@@ -285,28 +285,28 @@ export default function UsersPage() {
       />
 
       {!isAdmin() && (
-        <div className="mb-4 rounded-sm border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-400">
+        <div className="mb-4 rounded-xs border p-4 text-sm">
           Admin access required.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
 
-      <div className="mb-4 flex max-w-md gap-1 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-1">
+      <div className="mb-4 flex max-w-md gap-1 rounded-xs border bg-(--surface) p-1">
         <button
           type="button"
           onClick={() => setActiveTab("manage")}
-          className={`flex-1 rounded-sm px-3 py-2 text-sm font-medium transition-ui ${activeTab === "manage" ? "bg-amber-500/[0.12] text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-amber-500/[0.08]"}`}
+          className={`flex-1 rounded-xs px-3 py-2 text-sm font-medium transition-ui ${activeTab === "manage" ? "text-(--text)" : "text-(--text-muted) "}`}
         >
           Manage Users
         </button>
         <button
           type="button"
           onClick={() => setActiveTab("create")}
-          className={`flex-1 rounded-sm px-3 py-2 text-sm font-medium transition-ui ${activeTab === "create" ? "bg-amber-500/[0.12] text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-amber-500/[0.08]"}`}
+          className={`flex-1 rounded-xs px-3 py-2 text-sm font-medium transition-ui ${activeTab === "create" ? "text-(--text)" : "text-(--text-muted) "}`}
         >
           Add User
         </button>

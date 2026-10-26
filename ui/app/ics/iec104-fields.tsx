@@ -13,13 +13,13 @@ export const IEC104_CLASS_CHIP: Record<IEC104Class, string> = {
   monitor: "border-emerald-500/20 bg-emerald-500/10 text-emerald-400",
   control: "border-red-500/20 bg-red-500/10 text-red-400",
   system: "border-blue-500/20 bg-blue-500/10 text-blue-400",
-  unknown: "border-white/[0.06] bg-white/[0.02] text-[var(--text-dim)]",
+  unknown: "border-white/6 bg-white/2 text-(--text-dim)",
 };
 
 const CHIP_OFF =
-  "border-white/[0.06] bg-white/[0.02] text-[var(--text-dim)] line-through";
+  "border-white/6 bg-white/2 text-(--text-dim) line-through";
 
-const LABEL = "block text-[10px] font-medium text-[var(--text-muted)] mb-1";
+const LABEL = "block text-[10px] font-medium text-(--text-muted) mb-1";
 
 /** IEC 104 predicate inputs. Mode is owned by the surrounding editor. */
 export function IEC104Fields({
@@ -51,7 +51,7 @@ export function IEC104Fields({
       <div className="grid gap-3 md:grid-cols-2">
         <div>
           <label className={LABEL}>
-            Type IDs <span className="text-[var(--text-dim)]">(comma-separated, 1-255; empty = any)</span>
+            Type IDs <span className="text-(--text-dim)">(comma-separated, 1-255; empty = any)</span>
           </label>
           <input
             value={draft.typeIds}
@@ -68,7 +68,7 @@ export function IEC104Fields({
                   <span
                     key={t}
                     title={info.name}
-                    className={`rounded-sm border px-1.5 py-0.5 text-[9px] ${IEC104_CLASS_CHIP[info.cls]}`}
+                    className={`rounded-xs border px-1.5 py-0.5 text-[9px] ${IEC104_CLASS_CHIP[info.cls]}`}
                   >
                     {t} · {info.cls}
                     {!info.descriptor && " · not decoded"}
@@ -82,7 +82,7 @@ export function IEC104Fields({
         </div>
         <div>
           <label className={LABEL}>
-            Classes <span className="text-[var(--text-dim)]">(any selected; none = any)</span>
+            Classes <span className="text-(--text-dim)">(any selected; none = any)</span>
           </label>
           <div className="flex flex-wrap gap-1.5 pt-1">
             {IEC104_CLASSES.map((c) => {
@@ -94,7 +94,7 @@ export function IEC104Fields({
                   aria-pressed={on}
                   disabled={disabled}
                   onClick={() => toggleClass(c)}
-                  className={`rounded-sm border px-2 py-1 text-[10px] transition-ui disabled:opacity-60 ${on ? IEC104_CLASS_CHIP[c] : CHIP_OFF}`}
+                  className={`rounded-xs border px-2 py-1 text-[10px] transition-ui disabled:opacity-60 ${on ? IEC104_CLASS_CHIP[c] : CHIP_OFF}`}
                 >
                   {c}
                 </button>
@@ -120,7 +120,7 @@ export function IEC104Fields({
         </div>
         <div>
           <label className={LABEL}>
-            Common address (CA) <span className="text-[var(--text-dim)]">(0-65534)</span>
+            Common address (CA) <span className="text-(--text-dim)">(0-65534)</span>
           </label>
           <input
             value={draft.ca}
@@ -132,7 +132,7 @@ export function IEC104Fields({
         </div>
         <div>
           <label className={LABEL}>
-            IOA ranges <span className="text-[var(--text-dim)]">(0-16777215)</span>
+            IOA ranges <span className="text-(--text-dim)">(0-16777215)</span>
           </label>
           <input
             value={draft.ioa}
@@ -144,18 +144,18 @@ export function IEC104Fields({
         </div>
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+      <label className="flex items-center gap-2 text-sm text-(--text)">
         <input
           type="checkbox"
           checked={draft.readOnly}
           onChange={(e) => set("readOnly", e.target.checked)}
           disabled={disabled}
-          className="h-4 w-4 rounded border-white/20 bg-[var(--surface)] disabled:opacity-60"
+          className="h-4 w-4 rounded-sm border-white/20 bg-(--surface) disabled:opacity-60"
         />
         Read-only
         <InfoTip label="Matches monitor data from the server, general interrogation, read requests, end of initialization, S-frames and STARTDT/STOPDT/TESTFR. It never matches commands, counter interrogation, clock sync, reset process, broadcast CA, or malformed or unsupported traffic. Unchecked means no access constraint, not write-only." />
       </label>
-      <div className="text-[10px] text-[var(--text-dim)]">
+      <div className="text-[10px] text-(--text-dim)">
         Rules match the session (client to port 2404) in both directions; Direction picks which half. CA and IOA need an object, so S- and U-frames never match a rule that sets them. Broadcast CA 65535 never matches an allow rule.
       </div>
     </div>

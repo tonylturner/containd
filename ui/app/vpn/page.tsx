@@ -330,24 +330,24 @@ export default function VPNPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => refresh()}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Save
             </button>
           )}
-          <label className="ml-2 flex items-center gap-2 text-xs text-[var(--text)]">
+          <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
+              className="h-4 w-4 rounded-sm bg-(--surface)"
             />
             Auto
           </label>
@@ -355,37 +355,37 @@ export default function VPNPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)] shadow-card">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text) shadow-card">
           View-only mode: configuration changes are disabled.
         </div>
       )}
-      <p className="mb-4 text-xs text-[var(--text-muted)]">
+      <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
       <VPNRuntimeStatusCard cfg={cfg} loading={loading} svcStatus={svcStatus} vpnSpark={vpnSpark} />
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="relative overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card backdrop-blur">
-          <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-amber-500/[0.1] blur-2xl" />
+        <div className="relative overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full blur-2xl" />
           <div className="relative flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-sm border border-amber-500/[0.15] bg-gradient-to-br from-blue-500/25 to-sky-500/10">
+              <div className="grid h-11 w-11 place-items-center rounded-xs border bg-linear-to-br from-blue-500/25 to-sky-500/10">
                 <Image
                   src={staticAssetURL("/icons/wireguard.svg")}
                   alt="WireGuard"
                   width={24}
                   height={24}
-                  className="h-6 w-6 invert opacity-90 drop-shadow"
+                  className="h-6 w-6 invert opacity-90 drop-shadow-sm"
                 />
               </div>
               <div>
-                <h2 className="text-lg font-semibold text-[var(--text)]">WireGuard</h2>
-                <p className="mt-0.5 text-sm text-[var(--text)]">Remote access VPN (preferred).</p>
+                <h2 className="text-lg font-semibold text-(--text)">WireGuard</h2>
+                <p className="mt-0.5 text-sm text-(--text)">Remote access VPN (preferred).</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -403,7 +403,7 @@ export default function VPNPage() {
           </div>
 
           <div className="mt-4 grid gap-3">
-            <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+            <label className="flex items-center gap-2 text-sm text-(--text)">
               <input
                 type="checkbox"
                 checked={cfg.wireguard.enabled ?? false}
@@ -415,23 +415,23 @@ export default function VPNPage() {
             </label>
 
             {cfg.wireguard.enabled ? <IssuesBanner title="WireGuard setup checklist" issues={wireguardIssues} /> : null}
-            <div className="rounded-sm border border-amber-500/[0.15] bg-black/20 px-3 py-2 text-xs text-[var(--text)]">
+            <div className="rounded-xs border bg-black/20 px-3 py-2 text-xs text-(--text)">
               When enabled, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the configured listen zone or interfaces
               (default <span className="font-mono">wan</span>) via nftables input so clients can connect.
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
               <div>
-                <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Interface</label>
+                <label className="text-xs uppercase tracking-wide text-(--text-muted)">Interface</label>
                 <input
                   value={cfg.wireguard.interface ?? "wg0"}
                   disabled={!canEdit}
                   onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, interface: e.target.value } }))}
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
               </div>
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                   Listen Port
                   <InfoTip label="UDP port WireGuard listens on (default 51820)." />
                 </label>
@@ -445,11 +445,11 @@ export default function VPNPage() {
                       wireguard: { ...c.wireguard, listenPort: Number(e.target.value) || 0 },
                     }))
                   }
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
               </div>
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                   Listen Zone
                   <InfoTip label="Zone used for auto-open input rules (default wan)." />
                 </label>
@@ -462,7 +462,7 @@ export default function VPNPage() {
                       wireguard: { ...c.wireguard, listenZone: e.target.value },
                     }))
                   }
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 >
                   <option value="">default (wan)</option>
                   {zones.map((z) => (
@@ -475,7 +475,7 @@ export default function VPNPage() {
             </div>
 
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                 Listen Interfaces (optional)
                 <InfoTip label="Overrides listen zone when set. Select one or more interfaces/devices." />
               </label>
@@ -484,7 +484,7 @@ export default function VPNPage() {
                   {interfaceOptions.map((opt) => {
                     const active = (cfg.wireguard.listenInterfaces ?? []).includes(opt.value);
                     return (
-                      <label key={opt.value} className="flex items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
+                      <label key={opt.value} className="flex items-center gap-2 rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text)">
                         <input
                           type="checkbox"
                           checked={active}
@@ -506,13 +506,13 @@ export default function VPNPage() {
                   })}
                 </div>
               ) : (
-                <p className="mt-2 text-xs text-[var(--text-muted)]">No interfaces discovered yet.</p>
+                <p className="mt-2 text-xs text-(--text-muted)">No interfaces discovered yet.</p>
               )}
-              <p className="mt-2 text-xs text-[var(--text-muted)]">If any interfaces are selected, the listen zone is ignored.</p>
+              <p className="mt-2 text-xs text-(--text-muted)">If any interfaces are selected, the listen zone is ignored.</p>
             </div>
 
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                 Address (CIDR)
                 <InfoTip label="VPN client network. Policy can target vpn:wireguard." />
               </label>
@@ -520,12 +520,12 @@ export default function VPNPage() {
                 value={cfg.wireguard.addressCIDR ?? ""}
                 disabled={!canEdit}
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, addressCIDR: e.target.value } }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
               />
             </div>
 
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                 Private Key (base64)
                 <InfoTip label="Server private key. Stored in config; export redaction handled elsewhere." />
               </label>
@@ -533,13 +533,13 @@ export default function VPNPage() {
                 value={cfg.wireguard.privateKey ?? ""}
                 disabled={!canEdit}
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, privateKey: e.target.value } }))}
-                className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 placeholder="(leave blank to set later)"
               />
             </div>
 
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                 Peers (JSON)
                 <InfoTip label="JSON array with name, publicKey, and allowedIPs for each peer." />
               </label>
@@ -555,7 +555,7 @@ export default function VPNPage() {
                     // Keep text editing until valid JSON is entered.
                   }
                 }}
-                className="mt-1 w-full rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 font-mono text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
               />
             </div>
           </div>
@@ -589,7 +589,7 @@ export default function VPNPage() {
         />
       </div>
 
-      <p className="mt-3 text-xs text-[var(--text-muted)]">
+      <p className="mt-3 text-xs text-(--text-muted)">
         State:{" "}
         {saveState === "saving"
           ? "saving\u2026"

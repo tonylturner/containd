@@ -116,9 +116,9 @@ export default function AlertsPage() {
       actions={
         <div className="flex items-center gap-3">
           <button onClick={() => setLive((v) => !v)}
-            className={`inline-flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-xs border px-3 py-1.5 text-xs font-medium transition-colors ${
               live ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                : "border-amber-500/[0.15] bg-[var(--surface2)] text-[var(--text-muted)] hover:bg-amber-500/[0.1]"
+                : "bg-(--surface2) text-(--text-muted) "
             }`}>
             {live && (
               <span className="relative flex h-2 w-2">
@@ -129,24 +129,24 @@ export default function AlertsPage() {
             {live ? "Live" : "Paused"}
           </button>
           <button onClick={manualRefresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs font-medium text-[var(--text)] transition-colors hover:bg-amber-500/[0.1]">
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs font-medium text-(--text) transition-colors">
             Refresh
           </button>
         </div>
       }
     >
-      {error && <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
+      {error && <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
 
       {/* Severity summary */}
       <div className="mb-4 flex gap-3">
         {(["critical", "high", "medium", "low"] as const).map((s) => (
           <button key={s} onClick={() => setSevFilter(sevFilter === s ? "" : s)}
-            className={`flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs tabular-nums transition-ui ${
-              sevFilter === s ? "border-amber-500/30 bg-amber-500/[0.08] text-amber-400"
-                : "border-amber-500/[0.08] bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"
+            className={`flex items-center gap-1.5 rounded-xs border px-3 py-1.5 text-xs tabular-nums transition-ui ${
+              sevFilter === s ? ""
+                : "bg-(--surface) text-(--text-muted) hover:text-(--text)"
             }`}>
             <span className={`inline-block h-2 w-2 rounded-full ${
-              s === "critical" ? "bg-red-500" : s === "high" ? "bg-orange-500" : s === "medium" ? "bg-amber-500" : "bg-emerald-500"
+              s === "critical" ? "bg-red-500" : s === "high" ? "bg-orange-500" : s === "medium" ? "" : "bg-emerald-500"
             }`} />
             {s} <span className="font-mono">{sevCounts[s]}</span>
           </button>
@@ -156,7 +156,7 @@ export default function AlertsPage() {
       {/* Search */}
       <div className="mb-3 max-w-lg">
         <div className="relative">
-          <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-dim)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--text-dim)" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
           <input value={search} onChange={(e) => setSearch(e.target.value)}
@@ -172,10 +172,10 @@ export default function AlertsPage() {
         <div className="flex gap-4">
           {/* Alert list */}
           <div className={selected ? "min-w-0 flex-1" : "min-w-0 w-full"}>
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden">
+            <div className="rounded-xs border bg-(--surface) overflow-hidden">
               <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="bg-[var(--surface)] text-[9px] font-medium uppercase tracking-[2px] text-[var(--text-dim)]">
+                  <tr className="bg-(--surface) text-[9px] font-medium uppercase tracking-[2px] text-(--text-dim)">
                     <th className="px-4 py-2.5">Message</th>
                     <th className="px-4 py-2.5">Severity</th>
                     <th className="px-4 py-2.5">Source</th>
@@ -189,12 +189,12 @@ export default function AlertsPage() {
                     return (
                       <tr key={ev.id}
                         onClick={() => setSelected(isActive ? null : ev)}
-                        className={`table-row-hover transition-ui border-t border-amber-500/[0.1] cursor-pointer ${isActive ? "bg-amber-500/[0.06]" : ""}`}>
-                        <td className="px-4 py-2.5 font-medium text-[var(--text)] max-w-[200px] truncate" title={msg}>{msg}</td>
+                        className="table-row-hover transition-ui border-t cursor-pointer">
+                        <td className="px-4 py-2.5 font-medium text-(--text) max-w-[200px] truncate" title={msg}>{msg}</td>
                         <td className="px-4 py-2.5"><StatusBadge variant={severityVariant(sev)} dot>{sev}</StatusBadge></td>
-                        <td className="px-4 py-2.5 text-xs text-[var(--text)] font-mono">{ev.srcIp}:{ev.srcPort}</td>
-                        <td className="px-4 py-2.5 text-xs text-[var(--text)] font-mono">{ev.dstIp}:{ev.dstPort}</td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-xs text-[var(--text-muted)]">{new Date(ev.timestamp).toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-xs text-(--text) font-mono">{ev.srcIp}:{ev.srcPort}</td>
+                        <td className="px-4 py-2.5 text-xs text-(--text) font-mono">{ev.dstIp}:{ev.dstPort}</td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-xs text-(--text-muted)">{new Date(ev.timestamp).toLocaleString()}</td>
                       </tr>
                     );
                   })}
@@ -272,20 +272,20 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
   const isIEC104 = eventProto === "iec104";
 
   return (
-    <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden flex flex-col h-[calc(100vh-240px)] sticky top-4">
+    <div className="rounded-xs border bg-(--surface) overflow-hidden flex flex-col h-[calc(100vh-240px)] sticky top-4">
       {/* Header */}
-      <div className="flex items-start justify-between gap-2 border-b border-amber-500/[0.1] px-4 py-3">
+      <div className="flex items-start justify-between gap-2 border-b px-4 py-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-[var(--text)] break-words">{msg}</h3>
+          <h3 className="text-sm font-semibold text-(--text) wrap-break-word">{msg}</h3>
           <div className="mt-1 flex items-center gap-2 flex-wrap">
             <StatusBadge variant={severityVariant(sev)} dot>{sev}</StatusBadge>
             {eventProto && (
-              <span className="rounded-sm border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-400 uppercase">{eventProto}</span>
+              <span className="rounded-xs border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-400 uppercase">{eventProto}</span>
             )}
-            {sourceFormat && <span className="text-[10px] text-[var(--text-muted)] uppercase">{sourceFormat}</span>}
+            {sourceFormat && <span className="text-[10px] text-(--text-muted) uppercase">{sourceFormat}</span>}
           </div>
         </div>
-        <button onClick={onClose} className="shrink-0 rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-0.5 text-xs text-[var(--text-muted)] transition-ui hover:bg-amber-500/[0.08]">
+        <button onClick={onClose} className="shrink-0 rounded-xs border bg-(--surface2) px-2 py-0.5 text-xs text-(--text-muted) transition-ui">
           Close
         </button>
       </div>
@@ -317,14 +317,14 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
               return (
                 <>
                   <div className="flex justify-between gap-3 text-xs">
-                    <span className="text-[var(--text-dim)] shrink-0">Function Code</span>
+                    <span className="text-(--text-dim) shrink-0">Function Code</span>
                     <span className="text-right font-mono text-[11px]">
                       <span className={isWrite ? "text-red-400" : "text-emerald-400"}>FC {fc}</span>
-                      <span className="text-[var(--text-muted)] ml-2">{fcName}</span>
+                      <span className="text-(--text-muted) ml-2">{fcName}</span>
                     </span>
                   </div>
                   <div className="flex justify-between gap-3 text-xs">
-                    <span className="text-[var(--text-dim)]">Operation</span>
+                    <span className="text-(--text-dim)">Operation</span>
                     <span className={`text-right font-mono text-[11px] font-medium ${isWrite ? "text-red-400" : "text-emerald-400"}`}>
                       {isWrite ? "WRITE" : "READ"}
                     </span>
@@ -348,7 +348,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
               <DetailRow label="Address Range" value={`${eventAttrs["address"]}–${Number(eventAttrs["address"]) + Number(eventAttrs["quantity"]) - 1}`} mono />
             )}
             {eventAttrs["exception_code"] != null && (
-              <div className="rounded-sm border border-red-500/20 bg-red-500/[0.06] px-3 py-2 mt-1">
+              <div className="rounded-xs border border-red-500/20 bg-red-500/6 px-3 py-2 mt-1">
                 <div className="flex justify-between text-xs">
                   <span className="text-red-400 font-medium">Exception</span>
                   <span className="font-mono text-[11px] text-red-300">
@@ -379,7 +379,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
               <DetailRow label="JA3 Fingerprint" value={String(eventAttrs["ja3_hash"])} mono />
             )}
             {(eventAttrs["expected_cn"] != null || eventAttrs["observed_cn"] != null) && (
-              <div className="rounded-sm border border-red-500/20 bg-red-500/[0.06] px-3 py-2 mt-1 space-y-1.5">
+              <div className="rounded-xs border border-red-500/20 bg-red-500/6 px-3 py-2 mt-1 space-y-1.5">
                 <div className="text-[10px] font-medium uppercase tracking-wider text-red-400">Certificate Mismatch</div>
                 {eventAttrs["expected_cn"] != null && (
                   <div className="flex justify-between gap-3 text-xs">
@@ -408,14 +408,14 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
               <div className="flex gap-4 text-xs">
                 {eventAttrs["not_before"] != null && (
                   <div>
-                    <span className="text-[var(--text-dim)]">Valid from </span>
-                    <span className="font-mono text-[11px] text-[var(--text)]">{String(eventAttrs["not_before"]).slice(0, 10)}</span>
+                    <span className="text-(--text-dim)">Valid from </span>
+                    <span className="font-mono text-[11px] text-(--text)">{String(eventAttrs["not_before"]).slice(0, 10)}</span>
                   </div>
                 )}
                 {eventAttrs["not_after"] != null && (
                   <div>
-                    <span className="text-[var(--text-dim)]">to </span>
-                    <span className="font-mono text-[11px] text-[var(--text)]">{String(eventAttrs["not_after"]).slice(0, 10)}</span>
+                    <span className="text-(--text-dim)">to </span>
+                    <span className="font-mono text-[11px] text-(--text)">{String(eventAttrs["not_after"]).slice(0, 10)}</span>
                   </div>
                 )}
               </div>
@@ -466,7 +466,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
               <div className="text-xs font-medium text-orange-400">CONTROL OPERATION (CPU Start/Stop)</div>
             )}
             {eventAttrs["safety_critical"] === true && (
-              <div className="rounded-sm border border-red-500/20 bg-red-500/10 px-2 py-1 text-xs text-red-400 font-medium">
+              <div className="rounded-xs border border-red-500/20 bg-red-500/10 px-2 py-1 text-xs text-red-400 font-medium">
                 SAFETY-CRITICAL DB ACCESS
               </div>
             )}
@@ -526,9 +526,9 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
           <DetailSection label="Matched Patterns">
             <div className="space-y-1">
               {matchedPatterns.map((p, i) => (
-                <div key={i} className="rounded-sm border border-red-500/20 bg-red-500/[0.06] px-3 py-1.5 font-mono text-xs text-red-300">
+                <div key={i} className="rounded-xs border border-red-500/20 bg-red-500/6 px-3 py-1.5 font-mono text-xs text-red-300">
                   <span className="text-red-500/60 mr-2">MATCH</span>
-                  <span className="bg-red-500/20 px-1 rounded-sm text-red-200">{p}</span>
+                  <span className="bg-red-500/20 px-1 rounded-xs text-red-200">{p}</span>
                 </div>
               ))}
             </div>
@@ -538,16 +538,16 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
         {/* Hex dump of raw payload */}
         {typeof eventAttrs["raw_hex"] === "string" && (eventAttrs["raw_hex"] as string).length > 0 && (
           <DetailSection label="Raw Packet Data">
-            <div className="rounded-sm border border-amber-500/[0.1] bg-[#060808] p-3 font-mono text-[10px] leading-[1.6] overflow-x-auto">
-              <div className="flex gap-4 text-[var(--text-dim)] mb-1 border-b border-amber-500/[0.06] pb-1">
+            <div className="rounded-xs border bg-[#060808] p-3 font-mono text-[10px] leading-[1.6] overflow-x-auto">
+              <div className="flex gap-4 text-(--text-dim) mb-1 border-b pb-1">
                 <span className="w-10">OFFSET</span>
                 <span className="flex-1">HEX</span>
                 <span>ASCII</span>
               </div>
               {formatHexDump(eventAttrs["raw_hex"] as string).map((row, i) => (
                 <div key={i} className="flex gap-4">
-                  <span className="w-10 text-amber-500/50">{row.offset}</span>
-                  <span className="flex-1 text-[var(--text)]">{row.hex}</span>
+                  <span className="w-10">{row.offset}</span>
+                  <span className="flex-1 text-(--text)">{row.hex}</span>
                   <span className="text-emerald-400/60">{row.ascii}</span>
                 </div>
               ))}
@@ -558,13 +558,13 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
         {/* Generic event attributes (for protocols without dedicated section) */}
         {Object.keys(eventAttrs).length > 0 && !isModbus && !isTLS && !isDNP3 && !isS7 && !isCIP && !isBACnet && !isIEC104 && (
           <DetailSection label="Event Attributes">
-            <div className="rounded-sm border border-amber-500/[0.1] bg-[#060808] p-3 font-mono text-[11px] leading-relaxed overflow-x-auto">
+            <div className="rounded-xs border bg-[#060808] p-3 font-mono text-[11px] leading-relaxed overflow-x-auto">
               {Object.entries(eventAttrs).filter(([k]) => k !== "raw_hex").map(([key, val]) => {
                 const strVal = typeof val === "object" ? JSON.stringify(val) : String(val);
                 return (
                   <div key={key} className="flex gap-2">
-                    <span className="text-[var(--text-dim)] shrink-0">{key}:</span>
-                    <span className="text-[var(--text)]">{strVal}</span>
+                    <span className="text-(--text-dim) shrink-0">{key}:</span>
+                    <span className="text-(--text)">{strVal}</span>
                   </div>
                 );
               })}
@@ -577,20 +577,20 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
           <DetailSection label="References">
             {cves.map((c) => (
               <div key={c} className="flex items-center gap-2 text-xs">
-                <span className="rounded-sm border border-red-500/20 bg-red-500/10 px-1.5 py-0.5 text-red-400 text-[10px]">CVE</span>
-                <span className="text-[var(--text)] font-mono">{c}</span>
+                <span className="rounded-xs border border-red-500/20 bg-red-500/10 px-1.5 py-0.5 text-red-400 text-[10px]">CVE</span>
+                <span className="text-(--text) font-mono">{c}</span>
               </div>
             ))}
             {mitreIds.map((m) => (
               <div key={m} className="flex items-center gap-2 text-xs">
-                <span className="rounded-sm border border-purple-500/20 bg-purple-500/10 px-1.5 py-0.5 text-purple-400 text-[10px]">ATT&CK</span>
-                <span className="text-[var(--text)] font-mono">{m}</span>
+                <span className="rounded-xs border border-purple-500/20 bg-purple-500/10 px-1.5 py-0.5 text-purple-400 text-[10px]">ATT&CK</span>
+                <span className="text-(--text) font-mono">{m}</span>
               </div>
             ))}
             {refs.map((r) => (
-              <div key={r} className="text-xs text-amber-400/80 truncate">
+              <div key={r} className="text-xs truncate">
                 {r.startsWith("http") ? (
-                  <a href={r} target="_blank" rel="noopener noreferrer" className="hover:text-amber-300 underline">{r}</a>
+                  <a href={r} target="_blank" rel="noopener noreferrer" className="underline">{r}</a>
                 ) : r}
               </div>
             ))}

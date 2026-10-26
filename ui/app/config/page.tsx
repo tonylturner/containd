@@ -349,7 +349,7 @@ function ConfigPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+          className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
         >
           Refresh
         </button>
@@ -357,7 +357,7 @@ function ConfigPage() {
     >
       <ConfirmDialog {...confirm.props} />
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -369,26 +369,26 @@ function ConfigPage() {
             title={TAB_META[t].description}
             className={
               tab === t
-                ? "rounded-sm bg-amber-500/[0.1] px-3 py-1.5 text-sm text-[var(--text)] transition-ui"
-                : "rounded-sm px-3 py-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-amber-500/[0.04] transition-ui"
+                ? "rounded-xs px-3 py-1.5 text-sm text-(--text) transition-ui"
+                : "rounded-xs px-3 py-1.5 text-sm text-(--text-muted) hover:text-(--text) transition-ui"
             }
           >
             {TAB_META[t].label}
           </button>
         ))}
       </div>
-      <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text)]">
+      <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-xs text-(--text)">
         Workflow: edit the staged config, review the change summary, then commit or commit-confirmed to update the live appliance safely.
       </div>
 
       {status && (
         <div
-          className={`mb-4 rounded-sm px-4 py-3 text-sm ${
+          className={`mb-4 rounded-xs px-4 py-3 text-sm ${
             status.includes("failed") || status.includes("Failed") || status === "Invalid JSON." || status === "Invalid JSON file."
               ? "border border-red-500/30 bg-red-500/10 text-red-400"
               : status.includes("staged") || status.includes("saved") || status.includes("Committed") || status.includes("confirmed") || status.includes("restored") || status.includes("downloaded") || status.includes("deleted") || status.includes("Rolled back") || status.includes("replaced")
                 ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                : "border border-amber-500/[0.15] bg-[var(--surface)] text-[var(--text)]"
+                : "border bg-(--surface) text-(--text)"
           }`}
         >
           {status}
@@ -493,8 +493,8 @@ function ConfigPage() {
         <Card padding="md">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-[var(--text)]">Staged config JSON</h2>
-              <div className="text-xs text-[var(--text-muted)]">
+              <h2 className="text-sm font-semibold text-(--text)">Staged config JSON</h2>
+              <div className="text-xs text-(--text-muted)">
                 {candidateLoadedAt
                   ? `Last saved ${candidateLoadedAt.toLocaleString()}`
                   : "Not saved yet"}
@@ -504,20 +504,20 @@ function ConfigPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={copyRunningToCandidate}
-                  className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+                  className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
                 >
                   Copy running → staged
                 </button>
                 <button
                   onClick={saveCandidate}
-                  className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
+                  className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
                 >
                   Save staged config
                 </button>
               </div>
             )}
           </div>
-          <div className="mb-3 text-xs text-[var(--text-muted)]">
+          <div className="mb-3 text-xs text-(--text-muted)">
             Changes here are saved but not active until you review and commit them.
           </div>
           <textarea
@@ -526,18 +526,18 @@ function ConfigPage() {
             onChange={(e) => setCandidateText(e.target.value)}
             readOnly={!canEdit}
             rows={22}
-            className="w-full rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 font-mono text-xs text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
+            className="w-full rounded-xs border bg-(--surface) p-3 font-mono text-xs text-(--text) transition-ui outline-hidden"
           />
         </Card>
       )}
 
       {tab === "running" && (
-        <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)] shadow-card">
-          <div className="mb-3 flex items-center justify-between text-xs text-[var(--text-muted)]">
+        <div className="rounded-xs border bg-(--surface) p-4 text-xs text-(--text) shadow-card">
+          <div className="mb-3 flex items-center justify-between text-xs text-(--text-muted)">
             <div>Running config</div>
             <div>{runningLoadedAt ? `Loaded ${runningLoadedAt.toLocaleString()}` : "Not loaded yet"}</div>
           </div>
-          <div className="mb-3 text-xs text-[var(--text-muted)]">
+          <div className="mb-3 text-xs text-(--text-muted)">
             This is the last committed config, not proof of live enforcement.
           </div>
           <pre>{runningText}</pre>
@@ -547,24 +547,24 @@ function ConfigPage() {
       {tab === "diff" && (
         <div className="grid gap-4">
           {candidateLoadedAt && runningLoadedAt && candidateLoadedAt < runningLoadedAt && (
-            <div className="rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 shadow-card">
+            <div className="rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 shadow-card">
               Staged config looks older than running config. Copy running → staged first if you want to review your latest committed state.
             </div>
           )}
           {configDiff === undefined ? (
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
+            <div className="rounded-xs border bg-(--surface) p-4 text-sm text-(--text) shadow-card">
               Loading configuration changes…
             </div>
           ) : configDiff === null ? (
-            <div role="alert" className="rounded-sm border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400 shadow-card">
+            <div role="alert" className="rounded-xs border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400 shadow-card">
               Unable to load configuration changes. Use Refresh to try again.
             </div>
           ) : !candidate ? (
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
+            <div className="rounded-xs border bg-(--surface) p-4 text-sm text-(--text) shadow-card">
               No staged config to compare. Save staged changes to review them here.
             </div>
           ) : !configDiff.changed ? (
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-sm text-[var(--text)] shadow-card">
+            <div className="rounded-xs border bg-(--surface) p-4 text-sm text-(--text) shadow-card">
               No differences between running and staged config.
             </div>
           ) : (
@@ -573,25 +573,25 @@ function ConfigPage() {
                 key={block.key}
                 role="region"
                 aria-label={`${block.label} changes`}
-                className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 shadow-card"
+                className="rounded-xs border bg-(--surface) p-4 shadow-card"
               >
                 <div className="mb-3 flex items-center justify-between">
                   <div>
-                    <div className="text-xs uppercase tracking-[0.2em] text-[var(--text-dim)]">Changed block</div>
-                    <div className="text-sm font-semibold text-[var(--text)]">{block.label}</div>
+                    <div className="text-xs uppercase tracking-[0.2em] text-(--text-dim)">Changed block</div>
+                    <div className="text-sm font-semibold text-(--text)">{block.label}</div>
                   </div>
                   {block.diff.length > 0 && (
-                    <div className="text-xs text-[var(--text-muted)]">
+                    <div className="text-xs text-(--text-muted)">
                       {block.diff.filter((l) => l.type === "add").length} added ·{" "}
                       {block.diff.filter((l) => l.type === "del").length} removed
                     </div>
                   )}
                 </div>
                 {block.hiddenChanges && (
-                  <p className="text-sm text-[var(--text)]">Secret values changed (hidden).</p>
+                  <p className="text-sm text-(--text)">Secret values changed (hidden).</p>
                 )}
                 {block.idsBank && (
-                  <div className="mb-3 grid gap-1 text-xs text-[var(--text)]">
+                  <div className="mb-3 grid gap-1 text-xs text-(--text)">
                     <div className="font-semibold">IDS rule bank</div>
                     <div>
                       Running: {block.idsBank.running.count.toLocaleString()} rules · SHA-256{" "}
@@ -604,14 +604,14 @@ function ConfigPage() {
                   </div>
                 )}
                 {block.diff.length > 0 && (
-                  <div className="grid gap-1 rounded-sm border border-amber-500/[0.15] bg-black/60 p-3 text-xs text-[var(--text)]">
+                  <div className="grid gap-1 rounded-xs border bg-black/60 p-3 text-xs text-(--text)">
                     {block.diff.map((line, idx) => (
                       <div
                         key={`${block.key}-${idx}`}
                         className={
                           line.type === "add"
-                            ? "rounded bg-mint/20 px-2 py-0.5 text-mint"
-                            : "rounded bg-rose-500/20 px-2 py-0.5 text-rose-200"
+                            ? "rounded-sm bg-mint/20 px-2 py-0.5 text-mint"
+                            : "rounded-sm bg-rose-500/20 px-2 py-0.5 text-rose-200"
                         }
                       >
                         <span className="mr-2 inline-block w-3 text-center">

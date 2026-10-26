@@ -124,11 +124,11 @@ export default function IDSPage() {
       title="IDS Rules"
       actions={
         <div className="flex items-center gap-2">
-          <button onClick={refresh} className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">
+          <button onClick={refresh} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui">
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110">
+            <button onClick={onSave} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110">
               Save
             </button>
           )}
@@ -136,35 +136,35 @@ export default function IDSPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
-      {error && <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>}
-      {success && <div className="mb-4 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{success}</div>}
+      {error && <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>}
+      {success && <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{success}</div>}
 
       <div className="mb-6 flex items-center gap-4">
-        <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+        <label className="flex items-center gap-2 text-sm text-(--text)">
           <input type="checkbox" checked={!!ids.enabled} disabled={!canEdit}
             onChange={(e) => setIds({ ...ids, enabled: e.target.checked })}
-            className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]" />
+            className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
           Enable IDS engine
         </label>
-        <span className="ml-auto text-xs text-[var(--text-muted)] tabular-nums">
+        <span className="ml-auto text-xs text-(--text-muted) tabular-nums">
           {enabledCount.toLocaleString()} / {rules.length.toLocaleString()} rules enabled
         </span>
       </div>
 
       {/* Tab bar */}
-      <div className="mb-4 flex gap-1 border-b border-amber-500/[0.1] overflow-x-auto">
+      <div className="mb-4 flex gap-1 border-b overflow-x-auto">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setActiveTab(t.key)}
             className={`shrink-0 px-4 py-2 text-sm transition-ui border-b-2 -mb-px ${
-              activeTab === t.key ? "border-amber-500 text-amber-400" : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
+              activeTab === t.key ? "" : "border-transparent text-(--text-muted) hover:text-(--text)"
             }`}>
             {t.label}
             {t.count !== undefined && (
-              <span className="ml-1.5 rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-xs tabular-nums">{t.count.toLocaleString()}</span>
+              <span className="ml-1.5 rounded-xs bg-white/6 px-1.5 py-0.5 text-xs tabular-nums">{t.count.toLocaleString()}</span>
             )}
           </button>
         ))}
@@ -182,7 +182,7 @@ export default function IDSPage() {
         <ImportPanel onImported={(msg) => { flashSuccess(msg); refresh(); setActiveTab("rules"); }} onError={setError} />
       )}
       {activeTab === "import" && !canEdit && (
-        <div className="py-8 text-center text-sm text-[var(--text-muted)]">Import is disabled in view-only mode.</div>
+        <div className="py-8 text-center text-sm text-(--text-muted)">Import is disabled in view-only mode.</div>
       )}
       {activeTab === "export" && <ExportPanel ruleCount={rules.length} />}
       {activeTab === "sources" && <SourcesCatalog sources={sources} />}

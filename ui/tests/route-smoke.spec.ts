@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { snapshot } from "./fixtures/iec104-inventory";
+import { pressure } from "./fixtures/iec104-pressure";
 import { interfaceAddresses, OS_ADDRESS_HINT, runtimeFor } from "../lib/interface-addresses";
 import type { Interface, SystemInspection } from "../lib/api";
 
@@ -267,6 +269,8 @@ function responseFor(pathname: string) {
   if (pathname === "/api/v1/auth/me" || pathname === "/api/v1/auth/session") {
     return json(adminUser);
   }
+  if (pathname === "/api/v1/inventory/iec104") return json(snapshot);
+  if (pathname === "/api/v1/diagnostics/iec104") return json(pressure);
   if (pathname === "/api/v1/dashboard") return json(dashboard);
   if (pathname === "/api/v1/zones") return json(zones);
   if (pathname === "/api/v1/interfaces") return json(interfaces);
@@ -413,6 +417,16 @@ for (const path of routes) {
     expect(consoleErrors).toEqual([]);
   });
 }
+
+test("dashboard health keeps twelve pixels between uptime and gauges", async ({ page }) => {
+  await page.goto("/");
+  const uptime = page.getByText("Uptime: 12m", { exact: true }).locator("..");
+  const cpu = page.getByText("CPU", { exact: true }).locator("..");
+  await expect(uptime).toBeVisible();
+  const uptimeBox = (await uptime.boundingBox())!;
+  const cpuBox = (await cpu.boundingBox())!;
+  expect(cpuBox.y - uptimeBox.y - uptimeBox.height).toBe(12);
+});
 
 test("interface addresses prefer config, then the bound device, without mutating either", () => {
   const before = JSON.stringify({ interfaces, interfaceState });

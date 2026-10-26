@@ -95,7 +95,7 @@ async function applyTemplate(
 /* ── Protocol badge colors ─────────────────────────────────────── */
 
 const PROTO_COLORS: Record<string, string> = {
-  modbus: "bg-amber-500/[0.2] text-[var(--amber)]",
+  modbus: "text-(--amber)",
   dnp3: "bg-purple-500/20 text-purple-300",
   cip: "bg-orange-500/20 text-orange-300",
   s7comm: "bg-teal-500/20 text-teal-300",
@@ -105,7 +105,7 @@ const PROTO_COLORS: Record<string, string> = {
 };
 
 function protoBadgeClass(proto: string): string {
-  return PROTO_COLORS[proto.toLowerCase()] ?? "bg-amber-500/[0.1] text-[var(--text)]";
+  return PROTO_COLORS[proto.toLowerCase()] ?? "text-(--text)";
 }
 
 /* ── Page ─────────────────────────────────────────────────────── */
@@ -136,29 +136,29 @@ export default function TemplatesPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.1]"
+          className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
         >
           Refresh
         </button>
       }
     >
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
       {success && (
-        <div className="mb-4 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+        <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
           {success}
         </div>
       )}
 
       {/* Description */}
       <Card className="mb-6">
-        <div className="text-xs uppercase tracking-[0.2em] text-[var(--text)]">
+        <div className="text-xs uppercase tracking-[0.2em] text-(--text)">
           About Templates
         </div>
-        <p className="mt-2 text-sm text-[var(--text-muted)]">
+        <p className="mt-2 text-sm text-(--text-muted)">
           ICS rule templates provide pre-built security baselines for common OT
           network configurations. Select a template to generate firewall rules
           tailored to your environment, including Purdue model baselines and
@@ -169,7 +169,7 @@ export default function TemplatesPage() {
       {/* Template cards */}
       {templates.length === 0 ? (
         <Card>
-          <p className="text-sm text-[var(--text-muted)]">
+          <p className="text-sm text-(--text-muted)">
             No templates available. Check that the backend has ICS templates
             configured.
           </p>
@@ -179,28 +179,28 @@ export default function TemplatesPage() {
           {templates.map((t) => (
             <div
               key={t.name}
-              className="flex flex-col rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card transition-ui hover:bg-amber-500/[0.08] hover:border-amber-500/30 cursor-pointer"
+              className="flex flex-col rounded-xs border bg-(--surface) p-5 shadow-card transition-ui cursor-pointer"
             >
               <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-[var(--text)]">{t.name}</h3>
+                <h3 className="text-sm font-semibold text-(--text)">{t.name}</h3>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs ${protoBadgeClass(t.protocol)}`}
                 >
                   {t.protocol}
                 </span>
               </div>
-              <p className="mb-4 flex-1 text-xs text-[var(--text-muted)]">
+              <p className="mb-4 flex-1 text-xs text-(--text-muted)">
                 {t.description}
               </p>
               {t.parameters && t.parameters.length > 0 && (
-                <div className="mb-3 text-xs text-[var(--text-muted)]">
+                <div className="mb-3 text-xs text-(--text-muted)">
                   Parameters:{" "}
                   {t.parameters.map((p) => p.label).join(", ")}
                 </div>
               )}
               <button
                 onClick={() => setActiveTemplate(t)}
-                className="mt-auto rounded-sm bg-[var(--amber)] px-3 py-2 text-sm text-white font-medium transition-ui hover:brightness-110"
+                className="mt-auto rounded-xs bg-(--amber) px-3 py-2 text-sm text-white font-medium transition-ui hover:brightness-110"
               >
                 Generate Rules
               </button>
@@ -302,17 +302,17 @@ function TemplateModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card-lg animate-fade-in">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xs border bg-(--surface) p-5 shadow-card-lg animate-fade-in">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text)]">
+            <h2 className="text-lg font-semibold text-(--text)">
               {template.name}
             </h2>
-            <p className="text-sm text-[var(--text-muted)]">{template.description}</p>
+            <p className="text-sm text-(--text-muted)">{template.description}</p>
           </div>
           <button
             onClick={onClose}
-            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.1]"
+            className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
           >
             Close
           </button>
@@ -322,7 +322,7 @@ function TemplateModal({
           {/* Zone selectors */}
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="text-xs uppercase tracking-wide text-(--text)">
                 Source Zones (optional)
               </label>
               <div className="mt-1 flex flex-wrap gap-1">
@@ -334,22 +334,22 @@ function TemplateModal({
                     }
                     className={`rounded-full px-2 py-0.5 text-xs ${
                       sourceZones.includes(z.name)
-                        ? "bg-amber-500/[0.2] text-[var(--amber)]"
-                        : "bg-amber-500/[0.1] text-[var(--text)] hover:bg-amber-500/[0.12]"
+                        ? "text-(--amber)"
+                        : "text-(--text) "
                     }`}
                   >
                     {z.name}
                   </button>
                 ))}
                 {zones.length === 0 && (
-                  <span className="text-xs text-[var(--text-muted)]">
+                  <span className="text-xs text-(--text-muted)">
                     No zones configured
                   </span>
                 )}
               </div>
             </div>
             <div>
-              <label className="text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="text-xs uppercase tracking-wide text-(--text)">
                 Destination Zones (optional)
               </label>
               <div className="mt-1 flex flex-wrap gap-1">
@@ -359,15 +359,15 @@ function TemplateModal({
                     onClick={() => toggleZone(z.name, destZones, setDestZones)}
                     className={`rounded-full px-2 py-0.5 text-xs ${
                       destZones.includes(z.name)
-                        ? "bg-amber-500/[0.2] text-[var(--amber)]"
-                        : "bg-amber-500/[0.1] text-[var(--text)] hover:bg-amber-500/[0.12]"
+                        ? "text-(--amber)"
+                        : "text-(--text) "
                     }`}
                   >
                     {z.name}
                   </button>
                 ))}
                 {zones.length === 0 && (
-                  <span className="text-xs text-[var(--text-muted)]">
+                  <span className="text-xs text-(--text-muted)">
                     No zones configured
                   </span>
                 )}
@@ -378,14 +378,14 @@ function TemplateModal({
           {/* Template-specific parameters */}
           {(template.parameters ?? []).map((p) => (
             <div key={p.name}>
-              <label className="text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="text-xs uppercase tracking-wide text-(--text)">
                 {p.label}
                 {p.required && (
                   <span className="ml-1 text-red-400">*</span>
                 )}
               </label>
               {p.help && (
-                <div className="mt-0.5 text-xs text-[var(--text-muted)]">{p.help}</div>
+                <div className="mt-0.5 text-xs text-(--text-muted)">{p.help}</div>
               )}
               <input
                 value={params[p.name] ?? ""}
@@ -403,7 +403,7 @@ function TemplateModal({
             <button
               onClick={handlePreview}
               disabled={loading}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.1] disabled:opacity-40"
+              className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-40"
             >
               {loading ? "Loading..." : "Preview"}
             </button>
@@ -411,7 +411,7 @@ function TemplateModal({
               <button
                 onClick={handleApply}
                 disabled={loading}
-                className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm text-white font-medium transition-ui hover:brightness-110 disabled:opacity-40"
+                className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm text-white font-medium transition-ui hover:brightness-110 disabled:opacity-40"
               >
                 Stage
               </button>
@@ -421,17 +421,17 @@ function TemplateModal({
           {/* Preview results */}
           {preview && (
             <div className="mt-4">
-              <h3 className="mb-2 text-sm font-semibold text-[var(--text)]">
+              <h3 className="mb-2 text-sm font-semibold text-(--text)">
                 Preview: {preview.length} Rule(s)
               </h3>
               {preview.length === 0 ? (
-                <div className="text-xs text-[var(--text-muted)]">
+                <div className="text-xs text-(--text-muted)">
                   No rules generated with the current parameters.
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-sm border border-amber-500/[0.15]">
+                <div className="overflow-hidden rounded-xs border">
                   <table className="w-full text-sm">
-                    <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+                    <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
                       <tr>
                         <th className="px-4 py-2">ID</th>
                         <th className="px-4 py-2">Description</th>
@@ -442,11 +442,11 @@ function TemplateModal({
                     </thead>
                     <tbody>
                       {preview.map((r) => (
-                        <tr key={r.id} className="border-t border-amber-500/[0.08]">
-                          <td className="px-4 py-2 font-mono text-xs text-[var(--text)]">
+                        <tr key={r.id} className="border-t">
+                          <td className="px-4 py-2 font-mono text-xs text-(--text)">
                             {r.id}
                           </td>
-                          <td className="px-4 py-2 text-[var(--text)]">
+                          <td className="px-4 py-2 text-(--text)">
                             {r.description || "-"}
                           </td>
                           <td className="px-4 py-2">
@@ -456,7 +456,7 @@ function TemplateModal({
                               {r.protocol}
                             </span>
                           </td>
-                          <td className="px-4 py-2 font-mono text-xs text-[var(--text)]">
+                          <td className="px-4 py-2 font-mono text-xs text-(--text)">
                             {(r.functionCodes ?? []).join(", ") || "*"}
                           </td>
                           <td className="px-4 py-2">

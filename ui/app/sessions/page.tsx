@@ -105,7 +105,7 @@ export default function SessionsPage() {
           <select
             value={String(limit)}
             onChange={(e) => setLimit(Number(e.target.value) || 200)}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 outline-none"
+            className="rounded-xs border bg-(--surface) px-2 py-1.5 text-sm text-(--text) transition-ui outline-hidden"
           >
             <option value="200">200</option>
             <option value="500">500</option>
@@ -113,7 +113,7 @@ export default function SessionsPage() {
           </select>
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.1]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text)"
           >
             Refresh
           </button>
@@ -121,7 +121,7 @@ export default function SessionsPage() {
       }
     >
       {!canKill && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface2) px-4 py-3 text-sm text-(--text)">
           View-only mode: session kill requires admin.
         </div>
       )}
@@ -137,53 +137,53 @@ export default function SessionsPage() {
           description={entries.length === 0 ? "No conntrack entries found. The engine may be unreachable or conntrack unavailable." : "No sessions match the current filter."}
         />
       ) : (
-        <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden shadow-card">
+        <div className="rounded-xs border bg-(--surface) overflow-hidden shadow-card">
           <div className="flex items-center justify-between px-4 py-3">
             <div>
-              <div className="text-sm text-[var(--text)]">
+              <div className="text-sm text-(--text)">
                 {loading ? "Loading…" : `${filtered.length} shown / ${entries.length} total`}
               </div>
-              <div className="text-xs text-[var(--text-muted)]">
+              <div className="text-xs text-(--text-muted)">
                 Conntrack is kernel state. Kill is best-effort (IPv4 tcp/udp/icmp only for now).
               </div>
             </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-[var(--surface)]">
+              <thead className="bg-(--surface)">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">Proto</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">State</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">Src</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">Sport</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">Dst</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">Dport</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">Mark</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">Assured</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">TTL</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--text-dim)]">Actions</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Proto</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">State</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Src</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Sport</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Dst</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Dport</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Mark</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Assured</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">TTL</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-(--text-dim)">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((e, idx) => (
-                  <tr key={`${e.proto}-${e.src}-${e.sport}-${e.dst}-${e.dport}-${idx}`} className="table-row-hover transition-ui border-t border-amber-500/[0.1]">
-                    <td className="px-4 py-3 font-medium text-[var(--text)]">{e.proto || "—"}</td>
-                    <td className="px-4 py-3 text-[var(--text)]">{e.state || "—"}</td>
-                    <td className="px-4 py-3 text-[var(--text)]">{e.src || "—"}</td>
-                    <td className="px-4 py-3 text-[var(--text)]">{e.sport || "—"}</td>
-                    <td className="px-4 py-3 text-[var(--text)]">{e.dst || "—"}</td>
-                    <td className="px-4 py-3 text-[var(--text)]">{e.dport || "—"}</td>
-                    <td className="px-4 py-3 text-[var(--text)]">{e.mark || "—"}</td>
-                    <td className="px-4 py-3 text-[var(--text)]">{e.assured ? "yes" : "no"}</td>
-                    <td className="px-4 py-3 text-[var(--text)]">{e.timeoutSecs ? `${e.timeoutSecs}s` : "—"}</td>
+                  <tr key={`${e.proto}-${e.src}-${e.sport}-${e.dst}-${e.dport}-${idx}`} className="table-row-hover transition-ui border-t">
+                    <td className="px-4 py-3 font-medium text-(--text)">{e.proto || "—"}</td>
+                    <td className="px-4 py-3 text-(--text)">{e.state || "—"}</td>
+                    <td className="px-4 py-3 text-(--text)">{e.src || "—"}</td>
+                    <td className="px-4 py-3 text-(--text)">{e.sport || "—"}</td>
+                    <td className="px-4 py-3 text-(--text)">{e.dst || "—"}</td>
+                    <td className="px-4 py-3 text-(--text)">{e.dport || "—"}</td>
+                    <td className="px-4 py-3 text-(--text)">{e.mark || "—"}</td>
+                    <td className="px-4 py-3 text-(--text)">{e.assured ? "yes" : "no"}</td>
+                    <td className="px-4 py-3 text-(--text)">{e.timeoutSecs ? `${e.timeoutSecs}s` : "—"}</td>
                     <td className="px-4 py-3 text-right">
                       <button
                         disabled={!canKill}
                         onClick={() => handleKill(e)}
                         className={
                           canKill
-                            ? "rounded-sm px-3 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
-                            : "rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1 text-xs text-[var(--text-dim)]"
+                            ? "rounded-xs px-3 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
+                            : "rounded-xs border bg-(--surface2) px-3 py-1 text-xs text-(--text-dim)"
                         }
                         title={canKill ? "Delete conntrack entry (best-effort)" : "Admin only"}
                       >

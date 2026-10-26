@@ -6,7 +6,7 @@ export function SearchBar({ value, onChange, placeholder }: {
 }) {
   return (
     <div className="relative">
-      <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-dim)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--text-dim)" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <circle cx="11" cy="11" r="8" />
         <path d="m21 21-4.35-4.35" />
       </svg>
@@ -27,13 +27,13 @@ export function SortableHeader({ label, sortKey, currentSort, currentDir, onSort
   const active = currentSort === sortKey;
   return (
     <th
-      className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 text-left font-mono text-[9px] font-medium uppercase tracking-[2px] text-[var(--text-dim)] transition-ui hover:text-[var(--text)]"
+      className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 text-left font-mono text-[9px] font-medium uppercase tracking-[2px] text-(--text-dim) transition-ui hover:text-(--text)"
       onClick={() => onSort(sortKey)}
     >
       <span className="inline-flex items-center gap-1">
         {label}
         {active && (
-          <span className="text-[var(--amber)]">{currentDir === "asc" ? "\u25B2" : "\u25BC"}</span>
+          <span className="text-(--amber)">{currentDir === "asc" ? "\u25B2" : "\u25BC"}</span>
         )}
       </span>
     </th>
@@ -45,14 +45,14 @@ export function Pagination({ page, totalPages, totalItems, onPage, pageSize, onP
   pageSize?: number; onPageSize?: (s: number) => void; pageSizeOptions?: number[];
 }) {
   return (
-    <div className="flex items-center justify-between border-t border-amber-500/[0.1] px-4 py-2.5 font-mono text-[10px] text-[var(--text-dim)]">
+    <div className="flex items-center justify-between border-t px-4 py-2.5 font-mono text-[10px] text-(--text-dim)">
       <div className="flex items-center gap-3">
         <span>{totalItems} items</span>
         {onPageSize && pageSizeOptions && (
           <select
             value={pageSize}
             onChange={(e) => onPageSize(Number(e.target.value))}
-            className="rounded-sm border border-amber-500/[0.1] bg-[var(--surface2)] px-1.5 py-0.5 text-[10px] text-[var(--text-dim)] outline-none"
+            className="rounded-xs border bg-(--surface2) px-1.5 py-0.5 text-[10px] text-(--text-dim) outline-hidden"
           >
             {pageSizeOptions.map((s) => (
               <option key={s} value={s}>{s} / page</option>
@@ -65,7 +65,7 @@ export function Pagination({ page, totalPages, totalItems, onPage, pageSize, onP
           <button
             disabled={page <= 0}
             onClick={() => onPage(page - 1)}
-            className="rounded-sm bg-[var(--surface2)] px-2.5 py-1 transition-ui hover:bg-amber-500/[0.1] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed"
+            className="rounded-xs bg-(--surface2) px-2.5 py-1 transition-ui hover:text-(--text) disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Prev
           </button>
@@ -73,7 +73,7 @@ export function Pagination({ page, totalPages, totalItems, onPage, pageSize, onP
           <button
             disabled={page >= totalPages - 1}
             onClick={() => onPage(page + 1)}
-            className="rounded-sm bg-[var(--surface2)] px-2.5 py-1 transition-ui hover:bg-amber-500/[0.1] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed"
+            className="rounded-xs bg-(--surface2) px-2.5 py-1 transition-ui hover:text-(--text) disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Next
           </button>

@@ -175,10 +175,10 @@ function EventsInner() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setLive((v) => !v)}
-            className={`inline-flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-xs border px-3 py-1.5 text-xs font-medium transition-colors ${
               live
                 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-                : "border-amber-500/[0.15] bg-[var(--surface2)] text-[var(--text-muted)] hover:bg-amber-500/[0.1]"
+                : "bg-(--surface2) text-(--text-muted) "
             }`}
           >
             {live && (
@@ -191,7 +191,7 @@ function EventsInner() {
           </button>
           <button
             onClick={manualRefresh}
-            className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.06]"
+            className="transition-ui rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text)"
           >
             Refresh
           </button>
@@ -199,8 +199,8 @@ function EventsInner() {
       }
     >
       {/* Filter bar */}
-      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
-        <div className="w-full text-xs text-[var(--text-muted)]">
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xs border bg-(--surface) px-4 py-3">
+        <div className="w-full text-xs text-(--text-muted)">
           Use Events for raw telemetry and service activity. Use Flows for active connections and Alerts for IDS triage.
         </div>
         {FILTER_OPTIONS.map((option) => (
@@ -209,8 +209,8 @@ function EventsInner() {
             onClick={() => setFilter(option.value)}
             className={
               filter === option.value
-                ? "transition-ui rounded-sm border border-amber-500/30 bg-amber-500/[0.1] px-3 py-1.5 text-xs text-[var(--text)]"
-                : "transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
+                ? "transition-ui rounded-xs border px-3 py-1.5 text-xs text-(--text)"
+                : "transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs text-(--text) "
             }
           >
             {option.label}
@@ -221,7 +221,7 @@ function EventsInner() {
             setFilter("proxy");
             setKindPrefix("service.envoy");
           }}
-          className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
+          className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs text-(--text)"
         >
           Envoy only
         </button>
@@ -230,12 +230,12 @@ function EventsInner() {
             setFilter("proxy");
             setKindPrefix("service.nginx");
           }}
-          className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
+          className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs text-(--text)"
         >
           Nginx only
         </button>
         <select
-          className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] outline-none focus:border-amber-500/40 focus-visible:shadow-focus-ring"
+          className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) outline-hidden focus-visible:shadow-focus-ring"
           value={filter}
           onChange={(e) => setFilter(e.target.value as EventFilter)}
         >
@@ -248,7 +248,7 @@ function EventsInner() {
           placeholder="Event name starts with... (optional)"
           value={kindPrefix}
           onChange={(e) => setKindPrefix(e.target.value)}
-          className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] outline-none focus:border-amber-500/40 focus-visible:shadow-focus-ring"
+          className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) outline-hidden focus-visible:shadow-focus-ring"
         />
         {([
           ["Session ID", sessionFilter, setSessionFilter], ["Flow ID", flowFilter, setFlowFilter],
@@ -256,13 +256,13 @@ function EventsInner() {
           ["Verdict / outcome", verdict, setVerdict], ["Since (RFC3339)", since, setSince],
           ["Cursor", cursor, setCursor],
         ] as const).map(([label, value, setValue]) => (
-          <label key={label} className="flex flex-col gap-1 text-xs text-[var(--text)]">
+          <label key={label} className="flex flex-col gap-1 text-xs text-(--text)">
             {label}
             <input aria-label={label} value={value} onChange={(e) => setValue(e.target.value)}
-              className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm outline-none focus:border-amber-500/40" />
+              className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm outline-hidden" />
           </label>
         ))}
-        <label className="flex items-center gap-2 text-xs text-[var(--text)]">
+        <label className="flex items-center gap-2 text-xs text-(--text)">
           <input
             type="checkbox"
             checked={onlyDetections}
@@ -275,7 +275,7 @@ function EventsInner() {
           <button
             onClick={() => setSessionFilter("")}
             title="Clear session filter"
-            className="transition-ui rounded-sm border border-amber-500/30 bg-amber-500/[0.1] px-3 py-1.5 font-mono text-xs text-[var(--text)]"
+            className="transition-ui rounded-xs border px-3 py-1.5 font-mono text-xs text-(--text)"
           >
             Session {sessionFilter} ×
           </button>
@@ -289,44 +289,44 @@ function EventsInner() {
               setSessionFilter("");
               setFlowFilter(""); setAPDU(""); setProtocol(""); setDecision(""); setVerdict(""); setSince(""); setCursor("");
             }}
-            className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-amber-500/[0.06]"
+            className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs text-(--text)"
           >
             Clear filters
           </button>
         )}
       </div>
 
-      {truncated && <p role="status" className="mb-3 text-sm text-[var(--text-muted)]">Retained evidence only: history may have gaps from eviction or restart. Pagination cannot recover missing events.</p>}
-      {nextCursor && <button disabled={live || loading} onClick={() => void refresh(nextCursor)} className="mb-3 rounded-sm border border-amber-500/[0.15] px-3 py-1.5 text-sm disabled:opacity-50">{live ? "Pause live updates to load older evidence" : "Load older evidence"}</button>}
+      {truncated && <p role="status" className="mb-3 text-sm text-(--text-muted)">Retained evidence only: history may have gaps from eviction or restart. Pagination cannot recover missing events.</p>}
+      {nextCursor && <button disabled={live || loading} onClick={() => void refresh(nextCursor)} className="mb-3 rounded-xs border px-3 py-1.5 text-sm disabled:opacity-50">{live ? "Pause live updates to load older evidence" : "Load older evidence"}</button>}
       {error && (
         <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
-      <div className="mb-3 flex flex-wrap gap-2 text-xs text-[var(--text)]">
-        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
+      <div className="mb-3 flex flex-wrap gap-2 text-xs text-(--text)">
+        <div className="rounded-lg border bg-(--surface2) px-3 py-1.5 text-xs">
           Showing: {visibleEvents.length} of {filteredEvents.length}
         </div>
-        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
+        <div className="rounded-lg border bg-(--surface2) px-3 py-1.5 text-xs">
           Proxy events: {proxyCount}
         </div>
-        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
+        <div className="rounded-lg border bg-(--surface2) px-3 py-1.5 text-xs">
           Service events: {serviceCount}
         </div>
-        <div className="rounded-lg border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs">
+        <div className="rounded-lg border bg-(--surface2) px-3 py-1.5 text-xs">
           AV detections: {detectionCount}
         </div>
       </div>
 
       <div className="space-y-2">
-        {loading && <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-6 text-sm text-[var(--text-muted)]">Loading...</div>}
+        {loading && <div className="rounded-xs border bg-(--surface) p-6 text-sm text-(--text-muted)">Loading...</div>}
         {!loading && events.length === 0 && (
-          <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-muted)]">
+          <div className="rounded-xs border bg-(--surface) p-6 text-center text-sm text-(--text-muted)">
             No retained events match this query. Clear filters or check the session and time bounds.
           </div>
         )}
         {!loading && filteredEvents.length > 0 && (
-          <div className="mb-2 text-xs text-[var(--text-muted)]">
+          <div className="mb-2 text-xs text-(--text-muted)">
             Showing {visibleEvents.length} of {filteredEvents.length} events
           </div>
         )}
@@ -336,20 +336,20 @@ function EventsInner() {
           return (
           <div
             key={ev.id}
-            className="table-row-hover rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4"
+            className="table-row-hover rounded-xs border bg-(--surface) p-4"
           >
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-[var(--text)]">
+              <div className="text-sm font-semibold text-(--text)">
                 {eventHeadline(ev)}
               </div>
-              <div className="text-xs text-[var(--text-muted)]">
+              <div className="text-xs text-(--text-muted)">
                 {new Date(ev.timestamp).toLocaleString()}
               </div>
             </div>
-            <div className="mt-1 text-xs text-[var(--text-muted)]">
+            <div className="mt-1 text-xs text-(--text-muted)">
               {eventSubtitle(ev)}
             </div>
-            <div className="mt-1 text-xs text-[var(--text)]">
+            <div className="mt-1 text-xs text-(--text)">
               {ev.srcIp}:{ev.srcPort} → {ev.dstIp}:{ev.dstPort}{" "}
               {ev.transport ? `(${ev.transport})` : ""}
             </div>
@@ -357,11 +357,11 @@ function EventsInner() {
               <div className="mt-2 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusBadge variant={evidence.variant} dot>{evidence.badge}</StatusBadge>
-                  <span className="text-xs text-[var(--text)]">{evidence.message}</span>
+                  <span className="text-xs text-(--text)">{evidence.message}</span>
                   {evidence.sessionId && evidence.sessionId !== sessionFilter && (
                     <button
                       onClick={() => setSessionFilter(evidence.sessionId)}
-                      className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-0.5 text-[10px] text-[var(--text)] hover:bg-amber-500/[0.06]"
+                      className="transition-ui rounded-xs border bg-(--surface2) px-2 py-0.5 text-[10px] text-(--text)"
                     >
                       Show session
                     </button>
@@ -370,15 +370,15 @@ function EventsInner() {
                 <div className="grid gap-x-4 gap-y-0.5 text-xs sm:grid-cols-2">
                   {evidence.rows.map((row) => (
                     <div key={row.label} className="flex gap-2">
-                      <span className="shrink-0 text-[var(--text-dim)]">{row.label}</span>
-                      <span className="break-all font-mono text-[11px] text-[var(--text)]">{row.value}</span>
+                      <span className="shrink-0 text-(--text-dim)">{row.label}</span>
+                      <span className="break-all font-mono text-[11px] text-(--text)">{row.value}</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
             {ev.attributes && (
-              <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3 text-xs text-[var(--text)]">
+              <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3 text-xs text-(--text)">
                 {JSON.stringify(ev.attributes, null, 2)}
               </pre>
             )}
@@ -390,7 +390,7 @@ function EventsInner() {
           <div ref={sentinelRef} className="flex items-center justify-center py-4">
             <button
               onClick={loadMore}
-              className="transition-ui rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--text-muted)] hover:bg-amber-500/[0.06]"
+              className="transition-ui rounded-xs border bg-(--surface) px-4 py-2 text-sm text-(--text-muted)"
             >
               Load more ({filteredEvents.length - visibleCount} remaining)
             </button>
@@ -403,7 +403,7 @@ function EventsInner() {
 
 export default function EventsPage() {
   return (
-    <Suspense fallback={<div className="p-4 text-[var(--text)]">Loading events...</div>}>
+    <Suspense fallback={<div className="p-4 text-(--text)">Loading events...</div>}>
       <EventsInner />
     </Suspense>
   );

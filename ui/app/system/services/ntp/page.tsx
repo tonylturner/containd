@@ -89,24 +89,24 @@ export default function NTPPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Save
             </button>
           )}
-          <label className="ml-2 flex items-center gap-2 text-xs text-[var(--text)]">
+          <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
+              className="h-4 w-4 rounded-sm bg-(--surface)"
             />
             Auto
           </label>
@@ -114,7 +114,7 @@ export default function NTPPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -123,38 +123,38 @@ export default function NTPPage() {
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-[var(--text-muted)]">
+      <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
 
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Live runtime status</h2>
+        <h2 className="text-sm font-semibold text-(--text)">Live runtime status</h2>
         {loading ? (
           <div className="mt-3">
             <Skeleton className="h-20 w-full" />
           </div>
         ) : (
-          <div className="mt-3 grid gap-2 text-sm text-[var(--text)] md:grid-cols-2">
+          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
             <div>
               Running:{" "}
-              <span className="text-[var(--text)]">{status?.running ? "yes" : "no"}</span>
-              {status?.pid ? <span className="text-[var(--text-muted)]"> (pid {status.pid})</span> : null}
+              <span className="text-(--text)">{status?.running ? "yes" : "no"}</span>
+              {status?.pid ? <span className="text-(--text-muted)"> (pid {status.pid})</span> : null}
             </div>
             <div>
               Last start:{" "}
-              <span className="text-[var(--text)]">
+              <span className="text-(--text)">
                 {status?.last_start ?? "n/a"}
               </span>
             </div>
             <div>
-              Rate: <span className="text-[var(--text)]">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             <div>
-              Errors: <span className="text-amber-300">{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             <div className="md:col-span-2">
               Binary:{" "}
-              <span className="text-[var(--text)]">
+              <span className="text-(--text)">
                 {status?.ntpd_path || "not found"}{status?.ntpd_name ? ` (${status.ntpd_name})` : ""}
               </span>
             </div>
@@ -176,13 +176,13 @@ export default function NTPPage() {
       </Card>
 
       <Card>
-        <h2 className="text-lg font-semibold text-[var(--text)]">Client</h2>
-        <p className="mt-1 text-sm text-[var(--text)]">
+        <h2 className="text-lg font-semibold text-(--text)">Client</h2>
+        <p className="mt-1 text-sm text-(--text)">
           Configure the embedded chrony NTP client.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+          <label className="flex items-center gap-2 text-sm text-(--text)">
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
@@ -196,7 +196,7 @@ export default function NTPPage() {
           </label>
 
           <div>
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Interval Seconds (hint)
             </label>
             <input
@@ -214,7 +214,7 @@ export default function NTPPage() {
           </div>
 
           <div className="md:col-span-2">
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Servers / Pools (one per line)
             </label>
             <textarea
@@ -236,7 +236,7 @@ export default function NTPPage() {
           </div>
         </div>
 
-        <p className="mt-3 text-xs text-[var(--text-muted)]">
+        <p className="mt-3 text-xs text-(--text-muted)">
           State:{" "}
           {saveState === "saving"
             ? "saving\u2026"

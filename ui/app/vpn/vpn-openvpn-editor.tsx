@@ -58,22 +58,22 @@ export function OpenVPNEditorCard({
   downloadClient,
 }: Props) {
   return (
-    <div className="relative overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card backdrop-blur">
-      <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-amber-500/10 blur-2xl" />
+    <div className="relative overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
+      <div className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full blur-2xl" />
       <div className="relative flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-sm border border-amber-500/[0.15] bg-gradient-to-br from-amber-500/25 to-rose-500/10">
+          <div className="grid h-11 w-11 place-items-center rounded-xs border bg-linear-to-br from-amber-500/25 to-rose-500/10">
             <Image
               src={staticAssetURL("/icons/openvpn.svg")}
               alt="OpenVPN"
               width={24}
               height={24}
-              className="h-6 w-6 invert opacity-90 drop-shadow"
+              className="h-6 w-6 invert opacity-90 drop-shadow-sm"
             />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text)]">OpenVPN</h2>
-            <p className="mt-0.5 text-sm text-[var(--text)]">Compatibility VPN (optional).</p>
+            <h2 className="text-lg font-semibold text-(--text)">OpenVPN</h2>
+            <p className="mt-0.5 text-sm text-(--text)">Compatibility VPN (optional).</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -88,7 +88,7 @@ export function OpenVPNEditorCard({
       </div>
 
       <div className="mt-4 grid gap-3">
-        <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+        <label className="flex items-center gap-2 text-sm text-(--text)">
           <input
             type="checkbox"
             checked={cfg.openvpn.enabled ?? false}
@@ -102,12 +102,12 @@ export function OpenVPNEditorCard({
         <IssuesBanner title="OpenVPN setup checklist" issues={openvpnIssues} />
 
         <div>
-          <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Mode</label>
+          <label className="text-xs uppercase tracking-wide text-(--text-muted)">Mode</label>
           <select
             value={cfg.openvpn.mode ?? "client"}
             disabled={!canEdit}
             onChange={(e) => setCfg((c) => ({ ...c, openvpn: { ...c.openvpn, mode: e.target.value } }))}
-            className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
             <option value="client">client</option>
             <option value="server">server</option>
@@ -115,15 +115,15 @@ export function OpenVPNEditorCard({
         </div>
 
         {cfg.openvpn.mode === "client" ? (
-          <div className="rounded-sm border border-amber-500/[0.15] bg-black/20 p-3">
+          <div className="rounded-xs border bg-black/20 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Client Configuration</div>
-                <div className="mt-1 text-sm text-[var(--text)]">
+                <div className="text-xs uppercase tracking-wide text-(--text-muted)">Client Configuration</div>
+                <div className="mt-1 text-sm text-(--text)">
                   {cfg.openvpn.managed ? "Managed config (recommended)" : "Advanced profile path"}
                 </div>
               </div>
-              <label className="inline-flex items-center gap-2 text-xs text-[var(--text)]">
+              <label className="inline-flex items-center gap-2 text-xs text-(--text)">
                 <input
                   type="checkbox"
                   checked={!!cfg.openvpn.managed}
@@ -149,7 +149,7 @@ export function OpenVPNEditorCard({
               <div className="mt-3 grid gap-3">
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="md:col-span-2">
-                    <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                    <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                       Remote
                       <InfoTip label="Hostname or IP address of the OpenVPN gateway." />
                     </label>
@@ -165,12 +165,12 @@ export function OpenVPNEditorCard({
                           },
                         }))
                       }
-                      className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                      className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                       placeholder="vpn.example.com"
                     />
                   </div>
                   <div>
-                    <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Port</label>
+                    <label className="text-xs uppercase tracking-wide text-(--text-muted)">Port</label>
                     <input
                       type="number"
                       value={cfg.openvpn.managed.port ?? 1194}
@@ -184,14 +184,14 @@ export function OpenVPNEditorCard({
                           },
                         }))
                       }
-                      className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                      className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     />
                   </div>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <div>
-                    <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Protocol</label>
+                    <label className="text-xs uppercase tracking-wide text-(--text-muted)">Protocol</label>
                     <select
                       value={cfg.openvpn.managed.proto ?? "udp"}
                       disabled={!canEdit}
@@ -204,14 +204,14 @@ export function OpenVPNEditorCard({
                           },
                         }))
                       }
-                      className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                      className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     >
                       <option value="udp">udp</option>
                       <option value="tcp">tcp</option>
                     </select>
                   </div>
                   <div className="grid gap-2">
-                    <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                    <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                       User/Pass (optional)
                       <InfoTip label="Only needed when the OpenVPN gateway requires username/password auth." />
                     </div>
@@ -228,7 +228,7 @@ export function OpenVPNEditorCard({
                             },
                           }))
                         }
-                        className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                         placeholder="username"
                       />
                       <input
@@ -244,7 +244,7 @@ export function OpenVPNEditorCard({
                             },
                           }))
                         }
-                        className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                        className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                         placeholder="password"
                       />
                     </div>
@@ -287,15 +287,15 @@ export function OpenVPNEditorCard({
                     }))
                   }
                 />
-                <div className="text-xs text-[var(--text-muted)]">
+                <div className="text-xs text-(--text-muted)">
                   This is stored in the appliance config for now; secret encryption/redaction is tracked as a follow-up.
                 </div>
               </div>
             ) : (
-              <details className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
-                <summary className="cursor-pointer text-sm text-[var(--text)]">Advanced profile path</summary>
+              <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3">
+                <summary className="cursor-pointer text-sm text-(--text)">Advanced profile path</summary>
                 <div className="mt-3">
-                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                     Config Path
                     <InfoTip label="Foreground OpenVPN config file; omit the daemon directive." />
                   </label>
@@ -303,20 +303,20 @@ export function OpenVPNEditorCard({
                     value={cfg.openvpn.configPath ?? ""}
                     disabled={!canEdit}
                     onChange={(e) => setCfg((c) => ({ ...c, openvpn: { ...c.openvpn, configPath: e.target.value } }))}
-                    className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     placeholder="/data/openvpn/profiles/client.ovpn"
                   />
                 </div>
               </details>
             )}
 
-            <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
+            <div className="mt-3 rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text)">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-[var(--text)]">
+                <div className="flex items-center gap-2 text-(--text)">
                   Import profile (advanced)
                   <InfoTip label="Uploads a .ovpn and sets Config Path automatically (clears managed config)." />
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-xs text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs text-(--text) transition-ui">
                   <input
                     type="file"
                     accept=".ovpn,.conf,.txt"
@@ -334,16 +334,16 @@ export function OpenVPNEditorCard({
             </div>
           </div>
         ) : cfg.openvpn.mode === "server" ? (
-          <div className="rounded-sm border border-amber-500/[0.15] bg-black/20 p-3">
-            <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Server Configuration</div>
+          <div className="rounded-xs border bg-black/20 p-3">
+            <div className="text-xs uppercase tracking-wide text-(--text-muted)">Server Configuration</div>
             <div className="mt-3 grid gap-3">
-              <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
+              <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text)">
                 Enabling OpenVPN server automatically opens the listen port on the configured listen zone or interfaces
                 (default WAN) via nftables input so clients can connect.
               </div>
               <div className="grid gap-3 md:grid-cols-3">
                 <div>
-                  <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Listen Port</label>
+                  <label className="text-xs uppercase tracking-wide text-(--text-muted)">Listen Port</label>
                   <input
                     type="number"
                     value={cfg.openvpn.server?.listenPort ?? 1194}
@@ -357,11 +357,11 @@ export function OpenVPNEditorCard({
                         },
                       }))
                     }
-                    className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                   />
                 </div>
                 <div>
-                  <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Protocol</label>
+                  <label className="text-xs uppercase tracking-wide text-(--text-muted)">Protocol</label>
                   <select
                     value={cfg.openvpn.server?.proto ?? "udp"}
                     disabled={!canEdit}
@@ -371,14 +371,14 @@ export function OpenVPNEditorCard({
                         openvpn: { ...c.openvpn, server: { ...(c.openvpn.server ?? defaultOpenVPNServer), proto: e.target.value } },
                       }))
                     }
-                    className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                   >
                     <option value="udp">udp</option>
                     <option value="tcp">tcp</option>
                   </select>
                 </div>
                 <div>
-                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                     Tunnel CIDR
                     <InfoTip label="Client address pool. Policy can target vpn:openvpn." />
                   </label>
@@ -394,14 +394,14 @@ export function OpenVPNEditorCard({
                         },
                       }))
                     }
-                    className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                   />
                 </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                     Listen Zone
                     <InfoTip label="Zone used for auto-open input rules (default wan)." />
                   </label>
@@ -417,7 +417,7 @@ export function OpenVPNEditorCard({
                         },
                       }))
                     }
-                    className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                   >
                     <option value="">default (wan)</option>
                     {zones.map((z) => (
@@ -428,7 +428,7 @@ export function OpenVPNEditorCard({
                   </select>
                 </div>
                 <div>
-                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                     Listen Interfaces (optional)
                     <InfoTip label="Overrides listen zone when set. Select one or more interfaces/devices." />
                   </label>
@@ -439,7 +439,7 @@ export function OpenVPNEditorCard({
                         return (
                           <label
                             key={opt.value}
-                            className="flex items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]"
+                            className="flex items-center gap-2 rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text)"
                           >
                             <input
                               type="checkbox"
@@ -471,14 +471,14 @@ export function OpenVPNEditorCard({
                       })}
                     </div>
                   ) : (
-                    <p className="mt-2 text-xs text-[var(--text-muted)]">No interfaces discovered yet.</p>
+                    <p className="mt-2 text-xs text-(--text-muted)">No interfaces discovered yet.</p>
                   )}
-                  <p className="mt-2 text-xs text-[var(--text-muted)]">If any interfaces are selected, the listen zone is ignored.</p>
+                  <p className="mt-2 text-xs text-(--text-muted)">If any interfaces are selected, the listen zone is ignored.</p>
                 </div>
               </div>
 
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                   Public Endpoint (for client profiles)
                   <InfoTip label="Used when generating downloadable .ovpn client profiles." />
                 </label>
@@ -494,12 +494,12 @@ export function OpenVPNEditorCard({
                       },
                     }))
                   }
-                  className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                   placeholder="vpn.example.com"
                 />
               </div>
 
-              <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+              <label className="flex items-center gap-2 text-sm text-(--text)">
                 <input
                   type="checkbox"
                   checked={cfg.openvpn.server?.clientToClient ?? false}
@@ -520,7 +520,7 @@ export function OpenVPNEditorCard({
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                     Push DNS (comma-separated)
                     <InfoTip label="DNS servers sent to clients when they connect." />
                   </label>
@@ -542,12 +542,12 @@ export function OpenVPNEditorCard({
                         },
                       }))
                     }
-                    className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     placeholder="1.1.1.1, 8.8.8.8"
                   />
                 </div>
                 <div>
-                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                  <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                     Push Routes (comma-separated CIDR)
                     <InfoTip label="Networks advertised to VPN clients for reachability." />
                   </label>
@@ -569,15 +569,15 @@ export function OpenVPNEditorCard({
                         },
                       }))
                     }
-                    className="mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     placeholder="192.168.0.0/24, 10.0.0.0/8"
                   />
                 </div>
               </div>
 
-              <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3">
+              <div className="rounded-xs border bg-(--surface) p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-[var(--text)]">
+                  <div className="flex items-center gap-2 text-(--text)">
                     Client profiles
                     <InfoTip label="Generates ECDSA certs and downloads inline .ovpn profiles." />
                   </div>
@@ -586,13 +586,13 @@ export function OpenVPNEditorCard({
                       value={newClientName}
                       disabled={!canEdit}
                       onChange={(e) => setNewClientName(e.target.value)}
-                      className="w-40 input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                      className="w-40 input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                       placeholder="client name"
                     />
                     <button
                       onClick={() => void createClient()}
                       disabled={!canEdit || !newClientName.trim()}
-                      className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
+                      className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
                     >
                       Create
                     </button>
@@ -601,11 +601,11 @@ export function OpenVPNEditorCard({
                 {ovpnClients.length ? (
                   <div className="mt-3 grid gap-2">
                     {ovpnClients.map((n) => (
-                      <div key={n} className="flex items-center justify-between rounded-sm border border-amber-500/[0.15] bg-black/20 px-3 py-2">
-                        <div className="font-mono text-sm text-[var(--text)]">{n}</div>
+                      <div key={n} className="flex items-center justify-between rounded-xs border bg-black/20 px-3 py-2">
+                        <div className="font-mono text-sm text-(--text)">{n}</div>
                         <button
                           onClick={() => void downloadClient(n)}
-                          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+                          className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
                         >
                           Download
                         </button>
@@ -613,7 +613,7 @@ export function OpenVPNEditorCard({
                     ))}
                   </div>
                 ) : (
-                  <div className="mt-3 text-xs text-[var(--text-muted)]">No clients yet.</div>
+                  <div className="mt-3 text-xs text-(--text-muted)">No clients yet.</div>
                 )}
               </div>
             </div>
@@ -621,11 +621,11 @@ export function OpenVPNEditorCard({
         ) : null}
 
         {svcStatus?.openvpn_last_error ? (
-          <div className="rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+          <div className="rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
             {svcStatus.openvpn_last_error}
           </div>
         ) : (
-          <div className="rounded-sm border border-amber-500/[0.15] bg-black/20 px-3 py-2 text-xs text-[var(--text)]">
+          <div className="rounded-xs border bg-black/20 px-3 py-2 text-xs text-(--text)">
             OpenVPN is supervised only when the binary is present and a valid config file is provided.
           </div>
         )}

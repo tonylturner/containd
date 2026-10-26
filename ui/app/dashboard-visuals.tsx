@@ -35,9 +35,9 @@ export function NetworkPulseStats({
         <span className="text-red-400 tabular-nums">{blocked}</span>
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-amber-400" />
+        <span className="h-2 w-2 rounded-full" />
         <span className="text-slate-500">INSPECT</span>
-        <span className="text-amber-400 tabular-nums">{inspected}</span>
+        <span className="tabular-nums">{inspected}</span>
       </span>
     </div>
   );
@@ -272,18 +272,18 @@ export function ZoneList({ zones, threatMap, sparklineMap }: {
           <Link
             key={z.name}
             href="/zones/"
-            className="block rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 transition-colors hover:border-white/[0.12] hover:bg-white/[0.04]"
+            className="block rounded-lg border border-white/6 bg-white/2 p-3 transition-colors hover:border-white/12 hover:bg-white/4"
           >
             <div className="mb-1 flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-200 font-mono">
                 {z.alias || z.name}
               </span>
-              <span className={`text-2xs font-mono px-1.5 py-0.5 rounded ${badgeInfo.cls}`}>
+              <span className={`text-2xs font-mono px-1.5 py-0.5 rounded-sm ${badgeInfo.cls}`}>
                 {badgeInfo.label}
               </span>
             </div>
             {threat.alerts > 0 && (
-              <div className="mb-1 text-2xs font-mono text-amber-400/80">
+              <div className="mb-1 text-2xs font-mono">
                 {threat.alerts} alert{threat.alerts !== 1 ? "s" : ""}
                 {threat.blocks > 0 && ` · ${threat.blocks} block${threat.blocks !== 1 ? "s" : ""}`}
               </div>
@@ -301,7 +301,7 @@ export function ZoneList({ zones, threatMap, sparklineMap }: {
                   return (
                     <div
                       key={i}
-                      className="flex-1 rounded-t-sm"
+                      className="flex-1 rounded-t-xs"
                       style={{
                         height: `${h}px`,
                         background: threat.level === "critical"
@@ -491,7 +491,7 @@ function zoneBadge(level: ZoneThreat["level"]): { label: string; cls: string } {
     case "critical":
       return { label: "CRITICAL", cls: "bg-red-500/15 text-red-400" };
     case "elevated":
-      return { label: "ELEVATED", cls: "bg-amber-500/15 text-amber-400" };
+      return { label: "ELEVATED", cls: "" };
     default:
       return { label: "CLEAR", cls: "bg-emerald-500/10 text-emerald-400" };
   }

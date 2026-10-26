@@ -39,7 +39,7 @@ export const CARDS: CardDef[] = [
     title: "Allow LAN Internet Access",
     description:
       "Enable internal hosts to reach the Internet via SNAT masquerade.",
-    color: "bg-[var(--amber)]",
+    color: "bg-(--amber)",
     steps: ["Select LAN zone", "Select WAN zone", "Review & Apply"],
   },
   {
@@ -60,7 +60,7 @@ export const CARDS: CardDef[] = [
     title: "Allow ICS Communication",
     description:
       "Permit industrial protocol traffic between zones with DPI enforcement.",
-    color: "bg-cyan-400",
+    color: "",
     steps: [
       "Select ICS protocol",
       "Select zones",

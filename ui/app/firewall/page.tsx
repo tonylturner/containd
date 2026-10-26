@@ -63,7 +63,7 @@ export default function FirewallPage() {
       body: (
         <>
           Define zones in{" "}
-          <Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+          <Link href="/zones/" className="font-semibold text-(--amber) hover:text-(--amber)">
             Zones
           </Link>{" "}
           so you can target them in rules.
@@ -83,7 +83,7 @@ export default function FirewallPage() {
       body: (
         <>
           Turn on SNAT in{" "}
-          <Link href="/nat/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+          <Link href="/nat/" className="font-semibold text-(--amber) hover:text-(--amber)">
             NAT
           </Link>{" "}
           to allow LAN hosts to reach the Internet.
@@ -321,7 +321,7 @@ export default function FirewallPage() {
             <button
               onClick={quickStartLanWanOutbound}
               disabled={quickStarting}
-              className="rounded-sm border border-amber-500/30 bg-amber-500/[0.1] px-3 py-1.5 text-sm text-[var(--amber)] transition-ui hover:brightness-110/15 disabled:opacity-50"
+              className="rounded-xs border px-3 py-1.5 text-sm text-(--amber) transition-ui disabled:opacity-50"
               title="Best-effort: default route + SNAT + allow rule for LAN/MGMT \u2192 WAN"
             >
               {quickStarting ? "Enabling..." : "Quick start (LAN\u2192WAN)"}
@@ -329,7 +329,7 @@ export default function FirewallPage() {
           )}
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
@@ -337,14 +337,14 @@ export default function FirewallPage() {
       }
     >
       {!isAdmin() && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       <TipsBanner tips={tips} className="mb-4" />
       <Card padding="md" className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="font-semibold text-[var(--text)]">Outbound readiness</div>
+          <div className="font-semibold text-(--text)">Outbound readiness</div>
           <div className="flex flex-wrap gap-2 text-xs">
             <StatusBadge variant={outboundStatus.hasDefaultRoute ? "success" : "warning"} dot>
               default route
@@ -364,22 +364,22 @@ export default function FirewallPage() {
           </div>
         </div>
         {!outboundStatus.ok && (
-          <div className="mt-2 text-xs text-[var(--text-muted)]">
+          <div className="mt-2 text-xs text-(--text-muted)">
             {"To reach the Internet from LAN, you typically need a default route, a LAN\u2192WAN allow rule, and "}
-            <Link href="/nat/" className="font-semibold text-[var(--text)] hover:text-[var(--text)]">SNAT</Link>
+            <Link href="/nat/" className="font-semibold text-(--text) hover:text-(--text)">SNAT</Link>
             {" out WAN. Use "}
-            <span className="font-semibold text-[var(--text)]">{"Quick start (LAN\u2192WAN)"}</span>
+            <span className="font-semibold text-(--text)">{"Quick start (LAN\u2192WAN)"}</span>
             {" to auto-configure these (including NAT)."}
           </div>
         )}
       </Card>
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
       {notice && (
-        <div className="mb-4 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+        <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
           {notice}
         </div>
       )}
@@ -387,37 +387,37 @@ export default function FirewallPage() {
       <Card padding="lg" className="mt-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-[var(--text)]">nftables ruleset preview</h2>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
+            <h2 className="text-sm font-semibold text-(--text)">nftables ruleset preview</h2>
+            <p className="mt-1 text-xs text-(--text-muted)">
               Preview the compiled ruleset before it is applied to the dataplane.
             </p>
           </div>
           {isAdmin() && (
             <button
               onClick={loadRulesetPreview}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+              className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
             >
               {rulesetState === "loading" ? "Loading..." : "Preview"}
             </button>
           )}
         </div>
         {!isAdmin() && (
-          <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+          <div className="mt-3 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
             View-only mode: ruleset preview requires admin access.
           </div>
         )}
         {rulesetState === "error" && (
-          <div className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <div className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             Failed to load ruleset preview.
           </div>
         )}
         {rulesetPreview?.engineStatusError && (
-          <div className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <div className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             Engine status unavailable: {rulesetPreview.engineStatusError}
           </div>
         )}
         {rulesetPreview?.ruleset && (
-          <pre className="mt-4 max-h-[360px] overflow-auto rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)]">
+          <pre className="mt-4 max-h-[360px] overflow-auto rounded-xs border bg-(--surface) p-4 text-xs text-(--text)">
             {rulesetPreview.ruleset}
           </pre>
         )}
@@ -427,9 +427,9 @@ export default function FirewallPage() {
 
       {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
 
-      <div className="mt-6 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] shadow-card">
+      <div className="mt-6 overflow-hidden rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
-          <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">ID</th>
               <th className="px-4 py-3">Description</th>
@@ -453,23 +453,23 @@ export default function FirewallPage() {
               </tr>
             )}
             {rules.map((r) => (
-              <tr key={r.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">{r.id}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.description || "\u2014"}</td>
-                <td className="px-4 py-3 text-[var(--text)]">
+              <tr key={r.id} className="border-t table-row-hover transition-ui">
+                <td className="px-4 py-3 font-mono text-xs text-(--text)">{r.id}</td>
+                <td className="px-4 py-3 text-(--text)">{r.description || "\u2014"}</td>
+                <td className="px-4 py-3 text-(--text)">
                   {(r.sourceZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}{" \u2192 "}
                   {(r.destZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}
                 </td>
-                <td className="px-4 py-3 text-[var(--text)]">
+                <td className="px-4 py-3 text-(--text)">
                   {(r.protocols ?? []).map((p) => `${p.name}${p.port ? ":" + p.port : ""}`).join(", ") || "any"}
                 </td>
-                <td className="px-4 py-3 text-[var(--text)]">
+                <td className="px-4 py-3 text-(--text)">
                   {r.ics?.protocol ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge variant="neutral">
                         {r.ics.mode === "learn" ? "safe learning" : "enforce"}
                       </StatusBadge>
-                      <span className="text-xs text-[var(--text)]">
+                      <span className="text-xs text-(--text)">
                         {r.ics.protocol === "iec104"
                           ? `iec104 ${summarizeIEC104(r.ics).types} ${summarizeIEC104(r.ics).addresses}`
                           : `${r.ics.protocol} fc=${(r.ics.functionCode ?? []).join(",") || "*"}`}
@@ -486,13 +486,13 @@ export default function FirewallPage() {
                   {r.log ? (
                     <StatusBadge variant="info">log</StatusBadge>
                   ) : (
-                    <span className="text-xs text-[var(--text-muted)]">&mdash;</span>
+                    <span className="text-xs text-(--text-muted)">&mdash;</span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {isAdmin() && (
                     <>
-                      <button onClick={() => setEditing(r)} className="mr-2 rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]">Edit</button>
+                      <button onClick={() => setEditing(r)} className="mr-2 rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Edit</button>
                       <button
                         onClick={() => {
                           confirm.open({

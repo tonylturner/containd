@@ -74,7 +74,7 @@ function parseTraceroute(output: string): Hop[] {
 }
 
 function smallSpark(values: number[]): JSX.Element {
-  if (values.length === 0) return <span className="text-[var(--text-muted)]">—</span>;
+  if (values.length === 0) return <span className="text-(--text-muted)">—</span>;
   const max = Math.max(...values);
   const min = Math.min(...values);
   const span = Math.max(1, max - min);
@@ -85,7 +85,7 @@ function smallSpark(values: number[]): JSX.Element {
         return (
           <div
             key={idx}
-            className="w-2 rounded-sm bg-amber-500/[0.3]"
+            className="w-2 rounded-xs"
             style={{ height: `${h}px` }}
             title={`${v.toFixed(1)}ms`}
           />
@@ -208,7 +208,7 @@ export default function DiagnosticsPage() {
   return (
     <Shell title="Diagnostics">
       <ConfirmDialog {...confirm.props} />
-      <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)] shadow-card">
+      <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text) shadow-card">
         Diagnostics run from the appliance. In container labs, ICMP may be blocked; <span className="font-semibold">diag ping</span>{" "}
         falls back to TCP probes when needed.
       </div>
@@ -221,17 +221,17 @@ export default function DiagnosticsPage() {
               value={pingHost}
               onChange={(e) => setPingHost(e.target.value)}
               placeholder="host or IP"
-              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2"
+              className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden md:col-span-2"
             />
             <input
               value={String(pingCount)}
               onChange={(e) => setPingCount(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
               placeholder="count"
-              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
             />
           </div>
           <div className="mt-3 flex items-center justify-between">
-            <div className="text-xs text-[var(--text-muted)]">Command: `diag ping {pingHost} {pingCount}`</div>
+            <div className="text-xs text-(--text-muted)">Command: `diag ping {pingHost} {pingCount}`</div>
             <button
               type="button"
               disabled={busy !== null}
@@ -240,38 +240,38 @@ export default function DiagnosticsPage() {
                 setPingRes(await runCLI(`diag ping ${pingHost} ${pingCount}`));
                 setBusy(null);
               }}
-              className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
+              className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
             >
               {busy === "ping" ? "Running..." : "Run"}
             </button>
           </div>
           {pingRes && (
-            <div className="mt-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
+            <div className="mt-4 rounded-xs border bg-(--surface) p-4">
               {pingRes.error && (
-                <div className="mb-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+                <div className="mb-3 rounded-xs border px-3 py-2 text-sm">
                   {pingRes.error}
                 </div>
               )}
               {pingParsed && (
                 <div className="mb-3 grid gap-2 md:grid-cols-3">
-                  <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
-                    <div className="text-xs text-[var(--text-muted)]">Samples</div>
-                    <div className="text-sm text-[var(--text)]">{pingParsed.samplesMs.length}</div>
+                  <div className="rounded-xs border bg-(--surface) px-3 py-2">
+                    <div className="text-xs text-(--text-muted)">Samples</div>
+                    <div className="text-sm text-(--text)">{pingParsed.samplesMs.length}</div>
                   </div>
-                  <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
-                    <div className="text-xs text-[var(--text-muted)]">min/avg/max</div>
-                    <div className="text-sm text-[var(--text)]">
+                  <div className="rounded-xs border bg-(--surface) px-3 py-2">
+                    <div className="text-xs text-(--text-muted)">min/avg/max</div>
+                    <div className="text-sm text-(--text)">
                       {(pingParsed.minMs ?? 0).toFixed(0)} / {(pingParsed.avgMs ?? 0).toFixed(0)} /{" "}
                       {(pingParsed.maxMs ?? 0).toFixed(0)} ms
                     </div>
                   </div>
-                  <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
-                    <div className="text-xs text-[var(--text-muted)]">Trend</div>
+                  <div className="rounded-xs border bg-(--surface) px-3 py-2">
+                    <div className="text-xs text-(--text-muted)">Trend</div>
                     {smallSpark(pingParsed.samplesMs)}
                   </div>
                 </div>
               )}
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-[var(--text)]">{pingRes.output}</pre>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-(--text)">{pingRes.output}</pre>
             </div>
           )}
         </Card>
@@ -282,17 +282,17 @@ export default function DiagnosticsPage() {
               value={traceHost}
               onChange={(e) => setTraceHost(e.target.value)}
               placeholder="host or IP"
-              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2"
+              className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden md:col-span-2"
             />
             <input
               value={String(traceHops)}
               onChange={(e) => setTraceHops(Math.max(1, Math.min(64, Number(e.target.value) || 20)))}
               placeholder="max hops"
-              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
             />
           </div>
           <div className="mt-3 flex items-center justify-between">
-            <div className="text-xs text-[var(--text-muted)]">Command: `diag traceroute {traceHost} {traceHops}`</div>
+            <div className="text-xs text-(--text-muted)">Command: `diag traceroute {traceHost} {traceHops}`</div>
             <button
               type="button"
               disabled={busy !== null}
@@ -301,22 +301,22 @@ export default function DiagnosticsPage() {
                 setTraceRes(await runCLI(`diag traceroute ${traceHost} ${traceHops}`));
                 setBusy(null);
               }}
-              className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
+              className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
             >
               {busy === "trace" ? "Running..." : "Run"}
             </button>
           </div>
           {traceRes && (
-            <div className="mt-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
+            <div className="mt-4 rounded-xs border bg-(--surface) p-4">
               {traceRes.error && (
-                <div className="mb-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+                <div className="mb-3 rounded-xs border px-3 py-2 text-sm">
                   {traceRes.error}
                 </div>
               )}
               {traceParsed.length > 0 && (
-                <div className="mb-3 overflow-hidden rounded-sm border border-amber-500/[0.15]">
+                <div className="mb-3 overflow-hidden rounded-xs border">
                   <table className="w-full text-xs">
-                    <thead className="bg-[var(--surface)] text-left text-[11px] uppercase tracking-wide text-[var(--text)]">
+                    <thead className="bg-(--surface) text-left text-[11px] uppercase tracking-wide text-(--text)">
                       <tr>
                         <th className="px-3 py-2">Hop</th>
                         <th className="px-3 py-2">Peer</th>
@@ -327,11 +327,11 @@ export default function DiagnosticsPage() {
                     </thead>
                     <tbody>
                       {traceParsed.slice(0, 24).map((h) => (
-                        <tr key={h.ttl} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                          <td className="px-3 py-2 text-[var(--text)]">{h.ttl}</td>
-                          <td className="px-3 py-2 text-[var(--text)]">{h.peer ?? "—"}</td>
+                        <tr key={h.ttl} className="border-t table-row-hover transition-ui">
+                          <td className="px-3 py-2 text-(--text)">{h.ttl}</td>
+                          <td className="px-3 py-2 text-(--text)">{h.peer ?? "—"}</td>
                           {h.probes.map((p, idx) => (
-                            <td key={idx} className="px-3 py-2 text-[var(--text)]">
+                            <td key={idx} className="px-3 py-2 text-(--text)">
                               {p ?? "*"}
                             </td>
                           ))}
@@ -341,7 +341,7 @@ export default function DiagnosticsPage() {
                   </table>
                 </div>
               )}
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-[var(--text)]">{traceRes.output}</pre>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-(--text)">{traceRes.output}</pre>
             </div>
           )}
         </Card>
@@ -352,23 +352,23 @@ export default function DiagnosticsPage() {
               value={tcpTraceHost}
               onChange={(e) => setTCPTraceHost(e.target.value)}
               placeholder="host or IP"
-              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
             />
             <input
               value={String(tcpTracePort)}
               onChange={(e) => setTCPTracePort(Math.max(1, Math.min(65535, Number(e.target.value) || 443)))}
               placeholder="port"
-              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
             />
             <input
               value={String(tcpTraceHops)}
               onChange={(e) => setTCPTraceHops(Math.max(1, Math.min(64, Number(e.target.value) || 20)))}
               placeholder="max hops"
-              className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
             />
           </div>
           <div className="mt-3 flex items-center justify-between">
-            <div className="text-xs text-[var(--text-muted)]">
+            <div className="text-xs text-(--text-muted)">
               Command: `diag tcptraceroute {tcpTraceHost} {tcpTracePort} {tcpTraceHops}`
             </div>
             <button
@@ -379,22 +379,22 @@ export default function DiagnosticsPage() {
                 setTCPTraceRes(await runCLI(`diag tcptraceroute ${tcpTraceHost} ${tcpTracePort} ${tcpTraceHops}`));
                 setBusy(null);
               }}
-              className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
+              className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
             >
               {busy === "tcptrace" ? "Running..." : "Run"}
             </button>
           </div>
           {tcpTraceRes && (
-            <div className="mt-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
+            <div className="mt-4 rounded-xs border bg-(--surface) p-4">
               {tcpTraceRes.error && (
-                <div className="mb-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+                <div className="mb-3 rounded-xs border px-3 py-2 text-sm">
                   {tcpTraceRes.error}
                 </div>
               )}
               {tcpTraceParsed.length > 0 && (
-                <div className="mb-3 overflow-hidden rounded-sm border border-amber-500/[0.15]">
+                <div className="mb-3 overflow-hidden rounded-xs border">
                   <table className="w-full text-xs">
-                    <thead className="bg-[var(--surface)] text-left text-[11px] uppercase tracking-wide text-[var(--text)]">
+                    <thead className="bg-(--surface) text-left text-[11px] uppercase tracking-wide text-(--text)">
                       <tr>
                         <th className="px-3 py-2">Hop</th>
                         <th className="px-3 py-2">P1</th>
@@ -404,10 +404,10 @@ export default function DiagnosticsPage() {
                     </thead>
                     <tbody>
                       {tcpTraceParsed.slice(0, 24).map((h) => (
-                        <tr key={h.ttl} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                          <td className="px-3 py-2 text-[var(--text)]">{h.ttl}</td>
+                        <tr key={h.ttl} className="border-t table-row-hover transition-ui">
+                          <td className="px-3 py-2 text-(--text)">{h.ttl}</td>
                           {h.probes.map((p, idx) => (
-                            <td key={idx} className="px-3 py-2 text-[var(--text)]">
+                            <td key={idx} className="px-3 py-2 text-(--text)">
                               {p ?? "*"}
                             </td>
                           ))}
@@ -417,29 +417,29 @@ export default function DiagnosticsPage() {
                   </table>
                 </div>
               )}
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-[var(--text)]">{tcpTraceRes.output}</pre>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-(--text)">{tcpTraceRes.output}</pre>
             </div>
           )}
         </Card>
 
         <Card title="Interface Connectivity" padding="lg">
-          <div className="text-xs text-[var(--text-muted)]">
+          <div className="text-xs text-(--text-muted)">
             Tests from a selected interface. Use this to validate routing and basic port reachability.
           </div>
           {!interfaceStateLoading && state === null && (
-            <div role="status" className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            <div role="status" className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
               <p>Interface runtime state unavailable — the engine could not be reached. Runtime addresses are unknown; saved interface choices remain available.</p>
-              <button onClick={refreshInterfaceState} className="mt-2 rounded-sm border border-red-500/30 px-3 py-1">Retry</button>
+              <button onClick={refreshInterfaceState} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
             </div>
           )}
-          {state?.length === 0 && <p role="status" className="mt-3 text-sm text-[var(--text)]">No OS interfaces reported.</p>}
+          {state?.length === 0 && <p role="status" className="mt-3 text-sm text-(--text)">No OS interfaces reported.</p>}
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div>
-              <div className="mb-1 text-xs text-[var(--text-muted)]">Source interface</div>
+              <div className="mb-1 text-xs text-(--text-muted)">Source interface</div>
               <select
                 value={reachSrc}
                 onChange={(e) => setReachSrc(e.target.value)}
-                className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
               >
                 {ifaces
                   .slice()
@@ -452,13 +452,13 @@ export default function DiagnosticsPage() {
               </select>
             </div>
             <div>
-              <div className="mb-1 text-xs text-[var(--text-muted)]">Destination</div>
+              <div className="mb-1 text-xs text-(--text-muted)">Destination</div>
               {reachSelfTest ? (
                 <>
                   <select
                     value={reachDstIface}
                     onChange={(e) => setReachDstIface(e.target.value)}
-                    className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                   >
                     {ifaces
                       .slice()
@@ -469,7 +469,7 @@ export default function DiagnosticsPage() {
                         </option>
                       ))}
                   </select>
-                  <div className="mt-1 text-[11px] text-[var(--text-muted)]">
+                  <div className="mt-1 text-[11px] text-(--text-muted)">
                     Self-test runs a temporary listener on the destination interface so TCP/UDP can be validated even when
                     nothing is running.
                   </div>
@@ -480,10 +480,10 @@ export default function DiagnosticsPage() {
                     value={reachDst}
                     onChange={(e) => setReachDst(e.target.value)}
                     placeholder="host, IP, or interface name"
-                    className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                    className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                   />
-                  <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-                    Tip: set this to another interface name (e.g. <span className="text-[var(--text)]">wan</span>) for a
+                  <div className="mt-1 text-[11px] text-(--text-muted)">
+                    Tip: set this to another interface name (e.g. <span className="text-(--text)">wan</span>) for a
                     deterministic self-test, or an IP/host for best-effort probing.
                   </div>
                 </>
@@ -492,7 +492,7 @@ export default function DiagnosticsPage() {
           </div>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div>
-              <div className="mb-1 text-xs text-[var(--text-muted)]">Protocol</div>
+              <div className="mb-1 text-xs text-(--text-muted)">Protocol</div>
               <select
                 value={reachProto}
                 onChange={(e) => {
@@ -501,13 +501,13 @@ export default function DiagnosticsPage() {
                   if (v === "icmp") setReachPort("");
                   if (v === "icmp") setReachSelfTest(false);
                 }}
-                className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
               >
                 <option value="tcp">tcp</option>
                 <option value="udp">udp</option>
                 <option value="icmp">icmp</option>
               </select>
-              <label className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text)]">
+              <label className="mt-2 flex items-center gap-2 text-[11px] text-(--text)">
                 <input
                   type="checkbox"
                   checked={reachSelfTest}
@@ -515,13 +515,13 @@ export default function DiagnosticsPage() {
                   onChange={(e) => setReachSelfTest(e.target.checked)}
                 />
                 Self-test (dst interface)
-                <span className="text-[var(--text-dim)]">
+                <span className="text-(--text-dim)">
                   {reachProto === "icmp" ? "(not applicable)" : "(recommended for interface↔interface checks)"}
                 </span>
               </label>
             </div>
             <div>
-              <div className="mb-1 text-xs text-[var(--text-muted)]">Port (tcp/udp only; optional)</div>
+              <div className="mb-1 text-xs text-(--text-muted)">Port (tcp/udp only; optional)</div>
               <input
                 value={reachPort}
                 disabled={reachProto === "icmp"}
@@ -543,12 +543,12 @@ export default function DiagnosticsPage() {
                     ? "N/A for ICMP"
                     : "blank = skip (or self-test if dst is an interface name)"
                 }
-                className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none disabled:opacity-60"
+                className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden disabled:opacity-60"
               />
             </div>
           </div>
           <div className="mt-3 flex items-end justify-between gap-2">
-            <div className="text-[11px] text-[var(--text-muted)]">
+            <div className="text-[11px] text-(--text-muted)">
               Uses `diag reach` (new).
               {dstInterfaceChoices.length > 0 ? (
                 <div className="mt-1">
@@ -557,7 +557,7 @@ export default function DiagnosticsPage() {
                     <button
                       key={c.value}
                       type="button"
-                      className="ml-2 rounded-md bg-[var(--surface)] px-2 py-1 text-[11px] text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+                      className="ml-2 rounded-md bg-(--surface) px-2 py-1 text-[11px] text-(--text) transition-ui"
                       onClick={() => {
                         if (reachSelfTest) {
                           setReachDstIface(c.value);
@@ -586,21 +586,21 @@ export default function DiagnosticsPage() {
                 setReachRes(await runCLI(line));
                 setBusy(null);
               }}
-              className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
+              className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
             >
               {busy === "reach" ? "Running..." : "Run"}
             </button>
           </div>
           {reachRes && (
-            <div className="mt-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
+            <div className="mt-4 rounded-xs border bg-(--surface) p-4">
               {reachRes.error && (
-                <div className="mb-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+                <div className="mb-3 rounded-xs border px-3 py-2 text-sm">
                   {reachRes.error}
                 </div>
               )}
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-[var(--text)]">{reachRes.output}</pre>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-(--text)">{reachRes.output}</pre>
               {!isAdmin() && (
-                <div className="mt-2 text-[11px] text-[var(--text-muted)]">
+                <div className="mt-2 text-[11px] text-(--text-muted)">
                   Some diagnostics (like packet capture) require admin.
                 </div>
               )}
@@ -609,31 +609,31 @@ export default function DiagnosticsPage() {
         </Card>
 
         <Card title="Temporary Blocks" padding="lg">
-          <div className="text-xs text-[var(--text-muted)]">
+          <div className="text-xs text-(--text-muted)">
             Push short-lived blocks into nftables. These are best-effort and expire automatically when dataplane
             enforcement is enabled.
           </div>
           {!canEdit && (
-            <div className="mt-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            <div className="mt-3 rounded-xs border px-3 py-2 text-xs">
               Admin access required to apply blocks.
             </div>
           )}
           {canEdit && enforcementOff && (
-            <div className="mt-3 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            <div className="mt-3 rounded-xs border px-3 py-2 text-xs">
               Dataplane enforcement is off, so temporary block actions are disabled. Enable enforcement on the
               Dataplane page or set <span className="font-semibold">CONTAIND_ENFORCE_ENABLED=1</span> in your lab
               compose.
             </div>
           )}
           <div className="mt-4 grid gap-4">
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
-              <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Block Host</div>
+            <div className="rounded-xs border bg-(--surface) p-4">
+              <div className="text-xs uppercase tracking-wide text-(--text-muted)">Block Host</div>
               <div className="mt-3 grid gap-3 md:grid-cols-3">
                 <input
                   value={blockHostIP}
                   onChange={(e) => setBlockHostIP(e.target.value)}
                   placeholder="source or destination IP"
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none md:col-span-2"
+                  className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden md:col-span-2"
                 />
                 <input
                   value={blockHostTTL}
@@ -642,11 +642,11 @@ export default function DiagnosticsPage() {
                     if (v === "" || v.match(/^[0-9]+$/)) setBlockHostTTL(v);
                   }}
                   placeholder="ttl (seconds)"
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
               </div>
               <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="text-xs text-[var(--text-muted)]">Blocks any flow matching this IP.</div>
+                <div className="text-xs text-(--text-muted)">Blocks any flow matching this IP.</div>
                 <button
                   type="button"
                   disabled={blockDisabled}
@@ -674,34 +674,34 @@ export default function DiagnosticsPage() {
                       },
                     });
                   }}
-                  className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
+                  className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
                 >
                   {busy === "block-host" ? "Applying..." : "Block host"}
                 </button>
               </div>
             </div>
 
-            <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
-              <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Block Flow</div>
+            <div className="rounded-xs border bg-(--surface) p-4">
+              <div className="text-xs uppercase tracking-wide text-(--text-muted)">Block Flow</div>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <input
                   value={blockFlowSrc}
                   onChange={(e) => setBlockFlowSrc(e.target.value)}
                   placeholder="source IP"
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
                 <input
                   value={blockFlowDst}
                   onChange={(e) => setBlockFlowDst(e.target.value)}
                   placeholder="destination IP"
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
               </div>
               <div className="mt-3 grid gap-3 md:grid-cols-3">
                 <select
                   value={blockFlowProto}
                   onChange={(e) => setBlockFlowProto(e.target.value as "tcp" | "udp")}
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 >
                   <option value="tcp">tcp</option>
                   <option value="udp">udp</option>
@@ -713,7 +713,7 @@ export default function DiagnosticsPage() {
                     if (v === "" || v.match(/^[0-9]+$/)) setBlockFlowPort(v);
                   }}
                   placeholder="dst port"
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
                 <input
                   value={blockFlowTTL}
@@ -722,11 +722,11 @@ export default function DiagnosticsPage() {
                     if (v === "" || v.match(/^[0-9]+$/)) setBlockFlowTTL(v);
                   }}
                   placeholder="ttl (seconds)"
-                  className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
               </div>
               <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="text-xs text-[var(--text-muted)]">Blocks a specific 5-tuple (src/dst/port/proto).</div>
+                <div className="text-xs text-(--text-muted)">Blocks a specific 5-tuple (src/dst/port/proto).</div>
                 <button
                   type="button"
                   disabled={blockDisabled}
@@ -766,7 +766,7 @@ export default function DiagnosticsPage() {
                       },
                     });
                   }}
-                  className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
+                  className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
                 >
                   {busy === "block-flow" ? "Applying..." : "Block flow"}
                 </button>
@@ -776,12 +776,12 @@ export default function DiagnosticsPage() {
           {(blockMsg || blockErr) && (
             <div className="mt-4 space-y-2">
               {blockErr && (
-                <div className="rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                <div className="rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
                   {blockErr}
                 </div>
               )}
               {blockMsg && (
-                <div className="rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400">
+                <div className="rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400">
                   {blockMsg}
                 </div>
               )}

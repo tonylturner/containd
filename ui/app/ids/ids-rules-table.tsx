@@ -159,7 +159,7 @@ export function RulesTable({
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] max-w-lg flex-1">
           <svg
-            className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-dim)]"
+            className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--text-dim)"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -177,10 +177,10 @@ export function RulesTable({
         </div>
         <button
           onClick={() => setAdvOpen(!advOpen)}
-          className={`rounded-sm border px-3 py-1.5 text-xs transition-ui ${
+          className={`rounded-xs border px-3 py-1.5 text-xs transition-ui ${
             hasAdvFilters
-              ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
-              : "border-amber-500/[0.15] bg-[var(--surface2)] text-[var(--text-muted)] hover:text-[var(--text)]"
+              ? ""
+              : "bg-(--surface2) text-(--text-muted) hover:text-(--text)"
           }`}
         >
           Filters{hasAdvFilters ? " *" : ""}
@@ -188,7 +188,7 @@ export function RulesTable({
         {hasAdvFilters && (
           <button
             onClick={() => setAdv(EMPTY_FILTERS)}
-            className="text-xs text-[var(--text-muted)] transition-ui hover:text-[var(--text)]"
+            className="text-xs text-(--text-muted) transition-ui hover:text-(--text)"
           >
             Clear
           </button>
@@ -196,9 +196,9 @@ export function RulesTable({
       </div>
 
       {advOpen && (
-        <div className="mb-3 grid grid-cols-2 gap-2 rounded-sm border border-amber-500/[0.1] bg-[var(--surface)] p-3 sm:grid-cols-4">
+        <div className="mb-3 grid grid-cols-2 gap-2 rounded-xs border bg-(--surface) p-3 sm:grid-cols-4">
           <div>
-            <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--text-dim)]">
+            <label className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
               Format
             </label>
             <select
@@ -215,7 +215,7 @@ export function RulesTable({
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--text-dim)]">
+            <label className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
               Severity
             </label>
             <select
@@ -231,7 +231,7 @@ export function RulesTable({
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--text-dim)]">
+            <label className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
               Protocol
             </label>
             <select
@@ -248,7 +248,7 @@ export function RulesTable({
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--text-dim)]">
+            <label className="mb-1 block text-[10px] uppercase tracking-wider text-(--text-dim)">
               Status
             </label>
             <select
@@ -265,34 +265,34 @@ export function RulesTable({
       )}
 
       {someSelected && canEdit && (
-        <div className="mb-3 flex items-center gap-2 rounded-sm border border-amber-500/[0.15] bg-amber-500/[0.04] px-3 py-2">
-          <span className="tabular-nums text-xs text-amber-400">
+        <div className="mb-3 flex items-center gap-2 rounded-xs border px-3 py-2">
+          <span className="tabular-nums text-xs">
             {selected.size} selected
           </span>
           {selected.size < filtered.length && (
             <button
               onClick={selectAllFiltered}
-              className="text-xs text-amber-400 underline hover:text-amber-300"
+              className="text-xs underline"
             >
               Select all {filtered.length.toLocaleString()} filtered
             </button>
           )}
           <button
             onClick={clearSelection}
-            className="text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+            className="text-xs text-(--text-muted) hover:text-(--text)"
           >
             Clear
           </button>
           <span className="flex-1" />
           <button
             onClick={() => onBulkToggle(Array.from(selected), true)}
-            className="rounded-sm border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-400 transition-ui hover:bg-emerald-500/20"
+            className="rounded-xs border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-400 transition-ui hover:bg-emerald-500/20"
           >
             Enable
           </button>
           <button
             onClick={() => onBulkToggle(Array.from(selected), false)}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2.5 py-1 text-xs text-[var(--text-muted)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-2.5 py-1 text-xs text-(--text-muted) transition-ui"
           >
             Disable
           </button>
@@ -301,17 +301,17 @@ export function RulesTable({
               onBulkDelete(Array.from(selected));
               clearSelection();
             }}
-            className="rounded-sm border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/20"
+            className="rounded-xs border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/20"
           >
             Delete
           </button>
         </div>
       )}
 
-      <div className="overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] shadow-card">
+      <div className="overflow-hidden rounded-xs border bg-(--surface) shadow-card">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-[var(--surface)] text-left">
+            <thead className="bg-(--surface) text-left">
               <tr>
                 {canEdit && (
                   <th className="w-8 px-3 py-2.5">
@@ -319,7 +319,7 @@ export function RulesTable({
                       type="checkbox"
                       checked={allOnPageSelected && pageData.length > 0}
                       onChange={toggleAll}
-                      className="h-3.5 w-3.5 rounded border-white/20 bg-[var(--surface)]"
+                      className="h-3.5 w-3.5 rounded-sm border-white/20 bg-(--surface)"
                     />
                   </th>
                 )}
@@ -365,7 +365,7 @@ export function RulesTable({
                   dir={sortDir}
                   onSort={doSort}
                 />
-                <th className="px-4 py-2.5 text-right text-[9px] font-medium uppercase tracking-[2px] text-[var(--text-dim)]">
+                <th className="px-4 py-2.5 text-right text-[9px] font-medium uppercase tracking-[2px] text-(--text-dim)">
                   Actions
                 </th>
               </tr>
@@ -394,7 +394,7 @@ export function RulesTable({
                 return (
                   <tr
                     key={r.id}
-                    className={`table-row-hover border-t border-amber-500/[0.1] transition-ui ${!enabled ? "opacity-50" : ""}`}
+                    className={`table-row-hover border-t transition-ui ${!enabled ? "opacity-50" : ""}`}
                   >
                     {canEdit && (
                       <td className="w-8 px-3 py-2.5">
@@ -402,7 +402,7 @@ export function RulesTable({
                           type="checkbox"
                           checked={selected.has(r.id)}
                           onChange={() => toggleOne(r.id)}
-                          className="h-3.5 w-3.5 rounded border-white/20 bg-[var(--surface)]"
+                          className="h-3.5 w-3.5 rounded-sm border-white/20 bg-(--surface)"
                         />
                       </td>
                     )}
@@ -424,13 +424,13 @@ export function RulesTable({
                       )}
                     </td>
                     <td
-                      className="max-w-[160px] truncate px-4 py-2.5 font-mono text-[11px] text-[var(--text)]"
+                      className="max-w-[160px] truncate px-4 py-2.5 font-mono text-[11px] text-(--text)"
                       title={r.id}
                     >
                       {r.id}
                     </td>
                     <td
-                      className="max-w-[280px] truncate px-4 py-2.5 text-[var(--text)]"
+                      className="max-w-[280px] truncate px-4 py-2.5 text-(--text)"
                       title={r.title || r.message}
                     >
                       {r.title || r.message || "\u2014"}
@@ -438,7 +438,7 @@ export function RulesTable({
                     <td className="px-4 py-2.5">
                       <FormatBadge format={r.sourceFormat} />
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-[var(--text)]">
+                    <td className="px-4 py-2.5 text-xs text-(--text)">
                       {r.proto || "\u2014"}
                     </td>
                     <td className="px-4 py-2.5">
@@ -459,13 +459,13 @@ export function RulesTable({
                         <>
                           <button
                             onClick={() => onEdit(r)}
-                            className="mr-1.5 rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-0.5 text-[11px] transition-ui hover:bg-amber-500/[0.08]"
+                            className="mr-1.5 rounded-xs border bg-(--surface2) px-2 py-0.5 text-[11px] transition-ui"
                           >
                             Edit
                           </button>
                           <button
                             onClick={() => onDelete(r.id)}
-                            className="rounded-sm px-2 py-0.5 text-[11px] text-red-400 transition-ui hover:bg-red-500/10"
+                            className="rounded-xs px-2 py-0.5 text-[11px] text-red-400 transition-ui hover:bg-red-500/10"
                           >
                             Del
                           </button>
@@ -511,13 +511,13 @@ function SortHeader({
   const active = current === sortKey;
   return (
     <th
-      className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 text-left text-[9px] font-medium uppercase tracking-[2px] text-[var(--text-dim)] transition-ui hover:text-[var(--text)]"
+      className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 text-left text-[9px] font-medium uppercase tracking-[2px] text-(--text-dim) transition-ui hover:text-(--text)"
       onClick={() => onSort(sortKey)}
     >
       <span className="inline-flex items-center gap-1">
         {label}
         {active && (
-          <span className="text-[var(--amber)]">
+          <span className="text-(--amber)">
             {dir === "asc" ? "\u25B2" : "\u25BC"}
           </span>
         )}

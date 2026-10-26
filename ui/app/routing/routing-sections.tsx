@@ -9,7 +9,7 @@ import { InfoTip } from "../../components/InfoTip";
 type StringSetter = Dispatch<SetStateAction<string>>;
 
 const INPUT_CLASS =
-  "mt-1 w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none";
+  "mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden";
 
 type RoutingSetupCalloutProps = {
   hasConfig: boolean;
@@ -30,11 +30,11 @@ export function RoutingSetupCallout({
 }: RoutingSetupCalloutProps) {
   if (hasConfig || !hasOSDefault) return null;
   return (
-    <div className="mb-6 rounded-sm border border-amber-500/20 bg-amber-500/[0.1] p-5 shadow-card backdrop-blur">
+    <div className="mb-6 rounded-xs border p-5 shadow-card backdrop-blur-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-[var(--text)]">Routing not configured yet</div>
-          <div className="mt-1 text-xs text-[var(--text)]">
+          <div className="text-sm font-semibold text-(--text)">Routing not configured yet</div>
+          <div className="mt-1 text-xs text-(--text)">
             The kernel already has a working default route (
             <span className="font-semibold">{defaultIface}</span> →{" "}
             <span className="font-semibold">{defaultGateway}</span>). Adopt it into containd so routing/NAT policies can
@@ -44,12 +44,12 @@ export function RoutingSetupCallout({
         {isAdmin ? (
           <button
             onClick={onAdoptOSDefaultRoute}
-            className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
           >
             Adopt OS default route
           </button>
         ) : (
-          <div className="text-xs text-[var(--text)]">Admin required to adopt routing.</div>
+          <div className="text-xs text-(--text)">Admin required to adopt routing.</div>
         )}
       </div>
     </div>
@@ -67,8 +67,8 @@ export function OSRoutingCard({ osRouting, isAdmin, onAdoptOSDefaultRoute }: OSR
     <Card padding="lg" className="mb-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-[var(--text)]">Detect from OS</h2>
-          <div className="mt-1 text-xs text-[var(--text-muted)]">
+          <h2 className="text-sm font-semibold text-(--text)">Detect from OS</h2>
+          <div className="mt-1 text-xs text-(--text-muted)">
             Shows the current kernel routing table. This is useful in Docker labs where the OS already has a working
             default route, but your configured routing is still empty.
           </div>
@@ -77,7 +77,7 @@ export function OSRoutingCard({ osRouting, isAdmin, onAdoptOSDefaultRoute }: OSR
           <button
             onClick={onAdoptOSDefaultRoute}
             disabled={!osRouting?.defaultRoute?.gateway || !osRouting?.defaultRoute?.iface}
-            className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
+            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
             title="Create a gateway + default route in config from the detected OS default route"
           >
             Adopt default route
@@ -87,8 +87,8 @@ export function OSRoutingCard({ osRouting, isAdmin, onAdoptOSDefaultRoute }: OSR
 
       {osRouting?.routes?.length ? (
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-sm text-[var(--text)]">
-            <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+          <table className="w-full text-sm text-(--text)">
+            <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
               <tr>
                 <th className="px-3 py-2">Destination</th>
                 <th className="px-3 py-2">Gateway</th>
@@ -98,8 +98,8 @@ export function OSRoutingCard({ osRouting, isAdmin, onAdoptOSDefaultRoute }: OSR
             </thead>
             <tbody>
               {osRouting.routes.map((r, idx) => (
-                <tr key={idx} className="table-row-hover transition-ui border-t border-amber-500/[0.1]">
-                  <td className="px-3 py-2 font-medium text-[var(--text)]">{r.dst || "\u2014"}</td>
+                <tr key={idx} className="table-row-hover transition-ui border-t">
+                  <td className="px-3 py-2 font-medium text-(--text)">{r.dst || "\u2014"}</td>
                   <td className="px-3 py-2">{r.gateway || "\u2014"}</td>
                   <td className="px-3 py-2">{r.iface || "\u2014"}</td>
                   <td className="px-3 py-2">{typeof r.metric === "number" ? String(r.metric) : "\u2014"}</td>
@@ -108,14 +108,14 @@ export function OSRoutingCard({ osRouting, isAdmin, onAdoptOSDefaultRoute }: OSR
             </tbody>
           </table>
           {osRouting.defaultRoute?.gateway && osRouting.defaultRoute?.iface && (
-            <div className="mt-3 text-xs text-[var(--text-muted)]">
-              Detected default: <span className="text-[var(--text)]">{osRouting.defaultRoute.iface}</span> →{" "}
-              <span className="text-[var(--text)]">{osRouting.defaultRoute.gateway}</span>
+            <div className="mt-3 text-xs text-(--text-muted)">
+              Detected default: <span className="text-(--text)">{osRouting.defaultRoute.iface}</span> →{" "}
+              <span className="text-(--text)">{osRouting.defaultRoute.gateway}</span>
             </div>
           )}
         </div>
       ) : (
-        <div className="mt-4 text-sm text-[var(--text)]">
+        <div className="mt-4 text-sm text-(--text)">
           No OS routes detected (or not supported in this environment). Click <span className="font-semibold">Detect from OS</span>{" "}
           to refresh.
         </div>
@@ -165,46 +165,46 @@ export function GatewaysCard(props: GatewaysCardProps) {
     <Card padding="lg" className="lg:col-span-2">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-[var(--text)]">Gateways</h2>
-          <div className="mt-1 text-xs text-[var(--text-muted)]">
+          <h2 className="text-sm font-semibold text-(--text)">Gateways</h2>
+          <div className="mt-1 text-xs text-(--text-muted)">
             Named next-hops you can reference from routes (use the gateway name in the route gateway field).
           </div>
         </div>
-        {saving && <span className="text-xs text-[var(--text-muted)]">saving…</span>}
+        {saving && <span className="text-xs text-(--text-muted)">saving…</span>}
       </div>
 
       {isAdmin && (
-        <details className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
-          <summary className="cursor-pointer text-sm text-[var(--text)]">Add gateway (advanced)</summary>
+        <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3">
+          <summary className="cursor-pointer text-sm text-(--text)">Add gateway (advanced)</summary>
           <div className="mt-3 grid gap-2 md:grid-cols-5">
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Name
               <InfoTip label="Human-friendly name used by routes (e.g. isp1)." />
               <input value={gwName} onChange={(e) => setGwName(e.target.value)} placeholder="isp1" className={INPUT_CLASS} />
             </label>
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Alias
               <InfoTip label="Optional display name shown in selectors." />
               <input value={gwAlias} onChange={(e) => setGwAlias(e.target.value)} placeholder="primary ISP" className={INPUT_CLASS} />
             </label>
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Address
               <InfoTip label="IPv4 address of the next-hop gateway." />
               <input value={gwAddr} onChange={(e) => setGwAddr(e.target.value)} placeholder="192.168.240.1" className={INPUT_CLASS} />
             </label>
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Interface
               <InfoTip label="Optional interface to bind this gateway to." />
               <input value={gwIface} onChange={(e) => setGwIface(e.target.value)} placeholder="wan" className={INPUT_CLASS} />
             </label>
             <div className="flex gap-2 md:col-span-1">
-              <label className="flex-1 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+              <label className="flex-1 text-xs uppercase tracking-wide text-(--text-muted)">
                 Description
                 <input value={gwDesc} onChange={(e) => setGwDesc(e.target.value)} placeholder="primary ISP" className={INPUT_CLASS} />
               </label>
               <button
                 onClick={onAddGateway}
-                className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
+                className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
               >
                 Add
               </button>
@@ -213,9 +213,9 @@ export function GatewaysCard(props: GatewaysCardProps) {
         </details>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15]">
+      <div className="mt-4 overflow-hidden rounded-xs border">
         <table className="w-full text-sm">
-          <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Alias</th>
@@ -228,18 +228,18 @@ export function GatewaysCard(props: GatewaysCardProps) {
           <tbody>
             {gateways.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={6}>
+                <td className="px-4 py-4 text-(--text-muted)" colSpan={6}>
                   No gateways configured. Add a default gateway to enable outbound routing.
                 </td>
               </tr>
             )}
             {gateways.map((g, idx) => (
-              <tr key={`${g.name}-${idx}`} className="table-row-hover transition-ui border-t border-amber-500/[0.1]">
-                <td className="px-4 py-3 font-medium text-[var(--text)]">{g.name}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{g.alias || "\u2014"}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{g.address}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{g.iface || "\u2014"}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{g.description || "\u2014"}</td>
+              <tr key={`${g.name}-${idx}`} className="table-row-hover transition-ui border-t">
+                <td className="px-4 py-3 font-medium text-(--text)">{g.name}</td>
+                <td className="px-4 py-3 text-(--text)">{g.alias || "\u2014"}</td>
+                <td className="px-4 py-3 text-(--text)">{g.address}</td>
+                <td className="px-4 py-3 text-(--text)">{g.iface || "\u2014"}</td>
+                <td className="px-4 py-3 text-(--text)">{g.description || "\u2014"}</td>
                 <td className="px-4 py-3 text-right">
                   {isAdmin ? (
                     <button
@@ -249,7 +249,7 @@ export function GatewaysCard(props: GatewaysCardProps) {
                       Delete
                     </button>
                   ) : (
-                    <span className="text-[var(--text-dim)]">\u2014</span>
+                    <span className="text-(--text-dim)">\u2014</span>
                   )}
                 </td>
               </tr>
@@ -305,21 +305,21 @@ export function StaticRoutesCard(props: StaticRoutesCardProps) {
   return (
     <Card padding="lg">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Static routes</h2>
-        {saving && <span className="text-xs text-[var(--text-muted)]">saving…</span>}
+        <h2 className="text-sm font-semibold text-(--text)">Static routes</h2>
+        {saving && <span className="text-xs text-(--text-muted)">saving…</span>}
       </div>
 
       {isAdmin && (
-        <details className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
-          <summary className="cursor-pointer text-sm text-[var(--text)]">Add static route (advanced)</summary>
+        <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3">
+          <summary className="cursor-pointer text-sm text-(--text)">Add static route (advanced)</summary>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Destination
               <InfoTip label="CIDR or default. Example: 0.0.0.0/0 or 10.0.0.0/24." />
               <input value={routeDst} onChange={(e) => setRouteDst(e.target.value)} placeholder="dst (CIDR or default)" className={INPUT_CLASS} />
             </label>
             <div className="space-y-2">
-              <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+              <label className="text-xs uppercase tracking-wide text-(--text-muted)">
                 Gateway
                 <InfoTip label="Gateway IP or gateway name. Optional if iface is set." />
                 <input
@@ -336,7 +336,7 @@ export function StaticRoutesCard(props: StaticRoutesCardProps) {
                     const v = e.target.value;
                     if (v) setRouteGw(v);
                   }}
-                  className="w-full input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+                  className="w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 >
                   <option value="">Pick gateway…</option>
                   {gateways.map((g) => (
@@ -347,7 +347,7 @@ export function StaticRoutesCard(props: StaticRoutesCardProps) {
                 </select>
               )}
             </div>
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Interface
               <InfoTip label="Logical or OS device (optional)." />
               <input
@@ -358,12 +358,12 @@ export function StaticRoutesCard(props: StaticRoutesCardProps) {
               />
             </label>
             <div className="grid grid-cols-2 gap-2">
-              <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+              <label className="text-xs uppercase tracking-wide text-(--text-muted)">
                 Table
                 <InfoTip label="Routing table (0 = main)." />
                 <input value={routeTable} onChange={(e) => setRouteTable(e.target.value)} placeholder="table (0=main)" className={INPUT_CLASS} />
               </label>
-              <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+              <label className="text-xs uppercase tracking-wide text-(--text-muted)">
                 Metric
                 <InfoTip label="Optional route priority (lower wins)." />
                 <input value={routeMetric} onChange={(e) => setRouteMetric(e.target.value)} placeholder="metric (optional)" className={INPUT_CLASS} />
@@ -372,7 +372,7 @@ export function StaticRoutesCard(props: StaticRoutesCardProps) {
             <div className="md:col-span-2 flex justify-end">
               <button
                 onClick={onAddRoute}
-                className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
+                className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
               >
                 Add route
               </button>
@@ -381,9 +381,9 @@ export function StaticRoutesCard(props: StaticRoutesCardProps) {
         </details>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15]">
+      <div className="mt-4 overflow-hidden rounded-xs border">
         <table className="w-full text-sm">
-          <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">Dst</th>
               <th className="px-4 py-3">Gateway</th>
@@ -396,18 +396,18 @@ export function StaticRoutesCard(props: StaticRoutesCardProps) {
           <tbody>
             {routes.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={6}>
+                <td className="px-4 py-4 text-(--text-muted)" colSpan={6}>
                   No static routes configured. Static routes direct traffic to specific subnets via a gateway.
                 </td>
               </tr>
             )}
             {routes.map((r, idx) => (
-              <tr key={`${r.dst}-${idx}`} className="table-row-hover transition-ui border-t border-amber-500/[0.1]">
-                <td className="px-4 py-3 font-medium text-[var(--text)]">{r.dst}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{gatewayLabel(r.gateway)}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.iface ?? "\u2014"}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.table ?? 0}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.metric ?? "\u2014"}</td>
+              <tr key={`${r.dst}-${idx}`} className="table-row-hover transition-ui border-t">
+                <td className="px-4 py-3 font-medium text-(--text)">{r.dst}</td>
+                <td className="px-4 py-3 text-(--text)">{gatewayLabel(r.gateway)}</td>
+                <td className="px-4 py-3 text-(--text)">{r.iface ?? "\u2014"}</td>
+                <td className="px-4 py-3 text-(--text)">{r.table ?? 0}</td>
+                <td className="px-4 py-3 text-(--text)">{r.metric ?? "\u2014"}</td>
                 <td className="px-4 py-3 text-right">
                   {isAdmin ? (
                     <button
@@ -417,7 +417,7 @@ export function StaticRoutesCard(props: StaticRoutesCardProps) {
                       Delete
                     </button>
                   ) : (
-                    <span className="text-[var(--text-dim)]">\u2014</span>
+                    <span className="text-(--text-dim)">\u2014</span>
                   )}
                 </td>
               </tr>
@@ -465,30 +465,30 @@ export function PolicyRulesCard(props: PolicyRulesCardProps) {
   return (
     <Card padding="lg">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Policy-based routing (ip rules)</h2>
-        {saving && <span className="text-xs text-[var(--text-muted)]">saving…</span>}
+        <h2 className="text-sm font-semibold text-(--text)">Policy-based routing (ip rules)</h2>
+        {saving && <span className="text-xs text-(--text-muted)">saving…</span>}
       </div>
 
       {isAdmin && (
-        <details className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
-          <summary className="cursor-pointer text-sm text-[var(--text)]">Add policy rule (advanced)</summary>
+        <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3">
+          <summary className="cursor-pointer text-sm text-(--text)">Add policy rule (advanced)</summary>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Source CIDR
               <InfoTip label="Optional source match." />
               <input value={ruleSrc} onChange={(e) => setRuleSrc(e.target.value)} placeholder="src CIDR (optional)" className={INPUT_CLASS} />
             </label>
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Destination CIDR
               <InfoTip label="Optional destination match." />
               <input value={ruleDst} onChange={(e) => setRuleDst(e.target.value)} placeholder="dst CIDR (optional)" className={INPUT_CLASS} />
             </label>
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Table
               <InfoTip label="Routing table to use when rule matches (required)." />
               <input value={ruleTable} onChange={(e) => setRuleTable(e.target.value)} placeholder="table (required)" className={INPUT_CLASS} />
             </label>
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Priority
               <InfoTip label="Optional priority; lower wins." />
               <input value={rulePrio} onChange={(e) => setRulePrio(e.target.value)} placeholder="priority (optional)" className={INPUT_CLASS} />
@@ -496,7 +496,7 @@ export function PolicyRulesCard(props: PolicyRulesCardProps) {
             <div className="md:col-span-2 flex justify-end">
               <button
                 onClick={onAddRule}
-                className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
+                className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
               >
                 Add rule
               </button>
@@ -505,9 +505,9 @@ export function PolicyRulesCard(props: PolicyRulesCardProps) {
         </details>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15]">
+      <div className="mt-4 overflow-hidden rounded-xs border">
         <table className="w-full text-sm">
-          <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">Priority</th>
               <th className="px-4 py-3">Src</th>
@@ -519,17 +519,17 @@ export function PolicyRulesCard(props: PolicyRulesCardProps) {
           <tbody>
             {rules.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={5}>
+                <td className="px-4 py-4 text-(--text-muted)" colSpan={5}>
                   No policy rules configured.
                 </td>
               </tr>
             )}
             {rules.map((r, idx) => (
-              <tr key={`${r.table}-${idx}`} className="table-row-hover transition-ui border-t border-amber-500/[0.1]">
-                <td className="px-4 py-3 text-[var(--text)]">{r.priority ?? "auto"}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.src ?? "\u2014"}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.dst ?? "\u2014"}</td>
-                <td className="px-4 py-3 font-medium text-[var(--text)]">{r.table}</td>
+              <tr key={`${r.table}-${idx}`} className="table-row-hover transition-ui border-t">
+                <td className="px-4 py-3 text-(--text)">{r.priority ?? "auto"}</td>
+                <td className="px-4 py-3 text-(--text)">{r.src ?? "\u2014"}</td>
+                <td className="px-4 py-3 text-(--text)">{r.dst ?? "\u2014"}</td>
+                <td className="px-4 py-3 font-medium text-(--text)">{r.table}</td>
                 <td className="px-4 py-3 text-right">
                   {isAdmin ? (
                     <button
@@ -539,7 +539,7 @@ export function PolicyRulesCard(props: PolicyRulesCardProps) {
                       Delete
                     </button>
                   ) : (
-                    <span className="text-[var(--text-dim)]">\u2014</span>
+                    <span className="text-(--text-dim)">\u2014</span>
                   )}
                 </td>
               </tr>
