@@ -55,7 +55,7 @@ func TestIDSHandlersDeferApplyResultsUntilCommit(t *testing.T) {
 			{name: "success", status: http.StatusOK},
 			{name: "apply error", err: errors.New("engine unavailable"), status: http.StatusInternalServerError},
 			{name: "infrastructure warning", svcErr: errors.New("services unavailable"), status: http.StatusOK, warning: "services: services unavailable"},
-			{name: "ruleset warning", err: errors.New("operation not permitted"), status: http.StatusOK, warning: "ruleset: operation not permitted"},
+			{name: "ruleset permission failure", err: errors.New("operation not permitted"), status: http.StatusInternalServerError},
 		} {
 			t.Run(action+"/"+result.name, func(t *testing.T) {
 				store := stageStore(t)
@@ -84,7 +84,7 @@ func TestIDSHandlersDeferApplyResultsUntilCommit(t *testing.T) {
 					t.Fatalf("warnings=%v want=%q", warnings, result.warning)
 				}
 				if result.status == http.StatusInternalServerError {
-					if !strings.Contains(rec.Body.String(), `"error":"internal server error"`) {
+					if !strings.Contains(rec.Body.String(), `"error":"configuration apply failed"`) {
 						t.Fatalf("apply error response=%s", rec.Body)
 					}
 

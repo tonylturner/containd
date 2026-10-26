@@ -633,7 +633,7 @@ func TestImportConfigReplacesEmbeddedIDSRules(t *testing.T) {
 
 func TestCommitConfirmedTTLParsing(t *testing.T) {
 	m := &mockStore{}
-	s := NewServer(m, nil)
+	s := NewServerWithEngine(m, nil, &mockEngine{})
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config/commit_confirmed", bytes.NewBufferString(`{"ttl_seconds":5}`))
 	req.Header.Set("Content-Type", "application/json")

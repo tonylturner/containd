@@ -412,3 +412,36 @@ func TestUpdateInterfaceNotFound(t *testing.T) {
 		t.Fatalf("expected 404, got %d", rec.Code)
 	}
 }
+
+func (m *mockStore) ApplyChange(ctx context.Context, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) error {
+	return mockApplyChange(ctx, m, change, ttl, apply)
+}
+func (m *mockStore) RuntimeApplyFault(context.Context) (string, error)  { return "", nil }
+func (m *mockStore) SetRuntimeApplyFault(context.Context, string) error { return nil }
+
+func mockApplyChange(ctx context.Context, store config.Store, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) error {
+	previous, err := loadOrInitConfig(ctx, store)
+	if err != nil {
+		return err
+	}
+	switch change {
+	case config.ChangeCommit:
+		err = store.Commit(ctx)
+	case config.ChangeCommitConfirmed:
+		err = store.CommitConfirmed(ctx, ttl)
+	case config.ChangeRollback:
+		err = store.Rollback(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	next, err := loadOrInitConfig(ctx, store)
+	if err != nil {
+		return err
+	}
+	if err := apply(ctx, previous, next); err != nil {
+		restoreErr := store.Save(context.WithoutCancel(ctx), previous)
+		return &config.ApplyError{Err: err, RestoreError: restoreErr, ReapplyError: apply(context.WithoutCancel(ctx), next, previous)}
+	}
+	return nil
+}

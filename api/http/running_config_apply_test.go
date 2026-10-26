@@ -306,3 +306,9 @@ func TestRuntimeMutationsWaitForReplay(t *testing.T) {
 		})
 	}
 }
+
+func (s *commitApplyStore) ApplyChange(ctx context.Context, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) error {
+	return mockApplyChange(ctx, s, change, ttl, apply)
+}
+func (s *commitApplyStore) RuntimeApplyFault(context.Context) (string, error)  { return "", nil }
+func (s *commitApplyStore) SetRuntimeApplyFault(context.Context, string) error { return nil }

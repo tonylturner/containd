@@ -44,6 +44,12 @@ func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 			}
 			cancel()
 		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
+		enforcement := rulesetHealth(ctx, store, engine)
+		cancel()
+		enforcement["active"] = iec.Active
+		enforcement["healthy"] = iec.Healthy
+		enforcement["reason"] = iec.Reason
 		binding := gin.H{"state": "unknown"}
 		if store != nil && engine != nil {
 			ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
@@ -73,7 +79,7 @@ func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 			"component":         "mgmt",
 			"build":             config.BuildVersion,
 			"time":              time.Now().UTC().Format(time.RFC3339Nano),
-			"iec104Enforcement": iec,
+			"iec104Enforcement": enforcement,
 			"ipv4Forwarding":    forwarding,
 			"managementBinding": binding,
 		})

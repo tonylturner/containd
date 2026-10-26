@@ -340,7 +340,7 @@ func TestSystemInspectionAndFactoryResetHandlers(t *testing.T) {
 		c.Set("actor", "alice")
 		c.Next()
 	})
-	router.POST("/system/factory-reset", factoryResetHandler(cfgStore, userStore, nil, nil))
+	router.POST("/system/factory-reset", factoryResetHandler(cfgStore, userStore, &mockEngine{}, nil))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))

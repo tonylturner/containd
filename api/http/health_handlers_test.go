@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	engineclient "github.com/tonylturner/containd/api/engine"
@@ -133,6 +134,24 @@ func TestHealthReportsIEC104Enforcement(t *testing.T) {
 		}
 		if body["ipv4Forwarding"] != string(c.forwarding) {
 			t.Fatalf("%s: ipv4Forwarding = %v, want %q", c.name, body["ipv4Forwarding"], c.forwarding)
+		}
+	}
+}
+
+func TestRulesetHealthDoesNotExposePolicyDiagnostics(t *testing.T) {
+	store := stageStore(t)
+	sensitive := "nft apply failed: secret source 192.0.2.44 tcp dport 12345"
+	if err := store.SetRuntimeApplyFault(context.Background(), sensitive); err != nil {
+		t.Fatal(err)
+	}
+	engine := &mockEngine{ruleset: dpengine.RulesetStatus{Error: sensitive}}
+	health := rulesetHealth(context.Background(), store, engine)
+	if health["rulesetAvailable"] != false || health["configApplyError"] == "" {
+		t.Fatalf("health fault hidden: %v", health)
+	}
+	for _, field := range []string{"rulesetReason", "configApplyError"} {
+		if strings.Contains(health[field].(string), "192.0.2.44") || strings.Contains(health[field].(string), "12345") {
+			t.Fatalf("unauthenticated health exposes policy: %v", health)
 		}
 	}
 }

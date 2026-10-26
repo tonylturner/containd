@@ -20,7 +20,7 @@ func RecoverySnapshot() rules.Snapshot {
 
 // ApplyBootConfig shares the promotion/replay lock so a delayed recovery apply
 // can never overwrite a newer safe commit, rollback or reset.
-func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
+func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) (warnings []string, applyErr error) {
 	runningConfigApplyMu.Lock()
 	defer runningConfigApplyMu.Unlock()
 	err := config.CheckManagementBootFault(ctx, store)
@@ -30,6 +30,7 @@ func ApplyBootConfig(ctx context.Context, store config.Store, engine EngineClien
 	if !errors.Is(err, config.ErrManagementBootFault) {
 		return nil, err
 	}
+	defer func() { applyErr = recordRuntimeApplyResult(ctx, store, applyErr) }()
 	if engine == nil {
 		return nil, errors.New("recovery engine unavailable")
 	}

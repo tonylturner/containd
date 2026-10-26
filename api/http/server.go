@@ -5,7 +5,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -488,104 +487,6 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func commitConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		previous, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := store.Commit(c.Request.Context()); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services, previous)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		setWarningHeader(c, warnings)
-		auditLog(c, audit.Record{Action: "config.commit", Target: "running"})
-		committedConfigResponse(c, "committed")
-	}
-}
-
-func commitConfirmedHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		const defaultTTLSeconds = 60
-		body, _ := io.ReadAll(io.LimitReader(c.Request.Body, 4096))
-		ttlSeconds := int64(defaultTTLSeconds)
-		if len(body) > 0 {
-			var req struct {
-				TTLSeconds int64 `json:"ttl_seconds"`
-			}
-			if err := json.Unmarshal(body, &req); err != nil {
-				apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
-				return
-			}
-			if req.TTLSeconds > 0 {
-				ttlSeconds = req.TTLSeconds
-			}
-		}
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		previous, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := store.CommitConfirmed(c.Request.Context(), time.Duration(ttlSeconds)*time.Second); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services, previous)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		setWarningHeader(c, warnings)
-		auditLog(c, audit.Record{Action: "config.commit_confirmed", Target: "running"})
-		committedConfigResponse(c, "committed")
-	}
-}
-
-func confirmCommitHandler(store config.Store) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if err := store.ConfirmCommit(c.Request.Context()); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		auditLog(c, audit.Record{Action: "config.confirm_commit", Target: "running"})
-		committedConfigResponse(c, "confirmed")
-	}
-}
-
-func rollbackConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		previous, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := store.Rollback(c.Request.Context()); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services, previous)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		setWarningHeader(c, warnings)
-		auditLog(c, audit.Record{Action: "config.rollback", Target: "running"})
-		committedConfigResponse(c, "rolled back")
-	}
-}
-
 // ApplyRunningConfig replays the current stored running config through the same
 // serialized apply path used by commits and rollback.
 func ApplyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
@@ -607,7 +508,8 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 
 // applyRunningConfigLocked is the single apply sequence. Callers must hold
 // runningConfigApplyMu, including across any preceding store mutation.
-func applyRunningConfigLocked(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous *config.Config) ([]string, error) {
+func applyRunningConfigLocked(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous *config.Config) (warnings []string, applyErr error) {
+	defer func() { applyErr = recordRuntimeApplyResult(ctx, store, applyErr) }()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -621,6 +523,12 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 		}
 		return nil, err
 	}
+	return applyConfigSnapshot(ctx, store, engine, services, previous, cfg)
+}
+
+// applyConfigSnapshot must not load or mutate the store: a transition holds its
+// mutex across this callback. Validation uses only immutable boot authority.
+func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous, cfg *config.Config) ([]string, error) {
 	// Re-bind logical interface names to physical kernel devices before
 	// applying them. Keep this change in memory only: applying a previously
 	// loaded snapshot must never persist it over a newer store mutation.
@@ -642,67 +550,51 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 		}
 	}
 	var warnings []string
-	if engine != nil {
-		// Infrastructure steps (interfaces, routing, services, pcap) may fail in
-		// unprivileged environments (e.g. Docker without NET_ADMIN). Collect those
-		// errors but always proceed to compile and apply rules so that IDS/firewall
-		// rule evaluation works even when nftables is unavailable.
-		if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
-			warnings = append(warnings, fmt.Sprintf("interfaces: %v", err))
+	if engine == nil {
+		return nil, errors.New("engine unavailable")
+	}
+	// Auxiliary infrastructure remains best-effort. Dataplane configuration
+	// and ruleset application are mandatory: they control enforcement.
+	if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
+		warnings = append(warnings, fmt.Sprintf("interfaces: %v", err))
+	}
+	if warning := ipv4ForwardingCommitWarning(ctx, cfg, engine); warning != "" {
+		warnings = append(warnings, warning)
+	}
+	if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
+		warnings = append(warnings, fmt.Sprintf("routing: %v", err))
+	}
+	if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
+		warnings = append(warnings, fmt.Sprintf("services: %v", err))
+	}
+	if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
+		return nil, fmt.Errorf("dataplane: %w", err)
+	}
+	// Replay config on boot/reconnect, but preserve operational captures
+	// across promotions that do not change saved capture settings.
+	if previous == nil || !reflect.DeepEqual(previous.PCAP, cfg.PCAP) {
+		if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
+			warnings = append(warnings, fmt.Sprintf("pcap config: %v", err))
 		}
-		if warning := ipv4ForwardingCommitWarning(ctx, cfg, engine); warning != "" {
-			warnings = append(warnings, warning)
-		}
-		if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
-			warnings = append(warnings, fmt.Sprintf("routing: %v", err))
-		}
-		if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
-			warnings = append(warnings, fmt.Sprintf("services: %v", err))
-		}
-		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
-			warnings = append(warnings, fmt.Sprintf("dataplane: %v", err))
-		}
-		// Replay config on boot/reconnect, but preserve operational captures
-		// across promotions that do not change saved capture settings.
-		if previous == nil || !reflect.DeepEqual(previous.PCAP, cfg.PCAP) {
-			if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
-				warnings = append(warnings, fmt.Sprintf("pcap config: %v", err))
+		if cfg.PCAP.Enabled {
+			if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
+				warnings = append(warnings, fmt.Sprintf("pcap start: %v", err))
 			}
-			if cfg.PCAP.Enabled {
-				if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
-					warnings = append(warnings, fmt.Sprintf("pcap start: %v", err))
-				}
-			} else {
-				if _, err := engine.StopPcap(ctx); err != nil {
-					warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
-				}
+		} else {
+			if _, err := engine.StopPcap(ctx); err != nil {
+				warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
 			}
 		}
-		// Always compile and push rules regardless of infrastructure errors.
-		snap, err := compile.CompileSnapshot(cfg)
-		if err != nil {
-			return nil, err
-		}
-		if err := engine.ApplyRules(ctx, snap); err != nil {
-			if isRuntimeApplyWarning(err) {
-				warnings = append(warnings, fmt.Sprintf("ruleset: %v", err))
-				return warnings, nil
-			}
-			return nil, err
-		}
+	}
+	// Always compile and push rules regardless of infrastructure errors.
+	snap, err := compile.CompileSnapshot(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := engine.ApplyRules(ctx, snap); err != nil {
+		return nil, fmt.Errorf("ruleset: %w", err)
 	}
 	return warnings, nil
-}
-
-func isRuntimeApplyWarning(err error) bool {
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	if msg == "" {
-		return false
-	}
-	return strings.Contains(msg, "operation not permitted") ||
-		strings.Contains(msg, "permission denied") ||
-		strings.Contains(msg, "not supported") ||
-		strings.Contains(msg, "nft apply failed")
 }
 
 // loadOrInitConfig only supplies an in-memory default for an uninitialized
