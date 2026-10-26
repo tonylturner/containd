@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	engineclient "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
@@ -31,7 +32,7 @@ var engineUnreachable = dpengine.IEC104Enforcement{Active: false, Healthy: false
 
 // healthHandler is unauthenticated liveness. It is always 200; the
 // iec104Enforcement object carries the engine's enforcement health.
-func healthHandler(engine EngineClient) gin.HandlerFunc {
+func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		iec := engineUnreachable
 		forwarding := netcfg.IPv4ForwardingUnknown
@@ -40,6 +41,27 @@ func healthHandler(engine EngineClient) gin.HandlerFunc {
 			if health, err := hc.RuntimeHealth(ctx); err == nil {
 				iec = health.IEC104Enforcement
 				forwarding = health.IPv4Forwarding
+			}
+			cancel()
+		}
+		binding := gin.H{"state": "unknown"}
+		if store != nil && engine != nil {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
+			cfg, cfgErr := store.Load(ctx)
+			state, stateErr := engine.ListInterfaceState(ctx)
+			if cfgErr == nil && stateErr == nil && cfg != nil {
+				live := make([]string, 0, len(state))
+				for _, iface := range state {
+					if iface.Name != "lo" {
+						live = append(live, iface.Name)
+					}
+				}
+				ports := compile.UnboundManagementPorts(cfg, live)
+				binding["state"] = "configured"
+				if len(ports) > 0 {
+					binding["state"] = "unbound-appliance"
+					binding["recoveryPorts"] = ports
+				}
 			}
 			cancel()
 		}
@@ -53,6 +75,7 @@ func healthHandler(engine EngineClient) gin.HandlerFunc {
 			"time":              time.Now().UTC().Format(time.RFC3339Nano),
 			"iec104Enforcement": iec,
 			"ipv4Forwarding":    forwarding,
+			"managementBinding": binding,
 		})
 	}
 }

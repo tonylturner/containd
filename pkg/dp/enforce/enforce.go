@@ -136,6 +136,16 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) erro
 	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)
 	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
 	for _, lr := range locals {
+		if lr.RecoverUnbound {
+			live, err := mgmtpath.Devices()
+			if err != nil {
+				return fmt.Errorf("discover management bindings: %w", err)
+			}
+			lr.Ifaces, _ = mgmtpath.ResolveBindings(lr.Ifaces, lr.DeniedIfaces, live)
+			if len(lr.Ifaces) == 0 {
+				continue
+			}
+		}
 		line, err := compileLocalInputRule(lr, snap.ZoneIfaces)
 		if err != nil {
 			return err
