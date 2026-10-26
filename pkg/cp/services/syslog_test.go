@@ -137,3 +137,35 @@ func TestSyslogFlushWhileFormatChanges(t *testing.T) {
 	}
 	<-done
 }
+
+func TestSyslogEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		ip   string
+		port uint16
+		want string
+	}{
+		{"192.0.2.1", 502, "192.0.2.1:502"},
+		{"192.0.2.1", 0, "192.0.2.1"},
+		{"2001:db8::1", 2404, "[2001:db8::1]:2404"},
+		{"2001:db8::1", 0, "2001:db8::1"},
+	} {
+		if got := syslogEndpoint(tc.ip, tc.port); got != tc.want {
+			t.Errorf("syslogEndpoint(%q, %d) = %q, want %q", tc.ip, tc.port, got, tc.want)
+		}
+	}
+}
+
+func TestSyslogRFC5424ICMPHasNoPorts(t *testing.T) {
+	mgr := NewSyslogManager()
+	ev := dpevents.Event{
+		Kind:      "firewall.rule.hit",
+		Timestamp: time.Date(2026, 3, 13, 15, 0, 0, 0, time.UTC),
+		SrcIP:     "2001:db8::1",
+		DstIP:     "2001:db8::2",
+		Transport: "icmpv6",
+	}
+	line := mgr.formatEvent(ev, "rfc5424")
+	if !strings.Contains(line, `"src":"2001:db8::1"`) || !strings.Contains(line, `"dst":"2001:db8::2"`) {
+		t.Fatalf("ICMPv6 event endpoints carry a port: %s", line)
+	}
+}
