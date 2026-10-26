@@ -131,7 +131,10 @@ exactly `state` and `reason`:
 - `enforcing`: enforcement is enabled and the engine reports an applied ruleset
   without error.
 - `degraded`: a ruleset is in force, but the last apply failed and left the
-  previous ruleset in force.
+  previous ruleset in force, or the schedule planner is degraded: a refill of
+  the schedule time sets is failing, or their horizon ends within an hour.
+  `engineStatus.schedulePlanner` in `GET /api/v1/dataplane/ruleset` shows the
+  planner's last refill, horizon end and last error.
 - `disabled`: `dataplane.enforcement: false` intentionally selects the supported
   in-memory-only mode; a successful commit does not install nft rules.
 - `unavailable`: the ruleset apply failed with no ruleset in force, no ruleset

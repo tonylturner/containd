@@ -423,8 +423,8 @@ func applyVerdict(ctx context.Context, updater enforce.Updater, v verdict.Verdic
 	}
 }
 
-// RulesetStatus returns the last compiled/applied nftables ruleset snapshot
-// and the live ICS coverage of the applied rules.
+// RulesetStatus returns the status of the installed nftables ruleset with
+// the live ICS coverage of its rules and its schedule planner's state.
 func (e *Engine) RulesetStatus() RulesetStatus {
 	if e == nil {
 		return RulesetStatus{}
@@ -434,6 +434,7 @@ func (e *Engine) RulesetStatus() RulesetStatus {
 		st = *ptr
 	}
 	st.ICSCoverage = e.ICSCoverage()
+	st.SchedulePlanner = e.gate.schedulePlanAt(e.gate.now())
 	return st
 }
 

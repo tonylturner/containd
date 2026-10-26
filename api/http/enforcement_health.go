@@ -82,6 +82,10 @@ func enforcementHealth(snapshot config.HealthSnapshot, snapshotErr error, rulese
 	case status.Error != "":
 		health["state"] = "degraded"
 		health["reason"] = "last ruleset apply failed; the previous ruleset stays in force"
+	case status.SchedulePlanner != nil && status.SchedulePlanner.State == dpengine.SchedulePlannerDegraded:
+		// The planner's reasons are fixed texts that name no rule.
+		health["state"] = "degraded"
+		health["reason"] = status.SchedulePlanner.Reason
 	default:
 		health["state"] = "enforcing"
 		health["reason"] = ""

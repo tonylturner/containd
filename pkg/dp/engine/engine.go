@@ -90,7 +90,9 @@ type Engine struct {
 // FailedSnapshotVersion and FailedAt describe the last apply when it
 // failed; the next successful apply clears them. ICSCoverage is the live
 // coverage of the ICS rules in force (none before the first success, never
-// a failed snapshot's); omitted when there are none.
+// a failed snapshot's); omitted when there are none. SchedulePlanner is the
+// schedule planner's state for the installed ruleset; omitted when it has
+// no scheduled rule.
 type RulesetStatus struct {
 	Ruleset               string                `json:"ruleset"`
 	SnapshotVersion       string                `json:"snapshotVersion,omitempty"`
@@ -100,6 +102,7 @@ type RulesetStatus struct {
 	FailedAt              *time.Time            `json:"failedAt,omitempty"`
 	Warnings              []enforce.RuleWarning `json:"warnings,omitempty"`
 	ICSCoverage           []coverage.Rule       `json:"icsCoverage,omitempty"`
+	SchedulePlanner       *SchedulePlan         `json:"schedulePlanner,omitempty"`
 }
 
 type EnforceConfig struct {
