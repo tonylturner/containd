@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -115,14 +116,15 @@ func setTLSCertHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		certFile, keyFile := mgmttls.ResolveFiles(cfg)
+		cert, key := mgmttls.ResolveFilesWithSources(cfg)
+		certFile, keyFile := cert.Path, key.Path
 
 		if !strings.HasPrefix(filepath.Clean(certFile)+string(os.PathSeparator), string(os.PathSeparator)+"data"+string(os.PathSeparator)) {
-			apiError(c, http.StatusBadRequest, "tlsCertFile must be under /data")
+			apiError(c, http.StatusConflict, fmt.Sprintf("TLS certificate path %q (source: %s) must be under /data", certFile, cert.Source))
 			return
 		}
 		if !strings.HasPrefix(filepath.Clean(keyFile)+string(os.PathSeparator), string(os.PathSeparator)+"data"+string(os.PathSeparator)) {
-			apiError(c, http.StatusBadRequest, "tlsKeyFile must be under /data")
+			apiError(c, http.StatusConflict, fmt.Sprintf("TLS key path %q (source: %s) must be under /data", keyFile, key.Source))
 			return
 		}
 

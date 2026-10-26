@@ -15,24 +15,37 @@ const (
 	DefaultKeyFile  = "/data/tls/server.key"
 )
 
+// ResolvedFile identifies a listener file and the setting that selected it.
+type ResolvedFile struct {
+	Path string
+	// Source is an environment variable name, dotted config field, or "default".
+	Source string
+}
+
 // ResolveFiles applies environment overrides, configured paths, then defaults.
 // Certificate and key overrides are independent.
 func ResolveFiles(cfg *config.Config) (certFile, keyFile string) {
-	certFile = strings.TrimSpace(os.Getenv("CONTAIND_TLS_CERT_FILE"))
-	keyFile = strings.TrimSpace(os.Getenv("CONTAIND_TLS_KEY_FILE"))
+	cert, key := ResolveFilesWithSources(cfg)
+	return cert.Path, key.Path
+}
+
+// ResolveFilesWithSources resolves listener files with their selection sources.
+func ResolveFilesWithSources(cfg *config.Config) (cert, key ResolvedFile) {
+	var cfgCert, cfgKey string
 	if cfg != nil {
-		if certFile == "" {
-			certFile = strings.TrimSpace(cfg.System.Mgmt.TLSCertFile)
-		}
-		if keyFile == "" {
-			keyFile = strings.TrimSpace(cfg.System.Mgmt.TLSKeyFile)
-		}
+		cfgCert = cfg.System.Mgmt.TLSCertFile
+		cfgKey = cfg.System.Mgmt.TLSKeyFile
 	}
-	if certFile == "" {
-		certFile = DefaultCertFile
+	return resolveFile("CONTAIND_TLS_CERT_FILE", cfgCert, "system.mgmt.tlsCertFile", DefaultCertFile),
+		resolveFile("CONTAIND_TLS_KEY_FILE", cfgKey, "system.mgmt.tlsKeyFile", DefaultKeyFile)
+}
+
+func resolveFile(env, configured, field, fallback string) ResolvedFile {
+	if path := strings.TrimSpace(os.Getenv(env)); path != "" {
+		return ResolvedFile{Path: path, Source: env}
 	}
-	if keyFile == "" {
-		keyFile = DefaultKeyFile
+	if path := strings.TrimSpace(configured); path != "" {
+		return ResolvedFile{Path: path, Source: field}
 	}
-	return certFile, keyFile
+	return ResolvedFile{Path: fallback, Source: "default"}
 }
