@@ -18,14 +18,15 @@ import (
 )
 
 func previewZoneResolver(snap *rules.Snapshot, src, dst net.IP) (string, string) {
-	return resolveZonesWithAddrs(snap, src, dst, func(name string) ([]net.Addr, error) {
+	zones := zoneCache{addrsFor: func(name string) ([]net.Addr, error) {
 		cidr := map[string]string{"cc0": "10.60.60.1/24", "rtu0": "10.30.30.1/24"}[name]
 		if cidr == "" {
 			return nil, fmt.Errorf("unknown test interface %q", name)
 		}
 		_, network, err := net.ParseCIDR(cidr)
 		return []net.Addr{network}, err
-	})
+	}}
+	return zones.resolve(snap, src, dst)
 }
 
 func TestPreviewRuleZones(t *testing.T) {
@@ -87,7 +88,7 @@ func TestPreviewRuleIEC104RuntimeParity(t *testing.T) {
 					ICS: rules.ICSPredicate{Protocol: "iec104", ReadOnly: readOnly, Mode: "enforce"}}
 				snap := &rules.Snapshot{Firewall: []rules.Entry{entry},
 					ZoneIfaces: map[string][]string{"control": {"cc0"}, "plant": {"rtu0"}}}
-				table := newIECTable("enforce")
+				table := newIECTable("enforce", &zoneCache{})
 				table.policy = newRulesPolicy(snap)
 				client, _ := addrPort(net.ParseIP(evs[0].SrcIP), evs[0].SrcPort)
 				server, _ := addrPort(net.ParseIP(evs[0].DstIP), evs[0].DstPort)

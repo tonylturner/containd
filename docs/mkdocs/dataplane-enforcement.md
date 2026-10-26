@@ -30,7 +30,10 @@ or underscore, followed by letters, digits, underscores and hyphens.
 Local input and NAT rules match a zone's interfaces through the set
 `zone_<hex-encoded zone name>` in the policy table, so every zone gets its own
 set even when names differ only in case or punctuation. A zone with interfaces
-can therefore have a name of at most 125 bytes.
+can therefore have a name of at most 125 bytes. The engine places a flow's
+addresses in zones by the networks on each zone's interfaces. It reads them
+once and again after every link or address change the kernel reports, so a
+changed address takes effect without a commit.
 
 nftables enforces identity and schedule predicates on the rules it handles,
 with per-label address sets and absolute-time interval sets in the policy

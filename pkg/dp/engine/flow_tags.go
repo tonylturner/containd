@@ -33,7 +33,7 @@ func (e *Engine) flowTags(key flow.Key) []string {
 	}
 	ctx := tagContext(p.snapshot, key.OpenerIP(), key.ServerIP(), protocolName(key.Proto), port)
 	if p.evaluator.TagsUseZones() {
-		ctx.SrcZone, ctx.DstZone = resolveZonesForFlow(p.snapshot, ctx.SrcIP, ctx.DstIP)
+		ctx.SrcZone, ctx.DstZone = e.zones.resolve(p.snapshot, ctx.SrcIP, ctx.DstIP)
 	}
 	return p.evaluator.Tags(ctx)
 }
@@ -104,7 +104,7 @@ func (t *iecTable) withSessionTags(evs []events.Event) []events.Event {
 		}
 		ctx := tagContext(snap, client, server, strings.ToLower(ev.Transport), ev.DstPort)
 		if tp.TagsUseZones() {
-			ctx.SrcZone, ctx.DstZone = resolveZonesForFlow(snap, client, server)
+			ctx.SrcZone, ctx.DstZone = t.zones.resolve(snap, client, server)
 		}
 		evs[i].Attributes = events.WithTags(ev.Attributes, tp.Tags(ctx))
 	}
@@ -134,7 +134,7 @@ func (e *Engine) TagConnections(entries []conntrack.Entry) []TaggedConnection {
 	}
 	var zones zoneIndex
 	if p.evaluator.TagsUseZones() {
-		zones = newZoneIndex(p.snapshot, interfaceAddrs)
+		zones = e.zones.index(p.snapshot)
 	}
 	for i, c := range entries {
 		opener, server := net.ParseIP(c.Src), net.ParseIP(c.Dst)

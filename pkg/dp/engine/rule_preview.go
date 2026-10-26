@@ -45,7 +45,7 @@ type PreviewTimeRange struct {
 // running configuration binds to each event's opener now, not at the time
 // of the event.
 func (e *Engine) PreviewRule(entry rules.Entry) PreviewRuleResponse {
-	return e.previewRule(entry, resolveZonesForFlow)
+	return e.previewRule(entry, e.zones.resolve)
 }
 
 func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRuleResponse {

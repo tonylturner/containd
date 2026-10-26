@@ -55,7 +55,7 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 	// action governs requests only: a reply is enforced only when a rule
 	// matches it. NFQUEUE mode behaves the same, because replies take the
 	// established conntrack path there and are never queued.
-	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.OpenerIP(), state.Key.ServerIP())
+	srcZone, dstZone := e.zones.resolve(snap, state.Key.OpenerIP(), state.Key.ServerIP())
 	applyDefault := !isReply(state)
 	for _, ev := range evs {
 		ctx, ok := evalContextFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
@@ -122,10 +122,6 @@ func evalContextFromDPIEvent(snap *rules.Snapshot, state *flow.State, pkt *dpi.P
 
 type zoneResolver func(*rules.Snapshot, net.IP, net.IP) (string, string)
 
-func resolveZonesForFlow(snap *rules.Snapshot, srcIP, dstIP net.IP) (string, string) {
-	return resolveZonesWithAddrs(snap, srcIP, dstIP, interfaceAddrs)
-}
-
 // interfaceAddrs keeps OS interface lookup in the engine's network namespace.
 func interfaceAddrs(name string) ([]net.Addr, error) {
 	iface, err := net.InterfaceByName(name)
@@ -133,11 +129,6 @@ func interfaceAddrs(name string) ([]net.Addr, error) {
 		return nil, err
 	}
 	return iface.Addrs()
-}
-
-func resolveZonesWithAddrs(snap *rules.Snapshot, srcIP, dstIP net.IP, addrsFor func(string) ([]net.Addr, error)) (string, string) {
-	zones := newZoneIndex(snap, addrsFor)
-	return zones.zoneFor(srcIP), zones.zoneFor(dstIP)
 }
 
 // zoneIndex maps addresses to the zone whose interface networks hold them.

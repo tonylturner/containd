@@ -77,7 +77,7 @@ func (e *Engine) failClosedRule(pkt capture.Packet, state *flow.State, parsed *d
 			continue
 		}
 		if !zoned && (len(entry.SourceZones) > 0 || len(entry.DestZones) > 0) {
-			ctx.SrcZone, ctx.DstZone = resolveZonesForFlow(snap, ctx.SrcIP, ctx.DstIP)
+			ctx.SrcZone, ctx.DstZone = e.zones.resolve(snap, ctx.SrcIP, ctx.DstIP)
 			zoned = true
 		}
 		if p.evaluator.AddressScopeMatch(i, ctx) {

@@ -293,12 +293,14 @@ func BenchmarkFailClosedRule(b *testing.B) {
 }
 
 // BenchmarkFailClosedRuleZoned is BenchmarkFailClosedRule with zoned rules,
-// whose scope needs the zones of the flow's addresses.
+// whose scope needs the zones of the flow's addresses, while the zone
+// cache is subscribed to interface changes, as in a running engine.
 func BenchmarkFailClosedRuleZoned(b *testing.B) {
 	e, err := New(Config{DPIEnabled: true, DPIMode: "enforce"})
 	if err != nil {
 		b.Fatal(err)
 	}
+	e.zones.subscribed()
 	snap := firstCommandPolicy()
 	snap.ZoneIfaces = map[string][]string{"control": {loopbackName(b)}}
 	for i := range snap.Firewall {
