@@ -72,6 +72,25 @@ func TestPreviewFirewallRuleDelegates(t *testing.T) {
 	}
 }
 
+// The previewed entry carries the action parameters of RATE_LIMIT and
+// TAG rules.
+func TestPreviewFirewallRuleCarriesActionParameters(t *testing.T) {
+	for body, want := range map[string]rules.Entry{
+		`{"id":"police","action":"RATE_LIMIT","rateLimit":{"packetsPerSecond":50,"burst":5}}`: {ID: "police", Action: rules.ActionRateLimit,
+			RateLimit: &rules.RateLimit{PacketsPerSecond: 50, Burst: 5}},
+		`{"id":"label","action":"TAG","tag":"plc"}`: {ID: "label", Action: rules.ActionTag, Tag: "plc"},
+	} {
+		eng := &previewMockEngine{}
+		rec := httptest.NewRecorder()
+		req := authedRequest(http.MethodPost, "/api/v1/firewall/rules/preview", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		NewServerWithEngine(&mockStore{}, nil, eng).ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || eng.calls != 1 || !reflect.DeepEqual(eng.entry, want) {
+			t.Fatalf("%s: status=%d entry=%+v, want %+v", body, rec.Code, eng.entry, want)
+		}
+	}
+}
+
 func TestPreviewFirewallRuleErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string

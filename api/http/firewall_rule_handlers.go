@@ -209,8 +209,13 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 			Sources:      req.Sources,
 			Destinations: req.Destinations,
 			Action:       rules.Action(req.Action),
+			Tag:          req.Tag,
 			Identities:   req.Identities,
 			ICS:          compile.ICSPredicate(req.ICS),
+		}
+		// A zero burst means packetsPerSecond here as in the snapshot.
+		if rl := req.RateLimit; rl != nil {
+			entry.RateLimit = &rules.RateLimit{PacketsPerSecond: rl.PacketsPerSecond, Burst: rl.Burst}
 		}
 		if req.Schedule != nil {
 			entry.Schedule = rules.SchedulePredicate{
