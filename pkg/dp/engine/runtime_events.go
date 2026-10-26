@@ -437,17 +437,17 @@ func (e *Engine) RulesetStatus() RulesetStatus {
 	return st
 }
 
-func (e *Engine) setRulesetStatus(version, ruleset string, warnings []enforce.RuleWarning, err error) {
-	st := &RulesetStatus{
-		Ruleset:         ruleset,
-		SnapshotVersion: version,
-		AppliedAt:       time.Now().UTC(),
-		Warnings:        warnings,
+// recordApplyFailure adds a failed apply of the snapshot version to the
+// status of the installed ruleset, which the failure left in place.
+// Callers hold lifecycleMu.
+func (e *Engine) recordApplyFailure(version string, err error) {
+	var st RulesetStatus
+	if prev := e.rulesetStatus.Load(); prev != nil {
+		st = *prev
 	}
-	if err != nil {
-		st.Error = err.Error()
-	}
-	e.rulesetStatus.Store(st)
+	at := time.Now().UTC()
+	st.Error, st.FailedSnapshotVersion, st.FailedAt = err.Error(), version, &at
+	e.rulesetStatus.Store(&st)
 }
 
 // RevokeConnections installs operator revocations through the active enforcement

@@ -73,17 +73,26 @@ func enforcementHealth(snapshot config.HealthSnapshot, snapshotErr error, rulese
 	switch {
 	case ruleset.err != nil:
 		health["reason"] = "engine ruleset status unavailable"
-	case status.Error != "":
+	case !rulesetInstalled(status) && status.Error != "":
 		health["state"] = "unavailable"
 		health["reason"] = "ruleset apply failed"
-	case status.AppliedAt.IsZero() || status.Ruleset == "":
+	case !rulesetInstalled(status):
 		health["state"] = "unavailable"
 		health["reason"] = "no enforced ruleset applied"
+	case status.Error != "":
+		health["state"] = "degraded"
+		health["reason"] = "last ruleset apply failed; the previous ruleset stays in force"
 	default:
 		health["state"] = "enforcing"
 		health["reason"] = ""
 	}
 	return health
+}
+
+// rulesetInstalled reports whether the engine has a ruleset in force. A
+// failed apply leaves the installed one, so the status can carry both.
+func rulesetInstalled(status dpengine.RulesetStatus) bool {
+	return !status.AppliedAt.IsZero() && status.Ruleset != ""
 }
 
 // icsEnforcementHealth summarizes the applied ICS rule coverage as counts

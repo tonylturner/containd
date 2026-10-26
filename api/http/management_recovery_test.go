@@ -88,7 +88,9 @@ func TestManagementRecoveryApplyAndStatus(t *testing.T) {
 		want   string
 	}{
 		{"not applied", dpengine.RulesetStatus{}, "recovery pending:"},
-		{"apply failed", dpengine.RulesetStatus{Ruleset: compiled, SnapshotVersion: recovery, AppliedAt: time.Now(), Error: "nft failed"}, "recovery failed:"},
+		{"apply failed", dpengine.RulesetStatus{FailedSnapshotVersion: recovery, Error: "nft failed"}, "recovery failed:"},
+		{"apply failed over another snapshot", dpengine.RulesetStatus{Ruleset: compiled, SnapshotVersion: "compiled-0.1.7", AppliedAt: time.Now(), FailedSnapshotVersion: recovery, Error: "nft failed"}, "recovery failed:"},
+		{"applied, a later apply failed", dpengine.RulesetStatus{Ruleset: compiled, SnapshotVersion: recovery, AppliedAt: time.Now(), FailedSnapshotVersion: recovery, Error: "nft failed"}, "recovery: new transit dropped"},
 		{"other snapshot applied", dpengine.RulesetStatus{Ruleset: compiled, SnapshotVersion: "compiled-0.1.7", AppliedAt: time.Now()}, "recovery pending:"},
 		{"version unreported", dpengine.RulesetStatus{Ruleset: compiled, AppliedAt: time.Now()}, "recovery pending:"},
 		{"no ruleset", dpengine.RulesetStatus{SnapshotVersion: recovery, AppliedAt: time.Now()}, "recovery pending:"},
@@ -223,7 +225,7 @@ func TestManagementRecoveryWithoutReservation(t *testing.T) {
 		view   string
 	}{
 		{"pending", dpengine.RulesetStatus{}, "pending", "recovery pending:"},
-		{"failed", dpengine.RulesetStatus{Ruleset: "x", SnapshotVersion: config.ManagementRecoveryVersion, AppliedAt: time.Now(), Error: "nft failed"}, "failed", "recovery failed: nft failed"},
+		{"failed", dpengine.RulesetStatus{FailedSnapshotVersion: config.ManagementRecoveryVersion, Error: "nft failed"}, "failed", "recovery failed: nft failed"},
 		{"applied", dpengine.RulesetStatus{Ruleset: "x", SnapshotVersion: config.ManagementRecoveryVersion, AppliedAt: time.Now()}, "active", "recovery: new transit dropped"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

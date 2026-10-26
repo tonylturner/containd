@@ -103,19 +103,21 @@ const (
 // the guard's health. A restarted/unreachable engine must never be advertised
 // as fail-closed. The engine compiles with authority management cannot see
 // (its engine API path, its reservation), so recovery is recognized by the
-// snapshot version the engine applied, not by recompiling the ruleset here.
+// snapshot version of the ruleset the engine has installed, not by
+// recompiling the ruleset here. A failed apply leaves the installed ruleset
+// in force, so installed recovery stays applied whatever failed after it.
 // detail may carry engine diagnostics and is for authenticated views only.
 func observeManagementRecovery(ruleset rulesetObservation) (state, detail string) {
 	status := ruleset.status
 	switch {
 	case ruleset.err != nil:
 		return recoveryPending, ruleset.err.Error()
+	case rulesetInstalled(status) && status.SnapshotVersion == config.ManagementRecoveryVersion:
+		return recoveryApplied, "new transit dropped"
 	case status.Error != "":
 		return recoveryFailed, status.Error
-	case status.AppliedAt.IsZero() || status.Ruleset == "" || status.SnapshotVersion != config.ManagementRecoveryVersion:
-		return recoveryPending, "ruleset not applied"
 	default:
-		return recoveryApplied, "new transit dropped"
+		return recoveryPending, "ruleset not applied"
 	}
 }
 

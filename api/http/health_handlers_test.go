@@ -186,6 +186,7 @@ func TestHealthEnforcementStates(t *testing.T) {
 		{name: "enforcing", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now()}, want: "enforcing"},
 		{name: "not applied", enabled: true, want: "unavailable"},
 		{name: "failed ruleset", enabled: true, status: dpengine.RulesetStatus{Error: "private nft diagnostic"}, want: "unavailable"},
+		{name: "failed over an installed ruleset", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now(), Error: "private nft diagnostic"}, want: "degraded"},
 		{name: "persisted fault", enabled: true, fault: "private replay diagnostic", want: "unavailable"},
 		{name: "failed disable", fault: "private replay diagnostic", want: "unavailable"},
 		{name: "store busy", snapshotErr: config.ErrHealthBusy, want: "unknown"},
@@ -199,7 +200,7 @@ func TestHealthEnforcementStates(t *testing.T) {
 			if health["state"] != tc.want || len(health) != 2 {
 				t.Fatalf("health: %v want %s", health, tc.want)
 			}
-			wantReason := tc.want == "unknown" || tc.want == "unavailable"
+			wantReason := tc.want != "enforcing" && tc.want != "disabled"
 			if (health["reason"] != "") != wantReason || strings.Contains(health["reason"].(string), "private") {
 				t.Fatalf("reason: %v", health)
 			}
