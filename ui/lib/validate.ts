@@ -145,3 +145,23 @@ export function parseIdentityLabels(
   }
   return { ok: true, labels };
 }
+
+/**
+ * Longest zone name in bytes: enforcement names each zone's interface set
+ * zone_<hex name>, and nftables names are at most 255 bytes.
+ */
+export const MAX_ZONE_NAME_BYTES = 125;
+
+/**
+ * Validates a zone name as the server does: not blank, no leading or
+ * trailing whitespace, and at most 125 bytes of UTF-8. Returns null if valid.
+ */
+export function validateZoneName(name: string): string | null {
+  if (name.trim() === "") return "Zone name is required.";
+  if (name.trim() !== name) return "Zone name cannot start or end with a space.";
+  const bytes = new TextEncoder().encode(name).length;
+  if (bytes > MAX_ZONE_NAME_BYTES) {
+    return `Zone name is ${bytes} bytes; the limit is ${MAX_ZONE_NAME_BYTES} bytes (characters outside ASCII take 2 to 4 bytes each).`;
+  }
+  return null;
+}

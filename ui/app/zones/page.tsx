@@ -7,6 +7,7 @@ import Link from "next/link";
 
 import { api, isAdmin, type Zone, type ConduitMap } from "../../lib/api";
 import { mapZone, scoreZone, slColor } from "../../lib/security-scoring";
+import { validateZoneName } from "../../lib/validate";
 import { useToast } from "../../components/ToastProvider";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
@@ -29,8 +30,6 @@ export default function ZonesPage() {
   const [saving, setSaving] = useState(false);
   const confirm = useConfirm();
 
-  const ZONE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
-
   async function refresh() {
     const [list, conds] = await Promise.all([
       api.listZones(),
@@ -46,20 +45,16 @@ export default function ZonesPage() {
     refresh();
   }, []);
 
-  function validateName(v: string): string | null {
-    if (!v.trim()) return "Zone name is required.";
-    if (!ZONE_NAME_RE.test(v.trim())) return "Only letters, numbers, dash, and underscore allowed (no spaces).";
-    return null;
-  }
-
   async function onCreate() {
     setError(null);
-    const nameErr = validateName(name);
+    // The name is sent as typed: the server refuses surrounding whitespace
+    // rather than trimming it, so the form does too.
+    const nameErr = validateZoneName(name);
     setNameError(nameErr);
     if (nameErr) return;
     setSaving(true);
     const result = await api.createZone({
-      name: name.trim(),
+      name,
       alias: alias.trim() || undefined,
       description: description.trim() || undefined,
       slTarget: slTarget || undefined,
@@ -161,12 +156,12 @@ export default function ZonesPage() {
             <input
               id="zone-name"
               value={name}
-              onChange={(e) => { setName(e.target.value); setNameError(validateName(e.target.value)); }}
+              onChange={(e) => { setName(e.target.value); setNameError(validateZoneName(e.target.value)); }}
               placeholder="name (e.g. ot)"
               disabled={!isAdmin()}
               className={"w-full input-industrial " + (nameError ? "border-red-500/30" : "")}
             />
-            {nameError && <p className="mt-1 text-xs text-red-400">{nameError}</p>}
+            {nameError && <p role="alert" aria-label="Zone name error" className="mt-1 text-xs text-red-400">{nameError}</p>}
           </div>
           <div>
             <label htmlFor="zone-alias" className="sr-only">Zone alias</label>
@@ -208,7 +203,7 @@ export default function ZonesPage() {
           </div>
         </div>
         <div className="mt-3 flex items-center justify-between">
-          {error && <p className="rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm text-red-400">{error}</p>}
+          {error && <p role="alert" aria-label="Zone save error" className="rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm text-red-400">{error}</p>}
           {isAdmin() && (
             <button
               onClick={onCreate}
