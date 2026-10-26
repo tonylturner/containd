@@ -26,7 +26,8 @@ func applianceDefaults(r *mgmtpath.Reservation, bind func(*config.Config, *mgmtp
 	t := true
 	def.System.Mgmt.EnableHTTP = &t
 	def.System.Mgmt.EnableHTTPS = &t
-	def.System.Mgmt.TLSCertFile, def.System.Mgmt.TLSKeyFile = mgmttls.ResolveFiles(nil)
+	def.System.Mgmt.TLSCertFile = mgmttls.DefaultCertFile
+	def.System.Mgmt.TLSKeyFile = mgmttls.DefaultKeyFile
 	def.System.SSH.ListenAddr = ":2222"
 	def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
 	if r != nil {

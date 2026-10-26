@@ -284,10 +284,10 @@ func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) error {
 				next.System.Mgmt.EnableHTTPS = boolPtr(true)
 			}
 			if strings.TrimSpace(next.System.Mgmt.TLSCertFile) == "" {
-				next.System.Mgmt.TLSCertFile, _ = mgmttls.ResolveFiles(next)
+				next.System.Mgmt.TLSCertFile = mgmttls.DefaultCertFile
 			}
 			if strings.TrimSpace(next.System.Mgmt.TLSKeyFile) == "" {
-				_, next.System.Mgmt.TLSKeyFile = mgmttls.ResolveFiles(next)
+				next.System.Mgmt.TLSKeyFile = mgmttls.DefaultKeyFile
 			}
 			return nil
 		})
