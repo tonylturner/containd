@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import type { Interface, InterfaceState, Zone } from "../../lib/api";
 import { interfaceAddresses, OS_ADDRESS_HINT } from "../../lib/interface-addresses";
 import { staticAssetURL } from "../../lib/api-core";
+import { zoneLabel, zoneName } from "../../lib/zones";
 
 export function InterfaceRow({
   iface,
@@ -75,11 +76,7 @@ export function InterfaceRow({
     return "physical";
   }
 
-  const zoneLabel = (z: Zone): string =>
-    z.alias ? `${z.alias} (${z.name})` : z.name;
-  const zoneDisplay = iface.zone
-    ? zoneLabel(zones.find((z) => z.name === iface.zone) ?? { name: iface.zone })
-    : "—";
+  const zoneDisplay = iface.zone ? zoneName(zones, iface.zone) : "—";
 
   return (
     <tr className="border-t table-row-hover transition-ui">

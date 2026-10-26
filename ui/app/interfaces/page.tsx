@@ -16,6 +16,7 @@ import { chipClass, InterfaceRow } from "./interface-row";
 import { BootFaultStatus } from "./boot-fault-notice";
 import type { ManagementReservation } from "../../lib/api-console";
 import { runtimeFor } from "../../lib/interface-addresses";
+import { zoneLabel } from "../../lib/zones";
 
 export default function InterfacesPage() {
   const [reservation, setReservation] = useState<ManagementReservation | null>(null);
@@ -39,7 +40,6 @@ export default function InterfacesPage() {
 
   const confirm = useConfirm();
 
-  const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
   const tips: Tip[] = [
     {
       id: "interfaces:zones",

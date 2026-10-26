@@ -1,4 +1,5 @@
 import type { Interface, InterfaceState, Zone } from "../../lib/api";
+import { isCIDR, isIPv4 } from "../../lib/validate";
 
 export type ICSProtoMeta = {
   label: string;
@@ -165,12 +166,14 @@ export function zoneName(zones: Zone[], name: string): string {
   return match ? zoneLabel(match) : name;
 }
 
-function ip4ToInt(ip: string): number | null {
-  const parts = ip.split(".");
-  if (parts.length !== 4) return null;
-  const nums = parts.map((p) => Number(p));
-  if (nums.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return null;
-  return ((nums[0] << 24) | (nums[1] << 16) | (nums[2] << 8) | nums[3]) >>> 0;
+/** True if s is an IPv4 CIDR as isCIDR and isIPv4 read one (192.0.2.7/24). */
+function isIPv4CIDR(s: string): boolean {
+  return isCIDR(s) && isIPv4(s.slice(0, s.lastIndexOf("/")));
+}
+
+/** The address as a 32-bit number; ip must already pass isIPv4. */
+function ip4ToInt(ip: string): number {
+  return ip.split(".").reduce((n, octet) => ((n << 8) | Number(octet)) >>> 0, 0);
 }
 
 function intToIP4(n: number): string {
@@ -178,24 +181,14 @@ function intToIP4(n: number): string {
   return `${(v >>> 24) & 255}.${(v >>> 16) & 255}.${(v >>> 8) & 255}.${v & 255}`;
 }
 
-function maskFromPrefix(prefix: number): number | null {
-  if (!Number.isFinite(prefix) || prefix < 0 || prefix > 32) return null;
-  if (prefix === 0) return 0;
-  return (0xffffffff << (32 - prefix)) >>> 0;
-}
-
+/** The address after the network address of an IPv4 CIDR, or null for anything else. */
 export function firstHostInCIDR(cidr: string): string | null {
-  const raw = cidr.trim();
-  const slash = raw.lastIndexOf("/");
-  if (slash <= 0) return null;
-  const ip = raw.slice(0, slash);
-  const pfx = Number(raw.slice(slash + 1));
-  const ipInt = ip4ToInt(ip);
-  const mask = maskFromPrefix(pfx);
-  if (ipInt == null || mask == null) return null;
-  const net = ipInt & mask;
-  const first = (net + 1) >>> 0;
-  return intToIP4(first);
+  if (!isIPv4CIDR(cidr)) return null;
+  const slash = cidr.lastIndexOf("/");
+  const prefix = Number(cidr.slice(slash + 1));
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const net = (ip4ToInt(cidr.slice(0, slash)) & mask) >>> 0;
+  return intToIP4(net + 1);
 }
 
 export function pickWanIface(ifs: Interface[]): Interface | null {
@@ -209,8 +202,7 @@ export function pickWanCIDR(state: InterfaceState | null): string | null {
   if (!state) return null;
   for (const addr of state.addrs || []) {
     const s = String(addr);
-    if (!s.includes("/")) continue;
-    if (s.includes(":")) continue;
+    if (!isIPv4CIDR(s)) continue;
     if (s.startsWith("169.254.")) continue;
     return s;
   }
