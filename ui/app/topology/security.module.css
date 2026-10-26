@@ -4,6 +4,8 @@
 .matrixHeader { padding: 16px 24px 12px; border-bottom: 1px solid var(--topo-border); flex-shrink: 0; }
 .matrixTitle { font-family: var(--display); font-size: 9px; letter-spacing: 3px; color: var(--text-mid); margin-bottom: 2px; }
 .matrixSubtitle { font-family: var(--mono); font-size: 8px; color: var(--text-dim); }
+.targetSummary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; font-family: var(--mono); font-size: 8px; }
+.targetGap { white-space: nowrap; }
 .matrixScroll { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .matrixScroll::-webkit-scrollbar { width: 3px; height: 3px; }
 .matrixScroll::-webkit-scrollbar-thumb { background: var(--amber-dim); }

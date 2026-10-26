@@ -5,6 +5,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useToast } from "../../components/ToastProvider";
 import { api, Conduit, ConduitMap } from "../../lib/api";
 import { type ZoneView, MAX_SL, mapZone, scoreZone, slColor } from "../../lib/security-scoring";
+import { summarizeTargets, targetSummaryText } from "./security-summary";
 import s from "./security.module.css";
 import ts from "./topology.module.css";
 
@@ -53,6 +54,7 @@ export default function SecurityView() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const activeZones = useMemo(() => allZones.filter((z) => activeIds.includes(z.id)), [allZones, activeIds]);
+  const targets = useMemo(() => summarizeTargets(allZones, conduits), [allZones, conduits]);
 
   // ── Zone selector ──
   const addZone = useCallback((id: string) => {
@@ -143,6 +145,12 @@ export default function SecurityView() {
         <div className={s.matrixHeader}>
           <div className={s.matrixTitle}>ZONE &middot; CONDUIT MATRIX</div>
           <div className={s.matrixSubtitle}>Zone targets are candidate settings; conduit observations are live. Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR compliance. SL-A/T shown on zone headers.</div>
+          <div role="status" aria-label="Zones below target" className={s.targetSummary}>
+            <span style={{ color: targets.below.length > 0 ? "var(--amber)" : targets.total > 0 ? "var(--topo-green)" : "var(--text-dim)" }}>{targetSummaryText(targets)}</span>
+            {targets.below.map((z) => (
+              <span key={z.id} className={s.targetGap} style={{ color: slColor(z.sl_a, z.sl_t) }}>{z.name} SL{z.sl_a}/{z.sl_t}</span>
+            ))}
+          </div>
         </div>
 
         {/* Zone selector bar */}
