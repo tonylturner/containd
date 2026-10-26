@@ -85,6 +85,10 @@ const (
 	// seen after its handshake, or ended and was seen again), or the idle
 	// sweep dropped its partial frame. Its bytes need not start a frame.
 	StreamMidStream
+	// StreamDenied is a stream that fails closed whose connection the
+	// policy denied (Manager.FailStream). The denied bytes were consumed,
+	// so a retransmission of them would otherwise pass as a duplicate.
+	StreamDenied
 )
 
 func (k StreamErrKind) String() string {
@@ -103,6 +107,8 @@ func (k StreamErrKind) String() string {
 		return "decoder_panic"
 	case StreamMidStream:
 		return "midstream"
+	case StreamDenied:
+		return "denied"
 	default:
 		return "unknown(" + strconv.Itoa(int(k)) + ")"
 	}

@@ -315,7 +315,7 @@ func TestFailStreamKeepsStreamFailed(t *testing.T) {
 	mgr, _, st := framedFixture()
 	mgr.Inspect(st, synSeg(100, true))
 	wantFrames(t, "frame and partial frame", mgr.Inspect(st, failClosedSeg(100, 0x00, 0x02, 0xA1)), frameRange{0, 1})
-	mgr.FailStream(st, failClosedSeg(102))
+	mgr.FailStream(st, failClosedSeg(102), StreamDecoderPanic)
 	if _, held := mgr.reassembler.stats(); held != 0 {
 		t.Fatalf("failed stream holds %d bytes", held)
 	}
@@ -336,14 +336,14 @@ func TestFailStreamKeepsStreamFailed(t *testing.T) {
 
 	// The panic may come before the stream holds anything.
 	mgr, _, st = framedFixture()
-	mgr.FailStream(st, failClosedSeg(100))
+	mgr.FailStream(st, failClosedSeg(100), StreamDecoderPanic)
 	if res := mgr.Inspect(st, failClosedSeg(100, 0x00)); !errors.As(res.Err, &se) || se.Kind != StreamDecoderPanic {
 		t.Fatalf("FailStream without a stream: Err = %v", res.Err)
 	}
 
 	// Without a framing decoder there is no stream to fail.
 	plain := NewManager(&countingDecoder{})
-	plain.FailStream(st, failClosedSeg(100))
+	plain.FailStream(st, failClosedSeg(100), StreamDecoderPanic)
 	if streams, _ := plain.reassembler.stats(); streams != 0 {
 		t.Fatalf("FailStream without a framer created %d streams", streams)
 	}
@@ -358,3 +358,17 @@ func (d *countingDecoder) OnPacket(*flow.State, *ParsedPacket) ([]Event, error) 
 	return nil, nil
 }
 func (d *countingDecoder) OnFlowEnd(*flow.State) ([]Event, error) { return nil, nil }
+
+// FailStream records the kind it is given: a denied stream stays failed
+// with StreamDenied, so its consumed bytes are never taken as duplicates.
+func TestFailStreamDenied(t *testing.T) {
+	mgr, _, st := framedFixture()
+	mgr.Inspect(st, synSeg(100, true))
+	wantFrames(t, "denied frame", mgr.Inspect(st, failClosedSeg(100, 0x01, 0xAA)), frameRange{0, 2})
+	mgr.FailStream(st, failClosedSeg(100), StreamDenied)
+	res := mgr.Inspect(st, failClosedSeg(100, 0x01, 0xAA))
+	var se *StreamError
+	if !errors.As(res.Err, &se) || se.Kind != StreamDenied || se.Offset != 2 || len(res.Events) != 0 {
+		t.Fatalf("retransmitted denied frame Err=%v events=%v, want the stream denied at 2", res.Err, res.Events)
+	}
+}

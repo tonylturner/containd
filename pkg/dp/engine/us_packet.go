@@ -96,7 +96,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 	parsed.FailClosed = scope != nil
 	res, panicErr := e.inspectFlow(state, &parsed)
 	if panicErr != nil {
-		e.dpiMgr.FailStream(state, &parsed)
+		e.dpiMgr.FailStream(state, &parsed, dpi.StreamDecoderPanic)
 		return e.failClosed(pkt.Token, state, &parsed, scope, failClosedPanic, "", panicErr)
 	}
 	// Events come before the error: a stream error's malformed event is
@@ -106,7 +106,13 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 	if enforced {
 		e.verdictCache.Put(flowHash, v)
 		e.afterDrop(pkt.Token, e.dynamicBlockJob(v, evalCtx))
+		if scope != nil {
+			e.dpiMgr.FailStream(state, &parsed, dpi.StreamDenied)
+		}
 		return capture.Decision{Action: capture.Drop, Reason: reasonDPIDeny}
+	}
+	if scope != nil && deniedStream(res.Err) {
+		return e.stillDenied(pkt.Token, state, &parsed)
 	}
 	if scope != nil && isStreamFailure(res) {
 		return e.failClosed(pkt.Token, state, &parsed, scope, failClosedReason(res.Err), res.Proto, res.Err)
