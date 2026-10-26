@@ -53,7 +53,7 @@ func (p ICSPredicate) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// UnmarshalJSON decodes an ICS predicate strictly (spec §6.2): unknown
+// UnmarshalJSON decodes an ICS predicate strictly: unknown
 // and duplicate keys are errors, the IEC104 list fields reject null, empty
 // lists and null elements, and keys a protocol does not support are
 // rejected by presence (so "writeOnly": false on iec104 is an error).

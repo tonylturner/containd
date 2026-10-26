@@ -5,7 +5,7 @@ package iec104
 
 import "github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 
-// Class values of the class attribute and of policy classes (spec §6.1).
+// Class values of the class attribute and of policy classes.
 const (
 	ClassMonitor = "monitor"
 	ClassControl = "control"
@@ -79,13 +79,13 @@ var elementSize = [...]int{
 // cp56Len is the size of CP56Time2a (IEC 60870-5-101 7.2.6.18).
 const cp56Len = 7
 
-// descriptor is the B decoding of one Type ID (spec §7.2 table).
+// descriptor defines the supported decoding of one Type ID.
 type descriptor struct {
 	class  string
 	elem   elementKind
 	timed  bool // a CP56Time2a follows the element
-	sqOK   bool // B profile: SQ=1 accepted for this untimed monitor layout
-	single bool // B profile: SQ=0 and exactly one object (control and system types)
+	sqOK   bool // Decoder profile: SQ=1 accepted for this untimed monitor layout
+	single bool // Decoder profile: SQ=0 and exactly one object (control and system types)
 }
 
 // objectSize is the size of one information object without its IOA.
@@ -97,7 +97,7 @@ func (d descriptor) objectSize() int {
 	return n
 }
 
-// descriptors holds every Type ID with a B descriptor. Every other Type ID,
+// descriptors holds every Type ID with a decoder descriptor. Every other Type ID,
 // including 104 and 106 (IEC 101 test and delay commands, not used in IEC
 // 104), is unsupported and of class unknown.
 var descriptors = map[uint8]descriptor{
@@ -158,7 +158,7 @@ const (
 )
 
 // ClassOf returns the class of a Type ID: monitor, control or system for
-// the Type IDs with a B descriptor (spec §7.2), unknown for every other.
+// the Type IDs with a decoder descriptor, unknown for every other.
 func ClassOf(typeID uint8) string {
 	if d, ok := descriptors[typeID]; ok {
 		return d.class
@@ -186,8 +186,8 @@ func isWrite(direction string, typeID uint8) bool {
 	return ClassOf(typeID) == ClassControl
 }
 
-// SafeRead reports whether a decoded IEC104 event is in the read-only set of
-// spec §6.1 (with correction W7): S-frames; every U-frame (STARTDT, STOPDT,
+// SafeRead reports whether a decoded IEC104 event is in the read-only set:
+// S-frames; every U-frame (STARTDT, STOPDT,
 // TESTFR); monitor-class I-frames in the response direction; general
 // interrogation (100) in either direction; read (102) requests only; end of
 // initialization (70). It is false for anything else: counter interrogation

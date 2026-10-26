@@ -27,7 +27,7 @@ type RuntimeHealthClient interface {
 const engineHealthTimeout = time.Second
 
 // engineUnreachable is reported when the engine cannot be asked: health
-// never invents a healthy engine (contracts K6).
+// never invents a healthy engine.
 var engineUnreachable = dpengine.IEC104Enforcement{Active: false, Healthy: false, Reason: "engine unreachable"}
 
 // healthHandler is unauthenticated liveness. It is always 200; the

@@ -235,7 +235,7 @@ func AnalyzeForPolicy(r io.Reader, decoders ...dpi.Decoder) (*PolicyAnalysis, er
 	onEvent := func(srcIP, dstIP string, ev dpi.Event) {
 		eventSummary[ev.Proto]++
 		// IEC104 traffic is summarised but never learned into permissive
-		// rules (spec §7.4, W4).
+		// rules.
 		if !strings.EqualFold(ev.Proto, eventfields.ProtoIEC104) {
 			learner.RecordEvent(srcIP, dstIP, ev)
 		}

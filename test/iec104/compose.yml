@@ -1,4 +1,4 @@
-# containd milestone B IEC 60870-5-104 truth harness (spec §10.2).
+# containd IEC 60870-5-104 truth harness.
 #
 # Two endpoint containers (the lib60870 RTU server and control-centre client,
 # GPLv3, in the harness-only endpoint image) sit on two disposable networks

@@ -15,13 +15,13 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
-// IEC104 decoder event kinds (contracts K4).
+// IEC104 decoder event kinds.
 const (
 	iecKindMalformed   = "malformed"
 	iecKindUnsupported = "unsupported"
 )
 
-// ics.decision values and reasons (spec §8.4).
+// ics.decision values and reasons.
 const (
 	decisionAllow     = "allow"
 	decisionDeny      = "deny"
@@ -35,7 +35,7 @@ const (
 	reasonRole        = "role"
 )
 
-// ics.verdict and ics.session outcomes (spec §8.4).
+// ics.verdict and ics.session outcomes.
 const (
 	outcomeDropped          = "dropped"
 	outcomeDropFailed       = "drop_failed"
@@ -62,8 +62,8 @@ const (
 	abortUnhealthy = "unhealthy"
 )
 
-// liveRunID identifies this process's live engine for session IDs
-// (contracts K4: once per live engine lifetime; Reconfigure keeps it).
+// liveRunID identifies this process's live engine for session IDs.
+// It is set once per live engine lifetime; Reconfigure keeps it.
 var (
 	liveRunID      = newRunID()
 	liveSessionSeq atomic.Uint64

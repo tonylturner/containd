@@ -68,8 +68,8 @@ func (h asduHeader) attrs(a map[string]any) {
 	a[eventfields.KeyCA] = h.ca
 }
 
-// profileError marks a B profile restriction: the standard allows it, B
-// rejects it (spec §7.2, §7.3, W6).
+// profileError marks a decoder profile restriction: the standard allows it,
+// but containd rejects it.
 func profileError(format string, args ...any) error {
 	return fmt.Errorf("profile: "+format, args...)
 }
@@ -94,7 +94,7 @@ func b2i(b bool) int {
 	return 0
 }
 
-// checkRole applies the B role restrictions (spec §7.3): the client must not
+// checkRole applies the sender-role restrictions: the client must not
 // send monitor-direction types (1..44), and the server must not originate
 // control or system commands (cause 6 activation or 8 deactivation).
 func checkRole(h asduHeader, direction string) error {
@@ -245,7 +245,7 @@ func setpointQualifier(qos uint8, obj map[string]any) {
 
 // shortFloat records R32-IEEE STD 754 as value. The standard allows NaN and
 // infinities, but JSON cannot carry them: such an object keeps its kind and
-// other attributes, omits value and sets value_invalid (contracts K8).
+// other attributes, omits value and sets value_invalid.
 func shortFloat(b []byte, obj map[string]any) {
 	f := math.Float32frombits(binary.LittleEndian.Uint32(b))
 	if math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {
@@ -260,7 +260,7 @@ func shortFloat(b []byte, obj map[string]any) {
 // bit 7 IV), hour (bits 0-4, 0..23; bit 7 SU), day of month (bits 0-4,
 // 1..31; day of week ignored), month (bits 0-3, 1..12), year (bits 0-6,
 // 0..99). Reserved bits are ignored. The century is not on the wire: year
-// is 2000 + the year field (B profile assumption), and a field of 100..127
+// is 2000 + the year field (the decoder's century assumption), and a field of 100..127
 // or any date that cannot exist is malformed. source_time is ISO 8601
 // without a zone; the profile, not the decoder, says the RTU runs UTC.
 func decodeCP56(b []byte, obj map[string]any) error {

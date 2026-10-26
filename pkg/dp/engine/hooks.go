@@ -51,7 +51,7 @@ func (h *inlineHooks) onVerdict(tok capture.Token, _ capture.Verdict, err error)
 
 // onSource handles inline source state changes. A source that goes down
 // aborts the enforce sessions; enforcement is healthy again only once the
-// source reports ready (contracts K6).
+// source reports ready.
 func (h *inlineHooks) onSource(ev capture.SourceEvent) {
 	// A queue closed by Stop (every Reconfigure) is not an error to log.
 	if ev.Err != nil && !errors.Is(ev.Err, capture.ErrQueueClosed) && h.onError != nil {
@@ -63,7 +63,7 @@ func (h *inlineHooks) onSource(ev capture.SourceEvent) {
 		return
 	}
 	// Close the envelope first: until this engine rebinds, nft drops
-	// envelope traffic instead of queueing it (contracts K8).
+	// envelope traffic instead of queueing it.
 	h.gate.own(0)
 	reason := "queue down"
 	if ev.Err != nil {

@@ -22,7 +22,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// euPolicyJSON is the spec §12.4 policy shape: dataplane and the four
+// euPolicyJSON configures the dataplane and the four
 // IEC104 rules, as literal JSON.
 const euPolicyJSON = `{
   "schema_version": "0.1.7",
@@ -55,7 +55,7 @@ const euPolicyJSON = `{
   ]}
 }`
 
-// Spec §10.1 schema bullet: literal JSON → strict decode → validate →
+// The schema pipeline is literal JSON → strict decode → validate →
 // marshal → compile → engine snapshot JSON → evaluate and preview.
 func TestIEC104SchemaPipeline(t *testing.T) {
 	var cfg config.Config
@@ -144,11 +144,11 @@ func TestIEC104SchemaPipeline(t *testing.T) {
 	// The same policy is rejected before save when the decoder is off.
 	cfg.DataPlane.DPIICSProtocols["iec104"] = false
 	if _, err := CompileSnapshot(&cfg); err == nil || !strings.Contains(err.Error(), "dpiIcsProtocols.iec104") {
-		t.Fatalf("compile with the decoder off err = %v, want E3 rejection", err)
+		t.Fatalf("compile with the decoder off err = %v, want rejection of enforce policy without an enabled IEC104 decoder", err)
 	}
 }
 
-// Both shipped RangerDanger US policies still compile (spec §6.2).
+// Both shipped RangerDanger US policies still compile.
 func TestRangerDangerUSPoliciesCompile(t *testing.T) {
 	for _, name := range []string{"substation-weak.json", "substation-improved.json"} {
 		raw, err := os.ReadFile(filepath.Join("..", "config", "testdata", "rangerdanger", name))

@@ -29,9 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Product roadmap page (Docs → Roadmap) built from the 2026-10-25 maturity
-  audit, with the audit reports kept in `docs/audits/2026-10-25/`. Secure by
-  Design now marks MFA and intrusion evidence as Partial and states the SSH
+- Secure by Design now marks MFA and intrusion evidence as Partial and states the SSH
   and session-revocation caveats.
 
 - Query retained events server-side by IEC session/APDU, flow, kind, protocol,

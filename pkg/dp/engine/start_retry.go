@@ -25,7 +25,7 @@ var errStartSuperseded = errors.New("engine: start superseded by reconfigure")
 // StartWithRetry starts the data plane. An inline (NFQUEUE) engine whose
 // queue fails to bind retries with bounded exponential backoff; while it is
 // unbound the queue-bind health fault stands, so IEC104 enforcement reports
-// unhealthy and envelope traffic fails closed in the kernel (spec E3). A
+// unhealthy and envelope traffic fails closed in the kernel. A
 // Reconfigure ends the loop: the new configuration starts its own. Other
 // capture modes start once, as before.
 func (e *Engine) StartWithRetry(ctx context.Context) error {

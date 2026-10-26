@@ -11,14 +11,14 @@ import (
 )
 
 // learnableICSEvent reports ICS events that may feed the asset inventory
-// and the learner. IEC104 events never do: B does not auto-learn or render
-// permissive IEC104 rules (spec §7.4).
+// and the learner. IEC104 events never do: containd does not auto-learn or render
+// permissive IEC104 rules.
 func learnableICSEvent(ev dpi.Event) bool {
 	return isICSEvent(ev.Proto, ev.Kind) && !strings.EqualFold(ev.Proto, eventfields.ProtoIEC104)
 }
 
 // iecIdentityKeys are the IEC104 command identity attributes that derived
-// alerts keep (spec §7.4), so an alert names its command, CA and IOA and
+// alerts keep, so an alert names its command, CA and IOA and
 // groups with its session in /flows.
 var iecIdentityKeys = []string{
 	eventfields.KeySessionID, eventfields.KeyAPDUID, eventfields.KeyDirection,

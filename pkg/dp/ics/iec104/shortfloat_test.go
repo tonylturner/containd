@@ -12,7 +12,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
 )
 
-// Non-finite short floats (contracts K8): the standard does not forbid NaN or
+// Non-finite short floats: the standard does not forbid NaN or
 // infinities in R32, so such an object keeps its kind and every other
 // attribute, omits value and sets value_invalid.
 

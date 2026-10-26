@@ -1,4 +1,4 @@
-# IEC 60870-5-104 Linux truth harness (milestone B §10.2)
+# IEC 60870-5-104 Linux truth harness
 
 Proves, on Docker Desktop's Linux VM (or any Linux Docker host), what the
 containd firewall does to real IEC 104 traffic: first-command prevention,
@@ -12,9 +12,9 @@ behaviour. The plant's own state is the evidence, never a client timeout.
 | `malformer/` | pure-Go client for split, coalesced, malformed, unsupported and same-5-tuple cases; never links lib60870 | Apache-2.0 |
 | `capture/` | regenerates the reference pcaps in `testdata/` | Apache-2.0 |
 | `testdata/` | lib60870 wire captures, Wireshark expected-decode tables, provenance | Apache-2.0 test data |
-| `preflight/` | checkpoint-1 NFQUEUE and raw-RST kernel harness (`scripts/preflight-iec104.sh`) | Apache-2.0 |
+| `preflight/` | NFQUEUE and raw-RST kernel harness (`scripts/preflight-iec104.sh`) | Apache-2.0 |
 
-## GPL boundary (spec D3)
+## GPL boundary
 
 lib60870-C is GPLv3-or-commercial, so `endpoint/iec104ep.c` is a GPLv3
 combined work. It is compiled only inside `endpoint/Dockerfile`, whose image
@@ -32,7 +32,7 @@ bash scripts/smoke-iec104.sh
 The script builds the branch firewall image (`build/Dockerfile.mgmt`) and the
 endpoint image if they are absent, brings the stack up under a unique compose
 project, routes both endpoints through the firewall, applies an L4 baseline
-and then the §12.4 EU policy, runs every §10.2 assertion, writes
+and then the scoped EU enforce policy, runs every enforcement assertion, writes
 `build/iec104-smoke/results.json`, and tears down everything it created.
 
 | Variable | Default | Use |
@@ -41,17 +41,17 @@ and then the §12.4 EU policy, runs every §10.2 assertion, writes
 | `IEC104_ENDPOINT_IMAGE` | `containd-iec104-endpoint:iec104-smoke` | lib60870 endpoint image |
 | `IEC104_PROJECT` | `iec104-smoke-<time>-<pid>` | compose project |
 | `IEC104_CC_SUBNET`, `IEC104_RTU_SUBNET` | `10.233.0`, `10.234.0` | first three octets of the two /24s, for a parallel run |
-| `IEC104_FRESHNESS_SECONDS` | `660` | telemetry freshness window (spec: > 10 minutes) |
+| `IEC104_FRESHNESS_SECONDS` | `660` | telemetry freshness window (must exceed 10 minutes) |
 | `IEC104_HOLD` | `5s` | how long a malformed-case client waits for a reset |
 | `IEC104_REUSE_PORT` | `40404` | fixed client port for the same-5-tuple case |
 | `IEC104_RESULTS_DIR` | `build/iec104-smoke` | results location |
 
 Statuses: `PASS`; `FAIL` (baseline or harness defect, independent of IEC
-enforcement); `GATE-FAIL` (needs the integrated L1-L4 engine);
+enforcement); `GATE-FAIL` (needs IEC104 enforcement);
 `NOT-IMPLEMENTED` (kept only for the freshness window when it is shortened
 below ten minutes). Exit 0 is acceptance (everything passed); 1 is a `FAIL`
 or a setup error; 3 means the baseline passed but gate assertions remain.
-Passing with skips is not acceptance (B6).
+Passing with skips is not acceptance.
 
 Two assertions use extra tooling. The stale-retransmit case (`malformer
 -scenario stale-retransmit`) opens a raw-socket TCP session (ports 40405 and
@@ -60,7 +60,7 @@ injects a later segment of the first session carrying a forbidden command to
 IOA 2003; it suppresses the container's own RST with an `iptables` OUTPUT
 rule so the raw handshake completes. The queue-bind case builds
 `test/iec104/queueholder`, which binds NFQUEUE 101 before the engine does, so
-the engine's bind fails and (per E3/K6) enforcement must keep the config,
+the engine's bind fails and enforcement must keep the config,
 fail closed and report unhealthy.
 
 ## Endpoint points and state
@@ -96,10 +96,10 @@ The cyclic task sends feeder current as spontaneous data (COT 3) every 2 s
 and busbar voltage as cyclic data (COT 1) every 10 s; `PERIODIC_MS=0`
 disables both. The control-centre client honours `IEC104_T3`.
 
-The long-lived control centre (`iec104ep cc`) behaves like a real one (B1):
+The long-lived control centre (`iec104ep cc`) behaves like a real one:
 when its session closes or is reset it waits 1 s, reconnects, sends STARTDT
 and re-runs station GI. Every policy apply resets the enforce IEC sessions
-(§6.4 envelope change, §8.3 queue restart), so the harness checks that each
+(on envelope changes or queue restarts), so the harness checks that each
 recovery (close to GI termination) fits the 5 s budget, waits for the session
 to settle after the last apply, and only then watches freshness: more than
 10 minutes with an update in every 30 s window and no session drop. Its log
@@ -107,17 +107,3 @@ lines carry `t=<epoch ms>`; the script copies it to `cc.log` in the results
 directory, next to `compose.log` and `results.json`. The script deletes only
 those two log files at start, so a caller's own console log in the same
 directory survives.
-
-## Phase 1 result (2026-10-09, before L1-L4 merge)
-
-Full run against `iec104` with only the contract commit (default 660 s
-freshness window): exit 3, 13 passed, 0 failed, 21 gate-failed, 2 not
-implemented. The baseline passes: routing through the firewall, NFQUEUE
-group 101 bound, CAP_NET_RAW, GI and command confirmations both ways, the
-allowed command actuates, no `block_flows` entry, a GI on a reused 5-tuple,
-and 365 spontaneous updates over 11 minutes on an unbroken session. Every
-enforcement assertion gate-fails because forbidden, split and coalesced
-commands reach and actuate the RTU and nothing resets a session. Not
-implemented: a stale retransmit after a new handshake (needs a raw old-ISN
-replay tool) and a queue-bind failure at start (needs a second binder on
-group 101).

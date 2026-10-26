@@ -2,7 +2,7 @@
 // Copyright 2025 containd Authors
 
 // Package iec104 decodes IEC 60870-5-104 APDUs from a TCP byte stream into
-// containd ICS events (milestone B spec §5.5 and §7; contracts K2, K4).
+// containd ICS events.
 //
 // Standards: IEC 60870-5-104 Edition 2.0 (2006) and IEC 60870-5-101
 // Edition 2.0 (2003). Clause references:
@@ -20,10 +20,10 @@
 //
 // The sub-clause numbers were taken from the editions' structure without
 // the licensed text at hand; verify them, and every rule, against the
-// licensed editions and the lib60870 captures before release (spec §7.2).
+// licensed editions and the lib60870 captures before release.
 //
-// B profile restrictions (the standard allows them; B rejects them as
-// malformed with an error that starts with "profile:"): control and system
+// Decoder profile restrictions (the standard allows these forms; containd
+// rejects them as malformed with an error that starts with "profile:"): control and system
 // types with SQ=1 or more than one object; monitor-direction types (1..44)
 // from the client; control or system types from the server with cause 6 or 8.
 // The descriptor table marks untimed monitor types that accept SQ=1.
@@ -47,7 +47,7 @@ import (
 // Port is the IEC 104 TCP port (IEC 60870-5-104 clause 5).
 const Port = 2404
 
-// maxRawHex bounds raw_hex to one maximal APDU (spec §5.5).
+// maxRawHex bounds raw_hex to one maximal APDU.
 const maxRawHex = 2 + maxAPDULength
 
 // Decoder implements dpi.StreamDecoder for IEC 60870-5-104.
@@ -196,7 +196,7 @@ func (dc dirContext) iFrameEvents(base map[string]any, asdu []byte) []dpi.Event 
 		if roleErr != nil {
 			return dc.single(eventfields.KindMalformed, base, roleErr)
 		}
-		return dc.single(eventfields.KindUnsupported, base, fmt.Errorf("type %d has no B descriptor", h.typeID))
+		return dc.single(eventfields.KindUnsupported, base, fmt.Errorf("type %d is not in the supported IEC 104 type set", h.typeID))
 	}
 	base[eventfields.KeyIsWrite] = isWrite(dc.direction, h.typeID)
 	if h.count == 0 {

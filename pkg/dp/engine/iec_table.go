@@ -22,7 +22,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
-// IEC104 session bounds (spec §8.1 starting values and §8.2).
+// IEC104 session bounds.
 const (
 	iec104Port              = 2404
 	iecMaxHeldPerSession    = 32
@@ -44,7 +44,7 @@ const (
 	iecDirClient, iecDirSrv = 0, 1
 )
 
-// iecPolicy is the IEC104 part of the rule evaluator (contracts K5).
+// iecPolicy is the IEC104 part of the rule evaluator.
 // *rules.Evaluator implements it.
 type iecPolicy interface {
 	IEC104Envelope(ctx rules.EvalContext, globalMode string) (bool, string)
@@ -69,7 +69,7 @@ type iecSession struct {
 	id         string
 	client     netip.AddrPort
 	server     netip.AddrPort
-	ctx        rules.EvalContext // opener-oriented session tuple (B8)
+	ctx        rules.EvalContext // opener-oriented session tuple
 	mode       string            // envelope mode, fixed at the SYN
 	state      iecState
 	lastSeen   time.Time
@@ -132,7 +132,7 @@ type iecTable struct {
 	newPolicy  func(*rules.Snapshot) iecPolicy
 	safeRead   func(map[string]any) bool
 	newID      func() string
-	ctDelete   func(context.Context, conntrack.DeleteRequest) error // after the resets (spec §8.2 step 4)
+	ctDelete   func(context.Context, conntrack.DeleteRequest) error // after the resets
 	globalMode string
 
 	policy     iecPolicy
@@ -227,7 +227,7 @@ func hasEnforceIEC(snap *rules.Snapshot, globalMode string) (hasIEC, enforce boo
 }
 
 // setPolicy installs the snapshot's IEC104 policy. Live sessions whose
-// envelope or mode changed are aborted (spec §6.4); sessions of an
+// envelope or mode changed are aborted; sessions of an
 // unchanged envelope continue.
 func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 	hasIEC, active := hasEnforceIEC(snap, t.globalMode)

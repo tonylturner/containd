@@ -79,7 +79,7 @@ func records(e *Engine) []string {
 	return out
 }
 
-// TestFlowPathPassesTCPSequence pins contracts K8: with the sequence number
+// TestFlowPathPassesTCPSequence verifies that with the sequence number
 // filled in, a second message on a persistent connection is parsed and a
 // retransmission is not parsed again.
 func TestFlowPathPassesTCPSequence(t *testing.T) {
@@ -165,7 +165,7 @@ func TestInvalidPacketDecision(t *testing.T) {
 func TestFlowPathRecordsEventsBeforeError(t *testing.T) {
 	e := recordEngine(t)
 	if d := e.handlePacket(recordPacket(0, capture.TCPFlagPSH, "GOODBAD!")); d.Action != capture.Accept {
-		t.Fatalf("decision = %+v, want Accept (spec §4.2)", d)
+		t.Fatalf("decision = %+v, want Accept while recording events before the stream error", d)
 	}
 	var kinds []string
 	for _, ev := range e.Events().List(10) {

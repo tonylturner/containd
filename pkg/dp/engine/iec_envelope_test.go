@@ -14,8 +14,8 @@ import (
 )
 
 // TestIECEnvelopeAgreesWithNftSteering: for the same snapshot, the engine
-// treats a session as inside an IEC104 envelope exactly when L3's nft
-// compiler steers that rule's traffic to the queue (spec §6.4, K5).
+// treats a session as inside an IEC104 envelope exactly when the nft
+// compiler steers that rule's traffic to the queue.
 func TestIECEnvelopeAgreesWithNftSteering(t *testing.T) {
 	comp := enforce.NewCompiler()
 	comp.QueueID = 101

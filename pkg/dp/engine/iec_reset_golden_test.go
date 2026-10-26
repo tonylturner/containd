@@ -12,7 +12,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
-// Golden RST targets (spec §8.2 step 2): for target X the sequence is the
+// Golden RST targets: for target X the sequence is the
 // end of the last byte forwarded to X, whichever side sent the denied APDU.
 
 var (

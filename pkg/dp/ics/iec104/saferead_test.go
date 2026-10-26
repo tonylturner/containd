@@ -10,7 +10,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
 )
 
-// The read-only set of spec §6.1 with W7, on real decoded events, in memory
+// SafeRead classifies real decoded events consistently in memory
 // and after a JSON round trip.
 func TestSafeRead(t *testing.T) {
 	gi := cat(ioa(0), []byte{20})

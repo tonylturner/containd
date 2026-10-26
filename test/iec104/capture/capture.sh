@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # These are Apache-2.0 test data: packet captures of lib60870 (and the pure-Go
 # malformer) traffic on a throwaway Docker network. The pcaps carry protocol
-# bytes only, no lib60870 code. They seed the L1 decoder and L4 engine tests;
+# bytes only, no lib60870 code. They seed the IEC104 decoder and engine tests;
 # the Go unit tests derive byte fixtures from them and never need tshark at run
 # time. The capture runs the RTU and a control-centre/command client directly
 # (no firewall) so the fixtures are clean lib60870 wire traffic.

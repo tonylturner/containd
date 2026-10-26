@@ -5,6 +5,11 @@ repo_url: ""
 docs_dir: mkdocs
 site_dir: ../site
 
+# Source-directory notes are for contributors, not rendered site pages.
+exclude_docs: |
+  /README.md
+  /assets/README.md
+
 theme:
   name: material
   custom_dir: mkdocs/overrides
@@ -45,7 +50,6 @@ extra_css:
 
 nav:
   - Home: index.md
-  - Roadmap: roadmap.md
   - Getting Started:
       - Deploy with Docker Compose: docker-compose.md
       - Customizing Lab Compose: lab-compose.md
@@ -70,7 +74,6 @@ nav:
   - Reference:
       - Config Format: config-format.md
       - API Reference: api-reference.md
-      - Audit Baseline: audit-baseline.md
   - Security:
       - Secure by Design: secure-by-design.md
       - Threat Model: threat-model.md

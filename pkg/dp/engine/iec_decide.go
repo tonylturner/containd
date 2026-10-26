@@ -30,7 +30,7 @@ type iecDecision struct {
 // enforced reports a decision that aborts the session.
 func (d iecDecision) enforced() bool { return d.decision == decisionDeny }
 
-// decideLocked judges one decoded event of session s (spec §6.5). Broadcast
+// decideLocked judges one decoded event of session s. Broadcast
 // objects, malformed, role-invalid and unsupported APDUs are denied without
 // a rule; everything else is matched against the IEC104 rules only, and no
 // match is DENY in the envelope mode. In a learn envelope, or under a
@@ -113,7 +113,7 @@ func iecBroadcast(a map[string]any) bool {
 
 // judgeLocked decides the events of newly framed APDUs. It reports whether
 // any decision is an enforced deny, the apdu_id of the first one, and the
-// decision events; every event is judged, even after a deny (spec §6.3).
+// decision events; every event is judged, even after a deny.
 func (t *iecTable) judgeLocked(s *iecSession, evs []dpi.Event, now time.Time) (denied bool, trigger string, out []events.Event) {
 	for _, ev := range evs {
 		if !strings.EqualFold(ev.Proto, iecProtocol) {
@@ -135,7 +135,7 @@ func (t *iecTable) judgeLocked(s *iecSession, evs []dpi.Event, now time.Time) (d
 }
 
 // reconnectLocked reports the first STARTDT con of a new incarnation of a
-// client/server pair after an abort (spec §8.4).
+// client/server pair after an abort.
 func (t *iecTable) reconnectLocked(s *iecSession, ev dpi.Event) bool {
 	if !s.reconnects {
 		return false
