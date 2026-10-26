@@ -324,6 +324,7 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 					writeTTY(ch, "Warning: no PTY requested, falling back to appliance CLI.\n")
 				}
 				s.repl(ctx, username, remote, reg, ch, &pr, windowCh)
+				sendExitStatus(ch, exitSuccess)
 			}
 			return
 		case "exec":
@@ -332,6 +333,8 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 			_ = req.Reply(true, nil)
 			line := strings.TrimSpace(m.Command)
 			if line == "" {
+				writeTTY(ch, "no command given\n")
+				sendExitStatus(ch, exitFailure)
 				return
 			}
 			var buf strings.Builder
@@ -361,11 +364,28 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 				writeTTY(ch, err.Error()+"\n")
 			}
 			s.writeResetResult(ctx, ch)
+			if err != nil {
+				sendExitStatus(ch, exitFailure)
+			} else {
+				sendExitStatus(ch, exitSuccess)
+			}
 			return
 		default:
 			_ = req.Reply(false, nil)
 		}
 	}
+}
+
+// Exit statuses of a session's command (RFC 4254 section 6.10).
+const (
+	exitSuccess uint32 = 0
+	exitFailure uint32 = 1
+)
+
+// sendExitStatus reports the exit status of the session's command or shell
+// before the channel closes, so clients do not report a missing status.
+func sendExitStatus(ch ssh.Channel, status uint32) {
+	_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
 }
 
 func (s *Server) isLinuxShellMode() bool {

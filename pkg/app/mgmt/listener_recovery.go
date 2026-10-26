@@ -4,8 +4,6 @@ package mgmtapp
 import (
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 
 	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
@@ -17,10 +15,9 @@ import (
 // boundManagement is the management listeners this boot serves.
 type boundManagement struct {
 	// cfg is the runtime configuration whose listener settings are bound.
-	cfg       *config.Config
-	listener  mgmtListenerConfig
-	servers   []*http.Server
-	listeners []net.Listener
+	cfg      *config.Config
+	listener mgmtListenerConfig
+	binds    mgmtBinds
 	// event is the boot fault event of a listener fallback, nil without one.
 	event *dpevents.Event
 }
@@ -34,10 +31,10 @@ type boundManagement struct {
 // A failure of the defaults themselves, or of listeners the environment
 // sets, stays fatal. With a reservation the reserved path decides (see
 // reservationSafeBootListeners).
-func bindManagement(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Config, r *mgmtpath.Reservation, listener mgmtListenerConfig, build func(mgmtListenerConfig) ([]*http.Server, []net.Listener, error)) (boundManagement, error) {
-	servers, listeners, err := build(listener)
+func bindManagement(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Config, r *mgmtpath.Reservation, listener mgmtListenerConfig, build func(mgmtListenerConfig) (mgmtBinds, error)) (boundManagement, error) {
+	binds, err := build(listener)
 	if err == nil {
-		return boundManagement{cfg: cfg, listener: listener, servers: servers, listeners: listeners}, nil
+		return boundManagement{cfg: cfg, listener: listener, binds: binds}, nil
 	}
 	if r != nil {
 		return boundManagement{}, err
@@ -49,17 +46,15 @@ func bindManagement(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Co
 	}
 	bindErr := fmt.Errorf("management listener: %w", err)
 	logger.Errorw("stored management listeners cannot be bound; serving the default listeners", "error", err)
-	if servers, listeners, ferr = build(fallbackListener); ferr != nil {
+	if binds, ferr = build(fallbackListener); ferr != nil {
 		return boundManagement{}, errors.Join(bindErr, fmt.Errorf("default management listeners: %w", ferr))
 	}
 	event, perr := persistBootFault(logger, stores, errors.Join(bootConflict(cfg, nil), bindErr), nil)
 	if perr != nil {
-		for _, ln := range listeners {
-			_ = ln.Close()
-		}
+		binds.close()
 		return boundManagement{}, perr
 	}
-	return boundManagement{cfg: fallback, listener: fallbackListener, servers: servers, listeners: listeners, event: event}, nil
+	return boundManagement{cfg: fallback, listener: fallbackListener, binds: binds, event: event}, nil
 }
 
 // sameBinds reports whether a and b bind the same sockets, so that
