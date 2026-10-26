@@ -3,6 +3,7 @@
 import type React from "react";
 
 import type { Zone } from "../../lib/api";
+import { formatEndpoint } from "../../lib/endpoint";
 
 import {
   CARDS,
@@ -211,9 +212,7 @@ export function WizardStepContent({
           <p>
             Port forward (DNAT): <strong>{ingressZone}</strong>{" "}
             {pubProto.toUpperCase()}/{serverPort} &#8594;{" "}
-            <strong>
-              {serverIp}:{serverPort}
-            </strong>
+            <strong>{formatEndpoint(serverIp, serverPort)}</strong>
           </p>
           <p>
             Firewall rule: <span className="text-emerald-400">ALLOW</span>{" "}
