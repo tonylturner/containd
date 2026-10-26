@@ -564,6 +564,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The unused top-level `export` configuration section and the unwired `pkg/dp/export` DPI event exporter. Stored and imported configurations that still contain `export` load normally; the section is ignored and dropped on the next save.
 - The unused OpenNTPD fallback; chrony is the only NTP daemon the images ship.
 - Removed the redundant documentation-directory landing page.
 - Remove the incomplete host/systemd deployment guide; Docker Compose remains
