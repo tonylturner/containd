@@ -251,11 +251,12 @@ func (l *Learner) GenerateRules() []config.Rule {
 		fcs := sortedUint8Keys(mergedFCs)
 		addrs := sortedStringKeys(p.Addresses)
 
+		// Mode stays empty: a learned rule inherits the global DPI mode, so
+		// it enforces only where enforce is configured and has an inline path.
 		ics := config.ICSPredicate{
 			Protocol:     p.Protocol,
 			FunctionCode: fcs,
 			Addresses:    addrs,
-			Mode:         "enforce",
 		}
 
 		// Set read/write classification.
