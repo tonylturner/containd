@@ -5,6 +5,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -287,7 +288,7 @@ func listConntrackHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cc, ok := engine.(ConntrackClient)
 		if !ok || cc == nil {
-			c.JSON(http.StatusOK, []conntrack.Entry{})
+			apiError(c, http.StatusServiceUnavailable, "conntrack backend unavailable")
 			return
 		}
 		limit := 200
@@ -301,6 +302,9 @@ func listConntrackHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
+		if ents == nil {
+			ents = []conntrack.Entry{}
+		}
 		c.JSON(http.StatusOK, ents)
 	}
 }
@@ -312,16 +316,25 @@ func killConntrackHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusNotImplemented, "conntrack delete not supported")
 			return
 		}
-		var req conntrack.DeleteRequest
+		var req conntrack.KillRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if err := ck.DeleteConntrack(c.Request.Context(), req); err != nil {
+		if err := req.Validate(); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		result, err := ck.DeleteConntrack(c.Request.Context(), req)
+		if err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
-		auditLog(c, audit.Record{Action: "conntrack.delete", Target: "dataplane"})
-		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+		outcome := "success"
+		if !result.RevocationInstalled || !result.ConntrackDeleted {
+			outcome = "failure"
+		}
+		auditLog(c, audit.Record{Action: "conntrack.kill", Target: fmt.Sprintf("%s [%s]:%d → [%s]:%d", req.Proto, req.Src, req.Sport, req.Dst, req.Dport), Result: outcome, Detail: fmt.Sprintf("scope=%s deleted=%d/%d revocation=%t %s %s", result.Scope, result.Deleted, result.Matched, result.RevocationInstalled, result.DeleteError, result.RevocationError)})
+		c.JSON(http.StatusOK, result)
 	}
 }

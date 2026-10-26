@@ -275,3 +275,31 @@ confirms storage only, not endpoint trust. See [security limits](secure-by-desig
 
 See [API Reference](api-reference.md) for endpoints and the OpenAPI wire contract.
 Configuration lifecycle and JSON examples are maintained on this page.
+
+## Runtime connections
+
+The Sessions page and `GET /api/v1/conntrack` show the kernel's IPv4 and IPv6
+connections, including original and reply NAT tuples. A successful empty array
+is a verified empty table; unavailable or interrupted netlink dumps return an
+error with the backend reason. The engine needs Linux conntrack support and
+`NET_ADMIN` in the traffic's network namespace. The list is capped at 5,000 rows.
+
+Admins use `POST /api/v1/conntrack/kill` with the displayed original TCP or UDP
+tuple (`proto`, `src`, `dst`, `sport`, `dport`). `scope: connection` (default)
+revokes only that exact connection in both directions; reconnecting from a fresh
+source port is allowed. `scope: client-service` ends all that client's
+connections to the original destination service and prevents reconnects for the
+interval. Neighbouring clients, services and transports remain unaffected.
+`durationSecs` is 1–3600 seconds, default 60. These are runtime operations, not
+candidate configuration changes, and require active nftables enforcement.
+
+The response reports `revocationInstalled`, `blockedUntil`, `conntrackDeleted`
+and counts/errors independently. Revocation is installed atomically before
+state deletion. Matching TCP packets receive kernel-generated resets on each
+endpoint's next packet; this is not confirmed endpoint closure. Matching UDP
+packets are dropped. A failed revocation does not delete kernel state. Inspect
+each step even on HTTP 200. ICMP and other protocols are visible but cannot be
+killed through this port-based API.
+
+Revocations are kernel runtime state. Replacing the firewall ruleset or
+restarting the appliance clears them; they are not persisted configuration.

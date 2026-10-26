@@ -65,6 +65,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
 	c.writeZoneIfaceSets(&buf, snap)
 	c.writeDynamicSets(&buf)
+	c.writeRevocations(&buf)
 	// Declared before the forward chain that jumps to it.
 	if c.SteersIEC104(snap) {
 		c.writeIEC104EnvelopeChain(&buf)
@@ -129,11 +130,13 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot) erro
 	buf.WriteString("  chain input {\n")
 	buf.WriteString("    type filter hook input priority 0;\n")
 	buf.WriteString("    policy drop;\n")
+	buf.WriteString("    jump revocations;\n")
 	buf.WriteString("    iifname \"lo\" accept;\n")
 	buf.WriteString("    ct state { established, related } accept;\n")
 	buf.WriteString("    ct state invalid drop;\n")
 	c.writeManagementInput(buf)
 	buf.WriteString("    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;\n")
+	buf.WriteString("    meta l4proto ipv6-icmp icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept;\n")
 	buf.WriteString("    tcp dport 8081 accept;\n")
 	locals := append([]rules.LocalServiceRule(nil), snap.LocalInput...)
 	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
@@ -165,6 +168,8 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
+
+	buf.WriteString("    jump revocations;\n")
 
 	// block_hosts/block_flows must fire BEFORE ct established so that
 	// retroactive blocks (added by enforceDPIEvents.ApplyVerdict when a
