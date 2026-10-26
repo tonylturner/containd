@@ -58,6 +58,34 @@ func TestReconnectKernelSamePortAfterSilentLoss(t *testing.T) {
 	}
 }
 
+// TestIECReconnectKernelSamePortAfterSilentLoss is
+// TestReconnectKernelSamePortAfterSilentLoss for an IEC 104 envelope: the
+// engine still tracks the lost connection's established session when the
+// client's SYN arrives. The SYN passes into it and opens nothing; the
+// client's RST at the station's challenge ACK closes the session; the
+// client's next SYN opens the next one, within fcReconnectBound.
+func TestIECReconnectKernelSamePortAfterSilentLoss(t *testing.T) {
+	ctx := newFirstCommandLab(t)
+	srv := startIECStation(t)
+	startIECEngine(t, ctx)
+
+	const src = "198.18.50.48"
+	fcRun(ctx, t, "ip", "-n", fcClientNS, "addr", "add", src+"/24", "dev", "fcp0")
+	c, _ := dialFrom(ctx, t, src, 0, iec104Port)
+	c.startdt()
+	port := c.localPort()
+	c.vanish()
+	next, took := dialFrom(ctx, t, src, port, iec104Port)
+	t.Logf("reconnect from %s:%d took %v", src, port, took)
+	if took > fcReconnectBound {
+		t.Fatalf("reconnect took %v, want at most %v", took, fcReconnectBound)
+	}
+	if ends := srv.ended(t, src, 1); !errors.Is(ends[0], syscall.ECONNRESET) {
+		t.Fatalf("old station connection ended with %v, want the client's reset", ends[0])
+	}
+	next.startdt()
+}
+
 // expectReset requires the connection to be reset within fcReplyWait
 // without a reply.
 func (c *fcClient) expectReset() {

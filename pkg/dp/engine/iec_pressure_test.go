@@ -49,7 +49,8 @@ func TestIECPressureHoldReleasePaths(t *testing.T) {
 				h.clock = h.clock.Add(iecPendingTimeout)
 				h.e.iec.expire()
 			case "rst":
-				h.e.handlePacket(h.pkt(true, capture.TCPFlagRST, h.cSeq, h.sSeq, nil))
+				// At the server's receive point, before the held bytes.
+				h.e.handlePacket(h.pkt(true, capture.TCPFlagRST, h.cSeq-4, h.sSeq, nil))
 			case "fin":
 				h.e.handlePacket(h.pkt(true, capture.TCPFlagFIN|capture.TCPFlagACK, h.cSeq, h.sSeq, nil))
 			case "verdict":
