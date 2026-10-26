@@ -589,6 +589,8 @@ export type ConntrackEntry = {
   mark?: string;
   assured?: boolean;
   timeoutSecs?: number;
+  /** Labels of the running TAG rules matching the original tuple; absent when none. */
+  tags?: string[];
 };
 
 export type TelemetryEvent = {
