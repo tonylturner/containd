@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 )
 
 func TestRedirectScriptReplacesOnlyItsTable(t *testing.T) {
@@ -45,14 +47,14 @@ func TestKernelRedirectScriptAppliesWithTableAbsentAndPresent(t *testing.T) {
 		out, err := exec.CommandContext(ctx, "nft", args...).CombinedOutput()
 		return string(out), err
 	}
-	if _, err := nft("list", "table", "inet", redirectTable); err == nil {
+	if _, err := nft("list", "table", "inet", enforce.DHCPRedirectTable); err == nil {
 		t.Fatal("the namespace already holds the redirect table")
 	}
 	for _, devs := range [][]string{{"lan0"}, {"lan1"}} {
 		if err := ensureRedirect(ctx, devs, true); err != nil {
 			t.Fatal(err)
 		}
-		table, err := nft("list", "table", "inet", redirectTable)
+		table, err := nft("list", "table", "inet", enforce.DHCPRedirectTable)
 		if err != nil || !strings.Contains(table, `iifname "`+devs[0]+`" udp dport 67 redirect to :1067`) || strings.Count(table, "redirect") != 1 {
 			t.Fatalf("redirect table after applying %v (%v):\n%s", devs, err, table)
 		}
@@ -62,7 +64,7 @@ func TestKernelRedirectScriptAppliesWithTableAbsentAndPresent(t *testing.T) {
 		if err := ensureRedirect(ctx, nil, false); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := nft("list", "table", "inet", redirectTable); err == nil {
+		if _, err := nft("list", "table", "inet", enforce.DHCPRedirectTable); err == nil {
 			t.Fatal("disabling kept the redirect table")
 		}
 	}

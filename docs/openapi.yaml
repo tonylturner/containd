@@ -821,7 +821,9 @@ components:
           description: >-
             nftables table name (inet family). The engine owns inet <enforceTable> for temporary blocks and
             connection revocations and inet <enforceTable>_policy for the firewall policy. Empty selects
-            containd; containd_dhcp is reserved for the DHCP redirect table.
+            containd; containd_dhcp is reserved for the DHCP redirect table. An nft keyword (for example
+            table, inet, ip, accept or drop) is rejected because nft cannot address it as a table name, even
+            quoted; keywords are lowercase, so Table is accepted.
         enforcement: {type: boolean}
         nflogGroup: {type: integer}
         nfqueueGroup: {type: integer}
