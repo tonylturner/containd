@@ -14,8 +14,8 @@
 # HTTPS:   https://localhost:8443
 # SSH CLI: ssh -p 2222 containd@localhost
 # Default credentials: containd / containd. Change them before exposing services.
-# Web/API enforces password change; SSH does not enforce password change or MFA.
-# Provision SSH keys and disable password auth for non-lab use.
+# Outside lab mode, web, API and SSH all enforce the password change and MFA.
+# Lab mode keeps direct containd/containd login. Prefer SSH keys outside labs.
 #
 # This starter topology gives containd eight Docker-managed interfaces:
 #   WAN  -> 192.168.240.2/24
