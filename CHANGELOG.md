@@ -335,6 +335,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Publish Internal Service wizard checks the internal server address on the server step and shows the error under the field. A port forward's destination must be IPv4, so other text no longer passes the step only to fail at Stage.
+- Adding a port forward on the NAT page refuses a fractional port (it took `1.5` as port 1) and a destination that is not an IPv4 address, instead of failing on save.
+- IP address and CIDR fields refuse IPv4 octets with leading zeros (`192.0.2.05`), which the server rejects.
+- The Alerts page shows a loading placeholder until the first alert list arrives, instead of the "No alerts yet" empty state.
 - The Alerts page hides the earlier alert list while loading fails, as Flows, Templates and Sessions do, instead of showing it beside the error.
 - The Publish Internal Service wizard checks the port (1-65535) on the server step and shows the error under the port field, instead of accepting any value until Stage.
 - The topology status chip no longer reads ALL NOMINAL while firewall enforcement is degraded or unavailable. It shows the firewall enforcement state from health and, unless enforcing, why: a failed ruleset apply, a degraded schedule planner or health's reason.
