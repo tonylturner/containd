@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api, type TelemetryEvent } from "../../lib/api";
+import { formatEndpoint } from "../../lib/endpoint";
 import { Shell } from "../../components/Shell";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState } from "../../components/EmptyState";
@@ -183,8 +184,8 @@ export default function AlertsPage() {
                         className="table-row-hover transition-ui border-t cursor-pointer">
                         <td className="px-4 py-2.5 font-medium text-(--text) max-w-[200px] truncate" title={msg}>{msg}</td>
                         <td className="px-4 py-2.5"><StatusBadge variant={severityVariant(sev)} dot>{sev}</StatusBadge></td>
-                        <td className="px-4 py-2.5 text-xs text-(--text) font-mono">{ev.srcIp}:{ev.srcPort}</td>
-                        <td className="px-4 py-2.5 text-xs text-(--text) font-mono">{ev.dstIp}:{ev.dstPort}</td>
+                        <td className="px-4 py-2.5 text-xs text-(--text) font-mono">{formatEndpoint(ev.srcIp, ev.srcPort)}</td>
+                        <td className="px-4 py-2.5 text-xs text-(--text) font-mono">{formatEndpoint(ev.dstIp, ev.dstPort)}</td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-xs text-(--text-muted)">{new Date(ev.timestamp).toLocaleString()}</td>
                       </tr>
                     );
@@ -292,8 +293,8 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
 
         {/* Network */}
         <DetailSection label="Network">
-          <DetailRow label="Source" value={`${event.srcIp}:${event.srcPort}`} mono />
-          <DetailRow label="Destination" value={`${event.dstIp}:${event.dstPort}`} mono />
+          <DetailRow label="Source" value={formatEndpoint(event.srcIp, event.srcPort)} mono />
+          <DetailRow label="Destination" value={formatEndpoint(event.dstIp, event.dstPort)} mono />
           {event.transport && <DetailRow label="Transport" value={event.transport.toUpperCase()} />}
           {event.flowId && <DetailRow label="Flow ID" value={event.flowId} mono />}
         </DetailSection>

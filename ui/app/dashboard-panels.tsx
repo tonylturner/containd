@@ -9,6 +9,7 @@ import type {
 } from "../lib/api";
 
 import { Skeleton } from "../components/Skeleton";
+import { formatEndpoint } from "../lib/endpoint";
 import { formatBytes } from "../lib/utils";
 
 export type ServiceInfo = {
@@ -250,7 +251,7 @@ function eventMessage(event: TelemetryEvent): string {
   }
   const parts = [event.kind];
   if (event.proto) parts.push(event.proto);
-  if (event.dstIp) parts.push(`-> ${event.dstIp}:${event.dstPort ?? ""}`);
+  if (event.dstIp) parts.push(`-> ${formatEndpoint(event.dstIp, event.dstPort)}`);
   return parts.join(" ");
 }
 
