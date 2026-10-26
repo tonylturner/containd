@@ -15,7 +15,7 @@ func TestManagementUnboundInvariant(t *testing.T) {
 	cfg.Interfaces[0].Device = "disabled-device"
 	off := false
 	cfg.Interfaces[0].Access = config.InterfaceAccess{Mgmt: &off, HTTP: &off, HTTPS: &off, SSH: &off}
-	locals := compileMgmtLocalInput(cfg)
+	locals := ManagementLocalInput(cfg)
 	if len(locals) == 0 {
 		t.Fatal("no recovery listeners")
 	}
@@ -42,7 +42,7 @@ func TestManagementUnboundInvariant(t *testing.T) {
 	for i := range cfg.Interfaces {
 		cfg.Interfaces[i].Access = cfg.Interfaces[0].Access
 	}
-	if got := compileMgmtLocalInput(cfg); len(got) != 0 {
+	if got := ManagementLocalInput(cfg); len(got) != 0 {
 		t.Fatalf("disabled access became recovery: %+v", got)
 	}
 	if len(UnboundManagementPorts(cfg, []string{"eth0"})) != 0 {
@@ -53,7 +53,7 @@ func TestManagementUnboundInvariant(t *testing.T) {
 func TestManagementCompilesOnlyBoundDevices(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Interfaces[4].Device = "eth4"
-	for _, rule := range compileMgmtLocalInput(cfg) {
+	for _, rule := range ManagementLocalInput(cfg) {
 		if len(rule.Ifaces) != 1 || rule.Ifaces[0] != "eth4" {
 			t.Fatalf("not bound-only: %+v", rule)
 		}
@@ -68,7 +68,7 @@ func TestManagementRecoveryExcludesDisabledKernelName(t *testing.T) {
 	off := false
 	cfg.Interfaces[0].Name = "eth0"
 	cfg.Interfaces[0].Access = config.InterfaceAccess{Mgmt: &off, HTTP: &off, HTTPS: &off, SSH: &off}
-	for _, rule := range compileMgmtLocalInput(cfg) {
+	for _, rule := range ManagementLocalInput(cfg) {
 		if len(rule.DeniedIfaces) != 1 || rule.DeniedIfaces[0] != "eth0" {
 			t.Fatalf("disabled legacy kernel binding not excluded: %+v", rule)
 		}
