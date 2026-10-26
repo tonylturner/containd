@@ -14,7 +14,7 @@ import (
 func TestUnsupportedPlatformHelpers(t *testing.T) {
 	t.Parallel()
 
-	entries, err := List(10)
+	entries, err := List(context.Background(), 10)
 	if err == nil || !strings.Contains(err.Error(), "only available on Linux") {
 		t.Fatalf("List error = %v, want unsupported-platform error", err)
 	}

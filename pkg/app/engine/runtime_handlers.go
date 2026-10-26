@@ -301,7 +301,7 @@ func conntrackHandler(dp *engine.Engine) http.HandlerFunc {
 					limit = v
 				}
 			}
-			entries, err := conntrack.List(limit)
+			entries, err := conntrack.List(r.Context(), limit)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return

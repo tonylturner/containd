@@ -250,7 +250,7 @@ func TestKernelConntrackKill(t *testing.T) {
 			defer cancel()
 			// Conntrack outlives namespaces. Remove only this harness's stale
 			// tuples before reusing its deliberately tiny SNAT port pool.
-			old, err := conntrack.List(0)
+			old, err := conntrack.List(ctx, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -387,7 +387,7 @@ func TestKernelConntrackKill(t *testing.T) {
 			if got := p.command(t, "echo otherclient"); got != "ok" {
 				t.Fatal(got)
 			}
-			entries, err := conntrack.List(0)
+			entries, err := conntrack.List(ctx, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -408,6 +408,10 @@ func TestKernelConntrackKill(t *testing.T) {
 			}
 			if !found {
 				t.Fatalf("connection absent in dump: %+v", entries)
+			}
+			// A positive limit ends the dump early with exactly that many entries.
+			if limited, err := conntrack.List(ctx, 1); err != nil || len(limited) != 1 || len(entries) < 2 {
+				t.Fatalf("limited dump: %d of %d entries: %v", len(limited), len(entries), err)
 			}
 			result, err := conntrack.Kill(ctx, conntrack.KillRequest{DeleteRequest: conntrack.DeleteRequest{Proto: "tcp", Src: client, Dst: dest, Sport: 41001, Dport: 25000}, Scope: tc.scope, DurationSecs: 2}, enforce.NewNftUpdater("containd").RevokeConnections)
 			if err != nil || !result.ConntrackDeleted || !result.RevocationInstalled {
@@ -446,7 +450,7 @@ func TestKernelConntrackKill(t *testing.T) {
 				// All three SNAT slots were occupied before kill. The fresh
 				// source port must reuse the deleted flow's translated port,
 				// without inheriting its revocation.
-				entries, err := conntrack.List(0)
+				entries, err := conntrack.List(ctx, 0)
 				if err != nil {
 					t.Fatal(err)
 				}

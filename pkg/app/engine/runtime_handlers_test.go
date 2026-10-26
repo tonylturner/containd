@@ -3,6 +3,7 @@ package engineapp
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,5 +18,16 @@ func TestConntrackKillRejectsInvalidInput(t *testing.T) {
 		if rec.Code != http.StatusBadRequest || strings.Contains(rec.Body.String(), "deleted") {
 			t.Fatalf("%d %s", rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestConntrackListErrorIsUnavailable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/internal/conntrack?limit=10", nil)
+	conntrackHandler(nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable || strings.Contains(rec.Body.String(), "entries") {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 }

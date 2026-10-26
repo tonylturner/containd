@@ -14,23 +14,36 @@ import (
 )
 
 // List reads both IP families and NAT tuples from the kernel over ctnetlink.
-// Permission errors, missing support and incomplete dumps are errors, not emptiness.
-func List(limit int) ([]Entry, error) {
-	messages, err := exchange(context.Background(), 0x101, []byte{0, 0, 0, 0}, true)
-	if err != nil {
+// It decodes records as they arrive and stops the dump once it holds limit
+// entries; limit <= 0 reads the whole table. Permission errors, missing
+// support, malformed records, cancellation and incomplete dumps are errors,
+// not emptiness.
+func List(ctx context.Context, limit int) ([]Entry, error) {
+	sink := newEntrySink(limit)
+	if err := exchange(ctx, 0x101, []byte{0, 0, 0, 0}, true, sink.add); err != nil {
 		return nil, err
 	}
-	out := []Entry{}
-	for _, message := range messages {
-		e, err := parseEntry(message)
-		if err != nil {
-			return nil, err
-		}
-		if limit <= 0 || len(out) < limit {
-			out = append(out, e)
-		}
+	return sink.entries, nil
+}
+
+// entrySink keeps at most limit decoded entries (all when limit <= 0).
+type entrySink struct {
+	limit   int
+	entries []Entry
+}
+
+func newEntrySink(limit int) *entrySink {
+	return &entrySink{limit: limit, entries: []Entry{}}
+}
+
+// add decodes one ctnetlink record and reports whether the sink is full.
+func (s *entrySink) add(record []byte) (bool, error) {
+	e, err := parseEntry(record)
+	if err != nil {
+		return false, err
 	}
-	return out, nil
+	s.entries = append(s.entries, e)
+	return s.limit > 0 && len(s.entries) >= s.limit, nil
 }
 
 func parseEntry(data []byte) (Entry, error) {
