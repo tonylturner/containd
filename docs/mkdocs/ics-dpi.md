@@ -148,11 +148,20 @@ than IEC 104 are:
 | `protocol` | `modbus`, `dnp3`, `cip`, `s7comm`, `mms`, `bacnet`, or `opcua` |
 | `functionCode` | Array of numeric function/service codes, 0–255; evaluated from `function_code` |
 | `unitId` | Optional Modbus unit ID, 0–255; evaluated from `unit_id` |
-| `addresses` | Register/address strings or ranges; evaluated from `address` |
+| `addresses` | Array of address entries, each one value or an inclusive `low-high` range (see below); evaluated from `address` |
 | `objectClasses` | CIP object-class IDs, 0–65535; evaluated from `object_class`; CIP only |
 | `readOnly`, `writeOnly` | Read/write class from an explicitly present `is_write`; not both true |
 | `direction` | `request` or `response`; omit for both |
 | `mode` | `learn` or `enforce`; omit to inherit global mode |
+
+Each `addresses` entry is one value (`256`, `0x0100`) or an inclusive range
+`low-high` (`100-511`, `0x0100-0x01FF`). Values are unsigned decimal or hex with
+a `0x` prefix, may mix within a range, and may have spaces around them. A range
+needs low <= high. Modbus addresses are 0–65535 (`0xFFFF`); the other protocols
+accept 0–4294967295 (`0xFFFFFFFF`). Validation refuses any other entry, such as
+`0x01G0`, `-5` or `0x200-0x100`, and names the rule and the entry. A stored
+configuration with such an entry starts in management recovery until a valid
+configuration is committed.
 
 Only metadata actually emitted by the decoder can satisfy these conditions.
 There are no firewall selectors for DNP3 station addresses/object headers, CIP

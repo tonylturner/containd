@@ -551,7 +551,7 @@ components:
           - {type: object, additionalProperties: true}
           nullable: true
         unitId: {type: integer, minimum: 0, maximum: 255, description: Modbus unit id}
-        addresses: {type: array, items: {type: string}, description: Register/address values or ranges (not iec104)}
+        addresses: {type: array, items: {type: string}, description: "Address entries (not iec104), each one value or an inclusive low-high range, decimal or 0x hex, low <= high; Modbus 0-65535, other protocols 0-4294967295"}
         objectClasses: {type: array, items: {type: integer}, description: CIP object classes (cip only)}
         readOnly:
           type: boolean

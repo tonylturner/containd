@@ -6,7 +6,6 @@ package rules
 import (
 	"net"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -43,7 +42,7 @@ type ICSContext struct {
 
 // compiledAddr holds a pre-parsed ICS address or address range.
 type compiledAddr struct {
-	low, high int64
+	low, high uint32
 }
 
 // compiledPort holds a pre-parsed protocol port or port range.
@@ -151,31 +150,22 @@ func compileEntry(entry Entry) compiledEntry {
 }
 
 // addrSet is an ICS address predicate's parsed specifications. listed
-// records that the predicate names any, parseable or not: one whose
-// specifications all fail to parse matches no address.
+// records that the predicate names any. An entry ParseICSAddressSpec
+// refuses, which validation rejects, leaves ranges empty: the predicate
+// then matches no address rather than only its parseable entries.
 type addrSet struct {
 	listed bool
 	ranges []compiledAddr
 }
 
-// compileAddrs parses ICS address specifications: a single value ("0x0100",
-// "256") or a dash-separated range ("0x0100-0x01FF", "100-511"), hex (0x
-// prefix) or decimal, mixed freely. Specifications that parse as neither
-// are skipped.
 func compileAddrs(specs []string) addrSet {
 	set := addrSet{listed: len(specs) > 0}
 	for _, spec := range specs {
-		if parts := strings.SplitN(spec, "-", 2); len(parts) == 2 {
-			low, okLow := parseAddr(parts[0])
-			high, okHigh := parseAddr(parts[1])
-			if okLow && okHigh {
-				set.ranges = append(set.ranges, compiledAddr{low: low, high: high})
-				continue
-			}
+		low, high, err := ParseICSAddressSpec(spec)
+		if err != nil {
+			return addrSet{listed: true}
 		}
-		if val, ok := parseAddr(spec); ok {
-			set.ranges = append(set.ranges, compiledAddr{low: val, high: val})
-		}
+		set.ranges = append(set.ranges, compiledAddr{low: low, high: high})
 	}
 	return set
 }
@@ -304,8 +294,8 @@ func matchICSAddresses(addresses addrSet, ctx EvalContext) bool {
 	if !addresses.listed {
 		return true
 	}
-	ctxVal, ok := parseAddr(ctx.ICS.Address)
-	if !ok {
+	ctxVal, err := parseICSAddress(ctx.ICS.Address)
+	if err != nil {
 		return false
 	}
 	for _, a := range addresses.ranges {
@@ -364,18 +354,4 @@ func icsPredicateEmpty(p ICSPredicate) bool {
 		len(p.Classes) == 0 &&
 		len(p.CA) == 0 &&
 		len(p.IOA) == 0
-}
-
-// parseAddr parses a numeric address string supporting both decimal and hex (0x prefix).
-func parseAddr(s string) (int64, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, false
-	}
-	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
-		v, err := strconv.ParseInt(s[2:], 16, 64)
-		return v, err == nil
-	}
-	v, err := strconv.ParseInt(s, 10, 64)
-	return v, err == nil
 }
