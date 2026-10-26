@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Release SBOMs are signed CycloneDX attestations bound to each image digest,
+  and promotion verifies them. The management SBOM includes the UI's production
+  npm packages. A manual release run can no longer move `:latest` to an older
+  version.
 - Bind the unauthenticated engine API to `127.0.0.1:8081` by default in combined
   mode and starter/dev Compose; explicit `CONTAIND_ENGINE_ADDR` overrides still
   apply, and split engine mode retains `:8081`. Management derives its local
@@ -48,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- UI builds always regenerate the embedded documentation and fail if MkDocs
+  cannot produce it; `CONTAIND_SKIP_DOCS=1` is only for builds that supply the
+  docs separately. UI builds use Node.js 24.
 - Commit, commit-confirmed and rollback now fail on every firewall ruleset or
   dataplane configuration apply error, including nft permission failures. The
   warning-only nft failure path is removed. Auxiliary infrastructure warnings
