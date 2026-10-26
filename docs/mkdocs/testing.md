@@ -89,6 +89,19 @@ the packages in `docs/requirements-mkdocs.txt` and put `mkdocs` on `PATH`; the
 build fails without it. `CONTAIND_SKIP_DOCS=1` skips the docs only for builds
 that supply them separately, such as `build/Dockerfile.mgmt`.
 
+## Quickstart Smoke
+
+`bash scripts/smoke-quickstart.sh` is the CI check of the public Compose
+quickstart. It starts `deploy/docker-compose.yml`, waits for health, rotates
+the bootstrap password and checks that interface assignment, routing and the
+monitoring APIs answer. Set `CONTAIND_IMAGE` to the image under test, for
+example `containd/containd:dev`; Compose uses its default image otherwise.
+`COMPOSE_PROJECT_NAME` defaults to `containd-quickstart`, and a random
+`CONTAIND_JWT_SECRET` is generated when unset. The stack publishes the
+quickstart ports (8080, 8443 and 2222 by default); move them with the
+`CONTAIND_PUBLISH_*_PORT` variables. The script removes the project and its
+volumes on exit.
+
 ## Forwarding Smoke
 
 `bash scripts/smoke-forward.sh`, also run by `bash scripts/smoketest`, brings
