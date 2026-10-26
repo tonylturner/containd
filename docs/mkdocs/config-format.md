@@ -222,7 +222,7 @@ Notes:
   - `RATE_LIMIT` needs `rateLimit`: `{"packetsPerSecond": 100, "burst": 20}`, with `packetsPerSecond` 1–1000000 and `burst` 0–1000000 packets (0 means `packetsPerSecond`). Other actions reject `rateLimit`.
   - `TAG` needs `tag`, matching `^[a-z0-9][a-z0-9_.-]{0,31}$`, and takes no `schedule`; a config uses at most 32 distinct labels. Other actions reject `tag`.
   - `RESET`, `RATE_LIMIT` and `TAG` reject an `ics.protocol`; `RESET` is not a valid `firewall.defaultAction`.
-- Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
+- Firewall rule objects, and their `rateLimit` objects, reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
 - `firewall.nat.enabled` enables source NAT (masquerade) from `sourceZones` out
   `egressZone` (defaults: `lan`/`dmz` out `wan`). Only zones with bound interfaces
   generate matches; custom zone names are supported.
