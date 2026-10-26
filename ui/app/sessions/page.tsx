@@ -7,6 +7,7 @@ import type { ConntrackKillResult, ConntrackKillRequest } from "../../lib/api-co
 import { Shell } from "../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
+import { TagList } from "../../components/TagList";
 
 type Filter = {
   q: string;
@@ -216,13 +217,7 @@ export default function SessionsPage() {
                     <td className="px-4 py-3 text-(--text)">{e.dport || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.mark || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">
-                      {e.tags?.length ? (
-                        <div className="flex flex-wrap gap-1">
-                          {e.tags.map((t) => (
-                            <span key={t} className="rounded-xs bg-[rgba(6,182,212,0.15)] px-1.5 py-0.5 font-mono text-[11px] text-(--cyan)">{t}</span>
-                          ))}
-                        </div>
-                      ) : "—"}
+                      <TagList tags={e.tags} />
                     </td>
                     <td className="px-4 py-3 text-(--text)">{e.assured ? "yes" : "no"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.timeoutSecs ? `${e.timeoutSecs}s` : "—"}</td>

@@ -563,6 +563,8 @@ export type FlowSummary = {
   avBlocked?: boolean;
   /** IEC 104 session incarnation; set when the group is one IEC session. */
   session_id?: string;
+  /** Sorted TAG labels the flow's events carry; absent when none. */
+  tags?: string[];
 };
 
 /** Event kinds of IEC 104 enforcement evidence. */
