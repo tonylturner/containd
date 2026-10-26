@@ -36,6 +36,7 @@ override that moves them and point the scripts at it:
 | `COMPOSE_FILE` | colon-separated compose files, base first (as in `docker compose`) |
 | `SMOKE_WAN_NET`, `SMOKE_LAN_NET` | first three octets of the moved subnets |
 | `BASE`, `ENGINE` | management and engine URLs for the moved host ports |
+| `TOKEN` | management bearer token (default `devtoken`) |
 | `SMOKE_SKIP_UP=1` | use a stack you brought up yourself (to read random ports); without it, `smoke-dpi.sh` recreates the containers, because a reused stack keeps the earlier run's dynamic blocks |
 
 The override replaces the engine image, networks, addresses, ports and the
@@ -45,12 +46,34 @@ The override replaces the engine image, networks, addresses, ports and the
 and `networks.<name>.ipam: !override` with the new subnet. Replace the
 **entire** ports list (the example publishes only HTTP and engine) and set a
 non-empty `CONTAIND_JWT_SECRET` in the override's engine environment, for
-example a value generated with `openssl rand -hex 32`. Use a separate data
-directory for the `/data` bind. Bring the stack
+example a value generated with `openssl rand -hex 32`. With that secret set,
+lab mode accepts only bearer tokens signed with it, so set `TOKEN` to an
+HS256 JWT signed with the secret and carrying a future `exp`. Use a separate
+data directory for the `/data` bind. Bring the stack
 up with `docker compose -p "$SMOKE_PROJECT" -f deploy/docker-compose.smoke.yml
 -f <override> up -d`, read the ports with `docker compose ... port engine
 18080` and `port engine 8081`, run the script with `SMOKE_SKIP_UP=1`, then
 `down --volumes` the project you created.
+
+## Forwarding fixtures
+
+`forward/echo.py NAME PORT...` serves HTTP on each port and answers every
+request with one line, for example
+`server=wan_server port=8080 client=172.30.0.2`, naming the listener, the
+accepting port and the client address it observed. `wan_server` listens on
+8080 and 8082, `lan_target` on 80 and 22, so every flow the forwarding smoke
+expects to be denied has a live listener behind it. `forward/probe.py IP PORT
+TIMEOUT` makes one TCP connection and prints its outcome: `open <reply
+line>`, `timeout`, `refused` or `unreachable`. It exits 2 when it cannot
+probe at all, so a broken probe is never read as a drop. The compose file
+mounts the directory at `/opt/forward` in `lan_client`, `lan_target` and
+`wan_server`.
+
+`scripts/smoke-forward.sh` also reads `SMOKE_PROBE_TIMEOUT` (seconds a
+probe waits for a connection, default 3), `SMOKE_MUTATION` (`permissive` or
+`no-masquerade`, used by `scripts/smoke-forward-mutations.sh`) and
+`SMOKE_RESULT_FILE` (a file that receives the IDs of failed checks, one per
+line).
 
 ## ICS fixtures and the NFQUEUE variant
 
