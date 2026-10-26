@@ -92,6 +92,9 @@ client's SYN passes (no payload, acknowledging the SYN): the client fails at
 once, as with a station that does not listen, and its next SYN opens a new
 session. Any other packet before the SYN-ACK, except the client's SYN, is
 dropped.
+A segment carrying both SYN and RST is never a handshake segment: it
+opens, establishes and closes no session, and is dropped within any
+session and in an enforce envelope.
 
 With NFQUEUE, a generic ICS connection inside an enforce rule's scope fails
 closed when its stream cannot be inspected: a conflicting overlap, a

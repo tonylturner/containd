@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- In IEC 104 envelopes a SYN-ACK that also carries RST is dropped and no longer establishes the session, including the next session after a reset one.
+- In IEC 104 envelopes a segment carrying both SYN and RST no longer opens, establishes or closes a session: every session and every enforce envelope drops it, and learn mode no longer starts a session at it.
 - The web console and SSH CLI sessions call a management listener on 127.0.0.1 only through a socket management itself bound. A failed loopback or HTTPS bind, or a reserved-endpoint fallback after a failed wildcard bind, no longer sends bearer tokens to another process holding that port. With no bound listener reachable on 127.0.0.1 the console reports it and SSH stays off with a listener fault.
 - In IEC 104 envelopes a RST without payload closes a session only at the
   sequence number its receiver expects next. A forged or stale RST no longer
@@ -333,6 +333,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Firewall rule hits logged through NFLOG for ICMP and ICMPv6 packets now carry their source and destination addresses and transport `icmp` or `icmpv6`, without ports.
 - SSH is recorded as a bound management listener only after its socket binds. A failed SSH bind leaves SSH off with a listener fault instead of reporting it enabled; HTTP and HTTPS are unaffected.
 - HTTP redirects to HTTPS only when the HTTPS listener bound.
 - SSH exec requests report exit status 0 on success and 1 on a failed or empty command, and the appliance shell reports 0 when it closes, so OpenSSH clients no longer exit 255.
