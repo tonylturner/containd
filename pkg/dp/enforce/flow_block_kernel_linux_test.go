@@ -17,11 +17,11 @@ import (
 
 // Run only inside a disposable network namespace: the test replaces containd's nft tables.
 func TestKernelFlowBlockProtocolKeys(t *testing.T) {
-	if os.Getenv("CONTAIND_KERNEL_TESTS") != "1" {
-		t.Skip("requires CONTAIND_KERNEL_TESTS=1 in an isolated Linux container with NET_ADMIN and nft")
+	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" || os.Geteuid() != 0 {
+		t.Skip("requires CONTAIND_NETNS_KERNEL_TEST=1 in a disposable privileged Linux container with nft")
 	}
-	if _, err := exec.LookPath("nft"); err != nil || os.Geteuid() != 0 {
-		t.Fatalf("kernel test needs root and nft: %v", err)
+	if _, err := exec.LookPath("nft"); err != nil {
+		t.Fatalf("kernel test needs nft: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
