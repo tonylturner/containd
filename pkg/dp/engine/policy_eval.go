@@ -52,15 +52,11 @@ func (e *Engine) isExcluded(state *flow.State) bool {
 				return true
 			}
 		case "domain":
-			// Domain exclusions are matched against flow metadata if available.
-			// In practice, DNS responses populate flow state with resolved names.
-			// For now, domain exclusions match the SNI or query_name if the flow
-			// has been tagged by TLS/DNS decoders — this will be enhanced when
-			// TLS interception is added.
+			// The pre-selection observer has already pinned the flow decision.
 			continue
 		}
 	}
-	return false
+	return e.domainExcluded(state)
 }
 
 // enforceDPIEvents evaluates decoded ICS events against the firewall rules

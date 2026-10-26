@@ -95,6 +95,24 @@ func (d *TLSDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 
 func (d *TLSDecoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) { return nil, nil }
 
+// ClientHelloSNI returns the visible SNI in a complete packet-local ClientHello.
+// Unlike telemetry's best-effort parser, exclusions must not use partial records.
+// It works on every TCP port and does not reassemble fragmented handshakes.
+func ClientHelloSNI(p []byte) string {
+	if len(p) < 9 || p[0] != 0x16 || p[1] != 3 {
+		return ""
+	}
+	n := int(binary.BigEndian.Uint16(p[3:5]))
+	if n < 4 || n > len(p)-5 || p[5] != 1 {
+		return ""
+	}
+	hs := int(p[6])<<16 | int(p[7])<<8 | int(p[8])
+	if hs > n-4 {
+		return ""
+	}
+	return parseClientHello(p[9 : 9+hs]).SNI
+}
+
 type clientHelloMeta struct {
 	SNI          string
 	ALPN         string
@@ -138,7 +156,7 @@ func parseClientHello(ch []byte) clientHelloMeta {
 	extLen := int(binary.BigEndian.Uint16(ch[off : off+2]))
 	off += 2
 	if off+extLen > len(ch) {
-		extLen = len(ch) - off
+		return clientHelloMeta{}
 	}
 	exts := ch[off : off+extLen]
 	eoff := 0
@@ -151,7 +169,7 @@ func parseClientHello(ch []byte) clientHelloMeta {
 		l := int(binary.BigEndian.Uint16(exts[eoff+2 : eoff+4]))
 		eoff += 4
 		if eoff+l > len(exts) {
-			break
+			return clientHelloMeta{}
 		}
 		body := exts[eoff : eoff+l]
 		eoff += l
@@ -167,6 +185,9 @@ func parseClientHello(ch []byte) clientHelloMeta {
 			}
 		}
 	}
+	if eoff != len(exts) {
+		return clientHelloMeta{}
+	}
 	meta.JA3 = buildJA3(clientVersion, meta.CipherSuites, meta.Extensions)
 	if meta.JA3 != "" {
 		sum := md5.Sum([]byte(meta.JA3)) // nosemgrep: go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5 -- JA3 fingerprints are standardized as MD5 over the canonical JA3 string.
@@ -180,16 +201,16 @@ func parseSNI(body []byte) string {
 		return ""
 	}
 	listLen := int(binary.BigEndian.Uint16(body[0:2]))
-	if 2+listLen > len(body) {
-		listLen = len(body) - 2
+	if 2+listLen != len(body) {
+		return ""
 	}
 	off := 2
 	for off+3 <= 2+listLen {
 		nameType := body[off]
 		nameLen := int(binary.BigEndian.Uint16(body[off+1 : off+3]))
 		off += 3
-		if off+nameLen > len(body) {
-			break
+		if off+nameLen > 2+listLen {
+			return ""
 		}
 		if nameType == 0 {
 			return string(bytes.ToLower(body[off : off+nameLen]))

@@ -61,6 +61,7 @@ commit-confirmed and rollback.
 
 - Zone-based nftables firewalling and SNAT/DNAT: [policy model](docs/mkdocs/policy-model.md).
 - ICS protocol inspection, including IEC 60870-5-104: [ICS DPI](docs/mkdocs/ics-dpi.md).
+- DNS- and TLS SNI-based [DPI domain exclusions](docs/mkdocs/ics-dpi.md#dpi-exclusions).
 - Candidate/running configuration with commit-confirmed and rollback: [config format](docs/mkdocs/config-format.md).
 - Web, SSH and REST management with embedded network services: [services](docs/mkdocs/services.md).
 

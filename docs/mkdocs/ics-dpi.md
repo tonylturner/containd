@@ -52,6 +52,61 @@ replacement request:
 An omitted protocol toggle leaves its decoder enabled. `dpiProtocols` controls
 the IT decoders separately. Enabling a decoder does not create a policy rule.
 
+## DPI exclusions
+
+`dataplane.dpiExclusions` accepts `ip`, `cidr`, and `domain` entries. Each
+entry has a `type` and `value`; commit the candidate to activate changes.
+IP and CIDR exclusions match either endpoint.
+
+Domain values are exact DNS names such as `updates.example.com`, or suffix
+wildcards such as `*.example.com`. Matching ignores case and one trailing dot.
+A wildcard matches subdomains, **not the apex**: add `example.com` separately.
+Use ASCII DNS labels (punycode for internationalized names); URLs, ports,
+embedded wildcards, spaces and IP literals are not domain values.
+
+The engine decides a connection once, at its **first client payload-bearing
+packet**:
+
+- If that packet contains a complete TLS ClientHello with visible SNI, only
+  that SNI decides. A nonmatching SNI keeps inspection enabled even when DNS
+  associated the destination IP with an excluded name.
+- Otherwise, a live observed DNS association for the destination IP decides.
+  An A or AAAA answer can associate the queried name and CNAME targets within
+  that response. The minimum TTL along each CNAME path is clamped to 30 seconds
+  through one hour.
+
+Handshake-only packets use normal inspection selection. Later DNS answers,
+later SNI, or DNS expiry do not reverse a cached decision; the decision applies
+to both directions. Packets inspected before the decision remain inspected.
+Decisions live with the engine's tracked flows; association-cache eviction
+does not reverse them. The association cache holds at most 16,384 IP/name pairs
+and evicts the least recently used pair at capacity. Reconfiguration clears
+domain associations and flow decisions.
+
+**Shared IP warning:** without a deciding SNI, every new connection to an
+associated IP can skip DPI, including non-TLS traffic for other names on that IP.
+TLS SNI provides precision only when present in the deciding packet. Observation
+is packet-local: split TLS ClientHellos or TCP DNS messages are not reassembled
+for exclusion decisions. A split ClientHello therefore uses DNS at its first
+payload and cannot be corrected by later SNI.
+
+The engine observes ordinary DNS responses from port 53 and TLS ClientHellos
+on any TCP port whenever a domain exclusion is configured, even if DNS/TLS
+event decoders are disabled. Encrypted DNS (DoH/DoT) does not expose DNS answers;
+ECH does not reveal the encrypted server name. These mechanisms do not provide
+associations for hidden names. This is passive, unauthenticated DNS observation,
+not a hostname-authentication boundary.
+
+Domain exclusions **never bypass IEC 104 inspection or its enforcement
+envelopes**. Existing IP/CIDR overlap validation remains in force for IEC 104
+enforce rules.
+
+The existing DPI protocol statistics expose flow-hit totals in `eventCount`
+under `dpi_exclusion_sni` and `dpi_exclusion_dns`, and capacity-eviction totals
+under `dpi_domain_cache_eviction`. These are reason counters, not decoded
+protocols or packet counts. Debug logging names the matched exclusion value
+and selection reason.
+
 ## Protocol decoders
 
 | ICS protocol | Usual port | Decoder package |

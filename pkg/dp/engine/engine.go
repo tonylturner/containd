@@ -77,6 +77,7 @@ type Engine struct {
 	hooks                 *inlineHooks
 	iec                   *iecTable
 	gate                  *envelopeGate // outlives Reconfigure, as the kernel ruleset does
+	domains               *domainExclusions
 }
 
 // RulesetStatus captures the last compiled/applied ruleset and any error.
@@ -167,6 +168,7 @@ func New(cfg Config) (*Engine, error) {
 		dpiEnabled:            cfg.DPIEnabled,
 		dpiMode:               cfg.DPIMode,
 		dpiExclusions:         cfg.DPIExclusions,
+		domains:               newDomainExclusions(cfg.DPIExclusions),
 		nflogGroup:            cfg.NFLogGroup,
 		nfqueueGroup:          cfg.NFQueueGroup,
 		flows:                 make(map[string]*flow.State),
@@ -273,6 +275,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.dpiEnabled = fresh.dpiEnabled
 	e.dpiMode = fresh.dpiMode
 	e.dpiExclusions = fresh.dpiExclusions
+	e.domains = fresh.domains
 	e.nflogGroup = fresh.nflogGroup
 	e.nfqueueGroup = fresh.nfqueueGroup
 	e.onError = fresh.onError
