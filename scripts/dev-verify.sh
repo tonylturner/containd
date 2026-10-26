@@ -73,18 +73,23 @@ run_step() {
 
 shellcheck_targets=(
     scripts/bootstrap-starter.sh
+    scripts/complexity-report.sh
     scripts/containd
     scripts/containd-connect
     scripts/coverage-report.sh
     scripts/dev-verify.sh
     scripts/perf-baseline.sh
+    scripts/preflight-iec104-helpers.sh
     scripts/preflight-iec104.sh
     scripts/quickstart.sh
     scripts/semgrep-verify.sh
     scripts/smoke-dpi.sh
     scripts/smoke-forward-mutations.sh
     scripts/smoke-forward.sh
+    scripts/smoke-iec104-observe.sh
     scripts/smoke-iec104.sh
+    scripts/smoke-mgmt-partial-nics.sh
+    scripts/smoke-mgmt-reservation.sh
     scripts/smoketest
     test/iec104/capture/capture.sh
 )
