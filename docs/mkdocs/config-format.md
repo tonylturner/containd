@@ -206,15 +206,34 @@ Notes:
   - `routes` are installed via netlink (Linux only; IPv4 only). Route `table: 0`
     selects main; explicit tables use IDs 1–252.
   - `rules` are installed via netlink as basic policy-based routing (Linux only;
-    src/dst CIDR selection, table IDs 1–252). Priority 0 selects automatic priority.
+    src/dst CIDR selection, table IDs 1–252). Explicit priorities use 1–65535;
+    priority 0 selects automatic priority starting at 10000. The reserved
+    management path can reject overlapping rules at priority 1.
+  - Every running-config apply converges entries marked with protocol 98,
+    including deletion and empty intent. Identical foreign entries satisfy intent
+    without taking ownership. A foreign route with the same destination, table,
+    TOS and metric but a different next hop is journaled, replaced, and restored
+    when that route leaves intent. Unsupported collisions fail with route details.
+    See [routing ownership and upgrades](dataplane.md#routing-ownership-and-upgrades).
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
 - Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
-- `firewall.nat` enables simple source NAT (masquerade) for traffic forwarded from `sourceZones` out `egressZone`.
+- `firewall.nat.enabled` enables source NAT (masquerade) from `sourceZones` out
+  `egressZone` (defaults: `lan`/`dmz` out `wan`). Only zones with bound interfaces
+  generate matches; custom zone names are supported.
+- Each enabled `firewall.nat.portForwards` entry translates traffic arriving in
+  its `ingressZone` to `destIp`/`destPort`; disabled entries generate no rules.
+  The ingress zone must have bound interfaces. When source NAT is enabled,
+  forwarded DNAT traffic is masqueraded only for that entry's translated target,
+  using the route-selected egress interface rather than an assumed `lan` zone.
+  The destination sees the firewall's egress address, ensuring a return path.
+  Port-forward enablement is independent of `firewall.nat.enabled`; disabling
+  source NAT leaves DNAT enabled and requires a routed return path.
 - `protocols.port` accepts single ports or ranges (`"443"` or `"1000-2000"`).
 - Syslog forwarders require address and port; proto `udp` or `tcp` (defaults to udp if empty).
 
 Limitations:
-- Routing/PBR supports additive updates plus an explicit replace/reconcile mode; IPv6 routing is not supported.
+- Routing/PBR supports IPv4 only. Unmarked rules installed before protocol-based
+  ownership require manual upgrade cleanup; see the routing ownership guide.
 - NAT supports postrouting masquerade and DNAT/port-forwarding.
 
 ## Configuration lifecycle

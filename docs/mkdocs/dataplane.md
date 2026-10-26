@@ -45,3 +45,50 @@ inspection envelope. Snapshot swaps are atomic.
 For enablement, privileges, capture modes, and failure limits, see
 [Enforcement](dataplane-enforcement.md). For staging and commit semantics, see
 [Policy Model](policy-model.md).
+
+## Routing ownership and upgrades
+
+Every routing apply, including commit, rollback, restart replay, periodic
+reconciliation, and explicit reconcile, converges the IPv4 routes and policy
+rules marked with protocol **98**. Reserve that protocol for containd in its
+network namespace. Priorities are ordering, not ownership: rules at any accepted
+priority are removed when absent from running config, while foreign rules even
+at priorities 10000–19999 remain. Empty routing intent clears all marked entries.
+Unchanged entries are retained without deleting and re-adding them.
+
+An existing foreign route with the same table, destination, TOS, metric and
+next hop satisfies intent without being adopted; an explicitly configured
+output interface must also match. Identical foreign policy rules likewise
+satisfy intent without being adopted or duplicated. Removing such intent leaves
+those entries unchanged. This includes a Docker-created default route that
+already matches the outbound quickstart configuration.
+
+If a simple foreign unicast route has the same table, destination, TOS and metric
+but a different next hop, containd saves its complete payload before replacing
+it with a protocol-98 route. Removing that route from intent restores the original
+foreign route, including its protocol, scope, preferred source and route metrics.
+Unsupported or ambiguous collisions (for example multipath or blackhole routes)
+fail with route details rather than replacing entries that cannot be represented
+by static-route intent. Unrelated Docker and reserved management entries remain
+untouched. A failed commit uses the existing running-config recovery path.
+
+The displaced-route journal is `/data/routing-displaced.json` in the engine data
+directory. `CONTAIND_ROUTING_STATE_PATH` overrides its location. Keep that path
+writable and persistent; failure to save the journal prevents replacement. The
+journal is scoped to the current kernel boot and network namespace, so it
+survives an engine process restart in that namespace but is not replayed into a
+new container namespace. Run only one engine per namespace, and use a separate
+journal path for each namespace. Do not delete the journal while routes are
+displaced. If an external actor installs a conflicting route before restoration,
+reconcile reports a conflict and retains the journal instead of overwriting it.
+
+Earlier versions already marked static routes with protocol 98, so those routes
+converge automatically on upgrade. Earlier policy rules have no reliable
+ownership marker. They are deliberately **not** deleted by priority range,
+including during explicit reconcile: doing so could remove another application's
+rules. Before the first upgraded apply, inspect `ip -4 -details rule show` in the
+appliance namespace against the old running configuration and remove only the
+individually verified old containd rules (with their exact priority, table and
+source/destination selectors). Do not flush the 10000–19999 range. Restarting the
+container with a fresh network namespace also discards legacy rules; preserve
+Docker and management networking through the normal deployment configuration.

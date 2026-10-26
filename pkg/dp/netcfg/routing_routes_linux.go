@@ -21,51 +21,51 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func addRoute(r config.StaticRoute, gwByName map[string]config.Gateway) error {
+func resolveRoute(r config.StaticRoute, gwByName map[string]config.Gateway) (kernelRoute, error) {
 	ipnet, prefixLen, err := parseRouteDestination(r.Dst)
 	if err != nil {
-		return err
+		return kernelRoute{}, err
+	}
+	if ipnet.IP.To4() == nil {
+		return kernelRoute{}, fmt.Errorf("route dst must be IPv4: %q", r.Dst)
 	}
 	gw4, ifaceHint, err := resolveRouteGateway(r.Gateway, gwByName)
 	if err != nil {
-		return err
+		return kernelRoute{}, err
 	}
-	if strings.TrimSpace(r.Iface) == "" && ifaceHint != "" {
+	if strings.TrimSpace(r.Iface) == "" {
 		r.Iface = ifaceHint
 	}
 	ifIndex := routeInterfaceIndex(r.Iface)
+	if strings.TrimSpace(r.Iface) != "" && ifIndex == 0 {
+		return kernelRoute{}, fmt.Errorf("route interface not found: %q", r.Iface)
+	}
+	if r.Table < 0 || r.Table > 252 || r.Metric < 0 {
+		return kernelRoute{}, fmt.Errorf("invalid route table or metric")
+	}
+	table := uint8(unix.RT_TABLE_MAIN)
+	if r.Table != 0 {
+		table = uint8(r.Table)
+	}
+	return kernelRoute{dst: ipnet.IP.To4(), dstLen: prefixLen, gateway: gw4, ifIndex: ifIndex, table: uint32(table), metric: uint32(r.Metric), proto: routeProtoContaind}, nil
+}
+
+func putRoute(r kernelRoute, replace bool) error {
 	fd, err := openRouteNetlinkSocket()
 	if err != nil {
 		return err
 	}
 	defer unix.Close(fd)
-
 	seq := atomic.AddUint32(&nlSeq, 1)
-	table := uint8(unix.RT_TABLE_MAIN)
-	if r.Table != 0 {
-		table = uint8(r.Table)
+	ipnet := &net.IPNet{IP: r.dst}
+	b := buildAddRouteRequest(seq, ipnet, r.dstLen, uint8(r.table), r.ifIndex, r.gateway, int(r.metric))
+	if replace {
+		(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Flags = unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_REPLACE
 	}
-	b := buildAddRouteRequest(seq, ipnet, prefixLen, table, ifIndex, gw4, r.Metric)
 	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return err
 	}
-	if err := readNetlinkAck(fd, seq); err != nil {
-		if isSysctlWriteBlocked(err) {
-			exists, existsErr := routeExists(kernelRoute{
-				dst:     ipnet.IP.To4(),
-				dstLen:  prefixLen,
-				gateway: gw4,
-				ifIndex: ifIndex,
-				table:   table,
-				metric:  uint32(r.Metric),
-			})
-			if existsErr == nil && exists {
-				return nil
-			}
-		}
-		return err
-	}
-	return nil
+	return readRoutingAck(fd, seq)
 }
 
 func parseRouteDestination(dst string) (*net.IPNet, int, error) {
@@ -131,7 +131,7 @@ func buildAddRouteRequest(seq uint32, ipnet *net.IPNet, prefixLen int, table uin
 	var req bytes.Buffer
 	hdr := unix.NlMsghdr{
 		Type:  unix.RTM_NEWROUTE,
-		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_REPLACE,
+		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_EXCL,
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
@@ -166,153 +166,26 @@ func buildAddRouteRequest(seq uint32, ipnet *net.IPNet, prefixLen int, table uin
 	return b
 }
 
-func routeExists(want kernelRoute) (bool, error) {
-	fd, err := openRouteNetlinkSocket()
-	if err != nil {
-		return false, err
-	}
-	defer unix.Close(fd)
-
-	seq := atomic.AddUint32(&nlSeq, 1)
-	b := buildRouteDumpRequest(seq)
-	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return false, err
-	}
-
-	buf := make([]byte, 1<<16)
-	for {
-		msgs, err := recvRouteMessages(context.Background(), fd, buf)
-		if err != nil {
-			return false, err
-		}
-		done, found, err := routeExistsInMessages(msgs, seq, want)
-		if err != nil {
-			return false, err
-		}
-		if found || done {
-			return found, nil
-		}
-	}
-}
-
-func buildRouteDumpRequest(seq uint32) []byte {
-	var req bytes.Buffer
-	hdr := unix.NlMsghdr{
-		Type:  unix.RTM_GETROUTE,
-		Flags: unix.NLM_F_REQUEST | unix.NLM_F_DUMP,
-		Seq:   seq,
-		Pid:   uint32(unix.Getpid()),
-	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
-	rtm := unix.RtMsg{Family: unix.AF_INET}
-	_ = binary.Write(&req, binary.LittleEndian, rtm)
-	b := req.Bytes()
-	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
-	return b
-}
-
-func routeExistsInMessages(msgs []syscall.NetlinkMessage, seq uint32, want kernelRoute) (bool, bool, error) {
-	for _, m := range msgs {
-		if m.Header.Seq != seq {
-			continue
-		}
-		switch m.Header.Type {
-		case unix.NLMSG_DONE:
-			return true, false, nil
-		case unix.NLMSG_ERROR:
-			if len(m.Data) < 4 {
-				return false, false, errors.New("netlink error")
-			}
-			code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
-			if code == 0 {
-				continue
-			}
-			return false, false, unix.Errno(-code)
-		case unix.RTM_NEWROUTE:
-			got, ok := decodeKernelRoute(m.Data)
-			if ok && routesEqual(got, want) {
-				return false, true, nil
-			}
-		}
-	}
-	return false, false, nil
-}
-
-func decodeKernelRoute(data []byte) (kernelRoute, bool) {
-	if len(data) < unix.SizeofRtMsg {
-		return kernelRoute{}, false
-	}
-	rm := (*unix.RtMsg)(unsafe.Pointer(&data[0]))
-	if rm.Family != unix.AF_INET {
-		return kernelRoute{}, false
-	}
-	got := kernelRoute{
-		dstLen: int(rm.Dst_len),
-		table:  rm.Table,
-	}
-	for _, a := range parseNetlinkAttrs(data[unix.SizeofRtMsg:]) {
-		switch a.Type {
-		case unix.RTA_DST:
-			got.dst = net.IP(append([]byte(nil), a.Value...)).To4()
-		case unix.RTA_GATEWAY:
-			got.gateway = net.IP(append([]byte(nil), a.Value...)).To4()
-		case unix.RTA_OIF:
-			if len(a.Value) >= 4 {
-				got.ifIndex = int(binary.LittleEndian.Uint32(a.Value[:4]))
-			}
-		case unix.RTA_PRIORITY:
-			if len(a.Value) >= 4 {
-				got.metric = binary.LittleEndian.Uint32(a.Value[:4])
-			}
-		}
-	}
-	if got.dst == nil && got.dstLen == 0 {
-		got.dst = net.IPv4zero
-	}
-	return got, true
-}
-
-func routesEqual(got, want kernelRoute) bool {
-	if got.dstLen != want.dstLen || got.table != want.table {
-		return false
-	}
-	if want.dstLen == 0 {
-		if got.dst == nil || !got.dst.Equal(net.IPv4zero) {
-			return false
-		}
-	} else if got.dst == nil || want.dst == nil || !got.dst.Equal(want.dst) {
-		return false
-	}
-	if want.gateway != nil && (got.gateway == nil || !got.gateway.Equal(want.gateway)) {
-		return false
-	}
-	if want.ifIndex != 0 && got.ifIndex != want.ifIndex {
-		return false
-	}
-	if want.metric != 0 && got.metric != want.metric {
-		return false
-	}
-	return true
-}
-
 type kernelRoute struct {
 	dst     net.IP
 	dstLen  int
 	gateway net.IP
 	ifIndex int
-	table   uint8
+	table   uint32
 	metric  uint32
 	proto   uint8
+	tos     uint8
+	raw     []byte
 }
 
-func deleteManagedRoutes(ctx context.Context) error {
+func kernelRoutes(ctx context.Context) ([]kernelRoute, error) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer unix.Close(fd)
 	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return err
+		return nil, err
 	}
 
 	seq := atomic.AddUint32(&nlSeq, 1)
@@ -329,17 +202,13 @@ func deleteManagedRoutes(ctx context.Context) error {
 	b := req.Bytes()
 	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
 	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return err
+		return nil, err
 	}
 
-	managed, err := listManagedRoutes(ctx, fd, seq)
-	if err != nil {
-		return err
-	}
-	return deleteKernelRoutes(ctx, managed)
+	return listKernelRoutes(ctx, fd, seq)
 }
 
-func listManagedRoutes(ctx context.Context, fd int, seq uint32) ([]kernelRoute, error) {
+func listKernelRoutes(ctx context.Context, fd int, seq uint32) ([]kernelRoute, error) {
 	var managed []kernelRoute
 	buf := make([]byte, 1<<16)
 	for {
@@ -347,7 +216,7 @@ func listManagedRoutes(ctx context.Context, fd int, seq uint32) ([]kernelRoute, 
 		if err != nil {
 			return nil, err
 		}
-		done, routes, err := extractManagedRoutes(msgs, seq)
+		done, routes, err := extractKernelRoutes(msgs, seq)
 		if err != nil {
 			return nil, err
 		}
@@ -371,11 +240,14 @@ func recvRouteMessages(ctx context.Context, fd int, buf []byte) ([]syscall.Netli
 	return syscall.ParseNetlinkMessage(buf[:n])
 }
 
-func extractManagedRoutes(msgs []syscall.NetlinkMessage, seq uint32) (bool, []kernelRoute, error) {
+func extractKernelRoutes(msgs []syscall.NetlinkMessage, seq uint32) (bool, []kernelRoute, error) {
 	var managed []kernelRoute
 	for _, m := range msgs {
 		if m.Header.Seq != seq {
 			continue
+		}
+		if err := routeDumpError(m); err != nil {
+			return false, nil, err
 		}
 		switch m.Header.Type {
 		case unix.NLMSG_DONE:
@@ -390,7 +262,7 @@ func extractManagedRoutes(msgs []syscall.NetlinkMessage, seq uint32) (bool, []ke
 			}
 			return false, nil, unix.Errno(-code)
 		case unix.RTM_NEWROUTE:
-			if kr, ok := decodeManagedRoute(m.Data); ok {
+			if kr, ok := decodeKernelRoute(m.Data); ok {
 				managed = append(managed, kr)
 			}
 		}
@@ -398,17 +270,19 @@ func extractManagedRoutes(msgs []syscall.NetlinkMessage, seq uint32) (bool, []ke
 	return false, managed, nil
 }
 
-func decodeManagedRoute(data []byte) (kernelRoute, bool) {
+func decodeKernelRoute(data []byte) (kernelRoute, bool) {
 	if len(data) < unix.SizeofRtMsg {
 		return kernelRoute{}, false
 	}
 	rm := (*unix.RtMsg)(unsafe.Pointer(&data[0]))
-	if rm.Family != unix.AF_INET || rm.Protocol != routeProtoContaind {
+	if rm.Family != unix.AF_INET {
 		return kernelRoute{}, false
 	}
 	kr := kernelRoute{
 		dstLen: int(rm.Dst_len),
-		table:  rm.Table,
+		table:  uint32(rm.Table),
+		tos:    rm.Tos,
+		raw:    append([]byte(nil), data...),
 		proto:  rm.Protocol,
 	}
 	for _, a := range parseNetlinkAttrs(data[unix.SizeofRtMsg:]) {
@@ -420,6 +294,10 @@ func decodeManagedRoute(data []byte) (kernelRoute, bool) {
 		case unix.RTA_OIF:
 			if len(a.Value) >= 4 {
 				kr.ifIndex = int(binary.LittleEndian.Uint32(a.Value[:4]))
+			}
+		case unix.RTA_TABLE:
+			if len(a.Value) >= 4 {
+				kr.table = binary.LittleEndian.Uint32(a.Value[:4])
 			}
 		case unix.RTA_PRIORITY:
 			if len(a.Value) >= 4 {
@@ -473,7 +351,7 @@ func delRoute(r kernelRoute) error {
 	rtm := unix.RtMsg{
 		Family:   unix.AF_INET,
 		Dst_len:  uint8(r.dstLen),
-		Table:    r.table,
+		Table:    uint8(r.table),
 		Protocol: routeProtoContaind,
 		Scope:    unix.RT_SCOPE_UNIVERSE,
 		Type:     unix.RTN_UNICAST,

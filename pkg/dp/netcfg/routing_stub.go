@@ -11,10 +11,9 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-func applyRouting(ctx context.Context, routing config.RoutingConfig, opts ApplyRoutingOptions) error {
+func applyRouting(ctx context.Context, routing config.RoutingConfig) error {
 	_ = ctx
 	_ = routing
-	_ = opts
 	// No-op on non-Linux platforms.
 	return nil
 }
