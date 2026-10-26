@@ -51,8 +51,9 @@ func resolveLocalInput(snap *rules.Snapshot) ([]rules.LocalServiceRule, error) {
 }
 
 // managementExemptions returns the rules that let management traffic pass
-// the revocation chain: requests to the reserved management listener and to
-// each management listener on the interfaces it serves, and their replies.
+// the revocation chain: requests to the reserved management listener, to
+// the engine API path and to each management listener on the interfaces it
+// serves, and their replies.
 // They accept only within the dynamic table, so the policy table still
 // decides the traffic; a revocation can never refuse management access
 // from the management network.
@@ -60,6 +61,10 @@ func (c *Compiler) managementExemptions(locals []rules.LocalServiceRule) (input,
 	if r := c.ManagementReservation; r != nil {
 		input = append(input, fmt.Sprintf("iifname %q ip saddr { %s } ip daddr %s tcp dport %d accept", r.Device, reservationSources(r), r.Local.Addr(), r.Port))
 		output = append(output, fmt.Sprintf("oifname %q ip saddr %s ip daddr { %s } tcp sport %d accept", r.Device, r.Local.Addr(), reservationSources(r), r.Port))
+	}
+	if p := c.EngineAPI; p != nil {
+		input = append(input, p.match()+" accept")
+		output = append(output, p.replyMatch()+" accept")
 	}
 	for _, lr := range locals {
 		// Only management listeners carry RecoverUnbound.

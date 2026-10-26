@@ -42,6 +42,7 @@ type captureRunner interface {
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
 	managementReservation *mgmtpath.Reservation
+	engineAPI             *enforce.EngineAPIPath
 	capture               captureRunner
 	runCapture            captureRunner
 	runCancel             context.CancelFunc
@@ -92,10 +93,12 @@ type RulesetStatus struct {
 
 type EnforceConfig struct {
 	ManagementReservation *mgmtpath.Reservation
-	Enabled               bool
-	TableName             string
-	Applier               enforce.Applier
-	Updater               enforce.Updater
+	// EngineAPI is the process's non-loopback engine API path, if any.
+	EngineAPI *enforce.EngineAPIPath
+	Enabled   bool
+	TableName string
+	Applier   enforce.Applier
+	Updater   enforce.Updater
 }
 
 type Config struct {
@@ -165,6 +168,7 @@ func New(cfg Config) (*Engine, error) {
 	}
 	e := &Engine{
 		managementReservation: cfg.Enforce.ManagementReservation,
+		engineAPI:             cfg.Enforce.EngineAPI,
 		capture:               capManager,
 		onError:               cfg.OnError,
 		inspectAll:            cfg.InspectAll,
@@ -196,6 +200,7 @@ func New(cfg Config) (*Engine, error) {
 		comp := enforce.NewCompilerWithSettings(enforce.CompilerSettings{
 			TableName: cfg.Enforce.TableName, NFLogGroup: cfg.NFLogGroup, NFQueueGroup: cfg.NFQueueGroup,
 		}, e.managementReservation)
+		comp.EngineAPI = e.engineAPI
 		e.compiler = comp
 		if cfg.Enforce.Applier != nil {
 			e.applier = cfg.Enforce.Applier
@@ -274,6 +279,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.compiler = fresh.compiler
 	if e.compiler != nil {
 		e.compiler.ManagementReservation = e.managementReservation
+		e.compiler.EngineAPI = e.engineAPI
 	}
 	e.applier = fresh.applier
 	e.updater = fresh.updater

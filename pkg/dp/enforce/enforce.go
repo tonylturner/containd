@@ -23,7 +23,9 @@ import (
 // This is a minimal Phase 1 skeleton.
 type Compiler struct {
 	ManagementReservation *mgmtpath.Reservation
-	TableName             string
+	// EngineAPI is the non-loopback path to the engine API, or nil for none.
+	EngineAPI *EngineAPIPath
+	TableName string
 	// QueueID, when non-zero, causes DPI-eligible rules (those with an
 	// ICS predicate) to emit "queue num <QueueID>" instead of accept/drop,
 	// steering matched traffic through NFQUEUE for selective DPI.
@@ -133,7 +135,7 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot, loca
 	c.writeManagementInput(buf)
 	buf.WriteString("    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;\n")
 	buf.WriteString("    meta l4proto ipv6-icmp icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept;\n")
-	buf.WriteString("    tcp dport 8081 accept;\n")
+	c.writeEngineAPIInput(buf)
 	for _, lr := range locals {
 		line, err := compileLocalInputRule(lr, snap.ZoneIfaces)
 		if err != nil {

@@ -134,9 +134,19 @@ while True:
 // probe connects from the client namespace to addr:port and requires the
 // server to report source address seen.
 func (l *netnsLab) probe(addr string, port int, seen string) error {
-	out, err := exec.CommandContext(l.ctx, "ip", "netns", "exec", l.client, "python3", "-c", fmt.Sprintf(`import socket
+	return l.probeFrom(l.client, addr, port, seen)
+}
+
+// probeFrom is probe from namespace ns; "" is this namespace.
+func (l *netnsLab) probeFrom(ns, addr string, port int, seen string) error {
+	var args []string
+	if ns != "" {
+		args = []string{"ip", "netns", "exec", ns}
+	}
+	args = append(args, "python3", "-c", fmt.Sprintf(`import socket
 s=socket.socket(); s.settimeout(1); s.connect((%q,%d)); assert s.recv(64)==%q.encode()
-`, addr, port, seen)).CombinedOutput()
+`, addr, port, seen))
+	out, err := exec.CommandContext(l.ctx, args[0], args[1:]...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, out)
 	}
