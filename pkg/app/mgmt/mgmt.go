@@ -16,6 +16,7 @@ import (
 
 	engineapi "github.com/tonylturner/containd/api/engine"
 	httpapi "github.com/tonylturner/containd/api/http"
+	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
@@ -64,7 +65,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	if err := opts.Reservation.ValidateEngineBind(common.EnvTrimmed("CONTAIND_ENGINE_ADDR", ":8081")); err != nil {
+	if err := opts.Reservation.ValidateEngineBind(engineapp.ListenAddr(opts.Combined)); err != nil {
 		return err
 	}
 	if err := validateReservedEnvironment(opts.Reservation); err != nil {

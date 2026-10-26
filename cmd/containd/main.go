@@ -273,7 +273,9 @@ func runAll(ctx context.Context, reservation *mgmtpath.Reservation) error {
 	if reservation != nil {
 		ready = make(chan struct{})
 	}
-	go func() { errCh <- engineapp.Run(ctx, engineapp.Options{Reservation: reservation, Ready: ready}) }()
+	go func() {
+		errCh <- engineapp.Run(ctx, engineapp.Options{Combined: true, Reservation: reservation, Ready: ready})
+	}()
 	if ready != nil {
 		select {
 		case <-ready:

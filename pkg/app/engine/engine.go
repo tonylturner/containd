@@ -30,6 +30,7 @@ import (
 type Options struct {
 	Reservation       *mgmtpath.Reservation
 	Ready             chan<- struct{}
+	Combined          bool
 	Addr              string
 	CaptureInterfaces []string
 	EnforceEnabled    *bool
@@ -77,7 +78,7 @@ func Run(ctx context.Context, opts Options) error {
 	defer cancel()
 	addr := opts.Addr
 	if addr == "" {
-		addr = common.Env("CONTAIND_ENGINE_ADDR", ":8081")
+		addr = ListenAddr(opts.Combined)
 	}
 	if err := opts.Reservation.ValidateEngineBind(addr); err != nil {
 		return err

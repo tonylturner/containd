@@ -17,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	httpapi "github.com/tonylturner/containd/api/http"
+	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
@@ -28,10 +29,7 @@ import (
 func resolveEngineURL(logger *zap.SugaredLogger, opts Options) string {
 	engineURL := common.EnvTrimmed("CONTAIND_ENGINE_URL", "")
 	if engineURL == "" && (opts.Combined || opts.Reservation != nil) {
-		engineAddr := common.EnvTrimmed("CONTAIND_ENGINE_ADDR", "")
-		if engineAddr == "" {
-			engineAddr = ":8081"
-		}
+		engineAddr := engineapp.ListenAddr(opts.Combined)
 		if derived, ok := localEngineURL(engineAddr); ok {
 			engineURL = derived
 			logger.Infof("CONTAIND_ENGINE_URL not set; using local engine URL %q for combined mode", engineURL)
