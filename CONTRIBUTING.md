@@ -17,7 +17,7 @@ using [SECURITY.md](SECURITY.md).
 Prerequisites:
 
 - Go 1.26.10+ (see `go.mod` for the exact version).
-- Node.js 20+ and npm.
+- Node.js 24+ and npm.
 - Docker with modern Docker Compose for appliance builds and smoke tests.
 - OpenSSL for the JWT secret-generation command below.
 - Python 3.12+ and the pinned MkDocs dependencies for docs **and UI source builds**
