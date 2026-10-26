@@ -4331,8 +4331,10 @@ paths:
       description: >-
         Validates every PEM block as a CA certificate and atomically replaces the
         bundle under /data. The running trustedCAFile setting selects its path;
-        the default is /data/tls/trusted_ca.pem. This operation stores the bundle
-        only; outbound client trust is not reconfigured.
+        the default is /data/tls/trusted_ca.pem. The stored content and its
+        revision are then sent to the engine, whose ICAP-over-TLS and FreshClam
+        clients trust the system roots plus this bundle. Every config apply
+        sends the bundle again.
       tags: [System]
       requestBody:
         required: true
@@ -4341,12 +4343,21 @@ paths:
             schema: {$ref: '#/components/schemas/SetTrustedCARequest'}
       responses:
         '200':
-          description: Bundle stored or cleared
+          description: Bundle stored or cleared and applied by the engine
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/StatusResponse'}
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+                  revision: {type: string, description: 'sha256:<hex> of the stored bundle, or none when cleared'}
         '400':
           description: Invalid JSON, empty or invalid CA bundle, conflicting clear and PEM, or path outside /data
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Bundle stored, but the engine is unavailable or did not apply it
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

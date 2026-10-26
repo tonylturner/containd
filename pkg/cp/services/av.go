@@ -93,6 +93,7 @@ type AVManager struct {
 	defsGen    uint64
 	clamd      clamdProcess
 	fresh      freshclamState
+	trust      avTrust
 	scans      meter
 	scanErrs   meter
 	detections int
@@ -239,7 +240,7 @@ func (m *AVManager) probeICAP(ctx context.Context, cfg config.AVConfig) error {
 }
 
 func (m *AVManager) icapClient(cfg config.AVConfig) *ICAPClient {
-	return &ICAPClient{Timeout: avTimeout(cfg)}
+	return &ICAPClient{Timeout: avTimeout(cfg), RootCAs: m.trustPool()}
 }
 
 // Current returns the applied configuration.
@@ -281,9 +282,11 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	out["freshclam_last"] = formatMaybe(m.fresh.last)
 	out["freshclam_error"] = m.fresh.err
 	out["freshclam_running"] = m.fresh.running
+	out["freshclam_runs"] = m.fresh.runs
 	out["last_render"] = formatMaybe(m.lastRender)
 	out["last_error"] = m.lastError
 	out["last_test"] = formatMaybe(m.lastTest)
+	out["trust_revision"] = trustRevision(m.trust.bundle)
 	m.mu.Unlock()
 
 	ready, version, readyErr := m.readiness(ctx, cfg)

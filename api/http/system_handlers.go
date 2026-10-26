@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -17,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/common/trust"
+	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -154,12 +156,32 @@ type setTrustedCARequest struct {
 	Clear bool   `json:"clear"`
 }
 
-func setTrustedCAHandler(store config.Store) gin.HandlerFunc {
-	return trustedCAUploadHandler(store, "/data")
+func setTrustedCAHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+	return trustedCAUploadHandler(store, engine, "/data")
+}
+
+// trustedCABundlePath is management's storage path for the additional CA bundle.
+func trustedCABundlePath(cfg *config.Config) string {
+	return firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, trust.DefaultBundlePath)
+}
+
+// pushTrustedCA sends the stored bundle's content and revision to the engine.
+// The engine never reads management's file.
+func pushTrustedCA(ctx context.Context, cfg *config.Config, engine EngineClient) error {
+	if engine == nil {
+		return errors.New("engine unavailable")
+	}
+	b, err := trust.LoadBundle(trustedCABundlePath(cfg))
+	if err != nil {
+		return err
+	}
+	return engine.ConfigureTrust(ctx, b)
 }
 
 // trustedCAUploadHandler keeps the storage boundary explicit and testable.
-func trustedCAUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
+// A stored bundle is pushed to the engine at once; failing to apply it there
+// is reported, and the next config apply retries it.
+func trustedCAUploadHandler(store config.Store, engine EngineClient, dataDir string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
 			apiError(c, http.StatusServiceUnavailable, "config store unavailable")
@@ -175,30 +197,39 @@ func trustedCAUploadHandler(store config.Store, dataDir string) gin.HandlerFunc 
 			apiError(c, http.StatusBadRequest, "clear and pem are mutually exclusive")
 			return
 		}
-		var data []byte
-		if !req.Clear {
-			if _, err := trust.Certificates([]byte(pemText)); err != nil {
-				apiErrorDetail(c, http.StatusBadRequest, "invalid PEM CA bundle", err.Error())
-				return
-			}
-			data = []byte(pemText + "\n")
+		if !req.Clear && pemText == "" {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid PEM CA bundle", "CA bundle is empty; use clear to remove additional trust")
+			return
+		}
+		bundle, err := trust.NewBundle([]byte(pemText))
+		if err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid PEM CA bundle", err.Error())
+			return
 		}
 
+		// Serialize with config applies so they push the same bundle.
+		runningConfigApplyMu.Lock()
+		defer runningConfigApplyMu.Unlock()
 		cfg, err := store.Load(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		path := firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, trust.DefaultBundlePath)
+		path := trustedCABundlePath(cfg)
 		if !strings.HasPrefix(filepath.Clean(path)+string(os.PathSeparator), filepath.Clean(dataDir)+string(os.PathSeparator)) {
 			apiError(c, http.StatusBadRequest, "trustedCAFile must be under /data")
 			return
 		}
-		if err := trust.WriteBundle(path, data); err != nil {
+		if err := trust.WriteBundle(path, []byte(bundle.PEM)); err != nil {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "updated"})
+		auditLog(c, audit.Record{Action: "system.tls.trusted_ca.set", Target: bundle.Revision})
+		if err := pushTrustedCA(c.Request.Context(), cfg, engine); err != nil {
+			apiErrorDetail(c, http.StatusServiceUnavailable, "trusted CA bundle saved but not applied by the engine", err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "updated", "revision": bundle.Revision})
 	}
 }
 

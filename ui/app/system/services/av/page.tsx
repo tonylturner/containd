@@ -241,6 +241,7 @@ export default function AVPage() {
             <div>Backend ready: <span className="text-(--text)">{status?.ready ? "yes" : `no${status?.ready_error ? ` (${status.ready_error})` : ""}`}</span></div>
             <div>Definitions: <span className="text-(--text)">{status?.db_version || "n/a"}</span></div>
             <div>Detections: <span className="text-(--text)">{status?.detections ?? 0}</span></div>
+            <div>Additional CA: <span className="text-(--text)">{status?.trust_revision && status.trust_revision !== "none" ? status.trust_revision.slice(0, 19) : "none"}</span></div>
             <div>Mode: <span className="text-(--text)">{status?.mode ?? cfg.mode ?? "icap"}</span></div>
             <div>Fail policy: <span className="text-(--text)">{status?.failPolicy ?? cfg.failPolicy ?? "open"}</span></div>
             <div>

@@ -151,12 +151,14 @@ Scanning:
   `204 No Content` is clean; an `X-ICAP-Status` header containing
   `VirusFound` is malware; any other reply, including `200` with adapted
   content, is a scan error. `useTls` connects with verified TLS 1.2 or
-  newer, using the configured host as the server name and the system roots;
+  newer, using the configured host as the server name and the system roots
+  plus the [additional CA bundle](config-format.md#additional-ca-bundle);
   there is no plaintext fallback.
 
 Status (`av` entry) reports the applied settings, `ready` and `db_version`
 from a live clamd `PING`/`VERSION` (or ICAP `OPTIONS`), scan, error and
-detection counters, the clamd process and the FreshClam schedule.
+detection counters, the clamd process, the FreshClam schedule and the applied
+additional CA bundle revision (`trust_revision`).
 
 ## Proxies
 

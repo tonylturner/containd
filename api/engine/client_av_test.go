@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/tonylturner/containd/pkg/common/trust"
 )
 
 func TestAVClientMethods(t *testing.T) {
@@ -70,5 +72,27 @@ func TestAVClientReportsStatusErrors(t *testing.T) {
 	}
 	if _, err := NewHTTPClient("").AVStatus(context.Background()); err == nil {
 		t.Fatal("empty BaseURL accepted")
+	}
+}
+
+func TestConfigureTrustSendsContentAndRevision(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got = r.Method + " " + r.URL.Path + " " + string(body)
+		if strings.Contains(string(body), "bad") {
+			http.Error(w, "invalid av request: revision mismatch", http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, `{"revision":"none"}`)
+	}))
+	defer srv.Close()
+	c := NewHTTPClient(srv.URL)
+	if err := c.ConfigureTrust(context.Background(), trust.Bundle{Revision: trust.NoRevision}); err != nil || got != `POST /internal/trust {"pem":"","revision":"none"}` {
+		t.Fatalf("ConfigureTrust = %v (%s)", err, got)
+	}
+	var se *StatusError
+	if err := c.ConfigureTrust(context.Background(), trust.Bundle{PEM: "bad"}); !errors.As(err, &se) || se.Code != http.StatusBadRequest {
+		t.Fatalf("ConfigureTrust(bad) = %#v", err)
 	}
 }

@@ -266,9 +266,22 @@ candidate edit:
 - A rejected upload leaves the previous file unchanged. Successful replacement
   is atomic, so readers cannot observe a partially written bundle.
 
-**Runtime limitation:** storing this bundle does not yet configure outbound TLS
-clients or external service daemons to use it. An upload's `updated` response
-confirms storage only, not endpoint trust. See [security limits](secure-by-design.md#additional-ca-bundle-storage).
+After storing the bundle, management sends its content and revision
+(`sha256:<hex>`, or `none` when cleared) to the engine; the engine never reads
+management's file. An `updated` response with the `revision` means the engine
+applied it. If the engine is unavailable or rejects it, the bundle stays stored
+and the request returns `503`; every commit, rollback, boot replay and `SIGHUP`
+reload sends it again.
+
+The engine's antivirus clients trust the system roots plus this bundle:
+
+- ICAP servers with `useTls` (from the next connection).
+- FreshClam definition downloads (from the next run). The engine writes the
+  system roots and the bundle to an engine-local file and passes it to the
+  FreshClam process only, as `CURL_CA_BUNDLE`.
+
+See [security limits](secure-by-design.md#additional-ca-bundle) for clients
+that do not use it.
 
 ## API endpoints
 

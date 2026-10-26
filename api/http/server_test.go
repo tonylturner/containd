@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
@@ -187,6 +188,8 @@ type mockEngine struct {
 	avUploadName string
 	avUpload     []byte
 	avDeleted    string
+	trustErr     error
+	trustPushes  []trust.Bundle
 }
 
 func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
@@ -319,6 +322,14 @@ func (m *mockEngine) UploadAVDef(ctx context.Context, name string, r io.Reader) 
 	}
 	m.avUploadName, m.avUpload = name, data
 	return cpservices.AVDefinition{Name: name, Size: int64(len(data)), Active: true}, nil
+}
+
+func (m *mockEngine) ConfigureTrust(ctx context.Context, b trust.Bundle) error {
+	if m.trustErr != nil {
+		return m.trustErr
+	}
+	m.trustPushes = append(m.trustPushes, b)
+	return nil
 }
 
 func (m *mockEngine) DeleteAVDef(ctx context.Context, name string) error {

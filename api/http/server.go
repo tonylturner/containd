@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	engineclient "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -80,6 +81,8 @@ type EngineClient interface {
 	ListAVDefs(ctx context.Context) (cpservices.AVDefinitionList, error)
 	UploadAVDef(ctx context.Context, name string, r io.Reader) (cpservices.AVDefinition, error)
 	DeleteAVDef(ctx context.Context, name string) error
+	// ConfigureTrust distributes the additional CA bundle to the engine.
+	ConfigureTrust(ctx context.Context, b trust.Bundle) error
 }
 
 // RulePreviewClient delegates impact evaluation to the engine's live policy context.
@@ -244,7 +247,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/system/inspection", systemInspectionHandler())
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
-		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
+		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store, engine))
 		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), factoryResetHandler(store, userStore, engine, services, resetSessions))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), saveConfigHandler(store))
@@ -574,6 +577,10 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	}
 	if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
 		warnings = append(warnings, fmt.Sprintf("routing: %v", err))
+	}
+	// Trust precedes services so AV clients verify with the current bundle.
+	if err := pushTrustedCA(ctx, cfg, engine); err != nil {
+		warnings = append(warnings, fmt.Sprintf("trust: %v", err))
 	}
 	if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
 		warnings = append(warnings, fmt.Sprintf("services: %v", err))

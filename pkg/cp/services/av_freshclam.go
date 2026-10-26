@@ -35,6 +35,7 @@ type freshclamState struct {
 	done     chan struct{}
 	now      chan struct{}
 	running  bool
+	runs     int // completed runs, successful or not
 	last     time.Time
 	err      string
 }
@@ -188,6 +189,7 @@ func (m *AVManager) runFreshclam(ctx context.Context) {
 	updated, err := m.execFreshclam(ctx)
 	m.mu.Lock()
 	m.fresh.running = false
+	m.fresh.runs++
 	if err != nil {
 		m.fresh.err = err.Error()
 	} else {
@@ -229,11 +231,6 @@ func (m *AVManager) execFreshclam(ctx context.Context) (bool, error) {
 	default:
 		return false, fmt.Errorf("freshclam: %s", exitText(err))
 	}
-}
-
-// freshclamEnv is the child environment; it is never applied process-wide.
-func (m *AVManager) freshclamEnv() []string {
-	return os.Environ()
 }
 
 // afterDefinitionsUpdate reloads clamd after new databases arrived, or
