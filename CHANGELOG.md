@@ -86,8 +86,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `dataplane.enforceTable` must start with a letter or underscore and be at most
-  248 characters, which is what nftables can address. Revocations now work with
+  248 characters, which is what nftables can address, and must not be
+  `containd_dhcp`. Staging rejects other names. Revocations now work with
   table names that contain upper case or hyphens.
+- Staging rejects a ClamAV `updateSchedule` that is not a positive duration, a
+  `timeoutSec` outside 0–300 and a `maxSizeBytes` outside 0–100 MiB.
+  `clamav.socketPath` is optional and defaults to `/run/clamav/clamd.sock`.
+- The Compose files keep ClamAV databases in the `clamav-db` volume across
+  container replacement.
 - The engine is the only antivirus owner in split and combined deployments.
   Management's AV status, update and custom-definition routes delegate to the
   engine and return 503 when it is unreachable. A cron-style
@@ -131,6 +137,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Factory reset clears the engine's temporary blocks and connection
+  revocations. A failed clear is reported as a `dynamic blocks:` warning.
+- The rule impact preview returns `warnings`, and the firewall rule editor's
+  Preview impact explains why an ALLOW rule with an identity or schedule
+  matches nothing.
+- Trusted CA upload shows the applied bundle revision, or says the bundle was
+  stored but the engine could not apply it.
+- The services overview no longer shows a made-up antivirus trend.
 - The engine no longer flushes the whole nftables ruleset on every apply and
   at boot. Docker's embedded DNS (so CLI `diag`, FreshClam and other name
   lookups), the DHCP redirect and any other table in the namespace now survive
