@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -234,5 +235,77 @@ func TestTLSInfoShowsServedCertificate(t *testing.T) {
 	if got := read(); got.ServedCertFile != "" || got.ServedKeyFile != "" || got.ServedCertSubject != "" || got.ServedCertNotAfter != "" ||
 		got.BoundHTTPSListenAddr != "" || got.BoundHTTPListenAddr != ":8080" {
 		t.Fatalf("readout without HTTPS = %+v", got)
+	}
+}
+
+// The readout says whether the next start binds another listener than the
+// bound one. A bound listener is recorded at its socket's address, so a
+// wildcard listen is recorded as [::] (0.0.0.0 without IPv6), which every
+// wildcard spelling of the same port binds again. A listener bound at a
+// specific address in place of a wildcard, as a reserved endpoint or
+// loopback fallback is, still differs.
+func TestTLSInfoComparesBoundAndNextListeners(t *testing.T) {
+	t.Setenv(config.EnvManagementHTTPAddr, "")
+	t.Setenv(config.EnvManagementHTTPSAddr, "")
+	listen := func(addr string) (string, string) {
+		t.Helper()
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ln.Close() })
+		_, port, err := net.SplitHostPort(ln.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ln.Addr().String(), port
+	}
+	wildcard, wildPort := listen(":0")
+	if host, _, _ := net.SplitHostPort(wildcard); host != "::" && host != "0.0.0.0" {
+		t.Fatalf("wildcard listener recorded as %s", wildcard)
+	}
+	specific, specificPort := listen("127.0.0.1:0")
+	on := func(addr string) config.ManagementListener {
+		return config.ManagementListener{Addr: addr, Enabled: true}
+	}
+	for _, tc := range []struct {
+		name    string
+		bound   config.ManagementListener
+		next    string
+		enabled bool
+		changes bool
+	}{
+		{"default wildcard", on(wildcard), ":" + wildPort, true, false},
+		{"IPv4 wildcard", on(wildcard), "0.0.0.0:" + wildPort, true, false},
+		{"IPv6 wildcard", on(wildcard), "[::]:" + wildPort, true, false},
+		{"zero-padded port", on(wildcard), ":0" + wildPort, true, false},
+		{"other port", on(wildcard), ":" + specificPort, true, true},
+		{"specific address", on(specific), "127.0.0.1:" + specificPort, true, false},
+		{"IPv4-mapped address", on(specific), "[::ffff:127.0.0.1]:" + specificPort, true, false},
+		{"specific address in place of the wildcard", on(specific), ":" + specificPort, true, true},
+		{"wildcard in place of a specific address", on(wildcard), "127.0.0.1:" + wildPort, true, true},
+		{"host name", on(specific), "localhost:" + specificPort, true, true},
+		{"disabled at the next start", on(wildcard), ":" + wildPort, false, true},
+		{"not bound", config.ManagementListener{}, ":" + wildPort, true, true},
+		{"neither", config.ManagementListener{}, ":" + wildPort, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bindConsoleTest(t, config.ManagementListeners{HTTP: tc.bound, HTTPS: tc.bound})
+			enabled := tc.enabled
+			cfg := config.DefaultConfig()
+			cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.EnableHTTP = tc.next, &enabled
+			cfg.System.Mgmt.HTTPSListenAddr, cfg.System.Mgmt.EnableHTTPS = tc.next, &enabled
+			router := gin.New()
+			router.GET("/tls", getTLSHandler(&mockStore{cfg: cfg}))
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
+			var got map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+				t.Fatalf("status %d, %v: %s", rec.Code, err, rec.Body)
+			}
+			if got["httpListenChanges"] != tc.changes || got["httpsListenChanges"] != tc.changes {
+				t.Fatalf("bound %+v, next %q enabled=%v: %s", tc.bound, tc.next, tc.enabled, rec.Body)
+			}
+		})
 	}
 }

@@ -401,6 +401,10 @@ export type TLSInfo = {
   /** Listeners management has bound now; absent when not bound. */
   boundHttpListenAddr?: string;
   boundHttpsListenAddr?: string;
+  /** Whether the next start binds another listener than the bound one;
+   * the API compares them, so wildcard spellings of one port are equal. */
+  httpListenChanges: boolean;
+  httpsListenChanges: boolean;
   /** Files the HTTPS listener serves from the next start; the cert fields
    * describe this certificate. */
   certFile?: string;
