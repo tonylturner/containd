@@ -68,6 +68,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Port forwards and masquerade compile from the configured zones: custom zone
+  names work, disabled forwards emit nothing, and the ruleset never references
+  an undeclared set.
+- Commit and restart converge static routes and policy rules. Removed entries
+  leave the kernel at every valid priority, and only containd-owned entries
+  (protocol 98) are removed. Docker and management routes stay. A configured
+  route that matches an existing one reuses it; one that differs only in next
+  hop replaces it and restores it on removal (journal in
+  `/data/routing-displaced.json`). `set outbound quickstart` works with the
+  Docker-provided default route.
 - The SSH setup wizard stops and reports a failed password change instead of
   auditing and announcing success.
 - SSH host keys rotate on schedule on a long-running server; existing sessions
