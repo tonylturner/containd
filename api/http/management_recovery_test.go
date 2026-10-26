@@ -3,12 +3,18 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
@@ -75,7 +81,7 @@ func TestManagementRecoveryApplyAndStatus(t *testing.T) {
 	if split == compiled {
 		t.Fatal("engine API path did not change the compiled ruleset")
 	}
-	recovery := RecoverySnapshot().Version
+	recovery := config.ManagementRecoveryVersion
 	for _, tc := range []struct {
 		name   string
 		status dpengine.RulesetStatus
@@ -147,7 +153,104 @@ func TestQueuedRecoveryRechecksPromotionUnderApplyLock(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if engine.snapshot.Version == RecoverySnapshot().Version || engine.mutations == 0 || services.mutations == 0 {
+	if engine.snapshot.Version == config.ManagementRecoveryVersion || engine.mutations == 0 || services.mutations == 0 {
 		t.Fatal("queued recovery overwrote a safe promotion")
+	}
+}
+
+func TestManagementRecoveryWithoutReservation(t *testing.T) {
+	ctx := context.Background()
+	store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	f := false
+	cfg := config.DefaultConfig()
+	cfg.Interfaces = []config.Interface{
+		{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt"},
+		{Name: "wan0", Device: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
+	}
+	cfg.DataPlane.Enforcement = true
+	if err := store.Save(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	const fault = "rule modbus-enforce: modbus enforce needs an inline path"
+	if err := store.SetManagementBootFault(ctx, fault); err != nil {
+		t.Fatal(err)
+	}
+	engine := &recoveryEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}}
+	services := &stageServices{}
+	if _, err := ApplyBootConfig(ctx, store, engine, services); err != nil {
+		t.Fatal(err)
+	}
+	snap := engine.snapshot
+	if engine.mutations != 0 || services.mutations != 0 || !engine.dp.Enforcement ||
+		snap.Version != config.ManagementRecoveryVersion || snap.Default != rules.ActionDeny ||
+		len(snap.Firewall) != 0 || len(snap.ZoneIfaces) != 0 || snap.NAT.Enabled {
+		t.Fatalf("recovery leaked stored input: dp=%+v snap=%+v engine=%d services=%d", engine.dp, snap, engine.mutations, services.mutations)
+	}
+	// Without a reservation, stored management access is the only way in.
+	if len(snap.LocalInput) == 0 || !reflect.DeepEqual(snap.LocalInput, compile.ManagementLocalInput(cfg)) {
+		t.Fatalf("recovery management input = %+v", snap.LocalInput)
+	}
+
+	type healthBody struct {
+		Enforcement struct{ State string } `json:"enforcement"`
+		Recovery    struct {
+			State  string `json:"state"`
+			Reason string `json:"reason"`
+		} `json:"managementRecovery"`
+	}
+	server := NewServerWithEngineAndServices(store, nil, engine, nil, nil)
+	health := func() healthBody {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+		var body healthBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(rec.Body.String(), "modbus-enforce") {
+			t.Fatalf("unauthenticated health names stored rules: %s", rec.Body)
+		}
+		return body
+	}
+	for _, tc := range []struct {
+		name   string
+		status dpengine.RulesetStatus
+		state  string
+		view   string
+	}{
+		{"pending", dpengine.RulesetStatus{}, "pending", "recovery pending:"},
+		{"failed", dpengine.RulesetStatus{Ruleset: "x", SnapshotVersion: config.ManagementRecoveryVersion, AppliedAt: time.Now(), Error: "nft failed"}, "failed", "recovery failed: nft failed"},
+		{"applied", dpengine.RulesetStatus{Ruleset: "x", SnapshotVersion: config.ManagementRecoveryVersion, AppliedAt: time.Now()}, "active", "recovery: new transit dropped"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine.ruleset = tc.status
+			body := health()
+			if body.Recovery.State != tc.state || !strings.Contains(body.Recovery.Reason, "refused at boot") || body.Enforcement.State != "unavailable" {
+				t.Fatalf("health = %+v", body)
+			}
+			rec := requestStage(t, server, "GET", "/system/management-reservation", nil)
+			var view map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+				t.Fatal(err)
+			}
+			if view["active"] != false || view["bootFault"] != fault || !strings.HasPrefix(view["recovery"].(string), tc.view) {
+				t.Fatalf("reservation view = %s", rec.Body)
+			}
+		})
+	}
+
+	if err := store.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	engine.ruleset = dpengine.RulesetStatus{Ruleset: "x", SnapshotVersion: "compiled", AppliedAt: time.Now()}
+	if body := health(); body.Recovery.State != "inactive" || body.Recovery.Reason != "" || body.Enforcement.State != "enforcing" {
+		t.Fatalf("health after commit = %+v", body)
+	}
+	if rec := requestStage(t, server, "GET", "/system/management-reservation", nil); strings.TrimSpace(rec.Body.String()) != `{"active":false}` {
+		t.Fatalf("reservation view after commit = %s", rec.Body)
 	}
 }

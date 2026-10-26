@@ -237,33 +237,30 @@ func TestManagementBootFaultRecovery(t *testing.T) {
 	}
 }
 
-func TestManagementBootFaultDoesNotGateRemovedReservation(t *testing.T) {
+func TestManagementBootFaultGatesWithoutReservation(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "config.db")
-	valid, r := reservationFixture()
-	store, err := NewSQLiteStore(path, WithManagementReservation(r))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Save(ctx, valid); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetManagementBootFault(ctx, "historical fault"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	store, err = NewSQLiteStore(path)
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := CheckManagementBootFault(ctx, store); err != nil {
-		t.Fatalf("removed reservation still gates replay: %v", err)
+	if err := store.Save(ctx, DefaultConfig()); err != nil {
+		t.Fatal(err)
 	}
-	fault, err := store.ManagementBootFault(ctx)
-	if err != nil || fault != "historical fault" {
-		t.Fatalf("inactive boot path changed fault history: %q %v", fault, err)
+	// Boot records this for a stored config that fails validation.
+	if err := store.SetManagementBootFault(ctx, "stored config invalid"); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckManagementBootFault(ctx, store); !errors.Is(err, ErrManagementBootFault) {
+		t.Fatalf("fault without reservation did not gate replay: %v", err)
+	}
+	if err := store.SaveCandidate(ctx, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckManagementBootFault(ctx, store); err != nil {
+		t.Fatalf("valid commit did not clear the fault: %v", err)
 	}
 }

@@ -202,6 +202,19 @@ components:
           properties:
             state: {type: string, enum: [configured, unbound-appliance, unknown]}
             recoveryPorts: {type: array, items: {type: integer}}
+        managementRecovery:
+          type: object
+          required: [state, reason]
+          description: >
+            Boot recovery after the stored running configuration was refused at
+            boot, with or without a management reservation. Active means the
+            engine applied the fail-closed recovery ruleset (new transit dropped);
+            pending and failed mean it is not applied. The reason is generic: the
+            refusal itself is in GET /system/management-reservation. While
+            recovery holds, enforcement reports unavailable.
+          properties:
+            state: {type: string, enum: [inactive, active, pending, failed, unknown]}
+            reason: {type: string, description: Generic summary; empty when inactive}
 
     IEC104Enforcement:
       type: object
@@ -2206,7 +2219,9 @@ paths:
       tags: [System]
       responses:
         "200":
-          description: Reservation view; exactly {"active":false} when unset
+          description: >
+            Reservation view. Without a reservation it is {"active":false}, plus
+            bootFault and recovery while a boot fault holds.
           content:
             application/json:
               schema:
@@ -2221,9 +2236,12 @@ paths:
                   bootFault:
                     type: string
                     description: >
-                      Residual stored-config conflict after boot normalization; empty
-                      when clear. Blocks stored service/config replay and installs a
-                      minimal enforcement-on default-deny recovery ruleset instead.
+                      Why the stored running configuration was refused at boot:
+                      its validation error, or a residual reservation conflict after
+                      boot normalization; empty when clear. Blocks stored
+                      service/config replay and installs a minimal enforcement-on
+                      default-deny recovery ruleset instead. Without a reservation
+                      that ruleset keeps the stored management listener access.
                       A safe commit, rollback or factory reset clears it.
                   recovery:
                     type: string

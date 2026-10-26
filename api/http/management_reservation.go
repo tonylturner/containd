@@ -19,9 +19,26 @@ type ManagementListenerFaults func() []string
 
 func managementReservationHandler(store config.Store, health ManagementGuardHealth, engine EngineClient, listeners ManagementListenerFaults) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		bootFault, err := config.ManagementBootFaultForStore(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		recovery := ""
+		if bootFault != "" {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
+			recovery = managementRecoveryStatus(ctx, engine)
+			cancel()
+		}
 		r := config.ReservationForStore(store)
 		if r == nil {
-			c.JSON(http.StatusOK, gin.H{"active": false})
+			// Boot recovery does not need a reservation: an invalid stored
+			// configuration is refused the same way, and its cause shows here.
+			body := gin.H{"active": false}
+			if bootFault != "" {
+				body["bootFault"], body["recovery"] = bootFault, recovery
+			}
+			c.JSON(http.StatusOK, body)
 			return
 		}
 		sources := make([]string, 0, len(r.Sources))
@@ -43,23 +60,11 @@ func managementReservationHandler(store config.Store, health ManagementGuardHeal
 		if faults, ok := store.(interface {
 			ManagementRollbackFault(context.Context) (string, error)
 		}); ok {
-			var err error
 			fault, err = faults.ManagementRollbackFault(c.Request.Context())
 			if err != nil {
 				internalError(c, err)
 				return
 			}
-		}
-		bootFault, err := config.ManagementBootFaultForStore(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		recovery := ""
-		if bootFault != "" {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
-			recovery = managementRecoveryStatus(ctx, engine)
-			cancel()
 		}
 		var listenerFaults []string
 		if listeners != nil {

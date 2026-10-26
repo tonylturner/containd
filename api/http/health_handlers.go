@@ -54,6 +54,11 @@ func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 		}
 		ruleset := observeRuleset(ctx, engine)
 		enforcement := enforcementHealth(snapshot, snapshotErr, ruleset)
+		recovery := managementRecoveryHealth(ctx, store, ruleset)
+		if recovery["state"] != recoveryInactive && recovery["state"] != recoveryUnknown {
+			// Recovery enforces its own ruleset, never the stored policy.
+			enforcement = gin.H{"state": "unavailable", "reason": "management recovery: stored running configuration not applied"}
+		}
 		binding := gin.H{"state": "unknown"}
 		if snapshotErr == nil && snapshot.Config != nil && engine != nil {
 			cfg := snapshot.Config
@@ -77,15 +82,40 @@ func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 			forwarding = netcfg.IPv4ForwardingUnknown
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"status":            "ok",
-			"component":         "mgmt",
-			"build":             config.BuildVersion,
-			"time":              time.Now().UTC().Format(time.RFC3339Nano),
-			"iec104Enforcement": iec,
-			"enforcement":       enforcement,
-			"icsEnforcement":    icsEnforcementHealth(ruleset),
-			"ipv4Forwarding":    forwarding,
-			"managementBinding": binding,
+			"status":             "ok",
+			"component":          "mgmt",
+			"build":              config.BuildVersion,
+			"time":               time.Now().UTC().Format(time.RFC3339Nano),
+			"iec104Enforcement":  iec,
+			"enforcement":        enforcement,
+			"icsEnforcement":     icsEnforcementHealth(ruleset),
+			"ipv4Forwarding":     forwarding,
+			"managementBinding":  binding,
+			"managementRecovery": recovery,
 		})
 	}
+}
+
+// managementRecoveryHealth reports boot recovery without the persisted fault
+// text: health is unauthenticated and that text names stored rules. The
+// authenticated management-reservation view carries the cause.
+func managementRecoveryHealth(ctx context.Context, store config.Store, ruleset rulesetObservation) gin.H {
+	fault, err := config.ManagementBootFaultForStore(ctx, store)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		return gin.H{"state": recoveryUnknown, "reason": "boot fault state unavailable"}
+	}
+	if fault == "" {
+		return gin.H{"state": recoveryInactive, "reason": ""}
+	}
+	const cause = "stored running configuration refused at boot"
+	state, _ := observeManagementRecovery(ruleset)
+	reason := map[string]string{
+		recoveryApplied: cause + "; new transit is dropped",
+		recoveryPending: cause + "; recovery ruleset not applied yet",
+		recoveryFailed:  cause + "; recovery ruleset failed to apply",
+	}[state]
+	return gin.H{"state": state, "reason": reason}
 }
