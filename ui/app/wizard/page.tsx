@@ -20,6 +20,7 @@ import {
   COMMON_PROTOCOLS,
   genId,
   ICS_PROTOCOLS,
+  serverIpError,
   serverPortError,
   type WizardId,
 } from "./wizard-shared";
@@ -150,23 +151,24 @@ export default function WizardPage() {
     setApplying(true);
     setError(null);
     try {
-      const portError = serverPortError(serverPort);
-      if (portError) {
-        setError(portError);
+      const fieldError = serverIpError(serverIp) ?? serverPortError(serverPort);
+      if (fieldError) {
+        setError(fieldError);
         setApplying(false);
         return;
       }
+      const destIp = serverIp.trim();
       const port = Number(serverPort.trim());
 
       // Add port forward via NAT
       const pf: PortForward = {
         id: genId(),
         enabled: true,
-        description: `Port forward ${pubProto.toUpperCase()}/${port} to ${serverIp} (wizard)`,
+        description: `Port forward ${pubProto.toUpperCase()}/${port} to ${destIp} (wizard)`,
         ingressZone: ingressZone,
         proto: pubProto,
         listenPort: port,
-        destIp: serverIp,
+        destIp,
         destPort: port,
       };
       const updatedNat: NATConfig = {
@@ -185,9 +187,9 @@ export default function WizardPage() {
       // Create matching firewall allow rule
       const ruleRes = await api.createFirewallRule({
         id: genId(),
-        description: `Allow inbound ${pubProto.toUpperCase()}/${port} to ${serverIp} (wizard)`,
+        description: `Allow inbound ${pubProto.toUpperCase()}/${port} to ${destIp} (wizard)`,
         sourceZones: [ingressZone],
-        destinations: [serverIp],
+        destinations: [destIp],
         protocols: [{ name: pubProto, port: String(port) }],
         action: "ALLOW",
       });
@@ -305,7 +307,7 @@ export default function WizardPage() {
         if (step === 1) return !!wanZone;
         return true;
       case "publish-service":
-        if (step === 0) return !!serverIp && !serverPortError(serverPort);
+        if (step === 0) return !serverIpError(serverIp) && !serverPortError(serverPort);
         if (step === 1) return true;
         if (step === 2) return !!ingressZone;
         return true;

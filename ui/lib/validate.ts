@@ -81,6 +81,14 @@ export function validateIP(input: string): string | null {
   return null;
 }
 
+/** Validates a single IPv4 address. Returns null if valid or empty. */
+export function validateIPv4(input: string): string | null {
+  const s = input.trim();
+  if (!s) return null;
+  if (!isIPv4(s)) return `"${s}" is not a valid IPv4 address`;
+  return null;
+}
+
 /** Validates a port number (1-65535). Returns null if valid or empty. */
 export function validatePort(input: string): string | null {
   const s = input.trim();

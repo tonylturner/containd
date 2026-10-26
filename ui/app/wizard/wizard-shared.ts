@@ -1,5 +1,5 @@
 import type { Zone } from "../../lib/api";
-import { validatePort } from "../../lib/validate";
+import { validateIPv4, validatePort } from "../../lib/validate";
 
 export const ICS_PROTOCOLS: Record<string, { label: string; port: number }> = {
   modbus: { label: "Modbus/TCP", port: 502 },
@@ -14,6 +14,14 @@ export const ICS_PROTOCOLS: Record<string, { label: string; port: number }> = {
 
 export function zoneLabel(zone: Zone): string {
   return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
+}
+
+/**
+ * Why the publish-service server address cannot be staged, or null when it
+ * can. A port forward's destination must be IPv4.
+ */
+export function serverIpError(value: string): string | null {
+  return value.trim() ? validateIPv4(value) : "Enter an IPv4 address.";
 }
 
 /** Why the publish-service port cannot be staged, or null when it can. */
