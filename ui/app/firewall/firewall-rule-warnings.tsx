@@ -1,10 +1,31 @@
+import Link from "next/link";
+
 import type { RulePreview, RuleWarning } from "../../lib/api";
 import { ICSCoverageSection } from "../ics/ics-coverage";
 
 function warningKind(w: RuleWarning): string {
   if (w.shadowedBy) return "shadowed";
-  if (w.predicate === "identity") return "unbound identity";
-  return "warning";
+  switch (w.predicate) {
+    case "identity":
+      return "unbound identity";
+    case "zone":
+      return "zone without interfaces";
+    case "addressFamily":
+      return "no shared address family";
+    default:
+      return "warning";
+  }
+}
+
+/** Where to fix the part of the rule that matches nothing. */
+function WarningFix({ warning }: { warning: RuleWarning }) {
+  if (warning.predicate === "zone") {
+    return <> <Link href="/interfaces/" className="underline">Assign an interface</Link> to {warning.zones?.length === 1 ? "it" : "one"}.</>;
+  }
+  if (warning.predicate === "identity") {
+    return <> <Link href="/identities/" className="underline">Bind an address</Link>.</>;
+  }
+  return null;
 }
 
 const SCOPES = {
@@ -13,9 +34,10 @@ const SCOPES = {
 } as const;
 
 /**
- * Rules that do not act as written: an identity rule no bound address
- * satisfies matches nothing, and a DENY or RESET rule an ALLOW fully covers
- * never decides. `scope` names the ruleset the warnings describe; a single
+ * Rules that do not act as written: a rule matches nothing when no bound
+ * address satisfies its identities, none of its zones has an interface, or
+ * its sources and destinations share no address family; and a DENY or RESET
+ * rule an ALLOW fully covers never decides. `scope` names the ruleset the warnings describe; a single
  * previewed rule has none.
  */
 export function RuleWarningList({
@@ -48,6 +70,7 @@ export function RuleWarningList({
               {warningKind(w)}
             </span>
             <span className="font-mono">{w.ruleId}</span>: {w.message}
+            <WarningFix warning={w} />
           </li>
         ))}
       </ul>

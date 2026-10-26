@@ -81,6 +81,7 @@ export type {
   RulePreview,
   RuleSchedule,
   RuleWarning,
+  RuleWarningPredicate,
 } from "./api-firewall";
 export type {
   ICSCoverageReason,

@@ -90,3 +90,28 @@ test("no applied warnings shows no applied list", async ({ page }) => {
   await expect(page.getByRole("status", { name: "Candidate rule warnings" })).toBeVisible();
   await expect(page.getByRole("status", { name: "Applied rule warnings" })).toHaveCount(0);
 });
+
+test("ruleset preview explains rules that match nothing because of zones or address families", async ({ page }) => {
+  const zone = {
+    ruleId: "dmz-in", predicate: "zone", zones: ["dmz", "lab"], action: "ALLOW",
+    message: "no interface is assigned to zones dmz, lab; the rule matches nothing until one is",
+  };
+  const family = {
+    ruleId: "v6-to-v4", predicate: "addressFamily", action: "DENY",
+    message: "its sources and destinations share no address family (IPv4 or IPv6); the rule matches nothing",
+  };
+  await openFirewall(page, []);
+  await page.route("**/api/v1/dataplane/ruleset", (route) => route.fulfill({
+    json: { ruleset: "table inet containd {}", runtime: { iec104EnvelopeOpen: false, reason: "no IEC 104 rules" }, warnings: [zone, family, unbound] },
+  }));
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  const items = page.getByRole("status", { name: "Candidate rule warnings" }).getByRole("listitem");
+  await expect(items).toHaveCount(3);
+  await expect(items.nth(0)).toContainText("zone without interfaces");
+  await expect(items.nth(0)).toContainText(`dmz-in: ${zone.message}`);
+  await expect(items.nth(0).getByRole("link", { name: "Assign an interface" })).toHaveAttribute("href", "/interfaces/");
+  await expect(items.nth(1)).toContainText("no shared address family");
+  await expect(items.nth(1)).toContainText(`v6-to-v4: ${family.message}`);
+  await expect(items.nth(1).getByRole("link")).toHaveCount(0);
+  await expect(items.nth(2).getByRole("link", { name: "Bind an address" })).toHaveAttribute("href", "/identities/");
+});
