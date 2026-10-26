@@ -252,6 +252,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Web UI: a page shows the data as unavailable instead of crashing when an
+  API response has the wrong shape. Shape checks cover 18 list and object
+  routes. The topology view reads health from the shared health store.
 - Management INPUT admits the listeners management serves: HTTPS on its
   default port when its settings are unset, the addresses set by
   `CONTAIND_MGMT_ADDR`, `CONTAIND_MGMT_HTTPS_ADDR` and `CONTAIND_SSH_ADDR`,
