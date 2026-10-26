@@ -63,9 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   well under 1 ms. Banks are stored once per running, candidate and previous
   configuration; obsolete banks are reclaimed after commit, rollback and reset.
   The Config page diff uses bounded memory for large configurations.
-- Inventory endpoints return a JSON 503 when the engine inventory is
-  unavailable instead of an empty list. Discovered assets, their peers and
-  station addresses now have fixed caps with counted overflow.
+- Monitoring APIs (flows, protocol and top-talker stats, anomalies, learning,
+  signatures, interface state, simulation and inventory) return a JSON 503
+  when the engine or capability is unavailable, instead of an empty list, a
+  stopped simulation or a successful clear. Engine call failures that returned
+  502 now return 503. The UI views and CLI `show` commands that use them show
+  "unavailable" with a retry, distinct from empty. `show system` labels
+  listener settings as saved configuration and shows the HSTS default.
+- Discovered ICS assets, their peers and station addresses have fixed caps
+  with counted overflow.
 - Complete the management OpenAPI route reference and guard it against the
   registered router, including optional identity and audit endpoints.
 - Document staged dataplane settings, session and lab authentication, filtered
