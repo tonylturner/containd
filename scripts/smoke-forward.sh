@@ -203,9 +203,9 @@ deny_probe() {
 # forward, or nothing when the rule or its counter is missing.
 dnat_packets() {
   local table status=0
-  table=$(compose exec -T engine nft list table inet containd 2>"$WORK_DIR/nft.err") || status=$?
+  table=$(compose exec -T engine nft list table inet containd_policy 2>"$WORK_DIR/nft.err") || status=$?
   if [[ $status -ne 0 ]]; then
-    harness_error "nft list table inet containd failed (exit $status): $(tr -d '\r' <"$WORK_DIR/nft.err")"
+    harness_error "nft list table inet containd_policy failed (exit $status): $(tr -d '\r' <"$WORK_DIR/nft.err")"
   fi
   printf '%s\n' "$table" | tr -d '\r' | awk -v want="dnat ip to ${LAN_TARGET}:80" -v port="dport ${DNAT_PORT} " '
     index($0, want) && index($0, port) {
@@ -342,7 +342,7 @@ fi
 log "Enforced forward and NAT chains:"
 for chain in forward prerouting postrouting; do
   # A missing NAT chain is reported by the checks that need it.
-  compose exec -T engine nft list chain inet containd "$chain" 2>&1 | tr -d '\r' | sed 's/^/  /' || true
+  compose exec -T engine nft list chain inet containd_policy "$chain" 2>&1 | tr -d '\r' | sed 's/^/  /' || true
 done
 
 log "Verifying mgmt API still reachable..."
