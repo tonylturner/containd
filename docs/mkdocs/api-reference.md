@@ -81,20 +81,31 @@ A store preflight/validation failure before promotion is HTTP 400 without
 recovery fields and does not promote running. A disconnected request is not
 proof of success or failure; read running, candidate and health before retrying.
 
-`GET /health` remains HTTP 200 liveness. Its existing `iec104Enforcement`
-object also contains `rulesetAvailable`, `rulesetReason` and `configApplyError`.
-The last field persists a failed replay or failed recovery across management
-restarts until a successful apply. Health uses summary errors to avoid exposing
-policy diagnostics without authentication; the commit response carries details.
-Ruleset availability is false when the engine cannot be queried, no enforced
-ruleset has been applied, the last
-ruleset attempt failed, or config replay/recovery failed. The original
-`active`, `healthy` and `reason` fields still describe IEC104 queue/reset
-health separately; an inactive IEC104 policy is not proof nft is available.
-Intentionally disabling enforcement can apply an in-memory snapshot with 200,
-but does not install nft rules and does not imply `rulesetAvailable: true`.
-A successful commit does not guarantee later queue/reset readiness or packet
-delivery; check health and infrastructure warnings.
+`GET /health` remains HTTP 200 liveness and uses one observation budget of
+one second. General firewall health is a top-level `enforcement` object with
+exactly `state` and `reason`:
+
+- `enforcing`: enforcement is enabled and the engine reports an applied ruleset
+  without error.
+- `disabled`: `dataplane.enforcement: false` intentionally selects the supported
+  in-memory-only mode; a successful commit does not install nft rules.
+- `unavailable`: the ruleset apply failed, no ruleset has been applied while
+  enforcement is enabled, or a persisted replay/recovery fault makes runtime
+  synchronization uncertain (including a failed disable operation).
+- `unknown`: the configuration/fault or engine state could not be read within
+  the observation budget. During a running-state transition, health does not
+  wait for the commit or expose its unapplied document; enforcement and
+  management binding report `unknown` when their config snapshot is busy.
+
+A persisted replay/recovery fault survives management restarts until a
+successful apply and takes precedence over configured mode. Its generic
+`reason` does not expose policy diagnostics without authentication; the commit
+response carries details. There is no separate config-apply-error field.
+The existing `iec104Enforcement` object is unchanged: only `active`, `healthy`
+and `reason`, describing IEC104 queue/reset health independently. An inactive
+IEC104 policy is not proof nft is available. A successful commit does not
+guarantee later queue/reset readiness or packet delivery; check both health
+objects and infrastructure warnings.
 
 Interface, routing, engine service (including the auxiliary DHCP redirect),
 IPv4 forwarding and PCAP problems remain 200 + `X-Containd-Warnings` when the

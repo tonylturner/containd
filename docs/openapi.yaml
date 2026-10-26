@@ -131,6 +131,7 @@ components:
         hostname: { type: string }
         time: { type: string, format: date-time }
         iec104Enforcement: { $ref: "#/components/schemas/IEC104Enforcement" }
+        enforcement: { $ref: "#/components/schemas/EnforcementHealth" }
         ipv4Forwarding:
           type: string
           enum: [enabled, disabled, unknown]
@@ -171,22 +172,33 @@ components:
             reset injector or bounded-worker failure. IEC104 envelope
             traffic then fails closed until readiness returns.
         reason: { type: string, description: "Cause when IEC104 is unhealthy, else empty" }
-        rulesetAvailable:
-          type: boolean
-          description: >
-            Management API extension. True only when the engine reports a
-            nonempty enforced ruleset without error and there is no persisted
-            configuration replay/recovery fault. False for unavailable engine,
-            no enforced ruleset, failed last apply, or uncertain synchronization.
-            Independent of IEC104 active/healthy and not a packet-delivery test.
-        rulesetReason: { type: string, description: "Reason ruleset availability is false, else empty" }
-        configApplyError:
-          type: string
-          description: >
-            Persisted failed replay or failed restore/reapply, cleared by a
-            successful apply. Management API extension; empty when none recorded.
+      example: { active: true, healthy: true, reason: "" }
 
-      example: { active: true, healthy: true, reason: "", rulesetAvailable: true, rulesetReason: "", configApplyError: "" }
+    EnforcementHealth:
+      type: object
+      required: [state, reason]
+      additionalProperties: false
+      description: >
+        General firewall health, separate from IEC104 queue/reset health.
+        Health stays HTTP 200 and shares one one-second observation budget.
+        Persisted replay/recovery faults take precedence over configured mode
+        and yield unavailable with a generic reason, never private nft policy
+        diagnostics. During a running-state operation, a non-blocking metadata
+        snapshot yields unknown rather than exposing unapplied running state
+        or waiting for commit/recovery. Management binding is also unknown
+        when that snapshot or its engine observation cannot be read in time.
+      properties:
+        state:
+          type: string
+          enum: [enforcing, disabled, unavailable, unknown]
+          description: >
+            Enforcing means enforcement enabled and an applied ruleset without
+            error. Disabled means dataplane.enforcement is false. Unavailable
+            means ruleset apply failure, a persisted replay/recovery fault, or
+            no applied ruleset while enforcement is on. Unknown means required
+            config/fault or engine state could not be read within the budget.
+        reason: { type: string, description: Generic summary for unavailable or unknown; otherwise empty }
+      example: { state: enforcing, reason: "" }
 
     ConfigApplyError:
       type: object
