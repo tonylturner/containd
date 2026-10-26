@@ -7,7 +7,9 @@ import {
 // GET /api/v1/health: liveness plus runtime enforcement and recovery state.
 
 /** Runtime IEC 104 enforcement health. `active` describes the loaded
- * runtime envelope, not the saved config. */
+ * runtime envelope, not the saved config. With `active` false the object is
+ * unhealthy only when the engine failed to reset an ICS connection of
+ * another protocol that it picked up mid-stream. */
 export type IEC104EnforcementHealth = {
   active: boolean;
   healthy: boolean;

@@ -18,6 +18,7 @@ import type {
   Asset,
   AuditRecord,
   DashboardData,
+  TLSCertUpload,
   TLSInfo,
 } from "./api";
 
@@ -43,7 +44,7 @@ export const policyAPI = {
 
   getTLSInfo: () => getJSON<TLSInfo>("/api/v1/system/tls"),
   setTLSCert: (certPEM: string, keyPEM: string) =>
-    postJSONResult<{ status: string }>("/api/v1/system/tls/cert", {
+    postJSONResult<TLSCertUpload>("/api/v1/system/tls/cert", {
       certPEM,
       keyPEM,
     }),

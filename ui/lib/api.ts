@@ -397,14 +397,24 @@ export type TLSInfo = {
   httpsListenAddr?: string;
   httpEnabled: boolean;
   httpsEnabled: boolean;
+  /** Files the HTTPS listener serves from the next start; the certificate
+   * fields describe this certificate. */
   certFile?: string;
   keyFile?: string;
+  /** Files the bound HTTPS listener serves now; absent when none is bound. */
+  servedCertFile?: string;
+  servedKeyFile?: string;
   certSubject?: string;
   certIssuer?: string;
   certNotAfter?: string;
   certDnsNames?: string[];
   certIps?: string[];
 };
+
+/** Result of a management certificate upload: status "updated" when the
+ * bound HTTPS listener serves it at once, "stored" when it is served from
+ * the next start, with the reason in warnings. */
+export type TLSCertUpload = { status?: string; warnings?: string[] };
 
 export type UpdateMeRequest = {
   firstName?: string;

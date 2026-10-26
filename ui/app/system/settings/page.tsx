@@ -12,6 +12,7 @@ import {
   setPersistCLIHistory,
   setShowTips,
 } from "../../../lib/prefs";
+import { certUploadNotice, tlsFilesView } from "./tls-view";
 
 export default function SystemSettingsPage() {
   const canEdit = isAdmin();
@@ -44,6 +45,7 @@ export default function SystemSettingsPage() {
       return tlsInfo.certNotAfter;
     }
   }, [tlsInfo?.certNotAfter]);
+  const files = tlsFilesView(tlsInfo);
 
   async function readFileText(f: File): Promise<string> {
     return await f.text();
@@ -60,11 +62,13 @@ export default function SystemSettingsPage() {
     }
     const [certPEM, keyPEM] = await Promise.all([readFileText(certFile), readFileText(keyFile)]);
     const res = await api.setTLSCert(certPEM, keyPEM);
-    if (!res.ok) {
-      setError(res.error || "Failed to upload certificate.");
+    const notice = certUploadNotice(res);
+    if (notice.kind === "error") {
+      setError(notice.text);
       return;
     }
-    setStatus(res.warning ? `Certificate updated with warning: ${res.warning}` : "Certificate updated. New connections will use it immediately.");
+    if (notice.kind === "warning") setWarning(notice.text);
+    else setStatus(notice.text);
     await refresh();
   }
 
@@ -129,9 +133,12 @@ export default function SystemSettingsPage() {
             <Row label="HTTP listen" value={tlsInfo?.httpListenAddr ?? "—"} />
             <Row label="HTTPS" value={tlsInfo ? (tlsInfo.httpsEnabled ? "enabled" : "disabled") : "—"} />
             <Row label="HTTPS listen" value={tlsInfo?.httpsListenAddr ?? "—"} />
-            <Row label="Cert file" value={tlsInfo?.certFile ?? "—"} />
-            <Row label="Key file" value={tlsInfo?.keyFile ?? "—"} />
-            <Row label="Cert expires" value={certSummary} />
+            <Row label="Served cert file" value={files.servedCert} />
+            <Row label="Served key file" value={files.servedKey} />
+            <Row label={files.pending ? "Cert file (next start)" : "Cert file"} value={files.savedCert} />
+            <Row label={files.pending ? "Key file (next start)" : "Key file"} value={files.savedKey} />
+            <Row label={files.pending ? "Cert expires (next start)" : "Cert expires"} value={certSummary} />
+            {files.pendingNote && <p className="pt-1 text-xs text-amber">{files.pendingNote}</p>}
           </div>
 
           <div className="mt-5 grid gap-2">
