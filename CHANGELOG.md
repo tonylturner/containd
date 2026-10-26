@@ -101,6 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An omitted or empty firewall `defaultAction` means DENY everywhere. The
+  security conduits view used to show such configs as unmodeled while the
+  dataplane already dropped unmatched traffic.
 - SSH console prompts no longer see an extra empty line from clients that send
   CR LF.
 - A TLS certificate upload whose resolved path is outside `/data` now returns
