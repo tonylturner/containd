@@ -60,7 +60,12 @@ type Server struct {
 
 	lnMu sync.Mutex
 	ln   net.Listener
-	wg   sync.WaitGroup
+	// base is the server configuration without host keys; current adds the
+	// host key new connections use. Listen sets both; host key rotation
+	// replaces current.
+	base    *ssh.ServerConfig
+	current atomic.Pointer[ssh.ServerConfig]
+	wg      sync.WaitGroup
 
 	hostKeyClock hostKeyClock
 
@@ -99,7 +104,9 @@ func New(opts Options) (*Server, error) {
 	}, nil
 }
 
-func (s *Server) ListenAndServe(ctx context.Context) error {
+// Listen loads the host key and binds ListenAddr. The socket accepts no
+// connection until Serve; Close releases it.
+func (s *Server) Listen(ctx context.Context) error {
 	days, err := s.rotationDays(ctx)
 	if err != nil {
 		return err
@@ -111,7 +118,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	// handleConn adds the PublicKeyCallback, which collects one connection's
 	// refused keys.
-	cfg := &ssh.ServerConfig{
+	base := &ssh.ServerConfig{
 		PasswordCallback:          s.passwordCallback(),
 		VerifiedPublicKeyCallback: s.verifiedPublicKeyCallback(),
 		BannerCallback: func(conn ssh.ConnMetadata) string {
@@ -121,17 +128,41 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			return "containd ICS/OT firewall\r\n"
 		},
 	}
-	var current atomic.Pointer[ssh.ServerConfig]
-	current.Store(configWithHostKey(cfg, signer))
-
+	s.lnMu.Lock()
+	defer s.lnMu.Unlock()
+	if s.ln != nil {
+		return errors.New("ssh server already listening")
+	}
 	ln, err := net.Listen("tcp", s.opts.ListenAddr)
 	if err != nil {
 		return err
 	}
-	s.lnMu.Lock()
 	s.ln = ln
+	s.base = base
+	s.current.Store(configWithHostKey(base, signer))
+	s.logger.Infof("ssh listening on %s", ln.Addr())
+	return nil
+}
+
+// Addr is the address of the socket Listen bound; nil before Listen.
+func (s *Server) Addr() net.Addr {
+	s.lnMu.Lock()
+	defer s.lnMu.Unlock()
+	if s.ln == nil {
+		return nil
+	}
+	return s.ln.Addr()
+}
+
+// Serve accepts connections on the socket Listen bound until ctx ends or
+// Close is called. Call it once per Listen.
+func (s *Server) Serve(ctx context.Context) error {
+	s.lnMu.Lock()
+	ln, base := s.ln, s.base
 	s.lnMu.Unlock()
-	s.logger.Infof("ssh listening on %s", s.opts.ListenAddr)
+	if ln == nil {
+		return errors.New("ssh server is not listening")
+	}
 	if !s.opts.LabMode {
 		defer s.opts.UserStore.SubscribeSessionRevocations(s.closeRevokedSessions)()
 	}
@@ -144,7 +175,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		rotationDone := make(chan struct{})
 		go func() {
 			defer close(rotationDone)
-			s.rotateHostKeys(lifetime, cfg, &current)
+			s.rotateHostKeys(lifetime, base, &s.current)
 		}()
 		select {
 		case <-ctx.Done():
@@ -167,7 +198,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		go func(conn net.Conn, connConfig *ssh.ServerConfig) {
 			defer s.wg.Done()
 			s.handleConn(conn, connConfig)
-		}(c, current.Load())
+		}(c, s.current.Load())
 	}
 	cancel()
 	s.wg.Wait()

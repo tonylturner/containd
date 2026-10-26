@@ -88,7 +88,7 @@ func TestFailedLoopbackBindIsNotRecorded(t *testing.T) {
 	faults := &bootListenerFaults{logger: zap.NewNop().Sugar()}
 	lc := mgmtListenerConfig{
 		enableHTTP: true, httpAddr: net.JoinHostPort(ip, port), httpLoopbackAddr: net.JoinHostPort("127.0.0.1", port),
-		sshAddr: ":2222", optionalFault: faults.record,
+		optionalFault: faults.record,
 	}
 	binds, err := buildMgmtServers(http.NewServeMux(), lc)
 	defer binds.close()
@@ -134,7 +134,7 @@ func TestBoundLoopbackSocketIsCalled(t *testing.T) {
 	faults := &bootListenerFaults{logger: zap.NewNop().Sugar()}
 	lc := mgmtListenerConfig{
 		enableHTTP: true, httpAddr: net.JoinHostPort(ip, port), httpLoopbackAddr: net.JoinHostPort("127.0.0.1", port),
-		sshAddr: ":2222", optionalFault: faults.record,
+		optionalFault: faults.record,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "management") })
@@ -145,7 +145,7 @@ func TestBoundLoopbackSocketIsCalled(t *testing.T) {
 	}
 	serveTestBinds(t, binds)
 	publishTestBinds(t, lc, binds)
-	if bound := config.BoundManagementListeners(); bound.HTTP.Addr != lc.httpAddr || !bound.SSH.Enabled {
+	if bound := config.BoundManagementListeners(); bound.HTTP.Addr != lc.httpAddr || bound.SSH != (config.ManagementListener{}) {
 		t.Fatalf("bound = %+v", bound)
 	}
 	baseURL, client, err := httpapi.LoopbackManagementAPI()
@@ -172,7 +172,7 @@ func TestFailedHTTPSBindIsNotRecorded(t *testing.T) {
 		enableHTTP: true, httpAddr: "127.0.0.1:0",
 		enableHTTPS: true, httpsAddr: occupied.Addr().String(), redirectHTTPToHTTPS: true,
 		tlsCert: filepath.Join(dir, "server.crt"), tlsKey: filepath.Join(dir, "server.key"),
-		sshAddr: ":2222", optionalFault: faults.record,
+		optionalFault: faults.record,
 	}
 	binds, err := buildMgmtServers(http.NewServeMux(), lc)
 	defer binds.close()
@@ -180,7 +180,7 @@ func TestFailedHTTPSBindIsNotRecorded(t *testing.T) {
 		t.Fatalf("bind: listeners=%d err=%v faults=%v redirects=%v", len(binds.listeners), err, faults.list(), binds.redirects)
 	}
 	publishTestBinds(t, lc, binds)
-	if bound := config.BoundManagementListeners(); bound.HTTPS.Enabled || !bound.HTTP.Enabled || !bound.SSH.Enabled {
+	if bound := config.BoundManagementListeners(); bound.HTTPS.Enabled || !bound.HTTP.Enabled || bound.SSH != (config.ManagementListener{}) {
 		t.Fatalf("bound = %+v", bound)
 	}
 	if served := lc.servedManagement(binds); served != (httpapi.ServedManagement{}) {

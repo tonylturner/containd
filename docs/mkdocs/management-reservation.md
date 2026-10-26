@@ -207,7 +207,9 @@ listener address, or the convenience loopback listener. A port whose
 loopback listener failed to bind may belong to another process and is never
 called. An HTTPS listener that failed to bind is not served, and HTTP does
 not redirect to it. SSH stays off with a listener fault when no bound
-listener is reachable on 127.0.0.1. Correct stored listener settings and restart
+listener is reachable on 127.0.0.1 or its own socket fails to bind; SSH counts
+as bound only once that socket binds, and its failure never stops HTTP or
+HTTPS. Correct stored listener settings and restart
 to restore the optional or stored listener: an ordinary commit does not rebind
 sockets, so listener changes take effect at the next restart.
 Management HTTP, legacy HTTP, HTTPS and SSH listener values are structurally
