@@ -90,19 +90,14 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			Identities:   append([]string(nil), r.Identities...),
 			ICS:          ICSPredicate(r.ICS),
 		}
-		if r.Schedule != nil {
-			entry.Schedule = dprules.SchedulePredicate{
-				DaysOfWeek: append([]string(nil), r.Schedule.DaysOfWeek...),
-				StartTime:  r.Schedule.StartTime,
-				EndTime:    r.Schedule.EndTime,
-				Timezone:   r.Schedule.Timezone,
-			}
-		}
+		entry.Schedule = r.Schedule.Predicate()
 		for _, p := range r.Protocols {
 			entry.Protocols = append(entry.Protocols, dprules.Protocol{Name: p.Name, Port: p.Port})
 		}
 		snap.Firewall = append(snap.Firewall, entry)
 	}
+
+	snap.IdentityBindings = compileIdentityBindings(cfg.Firewall.IdentityBindings)
 
 	// Local input allow rules (management plane + VPN listeners).
 	snap.LocalInput = append(snap.LocalInput, compileLocalInput(cfg)...)

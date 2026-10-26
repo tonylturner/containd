@@ -198,6 +198,7 @@ func iecSessionContext(snap *rules.Snapshot, client, server netip.AddrPort, reso
 		Port:  strconv.Itoa(int(server.Port())),
 	}
 	ctx.SrcZone, ctx.DstZone = resolve(snap, ctx.SrcIP, ctx.DstIP)
+	ctx.Identities = snap.IdentitiesOf(ctx.SrcIP)
 	return ctx
 }
 

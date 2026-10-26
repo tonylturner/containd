@@ -25,9 +25,9 @@ type PreviewRuleResponse struct {
 	SampleMatches []events.Event    `json:"sample_matches"`
 	TimeRange     *PreviewTimeRange `json:"time_range"`
 	TotalEvents   int               `json:"total_events"`
-	// Warnings lists the candidate's predicates that resolve toward denial
-	// under the running enforcement, which explains an inactive ALLOW rule's
-	// zero matches; omitted when there are none.
+	// Warnings reports a candidate that matches nothing under the running
+	// identity bindings, which explains its zero matches; omitted when there
+	// are none.
 	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
 	// ICSCoverage is the candidate's coverage under the running settings
 	// and runtime state; omitted for a rule without an ICS protocol.
@@ -41,8 +41,9 @@ type PreviewTimeRange struct {
 
 // PreviewRule tests a candidate in isolation, not against preceding rules or
 // default actions. It does not apply rules, log decisions or enforce verdicts.
-// Predicates the running enforcement cannot evaluate resolve toward denial,
-// as they do when the rule is applied.
+// A schedule is evaluated at each event's time. Identities are those the
+// running configuration binds to each event's opener now, not at the time
+// of the event.
 func (e *Engine) PreviewRule(entry rules.Entry) PreviewRuleResponse {
 	return e.previewRule(entry, resolveZonesForFlow)
 }
@@ -55,13 +56,15 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 	evs := e.eventStore.ListTelemetry(5000)
 	result.TotalEvents = len(evs)
 	snap := e.ruleSnap.Load()
-	queueID := e.enforcedQueueID()
-	effective, active := enforcedCandidate(entry, queueID)
-	result.Warnings = (&enforce.Compiler{QueueID: queueID}).RuleWarnings(&rules.Snapshot{Firewall: []rules.Entry{entry}})
-	if cov := e.coverageOf(&rules.Snapshot{Firewall: []rules.Entry{entry}}); len(cov) == 1 {
+	candidate := &rules.Snapshot{Firewall: []rules.Entry{entry}}
+	if snap != nil {
+		candidate.IdentityBindings = snap.IdentityBindings
+	}
+	result.Warnings = (&enforce.Compiler{QueueID: e.enforcedQueueID()}).RuleWarnings(candidate)
+	if cov := e.coverageOf(candidate); len(cov) == 1 {
 		result.ICSCoverage = &cov[0]
 	}
-	evaluator := rules.NewEvaluator(&rules.Snapshot{Firewall: []rules.Entry{effective}})
+	evaluator := rules.NewEvaluator(candidate)
 	for _, ev := range evs {
 		if result.TimeRange == nil {
 			result.TimeRange = &PreviewTimeRange{Start: ev.Timestamp, End: ev.Timestamp}
@@ -72,9 +75,6 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 			if ev.Timestamp.After(result.TimeRange.End) {
 				result.TimeRange.End = ev.Timestamp
 			}
-		}
-		if !active {
-			continue
 		}
 		ctx, ok := previewEventContext(snap, entry, ev, resolve)
 		if !ok {
@@ -95,25 +95,6 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 		}
 	}
 	return result
-}
-
-// enforcedCandidate returns entry as enforcement decides it when the engine
-// queues ICS rules to queueID, and false when it can never match: an ALLOW
-// rule with an unenforced predicate is inactive, and a DENY rule applies as
-// if each unenforced predicate always matched.
-func enforcedCandidate(entry rules.Entry, queueID int) (rules.Entry, bool) {
-	for _, p := range enforce.UnenforcedPredicates(entry, queueID) {
-		if entry.Action == rules.ActionAllow {
-			return entry, false
-		}
-		switch p {
-		case enforce.PredicateIdentity:
-			entry.Identities = nil
-		case enforce.PredicateSchedule:
-			entry.Schedule = rules.SchedulePredicate{}
-		}
-	}
-	return entry, true
 }
 
 // enforcedQueueID is the NFQUEUE group the running compiler steers ICS rules
@@ -165,7 +146,7 @@ func previewEventContext(snap *rules.Snapshot, entry rules.Entry, ev events.Even
 	if entry.ICS.Protocol == "" {
 		srcZone, dstZone := resolve(snap, src, dst)
 		return rules.EvalContext{SrcIP: src, DstIP: dst, SrcZone: srcZone, DstZone: dstZone,
-			Proto: ev.Transport, Port: strconv.Itoa(int(ev.DstPort)), Now: ev.Timestamp}, true
+			Proto: ev.Transport, Port: strconv.Itoa(int(ev.DstPort)), Identities: snap.IdentitiesOf(src), Now: ev.Timestamp}, true
 	}
 	// DPI events retain the directional flow.Key.Hash. Use its direction,
 	// not the message kind (unsolicited server messages can be requests).

@@ -220,6 +220,17 @@ Notes:
 - `firewall.defaultAction` applies to forwarded traffic that no rule matches. It is `ALLOW` or `DENY`; omitted or empty means `DENY`, and any other value is rejected.
 - `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
 - Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
+- `firewall.identityBindings` tags source addresses with identity labels for
+  rule `identities`: `[{"ip": "10.0.0.5", "identities": ["operator"]}]`. Each
+  entry binds one unicast IPv4 or IPv6 address, without a zone, at most once
+  (an IPv4-mapped IPv6 address is its IPv4 address), to 1–16 distinct labels.
+  A label is 1–64 bytes of printable UTF-8 without surrounding spaces. A
+  configuration holds at most 4096 bindings. `/api/v1/identities` edits them in
+  the candidate; see
+  [Identity and schedule predicates](policy-model.md#identity-and-schedule-predicates).
+- A rule `schedule` has `daysOfWeek` (`Sunday`…`Saturday`, empty for every day),
+  `startTime` and `endTime` (24-hour `HH:MM`) and an IANA `timezone` (blank is
+  UTC). Equal start and end times are rejected. Zone data ships with containd.
 - `firewall.nat.enabled` enables source NAT (masquerade) from `sourceZones` out
   `egressZone` (defaults: `lan`/`dmz` out `wan`). Only zones with bound interfaces
   generate matches; custom zone names are supported.

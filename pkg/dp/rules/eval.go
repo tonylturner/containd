@@ -204,30 +204,6 @@ func matchProtoCompiled(ce *compiledEntry, ctx EvalContext) bool {
 	return false
 }
 
-// matchIdentities matches an entry's identity predicate. The dataplane does
-// not attach identities to flows, so a context without identities cannot
-// decide the predicate and it resolves toward denial: a DENY rule matches as
-// if the predicate held, and an ALLOW rule does not match.
-func matchIdentities(entry Entry, ctx EvalContext) bool {
-	if !entry.HasIdentityPredicate() {
-		return true
-	}
-	if len(ctx.Identities) == 0 {
-		return entry.Action == ActionDeny
-	}
-	for _, id := range entry.Identities {
-		if id == "" {
-			continue
-		}
-		for _, got := range ctx.Identities {
-			if id == got {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // matchICSCompiled uses pre-parsed addresses for fast evaluation.
 func matchICSCompiled(ce *compiledEntry, ctx EvalContext) bool {
 	if icsPredicateEmpty(ce.ICS) {
@@ -395,71 +371,4 @@ func ipInCIDRs(ip net.IP, cidrs []string) bool {
 		}
 	}
 	return false
-}
-
-func schedulePredicateEmpty(s SchedulePredicate) bool {
-	return len(s.DaysOfWeek) == 0 && s.StartTime == "" && s.EndTime == ""
-}
-
-func matchSchedule(entry Entry, ctx EvalContext) bool {
-	if !entry.HasSchedulePredicate() {
-		return true
-	}
-	now, ok := scheduleNow(entry.Schedule, ctx.Now)
-	return ok && matchScheduleDay(entry.Schedule, now) && matchScheduleTimeWindow(entry.Schedule, now)
-}
-
-func scheduleNow(schedule SchedulePredicate, now time.Time) (time.Time, bool) {
-	if now.IsZero() {
-		now = time.Now()
-	}
-	if schedule.Timezone == "" {
-		return now, true
-	}
-	loc, err := time.LoadLocation(schedule.Timezone)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return now.In(loc), true
-}
-
-func matchScheduleDay(schedule SchedulePredicate, now time.Time) bool {
-	if len(schedule.DaysOfWeek) == 0 {
-		return true
-	}
-	day := now.Weekday().String()
-	return contains(schedule.DaysOfWeek, day)
-}
-
-func matchScheduleTimeWindow(schedule SchedulePredicate, now time.Time) bool {
-	hasStart := schedule.StartTime != ""
-	hasEnd := schedule.EndTime != ""
-	if !hasStart && !hasEnd {
-		return true
-	}
-	return withinScheduleWindow(formatHHMM(now.Hour(), now.Minute()), schedule.StartTime, schedule.EndTime)
-}
-
-func withinScheduleWindow(hhmm, start, end string) bool {
-	hasStart := start != ""
-	hasEnd := end != ""
-	if hasStart && hasEnd {
-		if start <= end {
-			return hhmm >= start && hhmm <= end
-		}
-		return hhmm >= start || hhmm <= end
-	}
-	if hasStart {
-		return hhmm >= start
-	}
-	return hhmm <= end
-}
-
-// formatHHMM returns "HH:MM" without fmt.Sprintf allocation.
-func formatHHMM(h, m int) string {
-	return string([]byte{
-		byte('0' + h/10), byte('0' + h%10),
-		':',
-		byte('0' + m/10), byte('0' + m%10),
-	})
 }

@@ -18,13 +18,14 @@ type RulesetPreview struct {
 	Snapshot rules.Snapshot        `json:"snapshot"`
 	Ruleset  string                `json:"ruleset,omitempty"`
 	Runtime  RulesetPreviewRuntime `json:"runtime"`
-	// Warnings lists the rules whose predicates resolve toward denial in
-	// Ruleset; omitted when there are none.
+	// Warnings lists the rules of the candidate that match nothing (see
+	// enforce.RuleWarnings); omitted when there are none.
 	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
 }
 
 // PreviewRuleset compiles an isolated candidate with the queue ownership sampled
-// now. A subsequent bind or reconfiguration can change the eventual apply.
+// now and schedule time sets planned from now. A subsequent bind or
+// reconfiguration, or a later apply time, can change the eventual apply.
 func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSettings) (RulesetPreview, error) {
 	if err := enforce.ValidateManagementSnapshot(&snap, e.managementReservation); err != nil {
 		return RulesetPreview{}, err
@@ -32,6 +33,7 @@ func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSe
 	comp := enforce.NewCompilerWithSettings(settings, e.managementReservation)
 	comp.EngineAPI = e.engineAPI
 	comp.IEC104EnvelopeOpen = e.gate.sampleOpen(comp.QueueID)
+	comp.ScheduleFrom = e.gate.now()
 	runtime := RulesetPreviewRuntime{IEC104EnvelopeOpen: comp.IEC104EnvelopeOpen}
 	switch {
 	case !comp.SteersIEC104(&snap):

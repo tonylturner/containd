@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
@@ -46,6 +47,8 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 				t.Fatal(err)
 			}
 			e.gate.own(tc.owned)
+			planned := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+			e.gate.clock = func() time.Time { return planned }
 			before := *e.compiler
 			preview, err := e.PreviewRuleset(snap, settings)
 			if err != nil {
@@ -64,13 +67,11 @@ func TestRulesetPreviewEqualsApply(t *testing.T) {
 				t.Fatalf("preview differs from apply:\n%s\napply:\n%s", preview.Ruleset, applier.ruleset)
 			}
 			applied := e.RulesetStatus().Warnings
-			if len(preview.Warnings) != 2 || !reflect.DeepEqual(preview.Warnings, applied) {
+			if len(preview.Warnings) != 1 || !reflect.DeepEqual(preview.Warnings, applied) {
 				t.Fatalf("preview warnings %+v differ from apply status warnings %+v", preview.Warnings, applied)
 			}
-			if strings.Contains(preview.Ruleset, "tcp dport 22") {
-				t.Fatalf("scheduled ALLOW compiled:\n%s", preview.Ruleset)
-			}
-			for _, want := range []string{"table inet candidate_table", "group 203", "tcp dport 502 queue num 207", "ip daddr 10.99.99.2 tcp dport 8080 accept",
+			for _, want := range []string{"table inet candidate_table",
+				"meta time @schedule_allow_40_0120_0360_555443 tcp dport 22 accept", "elements = { 1793412000-1793426400 }", "group 203", "tcp dport 502 queue num 207", "ip daddr 10.99.99.2 tcp dport 8080 accept",
 				`iifname "eth6" ip daddr 10.98.0.2 tcp dport 9091 accept`} {
 				if !strings.Contains(preview.Ruleset, want) {
 					t.Fatalf("missing %q:\n%s", want, preview.Ruleset)

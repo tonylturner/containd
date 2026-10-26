@@ -432,9 +432,10 @@ components:
           type: array
           items: {type: string}
           description: >-
-            Not enforced yet: the dataplane does not attach identities to flows, so an
-            ALLOW rule with identities never matches and a DENY rule with identities
-            matches every flow its other predicates match.
+            Matches a connection whose opener address firewall.identityBindings binds
+            to any of these labels (exact, case-sensitive). An unbound opener matches
+            no identity rule, ALLOW or DENY. Removing a binding also stops established
+            connections that only a conditional ALLOW admitted.
         ics:
           allOf:
           - $ref: "#/components/schemas/ICSPredicate"
@@ -445,9 +446,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/ScheduleConfig'
           description: >-
-            Enforced only on ICS rules that NFQUEUE steers to the engine (nonzero
-            nfqueueGroup). nftables decides every other rule: a scheduled ALLOW is
-            inactive and a scheduled DENY applies at all times.
+            Recurring window, enforced by nftables time sets on the rules it decides and
+            by the engine on ICS rules NFQUEUE steers to it. When a window ends,
+            established connections that only a scheduled ALLOW admitted stop; when a
+            scheduled DENY window opens, it applies to established connections too.
 
     ICSPredicate:
       type: object
@@ -650,8 +652,8 @@ components:
           type: array
           items: {$ref: '#/components/schemas/RuleWarning'}
           description: >-
-            Predicates of the rule that resolve toward denial under the running enforcement;
-            an inactive ALLOW rule matches nothing. Omitted when there are none.
+            Reports a rule that matches nothing under the running identity bindings, which
+            explains its zero matches. Omitted when there are none.
     AVConfig:
       properties:
         blockTtlSeconds: {type: integer, minimum: 0, description: Seconds a detected malware flow stays blocked; 0 selects 600}
@@ -871,6 +873,11 @@ components:
         defaultAction: {type: string, enum: ['', ALLOW, DENY], description: Omitted or empty means DENY.}
         nat: {$ref: '#/components/schemas/NATConfig'}
         rules: {items: {$ref: '#/components/schemas/FirewallRule'}, type: array}
+        identityBindings:
+          type: array
+          maxItems: 4096
+          items: {$ref: '#/components/schemas/IdentityMapping'}
+          description: Admin-set identity labels of source addresses, each address at most once.
       type: object
     ForwardProxyConfig:
       properties:
@@ -1271,11 +1278,18 @@ components:
         shellMode: {type: string}
       type: object
     ScheduleConfig:
+      description: >-
+        A window opens on each listed day (every day when daysOfWeek is empty) at
+        startTime in timezone and closes at endTime, which is exclusive. An end not
+        after the start ends on the next day; the window belongs to its start day.
+        Blank startTime is 00:00 and blank endTime the end of the day; equal times
+        are invalid. A skipped local time is the end of the daylight-saving gap and
+        a repeated one its first occurrence.
       properties:
-        daysOfWeek: {items: {type: string}, type: array}
-        endTime: {type: string}
-        startTime: {type: string}
-        timezone: {type: string}
+        daysOfWeek: {items: {type: string, enum: [Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday]}, type: array}
+        endTime: {type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: "06:00"}
+        startTime: {type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: "02:00"}
+        timezone: {type: string, description: 'IANA timezone; blank is UTC.', example: America/New_York}
       type: object
     ServicesConfig:
       properties:
@@ -1653,11 +1667,13 @@ components:
     IdentityMapping:
       type: object
       description: >-
-        Runtime IP-to-identity mapping held by the management API. Firewall rule
-        evaluation does not consult these mappings yet; see FirewallRule.identities.
+        One firewall.identityBindings entry: a unicast IPv4 or IPv6 address (no zone;
+        responses use its canonical form, IPv4 for an IPv4-mapped address) bound to
+        1-16 distinct labels of 1-64 printable bytes without surrounding spaces.
+        See FirewallRule.identities.
       properties:
-        ip: {type: string}
-        identities: {type: array, items: {type: string}, minItems: 1}
+        ip: {type: string, example: 10.0.0.5}
+        identities: {type: array, items: {type: string, minLength: 1, maxLength: 64}, minItems: 1, maxItems: 16}
       required: [ip, identities]
     SessionResponse:
       type: object
@@ -1736,7 +1752,7 @@ components:
         warnings:
           type: array
           items: {$ref: '#/components/schemas/RuleWarning'}
-          description: Rules of the applied ruleset whose predicates resolve toward denial; omitted when there are none or the apply failed.
+          description: Rules of the applied ruleset that match nothing; omitted when there are none or the apply failed.
       type: object
     ICSCoverageRule:
       type: object
@@ -1778,14 +1794,13 @@ components:
       type: object
       required: [ruleId, predicate, action, message]
       description: >-
-        A firewall rule predicate the dataplane cannot evaluate. It resolves toward denial:
-        an ALLOW rule is inactive, and a DENY rule applies as if the predicate always matched.
+        A firewall rule that matches nothing as configured: no bound address satisfies
+        its identities.
       properties:
         ruleId: {type: string}
         predicate:
           type: string
-          enum: [identity, schedule]
-          description: Identity predicates are never evaluated; schedules are evaluated only on ICS rules inspected through NFQUEUE.
+          enum: [identity]
         action: {type: string, enum: [ALLOW, DENY]}
         message: {type: string}
     NetcfgManagementFault:
@@ -1926,6 +1941,11 @@ components:
         Name: {type: string}
         RuleCount: {type: integer}
       type: object
+    RulesIdentityBinding:
+      properties:
+        IP: {type: string}
+        Identities: {items: {type: string}, type: array}
+      type: object
     RulesSchedulePredicate:
       properties:
         DaysOfWeek: {items: {type: string}, type: array}
@@ -1938,6 +1958,7 @@ components:
         Default: {type: string}
         Firewall: {items: {$ref: '#/components/schemas/RulesEntry'}, type: array}
         IDS: {$ref: '#/components/schemas/RulesIDSConfig'}
+        IdentityBindings: {items: {$ref: '#/components/schemas/RulesIdentityBinding'}, type: array, description: Sorted by address.}
         LocalInput: {items: {$ref: '#/components/schemas/RulesLocalServiceRule'}, type: array}
         NAT: {$ref: '#/components/schemas/RulesNATConfig'}
         Version: {type: string}
@@ -4526,7 +4547,7 @@ paths:
                   warnings:
                     type: array
                     items: {$ref: '#/components/schemas/RuleWarning'}
-                    description: Candidate rules whose predicates resolve toward denial, in rule ID order; omitted when there are none.
+                    description: Candidate rules that match nothing, in rule ID order; omitted when there are none.
                   icsCoverage:
                     type: array
                     items: {$ref: '#/components/schemas/ICSCoverageRule'}
@@ -4890,9 +4911,9 @@ paths:
         schema: {type: string}
   /identities:
     get:
-      summary: List runtime IP identity mappings
+      summary: List identity bindings
       tags: [Identities]
-      description: Available when an identity resolver is configured.
+      description: Reads firewall.identityBindings of the candidate configuration.
       responses:
         '200':
           description: Success
@@ -4900,12 +4921,15 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [mappings]
                 properties:
-                  mappings: {type: object, additionalProperties: {type: array, items: {type: string}}}
+                  mappings: {type: array, items: {$ref: '#/components/schemas/IdentityMapping'}}
     post:
-      summary: Set runtime IP identity mapping (admin)
+      summary: Stage an identity binding (admin)
       tags: [Identities]
-      description: Immediate runtime update; available when an identity resolver is configured.
+      description: >-
+        Binds an address to identities in the candidate, replacing its existing
+        binding. Stages the shared candidate; commit to apply.
       requestBody:
         required: true
         content:
@@ -4913,24 +4937,31 @@ paths:
             schema: {$ref: '#/components/schemas/IdentityMapping'}
       responses:
         '200':
-          description: Success
+          description: Staged binding, with the canonical address
           content:
             application/json:
               schema: {$ref: '#/components/schemas/IdentityMapping'}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+        '400': {description: Invalid address or resulting configuration, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /identities/{ip}:
     delete:
-      summary: Delete runtime identity mapping (admin)
+      summary: Stage removal of an identity binding (admin)
       tags: [Identities]
-      description: Available when an identity resolver is configured.
+      description: Removes the address's binding from the candidate. Stages the shared candidate; commit to apply.
       responses:
         '200':
-          description: Success
+          description: Staged removal
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   deleted: {type: string}
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+        '400': {description: Invalid address, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        '404': {description: No binding for the address, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       parameters:
       - name: ip
         in: path

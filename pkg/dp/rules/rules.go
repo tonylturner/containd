@@ -80,10 +80,8 @@ type Entry struct {
 	RateLimit    *RateLimit // RATE_LIMIT only
 	Tag          string     // TAG only
 	Log          bool       // log matching traffic
-	// Identities restricts the entry to flows of these user/group roles.
-	// The dataplane does not attach identities to flows: an ALLOW entry
-	// with identities never matches, and a DENY entry matches every
-	// identity.
+	// Identities restricts the entry to flows whose opener address is bound
+	// (Snapshot.IdentityBindings) to any of these labels.
 	Identities []string
 	ICS        ICSPredicate
 	Schedule   SchedulePredicate

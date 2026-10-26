@@ -10,8 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
-
-	"github.com/tonylturner/containd/pkg/cp/identity"
 )
 
 // TestOpenAPIRoutes compares the public wire contract with the production
@@ -52,7 +50,7 @@ func TestOpenAPIRoutes(t *testing.T) {
 	// and use the same production constructor with audit enabled for parity.
 	full := NewServerWithEngineAndServices(
 		&mockStore{}, &mockAuditStore{}, newRuntimeMockEngine(),
-		routeInventoryServices{}, newMockUserStore(), identity.NewResolver(),
+		routeInventoryServices{}, newMockUserStore(),
 	)
 	registered := openAPIOperations(full)
 	for operation := range registered {

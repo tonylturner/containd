@@ -24,7 +24,6 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/cp/identity"
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
@@ -170,8 +169,8 @@ func NewServerWithEngine(store config.Store, auditStore audit.Store, engine Engi
 }
 
 // NewServerWithEngineAndServices builds a Gin engine and optionally wires engine, services, and users stores.
-// opts may contain an *identity.Resolver as the first element and a
-// ManagementGuardHealth provider; absent identity disables identity endpoints.
+// opts may contain ManagementGuardHealth, ManagementListenerFaults and
+// FactoryResetSessions providers.
 func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store, opts ...any) *gin.Engine {
 	var guardHealth ManagementGuardHealth
 	var listenerFaults ManagementListenerFaults
@@ -404,14 +403,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		// ICS protocol templates.
 		protected.GET("/templates/ics", listICSTemplatesHandler())
 		protected.POST("/templates/ics/apply", requireAdmin(), applyICSTemplateHandler(store))
-		// Identity resolver routes (optional).
-		for _, o := range opts {
-			if resolver, ok := o.(*identity.Resolver); ok && resolver != nil {
-				protected.GET("/identities", listIdentitiesHandler(resolver))
-				protected.POST("/identities", requireAdmin(), setIdentityHandler(resolver))
-				protected.DELETE("/identities/:ip", requireAdmin(), deleteIdentityHandler(resolver))
-			}
-		}
+		// Identity bindings (candidate firewall.identityBindings).
+		protected.GET("/identities", listIdentitiesHandler(store))
+		protected.POST("/identities", requireAdmin(), setIdentityHandler(store))
+		protected.DELETE("/identities/:ip", requireAdmin(), deleteIdentityHandler(store))
 	}
 
 	return r
@@ -678,5 +673,3 @@ func auditLog(c *gin.Context, rec audit.Record) {
 	}
 	_ = store.Add(c.Request.Context(), rec)
 }
-
-// --- Identity mapping handlers ---

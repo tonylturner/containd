@@ -36,8 +36,8 @@ func (e *rulesetPreviewEngine) PreviewRuleset(_ context.Context, cfg *config.Con
 func TestRulesetPreviewDelegatesCandidate(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DataPlane = config.DataPlaneConfig{Enforcement: true, EnforceTable: "custom", NFLogGroup: 205, NFQueueGroup: 209}
-	warnings := []enforce.RuleWarning{{RuleID: "maint", Predicate: enforce.PredicateSchedule, Action: rules.ActionAllow,
-		Message: "schedules are enforced only on ICS rules inspected through NFQUEUE; ALLOW rule inactive"}}
+	warnings := []enforce.RuleWarning{{RuleID: "maint", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow,
+		Message: "no bound address can match identities operator; the rule matches nothing until one is bound"}}
 	applied := dpengine.RulesetStatus{Ruleset: "engine-applied", Warnings: warnings}
 	engine := &rulesetPreviewEngine{mockEngine: &mockEngine{ruleset: applied}, result: dpengine.RulesetPreview{Ruleset: "engine-compiled",
 		Runtime: dpengine.RulesetPreviewRuntime{IEC104EnvelopeOpen: true, Reason: "owned"}, Warnings: warnings}}

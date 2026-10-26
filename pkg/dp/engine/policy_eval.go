@@ -82,7 +82,7 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 	return verdict.Verdict{}, rules.EvalContext{}, false
 }
 
-func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, srcZone, dstZone string) (rules.EvalContext, bool) {
+func evalContextFromDPIEvent(snap *rules.Snapshot, state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, srcZone, dstZone string) (rules.EvalContext, bool) {
 	if state == nil || pkt == nil || !isRuleEvaluableICSEvent(ev.Proto) || isStreamErrorEvent(ev) {
 		return rules.EvalContext{}, false
 	}
@@ -97,6 +97,8 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 		DstIP:   state.Key.ServerIP(),
 		Proto:   strings.ToLower(pkt.Proto),
 		Port:    strconv.Itoa(int(service)),
+		// Identities are bound to the connection's opener.
+		Identities: snap.IdentitiesOf(state.Key.OpenerIP()),
 		ICS: &rules.ICSContext{
 			Protocol:  strings.ToLower(ev.Proto),
 			Address:   attrString(ev.Attributes, "address"),

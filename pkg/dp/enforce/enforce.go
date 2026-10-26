@@ -45,6 +45,11 @@ type Compiler struct {
 	// the existing NFQUEUE userspace path, so this log statement is
 	// suppressed for them to avoid double-counting.
 	NFLogGroup int
+	// ScheduleFrom and ScheduleHorizon bound the windows written to schedule
+	// time sets: [ScheduleFrom, ScheduleFrom+ScheduleHorizon). Zero values
+	// mean now and DefaultScheduleHorizon (see schedule.go).
+	ScheduleFrom    time.Time
+	ScheduleHorizon time.Duration
 }
 
 func NewCompiler() *Compiler {
@@ -67,10 +72,21 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		return "", err
 	}
 
+	preds, err := newPredicates(snap, c.QueueID)
+	if err != nil {
+		return "", err
+	}
+
 	var buf bytes.Buffer
 	buf.WriteString(DeleteTable(table))
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
 	c.writeZoneIfaceSets(&buf, snap)
+	if err := preds.writeSets(&buf, c); err != nil {
+		return "", err
+	}
+	if err := preds.writeRecheckChains(&buf); err != nil {
+		return "", err
+	}
 	// Declared before the forward chain that jumps to it.
 	if c.SteersIEC104(snap) {
 		c.writeIEC104EnvelopeChain(&buf)
@@ -78,7 +94,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if err := c.writeInputChain(&buf, snap, locals); err != nil {
 		return "", err
 	}
-	if err := c.writeForwardChain(&buf, snap); err != nil {
+	if err := c.writeForwardChain(&buf, snap, preds); err != nil {
 		return "", err
 	}
 	if err := c.writePreroutingChain(&buf, snap); err != nil {
@@ -150,21 +166,14 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, snap *rules.Snapshot, loca
 	return nil
 }
 
-func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) error {
+func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot, preds *predicates) error {
 	buf.WriteString("  chain forward {\n")
 	buf.WriteString("    type filter hook forward priority 0;\n")
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
 	// Revocations and temporary blocks act in the dynamic table's earlier
 	// forward chain, before anything below (see writeDynamicTable).
 
-	entries := append([]rules.Entry(nil), snap.Firewall...)
-	sort.SliceStable(entries, func(i, j int) bool {
-		ai, aj := entries[i].Action, entries[j].Action
-		if ai != aj {
-			return ai == rules.ActionAllow
-		}
-		return entries[i].ID < entries[j].ID
-	})
+	entries := kernelOrder(snap.Firewall)
 
 	// Emit dpiEligible rules (those with ICS predicates compiled to
 	// `queue num N`) BEFORE the ct established fast-path. Otherwise only
@@ -192,6 +201,7 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 		}
 	}
 
+	preds.writeRecheckJump(buf)
 	buf.WriteString("    ct state { established, related } accept;\n")
 	if err := c.writeDNATAccepts(buf, snap); err != nil {
 		return err
@@ -206,6 +216,9 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot) er
 			continue
 		}
 		lines, err := compileEntry(e, snap.ZoneIfaces, c.QueueID, c.NFLogGroup)
+		if err == nil {
+			lines, err = preds.guard(e, lines)
+		}
 		if err != nil {
 			return err
 		}
@@ -233,15 +246,11 @@ func defaultPolicy(a rules.Action) string {
 // Entries with zero protocols emit a single line with no proto/port match
 // (relies on zone iifname/oifname or saddr/daddr to constrain the rule).
 //
-// A predicate nftables cannot evaluate (identity, schedule) resolves toward
-// denial unless the rule is queued to the engine: an ALLOW entry emits no
-// line, and a DENY entry drops without the predicate's condition.
+// Identity and schedule predicates are not part of these lines: the forward
+// chain adds them (predicates.guard).
 func compileEntry(e rules.Entry, zoneIfaces map[string][]string, queueID int, nflogGroup int) ([]string, error) {
 	dpiEligible := isDPIEligible(e)
 	queued := queuedToEngine(e, queueID)
-	if !queued && e.Action == rules.ActionAllow && len(UnenforcedPredicates(e, queueID)) > 0 {
-		return nil, nil
-	}
 	base := []string{}
 	if c := zoneClause("iifname", e.SourceZones, zoneIfaces); c != "" {
 		base = append(base, c)
@@ -389,68 +398,32 @@ func sanitizeRuleIDForLog(id string) string {
 	return string(b)
 }
 
-// UnenforcedPredicate names a rule predicate that the component deciding
-// the rule's traffic cannot evaluate.
-type UnenforcedPredicate string
+// RulePredicate names the rule predicate a warning is about.
+type RulePredicate string
 
-const (
-	PredicateIdentity UnenforcedPredicate = "identity"
-	PredicateSchedule UnenforcedPredicate = "schedule"
-)
+const PredicateIdentity RulePredicate = "identity"
 
-// RuleWarning reports a firewall rule whose predicate resolves toward
-// denial because it cannot be evaluated: an ALLOW rule is inactive, and a
-// DENY rule applies as if the predicate always held.
+// RuleWarning reports a firewall rule that matches nothing as configured.
 type RuleWarning struct {
-	RuleID    string              `json:"ruleId"`
-	Predicate UnenforcedPredicate `json:"predicate"`
-	Action    rules.Action        `json:"action"`
-	Message   string              `json:"message"`
+	RuleID    string        `json:"ruleId"`
+	Predicate RulePredicate `json:"predicate"`
+	Action    rules.Action  `json:"action"`
+	Message   string        `json:"message"`
 }
 
-// RuleWarnings lists, in rule ID order, every predicate of snap's firewall
-// rules that resolves toward denial under this compiler's queue setting.
-// Identity predicates are never evaluated. Schedules are evaluated by the
-// engine only for rules queued to it, so nftables cannot honour them on
-// any other rule.
+// RuleWarnings lists, in rule ID order, snap's firewall rules whose
+// identity predicate no bound address can satisfy.
 func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
 	if snap == nil {
 		return nil
 	}
-	var out []RuleWarning
-	for _, e := range snap.Firewall {
-		for _, p := range UnenforcedPredicates(e, c.QueueID) {
-			out = append(out, ruleWarning(e, p))
-		}
+	idx, err := newIdentityIndex(snap.IdentityBindings)
+	if err != nil {
+		return nil // such a snapshot does not compile, so it has no ruleset to warn about
 	}
+	out := identityWarnings(snap, idx)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].RuleID < out[j].RuleID })
 	return out
-}
-
-// UnenforcedPredicates lists e's predicates that no component evaluates
-// when the compiler queues to queueID (0: no queue). The compiler and the
-// rule impact preview both resolve these toward denial.
-func UnenforcedPredicates(e rules.Entry, queueID int) []UnenforcedPredicate {
-	var out []UnenforcedPredicate
-	if e.HasIdentityPredicate() {
-		out = append(out, PredicateIdentity)
-	}
-	if e.HasSchedulePredicate() && !queuedToEngine(e, queueID) {
-		out = append(out, PredicateSchedule)
-	}
-	return out
-}
-
-func ruleWarning(e rules.Entry, p UnenforcedPredicate) RuleWarning {
-	reason := "identity predicates are not enforced yet"
-	if p == PredicateSchedule {
-		reason = "schedules are enforced only on ICS rules inspected through NFQUEUE"
-	}
-	effect := "ALLOW rule inactive"
-	if e.Action != rules.ActionAllow {
-		effect = string(e.Action) + " rule applies as if the " + string(p) + " always matched"
-	}
-	return RuleWarning{RuleID: e.ID, Predicate: p, Action: e.Action, Message: reason + "; " + effect}
 }
 
 // isDPIEligible returns true if an entry requires DPI/ICS inspection and

@@ -42,6 +42,20 @@ type envelopeGate struct {
 	// fault reports a failed switch; ok reports a successful one.
 	fault func(reason string)
 	ok    func()
+	// snap is the snapshot of the installed ruleset and planned the start of
+	// the schedule horizon its time sets hold (schedule_planner.go).
+	snap    *rules.Snapshot
+	planned time.Time
+	// clock plans schedule horizons; nil is time.Now.
+	clock func() time.Time
+}
+
+// now is the time schedule horizons start from.
+func (g *envelopeGate) now() time.Time {
+	if g.clock != nil {
+		return g.clock()
+	}
+	return time.Now()
 }
 
 // wantOpenLocked reports whether the installed envelope may queue: only to
@@ -72,6 +86,7 @@ func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applie
 	defer g.mu.Unlock()
 	open := g.queueOpenLocked(comp.QueueID)
 	comp.IEC104EnvelopeOpen = open
+	comp.ScheduleFrom = g.now()
 	compiled, err := comp.CompileFirewall(snap)
 	if err != nil {
 		return compiled, err
@@ -91,6 +106,7 @@ func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applie
 		return compiled, err
 	}
 	g.comp, g.applier = comp, applier
+	g.snap, g.planned = snap, comp.ScheduleFrom
 	g.installed = comp.SteersIEC104(snap)
 	g.open = g.installed && open
 	if g.ok != nil {
@@ -112,7 +128,7 @@ func (g *envelopeGate) release() error {
 	if err := g.applier.Apply(ctx, g.comp.DeleteTables()); err != nil {
 		return err
 	}
-	g.comp, g.applier = nil, nil
+	g.comp, g.applier, g.snap = nil, nil, nil
 	g.installed, g.open = false, false
 	return nil
 }
