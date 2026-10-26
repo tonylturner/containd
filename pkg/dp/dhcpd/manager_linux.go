@@ -543,20 +543,21 @@ func (m *Manager) startListenerLocked(dev string, cfg config.DHCPConfig, pl pool
 		if err == nil || errors.Is(err, context.Canceled) {
 			return
 		}
-		m.handleListenerExit(dev, err)
+		m.handleListenerExit(dev, errCh, err)
 	}(dev)
 }
 
-func (m *Manager) handleListenerExit(dev string, err error) {
+func (m *Manager) handleListenerExit(dev string, exited <-chan error, err error) {
 	m.mu.Lock()
 	l, ok := m.listeners[dev]
-	if !ok {
+	if !ok || l.errCh != exited {
 		m.mu.Unlock()
 		return
 	}
-	// Listener exited unexpectedly; clear it so we can restart.
-	delete(m.listeners, dev)
+	// Retain this listener identity while waiting to retry. Apply may replace
+	// or remove it in the meantime; an old worker must never resurrect it.
 	l.retry++
+	m.listeners[dev] = l
 	m.lastErr = fmt.Sprintf("listener %s failed: %v", dev, err)
 	cfg := l.cfg
 	pl := l.pool
@@ -578,8 +579,9 @@ func (m *Manager) handleListenerExit(dev string, err error) {
 	time.Sleep(backoff)
 
 	m.mu.Lock()
-	// Only restart if DHCP is still enabled and this dev is still desired.
-	if !cfg.Enabled || containsListener(m.listeners, dev) {
+	// Only restart if Apply has not removed or replaced this listener.
+	current, ok := m.listeners[dev]
+	if !ok || current.errCh != exited {
 		m.mu.Unlock()
 		return
 	}
@@ -590,11 +592,6 @@ func (m *Manager) handleListenerExit(dev string, err error) {
 	m.listeners[dev] = nl
 	m.mu.Unlock()
 	go m.emit("service.dhcp.listener_restarted", map[string]any{"dev": dev, "retry": l.retry})
-}
-
-func containsListener(listeners map[string]listener, dev string) bool {
-	_, ok := listeners[dev]
-	return ok
 }
 
 func (m *Manager) pruneExpiredLeasesLocked() {

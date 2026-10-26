@@ -31,6 +31,7 @@ type NTPManager struct {
 	NTPDName string
 	OnEvent  func(kind string, attrs map[string]any)
 
+	applyMu    sync.Mutex // serialize renders and daemon restarts
 	mu         sync.Mutex
 	lastCfg    config.NTPConfig
 	lastRender time.Time
@@ -121,6 +122,8 @@ func newNTPLogger() *zap.SugaredLogger {
 }
 
 func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
 	_ = ctx
 	m.mu.Lock()
 	m.lastCfg = cfg
@@ -131,7 +134,9 @@ func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
 	}
 	path := m.configPath()
 	if !cfg.Enabled {
+		m.mu.Lock()
 		m.stopLocked()
+		m.mu.Unlock()
 		_ = os.Remove(path)
 		// Also clean up the other config file name to avoid stale files.
 		if m.NTPDName == "chrony" {
@@ -308,28 +313,44 @@ func (m *NTPManager) validate(ctx context.Context, configPath string) error {
 }
 
 func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
+	earlyExit := m.startDaemon(configPath)
+	if earlyExit == nil {
+		return
+	}
+	// Brief stability check: if the daemon dies within 1 second, report failure immediately.
+	select {
+	case exit := <-earlyExit:
+		if exit != "ok" {
+			m.log.Errorw("NTP daemon failed immediately after start", "impl", m.NTPDName, "exit", exit)
+		}
+	case <-time.After(1 * time.Second):
+		// Daemon survived initial startup — considered stable.
+	}
+}
+
+func (m *NTPManager) startDaemon(configPath string) <-chan string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.lastCfg.Enabled {
-		return
+		return nil
 	}
 	if m.NTPDPath == "" {
 		m.lastError = "NTP daemon not found; supervision skipped"
 		m.emit("service.ntp.start_skipped", map[string]any{"reason": m.lastError})
 		m.log.Warnw("NTP daemon not found; supervision skipped")
-		return
+		return nil
 	}
 	if syscall.Geteuid() != 0 {
 		m.lastError = "NTP supervision skipped (requires root)"
 		m.emit("service.ntp.start_skipped", map[string]any{"reason": m.lastError})
 		m.log.Warnw("NTP supervision skipped; not running as root")
-		return
+		return nil
 	}
 	if !hasSysTimeCap() {
 		m.lastError = "NTP supervision skipped: CAP_SYS_TIME not available (add --cap-add SYS_TIME to docker run)"
 		m.emit("service.ntp.start_skipped", map[string]any{"reason": m.lastError})
 		m.log.Warnw("NTP supervision skipped; CAP_SYS_TIME missing")
-		return
+		return nil
 	}
 	if m.cmd != nil && m.cmd.Process != nil {
 		_ = m.cmd.Process.Signal(os.Interrupt)
@@ -353,7 +374,7 @@ func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
 		m.lastError = err.Error()
 		m.emit("service.ntp.start_failed", map[string]any{"error": err.Error(), "error_count": 1})
 		m.log.Errorw("failed to start NTP daemon", "impl", m.NTPDName, "error", err)
-		return
+		return nil
 	}
 	m.cmd = cmd
 	m.lastError = ""
@@ -370,27 +391,21 @@ func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
 			exit = err.Error()
 		}
 		m.mu.Lock()
-		m.lastExit = exit
-		m.lastStop = time.Now().UTC()
-		if exit != "ok" {
-			m.lastError = "NTP daemon exited unexpectedly: " + exit + " (check CAP_SYS_TIME capability)"
+		if m.cmd == cmd {
+			m.lastExit = exit
+			m.lastStop = time.Now().UTC()
+			if exit != "ok" {
+				m.lastError = "NTP daemon exited unexpectedly: " + exit + " (check CAP_SYS_TIME capability)"
+			}
+			m.cmd = nil
 		}
-		m.cmd = nil
 		m.mu.Unlock()
 		m.log.Infow("NTP daemon exited", "impl", m.NTPDName, "pid", cmd.Process.Pid, "exit", exit)
 		m.emit("service.ntp.exited", map[string]any{"pid": cmd.Process.Pid, "exit": exit, "error_count": 1})
 		earlyExit <- exit
 	}()
 
-	// Brief stability check: if the daemon dies within 1 second, report failure immediately.
-	select {
-	case exit := <-earlyExit:
-		if exit != "ok" {
-			m.log.Errorw("NTP daemon failed immediately after start", "impl", m.NTPDName, "exit", exit)
-		}
-	case <-time.After(1 * time.Second):
-		// Daemon survived initial startup — considered stable.
-	}
+	return earlyExit
 }
 
 func (m *NTPManager) stopLocked() {

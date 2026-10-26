@@ -93,6 +93,9 @@ func serveDHCPv4(ctx context.Context, dev string, cfg config.DHCPConfig, pl pool
 		if !ok {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		emitDHCPRequestEvent(rt, req)
 		if err := handleDHCPRequest(rt, req); err != nil {
 			return err
