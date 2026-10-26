@@ -27,6 +27,13 @@ import type {
   TLSInfo,
 } from "./api";
 
+/** Outcome of a trusted CA bundle upload. `stored` means management saved
+ * the bundle but the engine could not apply it; the next commit retries. */
+export type TrustedCAUploadResult =
+  | { state: "applied"; revision: string }
+  | { state: "stored"; detail: string }
+  | { state: "failed"; error: string };
+
 export const policyAPI = {
   listAssets: () => getJSON<Asset[]>("/api/v1/assets"),
   createAsset: (a: Asset) => postJSONResult<Asset>("/api/v1/assets", a),
@@ -109,8 +116,29 @@ export const policyAPI = {
       certPEM,
       keyPEM,
     }),
-  setTrustedCA: (pem: string) =>
-    postJSONResult<{ status: string }>("/api/v1/system/tls/trusted-ca", {
-      pem,
-    }),
+  setTrustedCA: async (pem: string): Promise<TrustedCAUploadResult> => {
+    try {
+      const res = await fetchWithSession("/api/v1/system/tls/trusted-ca", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ pem }),
+      });
+      if (handleUnauthorized(res)) return { state: "failed", error: "Unauthorized" };
+      clearAuthExpired();
+      const body = (await res.json().catch(() => ({}))) as {
+        revision?: string;
+        error?: string;
+        detail?: string;
+      };
+      if (res.ok) return { state: "applied", revision: body.revision ?? "" };
+      // 503: the bundle is stored, but the engine is unavailable or did not apply it.
+      if (res.status === 503) {
+        return { state: "stored", detail: body.detail || body.error || res.statusText };
+      }
+      const error = body.error || res.statusText;
+      return { state: "failed", error: body.detail ? `${error}: ${body.detail}` : error };
+    } catch (e) {
+      return { state: "failed", error: e instanceof Error ? e.message : "Network error" };
+    }
+  },
 };

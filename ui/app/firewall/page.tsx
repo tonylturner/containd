@@ -21,8 +21,8 @@ import {
   type StaticRoute,
   type Zone,
   type NATConfig,
+  type RulesetPreview,
 } from "../../lib/api";
-import type { RulesetPreviewResult } from "../../lib/api-dataplane";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { EmptyState } from "../../components/EmptyState";
@@ -51,7 +51,7 @@ export default function FirewallPage() {
   const [dpiConfig, setDpiConfig] = useState<DataPlaneConfig>({ captureInterfaces: [], dpiMock: false });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [rulesetPreview, setRulesetPreview] = useState<RulesetPreviewResult | null>(null);
+  const [rulesetPreview, setRulesetPreview] = useState<RulesetPreview | null>(null);
   const [rulesetState, setRulesetState] = useState<"idle" | "loading" | "error">("idle");
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [quickStarting, setQuickStarting] = useState(false);

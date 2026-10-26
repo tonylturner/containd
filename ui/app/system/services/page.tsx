@@ -21,16 +21,27 @@ export default function ServicesOverviewPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
+  const reportedSeries = useCallback(
+    (svc: string): number[] | null => {
+      const s = (status as any)?.[svc];
+      return Array.isArray(s?.sparkline) && s.sparkline.length ? (s.sparkline as number[]) : null;
+    },
+    [status],
+  );
+  // Antivirus shows only a reported series, never a fabricated trend.
+  const avSeries = reportedSeries("av");
+
   const series = useCallback(
     (svc: string, fallback: number[]) => {
+      const reported = reportedSeries(svc);
+      if (reported) return reported;
       const s = (status as any)?.[svc];
-      if (Array.isArray(s?.sparkline) && s.sparkline.length) return s.sparkline as number[];
       if (typeof s?.count === "number") {
         return [s.count, Math.max(1, Math.round((s.count as number) * 1.1)), s.count];
       }
       return fallback;
     },
-    [status],
+    [status, reportedSeries],
   );
 
   const rate = useCallback(
@@ -375,12 +386,16 @@ export default function ServicesOverviewPage() {
         <ServiceCard
           title="Antivirus / ICAP"
           loading={loading}
-          spark={{
-            values: series("av", [2, 4, (status as any)?.av?.clamav_custom_defs ?? 3, 5, 7, 6]),
-            color: "var(--purple)",
-            background: "linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))",
-            title: "AV detections (simulated)",
-          }}
+          spark={
+            avSeries
+              ? {
+                  values: avSeries,
+                  color: "var(--purple)",
+                  background: "linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))",
+                  title: "AV detections",
+                }
+              : undefined
+          }
           rate={rate("av")}
           errorsRate={errRate("av")}
         >
