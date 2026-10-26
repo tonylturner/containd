@@ -3,7 +3,7 @@
 import Image from "next/image";
 import type { Dispatch, SetStateAction } from "react";
 
-import type { Zone } from "../../lib/api";
+import type { VPNStatus, Zone } from "../../lib/api";
 import { staticAssetURL } from "../../lib/api-core";
 import { InfoTip } from "../../components/InfoTip";
 import {
@@ -14,7 +14,6 @@ import {
   PEMField,
   type FieldIssue,
   type NormalizedVPNConfig,
-  type VPNServiceStatus,
 } from "./vpn-shared";
 
 type UploadState = "idle" | "uploading" | "uploaded" | "error";
@@ -31,7 +30,7 @@ type Props = {
   zones: Zone[];
   interfaceOptions: InterfaceOption[];
   openvpnIssues: FieldIssue[];
-  svcStatus: VPNServiceStatus | null;
+  svcStatus: VPNStatus | null;
   uploadState: UploadState;
   ovpnClients: string[];
   newClientName: string;

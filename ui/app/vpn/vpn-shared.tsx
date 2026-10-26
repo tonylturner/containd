@@ -17,17 +17,6 @@ export type FieldIssue = {
   severity: "required" | "recommended";
 };
 
-export type VPNServiceStatus = {
-  openvpn_installed?: boolean;
-  openvpn_running?: boolean;
-  openvpn_pid?: number;
-  openvpn_config_path?: string;
-  openvpn_last_error?: string;
-  openvpn_mode?: string;
-  openvpn_server_tunnel?: string;
-  openvpn_server_endpoint?: string;
-};
-
 export function normalize(cfg: VPNConfig | null): {
   wireguard: WireGuardConfig;
   openvpn: OpenVPNConfig;
