@@ -83,7 +83,7 @@ export function FirewallRuleTable({
   onDelete: (id: string) => void;
 }) {
   return (
-    <>
+    <section aria-label="Firewall rules">
       <RulePrecedenceNote />
     <RuleCountersNote counters={counters} />
       <div className="overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
@@ -175,6 +175,6 @@ export function FirewallRuleTable({
           </tbody>
         </table>
       </div>
-    </>
+    </section>
   );
 }

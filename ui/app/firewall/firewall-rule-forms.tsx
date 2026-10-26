@@ -237,19 +237,19 @@ export function EditRuleModal({
             <option value="">Dest zone (any)</option>
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
-          <label className="flex items-center gap-2 text-sm text-(--text)">
-            <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
-            Log hits
-            <InfoTip label={LOG_HELP} />
-          </label>
-          <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial md:col-span-2" />
-          <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="input-industrial md:col-span-2" />
           <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
             <option value="tcp">tcp</option>
             <option value="udp">udp</option>
             <option value="icmp">icmp</option>
           </select>
+          <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial md:col-span-2" />
           <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="input-industrial" />
+          <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="input-industrial md:col-span-2" />
+          <label className="flex items-center gap-2 text-sm text-(--text)">
+            <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
+            Log hits
+            <InfoTip label={LOG_HELP} />
+          </label>
         </div>
 
         <RulePolicyFields draft={policy} onChange={setPolicy} />
