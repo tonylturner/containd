@@ -61,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The forwarding smoke (`scripts/smoke-forward.sh`) proves each deny against a
+  live listener, proves masquerade by the source address the server sees and
+  requires the DNAT counter to rise. `scripts/smoke-forward-mutations.sh`
+  shows it fails on an allow-all policy and on disabled masquerade.
 - Lab mode refuses every password change, for every user, through the
   users store: web, admin, SSH menu and the setup wizard give the same reason.
 - UI builds always regenerate the embedded documentation and fail if MkDocs
