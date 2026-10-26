@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func TestMonitoringShowUnavailable(t *testing.T) {
@@ -107,5 +109,57 @@ func TestShowInterfacesDoesNotSubstituteLocalState(t *testing.T) {
 	err := showInterfacesAPI(&API{BaseURL: "http://test", Client: client})(context.Background(), &out, nil)
 	if err == nil || !strings.Contains(out.String(), "Interface runtime state unavailable") || strings.Contains(out.String(), "127.0.0.1") {
 		t.Fatalf("output: %s (%v)", &out, err)
+	}
+}
+
+func TestSavedListenerViewsHSTS(t *testing.T) {
+	off, on := false, true
+	for _, view := range []struct {
+		name    string
+		command func(*API) Command
+		key     string
+	}{
+		{"system", showSystem, "mgmt.hsts:"},
+		{"listeners", showMgmtListeners, "hsts"},
+	} {
+		for _, tc := range []struct {
+			name  string
+			value *bool
+			want  string
+		}{
+			{"unset uses runtime default", nil, "yes"},
+			{"explicitly disabled", &off, "no"},
+			{"explicitly enabled", &on, "yes"},
+		} {
+			t.Run(view.name+"/"+tc.name, func(t *testing.T) {
+				cfg := config.Config{System: config.SystemConfig{Mgmt: config.MgmtConfig{EnableHSTS: tc.value}}}
+				client := &dispatchHTTPClient{t: t, handlers: map[string]func(*http.Request) (*http.Response, error){
+					"GET /api/v1/config": func(*http.Request) (*http.Response, error) { return jsonHTTPResponse(200, cfg, nil), nil },
+					"GET /api/v1/health": func(*http.Request) (*http.Response, error) {
+						return jsonHTTPResponse(200, map[string]string{"component": "mgmt"}, nil), nil
+					},
+				}}
+				var out bytes.Buffer
+				if err := view.command(&API{BaseURL: "http://test", Client: client})(context.Background(), &out, nil); err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(out.String(), savedListenerNotice) {
+					t.Fatalf("saved/live label missing: %s", &out)
+				}
+				found := false
+				for _, line := range strings.Split(out.String(), "\n") {
+					fields := strings.Fields(line)
+					if len(fields) == 2 && fields[0] == view.key {
+						found = true
+						if fields[1] != tc.want {
+							t.Fatalf("HSTS: %s, want %s", line, tc.want)
+						}
+					}
+				}
+				if !found {
+					t.Fatalf("HSTS field missing: %s", &out)
+				}
+			})
+		}
 	}
 }

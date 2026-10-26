@@ -15,6 +15,8 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
+const savedListenerNotice = "Listener settings: saved configuration (not live socket state)."
+
 func showRunningConfig(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var cfg config.Config
@@ -76,6 +78,7 @@ func showSystem(api *API) Command {
 			configErr = monitoringUnavailable(out, "System configuration", configErr)
 		} else {
 			fmt.Fprintf(out, "hostname: %s\n", cfg.System.Hostname)
+			fmt.Fprintln(out, savedListenerNotice)
 			mgmtHTTP := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
 			mgmtHTTPS := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
 			fmt.Fprintf(out, "mgmt.http_enabled: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTP, true)))
@@ -83,7 +86,7 @@ func showSystem(api *API) Command {
 			fmt.Fprintf(out, "mgmt.http_listen: %s\n", mgmtHTTP)
 			fmt.Fprintf(out, "mgmt.https_listen: %s\n", mgmtHTTPS)
 			fmt.Fprintf(out, "mgmt.redirect_http_to_https: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.RedirectHTTPToHTTPS, false)))
-			fmt.Fprintf(out, "mgmt.hsts: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, false)))
+			fmt.Fprintf(out, "mgmt.hsts: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, true)))
 			if cfg.System.Mgmt.HSTSMaxAgeSeconds > 0 {
 				fmt.Fprintf(out, "mgmt.hsts_max_age_seconds: %d\n", cfg.System.Mgmt.HSTSMaxAgeSeconds)
 			}
@@ -138,6 +141,7 @@ func showMgmtListeners(api *API) Command {
 			return nil
 		}
 
+		fmt.Fprintln(out, savedListenerNotice)
 		mgmtHTTP := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
 		mgmtHTTPS := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
 		kvTable(out, map[string]string{
@@ -146,7 +150,7 @@ func showMgmtListeners(api *API) Command {
 			"http_listen":             mgmtHTTP,
 			"https_listen":            mgmtHTTPS,
 			"redirect_http_to_https":  yesNoStr(boolDefault(cfg.System.Mgmt.RedirectHTTPToHTTPS, false)),
-			"hsts":                    yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, false)),
+			"hsts":                    yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, true)),
 			"hsts_max_age_seconds":    fmt.Sprintf("%d", max(0, cfg.System.Mgmt.HSTSMaxAgeSeconds)),
 			"tls_cert_file":           firstNonEmpty(cfg.System.Mgmt.TLSCertFile, "—"),
 			"tls_key_file":            firstNonEmpty(cfg.System.Mgmt.TLSKeyFile, "—"),
