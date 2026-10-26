@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/audit"
@@ -171,7 +172,7 @@ func setTrustedCAHandler(store config.Store, engine EngineClient) gin.HandlerFun
 
 // trustedCABundlePath is management's storage path for the additional CA bundle.
 func trustedCABundlePath(cfg *config.Config) string {
-	return firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, trust.DefaultBundlePath)
+	return common.FirstNonEmpty(cfg.System.Mgmt.TrustedCAFile, trust.DefaultBundlePath)
 }
 
 // pushTrustedCA sends the stored bundle's content and revision to the engine.

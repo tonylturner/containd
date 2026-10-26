@@ -44,22 +44,6 @@ func rateLimitSensitive() gin.HandlerFunc {
 	}
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func boolDefault(v *bool, def bool) bool {
-	if v == nil {
-		return def
-	}
-	return *v
-}
-
 // apiError sends a standardized JSON error response.
 func apiError(c *gin.Context, status int, msg string) {
 	c.JSON(status, gin.H{"error": msg})
