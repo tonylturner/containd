@@ -35,7 +35,8 @@ func TestManagementInputAdmitsServedListeners(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			served := listener.served()
+			binds := configuredBinds(listener)
+			served := listener.served(binds, listener.servedManagement(binds))
 			for i, l := range []config.ManagementListener{served.HTTP, served.HTTPS, served.SSH} {
 				if l.Port() != tc.want[i] {
 					t.Fatalf("served listeners = %+v, want ports %v", served, tc.want)

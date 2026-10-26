@@ -188,24 +188,28 @@ func TestSSHStaysOffWithoutManagementAPI(t *testing.T) {
 }
 
 // The bound record claims SSH whenever its CLI sessions have a listener to
-// call, and the HTTP listener redirects only while HTTPS is served.
-func TestServedListenersAndRedirect(t *testing.T) {
+// call on loopback; the served certificate is the bound HTTPS listener's.
+func TestServedListenersRecordSSH(t *testing.T) {
+	lc := mgmtListenerConfig{sshAddr: ":2222", tlsCert: "/c", tlsKey: "/k"}
 	for _, tc := range []struct {
-		http, https, redirect, ssh, redirects bool
+		name        string
+		http, https boundListener
+		ssh, cert   bool
 	}{
-		{http: true, ssh: true},
-		{https: true, ssh: true},
-		{http: true, https: true, redirect: true, ssh: true, redirects: true},
-		{http: true, redirect: true, ssh: true},
-		{redirect: true},
+		{name: "HTTP", http: boundListener{addr: "[::]:8080"}, ssh: true},
+		{name: "HTTPS", https: boundListener{addr: "[::]:8443"}, ssh: true, cert: true},
+		{name: "HTTP with a loopback socket", http: boundListener{addr: "10.10.10.10:8080", loopback: "127.0.0.1:8080"}, ssh: true},
+		{name: "HTTP not on loopback", http: boundListener{addr: "10.10.10.10:8080"}},
+		{name: "HTTPS loopback socket only", https: boundListener{loopback: "127.0.0.1:8443"}, ssh: true, cert: true},
+		{name: "none"},
 	} {
-		lc := mgmtListenerConfig{enableHTTP: tc.http, enableHTTPS: tc.https, redirectHTTPToHTTPS: tc.redirect, sshAddr: ":2222", tlsCert: "/c", tlsKey: "/k"}
-		if got := lc.served().SSH.Enabled; got != tc.ssh {
-			t.Errorf("%+v: SSH recorded %v", tc, got)
+		b := mgmtBinds{http: tc.http, https: tc.https}
+		served := lc.servedManagement(b)
+		if got := lc.served(b, served).SSH.Enabled; got != tc.ssh {
+			t.Errorf("%s: SSH recorded %v", tc.name, got)
 		}
-		served := lc.servedManagement()
-		if served.HTTPRedirects != tc.redirects || (served.CertFile == "/c" && served.KeyFile == "/k") != tc.https {
-			t.Errorf("%+v: served = %+v", tc, served)
+		if (served.CertFile == "/c" && served.KeyFile == "/k") != tc.cert {
+			t.Errorf("%s: served = %+v", tc.name, served)
 		}
 	}
 }

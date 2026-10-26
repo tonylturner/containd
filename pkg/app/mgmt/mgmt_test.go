@@ -161,20 +161,18 @@ func TestResolveMgmtListenerConfigAndBuildServers(t *testing.T) {
 
 	listenerCfg.httpAddr = ":0"
 	listenerCfg.httpLoopbackAddr = "127.0.0.1:0"
-	servers, listeners, err := buildMgmtServers(http.NewServeMux(), listenerCfg)
+	binds, err := buildMgmtServers(http.NewServeMux(), listenerCfg)
 	if err != nil {
 		t.Fatalf("buildMgmtServers: %v", err)
 	}
-	if len(servers) != 2 || len(listeners) != 2 {
-		t.Fatalf("server/listener count = %d/%d, want 2/2", len(servers), len(listeners))
-	}
-	for _, ln := range listeners {
-		_ = ln.Close()
+	defer binds.close()
+	if len(binds.servers) != 2 || len(binds.listeners) != 2 {
+		t.Fatalf("server/listener count = %d/%d, want 2/2", len(binds.servers), len(binds.listeners))
 	}
 }
 
 func TestBuildMgmtServersRejectsNoListeners(t *testing.T) {
-	_, _, err := buildMgmtServers(http.NewServeMux(), mgmtListenerConfig{})
+	_, err := buildMgmtServers(http.NewServeMux(), mgmtListenerConfig{})
 	if err == nil {
 		t.Fatal("expected no management listeners enabled error")
 	}
@@ -265,7 +263,7 @@ func TestServedCertificateIsTheListenerCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := listener.servedManagement(); got.CertFile != envCert || got.KeyFile != envKey {
+	if got := listener.servedManagement(configuredBinds(listener)); got.CertFile != envCert || got.KeyFile != envKey {
 		t.Fatalf("served = %+v, want %q and %q", got, envCert, envKey)
 	}
 	if _, err := os.Stat(envCert); err != nil {
@@ -273,7 +271,7 @@ func TestServedCertificateIsTheListenerCertificate(t *testing.T) {
 	}
 	cfg.System.Mgmt.EnableHTTPS = boolPtr(false)
 	cfg.System.Mgmt.EnableHTTP = boolPtr(true)
-	if listener, err = resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil); err != nil || listener.servedManagement() != (httpapi.ServedManagement{}) {
-		t.Fatalf("served without HTTPS = %+v, %v", listener.servedManagement(), err)
+	if listener, err = resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil); err != nil || listener.servedManagement(configuredBinds(listener)) != (httpapi.ServedManagement{}) {
+		t.Fatalf("served without HTTPS = %+v, %v", listener.servedManagement(configuredBinds(listener)), err)
 	}
 }

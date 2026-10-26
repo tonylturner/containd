@@ -17,10 +17,13 @@ import (
 )
 
 // The console and SSH CLI sessions call the same loopback URL: the bound
-// HTTP listener unless it redirects to the bound HTTPS listener, then HTTPS.
+// HTTP listener unless it redirects to the bound HTTPS listener or does not
+// accept loopback connections, then HTTPS.
 func TestLoopbackManagementAPIChoosesTheListener(t *testing.T) {
-	httpOn := config.ManagementListener{Addr: "10.10.10.10:8080", Enabled: true}
+	httpOn := config.ManagementListener{Addr: "[::]:8080", Enabled: true}
 	httpsOn := config.ManagementListener{Addr: ":8443", Enabled: true}
+	httpHost := config.ManagementListener{Addr: "10.10.10.10:8080", Enabled: true}
+	httpLoopback := config.ManagementListener{Addr: "127.0.0.1:8080", Enabled: true}
 	for _, tc := range []struct {
 		name     string
 		bound    config.ManagementListeners
@@ -29,6 +32,9 @@ func TestLoopbackManagementAPIChoosesTheListener(t *testing.T) {
 		wantPins bool
 	}{
 		{"HTTP", config.ManagementListeners{HTTP: httpOn}, ServedManagement{}, "http://127.0.0.1:8080", false},
+		{"HTTP on 127.0.0.1", config.ManagementListeners{HTTP: httpLoopback}, ServedManagement{}, "http://127.0.0.1:8080", false},
+		{"HTTP with a loopback socket", config.ManagementListeners{HTTP: httpHost}, ServedManagement{HTTPLoopback: true}, "http://127.0.0.1:8080", false},
+		{"HTTP not on loopback", config.ManagementListeners{HTTP: httpHost, HTTPS: httpsOn}, ServedManagement{CertFile: "/c"}, "https://127.0.0.1:8443", true},
 		{"HTTP and HTTPS", config.ManagementListeners{HTTP: httpOn, HTTPS: httpsOn}, ServedManagement{CertFile: "/c"}, "http://127.0.0.1:8080", false},
 		{"HTTP redirecting to HTTPS", config.ManagementListeners{HTTP: httpOn, HTTPS: httpsOn}, ServedManagement{CertFile: "/c", HTTPRedirects: true}, "https://127.0.0.1:8443", true},
 		{"HTTPS only", config.ManagementListeners{HTTPS: httpsOn}, ServedManagement{CertFile: "/c"}, "https://127.0.0.1:8443", true},
@@ -93,7 +99,8 @@ func TestLoopbackManagementAPIRefusesHTTPRedirect(t *testing.T) {
 	}
 }
 
-// Without a listener to call there is no URL, and the console says so.
+// Without a listener to call on 127.0.0.1 there is no URL, and the console
+// says so: a port management did not bind on loopback is never called.
 func TestLoopbackManagementAPIWithoutListener(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -104,6 +111,9 @@ func TestLoopbackManagementAPIWithoutListener(t *testing.T) {
 		{"none bound", config.ManagementListeners{}, ServedManagement{}, "no management HTTP or HTTPS listener bound"},
 		{"HTTP without a port", config.ManagementListeners{HTTP: config.ManagementListener{Addr: "10.10.10.10", Enabled: true}}, ServedManagement{}, "no management HTTP or HTTPS listener bound"},
 		{"HTTPS without a certificate", config.ManagementListeners{HTTPS: config.ManagementListener{Addr: ":8443", Enabled: true}}, ServedManagement{}, "the bound HTTPS listener recorded no certificate"},
+		{"HTTP not on loopback", config.ManagementListeners{HTTP: config.ManagementListener{Addr: "10.10.10.10:8080", Enabled: true}}, ServedManagement{}, "no bound management HTTP or HTTPS listener accepts connections on 127.0.0.1"},
+		{"HTTPS not on loopback", config.ManagementListeners{HTTPS: config.ManagementListener{Addr: "10.10.10.10:8443", Enabled: true}}, ServedManagement{CertFile: "/c"}, "no bound management HTTP or HTTPS listener accepts connections on 127.0.0.1"},
+		{"HTTP on another loopback address", config.ManagementListeners{HTTP: config.ManagementListener{Addr: "127.0.0.2:8080", Enabled: true}}, ServedManagement{}, "no bound management HTTP or HTTPS listener accepts connections on 127.0.0.1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bindConsoleTest(t, tc.bound)

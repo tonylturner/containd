@@ -53,13 +53,55 @@ func localIPFromRequest(r *http.Request) net.IP {
 	return nil
 }
 
+// mgmtBinds is the management sockets one listener configuration bound,
+// with a server for each.
+type mgmtBinds struct {
+	servers   []*http.Server
+	listeners []net.Listener
+	http      boundListener
+	https     boundListener
+	// redirects reports that the HTTP server redirects to the bound HTTPS
+	// listener.
+	redirects bool
+}
+
+// boundListener is the sockets one management listener bound.
+type boundListener struct {
+	// addr is the address of the listener's own socket, or of the reserved
+	// endpoint bound in its place; empty when it bound neither.
+	addr string
+	// loopback is the address of its separate 127.0.0.1 socket on the same
+	// port; empty when it has none or that socket failed to bind.
+	loopback string
+}
+
+// record is the listener as management records it bound: the address of
+// its own socket, else of its loopback socket; disabled with neither.
+func (b boundListener) record() config.ManagementListener {
+	addr := b.addr
+	if addr == "" {
+		addr = b.loopback
+	}
+	return config.ManagementListener{Addr: addr, Enabled: addr != ""}
+}
+
+func (b *mgmtBinds) close() {
+	for _, listener := range b.listeners {
+		_ = listener.Close()
+	}
+}
+
+// bindListener binds one listener's address and, when it differs, its
+// convenience loopback address, adding a server for each socket.
+//
 // In reserved mode the primary HTTP bind serves the reserved endpoint and is
 // mandatory. A wildcard may fail because a different address is occupied: bind
 // the reserved endpoint independently in that case. TLS and convenience
-// loopback sockets are independent best effort.
-func buildListenerServers(handler http.Handler, addr, loopbackAddr string, tlsCfg *tls.Config, reservedAddr string, optionalFault func(error)) ([]*http.Server, []net.Listener, error) {
-	var servers []*http.Server
-	var listeners []net.Listener
+// loopback sockets are independent best effort. A socket that fails to bind
+// is left out of the returned listener, so it is never recorded as bound. On
+// error the caller closes the sockets b holds.
+func (b *mgmtBinds) bindListener(handler http.Handler, addr, loopbackAddr string, tlsCfg *tls.Config, reservedAddr string, optionalFault func(error)) (boundListener, error) {
+	var bound boundListener
 	addrs := []string{addr}
 	if loopbackAddr != "" && loopbackAddr != addr {
 		addrs = append(addrs, loopbackAddr)
@@ -75,16 +117,17 @@ func buildListenerServers(handler http.Handler, addr, loopbackAddr string, tlsCf
 				optionalFault(err)
 				continue
 			}
-			for _, listener := range listeners {
-				_ = listener.Close()
-			}
-			return nil, nil, err
+			return boundListener{}, err
 		}
-		srv := &http.Server{Handler: handler, ConnContext: connContextWithLocalIP, TLSConfig: tlsCfg}
-		servers = append(servers, srv)
-		listeners = append(listeners, ln)
+		if i == 0 {
+			bound.addr = ln.Addr().String()
+		} else {
+			bound.loopback = ln.Addr().String()
+		}
+		b.servers = append(b.servers, &http.Server{Handler: handler, ConnContext: connContextWithLocalIP, TLSConfig: tlsCfg})
+		b.listeners = append(b.listeners, ln)
 	}
-	return servers, listeners, nil
+	return bound, nil
 }
 
 type ipInterfaceIndex struct {

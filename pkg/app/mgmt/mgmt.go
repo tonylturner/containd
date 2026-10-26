@@ -125,7 +125,7 @@ func Run(ctx context.Context, opts Options) error {
 	ipIndex := newIPInterfaceIndex()
 	access := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
 	// Bind before any runtime apply: a listener fallback enters recovery.
-	bound, err := bindManagement(logger, stores, runtimeCfg, opts.Reservation, listenerCfg, func(lc mgmtListenerConfig) ([]*http.Server, []net.Listener, error) {
+	bound, err := bindManagement(logger, stores, runtimeCfg, opts.Reservation, listenerCfg, func(lc mgmtListenerConfig) (mgmtBinds, error) {
 		return buildMgmtServers(applyMgmtHTTPMiddleware(logger, access, lc), lc)
 	})
 	if err != nil {
@@ -135,10 +135,7 @@ func Run(ctx context.Context, opts Options) error {
 		serviceManager.event = bound.event
 	}
 	runtimeCfg, listenerCfg = bound.cfg, bound.listener
-	// Every compile in this process admits these until the next start.
-	config.SetBoundManagementListeners(listenerCfg.served())
-	// The console and SSH CLI sessions call the bound listeners on loopback.
-	httpapi.SetServedManagement(listenerCfg.servedManagement())
+	publishBoundManagement(listenerCfg, bound.binds)
 	// Best-effort initial service render on startup.
 	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
@@ -166,7 +163,7 @@ func Run(ctx context.Context, opts Options) error {
 	// Start SSH server (admin-only) for interactive CLI.
 	sshAddr, sshEnabled := startSSH(ctx, logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, ipIndex, optionalFault, sshServer.Store)
 	printStartupHints(logger, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, listenerCfg.enableHTTP, listenerCfg.enableHTTPS, sshAddr, sshEnabled)
-	return serveMgmtServers(ctx, bound.servers, bound.listeners)
+	return serveMgmtServers(ctx, bound.binds.servers, bound.binds.listeners)
 }
 
 func validateJWTSecret(logger *zap.SugaredLogger) error {
@@ -326,32 +323,38 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	return listenerCfg, nil
 }
 
-// served is the listeners this configuration binds: HTTP and HTTPS as
-// resolved, HTTPS off when its certificate failed, and SSH, which starts
-// best effort after them whenever its CLI sessions have one of them to call
+// publishBoundManagement records the sockets b holds as this process's
+// bound management: every compile in this process admits them until the
+// next start, and the console and SSH CLI sessions call them on loopback
 // (see httpapi.LoopbackManagementAPI).
-func (lc mgmtListenerConfig) served() config.ManagementListeners {
-	return config.ManagementListeners{
-		HTTP:  config.ManagementListener{Addr: lc.httpAddr, Enabled: lc.enableHTTP},
-		HTTPS: config.ManagementListener{Addr: lc.httpsAddr, Enabled: lc.enableHTTPS},
-		SSH:   config.ManagementListener{Addr: lc.sshAddr, Enabled: lc.enableHTTP || lc.enableHTTPS},
+func publishBoundManagement(lc mgmtListenerConfig, b mgmtBinds) {
+	served := lc.servedManagement(b)
+	httpapi.SetServedManagement(served)
+	config.SetBoundManagementListeners(lc.served(b, served))
+}
+
+// served is the listeners b holds: HTTP and HTTPS at the address their own
+// socket bound, else at their loopback socket, and off when neither bound;
+// and SSH, which starts best effort after them whenever its CLI sessions
+// have one of them to call on loopback.
+func (lc mgmtListenerConfig) served(b mgmtBinds, served httpapi.ServedManagement) config.ManagementListeners {
+	l := config.ManagementListeners{HTTP: b.http.record(), HTTPS: b.https.record()}
+	l.SSH = config.ManagementListener{Addr: lc.sshAddr, Enabled: httpapi.CheckLoopbackManagement(l, served) == nil}
+	return l
+}
+
+// servedManagement is what the listeners b holds serve beyond their
+// addresses. The certificate and key are the resolved, possibly generated,
+// files of the HTTPS listener, which a listener fallback or an environment
+// override can make differ from the saved settings; empty when no HTTPS
+// socket is bound.
+func (lc mgmtListenerConfig) servedManagement(b mgmtBinds) httpapi.ServedManagement {
+	served := httpapi.ServedManagement{
+		HTTPRedirects: b.redirects,
+		HTTPLoopback:  b.http.loopback != "",
+		HTTPSLoopback: b.https.loopback != "",
 	}
-}
-
-// redirectsHTTP reports that the HTTP listener redirects GET and HEAD
-// requests to HTTPS: when configured to, and only while HTTPS is served.
-func (lc mgmtListenerConfig) redirectsHTTP() bool {
-	return lc.enableHTTP && lc.enableHTTPS && lc.redirectHTTPToHTTPS
-}
-
-// servedManagement is what this configuration's listeners serve beyond
-// their addresses. The certificate and key are the resolved, possibly
-// generated, files of the HTTPS listener, which a listener fallback or an
-// environment override can make differ from the saved settings; empty when
-// HTTPS is not served.
-func (lc mgmtListenerConfig) servedManagement() httpapi.ServedManagement {
-	served := httpapi.ServedManagement{HTTPRedirects: lc.redirectsHTTP()}
-	if lc.enableHTTPS {
+	if b.https.record().Enabled {
 		served.CertFile, served.KeyFile = lc.tlsCert, lc.tlsKey
 	}
 	return served
@@ -367,39 +370,38 @@ func applyMgmtHTTPMiddleware(logger *zap.SugaredLogger, handler http.Handler, li
 	return frameOptionsHandler(handler, listenerCfg.allowedOrigins)
 }
 
-func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) ([]*http.Server, []net.Listener, error) {
-	errChPrefix := func(proto string, err error) error {
-		return fmt.Errorf("%s disabled: %w", proto, err)
-	}
-	var servers []*http.Server
-	var listeners []net.Listener
-	if listenerCfg.enableHTTP {
-		httpHandler := handler
-		if listenerCfg.redirectsHTTP() {
-			httpHandler = redirectToHTTPSHandler(listenerCfg.httpsAddr, httpHandler)
-		}
-		srv, lns, err := buildListenerServers(httpHandler, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, nil, listenerCfg.reservedHTTPAddr, listenerCfg.optionalFault)
-		if err != nil {
-			return nil, nil, errChPrefix("http", err)
-		}
-		servers = append(servers, srv...)
-		listeners = append(listeners, lns...)
+// buildMgmtServers binds the listeners of listenerCfg. HTTPS binds first:
+// the HTTP listener redirects to HTTPS only when configured to and HTTPS
+// bound its own socket.
+func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) (mgmtBinds, error) {
+	var b mgmtBinds
+	fail := func(proto string, err error) (mgmtBinds, error) {
+		b.close()
+		return mgmtBinds{}, fmt.Errorf("%s disabled: %w", proto, err)
 	}
 	if listenerCfg.enableHTTPS {
-		srv, lns, err := buildListenerServers(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsCert, listenerCfg.tlsKey), "", listenerCfg.optionalFault)
+		bound, err := b.bindListener(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsCert, listenerCfg.tlsKey), "", listenerCfg.optionalFault)
 		if err != nil {
-			for _, listener := range listeners {
-				_ = listener.Close()
-			}
-			return nil, nil, errChPrefix("https", err)
+			return fail("https", err)
 		}
-		servers = append(servers, srv...)
-		listeners = append(listeners, lns...)
+		b.https = bound
 	}
-	if len(servers) == 0 {
-		return nil, nil, fmt.Errorf("no management listeners enabled")
+	if listenerCfg.enableHTTP {
+		httpHandler := handler
+		if listenerCfg.redirectHTTPToHTTPS && b.https.addr != "" {
+			httpHandler = redirectToHTTPSHandler(listenerCfg.httpsAddr, httpHandler)
+			b.redirects = true
+		}
+		bound, err := b.bindListener(httpHandler, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, nil, listenerCfg.reservedHTTPAddr, listenerCfg.optionalFault)
+		if err != nil {
+			return fail("http", err)
+		}
+		b.http = bound
 	}
-	return servers, listeners, nil
+	if len(b.servers) == 0 {
+		return mgmtBinds{}, fmt.Errorf("no management listeners enabled")
+	}
+	return b, nil
 }
 
 func newMgmtTLSConfig(tlsCert, tlsKey string) *tls.Config {

@@ -25,17 +25,17 @@ type listenerBuilds struct {
 	built   []mgmtListenerConfig
 }
 
-func (b *listenerBuilds) build(lc mgmtListenerConfig) ([]*http.Server, []net.Listener, error) {
+func (b *listenerBuilds) build(lc mgmtListenerConfig) (mgmtBinds, error) {
 	b.built = append(b.built, lc)
 	if len(b.built) == 1 || b.failAll {
-		return nil, nil, b.bindErr
+		return mgmtBinds{}, b.bindErr
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		b.t.Fatal(err)
 	}
 	b.t.Cleanup(func() { _ = ln.Close() })
-	return []*http.Server{{}}, []net.Listener{ln}, nil
+	return mgmtBinds{servers: []*http.Server{{}}, listeners: []net.Listener{ln}}, nil
 }
 
 // bootStores opens the management stores over a stored running config
@@ -99,7 +99,7 @@ func TestUnbindableStoredListenerEntersRecovery(t *testing.T) {
 	if len(builds.built) != 2 || builds.built[0].httpAddr != "192.0.2.50:9090" || builds.built[1].httpAddr != ":8080" || builds.built[1].httpsAddr != ":8443" {
 		t.Fatalf("built listeners %+v, want the stored then the default listeners", builds.built)
 	}
-	if bound.listener.httpAddr != ":8080" || bound.cfg.System.Mgmt.HTTPListenAddr != ":8080" || len(bound.listeners) != 1 {
+	if bound.listener.httpAddr != ":8080" || bound.cfg.System.Mgmt.HTTPListenAddr != ":8080" || len(bound.binds.listeners) != 1 {
 		t.Fatalf("bound = %+v", bound)
 	}
 	fault, err := config.ManagementBootFaultForStore(ctx, stores.store)
