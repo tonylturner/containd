@@ -369,6 +369,9 @@ func zoneIfaceMap(ifaces []Interface) map[string][]string {
 }
 
 func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error {
+	if a := f.DefaultAction; a != "" && a != ActionAllow && a != ActionDeny {
+		return fmt.Errorf("firewall.defaultAction %q is invalid; allowed values: %q, %q or empty", f.DefaultAction, ActionAllow, ActionDeny)
+	}
 	zoneSet := map[string]struct{}{}
 	for _, z := range zones {
 		zoneSet[z.Name] = struct{}{}
