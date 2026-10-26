@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Firewall rules with identity or schedule predicates no longer compile to
+  always-on rules. A predicate that cannot be evaluated resolves toward denial:
+  such an ALLOW rule is inactive and such a DENY rule always applies. Schedules
+  still apply to ICS rules inspected through NFQUEUE. The maintenance-window
+  template's scheduled allows are inactive until schedule enforcement ships.
 - New and factory-reset configurations no longer include the `allow-mgmt-ui`
   firewall rule. It never governed management access, but it allowed any
   forwarded traffic to tcp/8080. Existing configurations keep it; delete it
