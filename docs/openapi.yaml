@@ -703,14 +703,37 @@ components:
         version: {type: string}
         zones: {items: {$ref: '#/components/schemas/Zone'}, type: array, nullable: true}
       type: object
-    ConntrackDeleteRequest:
-      properties:
-        dport: {type: integer}
-        dst: {type: string}
-        proto: {type: string}
-        sport: {type: integer}
-        src: {type: string}
+    ConntrackKillRequest:
       type: object
+      required: [proto, src, dst, sport, dport]
+      description: Select the original tuple from the connections list, including for NAT flows. TCP and UDP support IPv4 and IPv6.
+      properties:
+        proto: {type: string, enum: [tcp, udp]}
+        src: {type: string, description: Original source IP}
+        dst: {type: string, description: Original destination IP}
+        sport: {type: integer, minimum: 1, maximum: 65535}
+        dport: {type: integer, minimum: 1, maximum: 65535}
+        scope:
+          type: string
+          enum: [connection, client-service]
+          default: connection
+          description: Connection blocks the exact tuple in both directions; a fresh source port is allowed. Client-service ends all this client's connections to the service and prevents reconnects during the interval.
+        durationSecs: {type: integer, minimum: 1, maximum: 3600, default: 60}
+    ConntrackKillResult:
+      type: object
+      required: [scope, matched, deleted, conntrackDeleted, revocationInstalled, closure]
+      properties:
+        scope: {type: string, enum: [connection, client-service]}
+        matched: {type: integer}
+        deleted: {type: integer}
+        conntrackDeleted: {type: boolean, description: All matched kernel entries were deleted}
+        deleteError: {type: string}
+        revocationInstalled: {type: boolean}
+        revocationError: {type: string}
+        blockedUntil: {type: string, format: date-time}
+        closure:
+          type: string
+          description: TCP resets are signalled on each endpoint's next matching packet, not proof of endpoint closure. UDP matching packets are dropped.
     ConntrackEntry:
       properties:
         assured: {type: boolean}
@@ -1681,7 +1704,25 @@ components:
         appliedAt: {format: date-time, type: string}
         error: {type: string}
         ruleset: {type: string}
+        warnings:
+          type: array
+          items: {$ref: '#/components/schemas/RuleWarning'}
+          description: Rules of the applied ruleset whose predicates resolve toward denial; omitted when there are none or the apply failed.
       type: object
+    RuleWarning:
+      type: object
+      required: [ruleId, predicate, action, message]
+      description: >-
+        A firewall rule predicate the dataplane cannot evaluate. It resolves toward denial:
+        an ALLOW rule is inactive, and a DENY rule applies as if the predicate always matched.
+      properties:
+        ruleId: {type: string}
+        predicate:
+          type: string
+          enum: [identity, schedule]
+          description: Identity predicates are never evaluated; schedules are evaluated only on ICS rules inspected through NFQUEUE.
+        action: {type: string, enum: [ALLOW, DENY]}
+        message: {type: string}
     NetcfgManagementFault:
       properties:
         address: {type: string}
@@ -4201,19 +4242,23 @@ paths:
               schema: {$ref: '#/components/schemas/TlsInfoResponse'}
   /conntrack:
     get:
-      summary: List conntrack
+      summary: List kernel connections (IPv4 and IPv6)
       tags: [Conntrack]
       responses:
         '200':
-          description: Success
+          description: Verified snapshot; an empty array means the kernel table was empty
           content:
             application/json:
               schema: {type: array, items: {$ref: '#/components/schemas/ConntrackEntry'}}
+        '503':
+          description: Conntrack backend unavailable
+        '502':
+          description: Engine dump unavailable or incomplete; error body includes the reason
       parameters:
       - name: limit
         in: query
         required: false
-        schema: {type: integer, default: 200, minimum: 1}
+        schema: {type: integer, default: 200, minimum: 1, maximum: 5000}
   /templates:
     get:
       summary: List templates
@@ -4226,19 +4271,25 @@ paths:
               schema: {type: array, items: {$ref: '#/components/schemas/PolicyTemplate'}}
   /conntrack/kill:
     post:
-      summary: Delete a conntrack flow (admin)
+      summary: Revoke a connection or client-service (admin)
       tags: [Conntrack]
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/ConntrackDeleteRequest'}
+            schema: {$ref: '#/components/schemas/ConntrackKillRequest'}
       responses:
         '200':
-          description: Success
+          description: Per-step outcome, including partial failures. Revocation is installed before deletion. No injected reset or confirmed closure is claimed.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/StatusResponse'}
+              schema: {$ref: '#/components/schemas/ConntrackKillResult'}
+        '400':
+          description: Invalid tuple, scope or duration
+        '502':
+          description: Kernel dump unavailable or selected connection no longer present; includes reason
+        '501':
+          description: Engine does not support connection revocation
   /inventory/{ip}:
     get:
       summary: Get discovered asset
@@ -4374,6 +4425,10 @@ paths:
                         type: boolean
                         description: Whether the engine owns the candidate queue at sampling time; used only if enforcement is enabled and the candidate has an IEC 104 envelope.
                       reason: {type: string, description: Explanation of disabled enforcement or the sampled envelope decision}
+                  warnings:
+                    type: array
+                    items: {$ref: '#/components/schemas/RuleWarning'}
+                    description: Candidate rules whose predicates resolve toward denial, in rule ID order; omitted when there are none.
                   engineStatus: {$ref: '#/components/schemas/EngineRulesetStatus'}
                   engineStatusError: {type: string}
         '400':

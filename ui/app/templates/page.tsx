@@ -164,6 +164,11 @@ export default function TemplatesPage() {
           tailored to your environment, including Purdue model baselines and
           maintenance window policies.
         </p>
+        <p className="mt-2 text-xs text-(--text-muted)">
+          Maintenance window allows are inactive: schedules apply only to ICS
+          rules inspected through NFQUEUE. The firewall ruleset preview lists
+          the affected rules.
+        </p>
       </Card>
 
       {/* Template cards */}

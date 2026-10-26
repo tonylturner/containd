@@ -31,6 +31,19 @@ steers to the engine (a nonzero `nfqueueGroup`). nftables decides every other
 rule, so a scheduled `ALLOW` admits nothing and a scheduled `DENY` drops at all
 times.
 
+Each affected rule produces a warning with its rule ID, the predicate
+(`identity` or `schedule`), the action and the effect. Operators see them in:
+
+- The firewall page's nftables ruleset preview, which lists the candidate's
+  warnings.
+- `GET /api/v1/dataplane/ruleset`: `warnings` for the candidate and
+  `engineStatus.warnings` for the last applied ruleset.
+
+The rule impact preview (`POST /api/v1/firewall/rules/preview`) resolves these
+predicates the same way under the running engine's NFQUEUE setting, so an
+affected `ALLOW` rule previews no matches and an affected `DENY` rule matches
+regardless of the predicate.
+
 DPI mode resolves per-rule `ics.mode` > global `dpiMode` > `learn`. Learn is not a
 global bypass: enforce-mode rules and independent kernel decisions can still
 block traffic. IEC 104 uses a dedicated inspection envelope with default-deny

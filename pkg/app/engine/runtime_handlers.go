@@ -279,7 +279,7 @@ func dhcpLeasesHandler(mgr *dhcpd.Manager) http.HandlerFunc {
 	}
 }
 
-func conntrackHandler() http.HandlerFunc {
+func conntrackHandler(dp *engine.Engine) http.HandlerFunc {
 	type resp struct {
 		Entries []conntrack.Entry `json:"entries"`
 	}
@@ -300,18 +300,23 @@ func conntrackHandler() http.HandlerFunc {
 			writeJSON(w, resp{Entries: entries})
 			return
 		case http.MethodPost:
-			var req conntrack.DeleteRequest
+			var req conntrack.KillRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, "invalid JSON", http.StatusBadRequest)
 				return
 			}
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-			defer cancel()
-			if err := conntrack.Delete(ctx, req); err != nil {
+			if err := req.Validate(); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			writeJSON(w, map[string]any{"status": "deleted"})
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+			result, err := conntrack.Kill(ctx, req, dp.RevokeConnections)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			writeJSON(w, result)
 			return
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

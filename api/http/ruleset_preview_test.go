@@ -15,7 +15,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 type rulesetPreviewEngine struct {
@@ -33,15 +35,37 @@ func (e *rulesetPreviewEngine) PreviewRuleset(_ context.Context, cfg *config.Con
 func TestRulesetPreviewDelegatesCandidate(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DataPlane = config.DataPlaneConfig{Enforcement: true, EnforceTable: "custom", NFLogGroup: 205, NFQueueGroup: 209}
-	engine := &rulesetPreviewEngine{mockEngine: &mockEngine{}, result: dpengine.RulesetPreview{Ruleset: "engine-compiled", Runtime: dpengine.RulesetPreviewRuntime{IEC104EnvelopeOpen: true, Reason: "owned"}}}
+	warnings := []enforce.RuleWarning{{RuleID: "maint", Predicate: enforce.PredicateSchedule, Action: rules.ActionAllow,
+		Message: "schedules are enforced only on ICS rules inspected through NFQUEUE; ALLOW rule inactive"}}
+	applied := dpengine.RulesetStatus{Ruleset: "engine-applied", Warnings: warnings}
+	engine := &rulesetPreviewEngine{mockEngine: &mockEngine{ruleset: applied}, result: dpengine.RulesetPreview{Ruleset: "engine-compiled",
+		Runtime: dpengine.RulesetPreviewRuntime{IEC104EnvelopeOpen: true, Reason: "owned"}, Warnings: warnings}}
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/dataplane/ruleset", nil)
 	getRulesetPreviewHandler(&mockStore{cfg: cfg}, engine)(c)
-	var got dpengine.RulesetPreview
+	var got struct {
+		dpengine.RulesetPreview
+		EngineStatus dpengine.RulesetStatus `json:"engineStatus"`
+	}
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil ||
-		!reflect.DeepEqual(got, engine.result) || !reflect.DeepEqual(engine.cfg, cfg) {
+		!reflect.DeepEqual(got.RulesetPreview, engine.result) || !reflect.DeepEqual(engine.cfg, cfg) {
 		t.Fatalf("status=%d body=%s forwarded=%+v", rec.Code, rec.Body.String(), engine.cfg)
+	}
+	if !reflect.DeepEqual(got.EngineStatus, applied) {
+		t.Fatalf("engineStatus = %+v, want %+v", got.EngineStatus, applied)
+	}
+}
+
+func TestRulesetPreviewOmitsEmptyWarnings(t *testing.T) {
+	cfg := config.DefaultConfig()
+	engine := &rulesetPreviewEngine{mockEngine: &mockEngine{}, result: dpengine.RulesetPreview{Ruleset: "engine-compiled"}}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/dataplane/ruleset", nil)
+	getRulesetPreviewHandler(&mockStore{cfg: cfg}, engine)(c)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"warnings"`) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

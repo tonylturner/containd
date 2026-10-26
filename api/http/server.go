@@ -89,7 +89,7 @@ type ConntrackClient interface {
 }
 
 type ConntrackKiller interface {
-	DeleteConntrack(ctx context.Context, req conntrack.DeleteRequest) error
+	DeleteConntrack(ctx context.Context, req conntrack.KillRequest) (conntrack.KillResult, error)
 }
 
 type DHCPLeasesClient interface {

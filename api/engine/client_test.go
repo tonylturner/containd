@@ -282,11 +282,17 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 				"entries": []conntrack.Entry{{Proto: "tcp", State: "ESTABLISHED", Src: "192.0.2.10", Dst: "192.0.2.20"}},
 			})
 		case http.MethodPost:
-			var req conntrack.DeleteRequest
+			var req conntrack.KillRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode conntrack delete: %v", err)
 			}
-			w.WriteHeader(http.StatusOK)
+			if err := req.Validate(); err != nil {
+				t.Errorf("invalid kill request: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			until := time.Now().Add(time.Minute)
+			_ = json.NewEncoder(w).Encode(conntrack.KillResult{Scope: req.Scope, Matched: 1, Deleted: 1, ConntrackDeleted: true, RevocationInstalled: true, BlockedUntil: &until, Closure: "TCP reset signalled on next packet"})
 		default:
 			t.Fatalf("conntrack method = %s", r.Method)
 		}
@@ -390,7 +396,7 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 	if err != nil || len(entries) != 1 || entries[0].State != "ESTABLISHED" {
 		t.Fatalf("ListConntrack = %#v, %v", entries, err)
 	}
-	if err := c.DeleteConntrack(ctx, conntrack.DeleteRequest{Proto: "tcp", Src: "192.0.2.10", Dst: "192.0.2.20"}); err != nil {
+	if result, err := c.DeleteConntrack(ctx, conntrack.KillRequest{DeleteRequest: conntrack.DeleteRequest{Proto: "tcp", Src: "192.0.2.10", Dst: "192.0.2.20", Sport: 1234, Dport: 443}}); err != nil || !result.RevocationInstalled {
 		t.Fatalf("DeleteConntrack: %v", err)
 	}
 	flows, err := c.ListFlows(ctx, 4)

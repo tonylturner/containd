@@ -56,7 +56,7 @@ type runtimeMockEngine struct {
 	anomaliesCleared    bool
 	conntrackResp       []conntrack.Entry
 	conntrackErr        error
-	conntrackDeleteReq  conntrack.DeleteRequest
+	conntrackDeleteReq  conntrack.KillRequest
 	wireGuardStatusResp netcfg.WireGuardStatus
 }
 
@@ -155,9 +155,9 @@ func (m *runtimeMockEngine) ListConntrack(ctx context.Context, limit int) ([]con
 	return m.conntrackResp, m.conntrackErr
 }
 
-func (m *runtimeMockEngine) DeleteConntrack(ctx context.Context, req conntrack.DeleteRequest) error {
+func (m *runtimeMockEngine) DeleteConntrack(ctx context.Context, req conntrack.KillRequest) (conntrack.KillResult, error) {
 	m.conntrackDeleteReq = req
-	return nil
+	return conntrack.KillResult{Scope: req.Scope, Matched: 1, Deleted: 1, ConntrackDeleted: true, RevocationInstalled: true, Closure: "TCP reset signalled on next packet"}, nil
 }
 
 func (m *runtimeMockEngine) GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error) {

@@ -38,11 +38,18 @@ func TestEvaluatorMatch(t *testing.T) {
 	}
 }
 
-func TestEvaluatorDefaultDeny(t *testing.T) {
-	ev := NewEvaluator(&Snapshot{Default: ActionDeny})
-	ctx := EvalContext{}
-	if got := ev.Evaluate(ctx); got != ActionDeny {
-		t.Fatalf("expected deny, got %s", got)
+func TestEvaluatorDefaultAction(t *testing.T) {
+	for _, tc := range []struct {
+		def, want Action
+	}{
+		{ActionAllow, ActionAllow},
+		{ActionDeny, ActionDeny},
+		{"", ActionDeny},
+		{"REJECT", ActionDeny},
+	} {
+		if got := NewEvaluator(&Snapshot{Default: tc.def}).Evaluate(EvalContext{}); got != tc.want {
+			t.Fatalf("default %q evaluated to %s, want %s", tc.def, got, tc.want)
+		}
 	}
 }
 

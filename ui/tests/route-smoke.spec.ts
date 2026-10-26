@@ -115,6 +115,20 @@ const interfaceState = [
   },
 ];
 
+const rulesetPreview = {
+  snapshot: {},
+  ruleset: "table inet containd {\n}\n",
+  runtime: { iec104EnvelopeOpen: false, reason: "IEC 104 envelope not used by this candidate" },
+  warnings: [
+    {
+      ruleId: "maint-l3-to-l1",
+      predicate: "schedule",
+      action: "ALLOW",
+      message: "schedules are enforced only on ICS rules inspected through NFQUEUE; ALLOW rule inactive",
+    },
+  ],
+};
+
 const malformedFirewallRules = [
   {
     id: "tpl-modbus-allow-reads",
@@ -308,7 +322,7 @@ function responseFor(pathname: string) {
     });
   }
   if (pathname === "/api/v1/dataplane/ruleset") {
-    return json({ compiled: "", status: "ok" });
+    return json(rulesetPreview);
   }
   if (
     pathname === "/api/v1/assets" ||
@@ -417,6 +431,24 @@ for (const path of routes) {
     expect(consoleErrors).toEqual([]);
   });
 }
+
+test("firewall ruleset preview lists rules whose predicates resolve toward denial", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
+  await page.goto("/firewall");
+  const button = page.getByRole("button", { name: "Preview", exact: true });
+  await expect(button).toBeVisible();
+  const response = page.waitForResponse((res) => new URL(res.url()).pathname === "/api/v1/dataplane/ruleset");
+  await button.click();
+  await response;
+  const warning = page.getByRole("status").filter({ hasText: "Rule predicates resolved toward denial" });
+  await expect(warning).toContainText("maint-l3-to-l1");
+  await expect(warning).toContainText("ALLOW rule inactive");
+});
+
+test("templates note that maintenance window allows are inactive", async ({ page }) => {
+  await page.goto("/templates");
+  await expect(page.getByText("Maintenance window allows are inactive")).toBeVisible();
+});
 
 test("dashboard health keeps twelve pixels between uptime and gauges", async ({ page }) => {
   await page.goto("/");

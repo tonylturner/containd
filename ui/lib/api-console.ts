@@ -1,6 +1,8 @@
-import { getJSON, postJSON } from "./api-request";
+import { getJSON, postJSON, postJSONResult, parseErrorBody } from "./api-request";
+import { authHeaders, clearAuthExpired, fetchWithSession, handleUnauthorized } from "./api-core";
 
 import type {
+  ApiResult,
   CLIExecuteResponse,
   ConntrackEntry,
   FlowSummary,
@@ -30,6 +32,29 @@ export type ManagementReservation = {
   listenerFaults?: string[] | null;
 };
 
+export type ConntrackKillRequest = {
+  proto: string; src: string; dst: string; sport: number; dport: number;
+  scope: "connection" | "client-service"; durationSecs: number;
+};
+export type ConntrackKillResult = {
+  scope: "connection" | "client-service";
+  matched: number; deleted: number; conntrackDeleted: boolean; deleteError?: string;
+  revocationInstalled: boolean; revocationError?: string; blockedUntil?: string;
+  closure: string;
+};
+
+async function listConntrack(limit: number): Promise<ApiResult<ConntrackEntry[]>> {
+  try {
+    const res = await fetchWithSession(`/api/v1/conntrack?limit=${limit}`, { cache: "no-store", headers: authHeaders() });
+    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    clearAuthExpired();
+    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    return { ok: true, data: await res.json() as ConntrackEntry[] };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
 export const consoleAPI = {
   getManagementReservation: () => getJSON<ManagementReservation>("/api/v1/system/management-reservation"),
   listCLICommands: () => getJSON<string[]>("/api/v1/cli/commands"),
@@ -56,13 +81,7 @@ export const consoleAPI = {
   stopSimulation: () =>
     postJSON<{ running: boolean }>("/api/v1/simulation", { action: "stop" }),
 
-  listConntrack: (limit = 200) =>
-    getJSON<ConntrackEntry[]>(`/api/v1/conntrack?limit=${limit}`),
-  killConntrack: (req: {
-    proto: string;
-    src: string;
-    dst: string;
-    sport?: number;
-    dport?: number;
-  }) => postJSON<{ status: string }>("/api/v1/conntrack/kill", req),
+  listConntrack: (limit = 200) => listConntrack(limit),
+  killConntrack: (req: ConntrackKillRequest) =>
+    postJSONResult<ConntrackKillResult>("/api/v1/conntrack/kill", req),
 };

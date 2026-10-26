@@ -13,7 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   always-on rules. A predicate that cannot be evaluated resolves toward denial:
   such an ALLOW rule is inactive and such a DENY rule always applies. Schedules
   still apply to ICS rules inspected through NFQUEUE. The maintenance-window
-  template's scheduled allows are inactive until schedule enforcement ships.
+  template's scheduled allows are inactive. Affected rules are listed as
+  warnings in the engine ruleset status, in `GET /api/v1/dataplane/ruleset`
+  (`warnings` and `engineStatus.warnings`) and in the firewall page's ruleset
+  preview. The rule impact preview and the userspace evaluator decide these
+  rules the same way, and the evaluator admits by default only when the
+  firewall default action is exactly `ALLOW`.
 - New and factory-reset configurations no longer include the `allow-mgmt-ui`
   firewall rule. It never governed management access, but it allowed any
   forwarded traffic to tcp/8080. Existing configurations keep it; delete it
@@ -38,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The Sessions page and `GET /api/v1/conntrack` show the kernel's real IPv4
+  and IPv6 connections, including NAT reply tuples, and report an unavailable
+  backend as an error instead of an empty list. Kill now works for TCP and UDP:
+  it deletes the connection and refuses reconnects for a chosen interval
+  (1–3600 s, default 60 s), for the exact connection or the client's service.
 - DPI domain exclusions now work: a flow is excluded when its TLS SNI or an
   observed DNS answer for its server address matches an exact name or a
   `*.suffix`, decided at the first client payload. IEC 104 is never excluded
@@ -106,6 +116,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The firewall admits essential ICMPv6 to the appliance (neighbor discovery,
+  destination unreachable, packet too big, time exceeded, parameter problem),
+  so IPv6 interfaces keep working with enforcement on.
 - An omitted or empty firewall `defaultAction` means DENY everywhere. The
   security conduits view used to show such configs as unmodeled while the
   dataplane already dropped unmatched traffic.

@@ -5,12 +5,14 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
@@ -432,13 +434,24 @@ func (e *Engine) RulesetStatus() RulesetStatus {
 	return *ptr
 }
 
-func (e *Engine) setRulesetStatus(ruleset string, err error) {
+func (e *Engine) setRulesetStatus(ruleset string, warnings []enforce.RuleWarning, err error) {
 	st := &RulesetStatus{
 		Ruleset:   ruleset,
 		AppliedAt: time.Now().UTC(),
+		Warnings:  warnings,
 	}
 	if err != nil {
 		st.Error = err.Error()
 	}
 	e.rulesetStatus.Store(st)
+}
+
+// RevokeConnections installs operator revocations through the active enforcement
+// backend. Unsupported or disabled backends cannot report a successful kill.
+func (e *Engine) RevokeConnections(ctx context.Context, entries []conntrack.Entry, scope string, ttl time.Duration) error {
+	revoker, ok := e.Updater().(enforce.ConnectionRevoker)
+	if !ok {
+		return fmt.Errorf("connection revocation unavailable: nftables enforcement is not active")
+	}
+	return revoker.RevokeConnections(ctx, entries, scope, ttl)
 }
