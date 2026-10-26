@@ -168,7 +168,7 @@ endpoints are not the public policy-generation interface. See
 ## Events and templates
 
 Live telemetry includes inventory, anomalies, signatures, and protocol statistics.
-Inventory excludes IEC 104. Native IDS rules and the built-in signature engine
+The passive IEC 104 inventory is separate from the learner. Native IDS rules and the built-in signature engine
 are separate consumers. See [Logging and Evidence](logging-evidence.md) for
 bounded retention, queries, and the distinction between working syslog sinks and
 the unwired SIEM export configuration.
@@ -215,3 +215,36 @@ the management process has its own registry. The engine API is unauthenticated:
 keep any split-mode listener on a trusted private network. Metric registration
 happens once per process, not once per listener. The series have no
 station/session/IP/CA/IOA labels; only the abort counter has a fixed `reason` label.
+
+
+## Passive IEC 104 inventory
+
+The **Assets** page has a read-only IEC 104 section, separate from configured
+assets and learned profiles. It groups controlling stations (clients) with
+controlled stations (servers, normally port 2404). Expand a pair to see observed
+common addresses (CAs), then expand a CA to see each (IOA, type ID) point and its
+first/last observation times. Pair and CA command counters distinguish decoded
+client command attempts from accepted commands. Accepted means the IEC decision
+allowed the APDU **and every packet carrying its bytes completed an Accept
+verdict without error**; an allow decision alone is not delivery evidence.
+Server echoes and monitoring ASDUs do not count as command attempts.
+
+The inventory model and read API are available, but the engine observation feed
+is not connected yet. An available engine therefore returns an empty IEC 104
+section until observations are supplied. Inventory never feeds the learner,
+auto-ALLOW, or enforcement decisions. Engine unavailability displays an explicit
+unavailable state, not an empty inventory or zero counters; **Refresh** retries.
+
+Memory is bounded to 128 endpoint pairs, 32 CAs per pair and 256 (IOA, type ID)
+points per CA. The least recently observed entry is evicted at each cap; idle
+entries expire after 24 hours on the next observation or read. Reads do not
+extend retention. The legacy Modbus/DNP3/CIP inventory is bounded to 1,024 assets,
+128 peers and 256 station addresses per asset, with the same asset LRU/expiry.
+Overflow counters show capacity evictions, truncated metadata observations and
+late command outcomes whose observation has expired or been evicted. Input calls
+never wait for the inventory lock: observations or outcomes dropped on contention
+have visible overflow counters. Oversized
+ASDU input is truncated to 127 IOAs and counted as point overflow. Expiry is not
+overflow. Counts are retained-history totals, not lifetime traffic or unique
+missing-device counts. Clearing inventory or restarting the engine resets data
+and overflow totals. See [API Reference](api-reference.md#passive-inventory).
