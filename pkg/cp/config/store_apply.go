@@ -52,6 +52,40 @@ type savedConfigRow struct {
 // the transition either succeeds or has been restored and reapplied. Recovery
 // has its own bounded context: disconnecting the caller must not cancel it.
 func (s *SQLiteStore) ApplyChange(ctx context.Context, change RunningChange, ttl time.Duration, apply func(context.Context, *Config, *Config) error) error {
+	return s.applyTransition(ctx, func() error {
+		switch change {
+		case ChangeCommit:
+			return s.promoteLocked(ctx, 0)
+		case ChangeCommitConfirmed:
+			if ttl <= 0 {
+				return errors.New("ttl must be > 0")
+			}
+			return s.promoteLocked(ctx, ttl)
+		case ChangeRollback:
+			return s.rollbackLocked(ctx)
+		default:
+			return fmt.Errorf("unknown running change %q", change)
+		}
+	}, apply)
+}
+
+// ApplyReset replaces all configuration state with validated defaults, using
+// the same restoration and runtime recovery as ApplyChange. Users and audit
+// stores must only be cleared after it succeeds. The callback must not acquire
+// the store mutex.
+func (s *SQLiteStore) ApplyReset(ctx context.Context, defaults *Config, apply func(context.Context, *Config, *Config) error) error {
+	if defaults == nil {
+		return errors.New("config is nil")
+	}
+	if err := s.ValidateConfig(defaults); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+	return s.applyTransition(ctx, func() error {
+		return s.resetLocked(ctx, defaults)
+	}, apply)
+}
+
+func (s *SQLiteStore) applyTransition(ctx context.Context, transition func() error, apply func(context.Context, *Config, *Config) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous, err := s.loadRunningLocked(ctx)
@@ -80,20 +114,7 @@ func (s *SQLiteStore) ApplyChange(ctx context.Context, change RunningChange, ttl
 	if err != nil {
 		return err
 	}
-	switch change {
-	case ChangeCommit:
-		err = s.promoteLocked(ctx, 0)
-	case ChangeCommitConfirmed:
-		if ttl <= 0 {
-			return errors.New("ttl must be > 0")
-		}
-		err = s.promoteLocked(ctx, ttl)
-	case ChangeRollback:
-		err = s.rollbackLocked(ctx)
-	default:
-		return fmt.Errorf("unknown running change %q", change)
-	}
-	if err != nil {
+	if err := transition(); err != nil {
 		return err
 	}
 	next, err := s.loadRunningLocked(ctx)

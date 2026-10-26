@@ -833,7 +833,12 @@ paths:
         Preflights the autobound appliance defaults (shared with first boot) against
         the immutable management reservation before wiping users, sessions, config,
         or audit. Genuine incompatible defaults are refused without changing these
-        stores. A successful reset clears the boot fault and applies the defaults.
+        stores. Configuration replacement uses atomic restore/reapply recovery.
+        On runtime apply failure users, sessions and existing audit history are not
+        wiped; successful recovery restores running, candidate, previous, pending
+        rollback and the IDS bank. Users and audit are wiped only after runtime apply
+        succeeds. A successful reset clears the boot fault and applies the defaults.
+        A later user-store failure does not undo the successfully applied configuration.
       tags: [System]
       requestBody:
         required: true
@@ -848,6 +853,31 @@ paths:
         "200": { description: Reset complete; reauthenticate with default credentials }
         "400": { description: Invalid confirmation or defaults conflict with reserved management path }
         "403": { description: Admin role required }
+        "500":
+          description: >
+            Reset failed. Runtime apply failures include restored/reapplied recovery
+            results and optional recovery errors; other store failures return an error.
+            A failed reapply leaves runtime health unavailable.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
+                  detail: { type: string }
+                  restored: { type: boolean, description: Present on runtime apply failure; whether persisted configuration was restored }
+                  reapplied: { type: boolean, description: Present on runtime apply failure; whether the prior runtime snapshot was reapplied }
+                  restoreError: { type: string }
+                  reapplyError: { type: string }
+                  healthError: { type: string }
+              example:
+                error: configuration apply failed
+                detail: "ruleset: nft apply failed"
+                restored: true
+                reapplied: true
+        "501": { description: Factory reset requires SQLite config and users stores }
+        "503": { description: Reset stores unavailable }
 
   # ── Config ────────────────────────────────────────────────────────
   /config/validate:

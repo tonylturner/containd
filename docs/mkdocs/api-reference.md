@@ -130,8 +130,31 @@ Otherwise staging is rejected with HTTP 400 and running remains unchanged.
 
 `POST /config/confirm` only cancels the pending rollback deadline; its
 `committed` header acknowledges confirmation, not a new runtime apply.
-Factory reset also uses the strict apply path, but is destructive and does not
-restore wiped users/config/audit data if its runtime apply fails.
+
+### Factory reset
+
+`POST /system/factory-reset` requires admin access and `{"confirm":"NUCLEAR"}`.
+It validates the appliance defaults before changing any store, then replaces
+configuration through the same atomic restore/reapply path as commit. If runtime
+apply fails, HTTP 500 reports `error`, `detail`, `restored` and `reapplied`, plus
+`restoreError`, `reapplyError` or `healthError` when those recovery steps fail:
+
+```json
+{"error":"configuration apply failed","detail":"ruleset: nft apply failed","restored":true,"reapplied":true}
+```
+
+Successful recovery preserves running, candidate, previous, pending-confirmed
+state and the IDS bank. Users, credentials, MFA, sessions and existing audit
+records are not wiped on an apply failure; the reset-intent audit record remains.
+A failed recovery is explicitly reported and leaves runtime health unavailable.
+
+Only after runtime apply succeeds does reset wipe users/sessions, seed the default
+admin, clear audit history and clear the browser auth cookie. HTTP 200 returns
+`status: "reset"` and `loggedOut: true`; reauthenticate with the default credentials.
+Configuration history, pending rollback and the old IDS bank are replaced, not
+retained for rollback. Subsequent user-store failures return HTTP 500 without
+undoing the successfully applied configuration; the databases do not share a
+transaction.
 
 ## Event Retention and Page Limits
 
