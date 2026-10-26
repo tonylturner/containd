@@ -72,7 +72,7 @@ func TestMenuResetPasswordHidesInputAndConfirms(t *testing.T) {
 	t.Setenv("CONTAIND_LAB_MODE", "")
 	srv, store, audits := newTestSSHServer(t)
 	password := sshTestValue("menu-hidden")
-	session, rw := newTestSession(srv, cli.NewRegistry(nil, nil), password+"\n"+password+"\n")
+	session, rw := newTestSession(srv, cli.NewRegistry(nil, nil), "containd\n"+password+"\n"+password+"\n")
 	session.menuResetPassword()
 
 	got := rw.String()
@@ -104,7 +104,7 @@ func TestPasswordMismatchRefuses(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			session, rw := newTestSession(srv, cli.NewRegistry(nil, nil), first+"\n"+second+"\n")
+			session, rw := newTestSession(srv, cli.NewRegistry(nil, nil), "containd\n"+first+"\n"+second+"\n")
 			if flow == "menu" {
 				session.menuResetPassword()
 			} else if session.wizardPromptPassword() {
@@ -141,7 +141,7 @@ func TestPasswordPromptBlankSkipsConfirmation(t *testing.T) {
 	session, rw := newTestSession(srv, cli.NewRegistry(nil, nil), "  \n")
 	session.menuResetPassword()
 	got := rw.String()
-	if !strings.Contains(got, "Cancelled.") || strings.Contains(got, "Confirm new password") {
+	if !strings.Contains(got, "Cancelled.") || strings.Contains(got, "New password") {
 		t.Fatalf("blank entry did not cancel before confirmation: %q", got)
 	}
 	if len(audits.records) != 0 {

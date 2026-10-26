@@ -162,9 +162,14 @@ password-change flow, and both support optional TOTP MFA for local accounts:
 - An account whose MFA enrollment grace period has ended cannot log in over SSH
   until it enrolls through the web UI.
 - A password or MFA change ends the account's other sessions and SSH connections.
+- A TOTP code is accepted once per account, on web/API and SSH.
+- The SSH menu and setup wizard ask for the current password before changing it.
+- Refused SSH logins are audited. SSH password, key and TOTP failures share one
+  rate limit per client address and account, so many addresses or account
+  names are not limited together.
 
-Lab mode (`CONTAIND_LAB_MODE=1`) skips these SSH checks and pins the bootstrap
-credential. An authenticated SSH PTY can reach the appliance's Linux shell, not
+Lab mode (`CONTAIND_LAB_MODE=1`) skips these SSH checks, accepts a reused TOTP
+code and pins the bootstrap credential. An authenticated SSH PTY can reach the appliance's Linux shell, not
 just a restricted configuration CLI. The supplied appliance runs as root inside
 its container; treat SSH access as privileged appliance access. Keep it
 unreachable from untrusted networks.

@@ -158,25 +158,12 @@ func (s *interactiveSession) menuResetPassword() {
 		s.writeLn("error: " + err.Error())
 		return
 	}
-	pw, ok := s.askNewPassword("New password (blank to cancel): ")
-	if !ok {
-		return
-	}
-	if pw == "" {
+	switch s.changeOwnPassword("ssh menu", "Current password (blank to cancel): ", "New password (blank to cancel): ") {
+	case ownPasswordChanged:
+		s.writeLn("Password updated.")
+	case ownPasswordSkipped:
 		s.writeLn("Cancelled.")
-		return
 	}
-	u, err := s.server.opts.UserStore.GetByUsername(s.ctx, s.username)
-	if err != nil || u == nil {
-		s.writeLn("error: failed to load user")
-		return
-	}
-	if err := s.server.opts.UserStore.SetPassword(s.ctx, u.ID, pw); err != nil {
-		s.writeLn("error: " + err.Error())
-		return
-	}
-	s.writeAudit(audit.Record{Action: "auth.password.change", Target: s.username, Detail: "ssh menu"})
-	s.writeLn("Password updated.")
 }
 
 func (s *interactiveSession) menuFactoryReset() bool {
@@ -458,25 +445,13 @@ func (s *interactiveSession) wizardPromptPassword() bool {
 		s.writeLn("password step skipped: " + err.Error())
 		return true
 	}
-	v, ok := s.askNewPassword("New password for this user (blank to skip): ")
-	if !ok {
+	switch s.changeOwnPassword("ssh setup wizard", "Current password, to change it (blank to skip): ", "New password for this user: ") {
+	case ownPasswordChanged:
+		s.writeLn("password updated")
+	case ownPasswordFailed:
 		s.writeLn("Wizard cancelled.")
 		return false
 	}
-	if v == "" {
-		return true
-	}
-	u, err := s.server.opts.UserStore.GetByUsername(s.ctx, s.username)
-	if err != nil || u == nil {
-		s.writeLn("error: failed to load user")
-		return false
-	}
-	if err := s.server.opts.UserStore.SetPassword(s.ctx, u.ID, v); err != nil {
-		s.writeLn("error: " + err.Error())
-		return false
-	}
-	s.writeAudit(audit.Record{Action: "auth.password.change", Target: s.username, Detail: "ssh setup wizard"})
-	s.writeLn("password updated")
 	return true
 }
 

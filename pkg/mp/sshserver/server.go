@@ -103,9 +103,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return err
 	}
 
+	// handleConn adds the PublicKeyCallback, which collects one connection's
+	// refused keys.
 	cfg := &ssh.ServerConfig{
 		PasswordCallback:          s.passwordCallback(),
-		PublicKeyCallback:         s.publicKeyCallback(),
 		VerifiedPublicKeyCallback: s.verifiedPublicKeyCallback(),
 		BannerCallback: func(conn ssh.ConnMetadata) string {
 			if s.opts.Banner != "" {
@@ -196,8 +197,12 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		}
 	}
 
-	sc, chans, reqs, err := ssh.NewServerConn(nc, cfg)
+	refusals := &keyRefusals{}
+	connCfg := *cfg
+	connCfg.PublicKeyCallback = s.publicKeyCallback(refusals)
+	sc, chans, reqs, err := ssh.NewServerConn(nc, &connCfg)
 	if err != nil {
+		s.recordKeyRefusals(refusals)
 		return
 	}
 	defer sc.Close()
