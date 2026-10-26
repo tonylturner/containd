@@ -870,19 +870,21 @@ func validateDataPlane(dp DataPlaneConfig) error {
 			return errors.New("dataplane.captureInterfaces cannot include empty name")
 		}
 	}
-	// The engine also owns inet <enforceTable>_blocks, and nft limits table
-	// names to 255 bytes. containd_dhcp is the DHCP redirect table.
-	if t := dp.EnforceTable; t != "" && !enforceTableName.MatchString(t) {
+	// The engine owns inet <t> (dynamic sets) and inet <t>_policy; neither
+	// may be the DHCP redirect table.
+	t := dp.EnforceTable
+	if t != "" && !enforceTableName.MatchString(t) {
 		return fmt.Errorf("dataplane.enforceTable %q must start with a letter or '_', continue with letters, digits, '_' or '-', and have at most 248 characters", t)
 	}
-	if dp.EnforceTable == "containd_dhcp" {
-		return errors.New("dataplane.enforceTable containd_dhcp is reserved for the DHCP redirect table")
+	if t == "containd_dhcp" || t+"_policy" == "containd_dhcp" {
+		return errors.New("dataplane.enforceTable must not name the DHCP redirect table containd_dhcp")
 	}
 	return nil
 }
 
-// enforceTableName is the unquoted table name nft parses: a leading digit
-// or '-' is a syntax error.
+// enforceTableName is the engine's table name rule: nft cannot address a
+// name that starts with a digit or '-', even quoted, and <t>_policy must fit
+// the kernel's 255-byte object names.
 var enforceTableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,247}$`)
 
 func validatePCAP(p PCAPConfig) error {

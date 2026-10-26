@@ -819,8 +819,9 @@ components:
           type: string
           pattern: '^[A-Za-z_][A-Za-z0-9_-]{0,247}$'
           description: >-
-            nftables policy table (inet family); the engine also owns <enforceTable>_blocks for
-            dynamic blocks. Empty selects containd; containd_dhcp is reserved for the DHCP redirect table.
+            nftables table name (inet family). The engine owns inet <enforceTable> for temporary blocks and
+            connection revocations and inet <enforceTable>_policy for the firewall policy. Empty selects
+            containd; containd_dhcp is reserved for the DHCP redirect table.
         enforcement: {type: boolean}
         nflogGroup: {type: integer}
         nfqueueGroup: {type: integer}

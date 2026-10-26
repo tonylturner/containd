@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// The accepted names are the unquoted table names nft 1.1 parses, with room
-// for the engine's "_blocks" companion table within the 255-byte limit.
+// The accepted names follow the engine's table name rule: nft's identifier
+// syntax, with room for the "_policy" table within the kernel's 255 bytes.
 func TestValidateEnforceTable(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -21,7 +21,8 @@ func TestValidateEnforceTable(t *testing.T) {
 		{"_fw", true},
 		{"fw-1", true},
 		{"a1", true},
-		{"containd_blocks", true},
+		{"containd_policy", true},
+		{"containd_dhcp_policy", true},
 		{strings.Repeat("a", 248), true},
 		{strings.Repeat("a", 249), false},
 		{"1fw", false},
