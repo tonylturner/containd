@@ -154,6 +154,33 @@ func TestRenumberedReservedRowIsNotPinnedToStaleOwner(t *testing.T) {
 	}
 }
 
+func TestRenumberedUnaddressedReservedRowUsesSubnetAuthority(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Interfaces = []config.Interface{
+		{Name: "wan", Device: "eth0", Zone: "wan"},
+		{Name: "lan3", Device: "eth4", Zone: "lan"},
+	}
+	t.Setenv("CONTAIND_AUTO_WAN_SUBNET", "10.10.10.0/24")
+	t.Setenv("CONTAIND_AUTO_LAN3_SUBNET", "10.99.99.0/24")
+	r := &mgmtpath.Reservation{Device: "eth0", Local: netip.MustParsePrefix("10.99.99.2/24"), Port: 8080}
+	// Both rows are unaddressed, so the old structural-only check succeeds.
+	if err := config.ValidateManagementInterfaces(cfg.Interfaces, r); err != nil {
+		t.Fatal(err)
+	}
+	blankDefaultInterfaceDevicesExcept(cfg, r)
+	for _, iface := range cfg.Interfaces {
+		if iface.Device != "" {
+			t.Fatalf("stale physical name pinned to wrong subnet: %+v", iface)
+		}
+	}
+	// A genuinely matching reserved row still retains its C2 binding.
+	cfg.Interfaces[1].Device = r.Device
+	blankDefaultInterfaceDevicesExcept(cfg, r)
+	if cfg.Interfaces[1].Device != r.Device {
+		t.Fatal("matching reserved owner cleared")
+	}
+}
+
 func TestNonReservationBootRepairErrorWarnsAndContinues(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.db")

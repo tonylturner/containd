@@ -251,7 +251,14 @@ func blankDefaultInterfaceDevicesExcept(cfg *config.Config, r *mgmtpath.Reservat
 	preserveReserved := r != nil && config.ValidateManagementInterfaces(cfg.Interfaces, r) == nil
 	for i := range cfg.Interfaces {
 		if preserveReserved && cfg.Interfaces[i].Device == r.Device {
-			continue
+			// Structural validity alone cannot establish ownership: on a
+			// partial appliance an unaddressed ordinary row may now carry the
+			// reserved NIC's old ethN name. Explicit subnet authority wins.
+			subnet := httpapi.DefaultInterfaceSubnetOverride(cfg.Interfaces[i].Name)
+			_, network, err := net.ParseCIDR(subnet)
+			if subnet == "" || err == nil && network.Contains(net.IP(r.Local.Addr().AsSlice())) {
+				continue
+			}
 		}
 		if _, ok := defaults[cfg.Interfaces[i].Name]; ok {
 			cfg.Interfaces[i].Device = ""

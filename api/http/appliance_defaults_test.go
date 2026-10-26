@@ -43,7 +43,7 @@ func TestReservedAutoBindAfterRenumber(t *testing.T) {
 		// The reserved NIC is now index/name 5, which used to hold addressed lan4.
 		subnet := fmt.Sprintf("10.219.%d.0/24", i)
 		t.Setenv("CONTAIND_AUTO_"+strings.ToUpper(name)+"_SUBNET", subnet)
-		state = append(state, config.InterfaceState{Name: fmt.Sprintf("nic%d", (i+1)%8), Index: i + 1, Addrs: []string{fmt.Sprintf("10.219.%d.2/24", i)}})
+		state = append(state, config.InterfaceState{Name: fmt.Sprintf("nic%d", (i+1)%8), Index: i + 1, Up: true, Addrs: []string{fmt.Sprintf("10.219.%d.2/24", i)}})
 		// The boot normalizer has blanked stale default bindings; row values stay.
 		if name == "lan4" {
 			cfg.Interfaces[i].Addresses = []string{"192.0.2.14/24"}
