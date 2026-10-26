@@ -35,7 +35,7 @@ func TestStartupRepairsPreserveCandidateAcrossRestart(t *testing.T) {
 	if err := store.Save(ctx, initial); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.MutateCandidate(ctx, func(next *config.Config) error {
+	if err := store.MutateCandidateIDS(ctx, func(next *config.Config) error {
 		next.System.Hostname = "staged-host"
 		next.System.Mgmt.HTTPSListenAddr = ":9444"
 		next.Firewall.Rules = []config.Rule{{ID: "staged-rule", Action: config.ActionAllow}}
