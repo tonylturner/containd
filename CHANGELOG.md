@@ -75,6 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Temporary flow blocks key on the transport protocol, so blocking a TCP flow
+  no longer blocks UDP to the same port. The connections list keeps the
+  engine's error detail when the backend fails.
 - Factory reset brings the firewall and service daemons to the default
   configuration and reports any part that did not converge. It revokes web and
   API sessions (lab-mode tokens stay valid by design) and closes SSH sessions.
