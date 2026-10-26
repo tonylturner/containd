@@ -78,7 +78,7 @@ func (s *Server) refuseExpiredMFAGrace(conn ssh.ConnMetadata, u *users.StoredUse
 	if !users.IsMFAGraceExpired(u, time.Now()) {
 		return nil
 	}
-	s.auditLogin(conn, "denied", "mfa setup required")
+	s.recordDenial(conn.RemoteAddr(), conn.User(), "mfa setup required")
 	return &ssh.BannerError{Err: errMFASetupRequired, Message: mfaEnrollmentBanner}
 }
 
@@ -155,16 +155,12 @@ func (a *assuranceStep) verifyTOTP(conn ssh.ConnMetadata, u *users.StoredUser, c
 
 // refuseCheck refuses a TOTP code or current password that the store refused.
 // A locked check writes one record per lock (users.Refusal); its later
-// refusals still count against the client's login limit.
+// refusals still count against the client's login limit. A store failure is
+// not a refusal and is neither counted nor recorded.
 func (a *assuranceStep) refuseCheck(conn ssh.ConnMetadata, err error) error {
-	detail, record, refused := users.Refusal(err)
-	switch {
-	case !refused:
-		return err
-	case record:
-		return a.server.refuseLogin(conn, detail, err)
+	if detail, record, refused := users.Refusal(err); refused {
+		a.server.countRefusal(conn.RemoteAddr(), conn.User(), detail, record)
 	}
-	a.server.pwLimiter.Fail(a.key)
 	return err
 }
 
@@ -215,15 +211,6 @@ func (a *assuranceStep) changePassword(conn ssh.ConnMetadata, u *users.StoredUse
 		return nil
 	}
 	return errors.New("password change not completed")
-}
-
-func (s *Server) auditLogin(conn ssh.ConnMetadata, result, detail string) {
-	s.audit(conn.User(), audit.Record{
-		Action: "ssh.login",
-		Target: conn.RemoteAddr().String(),
-		Result: result,
-		Detail: detail,
-	})
 }
 
 // audit records an SSH-originated event for actor.
