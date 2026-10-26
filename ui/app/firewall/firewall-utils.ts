@@ -1,6 +1,3 @@
-import type { Interface, InterfaceState } from "../../lib/api";
-import { isCIDR, isIPv4 } from "../../lib/validate";
-
 export type ICSProtoMeta = {
   label: string;
   port: string;
@@ -155,49 +152,6 @@ export function icsProtoMeta(name: string): ICSProtoMeta {
       addrHelp: "",
     }
   );
-}
-
-/** True if s is an IPv4 CIDR as isCIDR and isIPv4 read one (192.0.2.7/24). */
-function isIPv4CIDR(s: string): boolean {
-  return isCIDR(s) && isIPv4(s.slice(0, s.lastIndexOf("/")));
-}
-
-/** The address as a 32-bit number; ip must already pass isIPv4. */
-function ip4ToInt(ip: string): number {
-  return ip.split(".").reduce((n, octet) => ((n << 8) | Number(octet)) >>> 0, 0);
-}
-
-function intToIP4(n: number): string {
-  const v = n >>> 0;
-  return `${(v >>> 24) & 255}.${(v >>> 16) & 255}.${(v >>> 8) & 255}.${v & 255}`;
-}
-
-/** The address after the network address of an IPv4 CIDR, or null for anything else. */
-export function firstHostInCIDR(cidr: string): string | null {
-  if (!isIPv4CIDR(cidr)) return null;
-  const slash = cidr.lastIndexOf("/");
-  const prefix = Number(cidr.slice(slash + 1));
-  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-  const net = (ip4ToInt(cidr.slice(0, slash)) & mask) >>> 0;
-  return intToIP4(net + 1);
-}
-
-export function pickWanIface(ifs: Interface[]): Interface | null {
-  const byName = ifs.find((i) => i.name === "wan");
-  if (byName) return byName;
-  const byZone = ifs.find((i) => (i.zone || "").toLowerCase() === "wan");
-  return byZone ?? null;
-}
-
-export function pickWanCIDR(state: InterfaceState | null): string | null {
-  if (!state) return null;
-  for (const addr of state.addrs || []) {
-    const s = String(addr);
-    if (!isIPv4CIDR(s)) continue;
-    if (s.startsWith("169.254.")) continue;
-    return s;
-  }
-  return null;
 }
 
 export const IT_PROTOCOLS: {

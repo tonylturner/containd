@@ -13,9 +13,7 @@ import {
   type DataPlaneConfig,
   type FirewallRule,
   type FirewallRulePatch,
-  type Gateway,
   type RoutingConfig,
-  type StaticRoute,
   type Zone,
   type NATConfig,
   type RulesetPreview,
@@ -25,11 +23,7 @@ import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { Card } from "../../components/Card";
-import {
-  firstHostInCIDR,
-  pickWanCIDR,
-  pickWanIface,
-} from "./firewall-utils";
+import { inferWanGateway, WAN_GATEWAY_NAME, wanGateway, withDefaultRoute } from "../../lib/wan-gateway";
 import { DPIConfigSection } from "./firewall-dpi-config";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
 import { RuleWarningList } from "./firewall-rule-warnings";
@@ -236,47 +230,9 @@ export default function FirewallPage() {
       ]);
       if (states === null) throw new Error("Interface state unavailable — WAN address discovery failed; no quick-start changes were staged.");
       if (ifs === null) throw new Error("Interface configuration unavailable — WAN discovery failed; no quick-start changes were staged.");
-      const wanIface = pickWanIface(ifs);
-      if (!wanIface) throw new Error("Could not determine WAN interface (expected an interface named 'wan' or in zone 'wan').");
-      const wanState = states.find((s) => s.name === (wanIface.device?.trim() || wanIface.name)) ?? null;
-      const wanCIDR = pickWanCIDR(wanState);
-      if (!wanCIDR) {
-        throw new Error(
-          `Could not determine WAN IPv4 address for '${wanIface.name}'. If you're using DHCP in Docker, restart the container so Docker assigns an IP at startup.`,
-        );
-      }
-      const inferredGw = firstHostInCIDR(wanCIDR);
-      if (!inferredGw) throw new Error(`Could not infer a WAN gateway from '${wanCIDR}'.`);
-
-      const gwName = "wan-gw";
-      const nextGateway: Gateway = {
-        name: gwName,
-        address: inferredGw,
-        iface: wanIface.name,
-        description: "Auto (WAN) from OS address",
-      };
-
-      const nextRouting: RoutingConfig = {
-        gateways: curRouting?.gateways ?? [],
-        routes: curRouting?.routes ?? [],
-        rules: curRouting?.rules ?? [],
-      };
-
-      const existingGwIdx = (nextRouting.gateways ?? []).findIndex((g) => g.name === gwName);
-      nextRouting.gateways =
-        existingGwIdx >= 0
-          ? (nextRouting.gateways ?? []).map((g, i) => (i === existingGwIdx ? nextGateway : g))
-          : [...(nextRouting.gateways ?? []), nextGateway];
-
-      const isDefaultDst = (dst: string) => {
-        const d = dst.trim().toLowerCase();
-        return d === "default" || d === "0.0.0.0/0";
-      };
-      const routes = nextRouting.routes ?? [];
-      const existingDefaultIdx = routes.findIndex((r) => isDefaultDst(r.dst) && (r.table ?? 0) === 0);
-      const nextDefault: StaticRoute = { dst: "default", gateway: gwName, iface: wanIface.name, table: 0 };
-      nextRouting.routes =
-        existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
+      const inferred = inferWanGateway(ifs, states);
+      if (!inferred.ok) throw new Error(inferred.error);
+      const nextRouting = withDefaultRoute(curRouting, wanGateway(inferred.wan));
 
       const routingUpdated = await api.setRouting(nextRouting);
       if (!routingUpdated.ok) throw new Error(routingUpdated.error || "Failed to update routing configuration.");
@@ -315,7 +271,7 @@ export default function FirewallPage() {
       setNotice(
         warnings.length > 0
           ? `Outbound quick start staged — commit to apply. Warnings: ${warnings.join(" | ")}`
-          : `Outbound quick start staged — commit to apply: default route via ${gwName}, SNAT (LAN+MGMT \u2192 WAN), and firewall allow rule '${allowID}'.`,
+          : `Outbound quick start staged — commit to apply: default route via ${WAN_GATEWAY_NAME}, SNAT (LAN+MGMT \u2192 WAN), and firewall allow rule '${allowID}'.`,
       );
       await refresh();
     } catch (e) {
