@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Refresh contributor testing, performance and code-boundary guidance and
   package navigation; remove the empty internal API placeholder.
+- Clarify regression harness setup, isolation, endpoint image tags and
+  cleanup behavior without changing script execution.
 
 ## [0.1.34] - 2026-10-26
 

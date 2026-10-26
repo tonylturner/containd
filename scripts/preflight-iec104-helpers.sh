@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Preflight helpers; sourced by preflight-iec104.sh after its run state is set.
+# NFQUEUE preflight helpers, sourced by preflight-iec104.sh after run-state
+# initialization; not a standalone script. Requires the caller's Docker Compose,
+# jq and Python 3 tools, project/image names and results paths.
+# Records results and tears down run-owned resources via the caller's EXIT trap.
+# See test/iec104/README.md#nfqueue-kernel-preflight.
 
 compose() {
   docker compose --project-name "$PROJECT" --project-directory "$ROOT" -f "$COMPOSE_FILE" "$@"
