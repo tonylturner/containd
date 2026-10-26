@@ -82,6 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The nftables ruleset preview is compiled by the live engine with the
+  candidate's table and queue settings, the management reservation and the IEC
+  104 queue ownership sampled at request time, and states which envelope state
+  it used. With enforcement disabled it says nothing would be applied. Without
+  a reachable engine it returns an error instead of a default-compiler guess.
 - Temporary flow blocks key on the transport protocol, so blocking a TCP flow
   no longer blocks UDP to the same port. The connections list keeps the
   engine's error detail when the backend fails.
