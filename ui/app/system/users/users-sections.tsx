@@ -4,7 +4,16 @@ import { Card } from "../../../components/Card";
 import type { User, UserRole } from "../../../lib/api";
 
 /** The user action in flight: create, or edit/password/delete of one user. */
-export type PendingAction = "create" | `edit:${string}` | `password:${string}` | `delete:${string}` | null;
+export type PendingAction =
+  | "create"
+  | `edit:${string}`
+  | `password:${string}`
+  | `delete:${string}`
+  | `mfa-require:${string}`
+  | `mfa-grace:${string}`
+  | `mfa-clear:${string}`
+  | `mfa-disable:${string}`
+  | null;
 
 function formatTimestamp(value?: string) {
   if (!value) return "—";
@@ -332,37 +341,37 @@ export function ManageUsersPanel({
                       {!u.mfaRequired && (
                         <button
                           onClick={() => onRequireUserMFA(u)}
-                          disabled={!canEdit}
-                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
+                          disabled={!canEdit || pending === `mfa-require:${u.id}`}
+                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui disabled:opacity-60"
                         >
-                          Require MFA
+                          {pending === `mfa-require:${u.id}` ? "Requiring\u2026" : "Require MFA"}
                         </button>
                       )}
                       {u.mfaRequired && !u.mfaEnabled && (
                         <button
                           onClick={() => onExtendUserMFAGrace(u)}
-                          disabled={!canEdit}
-                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
+                          disabled={!canEdit || pending === `mfa-grace:${u.id}`}
+                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui disabled:opacity-60"
                         >
-                          Extend grace
+                          {pending === `mfa-grace:${u.id}` ? "Extending\u2026" : "Extend grace"}
                         </button>
                       )}
                       {u.mfaRequired && (
                         <button
                           onClick={() => onClearUserMFARequirement(u)}
-                          disabled={!canEdit}
-                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
+                          disabled={!canEdit || pending === `mfa-clear:${u.id}`}
+                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui disabled:opacity-60"
                         >
-                          Clear MFA req
+                          {pending === `mfa-clear:${u.id}` ? "Clearing\u2026" : "Clear MFA req"}
                         </button>
                       )}
                       {u.mfaEnabled && (
                         <button
                           onClick={() => onDisableUserMFA(u)}
-                          disabled={!canEdit}
-                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
+                          disabled={!canEdit || pending === `mfa-disable:${u.id}`}
+                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui disabled:opacity-60"
                         >
-                          {u.mfaRequired ? "Reset MFA" : "Disable MFA"}
+                          {pending === `mfa-disable:${u.id}` ? "Disabling\u2026" : u.mfaRequired ? "Reset MFA" : "Disable MFA"}
                         </button>
                       )}
                       <button

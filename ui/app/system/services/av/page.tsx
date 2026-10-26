@@ -7,12 +7,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, isAdmin, type AVConfig, type AVStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
+import { SaveStateLine } from "../../../../components/SaveStateLine";
+import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { Card } from "../../../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../../../components/ConfirmDialog";
-
-type SaveState = "idle" | "saving" | "saved" | "error";
 
 const emptyICAPServer = { address: "", useTls: false, service: "" };
 
@@ -29,7 +29,7 @@ export default function AVPage() {
     clamav: { freshclamEnabled: true },
   });
   const [status, setStatus] = useState<AVStatus | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
@@ -82,7 +82,6 @@ export default function AVPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    setSaveState("saving");
     // Ensure optional booleans are explicit so Go doesn't default omitted values to false.
     const payload: AVConfig = {
       ...cfg,
@@ -91,18 +90,13 @@ export default function AVPage() {
         freshclamEnabled: cfg.clamav?.freshclamEnabled ?? true,
       },
     };
-    const result = await api.setAV(payload);
-    if (result.ok) {
-      setSaveState("saved");
-      setCfg(result.data);
-      toast(result.warning ? `AV settings staged — commit to apply. Warning: ${result.warning}` : "AV settings staged — commit to apply.", "success");
-    } else {
-      setSaveState("error");
-      const msg = result.error || "Failed to save AV settings.";
-      setError(msg);
-      toast(msg, "error");
-    }
-    setTimeout(() => setSaveState("idle"), 1500);
+    const result = await save.run("save", () => api.setAV(payload), {
+      success: "AV settings staged — commit to apply.",
+      failure: "Failed to save AV settings.",
+    });
+    if (!result) return;
+    if (result.ok) setCfg(result.data);
+    else setError(result.error);
   }
 
   async function onRunUpdate() {
@@ -166,9 +160,10 @@ export default function AVPage() {
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              disabled={save.pending !== null}
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
-              Save
+              {save.pending ? "Saving\u2026" : "Save"}
             </button>
           )}
           <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
@@ -533,16 +528,7 @@ export default function AVPage() {
         </div>
       </Card>
 
-      <p className="mt-3 text-xs text-(--text-muted)">
-        State:{" "}
-        {saveState === "saving"
-          ? "saving\u2026"
-          : saveState === "saved"
-            ? "staged — commit to apply."
-            : saveState === "error"
-              ? "error"
-              : "idle"}
-      </p>
+      <SaveStateLine state={save.state} saved="staged — commit to apply." />
     </Shell>
   );
 }

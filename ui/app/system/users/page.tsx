@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Shell } from "../../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../../components/ConfirmDialog";
-import { useToast } from "../../../components/ToastProvider";
-import { api, isAdmin, type User, type UserRole } from "../../../lib/api";
+import { SaveStateLine } from "../../../components/SaveStateLine";
+import { useSaveAction } from "../../../hooks/useSaveAction";
+import { api, isAdmin, type ApiResult, type User, type UserRole } from "../../../lib/api";
 import {
   CreateUserPanel,
   ManageUsersPanel,
@@ -14,15 +15,11 @@ import {
 } from "./users-sections";
 
 type UsersTab = "manage" | "create";
-type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function UsersPage() {
   const confirm = useConfirm();
-  const toast = useToast();
-  const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [pending, setPending] = useState<PendingAction>(null);
-  // Guards a second submit that arrives before the disabled button renders.
-  const inFlight = useRef(false);
+  const save = useSaveAction<Exclude<PendingAction, null>>();
+  const pending = save.pending;
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -73,36 +70,19 @@ export default function UsersPage() {
   }, []);
 
   /**
-   * Runs one user action at a time, as the service pages save: the acting
+   * Runs one user action at a time through the shared save hook: the acting
    * button is disabled while it runs, then a toast and the state line confirm
-   * it, or the error is shown.
+   * it, or the error is shown. True when it succeeded.
    */
-  async function runAction(
+  async function runAction<T>(
     key: Exclude<PendingAction, null>,
-    action: () => Promise<{ ok: true } | { ok: false; error: string }>,
+    action: () => Promise<ApiResult<T>>,
     messages: { success: string; failure: string },
   ): Promise<boolean> {
-    if (inFlight.current) return false;
-    inFlight.current = true;
     setError(null);
-    setPending(key);
-    setSaveState("saving");
-    const result = await action().finally(() => {
-      inFlight.current = false;
-    });
-    setPending(null);
-    if (!result.ok) {
-      const msg = result.error || messages.failure;
-      setSaveState("error");
-      setError(msg);
-      toast(msg, "error");
-      setTimeout(() => setSaveState("idle"), 1500);
-      return false;
-    }
-    setSaveState("saved");
-    toast(messages.success, "success");
-    setTimeout(() => setSaveState("idle"), 1500);
-    return true;
+    const result = await save.run(key, action, messages);
+    if (result && !result.ok) setError(result.error);
+    return !!result?.ok;
   }
 
   async function onCreate() {
@@ -195,13 +175,11 @@ export default function UsersPage() {
       confirmLabel: "Disable MFA",
       variant: "warning",
       onConfirm: async () => {
-        setError(null);
-        const ok = await api.disableUserMFA(user.id);
-        if (!ok.ok) {
-          setError(ok.error || "Failed to disable MFA.");
-          return;
-        }
-        await refresh();
+        const done = await runAction(`mfa-disable:${user.id}`, () => api.disableUserMFA(user.id), {
+          success: `${user.mfaRequired ? "MFA reset" : "MFA disabled"} for ${user.username}.`,
+          failure: "Failed to disable MFA.",
+        });
+        if (done) await refresh();
       },
     });
   }
@@ -216,13 +194,11 @@ export default function UsersPage() {
       confirmLabel: "Require MFA",
       variant: "warning",
       onConfirm: async () => {
-        setError(null);
-        const ok = await api.requireUserMFA(user.id);
-        if (!ok.ok) {
-          setError(ok.error || "Failed to require MFA.");
-          return;
-        }
-        await refresh();
+        const done = await runAction(`mfa-require:${user.id}`, () => api.requireUserMFA(user.id), {
+          success: `MFA required for ${user.username}.`,
+          failure: "Failed to require MFA.",
+        });
+        if (done) await refresh();
       },
     });
   }
@@ -235,13 +211,11 @@ export default function UsersPage() {
       confirmLabel: "Clear requirement",
       variant: "warning",
       onConfirm: async () => {
-        setError(null);
-        const ok = await api.clearUserMFARequirement(user.id);
-        if (!ok.ok) {
-          setError(ok.error || "Failed to clear MFA requirement.");
-          return;
-        }
-        await refresh();
+        const done = await runAction(`mfa-clear:${user.id}`, () => api.clearUserMFARequirement(user.id), {
+          success: `MFA requirement cleared for ${user.username}.`,
+          failure: "Failed to clear MFA requirement.",
+        });
+        if (done) await refresh();
       },
     });
   }
@@ -254,13 +228,11 @@ export default function UsersPage() {
       confirmLabel: "Extend grace",
       variant: "warning",
       onConfirm: async () => {
-        setError(null);
-        const ok = await api.extendUserMFAGrace(user.id);
-        if (!ok.ok) {
-          setError(ok.error || "Failed to extend MFA grace.");
-          return;
-        }
-        await refresh();
+        const done = await runAction(`mfa-grace:${user.id}`, () => api.extendUserMFAGrace(user.id), {
+          success: `MFA grace extended for ${user.username}.`,
+          failure: "Failed to extend MFA grace.",
+        });
+        if (done) await refresh();
       },
     });
   }
@@ -342,16 +314,7 @@ export default function UsersPage() {
         />
       )}
 
-      <p role="status" aria-label="Save state" className="mt-3 text-xs text-(--text-muted)">
-        State:{" "}
-        {saveState === "saving"
-          ? "saving\u2026"
-          : saveState === "saved"
-            ? "saved."
-            : saveState === "error"
-              ? "error"
-              : "idle"}
-      </p>
+      <SaveStateLine state={save.state} saved="saved." />
     </Shell>
   );
 }
