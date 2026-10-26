@@ -112,8 +112,8 @@ return `503` and the status `av` entry reports `"available": false`.
 ClamAV mode:
 
 - The engine renders `clamd.conf` from the settings: clamd listens only on
-  `clamav.socketPath` (default `/run/clamav/clamd.sock`) and loads every
-  database in `/var/lib/clamav`. clamd restarts only when that rendered
+  `clamav.socketPath` (required in clamav mode; the images prepare
+  `/run/clamav/clamd.sock`) and loads every database in `/var/lib/clamav`. clamd restarts only when that rendered
   configuration changes.
 - clamd needs at least one signature database before it starts. With
   `freshclamEnabled`, FreshClam runs once when enabled and then every

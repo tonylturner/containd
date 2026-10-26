@@ -40,7 +40,7 @@ type AVDefinition struct {
 	Name     string    `json:"name"`
 	Size     int64     `json:"size"`
 	Modified time.Time `json:"modified"`
-	// Active reports that the database is installed where clamd loads it.
+	// Active reports that a running clamd is loading the database.
 	Active bool `json:"active"`
 }
 
@@ -69,6 +69,9 @@ func ValidateDefinitionName(name string) error {
 // ListDefinitions returns the stored custom databases.
 func (m *AVManager) ListDefinitions() (AVDefinitionList, error) {
 	cfg := m.Current()
+	m.mu.Lock()
+	loading := cfg.Enabled && avMode(cfg) == "clamav" && m.clamd.running()
+	m.mu.Unlock()
 	dir := customDefsPath(cfg)
 	out := AVDefinitionList{Path: dir, Files: []string{}, Definitions: []AVDefinition{}}
 	entries, err := os.ReadDir(dir)
@@ -92,7 +95,7 @@ func (m *AVManager) ListDefinitions() (AVDefinitionList, error) {
 			Name:     e.Name(),
 			Size:     info.Size(),
 			Modified: info.ModTime().UTC(),
-			Active:   activeErr == nil,
+			Active:   loading && activeErr == nil,
 		})
 	}
 	return out, nil

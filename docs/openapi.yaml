@@ -4856,7 +4856,7 @@ paths:
                         name: {type: string}
                         size: {type: integer}
                         modified: {type: string, format: date-time}
-                        active: {type: boolean, description: Installed where clamd loads it}
+                        active: {type: boolean, description: A running clamd is loading the definition}
         '503':
           description: Engine unavailable
           content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}

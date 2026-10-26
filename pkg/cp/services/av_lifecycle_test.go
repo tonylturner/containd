@@ -347,6 +347,16 @@ func TestAVManagerCustomDefinitionsActivateAndReload(t *testing.T) {
 		t.Fatalf("oversize upload = %v", err)
 	}
 
+	// Without a running clamd nothing is active, though it stays installed.
+	if err := mgr.stopClamd(); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := mgr.ListDefinitions(); err != nil || list.Definitions[0].Active {
+		t.Fatalf("ListDefinitions without clamd = %+v, %v", list, err)
+	}
+	if err := mgr.Apply(applyCtx(t), cfg); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
 	if err := mgr.DeleteDefinition(context.Background(), "local.ndb"); err != nil {
 		t.Fatalf("DeleteDefinition: %v", err)
 	}
