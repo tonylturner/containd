@@ -72,6 +72,14 @@ func TestKernelOwnedTablesKeepForeignStateAndBlocks(t *testing.T) {
 		t.Fatal("block stopped dropping after the second apply")
 	}
 
+	lab.nft(t, c.ClearBlocks())
+	if err := lab.probe("198.18.60.2", 18050, "198.18.50.2"); err != nil {
+		t.Fatalf("cleared block still drops: %v", err)
+	}
+
+	if err := NewNftUpdater("").BlockHostTemp(lab.ctx, net.ParseIP("198.18.60.2"), time.Hour); err != nil {
+		t.Fatal(err)
+	}
 	lab.nft(t, c.DeleteTables())
 	if lab.tableExists("inet", "containd") || lab.tableExists("inet", "containd_blocks") {
 		t.Fatalf("containd tables survived their deletion:\n%s", lab.run(t, "nft", "list", "tables"))
@@ -81,5 +89,32 @@ func TestKernelOwnedTablesKeepForeignStateAndBlocks(t *testing.T) {
 	}
 	if err := lab.probe("198.18.60.2", 18050, "198.18.50.2"); err != nil {
 		t.Fatalf("traffic still blocked without containd's tables: %v", err)
+	}
+}
+
+// TestKernelRenamedTablesRetireInOneTransaction renames the policy table to
+// the old blocks table's name and back. The retirement precedes the new
+// ruleset in one transaction, so neither direction collides.
+func TestKernelRenamedTablesRetireInOneTransaction(t *testing.T) {
+	lab := newNetnsLab(t, "ren", 70, 30*time.Second)
+	snap := &rules.Snapshot{Default: rules.ActionAllow}
+	short, long := NewCompiler(), NewCompiler()
+	long.TableName = "containd_blocks"
+	t.Cleanup(func() { lab.nft(t, short.DeleteTables()+long.DeleteTables()) })
+	lab.apply(t, short, snap)
+	for _, step := range []struct{ from, to *Compiler }{{short, long}, {long, short}} {
+		text, err := step.to.CompileFirewall(snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lab.nft(t, step.from.RetireTables(step.to)+text)
+		listing := lab.run(t, "nft", "list", "tables")
+		want := []string{"table inet " + step.to.TableName + "\n", "table inet " + BlocksTable(step.to.TableName) + "\n"}
+		if strings.Count(listing, "table inet ") != 2 || !strings.Contains(listing, want[0]) || !strings.Contains(listing, want[1]) {
+			t.Fatalf("after renaming %s to %s:\n%s", step.from.TableName, step.to.TableName, listing)
+		}
+		if chain := lab.run(t, "nft", "list", "chain", "inet", step.to.TableName, "input"); !strings.Contains(chain, "policy drop") {
+			t.Fatalf("policy table %s lacks its input chain:\n%s", step.to.TableName, chain)
+		}
 	}
 }

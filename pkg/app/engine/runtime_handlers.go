@@ -134,6 +134,25 @@ func blockFlowHandler(dp *engine.Engine) http.HandlerFunc {
 	}
 }
 
+// clearBlocksHandler removes every temporary host and flow block.
+func clearBlocksHandler(dp *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if dp == nil {
+			http.Error(w, "engine unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := dp.ClearBlocks(r.Context()); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
+	}
+}
+
 func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager) http.HandlerFunc {
 	var current config.ServicesConfig
 	var currentMu sync.Mutex

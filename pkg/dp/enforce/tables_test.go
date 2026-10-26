@@ -63,6 +63,35 @@ func TestCompileFirewallTouchesOnlyOwnedTables(t *testing.T) {
 	}
 }
 
+func TestRetireTablesOnlyOnRename(t *testing.T) {
+	old, same, renamed := NewCompiler(), NewCompiler(), NewCompiler()
+	renamed.TableName = "containd_blocks"
+	if got := old.RetireTables(same); got != "" {
+		t.Fatalf("same tables retired: %q", got)
+	}
+	want := DeleteTable("containd") + DeleteTable("containd_blocks")
+	if got := old.RetireTables(renamed); got != want {
+		t.Fatalf("retire = %q, want %q", got, want)
+	}
+	if got := old.DeleteTables(); got != want {
+		t.Fatalf("delete = %q, want %q", got, want)
+	}
+}
+
+func TestClearBlocksFlushesBothSets(t *testing.T) {
+	c := NewCompiler()
+	c.TableName = "fw"
+	text := c.ClearBlocks()
+	for _, want := range []string{"add table inet fw_blocks\n", "flush set inet fw_blocks block_hosts\n", "flush set inet fw_blocks block_flows\n"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "inet fw ") || strings.Contains(text, "delete") {
+		t.Fatalf("clearing blocks touches the policy table or deletes:\n%s", text)
+	}
+}
+
 func TestNftUpdaterTargetsBlocksTable(t *testing.T) {
 	u := NewNftUpdater("fw")
 	host := strings.Join(u.buildBlockHostArgs(net.ParseIP("10.1.2.3"), time.Second), " ")

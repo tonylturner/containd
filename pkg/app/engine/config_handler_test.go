@@ -27,14 +27,16 @@ import (
 )
 
 // countingDP is the real engine with its Reconfigure and StartWithRetry
-// calls counted. startFn, when set, replaces the next starts.
+// calls counted. startFn, when set, replaces the next starts; reconfigErr,
+// when set, fails the next Reconfigure without changing the engine.
 type countingDP struct {
 	*engine.Engine
-	reconfigs atomic.Int32
-	starts    atomic.Int32
-	mu        sync.Mutex
-	startFn   func(context.Context) error
-	results   chan error
+	reconfigErr error
+	reconfigs   atomic.Int32
+	starts      atomic.Int32
+	mu          sync.Mutex
+	startFn     func(context.Context) error
+	results     chan error
 }
 
 func newCountingDP(t *testing.T) *countingDP {
@@ -46,9 +48,13 @@ func newCountingDP(t *testing.T) *countingDP {
 	return &countingDP{Engine: e, results: make(chan error, 64)}
 }
 
-func (c *countingDP) Reconfigure(fresh *engine.Engine) {
+func (c *countingDP) Reconfigure(fresh *engine.Engine) error {
 	c.reconfigs.Add(1)
-	c.Engine.Reconfigure(fresh)
+	if err := c.reconfigErr; err != nil {
+		c.reconfigErr = nil
+		return err
+	}
+	return c.Engine.Reconfigure(fresh)
 }
 
 func (c *countingDP) StartWithRetry(ctx context.Context) error {
@@ -380,4 +386,23 @@ func TestConfigConcurrentGetAndPost(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestConfigFailedRebuildIsRetried(t *testing.T) {
+	dp := newCountingDP(t)
+	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
+	h := configHandler(zap.NewNop().Sugar(), dp, sim)
+	dp.reconfigErr = errors.New("remove enforcement tables: nft: netlink busy")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"enforcement":false}`)))
+	if rec.Code != http.StatusInternalServerError || !bytes.Contains(rec.Body.Bytes(), []byte("remove enforcement tables")) {
+		t.Fatalf("failed rebuild = %d %s", rec.Code, rec.Body.String())
+	}
+	if dp.starts.Load() != 0 {
+		t.Fatal("a failed rebuild started the engine")
+	}
+	if out := postConfig(t, h, `{"enforcement":false}`); out["unchanged"] != false || dp.reconfigs.Load() != 2 {
+		t.Fatalf("retry after a failed rebuild = %v reconfigs=%d", out, dp.reconfigs.Load())
+	}
+	dp.waitStart(t)
 }

@@ -48,6 +48,28 @@ func (c *Compiler) DeleteTables() string {
 	return DeleteTable(c.policyTable()) + DeleteTable(BlocksTable(c.policyTable()))
 }
 
+// RetireTables returns the script that removes the tables c installed when
+// next owns differently named ones, or "" when next owns the same tables.
+// It must precede next's ruleset in one transaction: the new names can
+// coincide with an old table of the other role.
+func (c *Compiler) RetireTables(next *Compiler) string {
+	if c.policyTable() == next.policyTable() {
+		return ""
+	}
+	return c.DeleteTables()
+}
+
+// ClearBlocks returns the script that removes every temporary block,
+// creating the empty block sets if they do not exist yet.
+func (c *Compiler) ClearBlocks() string {
+	var buf bytes.Buffer
+	table := BlocksTable(c.policyTable())
+	writeBlockSets(&buf, table)
+	buf.WriteString(fmt.Sprintf("flush set inet %s block_hosts\n", table))
+	buf.WriteString(fmt.Sprintf("flush set inet %s block_flows\n", table))
+	return buf.String()
+}
+
 // writeBlocksTable ensures the blocks table without touching its set
 // elements. Its forward chain runs before the policy table's (priority 0),
 // and a drop there is final, so a block takes precedence over IEC104
