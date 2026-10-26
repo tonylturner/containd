@@ -54,7 +54,8 @@ func sshTestAddr(t *testing.T) string {
 	return addr
 }
 
-func sshTestExec(t *testing.T, addr, command string) string {
+// sshTestExec runs command over SSH and returns its output and exit status.
+func sshTestExec(t *testing.T, addr, command string) (string, int) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -76,13 +77,16 @@ func sshTestExec(t *testing.T, addr, command string) string {
 			t.Fatal(err)
 		}
 		defer session.Close()
-		// The SSH CLI ends an exec request without an exit status.
+		// A failed command exits with status 1; its output says why.
 		out, err := session.Output(command)
-		var missing *ssh.ExitMissingError
-		if err != nil && !errors.As(err, &missing) {
+		var exit *ssh.ExitError
+		if errors.As(err, &exit) {
+			return string(out), exit.ExitStatus()
+		}
+		if err != nil {
 			t.Fatalf("%s: %v: %s", command, err, out)
 		}
-		return string(out)
+		return string(out), 0
 	}
 }
 
@@ -144,9 +148,9 @@ func TestSSHCallsHTTPSOnlyManagement(t *testing.T) {
 		t.Fatalf("SSH did not start with HTTPS only: %q %v %v", addr, enabled, faults)
 	}
 
-	out := sshTestExec(t, sshAddr, "show health")
-	if !strings.Contains(out, "pinned-https") {
-		t.Fatalf("show health over HTTPS: %q", out)
+	out, status := sshTestExec(t, sshAddr, "show health")
+	if !strings.Contains(out, "pinned-https") || status != 0 {
+		t.Fatalf("show health over HTTPS: %q, exit %d", out, status)
 	}
 	select {
 	case got := <-calls:
@@ -160,8 +164,8 @@ func TestSSHCallsHTTPSOnlyManagement(t *testing.T) {
 	// A listener presenting another certificate is refused before the
 	// bearer token is sent.
 	presented.Store(other)
-	if out := sshTestExec(t, sshAddr, "show health"); !strings.Contains(out, "tls: failed to verify certificate") {
-		t.Fatalf("wrong certificate accepted: %q", out)
+	if out, status := sshTestExec(t, sshAddr, "show health"); !strings.Contains(out, "tls: failed to verify certificate") || status != 1 {
+		t.Fatalf("wrong certificate accepted: %q, exit %d", out, status)
 	}
 	select {
 	case got := <-calls:

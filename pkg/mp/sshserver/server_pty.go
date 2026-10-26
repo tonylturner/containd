@@ -71,6 +71,8 @@ func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Ch
 	ptmx, err := pty.StartWithSize(cmd, winSize)
 	if err != nil {
 		s.logger.Errorf("failed to start linux shell: %v", err)
+		writeTTY(ch, "failed to start shell\n")
+		sendExitStatus(ch, exitFailure)
 		return
 	}
 
@@ -125,10 +127,7 @@ func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Ch
 		}
 	}
 
-	// Send exit-status to the SSH client.
-	exitPayload := make([]byte, 4)
-	binary.BigEndian.PutUint32(exitPayload, uint32(exitCode))
-	_, _ = ch.SendRequest("exit-status", false, exitPayload)
+	sendExitStatus(ch, uint32(exitCode))
 }
 
 // startLinuxShellInline launches a bash shell from within the appliance REPL.

@@ -136,7 +136,8 @@ func dialSSH(addr, user string, banners *[]string, methods ...ssh.AuthMethod) (*
 	})
 }
 
-// runShell opens the appliance CLI, sends input and returns its output.
+// runShell opens the appliance CLI, sends input and returns its output. The
+// CLI must close with exit status 0.
 func runShell(t *testing.T, client *ssh.Client, input string) string {
 	t.Helper()
 	session, err := client.NewSession()
@@ -150,7 +151,7 @@ func runShell(t *testing.T, client *ssh.Client, input string) string {
 	if err := session.Shell(); err != nil {
 		t.Fatal(err)
 	}
-	if err := session.Wait(); err != nil && !strings.Contains(err.Error(), "exited without exit status") {
+	if err := session.Wait(); err != nil {
 		t.Fatal(err)
 	}
 	return out.String()
