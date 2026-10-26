@@ -24,7 +24,7 @@
     "reactflow": "^11.11.4"
   },
   "devDependencies": {
-    "@playwright/test": "1.58.2",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "20.12.7",
     "@types/react": "18.2.46",
