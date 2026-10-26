@@ -60,7 +60,7 @@ func TestLabModeWizardSkipsPasswordStep(t *testing.T) {
 	if !strings.Contains(got, "password step skipped: "+users.ErrPasswordChangeLabMode.Error()) {
 		t.Fatalf("missing lab-mode skip notice: %q", got)
 	}
-	if strings.Contains(got, "Set a new password") {
+	if strings.Contains(got, "New password") {
 		t.Fatalf("wizard prompted for a password in lab mode: %q", got)
 	}
 	for _, later := range []string{"Paste an SSH public key", "Enable outbound Internet", "Not committed."} {
