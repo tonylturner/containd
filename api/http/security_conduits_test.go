@@ -52,3 +52,28 @@ func TestSecurityConduitsDefaultAction(t *testing.T) {
 		})
 	}
 }
+
+// A RESET rule refuses traffic like DENY: it blocks a conduit and, as a
+// catch-all, counts as its default deny.
+func TestSecurityConduitsResetIsDenial(t *testing.T) {
+	for _, action := range []config.Action{config.ActionDeny, config.ActionReset} {
+		t.Run(string(action), func(t *testing.T) {
+			m := &mockStore{cfg: &config.Config{
+				System: config.SystemConfig{Hostname: "containd"},
+				Zones:  []config.Zone{{Name: "lan"}, {Name: "wan"}},
+				Firewall: config.FirewallConfig{DefaultAction: config.ActionAllow, Rules: []config.Rule{
+					{ID: "refuse-lan", SourceZones: []string{"lan"}, Action: action},
+				}},
+			}}
+			rec := httptest.NewRecorder()
+			NewServer(m, nil).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/security/conduits", nil))
+			var got map[string]conduitResult
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+				t.Fatalf("status %d body=%s err=%v", rec.Code, rec.Body.String(), err)
+			}
+			if c := got["lan→wan"]; c.State != "block" || !c.DefaultDeny {
+				t.Fatalf("lan→wan state %q defaultDeny %v, want block true", c.State, c.DefaultDeny)
+			}
+		})
+	}
+}

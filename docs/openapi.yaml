@@ -1844,6 +1844,7 @@ components:
         message: {type: string}
     RateLimit:
       type: object
+      additionalProperties: false
       required: [packetsPerSecond]
       description: >-
         Packet policer for each directional 5-tuple (source, destination, layer-4 protocol,

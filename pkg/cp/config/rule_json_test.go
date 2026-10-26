@@ -108,3 +108,38 @@ func TestRuleUnmarshalJSONNull(t *testing.T) {
 		t.Fatalf("rule after null = %+v, want unchanged", rule)
 	}
 }
+
+func TestRateLimitJSONKeysMatchJSONTags(t *testing.T) {
+	typ := reflect.TypeOf(RateLimitConfig{})
+	var names []string
+	for i := 0; i < typ.NumField(); i++ {
+		name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		names = append(names, name)
+	}
+	if !reflect.DeepEqual(rateLimitJSONKeys, names) {
+		t.Fatalf("rateLimitJSONKeys = %v, want %v", rateLimitJSONKeys, names)
+	}
+}
+
+// rateLimit decodes strictly, like the rule around it; null clears it.
+func TestRateLimitUnmarshalJSONIsStrict(t *testing.T) {
+	for input, want := range map[string]string{
+		`{"id":"r","action":"RATE_LIMIT","rateLimit":{"packetsPerSecond":10,"brust":5}}`:             `rule (id "r"): rateLimit: unknown key "brust"`,
+		`{"id":"r","action":"RATE_LIMIT","rateLimit":{"packetsPerSecond":10,"packetsPerSecond":20}}`: `rule (id "r"): rateLimit: duplicate key "packetsPerSecond"`,
+		`{"id":"r","action":"RATE_LIMIT","rateLimit":[10]}`:                                          `rule (id "r"): rateLimit: expected a JSON object`,
+		`{"id":"r","action":"RATE_LIMIT","rateLimit":{"packetsPerSecond":-1}}`:                       `rule (id "r"): rateLimit: json: cannot unmarshal`,
+	} {
+		var r Rule
+		if err := json.Unmarshal([]byte(input), &r); err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("%s: err = %v, want prefix %q", input, err, want)
+		}
+	}
+	var r Rule
+	if err := json.Unmarshal([]byte(`{"id":"r","action":"RATE_LIMIT","rateLimit":{"packetsPerSecond":10,"burst":5}}`), &r); err != nil ||
+		!reflect.DeepEqual(r.RateLimit, &RateLimitConfig{PacketsPerSecond: 10, Burst: 5}) {
+		t.Fatalf("valid rateLimit = %+v, %v", r.RateLimit, err)
+	}
+	if err := json.Unmarshal([]byte(`{"id":"r","action":"DENY","rateLimit":null}`), &r); err != nil || r.RateLimit != nil {
+		t.Fatalf("null rateLimit = %+v, %v", r.RateLimit, err)
+	}
+}

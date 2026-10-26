@@ -263,7 +263,7 @@ func computeConduitState(rules []config.Rule, defaultAction config.Action) strin
 			if len(r.Protocols) > 0 || r.ICS.Protocol != "" {
 				allAllowUnrestricted = false
 			}
-		} else if r.Action == config.ActionDeny {
+		} else if denies(r.Action) {
 			hasDeny = true
 		}
 	}
@@ -282,7 +282,7 @@ func computeConduitState(rules []config.Rule, defaultAction config.Action) strin
 
 func hasExplicitDenyAll(rules []config.Rule, srcZone string) bool {
 	for _, r := range rules {
-		if r.Action != config.ActionDeny {
+		if !denies(r.Action) {
 			continue
 		}
 		srcMatch := len(r.SourceZones) == 0 || containsStr(r.SourceZones, srcZone)
@@ -407,4 +407,10 @@ func containsStr(ss []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// denies reports a rule action that refuses traffic: DENY drops it and
+// RESET rejects it.
+func denies(a config.Action) bool {
+	return a == config.ActionDeny || a == config.ActionReset
 }
