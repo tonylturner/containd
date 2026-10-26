@@ -5,7 +5,10 @@ import { Edge, Handle, Node, NodeProps, Position } from "reactflow";
 
 import {
   api,
+  type ApiResult,
   type FirewallRule,
+  type RuleAction,
+  type RuleCounters,
   type Interface,
   type OSRoutingSnapshot,
   type RoutingConfig,
@@ -18,6 +21,7 @@ import s from "./topology.module.css";
 import { normalizeFirewallRules } from "../../lib/api-normalize";
 import { interfaceAddresses, runtimeFor, type InterfaceAddresses } from "../../lib/interface-addresses";
 import { TopologyAddress } from "./topology-address";
+import { formatRateLimit } from "../firewall/firewall-rule-policy";
 
 export interface BuiltIface {
   name: string;
@@ -39,9 +43,36 @@ export interface BuiltRoute {
 }
 
 export interface BuiltRule {
-  action: "allow" | "deny";
+  id: string;
+  action: RuleAction;
+  /** ALLOW admits; DENY and RESET refuse; RATE_LIMIT and TAG are effects that decide nothing. */
+  kind: "allow" | "deny" | "effect";
   desc: string;
-  hits: number;
+  /** Packets since the last apply (connection openers for TAG); null when not counted. */
+  hits: number | null;
+}
+
+/** The firewall node's rule list, with the applied ruleset's counters. */
+export function buildTopologyRules(rules: FirewallRule[], counters: ApiResult<RuleCounters>): BuiltRule[] {
+  const counts = new Map(counters.ok ? counters.data.rules.map((c) => [c.ruleId, c.packets]) : []);
+  return rules.map((r) => {
+    const src = (r.sourceZones || []).join(",") || "*";
+    const dst = (r.destZones || []).join(",") || "*";
+    const ports = (r.protocols || [])
+      .map((p) => (p.port ? `${p.name}/${p.port}` : p.name))
+      .join(",");
+    const effect =
+      r.action === "RATE_LIMIT" && r.rateLimit ? ` \u00b7 ${formatRateLimit(r.rateLimit)}`
+        : r.action === "TAG" && r.tag ? ` \u00b7 tag ${r.tag}`
+          : "";
+    return {
+      id: r.id,
+      action: r.action,
+      kind: r.action === "ALLOW" ? "allow" : r.action === "DENY" || r.action === "RESET" ? "deny" : "effect",
+      desc: `${src} \u2192 ${dst}${ports ? " " + ports : ""}${effect}`,
+      hits: counts.get(r.id) ?? null,
+    };
+  });
 }
 
 export interface TopoNodeData {
@@ -352,7 +383,7 @@ export function nodeOperatorHint(data: TopoNodeData): string {
 }
 
 export async function buildTopology(): Promise<TopoResult | null> {
-  const [health, running, ifaceState, osRouting, flows, events, sysStats] = await Promise.all([
+  const [health, running, ifaceState, osRouting, flows, events, sysStats, counters] = await Promise.all([
     fetchHealth(),
     api.getRunningConfig(),
     api.listInterfaceState(),
@@ -360,6 +391,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
     api.listFlows(),
     api.listEvents(),
     api.getSystemStats().catch(() => null),
+    api.getRuleCounters(),
   ]);
   if (!running || ifaceState === null || flows === null) return null;
   const zones = running.zones;
@@ -486,18 +518,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
     });
   }
 
-  const builtRules: BuiltRule[] = ((fwRules as FirewallRule[]) || []).map((r) => {
-    const src = (r.sourceZones || []).join(",") || "*";
-    const dst = (r.destZones || []).join(",") || "*";
-    const ports = (r.protocols || [])
-      .map((p) => (p.port ? `${p.name}/${p.port}` : p.name))
-      .join(",");
-    return {
-      action: (r.action || "DENY").toLowerCase() as "allow" | "deny",
-      desc: `${src} \u2192 ${dst}${ports ? " " + ports : ""}`,
-      hits: 0,
-    };
-  });
+  const builtRules = buildTopologyRules(fwRules, counters);
 
   const gwCfg = (routing as RoutingConfig)?.gateways?.[0];
 
