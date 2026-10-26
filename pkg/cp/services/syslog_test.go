@@ -79,3 +79,18 @@ func TestSyslogForwarderOutlivesApplyContext(t *testing.T) {
 		t.Fatalf("unexpected payload %s", buf[:n])
 	}
 }
+
+// A re-apply rewrites the flush interval while the previous loop starts; the
+// loop takes its interval as an argument (checked under -race).
+func TestSyslogReapplyWhileForwarderStarts(t *testing.T) {
+	mgr := NewSyslogManager()
+	mgr.log = zap.NewNop().Sugar()
+	defer mgr.Stop()
+	mgr.SetEventLister(func(int) []dpevents.Event { return nil })
+	cfg := config.SyslogConfig{Forwarders: []config.SyslogForwarder{{Address: "127.0.0.1", Port: 514, Proto: "udp"}}}
+	for range 20 {
+		if err := mgr.Apply(context.Background(), cfg); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+	}
+}

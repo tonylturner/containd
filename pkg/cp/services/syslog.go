@@ -143,11 +143,10 @@ func (m *SyslogManager) restartForwarder() {
 	}
 	fwdCtx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	go m.forwardLoop(fwdCtx)
+	go m.forwardLoop(fwdCtx, m.flushEvery)
 }
 
-func (m *SyslogManager) forwardLoop(ctx context.Context) {
-	interval := m.flushEvery
+func (m *SyslogManager) forwardLoop(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
