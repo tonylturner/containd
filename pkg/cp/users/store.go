@@ -59,6 +59,7 @@ type Store interface {
 	SetTOTP(ctx context.Context, id string, secret string) error
 	DisableTOTP(ctx context.Context, id string) error
 	AcceptTOTP(ctx context.Context, id string, code string, now time.Time) error
+	CheckCurrentPassword(ctx context.Context, id string, password string, now time.Time) error
 	SetMFARequirement(ctx context.Context, id string, required bool, graceUntil *time.Time) error
 	EnsureDefaultAdmin(ctx context.Context) error
 	CreateSession(ctx context.Context, userID string, idleTTL time.Duration, maxTTL time.Duration) (*Session, error)
@@ -167,6 +168,16 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at INTEGER NOT NULL,
   revoked INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY(user_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS factor_failures (
+  user_id TEXT NOT NULL,
+  factor TEXT NOT NULL,
+  failures INTEGER NOT NULL DEFAULT 0,
+  last_failure INTEGER NOT NULL DEFAULT 0,
+  locked_until INTEGER NOT NULL DEFAULT 0,
+  lock_reported INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(user_id, factor),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );`
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("create users schema: %w", err)
@@ -485,10 +496,11 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// SetPassword replaces a user's password and revokes the account's other
-// sessions. It is the single entry point for password changes: it returns
-// ErrPasswordChangeLabMode in lab mode and ErrPasswordReuse when the new
-// password matches the current one.
+// SetPassword replaces a user's password, revokes the account's other
+// sessions and clears its TOTP and current-password failure counts. It is the
+// single entry point for password changes: it returns ErrPasswordChangeLabMode
+// in lab mode and ErrPasswordReuse when the new password matches the current
+// one.
 func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password string) error {
 	if err := CheckPasswordChange(); err != nil {
 		return err
@@ -508,29 +520,31 @@ func (s *SQLiteStore) SetPassword(ctx context.Context, id string, password strin
 		return fmt.Errorf("hash password: %w", err)
 	}
 	now := time.Now().UTC()
-	return s.updateCredential(ctx, "set password", id, `UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?`, string(hash), now.Unix(), id)
+	return s.updateCredential(ctx, "set password", id, "", `UPDATE users SET password_hash=?, must_change_password=0, updated_at=? WHERE id=?`, string(hash), now.Unix(), id)
 }
 
 // SetTOTP enables TOTP with secret and revokes the account's other sessions.
-// The new secret starts with no accepted time step.
+// The new secret starts with no accepted time step and no failed codes.
 func (s *SQLiteStore) SetTOTP(ctx context.Context, id string, secret string) error {
 	secret = strings.TrimSpace(secret)
 	if secret == "" {
 		return errors.New("totp secret required")
 	}
 	now := time.Now().UTC()
-	return s.updateCredential(ctx, "set totp", id, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_totp_last_step=0, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, now.Unix(), id)
+	return s.updateCredential(ctx, "set totp", id, FactorTOTP, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_totp_last_step=0, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, now.Unix(), id)
 }
 
-// DisableTOTP removes TOTP and revokes the account's other sessions.
+// DisableTOTP removes TOTP, its failure count and the account's other
+// sessions.
 func (s *SQLiteStore) DisableTOTP(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	return s.updateCredential(ctx, "disable totp", id, `UPDATE users SET mfa_totp_secret='', mfa_totp_enabled=0, mfa_totp_last_step=0, mfa_grace_until=0, updated_at=? WHERE id=?`, now.Unix(), id)
+	return s.updateCredential(ctx, "disable totp", id, FactorTOTP, `UPDATE users SET mfa_totp_secret='', mfa_totp_enabled=0, mfa_totp_last_step=0, mfa_grace_until=0, updated_at=? WHERE id=?`, now.Unix(), id)
 }
 
-// updateCredential applies one credential update and revokes the account's
-// other sessions atomically, then notifies revocation subscribers.
-func (s *SQLiteStore) updateCredential(ctx context.Context, op, id, query string, args ...any) error {
+// updateCredential applies one credential update, clears the failure count
+// of factor (every factor when empty) and revokes the account's other
+// sessions atomically, then notifies revocation subscribers.
+func (s *SQLiteStore) updateCredential(ctx context.Context, op, id string, factor Factor, query string, args ...any) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin %s: %w", op, err)
@@ -542,6 +556,14 @@ func (s *SQLiteStore) updateCredential(ctx context.Context, op, id, query string
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
+	}
+	if factor == "" {
+		_, err = tx.ExecContext(ctx, `DELETE FROM factor_failures WHERE user_id = ?`, id)
+	} else {
+		err = clearFactor(ctx, tx, id, factor)
+	}
+	if err != nil {
+		return fmt.Errorf("%s: clear failures: %w", op, err)
 	}
 	revoked, err := revokeOtherSessions(ctx, tx, id)
 	if err != nil {

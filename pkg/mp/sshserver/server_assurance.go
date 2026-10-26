@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/tonylturner/containd/pkg/cp/audit"
@@ -145,15 +144,28 @@ func (a *assuranceStep) verifyTOTP(conn ssh.ConnMetadata, u *users.StoredUser, c
 		return a.server.refuseLogin(conn, "invalid totp code", users.ErrInvalidTOTP)
 	}
 	if err := a.server.opts.UserStore.AcceptTOTP(context.Background(), u.ID, answers[0], time.Now()); err != nil {
-		detail, refused := users.TOTPRefusal(err)
-		if !refused {
-			return err
+		if _, _, refused := users.Refusal(err); refused {
+			a.totpRefused = err
 		}
-		a.totpRefused = err
-		return a.server.refuseLogin(conn, detail, err)
+		return a.refuseCheck(conn, err)
 	}
 	a.totpDone = true
 	return nil
+}
+
+// refuseCheck refuses a TOTP code or current password that the store refused.
+// A locked check writes one record per lock (users.Refusal); its later
+// refusals still count against the client's login limit.
+func (a *assuranceStep) refuseCheck(conn ssh.ConnMetadata, err error) error {
+	detail, record, refused := users.Refusal(err)
+	switch {
+	case !refused:
+		return err
+	case record:
+		return a.server.refuseLogin(conn, detail, err)
+	}
+	a.server.pwLimiter.Fail(a.key)
+	return err
 }
 
 // changePassword applies the forced change with the store's password rules.
@@ -177,8 +189,8 @@ func (a *assuranceStep) changePassword(conn ssh.ConnMetadata, u *users.StoredUse
 			return errors.New("incomplete password change response")
 		}
 		if confirm {
-			if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(answers[0])) != nil {
-				return a.server.refuseLogin(conn, "current password invalid", errInvalidCredentials)
+			if err := a.server.opts.UserStore.CheckCurrentPassword(context.Background(), u.ID, answers[0], time.Now()); err != nil {
+				return a.refuseCheck(conn, err)
 			}
 			a.currentVerified = true
 			answers = answers[1:]

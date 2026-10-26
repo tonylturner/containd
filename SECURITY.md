@@ -167,9 +167,17 @@ password-change flow, and both support optional TOTP MFA for local accounts:
 - Refused SSH logins are audited. SSH password, key and TOTP failures share one
   rate limit per client address and account, so many addresses or account
   names are not limited together.
+- TOTP codes and the current password asked before a password or MFA change
+  are also limited per account, from every client address, web and SSH
+  together. After 5 wrong codes, or 10 wrong current passwords, without a
+  success, that check alone is locked for 15 minutes: it is refused (web/API
+  `429` with `Retry-After`) before the guess is checked, and the first refusal
+  of each lock is audited. Password login is not locked, so someone without
+  the password cannot lock an account out; reaching the TOTP lock takes the
+  right password. Resetting the password or MFA lifts the locks.
 
-Lab mode (`CONTAIND_LAB_MODE=1`) skips these SSH checks, accepts a reused TOTP
-code and pins the bootstrap credential. An authenticated SSH PTY can reach the appliance's Linux shell, not
+Lab mode (`CONTAIND_LAB_MODE=1`) skips these SSH checks and the per-account
+limits, accepts a reused TOTP code and pins the bootstrap credential. An authenticated SSH PTY can reach the appliance's Linux shell, not
 just a restricted configuration CLI. The supplied appliance runs as root inside
 its container; treat SSH access as privileged appliance access. Keep it
 unreachable from untrusted networks.

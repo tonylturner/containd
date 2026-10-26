@@ -282,9 +282,10 @@ func changeMyPasswordHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusNotFound, "user not found")
 			return
 		}
-		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.CurrentPassword)) != nil {
-			auditLog(c, audit.Record{Action: "auth.password.change", Target: u.Username, Result: "denied", Detail: "current password invalid"})
-			apiError(c, http.StatusUnauthorized, "current password invalid")
+		if err := userStore.CheckCurrentPassword(c.Request.Context(), u.ID, req.CurrentPassword, time.Now()); err != nil {
+			refuseFactor(c, err, func(detail string) {
+				auditLog(c, audit.Record{Action: "auth.password.change", Target: u.Username, Result: "denied", Detail: detail})
+			})
 			return
 		}
 		// SetPassword also revokes this account's other sessions.
