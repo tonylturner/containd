@@ -152,7 +152,9 @@ restore the keys or change the SSH policy through HTTP management. A wizard
 password change writes the user store immediately, rather than waiting for a
 config commit. A rejected password or store error stops the wizard and is not
 reported or audited as a successful change. In lab mode the wizard prints why
-password changes are refused, skips its password step and continues.
+password changes are refused, skips its password step and continues. Outside
+lab mode, the menu reset and the wizard's password step first ask for the
+current password; a wrong one stops the step and is audited as denied.
 
 `set system ssh host-key-rotation <days>` accepts 0 (disabled) through 36500.
 The server checks host-key age at startup and every minute while running.

@@ -112,7 +112,7 @@ Current mitigations:
 - session auth with forced password change on first login, on web/API and SSH (standard deployments only)
 - TOTP MFA and admin-required MFA with grace periods; SSH password login asks for the TOTP code, and SSH key login counts the key as the possession factor
 - a password or MFA change ends the account's other sessions and SSH connections
-- SSH login attempts are rate-limited per client address and account, including wrong TOTP codes
+- SSH password, key and TOTP failures are rate-limited per client address and account, and refused logins are audited; a TOTP code is accepted once
 - route-level admin/view enforcement
 - request body limits and same-origin protection for cookie-authenticated unsafe requests
 - audit logging for logins, account, password, MFA and certificate changes, SSH sessions and key enrollment, and config saves and commits

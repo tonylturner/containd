@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- A TOTP code is accepted once per account. Web/API login, MFA self-disable
+  and SSH login refuse a code whose time step is not later than the last
+  accepted one, including after a restart.
+- Outside lab mode, refused SSH logins write `ssh.login` denied records naming
+  the account and client address: unknown or non-admin account, wrong
+  password, unauthorized key (once per unauthenticated connection, with
+  fingerprints), and wrong or reused TOTP code. SSH key logins now share the
+  password login rate limit.
+- Wrong codes at MFA enrollment and a wrong password or code when turning MFA
+  off write denied `auth.mfa.enable` / `auth.mfa.disable` records.
+- Outside lab mode, the SSH menu password reset and the setup wizard ask for
+  the current password before changing it, and record a wrong one as denied.
 - Outside lab mode, SSH applies the web login's account checks. The bootstrap
   admin must change its password at SSH login, for password and key logins,
   before the CLI, menu or shell opens. Password login of an account with TOTP
