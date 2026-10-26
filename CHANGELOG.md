@@ -259,6 +259,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Web UI: the login password and MFA steps, own password change and MFA
+  disable show the server's lock message and when to try again after a `429`,
+  instead of a generic failure.
 - Web UI: user management actions, MFA actions included, and the AV, DNS,
   NTP and syslog Save buttons show pending and saved feedback. The acting
   button is disabled while its save runs, so a double click submits once.
