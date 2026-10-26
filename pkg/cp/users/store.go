@@ -69,17 +69,29 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
-// WipeAll deletes all users and sessions (factory reset). Caller may re-seed defaults.
-func (s *SQLiteStore) WipeAll(ctx context.Context) error {
+// ResetToDefaultAdmin replaces users and sessions with the default admin atomically.
+func (s *SQLiteStore) ResetToDefaultAdmin(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("users store unavailable")
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin user reset: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	// Clear sessions first to avoid FK complaints in some SQLite configurations.
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
 		return fmt.Errorf("wipe sessions: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM users`); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM users`); err != nil {
 		return fmt.Errorf("wipe users: %w", err)
+	}
+	if err := ensureDefaultAdmin(ctx, tx); err != nil {
+		return fmt.Errorf("seed default admin: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit user reset: %w", err)
 	}
 	return nil
 }
@@ -161,6 +173,18 @@ CREATE TABLE IF NOT EXISTS sessions (
 }
 
 func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return errors.New("users store unavailable")
+	}
+	return ensureDefaultAdmin(ctx, s.db)
+}
+
+type userDB interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func ensureDefaultAdmin(ctx context.Context, db userDB) error {
 	username := strings.TrimSpace(os.Getenv("CONTAIND_DEFAULT_ADMIN_USERNAME"))
 	password := os.Getenv("CONTAIND_DEFAULT_ADMIN_PASSWORD")
 	if username == "" {
@@ -173,7 +197,7 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 	// If there are already users, do not silently create additional admins unless the operator
 	// explicitly set CONTAIND_DEFAULT_ADMIN_USERNAME/PASSWORD and that user doesn't exist yet.
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users`).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users`).Scan(&count); err != nil {
 		return fmt.Errorf("count users: %w", err)
 	}
 	if count > 0 {
@@ -181,11 +205,16 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 			return nil
 		}
 		// If the user already exists, do nothing.
-		if _, err := s.GetByUsername(ctx, username); err == nil {
+		var existingID string
+		err := db.QueryRowContext(ctx, `SELECT id FROM users WHERE username = ?`, username).Scan(&existingID)
+		if err == nil {
 			return nil
 		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("check default admin: %w", err)
+		}
 		// Otherwise create it (explicit operator intent).
-		_, err := s.createUser(ctx, User{
+		_, err = insertUser(ctx, db, User{
 			Username:  username,
 			FirstName: "Default",
 			LastName:  "Admin",
@@ -205,7 +234,7 @@ func (s *SQLiteStore) EnsureDefaultAdmin(ctx context.Context) error {
 	// deployments anyway — clearing it at seed time keeps the API
 	// responses consistent with the enforcement.
 	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
-	_, err := s.createUser(ctx, User{
+	_, err := insertUser(ctx, db, User{
 		Username:           username,
 		FirstName:          "Default",
 		LastName:           "Admin",
@@ -310,6 +339,13 @@ func (s *SQLiteStore) Create(ctx context.Context, u User, password string) (*Use
 }
 
 func (s *SQLiteStore) createUser(ctx context.Context, u User, password string, bootstrap bool) (*User, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("users store unavailable")
+	}
+	return insertUser(ctx, s.db, u, password, bootstrap)
+}
+
+func insertUser(ctx context.Context, db userDB, u User, password string, bootstrap bool) (*User, error) {
 	if strings.TrimSpace(u.Username) == "" {
 		return nil, errors.New("username required")
 	}
@@ -335,7 +371,7 @@ func (s *SQLiteStore) createUser(ctx context.Context, u User, password string, b
 	if u.MustChangePassword {
 		mustChange = 1
 	}
-	_, err = s.db.ExecContext(ctx,
+	_, err = db.ExecContext(ctx,
 		`INSERT INTO users (id, username, first_name, last_name, email, role, password_hash, must_change_password, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.ID, u.Username, u.FirstName, u.LastName, u.Email, u.Role, string(hash), mustChange, now.Unix(), now.Unix())
 	if err != nil {

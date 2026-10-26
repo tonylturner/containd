@@ -169,13 +169,14 @@ state and the IDS bank. Users, credentials, MFA, sessions and existing audit
 records are not wiped on an apply failure; the reset-intent audit record remains.
 A failed recovery is explicitly reported and leaves runtime health unavailable.
 
-Only after runtime apply succeeds does reset wipe users/sessions, seed the default
-admin, clear audit history and clear the browser auth cookie. HTTP 200 returns
-`status: "reset"` and `loggedOut: true`; reauthenticate with the default credentials.
-Configuration history, pending rollback and the old IDS bank are replaced, not
-retained for rollback. Subsequent user-store failures return HTTP 500 without
-undoing the successfully applied configuration; the databases do not share a
-transaction.
+Only after runtime apply succeeds does reset replace users and sessions with the
+default admin in one users-database transaction, then clear audit history and
+the browser auth cookie. A user-reset failure rolls back the users and sessions
+to their prior state and returns HTTP 500. It does not undo the successfully
+applied configuration: the config and users databases do not share a
+transaction. HTTP 200 returns `status: "reset"` and `loggedOut: true`;
+reauthenticate with the default credentials. Configuration history, pending
+rollback and the old IDS bank are replaced, not retained for rollback.
 
 ## Events: Filtered Queries and Legacy Lists
 

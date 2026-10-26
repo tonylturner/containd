@@ -176,6 +176,9 @@ func TestFactoryResetApplyErrorReportsRecoveryFailures(t *testing.T) {
 }
 
 func TestFactoryResetSuccessReplacesConfigurationAndUsers(t *testing.T) {
+	t.Setenv("CONTAIND_DEFAULT_ADMIN_USERNAME", "")
+	t.Setenv("CONTAIND_DEFAULT_ADMIN_PASSWORD", "")
+	t.Setenv("CONTAIND_LAB_MODE", "")
 	ctx := context.Background()
 	store := stageStore(t)
 	if err := store.CommitConfirmed(ctx, time.Hour); err != nil {
@@ -193,6 +196,10 @@ func TestFactoryResetSuccessReplacesConfigurationAndUsers(t *testing.T) {
 	}
 	defer userStore.Close()
 	user, err := userStore.Create(ctx, users.User{Username: "old-admin", Role: "admin"}, "StrongPassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := userStore.CreateSession(ctx, user.ID, time.Hour, 2*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,5 +230,11 @@ func TestFactoryResetSuccessReplacesConfigurationAndUsers(t *testing.T) {
 	gotUsers, err := userStore.List(ctx)
 	if err != nil || len(gotUsers) != 1 || gotUsers[0].ID == user.ID {
 		t.Fatalf("users not replaced: %+v %v", gotUsers, err)
+	}
+	if gotUsers[0].Username != "containd" {
+		t.Fatalf("default admin not seeded: %+v", gotUsers[0])
+	}
+	if _, err := userStore.GetSession(ctx, session.ID); !errors.Is(err, users.ErrNotFound) {
+		t.Fatalf("old session retained: %v", err)
 	}
 }

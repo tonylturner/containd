@@ -1986,9 +1986,12 @@ paths:
         stores. Configuration replacement uses atomic restore/reapply recovery.
         On runtime apply failure users, sessions and existing audit history are not
         wiped; successful recovery restores running, candidate, previous, pending
-        rollback and the IDS bank. Users and audit are wiped only after runtime apply
-        succeeds. A successful reset clears the boot fault and applies the defaults.
-        A later user-store failure does not undo the successfully applied configuration.
+        rollback and the IDS bank. After runtime apply succeeds, replacing users and
+        sessions with the default admin is atomic within the users database; a
+        user-reset failure preserves the prior users and sessions. Configuration
+        and users are separate databases, so that failure does not undo the
+        successfully applied configuration. Audit is cleared after runtime apply.
+        A successful reset clears the boot fault and applies the defaults.
       tags: [System]
       requestBody:
         required: true
@@ -2008,8 +2011,9 @@ paths:
           description: >
             Reset failed. A runtime apply failure returns ConfigApplyError with the
             restored/reapplied recovery results; users, sessions and audit are unchanged.
-            A failed reapply leaves runtime health unavailable. Other store failures
-            return ErrorResponse.
+            A failed reapply leaves runtime health unavailable. A user-reset failure
+            rolls back users and sessions but leaves the applied configuration in place.
+            Other store failures return ErrorResponse.
           content:
             application/json:
               schema:

@@ -78,11 +78,7 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 
 		// Wiping sessions also revokes the current token. No authentication
 		// state changes until the configuration has been successfully applied.
-		if err := us.WipeAll(ctx); err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := userStore.EnsureDefaultAdmin(ctx); err != nil {
+		if err := us.ResetToDefaultAdmin(ctx); err != nil {
 			internalError(c, err)
 			return
 		}
