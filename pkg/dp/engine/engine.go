@@ -138,9 +138,11 @@ type Config struct {
 	NFLogGroup uint16
 
 	// NFQueueGroup, when non-zero, enables NFQUEUE-based DPI enforcement
-	// for dpiEligible rules. The compiler emits `queue num <N>` instead
-	// of accept/drop on rules with an ICS predicate, and the capture
-	// manager runs an NFQUEUE consumer at that group. Zero disables
+	// for dpiEligible rules. The compiler queues the traffic of rules with
+	// an ICS predicate to queue <N> instead of accepting or dropping it
+	// (through enforce.ICSQueueChain, or enforce.IEC104EnvelopeChain for
+	// IEC104 rules), and the capture manager runs an NFQUEUE consumer at
+	// that group. Zero disables
 	// (ICS rules fall back to plain accept/drop with no function-code
 	// inspection, so management validation refuses ICS rules in enforce
 	// mode). See config.DataPlaneConfig.NFQueueGroup
@@ -166,9 +168,9 @@ func New(cfg Config) (*Engine, error) {
 		cfg.Capture.OnError = cfg.OnError
 	}
 	// If NFQueueGroup is set, drive the capture manager via NFQUEUE
-	// rather than AFPACKET. This pairs with the compiler emitting
-	// `queue num <NFQueueGroup>` as the verdict for dpiEligible rules
-	// (below), so ICS-flagged packets land in handlePacket where the
+	// rather than AFPACKET. This pairs with the compiler queueing the
+	// traffic of dpiEligible rules to NFQueueGroup (below), so ICS-flagged
+	// packets land in handlePacket where the
 	// DPI decoders + enforceDPIEvents can apply function-code-level
 	// verdicts. Explicit NFQUEUE config overrides any inherited Mode.
 	if cfg.NFQueueGroup != 0 {
