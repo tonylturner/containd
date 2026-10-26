@@ -88,6 +88,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reason `stream_midstream` names the rule. No flow block is installed: the
   client's next connection is inspected from its first byte. Learn mode is
   unchanged.
+- With NFQUEUE, a Modbus or DNP3 connection covered by an enforce ICS rule now
+  stays dropped after a denied command until the connection ends. If the nft
+  flow block could not be installed, the client's retransmission of the denied
+  command could reach the device about 30 s after the denial.
 - Validation refuses a firewall rule that names an ICS protocol and is in
   effective enforce mode while `dataplane.nfqueueGroup` is 0. Without an
   inline path the first prohibited command reached the device while the UI

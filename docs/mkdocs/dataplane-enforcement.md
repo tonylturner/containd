@@ -76,7 +76,9 @@ malformed framing, reassembly limits, a decoder fault, or a SYN with a new
 sequence number on the open connection (reason `stream_resync`). The packet is
 dropped and the connection blocked like a decoded denial, without restarting
 inspection. Only a FIN or RST that the receiver accepts in window ends the
-connection's stream early.
+connection's stream early. After a denied command, the connection drops every
+later packet until it ends, so a retransmission of the command never reaches
+the device, even when the flow block could not be installed.
 
 A connection the engine did not see from its SYN is dropped until it ends
 (reason `stream_midstream`). This covers connections open across an engine
