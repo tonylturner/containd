@@ -247,7 +247,7 @@ func (g *gateManager) originalDstHook(c net.Conn) (netip.AddrPort, error) {
 // port is refused, since the upstream leg would then carry the client
 // leg's tuple.
 func (g *gateManager) dialHook(ctx context.Context, client, server netip.AddrPort) (net.Conn, error) {
-	entry := g.registry.lookup(client)
+	entry := g.registry.lookup(client, server)
 	mark := enforce.GateUpstreamSockMark
 	if entry != nil && entry.masq {
 		mark |= enforce.GateMasqSockMark
@@ -278,7 +278,7 @@ func (g *gateManager) dialHook(ctx context.Context, client, server netip.AddrPor
 // eventHook records a gate event with the pre-DNAT destination it knows.
 func (g *gateManager) eventHook(ev httpgate.Event) {
 	var original netip.AddrPort
-	if entry := g.registry.lookup(ev.Client); entry != nil {
+	if entry := g.registry.lookup(ev.Client, ev.Server); entry != nil {
 		original = entry.original
 	}
 	if g.events != nil {

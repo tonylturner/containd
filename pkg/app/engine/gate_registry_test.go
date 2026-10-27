@@ -85,8 +85,12 @@ func TestGateRegistryCloseMatchingResetsBothLegs(t *testing.T) {
 	e := &gateEntry{client: gateAddrPort(gateSide.RemoteAddr()), effective: netip.MustParseAddrPort("192.0.2.80:80"), conn: gateSide}
 	e.setUpstream(upSide, gateAddrPort(upSide.LocalAddr()))
 	reg.add(e)
-	other := &gateEntry{client: netip.MustParseAddrPort("10.0.0.9:1"), effective: netip.MustParseAddrPort("192.0.2.80:80"), conn: gateSide}
+	otherClient, otherGate := tcpPair(t)
+	other := &gateEntry{client: e.client, effective: netip.MustParseAddrPort("192.0.2.80:81"), masq: true, conn: otherGate}
 	reg.add(other)
+	if reg.count() != 2 || reg.lookup(e.client, e.effective) != e || reg.lookup(other.client, other.effective) != other {
+		t.Fatal("connections sharing a client endpoint were not registered separately")
+	}
 	if n := reg.closeMatching(engine.GateCloseRequest{Host: netip.MustParseAddr("203.0.113.1")}); n != 0 {
 		t.Fatalf("closed %d connections for an unknown host", n)
 	}
@@ -97,10 +101,21 @@ func TestGateRegistryCloseMatchingResetsBothLegs(t *testing.T) {
 		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 		if _, err := c.Read(make([]byte, 1)); err == nil {
 			t.Fatalf("%s leg still open after the reset", name)
+		} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			t.Fatalf("%s leg timed out instead of closing: %v", name, err)
 		}
 	}
-	if reg.lookup(e.client) != nil || reg.count() != 1 {
+	if reg.lookup(e.client, e.effective) != nil || reg.count() != 1 || reg.lookup(other.client, other.effective) != other {
 		t.Fatal("reset connection still registered")
+	}
+	_ = otherClient.SetDeadline(time.Now().Add(2 * time.Second))
+	_ = otherGate.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := otherClient.Write([]byte{42}); err != nil {
+		t.Fatalf("unrelated client leg closed: %v", err)
+	}
+	buf := make([]byte, 1)
+	if _, err := otherGate.Read(buf); err != nil || buf[0] != 42 {
+		t.Fatalf("unrelated connection did not survive: %v, %v", buf, err)
 	}
 	// A wrapper close forgets its own entry but never a newer one under
 	// the same key.
@@ -108,15 +123,43 @@ func TestGateRegistryCloseMatchingResetsBothLegs(t *testing.T) {
 	replacement := &gateEntry{client: e.client, effective: e.effective, conn: gateSide}
 	reg.add(replacement)
 	_ = wrapper.Close()
-	if got := reg.lookup(e.client); got != replacement {
+	if got := reg.lookup(e.client, e.effective); got != replacement {
 		t.Fatalf("closing the old wrapper removed the replacement entry: %v", got)
 	}
 	_ = (&gateConn{TCPConn: gateSide, reg: reg, entry: replacement}).Close()
-	if reg.lookup(e.client) != nil {
+	if reg.lookup(e.client, e.effective) != nil {
 		t.Fatal("entry not removed on close")
 	}
 	if reg.count() != 1 {
 		t.Fatalf("registry holds %d entries, want the unrelated one", reg.count())
+	}
+	reg.remove(other)
+	if reg.count() != 0 {
+		t.Fatal("unrelated entry not removed")
+	}
+}
+
+func TestGateRegistrySeparatesDestinations(t *testing.T) {
+	client := netip.MustParseAddrPort("10.0.0.5:40000")
+	effective := netip.MustParseAddrPort("192.0.2.80:80")
+	for _, destination := range []string{"192.0.2.81:80", "192.0.2.80:81"} {
+		t.Run(destination, func(t *testing.T) {
+			reg := newGateRegistry()
+			plain := &gateEntry{client: client, effective: effective}
+			masq := &gateEntry{client: client, effective: netip.MustParseAddrPort(destination), masq: true}
+			reg.add(plain)
+			reg.add(masq)
+			if reg.count() != 2 || reg.lookup(client, plain.effective) != plain || reg.lookup(client, masq.effective) != masq {
+				t.Fatal("destination address and port must both distinguish entries")
+			}
+			if reg.lookup(netip.MustParseAddrPort("10.0.0.5:40001"), effective) != nil {
+				t.Fatal("lookup ignored the client port")
+			}
+			reg.remove(plain)
+			if reg.count() != 1 || reg.lookup(client, plain.effective) != nil || reg.lookup(client, masq.effective) != masq {
+				t.Fatal("removing one destination affected the other")
+			}
+		})
 	}
 }
 

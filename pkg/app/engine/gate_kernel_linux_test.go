@@ -103,7 +103,7 @@ func TestGateManagerKernel(t *testing.T) {
 		client := netip.MustParseAddrPort(net4(gateLabClientV4, c.port))
 		deadline := time.Now().Add(5 * time.Second)
 		for {
-			if e := g.registry.lookup(client); e != nil && len(e.legs()) == 2 {
+			if e := g.registry.lookup(client, netip.AddrPortFrom(netip.MustParseAddr(gateLabServerV4), 80)); e != nil && len(e.legs()) == 2 {
 				break
 			}
 			if time.Now().After(deadline) {

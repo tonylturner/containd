@@ -25,6 +25,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/httpgate"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -361,6 +362,79 @@ func TestGateManagerProxiesWithMarksAndEvents(t *testing.T) {
 	}
 }
 
+func TestGateManagerHooksSeparateDestinations(t *testing.T) {
+	env := newGateTestEnv(t)
+	g := env.g
+	client := netip.MustParseAddrPort("10.0.0.5:1")
+	plain := &gateEntry{
+		client: client, effective: netip.MustParseAddrPort("192.0.2.80:80"),
+		original: netip.MustParseAddrPort("203.0.113.1:8080"),
+	}
+	masq := &gateEntry{
+		client: client, effective: netip.MustParseAddrPort("192.0.2.80:81"),
+		original: netip.MustParseAddrPort("203.0.113.2:8080"), masq: true,
+	}
+	g.registry.add(plain)
+	g.registry.add(masq)
+	for _, tc := range []struct {
+		name   string
+		server netip.AddrPort
+		entry  *gateEntry
+		mark   uint32
+	}{
+		{"plain", plain.effective, plain, enforce.GateUpstreamSockMark},
+		{"masqueraded", masq.effective, masq, enforce.GateUpstreamSockMark | enforce.GateMasqSockMark},
+		{"unregistered", netip.MustParseAddrPort("192.0.2.81:80"), nil, enforce.GateUpstreamSockMark},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up, _ := tcpPair(t)
+			g.dial = func(_ context.Context, network string, local netip.Addr, mark uint32, server netip.AddrPort) (*net.TCPConn, error) {
+				if network != "tcp4" || local != client.Addr() || mark != tc.mark || server != tc.server {
+					t.Fatalf("dial got %s %s %#x %s, want tcp4 %s %#x %s", network, local, mark, server, client.Addr(), tc.mark, tc.server)
+				}
+				return up, nil
+			}
+			c, err := g.dialHook(context.Background(), client, tc.server)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			if tc.entry == nil {
+				if c != up {
+					t.Fatalf("unregistered destination got a registered upstream: %T", c)
+				}
+			} else {
+				wrapped, ok := c.(*gateUpstreamConn)
+				if !ok || wrapped.entry != tc.entry || tc.entry.upstream != up || tc.entry.upstreamAddr != gateAddrPort(up.LocalAddr()) {
+					t.Fatalf("upstream registered on the wrong entry: %v", c)
+				}
+			}
+			g.eventHook(httpgate.Event{Client: client, Server: tc.server, Verdict: avscan.Clean})
+			var recorded *events.Event
+			for _, ev := range env.store.List(100) {
+				if ev.Attributes["server"] == tc.server.String() {
+					recorded = &ev
+					break
+				}
+			}
+			if recorded == nil {
+				t.Fatal("gate event not recorded")
+			}
+			original, present := recorded.Attributes["original_destination"]
+			if tc.entry == nil {
+				if present {
+					t.Fatalf("unregistered destination inherited original destination %v", original)
+				}
+			} else if original != tc.entry.original.String() {
+				t.Fatalf("event original destination %v, want %s", original, tc.entry.original)
+			}
+			if g.registry.count() != 2 {
+				t.Fatal("dial or event hook changed the connection count")
+			}
+		})
+	}
+}
+
 func TestGateManagerCloseMatchingResetsBothLegs(t *testing.T) {
 	env := newGateTestEnv(t)
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -402,7 +476,7 @@ func TestGateManagerCloseMatchingResetsBothLegs(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		entry := env.g.registry.lookup(gateAddrPort(c.LocalAddr()))
+		entry := env.g.registry.lookup(gateAddrPort(c.LocalAddr()), env.upstream)
 		if entry != nil && len(entry.legs()) == 2 {
 			break
 		}

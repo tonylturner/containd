@@ -16,7 +16,12 @@ import (
 // kernel rule stops the packets, but neither socket would learn of it.
 type gateRegistry struct {
 	mu      sync.Mutex
-	entries map[netip.AddrPort]*gateEntry // by client address
+	entries map[gateKey]*gateEntry
+}
+
+type gateKey struct {
+	client    netip.AddrPort
+	effective netip.AddrPort
 }
 
 // gateEntry is one gated connection. The client leg runs from client to
@@ -37,28 +42,29 @@ type gateEntry struct {
 }
 
 func newGateRegistry() *gateRegistry {
-	return &gateRegistry{entries: map[netip.AddrPort]*gateEntry{}}
+	return &gateRegistry{entries: map[gateKey]*gateEntry{}}
 }
 
 func (r *gateRegistry) add(e *gateEntry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.entries[e.client] = e
+	r.entries[gateKey{client: e.client, effective: e.effective}] = e
 }
 
-// remove forgets e; a newer entry under the same client address stays.
+// remove forgets e; a newer entry under the same TCP tuple stays.
 func (r *gateRegistry) remove(e *gateEntry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.entries[e.client] == e {
-		delete(r.entries, e.client)
+	key := gateKey{client: e.client, effective: e.effective}
+	if r.entries[key] == e {
+		delete(r.entries, key)
 	}
 }
 
-func (r *gateRegistry) lookup(client netip.AddrPort) *gateEntry {
+func (r *gateRegistry) lookup(client, effective netip.AddrPort) *gateEntry {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.entries[client]
+	return r.entries[gateKey{client: client, effective: effective}]
 }
 
 func (r *gateRegistry) count() int {
