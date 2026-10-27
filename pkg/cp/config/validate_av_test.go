@@ -44,7 +44,21 @@ func TestValidateAV(t *testing.T) {
 		{"default cache ttl", clamav(func(c *AVConfig) { c.CacheTTL = 0 }), ""},
 		{"cache ttl", icap(func(c *AVConfig) { c.CacheTTL = time.Minute }), ""},
 		{"negative cache ttl", clamav(func(c *AVConfig) { c.CacheTTL = -time.Nanosecond }), "cacheTtl"},
+		{"empty mode is clamav", clamav(func(c *AVConfig) { c.Mode = "" }), ""},
+		{"empty mode ignores icap servers", clamav(func(c *AVConfig) { c.Mode = " "; c.ICAP.Servers = nil }), ""},
+		{"unknown mode", clamav(func(c *AVConfig) { c.Mode = "remote" }), "services.av.mode"},
 		{"icap needs servers", icap(func(c *AVConfig) { c.ICAP.Servers = nil }), "icap.servers"},
+		{"icap rejects a second server", icap(func(c *AVConfig) {
+			c.ICAP.Servers = append(c.ICAP.Servers, ICAPServer{Address: "127.0.0.2:1344"})
+		}), "exactly one server"},
+		{"icap needs an address", icap(func(c *AVConfig) { c.ICAP.Servers[0].Address = " " }), "address required"},
+		{"icap address needs a port", icap(func(c *AVConfig) { c.ICAP.Servers[0].Address = "icap.example" }), "host:port"},
+		{"icap tls service", icap(func(c *AVConfig) {
+			c.ICAP.Servers[0] = ICAPServer{Address: "icap.example:11344", UseTLS: true, Service: "avscan"}
+		}), ""},
+		{"clamav ignores icap servers", clamav(func(c *AVConfig) {
+			c.ICAP.Servers = []ICAPServer{{Address: "a:1"}, {Address: "b:2"}}
+		}), ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validateAV(tc.cfg)

@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -105,8 +106,11 @@ func TestAVManagerIcapAndClamAVScanPaths(t *testing.T) {
 		FailPolicy: "open",
 		ICAP:       config.ICAPConfig{Servers: []config.ICAPServer{{Address: icapAddr, Service: "avscan"}}},
 	}
-	if res := mgr.Scan(context.Background(), scanObject([]byte("payload"))); res.Verdict != avscan.Infected {
+	if res := mgr.Scan(context.Background(), scanObject([]byte("payload"))); res.Verdict != avscan.Infected || res.Backend != "icap|"+icapAddr+"|avscan|false" {
 		t.Fatalf("expected ICAP malware verdict, got %+v", res)
+	}
+	if res := mgr.Scan(context.Background(), uploadObject([]byte("upload payload"))); res.Verdict != avscan.Infected {
+		t.Fatalf("expected ICAP malware verdict for an upload, got %+v", res)
 	}
 
 	mgr.lastCfg = config.AVConfig{
@@ -117,8 +121,29 @@ func TestAVManagerIcapAndClamAVScanPaths(t *testing.T) {
 	if res := mgr.Scan(context.Background(), scanObject([]byte("payload"))); res.Verdict != avscan.Infected || res.Signature != "Eicar-Signature" {
 		t.Fatalf("expected ClamAV malware verdict, got %+v", res)
 	}
-	if status := mgr.Status(context.Background()); status["detections"] != 2 || status["count"] != 2 {
+	if status := mgr.Status(context.Background()); status["detections"] != 3 || status["count"] != 3 {
 		t.Fatalf("scan counters = %+v", status)
+	}
+}
+
+func TestAVManagerICAPProbeRequiresScannedMethods(t *testing.T) {
+	icapAddr, _ := startFakeICAP(t, nil, icapReply("ICAP/1.0 200 OK", "Methods: RESPMOD", "Encapsulated: null-body=0"))
+	mgr := newTestAVManager(t, AVOptions{})
+	cfg := config.AVConfig{
+		Enabled:      true,
+		Mode:         "icap",
+		HTTPDownload: true,
+		ICAP:         config.ICAPConfig{Servers: []config.ICAPServer{{Address: icapAddr}}},
+	}
+	if err := mgr.Apply(context.Background(), cfg); err != nil {
+		t.Fatalf("Apply(downloads): %v", err)
+	}
+	cfg.HTTPUpload = true
+	if err := mgr.Apply(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "REQMOD") {
+		t.Fatalf("Apply(uploads) against a RESPMOD-only service = %v", err)
+	}
+	if status := mgr.Status(context.Background()); status["ready"] != false || !strings.Contains(status["ready_error"].(string), "REQMOD") {
+		t.Fatalf("status after a failed probe = %+v", status)
 	}
 }
 
@@ -170,7 +195,27 @@ func TestAVManagerHonoursSizeTimeoutAndCacheScope(t *testing.T) {
 	}
 }
 
-// scanObject includes a real digest, so repeated scans exercise caching.
+// scanObject is a held download with the heads an ICAP scan encapsulates
+// and a real digest, so repeated scans exercise caching.
 func scanObject(payload []byte) avscan.Object {
-	return avscan.Object{Body: bytes.NewReader(payload), Size: int64(len(payload)), SHA256: fmt.Sprintf("%x", sha256.Sum256(payload))}
+	return avscan.Object{
+		Direction:    avscan.Download,
+		Client:       netip.MustParseAddrPort("10.1.2.3:51000"),
+		Server:       netip.MustParseAddrPort("192.0.2.10:80"),
+		RequestHead:  []byte("GET /file.bin HTTP/1.1\r\nHost: files.example\r\n\r\n"),
+		ResponseHead: []byte("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\n\r\n"),
+		Body:         bytes.NewReader(payload),
+		Size:         int64(len(payload)),
+		SHA256:       fmt.Sprintf("%x", sha256.Sum256(payload)),
+	}
+}
+
+// uploadObject is a held request body whose head carries the client's
+// framing and content coding.
+func uploadObject(payload []byte) avscan.Object {
+	obj := scanObject(payload)
+	obj.Direction = avscan.Upload
+	obj.RequestHead = []byte("POST /upload HTTP/1.1\r\nHost: files.example\r\nContent-Length: 999\r\nContent-Encoding: gzip\r\n\r\n")
+	obj.ResponseHead = nil
+	return obj
 }

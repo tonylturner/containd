@@ -260,7 +260,7 @@ func (m *AVManager) applyBackend(ctx context.Context, cfg config.AVConfig) error
 
 func (m *AVManager) probeICAP(ctx context.Context, cfg config.AVConfig) error {
 	srv := firstICAPServer(cfg)
-	err := m.icapClient(cfg).Probe(ctx, srv)
+	err := m.icapClient(cfg).Probe(ctx, srv, icapMethods(cfg)...)
 	m.mu.Lock()
 	m.lastTest = time.Now().UTC()
 	m.mu.Unlock()
@@ -337,7 +337,7 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 }
 
 // readiness checks the backend live: clamd must answer PING and VERSION, an
-// ICAP server must answer OPTIONS.
+// ICAP server must answer OPTIONS for the scanned directions.
 func (m *AVManager) readiness(ctx context.Context, cfg config.AVConfig) (bool, string, string) {
 	if !cfg.Enabled {
 		return false, "", "disabled"
@@ -356,7 +356,7 @@ func (m *AVManager) readiness(ctx context.Context, cfg config.AVConfig) (bool, s
 		}
 		return true, version, ""
 	case "icap":
-		if err := m.icapClient(cfg).Probe(ctx, firstICAPServer(cfg)); err != nil {
+		if err := m.icapClient(cfg).Probe(ctx, firstICAPServer(cfg), icapMethods(cfg)...); err != nil {
 			return false, "", err.Error()
 		}
 		return true, "", ""

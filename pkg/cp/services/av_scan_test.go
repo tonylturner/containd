@@ -231,6 +231,52 @@ func TestAVObjectTimeoutIsNotCached(t *testing.T) {
 	}
 }
 
+func TestAVEmptyModeIsClamAV(t *testing.T) {
+	socket := startFakeClamd(t, nulReply("stream: OK"))
+	m := newTestAVManager(t, AVOptions{})
+	m.lastCfg = config.AVConfig{Enabled: true, Mode: " ", ClamAV: config.ClamAVConfig{SocketPath: socket}}
+	if r := m.Scan(context.Background(), scanObject([]byte("content"))); r.Verdict != avscan.Clean || r.Backend != "clamav" {
+		t.Fatalf("empty mode = %+v", r)
+	}
+	if status := m.Status(context.Background()); status["mode"] != "clamav" {
+		t.Fatalf("status mode = %v", status["mode"])
+	}
+}
+
+func TestAVObjectICAPErrorsAreUnscanned(t *testing.T) {
+	var calls atomic.Int32
+	addr, _ := startFakeICAP(t, nil, func(req icapRequest) string {
+		calls.Add(1)
+		if string(req.Body) == "slow" {
+			time.Sleep(time.Second)
+		}
+		return "ICAP/1.0 500 Server Error\r\n\r\n"
+	})
+	m := newTestAVManager(t, AVOptions{})
+	m.lastCfg = config.AVConfig{Enabled: true, Mode: "icap", ICAP: config.ICAPConfig{Servers: []config.ICAPServer{{Address: addr}}}}
+	for range 2 {
+		r := m.Scan(context.Background(), scanObject([]byte("content")))
+		if r.Verdict != avscan.Unscanned || r.Reason != avscan.ReasonScannerError || r.Backend != "icap|"+addr+"||false" {
+			t.Fatalf("server error = %+v", r)
+		}
+	}
+	if calls.Load() != 2 || len(m.cache) != 0 {
+		t.Fatalf("scanner error was cached: %d calls, %d entries", calls.Load(), len(m.cache))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if r := m.Scan(ctx, scanObject([]byte("slow"))); r.Verdict != avscan.Unscanned || r.Reason != avscan.ReasonTimeout {
+		t.Fatalf("slow reply = %+v", r)
+	}
+	if time.Since(start) > 800*time.Millisecond {
+		t.Fatalf("caller deadline not honoured: %s", time.Since(start))
+	}
+	if status := m.Status(context.Background()); status["errors_count"] != 3 {
+		t.Fatalf("scan errors = %+v", status)
+	}
+}
+
 func TestAVReloadProbeAloneIsNotReady(t *testing.T) {
 	fake := newFakeClamAV(t)
 	fake.opts.DatabaseDir = t.TempDir()
