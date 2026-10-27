@@ -45,7 +45,6 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	e.recordLearnEvents(srcIP, dstIP, evs)
 	e.recordAnomalyAlerts(state, pkt, srcIP, dstIP, evs)
 	e.recordSignatureAlerts(state, pkt, evs)
-	e.enqueueAVTasks(state, evs)
 	e.eventStore.Record(state, pkt, evs)
 	e.recordEvaluatedIDSAlerts(state, pkt, evs)
 }
@@ -143,41 +142,6 @@ func signatureAlertFromMatch(ev dpi.Event, m signatures.Match) dpi.Event {
 	}
 }
 
-func (e *Engine) enqueueAVTasks(state *flow.State, evs []dpi.Event) {
-	if e == nil || e.avSink == nil {
-		return
-	}
-	src, dst := srcDestStrings(state)
-	for _, ev := range evs {
-		if !isAVScanCandidate(ev) {
-			continue
-		}
-		preview, _ := ev.Attributes["preview"].([]byte)
-		hash, _ := ev.Attributes["hash"].(string)
-		if len(preview) == 0 {
-			continue
-		}
-		e.avSink.EnqueueAVScan(context.Background(), AVScanTask{
-			Hash:      hash,
-			Direction: ev.Kind,
-			Proto:     "http",
-			Source:    src,
-			Dest:      dst,
-			FlowID:    ev.FlowID,
-			Preview:   preview,
-			ICS:       isICSEvent(ev.Proto, ev.Kind),
-		})
-		delete(ev.Attributes, "preview")
-	}
-}
-
-func isAVScanCandidate(ev dpi.Event) bool {
-	if ev.Proto != "http" {
-		return false
-	}
-	return ev.Kind == "request" || ev.Kind == "response"
-}
-
 func (e *Engine) recordProtoStats(evs []dpi.Event) {
 	if e == nil || e.stats == nil {
 		return
@@ -247,14 +211,6 @@ func (e *Engine) AnomalyDetector() *anomaly.Detector {
 		return nil
 	}
 	return e.anomalyDetector
-}
-
-// AVSink returns the currently configured AV sink, if any.
-func (e *Engine) AVSink() AVSink {
-	if e == nil {
-		return nil
-	}
-	return e.avSink
 }
 
 // Updater returns the dynamic nftables updater when enforcement is enabled.

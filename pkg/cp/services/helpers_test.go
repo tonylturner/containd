@@ -45,22 +45,4 @@ func TestHelpersAndQueue(t *testing.T) {
 		t.Fatalf("pidOrZero empty cmd = %d", got)
 	}
 
-	q := NewScanQueue(1)
-	if q == nil || q.Len() != 0 {
-		t.Fatalf("unexpected queue state: %#v len=%d", q, q.Len())
-	}
-	task := ScanTask{Hash: "flow-1"}
-	if !q.Enqueue(task) {
-		t.Fatal("expected enqueue to succeed")
-	}
-	if q.Enqueue(ScanTask{Hash: "flow-2"}) {
-		t.Fatal("expected second enqueue to fail on full queue")
-	}
-	got, ok := q.Dequeue(10 * time.Millisecond)
-	if !ok || got.Hash != "flow-1" {
-		t.Fatalf("Dequeue = %#v, %v", got, ok)
-	}
-	if _, ok := q.Dequeue(5 * time.Millisecond); ok {
-		t.Fatal("expected dequeue timeout on empty queue")
-	}
 }

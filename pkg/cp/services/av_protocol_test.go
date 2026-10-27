@@ -40,7 +40,7 @@ func TestClamdScanParsesNULReplies(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sock := startFakeClamd(t, func(string, []byte) []byte { return tc.reply })
-			res, err := (&ClamAVClient{Timeout: time.Second, Socket: sock}).Scan(context.Background(), []byte("payload"))
+			res, err := (&ClamAVClient{Timeout: time.Second, Socket: sock}).Scan(context.Background(), strings.NewReader("payload"), 7)
 			if tc.errPart != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.errPart) {
 					t.Fatalf("Scan() = %+v, %v; want error containing %q", res, err, tc.errPart)
@@ -63,7 +63,7 @@ func TestClamdScanStreamsChunkedPayload(t *testing.T) {
 		}
 		return []byte("stream: OK\x00")
 	})
-	if _, err := (&ClamAVClient{Timeout: time.Second, Socket: sock}).Scan(context.Background(), payload); err != nil {
+	if _, err := (&ClamAVClient{Timeout: time.Second, Socket: sock}).Scan(context.Background(), bytes.NewReader(payload), int64(len(payload))); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if stream := <-got; !bytes.Equal(stream, payload) {
@@ -77,7 +77,7 @@ func TestClamdScanTimesOutWithoutReply(t *testing.T) {
 		return nil
 	})
 	start := time.Now()
-	_, err := (&ClamAVClient{Timeout: 200 * time.Millisecond, Socket: sock}).Scan(context.Background(), []byte("x"))
+	_, err := (&ClamAVClient{Timeout: 200 * time.Millisecond, Socket: sock}).Scan(context.Background(), strings.NewReader("x"), 1)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}

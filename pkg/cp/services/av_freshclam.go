@@ -238,19 +238,10 @@ func (m *AVManager) afterDefinitionsUpdate(ctx context.Context, changed bool) {
 	m.mu.Lock()
 	running := m.clamd.running()
 	m.mu.Unlock()
-	if running {
-		if !changed {
-			return
-		}
-		if err := m.reloadClamd(ctx, cfg); err != nil {
-			m.emit("service.av.clamav_reload_failed", map[string]any{"error": err.Error()})
-			return
-		}
-	} else if err := m.ensureClamd(cfg); err != nil {
-		m.emit("service.av.clamav_start_failed", map[string]any{"error": err.Error()})
+	if running && !changed {
 		return
 	}
-	m.mu.Lock()
-	m.defsGen++
-	m.mu.Unlock()
+	if err := m.reloadClamd(ctx, cfg); err != nil {
+		m.emit("service.av.clamav_reload_failed", map[string]any{"error": err.Error()})
+	}
 }
