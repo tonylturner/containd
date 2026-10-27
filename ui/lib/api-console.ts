@@ -32,8 +32,11 @@ export type ManagementReservation = {
   listenerFaults?: string[] | null;
 };
 
-export type ConntrackKillRequest = {
-  proto: string; src: string; dst: string; sport: number; dport: number;
+/** The original tuple of the connection to kill: ports, or the ICMP identifier, type and code. */
+export type ConntrackKillTuple =
+  | { proto: "tcp" | "udp"; src: string; dst: string; sport: number; dport: number }
+  | { proto: "icmp" | "icmpv6"; src: string; dst: string; icmpId: number; icmpType: number; icmpCode: number };
+export type ConntrackKillRequest = ConntrackKillTuple & {
   scope: "connection" | "client-service"; durationSecs: number;
 };
 export type ConntrackKillResult = {

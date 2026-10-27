@@ -12,7 +12,9 @@ import (
 // hold the layout of another containd version: before 0.1.35 it held the
 // whole policy (filter and NAT chains, zone sets) and a block_flows set
 // without a protocol field. Each apply converges it to the current layout
-// and keeps only the elements of the current dynamic sets.
+// and keeps only the elements of the current dynamic sets. A set the current
+// layout adds needs no migration: the install declares it and keeps every
+// other set.
 
 // TableLayout is the live layout of a dynamic table.
 type TableLayout struct {
@@ -37,8 +39,11 @@ type LiveObject struct {
 	// Kind is the nft object keyword: set, map, counter, ct helper, ...
 	Kind string
 	Name string
-	// Type and Flags describe sets and maps; Type joins concatenated
-	// fields with " . ".
+	// Type and Flags describe sets and maps. Type joins the datatypes of
+	// concatenated fields with " . "; for a typeof set listed by nft 1.1.7
+	// or later it is "typeof " and the key expression in nft syntax
+	// ("typeof ip saddr . icmp id"). nft 1.1.1 lists a typeof set by its
+	// datatypes.
 	Type  string
 	Flags []string
 }
@@ -115,8 +120,8 @@ func currentObject(obj LiveObject) bool {
 		return false
 	}
 	for _, set := range dynamicSets() {
-		if obj.Name == set[0] {
-			return obj.Type == set[1] && slices.Equal(obj.Flags, []string{"timeout"})
+		if obj.Name == set.name {
+			return set.matches(obj.Type) && slices.Equal(obj.Flags, []string{"timeout"})
 		}
 	}
 	return false

@@ -493,6 +493,10 @@ export type DHCPLease = {
   hostname?: string;
 };
 
+/**
+ * A kernel connection as listed. TCP and UDP tuples carry ports; ICMP and
+ * ICMPv6 tuples carry the query identifier, type and code instead.
+ */
 export type ConntrackEntry = {
   proto: string;
   state?: string;
@@ -500,10 +504,16 @@ export type ConntrackEntry = {
   dst?: string;
   sport?: string;
   dport?: string;
+  icmpId?: string;
+  icmpType?: string;
+  icmpCode?: string;
   replySrc?: string;
   replyDst?: string;
   replySport?: string;
   replyDport?: string;
+  replyIcmpId?: string;
+  replyIcmpType?: string;
+  replyIcmpCode?: string;
   mark?: string;
   assured?: boolean;
   timeoutSecs?: number;
@@ -523,6 +533,8 @@ export type TelemetryEvent = {
   srcPort?: number;
   dstPort?: number;
   transport?: string;
+  /** Content hash, set on AV events. */
+  hash?: string;
 };
 
 export type FlowSummary = {

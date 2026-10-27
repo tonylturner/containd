@@ -23,7 +23,6 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
-	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // The helper is re-executed in an endpoint's network namespace. Commands and
@@ -39,11 +38,23 @@ func TestKernelConntrackPeer(t *testing.T) {
 	}
 
 	conns := map[string]net.Conn{}
+	pings := pingers{}
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		var err error
+		reply := "ok"
 		switch fields[0] {
+		case "ping":
+			id, _ := strconv.Atoi(fields[4])
+			err = pings.start(fields[1], fields[2], fields[3], id)
+		case "replies":
+			reply = pings.replies(fields[1])
+		case "stray":
+			id, _ := strconv.Atoi(fields[3])
+			err = sendStrays(fields[1], fields[2], id)
+		case "udpprobe":
+			err = udpProbe(fields[1], fields[2], fields[3])
 		case "dial":
 			port, _ := strconv.Atoi(fields[3])
 			d := net.Dialer{Timeout: 3 * time.Second, LocalAddr: &net.TCPAddr{IP: net.ParseIP(os.Getenv("CONTAIND_CONNTRACK_ADDRESS")), Port: port}, Control: func(_, _ string, c syscall.RawConn) error {
@@ -91,7 +102,6 @@ func TestKernelConntrackPeer(t *testing.T) {
 				delete(conns, fields[1])
 			}
 		}
-		reply := "ok"
 		if err != nil {
 			reply = err.Error()
 		}
@@ -248,118 +258,20 @@ func TestKernelConntrackKill(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			defer cancel()
-			// Conntrack outlives namespaces. Remove only this harness's stale
-			// tuples before reusing its deliberately tiny SNAT port pool.
-			old, err := conntrack.List(ctx, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, e := range old {
-				if e.Proto != "tcp" || (!strings.HasPrefix(e.Src, "10.91.") && !strings.HasPrefix(e.Src, "fd91:")) {
-					continue
-				}
-				sport, _ := strconv.Atoi(e.Sport)
-				dport, _ := strconv.Atoi(e.Dport)
-				if err := conntrack.Delete(ctx, conntrack.DeleteRequest{Proto: e.Proto, Src: e.Src, Dst: e.Dst, Sport: sport, Dport: dport}); err != nil && !errors.Is(err, syscall.ENOENT) {
-					t.Fatal(err)
-				}
-			}
-
-			run := func(args ...string) {
-				t.Helper()
-				out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
-				if err != nil {
-					t.Fatalf("%v: %v: %s", args, err, out)
-				}
-			}
-			suffix := strconv.Itoa(os.Getpid())
-			clientNS, serverNS := "ctc"+suffix, "cts"+suffix
-			for _, ns := range []string{clientNS, serverNS} {
-				run("ip", "netns", "add", ns)
-				t.Cleanup(func() { _ = exec.Command("ip", "netns", "del", ns).Run() })
-			}
-			client, server, routerClient, routerServer, vip := "10.91.1.2", "10.91.2.2", "10.91.1.1", "10.91.2.1", "10.91.1.100"
-			prefix := "/24"
-			family := "-4"
-			if tc.v6 {
-				client, server, routerClient, routerServer = "fd91:1::2", "fd91:2::2", "fd91:1::1", "fd91:2::1"
-				prefix = "/64"
-				family = "-6"
-			}
-			for _, link := range []struct{ name, ns, local, remote string }{{"ctclient", clientNS, routerClient, client}, {"ctserver", serverNS, routerServer, server}} {
-				run("ip", "link", "add", link.name, "type", "veth", "peer", "name", link.name+"p")
-				t.Cleanup(func() { _ = exec.Command("ip", "link", "del", link.name).Run() })
-				run("ip", "link", "set", link.name+"p", "netns", link.ns)
-				if tc.v6 {
-					// Static link-local addresses keep DAD transitions out of
-					// the transport test. Neighbor discovery still runs through
-					// the real firewall; no permanent neighbor entries are used.
-					run("ip", "link", "set", link.name, "addrgenmode", "none")
-					run("ip", "-n", link.ns, "link", "set", link.name+"p", "addrgenmode", "none")
-					run("ip", "-6", "addr", "add", "fe80::1/64", "dev", link.name, "nodad")
-					run("ip", "-n", link.ns, "-6", "addr", "add", "fe80::2/64", "dev", link.name+"p", "nodad")
-				}
-				args := []string{"ip", family, "addr", "add", link.local + prefix, "dev", link.name}
-				if tc.v6 {
-					args = append(args, "nodad")
-				}
-				run(args...)
-				run("ip", "link", "set", link.name, "up")
-				run("ip", "-n", link.ns, "link", "set", "lo", "up")
-				args = []string{"ip", "-n", link.ns, family, "addr", "add", link.remote + prefix, "dev", link.name + "p"}
-				if tc.v6 {
-					args = append(args, "nodad")
-				}
-				run(args...)
-				run("ip", "-n", link.ns, "link", "set", link.name+"p", "up")
-				run("ip", "-n", link.ns, family, "route", "add", "default", "via", link.local)
-			}
+			var nat func(*routedLab) string
 			if tc.nat {
-				run("ip", "addr", "add", vip+"/32", "dev", "ctclient")
-			}
-			otherClient := "10.91.1.3"
-			if tc.v6 {
-				otherClient = "fd91:1::3"
-			}
-			alias := []string{"ip", "-n", clientNS, family, "addr", "add", otherClient + prefix, "dev", "ctclientp"}
-			if tc.v6 {
-				alias = append(alias, "nodad")
-			}
-			run(alias...)
-			for _, key := range []string{"net.ipv4.ip_forward", "net.ipv6.conf.all.forwarding"} {
-				out, err := exec.CommandContext(ctx, "sysctl", "-n", key).Output()
-				if err != nil || strings.TrimSpace(string(out)) != "1" {
-					t.Fatalf("set %s=1 using docker --sysctl before running: %s %v", key, out, err)
+				nat = func(lab *routedLab) string {
+					return fmt.Sprintf("add rule inet containd test_dnat ip daddr %s tcp dport 25000 dnat ip to %s:25000\n", lab.vip, lab.server) +
+						fmt.Sprintf("add rule inet containd test_snat iifname ctclient ip daddr %s meta l4proto tcp snat ip to %s:50000-50002\n", lab.server, lab.routerServer)
 				}
 			}
-			text, err := enforce.NewCompiler().CompileFirewall(&rules.Snapshot{Default: rules.ActionAllow})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if tc.nat {
-				text += "add chain inet containd test_dnat { type nat hook prerouting priority dstnat; }\n"
-				text += "add chain inet containd test_snat { type nat hook postrouting priority srcnat; }\n"
-				text += fmt.Sprintf("add rule inet containd test_dnat ip daddr %s tcp dport 25000 dnat ip to %s:25000\n", vip, server)
-				text += fmt.Sprintf("add rule inet containd test_snat iifname ctclient ip daddr %s meta l4proto tcp snat ip to %s:50000-50002\n", server, routerServer)
-			}
-			if err := enforce.NewNftApplier().Apply(ctx, text); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				if t.Failed() {
-					out, _ := exec.Command("nft", "list", "ruleset").CombinedOutput()
-					t.Logf("rules: %s", out)
-					for _, cmd := range [][]string{{"ip", "-6", "addr"}, {"ip", "-6", "route"}, {"ip", "-6", "neigh"}, {"ip", "-n", clientNS, "-6", "route"}, {"ip", "-n", clientNS, "-6", "neigh"}, {"ip", "-n", serverNS, "-6", "route"}, {"ip", "-n", serverNS, "-6", "neigh"}} {
-						out, _ := exec.Command(cmd[0], cmd[1:]...).CombinedOutput()
-						t.Logf("%v: %s", cmd, out)
-					}
-				}
-			})
-			serverPeer := startPeer(t, ctx, serverNS, "server", net.JoinHostPort(server, "25000"))
-			p := startPeer(t, ctx, clientNS, "client", client)
+			lab := newRoutedLab(t, ctx, tc.v6, nat)
+			client, server, routerServer, otherClient := lab.client, lab.server, lab.routerServer, lab.otherClient
+			serverPeer := startPeer(t, ctx, lab.serverNS, "server", net.JoinHostPort(server, "25000"))
+			p := startPeer(t, ctx, lab.clientNS, "client", client)
 			dest := server
 			if tc.nat {
-				dest = vip
+				dest = lab.vip
 			}
 			address := net.JoinHostPort(dest, "25000")
 			for _, key := range []struct {
@@ -374,7 +286,7 @@ func TestKernelConntrackKill(t *testing.T) {
 				}
 			}
 			// An unrelated service key must remain untouched even for broad revocations.
-			startPeer(t, ctx, serverNS, "server", net.JoinHostPort(server, "25001"))
+			startPeer(t, ctx, lab.serverNS, "server", net.JoinHostPort(server, "25001"))
 			if got := p.command(t, "dial other "+net.JoinHostPort(server, "25001")+" 41003"); got != "ok" {
 				t.Fatal(got)
 			}

@@ -379,7 +379,7 @@ test("rule preview without coverage shows no coverage section", async ({ page })
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Preview impact" }).click();
   const summary = page.getByLabel("Rule impact preview");
-  await expect(summary).toContainText("0 of 0 recent events match this rule on its own.");
+  await expect(summary).toContainText("No recent events to search: the engine has retained none yet.");
   await expect(summary.getByLabel("ICS coverage", { exact: true })).toHaveCount(0);
   expect(seen.errors).toEqual([]);
 });

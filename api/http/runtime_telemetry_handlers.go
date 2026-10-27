@@ -335,7 +335,16 @@ func killConntrackHandler(engine EngineClient) gin.HandlerFunc {
 		if !result.RevocationInstalled || !result.ConntrackDeleted {
 			outcome = "failure"
 		}
-		auditLog(c, audit.Record{Action: "conntrack.kill", Target: fmt.Sprintf("%s [%s]:%d → [%s]:%d", req.Proto, req.Src, req.Sport, req.Dst, req.Dport), Result: outcome, Detail: fmt.Sprintf("scope=%s deleted=%d/%d revocation=%t %s %s", result.Scope, result.Deleted, result.Matched, result.RevocationInstalled, result.DeleteError, result.RevocationError)})
+		auditLog(c, audit.Record{Action: "conntrack.kill", Target: killTarget(req), Result: outcome, Detail: fmt.Sprintf("scope=%s deleted=%d/%d revocation=%t %s %s", result.Scope, result.Deleted, result.Matched, result.RevocationInstalled, result.DeleteError, result.RevocationError)})
 		c.JSON(http.StatusOK, result)
 	}
+}
+
+// killTarget names the selected tuple in the audit log: ports for TCP and
+// UDP, the identifier, type and code for ICMP and ICMPv6.
+func killTarget(req conntrack.KillRequest) string {
+	if conntrack.IsICMP(req.Proto) {
+		return fmt.Sprintf("%s [%s] → [%s] id %d type %d code %d", req.Proto, req.Src, req.Dst, req.ICMPID, req.ICMPType, req.ICMPCode)
+	}
+	return fmt.Sprintf("%s [%s]:%d → [%s]:%d", req.Proto, req.Src, req.Sport, req.Dst, req.Dport)
 }

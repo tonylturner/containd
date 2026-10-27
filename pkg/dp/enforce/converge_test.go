@@ -3,6 +3,7 @@
 package enforce
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,9 +36,86 @@ func currentLayout() TableLayout {
 		l.Chains = append(l.Chains, LiveChain{Name: ch.name, Type: "filter", Hook: ch.hook, Policy: "accept", Prio: dynamicChainPriority})
 	}
 	for _, set := range dynamicSets() {
-		l.Objects = append(l.Objects, LiveObject{Kind: "set", Name: set[0], Type: set[1], Flags: []string{"timeout"}})
+		l.Objects = append(l.Objects, LiveObject{Kind: "set", Name: set.name, Type: set.key, Flags: []string{"timeout"}})
 	}
 	return l
+}
+
+// typeofSetsJSON lists the ICMP revocation sets as nft 1.1.1 and nft 1.1.7
+// report them (nft -j -t list table inet containd, other items trimmed).
+var typeofSetsJSON = map[string]string{
+	"1.1.1": `{"nftables": [{"metainfo": {"version": "1.1.1", "json_schema_version": 1}},
+{"table": {"family": "inet", "name": "containd", "handle": 1}},
+{"set": {"family": "inet", "name": "revoke_icmp4", "table": "containd", "type": ["ipv4_addr", "ipv4_addr", "integer"], "handle": 1, "flags": ["timeout"]}},
+{"set": {"family": "inet", "name": "revoke_icmp6", "table": "containd", "type": ["ipv6_addr", "ipv6_addr", "integer"], "handle": 2, "flags": ["timeout"]}}]}`,
+	"1.1.7": `{"nftables": [{"metainfo": {"version": "1.1.7", "json_schema_version": 1}},
+{"table": {"family": "inet", "name": "containd", "handle": 1}},
+{"set": {"family": "inet", "name": "revoke_icmp4", "table": "containd", "type": {"typeof": {"concat": [{"payload": {"protocol": "ip", "field": "saddr"}}, {"payload": {"protocol": "ip", "field": "daddr"}}, {"payload": {"protocol": "icmp", "field": "id"}}]}}, "handle": 1, "flags": ["timeout"]}},
+{"set": {"family": "inet", "name": "revoke_icmp6", "table": "containd", "type": {"typeof": {"concat": [{"payload": {"protocol": "ip6", "field": "saddr"}}, {"payload": {"protocol": "ip6", "field": "daddr"}}, {"payload": {"protocol": "icmpv6", "field": "id"}}]}}, "handle": 2, "flags": ["timeout"]}}]}`,
+}
+
+// The typeof revocation sets read back as the current layout from both nft
+// versions, so an apply keeps their elements; any other key recreates them.
+func TestTypeofSetsConverge(t *testing.T) {
+	want := map[string][2]string{
+		"1.1.1": {"ipv4_addr . ipv4_addr . integer", "ipv6_addr . ipv6_addr . integer"},
+		"1.1.7": {"typeof ip saddr . ip daddr . icmp id", "typeof ip6 saddr . ip6 daddr . icmpv6 id"},
+	}
+	c := NewCompiler()
+	for version, doc := range typeofSetsJSON {
+		live, err := parseTableLayout([]byte(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(live.Objects) != 2 || live.Objects[0].Type != want[version][0] || live.Objects[1].Type != want[version][1] {
+			t.Fatalf("nft %s objects = %+v", version, live.Objects)
+		}
+		l := currentLayout()
+		for i, obj := range l.Objects {
+			for _, read := range live.Objects {
+				if obj.Name == read.Name {
+					l.Objects[i] = read
+				}
+			}
+		}
+		if got := c.InstallScript(l, "", "X\n"); got != "X\n" {
+			t.Fatalf("nft %s: typeof sets recreated: %q", version, got)
+		}
+	}
+	// A table of an earlier version lacks the ICMP identifier sets; the
+	// install adds them without touching the others.
+	l := currentLayout()
+	l.Objects = slices.DeleteFunc(l.Objects, func(o LiveObject) bool { return strings.HasPrefix(o.Name, "revoke_icmp") })
+	if got := c.InstallScript(l, "", "X\n"); got != "X\n" {
+		t.Fatalf("upgrade recreated objects: %q", got)
+	}
+	for name, typ := range map[string]string{
+		"other field":      "typeof ip saddr . ip daddr . tcp sport",
+		"other datatypes":  "ipv4_addr . ipv4_addr . inet_service",
+		"unknown typeof":   `{"typeof": {"concat": [{"meta": {"key": "mark"}}]}}`,
+		"other family key": "typeof ip6 saddr . ip6 daddr . icmpv6 id",
+	} {
+		l := currentLayout()
+		for i := range l.Objects {
+			if l.Objects[i].Name == "revoke_icmp4" {
+				l.Objects[i].Type = typ
+			}
+		}
+		if got := c.InstallScript(l, "", "X\n"); !strings.Contains(got, "delete set inet containd revoke_icmp4\n") || strings.Count(got, "delete ") != 1 {
+			t.Fatalf("%s: %q", name, got)
+		}
+	}
+	for raw, want := range map[string]string{
+		`"ipv4_addr"`:                   "ipv4_addr",
+		`["ipv4_addr", "inet_service"]`: "ipv4_addr . inet_service",
+		`{"typeof": {"payload": {"protocol": "icmp", "field": "id"}}}`:       "typeof icmp id",
+		`{"typeof": {"concat": [{"payload": {"protocol": "ip"}}]}}`:          `{"typeof": {"concat": [{"payload": {"protocol": "ip"}}]}}`,
+		`{"typeof": {"concat": [{"ct": {"key": "mark"}}, {"payload": {}}]}}`: `{"typeof": {"concat": [{"ct": {"key": "mark"}}, {"payload": {}}]}}`,
+	} {
+		if got := setType([]byte(raw)); got != want {
+			t.Fatalf("setType(%s) = %q, want %q", raw, got, want)
+		}
+	}
 }
 
 func TestParseLegacyTable(t *testing.T) {
