@@ -290,7 +290,7 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	out := meterStatus(&m.scans, &m.scanErrs)
 	out["enabled"] = cfg.Enabled
 	out["mode"] = avMode(cfg)
-	out["failPolicy"] = firstNonEmpty(strings.ToLower(cfg.FailPolicy), "open")
+	out["failPolicy"] = cfg.EffectiveFailPolicy()
 	out["max_size"] = cfg.MaxSizeBytes
 	out["timeout"] = int(avTimeout(cfg) / time.Second)
 	out["cache_ttl"] = avCacheTTL(cfg).String()
