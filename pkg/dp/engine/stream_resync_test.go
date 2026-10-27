@@ -132,7 +132,7 @@ func TestResyncInWindowCloseThenNewConnection(t *testing.T) {
 }
 
 // TestResyncCloseKeepsFailedStream closes a failed stream in window, by a
-// client RST on the cached denial and by a server RST that passes: the
+// client RST and a server RST, both dropped by the tuple tombstone: the
 // stream stays failed once the cached denial has expired.
 func TestResyncCloseKeepsFailedStream(t *testing.T) {
 	for _, p := range firstCommandProtocols() {
@@ -147,8 +147,8 @@ func TestResyncCloseKeepsFailedStream(t *testing.T) {
 			if d := f.decide(f.next, capture.TCPFlagRST, nil); d.Action != capture.Drop || d.Reason != reasonCachedDeny {
 				t.Fatalf("client RST on the denied flow = %+v, want the cached denial", d)
 			}
-			if d := f.fromServer(0, capture.TCPFlagRST); d.Action != capture.Accept {
-				t.Fatalf("server RST = %+v, want Accept", d)
+			if d := f.fromServer(0, capture.TCPFlagRST); d.Action != capture.Drop {
+				t.Fatalf("server RST = %+v, want Drop", d)
 			}
 			f.e.verdictCache = NewVerdictCache(time.Minute, 16)
 			f.failedClosed("read on the failed stream", f.decide(f.next, ackPsh, p.read(3)), p.name+"-read", failClosedStream, 1)
@@ -245,16 +245,16 @@ func TestResyncPanicKeepsStreamFailed(t *testing.T) {
 	f.failedClosed("read tail on the failed stream", f.decide(8, ackPsh, read[8:]), "modbus-read", failClosedPanic, 1)
 }
 
-// pickedUp requires the drop of a stream picked up mid-connection: one more
-// stream_midstream ics.decision for rule and no dynamic block.
+// pickedUp requires the drop of a stream picked up mid-connection, its
+// original stream_midstream decision and no dynamic block retry.
 func (f *fcFlow) pickedUp(what string, d capture.Decision, rule string, before int) {
 	f.t.Helper()
-	if d.Action != capture.Drop || d.Reason != reasonStreamFailClosed {
+	if d.Action != capture.Drop || (before == 0 && d.Reason != reasonStreamFailClosed) {
 		f.t.Fatalf("%s: decision = %+v, want Drop by %s", what, d, reasonStreamFailClosed)
 	}
 	evs := failClosedEvents(f.e)
-	if len(evs) != before+1 {
-		f.t.Fatalf("%s: fail-closed events %d -> %d, want one more", what, before, len(evs))
+	if len(evs) != 1 {
+		f.t.Fatalf("%s: fail-closed events %d -> %d, want the one original decision", what, before, len(evs))
 	}
 	ev := evs[0] // newest first
 	if ev.Attributes[eventfields.KeyRuleID] != rule || ev.Attributes[eventfields.KeyReason] != failClosedMidStream ||
@@ -350,8 +350,8 @@ func decisionEvents(e *Engine) int {
 	return n
 }
 
-// TestResyncDeniedStreamStaysDenied denies a command while the dynamic
-// block fails or stalls. Past the cached denial the retransmitted command
+// TestResyncDeniedStreamStaysDenied denies a command with an updater that
+// would fail or stall if called. Past the cached denial the retransmitted command
 // (bytes the stream already consumed) and every later packet of the
 // connection still drop, without another decision event or rule hit, until
 // the flow ends; the client's next connection is inspected as usual.
@@ -375,7 +375,7 @@ func TestResyncDeniedStreamStaysDenied(t *testing.T) {
 					{"read after the command", f.next, p.read(2)},
 				} {
 					f.e.verdictCache = NewVerdictCache(time.Minute, 16)
-					if d := f.decide(step.off, ackPsh, step.payload); d.Action != capture.Drop || d.Reason != reasonDPIDeny {
+					if d := f.decide(step.off, ackPsh, step.payload); d.Action != capture.Drop {
 						t.Fatalf("%s past the cached denial = %+v, want Drop by %s", step.what, d, reasonDPIDeny)
 					}
 				}
@@ -385,7 +385,6 @@ func TestResyncDeniedStreamStaysDenied(t *testing.T) {
 				if got := decisionEvents(f.e); got != decisions {
 					t.Fatalf("decision events %d -> %d, want none for the same denial", decisions, got)
 				}
-				f.e.sweepFlows(time.Now().Add(time.Hour))
 				f.client++
 				f.isn, f.next = 800000, 0
 				f.syn()

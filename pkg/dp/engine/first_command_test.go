@@ -14,14 +14,16 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
 // The tests in this file drive inline (NFQUEUE) packets through the real
 // Modbus and DNP3 decoders under an enforce policy: default DENY, reads
 // allowed, writes, diagnostics and operates denied. The first complete
 // prohibited command must be dropped in its own packet's verdict, however
-// the client segments it and whatever the dynamic-block updater does after
+// the client segments it and whatever the unused block updater does after
 // the drop. Allowed commands on the same flow must be accepted, so a policy
 // that blackholes the whole port cannot pass.
 
@@ -137,6 +139,7 @@ type firstCommandUpdater struct {
 }
 
 func (u *firstCommandUpdater) BlockHostTemp(context.Context, net.IP, time.Duration) error {
+	u.calls <- "unexpected host block"
 	return errors.New("unexpected host block")
 }
 
@@ -165,6 +168,9 @@ func firstCommandEngine(t *testing.T, mode string) (*Engine, *firstCommandUpdate
 		t.Fatalf("new engine: %v", err)
 	}
 	e.capture = idleCapture{}
+	e.iec.injector = &session.Fake{}
+	e.iec.health.clear(faultInjector)
+	e.iec.ctDelete = func(context.Context, conntrack.DeleteRequest) error { return nil }
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	if err := e.Start(ctx); err != nil {
@@ -231,7 +237,7 @@ func (f *fcFlow) acceptAt(off uint32, what string, payload []byte) {
 }
 
 // deny sends payload as the next new bytes and requires the first DPI drop
-// of the flow, by rule; the dynamic block follows the verdict.
+// of the flow, by rule; session resets follow the verdict.
 func (f *fcFlow) deny(what, rule string, payload []byte) {
 	f.t.Helper()
 	f.denyAt(f.next, what, rule, payload)
@@ -248,14 +254,11 @@ func (f *fcFlow) denyAt(off uint32, what, rule string, payload []byte) {
 		f.t.Fatalf("%s: rule %s hits %d -> %d, want one more", what, rule, hits, got)
 	}
 	f.denies++
-	want := fmt.Sprintf("%s>%s/tcp:%d", testClient, testServer, f.port)
+	assertResetEvidence(f.t, f.e)
 	select {
 	case got := <-f.up.calls:
-		if got != want {
-			f.t.Fatalf("dynamic block %q, want %q", got, want)
-		}
-	case <-time.After(2 * time.Second):
-		f.t.Fatal("dynamic block was not attempted after the drop verdict")
+		f.t.Fatalf("DPI installed block %q", got)
+	default:
 	}
 }
 

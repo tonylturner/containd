@@ -369,30 +369,30 @@ func TestFirstCommandKernelOracle(t *testing.T) {
 
 	run("first payload fc6 write", func(c *fcClient) step {
 		c.write(write(c))
-		c.expectSilence()
+		c.expectReset()
 		return step{}
 	})
 	run("first payload fc8 diagnostics", func(c *fcClient) step {
 		c.write(diag(c))
-		c.expectSilence()
+		c.expectReset()
 		return step{}
 	})
 	run("fc6 write after reads", func(c *fcClient) step {
 		c.read()
 		c.read()
 		c.write(write(c))
-		c.expectSilence()
+		c.expectReset()
 		return step{fcs: []uint8{3, 3}, bytes: 24}
 	})
 	run("fc8 diagnostics after read", func(c *fcClient) step {
 		c.read()
 		c.write(diag(c))
-		c.expectSilence()
+		c.expectReset()
 		return step{fcs: []uint8{3}, bytes: 12}
 	})
 	run("read and fc6 write coalesced", func(c *fcClient) step {
 		c.write(append(c.next(3, 0, 2), write(c)...))
-		c.expectSilence()
+		c.expectReset()
 		return step{}
 	})
 	run("read coalesced with fc6 write head", func(c *fcClient) step {
@@ -400,7 +400,7 @@ func TestFirstCommandKernelOracle(t *testing.T) {
 		c.write(append(c.next(3, 0, 2), w[:7]...))
 		c.expectReadReply()
 		c.write(w[7:])
-		c.expectSilence()
+		c.expectReset()
 		return step{fcs: []uint8{3}, bytes: 19}
 	})
 	for k := 1; k < 12; k++ {
@@ -409,7 +409,7 @@ func TestFirstCommandKernelOracle(t *testing.T) {
 			w := write(c)
 			c.write(w[:k])
 			c.write(w[k:])
-			c.expectSilence()
+			c.expectReset()
 			return step{fcs: []uint8{3}, bytes: 12 + k}
 		})
 	}
@@ -418,10 +418,9 @@ func TestFirstCommandKernelOracle(t *testing.T) {
 		return step{fcs: []uint8{3}, bytes: 12}
 	})
 
-	// The dynamic block of the first denial, kept for clients that read
-	// the set directly.
+	// DPI must not install a service-wide block.
 	out := fcRun(ctx, t, "nft", "list", "set", "inet", "containd", "block_flows")
-	if !strings.Contains(out, "198.18.50.11 . "+fcServerIP+" . tcp . 502") {
-		t.Fatalf("block_flows lacks the first denied flow:\n%s", out)
+	if strings.Contains(out, "198.18.50.11 . "+fcServerIP+" . tcp . 502") {
+		t.Fatalf("DPI installed a block:\n%s", out)
 	}
 }

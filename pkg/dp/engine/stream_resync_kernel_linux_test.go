@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/tonylturner/containd/pkg/dp/enforce"
+	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
 // TestStreamResyncKernelOutOfWindowRST runs in the first-command kernel
@@ -41,7 +42,7 @@ func TestStreamResyncKernelOutOfWindowRST(t *testing.T) {
 	}
 	// Transaction ID 0x00FE: the misframed MBAP length field.
 	c.write(append(read[8:], modbusADU(0x00FE, 6, 1, 0x1234)...))
-	c.expectSilence()
+	c.expectReset()
 	fcs, n, regs := srv.seen(c.src)
 	if len(fcs) != 0 || n != 8 || regs != [8]uint16{} {
 		t.Fatalf("server received FCs %v in %d bytes, registers %v; want only the 8-byte read head", fcs, n, regs)
@@ -118,8 +119,8 @@ func (failingUpdater) BlockFlowTemp(context.Context, net.IP, net.IP, string, str
 	return errors.New("nft: permission denied")
 }
 
-// TestStreamResyncKernelDeniedRetransmission denies a write while the nft
-// dynamic block fails. The client's stack keeps retransmitting the write;
+// TestStreamResyncKernelDeniedRetransmission denies a write while
+// reset injection fails. The client's stack keeps retransmitting the write;
 // the retransmissions after the 30 s userspace cached denial expired must
 // not reach the server either. Another client's reads, 5 s before and 27 s
 // after the write, run the reassembly idle sweep while the denied stream is
@@ -130,6 +131,12 @@ func TestStreamResyncKernelDeniedRetransmission(t *testing.T) {
 	srv := startModbusRecorder(t)
 	e := startFirstCommandEngine(t, ctx)
 	restartFirstCommandEngine(ctx, t, e, failingUpdater{})
+	inj := &session.Fake{}
+	inj.SetError(errors.New("reset send failure"))
+	if err := e.iec.injector.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e.iec.injector = inj
 
 	c := dialFirstCommand(ctx, t, "198.18.50.42")
 	other := dialFirstCommand(ctx, t, "198.18.50.43")
@@ -139,6 +146,9 @@ func TestStreamResyncKernelDeniedRetransmission(t *testing.T) {
 	c.write(c.next(6, 1, 0x1234))
 	sent := time.Now()
 	c.expectSilence()
+	if got := len(inj.Resets()); got != 2 {
+		t.Fatalf("reset attempts %d, want both peers", got)
+	}
 	raw, err := c.conn.SyscallConn()
 	if err != nil {
 		t.Fatal(err)

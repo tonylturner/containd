@@ -29,8 +29,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
-const dpiEnforceBlockTTL = 10 * time.Minute
-
 var startNFLog = capture.StartNFLog
 
 type captureRunner interface {
@@ -72,6 +70,9 @@ type Engine struct {
 	lifecycleMu           sync.Mutex // serializes Start, Reconfigure and ApplyRules
 	flowMu                sync.Mutex
 	flows                 map[string]*flow.State
+	deniedTCP             map[string]*deniedTCP
+	tcpISNs               map[string]uint32
+	tcpDecisions          [256]sync.Mutex
 	lastSweep             time.Time
 	verdictCache          *VerdictCache
 	inventory             *inventory.Inventory
@@ -322,6 +323,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.nfqueueGroup = fresh.nfqueueGroup
 	e.onError = fresh.onError
 	e.flows = fresh.flows
+	e.tcpISNs = fresh.tcpISNs
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
@@ -602,6 +604,8 @@ func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	defer e.lockGenericTCP(pkt)()
+	e.reopenDeniedTCP(pkt)
 	state := e.trackFlow(pkt, now)
 	if state == nil {
 		return acceptDecision
@@ -699,6 +703,12 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow
 	state.IdleTimeout = 5 * time.Minute
 	state.Tags = e.flowTags(key)
 	e.flows[key.Hash()] = state
+	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 && handshakeMarked(pkt) {
+		if e.tcpISNs == nil {
+			e.tcpISNs = make(map[string]uint32)
+		}
+		e.tcpISNs[key.Hash()] = pkt.TCP.Seq
+	}
 	metrics.FlowsActive.Inc()
 	return state, forgotten
 }
@@ -726,6 +736,7 @@ func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 		return nil
 	}
 	delete(e.flows, hash)
+	delete(e.tcpISNs, hash)
 	metrics.FlowsActive.Dec()
 	return st
 }
@@ -736,6 +747,7 @@ func (e *Engine) sweepFlows(now time.Time) {
 	for k, st := range e.flows {
 		if st == nil || st.Expired(now) {
 			delete(e.flows, k)
+			delete(e.tcpISNs, k)
 			metrics.FlowsActive.Dec()
 			if st != nil {
 				expired = append(expired, st)

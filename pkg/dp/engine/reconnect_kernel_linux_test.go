@@ -52,7 +52,7 @@ func TestReconnectKernelSamePortAfterSilentLoss(t *testing.T) {
 	}
 	next.read()
 	next.write(next.next(6, 1, 0x1234))
-	next.expectSilence()
+	next.expectReset()
 	if fcs, _, regs := srv.seen(src); !slices.Equal(fcs, []uint8{3, 3}) || regs != [8]uint16{} {
 		t.Fatalf("server received FCs %v, registers %v; want the two reads only", fcs, regs)
 	}

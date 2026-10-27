@@ -204,9 +204,9 @@ func TestReplyEvaluatedWithConnectionOrientation(t *testing.T) {
 // TestPersistentModbusUnderDefaultDeny mirrors the smoke policy: default
 // DENY, an allow for FC3 reads and a deny for FC6 writes from the client
 // to the server, enforce mode. Read replies must not be blocked; the write
-// must block the client -> server flow only. The echoed write reply
+// must drop without a host/service block. The echoed write reply
 // matches the deny rule too, so the write yields two rule hits, both
-// blocking the request tuple.
+// without installing a block on the request tuple.
 func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 	up := &blockRecorder{}
 	e, err := New(Config{
@@ -248,14 +248,17 @@ func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 	}
 
 	write6 := modbusADU(11, 6, 1, 0x1234)
-	e.handlePacket(segment(false, 112, ackPsh, write6))
-	want := testClient + ">" + testServer + "/tcp:502"
-	if got := up.blockedAfter(e); len(got) != 1 || got[0] != want {
-		t.Fatalf("blocks after write = %v, want [%s]", got, want)
+	if d := e.handlePacket(segment(false, 112, ackPsh, write6)); d.Action != capture.Drop {
+		t.Fatalf("write = %+v, want Drop", d)
 	}
-	e.handlePacket(segment(true, 513, ackPsh, write6))
-	if got := up.blockedAfter(e); len(got) != 2 || got[0] != want || got[1] != want {
-		t.Fatalf("blocks after the echoed reply = %v, want [%s %s]", got, want, want)
+	if got := up.blockedAfter(e); len(got) != 0 {
+		t.Fatalf("DPI blocks after write = %v, want none", got)
+	}
+	if d := e.handlePacket(segment(true, 513, ackPsh, write6)); d.Action != capture.Drop {
+		t.Fatalf("write reply = %+v, want Drop", d)
+	}
+	if got := up.blockedAfter(e); len(got) != 0 {
+		t.Fatalf("DPI blocks after reply = %v, want none", got)
 	}
 	if got := ruleHits(e, "write-deny"); got != 2 {
 		t.Fatalf("write-deny rule hits = %d, want 2", got)

@@ -5,7 +5,6 @@ package engine
 
 import (
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,38 +17,13 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
-// An inline flow in the scope of an enforce ICS rule fails closed when its
-// stream cannot be inspected: a conflicting overlap, a rewritten
-// retransmission, framing the decoder rejects, the payload of a SYN its
-// stream is not anchored at, or a recovered decoder panic drops the packet
-// and denies the flow like a decoded denial. The flow's stream stays
-// failed instead of restarting at a later segment, so a sender cannot
-// choose where framing resumes; only a FIN or RST in window ends it before
-// the flow does. Learn-only flows, packets that are not inline and the
-// IEC104 path keep passing such packets.
-//
-// A decoded denial of such a flow fails its stream too (dpi.StreamDenied):
-// the denied bytes were consumed, so without it their retransmission would
-// pass as a duplicate once the cached denial expired, if the dynamic block
-// failed or stalled. Every later packet of the connection drops until the
-// flow ends.
-//
-// A stream picked up mid-connection fails the same way, as an IEC104
-// session not observed from its SYN does: after an engine restart, after
-// the engine forgot an idle flow, after the reassembly sweep dropped a
-// partial frame, or after a SYN of a new handshake on its tuple, framing
-// could start inside a message. No flow block is installed, which would
-// also stop the client's next connection: the engine resets the connection
-// once (closePickedUp), its packets drop, and the client's next connection
-// anchors at its SYN and is inspected from its first byte. Only a SYN or
-// SYN-ACK of a handshake that the kernel's connection tracking has not
-// seen complete anchors a stream (dpi.ParsedPacket.TCPHandshake):
-// anchoring at one sent into an established connection, such as a
-// picked-up one, would let its sender choose where framing starts. Such a
-// SYN without payload passes and changes nothing: a client that lost its
-// connection and reconnects on the same port gets the server's challenge
-// ACK, and its RST in reply ends the old connection in the server, in
-// connection tracking and in the engine's stream.
+// Inline generic ICS streams in an enforce scope fail closed on the existing
+// framing, reassembly and decoder faults. Denied bytes must never become a
+// harmless duplicate after cache expiry: the tuple tombstone drops the old
+// incarnation and a fresh kernel-tracked handshake retires it. Decoded denies,
+// stream failures and midstream pickups all use the same session-only reset.
+// Learn-only flows, non-inline packets and the IEC104 path retain their own
+// behavior. No DPI failure installs a host or service block.
 
 const (
 	// reasonStreamFailClosed is the decision reason (logs and metrics).
@@ -136,16 +110,14 @@ func failClosedReason(err error) string {
 	return failClosedStream
 }
 
-// failClosed drops the packet and denies its flow as a decoded denial does:
-// a cached deny, the dynamic flow block once the drop verdict is submitted,
-// and an ics.decision event naming the rule whose scope holds the flow and
-// the cause. A mid-stream pickup gets no flow block, which would also stop
-// the client's next connection.
-func (e *Engine) failClosed(tok capture.Token, state *flow.State, parsed *dpi.ParsedPacket, scope *rules.Entry, reason, proto string, cause error) capture.Decision {
-	e.denyFlow(tok, state, parsed, reason, reason != failClosedMidStream)
+// failClosed drops the packet, resets only its TCP session after completion,
+// and records the rule scope and cause. It never installs a kernel block.
+func (e *Engine) failClosed(pkt capture.Packet, state *flow.State, parsed *dpi.ParsedPacket, scope *rules.Entry, reason, proto string, cause error) capture.Decision {
+	e.denyFlow(state, reason)
 	if proto == "" {
 		proto = strings.ToLower(scope.ICS.Protocol)
 	}
+	e.closeDeniedTCP(pkt, state, proto, reason)
 	e.eventStore.Append(events.Event{
 		FlowID:    state.Key.Hash(),
 		Proto:     proto,
@@ -167,30 +139,16 @@ func (e *Engine) failClosed(tok capture.Token, state *flow.State, parsed *dpi.Pa
 	return capture.Decision{Action: capture.Drop, Reason: reasonStreamFailClosed}
 }
 
-// stillDenied drops a packet of a connection the policy denied earlier.
-// Its stream stays failed (dpi.StreamDenied), so the retransmitted denied
-// command drops even after the cached denial expired, whatever the dynamic
-// block did. The denial was reported once; this renews the cached deny and
-// retries the flow block, without another event.
-func (e *Engine) stillDenied(tok capture.Token, state *flow.State, parsed *dpi.ParsedPacket) capture.Decision {
-	e.denyFlow(tok, state, parsed, reasonDPIDeny, true)
+// stillDenied keeps a failed stream denied without retrying any block.
+func (e *Engine) stillDenied(pkt capture.Packet, state *flow.State) capture.Decision {
+	e.denyFlow(state, reasonDPIDeny)
+	e.closeDeniedTCP(pkt, state, "", reasonDPIDeny)
 	return capture.Decision{Action: capture.Drop, Reason: reasonDPIDeny}
 }
 
-// denyFlow caches the denial of the flow and, with block, installs the
-// dynamic flow block once the drop verdict is submitted.
-func (e *Engine) denyFlow(tok capture.Token, state *flow.State, parsed *dpi.ParsedPacket, reason string, block bool) {
-	v := verdict.Verdict{Action: verdict.BlockFlowTemp, Reason: reason, TTL: dpiEnforceBlockTTL}
-	e.verdictCache.Put(state.Key.Hash(), v)
-	if !block {
-		return
-	}
-	e.afterDrop(tok, e.dynamicBlockJob(v, rules.EvalContext{
-		SrcIP: state.Key.OpenerIP(),
-		DstIP: state.Key.ServerIP(),
-		Proto: strings.ToLower(parsed.Proto),
-		Port:  strconv.Itoa(int(servicePort(state, parsed))),
-	}))
+// denyFlow caches a denial without installing a kernel block.
+func (e *Engine) denyFlow(state *flow.State, reason string) {
+	e.verdictCache.Put(state.Key.Hash(), verdict.Verdict{Action: verdict.DenyDrop, Reason: reason})
 }
 
 // deniedStream reports the error of a stream whose connection the policy

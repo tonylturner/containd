@@ -124,8 +124,8 @@ func TestPickupResetOnce(t *testing.T) {
 			c := p.denied[0]
 			f.deny("denied on the next connection", c.rule, c.frame)
 			time.Sleep(50 * time.Millisecond)
-			if got := len(f.inj.Resets()); got != 2 {
-				t.Fatalf("%d resets, want none for the next connection", got)
+			if got := len(f.waitResets(4)); got != 4 {
+				t.Fatalf("%d resets, want a pair for each denied connection", got)
 			}
 		})
 	}
@@ -205,8 +205,8 @@ func TestReconnectOnSamePortAfterLostConnection(t *testing.T) {
 			}
 			c := p.denied[0]
 			f.deny("denied on the next connection", c.rule, c.frame)
-			if got := f.inj.Resets(); len(got) != 0 {
-				t.Fatalf("resets %+v for a connection the client ended", got)
+			if got := f.waitResets(2); len(got) != 2 {
+				t.Fatalf("resets %+v, want a pair for the new denial", got)
 			}
 		})
 	}

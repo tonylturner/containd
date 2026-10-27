@@ -260,7 +260,7 @@ func TestRecordDPIEventsEmitsIDSAlert(t *testing.T) {
 	}
 }
 
-func TestEnforceDPIEventsBlocksDeniedICSFlow(t *testing.T) {
+func TestEnforceDPIEventsDeniesWithoutBlock(t *testing.T) {
 	up := &recordingUpdater{}
 	e, err := New(Config{
 		Capture: capture.Config{Interfaces: []string{"lo"}},
@@ -328,8 +328,8 @@ func TestEnforceDPIEventsBlocksDeniedICSFlow(t *testing.T) {
 	if !enforced {
 		t.Fatal("expected enforcement verdict")
 	}
-	if v.Action != verdict.BlockFlowTemp {
-		t.Fatalf("expected block-flow verdict, got %s", v.Action)
+	if !v.Denies() {
+		t.Fatalf("expected deny verdict, got %s", v.Action)
 	}
 	if up.flowKey != "" {
 		t.Fatal("enforceDPIEvents must not perform updater I/O")
@@ -337,11 +337,8 @@ func TestEnforceDPIEventsBlocksDeniedICSFlow(t *testing.T) {
 	if err := e.ApplyVerdict(context.Background(), v, evalCtx); err != nil {
 		t.Fatalf("apply verdict: %v", err)
 	}
-	if up.flowKey != "10.0.0.1->10.0.0.2/tcp:502" {
-		t.Fatalf("unexpected blocked flow key %q", up.flowKey)
-	}
-	if up.ttl != dpiEnforceBlockTTL {
-		t.Fatalf("ttl=%s want %s", up.ttl, dpiEnforceBlockTTL)
+	if up.flowKey != "" {
+		t.Fatalf("DPI installed block %q", up.flowKey)
 	}
 
 	list := e.Events().List(10)

@@ -53,7 +53,7 @@ func TestForgedSYNKernelRestartPickup(t *testing.T) {
 	next := &fcClient{t: t, src: src, conn: conn.(*net.TCPConn), tid: 50}
 	next.read()
 	next.write(next.next(6, 1, 0x1234))
-	next.expectSilence()
+	next.expectReset()
 	if fcs, _, regs := srv.seen(src); len(fcs) != 2 || regs != [8]uint16{} {
 		t.Fatalf("server received FCs %v, registers %v; want the two reads only", fcs, regs)
 	}
@@ -76,7 +76,7 @@ func TestForgedSYNKernelLiveConnection(t *testing.T) {
 	c.forgeSYN(502)
 	// Transaction ID 0x00FE: the misframed MBAP length field.
 	c.write(append(read[8:], modbusADU(0x00FE, 6, 1, 0x1234)...))
-	c.expectSilence()
+	c.expectReset()
 	if fcs, n, regs := srv.seen(c.src); len(fcs) != 0 || n != 8 || regs != [8]uint16{} {
 		t.Fatalf("server received FCs %v in %d bytes, registers %v; want only the 8-byte read head", fcs, n, regs)
 	}

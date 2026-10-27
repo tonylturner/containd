@@ -64,7 +64,12 @@ rule is reported in the ruleset warnings
   dataplane's `nfqueueGroup` to a nonzero queue (for example 101), preserve the
   rest of the dataplane settings, and commit. The queue and rules must be active
   on the routed packet path. A denied command is dropped inline; later packets
-  of the flow are blocked by the cached verdict and a temporary flow block.
+  of that TCP incarnation keep dropping even after the verdict cache expires.
+  After the drop completes, the engine sends a best-effort RST to each peer
+  and deletes exactly that conntrack tuple, including both ports. No DPI deny
+  installs a host or service block. A fresh handshake, including one from the
+  same source port, is admitted immediately; other sessions are untouched.
+  UDP denies drop only the datagram, with no reset or block.
   Generic DPI can cache per-flow verdicts; IEC 104 retains session-level
   inspection.
 
@@ -101,11 +106,22 @@ closed when its stream cannot be inspected: a conflicting overlap, a
 retransmission that differs from or predates the bytes the engine kept,
 malformed framing, reassembly limits, a decoder fault, or a SYN with payload
 that does not start the connection's stream (reason `stream_resync`). The
-packet is dropped and the connection blocked like a decoded denial, without
-restarting inspection. Only a FIN or RST that the receiver accepts in window
-ends the connection's stream early. After a denied command, the connection drops every
-later packet until it ends, so a retransmission of the command never reaches
-the device, even when the flow block could not be installed.
+packet is dropped and only that session is reset, like a decoded denial,
+without restarting inspection of its old bytes. A tuple tombstone keeps the
+denied incarnation dropping independently of cache expiry. A fresh,
+kernel-tracked handshake retires only that tuple's state.
+
+Generic resets are **best-effort**, not confirmation that either peer closed.
+The engine uses the denied packet's SEQ for its receiver and ACK for its
+sender; without an ACK the sender's reset sequence is unavailable. Generic
+NFQUEUE rules do not automatically steer reverse traffic, so server-side RFC
+5961 challenge ACKs may not be observed. There is no IPv6 reset injector:
+IPv6 denies, and TCP denies when the injector is not ready, drop only. An
+`ics.session` event per peer records `reset_sent`, `reset_failed`, or
+`unavailable`, with `target` set to `client` or `server`. Send failures retain
+the existing enforcement health fault. These events are visible in the generic
+event list; they do not assert confirmed closure. Manual blocks, AV blocks
+and operator connection revocations remain independent.
 
 A connection the engine did not see from its SYN is dropped (reason
 `stream_midstream`). This covers connections open across an engine restart or

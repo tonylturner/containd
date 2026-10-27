@@ -40,7 +40,7 @@ func (e *Engine) isExcluded(state *flow.State) bool {
 
 // enforceDPIEvents evaluates decoded ICS events against the firewall rules
 // and returns the first enforced denial with its context. It performs no
-// I/O: the caller drops the packet and installs the dynamic block after the
+// I/O: the caller drops the packet and resets the session after the
 // verdict. Logging of matched Log rules still happens in
 // EvaluateVerdictMatch for learn and enforce modes alike.
 func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) (verdict.Verdict, rules.EvalContext, bool) {
@@ -71,13 +71,6 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 			// Logged by EvaluateVerdictMatch ("would have been blocked")
 			// but not applied: the rule is in learn mode.
 			continue
-		}
-		if v.Denies() {
-			// A queued packet cannot be rejected: RESET drops here.
-			v.Action = verdict.BlockFlowTemp
-			if v.TTL <= 0 {
-				v.TTL = dpiEnforceBlockTTL
-			}
 		}
 		return v, ctx, true
 	}

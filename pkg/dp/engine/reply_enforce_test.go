@@ -153,7 +153,7 @@ func TestDNP3UnsolicitedNotEnforced(t *testing.T) {
 }
 
 // TestExplicitResponseRuleEnforcesReply: a deny rule that names the
-// response direction still enforces on a matching reply, and blocks the
+// response direction still enforces on a matching reply, without blocking the
 // request tuple. A Modbus reply is a response even though its decoder
 // kind is "request".
 func TestExplicitResponseRuleEnforcesReply(t *testing.T) {
@@ -182,10 +182,11 @@ func TestExplicitResponseRuleEnforcesReply(t *testing.T) {
 					t.Fatalf("the request was blocked by a response rule: %v", got)
 				}
 			}
-			e.handlePacket(connSegment(true, 41000, tc.port, 500, ackPsh, tc.reply))
-			want := testClient + ">" + testServer + "/tcp:" + port
-			if got := up.blockedAfter(e); len(got) != 1 || got[0] != want {
-				t.Fatalf("blocks = %v, want [%s]", got, want)
+			if d := e.handlePacket(connSegment(true, 41000, tc.port, 500, ackPsh, tc.reply)); d.Action != capture.Drop {
+				t.Fatalf("denied reply = %+v", d)
+			}
+			if got := up.blockedAfter(e); len(got) != 0 {
+				t.Fatalf("DPI blocks = %v, want none", got)
 			}
 			if got := ruleHits(e, "deny-reply"); got != 1 {
 				t.Fatalf("deny-reply rule hits = %d, want 1", got)
@@ -231,9 +232,10 @@ func TestRequestStillGetsDefault(t *testing.T) {
 
 	handshake(e, 41000, dnp3Port)
 	// The master sends an outstation's frame: FC130 from the opener.
-	e.handlePacket(connSegment(false, 41000, dnp3Port, 100, ackPsh, dnp3Unsolicited))
-	want := testClient + ">" + testServer + "/tcp:20000"
-	if got := up.blockedAfter(e); len(got) != 1 || got[0] != want {
-		t.Fatalf("blocks = %v, want [%s]", got, want)
+	if d := e.handlePacket(connSegment(false, 41000, dnp3Port, 100, ackPsh, dnp3Unsolicited)); d.Action != capture.Drop {
+		t.Fatalf("default deny = %+v", d)
+	}
+	if got := up.blockedAfter(e); len(got) != 0 {
+		t.Fatalf("DPI blocks = %v, want none", got)
 	}
 }

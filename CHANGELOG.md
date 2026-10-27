@@ -43,6 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- DPI denials now drop the packet and best-effort reset only that TCP session,
+  without installing a host or service block. Fresh connections, including
+  same-source-port reconnects, can start immediately and other sessions are
+  untouched. UDP denies drop only the datagram; IPv6 and unavailable injectors
+  report reset unavailability. Per-peer `ics.session` events report resets sent
+  or failed, not confirmed closure. IEC 104 keeps its existing abort path.
+  DPI block elements installed before upgrading have no owner marker and are
+  not cleared automatically; they expire within their existing 10-minute TTL.
+
 - Restored the full README overview and dashboard screenshot.
 - A Modbus `ALLOW` whose `addresses` covered only the start of the requests it
   admitted now denies them: `10-11` no longer admits a read of 8 registers from

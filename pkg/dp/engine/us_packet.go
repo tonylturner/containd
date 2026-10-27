@@ -4,14 +4,12 @@
 package engine
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/flow"
-	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
@@ -37,7 +35,7 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 
 // handleFlowPacket is the wire-oriented path for every protocol except
 // IEC104 sessions. A denied ICS message drops the current packet
-// and installs the existing dynamic flow block once the drop verdict is
+// and resets only that TCP session once the drop verdict is
 // submitted; a cached denial drops later packets of the same flow. An
 // inline flow in the scope of an enforce ICS rule fails closed on a stream
 // error, a stream picked up mid-connection, or a decoder panic the same
@@ -45,6 +43,9 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capture.Decision) {
 	e.recordPacketStats(pkt, state)
 	e.iec.answerPickupChallenge(pkt)
+	if e.isDeniedTCP(state) {
+		return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
+	}
 	parsed := dpi.ParsedPacket{
 		Payload:      pkt.Payload,
 		Proto:        pkt.Transport,
@@ -74,12 +75,6 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 			if !shouldInspect {
 				return acceptDecision
 			}
-		case parsed.TCPSyn && parsed.TCPHandshake && cached.Reason == failClosedMidStream:
-			// After a mid-stream pickup the SYN of a new handshake starts
-			// the client's next connection on the tuple, inspected from
-			// its first byte. A SYN sent into the established connection
-			// drops with it.
-			e.verdictCache.Invalidate(flowHash)
 		default:
 			return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
 		}
@@ -101,48 +96,31 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 	res, panicErr := e.inspectFlow(state, &parsed)
 	if panicErr != nil {
 		e.dpiMgr.FailStream(state, &parsed, dpi.StreamDecoderPanic)
-		return e.failClosed(pkt.Token, state, &parsed, scope, failClosedPanic, "", panicErr)
+		return e.failClosed(pkt, state, &parsed, scope, failClosedPanic, "", panicErr)
 	}
 	// Events come before the error: a stream error's malformed event is
 	// already among them. Outside an enforce scope the packet itself passes.
 	e.RecordDPIEvents(state, &parsed, res.Events)
 	v, evalCtx, enforced := e.enforceDPIEvents(state, &parsed, res.Events)
 	if enforced {
-		e.verdictCache.Put(flowHash, v)
-		e.afterDrop(pkt.Token, e.dynamicBlockJob(v, evalCtx))
+		if pkt.Proto != 17 {
+			e.verdictCache.Put(flowHash, v)
+		}
+		e.closeDeniedTCP(pkt, state, evalCtx.ICS.Protocol, reasonDPIDeny)
 		if scope != nil {
 			e.dpiMgr.FailStream(state, &parsed, dpi.StreamDenied)
 		}
 		return capture.Decision{Action: capture.Drop, Reason: reasonDPIDeny}
 	}
 	if scope != nil && deniedStream(res.Err) {
-		return e.stillDenied(pkt.Token, state, &parsed)
+		return e.stillDenied(pkt, state)
 	}
 	if scope != nil && isStreamFailure(res) {
 		reason := failClosedReason(res.Err)
-		denied := e.failClosed(pkt.Token, state, &parsed, scope, reason, res.Proto, res.Err)
-		if reason == failClosedMidStream && !res.Failed {
-			e.closePickedUp(pkt, state)
-		}
+		denied := e.failClosed(pkt, state, &parsed, scope, reason, res.Proto, res.Err)
 		return denied
 	}
 	return acceptDecision
-}
-
-// dynamicBlockJob installs the existing US dynamic block for a denied flow.
-// It runs on the block worker, never on the packet path, so an updater
-// failure cannot turn the drop into an accept.
-func (e *Engine) dynamicBlockJob(v verdict.Verdict, evalCtx rules.EvalContext) func() {
-	updater := e.updater
-	onError := e.onError
-	return func() {
-		if updater == nil {
-			return
-		}
-		if err := applyVerdict(context.Background(), updater, v, evalCtx); err != nil && onError != nil {
-			onError(fmt.Errorf("dynamic block %s: %w", v.Action, err))
-		}
-	}
 }
 
 // afterDrop runs job once the drop verdict of tok is submitted. A packet that
