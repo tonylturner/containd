@@ -77,6 +77,25 @@ func TestInvalidUpdateRejected(t *testing.T) {
 	}
 }
 
+// The largest cap is accepted and handled without overflowing the
+// spool's lookahead arithmetic.
+func TestMaxIntObjectCapHandled(t *testing.T) {
+	log := &bodyLog{}
+	o := echoOrigin(t, log)
+	g := startGate(t, o, func(s *Settings) {
+		s.ScanDownloads = false
+		s.MaxConcurrentObjects, s.MaxObjectBytes = 1, math.MaxInt64
+	})
+	c := g.client()
+	c.write(requestCL("POST", "/max", "", pattern(1000, 74)))
+	resp, rb := c.response("POST")
+	ev := g.events.next(t)
+	if resp.StatusCode != 200 || string(rb) != "ok" {
+		t.Fatalf("upload under MaxInt64 cap: %d %q (event %+v)", resp.StatusCode, rb, ev)
+	}
+	expectEvent(t, ev, avscan.Upload, avscan.Clean, "", avscan.Deliver)
+}
+
 func TestServeRequiresUpdateAndHooks(t *testing.T) {
 	ln, _ := listenLoopback(t)
 	s := &Server{}

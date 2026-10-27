@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -297,6 +298,11 @@ func TestSpoolFillOutcomes(t *testing.T) {
 	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), 4)
 	if outcome != fillComplete || err != nil || len(excess) != 0 || sp.size != 4 {
 		t.Fatalf("exact: %d %q %v", outcome, excess, err)
+	}
+	sp = newSpool(t.TempDir(), 1<<20)
+	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), math.MaxInt64)
+	if outcome != fillComplete || err != nil || len(excess) != 0 || sp.size != 4 {
+		t.Fatalf("MaxInt64 cap: %d %q %v", outcome, excess, err)
 	}
 	sp = newSpool("/nonexistent/httpgate-spool", 2)
 	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), 10)
