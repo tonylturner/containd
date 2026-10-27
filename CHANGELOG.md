@@ -22,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference to a removed protocol starts the appliance in management recovery;
   the saved configuration remains exportable until a valid configuration is
   committed.
+- IDS rules, custom signatures and Sigma rules reject the protocol name
+  `enip`; use `cip`. Suricata and Snort rule files that use `enip` still
+  import as `cip`.
+
+### Fixed
+
+- The built-in CIP IDS rules never matched: they named protocol `enip`, but
+  the CIP decoder reports `cip`. They now name `cip`. On upgrade, unchanged
+  built-in CIP rules are updated to `cip` and recorded in the same audit
+  record; an edited copy that names `enip` starts the appliance in management
+  recovery until it is corrected.
 
 ### Removed
 
