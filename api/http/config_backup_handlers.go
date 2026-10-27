@@ -76,6 +76,9 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
+		// Imports restore exported backups, including those of releases
+		// that saved any shellMode.
+		config.NormalizeLegacySSHShellMode(&cfg)
 		if err := cfg.Validate(); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return

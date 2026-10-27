@@ -49,7 +49,7 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("show candidate-config", RoleView, showCandidateConfig(api))
 		r.RegisterRole("show diff", RoleView, showDiff(api))
 		r.RegisterRole("show auth", RoleView, showAuth(api))
-		r.RegisterRole("show system", RoleView, showSystem(api))
+		r.RegisterRole("show system", RoleView, showSystem(store, api))
 		r.RegisterRole("show system ssh", RoleView, showSystemSSH(store, api))
 		r.RegisterRole("show mgmt listeners", RoleView, showMgmtListeners(api))
 		r.RegisterRole("show services", RoleView, showServicesStatus(api))

@@ -49,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   address 11. Before upgrading, compare each Modbus rule's `addresses` with the
   `address` and `quantity` of the requests it admits on the Events page, and
   widen the entries to cover whole requests.
+- The CLI guide documents SSH shell modes again: `appliance` and `linux`,
+  how `CONTAIND_SSH_SHELL_MODE` and `set system ssh shell-mode` select them,
+  switching between the CLI and the Linux shell, the PTY requirement, and the
+  root-shell and lab-mode caveats.
+- The ICS DPI guide documents protocol anomaly detection, the signature API
+  with its 23 built-in signatures and temporary custom signatures, the decoded
+  event fields of each ICS decoder, a Modbus function-code and address rule
+  example, and how the TLS `ja3` fingerprint differs from reference JA3.
 
 ### Fixed
 
@@ -67,6 +75,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and include FC 23 requests.
 - Modbus alert details show the value of FC 5/6 writes and the read and write
   ranges of FC 23 requests.
+- Without a client PTY, `shell` and `bash` in the SSH appliance CLI no
+  longer start a Linux shell that has no terminal and hangs the session.
+  They print that the Linux shell needs an interactive session and the CLI
+  keeps running.
+- After `exit` from a Linux shell opened with `shell` in the SSH appliance
+  CLI, the CLI no longer loses the next input: the shell's input copy kept
+  reading the SSH channel and discarded it. The shell also receives lines
+  typed ahead of it, and stops taking window-size changes when it exits.
+- `system.ssh.shellMode` accepts only `appliance`, `linux` or empty. Any
+  other value, such as `Linux` or `bash`, is rejected on save and commit
+  instead of silently meaning `appliance`. A value written by an earlier
+  release, whether stored or in an imported backup, becomes the mode that
+  release ran (`linux` in any letter case becomes `linux`, any other value
+  `appliance`): a stored one does not start management in recovery, and a
+  backup restores without an error. `CONTAIND_SSH_SHELL_MODE` keeps
+  accepting any letter case.
+- `show system` displayed the saved SSH shell mode, even when
+  `CONTAIND_SSH_SHELL_MODE` overrode it or a committed change had not yet
+  been applied by a restart. It now shows the mode SSH runs
+  (`ssh.shell_mode`), its source (`ssh.shell_mode_source`) and, when they
+  differ, the saved mode (`ssh.shell_mode_saved`). `show system ssh` lists
+  the same mode and source. A CLI without the appliance's store, such as
+  `containd cli` or the SSH console, runs `show system` on the appliance.
+- The SSH console no longer loses management access while the connection is
+  open. Its token expired 5 minutes after login, or 30 minutes after the last
+  command, and later commands failed with status 401 until the user
+  reconnected. Each request now uses a fresh token for the connection's
+  session, which stays valid until the connection closes or, with a JWT
+  secret, reaches the 4-hour session limit.
+- `configure` and `containd cli` in a Linux shell opened over SSH act as the
+  SSH login instead of logging in as `CONTAIND_CLI_USER` with
+  `CONTAIND_CLI_PASSWORD` (default `containd` / `containd`). They worked only
+  while that account kept its default password, and acted as that account
+  rather than the SSH user. The SSH server forwards their requests from a
+  socket that exists only while the shell runs, so the shell holds no token
+  or password. `containd cli` outside an SSH shell, such as through
+  `docker exec`, still logs in with those variables.
+- `containd cli` outside an SSH shell, such as through `docker exec`, and
+  the container health check (`containd healthcheck`) work on deployments
+  without management HTTP. They called `http://127.0.0.1` at the port of
+  `CONTAIND_MGMT_ADDR`, so they failed when HTTP was off, and could send the
+  CLI password to another process holding that port. Management now records
+  the listeners it bound in `run/management.json` beside the configuration
+  store, in a directory only its user can open, and removes the file when it
+  stops. The CLI and health check call those listeners the way the SSH
+  console does: HTTP unless it redirects, otherwise HTTPS trusting only the
+  served certificate, following no redirect. Without the file they report
+  `management is not running`.
+- Several sessions multiplexed on one SSH connection, such as with OpenSSH
+  `ControlMaster`, no longer share CLI client state. Concurrent commands
+  wrote the same API token field without synchronisation.
 
 ## [0.1.35] - 2026-10-26
 

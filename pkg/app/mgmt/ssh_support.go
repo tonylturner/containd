@@ -31,7 +31,9 @@ type sshRuntimeConfig struct {
 	passwordSource string
 	banner         string
 	rotationDays   int
-	shellMode      string
+	// shellMode is set at startup; SSH does not reread it.
+	shellMode       string
+	shellModeSource string
 }
 
 // startSSH binds the SSH socket and serves it best effort: SSH CLI sessions
@@ -41,8 +43,8 @@ type sshRuntimeConfig struct {
 // with a fault when CLI sessions have no listener to call or the socket does
 // not bind; neither stops HTTP or HTTPS.
 func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, idx *ipInterfaceIndex, optionalFault func(error), ready ...func(*sshserver.Server)) (string, bool) {
-	configureSSHPolicy(store, userStore)
 	rt := resolveSSHRuntimeConfig(cfg)
+	configureSSHPolicy(store, userStore, rt)
 	baseURL, apiClient, err := httpapi.LoopbackManagementAPI()
 	if err != nil {
 		err = fmt.Errorf("ssh disabled: CLI sessions have no management API to call: %w", err)
@@ -137,7 +139,9 @@ func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config
 	return addr, true
 }
 
-func configureSSHPolicy(store config.Store, userStore users.Store) {
+// configureSSHPolicy registers the effective SSH policy reader. Password
+// and key settings are read live; the shell mode is the one started.
+func configureSSHPolicy(store config.Store, userStore users.Store, started sshRuntimeConfig) {
 	if reporter, ok := store.(interface {
 		SetSSHRuntimePolicyReader(func(context.Context) (config.SSHRuntimePolicy, error))
 	}); ok {
@@ -152,6 +156,8 @@ func configureSSHPolicy(store config.Store, userStore users.Store) {
 				PasswordSource:      rt.passwordSource,
 				AuthorizedKeysDir:   rt.authKeysDir,
 				HostKeyRotationDays: rt.rotationDays,
+				ShellMode:           started.shellMode,
+				ShellModeSource:     started.shellModeSource,
 			}, nil
 		})
 	}
@@ -187,14 +193,13 @@ func resolveSSHRuntimeConfig(cfg *config.Config) sshRuntimeConfig {
 	if rt.bootstrapUser == "" {
 		rt.bootstrapUser = "containd"
 	}
+	savedShellMode := ""
 	if cfg != nil {
 		rt.banner = cfg.System.SSH.Banner
 		rt.rotationDays = cfg.System.SSH.HostKeyRotationDays
-		rt.shellMode = cfg.System.SSH.ShellMode
+		savedShellMode = cfg.System.SSH.ShellMode
 	}
-	if env := common.EnvTrimmed("CONTAIND_SSH_SHELL_MODE", ""); env != "" {
-		rt.shellMode = env
-	}
+	rt.shellMode, rt.shellModeSource = config.ResolveSSHShellMode(savedShellMode, os.Getenv(config.EnvSSHShellMode))
 	rt.allowPassword, rt.passwordSource = resolveSSHPasswordPolicy(cfg, rt.authKeysDir)
 	return rt
 }

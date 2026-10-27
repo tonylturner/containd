@@ -143,7 +143,7 @@ func TestEnsureHostKeyAndAuthorizedKeys(t *testing.T) {
 	}
 }
 
-func TestIssueTokenAndSignJWT(t *testing.T) {
+func TestSessionTokenAndSignJWT(t *testing.T) {
 	t.Parallel()
 
 	userStore, err := users.NewSQLiteStore(filepath.Join(t.TempDir(), "users.db"))
@@ -172,12 +172,13 @@ func TestIssueTokenAndSignJWT(t *testing.T) {
 	if err != nil || admin == nil {
 		t.Fatalf("GetByUsername: %v, admin=%#v", err, admin)
 	}
-	token, sessionID, err := srv.issueToken(context.Background(), admin.Username, admin.ID)
-	if err != nil {
-		t.Fatalf("issueToken: %v", err)
+	sessionID, err := srv.openSession(context.Background(), admin.Username, admin.ID)
+	if err != nil || sessionID == "" {
+		t.Fatalf("openSession: %q, %v", sessionID, err)
 	}
-	if sessionID == "" || token == "" {
-		t.Fatalf("unexpected token/session: %q %q", token, sessionID)
+	token, err := srv.sessionToken(context.Background(), sessionID)
+	if err != nil || token == "" {
+		t.Fatalf("sessionToken: %q, %v", token, err)
 	}
 	claims := jwt.MapClaims{}
 	parsed, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (any, error) {
@@ -186,11 +187,11 @@ func TestIssueTokenAndSignJWT(t *testing.T) {
 	if err != nil || !parsed.Valid {
 		t.Fatalf("ParseWithClaims: parsed=%v err=%v", parsed != nil && parsed.Valid, err)
 	}
-	if claims["sub"] != admin.ID || claims["username"] != admin.Username {
+	if claims["sub"] != admin.ID || claims["username"] != admin.Username || claims["jti"] != sessionID {
 		t.Fatalf("unexpected claims: %#v", claims)
 	}
 
-	if _, _, err := srv.issueToken(context.Background(), admin.Username, "wrong-id"); err == nil {
+	if _, err := srv.openSession(context.Background(), admin.Username, "wrong-id"); err == nil {
 		t.Fatal("expected user mismatch error")
 	}
 
@@ -206,11 +207,12 @@ func TestIssueTokenAndSignJWT(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New lab server: %v", err)
 	}
-	token, sessionID, err = labServer.issueToken(context.Background(), admin.Username, admin.ID)
+	sessionID, err = labServer.openSession(context.Background(), admin.Username, admin.ID)
 	if err != nil {
-		t.Fatalf("lab issueToken: %v", err)
+		t.Fatalf("lab openSession: %v", err)
 	}
-	if token != "lab" || sessionID != "" {
+	token, err = labServer.sessionToken(context.Background(), sessionID)
+	if err != nil || token != "lab" || sessionID != "" {
 		t.Fatalf("unexpected lab token/session: %q %q", token, sessionID)
 	}
 
@@ -379,5 +381,41 @@ func TestPasswordLimiterCountsPerHost(t *testing.T) {
 	// A new connection gets a new source port; it must not reset the count.
 	if _, err := auth(portConnMetadata{testConnMetadata{user: "containd"}, 40002}, []byte("containd")); err == nil || !strings.Contains(err.Error(), "too many login attempts") {
 		t.Fatalf("limiter did not apply across source ports: %v", err)
+	}
+}
+
+// A connection's token keeps its session usable while the connection is
+// open: an idle session is extended, and a revoked session yields no token.
+// TouchSession caps the extension at the session's maximum lifetime.
+func TestSessionTokenLifetime(t *testing.T) {
+	srv, store, _ := newAssuranceServer(t)
+	u, _ := createAdmin(t, store, "token-admin")
+	ctx := context.Background()
+
+	idle, err := store.CreateSession(ctx, u.ID, -time.Minute, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := srv.sessionToken(ctx, idle.ID)
+	if err != nil {
+		t.Fatalf("idle session: %v", err)
+	}
+	claims := jwt.MapClaims{}
+	if _, err := jwt.ParseWithClaims(token, claims, func(*jwt.Token) (any, error) { return srv.opts.JWTSecret, nil }); err != nil {
+		t.Fatalf("token for an idle session is not valid: %v", err)
+	}
+	if exp, _ := claims.GetExpirationTime(); exp == nil || !exp.After(time.Now().Add(sessionIdleTTL-time.Minute)) {
+		t.Fatalf("token expiry %v not extended", exp)
+	}
+
+	revoked, err := store.CreateSession(ctx, u.ID, time.Minute, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokeSession(ctx, revoked.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.sessionToken(ctx, revoked.ID); err == nil {
+		t.Fatal("revoked session yielded a token")
 	}
 }

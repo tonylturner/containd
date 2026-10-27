@@ -34,7 +34,7 @@ func TestSavedListenerViewsResolveDefaults(t *testing.T) {
 			},
 		}}
 		api := &API{BaseURL: "http://test", Client: client}
-		for name, command := range map[string]func(*API) Command{"system": showSystem, "listeners": showMgmtListeners} {
+		for name, command := range map[string]func(*API) Command{"system": applianceShowSystem(t), "listeners": showMgmtListeners} {
 			var out bytes.Buffer
 			if err := command(api)(context.Background(), &out, nil); err != nil {
 				t.Fatal(err)
