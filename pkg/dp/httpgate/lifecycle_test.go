@@ -63,6 +63,9 @@ func TestInvalidUpdateRejected(t *testing.T) {
 		"zero-scan":           func(s *Settings) { s.ScanTimeout = 0 },
 		"overflow-disk":       func(s *Settings) { s.MaxConcurrentObjects = 4; s.MaxObjectBytes = math.MaxInt64 / 2 },
 		"overflow-memory":     func(s *Settings) { s.MaxConcurrentObjects = 4; s.MemoryThreshold = math.MaxInt64 / 2 },
+		"unknown-mode":        func(s *Settings) { s.DownloadMode = "stream" },
+		"negative-url-ttl":    func(s *Settings) { s.BlockedURLTTL = -time.Second },
+		"negative-url-bound":  func(s *Settings) { s.BlockedURLEntries = -1 },
 	} {
 		set := testSettings(g.spoolDir)
 		mutate(&set)
@@ -76,6 +79,9 @@ func TestInvalidUpdateRejected(t *testing.T) {
 	set := testSettings("")
 	if err := g.srv.Update(set); err != nil || g.srv.settings.Load().SpoolDir == "" {
 		t.Fatalf("empty SpoolDir should default: %v", err)
+	}
+	if got := g.srv.settings.Load(); got.DownloadMode != DownloadHold || got.BlockedURLEntries != defaultBlockedURLEntries || got.BlockedURLTTL != defaultBlockedURLTTL {
+		t.Fatalf("zero values should default: mode %q entries %d ttl %v", got.DownloadMode, got.BlockedURLEntries, got.BlockedURLTTL)
 	}
 }
 

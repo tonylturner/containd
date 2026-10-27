@@ -91,6 +91,16 @@ func (tx *transaction) deliverResponse(u *upstream, h *head) bool {
 	if !tx.set.ScanDownloads {
 		return tx.writeResponse(h, body, nil) && persist
 	}
+	if h.partial() {
+		// A part of an object is not the object: scanning it proves
+		// nothing about the whole, so it is unsupported in every mode.
+		res := gateResult(avscan.ReasonUnsupported, "partial object (206 or Content-Range)")
+		if tx.set.decide(res, tx.ics) == avscan.Block {
+			tx.refuseDownload(h, res, h.declaredLength(), nil, false)
+			return false
+		}
+		return tx.writeResponse(h, body, &res) && persist
+	}
 	res, ok := tx.admit(h.declaredLength())
 	if !ok {
 		if tx.set.decide(res, tx.ics) == avscan.Block {
@@ -100,23 +110,15 @@ func (tx *transaction) deliverResponse(u *upstream, h *head) bool {
 		return tx.writeResponse(h, body, &res) && persist
 	}
 	defer c.srv.releaseObject()
+	if tx.set.DownloadMode == DownloadStreamTail {
+		return tx.streamDownload(u, h, body.rest) && persist
+	}
 	sp := newSpool(tx.set.SpoolDir, tx.set.MemoryThreshold)
 	defer sp.close()
-	outcome, excess, detail := tx.receive(sp, body.rest, u.peer)
+	outcome, excess, detail := tx.receive(sp, body.rest, u.peer, nil)
 	switch outcome {
 	case fillComplete:
-		// The watcher reads the client socket: a sender still streaming
-		// the request body from it must have returned first, and one that
-		// did not finish the body left the client mid-request, whose
-		// bytes are no pipelined request and would overflow the watch.
-		watch := c.client
-		if tx.streaming {
-			<-tx.sendDone
-			if tx.sendErr != nil {
-				watch = nil
-			}
-		}
-		res, aborted := tx.scan(tx.object(avscan.Download, sp, h.raw), watch)
+		res, aborted := tx.scan(tx.object(avscan.Download, sp, h.raw), tx.downloadWatch())
 		if aborted {
 			tx.emit(avscan.Download, res, avscan.Block, sp.size, sp, false, h.status)
 			return false
@@ -124,6 +126,7 @@ func (tx *transaction) deliverResponse(u *upstream, h *head) bool {
 		action := tx.set.decide(res, tx.ics)
 		tx.emit(avscan.Download, res, action, sp.size, sp, false, h.status)
 		if action == avscan.Block {
+			tx.remember(res)
 			_, _ = c.client.Write(refusal(403, "Forbidden", blockBody(res), tx.headOnly()))
 			return false
 		}
@@ -139,6 +142,21 @@ func (tx *transaction) deliverResponse(u *upstream, h *head) bool {
 		tx.emit(avscan.Download, incompleteResult(outcome, detail), avscan.Block, sp.size, sp, true, h.status)
 		return false
 	}
+}
+
+// downloadWatch is the peer watched for a close while a download is
+// scanned. The watcher reads the client socket: a sender still streaming
+// the request body from it must have returned first, and one that did
+// not finish the body left the client mid-request, whose bytes are no
+// pipelined request and would overflow the watch; nothing is watched then.
+func (tx *transaction) downloadWatch() *peer {
+	if tx.streaming {
+		<-tx.sendDone
+		if tx.sendErr != nil {
+			return nil
+		}
+	}
+	return tx.c.client
 }
 
 // refuseDownload sends the client a 403 in place of the response. partial

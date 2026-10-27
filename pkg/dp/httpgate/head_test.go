@@ -287,7 +287,7 @@ func TestSpoolMemoryThenUnlinkedFile(t *testing.T) {
 func TestSpoolFillOutcomes(t *testing.T) {
 	sp := newSpool(t.TempDir(), 1<<20)
 	src := bytes.NewReader([]byte("0123456789"))
-	outcome, excess, err := sp.fill(src, 4)
+	outcome, excess, err := sp.fill(src, 4, nil)
 	if outcome != fillOversized || err != nil || sp.size != 4 || string(excess) != "4" {
 		t.Fatalf("oversized: %d %q %v size %d", outcome, excess, err, sp.size)
 	}
@@ -295,23 +295,23 @@ func TestSpoolFillOutcomes(t *testing.T) {
 		t.Fatalf("remainder %q left in the reader", rest)
 	}
 	sp = newSpool(t.TempDir(), 1<<20)
-	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), 4)
+	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), 4, nil)
 	if outcome != fillComplete || err != nil || len(excess) != 0 || sp.size != 4 {
 		t.Fatalf("exact: %d %q %v", outcome, excess, err)
 	}
 	sp = newSpool(t.TempDir(), 1<<20)
-	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), math.MaxInt64)
+	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), math.MaxInt64, nil)
 	if outcome != fillComplete || err != nil || len(excess) != 0 || sp.size != 4 {
 		t.Fatalf("MaxInt64 cap: %d %q %v", outcome, excess, err)
 	}
 	sp = newSpool("/nonexistent/httpgate-spool", 2)
-	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), 10)
+	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), 10, nil)
 	var se *spoolError
 	if outcome != fillDisk || !errors.As(err, &se) || string(excess) != "0123" {
 		t.Fatalf("disk: %d %q %v", outcome, excess, err)
 	}
 	sp = newSpool(t.TempDir(), 1<<20)
-	outcome, _, err = sp.fill(&lengthReader{r: bufio.NewReader(strings.NewReader("ab")), n: 4}, 10)
+	outcome, _, err = sp.fill(&lengthReader{r: bufio.NewReader(strings.NewReader("ab")), n: 4}, 10, nil)
 	var fe *framingError
 	if outcome != fillFraming || !errors.As(err, &fe) {
 		t.Fatalf("framing: %d %v", outcome, err)
