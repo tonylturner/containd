@@ -99,6 +99,81 @@ func TestRuntimeRecordPublisherWritesBoundAndRemoves(t *testing.T) {
 	}
 }
 
+func TestRuntimeRecordResolvesRelativeServedCertificateFromManagementDirectory(t *testing.T) {
+	dir := isolateRuntimeRecord(t)
+	managementDir := filepath.Join(dir, "management")
+	cliDir := filepath.Join(dir, "cli")
+	for _, path := range []string{managementDir, cliDir} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	if err := os.WriteFile(filepath.Join(managementDir, "served.crt"), pem.EncodeToMemory(&pem.Block{
+		Type: "CERTIFICATE", Bytes: srv.Certificate().Raw,
+	}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(originalDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+	if err := os.Chdir(managementDir); err != nil {
+		t.Fatal(err)
+	}
+	wantCert, err := filepath.Abs("served.crt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantKey, err := filepath.Abs("served.key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.SetBoundManagementListeners(config.ManagementListeners{HTTPS: listener(srv)})
+	p := &runtimeRecordPublisher{
+		path: RuntimeRecordPath(),
+		served: httpapi.ServedManagement{
+			CertFile: "served.crt",
+			KeyFile:  "served.key",
+		},
+	}
+	if err := p.publish(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(cliDir); err != nil {
+		t.Fatal(err)
+	}
+
+	rec, err := readRuntimeRecord(p.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Served.CertFile != wantCert || rec.Served.KeyFile != wantKey {
+		t.Fatalf("published served paths = %q, %q; want %q, %q", rec.Served.CertFile, rec.Served.KeyFile, wantCert, wantKey)
+	}
+	baseURL, client, err := LocalManagementAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Get(baseURL + "/api/v1/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("health status %d; want 200", resp.StatusCode)
+	}
+}
+
 func TestLocalManagementAPIWithoutRecord(t *testing.T) {
 	dir := isolateRuntimeRecord(t)
 	for _, setup := range []func(){
