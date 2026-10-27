@@ -62,6 +62,65 @@ separately. Enabling a decoder does not create a policy rule. For saved
 configurations affected by removed protocol support, see
 [upgrade recovery](config-format.md#unsupported-protocols-during-upgrade).
 
+## Parsing modes
+
+`dataplane.dpiIcsParsing` sets parsing independently for `modbus`, `dnp3`,
+`cip` and `iec104`. Each value is `tolerant` (the default) or `strict`.
+An omitted map, omitted key or empty value means tolerant. Unknown protocol
+names and other values are rejected. Existing configurations become tolerant
+without migration. Stage settings in **Firewall → Deep Packet Inspection →
+ICS Protocol Decoders → Configure**, or POST the full candidate dataplane
+document to `/api/v1/dataplane`, then commit to apply.
+
+For example, this fragment selects strict IEC 104 parsing and leaves the other
+protocols tolerant (merge it into the full dataplane document before posting;
+the endpoint replaces, rather than patches, that document):
+
+```json
+{"dpiIcsParsing": {"iec104": "strict"}}
+```
+
+Parsing governs nonconformant content **inside a frame whose length is known**,
+such as a nonzero Modbus protocol ID, bad DNP3 data-block CRC, reserved bits,
+truncated PDU or unknown CIP command. Decoded fields remain available to policy;
+unreadable fields stay absent.
+
+| Effective rule mode | Tolerant parsing | Strict parsing |
+| --- | --- | --- |
+| Enforce scope | Evaluate decoded fields as usual; pass unless policy denies | Drop the packet and reset the session; decision reason `nonconformant` |
+| Learn (monitor) scope | Rules observe; no on-wire effect | Report `would_drop`; no on-wire effect |
+
+A decoded policy denial takes precedence and retains its own reason. Strict
+nonconformance is decided before ALLOW rules. Tolerant is not a policy bypass:
+under an allowlist, an unreadable field cannot satisfy an ALLOW that names that
+field, so the message falls to the default action. A broader ALLOW using only
+readable fields can still match.
+TCP resets are best effort and connection-scoped; UDP denials drop only the
+datagram, without a session reset.
+
+Every event with findings carries sorted, unique `conformance` codes such as
+`iec104.unsupported_type`. Both modes raise an `ids` / `alert` with rule ID
+`ics-conformance`, severity `medium`, flow identity, codes and the action taken
+(`passed`, `dropped and reset` or `would drop`). Alerts are bounded to one per
+connection per code; repeats only count. Events with findings never feed the
+learner, but inventory and telemetry still record them.
+
+**Both modes fail closed in enforce scope** when a frame boundary is lost:
+Modbus length outside 2–254, bad DNP3 start or header CRC, invalid IEC 104 start
+or length, or oversized CIP encapsulation. They also fail closed on integrity
+faults: midstream pickup, retransmission with different bytes, decoder panic,
+queue unavailability, buffer or out-of-order overflow, a missing decoder, and
+IEC 104 hold timeout. These faults reset the session, not a host/service block;
+tolerant does not scan for a new frame boundary or recover that session.
+
+IEC 104 malformed/profile-violating content with a known APDU length reaches
+the rules with decoded fields and an alert in tolerant mode; strict drops and
+resets it. Reserved APCI control bits with a readable length are conformance
+findings. An unsupported Type ID is still a decoded type byte: tolerant rules
+decide it, with an `iec104.unsupported_type` finding. Changing parsing applies
+to new decisions after the config push, not by resetting existing sessions
+solely because their parsing mode changed.
+
 ## DPI exclusions
 
 `dataplane.dpiExclusions` accepts `ip`, `cidr`, and `domain` entries. Each
@@ -192,7 +251,8 @@ the server), `session_id`, `apdu_id`, `apci_type` (`I`, `S` or `U`) and
 | Malformed or unsupported | `error`, with the identity attributes the decoder could read |
 
 An I-format APDU emits one event per information object. Types outside the
-supported set emit `unsupported`.
+supported set emit `unsupported` with a conformance finding; parsing mode and
+rules determine the verdict, not the event kind alone.
 
 CIP events report each EtherNet/IP layer as attributes. The protocol name `cip` covers the whole EtherNet/IP stack: one decoder toggle
 and one protocol match. The name `enip` is rejected at rule, signature, Sigma
@@ -323,7 +383,9 @@ ICS messages follow the firewall's precedence (see
 `ALLOW` admits the message, whatever its position; otherwise the first matching
 `DENY` or `RESET` by rule ID denies it. An ICS `DENY` that overlaps any `ALLOW`,
 including a plain L3/L4 `ALLOW` on the same port, is therefore shadowed and
-never denies anything there; the ruleset warnings name such rules. `RESET`,
+never denies anything there; the ruleset warnings name such rules. Strict
+nonconformance is rejected before ALLOW matching as described in
+[Parsing modes](#parsing-modes). `RESET`,
 `RATE_LIMIT` and `TAG` rules take no ICS protocol.
 
 ### IEC 104 fields and matching
@@ -347,7 +409,9 @@ even with a zero/false value. IEC-only list fields are rejected on other protoco
 
 Supported descriptor Type IDs are 1, 3, 5, 7, 9, 11, 13, 15, 21; 30–37;
 45–51; 58–64; 70, 100, 101, 102, 103, 105, and 107. Other types decode as
-unsupported, not as implicitly allowed commands.
+unsupported with a conformance finding: tolerant evaluates the decoded fields,
+including the Type ID, against the rules; strict drops and resets in enforce
+scope. Unsupported does not mean implicitly allowed.
 
 Safe-read includes S/U frames, response-direction monitoring, general
 interrogation (100), request-direction read (102), and end of initialization (70).
@@ -358,14 +422,17 @@ IEC 104 rules define an L3/L4 inspection envelope. Any matching enforce-mode rul
 makes the envelope enforce-mode. Object evaluation uses only IEC 104 rules: any
 matching IEC 104 `ALLOW` admits the object, otherwise the first matching IEC 104
 `DENY` by rule ID denies it, and no match is denied. A broad TCP/2404 allow rule
-or a generic allow default cannot bypass it. `ALLOW` cannot match malformed or
-broadcast objects. ASDU predicates, identity, and schedules do not narrow the envelope itself.
+or a generic allow default cannot bypass it. In tolerant mode, malformed or
+profile-violating content with a known length can match an `ALLOW` on fields
+that were decoded; absent fields never satisfy a predicate. Strict rejects
+nonconformance before ALLOW matching. Broadcast objects cannot match an
+`ALLOW`. ASDU predicates, identity, and schedules do not narrow the envelope itself.
 
 ## Learn Mode
 
 The generic learner records supported **request** events for Modbus, DNP3 and
 CIP. DNP3 restart/control messages are request messages even though their event
-kinds identify the command. Replies, exceptions, malformed/unsupported events,
+kinds identify the command. Replies, exceptions, events with conformance findings,
 and IEC 104 do not produce learned rules. IEC 104 is excluded from both
 automatic learning and asset discovery. Review learned rules before use:
 observation is not authorization.

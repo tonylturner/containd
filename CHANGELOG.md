@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-protocol `dataplane.dpiIcsParsing` settings (`tolerant` or `strict`) for
+  Modbus, DNP3, CIP and IEC 104, with Parsing controls in Firewall DPI settings.
+  Tolerant evaluates decoded fields and alerts on nonconformant content; strict
+  drops nonconformant frames and resets the session when enforcing.
+
 - Scheduled workflows check the published `:latest` management and engine
   images daily and after each release: Cosign signatures, signed CycloneDX SBOM
   attestations, and a Trivy HIGH/CRITICAL scan of every platform image.
@@ -59,6 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no events to search.
 
 ### Changed
+
+- Upgraded configurations default to tolerant ICS parsing without migration.
+  IEC 104 malformed or profile-violating APDUs with a known length now reach
+  the rules with a conformance alert instead of resetting the session. Set
+  `dataplane.dpiIcsParsing.iec104` to `strict` to retain that reset behavior.
+  Lost frame boundaries and integrity faults still fail closed in enforce
+  scope in both parsing modes.
 
 - `MODBUS-WRITE-COIL-ALL` now matches only FC 15 requests, not quantity echoes
   in replies. `ICS-WRITE-STORM` now alerts on 20 initiator write commands per
