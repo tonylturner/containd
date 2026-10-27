@@ -17,7 +17,7 @@ import (
 func TestRemovedProtocolInternalHandlers(t *testing.T) {
 	dp := newCountingDP(t)
 	config := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{})
-	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose"} {
+	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip"} {
 		for _, enabled := range []bool{true, false} {
 			body, err := json.Marshal(map[string]any{"dpiIcsProtocols": map[string]bool{name: enabled}})
 			if err != nil {

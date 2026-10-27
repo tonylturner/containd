@@ -14,7 +14,7 @@ import (
 )
 
 func TestRemovedProtocolValidation(t *testing.T) {
-	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose"} {
+	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip"} {
 		t.Run(name, func(t *testing.T) {
 			err := genericICSConfig(name, "learn", "", 0).Validate()
 			want := fmt.Sprintf("rule ics-1 ics protocol %q is not supported; supported: %s", name, ics.SupportedNames)
@@ -42,7 +42,7 @@ func TestRemovedProtocolValidation(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"", "tcp", "udp", "dns", "tls", "http", "ssh", "smb", "ntp", "snmp", "rdp", "enip"} {
+	for _, name := range []string{"", "tcp", "udp", "dns", "tls", "http", "ssh", "smb", "ntp", "snmp", "rdp"} {
 		if err := validateIDS(IDSConfig{Rules: []IDSRule{{ID: "it", Proto: name}}}); err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +57,7 @@ func TestRemovedProtocolValidation(t *testing.T) {
 }
 
 func TestRemovedProtocolBuiltinExactMatch(t *testing.T) {
-	for _, stock := range retiredBuiltinDefinitions() {
+	for _, stock := range append(retiredBuiltinDefinitions(), historicalCIPBuiltinDefinitions()...) {
 		for _, enabled := range []*bool{nil, boolRef(true), boolRef(false)} {
 			changed := stock
 			changed.Enabled = enabled

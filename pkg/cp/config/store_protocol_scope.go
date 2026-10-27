@@ -18,6 +18,7 @@ type IndustrialScopeMigration struct {
 	ID        uint64    `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
 	Removed   []string  `json:"removed"`
+	Updated   []string  `json:"updated,omitempty"`
 }
 
 const industrialScopeMigrationKey = "industrial_scope_migration_018"
@@ -34,6 +35,7 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 	}
 	defer tx.Rollback() //nolint:errcheck
 	removed := map[string]bool{}
+	updated := map[string]bool{}
 	for _, key := range []string{configKeyRunning, configKeyCandidate, configKeyPrevious} {
 		cfg, err := readKindUnupgradedFrom(ctx, tx, key, false)
 		if errors.Is(err, ErrNotFound) {
@@ -51,16 +53,20 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 		if err != nil {
 			return nil, err
 		}
-		ids := removeRetiredBuiltins(cfg)
-		if len(ids) == 0 {
-			continue
-		}
-		for _, id := range ids {
-			removed[id] = true
-		}
 		if err := UpgradeInPlace(cfg); err != nil {
 			return nil, err
 		}
+		if cfg.scopeMigration == nil {
+			continue
+		}
+		for _, id := range cfg.scopeMigration.Removed {
+			removed[id] = true
+		}
+		for _, id := range cfg.scopeMigration.Updated {
+			updated[id] = true
+		}
+		// Store open coalesces changes across all three snapshots into one record.
+		cfg.scopeMigration = nil
 		if key == configKeyRunning {
 			if err := replaceIDSRulesTx(ctx, tx, cfg.IDS.Rules); err != nil {
 				return nil, err
@@ -70,39 +76,60 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 			return nil, err
 		}
 	}
-	if len(removed) == 0 {
+	if len(removed)+len(updated) == 0 {
 		return nil, nil
 	}
-	now := time.Now().UTC()
-	record := IndustrialScopeMigration{ID: uint64(now.UnixNano()), Timestamp: now}
+	ids := make([]string, 0, len(removed))
 	for id := range removed {
-		record.Removed = append(record.Removed, id)
+		ids = append(ids, id)
 	}
-	sort.Strings(record.Removed)
-	// The outbox is append-only: restoring another old bank must not erase a
-	// previous migration's audit evidence.
-	var records []IndustrialScopeMigration
-	var raw string
-	err = tx.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, industrialScopeMigrationKey).Scan(&raw)
-	if err == nil {
-		if err := json.Unmarshal([]byte(raw), &records); err != nil {
-			return nil, err
-		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+	updatedIDs := make([]string, 0, len(updated))
+	for id := range updated {
+		updatedIDs = append(updatedIDs, id)
 	}
-	records = append(records, record)
-	blob, err := json.Marshal(records)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `REPLACE INTO configs (key,data,updated_at) VALUES (?,?,?)`, industrialScopeMigrationKey, string(blob), now.Unix()); err != nil {
+	record := newScopeMigration(ids, updatedIDs)
+	if err := persistScopeMigrationTx(ctx, tx, record); err != nil {
 		return nil, err
 	}
 	if err := s.commitStateTx(ctx, tx); err != nil {
 		return nil, err
 	}
-	return &record, nil
+	return record, nil
+}
+
+func newScopeMigration(ids, updated []string) *IndustrialScopeMigration {
+	now := time.Now().UTC()
+	sort.Strings(ids)
+	sort.Strings(updated)
+	return &IndustrialScopeMigration{ID: uint64(now.UnixNano()), Timestamp: now, Removed: ids, Updated: updated}
+}
+
+func persistScopeMigrationTx(ctx context.Context, tx *sql.Tx, record *IndustrialScopeMigration) error {
+	if record == nil {
+		return nil
+	}
+	var records []IndustrialScopeMigration
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, industrialScopeMigrationKey).Scan(&raw)
+	if err == nil {
+		if err := json.Unmarshal([]byte(raw), &records); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	for _, existing := range records {
+		if existing.ID == record.ID {
+			return nil
+		}
+	}
+	records = append(records, *record)
+	blob, err := json.Marshal(records)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `REPLACE INTO configs (key,data,updated_at) VALUES (?,?,?)`, industrialScopeMigrationKey, string(blob), record.Timestamp.Unix())
+	return err
 }
 
 func (s *SQLiteStore) IndustrialScopeMigrations(ctx context.Context) ([]IndustrialScopeMigration, error) {

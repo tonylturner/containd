@@ -101,7 +101,7 @@ func builtinIDSRules() []IDSRule {
 			ID:          "IDS-CIP-001",
 			Title:       "CIP Reset Service",
 			Description: "CIP Reset (service 0x05) restores factory defaults — potential sabotage.",
-			Proto:       "enip",
+			Proto:       "cip",
 			Severity:    "critical",
 			Message:     "CIP reset service invoked",
 			When: IDSCondition{
@@ -113,7 +113,7 @@ func builtinIDSRules() []IDSRule {
 			ID:          "IDS-CIP-002",
 			Title:       "CIP PLC Mode Change",
 			Description: "CIP service 0x07 changes PLC run/stop state.",
-			Proto:       "enip",
+			Proto:       "cip",
 			Severity:    "critical",
 			Message:     "CIP PLC run/stop state change",
 			When: IDSCondition{

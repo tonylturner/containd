@@ -122,13 +122,11 @@ func persistBootFault(logger *zap.SugaredLogger, stores mgmtStores, conflict err
 // boot event is emitted once and retained alongside ordinary service telemetry.
 type bootEventServices struct {
 	*services.Manager
-	event      *dpevents.Event
-	migrations []dpevents.Event
+	event *dpevents.Event
 }
 
 func (s *bootEventServices) ListTelemetryEvents(limit int) []dpevents.Event {
 	out := s.Manager.ListTelemetryEvents(limit)
-	out = append(out, s.migrations...)
 	if s.event != nil {
 		out = append(out, *s.event)
 	}

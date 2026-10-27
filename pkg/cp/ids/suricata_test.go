@@ -182,7 +182,8 @@ func TestParseSuricataPortMapping(t *testing.T) {
 		proto string
 	}{
 		{"502", "modbus"},
-		{"44818", "enip"},
+		{"44818", "cip"},
+		{"2222", "cip"},
 		{"20000", "dnp3"},
 		{"4840", "tcp"},
 		{"102", "tcp"},

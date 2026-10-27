@@ -32,7 +32,9 @@ func TestRemovedProtocolStageAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose"} {
+	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip"} {
+		// Each protocol is an independent validation case, not a rate-limit test.
+		resetTestRateLimiters()
 		for _, kind := range []string{"rule", "toggle-on", "toggle-off", "ids"} {
 			cfg := config.DefaultConfig()
 			var want string
@@ -75,7 +77,7 @@ func TestRemovedProtocolStageAtomic(t *testing.T) {
 func TestRemovedProtocolSignature(t *testing.T) {
 	eng := &signatureMockEngine{mockEngine: &mockEngine{}}
 	server := NewServerWithEngine(&mockStore{}, nil, eng)
-	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose"} {
+	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip"} {
 		sig := signatures.Signature{ID: "bad", Protocol: name, Conditions: []signatures.Condition{{Field: "kind", Op: "equals", Value: "request"}}}
 		rec := requestStage(t, server, "POST", "/signatures", sig)
 		var body struct {

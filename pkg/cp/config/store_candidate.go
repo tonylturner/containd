@@ -137,6 +137,9 @@ func writeConfigTx(ctx context.Context, tx *sql.Tx, key string, cfg *Config) err
 }
 
 func writeReferencedConfigTx(ctx context.Context, tx *sql.Tx, key string, cfg *Config, id int64) error {
+	if err := persistScopeMigrationTx(ctx, tx, cfg.scopeMigration); err != nil {
+		return err
+	}
 	stored := storedConfig{Config: *cfg, SnapshotFormat: snapshotFormatReferencedBank, BankID: id}
 	stored.IDS.Rules = nil
 	blob, err := json.Marshal(stored)
@@ -169,6 +172,11 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if candidate.scopeMigration != nil {
+		if err := writeConfigTx(ctx, tx, configKeyCandidate, candidate); err != nil {
+			return err
+		}
+	}
 	runningID, err := bankReference(ctx, tx, configKeyRunning)
 	if err != nil {
 		return err
@@ -243,6 +251,13 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if prev.scopeMigration != nil {
+		// Pin the upgraded bank in previous too, so repeated rollbacks cannot
+		// re-migrate the same historical snapshot or reuse its obsolete bank.
+		if err := writeConfigTx(ctx, tx, configKeyPrevious, prev); err != nil {
+			return err
+		}
+	}
 	id, err := bankReference(ctx, tx, configKeyPrevious)
 	if err != nil {
 		return err

@@ -12,6 +12,9 @@ import "time"
 // Domain validation should live in validate*.go siblings rather than growing
 // this file with large validation implementations again.
 type Config struct {
+	// Pending schema-upgrade evidence is persisted with the next successful write.
+	scopeMigration *IndustrialScopeMigration
+
 	SchemaVersion string          `json:"schema_version,omitempty"`
 	System        SystemConfig    `json:"system"`
 	Interfaces    []Interface     `json:"interfaces"`

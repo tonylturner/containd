@@ -125,7 +125,10 @@ func mapProtoToSuricata(proto string) string {
 		return strings.ToLower(proto)
 	case "http", "dns", "tls", "ssh", "ftp", "smtp":
 		return strings.ToLower(proto)
-	case "modbus", "dnp3", "enip":
+	case "cip":
+		// Suricata names its EtherNet/IP application protocol enip.
+		return "enip"
+	case "modbus", "dnp3":
 		return strings.ToLower(proto)
 	default:
 		return "ip"
