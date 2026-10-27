@@ -47,6 +47,9 @@ type peer struct {
 	objectDeadline  atomic.Int64
 	objectArmed     atomic.Bool
 	firstByteWindow atomic.Int64
+	// writeBound is the unix-nanosecond deadline of writes to the peer
+	// while another goroutine bounds them; 0 when none.
+	writeBound atomic.Int64
 	// interrupt tells a close watcher that its read was cut short by stop
 	// rather than by the peer.
 	interrupt atomic.Bool
@@ -104,21 +107,52 @@ func (p *peerReader) noteBytes() {
 // armDeadline sets the sooner of the idle deadline and object deadline od
 // and records which one applies.
 func (p *peerReader) armDeadline(od int64) {
-	d := time.Now().Add(p.idle)
-	object := false
-	if od != 0 {
-		if t := time.Unix(0, od); t.Before(d) {
-			d, object = t, true
-		}
-	}
+	d, object := (*peer)(p).soonerDeadline(od)
 	p.objectArmed.Store(object)
 	_ = p.conn.SetReadDeadline(d)
 }
 
-// Write sends b under the idle deadline.
+// soonerDeadline returns the idle deadline from now, or bound (a unix
+// nanosecond time, 0 for none) when that comes first, and whether bound
+// applies.
+func (p *peer) soonerDeadline(bound int64) (time.Time, bool) {
+	d := time.Now().Add(p.idle)
+	if bound != 0 {
+		if t := time.Unix(0, bound); t.Before(d) {
+			return t, true
+		}
+	}
+	return d, false
+}
+
+// Write sends b under the idle deadline, or the write bound when sooner.
 func (p *peer) Write(b []byte) (int, error) {
-	_ = p.conn.SetWriteDeadline(time.Now().Add(p.idle))
+	wb := p.writeBound.Load()
+	p.armWriteDeadline(wb)
+	// A bound set from another goroutine between the load and the
+	// deadline would otherwise be overwritten by the longer idle deadline.
+	if wb2 := p.writeBound.Load(); wb2 != wb {
+		p.armWriteDeadline(wb2)
+	}
 	return p.conn.Write(b)
+}
+
+func (p *peer) armWriteDeadline(wb int64) {
+	d, _ := p.soonerDeadline(wb)
+	_ = p.conn.SetWriteDeadline(d)
+}
+
+// boundWrite gives the peer window to accept what is being written to it,
+// including a write that is already blocked; a zero window clears the
+// bound. Writes that start later re-arm the idle deadline themselves.
+func (p *peer) boundWrite(window time.Duration) {
+	if window == 0 {
+		p.writeBound.Store(0)
+		return
+	}
+	d := time.Now().Add(window)
+	p.writeBound.Store(d.UnixNano())
+	_ = p.conn.SetWriteDeadline(d)
 }
 
 // setObjectDeadline bounds body receipt from now; a zero duration clears

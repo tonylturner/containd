@@ -58,9 +58,11 @@ type respResult struct {
 // exchange sends the request upstream while reading the response
 // concurrently. pass, when set, is the Unscanned result of an unheld
 // body whose event is emitted once the body has been forwarded. It
-// reports whether the connection persists.
+// reports whether the connection persists: never after a send the
+// response side stopped, since the origin saw a truncated request.
 func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 	c := tx.c
+	tx.streaming = body.rest != nil
 	for attempt := 0; ; attempt++ {
 		u, err := c.upstream(tx.set)
 		if err != nil {
@@ -71,7 +73,7 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 		reused := u.used
 		u.used = true
 		stop := make(chan struct{})
-		tx.sendDone.Store(false)
+		tx.sendDone, tx.sendErr = make(chan struct{}), nil
 		tx.spliceCh = make(chan struct{})
 		done := make(chan respResult, 1)
 		go func() {
@@ -100,6 +102,10 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 			}
 			r = <-done
 		}
+		// Bounds stopSend set on peers the sender had already left are
+		// stale now that both sides have returned.
+		c.client.setObjectDeadline(0)
+		u.boundWrite(0)
 		switch {
 		case r.retry && reused && attempt == 0 && body.kind == bodyNone && idempotent(tx.req.method):
 			c.closeUpstream()
@@ -117,28 +123,45 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 	}
 }
 
-// send writes the request head and body upstream. When stop closes while
-// the body is still streaming from the client, the rest of it is drained
-// for the drain window so the client can read the early response.
-func (tx *transaction) send(u *upstream, body bodySource, stop <-chan struct{}) (int64, error) {
-	if _, err := u.Write(tx.reqHead); err != nil {
-		return 0, err
-	}
-	var sent int64
-	if body.kind != bodyNone {
-		var err error
+// send writes the request head and body upstream and records its outcome
+// for the response side. A send that stop ended is truncated whichever
+// call noticed first: the stop check, a bounded client read or a bounded
+// origin write. When the body was still streaming from the client, the
+// rest of it is drained for the drain window so the client can read the
+// response.
+func (tx *transaction) send(u *upstream, body bodySource, stop <-chan struct{}) (sent int64, err error) {
+	defer func() {
+		tx.sendErr = err
+		close(tx.sendDone)
+	}()
+	if _, err = u.Write(tx.reqHead); err == nil && body.kind != bodyNone {
 		sent, err = writeBody(newBodyWriter(u, body.kind), body, stop)
-		if err != nil {
-			if errors.Is(err, errStopped) && body.rest != nil {
-				tx.c.client.bound(drainWindow)
-				_, _ = io.Copy(io.Discard, body.rest)
-				tx.c.client.setObjectDeadline(0)
-			}
-			return sent, err
-		}
 	}
-	tx.sendDone.Store(true)
-	return sent, nil
+	if err == nil {
+		return sent, nil
+	}
+	if closed(stop) {
+		err = errStopped
+	}
+	if errors.Is(err, errStopped) && body.rest != nil {
+		tx.c.client.bound(drainWindow)
+		_, _ = io.Copy(io.Discard, body.rest)
+	}
+	return sent, err
+}
+
+// stopSend tells the sender that the final response head is in: whatever
+// is left of the request is not forwarded. The sender notices at its
+// next stop check; one blocked reading the body from the client or
+// writing to an origin that stopped reading is bounded so it returns
+// within the drain window. A sender that has already finished is not
+// affected, and exchange clears the bounds once both sides returned.
+func (tx *transaction) stopSend(u *upstream, stop chan struct{}) {
+	close(stop)
+	if tx.streaming {
+		tx.c.client.bound(drainWindow)
+	}
+	u.boundWrite(drainWindow)
 }
 
 func closed(ch <-chan struct{}) bool {

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/avscan"
@@ -27,9 +26,15 @@ type transaction struct {
 	reqHead []byte
 	ics     bool
 	sent100 bool
-	// sendDone is set once the whole request has been written upstream;
-	// a final response before that is early.
-	sendDone atomic.Bool
+	// streaming says the request body is read from the client while it
+	// is sent, so the sender and a client watcher would compete for the
+	// socket; a bodyless or held request never reads the client.
+	streaming bool
+	// sendDone is closed when send has returned, with its error in
+	// sendErr: nil when the whole request reached the origin, errStopped
+	// when the response side ended the send first.
+	sendDone chan struct{}
+	sendErr  error
 	// spliceCh is closed when the response side switched to a raw splice.
 	spliceCh chan struct{}
 }
@@ -43,7 +48,10 @@ func (tx *transaction) run() bool {
 		tx.c.refuse(refusal(417, "Expectation Failed", "containd: unsupported Expect\n", tx.headOnly()), true)
 		return false
 	}
-	body := bodySource{kind: h.body, rest: newBodyReader(h, tx.c.client.r)}
+	body := bodySource{kind: h.body}
+	if h.body != bodyNone {
+		body.rest = newBodyReader(h, tx.c.client.r)
+	}
 	if h.body == bodyNone || !tx.set.ScanUploads {
 		return tx.exchange(body, nil)
 	}
