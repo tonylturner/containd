@@ -516,6 +516,16 @@ alerts once per flow ID when that many events match in one window. The window
 starts at the first matching event. The signature does not alert again for that
 flow ID until the window has passed.
 
+Two optional threshold fields change what counts:
+
+- `scope`: `flow` (the default) counts each direction of a connection
+  separately. `connection` counts both directions of one connection together.
+  Events whose flow ID is not a connection tuple keep their own counter.
+- `dedupAttr`: an event attribute. Matching events with the same nonempty value
+  count once in a window. The built-in write storm uses `apdu_id`. A window
+  retains at most 256 values; past that, new values still count but are not
+  remembered.
+
 ```json
 {
   "id": "SITE-MODBUS-WRITE-BURST",

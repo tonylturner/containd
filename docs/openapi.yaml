@@ -1405,6 +1405,8 @@ components:
       properties:
         count: {type: integer}
         windowSeconds: {type: integer}
+        scope: {type: string, enum: [flow, connection]}
+        dedupAttr: {type: string}
       type: object
     StaticRoute:
       properties:
