@@ -170,10 +170,19 @@ holds no token or password. Its CLI reaches management through the SSH
 server, over a socket that exists only while the shell runs
 (`CONTAIND_SSH_API_SOCKET`). After the shell or the SSH connection ends, or
 the login's session is revoked, `containd cli` stops with
-`SSH login unavailable`. Elsewhere, for example with
-`docker exec <container> containd cli`, the CLI logs in to management on
-`127.0.0.1`, at the port of `CONTAIND_MGMT_ADDR` (default 8080), as
-`CONTAIND_CLI_USER` with `CONTAIND_CLI_PASSWORD`; both default to `containd`.
+`SSH login unavailable`.
+
+Elsewhere, for example with `docker exec <container> containd cli`, the CLI
+calls the listeners management bound, as the SSH console does. When it binds
+them, management records them in `run/management.json` in the directory of
+the configuration store (`CONTAIND_CONFIG_DB`, default `/data/config.db` in
+the image), readable only by its own user. It removes the file when it stops.
+The CLI calls the HTTP listener on `127.0.0.1` unless it redirects to HTTPS,
+and otherwise the HTTPS listener, trusting only the certificate management
+serves. It follows no redirect. It logs in as `CONTAIND_CLI_USER` with
+`CONTAIND_CLI_PASSWORD`; both default to `containd`. Without the file, the
+CLI stops with `management is not running`. The container health check
+(`containd healthcheck`) uses the same file.
 
 The SSH CLI, and `containd cli` in an SSH shell, stay authorized while the
 connection is open. With a JWT secret, the login's session also ends after 4

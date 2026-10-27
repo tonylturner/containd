@@ -39,8 +39,14 @@ func cfgGetInt(cfg *config.Config, f func(*config.Config) int, def int) int {
 	return f(cfg)
 }
 
+// configDBPath is the configuration store's file: CONTAIND_CONFIG_DB, else
+// data/config.db in the working directory.
+func configDBPath() string {
+	return common.Env("CONTAIND_CONFIG_DB", filepath.Join("data", "config.db"))
+}
+
 func initStore(r *mgmtpath.Reservation) (config.Store, error) {
-	dbPath := common.Env("CONTAIND_CONFIG_DB", filepath.Join("data", "config.db"))
+	dbPath := configDBPath()
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create config dir: %w", err)
 	}

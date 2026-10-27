@@ -57,6 +57,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   socket that exists only while the shell runs, so the shell holds no token
   or password. `containd cli` outside an SSH shell, such as through
   `docker exec`, still logs in with those variables.
+- `containd cli` outside an SSH shell, such as through `docker exec`, and
+  the container health check (`containd healthcheck`) work on deployments
+  without management HTTP. They called `http://127.0.0.1` at the port of
+  `CONTAIND_MGMT_ADDR`, so they failed when HTTP was off, and could send the
+  CLI password to another process holding that port. Management now records
+  the listeners it bound in `run/management.json` beside the configuration
+  store, in a directory only its user can open, and removes the file when it
+  stops. The CLI and health check call those listeners the way the SSH
+  console does: HTTP unless it redirects, otherwise HTTPS trusting only the
+  served certificate, following no redirect. Without the file they report
+  `management is not running`.
 - Several sessions multiplexed on one SSH connection, such as with OpenSSH
   `ControlMaster`, no longer share CLI client state. Concurrent commands
   wrote the same API token field without synchronisation.
