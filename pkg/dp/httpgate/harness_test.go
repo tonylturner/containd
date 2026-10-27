@@ -70,8 +70,10 @@ func (f *fakeScanner) setVerdict(v func(obj avscan.Object, body []byte) avscan.R
 	f.verdict = v
 }
 
-// holdScans makes Scan block until the returned release runs or the
-// context ends.
+// holdScans makes every Scan that starts from now block until the
+// returned release runs or the context ends. Calling it again installs a
+// fresh latch for later scans, so one transaction's upload and download
+// can be released separately.
 func (f *fakeScanner) holdScans() (release func()) {
 	ch := make(chan struct{})
 	f.mu.Lock()
@@ -478,6 +480,18 @@ func (c *client) expectEOF() {
 	n, err := c.br.Read(make([]byte, 1))
 	if n != 0 || !errors.Is(err, io.EOF) {
 		c.t.Fatalf("expected EOF from gate, got n=%d err=%v", n, err)
+	}
+}
+
+// expectSilence asserts that nothing arrives from the gate within d, with
+// a deadline-bounded socket read rather than a look at the recorder, which
+// only sees bytes once something reads them.
+func (c *client) expectSilence(d time.Duration) {
+	c.t.Helper()
+	_ = c.conn.SetReadDeadline(time.Now().Add(d))
+	n, err := c.conn.Read(make([]byte, 1))
+	if n != 0 || !isTimeout(err) {
+		c.t.Fatalf("expected nothing from the gate within %v, got n=%d err=%v", d, n, err)
 	}
 }
 
