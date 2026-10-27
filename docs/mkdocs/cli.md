@@ -143,7 +143,7 @@ A command on the `ssh` command line, such as
 `ssh -p 2222 containd@localhost show version`, runs as one CLI command in both
 modes.
 
-containd reads the mode once, when management starts.
+containd reads the mode once, when management starts. A non-empty
 `CONTAIND_SSH_SHELL_MODE` takes precedence over the saved
 `system.ssh.shellMode`. Only `linux`, in any letter case, selects the Linux
 shell. Every other value, including an empty one, selects `appliance`.
@@ -153,16 +153,17 @@ the environment override. The starter Compose file (`deploy/docker-compose.yml`)
 always sets `CONTAIND_SSH_SHELL_MODE` (default `appliance`), so the saved value
 has no effect there. Set the variable in `.env` and run `docker compose up -d`.
 
-The Linux shell needs a PTY. Interactive `ssh` requests one by default;
+A `linux` mode login needs a PTY. Interactive `ssh` requests one by default;
 `ssh -T` does not. In `linux` mode, a login without a PTY opens the appliance
 CLI and prints a warning.
 
 `configure` and `containd cli` in the Linux shell do not reuse the SSH login.
-They log in to the management API on 127.0.0.1 as `CONTAIND_CLI_USER` with
+They log in to the management API on `127.0.0.1`, at the port of
+`CONTAIND_MGMT_ADDR` (default 8080), as `CONTAIND_CLI_USER` with
 `CONTAIND_CLI_PASSWORD`; both default to `containd`. The Linux shell starts
 with a minimal environment and does not receive the container's `CONTAIND_*`
-variables. If the account has a different password, set the variables for the
-command, for example
+variables. If the account has a different password, or management HTTP uses
+another port, set the variables for the command, for example
 `CONTAIND_CLI_USER=admin CONTAIND_CLI_PASSWORD='<password>' configure`.
 Otherwise the CLI stops with `authentication failed`. In lab mode the pinned
 `containd` / `containd` credential satisfies the defaults. The `menu`, `wizard`

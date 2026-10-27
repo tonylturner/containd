@@ -170,18 +170,19 @@ registers looks like this:
 
 Live ICS events also carry `ics: true`. Where present, `raw_hex` holds at most
 the first 512 payload bytes (IEC 104: the APDU). An attribute is present only
-when the decoder found its value. The tables list what each ICS decoder emits.
+when the decoder found its value. The tables list what each ICS decoder emits;
+the value in brackets is the event's `proto`.
 
 | Protocol | `kind` values | Attributes |
 | --- | --- | --- |
-| Modbus/TCP | `request`, `response`, `exception`, `malformed` | `transaction_id`, `unit_id`, `function_code`, `is_write`, `raw_hex`; `address`, `quantity` (first two 16-bit PDU values for function codes other than 8 and 43; in responses they can hold other data); `sub_function`, `sub_function_name` (code 8); `mei_type`, `mei_type_name` (code 43); `exception_code`, `exception_description` (exceptions, with `function_code` set to the base code); `error` (malformed) |
-| DNP3 | `request`, `response`, `restart` (codes 13, 14), `control` (codes 18, 19), `malformed` | `function_code`, `function_name`, `is_write`, `is_control`, `source_address`, `destination_address`, `direction` (`master` or `outstation`, from the link DIR bit), `iin_flags`, `object_groups` (comma-separated), `qualifier`, `object_count` (first object header), `raw_hex`; `error` (malformed) |
-| IEC 104 | `apci`, `request`, `response`, `malformed`, `unsupported` | See below |
-| CIP/EtherNet/IP | `request`, `response`, `session` (EtherNet/IP commands without a CIP message) | `command`, `command_code`, `session_handle`; `service_code`, `service_name`, `function_code` (the service code), `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; `multi_service_count` on a Multiple Service Packet, which also emits one event per sub-service with `msp: "true"` |
-| S7comm | `connection` (COTP CR/CC), `request`, `response` | `cotp_pdu_type` (connection); `message_type`, `pdu_reference`, `raw_hex`, `function_code`, `function_name`, `is_write`, `is_control`; `item_count`, `area`, `address`, `db_number`, `safety_critical` (Read/Write Var); `error_class`, `error_code` (Ack-Data) |
-| IEC 61850 MMS | `connection_request`, `connection_confirm`, `request`, `response`, `unconfirmed`, `initiate_request`, `initiate_response`, `unknown` | `service`, `pdu_tag`, `service_tag`, `is_write`, `is_control`, `variable_name` (Read/Write), `raw_hex` |
-| BACnet | `request`, `response`, `discovery` | `bvlc_function`, `pdu_type`, `service_code`, `service` (`bvlc` without an APDU), `is_write`, `is_critical`, `object_type`, `object_instance`, `property_id`, `raw_hex` |
-| OPC UA | `request`, `response`, `session` (HEL, ACK, OPN, CLO) | `message_type`, `chunk_type`, `service`, `is_write`, `raw_hex` |
+| Modbus/TCP (`modbus`) | `request`, `response`, `exception`, `malformed` | `transaction_id`, `unit_id`, `function_code`, `is_write`, `raw_hex`; `address`, `quantity` (first two 16-bit PDU values for function codes other than 8 and 43; in responses they can hold other data); `sub_function`, `sub_function_name` (code 8); `mei_type` (code 43), `mei_type_name` (MEI type 14); `exception_code`, `exception_description` (exceptions, with `function_code` set to the base code); `error` (malformed) |
+| DNP3 (`dnp3`) | `request`, `response`, `restart` (codes 13, 14), `control` (codes 18, 19), `malformed` | `function_code`, `function_name`, `is_write`, `is_control`, `source_address`, `destination_address`, `direction` (`master` or `outstation`, from the link DIR bit), `iin_flags`, `object_groups` (comma-separated), `qualifier`, `object_count` (first object header), `raw_hex`; `error` (malformed) |
+| IEC 104 (`iec104`) | `apci`, `request`, `response`, `malformed`, `unsupported` | See below |
+| CIP/EtherNet/IP (`cip`) | `request`, `response`, `session` (EtherNet/IP commands without a CIP message) | `command`, `command_code`, `session_handle`; `service_code`, `service_name`, `function_code` (the service code), `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; `multi_service_count` on a Multiple Service Packet, which also emits one event per sub-service with `msp: "true"` |
+| S7comm (`s7comm`) | `connection` (COTP CR/CC), `request`, `response` | `cotp_pdu_type` (connection); `message_type`, `pdu_reference`, `raw_hex`, `function_code`, `function_name`, `is_write`, `is_control`; `item_count`, `area`, `address`, `db_number`, `safety_critical` (Read/Write Var); `error_class`, `error_code` (Ack-Data) |
+| IEC 61850 MMS (`mms`) | `connection_request`, `connection_confirm`, `request`, `response`, `unconfirmed`, `initiate_request`, `initiate_response`, `unknown` | `service` (`connection` on COTP CR/CC events, which carry no other attribute), `pdu_tag`, `service_tag`, `is_write`, `is_control`, `variable_name` (Read/Write), `raw_hex` |
+| BACnet (`bacnet`) | `request`, `response`, `discovery` | `bvlc_function`, `pdu_type`, `service_code`, `service` (`bvlc` without an APDU), `is_write`, `is_critical`, `object_type`, `object_instance`, `property_id`, `raw_hex` |
+| OPC UA (`opcua`) | `request`, `response` (also ERR), `session` (HEL, ACK, OPN, CLO) | `message_type`, `chunk_type`, `service`, `is_write`, `raw_hex` |
 
 The DNP3 decoder emits one event per link frame that starts an application
 fragment. It does not reassemble fragments that span several link frames.
@@ -376,12 +377,12 @@ Detectors have no tuning controls.
 
 | `type` | Severity | Finding |
 | --- | --- | --- |
-| `malformed_frame` | medium | An ICS event with an `error` attribute: malformed Modbus, DNP3 or IEC 104 data, or an unsupported IEC 104 type |
+| `malformed_frame` | medium | An ICS event with an `error` attribute: malformed Modbus, DNP3 or IEC 104 data, an unsupported IEC 104 type, or an IEC 104 role violation |
 | `protocol_violation` | high | Modbus write to broadcast unit ID 0 |
 | `protocol_violation` | medium | Modbus response whose transaction ID matches no earlier request in the opposite direction |
 | `protocol_violation` | critical | DNP3 cold or warm restart (function code 13 or 14) from an outstation |
 | `protocol_violation` | high | Every DNP3 unsolicited response (function code 130) |
-| `protocol_violation` | high | DNP3 request function code outside 0–33 and 129–131 |
+| `protocol_violation` | high | DNP3 request with an undefined function code (34–127) |
 | `protocol_violation` | critical | S7comm PLC stop (function code 0x29) |
 | `protocol_violation` | high | S7comm PLC control (0x28) or block download (0x1A, 0x1B) |
 | `protocol_violation` | high | IEC 104 role violation: a monitor type (1–44) from the client, or a control or system activation/deactivation from the server |
@@ -392,7 +393,12 @@ Detectors have no tuning controls.
 These checks use the source and destination IP addresses, not ports. While a
 pair is above a rate limit, each further event raises another finding. After a
 pair shows a second protocol, each further ICS event of that pair raises that
-finding again. IEC 104 rate counts use one event per APDU.
+finding again. IEC 104 rate counts use one event per APDU. On TCP 102 the S7comm
+and MMS decoders both report a COTP connection, so a TCP 102 connection raises
+the multiple-protocol finding for its address pair. CIP, BACnet, OPC UA and MMS
+events get no protocol-specific checks. The `ids` / `anomaly` event of a finding
+from an IEC 104 event also copies that event's identity attributes, such as
+`session_id`, `apdu_id`, `type_id`, `ca` and `ioa`.
 
 `GET /api/v1/anomalies` lists stored findings, newest first. `limit` defaults
 to 200; values outside 1–5000 use the default. Each entry has `type`,
@@ -409,7 +415,8 @@ The signature engine compares every decoded event with the loaded signatures.
 It loads **23 built-in signatures**: 16 for Modbus, DNP3, CIP, S7comm and ICS
 write storms, and 7 for IEC 104. A match is recorded as an `ids` /
 `signature_match` event with `signature_id`, `name`, `severity` and
-`description`. Matches are observations only and never block traffic.
+`description`, plus the identity attributes of a matched IEC 104 event.
+Matches are observations only and never block traffic.
 
 | Request | Purpose |
 | --- | --- |
@@ -436,8 +443,9 @@ in any letter case. All conditions must match. Each condition names a `field`
 
 Validation does not check `op`; a condition with another `op` never matches.
 An optional `threshold` of `count` (at least 2) and `windowSeconds` (at least 1)
-alerts once per flow when that many events match in one window. It does not
-alert again for that flow until the window has passed.
+alerts once per flow ID when that many events match in one window. The window
+starts at the first matching event. The signature does not alert again for that
+flow ID until the window has passed.
 
 ```json
 {
