@@ -22,6 +22,7 @@ import (
 )
 
 const shellAPIResetHelperEnv = "CONTAIND_TEST_SSH_CLI_HELPER"
+const shellAPIResetRawHelperEnv = "CONTAIND_TEST_SSH_RAW_RESET_HELPER"
 
 // TestShellAPIResetCLIHelper runs as the containd cli child process in
 // TestFactoryResetDisconnectsLinuxShellCLI.
@@ -38,6 +39,34 @@ func TestShellAPIResetCLIHelper(t *testing.T) {
 	if err := reg.ParseAndExecute(ctx, "factory reset NUCLEAR", os.Stdout); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestShellAPIResetRawClientHelper triggers a reset without acknowledging it,
+// simulating a shell user that calls the socket without containd cli.
+func TestShellAPIResetRawClientHelper(t *testing.T) {
+	if os.Getenv(shellAPIResetRawHelperEnv) != "1" {
+		return
+	}
+	api, err := cli.ConnectSSHSession(context.Background(), os.Getenv(cli.EnvSSHAPISocket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, "http://ssh-session/api/v1/system/factory-reset", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := api.Client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("factory reset status: %d", resp.StatusCode)
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fmt.Fprintln(os.Stdout, "raw-reset-response-received")
 }
 
 // shellAPIUpstream records the requests the shell API forwards to
@@ -202,6 +231,61 @@ func TestFactoryResetDisconnectsLinuxShellCLI(t *testing.T) {
 		tty.send(t, "echo shell-survived-$((6*7))\n")
 		tty.waitFor(t, "shell-survived-42", 1)
 		t.Fatalf("factory reset response reached containd cli, but its SSH Linux shell remained usable: %q", tty.output())
+	}
+}
+
+func TestFactoryResetDisconnectsLinuxShellRawClient(t *testing.T) {
+	if _, err := os.Stat("/bin/bash"); err != nil {
+		t.Skip("needs /bin/bash")
+	}
+	srv, store, _ := newAssuranceServer(t)
+	srv.opts.ShellMode = "linux"
+	srv.opts.LabMode = true
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/me":
+			_, _ = io.WriteString(w, `{"username":"shell-reset-raw-admin"}`)
+		case "/api/v1/system/factory-reset":
+			srv.RevokeConnections(r.Header.Get("X-Containd-SSH-Connection"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"status":"reset","loggedOut":true,"warnings":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+	srv.opts.BaseURL = api.URL
+	addr := serveSSH(t, srv)
+	u, password := createAdmin(t, store, "shell-reset-raw-admin")
+	client, err := dialSSH(addr, u.Username, nil, ssh.Password(password))
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	defer client.Close()
+	tty := openTTY(t, client)
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := fmt.Sprintf("%s=1 %q -test.run=^TestShellAPIResetRawClientHelper$\n", shellAPIResetRawHelperEnv, testBinary)
+	tty.send(t, command)
+	tty.waitFor(t, "raw-reset-response-received", 1)
+
+	exited := make(chan error, 1)
+	go func() { exited <- tty.session.Wait() }()
+	connectionClosed := make(chan error, 1)
+	go func() { connectionClosed <- client.Conn.Wait() }()
+	select {
+	case <-exited:
+	case <-time.After(3 * time.Second):
+		tty.send(t, "echo shell-survived-$((6*7))\n")
+		tty.waitFor(t, "shell-survived-42", 1)
+		t.Fatalf("raw factory reset response reached the socket client, but its SSH Linux shell remained usable: %q", tty.output())
+	}
+	select {
+	case <-connectionClosed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("SSH connection remained open after raw factory reset")
 	}
 }
 
