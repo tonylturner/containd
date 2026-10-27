@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+var errClamdOversized = errors.New("clamd scan limit exceeded")
+
 const (
 	// clamdMaxReply bounds a single clamd reply. Verdicts, versions and
 	// errors are one short line; anything longer is a protocol violation.
@@ -72,7 +74,9 @@ func (c *ClamAVClient) command(ctx context.Context, name string) (string, error)
 		return "", err
 	}
 	defer conn.Close()
-	if _, err := conn.Write([]byte("z" + name + "\x00")); err != nil {
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	if err := writeClamd(conn, []byte("z"+name+"\x00")); err != nil {
 		return "", err
 	}
 	return readClamdReply(conn)
@@ -116,19 +120,26 @@ func (c *ClamAVClient) Reload(ctx context.Context) error {
 
 // Scan streams payload with INSTREAM and parses the verdict. A clamd ERROR
 // reply, a truncated reply or an unrecognised reply is an error, never clean.
-func (c *ClamAVClient) Scan(ctx context.Context, payload []byte) (ClamdVerdict, error) {
+func (c *ClamAVClient) Scan(ctx context.Context, payload io.Reader, size int64) (ClamdVerdict, error) {
 	conn, err := c.dial(ctx)
 	if err != nil {
 		return ClamdVerdict{}, err
 	}
 	defer conn.Close()
-	if _, err := conn.Write([]byte("zINSTREAM\x00")); err != nil {
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	if err := writeClamd(conn, []byte("zINSTREAM\x00")); err != nil {
 		return ClamdVerdict{}, err
 	}
-	if err := writeInstream(conn, payload); err != nil {
+	if err := writeInstream(conn, payload, size); err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.ErrShortWrite) {
+			return ClamdVerdict{}, err
+		}
 		// clamd answers a limit violation and closes; surface its reason.
 		if reply, rerr := readClamdReply(conn); rerr == nil {
-			return ClamdVerdict{}, fmt.Errorf("clamd: %s", reply)
+			if _, perr := parseClamdScanReply(reply); errors.Is(perr, errClamdOversized) {
+				return ClamdVerdict{}, perr
+			}
 		}
 		return ClamdVerdict{}, err
 	}
@@ -139,32 +150,47 @@ func (c *ClamAVClient) Scan(ctx context.Context, payload []byte) (ClamdVerdict, 
 	return parseClamdScanReply(reply)
 }
 
-func writeInstream(w io.Writer, payload []byte) error {
+// writeClamd rejects short writes even when a writer returns no error.
+func writeClamd(w io.Writer, data []byte) error {
+	n, err := w.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	return err
+}
+
+func writeInstream(w io.Writer, payload io.Reader, size int64) error {
+	if size < 0 {
+		return errors.New("negative stream size")
+	}
 	var hdr [4]byte
-	for len(payload) > 0 {
-		n := min(len(payload), clamdChunkSize)
+	buf := make([]byte, clamdChunkSize)
+	for size > 0 {
+		n := min(size, int64(len(buf)))
+		if _, err := io.ReadFull(payload, buf[:n]); err != nil {
+			return err
+		}
 		binary.BigEndian.PutUint32(hdr[:], uint32(n)) // #nosec G115 -- n <= clamdChunkSize
-		if _, err := w.Write(hdr[:]); err != nil {
+		if err := writeClamd(w, hdr[:]); err != nil {
 			return err
 		}
-		if _, err := w.Write(payload[:n]); err != nil {
+		if err := writeClamd(w, buf[:n]); err != nil {
 			return err
 		}
-		payload = payload[n:]
+		size -= n
 	}
 	binary.BigEndian.PutUint32(hdr[:], 0)
-	_, err := w.Write(hdr[:])
-	return err
+	return writeClamd(w, hdr[:])
 }
 
 // readClamdReply reads one NUL-terminated reply of at most clamdMaxReply bytes.
 func readClamdReply(r io.Reader) (string, error) {
 	br := bufio.NewReader(io.LimitReader(r, clamdMaxReply+1))
 	line, err := br.ReadBytes(0)
+	if len(line) > clamdMaxReply {
+		return "", errors.New("clamd reply exceeds size limit")
+	}
 	if err != nil {
-		if len(line) > clamdMaxReply {
-			return "", errors.New("clamd reply exceeds size limit")
-		}
 		if errors.Is(err, io.EOF) {
 			return "", errors.New("clamd reply truncated")
 		}
@@ -177,6 +203,8 @@ func parseClamdScanReply(reply string) (ClamdVerdict, error) {
 	// INSTREAM replies name the scanned object "stream".
 	body, ok := strings.CutPrefix(reply, "stream: ")
 	switch {
+	case strings.Contains(reply, "Heuristics.Limits.Exceeded") || strings.Contains(strings.ToLower(reply), "size limit exceeded"):
+		return ClamdVerdict{}, fmt.Errorf("%w: %s", errClamdOversized, reply)
 	case strings.HasSuffix(reply, " ERROR"):
 		return ClamdVerdict{}, fmt.Errorf("clamd: %s", reply)
 	case ok && body == "OK":

@@ -57,7 +57,6 @@ type Engine struct {
 	dpiMgr                *dpi.Manager
 	eventStore            *events.Store
 	rulesetStatus         atomic.Pointer[RulesetStatus]
-	avSink                AVSink
 	inspectAll            bool
 	dpiEnabled            bool              // master DPI on/off
 	dpiMode               string            // "learn" or "enforce"
@@ -315,7 +314,6 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.anomalyDetector = fresh.anomalyDetector
 	e.sigEngine = fresh.sigEngine
 	e.stats = fresh.stats
-	e.avSink = fresh.avSink
 	e.inspectAll = fresh.inspectAll
 	e.dpiEnabled = fresh.dpiEnabled
 	e.dpiMode = fresh.dpiMode

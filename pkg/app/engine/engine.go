@@ -136,9 +136,6 @@ func Run(ctx context.Context, opts Options) error {
 			logger.Errorf("stop antivirus: %v", err)
 		}
 	}()
-	wireAVEvents(avMgr, dpEngine)
-	avMgr.StartWorker()
-	dpEngine.SetAVSink(&avSinkAdapter{av: avMgr})
 	// Start capture (no-op if no interfaces).
 	go func() {
 		if err := dpEngine.StartWithRetry(ctx); err != nil {

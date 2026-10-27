@@ -4,13 +4,17 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/avscan"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
@@ -90,92 +94,6 @@ func TestAVManagerICAPApplyStatusAndFreshclamGuards(t *testing.T) {
 	}
 }
 
-func TestAVManagerCacheQueueWorkerAndPolicies(t *testing.T) {
-	if res := (*AVManager)(nil).Scan(context.Background(), ScanTask{}); res.Verdict != "unknown" || res.Error == nil {
-		t.Fatalf("nil manager Scan() = %+v", res)
-	}
-
-	mgr := newTestAVManager(t, AVOptions{})
-	mgr.maxCache = 1
-	mgr.queue = NewScanQueue(1)
-	mgr.recordVerdict("one", time.Minute, "clean")
-	if got, ok := mgr.cachedVerdict("one"); !ok || got != "clean" {
-		t.Fatalf("cachedVerdict(one) = %q, %v", got, ok)
-	}
-	mgr.cache["expired"] = cachedVerdict{verdict: "old", expires: time.Now().Add(-time.Second)}
-	if _, ok := mgr.cachedVerdict("expired"); ok {
-		t.Fatal("expected expired verdict to be evicted")
-	}
-	mgr.recordVerdict("two", time.Minute, "clean")
-	if _, ok := mgr.cache["one"]; ok {
-		t.Fatal("expected cache reset when maxCache reached")
-	}
-
-	dropped := make(chan string, 1)
-	mgr.OnEvent = func(kind string, attrs map[string]any) {
-		if kind == "service.av.queue_dropped" {
-			dropped <- kind
-		}
-	}
-	if !mgr.queue.Enqueue(ScanTask{Hash: "queued"}) {
-		t.Fatal("expected first queue enqueue to succeed")
-	}
-	mgr.EnqueueScan(ScanTask{Hash: "overflow"})
-	select {
-	case <-dropped:
-	case <-time.After(time.Second):
-		t.Fatal("expected queue_dropped event")
-	}
-
-	verdicts := make(chan ScanResult, 1)
-	worker := newTestAVManager(t, AVOptions{})
-	worker.OnVerdict = func(task ScanTask, res ScanResult) { verdicts <- res }
-	worker.StartWorker()
-	worker.EnqueueScan(ScanTask{Hash: "disabled"})
-	select {
-	case res := <-verdicts:
-		if res.Verdict != "disabled" || res.Error != nil {
-			t.Fatalf("expected disabled verdict from worker, got %+v", res)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for worker verdict")
-	}
-
-	policyMgr := newTestAVManager(t, AVOptions{})
-	policyMgr.lastCfg = config.AVConfig{Enabled: true, Mode: "unknown", FailPolicy: "closed", CacheTTL: time.Minute}
-	if res := policyMgr.Scan(context.Background(), ScanTask{Hash: "cached"}); res.Verdict != "error" || res.Error == nil {
-		t.Fatalf("unknown mode must not scan clean: %+v", res)
-	}
-	if len(policyMgr.cache) != 0 {
-		t.Fatalf("unknown mode cached a verdict: %v", policyMgr.cache)
-	}
-
-	policyMgr.lastCfg = config.AVConfig{Enabled: true, Mode: "clamav", FailPolicy: "closed", ClamAV: config.ClamAVConfig{SocketPath: "/nonexistent/clamd.sock"}}
-	if res := policyMgr.Scan(context.Background(), ScanTask{Preview: []byte("payload")}); res.Verdict != "error" || res.Error == nil {
-		t.Fatalf("expected clamav unavailable error, got %+v", res)
-	}
-
-	errBoom := errors.New("boom")
-	for _, tc := range []struct {
-		cfg     config.AVConfig
-		ics     bool
-		verdict string
-	}{
-		{cfg: config.AVConfig{FailPolicy: "open"}, verdict: "bypass"},
-		{cfg: config.AVConfig{}, verdict: "bypass"},
-		{cfg: config.AVConfig{FailPolicy: "closed"}, verdict: "error"},
-		{cfg: config.AVConfig{FailPolicy: "closed", FailOpenICS: true}, ics: true, verdict: "bypass"},
-		{cfg: config.AVConfig{FailPolicy: "closed"}, ics: true, verdict: "error"},
-	} {
-		if res := policyMgr.handleScanError(tc.cfg, errBoom, "icap", ScanTask{Hash: "h", ICS: tc.ics}); res.Verdict != tc.verdict || !errors.Is(res.Error, errBoom) {
-			t.Fatalf("handleScanError(%+v, ics=%v) = %+v, want %s", tc.cfg, tc.ics, res, tc.verdict)
-		}
-	}
-	if status := policyMgr.Status(context.Background()); status["errors_count"] == 0 {
-		t.Fatalf("scan errors not counted: %+v", status)
-	}
-}
-
 func TestAVManagerIcapAndClamAVScanPaths(t *testing.T) {
 	icapAddr, _ := startFakeICAP(t, nil, icapReply("ICAP/1.0 200 OK", "X-ICAP-Status: VirusFound", "Encapsulated: null-body=0"))
 	clamSock := startFakeClamd(t, nulReply("stream: Eicar-Signature FOUND"))
@@ -187,7 +105,7 @@ func TestAVManagerIcapAndClamAVScanPaths(t *testing.T) {
 		FailPolicy: "open",
 		ICAP:       config.ICAPConfig{Servers: []config.ICAPServer{{Address: icapAddr, Service: "avscan"}}},
 	}
-	if res := mgr.Scan(context.Background(), ScanTask{Hash: "icap-hash", Preview: []byte("payload")}); res.Verdict != "malware" || res.Error != nil {
+	if res := mgr.Scan(context.Background(), scanObject([]byte("payload"))); res.Verdict != avscan.Infected {
 		t.Fatalf("expected ICAP malware verdict, got %+v", res)
 	}
 
@@ -196,7 +114,7 @@ func TestAVManagerIcapAndClamAVScanPaths(t *testing.T) {
 		Mode:    "clamav",
 		ClamAV:  config.ClamAVConfig{SocketPath: clamSock},
 	}
-	if res := mgr.Scan(context.Background(), ScanTask{Hash: "clam-hash", Preview: []byte("payload")}); res.Verdict != "malware" || res.Signature != "Eicar-Signature" || res.Error != nil {
+	if res := mgr.Scan(context.Background(), scanObject([]byte("payload"))); res.Verdict != avscan.Infected || res.Signature != "Eicar-Signature" {
 		t.Fatalf("expected ClamAV malware verdict, got %+v", res)
 	}
 	if status := mgr.Status(context.Background()); status["detections"] != 2 || status["count"] != 2 {
@@ -216,14 +134,14 @@ func TestAVManagerHonoursSizeTimeoutAndCacheScope(t *testing.T) {
 	mgr := newTestAVManager(t, AVOptions{})
 	mgr.lastCfg = config.AVConfig{Enabled: true, Mode: "clamav", FailPolicy: "closed", MaxSizeBytes: 4, TimeoutSec: 1, ClamAV: config.ClamAVConfig{SocketPath: clamSock}}
 
-	if res := mgr.Scan(context.Background(), ScanTask{Hash: "big", Preview: []byte("12345")}); res.Verdict != "error" || res.Error == nil {
+	if res := mgr.Scan(context.Background(), scanObject([]byte("12345"))); res.Reason != avscan.ReasonOversized {
 		t.Fatalf("oversize payload = %+v", res)
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("oversize payload reached clamd")
 	}
 	start := time.Now()
-	if res := mgr.Scan(context.Background(), ScanTask{Hash: "slow", Preview: []byte("slow")}); res.Verdict != "error" {
+	if res := mgr.Scan(context.Background(), scanObject([]byte("slow"))); res.Reason != avscan.ReasonTimeout {
 		t.Fatalf("slow scan = %+v", res)
 	}
 	if time.Since(start) > 1400*time.Millisecond {
@@ -233,21 +151,26 @@ func TestAVManagerHonoursSizeTimeoutAndCacheScope(t *testing.T) {
 	// Resetting maxSizeBytes and timeoutSec to zero restores the defaults.
 	mgr.lastCfg.MaxSizeBytes = 0
 	mgr.lastCfg.TimeoutSec = 0
-	if res := mgr.Scan(context.Background(), ScanTask{Hash: "h", Preview: []byte("12345")}); res.Verdict != "clean" {
+	if res := mgr.Scan(context.Background(), scanObject([]byte("12345"))); res.Verdict != "clean" {
 		t.Fatalf("unlimited scan = %+v", res)
 	}
 	before := calls.Load()
-	if res := mgr.Scan(context.Background(), ScanTask{Hash: "h", Preview: []byte("12345")}); res.Verdict != "clean" || calls.Load() != before {
+	if res := mgr.Scan(context.Background(), scanObject([]byte("12345"))); res.Verdict != "clean" || calls.Load() != before {
 		t.Fatalf("cached scan = %+v calls %d->%d", res, before, calls.Load())
 	}
 	// A new definitions generation or backend must not reuse the verdict.
 	mgr.defsGen++
-	if mgr.Scan(context.Background(), ScanTask{Hash: "h", Preview: []byte("12345")}); calls.Load() != before+1 {
+	if mgr.Scan(context.Background(), scanObject([]byte("12345"))); calls.Load() != before+1 {
 		t.Fatalf("definitions generation did not invalidate cache")
 	}
 	other := startFakeClamd(t, nulReply("stream: Other FOUND"))
 	mgr.lastCfg.ClamAV.SocketPath = other
-	if res := mgr.Scan(context.Background(), ScanTask{Hash: "h", Preview: []byte("12345")}); res.Verdict != "malware" {
+	if res := mgr.Scan(context.Background(), scanObject([]byte("12345"))); res.Verdict != avscan.Infected {
 		t.Fatalf("backend change reused cached verdict: %+v", res)
 	}
+}
+
+// scanObject includes a real digest, so repeated scans exercise caching.
+func scanObject(payload []byte) avscan.Object {
+	return avscan.Object{Body: bytes.NewReader(payload), Size: int64(len(payload)), SHA256: fmt.Sprintf("%x", sha256.Sum256(payload))}
 }

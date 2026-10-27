@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/avscan"
 	commonlog "github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -72,7 +73,7 @@ func DefaultAVOptions() AVOptions {
 
 // AVManager is the engine's single antivirus owner: it applies AV settings,
 // supervises clamd and the FreshClam schedule, manages custom definitions
-// and scans queued tasks. Its children live until Stop.
+// and scans complete objects. Its children live until Stop.
 type AVManager struct {
 	opts   AVOptions
 	ctx    context.Context
@@ -82,8 +83,7 @@ type AVManager struct {
 	// a channel so goroutines being stopped can abandon the wait.
 	op chan struct{}
 
-	OnEvent   func(kind string, attrs map[string]any)
-	OnVerdict func(task ScanTask, res ScanResult)
+	OnEvent func(kind string, attrs map[string]any)
 
 	mu         sync.Mutex
 	lastCfg    config.AVConfig
@@ -100,18 +100,21 @@ type AVManager struct {
 	cache      map[string]cachedVerdict
 	maxCache   int
 
-	queue *ScanQueue
-	log   *zap.SugaredLogger
+	slots        chan struct{}
+	backendReady bool
+	reloadError  string
+	defsPath     string
+	log          *zap.SugaredLogger
 	// validateDef checks a candidate signature database before activation.
 	validateDef func(ctx context.Context, path string) error
 }
 
 type cachedVerdict struct {
-	verdict string
+	result  avscan.Result
 	expires time.Time
 }
 
-// NewAVManager returns a manager whose daemons and workers are bound to ctx
+// NewAVManager returns a manager whose daemons and scans are bound to ctx
 // and stopped by Stop.
 func NewAVManager(ctx context.Context, opts AVOptions) *AVManager {
 	ctx, cancel := context.WithCancel(ctx)
@@ -122,7 +125,7 @@ func NewAVManager(ctx context.Context, opts AVOptions) *AVManager {
 		op:       make(chan struct{}, 1),
 		cache:    make(map[string]cachedVerdict),
 		maxCache: 1024,
-		queue:    NewScanQueue(2048),
+		slots:    make(chan struct{}, 8),
 		log:      newAVLogger(),
 	}
 	m.validateDef = m.clamscanValidate
@@ -159,7 +162,7 @@ func (m *AVManager) lock(ctx context.Context) error {
 
 func (m *AVManager) unlock() { <-m.op }
 
-// Stop ends the FreshClam schedule, stops clamd and the scan worker, and
+// Stop ends the FreshClam schedule, stops clamd, and
 // waits for every goroutine and child process the manager started.
 func (m *AVManager) Stop() error {
 	m.op <- struct{}{}
@@ -167,6 +170,9 @@ func (m *AVManager) Stop() error {
 	m.stopFreshclam()
 	err := m.stopClamd()
 	m.cancel()
+	m.mu.Lock()
+	m.backendReady = false
+	m.mu.Unlock()
 	m.wg.Wait()
 	metrics.ServicesRunning.WithLabelValues("av").Set(0)
 	return err
@@ -182,14 +188,19 @@ func (m *AVManager) Apply(ctx context.Context, cfg config.AVConfig) error {
 	defer m.unlock()
 	m.mu.Lock()
 	m.lastCfg = cfg
+	if !cfg.Enabled || avMode(cfg) != "clamav" {
+		m.reloadError = ""
+	}
 	m.lastRender = time.Now().UTC()
 	m.mu.Unlock()
 	err := m.applyBackend(ctx, cfg)
 	m.mu.Lock()
 	if err != nil {
 		m.lastError = err.Error()
+		m.backendReady = false
 	} else {
 		m.lastError = ""
+		m.backendReady = cfg.Enabled
 	}
 	m.mu.Unlock()
 	ready := 0.0
@@ -264,7 +275,6 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	out["timeout"] = int(avTimeout(cfg) / time.Second)
 	out["cache_ttl"] = avCacheTTL(cfg).String()
 	out["cache_size"] = len(m.cache)
-	out["queue_depth"] = m.queue.Len()
 	out["icap_servers"] = len(cfg.ICAP.Servers)
 	out["detections"] = m.detections
 	out["definitions_generation"] = m.defsGen
@@ -293,6 +303,11 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	m.mu.Unlock()
 
 	ready, version, readyErr := m.readiness(ctx, cfg)
+	m.mu.Lock()
+	if m.reloadError != "" {
+		ready, readyErr = false, m.reloadError
+	}
+	m.mu.Unlock()
 	out["ready"] = ready
 	out["db_version"] = version
 	out["ready_error"] = readyErr

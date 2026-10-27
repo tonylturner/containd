@@ -7,12 +7,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -40,10 +42,13 @@ func TestFakeClamdHelper(t *testing.T) {
 	if err != nil {
 		os.Exit(3)
 	}
-	var socket string
+	var socket, database string
 	for _, line := range strings.Split(string(conf), "\n") {
 		if v, ok := strings.CutPrefix(line, "LocalSocket "); ok {
 			socket = v
+		}
+		if v, ok := strings.CutPrefix(line, "DatabaseDirectory "); ok {
+			database = v
 		}
 	}
 	_ = os.Remove(socket)
@@ -63,6 +68,9 @@ func TestFakeClamdHelper(t *testing.T) {
 		_ = os.Remove(socket)
 		os.Exit(0)
 	}()
+	var dbmu sync.Mutex
+	probe, _ := os.ReadFile(filepath.Join(database, reloadProbeFile))
+	pending := []byte(nil)
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -76,8 +84,23 @@ func TestFakeClamdHelper(t *testing.T) {
 			case "VERSION":
 				return []byte("ClamAV 1.5.2/1/fake\x00")
 			case "RELOAD":
+				dbmu.Lock()
+				pending, _ = os.ReadFile(filepath.Join(database, reloadProbeFile))
+				dbmu.Unlock()
 				return []byte("RELOADING\x00")
 			case "INSTREAM":
+				dbmu.Lock()
+				gate := os.Getenv("CONTAIND_TEST_RELOAD_GATE")
+				_, gateErr := os.Stat(gate)
+				if pending != nil && (gate == "" || gateErr == nil) {
+					probe, pending = pending, nil
+				}
+				data := append([]byte(nil), probe...)
+				dbmu.Unlock()
+				fields := strings.Split(strings.TrimSpace(string(data)), ":")
+				if len(fields) == 4 && hex.EncodeToString(stream) == fields[3] {
+					return []byte("stream: " + fields[0] + ".UNOFFICIAL FOUND\x00")
+				}
 				if bytes.Contains(stream, []byte("EICAR")) {
 					return []byte("stream: Eicar-Test-Signature FOUND\x00")
 				}
@@ -128,7 +151,11 @@ func newFakeClamAV(t *testing.T) *fakeClamAV {
 	if err := os.WriteFile(freshclam, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	f.opts = AVOptions{ClamdPath: clamd, FreshclamPath: freshclam}
+	database := t.TempDir()
+	if err := os.WriteFile(filepath.Join(database, "baseline.ndb"), []byte("Baseline.Test:0:*:4142434445\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.opts = AVOptions{ClamdPath: clamd, FreshclamPath: freshclam, DatabaseDir: database}
 	return f
 }
 
@@ -202,7 +229,7 @@ func TestAVManagerSupervisesOneClamdAndFreshclam(t *testing.T) {
 	if status["ready"] != true || status["db_version"] != "ClamAV 1.5.2/1/fake" || pid == 0 {
 		t.Fatalf("status after apply = %+v", status)
 	}
-	if res := mgr.Scan(context.Background(), ScanTask{Hash: "e", Preview: []byte("xxEICARxx")}); res.Verdict != "malware" {
+	if res := mgr.Scan(context.Background(), scanObject([]byte("xxEICARxx"))); res.Verdict != "infected" {
 		t.Fatalf("scan through supervised clamd = %+v", res)
 	}
 
@@ -373,11 +400,10 @@ func TestAVManagerCustomDefinitionsActivateAndReload(t *testing.T) {
 
 func TestAVManagerStopJoinsChildren(t *testing.T) {
 	fake := newFakeClamAV(t)
-	mgr := NewAVManager(context.Background(), AVOptions{ClamdPath: fake.opts.ClamdPath, FreshclamPath: fake.opts.FreshclamPath, StateDir: t.TempDir(), DatabaseDir: t.TempDir()})
+	mgr := NewAVManager(context.Background(), AVOptions{ClamdPath: fake.opts.ClamdPath, FreshclamPath: fake.opts.FreshclamPath, StateDir: t.TempDir(), DatabaseDir: fake.opts.DatabaseDir})
 	if err := mgr.Apply(applyCtx(t), clamavConfig(fake.socket())); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	mgr.StartWorker()
 	mgr.mu.Lock()
 	done := mgr.clamd.done
 	mgr.mu.Unlock()

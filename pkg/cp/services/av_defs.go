@@ -187,20 +187,9 @@ func (m *AVManager) activateDefinitions(ctx context.Context, cfg config.AVConfig
 	if !cfg.Enabled || avMode(cfg) != "clamav" {
 		return false, nil
 	}
-	m.mu.Lock()
-	running := m.clamd.running()
-	m.mu.Unlock()
-	if running {
-		if err := m.reloadClamd(ctx, cfg); err != nil {
-			return false, err
-		}
-	} else if err := m.ensureClamd(cfg); err != nil {
-		// clamd had exited for lack of a database; these may suffice.
+	if err := m.reloadClamd(ctx, cfg); err != nil {
 		return false, err
 	}
-	m.mu.Lock()
-	m.defsGen++
-	m.mu.Unlock()
 	return true, nil
 }
 

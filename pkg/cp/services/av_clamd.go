@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -66,6 +67,8 @@ func (m *AVManager) renderClamdConf(cfg config.AVConfig) string {
 	b.WriteString("FixStaleSocket yes\n")
 	fmt.Fprintf(&b, "DatabaseDirectory %s\n", m.opts.DatabaseDir)
 	b.WriteString("LogTime yes\n")
+	limit := max(cfg.MaxSizeBytes, int64(100<<20))
+	fmt.Fprintf(&b, "StreamMaxLength %d\nMaxScanSize %d\nMaxFileSize %d\nAlertExceedsMax yes\n", limit, limit, limit)
 	if name, _, _, ok := m.daemonAccount(); ok {
 		fmt.Fprintf(&b, "User %s\n", name)
 	}
@@ -90,14 +93,17 @@ func (m *AVManager) applyClamAV(ctx context.Context, cfg config.AVConfig) error 
 	if err := m.prepareDir(filepath.Dir(clamdSocket(cfg))); err != nil {
 		return fmt.Errorf("prepare clamd socket directory: %w", err)
 	}
-	if err := m.syncCustomDefs(cfg); err != nil {
-		return fmt.Errorf("activate custom definitions: %w", err)
-	}
-	if err := m.ensureClamd(cfg); err != nil {
-		return err
-	}
+	// FreshClam must still be able to bootstrap a missing real database.
 	if err := m.ensureFreshclam(cfg); err != nil {
 		return err
+	}
+	m.mu.Lock()
+	changed := !m.clamd.running() || m.clamd.conf != m.renderClamdConf(cfg) || m.defsPath != customDefsPath(cfg) || m.reloadError != ""
+	m.mu.Unlock()
+	if changed {
+		if _, err := m.activateDefinitions(ctx, cfg); err != nil {
+			return err
+		}
 	}
 	return m.waitClamdReady(ctx, cfg)
 }
@@ -112,6 +118,12 @@ func (m *AVManager) ensureClamd(cfg config.AVConfig) error {
 	if unchanged {
 		return nil
 	}
+	// A synthetic reload probe is not an antivirus database on its own.
+	// Without this check, a new installation could report every object clean
+	// while FreshClam has not downloaded any actual definitions yet.
+	if err := m.requireDefinitions(); err != nil {
+		return err
+	}
 	if err := m.stopClamd(); err != nil {
 		return err
 	}
@@ -122,6 +134,30 @@ func (m *AVManager) ensureClamd(cfg config.AVConfig) error {
 		return fmt.Errorf("write clamd config: %w", err)
 	}
 	return m.startClamd(conf)
+}
+
+func (m *AVManager) requireDefinitions() error {
+	entries, err := os.ReadDir(m.opts.DatabaseDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name() == reloadProbeFile || !entry.Type().IsRegular() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext != ".cvd" && ext != ".cld" && !slices.Contains(customDefExtensions, ext) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Size() > 0 {
+			return nil
+		}
+	}
+	return errors.New("clamd: a signature database is required (reload probe excluded)")
 }
 
 func (m *AVManager) startClamd(conf string) error {
@@ -208,16 +244,6 @@ func (m *AVManager) waitClamdReady(ctx context.Context, cfg config.AVConfig) err
 		case <-ticker.C:
 		}
 	}
-}
-
-// reloadClamd makes a running clamd load changed databases.
-func (m *AVManager) reloadClamd(ctx context.Context, cfg config.AVConfig) error {
-	ctx, cancel := context.WithTimeout(ctx, avTimeout(cfg))
-	defer cancel()
-	if err := (&ClamAVClient{Timeout: avTimeout(cfg), Socket: clamdSocket(cfg)}).Reload(ctx); err != nil {
-		return fmt.Errorf("reload clamd: %w", err)
-	}
-	return nil
 }
 
 // writeFileAtomic replaces path so readers see the old or new content only.
