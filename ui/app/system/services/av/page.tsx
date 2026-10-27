@@ -12,14 +12,13 @@ import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { Card } from "../../../../components/Card";
-import { ConfirmDialog, useConfirm } from "../../../../components/ConfirmDialog";
+import { CustomDefinitions } from "./custom-defs";
 
 const emptyICAPServer = { address: "", useTls: false, service: "" };
 
 export default function AVPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const confirm = useConfirm();
   const [cfg, setCfg] = useState<AVConfig>({
     enabled: false,
     mode: "clamav",
@@ -34,7 +33,6 @@ export default function AVPage() {
   const [updating, setUpdating] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const [defs, setDefs] = useState<string[]>([]);
-  const [uploading, setUploading] = useState(false);
   const [defsPath, setDefsPath] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -178,7 +176,6 @@ export default function AVPage() {
         </div>
       }
     >
-      <ConfirmDialog {...confirm.props} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -451,69 +448,16 @@ export default function AVPage() {
           </div>
         </div>
 
-        <div className="mt-6">
-          <h3 className="text-sm font-semibold text-(--text)">Custom definitions</h3>
-          <p className="text-xs text-(--text-muted)">Upload .ndb/.ldb/.yara files into the custom defs path.</p>
-          <div className="mt-3 flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <label className="text-xs uppercase tracking-wide text-(--text-muted)">
-                Upload file
-                <input
-                  type="file"
-                  className="mt-1 text-sm text-(--text)"
-                  disabled={!canEdit || uploading}
-                  onChange={async (e) => {
-                    if (!e.target.files?.length) return;
-                    setUploading(true);
-                    const f = e.target.files[0];
-                    const result = await api.uploadAVDef(f);
-                    const msg = result.ok ? `Uploaded ${f.name}` : (result.error || `Upload failed for ${f.name}`);
-                    setUpdateMsg(msg);
-                    toast(msg, result.ok ? "success" : "error");
-                    setUploading(false);
-                    refresh();
-                  }}
-                />
-              </label>
-            </div>
-            <div className="rounded-lg border bg-(--surface) p-3 text-xs text-(--text)">
-              <div className="mb-2 font-semibold text-(--text)">Existing defs</div>
-              {defsPath && <div className="mb-2 text-[10px] text-(--text-muted)">Path: {defsPath}</div>}
-              {defs.length === 0 && <div className="text-(--text-muted)">None uploaded.</div>}
-              {defs.length > 0 && (
-                <ul className="space-y-1">
-                  {defs.map((d) => (
-                    <li key={d} className="flex items-center justify-between rounded-sm border bg-(--surface) px-2 py-1">
-                      <span>{d}</span>
-                      {canEdit && (
-                        <button
-                          className="text-xs text-red-400 transition-ui hover:bg-red-500/10"
-                          onClick={() => {
-                            confirm.open({
-                              title: "Delete definition",
-                              message: `Delete ${d}?`,
-                              variant: "danger",
-                              confirmLabel: "Delete",
-                              onConfirm: async () => {
-                                const result = await api.deleteAVDef(d);
-                                const msg = result.ok ? `Deleted ${d}` : (result.error || `Failed to delete ${d}`);
-                                setUpdateMsg(msg);
-                                toast(msg, result.ok ? "success" : "error");
-                                refresh();
-                              },
-                            });
-                          }}
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        </div>
+        <CustomDefinitions
+          defs={defs}
+          defsPath={defsPath}
+          canEdit={canEdit}
+          notify={(msg, ok) => {
+            setUpdateMsg(msg);
+            toast(msg, ok ? "success" : "error");
+          }}
+          refresh={refresh}
+        />
       </Card>
 
       <SaveStateLine state={save.state} saved="staged — commit to apply." />
