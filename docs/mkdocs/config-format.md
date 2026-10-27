@@ -317,12 +317,18 @@ is a verified empty table; unavailable or interrupted netlink dumps return an
 error with the backend reason. The engine needs Linux conntrack support and
 `NET_ADMIN` in the traffic's network namespace. The list is capped at 5,000 rows.
 
-Admins use `POST /api/v1/conntrack/kill` with the displayed original TCP or UDP
-tuple (`proto`, `src`, `dst`, `sport`, `dport`). `scope: connection` (default)
-revokes only that exact connection in both directions; reconnecting from a fresh
-source port is allowed. `scope: client-service` ends all that client's
+Admins use `POST /api/v1/conntrack/kill` with the displayed original tuple:
+`proto`, `src`, `dst`, then `sport` and `dport` for TCP and UDP, or `icmpId`,
+`icmpType` and `icmpCode` for ICMP (IPv4) and ICMPv6 (IPv6). ICMP connections
+are queries such as pings: echo requests are type 8 (ICMP) and 128 (ICMPv6).
+`scope: connection` (default) revokes only that exact connection in both
+directions; reconnecting from a fresh source port, or pinging with a new ICMP
+identifier, is allowed. `scope: client-service` ends all that client's
 connections to the original destination service and prevents reconnects for the
-interval. Neighbouring clients, services and transports remain unaffected.
+interval. For ICMP the service is the query type and code sent to that
+destination, so client-service ends all of the client's pings to that host.
+Neighbouring clients, services and transports remain unaffected, and ICMP
+errors about other connections, such as destination unreachable, still pass.
 `durationSecs` is 1–3600 seconds, default 60. These are runtime operations, not
 candidate configuration changes, and require active nftables enforcement.
 Revocations never refuse management traffic: the management listeners stay
@@ -334,10 +340,12 @@ that one connection.
 The response reports `revocationInstalled`, `blockedUntil`, `conntrackDeleted`
 and counts/errors independently. Revocation is installed atomically before
 state deletion. Matching TCP packets receive kernel-generated resets on each
-endpoint's next packet; this is not confirmed endpoint closure. Matching UDP
-packets are dropped. A failed revocation does not delete kernel state. Inspect
-each step even on HTTP 200. ICMP and other protocols are visible but cannot be
-killed through this port-based API.
+endpoint's next packet; this is not confirmed endpoint closure. Matching UDP,
+ICMP and ICMPv6 packets are dropped. ICMP revocations match packets by their
+connection's original tuple, so an operator `notrack` rule that exempts ICMP
+from connection tracking also exempts it from an exact ICMP revocation. A
+failed revocation does not delete kernel state. Inspect each step even on HTTP
+200. Other protocols are visible but cannot be killed.
 
 Revocations are kernel runtime state in the nftables table
 `inet <enforceTable>`, not persisted configuration. They survive commits

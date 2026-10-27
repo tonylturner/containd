@@ -114,3 +114,40 @@ test("a malformed connection list is reported, not rendered", async ({ page }) =
   await expect(page.getByRole("alert", { name: "Connections error" })).toContainText("malformed connection list");
   await expect(page.getByText(/Verified empty/)).toHaveCount(0);
 });
+
+const ping = {
+  proto: "icmp", src: "192.0.2.10", dst: "198.51.100.20", icmpId: "4660", icmpType: "8", icmpCode: "0",
+  replySrc: "198.51.100.20", replyDst: "203.0.113.1", replyIcmpId: "7", replyIcmpType: "0", replyIcmpCode: "0",
+};
+const ping6 = {
+  proto: "icmpv6", src: "2001:db8::10", dst: "2001:db8::20", icmpId: "0", icmpType: "128", icmpCode: "0",
+  replySrc: "2001:db8::20", replyDst: "2001:db8::10", replyIcmpId: "0", replyIcmpType: "129", replyIcmpCode: "0",
+};
+
+test("ICMP rows show identifier and type in place of ports and can be killed", async ({ page }) => {
+  const writes = await mockAPI(page, { entries: [ping, ping6, { proto: "47", src: "192.0.2.10", dst: "198.51.100.20" }] });
+  await open(page);
+  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "id 4660", exact: true }) });
+  await expect(row.getByRole("cell", { name: "type 8 code 0", exact: true })).toBeVisible();
+  await expect(row).toContainText("198.51.100.20 → 203.0.113.1 (id 7)");
+  await expect(page.getByRole("row").filter({ has: page.getByRole("cell", { name: "47", exact: true }) }).getByRole("button", { name: "Kill", exact: true })).toBeDisabled();
+  await row.getByRole("button", { name: "Kill", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("icmp 192.0.2.10 → 198.51.100.20 (id 4660)");
+  await expect(page.getByRole("dialog")).toContainText("A new ICMP identifier is allowed. Matching packets are dropped.");
+  await page.getByRole("dialog").getByRole("button", { name: "Kill", exact: true }).click();
+  await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Conntrack deleted: yes (1/1)");
+  expect(writes).toEqual([{ proto: "icmp", src: ping.src, dst: ping.dst, icmpId: 4660, icmpType: 8, icmpCode: 0, scope: "connection", durationSecs: 60 }]);
+});
+
+test("client-service ICMPv6 kill ends the client's pings to that host", async ({ page }) => {
+  const writes = await mockAPI(page, { entries: [ping6] });
+  await open(page);
+  await page.getByLabel("Kill scope").selectOption("client-service");
+  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "id 0", exact: true }) });
+  await expect(row.getByRole("cell", { name: "type 128 code 0", exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "Kill", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("all of the client's pings to that host stop");
+  await page.getByRole("dialog").getByRole("button", { name: "Kill", exact: true }).click();
+  await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Revocation installed: yes");
+  expect(writes).toEqual([{ proto: "icmpv6", src: ping6.src, dst: ping6.dst, icmpId: 0, icmpType: 128, icmpCode: 0, scope: "client-service", durationSecs: 60 }]);
+});

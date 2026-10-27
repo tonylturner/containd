@@ -38,9 +38,9 @@ func revocationRules() []string {
 	// conntrack association. Let resets pass rather than rejecting our own RST.
 	out := []string{"tcp flags & rst == rst return"}
 	for _, family := range []string{"4", "6"} {
-		ip := "ip"
+		ip, icmp := "ip", "icmp"
 		if family == "6" {
-			ip = "ip6"
+			ip, icmp = "ip6", "icmpv6"
 		}
 		for _, service := range []bool{false, true} {
 			name := "revoke" + family
@@ -71,14 +71,43 @@ func revocationRules() []string {
 					out = append(out, fmt.Sprintf("meta l4proto %s %s%s @%s %s", proto, key, ports, name, action))
 				}
 			}
+			out = append(out, icmpRevocationRules(ip, icmp, name, service)...)
 		}
 	}
 	return out
 }
 
+// icmpRevocationRules drop the ICMP (IPv4) or ICMPv6 (IPv6) packets of
+// revoked entries. In an ICMP tuple the identifier takes the source port's
+// place (ct original proto-src) and the query type and code the destination
+// port's (ct original proto-dst, type * 256 + code). Matching requires an ICMP
+// entry: an ICMP error travels with the entry of the flow it reports on, so
+// errors about TCP and UDP flows never match an ICMP revocation.
+//
+// Packets without conntrack state match the service key by their own type
+// and code (th sport, the first two bytes of the ICMP header). They cannot
+// match an exact key: nft types the identifier (icmp id, bytes 4-5) as a
+// plain integer, which a set of service-typed fields does not accept. Every
+// query conntrack sees opens an entry that the tracked rule matches, so a
+// revoked flow gets no new replies; only packets exempt from conntrack, and
+// stray replies that no longer have an entry, escape an exact revocation.
+func icmpRevocationRules(ip, proto, set string, service bool) []string {
+	tracked := "ct original proto-src . ct original proto-dst"
+	if service {
+		tracked = "ct original proto-dst"
+	}
+	var out []string
+	if service {
+		out = append(out, fmt.Sprintf("meta l4proto %s ct state { invalid, untracked } %s saddr . %s daddr . meta l4proto . th sport @%s drop", proto, ip, ip, set))
+	}
+	return append(out, fmt.Sprintf("meta l4proto %s ct protocol %s ct original %s saddr . ct original %s daddr . meta l4proto . %s @%s drop", proto, proto, ip, ip, tracked, set))
+}
+
 // RevokeConnections commits all keys atomically, before conntrack is deleted.
 // Broad service keys use only original client addresses, never shared SNAT
 // reply addresses. Reply tuples remain exact so other NAT clients stay live.
+// ICMP and ICMPv6 entries are keyed by their original tuple only: their rules
+// match both directions by the entry's original tuple.
 func (u *NftUpdater) RevokeConnections(ctx context.Context, entries []conntrack.Entry, scope string, ttl time.Duration) error {
 	text, err := u.revocationBatch(entries, scope, ttl)
 	if err != nil {
@@ -98,10 +127,15 @@ func (u *NftUpdater) revocationBatch(entries []conntrack.Entry, scope string, tt
 		return "", err
 	}
 	keys := map[string]bool{}
+	add := func(set, key string) {
+		keys[fmt.Sprintf("add element inet %s %s { %s timeout %ds }\n", u.TableName, set, key, int(ttl.Seconds()))] = true
+	}
 	for _, e := range entries {
-		req := conntrack.KillRequest{DeleteRequest: conntrack.DeleteRequest{Proto: e.Proto, Src: e.Src, Dst: e.Dst}}
-		req.Sport, _ = strconv.Atoi(e.Sport)
-		req.Dport, _ = strconv.Atoi(e.Dport)
+		original, err := e.Original()
+		if err != nil {
+			return "", err
+		}
+		req := conntrack.KillRequest{DeleteRequest: original}
 		if err := req.Validate(); err != nil {
 			return "", err
 		}
@@ -109,6 +143,14 @@ func (u *NftUpdater) revocationBatch(entries []conntrack.Entry, scope string, tt
 		src, _ := netip.ParseAddr(req.Src)
 		if src.Is6() {
 			family = "6"
+		}
+		if conntrack.IsICMP(req.Proto) {
+			typeCode := req.ICMPType<<8 | req.ICMPCode
+			add("revoke"+family, fmt.Sprintf("%s . %s . %s . %d . %d", req.Src, req.Dst, req.Proto, req.ICMPID, typeCode))
+			if scope == "client-service" {
+				add("revoke_service"+family, fmt.Sprintf("%s . %s . %s . %d", req.Src, req.Dst, req.Proto, typeCode))
+			}
+			continue
 		}
 		for _, tuple := range [][4]string{{e.Src, e.Dst, e.Sport, e.Dport}, {e.ReplySrc, e.ReplyDst, e.ReplySport, e.ReplyDport}} {
 			a, ae := netip.ParseAddr(tuple[0])
@@ -118,12 +160,10 @@ func (u *NftUpdater) revocationBatch(entries []conntrack.Entry, scope string, tt
 			if ae != nil || be != nil || a.Is4() != src.Is4() || b.Is4() != src.Is4() || a.Zone() != "" || b.Zone() != "" || se != nil || de != nil || sp < 1 || sp > 65535 || dp < 1 || dp > 65535 {
 				return "", fmt.Errorf("invalid revocation tuple")
 			}
-			key := fmt.Sprintf("%s . %s . %s . %d . %d", a, b, req.Proto, sp, dp)
-			keys[fmt.Sprintf("add element inet %s revoke%s { %s timeout %ds }\n", u.TableName, family, key, int(ttl.Seconds()))] = true
+			add("revoke"+family, fmt.Sprintf("%s . %s . %s . %d . %d", a, b, req.Proto, sp, dp))
 		}
 		if scope == "client-service" {
-			key := fmt.Sprintf("%s . %s . %s . %d", req.Src, req.Dst, req.Proto, req.Dport)
-			keys[fmt.Sprintf("add element inet %s revoke_service%s { %s timeout %ds }\n", u.TableName, family, key, int(ttl.Seconds()))] = true
+			add("revoke_service"+family, fmt.Sprintf("%s . %s . %s . %d", req.Src, req.Dst, req.Proto, req.Dport))
 		}
 	}
 	lines := make([]string, 0, len(keys))

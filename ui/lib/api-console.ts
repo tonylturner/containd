@@ -32,8 +32,20 @@ export type ManagementReservation = {
   listenerFaults?: string[] | null;
 };
 
-export type ConntrackKillRequest = {
-  proto: string; src: string; dst: string; sport: number; dport: number;
+/**
+ * A kernel connection as listed. TCP and UDP tuples carry ports; ICMP and
+ * ICMPv6 tuples carry the query identifier, type and code instead.
+ */
+export type ConntrackConnection = ConntrackEntry & {
+  icmpId?: string; icmpType?: string; icmpCode?: string;
+  replyIcmpId?: string; replyIcmpType?: string; replyIcmpCode?: string;
+};
+
+/** The original tuple of the connection to kill: ports, or the ICMP identifier, type and code. */
+export type ConntrackKillTuple =
+  | { proto: "tcp" | "udp"; src: string; dst: string; sport: number; dport: number }
+  | { proto: "icmp" | "icmpv6"; src: string; dst: string; icmpId: number; icmpType: number; icmpCode: number };
+export type ConntrackKillRequest = ConntrackKillTuple & {
   scope: "connection" | "client-service"; durationSecs: number;
 };
 export type ConntrackKillResult = {
@@ -43,7 +55,7 @@ export type ConntrackKillResult = {
   closure: string;
 };
 
-async function listConntrack(limit: number): Promise<ApiResult<ConntrackEntry[]>> {
+async function listConntrack(limit: number): Promise<ApiResult<ConntrackConnection[]>> {
   try {
     const res = await fetchWithSession(`/api/v1/conntrack?limit=${limit}`, { cache: "no-store", headers: authHeaders() });
     if (handleUnauthorized(res)) return failureOf(res);
@@ -52,7 +64,7 @@ async function listConntrack(limit: number): Promise<ApiResult<ConntrackEntry[]>
     const body: unknown = await res.json();
     // A list is the only valid snapshot; anything else is not "verified empty".
     if (!Array.isArray(body)) return { ok: false, error: "malformed connection list" };
-    return { ok: true, data: body as ConntrackEntry[] };
+    return { ok: true, data: body as ConntrackConnection[] };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Network error" };
   }

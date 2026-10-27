@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type ConntrackEntry } from "../../lib/api";
-import type { ConntrackKillResult, ConntrackKillRequest } from "../../lib/api-console";
+import { api, isAdmin } from "../../lib/api";
+import type { ConntrackConnection, ConntrackKillResult, ConntrackKillRequest, ConntrackKillTuple } from "../../lib/api-console";
 import { Shell } from "../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
@@ -18,10 +18,52 @@ function normalizeProto(p: string | undefined): string {
   return (p ?? "").toLowerCase().trim();
 }
 
+const killable = ["tcp", "udp", "icmp", "icmpv6"];
+
+function isICMP(proto: string): proto is "icmp" | "icmpv6" {
+  return proto === "icmp" || proto === "icmpv6";
+}
+
+/** A listed decimal field as a number; NaN when absent or malformed. */
+function decimal(value: string | undefined): number {
+  return value !== undefined && /^\d+$/.test(value) ? Number(value) : NaN;
+}
+
+/** The original tuple a kill selects, or null when the entry lacks one. */
+function killTuple(e: ConntrackConnection): ConntrackKillTuple | null {
+  const proto = normalizeProto(e.proto);
+  const src = (e.src ?? "").trim();
+  const dst = (e.dst ?? "").trim();
+  if (!src || !dst) return null;
+  if (isICMP(proto)) {
+    const [icmpId, icmpType, icmpCode] = [e.icmpId, e.icmpType, e.icmpCode].map(decimal);
+    if ([icmpId, icmpType, icmpCode].some(Number.isNaN)) return null;
+    return { proto, src, dst, icmpId, icmpType, icmpCode };
+  }
+  if (proto !== "tcp" && proto !== "udp") return null;
+  const sport = decimal(e.sport);
+  const dport = decimal(e.dport);
+  if (!sport || !dport) return null;
+  return { proto, src, dst, sport, dport };
+}
+
+/** The tuple for display: endpoints with ports, or with the ICMP identifier. */
+function describeTuple(e: ConntrackConnection): string {
+  if (isICMP(normalizeProto(e.proto))) return `${e.proto} ${e.src ?? "—"} → ${e.dst ?? "—"} (id ${e.icmpId ?? "—"})`;
+  return `${e.proto} ${formatEndpoint(e.src, e.sport)} → ${formatEndpoint(e.dst, e.dport)}`;
+}
+
+/** The reply tuple (NAT) column: ports, or the ICMP identifier NAT may rewrite. */
+function replyTuple(e: ConntrackConnection): string {
+  if (!e.replySrc) return "—";
+  if (isICMP(normalizeProto(e.proto))) return `${e.replySrc} → ${e.replyDst ?? "—"} (id ${e.replyIcmpId ?? "—"})`;
+  return `${formatEndpoint(e.replySrc, e.replySport)} → ${formatEndpoint(e.replyDst, e.replyDport)}`;
+}
+
 export default function SessionsPage() {
   const canKill = isAdmin();
   const confirm = useConfirm();
-  const [entries, setEntries] = useState<ConntrackEntry[]>([]);
+  const [entries, setEntries] = useState<ConntrackConnection[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [available, setAvailable] = useState(false);
@@ -63,6 +105,7 @@ export default function SessionsPage() {
         e.sport ?? "",
         e.dst ?? "",
         e.dport ?? "",
+        e.icmpId ?? "",
         e.mark ?? "",
         ...(e.tags ?? []),
       ]
@@ -72,21 +115,17 @@ export default function SessionsPage() {
     });
   }, [entries, filter.q]);
 
-  async function kill(e: ConntrackEntry) {
+  async function kill(e: ConntrackConnection) {
     if (!canKill) return;
     setError(null);
-    const proto = normalizeProto(e.proto);
-    const src = (e.src ?? "").trim();
-    const dst = (e.dst ?? "").trim();
-    const sport = Number(e.sport);
-    const dport = Number(e.dport);
-    if (!proto || !src || !dst || !sport || !dport) {
+    const tuple = killTuple(e);
+    if (!tuple) {
       setError("Cannot kill: missing tuple fields.");
       return;
     }
     setKilling(true);
     setKillResult(null);
-    const res = await api.killConntrack({ proto, src, dst, sport, dport, scope, durationSecs });
+    const res = await api.killConntrack({ ...tuple, scope, durationSecs });
     setKilling(false);
     if (!res.ok) {
       setError(`Kill failed: ${res.error}`);
@@ -96,10 +135,16 @@ export default function SessionsPage() {
     await refresh();
   }
 
-  function handleKill(e: ConntrackEntry) {
+  function handleKill(e: ConntrackConnection) {
+    const proto = normalizeProto(e.proto);
+    const icmp = isICMP(proto);
+    const reach = scope === "client-service"
+      ? `This ends all of this client's connections to that service and prevents new ones during the interval.${icmp ? " For ICMP the service is the query type, so all of the client's pings to that host stop." : ""}`
+      : icmp ? "Only this exact ping is blocked. A new ICMP identifier is allowed." : "Only this exact connection is blocked. A fresh source port is allowed.";
+    const closure = proto === "tcp" ? "TCP closure is signalled on each endpoint's next packet, not confirmed." : "Matching packets are dropped.";
     confirm.open({
       title: scope === "connection" ? "Kill connection" : "Kill client-service connections",
-      message: `Revoke ${e.proto} ${formatEndpoint(e.src, e.sport)} → ${formatEndpoint(e.dst, e.dport)} for ${durationSecs} seconds? ${scope === "client-service" ? "This ends all of this client's connections to that service and prevents new ones during the interval." : "Only this exact connection is blocked. A fresh source port is allowed."} TCP closure is signalled on each endpoint's next packet, not confirmed.`,
+      message: `Revoke ${describeTuple(e)} for ${durationSecs} seconds? ${reach} ${closure}`,
       confirmLabel: "Kill",
       variant: "danger",
       onConfirm: () => kill(e),
@@ -151,7 +196,7 @@ export default function SessionsPage() {
           <label className="flex flex-col gap-1">Revocation seconds (1–3600)
             <input aria-label="Revocation seconds" type="number" min={1} max={3600} value={durationSecs} onChange={(e) => setDurationSecs(Number(e.target.value))} className="input-industrial w-40" />
           </label>
-          <p className="text-(--text-muted)">{scope === "connection" ? "A fresh source port is a new connection and is allowed." : "Ends all this client's connections to the service, including reconnects."}</p>
+          <p className="text-(--text-muted)">{scope === "connection" ? "A fresh source port, or a new ICMP identifier, is a new connection and is allowed." : "Ends all this client's connections to the service, including reconnects. For ICMP, all its pings to that host."}</p>
         </div>
       )}
       {killResult && (
@@ -180,7 +225,7 @@ export default function SessionsPage() {
                 {loading ? "Loading…" : `${filtered.length} shown / ${entries.length} total`}
               </div>
               <div className="text-xs text-(--text-muted)">
-                Kernel conntrack, IPv4 and IPv6. Tags are the labels of the running TAG rules that match each connection as opened. Kill supports TCP and UDP; TCP resets are sent in response to matching packets.
+                Kernel conntrack, IPv4 and IPv6. Tags are the labels of the running TAG rules that match each connection as opened. ICMP rows show the identifier and query type in place of ports. Kill supports TCP, UDP, ICMP and ICMPv6; TCP resets are sent in response to matching packets, and other matching packets are dropped.
               </div>
             </div>
           </div>
@@ -204,23 +249,23 @@ export default function SessionsPage() {
               </thead>
               <tbody>
                 {filtered.map((e, idx) => (
-                  <tr key={`${e.proto}-${e.src}-${e.sport}-${e.dst}-${e.dport}-${idx}`} className="table-row-hover transition-ui border-t">
+                  <tr key={`${e.proto}-${e.src}-${e.sport ?? e.icmpId}-${e.dst}-${e.dport ?? e.icmpType}-${idx}`} className="table-row-hover transition-ui border-t">
                     <td className="px-4 py-3 font-medium text-(--text)">{e.proto || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.state || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.src || "—"}</td>
-                    <td className="px-4 py-3 text-(--text)">{e.sport || "—"}</td>
+                    <td className="px-4 py-3 text-(--text)">{e.icmpId !== undefined ? `id ${e.icmpId}` : e.sport || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.dst || "—"}</td>
-                    <td className="px-4 py-3 text-(--text)">{e.dport || "—"}</td>
+                    <td className="px-4 py-3 text-(--text)">{e.icmpType !== undefined ? `type ${e.icmpType} code ${e.icmpCode ?? "—"}` : e.dport || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.mark || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">
                       <TagList tags={e.tags} />
                     </td>
                     <td className="px-4 py-3 text-(--text)">{e.assured ? "yes" : "no"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.timeoutSecs ? `${e.timeoutSecs}s` : "—"}</td>
-                    <td className="px-4 py-3 text-(--text-muted)">{e.replySrc ? `${formatEndpoint(e.replySrc, e.replySport)} → ${formatEndpoint(e.replyDst, e.replyDport)}` : "—"}</td>
+                    <td className="px-4 py-3 text-(--text-muted)">{replyTuple(e)}</td>
                     <td className="px-4 py-3 text-right">
                       <button
-                        disabled={!canKill || killing || !["tcp", "udp"].includes(e.proto) || !Number.isInteger(durationSecs) || durationSecs < 1 || durationSecs > 3600}
+                        disabled={!canKill || killing || !killable.includes(normalizeProto(e.proto)) || !Number.isInteger(durationSecs) || durationSecs < 1 || durationSecs > 3600}
                         onClick={() => handleKill(e)}
                         className={
                           canKill
