@@ -123,7 +123,7 @@ docker run -d \
   --name containd \
   --user 0 \
   --cap-add NET_ADMIN --cap-add NET_RAW \
-  --cap-add NET_BIND_SERVICE \
+  --cap-add NET_BIND_SERVICE --cap-add SYS_TIME \
   --device /dev/net/tun:/dev/net/tun \
   -p 8080:8080 -p 8443:8443 -p 2222:2222 \
   -v containd-data:/data \
