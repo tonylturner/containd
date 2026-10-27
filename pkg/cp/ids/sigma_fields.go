@@ -69,18 +69,14 @@ func decoderAttribute(field string) bool {
 		"qualifier", "quality", "value", "value_invalid", "source_time",
 		"time_valid", "time_summer", "apdu_id", "raw_hex", "transient":
 		return true
-	// Other protocol-specific keys emitted in pkg/dp/ics/*/decoder.go
-	// (and iec61850/mms.go).
-	case "bvlc_function", "is_critical", "object_instance", "object_type",
-		"property_id", "service", "service_code", "address", "attribute_id",
+	// Additional keys emitted by the retained industrial decoders.
+	case "service_code", "address", "attribute_id",
 		"cip_path", "command_code", "instance_id", "is_control", "msp",
 		"multi_service_count", "object_class", "object_class_name", "service_name",
 		"session_handle", "destination_address", "function_name", "iin_flags",
-		"source_address", "pdu_tag", "service_tag", "variable_name",
+		"source_address",
 		"transaction_id", "exception_code", "exception_description", "mei_type",
-		"mei_type_name", "quantity", "sub_function", "sub_function_name",
-		"chunk_type", "message_type", "area", "cotp_pdu_type", "db_number",
-		"error_class", "error_code", "item_count", "pdu_reference", "safety_critical":
+		"mei_type_name", "quantity", "sub_function", "sub_function_name":
 		return true
 	default:
 		return false

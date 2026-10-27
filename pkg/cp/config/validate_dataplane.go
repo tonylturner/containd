@@ -9,9 +9,13 @@ import (
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/dp/enforce"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 func validateDataPlane(dp DataPlaneConfig) error {
+	if err := ics.ValidateToggles(dp.DPIICSProtocols); err != nil {
+		return err
+	}
 	if err := validateDomainExclusions(dp.DPIExclusions); err != nil {
 		return err
 	}
@@ -138,3 +142,6 @@ func validatePCAPForwardTarget(t PCAPForwardTarget) error {
 	}
 	return nil
 }
+
+// ValidateDataPlaneConfig validates settings accepted by the internal engine API.
+func ValidateDataPlaneConfig(dp DataPlaneConfig) error { return validateDataPlane(dp) }

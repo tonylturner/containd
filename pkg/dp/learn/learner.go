@@ -12,6 +12,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
@@ -23,7 +24,7 @@ type LearnedProfile struct {
 	UnitIDs       map[uint8]bool  `json:"unitIDs,omitempty"`
 	FunctionCodes map[uint8]bool  `json:"functionCodes,omitempty"`
 	Addresses     map[string]bool `json:"addresses,omitempty"`
-	ServiceCodes  map[uint16]bool `json:"serviceCodes,omitempty"`  // CIP/OPC UA service codes > 255
+	ServiceCodes  map[uint16]bool `json:"serviceCodes,omitempty"`  // CIP service codes
 	ObjectClasses map[uint16]bool `json:"objectClasses,omitempty"` // CIP object classes
 	ReadSeen      bool            `json:"readSeen"`
 	WriteSeen     bool            `json:"writeSeen"`
@@ -48,7 +49,7 @@ func New() *Learner {
 // RecordEvent updates the learned profile for a communication pair based on a DPI event.
 func (l *Learner) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
 	proto := strings.ToLower(ev.Proto)
-	if proto == "" {
+	if !ics.Learnable(proto) {
 		return
 	}
 
@@ -97,14 +98,6 @@ func recordProtocolAttributes(proto string, p *LearnedProfile, ev dpi.Event) {
 		recordCIPAttributes(p, ev)
 	case "dnp3":
 		recordDNP3Attributes(p, ev)
-	case "s7comm":
-		recordFunctionAndAddress(p, ev)
-	case "bacnet":
-		recordBACnetAttributes(p, ev)
-	case "opcua":
-		recordStringAddress(p, ev.Attributes["service"])
-	case "mms":
-		recordMMSAttributes(p, ev)
 	default:
 		recordDefaultAttributes(p, ev)
 	}
@@ -125,35 +118,6 @@ func recordDNP3Attributes(p *LearnedProfile, ev dpi.Event) {
 		p.FunctionCodes[v] = true
 	}
 	recordStringAddress(p, ev.Attributes["object_groups"])
-}
-
-func recordFunctionAndAddress(p *LearnedProfile, ev dpi.Event) {
-	if v, ok := eventfields.Uint8(ev.Attributes, "function_code"); ok {
-		p.FunctionCodes[v] = true
-	}
-	recordStringAddress(p, ev.Attributes["address"])
-}
-
-func recordBACnetAttributes(p *LearnedProfile, ev dpi.Event) {
-	if v, ok := eventfields.Uint8(ev.Attributes, "service_code"); ok {
-		p.FunctionCodes[v] = true
-	}
-	objType, hasType := ev.Attributes["object_type"]
-	objInst, hasInst := ev.Attributes["object_instance"]
-	if hasType && hasInst {
-		p.Addresses[fmt.Sprintf("%v/%v", objType, objInst)] = true
-	}
-}
-
-func recordMMSAttributes(p *LearnedProfile, ev dpi.Event) {
-	if st, ok := ev.Attributes["service_tag"]; ok {
-		if s, ok := st.(string); ok {
-			if v, ok := parseHexUint8(s); ok {
-				p.FunctionCodes[v] = true
-			}
-		}
-	}
-	recordStringAddress(p, ev.Attributes["variable_name"])
 }
 
 func recordDefaultAttributes(p *LearnedProfile, ev dpi.Event) {
@@ -292,33 +256,6 @@ func (l *Learner) Clear() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.profiles = make(map[string]*LearnedProfile)
-}
-
-// parseHexUint8 parses a hex string like "0xA5" into a uint8.
-func parseHexUint8(s string) (uint8, bool) {
-	s = strings.TrimPrefix(s, "0x")
-	s = strings.TrimPrefix(s, "0X")
-	if s == "" {
-		return 0, false
-	}
-	var v uint64
-	for _, c := range s {
-		v <<= 4
-		switch {
-		case c >= '0' && c <= '9':
-			v |= uint64(c - '0')
-		case c >= 'a' && c <= 'f':
-			v |= uint64(c - 'a' + 10)
-		case c >= 'A' && c <= 'F':
-			v |= uint64(c - 'A' + 10)
-		default:
-			return 0, false
-		}
-		if v > 255 {
-			return 0, false
-		}
-	}
-	return uint8(v), true
 }
 
 func sanitizeIP(ip string) string {

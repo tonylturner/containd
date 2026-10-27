@@ -23,7 +23,7 @@ func TestLoadBuiltins(t *testing.T) {
 	for _, s := range sigs {
 		ids[s.ID] = true
 	}
-	for _, want := range []string{"MODBUS-SCAN-001", "DNP3-COLD-RESTART", "CIP-RESET-001", "S7-PLC-STOP", "ICS-WRITE-STORM"} {
+	for _, want := range []string{"MODBUS-SCAN-001", "DNP3-COLD-RESTART", "CIP-RESET-001", "IEC104-CONTROL-CMD", "ICS-WRITE-STORM"} {
 		if !ids[want] {
 			t.Errorf("missing builtin signature %s", want)
 		}

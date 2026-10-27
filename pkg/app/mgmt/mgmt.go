@@ -37,10 +37,11 @@ type Options struct {
 }
 
 type mgmtStores struct {
-	store      config.Store
-	auditStore audit.Store
-	userStore  users.Store
-	bootEvent  *dpevents.Event
+	store       config.Store
+	auditStore  audit.Store
+	userStore   users.Store
+	bootEvent   *dpevents.Event
+	scopeEvents []dpevents.Event
 }
 
 type mgmtListenerConfig struct {
@@ -106,7 +107,7 @@ func Run(ctx context.Context, opts Options) error {
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
-	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
+	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent, migrations: stores.scopeEvents}
 	auditLog, ok := stores.auditStore.(audit.ForwardLog)
 	if !ok {
 		return fmt.Errorf("audit store %T cannot be forwarded to syslog", stores.auditStore)
@@ -242,6 +243,12 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		return fail(err)
 	}
 	event, err := recordBootDecision(logger, stores, cfg, r)
+	if err != nil {
+		stores.auditStore.Close()
+		stores.userStore.Close()
+		return fail(err)
+	}
+	stores.scopeEvents, err = publishScopeMigrations(context.Background(), stores)
 	if err != nil {
 		stores.auditStore.Close()
 		stores.userStore.Close()

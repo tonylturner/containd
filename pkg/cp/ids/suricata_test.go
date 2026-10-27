@@ -184,9 +184,9 @@ func TestParseSuricataPortMapping(t *testing.T) {
 		{"502", "modbus"},
 		{"44818", "enip"},
 		{"20000", "dnp3"},
-		{"4840", "opcua"},
-		{"102", "s7comm"},
-		{"47808", "bacnet"},
+		{"4840", "tcp"},
+		{"102", "tcp"},
+		{"47808", "tcp"},
 	}
 	for _, tt := range tests {
 		line := `alert tcp any any -> any ` + tt.port + ` (msg:"port test"; sid:7000; rev:1;)`

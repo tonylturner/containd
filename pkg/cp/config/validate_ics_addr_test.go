@@ -16,7 +16,7 @@ func icsAddressConfig(proto string, specs ...string) *Config {
 }
 
 func TestValidateAcceptsICSAddressForms(t *testing.T) {
-	for _, proto := range []string{"modbus", "dnp3", "cip", "s7comm", "mms", "bacnet", "opcua"} {
+	for _, proto := range []string{"modbus", "dnp3", "cip"} {
 		for _, spec := range []string{"0", "256", "0x0100", "0X01ff", "100-511", "0x0100-0x01FF", "0x0100-511", "7-7", " 1 - 2 ", "65535", "0-0xFFFF"} {
 			if err := icsAddressConfig(proto, spec).Validate(); err != nil {
 				t.Errorf("%s address %q: %v", proto, spec, err)
@@ -24,7 +24,7 @@ func TestValidateAcceptsICSAddressForms(t *testing.T) {
 		}
 	}
 	// Protocols other than Modbus carry 32-bit addresses.
-	for _, proto := range []string{"dnp3", "opcua"} {
+	for _, proto := range []string{"dnp3"} {
 		for _, spec := range []string{"65536", "4294967295", "0-0xFFFFFFFF"} {
 			if err := icsAddressConfig(proto, spec).Validate(); err != nil {
 				t.Errorf("%s address %q: %v", proto, spec, err)
@@ -44,7 +44,7 @@ func TestValidateRefusesICSAddressForms(t *testing.T) {
 		{"modbus", "-5", "negative"},
 		{"dnp3", "-0x10", "negative"},
 		{"modbus", "0x200-0x100", "range starts at 512 after its end 256"},
-		{"opcua", "10-9", "range starts at 10 after its end 9"},
+		{"dnp3", "10-9", "range starts at 10 after its end 9"},
 		{"modbus", "65536", "modbus addresses end at 65535"},
 		{"modbus", "0-0x10000", "modbus addresses end at 65535"},
 		{"dnp3", "4294967296", "exceeds the largest address 4294967295"},

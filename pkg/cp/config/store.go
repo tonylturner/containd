@@ -126,6 +126,10 @@ func NewSQLiteStore(path string, opts ...StoreOption) (*SQLiteStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := store.MigrateIndustrialScope(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := store.checkAndSchedulePending(); err != nil {
 		db.Close()
 		return nil, err
@@ -177,7 +181,7 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 		return errors.New("config is nil")
 	}
 	if err := s.ValidateConfig(cfg); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+		return err
 	}
 
 	s.mu.Lock()
@@ -205,7 +209,7 @@ func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) er
 		return errors.New("config is nil")
 	}
 	if err := s.ValidateConfig(cfg); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+		return err
 	}
 	if err := s.validateSSHAccessLocked(ctx, cfg); err != nil {
 		return err
@@ -250,6 +254,17 @@ func loadKindFrom(ctx context.Context, db configReader, kind string) (*Config, e
 }
 
 func readKindFrom(ctx context.Context, db configReader, kind string, withBank bool) (*Config, error) {
+	cfg, err := readKindUnupgradedFrom(ctx, db, kind, withBank)
+	if err != nil {
+		return nil, err
+	}
+	if err := UpgradeInPlace(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func readKindUnupgradedFrom(ctx context.Context, db configReader, kind string, withBank bool) (*Config, error) {
 	row := db.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, kind)
 	var raw string
 	if err := row.Scan(&raw); err != nil {
@@ -263,9 +278,6 @@ func readKindFrom(ctx context.Context, db configReader, kind string, withBank bo
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 	cfg := stored.Config
-	if err := UpgradeInPlace(&cfg); err != nil {
-		return nil, err
-	}
 	if !withBank {
 		cfg.IDS.Rules = nil
 		return &cfg, nil
