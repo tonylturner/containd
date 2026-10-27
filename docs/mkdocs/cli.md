@@ -176,7 +176,9 @@ the login's session is revoked, `containd cli` stops with
 `CONTAIND_CLI_USER` with `CONTAIND_CLI_PASSWORD`; both default to `containd`.
 
 The SSH CLI, and `containd cli` in an SSH shell, stay authorized while the
-connection is open, up to the 4-hour session limit. Reconnect after that.
+connection is open. With a JWT secret, the login's session also ends after 4
+hours; reconnect after that. Lab mode without a JWT secret has no session
+and no such limit.
 The `menu`, `wizard` and `diagnostics` commands exist only in the appliance
 SSH CLI. There, `configure` opens the setup wizard, the same as `wizard`.
 

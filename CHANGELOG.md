@@ -47,8 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   open. Its token expired 5 minutes after login, or 30 minutes after the last
   command, and later commands failed with status 401 until the user
   reconnected. Each request now uses a fresh token for the connection's
-  session, which stays valid until the connection closes or reaches the
-  4-hour session limit.
+  session, which stays valid until the connection closes or, with a JWT
+  secret, reaches the 4-hour session limit.
 - `configure` and `containd cli` in a Linux shell opened over SSH act as the
   SSH login instead of logging in as `CONTAIND_CLI_USER` with
   `CONTAIND_CLI_PASSWORD` (default `containd` / `containd`). They worked only
