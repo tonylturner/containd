@@ -14,7 +14,11 @@ func TestRemovedProtocolImports(t *testing.T) {
 	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip"} {
 		for _, prefix := range []string{"proto.", "containd.proto."} {
 			source := fmt.Sprintf("id: bad\ntitle: rejected\ntags: [%s%s, proto.modbus]\ndetection:\n  selection:\n    function_code: 3\n  condition: selection\n", prefix, name)
-			if _, err := ConvertSigmaFile([]byte(source)); err == nil || !strings.Contains(err.Error(), name) {
+			want := fmt.Sprintf("ids rule bad proto %q is not supported; supported: modbus, dnp3, iec104, cip", name)
+			if name == "enip" {
+				want = `ids rule bad proto "enip": EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`
+			}
+			if _, err := ConvertSigmaFile([]byte(source)); err == nil || err.Error() != want {
 				t.Fatalf("Sigma %s: %v", name, err)
 			}
 		}
@@ -46,15 +50,26 @@ func TestRemovedProtocolImports(t *testing.T) {
 func TestProtocolScopeSigmaFields(t *testing.T) {
 	for _, key := range []string{"bvlc_function", "is_critical", "object_instance", "object_type", "property_id",
 		"service", "pdu_tag", "service_tag", "variable_name", "chunk_type", "message_type", "area",
-		"cotp_pdu_type", "db_number", "error_class", "error_code", "item_count", "pdu_reference", "safety_critical"} {
+		"cotp_pdu_type", "db_number", "error_class", "error_code", "item_count", "pdu_reference", "safety_critical", "command_code", "session_handle"} {
 		if decoderAttribute(key) {
 			t.Errorf("unemitted attribute %s retained", key)
 		}
 	}
 	for _, key := range []string{"service_code", "address", "is_control", "cip_path", "object_class",
+		"command", "enip_command", "enip_command_code", "enip_session_handle", "cpf_item_types",
 		"function_code", "unit_id", "ca", "ioa", "type_id", "raw_hex", "error", "direction"} {
 		if !decoderAttribute(key) {
 			t.Errorf("retained attribute %s removed", key)
+		}
+	}
+}
+
+func TestSigmaEtherNetIPNameRejection(t *testing.T) {
+	for _, prefix := range []string{"proto.", "containd.proto."} {
+		source := fmt.Sprintf("id: bad\ntitle: rejected\ntags: ['%s ENiP ']\ndetection:\n  selection:\n    enip_command: SendRRData\n  condition: selection\n", prefix)
+		want := `ids rule bad proto " ENiP ": EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`
+		if _, err := ConvertSigmaFile([]byte(source)); err == nil || err.Error() != want {
+			t.Fatalf("Sigma normalized enip rejection: %v, want %s", err, want)
 		}
 	}
 }

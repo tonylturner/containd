@@ -22,9 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference to a removed protocol starts the appliance in management recovery;
   the saved configuration remains exportable until a valid configuration is
   committed.
-- IDS rules, custom signatures and Sigma rules reject the protocol name
-  `enip`; use `cip`. Suricata and Snort rule files that use `enip` still
-  import as `cip`.
+- IDS rules, custom signatures, Sigma rules, firewall rules and decoder toggles
+  reject `enip` with `EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`.
+  The protocol name `cip` covers the whole EtherNet/IP stack. Suricata and Snort
+  rule files that use `enip` still import as `cip`.
+- CIP events (including MSP sub-events) replace `command`, `command_code` and
+  `session_handle` with `enip_command`, `enip_command_code` and
+  `enip_session_handle`, without aliases. `cpf_item_types` reports all CPF item
+  types in packet order for valid SendRRData/SendUnitData item lists; alert
+  details show the encapsulation command and CPF items.
 
 ### Fixed
 

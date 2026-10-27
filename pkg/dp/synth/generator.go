@@ -207,7 +207,8 @@ var scenarios = []scenario{
 		return map[string]any{
 			"service_code": s.code, "service_name": s.name,
 			"function_code": s.code, "is_write": s.w, "is_control": s.c,
-			"command": "SendRRData", "command_code": uint16(0x6F),
+			"enip_command": "SendRRData", "enip_command_code": uint16(0x6F),
+			"enip_session_handle": uint32(1), "cpf_item_types": []string{"0x0000", "0x00b2"},
 		}
 	}},
 

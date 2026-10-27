@@ -63,7 +63,7 @@ func TestProtocolScopeCIPUpgrade(t *testing.T) {
 	custom := DefaultConfig()
 	custom.SchemaVersion = "0.1.7"
 	custom.IDS.Rules = []IDSRule{{ID: "custom", Proto: "enip"}}
-	if err := s.SaveCandidate(context.Background(), custom); err == nil || err.Error() != `ids rule custom proto "enip" is not supported; supported: modbus, dnp3, iec104, cip` {
+	if err := s.SaveCandidate(context.Background(), custom); err == nil || err.Error() != `ids rule custom proto "enip": EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command` {
 		t.Fatalf("custom accepted: %v", err)
 	}
 	if custom.IDS.Rules[0].Proto != "enip" {

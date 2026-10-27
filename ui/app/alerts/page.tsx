@@ -260,7 +260,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
   const isModbus = eventProto === "modbus";
   const isTLS = eventProto === "tls";
   const isDNP3 = eventProto === "dnp3";
-  const isCIP = eventProto === "enip" || eventProto === "cip";
+  const isCIP = eventProto === "cip";
   const isIEC104 = eventProto === "iec104";
 
   return (
@@ -436,6 +436,12 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
         {/* ── Protocol Analysis (CIP/EtherNet/IP) ── */}
         {isCIP && Object.keys(eventAttrs).length > 0 && (
           <DetailSection label="CIP/EtherNet/IP Analysis">
+            {eventAttrs["enip_command"] != null && (
+              <DetailRow label="Encapsulation" value={String(eventAttrs["enip_command"])} mono />
+            )}
+            {eventAttrs["cpf_item_types"] != null && (
+              <DetailRow label="CPF Items" value={Array.isArray(eventAttrs["cpf_item_types"]) ? eventAttrs["cpf_item_types"].join(", ") : String(eventAttrs["cpf_item_types"])} mono />
+            )}
             {eventAttrs["service_name"] != null && (
               <DetailRow label="Service" value={String(eventAttrs["service_name"])} mono />
             )}

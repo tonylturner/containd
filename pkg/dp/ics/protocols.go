@@ -38,7 +38,7 @@ func Removed(name string) bool {
 
 func ValidateRule(id, name string) error {
 	if name != "" && !Supported(name) {
-		return fmt.Errorf("rule %s ics protocol %q is not supported; supported: %s", id, name, SupportedNames)
+		return unsupportedProtocol("rule "+id+" ics protocol", name)
 	}
 	return nil
 }
@@ -46,7 +46,7 @@ func ValidateRule(id, name string) error {
 func ValidateToggles(toggles map[string]bool) error {
 	for name := range toggles {
 		if !Supported(name) {
-			return fmt.Errorf("dataplane.dpiIcsProtocols: protocol %q is not supported; supported: %s", name, SupportedNames)
+			return unsupportedProtocol("dataplane.dpiIcsProtocols: protocol", name)
 		}
 	}
 	return nil
@@ -54,14 +54,21 @@ func ValidateToggles(toggles map[string]bool) error {
 
 func ValidateIDS(id, name string) error {
 	if Removed(name) {
-		return fmt.Errorf("ids rule %s proto %q is not supported; supported: %s", id, name, SupportedNames)
+		return unsupportedProtocol("ids rule "+id+" proto", name)
 	}
 	return nil
 }
 
 func ValidateSignature(id, name string) error {
 	if Removed(name) {
-		return fmt.Errorf("signature %s protocol %q is not supported; supported: %s", id, name, SupportedNames)
+		return unsupportedProtocol("signature "+id+" protocol", name)
 	}
 	return nil
+}
+
+func unsupportedProtocol(scope, name string) error {
+	if strings.EqualFold(strings.TrimSpace(name), "enip") {
+		return fmt.Errorf(`%s %q: EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`, scope, name)
+	}
+	return fmt.Errorf("%s %q is not supported; supported: %s", scope, name, SupportedNames)
 }

@@ -377,37 +377,45 @@ func ParseEIPHeader(data []byte) (*EIPHeader, error) {
 // Each item: Type ID (2) + Length (2) + Data (Length bytes)
 // We look for Unconnected Data Item (0x00B2) or Connected Data Item (0x00B1).
 func ParseCIPMessage(data []byte) (*CIPMessage, error) {
+	_, item, err := parseCPF(data)
+	if item != nil {
+		return parseCIPFromItem(item)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return nil, ErrNoCIPPayload
+}
+
+// parseCPF walks the complete item list, retaining the first CIP data item.
+// Item payload parsing is deliberately separate from CPF framing validation.
+// A malformed later item invalidates the type list, not an earlier CIP payload.
+func parseCPF(data []byte) ([]string, []byte, error) {
+	var cipItem []byte
 	// Minimum: interface(4) + timeout(2) + count(2) = 8
 	if len(data) < 8 {
-		return nil, ErrCIPTooShort
+		return nil, cipItem, ErrCIPTooShort
 	}
-	// interfaceHandle := binary.LittleEndian.Uint32(data[0:4])
-	// timeout := binary.LittleEndian.Uint16(data[4:6])
 	itemCount := binary.LittleEndian.Uint16(data[6:8])
-
+	types := make([]string, 0)
 	offset := 8
 	for i := 0; i < int(itemCount); i++ {
 		if offset+4 > len(data) {
-			return nil, ErrCIPTooShort
+			return nil, cipItem, ErrCIPTooShort
 		}
 		typeID := binary.LittleEndian.Uint16(data[offset : offset+2])
 		itemLen := binary.LittleEndian.Uint16(data[offset+2 : offset+4])
 		offset += 4
-
 		if offset+int(itemLen) > len(data) {
-			return nil, ErrTruncated
+			return nil, cipItem, ErrTruncated
 		}
-
-		// Unconnected Data Item (0x00B2) or Connected Data Item (0x00B1)
-		if typeID == 0x00B2 || typeID == 0x00B1 {
-			itemData := data[offset : offset+int(itemLen)]
-			return parseCIPFromItem(itemData)
+		types = append(types, fmt.Sprintf("0x%04x", typeID))
+		if cipItem == nil && (typeID == 0x00B2 || typeID == 0x00B1) {
+			cipItem = data[offset : offset+int(itemLen)]
 		}
-
 		offset += int(itemLen)
 	}
-
-	return nil, ErrNoCIPPayload
+	return types, cipItem, nil
 }
 
 // parseCIPFromItem parses the CIP service header from an item's data.

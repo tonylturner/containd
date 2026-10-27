@@ -14,21 +14,25 @@ import (
 )
 
 func TestRemovedProtocolValidation(t *testing.T) {
-	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip"} {
+	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip", " ENiP "} {
 		t.Run(name, func(t *testing.T) {
+			suffix := " is not supported; supported: " + ics.SupportedNames
+			if strings.EqualFold(strings.TrimSpace(name), "enip") {
+				suffix = `: EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`
+			}
 			err := genericICSConfig(name, "learn", "", 0).Validate()
-			want := fmt.Sprintf("rule ics-1 ics protocol %q is not supported; supported: %s", name, ics.SupportedNames)
+			want := fmt.Sprintf("rule ics-1 ics protocol %q%s", name, suffix)
 			if err == nil || err.Error() != want {
 				t.Fatalf("firewall error=%v want=%s", err, want)
 			}
 			for _, enabled := range []bool{true, false} {
 				err := validateDataPlane(DataPlaneConfig{DPIICSProtocols: map[string]bool{name: enabled}})
-				want := fmt.Sprintf("dataplane.dpiIcsProtocols: protocol %q is not supported; supported: %s", name, ics.SupportedNames)
+				want := fmt.Sprintf("dataplane.dpiIcsProtocols: protocol %q%s", name, suffix)
 				if err == nil || err.Error() != want {
 					t.Fatalf("toggle %t error=%v want=%s", enabled, err, want)
 				}
 				err = validateIDS(IDSConfig{Rules: []IDSRule{{ID: "custom", Proto: name, Enabled: &enabled}}})
-				want = fmt.Sprintf("ids rule custom proto %q is not supported; supported: %s", name, ics.SupportedNames)
+				want = fmt.Sprintf("ids rule custom proto %q%s", name, suffix)
 				if err == nil || err.Error() != want {
 					t.Fatalf("IDS error=%v want=%s", err, want)
 				}

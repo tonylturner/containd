@@ -4,6 +4,7 @@ package engineapp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,7 +18,11 @@ import (
 func TestRemovedProtocolInternalHandlers(t *testing.T) {
 	dp := newCountingDP(t)
 	config := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{})
-	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip"} {
+	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip", " ENiP "} {
+		want := fmt.Sprintf("protocol %q is not supported; supported: modbus, dnp3, iec104, cip", name)
+		if strings.EqualFold(strings.TrimSpace(name), "enip") {
+			want = fmt.Sprintf(`protocol %q: EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`, name)
+		}
 		for _, enabled := range []bool{true, false} {
 			body, err := json.Marshal(map[string]any{"dpiIcsProtocols": map[string]bool{name: enabled}})
 			if err != nil {
@@ -25,7 +30,7 @@ func TestRemovedProtocolInternalHandlers(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 			config.ServeHTTP(rec, httptest.NewRequest("POST", "/internal/config", bytes.NewReader(body)))
-			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `protocol "`+name+`" is not supported; supported: modbus, dnp3, iec104, cip`) {
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
 				t.Fatalf("%s toggle: %d %s", name, rec.Code, rec.Body)
 			}
 		}

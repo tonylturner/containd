@@ -127,12 +127,26 @@ and selection reason.
 | Modbus/TCP | TCP 502 | `pkg/dp/ics/modbus` |
 | DNP3 | TCP 20000 | `pkg/dp/ics/dnp3` |
 | IEC 60870-5-104 | TCP 2404 | `pkg/dp/ics/iec104` |
-| CIP/EtherNet/IP | TCP 44818 | `pkg/dp/ics/cip` |
+| CIP/EtherNet/IP | TCP 44818, UDP 2222 | `pkg/dp/ics/cip` |
 
 The eight IT decoders live in `pkg/dp/itdpi`: DNS, TLS, HTTP, SSH, SMB, NTP, SNMP,
 and RDP. Protocol events carry `proto`, `kind`, `flowId`, timestamp, and a decoder-
 specific attribute map. Inspect emitted events before authoring attribute-based
 [IDS conditions](ids-rules.md).
+
+The protocol name `cip` covers the whole EtherNet/IP stack: one decoder toggle
+and one protocol match. The name `enip` is rejected at rule, signature, Sigma
+and toggle boundaries with: `EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`.
+
+| CIP event layer | Attributes |
+| --- | --- |
+| Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle` |
+| Common Packet Format (CPF) | `cpf_item_types`: all item types in packet order as lowercase hex strings, such as `["0x0000", "0x00b2"]`, on SendRRData/SendUnitData with a valid item list |
+| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; MSP parents also carry `multi_service_count`, sub-events carry `msp` |
+
+MSP sub-events retain the encapsulation and CPF fields. Non-CPF commands such as
+RegisterSession have no `cpf_item_types`. The encapsulation fields replace
+`command`, `command_code` and `session_handle`; CIP events do not emit aliases.
 
 ## ICS Firewall Rule Predicates
 

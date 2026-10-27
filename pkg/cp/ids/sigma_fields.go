@@ -71,9 +71,9 @@ func decoderAttribute(field string) bool {
 		return true
 	// Additional keys emitted by the retained industrial decoders.
 	case "service_code", "address", "attribute_id",
-		"cip_path", "command_code", "instance_id", "is_control", "msp",
+		"cip_path", "enip_command", "enip_command_code", "cpf_item_types", "instance_id", "is_control", "msp",
 		"multi_service_count", "object_class", "object_class_name", "service_name",
-		"session_handle", "destination_address", "function_name", "iin_flags",
+		"enip_session_handle", "destination_address", "function_name", "iin_flags",
 		"source_address",
 		"transaction_id", "exception_code", "exception_description", "mei_type",
 		"mei_type_name", "quantity", "sub_function", "sub_function_name":

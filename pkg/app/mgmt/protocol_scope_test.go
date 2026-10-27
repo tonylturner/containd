@@ -125,7 +125,7 @@ func TestRemovedProtocolBootRecovery(t *testing.T) {
 								c.IDS.Rules[i].Title += " operator edit"
 							}
 						}
-						want = `ids rule IDS-CIP-001 proto "enip" is not supported`
+						want = `ids rule IDS-CIP-001 proto "enip": EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`
 					case "edited-bank":
 						c.IDS.Rules[len(c.IDS.Rules)-1].Title += " operator edit"
 						want = `ids rule IDS-S7-001 proto "s7comm" is not supported`

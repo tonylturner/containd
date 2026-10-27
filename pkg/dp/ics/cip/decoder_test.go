@@ -5,6 +5,7 @@ package cip
 
 import (
 	"encoding/binary"
+	"reflect"
 	"testing"
 	"time"
 
@@ -236,8 +237,8 @@ func TestDecoderOnPacketSendRRData(t *testing.T) {
 	if ev.Kind != "request" {
 		t.Fatalf("expected kind request, got %s", ev.Kind)
 	}
-	if ev.Attributes["command"] != "SendRRData" {
-		t.Fatalf("expected command SendRRData, got %v", ev.Attributes["command"])
+	if ev.Attributes["enip_command"] != "SendRRData" {
+		t.Fatalf("expected command SendRRData, got %v", ev.Attributes["enip_command"])
 	}
 	if ev.Attributes["service_code"] != uint8(0x4C) {
 		t.Fatalf("expected service_code 0x4C, got %v", ev.Attributes["service_code"])
@@ -272,8 +273,8 @@ func TestDecoderOnPacketRegisterSession(t *testing.T) {
 	if ev.Kind != "session" {
 		t.Fatalf("expected kind session, got %s", ev.Kind)
 	}
-	if ev.Attributes["command"] != "RegisterSession" {
-		t.Fatalf("expected command RegisterSession, got %v", ev.Attributes["command"])
+	if ev.Attributes["enip_command"] != "RegisterSession" {
+		t.Fatalf("expected command RegisterSession, got %v", ev.Attributes["enip_command"])
 	}
 }
 
@@ -486,6 +487,13 @@ func TestDecoderMSPTwoSubServices(t *testing.T) {
 	}
 	if len(evts) != 3 {
 		t.Fatalf("expected 3 events (1 parent + 2 sub), got %d", len(evts))
+	}
+
+	for _, ev := range evts {
+		assertEncapsulation(t, ev.Attributes, 0x006f, 1)
+		if !reflect.DeepEqual(ev.Attributes["cpf_item_types"], []string{"0x0000", "0x00b2"}) {
+			t.Errorf("MSP CPF metadata = %v", ev.Attributes["cpf_item_types"])
+		}
 	}
 
 	// First event: parent MSP

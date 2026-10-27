@@ -32,22 +32,26 @@ func TestRemovedProtocolStageAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip"} {
+	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip", " ENiP "} {
 		// Each protocol is an independent validation case, not a rate-limit test.
 		resetTestRateLimiters()
+		suffix := " is not supported; supported: " + ics.SupportedNames
+		if strings.EqualFold(strings.TrimSpace(name), "enip") {
+			suffix = `: EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`
+		}
 		for _, kind := range []string{"rule", "toggle-on", "toggle-off", "ids"} {
 			cfg := config.DefaultConfig()
 			var want string
 			switch kind {
 			case "rule":
 				cfg.Firewall.Rules = []config.Rule{{ID: "bad", Action: config.ActionAllow, ICS: config.ICSPredicate{Protocol: name}}}
-				want = fmt.Sprintf("rule bad ics protocol %q is not supported; supported: %s", name, ics.SupportedNames)
+				want = fmt.Sprintf("rule bad ics protocol %q%s", name, suffix)
 			case "ids":
 				cfg.IDS.Rules = []config.IDSRule{{ID: "bad", Proto: name}}
-				want = fmt.Sprintf("ids rule bad proto %q is not supported; supported: %s", name, ics.SupportedNames)
+				want = fmt.Sprintf("ids rule bad proto %q%s", name, suffix)
 			default:
 				cfg.DataPlane.DPIICSProtocols = map[string]bool{name: kind == "toggle-on"}
-				want = fmt.Sprintf("dataplane.dpiIcsProtocols: protocol %q is not supported; supported: %s", name, ics.SupportedNames)
+				want = fmt.Sprintf("dataplane.dpiIcsProtocols: protocol %q%s", name, suffix)
 			}
 			for _, path := range []string{"/config", "/config/import"} {
 				rec := requestStage(t, server, "POST", path, cfg)
@@ -77,7 +81,7 @@ func TestRemovedProtocolStageAtomic(t *testing.T) {
 func TestRemovedProtocolSignature(t *testing.T) {
 	eng := &signatureMockEngine{mockEngine: &mockEngine{}}
 	server := NewServerWithEngine(&mockStore{}, nil, eng)
-	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip"} {
+	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip", " ENiP "} {
 		sig := signatures.Signature{ID: "bad", Protocol: name, Conditions: []signatures.Condition{{Field: "kind", Op: "equals", Value: "request"}}}
 		rec := requestStage(t, server, "POST", "/signatures", sig)
 		var body struct {
@@ -87,6 +91,9 @@ func TestRemovedProtocolSignature(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := fmt.Sprintf("signature bad protocol %q is not supported; supported: %s", name, ics.SupportedNames)
+		if strings.EqualFold(strings.TrimSpace(name), "enip") {
+			want = fmt.Sprintf(`signature bad protocol %q: EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`, name)
+		}
 		if rec.Code != http.StatusBadRequest || body.Error != want || len(eng.added) != 0 {
 			t.Fatalf("signature %s: %d %s", name, rec.Code, rec.Body)
 		}
