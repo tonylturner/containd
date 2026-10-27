@@ -33,3 +33,34 @@ func normalizeStoredSSHShellMode(ssh *SSHConfig) {
 		ssh.ShellMode = SSHShellModeAppliance
 	}
 }
+
+// EnvSSHShellMode overrides system.ssh.shellMode when it is not empty.
+const EnvSSHShellMode = "CONTAIND_SSH_SHELL_MODE"
+
+// Sources of the shell mode SSH runs.
+const (
+	SSHShellModeSourceEnvironment = "environment (" + EnvSSHShellMode + ")"
+	SSHShellModeSourceConfig      = "config"
+	SSHShellModeSourceDefault     = "default"
+)
+
+// ResolveSSHShellMode returns the shell mode SSH runs and its source. A
+// non-empty env selects linux when it is linux in any letter case and the
+// appliance CLI otherwise. Without it the saved mode applies; an empty
+// saved mode is the appliance CLI.
+func ResolveSSHShellMode(saved, env string) (mode, source string) {
+	if env = strings.TrimSpace(env); env != "" {
+		if strings.EqualFold(env, SSHShellModeLinux) {
+			return SSHShellModeLinux, SSHShellModeSourceEnvironment
+		}
+		return SSHShellModeAppliance, SSHShellModeSourceEnvironment
+	}
+	switch {
+	case saved == "":
+		return SSHShellModeAppliance, SSHShellModeSourceDefault
+	case strings.EqualFold(saved, SSHShellModeLinux):
+		return SSHShellModeLinux, SSHShellModeSourceConfig
+	default:
+		return SSHShellModeAppliance, SSHShellModeSourceConfig
+	}
+}

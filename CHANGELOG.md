@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   becomes `linux`, any other value `appliance`), so it does not start
   management in recovery. `CONTAIND_SSH_SHELL_MODE` keeps accepting any
   letter case.
+- `show system` displayed the saved SSH shell mode, even when
+  `CONTAIND_SSH_SHELL_MODE` overrode it or a committed change had not yet
+  been applied by a restart. It now shows the mode SSH runs
+  (`ssh.shell_mode`), its source (`ssh.shell_mode_source`) and, when they
+  differ, the saved mode (`ssh.shell_mode_saved`). `show system ssh` lists
+  the same mode and source. A CLI without the appliance's store, such as
+  `containd cli` or the SSH console, runs `show system` on the appliance.
 
 ## [0.1.35] - 2026-10-26
 

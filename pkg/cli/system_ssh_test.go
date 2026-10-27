@@ -117,3 +117,80 @@ func TestSSHPasswordCommandPreservesFalse(t *testing.T) {
 		t.Fatal("no candidate was posted")
 	}
 }
+
+func shellModeStore(t *testing.T, policy config.SSHRuntimePolicy) config.Store {
+	t.Helper()
+	store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	store.SetSSHRuntimePolicyReader(func(context.Context) (config.SSHRuntimePolicy, error) {
+		return policy, nil
+	})
+	return store
+}
+
+// show system reports the shell mode SSH runs, its source, and the saved
+// mode when the environment overrides it or a restart has not applied it.
+func TestShowSystemShellMode(t *testing.T) {
+	env := "environment (CONTAIND_SSH_SHELL_MODE)"
+	for _, tc := range []struct {
+		saved, mode, source string
+		want                []string
+		absent              string
+	}{
+		{"", "appliance", "default", []string{"ssh.shell_mode: appliance\n", "ssh.shell_mode_source: default\n"}, "shell_mode_saved"},
+		{"linux", "linux", "config", []string{"ssh.shell_mode: linux\n", "ssh.shell_mode_source: config\n"}, "shell_mode_saved"},
+		{"appliance", "linux", env, []string{"ssh.shell_mode: linux\n", "ssh.shell_mode_source: " + env + "\n", "ssh.shell_mode_saved: appliance (overridden by CONTAIND_SSH_SHELL_MODE)\n"}, ""},
+		{"linux", "linux", env, []string{"ssh.shell_mode: linux\n"}, "shell_mode_saved"},
+		{"linux", "appliance", "default", []string{"ssh.shell_mode: appliance\n", "ssh.shell_mode_saved: linux (applies after restart)\n"}, ""},
+	} {
+		store := shellModeStore(t, config.SSHRuntimePolicy{ShellMode: tc.mode, ShellModeSource: tc.source})
+		var out bytes.Buffer
+		if err := showSSHShellMode(context.Background(), store, &out, tc.saved); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("%+v: missing %q in %q", tc, want, out.String())
+			}
+		}
+		if tc.absent != "" && strings.Contains(out.String(), tc.absent) {
+			t.Fatalf("%+v: unexpected %q in %q", tc, tc.absent, out.String())
+		}
+	}
+	var out bytes.Buffer
+	if err := showSSHShellMode(context.Background(), nil, &out, ""); err == nil || !strings.Contains(out.String(), "SSH shell mode unavailable") {
+		t.Fatalf("no reader: %v, %q", err, out.String())
+	}
+}
+
+// A client without the appliance store runs show system on the appliance and
+// prints its output, also when the appliance reports an error.
+func TestShowSystemRunsOnAppliance(t *testing.T) {
+	client := &dispatchHTTPClient{t: t, handlers: map[string]func(*http.Request) (*http.Response, error){
+		"POST /api/v1/cli/execute": func(req *http.Request) (*http.Response, error) {
+			payload := decodeJSONRequest[struct {
+				Line string `json:"line"`
+			}](t, req)
+			if payload.Line != "show system" {
+				t.Fatalf("unexpected remote command: %q", payload.Line)
+			}
+			return jsonHTTPResponse(http.StatusOK, map[string]string{"output": "ssh.shell_mode: linux\n", "error": "System health unavailable"}, nil), nil
+		},
+	}}
+	t.Setenv("CONTAIND_SSH_SHELL_MODE", "appliance")
+	var out bytes.Buffer
+	remote := NewRegistry(nil, &API{BaseURL: "http://localhost:8080", Client: client})
+	err := remote.ParseAndExecute(WithRole(context.Background(), string(RoleView)), "show system", &out)
+	if err == nil || !strings.Contains(out.String(), "ssh.shell_mode: linux") {
+		t.Fatalf("output %q, error %v", out.String(), err)
+	}
+}
+
+// applianceShowSystem is show system as the appliance runs it, with its store.
+func applianceShowSystem(t *testing.T) func(*API) Command {
+	store := shellModeStore(t, config.SSHRuntimePolicy{ShellMode: "appliance", ShellModeSource: "default"})
+	return func(api *API) Command { return showSystem(store, api) }
+}
