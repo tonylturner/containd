@@ -487,8 +487,9 @@ type DataPlaneConfig struct {
 	// plain accept/drop), and the engine starts an NFQUEUE capture
 	// consumer at that group ID. Packets land in handlePacket → DPI
 	// decoders → enforceDPIEvents, which evaluates the rule's ICS
-	// predicate (function-code allowlist, register ranges, etc.) and
-	// uses ApplyVerdict / BlockFlowTemp to block out-of-policy flows.
+	// predicate (function-code allowlist, register ranges, etc.). A deny
+	// drops the packet and resets that session only (TCP RST and conntrack
+	// delete); it installs no service-wide block.
 	// Without it, ICS rules compile to plain accept/drop, so validation
 	// rejects any ICS rule in effective enforce mode. Distinct from
 	// NFLogGroup since the two kernel subsystems (NFLOG vs NFQUEUE)
