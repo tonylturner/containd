@@ -123,6 +123,8 @@ backup, deployment, and post-update checks.
 
 The CI Trivy job scans the built management image (`containd/containd:ci`) with `--severity HIGH,CRITICAL --exit-code 1` and the repository `.trivyignore`. Unsuppressed findings fail that job. This does not assert that both images or every workflow run are scanned, nor that a passing scan proves an absence of vulnerabilities.
 
+The [scheduled image scan](#scheduled-checks-of-published-images) covers both published images.
+
 You can scan locally:
 
 ```bash
@@ -133,6 +135,28 @@ You can also use [Grype](https://github.com/anchore/grype) directly against the 
 
 ```bash
 grype sbom:sbom-mgmt.cdx.json
+```
+
+## Scheduled Checks of Published Images
+
+Three workflows check the published `:latest` management and engine images
+daily, after each successful Release run, and on demand. Each one backs a README
+badge:
+
+| Workflow | Check |
+|----------|-------|
+| [Published image signatures](https://github.com/tonylturner/containd/actions/workflows/published-cosign.yml) | Cosign keyless signature from the release workflow at the image's release tag and its commit |
+| [Published image SBOMs](https://github.com/tonylturner/containd/actions/workflows/published-sbom.yml) | Signed CycloneDX SBOM attestation under the same identity |
+| [Published image scan](https://github.com/tonylturner/containd/actions/workflows/published-trivy.yml) | Trivy scan of every platform image, with the CI severity policy and `.trivyignore` |
+
+The signature and SBOM checks also require both images to come from the same
+release, and that release's version tag to resolve to the `:latest` digest.
+Run the same checks locally with Docker, git and jq:
+
+```bash
+bash scripts/verify-published-images.sh signature
+bash scripts/verify-published-images.sh sbom
+bash scripts/verify-published-images.sh vulnerabilities
 ```
 
 ## Related

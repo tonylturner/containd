@@ -2,7 +2,15 @@
 
 [![CI](https://github.com/tonylturner/containd/actions/workflows/ci.yml/badge.svg)](https://github.com/tonylturner/containd/actions/workflows/ci.yml)
 [![Release](https://github.com/tonylturner/containd/actions/workflows/release.yml/badge.svg)](https://github.com/tonylturner/containd/actions/workflows/release.yml)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/tonylturner/containd?logo=github&label=release)](https://github.com/tonylturner/containd/releases)
+[![GHCR](https://ghcr-badge.egpl.dev/tonylturner/containd/latest_tag?ignore=sha256*,latest&label=ghcr.io)](https://github.com/tonylturner/containd/pkgs/container/containd)
+[![Trivy](https://img.shields.io/github/actions/workflow/status/tonylturner/containd/published-trivy.yml?branch=main&label=Trivy&logo=trivy)](https://github.com/tonylturner/containd/actions/workflows/published-trivy.yml)
+[![Cosign](https://img.shields.io/github/actions/workflow/status/tonylturner/containd/published-cosign.yml?branch=main&label=signed%3A%20Cosign)](https://github.com/tonylturner/containd/actions/workflows/published-cosign.yml)
+[![SBOM](https://img.shields.io/github/actions/workflow/status/tonylturner/containd/published-sbom.yml?branch=main&label=SBOM%3A%20CycloneDX&logo=owasp)](https://github.com/tonylturner/containd/actions/workflows/published-sbom.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/tonylturner/containd?logo=go)](https://go.dev/doc/devel/release)
+[![License](https://img.shields.io/github/license/tonylturner/containd)](LICENSE)
+[![OT Segmentation](https://img.shields.io/badge/topic-OT%20Segmentation-orange)](https://github.com/topics/ot-segmentation)
+[![Secure by Design](https://img.shields.io/badge/Secure%20by%20Design-CISA-blue)](https://www.cisa.gov/securebydesign)
 
 containd is a single-container appliance for ICS/OT lab segmentation.
 It combines zone-based firewalling, protocol inspection, network services,
