@@ -324,7 +324,7 @@ func TestEnforceDPIEventsDeniesWithoutBlock(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 	}}
 
-	v, evalCtx, enforced := e.enforceDPIEvents(state, pkt, evs)
+	v, evalCtx, enforced := e.enforceDPIEvents(state, pkt, evs, false)
 	if !enforced {
 		t.Fatal("expected enforcement verdict")
 	}

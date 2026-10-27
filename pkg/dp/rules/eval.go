@@ -28,13 +28,15 @@ type EvalContext struct {
 
 // ICSContext represents decoded ICS metadata for rule evaluation.
 type ICSContext struct {
-	Protocol     string
-	FunctionCode uint8
-	UnitID       *uint8
-	ObjectClass  uint16
-	ReadOnly     bool
-	WriteOnly    bool
-	Direction    string // "request" or "response"
+	Protocol        string
+	FunctionCode    uint8
+	HasFunctionCode bool // true only when decoded, including FC 0
+	UnitID          *uint8
+	ObjectClass     uint16
+	HasObjectClass  bool // true only when decoded, including class 0
+	ReadOnly        bool
+	WriteOnly       bool
+	Direction       string // "request" or "response"
 	// Spans are the address ranges the message reads or writes, for
 	// address predicates; empty when it touches none. SpansUnknown marks a
 	// message that may touch addresses its decoder cannot bound, such as a
@@ -254,6 +256,9 @@ func matchICSFunctionCode(pred ICSPredicate, ctx EvalContext) bool {
 	if len(pred.FunctionCode) == 0 {
 		return true
 	}
+	if !ctx.ICS.HasFunctionCode {
+		return false
+	}
 	for _, fc := range pred.FunctionCode {
 		if fc == ctx.ICS.FunctionCode {
 			return true
@@ -289,6 +294,9 @@ func matchICSAddresses(ce *compiledEntry, ctx EvalContext) bool {
 func matchICSObjectClass(pred ICSPredicate, ctx EvalContext) bool {
 	if len(pred.ObjectClasses) == 0 {
 		return true
+	}
+	if !ctx.ICS.HasObjectClass {
+		return false
 	}
 	for _, oc := range pred.ObjectClasses {
 		if oc == ctx.ICS.ObjectClass {
