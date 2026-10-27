@@ -7,11 +7,14 @@ import (
 	"context"
 	"encoding/hex"
 	"math/rand"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 )
 
 func TestDefaultConfigAndSubnets(t *testing.T) {
@@ -153,5 +156,51 @@ func TestRunGeneratesEventsAndCallsCallback(t *testing.T) {
 	}
 	if events[0].Proto == "" || events[0].FlowID == "" {
 		t.Fatalf("unexpected stored event: %#v", events[0])
+	}
+}
+
+// TestSynthModbusRequestShapes requires each synthetic request to carry the
+// decoder's fields for its function code and a span the policy can bound.
+func TestSynthModbusRequestShapes(t *testing.T) {
+	want := map[uint8][]string{
+		1: {"address", "quantity"}, 2: {"address", "quantity"},
+		3: {"address", "quantity"}, 4: {"address", "quantity"},
+		5: {"address", "value"}, 6: {"address", "value"},
+		15: {"address", "quantity", "byte_count"}, 16: {"address", "quantity", "byte_count"},
+		23: {"read_address", "read_quantity", "write_address", "write_quantity", "byte_count"},
+		8:  {"sub_function", "sub_function_name"},
+		43: {"mei_type", "mei_type_name"},
+	}
+	dataKeys := []string{"address", "quantity", "value", "byte_count", "register_count",
+		"and_mask", "or_mask", "read_address", "read_quantity", "write_address", "write_quantity"}
+	seen := map[uint8]bool{}
+	rng := rand.New(rand.NewSource(11))
+	for i := 0; i < 2000; i++ {
+		attrs := synthModbusRequest(rng)
+		fc, ok := eventfields.Uint8(attrs, "function_code")
+		keys, known := want[fc]
+		if !ok || !known {
+			t.Fatalf("unexpected function code in %v", attrs)
+		}
+		seen[fc] = true
+		for _, k := range keys {
+			if _, ok := attrs[k]; !ok {
+				t.Fatalf("FC %d lacks %q: %v", fc, k, attrs)
+			}
+		}
+		for _, k := range dataKeys {
+			if _, ok := attrs[k]; ok && !slices.Contains(keys, k) {
+				t.Fatalf("FC %d carries %q: %v", fc, k, attrs)
+			}
+		}
+		if isWrite, _ := eventfields.Bool(attrs, "is_write"); isWrite != (modbus.IsWriteFunctionCode(fc) || attrs["sub_function"] == uint16(1)) {
+			t.Fatalf("FC %d is_write = %v: %v", fc, isWrite, attrs)
+		}
+		if _, ok := modbus.AddressSpans(attrs); !ok {
+			t.Fatalf("FC %d request has no bounded span: %v", fc, attrs)
+		}
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("function codes generated = %v, want all of %v", seen, want)
 	}
 }
