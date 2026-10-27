@@ -29,7 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CIP events (including MSP sub-events) replace `command`, `command_code` and
   `session_handle` with `enip_command`, `enip_command_code` and
   `enip_session_handle`, without aliases. `cpf_item_types` reports all CPF item
-  types in packet order for valid SendRRData/SendUnitData item lists; alert
+  types in packet order as one comma-joined string without spaces for valid
+  SendRRData/SendUnitData item lists, usable with IDS scalar operators; alert
   details show the encapsulation command and CPF items.
 
 ### Fixed

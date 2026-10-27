@@ -3,7 +3,6 @@ package synth
 
 import (
 	"math/rand"
-	"reflect"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/ics"
@@ -27,9 +26,9 @@ func TestCIPScenarioLayers(t *testing.T) {
 		attrs := scenario.attrFn(rand.New(rand.NewSource(1)))
 		for key, want := range map[string]any{
 			"enip_command": "SendRRData", "enip_command_code": uint16(0x6f),
-			"enip_session_handle": uint32(1), "cpf_item_types": []string{"0x0000", "0x00b2"},
+			"enip_session_handle": uint32(1), "cpf_item_types": "0x0000,0x00b2",
 		} {
-			if !reflect.DeepEqual(attrs[key], want) {
+			if attrs[key] != want {
 				t.Errorf("%s=%v, want %v", key, attrs[key], want)
 			}
 		}

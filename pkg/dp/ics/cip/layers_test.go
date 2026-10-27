@@ -4,7 +4,6 @@ package cip
 
 import (
 	"encoding/binary"
-	"reflect"
 	"testing"
 	"time"
 
@@ -51,24 +50,25 @@ func TestDecoderEtherNetIPLayers(t *testing.T) {
 		name    string
 		command uint16
 		data    []byte
-		types   []string
+		types   string
+		cpf     bool
 	}{
-		{"SendRRData", 0x006f, buildSendRRDataPayload(0x4c, 0, nil), []string{"0x0000", "0x00b2"}},
+		{"SendRRData", 0x006f, buildSendRRDataPayload(0x4c, 0, nil), "0x0000,0x00b2", true},
 		// The connected payload includes its sequence count. This test only
 		// asserts framing metadata, not the service interpretation.
 		{"SendUnitData", 0x0070, buildCPFItems(
 			cpfTestItem{0x00a1, []byte{1, 0, 0, 0}},
 			cpfTestItem{0x00b1, []byte{1, 0, 0x4c, 0}},
-		), []string{"0x00a1", "0x00b1"}},
-		{"RegisterSession", 0x0065, []byte{1, 0, 0, 0}, nil},
+		), "0x00a1,0x00b1", true},
+		{"RegisterSession", 0x0065, []byte{1, 0, 0, 0}, "", false},
 		{"after CIP", 0x006f, buildCPFItems(
 			cpfTestItem{0x00b2, []byte{0x4c, 0}},
 			cpfTestItem{0x1234, []byte{1}},
 			cpfTestItem{0x00b2, []byte{0x4d, 0}},
-		), []string{"0x00b2", "0x1234", "0x00b2"}},
-		{"no CIP", 0x006f, buildCPFItems(cpfTestItem{0x0000, nil}), []string{"0x0000"}},
-		{"invalid CIP", 0x006f, buildCPFItems(cpfTestItem{0x00b2, nil}), []string{"0x00b2"}},
-		{"empty CPF", 0x0070, buildCPFItems(), []string{}},
+		), "0x00b2,0x1234,0x00b2", true},
+		{"no CIP", 0x006f, buildCPFItems(cpfTestItem{0x0000, nil}), "0x0000", true},
+		{"invalid CIP", 0x006f, buildCPFItems(cpfTestItem{0x00b2, nil}), "0x00b2", true},
+		{"empty CPF", 0x0070, buildCPFItems(), "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
@@ -84,11 +84,11 @@ func TestDecoderEtherNetIPLayers(t *testing.T) {
 			}
 			assertEncapsulation(t, ev.Attributes, tc.command, 0x12345678)
 			types, present := ev.Attributes["cpf_item_types"]
-			if !reflect.DeepEqual(types, tc.types) && (present || tc.types != nil) {
+			if tc.cpf && types != tc.types {
 				t.Errorf("CPF types=%v, want %v", types, tc.types)
 			}
-			if tc.types == nil && present {
-				t.Error("non-CPF command has cpf_item_types")
+			if present != tc.cpf {
+				t.Errorf("CPF field present=%t, want %t", present, tc.cpf)
 			}
 			if tc.name == "after CIP" && ev.Attributes["service_code"] != uint8(0x4c) {
 				t.Error("did not retain first CIP item")

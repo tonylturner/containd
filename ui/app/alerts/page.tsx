@@ -440,7 +440,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
               <DetailRow label="Encapsulation" value={String(eventAttrs["enip_command"])} mono />
             )}
             {eventAttrs["cpf_item_types"] != null && (
-              <DetailRow label="CPF Items" value={Array.isArray(eventAttrs["cpf_item_types"]) ? eventAttrs["cpf_item_types"].join(", ") : String(eventAttrs["cpf_item_types"])} mono />
+              <DetailRow label="CPF Items" value={String(eventAttrs["cpf_item_types"])} mono />
             )}
             {eventAttrs["service_name"] != null && (
               <DetailRow label="Service" value={String(eventAttrs["service_name"])} mono />

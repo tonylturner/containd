@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -63,7 +64,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		itemTypes, item, cpfErr := parseCPF(hdr.Data)
 		var cipMsg *CIPMessage
 		if cpfErr == nil {
-			attrs["cpf_item_types"] = itemTypes
+			attrs["cpf_item_types"] = strings.Join(itemTypes, ",")
 		}
 		if item != nil {
 			cipMsg, _ = parseCIPFromItem(item)

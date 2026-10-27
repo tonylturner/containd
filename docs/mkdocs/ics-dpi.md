@@ -141,12 +141,19 @@ and toggle boundaries with: `EtherNet/IP is decoded as "cip"; match encapsulatio
 | CIP event layer | Attributes |
 | --- | --- |
 | Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle` |
-| Common Packet Format (CPF) | `cpf_item_types`: all item types in packet order as lowercase hex strings, such as `["0x0000", "0x00b2"]`, on SendRRData/SendUnitData with a valid item list |
+| Common Packet Format (CPF) | `cpf_item_types`: all item types in packet order as one comma-joined lowercase hex string with no spaces, such as `"0x0000,0x00b2"`, on SendRRData/SendUnitData with a valid item list |
 | CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; MSP parents also carry `multi_service_count`, sub-events carry `msp` |
 
 MSP sub-events retain the encapsulation and CPF fields. Non-CPF commands such as
 RegisterSession have no `cpf_item_types`. The encapsulation fields replace
 `command`, `command_code` and `session_handle`; CIP events do not emit aliases.
+
+For a `cip` IDS rule, this condition matches a connected-data CPF item using
+`contains "0x00b1"`:
+
+```json
+{"field": "attr.cpf_item_types", "op": "contains", "value": "0x00b1"}
+```
 
 ## ICS Firewall Rule Predicates
 

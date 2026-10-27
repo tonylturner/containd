@@ -5,7 +5,6 @@ package cip
 
 import (
 	"encoding/binary"
-	"reflect"
 	"testing"
 	"time"
 
@@ -491,7 +490,7 @@ func TestDecoderMSPTwoSubServices(t *testing.T) {
 
 	for _, ev := range evts {
 		assertEncapsulation(t, ev.Attributes, 0x006f, 1)
-		if !reflect.DeepEqual(ev.Attributes["cpf_item_types"], []string{"0x0000", "0x00b2"}) {
+		if ev.Attributes["cpf_item_types"] != "0x0000,0x00b2" {
 			t.Errorf("MSP CPF metadata = %v", ev.Attributes["cpf_item_types"])
 		}
 	}
