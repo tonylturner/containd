@@ -5,6 +5,7 @@ package itdpi
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,5 +216,44 @@ func TestHTTPNonHTTPTraffic(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Fatalf("expected 0 events for non-HTTP traffic, got %d", len(events))
+	}
+}
+
+// Raw request and response bytes carry credentials, cookies and bodies, so
+// the decoder reports parsed metadata only.
+func TestHTTPEventsCarryNoRawBytes(t *testing.T) {
+	d := NewHTTPDecoder()
+	for name, pkt := range map[string]*dpi.ParsedPacket{
+		"request": {
+			Payload: []byte("POST /login HTTP/1.1\r\nHost: example.com\r\nAuthorization: Bearer SECRET\r\n" +
+				"Content-Type: application/x-www-form-urlencoded\r\n\r\npassword=SECRET"),
+			Proto: "tcp", SrcPort: 12345, DstPort: 80,
+		},
+		"response": {
+			Payload: []byte("HTTP/1.1 200 OK\r\nSet-Cookie: session=SECRET\r\n\r\ntoken=SECRET"),
+			Proto:   "tcp", SrcPort: 80, DstPort: 12345,
+		},
+		"h2 preface": {
+			Payload: []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\nSECRET"),
+			Proto:   "tcp", SrcPort: 12345, DstPort: 80,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			events, err := d.OnPacket(httpFlowState(pkt.SrcPort, pkt.DstPort), pkt)
+			if err != nil || len(events) != 1 {
+				t.Fatalf("events=%d err=%v", len(events), err)
+			}
+			for key, value := range events[0].Attributes {
+				if key == "preview" || key == "hash" {
+					t.Errorf("attribute %q present: %v", key, value)
+				}
+				if s, ok := value.(string); ok && strings.Contains(s, "SECRET") {
+					t.Errorf("attribute %q leaks payload: %q", key, s)
+				}
+				if b, ok := value.([]byte); ok {
+					t.Errorf("attribute %q carries raw bytes: %q", key, b)
+				}
+			}
+		})
 	}
 }

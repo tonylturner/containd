@@ -106,6 +106,8 @@ func TestNormalizeField(t *testing.T) {
 		{"attr.src_ip", ""},
 		{"attr.proto", ""},
 		{"http_header", ""},
+		{"preview", ""},
+		{"attr.hash", ""},
 		{"attr.http_header", ""},
 		{"unknown", ""},
 		{"attr.unknown", ""},

@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matches any Modbus request whose span cannot be bounded (unknown function
   code, malformed PDU, quantity outside protocol limits, byte count that
   disagrees with the quantity).
+- HTTP DPI events no longer carry the first 4 KiB of the raw request or
+  response (`preview`) or its SHA-256 (`hash`). Those bytes could include
+  `Authorization` and `Set-Cookie` headers and form bodies, and reached the
+  event store, the events API and exports once packet-preview scanning no
+  longer removed them. Events keep the parsed metadata (method, path, host,
+  status, user agent, ports). Sigma rules can no longer select `preview` or
+  `hash`.
 
 ### Added
 
