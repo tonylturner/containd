@@ -131,11 +131,16 @@ const (
 	fillFraming
 	// fillTimeout: idle or object deadline passed.
 	fillTimeout
+	// fillForward: the forward hook failed; the recipient of the streamed
+	// prefix is gone.
+	fillForward
 )
 
 // fill spools src into s up to max bytes. It returns the bytes read but not
 // spooled (so a pass-through can continue the stream) and the error.
-func (s *spool) fill(src io.Reader, max int64) (fillOutcome, []byte, error) {
+// forward, when set, runs after every write so a streaming mode can
+// relay what the spool now holds; its error ends the fill.
+func (s *spool) fill(src io.Reader, max int64, forward func() error) (fillOutcome, []byte, error) {
 	buf := make([]byte, copyBufSize)
 	for {
 		// Read one byte past the room left so an exact fit and an
@@ -153,6 +158,11 @@ func (s *spool) fill(src io.Reader, max int64) (fillOutcome, []byte, error) {
 			}
 			if _, werr := s.Write(buf[:keep]); werr != nil {
 				return fillDisk, append([]byte(nil), buf[:n]...), werr
+			}
+			if forward != nil {
+				if ferr := forward(); ferr != nil {
+					return fillForward, nil, ferr
+				}
 			}
 			if keep < int64(n) {
 				return fillOversized, append([]byte(nil), buf[keep:n]...), nil

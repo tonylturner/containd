@@ -224,7 +224,14 @@ func (c *conn) closeUpstream() {
 func (c *conn) idle() bool { return !c.client.active.Load() }
 
 // closeAll closes both connections; safe to call concurrently with serve.
-func (c *conn) closeAll() {
+func (c *conn) closeAll() { c.end((*peer).close) }
+
+// resetAll ends both connections with a TCP reset: the object was partly
+// delivered and must not look complete to either side.
+func (c *conn) resetAll() { c.end((*peer).reset) }
+
+// end closes both connections with fn once; later calls are no-ops.
+func (c *conn) end(fn func(*peer)) {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -233,9 +240,9 @@ func (c *conn) closeAll() {
 	c.closed = true
 	up := c.up
 	c.mu.Unlock()
-	c.client.close()
+	fn(c.client)
 	if up != nil {
-		up.close()
+		fn(up.peer)
 	}
 }
 

@@ -59,6 +59,8 @@ type head struct {
 	// host is the effective authority: the absolute-form target's
 	// authority when the target carries one, else the Host field.
 	host string
+	// contentRange records a Content-Range field on a response.
+	contentRange bool
 }
 
 // parseRequestHead interprets one request head strictly.
@@ -244,6 +246,8 @@ func (h *head) interpret(reqMethod string) error {
 				return unsupported("duplicate Host")
 			}
 			hostSeen, h.host = true, f.value
+		case "content-range":
+			h.contentRange = true
 		}
 	}
 	if len(codings) > 0 {
@@ -332,6 +336,10 @@ func (h *head) without(name string) []byte {
 
 // interim reports a 1xx response.
 func (h *head) interim() bool { return !h.request && h.status < 200 }
+
+// partial reports a response carrying part of an object: a 206 or any
+// response with Content-Range. A part can never be scanned as the object.
+func (h *head) partial() bool { return !h.request && (h.status == 206 || h.contentRange) }
 
 func parseContentLength(v string) (int64, error) {
 	if v == "" || len(v) > 19 || !isDigits(v) {

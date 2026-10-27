@@ -4,9 +4,13 @@
 // Package httpgate serves HTTP/1.x connections steered to it, holds each
 // selected message body until a scanner has classified it, and delivers or
 // refuses the whole message afterwards. No byte of a selected message
-// reaches its recipient before the decision; interim 1xx responses are the
-// only exception. Steering, scanner backends and configuration live
-// elsewhere and arrive through hooks.
+// reaches its recipient before the decision, with two exceptions: interim
+// 1xx responses, and downloads in stream_tail mode, which forward the body
+// as it arrives except its last 64 KiB and reset both connections when the
+// verdict blocks. A URL whose download was Infected is refused for a while
+// afterwards so the withheld tail cannot be fetched with a Range request.
+// Steering, scanner backends and configuration live elsewhere and arrive
+// through hooks.
 package httpgate
 
 import (
@@ -44,6 +48,7 @@ type Server struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	prefix   string
+	blocked  *blockedURLs
 
 	mu        sync.Mutex
 	listeners map[net.Listener]struct{}
@@ -70,6 +75,7 @@ func (s *Server) init() {
 		s.ctx, s.cancel = context.WithCancel(context.Background())
 		s.listeners = map[net.Listener]struct{}{}
 		s.conns = map[*conn]struct{}{}
+		s.blocked = newBlockedURLs()
 		var b [4]byte
 		_, _ = rand.Read(b[:])
 		s.prefix = hex.EncodeToString(b[:])

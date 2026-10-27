@@ -44,12 +44,16 @@ type Event struct {
 	// is empty when nothing was held.
 	SHA256        string
 	SHA256Partial bool
-	Verdict       avscan.Verdict
-	Reason        avscan.Reason
-	Signature     string
-	Backend       string
-	Detail        string
-	Action        avscan.Action
+	// Streamed is the body bytes forwarded to the client before the
+	// decision; non-zero only for stream_tail downloads. A reset discards
+	// what was still in transit, so the client may hold fewer.
+	Streamed  int64
+	Verdict   avscan.Verdict
+	Reason    avscan.Reason
+	Signature string
+	Backend   string
+	Detail    string
+	Action    avscan.Action
 	// Duration runs from the request head to the decision.
 	Duration time.Duration
 	// Error is set on connection events only.

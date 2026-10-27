@@ -187,6 +187,19 @@ func (p *peer) close() {
 	p.closeOnce.Do(func() { p.conn.Close() })
 }
 
+// reset closes the connection with a TCP reset instead of a FIN, so a
+// recipient holding a prefix of an object learns that it is incomplete
+// and unread bytes are discarded rather than drained. A transport
+// without SO_LINGER is closed plainly.
+func (p *peer) reset() {
+	p.closeOnce.Do(func() {
+		if l, ok := p.conn.(interface{ SetLinger(int) error }); ok {
+			_ = l.SetLinger(0)
+		}
+		p.conn.Close()
+	})
+}
+
 // closeWrite half-closes the sending side when the transport supports it.
 func (p *peer) closeWrite() {
 	if cw, ok := p.conn.(interface{ CloseWrite() error }); ok {

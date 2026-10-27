@@ -37,10 +37,17 @@ type transaction struct {
 	sendErr  error
 	// spliceCh is closed when the response side switched to a raw splice.
 	spliceCh chan struct{}
+	// streamed is the body bytes forwarded to the client before the
+	// download decision; non-zero in stream_tail mode only. emit records
+	// it in the event.
+	streamed int64
 }
 
 // run serves the transaction and reports whether the connection persists.
 func (tx *transaction) run() bool {
+	if tx.refuseRemembered() {
+		return false
+	}
 	h := tx.req
 	if h.hasExpect && h.expect != "100-continue" {
 		res := gateResult(avscan.ReasonUnsupported, "Expect: "+h.expect)
@@ -89,7 +96,7 @@ func (tx *transaction) holdUpload(body io.Reader) bool {
 		})
 	}
 	defer release()
-	outcome, excess, detail := tx.receive(sp, body, tx.c.client)
+	outcome, excess, detail := tx.receive(sp, body, tx.c.client, nil)
 	switch outcome {
 	case fillComplete:
 		res, aborted := tx.scan(tx.object(avscan.Upload, sp, nil), tx.c.client)
@@ -145,10 +152,10 @@ func (tx *transaction) admit(declared int64) (avscan.Result, bool) {
 }
 
 // receive spools body from p under the object deadline and describes how
-// it ended.
-func (tx *transaction) receive(sp *spool, body io.Reader, p *peer) (fillOutcome, []byte, string) {
+// it ended. forward, when set, relays the spool after every write.
+func (tx *transaction) receive(sp *spool, body io.Reader, p *peer, forward func() error) (fillOutcome, []byte, string) {
 	p.setObjectDeadline(tx.set.ObjectTimeout)
-	outcome, excess, err := sp.fill(body, tx.set.MaxObjectBytes)
+	outcome, excess, err := sp.fill(body, tx.set.MaxObjectBytes, forward)
 	var detail string
 	switch outcome {
 	case fillTimeout:
@@ -158,6 +165,8 @@ func (tx *transaction) receive(sp *spool, body io.Reader, p *peer) (fillOutcome,
 		}
 	case fillFraming, fillDisk:
 		detail = err.Error()
+	case fillForward:
+		detail = "client stopped taking the streamed body: " + err.Error()
 	case fillOversized:
 		detail = fmt.Sprintf("body exceeds %d bytes", tx.set.MaxObjectBytes)
 	}
@@ -251,7 +260,7 @@ func (tx *transaction) emit(dir avscan.Direction, res avscan.Result, action avsc
 	ev := Event{
 		ID: tx.id, Direction: dir, Client: tx.c.clientAddr, Server: tx.c.serverAddr, ICS: tx.ics,
 		Method: tx.req.method, Host: tx.req.host, Target: boundTarget(tx.req.target), Status: status,
-		Size: size, Verdict: res.Verdict, Reason: res.Reason, Signature: res.Signature,
+		Size: size, Streamed: tx.streamed, Verdict: res.Verdict, Reason: res.Reason, Signature: res.Signature,
 		Backend: res.Backend, Detail: res.Detail, Action: action, Duration: time.Since(tx.start),
 	}
 	if sp != nil && sp.size > 0 {

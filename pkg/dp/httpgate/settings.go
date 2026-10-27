@@ -14,6 +14,31 @@ import (
 	"github.com/tonylturner/containd/pkg/common/avscan"
 )
 
+// DownloadMode is how a selected response body reaches the client.
+type DownloadMode string
+
+const (
+	// DownloadHold holds the whole body until the verdict; the default.
+	DownloadHold DownloadMode = "hold"
+	// DownloadStreamTail forwards body bytes as they arrive except the
+	// last streamTailBytes, released on a verdict that delivers. A verdict
+	// that blocks resets both connections, since the client already holds
+	// a prefix of the object. Uploads are held in every mode.
+	DownloadStreamTail DownloadMode = "stream_tail"
+)
+
+// streamTailBytes is the body suffix a stream_tail download holds back
+// until the verdict. The gate re-frames chunked bodies one chunk per
+// write, so the origin's chunk boundaries never constrain the tail.
+const streamTailBytes = 64 << 10
+
+const (
+	// defaultBlockedURLEntries bounds the blocked-URL memory.
+	defaultBlockedURLEntries = 4096
+	// defaultBlockedURLTTL is how long a blocked URL stays refused.
+	defaultBlockedURLTTL = 10 * time.Minute
+)
+
 // Settings is one validated gate configuration. Every transaction uses the
 // snapshot that was current when its request head was parsed.
 type Settings struct {
@@ -21,6 +46,8 @@ type Settings struct {
 	// bodies. An unselected body is relayed with its original framing.
 	ScanUploads   bool
 	ScanDownloads bool
+	// DownloadMode is hold or stream_tail; empty means hold.
+	DownloadMode DownloadMode
 	// MaxObjectBytes is the largest body the gate holds. A longer body is
 	// Unscanned/oversized and follows FailPolicy.
 	MaxObjectBytes int64
@@ -55,6 +82,11 @@ type Settings struct {
 	DialTimeout time.Duration
 	// ScanTimeout bounds one Scanner.Scan call.
 	ScanTimeout time.Duration
+	// BlockedURLEntries bounds the URLs remembered as infected and
+	// BlockedURLTTL is how long each stays refused; zero takes the
+	// default. The memory defeats a Range resume of a blocked download.
+	BlockedURLEntries int
+	BlockedURLTTL     time.Duration
 }
 
 // validate reports the first problem with s and fills defaults.
@@ -87,6 +119,22 @@ func (s *Settings) validate() error {
 	}
 	if s.MemoryThreshold > math.MaxInt64/objects {
 		return errors.New("httpgate: MaxConcurrentObjects × MemoryThreshold overflows")
+	}
+	switch s.DownloadMode {
+	case "":
+		s.DownloadMode = DownloadHold
+	case DownloadHold, DownloadStreamTail:
+	default:
+		return fmt.Errorf("httpgate: download mode %q is neither hold nor stream_tail", s.DownloadMode)
+	}
+	if s.BlockedURLEntries < 0 || s.BlockedURLTTL < 0 {
+		return errors.New("httpgate: BlockedURLEntries and BlockedURLTTL must not be negative")
+	}
+	if s.BlockedURLEntries == 0 {
+		s.BlockedURLEntries = defaultBlockedURLEntries
+	}
+	if s.BlockedURLTTL == 0 {
+		s.BlockedURLTTL = defaultBlockedURLTTL
 	}
 	if s.SpoolDir == "" {
 		s.SpoolDir = os.TempDir()
