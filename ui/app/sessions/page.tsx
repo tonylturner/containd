@@ -18,8 +18,6 @@ function normalizeProto(p: string | undefined): string {
   return (p ?? "").toLowerCase().trim();
 }
 
-const killable = ["tcp", "udp", "icmp", "icmpv6"];
-
 function isICMP(proto: string): proto is "icmp" | "icmpv6" {
   return proto === "icmp" || proto === "icmpv6";
 }
@@ -47,17 +45,25 @@ function killTuple(e: ConntrackEntry): ConntrackKillTuple | null {
   return { proto, src, dst, sport, dport };
 }
 
-/** The tuple for display: endpoints with ports, or with the ICMP identifier. */
+/**
+ * One tuple direction for display: endpoints with their ports, or bare
+ * addresses followed by the ICMP identifier when the entry carries one. An
+ * engine that does not report ICMP identifiers yields bare addresses.
+ */
+function tupleText(proto: string, src: string | undefined, sport: string | undefined, dst: string | undefined, dport: string | undefined, icmpId: string | undefined): string {
+  const endpoints = `${formatEndpoint(src, sport)} → ${formatEndpoint(dst, dport)}`;
+  return isICMP(normalizeProto(proto)) && icmpId !== undefined ? `${endpoints} (id ${icmpId})` : endpoints;
+}
+
+/** The original tuple, prefixed with its protocol, as the kill dialog names it. */
 function describeTuple(e: ConntrackEntry): string {
-  if (isICMP(normalizeProto(e.proto))) return `${e.proto} ${e.src ?? "—"} → ${e.dst ?? "—"} (id ${e.icmpId ?? "—"})`;
-  return `${e.proto} ${formatEndpoint(e.src, e.sport)} → ${formatEndpoint(e.dst, e.dport)}`;
+  return `${e.proto} ${tupleText(e.proto, e.src, e.sport, e.dst, e.dport, e.icmpId)}`;
 }
 
 /** The reply tuple (NAT) column: ports, or the ICMP identifier NAT may rewrite. */
 function replyTuple(e: ConntrackEntry): string {
   if (!e.replySrc) return "—";
-  if (isICMP(normalizeProto(e.proto))) return `${e.replySrc} → ${e.replyDst ?? "—"} (id ${e.replyIcmpId ?? "—"})`;
-  return `${formatEndpoint(e.replySrc, e.replySport)} → ${formatEndpoint(e.replyDst, e.replyDport)}`;
+  return tupleText(e.proto, e.replySrc, e.replySport, e.replyDst, e.replyDport, e.replyIcmpId);
 }
 
 export default function SessionsPage() {
@@ -265,7 +271,7 @@ export default function SessionsPage() {
                     <td className="px-4 py-3 text-(--text-muted)">{replyTuple(e)}</td>
                     <td className="px-4 py-3 text-right">
                       <button
-                        disabled={!canKill || killing || !killable.includes(normalizeProto(e.proto)) || !Number.isInteger(durationSecs) || durationSecs < 1 || durationSecs > 3600}
+                        disabled={!canKill || killing || killTuple(e) === null || !Number.isInteger(durationSecs) || durationSecs < 1 || durationSecs > 3600}
                         onClick={() => handleKill(e)}
                         className={
                           canKill

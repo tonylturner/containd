@@ -129,7 +129,7 @@ test("ICMP rows show identifier and type in place of ports and can be killed", a
   await open(page);
   const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "id 4660", exact: true }) });
   await expect(row.getByRole("cell", { name: "type 8 code 0", exact: true })).toBeVisible();
-  await expect(row).toContainText("198.51.100.20 → 203.0.113.1 (id 7)");
+  await expect(row.getByRole("cell", { name: "198.51.100.20 → 203.0.113.1 (id 7)", exact: true })).toBeVisible();
   await expect(page.getByRole("row").filter({ has: page.getByRole("cell", { name: "47", exact: true }) }).getByRole("button", { name: "Kill", exact: true })).toBeDisabled();
   await row.getByRole("button", { name: "Kill", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("icmp 192.0.2.10 → 198.51.100.20 (id 4660)");
@@ -150,4 +150,13 @@ test("client-service ICMPv6 kill ends the client's pings to that host", async ({
   await page.getByRole("dialog").getByRole("button", { name: "Kill", exact: true }).click();
   await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Revocation installed: yes");
   expect(writes).toEqual([{ proto: "icmpv6", src: ping6.src, dst: ping6.dst, icmpId: 0, icmpType: 128, icmpCode: 0, scope: "client-service", durationSecs: 60 }]);
+});
+
+test("an ICMP row without identifier fields shows bare addresses and cannot be killed", async ({ page }) => {
+  // An engine that predates ICMP identifiers lists only the addresses.
+  await mockAPI(page, { entries: [{ proto: "icmp", src: "192.0.2.10", dst: "192.0.2.20", replySrc: "192.0.2.20", replyDst: "192.0.2.10" }] });
+  await open(page);
+  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "192.0.2.20 → 192.0.2.10", exact: true }) });
+  await expect(row.getByRole("cell")).toHaveText(["icmp", "—", "192.0.2.10", "—", "192.0.2.20", "—", "—", "—", "no", "—", "192.0.2.20 → 192.0.2.10", "Kill"]);
+  await expect(row.getByRole("button", { name: "Kill", exact: true })).toBeDisabled();
 });
