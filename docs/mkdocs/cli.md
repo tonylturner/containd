@@ -145,30 +145,40 @@ modes.
 
 containd reads the mode once, when management starts. A non-empty
 `CONTAIND_SSH_SHELL_MODE` takes precedence over the saved
-`system.ssh.shellMode`. Only `linux`, in any letter case, selects the Linux
-shell. Every other value, including an empty one, selects `appliance`.
-`set system ssh shell-mode <appliance|linux>` stages `system.ssh.shellMode`.
-Commit it, then restart containd. `show system` displays the saved value, not
-the environment override. The starter Compose file (`deploy/docker-compose.yml`)
-always sets `CONTAIND_SSH_SHELL_MODE` (default `appliance`), so the saved value
-has no effect there. Set the variable in `.env` and run `docker compose up -d`.
+`system.ssh.shellMode`: `linux` in any letter case selects the Linux shell,
+and any other value the appliance CLI. The saved value accepts only
+`appliance`, `linux` or empty, which means `appliance`.
+`set system ssh shell-mode <appliance|linux>` stages it. Commit it, then
+restart containd. The starter Compose file (`deploy/docker-compose.yml`)
+always sets `CONTAIND_SSH_SHELL_MODE` (default `appliance`); to change the
+mode there, set the variable in `.env` and run `docker compose up -d`.
 
-A `linux` mode login needs a PTY. Interactive `ssh` requests one by default;
-`ssh -T` does not. In `linux` mode, a login without a PTY opens the appliance
-CLI and prints a warning.
+`show system` shows the mode SSH runs as `ssh.shell_mode` and its source as
+`ssh.shell_mode_source`: `environment (CONTAIND_SSH_SHELL_MODE)`, `config` or
+`default`. When the saved value differs, `ssh.shell_mode_saved` shows it and
+says whether the environment overrides it or it applies after a restart.
+`show system ssh` also lists the mode and its source.
 
-`configure` and `containd cli` in the Linux shell do not reuse the SSH login.
-They log in to the management API on `127.0.0.1`, at the port of
-`CONTAIND_MGMT_ADDR` (default 8080), as `CONTAIND_CLI_USER` with
-`CONTAIND_CLI_PASSWORD`; both default to `containd`. The Linux shell starts
-with a minimal environment and does not receive the container's `CONTAIND_*`
-variables. If the account has a different password, or management HTTP uses
-another port, set the variables for the command, for example
-`CONTAIND_CLI_USER=admin CONTAIND_CLI_PASSWORD='<password>' configure`.
-Otherwise the CLI stops with `authentication failed`. In lab mode the pinned
-`containd` / `containd` credential satisfies the defaults. The `menu`, `wizard`
-and `diagnostics` commands exist only in the appliance SSH CLI. There,
-`configure` opens the setup wizard, the same as `wizard`.
+The Linux shell needs a PTY. Interactive `ssh` requests one by default;
+`ssh -T` does not. Without a PTY, a `linux` mode login opens the appliance CLI
+with a warning. There, `shell` and `bash` say that the Linux shell needs an
+interactive session, and the CLI keeps running.
+
+In a Linux shell opened over SSH, `configure` and `containd cli` act as the
+SSH login: they ask for no password and have the login's role. The shell
+holds no token or password. Its CLI reaches management through the SSH
+server, over a socket that exists only while the shell runs
+(`CONTAIND_SSH_API_SOCKET`). After the shell or the SSH connection ends, or
+the login's session is revoked, `containd cli` stops with
+`SSH login unavailable`. Elsewhere, for example with
+`docker exec <container> containd cli`, the CLI logs in to management on
+`127.0.0.1`, at the port of `CONTAIND_MGMT_ADDR` (default 8080), as
+`CONTAIND_CLI_USER` with `CONTAIND_CLI_PASSWORD`; both default to `containd`.
+
+The SSH CLI, and `containd cli` in an SSH shell, stay authorized while the
+connection is open, up to the 4-hour session limit. Reconnect after that.
+The `menu`, `wizard` and `diagnostics` commands exist only in the appliance
+SSH CLI. There, `configure` opens the setup wizard, the same as `wizard`.
 
 Access and lab caveats:
 
@@ -180,8 +190,9 @@ Access and lab caveats:
   containd as root with `NET_ADMIN` and `NET_RAW`. In the default `all` mode the
   engine runs in the same container. The shell can therefore change nftables,
   routes and files directly, without candidate validation or commit.
-- containd audits SSH logins and appliance CLI commands. It does not audit
-  commands typed in the Linux shell.
+- containd audits SSH logins and appliance CLI commands. Management audits
+  the changes `containd cli` makes from an SSH shell, as for any API client.
+  Commands typed in the Linux shell itself are not audited.
 
 Use `linux` mode only where every SSH admin can have root access to the
 appliance container.
