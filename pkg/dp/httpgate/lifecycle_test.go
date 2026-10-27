@@ -6,8 +6,10 @@ package httpgate
 import (
 	"context"
 	"errors"
+	"io"
 	"math"
 	"net"
+	"net/netip"
 	"runtime"
 	"strings"
 	"testing"
@@ -185,6 +187,38 @@ func TestShutdownForcesActiveConnectionsAtDeadline(t *testing.T) {
 		t.Fatalf("Shutdown took %v", took)
 	}
 	c.expectClosed()
+}
+
+// An upstream whose dial completes after Shutdown's forced close must be
+// closed at once, or the handler would wait on it until the idle timeout.
+func TestShutdownClosesLateDialledUpstream(t *testing.T) {
+	o := rawOrigin(t, func(c net.Conn, _ int) {
+		_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, _ = io.Copy(io.Discard, c)
+	})
+	dialling := make(chan struct{})
+	proceed := make(chan struct{})
+	o.dial = func(_ context.Context, _, server netip.AddrPort) (net.Conn, error) {
+		close(dialling)
+		<-proceed
+		return net.Dial("tcp", server.String())
+	}
+	g := startGate(t, o, func(s *Settings) { s.IdleTimeout = time.Minute; s.ScanUploads = false })
+	c := g.client()
+	c.write(getRequest("/late", ""))
+	<-dialling
+	shutdownErr := make(chan error, 1)
+	go func() { shutdownErr <- g.shutdown(200 * time.Millisecond) }()
+	c.expectClosed()
+	close(proceed)
+	select {
+	case err := <-shutdownErr:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Shutdown returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown hung on an upstream dialled after the forced close")
+	}
 }
 
 func TestNoGoroutineLeakAndCleanSpool(t *testing.T) {

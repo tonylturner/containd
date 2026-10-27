@@ -114,7 +114,7 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 
 // send writes the request head and body upstream. When stop closes while
 // the body is still streaming from the client, the rest of it is drained
-// briefly so the client can read the early response.
+// for the drain window so the client can read the early response.
 func (tx *transaction) send(u *upstream, body bodySource, stop <-chan struct{}) (int64, error) {
 	if _, err := u.Write(tx.reqHead); err != nil {
 		return 0, err
@@ -126,7 +126,7 @@ func (tx *transaction) send(u *upstream, body bodySource, stop <-chan struct{}) 
 		if err != nil {
 			if errors.Is(err, errStopped) && body.rest != nil {
 				tx.c.client.bound(drainWindow)
-				_, _ = io.CopyN(io.Discard, body.rest, drainLimit)
+				_, _ = io.Copy(io.Discard, body.rest)
 				tx.c.client.setObjectDeadline(0)
 			}
 			return sent, err

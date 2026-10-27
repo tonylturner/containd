@@ -191,11 +191,13 @@ func (l *recListener) Accept() (net.Conn, error) {
 }
 
 // origin is a loopback server standing in for the real destination. dst,
-// when set, replaces the OriginalDst hook that would return addr.
+// when set, replaces the OriginalDst hook that would return addr; dial,
+// when set, is installed as the Dial hook.
 type origin struct {
 	addr netip.AddrPort
 	rec  *recorder
 	dst  func(net.Conn) (netip.AddrPort, error)
+	dial func(ctx context.Context, client, server netip.AddrPort) (net.Conn, error)
 }
 
 func listenLoopback(t *testing.T) (net.Listener, netip.AddrPort) {
@@ -372,7 +374,7 @@ func startGate(t *testing.T, o *origin, adjust func(*Settings)) *gate {
 	if dst == nil {
 		dst = func(net.Conn) (netip.AddrPort, error) { return o.addr, nil }
 	}
-	g.srv = &Server{Scanner: g.scanner, OriginalDst: dst, OnEvent: g.events.add}
+	g.srv = &Server{Scanner: g.scanner, OriginalDst: dst, Dial: o.dial, OnEvent: g.events.add}
 	if err := g.srv.Update(set); err != nil {
 		t.Fatal(err)
 	}

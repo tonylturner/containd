@@ -139,16 +139,15 @@ func (p *peer) closeWrite() {
 	}
 }
 
-// drain discards whatever the peer still sends, for at most window or
-// limit bytes, so a response written just before close is read rather
-// than reset.
-func (p *peer) drain(window time.Duration, limit int) {
+// drain discards whatever the peer still sends until it stops or window
+// passes, so a response written just before close is read rather than
+// reset by unread bytes. Time is the only bound: a byte cap would reset
+// every refused body longer than the cap.
+func (p *peer) drain(window time.Duration) {
 	_ = p.conn.SetReadDeadline(time.Now().Add(window))
 	buf := make([]byte, copyBufSize)
-	for limit > 0 {
-		n, err := p.conn.Read(buf)
-		limit -= n
-		if err != nil {
+	for {
+		if _, err := p.conn.Read(buf); err != nil {
 			return
 		}
 	}

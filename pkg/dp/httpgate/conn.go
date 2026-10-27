@@ -18,12 +18,9 @@ import (
 	"github.com/tonylturner/containd/pkg/common/avscan"
 )
 
-const (
-	// drainWindow and drainLimit bound the read after a refusal so the
-	// client sees the response instead of a reset.
-	drainWindow = 500 * time.Millisecond
-	drainLimit  = 256 << 10
-)
+// drainWindow bounds the read after a refusal or an early response so
+// the client sees the response instead of a reset.
+const drainWindow = 500 * time.Millisecond
 
 // conn is one client connection and its lazily dialled upstream.
 type conn struct {
@@ -34,9 +31,12 @@ type conn struct {
 	serverAddr netip.AddrPort
 	// overLimit marks a connection accepted beyond MaxConnections.
 	overLimit bool
-	up        *upstream
 	txSeq     int
-	closeOnce sync.Once
+	// mu guards up and closed: the serve goroutine replaces the upstream
+	// while Shutdown closes the connection from another goroutine.
+	mu     sync.Mutex
+	up     *upstream
+	closed bool
 }
 
 // upstream is the origin connection. watch runs while it idles between
@@ -177,10 +177,22 @@ func (c *conn) upstream(set *Settings) (*upstream, error) {
 		if err != nil {
 			return nil, err
 		}
-		c.up = &upstream{peer: newPeer(nc, set.IdleTimeout)}
+		c.setUpstream(&upstream{peer: newPeer(nc, set.IdleTimeout)})
 	}
 	c.up.idle = set.IdleTimeout
 	return c.up, nil
+}
+
+// setUpstream installs u; an upstream dialled after the connection was
+// closed is closed at once so Shutdown never misses it.
+func (c *conn) setUpstream(u *upstream) {
+	c.mu.Lock()
+	c.up = u
+	closed := c.closed
+	c.mu.Unlock()
+	if closed && u != nil {
+		u.close()
+	}
 }
 
 func (c *conn) closeUpstream() {
@@ -189,7 +201,7 @@ func (c *conn) closeUpstream() {
 			c.up.watch.stop()
 		}
 		c.up.close()
-		c.up = nil
+		c.setUpstream(nil)
 	}
 }
 
@@ -199,21 +211,28 @@ func (c *conn) idle() bool { return !c.client.active.Load() }
 
 // closeAll closes both connections; safe to call concurrently with serve.
 func (c *conn) closeAll() {
-	c.closeOnce.Do(func() {
-		c.client.close()
-		if c.up != nil {
-			c.up.close()
-		}
-	})
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
+	up := c.up
+	c.mu.Unlock()
+	c.client.close()
+	if up != nil {
+		up.close()
+	}
 }
 
 // refuse writes a generated response and ends the connection. With drain
-// the client side is half-closed and read briefly first.
+// the client side is half-closed and read until it stops or the drain
+// window passes, so the response is read rather than reset.
 func (c *conn) refuse(resp []byte, drain bool) {
 	_, _ = c.client.Write(resp)
 	if drain {
 		c.client.closeWrite()
-		c.client.drain(drainWindow, drainLimit)
+		c.client.drain(drainWindow)
 	}
 	c.closeAll()
 }
