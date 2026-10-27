@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/verify-published-images.sh` runs the same checks locally. The README
   badges for Trivy, Cosign and SBOM show these results.
 
+### Changed
+
+- On upgrade, unchanged built-in IDS rules for removed industrial protocols
+  are removed automatically and recorded in an audit record. Any other saved
+  reference to a removed protocol starts the appliance in management recovery;
+  the saved configuration remains exportable until a valid configuration is
+  committed.
+
+### Removed
+
+- Removed S7comm, BACnet/IP, OPC UA and IEC 61850 MMS inspection, templates and
+  protocol-specific detections. Industrial inspection supports Modbus/TCP,
+  DNP3, IEC 60870-5-104 and optional CIP/EtherNet/IP.
+
 ## [0.1.35] - 2026-10-26
 
 ### Security

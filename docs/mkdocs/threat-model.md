@@ -85,7 +85,7 @@ Source code, dependencies, workflows, built images, SBOMs, signatures, advisorie
 
 Examples:
 
-- crafted BACnet, CIP, DNP3, Modbus, OPC UA, S7comm, DNS, HTTP, or TLS traffic intended to trigger bounds errors or panics
+- crafted CIP, DNP3, IEC 60870-5-104, Modbus/TCP, DNS, HTTP, or TLS traffic intended to trigger bounds errors or panics
 - malformed TCP segmentation or overlapping data designed to confuse reassembly
 
 Current mitigations:
