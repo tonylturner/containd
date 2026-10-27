@@ -14,7 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
-	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 )
 
@@ -234,9 +234,9 @@ func AnalyzeForPolicy(r io.Reader, decoders ...dpi.Decoder) (*PolicyAnalysis, er
 
 	onEvent := func(srcIP, dstIP string, ev dpi.Event) {
 		eventSummary[ev.Proto]++
-		// IEC104 traffic is summarised but never learned into permissive
-		// rules.
-		if !strings.EqualFold(ev.Proto, eventfields.ProtoIEC104) {
+		// IT/utility traffic remains visible in analysis, not ICS policy.
+		// IEC104 is also summarised but never auto-learned.
+		if ics.Learnable(strings.ToLower(ev.Proto)) {
 			learner.RecordEvent(srcIP, dstIP, ev)
 		}
 	}

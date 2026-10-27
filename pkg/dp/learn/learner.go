@@ -12,6 +12,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
@@ -48,7 +49,7 @@ func New() *Learner {
 // RecordEvent updates the learned profile for a communication pair based on a DPI event.
 func (l *Learner) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
 	proto := strings.ToLower(ev.Proto)
-	if proto == "" {
+	if !ics.Learnable(proto) {
 		return
 	}
 
