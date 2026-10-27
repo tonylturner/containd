@@ -15,8 +15,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
-// Decoder implements dpi.StreamDecoder for TCP CIP/EtherNet/IP visibility
-// and dpi.Decoder for UDP I/O traffic.
+// Decoder implements dpi.StreamDecoder for TCP EtherNet/IP encapsulation on
+// port 44818 and dpi.Decoder for UDP: implicit I/O datagrams on port 2222 and
+// packet-only encapsulation (ListIdentity and other commands) on port 44818.
 type Decoder struct{}
 
 func NewDecoder() *Decoder { return &Decoder{} }
@@ -28,8 +29,9 @@ func (d *Decoder) Supports(state *flow.State) bool {
 	switch state.Key.Proto {
 	case 6: // TCP — explicit messaging on port 44818
 		return state.Key.SrcPort == 44818 || state.Key.DstPort == 44818
-	case 17: // UDP — implicit/IO messaging on port 2222
-		return state.Key.SrcPort == 2222 || state.Key.DstPort == 2222
+	case 17: // UDP — implicit I/O on 2222, packet-only encapsulation on 44818
+		return state.Key.SrcPort == 2222 || state.Key.DstPort == 2222 ||
+			state.Key.SrcPort == 44818 || state.Key.DstPort == 44818
 	default:
 		return false
 	}
@@ -37,7 +39,7 @@ func (d *Decoder) Supports(state *flow.State) bool {
 
 // Ports implements dpi.PortHinter for port-based dispatch.
 func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
-	return []uint16{44818}, []uint16{2222}
+	return []uint16{44818}, []uint16{2222, 44818}
 }
 
 // cipCommands are EIP commands that carry CIP messages.
@@ -47,7 +49,15 @@ var cipCommands = map[uint16]bool{
 }
 
 func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Event, error) {
-	if pkt == nil || len(pkt.Payload) == 0 {
+	if pkt == nil {
+		return nil, nil
+	}
+	// Every datagram on the I/O port is one bounded frame, so an empty or
+	// malformed one is still reported rather than silently skipped.
+	if state != nil && state.Key.Proto == 17 && (state.Key.SrcPort == 2222 || state.Key.DstPort == 2222) {
+		return []dpi.Event{ioEvent(state, pkt.Payload)}, nil
+	}
+	if len(pkt.Payload) == 0 {
 		return nil, nil
 	}
 	hdr, err := ParseEIPHeader(pkt.Payload)

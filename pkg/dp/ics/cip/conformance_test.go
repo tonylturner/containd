@@ -70,7 +70,7 @@ func TestConformanceTwins(t *testing.T) {
 				}
 				assertCodes(t, res.Frames[0].Events[0], want)
 				udpState := cipState()
-				udpState.Key.Proto, udpState.Key.DstPort = 17, 2222
+				udpState.Key.Proto, udpState.Key.DstPort = 17, 44818
 				events, err := NewDecoder().OnPacket(udpState, &dpi.ParsedPacket{Payload: raw})
 				if err != nil || len(events) != len(res.Frames[0].Events) {
 					t.Fatalf("UDP events=%v err=%v", events, err)

@@ -368,33 +368,27 @@ func parseCPF(data []byte) ([]string, []byte, error) {
 func parseItems(data []byte, offset, count int) ([]string, []byte, error) {
 	var cipItem []byte
 	types := make([]string, 0)
-
-	for i := 0; i < count; i++ {
-		if offset+4 > len(data) {
-			return types, cipItem, ErrCIPTooShort
+	var itemErr error
+	err := walkCPFItems(data, offset, count, func(item cpfItem) {
+		types = append(types, fmt.Sprintf("0x%04x", item.typeID))
+		if !item.complete {
+			return
 		}
-		typeID := binary.LittleEndian.Uint16(data[offset : offset+2])
-		itemLen := binary.LittleEndian.Uint16(data[offset+2 : offset+4])
-		offset += 4
-		types = append(types, fmt.Sprintf("0x%04x", typeID))
-		if offset+int(itemLen) > len(data) {
-			return types, cipItem, ErrTruncated
-		}
-		if cipItem == nil && (typeID == 0x00B2 || typeID == 0x00B1) {
-			cipItem = data[offset : offset+int(itemLen)]
-			if typeID == 0x00b1 {
+		if cipItem == nil && (item.typeID == 0x00B2 || item.typeID == 0x00B1) {
+			cipItem = item.data
+			if item.typeID == 0x00b1 {
 				if len(cipItem) < 2 {
-					return types, []byte{}, ErrCIPTooShort
+					cipItem, itemErr = []byte{}, ErrCIPTooShort
+					return
 				}
 				cipItem = cipItem[2:] // connected explicit message sequence count
 			}
 		}
-		offset += int(itemLen)
+	})
+	if itemErr != nil {
+		err = itemErr
 	}
-	if offset != len(data) {
-		return types, cipItem, ErrInvalidCPF
-	}
-	return types, cipItem, nil
+	return types, cipItem, err
 }
 
 // parseCIPFromItem parses the CIP service header from an item's data.
