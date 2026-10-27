@@ -31,7 +31,7 @@ import (
 // second host, and a WAN namespace behind gs2 (zone wan). It runs only when
 // CONTAIND_NETNS_KERNEL_TEST=1 inside a disposable Linux container with
 // NET_ADMIN, NET_RAW and SYS_ADMIN, nft, iproute2 and Python; see
-// scripts/gate-spike/run.sh.
+// scripts/gate-kernel-tests.sh.
 type gateLab struct {
 	ctx                          context.Context
 	client, server, hairpin, wan string
@@ -55,7 +55,7 @@ const (
 func newGateLab(t *testing.T) *gateLab {
 	t.Helper()
 	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" || os.Geteuid() != 0 {
-		t.Skip("requires CONTAIND_NETNS_KERNEL_TEST=1 in a disposable Linux container with NET_ADMIN, NET_RAW and SYS_ADMIN; see scripts/gate-spike/run.sh")
+		t.Skip("requires CONTAIND_NETNS_KERNEL_TEST=1 in a disposable Linux container with NET_ADMIN, NET_RAW and SYS_ADMIN; see scripts/gate-kernel-tests.sh")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	t.Cleanup(cancel)
