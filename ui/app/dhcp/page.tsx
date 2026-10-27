@@ -8,13 +8,12 @@ import Link from "next/link";
 import { api, isAdmin, type DHCPConfig, type DHCPLease, type DHCPPool, type DHCPReservation, type DHCPStatus } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
+import { SaveStateLine } from "../../components/SaveStateLine";
+import { useSaveAction } from "../../hooks/useSaveAction";
 import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
 import { InfoTip } from "../../components/InfoTip";
 import { Card } from "../../components/Card";
-import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-
-type SaveState = "idle" | "saving" | "saved" | "error";
 
 function normalize(cfg: DHCPConfig | null): DHCPConfig {
   return {
@@ -65,10 +64,9 @@ function textToReservations(text: string): DHCPReservation[] {
 export default function DHCPPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const confirm = useConfirm();
   const [cfg, setCfg] = useState<DHCPConfig>(() => normalize(null));
   const [status, setStatus] = useState<DHCPStatus | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [leases, setLeases] = useState<DHCPLease[]>([]);
   const [leaseError, setLeaseError] = useState<string | null>(null);
@@ -141,18 +139,13 @@ export default function DHCPPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    setSaveState("saving");
-    const saved = await api.setDHCP(cfg);
-    setSaveState(saved.ok ? "saved" : "error");
-    if (!saved.ok) {
-      const msg = saved.error || "Failed to save DHCP settings.";
-      setError(msg);
-      toast(msg, "error");
-    } else {
-      setCfg(normalize(saved.data));
-      toast(saved.warning ? `DHCP staged — commit to apply. Warning: ${saved.warning}` : "DHCP staged — commit to apply.", "success");
-    }
-    setTimeout(() => setSaveState("idle"), 1500);
+    const saved = await save.run("save", () => api.setDHCP(cfg), {
+      success: "DHCP staged — commit to apply.",
+      failure: "Failed to save DHCP settings.",
+    });
+    if (!saved) return;
+    if (saved.ok) setCfg(normalize(saved.data));
+    else setError(saved.error);
   }
 
   return (
@@ -167,8 +160,12 @@ export default function DHCPPage() {
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110">
-              Save
+            <button
+              onClick={onSave}
+              disabled={save.pending !== null}
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
+            >
+              {save.pending ? "Saving…" : "Save"}
             </button>
           )}
           <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
@@ -183,7 +180,6 @@ export default function DHCPPage() {
         </div>
       }
     >
-      <ConfirmDialog {...confirm.props} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -407,16 +403,7 @@ export default function DHCPPage() {
           </details>
         </div>
 
-        <p className="mt-3 text-xs text-(--text-muted)">
-          State:{" "}
-          {saveState === "saving"
-            ? "saving\u2026"
-            : saveState === "saved"
-              ? "staged — commit to apply."
-              : saveState === "error"
-                ? "error"
-                : "idle"}
-        </p>
+        <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </Card>
 
       <Card className="mt-6">
