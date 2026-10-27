@@ -182,7 +182,7 @@ func readAck(fd int, seq uint32, allowExists bool) error {
 		if len(m.Data) < 4 {
 			return errors.New("netlink error")
 		}
-		code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+		code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
 		if code == 0 {
 			return nil
 		}
@@ -200,7 +200,7 @@ func routeDumpError(m syscall.NetlinkMessage) error {
 		return fmt.Errorf("interrupted routing dump")
 	}
 	if m.Header.Type == unix.NLMSG_DONE && len(m.Data) >= 4 {
-		code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+		code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
 		if code != 0 {
 			return unix.Errno(-code)
 		}

@@ -88,16 +88,16 @@ func openWireGuardNetlinkSocket() (int, error) {
 
 func buildWireGuardStatusRequest(seq uint32, familyID, ifIndex int) []byte {
 	var req bytes.Buffer
-	_ = binary.Write(&req, binary.LittleEndian, unix.NlMsghdr{
+	_ = binary.Write(&req, binary.NativeEndian, unix.NlMsghdr{
 		Type:  uint16(familyID),
 		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_DUMP,
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	})
-	_ = binary.Write(&req, binary.LittleEndian, genlMsgHdr{Cmd: wgCmdGetDevice, Version: wgGenlVersion})
+	_ = binary.Write(&req, binary.NativeEndian, genlMsgHdr{Cmd: wgCmdGetDevice, Version: wgGenlVersion})
 
 	ifi := make([]byte, 4)
-	binary.LittleEndian.PutUint32(ifi, uint32(ifIndex))
+	binary.NativeEndian.PutUint32(ifi, uint32(ifIndex))
 	addNLAttr(&req, wgDeviceAIfindex, ifi)
 
 	b := req.Bytes()
@@ -190,7 +190,7 @@ func parseWireGuardDeviceAttrs(out *WireGuardStatus, attrs []byte) {
 			}
 		case wgDeviceAListenPort:
 			if len(a.Value) >= 2 {
-				out.ListenPort = int(binary.LittleEndian.Uint16(a.Value[:2]))
+				out.ListenPort = int(binary.NativeEndian.Uint16(a.Value[:2]))
 			}
 		case wgDeviceAPeers:
 			out.Peers = parseWireGuardPeers(a.Value)
@@ -219,11 +219,11 @@ func parseWireGuardPeers(b []byte) []WireGuardPeerStatus {
 				ps.LastHandshake = decodeTimespec(a.Value)
 			case wgPeerARxBytes:
 				if len(a.Value) >= 8 {
-					ps.RxBytes = binary.LittleEndian.Uint64(a.Value[:8])
+					ps.RxBytes = binary.NativeEndian.Uint64(a.Value[:8])
 				}
 			case wgPeerATxBytes:
 				if len(a.Value) >= 8 {
-					ps.TxBytes = binary.LittleEndian.Uint64(a.Value[:8])
+					ps.TxBytes = binary.NativeEndian.Uint64(a.Value[:8])
 				}
 			case wgPeerAAllowedIPs:
 				ps.AllowedIPs = decodeAllowedIPs(a.Value)
@@ -252,7 +252,7 @@ func decodeAllowedIPs(b []byte) []string {
 			switch t {
 			case wgAllowedipAFamily:
 				if len(a.Value) >= 2 {
-					family = binary.LittleEndian.Uint16(a.Value[:2])
+					family = binary.NativeEndian.Uint16(a.Value[:2])
 				}
 			case wgAllowedipAIpaddr:
 				if len(a.Value) >= 4 {
@@ -276,12 +276,13 @@ func decodeAllowedIPs(b []byte) []string {
 }
 
 func decodeTimespec(b []byte) string {
-	// Kernel uses a timespec-like struct: 16 bytes (sec int64, nsec int64), little-endian.
+	// The kernel encodes the handshake time as a timespec-like struct: 16 bytes
+	// (sec int64, nsec int64) in host byte order, as every netlink attribute.
 	if len(b) < 16 {
 		return ""
 	}
-	sec := int64(binary.LittleEndian.Uint64(b[0:8]))
-	nsec := int64(binary.LittleEndian.Uint64(b[8:16]))
+	sec := int64(binary.NativeEndian.Uint64(b[0:8]))
+	nsec := int64(binary.NativeEndian.Uint64(b[8:16]))
 	if sec <= 0 {
 		return ""
 	}
@@ -296,7 +297,7 @@ func decodeSockaddr(b []byte) string {
 	if len(b) < 8 {
 		return ""
 	}
-	family := binary.LittleEndian.Uint16(b[0:2])
+	family := binary.NativeEndian.Uint16(b[0:2])
 	if family != unix.AF_INET {
 		return ""
 	}

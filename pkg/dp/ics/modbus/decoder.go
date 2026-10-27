@@ -12,6 +12,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
@@ -28,12 +29,12 @@ func (d *Decoder) Supports(state *flow.State) bool {
 	if state.Key.Proto != 6 {
 		return false
 	}
-	return state.Key.SrcPort == 502 || state.Key.DstPort == 502
+	return state.Key.SrcPort == ics.ModbusPort || state.Key.DstPort == ics.ModbusPort
 }
 
 // Ports implements dpi.PortHinter for port-based dispatch.
 func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
-	return []uint16{502}, nil
+	return []uint16{ics.ModbusPort}, nil
 }
 
 // Protocol implements dpi.StreamDecoder.

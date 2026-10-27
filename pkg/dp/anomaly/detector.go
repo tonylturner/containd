@@ -560,20 +560,10 @@ func (d *Detector) checkCrossProtocol(srcIP, dstIP string, ev dpi.Event) []Anoma
 func isKnownICS(proto string) bool { return ics.Supported(proto) }
 
 func isStandardPort(proto string, port uint16) bool {
-	if port == 0 {
-		return true // unknown port, don't flag
+	if port == 0 || !ics.Supported(proto) {
+		return true // unknown port or protocol, don't flag
 	}
-	switch proto {
-	case "modbus":
-		return port == 502
-	case "dnp3":
-		return port == 20000
-	case "cip":
-		return port == 44818 || port == 2222
-	case "iec104":
-		return port == 2404
-	}
-	return true // unknown protocol, don't flag
+	return ics.IsDecoderPort(proto, port)
 }
 
 // rateTracker tracks events per minute per key using minute-granularity buckets.

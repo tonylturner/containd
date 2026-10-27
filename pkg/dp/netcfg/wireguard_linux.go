@@ -182,12 +182,12 @@ func deleteLink(name string) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	ifi := unix.IfInfomsg{
 		Family: unix.AF_UNSPEC,
 		Index:  int32(nic.Index),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, ifi)
+	_ = binary.Write(&req, binary.NativeEndian, ifi)
 	b := req.Bytes()
 	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
 	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
@@ -222,9 +222,9 @@ func ensureWireGuard(name string) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	ifi := unix.IfInfomsg{Family: unix.AF_UNSPEC}
-	_ = binary.Write(&req, binary.LittleEndian, ifi)
+	_ = binary.Write(&req, binary.NativeEndian, ifi)
 
 	addRtAttr(&req, unix.IFLA_IFNAME, append([]byte(name), 0))
 	addNestedRtAttr(&req, unix.IFLA_LINKINFO, func(b *bytes.Buffer) {
@@ -273,7 +273,7 @@ func addRouteCIDR(ifIndex int, cidr string) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	rtm := unix.RtMsg{
 		Family:   unix.AF_INET,
 		Dst_len:  uint8(prefixLen),
@@ -285,10 +285,10 @@ func addRouteCIDR(ifIndex int, cidr string) error {
 		Type:     unix.RTN_UNICAST,
 		Flags:    0,
 	}
-	_ = binary.Write(&req, binary.LittleEndian, rtm)
+	_ = binary.Write(&req, binary.NativeEndian, rtm)
 
 	oif := make([]byte, 4)
-	binary.LittleEndian.PutUint32(oif, uint32(ifIndex))
+	binary.NativeEndian.PutUint32(oif, uint32(ifIndex))
 	addRtAttr(&req, unix.RTA_OIF, oif)
 	addRtAttr(&req, unix.RTA_DST, ip)
 
@@ -320,7 +320,7 @@ func readRouteAck(fd int, seq uint32) error {
 		if len(m.Data) < 4 {
 			return errors.New("netlink error")
 		}
-		code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+		code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
 		if code == 0 {
 			return nil
 		}
@@ -365,16 +365,16 @@ func wgSetDevice(ctx context.Context, ifIndex int, cfg config.WireGuardConfig) e
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, nlh)
-	_ = binary.Write(&req, binary.LittleEndian, genlMsgHdr{Cmd: wgCmdSetDevice, Version: wgGenlVersion})
+	_ = binary.Write(&req, binary.NativeEndian, nlh)
+	_ = binary.Write(&req, binary.NativeEndian, genlMsgHdr{Cmd: wgCmdSetDevice, Version: wgGenlVersion})
 
 	ifi := make([]byte, 4)
-	binary.LittleEndian.PutUint32(ifi, uint32(ifIndex))
+	binary.NativeEndian.PutUint32(ifi, uint32(ifIndex))
 	addNLAttr(&req, wgDeviceAIfindex, ifi)
 
 	// Replace peers as a set (including allowing an empty set to remove peers).
 	flags := make([]byte, 4)
-	binary.LittleEndian.PutUint32(flags, wgDeviceFReplacePeers)
+	binary.NativeEndian.PutUint32(flags, wgDeviceFReplacePeers)
 	addNLAttr(&req, wgDeviceAFlags, flags)
 
 	if pk := strings.TrimSpace(cfg.PrivateKey); pk != "" {
@@ -386,7 +386,7 @@ func wgSetDevice(ctx context.Context, ifIndex int, cfg config.WireGuardConfig) e
 	}
 	if cfg.ListenPort > 0 {
 		lp := make([]byte, 2)
-		binary.LittleEndian.PutUint16(lp, uint16(cfg.ListenPort))
+		binary.NativeEndian.PutUint16(lp, uint16(cfg.ListenPort))
 		addNLAttr(&req, wgDeviceAListenPort, lp)
 	}
 
@@ -399,12 +399,12 @@ func wgSetDevice(ctx context.Context, ifIndex int, cfg config.WireGuardConfig) e
 				addNLAttr(pbuf, wgPeerAPublicKey, b)
 				// Replace allowed IPs.
 				pflags := make([]byte, 4)
-				binary.LittleEndian.PutUint32(pflags, wgPeerFReplaceAllowedIPs)
+				binary.NativeEndian.PutUint32(pflags, wgPeerFReplaceAllowedIPs)
 				addNLAttr(pbuf, wgPeerAFlags, pflags)
 
 				if ka := peer.PersistentKeepalive; ka > 0 {
 					v := make([]byte, 2)
-					binary.LittleEndian.PutUint16(v, uint16(ka))
+					binary.NativeEndian.PutUint16(v, uint16(ka))
 					addNLAttr(pbuf, wgPeerAPersistentKeepalive, v)
 				}
 				if ep := strings.TrimSpace(peer.Endpoint); ep != "" {
@@ -426,7 +426,7 @@ func wgSetDevice(ctx context.Context, ifIndex int, cfg config.WireGuardConfig) e
 								return
 							}
 							fb := make([]byte, 2)
-							binary.LittleEndian.PutUint16(fb, family)
+							binary.NativeEndian.PutUint16(fb, family)
 							addNLAttr(ab, wgAllowedipAFamily, fb)
 							addNLAttr(ab, wgAllowedipAIpaddr, ipBytes)
 							addNLAttr(ab, wgAllowedipACidrMask, []byte{mask})
@@ -454,8 +454,8 @@ func genlFamilyID(ctx context.Context, fd int, name string) (int, error) {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, nlh)
-	_ = binary.Write(&req, binary.LittleEndian, genlMsgHdr{Cmd: ctrlCmdGetFamily, Version: 1})
+	_ = binary.Write(&req, binary.NativeEndian, nlh)
+	_ = binary.Write(&req, binary.NativeEndian, genlMsgHdr{Cmd: ctrlCmdGetFamily, Version: 1})
 	addNLAttr(&req, ctrlAttrFamilyName, append([]byte(name), 0))
 
 	b := req.Bytes()
@@ -494,7 +494,7 @@ func genlFamilyID(ctx context.Context, fd int, name string) (int, error) {
 				if len(m.Data) < 4 {
 					return 0, errors.New("netlink error")
 				}
-				code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+				code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
 				if code == 0 {
 					continue
 				}
@@ -546,7 +546,7 @@ func readGenlAck(ctx context.Context, fd int, seq uint32) error {
 			if len(m.Data) < 4 {
 				return errors.New("netlink error")
 			}
-			code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+			code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
 			if code == 0 {
 				return nil
 			}
@@ -559,8 +559,8 @@ func addNLAttr(b *bytes.Buffer, attrType uint16, value []byte) {
 	l := 4 + len(value)
 	pad := (4 - (l % 4)) % 4
 	h := make([]byte, 4)
-	binary.LittleEndian.PutUint16(h[0:2], uint16(l))
-	binary.LittleEndian.PutUint16(h[2:4], attrType)
+	binary.NativeEndian.PutUint16(h[0:2], uint16(l))
+	binary.NativeEndian.PutUint16(h[2:4], attrType)
 	b.Write(h)
 	b.Write(value)
 	if pad > 0 {
@@ -576,14 +576,14 @@ func addNestedNLAttr(b *bytes.Buffer, attrType uint16, fn func(*bytes.Buffer)) {
 
 func parseU16Attr(attrs []byte, wantType uint16) uint16 {
 	for len(attrs) >= 4 {
-		nlaLen := binary.LittleEndian.Uint16(attrs[0:2])
-		nlaType := binary.LittleEndian.Uint16(attrs[2:4]) &^ nlaNested
+		nlaLen := binary.NativeEndian.Uint16(attrs[0:2])
+		nlaType := binary.NativeEndian.Uint16(attrs[2:4]) &^ nlaNested
 		if nlaLen < 4 || int(nlaLen) > len(attrs) {
 			return 0
 		}
 		val := attrs[4:int(nlaLen)]
 		if nlaType == wantType && len(val) >= 2 {
-			return binary.LittleEndian.Uint16(val[:2])
+			return binary.NativeEndian.Uint16(val[:2])
 		}
 		adv := int((nlaLen + 3) &^ 3)
 		if adv <= 0 || adv > len(attrs) {
@@ -652,7 +652,7 @@ func encodeSockaddr(endpoint string) ([]byte, error) {
 	// sockaddr_in (16 bytes)
 	// struct sockaddr_in { sa_family_t sin_family; __be16 sin_port; struct in_addr sin_addr; ... }
 	raw := make([]byte, 16)
-	binary.LittleEndian.PutUint16(raw[0:2], unix.AF_INET)
+	binary.NativeEndian.PutUint16(raw[0:2], unix.AF_INET)
 	binary.BigEndian.PutUint16(raw[2:4], uint16(port))
 	copy(raw[4:8], ip4)
 	return raw, nil

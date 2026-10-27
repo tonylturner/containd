@@ -17,9 +17,9 @@ func TestRuleOwnershipIsProtocolNotPriority(t *testing.T) {
 	for _, priority := range []uint32{1, 100, 10000, 15000, 19999, 40000, 65535} {
 		for _, protocol := range []uint8{0, unix.RTPROT_STATIC, routeProtoContaind} {
 			var data bytes.Buffer
-			_ = binary.Write(&data, binary.LittleEndian, fibRuleHdr{Family: unix.AF_INET, Table: 201, Action: frActToTbl})
+			_ = binary.Write(&data, binary.NativeEndian, fibRuleHdr{Family: unix.AF_INET, Table: 201, Action: frActToTbl})
 			p := make([]byte, 4)
-			binary.LittleEndian.PutUint32(p, priority)
+			binary.NativeEndian.PutUint32(p, priority)
 			addRtAttr(&data, fraPriority, p)
 			addRtAttr(&data, fraProtocol, []byte{protocol})
 			r, ok := decodeKernelRule(data.Bytes(), int(unsafe.Sizeof(fibRuleHdr{})))
