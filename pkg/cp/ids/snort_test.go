@@ -114,7 +114,7 @@ func TestParseSnortContentWithModifiers(t *testing.T) {
 func TestConvertSnortFile(t *testing.T) {
 	data := []byte(`# Snort rules
 alert tcp any any -> any 502 (msg:"Modbus"; sid:10; rev:1;)
-alert udp any any -> any 47808 (msg:"BACnet"; sid:11; rev:1;)
+alert udp any any -> any 20000 (msg:"DNP3"; sid:11; rev:1;)
 `)
 	rules, err := ConvertSnortFile(data)
 	if err != nil {
@@ -126,7 +126,7 @@ alert udp any any -> any 47808 (msg:"BACnet"; sid:11; rev:1;)
 	if rules[0].SourceFormat != "snort" || rules[1].SourceFormat != "snort" {
 		t.Fatalf("expected snort sourceFormat")
 	}
-	if rules[0].Proto != "modbus" || rules[1].Proto != "bacnet" {
+	if rules[0].Proto != "modbus" || rules[1].Proto != "dnp3" {
 		t.Fatalf("unexpected protos: %s, %s", rules[0].Proto, rules[1].Proto)
 	}
 }

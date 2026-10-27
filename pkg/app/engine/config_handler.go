@@ -72,6 +72,10 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 				http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 				return
 			}
+			if err := config.ValidateDataPlaneConfig(next); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			if err := config.ValidateManagementDataPlane(next, dp.ManagementReservation()); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return

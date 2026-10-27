@@ -14,7 +14,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/dnp3"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
-	"github.com/tonylturner/containd/pkg/dp/ics/s7comm"
 )
 
 // These tests feed events produced by the real decoders, whose numeric
@@ -117,26 +116,9 @@ func TestDecodedDNP3FunctionCodeDrift(t *testing.T) {
 	}
 }
 
-func TestDecodedS7FunctionCodeDrift(t *testing.T) {
-	const stop = "S7comm PLC Stop command detected (FC 0x29)"
-	// TPKT + COTP DT + S7 job header with a PLC stop parameter (0x29).
-	param := []byte{0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x50, 0x5F, 0x50, 0x52, 0x4F, 0x47, 0x52, 0x41, 0x4D}
-	s7 := []byte{0x32, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, byte(len(param)), 0x00, 0x00}
-	s7 = append(s7, param...)
-	// COTP DT (ISO 8073 class 0): length 2, TPDU code 0xF0, EOT.
-	cotp := append([]byte{0x02, 0xF0, 0x80}, s7...)
-	tpkt := binary.BigEndian.AppendUint16([]byte{0x03, 0x00}, uint16(4+len(cotp)))
-	ev := decodeOne(t, s7comm.NewDecoder(), 102, append(tpkt, cotp...))
-	for _, e := range []dpi.Event{ev, jsonRoundTrip(t, ev)} {
-		if got := New().Check("10.0.0.1", "10.0.0.2", e); !hasMessage(got, stop) {
-			t.Fatalf("FC 0x29 not read from decoded event %v: %+v", e.Attributes, got)
-		}
-	}
-}
-
 func TestFractionalFunctionCodeIsAbsent(t *testing.T) {
-	ev := dpi.Event{Proto: "s7comm", Kind: "request", Attributes: map[string]any{"function_code": 41.5}}
+	ev := dpi.Event{Proto: "dnp3", Kind: "request", Attributes: map[string]any{"function_code": 13.5}}
 	if got := New().Check("10.0.0.1", "10.0.0.2", ev); len(got) != 0 {
-		t.Fatalf("fractional FC must not truncate to 41: %+v", got)
+		t.Fatalf("fractional FC must not truncate to 13: %+v", got)
 	}
 }

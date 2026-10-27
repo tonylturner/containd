@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 // Well-known port-to-protocol mappings for ICS/OT enrichment.
@@ -18,10 +19,6 @@ var portProtoMap = map[string]string{
 	"44818": "enip",
 	"2222":  "enip",
 	"20000": "dnp3",
-	"4840":  "opcua",
-	"102":   "s7comm",
-	"47808": "bacnet",
-	"18245": "goose",
 	"161":   "snmp",
 	"162":   "snmp",
 	"53":    "dns",
@@ -107,6 +104,9 @@ func parseSuricataSnortLine(line, sourceFormat string) (config.IDSRule, error) {
 		rule.Labels["evaluable"] = "false"
 	}
 	if err := ensureRuleIdentity(&rule, sourceFormat); err != nil {
+		return config.IDSRule{}, err
+	}
+	if err := ics.ValidateIDS(rule.ID, rule.Proto); err != nil {
 		return config.IDSRule{}, err
 	}
 	return rule, nil

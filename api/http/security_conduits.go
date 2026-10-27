@@ -24,9 +24,6 @@ var portNameMap = map[int]string{
 	502:   "Modbus",
 	20000: "DNP3",
 	44818: "EtherNet/IP",
-	102:   "S7comm",
-	47808: "BACnet",
-	4840:  "OPC-UA",
 }
 
 // Ports considered encrypted for TLS enforcement check.
@@ -41,7 +38,7 @@ var plaintextPorts = map[int]bool{
 
 // ICS protocol ports.
 var icsPorts = map[int]bool{
-	502: true, 20000: true, 44818: true, 102: true, 47808: true, 4840: true,
+	502: true, 20000: true, 44818: true,
 }
 
 // Admin protocol names for MITRE mapping.

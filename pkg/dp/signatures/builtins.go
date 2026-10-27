@@ -158,41 +158,6 @@ func builtinSignatures() []Signature {
 			References: []string{"https://attack.mitre.org/techniques/T0881/"},
 		},
 
-		// ---- S7comm ----
-		{
-			ID:          "S7-PLC-STOP",
-			Name:        "S7comm PLC Stop",
-			Description: "S7comm PLC Stop command (function code 0x29) halts the PLC program.",
-			Severity:    "critical",
-			Protocol:    "s7comm",
-			Conditions: []Condition{
-				{Field: "function_code", Op: "equals", Value: float64(0x29)},
-			},
-			References: []string{"https://attack.mitre.org/techniques/T0881/"},
-		},
-		{
-			ID:          "S7-PLC-CONTROL",
-			Name:        "S7comm PLC Control",
-			Description: "S7comm PLC Control command (function code 0x28) can start/stop PLC programs.",
-			Severity:    "high",
-			Protocol:    "s7comm",
-			Conditions: []Condition{
-				{Field: "function_code", Op: "equals", Value: float64(0x28)},
-			},
-			References: []string{"https://attack.mitre.org/techniques/T0858/"},
-		},
-		{
-			ID:          "S7-DOWNLOAD",
-			Name:        "S7comm Block Download",
-			Description: "S7comm block download (function codes 0x1A-0x1C) may indicate firmware modification.",
-			Severity:    "critical",
-			Protocol:    "s7comm",
-			Conditions: []Condition{
-				{Field: "function_code", Op: "in", Value: []any{float64(0x1A), float64(0x1B), float64(0x1C)}},
-			},
-			References: []string{"CVE-2019-13945", "https://attack.mitre.org/techniques/T0839/"},
-		},
-
 		// ---- Cross-protocol ----
 		{
 			ID:          "ICS-WRITE-STORM",

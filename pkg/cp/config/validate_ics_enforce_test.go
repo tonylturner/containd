@@ -38,7 +38,7 @@ func genericICSConfig(proto, mode, global string, queue uint16) *Config {
 // A rule naming an ICS protocol in effective enforce mode needs NFQUEUE;
 // every other combination of rule and global mode is valid without it.
 func TestValidateICSEnforceNeedsInlinePath(t *testing.T) {
-	generic := []string{"modbus", "dnp3", "cip", "s7comm", "mms", "bacnet", "opcua"}
+	generic := []string{"modbus", "dnp3", "cip"}
 	modes := []string{"", "learn", "enforce"}
 	for _, proto := range generic {
 		for _, rule := range modes {

@@ -15,11 +15,11 @@ func icsServiceDirection(pkt capture.Packet) (flow.Direction, bool) {
 		switch pkt.Proto {
 		case 6:
 			switch port {
-			case 502, 20000, 44818, 102, 4840, iec104Port:
+			case 502, 20000, 44818, iec104Port:
 				return true
 			}
 		case 17:
-			return port == 2222 || port == 47808
+			return port == 2222
 		}
 		return false
 	}

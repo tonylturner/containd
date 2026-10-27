@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 // LoadFromJSON loads custom signatures from a JSON reader.
@@ -36,6 +38,9 @@ func (e *Engine) LoadFromJSON(r io.Reader) error {
 
 // Validate checks the fields a signature needs to match.
 func (s Signature) Validate() error {
+	if err := ics.ValidateSignature(s.ID, s.Protocol); err != nil {
+		return err
+	}
 	if s.ID == "" {
 		return fmt.Errorf("signatures: signature missing required ID field")
 	}

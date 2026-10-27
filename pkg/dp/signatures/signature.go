@@ -21,7 +21,7 @@ type Signature struct {
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
 	Severity    string      `json:"severity"` // low, medium, high, critical
-	Protocol    string      `json:"protocol"` // modbus, dnp3, cip, s7comm, or "" for any
+	Protocol    string      `json:"protocol"` // modbus, dnp3, cip, iec104, or "" for any
 	Conditions  []Condition `json:"conditions"`
 	References  []string    `json:"references,omitempty"`
 	// Threshold, when set, alerts once per flow when Count matches fall in

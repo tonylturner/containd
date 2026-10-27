@@ -6,17 +6,12 @@ package config
 import (
 	"fmt"
 
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // ICSProtocolIEC104 is the ICS predicate protocol of IEC 60870-5-104 rules.
 const ICSProtocolIEC104 = "iec104"
-
-// icsProtocols are the protocols an ICS predicate can name.
-var icsProtocols = map[string]struct{}{
-	"modbus": {}, "dnp3": {}, "cip": {}, "s7comm": {}, "mms": {}, "bacnet": {}, "opcua": {},
-	ICSProtocolIEC104: {},
-}
 
 func validateICSPredicate(p ICSPredicate, ruleID string) error {
 	if p.Mode != "" && p.Mode != "learn" && p.Mode != "enforce" {
@@ -25,8 +20,8 @@ func validateICSPredicate(p ICSPredicate, ruleID string) error {
 	if p.Protocol == "" {
 		return validateICSWithoutProtocol(p, ruleID)
 	}
-	if _, ok := icsProtocols[p.Protocol]; !ok {
-		return fmt.Errorf("rule %s ics protocol %q is not supported", ruleID, p.Protocol)
+	if err := ics.ValidateRule(ruleID, p.Protocol); err != nil {
+		return err
 	}
 	if p.ReadOnly && p.WriteOnly {
 		return fmt.Errorf("rule %s ics predicate cannot be both readOnly and writeOnly", ruleID)

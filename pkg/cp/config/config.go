@@ -467,7 +467,7 @@ type DataPlaneConfig struct {
 	DPIEnabled      bool            `json:"dpiEnabled,omitempty"`      // master DPI on/off
 	DPIMode         string          `json:"dpiMode,omitempty"`         // "learn" or "enforce" (ICS DPI global mode)
 	DPIProtocols    map[string]bool `json:"dpiProtocols,omitempty"`    // per-IT-protocol enable: "dns","tls","http","ssh","smb","ntp","snmp","rdp"
-	DPIICSProtocols map[string]bool `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","s7comm","mms","bacnet","opcua","iec104"; an absent key is enabled
+	DPIICSProtocols map[string]bool `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","iec104"; an absent key is enabled
 	DPIExclusions   []DPIExclusion  `json:"dpiExclusions,omitempty"`   // IPs/domains excluded from DPI
 
 	// NFLogGroup, when non-zero, enables kernel-side logging for rules
@@ -836,10 +836,10 @@ type Protocol struct {
 }
 
 // ICSPredicate captures ICS-specific primitives for rules.
-// It covers modbus, dnp3, cip, s7comm, mms, bacnet, opcua and iec104.
+// It covers modbus, dnp3, cip and iec104.
 // JSON decoding is strict (ics_json.go).
 type ICSPredicate struct {
-	Protocol      string   `json:"protocol,omitempty"`      // modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104
+	Protocol      string   `json:"protocol,omitempty"`      // modbus, dnp3, cip, iec104
 	FunctionCode  []uint8  `json:"functionCode,omitempty"`  // function/service codes (all protocols)
 	UnitID        *uint8   `json:"unitId,omitempty"`        // optional Modbus unit id
 	Addresses     []string `json:"addresses,omitempty"`     // register/address ranges as strings
