@@ -32,15 +32,6 @@ export type ManagementReservation = {
   listenerFaults?: string[] | null;
 };
 
-/**
- * A kernel connection as listed. TCP and UDP tuples carry ports; ICMP and
- * ICMPv6 tuples carry the query identifier, type and code instead.
- */
-export type ConntrackConnection = ConntrackEntry & {
-  icmpId?: string; icmpType?: string; icmpCode?: string;
-  replyIcmpId?: string; replyIcmpType?: string; replyIcmpCode?: string;
-};
-
 /** The original tuple of the connection to kill: ports, or the ICMP identifier, type and code. */
 export type ConntrackKillTuple =
   | { proto: "tcp" | "udp"; src: string; dst: string; sport: number; dport: number }
@@ -55,7 +46,7 @@ export type ConntrackKillResult = {
   closure: string;
 };
 
-async function listConntrack(limit: number): Promise<ApiResult<ConntrackConnection[]>> {
+async function listConntrack(limit: number): Promise<ApiResult<ConntrackEntry[]>> {
   try {
     const res = await fetchWithSession(`/api/v1/conntrack?limit=${limit}`, { cache: "no-store", headers: authHeaders() });
     if (handleUnauthorized(res)) return failureOf(res);
@@ -64,7 +55,7 @@ async function listConntrack(limit: number): Promise<ApiResult<ConntrackConnecti
     const body: unknown = await res.json();
     // A list is the only valid snapshot; anything else is not "verified empty".
     if (!Array.isArray(body)) return { ok: false, error: "malformed connection list" };
-    return { ok: true, data: body as ConntrackConnection[] };
+    return { ok: true, data: body as ConntrackEntry[] };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Network error" };
   }

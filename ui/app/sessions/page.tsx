@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin } from "../../lib/api";
-import type { ConntrackConnection, ConntrackKillResult, ConntrackKillRequest, ConntrackKillTuple } from "../../lib/api-console";
+import { api, isAdmin, type ConntrackEntry } from "../../lib/api";
+import type { ConntrackKillResult, ConntrackKillRequest, ConntrackKillTuple } from "../../lib/api-console";
 import { Shell } from "../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
@@ -30,7 +30,7 @@ function decimal(value: string | undefined): number {
 }
 
 /** The original tuple a kill selects, or null when the entry lacks one. */
-function killTuple(e: ConntrackConnection): ConntrackKillTuple | null {
+function killTuple(e: ConntrackEntry): ConntrackKillTuple | null {
   const proto = normalizeProto(e.proto);
   const src = (e.src ?? "").trim();
   const dst = (e.dst ?? "").trim();
@@ -48,13 +48,13 @@ function killTuple(e: ConntrackConnection): ConntrackKillTuple | null {
 }
 
 /** The tuple for display: endpoints with ports, or with the ICMP identifier. */
-function describeTuple(e: ConntrackConnection): string {
+function describeTuple(e: ConntrackEntry): string {
   if (isICMP(normalizeProto(e.proto))) return `${e.proto} ${e.src ?? "—"} → ${e.dst ?? "—"} (id ${e.icmpId ?? "—"})`;
   return `${e.proto} ${formatEndpoint(e.src, e.sport)} → ${formatEndpoint(e.dst, e.dport)}`;
 }
 
 /** The reply tuple (NAT) column: ports, or the ICMP identifier NAT may rewrite. */
-function replyTuple(e: ConntrackConnection): string {
+function replyTuple(e: ConntrackEntry): string {
   if (!e.replySrc) return "—";
   if (isICMP(normalizeProto(e.proto))) return `${e.replySrc} → ${e.replyDst ?? "—"} (id ${e.replyIcmpId ?? "—"})`;
   return `${formatEndpoint(e.replySrc, e.replySport)} → ${formatEndpoint(e.replyDst, e.replyDport)}`;
@@ -63,7 +63,7 @@ function replyTuple(e: ConntrackConnection): string {
 export default function SessionsPage() {
   const canKill = isAdmin();
   const confirm = useConfirm();
-  const [entries, setEntries] = useState<ConntrackConnection[]>([]);
+  const [entries, setEntries] = useState<ConntrackEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [available, setAvailable] = useState(false);
@@ -115,7 +115,7 @@ export default function SessionsPage() {
     });
   }, [entries, filter.q]);
 
-  async function kill(e: ConntrackConnection) {
+  async function kill(e: ConntrackEntry) {
     if (!canKill) return;
     setError(null);
     const tuple = killTuple(e);
@@ -135,7 +135,7 @@ export default function SessionsPage() {
     await refresh();
   }
 
-  function handleKill(e: ConntrackConnection) {
+  function handleKill(e: ConntrackEntry) {
     const proto = normalizeProto(e.proto);
     const icmp = isICMP(proto);
     const reach = scope === "client-service"
