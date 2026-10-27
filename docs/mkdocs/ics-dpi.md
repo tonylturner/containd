@@ -189,7 +189,7 @@ and selection reason.
 | Modbus/TCP | TCP 502 | `pkg/dp/ics/modbus` |
 | DNP3 | TCP 20000 | `pkg/dp/ics/dnp3` |
 | IEC 60870-5-104 | TCP 2404 | `pkg/dp/ics/iec104` |
-| CIP/EtherNet/IP | TCP 44818, UDP 2222 | `pkg/dp/ics/cip` |
+| CIP/EtherNet/IP | TCP 44818, UDP 2222 and 44818 | `pkg/dp/ics/cip` |
 
 The eight IT decoders live in `pkg/dp/itdpi`: DNS, TLS, HTTP, SSH, SMB, NTP, SNMP,
 and RDP. Protocol events carry `proto`, `kind`, `flowId`, timestamp, and a decoder-
@@ -251,7 +251,7 @@ the server), `session_id`, `apdu_id`, `apci_type` (`I`, `S` or `U`) and
 | U-format | `class: system`, `is_write: false`, `u_function` (`startdt_act`, `startdt_con`, `stopdt_act`, `stopdt_con`, `testfr_act`, `testfr_con`) |
 | I-format | `send_sequence`, `receive_sequence`, `type_id`, `class`, `vsq`, `object_count`, `sq`, `cause`, `cot_negative`, `cot_test`, `originator`, `ca`, `is_write` |
 | Information object | `ioa`, `object_index`, and by type `value`, `quality`, `qualifier`, `select`, `transient`, `value_invalid`, `source_time`, `time_valid`, `time_summer` |
-| Malformed or unsupported | `error`, with the identity attributes the decoder could read |
+| Malformed or unsupported | `error` and `conformance`, with the identity attributes the decoder could read |
 
 An I-format APDU emits one event per information object. Types outside the
 supported set emit `unsupported` with a conformance finding; parsing mode and
@@ -263,11 +263,17 @@ and toggle boundaries with: `EtherNet/IP is decoded as "cip"; match encapsulatio
 
 TCP CIP on port 44818 is reassembled and framed per EtherNet/IP encapsulation,
 including split headers and bodies and multiple encapsulations in one segment.
-UDP 2222 remains packet-only, without stream reassembly.
+UDP is packet-only, without stream reassembly. Port 2222 carries implicit I/O
+datagrams: a bare Common Packet Format with a sequenced address item and a
+connected data item, decoded as one `session` event with `connection_id`,
+`sequence`, `data_length` and `cpf_item_types`, never a service code. A
+datagram whose item list cannot be read carries the `cip.cpf_layout` finding.
+Port 44818 carries encapsulation commands such as ListIdentity, decoded like TCP.
 
 | CIP event layer | Attributes |
 | --- | --- |
 | Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle` |
+| Implicit I/O (UDP 2222) | `connection_id`, `sequence`, `data_length` (whole connected data item), `cpf_item_types` |
 | Common Packet Format (CPF) | `cpf_item_types`: all item types in packet order as one comma-joined lowercase hex string with no spaces, such as `"0x0000,0x00b2"`, on SendRRData/SendUnitData with a valid item list |
 | CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; MSP parents also carry `multi_service_count`, sub-events carry `msp` |
 
@@ -415,6 +421,14 @@ Supported descriptor Type IDs are 1, 3, 5, 7, 9, 11, 13, 15, 21; 30–37;
 unsupported with a conformance finding: tolerant evaluates the decoded fields,
 including the Type ID, against the rules; strict drops and resets in enforce
 scope. Unsupported does not mean implicitly allowed.
+
+IEC 104 conformance codes: `iec104.apci_length`, `iec104.body_length`,
+`iec104.element`, `iec104.ioa_range`, `iec104.profile_sq`,
+`iec104.reserved_bits`, `iec104.role`, `iec104.short_asdu`, `iec104.time`,
+`iec104.u_function`, `iec104.unsupported_type`, `iec104.zero_objects`.
+Nonconformant content is never safe-read, so a `readOnly` ALLOW does not admit
+it. A malformed event without a code is a lost frame boundary or stream fault
+and is denied in both modes.
 
 Safe-read includes S/U frames, response-direction monitoring, general
 interrogation (100), request-direction read (102), and end of initialization (70).
