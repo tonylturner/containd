@@ -129,6 +129,40 @@ func TestMultipleEventsSamePairMerge(t *testing.T) {
 	if !p.WriteSeen {
 		t.Error("expected WriteSeen")
 	}
+
+	generated := l.GenerateRules()
+	if len(generated) != 3 {
+		t.Fatalf("expected one rule per unit/function tuple, got %d: %+v", len(generated), generated)
+	}
+	want := map[string]struct {
+		unit uint8
+		fc   uint8
+		addr string
+	}{
+		"learned-modbus-192.168.1.10-192.168.1.20-u1-fc03": {unit: 1, fc: 3, addr: "40001"},
+		"learned-modbus-192.168.1.10-192.168.1.20-u1-fc10": {unit: 1, fc: 16, addr: "40002"},
+		"learned-modbus-192.168.1.10-192.168.1.20-u2-fc03": {unit: 2, fc: 3, addr: "40001"},
+	}
+	for _, rule := range generated {
+		expected, ok := want[rule.ID]
+		if !ok {
+			t.Errorf("unexpected rule ID %q", rule.ID)
+			continue
+		}
+		if rule.ICS.UnitID == nil || *rule.ICS.UnitID != expected.unit {
+			t.Errorf("%s unit ID = %v, want %d", rule.ID, rule.ICS.UnitID, expected.unit)
+		}
+		if len(rule.ICS.FunctionCode) != 1 || rule.ICS.FunctionCode[0] != expected.fc {
+			t.Errorf("%s function codes = %v, want %d", rule.ID, rule.ICS.FunctionCode, expected.fc)
+		}
+		if len(rule.ICS.Addresses) != 1 || rule.ICS.Addresses[0] != expected.addr {
+			t.Errorf("%s addresses = %v, want only %s", rule.ID, rule.ICS.Addresses, expected.addr)
+		}
+		delete(want, rule.ID)
+	}
+	if len(want) != 0 {
+		t.Errorf("missing rules for tuples: %v", want)
+	}
 }
 
 func TestGenerateRulesProducesValidRules(t *testing.T) {
@@ -154,7 +188,7 @@ func TestGenerateRulesProducesValidRules(t *testing.T) {
 		t.Fatalf("expected 1 rule, got %d", len(rules))
 	}
 	r := rules[0]
-	if r.ID != "learned-modbus-192.168.1.10-192.168.1.20" {
+	if r.ID != "learned-modbus-192.168.1.10-192.168.1.20-u1-fc03" {
 		t.Errorf("unexpected rule ID: %s", r.ID)
 	}
 	if r.Action != "ALLOW" {
@@ -188,6 +222,9 @@ func TestReadOnlyClassification(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 		Attributes: map[string]any{
 			"function_code": uint8(3),
+			"unit_id":       uint8(1),
+			"address":       uint16(10),
+			"quantity":      uint16(1),
 			"is_write":      false,
 		},
 	}
@@ -213,6 +250,8 @@ func TestWriteOnlyClassification(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 		Attributes: map[string]any{
 			"function_code": uint8(6),
+			"unit_id":       uint8(1),
+			"address":       uint16(10),
 			"is_write":      true,
 		},
 	}
@@ -239,7 +278,10 @@ func TestMixedReadWriteClassification(t *testing.T) {
 		Kind:      "request",
 		Timestamp: now,
 		Attributes: map[string]any{
-			"is_write": false,
+			"function_code": uint8(6),
+			"unit_id":       uint8(1),
+			"address":       uint16(10),
+			"is_write":      false,
 		},
 	})
 	l.RecordEvent("10.0.0.1", "10.0.0.2", dpi.Event{
@@ -247,7 +289,10 @@ func TestMixedReadWriteClassification(t *testing.T) {
 		Kind:      "request",
 		Timestamp: now.Add(time.Second),
 		Attributes: map[string]any{
-			"is_write": true,
+			"function_code": uint8(6),
+			"unit_id":       uint8(1),
+			"address":       uint16(10),
+			"is_write":      true,
 		},
 	})
 
@@ -266,10 +311,8 @@ func TestMixedReadWriteClassification(t *testing.T) {
 func TestClearResetsProfiles(t *testing.T) {
 	l := New()
 	l.RecordEvent("10.0.0.1", "10.0.0.2", dpi.Event{
-		Proto:      "modbus",
-		Kind:       "request",
-		Timestamp:  time.Now().UTC(),
-		Attributes: map[string]any{},
+		Proto: "modbus", Kind: "request", Timestamp: time.Now().UTC(),
+		Attributes: map[string]any{"function_code": uint8(6), "unit_id": uint8(1), "address": uint16(0)},
 	})
 	if len(l.Profiles()) == 0 {
 		t.Fatal("expected profiles before clear")
@@ -285,14 +328,12 @@ func TestDifferentPairsCreateSeparateProfiles(t *testing.T) {
 	now := time.Now().UTC()
 
 	l.RecordEvent("10.0.0.1", "10.0.0.2", dpi.Event{
-		Proto:      "modbus",
-		Timestamp:  now,
-		Attributes: map[string]any{},
+		Proto: "modbus", Kind: "request", Timestamp: now,
+		Attributes: map[string]any{"function_code": uint8(6), "unit_id": uint8(1), "address": uint16(0)},
 	})
 	l.RecordEvent("10.0.0.3", "10.0.0.4", dpi.Event{
-		Proto:      "modbus",
-		Timestamp:  now,
-		Attributes: map[string]any{},
+		Proto: "modbus", Kind: "request", Timestamp: now,
+		Attributes: map[string]any{"function_code": uint8(6), "unit_id": uint8(1), "address": uint16(0)},
 	})
 
 	profiles := l.Profiles()

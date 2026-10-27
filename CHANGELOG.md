@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Learned ICS rules now come only from supported requests and are split by
+  source, destination, protocol, unit and function/service code. Modbus rules
+  retain only that tuple's bounded address spans; DNP3 and CIP suggestions no
+  longer misrepresent station, object-group or path values as addresses.
+  Previously generated wider rules are not removed automatically.
 - Modbus address rules now cover the whole request span. An `ALLOW` with
   `addresses` matches only when every register or coil the request reads or
   writes lies inside the listed entries; previously only the starting address
