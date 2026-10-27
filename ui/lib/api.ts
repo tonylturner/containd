@@ -146,6 +146,7 @@ export type DataPlaneConfig = {
   dpiMode?: "learn" | "enforce";
   dpiProtocols?: Record<string, boolean>;
   dpiIcsProtocols?: Record<string, boolean>;
+  dpiIcsParsing?: Record<string, "tolerant" | "strict">;
   dpiExclusions?: DPIExclusion[];
   nflogGroup?: number;
   nfqueueGroup?: number;
