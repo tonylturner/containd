@@ -6,7 +6,7 @@ import { isAdmin, type FirewallRule, type Zone } from "../../lib/api";
 import { summarizeIEC104 } from "../ics/iec104";
 import { ICSCoverageCell } from "../ics/ics-coverage";
 import type { ICSCoverageView } from "../ics/ics-coverage-model";
-import { formatICSMode } from "../ics/ics-shared";
+import { formatICSMode, isSupportedICSProtocol } from "../ics/ics-shared";
 import { zoneName } from "../../lib/zones";
 import { RuleCountersCell, RuleCountersNote, type CountersState } from "./firewall-rule-counters";
 import {
@@ -139,6 +139,9 @@ export function FirewallRuleTable({
                             ? `iec104 ${summarizeIEC104(r.ics).types} ${summarizeIEC104(r.ics).addresses}`
                             : `${r.ics.protocol} fc=${(r.ics.functionCode ?? []).join(",") || "*"}`}
                         </span>
+                        {!isSupportedICSProtocol(r.ics.protocol) && (
+                          <StatusBadge variant="warning">unsupported</StatusBadge>
+                        )}
                       </div>
                       <ICSCoverageCell view={coverage} ruleId={r.id} />
                     </div>
@@ -160,7 +163,11 @@ export function FirewallRuleTable({
                 <td className="px-3 py-3 text-right">
                   {isAdmin() && (
                     <>
-                      <button onClick={() => onEdit(r)} className="mr-2 rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Edit</button>
+                      {(!r.ics?.protocol || isSupportedICSProtocol(r.ics.protocol)) ? (
+                        <button onClick={() => onEdit(r)} className="mr-2 rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Edit</button>
+                      ) : (
+                        <span className="mr-2 text-xs text-(--text-muted)" title="Unsupported ICS rules are read-only; delete this rule to remove it.">Read-only</span>
+                      )}
                       <button
                         onClick={() => onDelete(r.id)}
                         className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"

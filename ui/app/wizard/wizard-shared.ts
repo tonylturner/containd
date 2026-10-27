@@ -3,12 +3,8 @@ import { validateIPv4, validatePort } from "../../lib/validate";
 export const ICS_PROTOCOLS: Record<string, { label: string; port: number }> = {
   modbus: { label: "Modbus/TCP", port: 502 },
   dnp3: { label: "DNP3", port: 20000 },
-  cip: { label: "CIP / EtherNet/IP", port: 44818 },
-  s7comm: { label: "S7comm (Siemens)", port: 102 },
-  bacnet: { label: "BACnet/IP", port: 47808 },
-  opcua: { label: "OPC UA", port: 4840 },
-  mms: { label: "IEC 61850 MMS", port: 102 },
   iec104: { label: "IEC 60870-5-104", port: 2404 },
+  cip: { label: "CIP / EtherNet/IP", port: 44818 },
 };
 
 /**

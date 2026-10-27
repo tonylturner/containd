@@ -118,24 +118,6 @@ export function ICSPredicateFields({
                 <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="1-10" className="input-industrial w-full" />
               </div>
             )}
-            {meta.showDbNumber && (
-              <div>
-                <label className="block text-[10px] font-medium text-(--text-muted) mb-1">DB Numbers <span className="text-(--text-dim)">(Siemens data blocks)</span></label>
-                <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="DB1, DB100" className="input-industrial w-full" />
-              </div>
-            )}
-            {meta.showObjectType && (
-              <div>
-                <label className="block text-[10px] font-medium text-(--text-muted) mb-1">Object Type <span className="text-(--text-dim)">(BACnet)</span></label>
-                <input disabled placeholder="analog-input, binary-output" className="input-industrial w-full opacity-60" title="Object type filtering coming soon" />
-              </div>
-            )}
-            {meta.showPropertyId && (
-              <div>
-                <label className="block text-[10px] font-medium text-(--text-muted) mb-1">Property ID <span className="text-(--text-dim)">(BACnet)</span></label>
-                <input disabled placeholder="85 (present-value)" className="input-industrial w-full opacity-60" title="Property ID filtering coming soon" />
-              </div>
-            )}
           </div>
 
           <div className="flex items-center gap-4 text-sm text-(--text)">
