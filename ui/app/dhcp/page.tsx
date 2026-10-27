@@ -8,13 +8,12 @@ import Link from "next/link";
 import { api, isAdmin, type DHCPConfig, type DHCPLease, type DHCPPool, type DHCPReservation, type DHCPStatus } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
+import { SaveStateLine } from "../../components/SaveStateLine";
+import { useSaveAction } from "../../hooks/useSaveAction";
 import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
 import { InfoTip } from "../../components/InfoTip";
 import { Card } from "../../components/Card";
-import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-
-type SaveState = "idle" | "saving" | "saved" | "error";
 
 function normalize(cfg: DHCPConfig | null): DHCPConfig {
   return {
@@ -28,6 +27,35 @@ function normalize(cfg: DHCPConfig | null): DHCPConfig {
     pools: cfg?.pools ?? [],
     reservations: cfg?.reservations ?? [],
   };
+}
+
+/**
+ * The form next to the config last read from or accepted by the server.
+ * `superseded` marks a server copy that changed while edits were unsaved.
+ */
+type Editor = { cfg: DHCPConfig; server: DHCPConfig; superseded: boolean };
+
+function sameConfig(a: DHCPConfig, b: DHCPConfig): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function fresh(cfg: DHCPConfig): Editor {
+  return { cfg, server: cfg, superseded: false };
+}
+
+/**
+ * Takes a config just read from the server. Unsaved edits stay in place unless
+ * the user asked for the reload, so a refresh triggered elsewhere, such as the
+ * one that follows a staged save, cannot discard them.
+ */
+function adopt(editor: Editor, next: DHCPConfig, keepEdits: boolean): Editor {
+  if (!keepEdits || sameConfig(editor.cfg, editor.server)) return fresh(next);
+  return { cfg: editor.cfg, server: next, superseded: editor.superseded || !sameConfig(next, editor.server) };
+}
+
+/** Takes the server's echo of a save; edits made since the save was submitted stay in place. */
+function accept(editor: Editor, submitted: DHCPConfig, next: DHCPConfig): Editor {
+  return sameConfig(editor.cfg, submitted) ? fresh(next) : { cfg: editor.cfg, server: next, superseded: false };
 }
 
 function poolsToText(pools: DHCPPool[]): string {
@@ -65,10 +93,14 @@ function textToReservations(text: string): DHCPReservation[] {
 export default function DHCPPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const confirm = useConfirm();
-  const [cfg, setCfg] = useState<DHCPConfig>(() => normalize(null));
+  const [editor, setEditor] = useState<Editor>(() => fresh(normalize(null)));
+  const { cfg } = editor;
+  const dirty = !sameConfig(cfg, editor.server);
+  const setCfg = useCallback((update: (cfg: DHCPConfig) => DHCPConfig) => {
+    setEditor((e) => ({ ...e, cfg: update(e.cfg) }));
+  }, []);
   const [status, setStatus] = useState<DHCPStatus | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [leases, setLeases] = useState<DHCPLease[]>([]);
   const [leaseError, setLeaseError] = useState<string | null>(null);
@@ -77,14 +109,14 @@ export default function DHCPPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     setLoading(true);
     setError(null);
     try {
       const svc = await api.getServicesStatus();
       setStatus(svc?.dhcp ?? null);
-      const s = await api.getDHCP();
-      setCfg(normalize(s));
+      const next = normalize(await api.getDHCP());
+      setEditor((e) => adopt(e, next, keepEdits));
       toast("DHCP status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -141,18 +173,18 @@ export default function DHCPPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    setSaveState("saving");
-    const saved = await api.setDHCP(cfg);
-    setSaveState(saved.ok ? "saved" : "error");
+    const submitted = cfg;
+    const saved = await save.run("save", () => api.setDHCP(submitted), {
+      success: "DHCP staged — commit to apply.",
+      failure: "Failed to save DHCP settings.",
+    });
+    if (!saved) return;
     if (!saved.ok) {
-      const msg = saved.error || "Failed to save DHCP settings.";
-      setError(msg);
-      toast(msg, "error");
-    } else {
-      setCfg(normalize(saved.data));
-      toast(saved.warning ? `DHCP staged — commit to apply. Warning: ${saved.warning}` : "DHCP staged — commit to apply.", "success");
+      setError(saved.error);
+      return;
     }
-    setTimeout(() => setSaveState("idle"), 1500);
+    const next = normalize(saved.data);
+    setEditor((e) => accept(e, submitted, next));
   }
 
   return (
@@ -161,14 +193,18 @@ export default function DHCPPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={refresh}
+            onClick={() => void refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110">
-              Save
+            <button
+              onClick={onSave}
+              disabled={save.pending !== null}
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
+            >
+              {save.pending ? "Saving…" : "Save"}
             </button>
           )}
           <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
@@ -183,7 +219,6 @@ export default function DHCPPage() {
         </div>
       }
     >
-      <ConfirmDialog {...confirm.props} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -407,16 +442,20 @@ export default function DHCPPage() {
           </details>
         </div>
 
-        <p className="mt-3 text-xs text-(--text-muted)">
-          State:{" "}
-          {saveState === "saving"
-            ? "saving\u2026"
-            : saveState === "saved"
-              ? "staged — commit to apply."
-              : saveState === "error"
-                ? "error"
-                : "idle"}
-        </p>
+        <SaveStateLine state={save.state} saved="staged — commit to apply." />
+        {dirty && (
+          <p
+            role="status"
+            aria-label="Unsaved edits"
+            className={editor.superseded
+              ? "mt-3 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber"
+              : "mt-3 text-xs text-(--text-muted)"}
+          >
+            {editor.superseded
+              ? "Unsaved edits kept: the DHCP settings changed on the server while you were editing. Save replaces them with your edits; Refresh discards your edits."
+              : "Unsaved edits — Save stages them; Refresh discards them."}
+          </p>
+        )}
       </Card>
 
       <Card className="mt-6">
