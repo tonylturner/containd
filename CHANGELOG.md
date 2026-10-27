@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Restored the full README overview and dashboard screenshot.
 - A Modbus `ALLOW` whose `addresses` covered only the start of the requests it
   admitted now denies them: `10-11` no longer admits a read of 8 registers from
   address 11. Before upgrading, compare each Modbus rule's `addresses` with the
