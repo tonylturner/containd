@@ -1,308 +1,258 @@
 # Secure by Design
 
-containd uses the CISA Secure by Design badge as a statement of intent and transparency, not as a government certification or a claim that every pledge detail is already complete. This page explains what the CISA initiative asks for, how containd aligns with those goals today, and which gaps remain.
+containd uses the CISA Secure by Design badge as a statement of intent and
+transparency, **not government certification**. This page maps the seven pledge
+goals to containd's design and defaults.
+
+A goal is met when the shipped design meets it by default, without extra
+configuration. Steps that an operator takes for a specific deployment are in
+[Deployment hardening](#deployment-hardening). They do not change a status.
 
 Official references:
 
-- CISA Secure by Design overview: <https://www.cisa.gov/resources-tools/resources/secure-by-design>
-- CISA Secure by Design pledge: <https://www.cisa.gov/securebydesign/pledge>
-- CISA and partner guidance, "Shifting the Balance of Cybersecurity Risk: Principles and Approaches for Secure by Design Software": <https://www.cisa.gov/sites/default/files/2023-10/SecureByDesign_1025_508c.pdf>
+- [CISA Secure by Design](https://www.cisa.gov/resources-tools/resources/secure-by-design)
+- [CISA pledge](https://www.cisa.gov/securebydesign/pledge)
+- [Secure by Design principles](https://www.cisa.gov/sites/default/files/2023-10/SecureByDesign_1025_508c.pdf)
 
-## What CISA Means by Secure by Design
+## Status at a glance
 
-CISA's broader Secure by Design guidance is not just a feature checklist. It asks software manufacturers to build products so that customers do not carry the full burden of defending them after purchase. The guidance centers on three principles:
+| Pledge goal | Status | Default design |
+| ----------- | ------ | -------------- |
+| 1. Multi-factor authentication | Met with caveat | TOTP MFA for every local account on web/API and SSH password login; admins can require it. An SSH key alone signs in. |
+| 2. Default passwords | Met | Forced first-login change on web/API and SSH, for password and key logins. |
+| 3. Entire classes of vulnerability | Met | Memory-safe Go, default-deny forwarding, fail-closed startup and recovery, isolated engine API. |
+| 4. Security patches | Met with caveat | Signed, versioned images; state persists across updates; safe boot after an upgrade. No automatic updates. |
+| 5. Vulnerability disclosure policy | Met | `SECURITY.md` and a served `security.txt`. |
+| 6. CVE transparency | Met | CSAF 2.0 advisories with CWE, served provider metadata. |
+| 7. Evidence of intrusions | Met with caveat | Audit log, events, syslog forwarding of audit records and events, and metrics in the base product. Event forwarding is best-effort. |
 
-1. **Take ownership of customer security outcomes.**
-   Software makers should move security work upstream instead of leaving it to the operator after deployment.
-2. **Embrace radical transparency and accountability.**
-   Vendors should publish clear security guidance, vulnerability handling practices, and meaningful evidence of how they are improving.
-3. **Lead from the top.**
-   Security should be treated as a business requirement, not a bolt-on engineering task.
+- **Met**: the design and its defaults deliver the goal.
+- **Met with caveat**: the design delivers the goal. A stated limit or trade-off
+  remains.
+- **Gap**: a design decision blocks the goal. See [Known gaps](#known-gaps).
 
-CISA also treats "secure by design" as including **secure by default**. In practice, that means security controls should be available in the base product and strong settings should not require paid upgrades or obscure expert tuning.
+containd has no paid tier. Every security feature on this page is in the base
+product.
 
-## What the Secure by Design Pledge Asks For
-
-The pledge is narrower than the full guidance. It asks manufacturers to show measurable progress within one year across seven goals:
-
-1. Multi-factor authentication
-2. Reducing default passwords
-3. Reducing an entire class of vulnerability
-4. Increasing customer installation of security patches
-5. Publishing a vulnerability disclosure policy
-6. Improving CVE transparency and completeness
-7. Increasing the ability for customers to gather evidence of intrusions
-
-CISA's examples also make several expectations clear:
-
-- MFA, SSO, and logging should be available without extra charges.
-- Privileged access should prefer modern strong authentication.
-- Security logs should be part of the baseline product.
-- Vulnerability reporting and advisory practices should be public and predictable.
-
-## Pledge Status at a Glance
-
-| Commitment | Status | containd today |
-| ---------- | ------ | -------------- |
-| Multi-factor authentication | Partial | Optional app-based TOTP MFA is built in for web sign-in to local accounts, including admin-enforced MFA with a 7-day grace period. SSH does not yet enforce MFA or forced password change. |
-| Reducing default passwords | Partial | Fresh installs still use a universal bootstrap password, but password change is mandatory on first login and the caveat is documented openly. |
-| Reducing an entire class of vulnerability | Partial | containd already emphasizes safer defaults, signed releases, SBOMs, scanning, and defensive validation, but this remains an ongoing engineering program rather than a finished milestone. |
-| Increasing customer installation of security patches | Partial | Releases, signed images, SBOMs, and update policy guidance are in place, but patch adoption still depends on operator action and is not measured centrally. |
-| Publishing a vulnerability disclosure policy | Done | Public `SECURITY.md` and machine-readable `security.txt` are implemented and shipped. |
-| Improving CVE transparency and completeness | Partial | containd now documents a GitHub advisory/CVE/CSAF process, but long-term completeness depends on continued execution as real advisories are published. |
-| Increasing the ability for customers to gather evidence of intrusions | Partial | Audit logs, events, DPI telemetry, syslog forwarding, and logging guidance are part of the base product. Audit coverage of account changes, syslog delivery of mixed event sources, and the configured SIEM export still have gaps. |
-
-## containd's Position
-
-containd is intended to meet the Secure by Design pledge in practice and align with the broader Secure by Design guidance. The current project position is:
-
-- containd already implements a number of the expected secure-by-default controls in the base product.
-- containd has one visible current caveat: fresh installs still use a universal bootstrap password that must be changed on first login.
-- containd has completed the first wave of security-process work around MFA, disclosure policy, CSAF, logging guidance, and update policy, but auth maturity and stronger bootstrap posture remain incomplete.
-
-This is intentional transparency. The point of this page is to show both what is already true and what still needs to be strengthened.
-
-## Current Caveat: Bootstrap Password
-
-Fresh local-account installs currently start with a deterministic bootstrap credential: `containd / containd`, followed by mandatory password change on first login.
-
-Why that exists today:
-
-- containd is often used in offline lab, classroom, demo, and containerized training environments.
-- instructors and students need a predictable first-login path that works even when there is no external identity provider, mail service, or secret-distribution system.
-- containd already enforces password change on first login and supports replacing password-based access with stronger controls such as SSH keys and app-based TOTP MFA for web sign-in.
-
-Why this is still called out:
-
-- CISA's default-password goal is specifically aimed at reducing universally shared credentials in the field.
-- even with mandatory password change, a universal bootstrap password is still a meaningful caveat and should be treated as one.
-
-Project stance:
-
-- for lab usability and first-access reliability, containd keeps the bootstrap credential today;
-- for transparent Secure by Design alignment, containd documents that choice and treats it as a caveat to be managed carefully rather than something to hide.
-
-## Pledge Goal Mapping
+## Pledge goals
 
 ### 1. Multi-Factor Authentication
 
-Current alignment:
+What the design delivers by default:
 
-- containd already has authenticated local accounts, short-lived JWT sessions, role enforcement, forced password change, session invalidation, and optional app-based TOTP MFA for local accounts.
-- admins can require MFA for individual local accounts, with a built-in 7-day enrollment grace period before full access is restricted.
-- authentication is part of the base product, not a paid add-on.
+- Every local web/API account can enroll app-based TOTP MFA.
+- Admins can require MFA for an account. After a seven-day enrollment grace
+  period, that account can reach only MFA setup until it enrolls.
+- Sessions are server-side records behind signed JWTs, with a 30-minute idle
+  limit and a 4-hour maximum. Logout revokes the session. Outside lab mode,
+  management refuses to start with an empty or example `CONTAIND_JWT_SECRET`.
+- API routes enforce the `admin` or `view` role. SSH accepts only `admin`
+  accounts.
+- SSH password login of an account with MFA asks for its TOTP code. An account
+  whose MFA enrollment grace period has ended cannot log in over SSH either.
+- A password or MFA change ends the account's other sessions, including its SSH
+  connections. The session that made the change stays signed in.
+- A TOTP code works once. Web/API and SSH refuse a code whose time step is not
+  later than the account's last accepted one, including after a restart.
+- The SSH menu and setup wizard ask for the current password before they change
+  the signed-in account's password, so a session opened with a key cannot set it.
+- Web/API login and SSH login, including TOTP codes, are rate-limited. SSH
+  password, key and TOTP failures share one limit per client address and account.
+- Five wrong TOTP codes, or ten wrong current passwords at a password or MFA
+  change, lock that check for the account for 15 minutes, from every client
+  address on web/API and SSH. Each lock is audited once. Password login is never
+  locked, so someone without the password cannot lock an account out.
+- Lab mode skips the SSH account checks and the per-account limits, and accepts
+  a reused TOTP code.
 
-Current caveat:
+Caveats:
 
-- the current MFA implementation is local-account TOTP only;
-- MFA and forced password change apply to web sign-in; SSH sign-in does not enforce them yet;
-- a password or MFA change does not yet revoke sessions that already exist;
-- SMS is intentionally not supported;
-- broader external identity integration and richer auth policy are still future work.
-
-Next steps:
-
-- keep MFA focused on authenticator apps such as Google Authenticator and Microsoft Authenticator;
-- add stronger external identity options later, especially OIDC;
-- expand beyond the current `admin` and `view` roles into more robust role management.
+- SSH public-key login does not ask for a TOTP code. The key counts as the
+  possession factor, so a key alone signs in to an MFA account. This keeps
+  key-based automation working; protect admin keys accordingly.
+- MFA is local-account TOTP. SMS is intentionally not supported. External
+  identity (OIDC single sign-on) and resource-scoped roles are not implemented.
 
 ### 2. Default Passwords
 
-Current alignment:
+What the design delivers by default:
 
-- containd forces password change on first login for the default bootstrap account in standard deployments;
-- operators can replace password-based access with SSH key bootstrap and stronger local credentials.
+- A fresh install seeds one admin account, `containd` / `containd`, and marks it
+  for a forced password change.
+- Until that change, a web/API session can reach only its own session, logout
+  and the password-change endpoint.
+- SSH asks for the change at login, for password and key logins alike, before
+  the CLI, menu or shell opens. It applies the same password rules.
+- A new password needs at least 8 characters with an uppercase letter, a
+  lowercase letter and a digit, and must differ from the current one, so the
+  bootstrap value cannot be kept.
 
-Current caveat:
+Design note: the bootstrap credential is the same on every instance, and the
+forced change at first login is what retires it, as the pledge describes.
+containd often runs in offline labs and classrooms that have no channel to
+distribute a per-instance secret. Bind management to a trusted network until
+the first login; see [Deployment hardening](#deployment-hardening).
 
-- the first-install bootstrap password is still universal.
+#### Lab-mode credential pinning
 
-#### Lab-mode credential pinning (transparency note)
+`CONTAIND_LAB_MODE=1` is an opt-in weakening for reproducible, isolated workshops.
+It is off by default and in the supplied Compose file. It pins
+`containd` / `containd` and refuses every password change for every user, on
+every path, with the same reason:
 
-When `CONTAIND_LAB_MODE=1` is set in the environment, containd >= 0.1.22 pins the canonical credential (`containd / containd`) and **disables password change**:
+- `GET /api/v1/auth/me` does not advertise `mustChangePassword: true`.
+- `POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password` return
+  403, also for admins.
+- The SSH console's "Reset admin password" option and the setup wizard's
+  password step print the reason and change nothing. The wizard continues with
+  its other steps.
+- Seeding the default admin at first boot and after a factory reset is not a
+  password change and is unaffected.
 
-- `GET /api/v1/auth/me` does not advertise `mustChangePassword: true`, so the UI does not prompt for a first-login change;
-- `POST /api/v1/auth/me/password` returns 403 with a clear lab-mode message;
-- `POST /api/v1/users/:id/password` returns the same 403 (admins also cannot rotate);
-- `seedDefaultAdmin` clears the `MustChangePassword` flag at seed time so the DB and the API responses stay consistent.
+Lab mode also relaxes web/API authentication. Every request gets admin access.
+With a JWT secret, any validly signed, unexpired token passes without a session
+lookup. Without a secret, any nonempty token passes. Factory reset does not
+revoke lab tokens. SSH password login is on by default, uses the same pinned
+credential, and skips the forced change and MFA checks.
 
-This is a **deliberate weakening** of the default-password posture, scoped to the lab-mode boundary, and we are documenting it openly rather than hiding it.
+Use lab mode only for single-tenant, isolated or offline training environments,
+with HTTP and SSH bound to loopback or an instructor-private network. Do not use
+it on hostile or shared networks, or for real ICS deployments. A compromised lab
+credential compromises that deployment's management boundary.
 
-Why it exists:
-
-- workshop and classroom deployments rely on a documented canonical credential (`containd / containd`) for SSH-on-`:2222`, lab-doc CLI examples, and proxied UI access. If a student completes the standard first-login forced change, every subsequent SSH-terminal step in the lab silently breaks because the credential drifted off the documented default;
-- the same forced-change endpoint also rejects requests through some reverse-proxy paths with a CORS/CSRF error that confused students into thinking the lab was broken. Locking the endpoint replaces that confusing failure mode with a clear 403 that says "lab mode";
-- without this lock, the only paths to a working lab were: ship a bespoke containd build with the prompt removed, document a manual recovery, or accept silent failure mid-workshop. Pinning the credential under an explicit lab-mode flag is the most transparent option.
-
-What this trades away:
-
-- credential rotation against the universal bootstrap is impossible inside a lab-mode deployment. A compromised lab credential cannot be rotated in place — the operator must redeploy the appliance to clear state;
-- there is no MFA path in lab mode that can substitute for password change today;
-- the SSH-on-`:2222` admin shell uses the same pinned credential, so any inbound network reach to that port is high-risk in lab mode.
-
-Boundary conditions (when lab mode is appropriate):
-
-- single-tenant single-host lab deployments (e.g. a student running the full stack on their own laptop with all containd ports bound to `127.0.0.1`);
-- offline or air-gapped classroom deployments where the appliance is not network-reachable from production systems;
-- ephemeral demo and training environments that get rebuilt per-cohort.
-
-When lab mode is **not** appropriate:
-
-- any deployment where containd's HTTP UI or `:2222` SSH is reachable from a hostile or shared network;
-- any deployment where containd holds policy or audit data that needs to survive credential exposure;
-- production substations, customer engagements, or anything that resembles a real ICS deployment.
-
-Operator-facing surface area:
-
-- the lab-mode lock is opt-in (default is unset → standard force-change behavior);
-- the 403 response body explicitly names `CONTAIND_LAB_MODE=1` so operators can identify the mechanism;
-- `RangerDanger` and other lab-platform integrations document the lab-mode boundary in their own SECURITY notes and bind containd's host ports to loopback only.
-
-Roadmap:
-
-- keep documenting the lab-mode trade-off openly in this section;
-- evaluate a future per-instance bootstrap path that preserves classroom usability without relying on a universal shared credential — that would let lab-mode pin a deployment-unique credential rather than the well-known `containd/containd`;
-- consider a lab-mode-compatible MFA bootstrap (e.g. instructor-distributed TOTP seeds) as an additional defensive layer.
+To return to standard authentication, remove the flag or set it to `0`, restart,
+and change the password through the standard flow. Disabling the flag does not
+rotate, reset or recover credentials. Recreating a container with the same data
+volume keeps the stored accounts.
 
 ### 3. Reducing Entire Classes of Vulnerability
 
-Current alignment:
+What the design delivers by default:
 
-- the project already emphasizes secure defaults such as default-deny firewalling, hardened cookies, restricted CORS behavior, signed releases, vulnerability scanning, and safer runtime defaults;
-- CI already blocks HIGH/CRITICAL image findings and publishes signed images plus SBOMs.
-
-Areas to keep improving:
-
-- continue reducing whole classes of defects through safer parser design, validation, and stronger test coverage;
-- track root causes over time rather than only counting fixes;
-- keep using memory-safe implementation languages where practical. The core management and control-plane code is already written in Go, which avoids many classic memory-safety issues common in C/C++ products.
-
-Next steps:
-
-- publish a short public note on the classes containd is deliberately trying to minimize, such as injection bugs, secret exposure, and unsafe parsing behavior;
-- use CVE/CWE history as an engineering learning signal rather than a vanity metric.
+- **Memory safety.** containd's management plane, control plane, dataplane and
+  protocol decoders are Go, built with cgo disabled. Untrusted packets are parsed
+  in memory-safe code. Embedded third-party services, such as ClamAV, are covered
+  by the SBOM and image scanning instead.
+- **Default deny.** Forwarded traffic that no rule allows is dropped. Only an
+  explicit `ALLOW` default action changes this.
+- **Fail closed, without lockout.** Every boot validates the stored running
+  configuration. If it is invalid, management enters recovery: new transit is
+  dropped and management stays reachable where it was. A reserved management
+  path, when declared, compiles into every firewall as an independent allow, so
+  policy cannot lock out the management network. See
+  [Reserved Management Path](management-reservation.md).
+- **Isolated engine API.** The engine API is unauthenticated, so its reach is
+  limited by design. Combined mode binds it to `127.0.0.1:8081`. Split engine
+  mode refuses to start without `CONTAIND_ENGINE_ADDR` and refuses loopback or
+  wildcard listeners, except on a reserved management path, where both processes
+  share one network namespace. While enforcing, the firewall admits the API from loopback
+  and on that address's interface only. See
+  [Threat Model](threat-model.md#management-plane-to-dataplane).
+- **Web defenses.** Auth cookies use `SameSite=Strict`. Cookie-authenticated
+  unsafe requests must be same-origin. Sensitive endpoints are rate-limited.
+- **Build gates.** CI runs race-enabled tests, golangci-lint and Semgrep. It
+  fails on unsuppressed HIGH/CRITICAL Trivy findings in the management image
+  (suppressions are in `.trivyignore`). A clean scan is not proof that no
+  vulnerability exists.
 
 ### 4. Security Patches
 
-Current alignment:
+What the design delivers by default:
 
-- containd ships as versioned container images through GitHub Container Registry;
-- releases are signed, SBOM-backed, and vulnerability-scanned;
-- upgrades are operationally simple for container-lab deployments: pull a newer image and restart the appliance.
+- Releases ship as versioned container images, signed with Cosign, with SBOM
+  attestations. `:latest` moves only to signed stable releases.
+- An update replaces the image. Configuration, users and audit data persist on
+  the `/data` volume.
+- If an upgrade tightens validation and the stored configuration fails it,
+  management boots into fail-closed recovery. It does not refuse to start, and it
+  does not apply a configuration it cannot validate.
 
-Current caveat:
+Caveat: containd does not update itself or check for updates. ICS appliances
+often run offline and under change control, so the operator schedules each
+update. containd does not send telemetry, so patch adoption is not measured. See
+[Update Policy](update-policy.md) and [SBOMs and signatures](sbom.md).
 
-- containd is a self-hosted appliance, so patch adoption still depends on operator action today;
-- the project does not publish aggregate patch-adoption telemetry.
+### 5. Vulnerability Disclosure Policy
 
-Implemented direction:
-
-- [`Update Policy`](update-policy.md) now documents the supported release posture, operator update expectations, and the secure update workflow for lab and production-style environments;
-- release notes, changelog entries, and machine-readable artifacts are meant to stay aligned so operators can update quickly.
-
-Next steps:
-
-- keep the update policy current as release process and support expectations evolve;
-- keep security-sensitive dependency updates explicit in release notes and advisories;
-- improve operator-facing upgrade guidance as the project approaches a more stable minor-release cadence.
-
-### 5. Vulnerability Disclosure Policy (VDP)
-
-Current alignment:
-
-- [SECURITY.md](https://github.com/tonylturner/containd/blob/main/SECURITY.md) now acts as the project's public vulnerability disclosure policy and coordinated disclosure statement.
-- containd also publishes a machine-readable `security.txt` for discoverability.
-
-Current caveat:
-
-- the project should continue tightening the policy over time as the advisory process matures, especially if it begins issuing more formal security advisories and CVEs on a regular basis.
-
-Next steps:
-
-- keep `SECURITY.md` as the human-readable disclosure policy;
-- keep `security.txt` current and discoverable in shipped deployments;
-- continue improving advisory and disclosure process detail as the project matures.
+[SECURITY.md](https://github.com/tonylturner/containd/blob/main/SECURITY.md) is the
+canonical disclosure policy. The appliance serves `/.well-known/security.txt`.
 
 ### 6. CVE Transparency and Completeness
 
-Current alignment:
-
-- containd already publishes versioned releases, signed images, SBOMs, and changelogs;
-- security-sensitive dependency fixes are called out in release notes when they occur.
-- containd now documents a lightweight advisory, CVE, and CSAF process in [`Advisories and CSAF`](advisories.md);
-- the project publishes provider metadata and repository layout for machine-readable advisory artifacts, with actual advisory JSON to be published when real vulnerabilities require it.
-
-Next steps:
-
-- include CWE/root-cause information whenever practical;
-- keep changelog, GitHub advisories, and CSAF documents aligned as real advisories are published.
+containd publishes CSAF 2.0 advisories with CWE classification, and the appliance
+serves CSAF provider metadata at `/.well-known/csaf/provider-metadata.json`.
+Release notes and the changelog name security-relevant fixes. Published
+advisories, including `containd-2026-001`, are indexed in
+[Advisories and CSAF](advisories.md).
 
 ### 7. Evidence of Intrusions
 
-Current alignment:
+What the design delivers by default:
 
-- containd already includes audit logs, runtime service events, firewall and DPI telemetry, syslog forwarding, event export in CEF/JSON/Syslog, monitoring views, and Prometheus metrics;
-- those capabilities are part of the base product and do not require a paid tier.
-- [`Logging and Evidence`](logging-evidence.md) now documents the major evidence surfaces, forwarding options, retention expectations, and recommended lab posture.
+- A persistent audit database records web/API and SSH logins, user, password and
+  MFA changes, SSH logouts, key enrollment and CLI commands, management TLS
+  certificate and CA bundle replacement, configuration saves and commits, factory
+  resets and management boot faults.
+- Refused logins and credential changes are recorded as `denied`: wrong
+  passwords, unknown or non-admin SSH accounts, unauthorized SSH keys, wrong or
+  reused TOTP codes, and a wrong current password or code when changing a
+  password or MFA. Records name the account and client address, never the
+  secret tried.
+- `GET /api/v1/events` exposes firewall, DPI, IDS, AV, proxy and service events.
+  Separate bounded banks keep firewall denies and IEC 104 incident evidence,
+  so routine traffic does not evict them.
+- The service syslog forwarder sends engine and service events and audit
+  records over UDP or TCP, as JSON or RFC 5424. Application logs can go to a
+  remote syslog sink.
+- Audit records are forwarded at least once over TCP: each forwarder keeps a
+  cursor in the audit database, so records written during a collector outage
+  or before a restart are sent later. The services status reports the backlog
+  and the last error per forwarder.
+- `/metrics` exposes Prometheus metrics.
 
-Next steps:
+Caveats:
 
-- continue improving event quality for identity, configuration, and policy-change visibility.
+- Event history is bounded and in memory, and event forwarding over syslog is
+  best-effort: events produced during a collector outage are not resent.
 
-## How containd Already Reflects the Broader Guidance
+See [Logging and Evidence](logging-evidence.md).
 
-### Take Ownership of Customer Security Outcomes
+## Known gaps
 
-Examples already present in containd:
+No pledge goal has a design gap. The caveats under each goal state the
+remaining limits and trade-offs.
 
-- default-deny firewall posture
-- forced password change for the bootstrap account
-- signed images and published SBOMs
-- vulnerability scanning in CI
-- built-in audit and event logging
-- embedded operational services managed through one security model instead of leaving the operator to integrate many disconnected tools
+## Deployment hardening
 
-### Embrace Radical Transparency and Accountability
+These steps adapt a deployment to its network. They are guidance, not gaps.
 
-Examples already present in containd:
+- Change the bootstrap password before management is reachable from a shared
+  network. Then enroll an admin SSH key and disable SSH password login; the SSH
+  setup wizard offers both steps and refuses a change that would lock out SSH.
+- Require MFA for administrative accounts.
+- Keep `CONTAIND_LAB_MODE=0` except in the isolated cases above.
+- Use a unique JWT secret. Replace the generated self-signed HTTPS certificate,
+  and prefer HTTPS.
+- Remove HTTP, HTTPS and SSH access from interfaces that do not need management.
+- In split mode, set `CONTAIND_ENGINE_ADDR` to the engine's address on a trusted
+  private management network.
+- Commit only the allow rules you need. Make sure the network routes protected
+  traffic through the appliance.
+- Configure a syslog forwarder, preferably over TCP, and verify that events
+  and audit records arrive off-box.
+- Install supported security updates; see [Update Policy](update-policy.md).
 
-- public `SECURITY.md`
-- public changelog and release notes
-- signed releases and published SBOMs
-- explicit documentation of the bootstrap-password caveat on this page
+## Additional CA bundle
 
-### Lead From the Top
+Admins can replace or clear the additional CA bundle using
+`POST /api/v1/system/tls/trusted-ca`; see the
+[configuration reference](config-format.md#additional-ca-bundle) for validation
+and request formats. This does not replace the management server's TLS
+certificate or change browser trust.
 
-For a project at containd's current stage, this means documenting security capabilities and gaps openly and treating security features as part of the base appliance, not premium extras.
-
-## Secure Configuration Guidance for Labs and Classrooms
-
-Because containd is often used to teach segmentation and secure operations, a "good classroom configuration" should look like this:
-
-- keep `CONTAIND_LAB_MODE=0`
-- set a unique `CONTAIND_JWT_SECRET`
-- change the bootstrap password immediately on first login
-- prefer HTTPS and SSH keys when practical
-- keep default-deny policy and commit only the minimum required allow rules
-- enable audit/event forwarding when the lab design supports it
-- stay on a current supported release
-- enable app-based MFA for instructor and administrative accounts
-
-The goal is not only to teach traffic segmentation. It is also to train students to recognize what a secure appliance posture looks like.
-
-## Known Gaps
-
-- Web, SSH, and CLI do not yet apply consistent account-assurance requirements; SSH does not enforce MFA or forced password change.
-- Fresh installs use a universal bootstrap password rather than a per-instance credential.
-- Audit coverage and visibility into evidence-delivery failures are incomplete.
-- External identity (OIDC) and richer, resource-scoped roles are not implemented.
-
-## Bottom Line
-
-containd uses the Secure by Design badge to signal a real engineering direction:
-
-- ship security features in the base product;
-- document tradeoffs openly;
-- make classroom and lab deployments teach secure habits instead of insecure shortcuts.
-
-The project already aligns with much of the CISA Secure by Design posture. The bootstrap password remains the clearest current caveat, while external auth maturity and richer role management are the main next steps.
+Management distributes the bundle's content to the engine, whose ICAP-over-TLS
+and FreshClam clients verify servers against the system roots plus the bundle.
+Other clients keep their own trust: the in-app console's and SSH CLI sessions'
+loopback connection pins the certificate the HTTPS listener serves, OpenVPN tunnels use their per-tunnel CA,
+and browsers and remote CLI hosts use their own trust stores. Do not disable
+certificate verification to work around a rejected private-CA endpoint.

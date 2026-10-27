@@ -8,7 +8,6 @@ import (
 	"time"
 
 	httpapi "github.com/tonylturner/containd/api/http"
-	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -22,16 +21,18 @@ func validateReservedEnvironment(r *mgmtpath.Reservation) error {
 	if r == nil {
 		return nil
 	}
-	if addr := common.EnvTrimmed("CONTAIND_MGMT_ADDR", ""); addr != "" {
-		if err := r.ValidateListen(addr); err != nil {
-			return fmt.Errorf("CONTAIND_MGMT_ADDR: %w", err)
+	httpAddr := config.ProcessEnv(config.EnvManagementHTTPAddr)
+	if httpAddr != "" {
+		if err := r.ValidateListen(httpAddr); err != nil {
+			return fmt.Errorf("%s: %w", config.EnvManagementHTTPAddr, err)
 		}
+	} else {
+		httpAddr = fmt.Sprintf(":%d", r.Port)
 	}
-	httpAddr := common.EnvTrimmed("CONTAIND_MGMT_ADDR", fmt.Sprintf(":%d", r.Port))
-	for _, key := range []string{"CONTAIND_MGMT_HTTPS_ADDR", "CONTAIND_SSH_ADDR"} {
-		addr := common.EnvTrimmed(key, "")
+	for _, key := range []string{config.EnvManagementHTTPSAddr, config.EnvSSHAddr} {
+		addr := config.ProcessEnv(key)
 		conflict := config.ManagementListenerOverlaps(addr, r)
-		if key == "CONTAIND_MGMT_HTTPS_ADDR" {
+		if key == config.EnvManagementHTTPSAddr {
 			conflict = config.ManagementListenerConflictsHTTP(addr, httpAddr, true, r)
 		}
 		if conflict {
@@ -44,15 +45,18 @@ func validateReservedEnvironment(r *mgmtpath.Reservation) error {
 // A disjoint SSH env bind can still collide with a wildcard HTTP socket. Check
 // that only once the effective (possibly boot-only) HTTP bind is known.
 func validateReservedBootEnvironment(cfg *config.Config, r *mgmtpath.Reservation) error {
-	if config.ManagementListenerConflictsHTTP(common.EnvTrimmed("CONTAIND_SSH_ADDR", ""), resolveHTTPAddr(cfg), false, r) {
-		return fmt.Errorf("CONTAIND_SSH_ADDR conflicts with reserved management path HTTP socket")
+	if config.ManagementListenerConflictsHTTP(config.ProcessEnv(config.EnvSSHAddr), config.EffectiveManagementListeners(cfg).HTTP.Addr, false, r) {
+		return fmt.Errorf("%s conflicts with reserved management path HTTP socket", config.EnvSSHAddr)
 	}
 	return nil
 }
 
-func reservationBootConflict(cfg *config.Config, r *mgmtpath.Reservation) error {
+// bootConflict is why the stored running configuration must not be replayed
+// at this boot. Without a reservation that is only its own validation, which
+// an upgrade can tighten under an existing store.
+func bootConflict(cfg *config.Config, r *mgmtpath.Reservation) error {
 	if r == nil {
-		return nil
+		return cfg.Validate()
 	}
 	return errors.Join(cfg.Validate(), config.ValidateManagementReservation(cfg, r), validateReservedStartup(cfg, r))
 }
@@ -66,24 +70,27 @@ func reservationSafeBootListeners(cfg *config.Config, r *mgmtpath.Reservation) *
 	if config.ValidateManagementListeners(cfg.System, r) == nil && validateReservedStartup(cfg, r) == nil {
 		return cfg
 	}
-	safe := *cfg
-	defaults := httpapi.ApplianceDefaults(r)
-	safe.System.Mgmt = defaults.System.Mgmt
-	safe.System.SSH.ListenAddr = defaults.System.SSH.ListenAddr
-	return &safe
+	return httpapi.WithApplianceListeners(cfg, r)
 }
 
-func recordReservationBootDecision(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Config, r *mgmtpath.Reservation) (*dpevents.Event, error) {
-	if r == nil {
-		return nil, nil
-	}
+// recordBootDecision persists every boot's recovery decision. A refused
+// stored configuration never stops management: replay is gated and the engine
+// gets the fail-closed recovery ruleset until a valid commit, rollback or
+// factory reset (see api/http ApplyBootConfig).
+func recordBootDecision(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Config, r *mgmtpath.Reservation) (*dpevents.Event, error) {
+	return persistBootFault(logger, stores, bootConflict(cfg, r), r)
+}
+
+// persistBootFault records conflict, or its absence, as this boot's
+// recovery decision, with an audit record and the returned event when
+// there is one.
+func persistBootFault(logger *zap.SugaredLogger, stores mgmtStores, conflict error, r *mgmtpath.Reservation) (*dpevents.Event, error) {
 	store, ok := stores.store.(interface {
 		SetManagementBootFault(context.Context, string) error
 	})
 	if !ok {
 		return nil, errors.New("config store does not support management boot fault persistence")
 	}
-	conflict := reservationBootConflict(cfg, r)
 	fault := ""
 	if conflict != nil {
 		fault = conflict.Error()
@@ -96,7 +103,10 @@ func recordReservationBootDecision(logger *zap.SugaredLogger, stores mgmtStores,
 		return nil, nil
 	}
 	now := time.Now().UTC()
-	const kind = "management.reservation.boot_fault"
+	kind := "management.recovery.boot_fault"
+	if r != nil {
+		kind = "management.reservation.boot_fault"
+	}
 	if err := stores.auditStore.Add(ctx, audit.Record{
 		Timestamp: now, Actor: "system", Source: "management",
 		Action: kind, Result: "fault", Detail: fault,

@@ -2,7 +2,8 @@ import { authHeaders, fetchWithSession, handleUnauthorized } from "./api-core";
 import {
   deleteJSONResult,
   getJSON,
-  patchJSONResult,
+  getJSONList,
+  isRecord,
   postJSONResult,
 } from "./api-request";
 
@@ -14,25 +15,31 @@ export type ConfigDiff = {
   changedSections: string[];
   running: ConfigBundle | null;
   candidate: ConfigBundle | null;
-  idsBank: { running: IDSBankSummary; candidate: IDSBankSummary };
+  /** Absent when the response did not carry both bank summaries. */
+  idsBank?: { running: IDSBankSummary; candidate: IDSBankSummary };
 };
+
+function normalizeConfigDiff(diff: ConfigDiff | null): ConfigDiff | null {
+  if (!diff || typeof diff.changed !== "boolean" || !Array.isArray(diff.changedSections)) return null;
+  const bank: unknown = diff.idsBank;
+  return isRecord(bank) && isRecord(bank.running) && isRecord(bank.candidate)
+    ? diff
+    : { ...diff, idsBank: undefined };
+}
 
 export const configAPI = {
   getRunningConfig: (signal?: AbortSignal) => getJSON<ConfigBundle>("/api/v1/config", signal),
   getCandidateConfig: () => getJSON<ConfigBundle>("/api/v1/config/candidate"),
   setCandidateConfig: (cfg: ConfigBundle) =>
     postJSONResult<{ status: string }>("/api/v1/config/candidate", cfg),
-  diffConfig: () =>
-    getJSON<ConfigDiff>(
-      "/api/v1/config/diff",
-    ),
+  diffConfig: async () => normalizeConfigDiff(await getJSON<ConfigDiff>("/api/v1/config/diff")),
   exportConfig: (redacted = true) =>
     getJSON<ConfigBundle>(
       `/api/v1/config/export?redacted=${redacted ? "1" : "0"}`,
     ),
   importConfig: (cfg: ConfigBundle) =>
     postJSONResult<{ status: string }>("/api/v1/config/import", cfg),
-  listConfigBackups: () => getJSON<ConfigBackup[]>("/api/v1/config/backups"),
+  listConfigBackups: () => getJSONList<ConfigBackup>("/api/v1/config/backups"),
   createConfigBackup: (req: { name?: string; redacted: boolean }) =>
     postJSONResult<ConfigBackup>("/api/v1/config/backups", req),
   deleteConfigBackup: (id: string) =>

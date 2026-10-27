@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -79,8 +80,10 @@ type iecSession struct {
 	heldBytes  int
 	stopParse  bool // learn envelope: parsing stopped after a stream error
 	reconnects bool // first STARTDT con counts as a reconnect
-	reset      *iecReset
-	next       *iecSession // new incarnation whose handshake is pending
+	reset      *connReset
+	next       *iecSession         // new incarnation whose handshake is pending
+	apci       *anomaly.IEC104APCI // observational state, owned by this incarnation
+	inventory  *iecInventoryLedger
 }
 
 // iecDir is one direction of a session (client→server or server→client).
@@ -120,6 +123,7 @@ func newIECDir(isn uint32) *iecDir {
 // session lock: it is never held across verdict submission or I/O.
 type iecTable struct {
 	mu         sync.Mutex
+	zones      *zoneCache // the engine's
 	now        func() time.Time
 	dpi        *dpi.Manager
 	injector   session.Injector
@@ -135,6 +139,16 @@ type iecTable struct {
 	ctDelete   func(context.Context, conntrack.DeleteRequest) error // after the resets
 	globalMode string
 
+	inventory       iecInventoryInput
+	inventoryTokens map[capture.Token]*iecSession
+
+	// pickups are the resets of picked-up inline flows (closePickedUp),
+	// which share this table's injector, worker and health.
+	pickups *pickupResets
+
+	// pressureOffline affects diagnostics only; retained tuples remain unchanged.
+	pressureOffline bool
+
 	policy     iecPolicy
 	snap       *rules.Snapshot
 	hasIEC     bool
@@ -146,8 +160,10 @@ type iecTable struct {
 	reconnect  map[string]time.Time // client IP + server → aborted at
 }
 
-func newIECTable(globalMode string) *iecTable {
+// newIECTable returns a table that resolves zones through zones.
+func newIECTable(globalMode string, zones *zoneCache) *iecTable {
 	return &iecTable{
+		zones:      zones,
 		now:        time.Now,
 		newPolicy:  newRulesPolicy,
 		safeRead:   iec104.SafeRead,
@@ -158,6 +174,9 @@ func newIECTable(globalMode string) *iecTable {
 		held:       make(map[capture.Token]*iecSession),
 		aborts:     make(map[capture.Token]*abortTxn),
 		reconnect:  make(map[string]time.Time),
+		pickups:    newPickupResets(),
+
+		inventoryTokens: make(map[capture.Token]*iecSession),
 	}
 }
 
@@ -176,7 +195,7 @@ func pairKey(client, server netip.AddrPort) string {
 
 // sessionCtx is the opener-oriented evaluation context of a session.
 func (t *iecTable) sessionCtx(client, server netip.AddrPort) rules.EvalContext {
-	return iecSessionContext(t.snap, client, server, resolveZonesForFlow)
+	return iecSessionContext(t.snap, client, server, t.zones.resolve)
 }
 
 func iecSessionContext(snap *rules.Snapshot, client, server netip.AddrPort, resolve zoneResolver) rules.EvalContext {
@@ -187,6 +206,7 @@ func iecSessionContext(snap *rules.Snapshot, client, server netip.AddrPort, reso
 		Port:  strconv.Itoa(int(server.Port())),
 	}
 	ctx.SrcZone, ctx.DstZone = resolve(snap, ctx.SrcIP, ctx.DstIP)
+	ctx.Identities = snap.IdentitiesOf(ctx.SrcIP)
 	return ctx
 }
 
@@ -226,6 +246,21 @@ func hasEnforceIEC(snap *rules.Snapshot, globalMode string) (hasIEC, enforce boo
 	return hasIEC, enforce
 }
 
+// hasEnforceICS reports whether a snapshot loads an enforce rule of an ICS
+// protocol other than IEC104, whose inline flows fail closed.
+func hasEnforceICS(snap *rules.Snapshot, globalMode string) bool {
+	if snap == nil {
+		return false
+	}
+	for _, entry := range snap.Firewall {
+		if entry.ICS.Protocol != "" && !strings.EqualFold(entry.ICS.Protocol, iecProtocol) &&
+			rules.EffectiveMode(entry.ICS.Mode, globalMode) == "enforce" {
+			return true
+		}
+	}
+	return false
+}
+
 // setPolicy installs the snapshot's IEC104 policy. Live sessions whose
 // envelope or mode changed are aborted; sessions of an
 // unchanged envelope continue.
@@ -250,12 +285,13 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 		default:
 			// A learn session left every envelope: stop tracking it.
 			t.dpi.EndStream(s.id)
-			t.deleteLocked(key, s)
+			acts.merge(t.deleteLocked(key, s))
 		}
 	}
 	t.mu.Unlock()
 	if t.health != nil {
 		t.health.clear(faultEnvelope)
+		t.health.setICS(hasEnforceICS(snap, t.globalMode))
 		t.health.setActive(active)
 	}
 	t.apply(acts)
@@ -271,18 +307,20 @@ func (t *iecTable) expire() {
 		switch s.state {
 		case iecAborted:
 			if now.Sub(s.endedAt) > iecTombstoneTTL {
-				t.deleteLocked(key, s)
+				acts.merge(t.deleteLocked(key, s))
 			}
 		case iecClosed:
 			if now.Sub(s.endedAt) > iecClosedTTL {
-				t.deleteLocked(key, s)
+				acts.merge(t.deleteLocked(key, s))
 			}
 		default:
+			s.expireAPCILocked(&acts, now)
+			t.expireInventoryLocked(s, &acts, now)
 			if len(s.held) > 0 && now.Sub(s.held[0].since) > iecPendingTimeout {
 				acts.merge(t.abortLocked(s, abortTimeout, "", nil, now))
 			} else if now.Sub(s.lastSeen) > iecIdleTTL {
 				t.dpi.EndStream(s.id)
-				t.deleteLocked(key, s)
+				acts.merge(t.deleteLocked(key, s))
 			}
 		}
 	}
@@ -295,11 +333,14 @@ func (t *iecTable) expire() {
 	t.apply(acts)
 }
 
-func (t *iecTable) deleteLocked(key iecKey, s *iecSession) {
+func (t *iecTable) deleteLocked(key iecKey, s *iecSession) iecActions {
+	acts := t.endInventoryLocked(s)
+	s.apci = nil
 	if s.state == iecAborted {
 		t.tombstones--
 	}
 	delete(t.sessions, key)
+	return acts
 }
 
 // evictTombstoneLocked removes the oldest tombstone when the bound is hit.
@@ -322,6 +363,12 @@ func (t *iecTable) evictTombstoneLocked() {
 
 // run drives the timers until stop is closed.
 func (t *iecTable) run(stop <-chan struct{}) {
+	defer func() {
+		t.stopInventory()
+		t.mu.Lock()
+		t.pressureOffline = true
+		t.mu.Unlock()
+	}()
 	ticker := time.NewTicker(iecExpireInterval)
 	defer ticker.Stop()
 	for {

@@ -43,7 +43,7 @@ func TestIECEnvelopeAgreesWithNftSteering(t *testing.T) {
 			Protocols: c.proto, Action: rules.ActionAllow,
 			ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"},
 		}}}
-		tab := newIECTable("learn")
+		tab := newIECTable("learn", &zoneCache{})
 		tab.setPolicy(snap)
 		matched, mode := tab.envelopeLocked(tab.sessionCtx(client, server))
 		if steers := comp.SteersIEC104(snap); steers != matched {

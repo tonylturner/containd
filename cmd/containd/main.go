@@ -63,18 +63,16 @@ func main() {
 	// Handle SIGHUP for config reload (runs in background).
 	sighupCh := make(chan os.Signal, 1)
 	signal.Notify(sighupCh, syscall.SIGHUP)
-	go func() {
-		for range sighupCh {
-			slog.Info("received SIGHUP, config reload not yet fully implemented")
-		}
-	}()
+	defer signal.Stop(sighupCh)
+	reloads := make(chan struct{}, 1)
+	go handleReloadSignals(ctx, mode, sighupCh, reloads)
 
 	var err error
 	switch mode {
 	case "all":
-		err = runAll(ctx, reservation)
+		err = runAll(ctx, reservation, reloads)
 	case "mgmt":
-		err = mgmtapp.Run(ctx, mgmtapp.Options{Reservation: reservation})
+		err = mgmtapp.Run(ctx, mgmtapp.Options{Reservation: reservation, Reload: reloads})
 	case "engine":
 		err = engineapp.Run(ctx, engineapp.Options{Reservation: reservation})
 	case "version":
@@ -101,18 +99,25 @@ func main() {
 	}
 }
 
-func runHealthcheck() error {
-	addr := common.Env("CONTAIND_MGMT_ADDR", "")
-	if addr == "" {
-		addr = ":8080"
+// loopbackManagementURL is the loopback base URL of the management HTTP
+// listener this process's environment selects: CONTAIND_MGMT_ADDR, else
+// the default. Management serves its HTTP port on 127.0.0.1 too.
+func loopbackManagementURL() (string, error) {
+	l := config.ResolveManagementListeners(nil, config.ProcessEnv).HTTP
+	port := l.Port()
+	if port == 0 {
+		return "", fmt.Errorf("management HTTP address %q names no port", l.Addr)
 	}
-	// Strip bind address, keep port.
-	port := addr
-	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
-		port = addr[idx+1:]
+	return fmt.Sprintf("http://127.0.0.1:%d", port), nil
+}
+
+func runHealthcheck() error {
+	baseURL, err := loopbackManagementURL()
+	if err != nil {
+		return err
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/api/v1/health", port))
+	resp, err := client.Get(baseURL + "/api/v1/health")
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
@@ -124,15 +129,10 @@ func runHealthcheck() error {
 }
 
 func runCLI(ctx context.Context) error {
-	addr := common.Env("CONTAIND_MGMT_ADDR", "")
-	if addr == "" {
-		addr = ":8080"
+	baseURL, err := loopbackManagementURL()
+	if err != nil {
+		return err
 	}
-	port := addr
-	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
-		port = addr[idx+1:]
-	}
-	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
 
 	token, err := cliLogin(baseURL)
 	if err != nil {
@@ -264,7 +264,7 @@ func cliLogin(baseURL string) (string, error) {
 	return result.Token, nil
 }
 
-func runAll(ctx context.Context, reservation *mgmtpath.Reservation) error {
+func runAll(ctx context.Context, reservation *mgmtpath.Reservation, reloads <-chan struct{}) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -273,7 +273,9 @@ func runAll(ctx context.Context, reservation *mgmtpath.Reservation) error {
 	if reservation != nil {
 		ready = make(chan struct{})
 	}
-	go func() { errCh <- engineapp.Run(ctx, engineapp.Options{Reservation: reservation, Ready: ready}) }()
+	go func() {
+		errCh <- engineapp.Run(ctx, engineapp.Options{Combined: true, Reservation: reservation, Ready: ready})
+	}()
 	if ready != nil {
 		select {
 		case <-ready:
@@ -283,7 +285,9 @@ func runAll(ctx context.Context, reservation *mgmtpath.Reservation) error {
 			return ctx.Err()
 		}
 	}
-	go func() { errCh <- mgmtapp.Run(ctx, mgmtapp.Options{Combined: true, Reservation: reservation}) }()
+	go func() {
+		errCh <- mgmtapp.Run(ctx, mgmtapp.Options{Combined: true, Reservation: reservation, Reload: reloads})
+	}()
 
 	// If either plane exits, cancel the other and drain both results.
 	var firstErr error

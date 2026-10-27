@@ -4,7 +4,10 @@ import type {
   IEC104Class,
   IOARange,
   Protocol,
-} from "./api";
+  RateLimit,
+  RuleAction,
+  RuleSchedule,
+} from "./api-firewall";
 
 function asList(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
@@ -152,7 +155,7 @@ export function normalizeFirewallRule(value: unknown): FirewallRule {
       typeof record.id === "string" && record.id.trim() !== ""
         ? record.id.trim()
         : "unknown-rule",
-    action: record.action === "DENY" ? "DENY" : "ALLOW",
+    action: normalizeRuleAction(record.action),
     sourceZones: toStringList(record.sourceZones),
     destZones: toStringList(record.destZones),
     sources: toStringList(record.sources),
@@ -167,6 +170,13 @@ export function normalizeFirewallRule(value: unknown): FirewallRule {
     normalized.description = record.description;
   }
   if (typeof record.log === "boolean") normalized.log = record.log;
+  const rateLimit = normalizeRateLimit(record.rateLimit);
+  if (rateLimit) normalized.rateLimit = rateLimit;
+  if (typeof record.tag === "string" && record.tag !== "") normalized.tag = record.tag;
+  const identities = toStringList(record.identities);
+  if (identities.length > 0) normalized.identities = identities;
+  const schedule = normalizeSchedule(record.schedule);
+  if (schedule) normalized.schedule = schedule;
 
   if ((normalized.sourceZones?.length ?? 0) === 0) delete normalized.sourceZones;
   if ((normalized.destZones?.length ?? 0) === 0) delete normalized.destZones;
@@ -176,6 +186,48 @@ export function normalizeFirewallRule(value: unknown): FirewallRule {
   if (!normalized.ics) delete normalized.ics;
 
   return normalized;
+}
+
+const RULE_ACTIONS: ReadonlySet<string> = new Set<RuleAction>([
+  "ALLOW",
+  "DENY",
+  "RESET",
+  "RATE_LIMIT",
+  "TAG",
+]);
+
+// The server rejects any other action, so an unknown value is a malformed
+// response; DENY is the conservative reading.
+export function normalizeRuleAction(value: unknown): RuleAction {
+  return typeof value === "string" && RULE_ACTIONS.has(value)
+    ? (value as RuleAction)
+    : "DENY";
+}
+
+function normalizeRateLimit(value: unknown): RateLimit | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { packetsPerSecond, burst } = value as Record<string, unknown>;
+  if (typeof packetsPerSecond !== "number" || !Number.isInteger(packetsPerSecond)) {
+    return undefined;
+  }
+  const rateLimit: RateLimit = { packetsPerSecond };
+  if (typeof burst === "number" && Number.isInteger(burst) && burst > 0) {
+    rateLimit.burst = burst;
+  }
+  return rateLimit;
+}
+
+function normalizeSchedule(value: unknown): RuleSchedule | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const schedule: RuleSchedule = {};
+  const days = toStringList(record.daysOfWeek);
+  if (days.length > 0) schedule.daysOfWeek = days;
+  for (const key of ["startTime", "endTime", "timezone"] as const) {
+    const v = record[key];
+    if (typeof v === "string" && v !== "") schedule[key] = v;
+  }
+  return Object.keys(schedule).length > 0 ? schedule : undefined;
 }
 
 export function normalizeFirewallRules(value: unknown): FirewallRule[] {

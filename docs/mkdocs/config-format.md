@@ -1,14 +1,30 @@
 # Config Format
 
-Canonical JSON configuration for export/import and persistent state.
+Canonical JSON configuration for export/import and persistent state. The config
+schema version is independent of the containd release version.
+
+Imports stage a candidate; commit is required to activate it. Failed commit,
+commit-confirmed or rollback restores and reapplies the pre-request running
+document and IDS bank while retaining the candidate. Inspect the error body's
+`restored`/`reapplied` fields rather than assuming recovery succeeded. Nft
+ruleset failures are fatal, including missing `NET_ADMIN`; see the
+[Orchestrator Client Contract](api-reference.md#orchestrator-client-contract).
+Keep `dataplane.enforcement: true` to install firewall rules. The example below
+shows the existing intentionally disabled mode, which only applies an in-memory
+snapshot and cannot certify nft enforcement.
 
 ## Schema
 
-```jsonc
+This complete example uses schema `0.1.7`. It defines two routed networks and a
+single TCP/80 allow rule. With enforcement enabled, other new forwarded
+connections are denied. Enforcement is off until you enable it deliberately. Replace the illustrative kernel devices and
+addresses with your deployment's values before applying it. This is not the
+Docker starter topology.
+
+```json
 {
-  "schema_version": "0.1.0",
-  "version": "0.1.0",
-  "description": "optional",
+  "schema_version": "0.1.7",
+  "description": "Two-zone routed lab; adapt device names and addressing before committing",
   "system": {
     "hostname": "containd",
     "mgmt": {
@@ -18,8 +34,7 @@ Canonical JSON configuration for export/import and persistent state.
       "httpListenAddr": ":8080",
       "httpsListenAddr": ":8443",
       "tlsCertFile": "/data/tls/server.crt",
-      "tlsKeyFile": "/data/tls/server.key",
-      "trustedCAFile": "/data/tls/trusted_ca.pem"
+      "tlsKeyFile": "/data/tls/server.key"
     },
     "ssh": {
       "listenAddr": ":2222",
@@ -28,44 +43,62 @@ Canonical JSON configuration for export/import and persistent state.
     }
   },
   "zones": [
-    { "name": "it", "description": "IT network" },
-    { "name": "dmz", "description": "DMZ" }
+    {
+      "name": "it",
+      "description": "IT network"
+    },
+    {
+      "name": "dmz",
+      "description": "DMZ"
+    }
   ],
   "interfaces": [
     {
-      "name": "eth0",
+      "name": "it",
       "zone": "it",
-      "addresses": ["192.168.1.1/24"],
-      "access": { "mgmt": true, "http": true, "https": true, "ssh": false }
+      "addresses": [
+        "192.168.1.1/24"
+      ],
+      "access": {
+        "mgmt": true,
+        "http": true,
+        "https": true,
+        "ssh": false
+      },
+      "device": "eth0"
     },
     {
-      "name": "eth1",
+      "name": "dmz",
       "zone": "dmz",
-      "addresses": ["10.0.0.1/24"],
-      "access": { "mgmt": false, "http": false, "https": false, "ssh": false }
+      "addresses": [
+        "10.0.0.1/24"
+      ],
+      "access": {
+        "mgmt": false,
+        "http": false,
+        "https": false,
+        "ssh": false
+      },
+      "device": "eth1"
     }
   ],
   "dataplane": {
-    "captureInterfaces": ["eth0", "eth1"],
+    "captureInterfaces": [
+      "eth0",
+      "eth1"
+    ],
     "enforcement": false,
     "enforceTable": "containd",
     "dpiMock": false
   },
   "routing": {
-    "staticRoutes": [
+    "routes": [
       {
         "dst": "203.0.113.0/24",
-        "via": "192.168.1.254",
-        "dev": "wan",
-        "table": 254,
+        "gateway": "192.168.1.254",
+        "iface": "it",
+        "table": 0,
         "metric": 100
-      }
-    ],
-    "policyRules": [
-      {
-        "priority": 10010,
-        "src": "192.168.1.0/24",
-        "table": 100
       }
     ]
   },
@@ -74,89 +107,75 @@ Canonical JSON configuration for export/import and persistent state.
       "id": "plc-1",
       "name": "Boiler PLC",
       "type": "PLC",
-      "zone": "ot",
-      "ips": ["10.0.0.10"],
-      "hostnames": ["plc1.lab.local"],
+      "zone": "dmz",
+      "ips": [
+        "10.0.0.10"
+      ],
+      "hostnames": [
+        "plc1.lab.local"
+      ],
       "criticality": "HIGH",
-      "tags": ["boiler", "line-1"]
+      "tags": [
+        "boiler",
+        "line-1"
+      ]
     }
   ],
   "services": {
     "syslog": {
       "forwarders": [
-        { "address": "192.0.2.10", "port": 514, "proto": "udp" }
+        {
+          "address": "192.0.2.10",
+          "port": 514,
+          "proto": "udp"
+        }
       ]
     },
     "dns": {
-      "enabled": true,
-      "listenPort": 53,
-      "upstreamServers": ["1.1.1.1", "8.8.8.8"],
-      "cacheSizeMB": 64
+      "enabled": false
     },
     "ntp": {
-      "enabled": true,
-      "servers": ["pool.ntp.org"],
-      "intervalSeconds": 3600
+      "enabled": false
     },
     "dhcp": {
-      "enabled": false,
-      "authoritative": true,
-      "listenIfaces": ["lan2", "lan3"],
-      "leaseSeconds": 3600,
-      "router": "192.168.10.1",
-      "dnsServers": ["192.168.10.1"],
-      "domain": "lab.local",
-      "pools": [
-        { "iface": "lan2", "start": "192.168.10.100", "end": "192.168.10.200" }
-      ]
+      "enabled": false
     },
     "vpn": {
       "wireguard": {
-        "enabled": false,
-        "iface": "wg0",
-        "listenPort": 51820,
-        "addressCIDR": "10.6.0.1/24",
-        "privateKey": "REDACTED",
-        "peers": [
-          {
-            "name": "laptop",
-            "publicKey": "BASE64",
-            "allowedIPs": ["10.6.0.2/32"],
-            "endpoint": "vpn.example.com:51820",
-            "persistentKeepalive": 25
-          }
-        ]
+        "enabled": false
       },
       "openvpn": {
-        "enabled": false,
-        "mode": "server"
+        "enabled": false
       }
     }
   },
   "firewall": {
-    "defaultAction": "ALLOW",
+    "defaultAction": "DENY",
     "nat": {
-      "enabled": true,
-      "egressZone": "wan",
-      "sourceZones": ["lan", "dmz"]
+      "enabled": false
     },
     "rules": [
       {
         "id": "1",
-        "description": "IT to DMZ",
-        "sourceZones": ["it"],
-        "destZones": ["dmz"],
-        "sources": ["192.168.1.0/24"],
-        "destinations": ["10.0.0.0/24"],
-        "protocols": [{ "name": "tcp", "port": "80" }],
-        "ics": {
-          "protocol": "modbus",
-          "functionCode": [3, 16],
-          "unitId": 1,
-          "addresses": ["0-100"],
-          "readOnly": false,
-          "writeOnly": false
-        },
+        "description": "IT web access to DMZ",
+        "sourceZones": [
+          "it"
+        ],
+        "destZones": [
+          "dmz"
+        ],
+        "sources": [
+          "192.168.1.0/24"
+        ],
+        "destinations": [
+          "10.0.0.0/24"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "80"
+          }
+        ],
         "action": "ALLOW"
       }
     ]
@@ -167,8 +186,11 @@ Canonical JSON configuration for export/import and persistent state.
 Notes:
 - Serialized firewall rules always include `ics`; `{}` means the rule has no
   ICS predicate. Input rules may omit this field.
-- `zones` must be unique.
+- `zones` must be unique. A zone name is 1 to 125 bytes without leading or
+  trailing whitespace; enforcement names each zone's nftables interface set
+  after it.
 - `interfaces.zone` must reference an existing zone; addresses are CIDR strings.
+- `interfaces.device`, or the `name` of an interface without a device (which is then its kernel name), must be a Linux interface name that nftables can match exactly: 1–15 bytes, without `/`, `:`, whitespace, control characters, `"`, `*` or `\`, and neither `.` nor `..`. So must each `services.dhcp.listenIfaces` entry of an enabled DHCP server that names a kernel device rather than a configured interface.
 - `pcap.interfaces` accepts logical interface names or kernel device names. Logical names resolve to their configured device (or the logical name when no device is set).
 - `pcap.zones` captures every configured interface assigned to each listed zone; interface and zone selections are combined and deduplicated when capture starts.
 - `pcap.filter.port` accepts one port (for example `"2404"`) or an inclusive range (for example `"1000-2000"`). It matches source or destination ports in TCP/UDP packets; it cannot be combined with `proto: "icmp"`.
@@ -176,118 +198,148 @@ Notes:
 - Capture start rejects unknown interfaces or zones, zones with no configured interfaces, and an empty selection. `GET /api/v1/pcap/status` reports the resolved kernel devices.
 - `interfaces.addressMode` supports `static` (explicit CIDRs) and `dhcp` (best-effort; Docker commonly preconfigures IPs without DHCP).
 - `interfaces.type` supports `physical` (default), `bridge` (with `members`), and `vlan` (with `parent` + `vlanId`).
-- `interfaces.access` controls whether mgmt/ssh is reachable on that interface (defaults to enabled when omitted; localhost is always allowed).
-- `services.dhcp` configures the built-in DHCP server.
+- `interfaces.access` controls whether mgmt/ssh is reachable on that interface (omitted access settings use the default grants; localhost is always allowed).
+- `services.dhcp` configures the built-in DHCP server. `authoritative` is a persisted boolean, default false when omitted. Requests for addresses this server cannot lease receive DHCPNAK only when authoritative, on directly attached served subnets; otherwise they receive no reply. Eligible INIT-REBOOT and renewal/rebinding requests receive DHCPACK and record a lease in both modes, even without a prior lease; relayed requests and requests selecting another server are ignored.
+- `services.ntp.intervalSeconds` pins chrony polling when positive: round up to a power of two and clamp to 16–131072 seconds. Omitted or zero retains adaptive 64–1024 second polling. Runtime status reports the configured fixed interval (or null for adaptive polling) and min/max seconds; initial bursts may be faster.
 - `services.vpn.wireguard` configures WireGuard. `services.vpn.openvpn` supports managed client/server modes.
 - `services.vpn.openvpn.server.tunnelCIDR` is the client address pool allocated by the OpenVPN server. WireGuard uses static peer `AllowedIPs` and `addressCIDR` for policy targeting.
-- Config backups are stored under `data/config-backups/` and can be created redacted or full (admin-only for unredacted).
+- Config backups are stored beside the config DB in `config-backups/` (normally `/data/config-backups/` in Compose) and can be created redacted or full (admin-only for unredacted).
 - `assets` must have unique `id` and `name`; `zone` must reference an existing zone if set; `ips` are IPv4/IPv6 strings; `type` and `criticality` are enumerated strings.
 - `dataplane` controls runtime capture/enforcement; values are pushed to the engine on commit/rollback.
+  - `enforceTable` names the engine's nftables tables (default `containd`): `inet <enforceTable>` holds temporary blocks and connection revocations, and `inet <enforceTable>_policy` holds the firewall policy. The name starts with a letter or `_`, continues with letters, digits, `_` or `-`, and has at most 248 characters. It must not be an nft keyword such as `table`, `inet`, `ip`, `accept` or `drop`, which nft cannot address as a table name even quoted; keywords are lowercase, so `Table` is accepted. `containd_dhcp` is reserved for the DHCP redirect table.
 - `routing` configures kernel routing when applying running config:
-  - `staticRoutes` are installed via netlink (Linux only today; IPv4 only).
-  - `policyRules` are installed via netlink as basic policy-based routing (Linux only today; src/dst CIDR selection, `table` selection).
-- `firewall.rules` must have unique `id`; action is `ALLOW` or `DENY`.
-- Firewall rule objects reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
-- `firewall.nat` enables simple source NAT (masquerade) for traffic forwarded from `sourceZones` out `egressZone`.
+  - `routes` are installed via netlink (Linux only; IPv4 only). Route `table: 0`
+    selects main; explicit tables use IDs 1–252.
+  - `rules` are installed via netlink as basic policy-based routing (Linux only;
+    src/dst CIDR selection, table IDs 1–252). Explicit priorities use 1–65535;
+    priority 0 selects automatic priority starting at 10000. The reserved
+    management path can reject overlapping rules at priority 1.
+  - Every running-config apply converges entries marked with protocol 98,
+    including deletion and empty intent. Identical foreign entries satisfy intent
+    without taking ownership. A foreign route with the same destination, table,
+    TOS and metric but a different next hop is journaled, replaced, and restored
+    when that route leaves intent. Unsupported collisions fail with route details.
+    See [routing ownership and upgrades](dataplane.md#routing-ownership-and-upgrades).
+- `firewall.defaultAction` applies to forwarded traffic that no rule matches. It is `ALLOW` or `DENY`; omitted or empty means `DENY`, and any other value is rejected.
+- `firewall.rules` must have unique `id`; `action` is `ALLOW`, `DENY`, `RESET`, `RATE_LIMIT` or `TAG` (see [Actions and precedence](policy-model.md#actions-and-precedence)). Rule order does not decide: any matching `ALLOW` wins, then the first matching `DENY` or `RESET` by `id`.
+  - `RATE_LIMIT` needs `rateLimit`: `{"packetsPerSecond": 100, "burst": 20}`, with `packetsPerSecond` 1–1000000 and `burst` 0–1000000 packets (0 means `packetsPerSecond`). Other actions reject `rateLimit`.
+  - `TAG` needs `tag`, matching `^[a-z0-9][a-z0-9_.-]{0,31}$`, and takes no `schedule`; a config uses at most 32 distinct labels. Other actions reject `tag`.
+  - `RESET`, `RATE_LIMIT` and `TAG` reject an `ics.protocol`; `RESET` is not a valid `firewall.defaultAction`.
+- Firewall rule objects, and their `rateLimit` objects, reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
+- `firewall.identityBindings` tags source addresses with identity labels for
+  rule `identities`: `[{"ip": "10.0.0.5", "identities": ["operator"]}]`. Each
+  entry binds one unicast IPv4 or IPv6 address, without a zone, at most once
+  (an IPv4-mapped IPv6 address is its IPv4 address), to 1–16 distinct labels.
+  A label is 1–64 bytes of printable UTF-8 without surrounding spaces. A
+  configuration holds at most 4096 bindings. `/api/v1/identities` edits them in
+  the candidate; see
+  [Identity and schedule predicates](policy-model.md#identity-and-schedule-predicates).
+- A rule `schedule` has `daysOfWeek` (`Sunday`…`Saturday`, empty for every day),
+  `startTime` and `endTime` (24-hour `HH:MM`) and an IANA `timezone` (blank is
+  UTC). Equal start and end times are rejected. Zone data ships with containd.
+- `firewall.nat.enabled` enables source NAT (masquerade) from `sourceZones` out
+  `egressZone` (defaults: `lan`/`dmz` out `wan`). Only zones with bound interfaces
+  generate matches; custom zone names are supported.
+- Each enabled `firewall.nat.portForwards` entry translates traffic arriving in
+  its `ingressZone` to `destIp`/`destPort`; disabled entries generate no rules.
+  The ingress zone must have bound interfaces. When source NAT is enabled,
+  forwarded DNAT traffic is masqueraded only for that entry's translated target,
+  using the route-selected egress interface rather than an assumed `lan` zone.
+  The destination sees the firewall's egress address, ensuring a return path.
+  Port-forward enablement is independent of `firewall.nat.enabled`; disabling
+  source NAT leaves DNAT enabled and requires a routed return path.
 - `protocols.port` accepts single ports or ranges (`"443"` or `"1000-2000"`).
 - Syslog forwarders require address and port; proto `udp` or `tcp` (defaults to udp if empty).
 
-Limitations (current):
-- Routing/PBR supports additive updates plus an explicit replace/reconcile mode; coverage for all tables and IPv6 is still expanding.
+Limitations:
+- Routing/PBR supports IPv4 only. Unmarked rules installed before protocol-based
+  ownership require manual upgrade cleanup; see the routing ownership guide.
 - NAT supports postrouting masquerade and DNAT/port-forwarding.
 
+## Configuration lifecycle
+
+Saving or importing validates and replaces the **candidate**; it does not change
+the running appliance. Review the running/candidate diff, then commit to promote
+and apply the candidate to the engine and services. A confirmed commit requires
+confirmation before its deadline or the previous configuration is restored.
+Rollback restores the previous running configuration. With a reserved management
+path, unsafe changes and rollback targets are refused; see
+[Reserved Management Path](management-reservation.md).
+
+Exports are redacted by default. Only admins can request an unredacted export;
+store full backups securely. Keep the persistent data volume as well as exported
+JSON if you need users, audit history, or service files during recovery.
+
+## Additional CA bundle
+
+`system.mgmt.trustedCAFile` selects the PEM bundle storage path, defaulting to
+`/data/tls/trusted_ca.pem`. Uploads require a path under `/data`.
+`POST /api/v1/system/tls/trusted-ca` is an immediate admin operation, not a
+candidate edit:
+
+- `{"pem":"-----BEGIN CERTIFICATE-----\n..."}` replaces the entire bundle.
+  Every block must parse as an X.509 CA certificate with valid CA basic
+  constraints. Root and intermediate CA certificates are accepted; leaf
+  certificates, non-certificate blocks, malformed PEM and empty bundles are not.
+- `{"clear":true}` clears the stored bundle. Do not combine it with nonblank PEM.
+- A rejected upload leaves the previous file unchanged. Successful replacement
+  is atomic, so readers cannot observe a partially written bundle.
+
+After storing the bundle, management sends its content and revision
+(`sha256:<hex>`, or `none` when cleared) to the engine; the engine never reads
+management's file. Every successful upload returns `200` with the stored
+`revision`. Status `updated` means the engine applied it. Status `stored` means
+the engine is unavailable or rejected it: the bundle stays stored, `warnings`
+and the `X-Containd-Warnings` header say why, and every commit, rollback, boot
+replay and `SIGHUP` reload sends it again. `503` means the config store is
+unavailable and nothing was stored.
+
+The engine's antivirus clients trust the system roots plus this bundle:
+
+- ICAP servers with `useTls` (from the next connection).
+- FreshClam definition downloads (from the next run). The engine writes the
+  system roots and the bundle to an engine-local file and passes it to the
+  FreshClam process only, as `CURL_CA_BUNDLE`.
+
+See [security limits](secure-by-design.md#additional-ca-bundle) for clients
+that do not use it.
+
 ## API endpoints
-- `GET /api/v1/config` – fetch current config (404 if none).
-- `POST /api/v1/config` – replace the candidate config (validates; stages, never applies).
-- `POST /api/v1/config/validate` – validate JSON without saving.
-- `GET /api/v1/config/export` – export current config.
-- `POST /api/v1/config/import` – replace the candidate config from an export (validates; stages, never applies).
-- `GET/POST /api/v1/config/candidate` – fetch/save candidate config.
-- `GET /api/v1/config/diff` – view running vs candidate.
-- `POST /api/v1/config/commit` – promote candidate to running.
-- `POST /api/v1/config/commit_confirmed` – promote candidate to running with auto-rollback unless confirmed.
-- `POST /api/v1/config/confirm` – confirm the last commit-confirmed operation.
-- `POST /api/v1/config/rollback` – restore previous running config.
-- `GET/POST /api/v1/config/backups` – list/create config backups.
-- `GET /api/v1/config/backups/:id` – download a config backup.
-- `DELETE /api/v1/config/backups/:id` – delete a config backup.
-- `GET/POST/PATCH/DELETE /api/v1/zones` – list/add/update/delete zones.
-- `GET/POST/PATCH/DELETE /api/v1/interfaces` – list/add/update/delete interfaces.
-- `GET/POST/PATCH/DELETE /api/v1/firewall/rules` – list/add/update/delete firewall rules.
-- `GET/POST/PATCH/DELETE /api/v1/assets` – list/add/update/delete assets.
-- `GET/POST /api/v1/services/syslog` – get/set syslog settings.
-- `GET/POST /api/v1/services/dns` – get/set DNS (Unbound) settings.
-- `GET/POST /api/v1/services/ntp` – get/set NTP (OpenNTPD) settings.
-- `GET/POST /api/v1/services/dhcp` – get/set DHCP (LAN) settings.
-- `GET/POST /api/v1/services/vpn` – get/set VPN settings (WireGuard + OpenVPN managed client/server).
-- `POST /api/v1/services/vpn/openvpn/profile` – upload a foreground `.ovpn` profile.
-- `GET/POST /api/v1/services/vpn/openvpn/clients` – list/create OpenVPN server clients.
-- `GET /api/v1/services/vpn/openvpn/clients/:name` – download a generated client profile.
-- `GET/POST /api/v1/services/proxy/forward` – get/set forward proxy (Envoy).
-- `GET/POST /api/v1/services/proxy/reverse` – get/set reverse proxy (Nginx).
-- `GET/POST /api/v1/services/av` – get/set AV settings.
-- `POST /api/v1/services/av/update` – trigger AV definition refresh.
-- `GET/POST/DELETE /api/v1/services/av/defs` – manage AV definitions.
-- `GET /api/v1/services/status` – summary of embedded service status.
-- `GET /api/v1/audit` – list audit records.
-- `GET /api/v1/events` – list DPI/firewall/service events.
-- `GET /api/v1/flows` – list active flows.
-- `GET /api/v1/stats/protocols` – protocol traffic statistics.
-- `GET /api/v1/stats/top-talkers` – top source/destination pairs by volume.
-- `GET /api/v1/anomalies` – list detected anomalies.
-- `DELETE /api/v1/anomalies` – clear anomaly records (admin).
-- `GET /api/v1/conntrack` – list kernel conntrack entries.
-- `POST /api/v1/conntrack/kill` – kill a conntrack session (admin).
-- `GET /api/v1/dataplane` – get dataplane config/status.
-- `POST /api/v1/dataplane` – set dataplane config (admin).
-- `GET /api/v1/dataplane/ruleset` – preview compiled ruleset (admin).
-- `POST /api/v1/dataplane/blocks/host` – block a host (admin).
-- `POST /api/v1/dataplane/blocks/flow` – block a flow (admin).
-- `GET /api/v1/pcap/config` – get PCAP capture config.
-- `POST /api/v1/pcap/config` – set PCAP capture config (admin).
-- `POST /api/v1/pcap/start` – start PCAP capture (admin).
-- `POST /api/v1/pcap/stop` – stop PCAP capture (admin).
-- `GET /api/v1/pcap/status` – get PCAP capture status.
-- `GET /api/v1/pcap/list` – list captured PCAP files.
-- `POST /api/v1/pcap/upload` – upload a PCAP file (admin).
-- `GET /api/v1/pcap/download/:name` – download a PCAP file.
-- `DELETE /api/v1/pcap/:name` – delete a PCAP file (admin).
-- `POST /api/v1/pcap/tag` – tag a PCAP file (admin).
-- `POST /api/v1/pcap/replay` – replay a PCAP file through DPI (admin).
-- `POST /api/v1/pcap/analyze` – upload and analyze a PCAP file (admin).
-- `POST /api/v1/pcap/analyze/:name` – analyze a previously uploaded PCAP (admin).
-- `GET /api/v1/inventory` – list auto-discovered ICS assets.
-- `GET /api/v1/inventory/:ip` – get a specific discovered asset.
-- `DELETE /api/v1/inventory` – clear discovered inventory (admin).
-- `GET /api/v1/signatures` – list IDS signatures.
-- `POST /api/v1/signatures` – add a custom signature (admin).
-- `DELETE /api/v1/signatures/:id` – remove a signature (admin).
-- `GET /api/v1/signatures/matches` – list signature match events.
-- `GET /api/v1/objects` – list reusable objects (address groups, service groups).
-- `POST /api/v1/objects` – create a reusable object (admin).
-- `PATCH /api/v1/objects/:id` – update a reusable object (admin).
-- `DELETE /api/v1/objects/:id` – delete a reusable object (admin).
-- `POST /api/v1/firewall/rules/preview` – preview/test a firewall rule match (admin).
-- `GET /api/v1/firewall/ics-rules` – list ICS-specific firewall rules.
-- `POST /api/v1/firewall/ics-rules` – create an ICS firewall rule (admin).
-- `PATCH /api/v1/firewall/ics-rules/:id` – update an ICS firewall rule (admin).
-- `GET /api/v1/learn/profiles` – list learned traffic profiles.
-- `POST /api/v1/learn/generate` – generate rules from learned profiles (admin).
-- `POST /api/v1/learn/apply` – apply generated rules to config (admin).
-- `DELETE /api/v1/learn` – clear learned profiles (admin).
-- `GET /api/v1/ids/rules` – get IDS rules.
-- `POST /api/v1/ids/rules` – set IDS rules (admin).
-- `POST /api/v1/ids/convert/sigma` – convert Sigma YAML to containd IDS format.
-- `GET /api/v1/templates` – list policy templates.
-- `POST /api/v1/templates/apply` – apply a policy template (admin).
-- `GET /api/v1/templates/ics` – list ICS protocol templates.
-- `POST /api/v1/templates/ics/apply` – apply an ICS template (admin).
-- `GET /api/v1/identities` – list identity mappings (when identity resolver is enabled).
-- `POST /api/v1/identities` – set an identity mapping (admin).
-- `DELETE /api/v1/identities/:ip` – delete an identity mapping (admin).
-- `GET /api/v1/users` – list users (admin).
-- `POST /api/v1/users` – create a user (admin).
-- `PATCH /api/v1/users/:id` – update a user (admin).
-- `POST /api/v1/users/:id/password` – set user password (admin).
-- `DELETE /api/v1/users/:id` – delete a user (admin).
-- `GET /metrics` – Prometheus metrics (unauthenticated).
+
+See [API Reference](api-reference.md) for endpoints and the OpenAPI wire contract.
+Configuration lifecycle and JSON examples are maintained on this page.
+
+## Runtime connections
+
+The Sessions page and `GET /api/v1/conntrack` show the kernel's IPv4 and IPv6
+connections, including original and reply NAT tuples. A successful empty array
+is a verified empty table; unavailable or interrupted netlink dumps return an
+error with the backend reason. The engine needs Linux conntrack support and
+`NET_ADMIN` in the traffic's network namespace. The list is capped at 5,000 rows.
+
+Admins use `POST /api/v1/conntrack/kill` with the displayed original TCP or UDP
+tuple (`proto`, `src`, `dst`, `sport`, `dport`). `scope: connection` (default)
+revokes only that exact connection in both directions; reconnecting from a fresh
+source port is allowed. `scope: client-service` ends all that client's
+connections to the original destination service and prevents reconnects for the
+interval. Neighbouring clients, services and transports remain unaffected.
+`durationSecs` is 1–3600 seconds, default 60. These are runtime operations, not
+candidate configuration changes, and require active nftables enforcement.
+Revocations never refuse management traffic: the management listeners stay
+reachable on the interfaces that grant management access, and the reserved
+management listener stays reachable, even when their tuples are revoked.
+Killing a management connection still deletes its kernel state, which can end
+that one connection.
+
+The response reports `revocationInstalled`, `blockedUntil`, `conntrackDeleted`
+and counts/errors independently. Revocation is installed atomically before
+state deletion. Matching TCP packets receive kernel-generated resets on each
+endpoint's next packet; this is not confirmed endpoint closure. Matching UDP
+packets are dropped. A failed revocation does not delete kernel state. Inspect
+each step even on HTTP 200. ICMP and other protocols are visible but cannot be
+killed through this port-based API.
+
+Revocations are kernel runtime state in the nftables table
+`inet <enforceTable>`, not persisted configuration. They survive commits
+and expire after their interval. Disabling enforcement or renaming
+`enforceTable` removes them, and a recreated container starts without them.

@@ -5,10 +5,15 @@ package mgmtapp
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
+	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
@@ -59,10 +64,27 @@ func TestResolveEngineURL(t *testing.T) {
 
 	t.Run("derives loopback url in combined mode", func(t *testing.T) {
 		t.Setenv("CONTAIND_ENGINE_URL", "")
-		t.Setenv("CONTAIND_ENGINE_ADDR", ":8081")
+		t.Setenv("CONTAIND_ENGINE_ADDR", "")
+		t.Setenv("NGFW_ENGINE_ADDR", "")
 		got := resolveEngineURL(logger, Options{Combined: true})
 		if got != "http://127.0.0.1:8081" {
 			t.Fatalf("resolveEngineURL combined=%q, want %q", got, "http://127.0.0.1:8081")
+		}
+	})
+
+	t.Run("derives explicit combined listener", func(t *testing.T) {
+		t.Setenv("CONTAIND_ENGINE_URL", "")
+		t.Setenv("CONTAIND_ENGINE_ADDR", "127.0.0.1:9091")
+		if got := resolveEngineURL(logger, Options{Combined: true}); got != "http://127.0.0.1:9091" {
+			t.Fatalf("resolveEngineURL override = %q", got)
+		}
+	})
+
+	t.Run("preserves explicit combined URL", func(t *testing.T) {
+		t.Setenv("CONTAIND_ENGINE_URL", "http://127.0.0.1:8081")
+		t.Setenv("CONTAIND_ENGINE_ADDR", "")
+		if got := resolveEngineURL(logger, Options{Combined: true}); got != "http://127.0.0.1:8081" {
+			t.Fatalf("resolveEngineURL explicit combined = %q", got)
 		}
 	})
 
@@ -139,20 +161,18 @@ func TestResolveMgmtListenerConfigAndBuildServers(t *testing.T) {
 
 	listenerCfg.httpAddr = ":0"
 	listenerCfg.httpLoopbackAddr = "127.0.0.1:0"
-	servers, listeners, err := buildMgmtServers(http.NewServeMux(), listenerCfg)
+	binds, err := buildMgmtServers(http.NewServeMux(), listenerCfg)
 	if err != nil {
 		t.Fatalf("buildMgmtServers: %v", err)
 	}
-	if len(servers) != 2 || len(listeners) != 2 {
-		t.Fatalf("server/listener count = %d/%d, want 2/2", len(servers), len(listeners))
-	}
-	for _, ln := range listeners {
-		_ = ln.Close()
+	defer binds.close()
+	if len(binds.servers) != 2 || len(binds.listeners) != 2 {
+		t.Fatalf("server/listener count = %d/%d, want 2/2", len(binds.servers), len(binds.listeners))
 	}
 }
 
 func TestBuildMgmtServersRejectsNoListeners(t *testing.T) {
-	_, _, err := buildMgmtServers(http.NewServeMux(), mgmtListenerConfig{})
+	_, err := buildMgmtServers(http.NewServeMux(), mgmtListenerConfig{})
 	if err == nil {
 		t.Fatal("expected no management listeners enabled error")
 	}
@@ -179,5 +199,79 @@ func TestEnsureDefaultConfig(t *testing.T) {
 	}
 	if !boolDefault(cfg.System.Mgmt.EnableHTTP, false) || !boolDefault(cfg.System.Mgmt.EnableHTTPS, false) {
 		t.Fatal("expected default http/https listeners enabled")
+	}
+}
+
+// A stored rule with an ICS address entry that validation now refuses starts
+// management in recovery, with the rule and the entry in the boot fault,
+// and leaves the stored rule for the operator to fix.
+func TestStoredBadICSAddressBootsIntoRecovery(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.db")
+	t.Setenv("CONTAIND_CONFIG_DB", path)
+	t.Setenv("CONTAIND_AUDIT_DB", filepath.Join(dir, "audit.db"))
+	t.Setenv("CONTAIND_USERS_DB", filepath.Join(dir, "users.db"))
+	store, err := config.NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := store.Save(ctx, config.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	setStoredRules(t, path, []config.Rule{{
+		ID: "modbus-addr", Action: config.ActionAllow,
+		Protocols: []config.Protocol{{Name: "tcp", Port: "502"}},
+		ICS:       config.ICSPredicate{Protocol: "modbus", Mode: "learn", Addresses: []string{"0x0100", "0x01G0"}},
+	}})
+
+	stores, running, err := initMgmtStores(zap.NewNop().Sugar(), nil)
+	if err != nil {
+		t.Fatalf("a bad stored address stopped management: %v", err)
+	}
+	defer stores.store.Close()
+	defer stores.auditStore.Close()
+	defer stores.userStore.Close()
+	fault, err := config.ManagementBootFaultForStore(ctx, stores.store)
+	if err != nil || !strings.Contains(fault, `rule modbus-addr ics addresses entry "0x01G0"`) {
+		t.Fatalf("fault = %q, %v", fault, err)
+	}
+	if !errors.Is(config.CheckManagementBootFault(ctx, stores.store), config.ErrManagementBootFault) {
+		t.Fatal("boot is not in recovery")
+	}
+	if len(running.Firewall.Rules) != 1 || !slices.Equal(running.Firewall.Rules[0].ICS.Addresses, []string{"0x0100", "0x01G0"}) {
+		t.Fatalf("boot rewrote the stored rules: %+v", running.Firewall.Rules)
+	}
+}
+
+// The certificate and key recorded for the console and SSH are the files the
+// HTTPS listener serves: environment overrides, generated when missing,
+// rather than the saved settings; none when HTTPS is not served.
+func TestServedCertificateIsTheListenerCertificate(t *testing.T) {
+	dir := t.TempDir()
+	envCert, envKey := filepath.Join(dir, "env.crt"), filepath.Join(dir, "env.key")
+	t.Setenv("CONTAIND_TLS_CERT_FILE", envCert)
+	t.Setenv("CONTAIND_TLS_KEY_FILE", envKey)
+	cfg := config.DefaultConfig()
+	cfg.System.Mgmt.TLSCertFile = filepath.Join(dir, "saved.crt")
+	cfg.System.Mgmt.TLSKeyFile = filepath.Join(dir, "saved.key")
+	cfg.System.Mgmt.EnableHTTP = boolPtr(false)
+	listener, err := resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := listener.servedManagement(configuredBinds(listener)); got.CertFile != envCert || got.KeyFile != envKey {
+		t.Fatalf("served = %+v, want %q and %q", got, envCert, envKey)
+	}
+	if _, err := os.Stat(envCert); err != nil {
+		t.Fatalf("served certificate not generated: %v", err)
+	}
+	cfg.System.Mgmt.EnableHTTPS = boolPtr(false)
+	cfg.System.Mgmt.EnableHTTP = boolPtr(true)
+	if listener, err = resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil); err != nil || listener.servedManagement(configuredBinds(listener)) != (httpapi.ServedManagement{}) {
+		t.Fatalf("served without HTTPS = %+v, %v", listener.servedManagement(configuredBinds(listener)), err)
 	}
 }

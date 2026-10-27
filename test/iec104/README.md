@@ -7,7 +7,7 @@ behaviour. The plant's own state is the evidence, never a client timeout.
 
 | Path | What | Licence |
 |---|---|---|
-| `compose.yml` | lib60870 RTU and control centre on two disposable networks, the branch-built containd firewall routing between them, management published to 127.0.0.1 only, no host networking | Apache-2.0 |
+| `compose.yml` | lib60870 RTU and control centre on two disposable networks, the locally built containd firewall routing between them, management published to 127.0.0.1 only, no host networking | Apache-2.0 |
 | `endpoint/` | `iec104ep` (RTU, control centre, one-shot command client) on lib60870-C v2.4.1, built only into the harness image | **GPLv3** |
 | `malformer/` | pure-Go client for split, coalesced, malformed, unsupported and same-5-tuple cases; never links lib60870 | Apache-2.0 |
 | `capture/` | regenerates the reference pcaps in `testdata/` | Apache-2.0 |
@@ -29,19 +29,23 @@ only. Do not publish that image as a containd artefact.
 bash scripts/smoke-iec104.sh
 ```
 
-The script builds the branch firewall image (`build/Dockerfile.mgmt`) and the
+Requirements: Docker with Compose and a Linux kernel supporting NFQUEUE and
+raw sockets, plus host `jq`, `curl` and Python 3. Run from the repository root.
+
+The script builds the local firewall image (`build/Dockerfile.mgmt`) and the
 endpoint image if they are absent, brings the stack up under a unique compose
 project, routes both endpoints through the firewall, applies an L4 baseline
 and then the scoped EU enforce policy, runs every enforcement assertion, writes
-`build/iec104-smoke/results.json`, and tears down everything it created.
+`build/iec104-smoke/results.json`, and tears down its containers, networks and
+volumes. Built images remain available for reuse.
 
 | Variable | Default | Use |
 |---|---|---|
 | `IEC104_FIREWALL_IMAGE` | `containd/containd:iec104-smoke` | firewall image under test |
-| `IEC104_ENDPOINT_IMAGE` | `containd-iec104-endpoint:iec104-smoke` | lib60870 endpoint image |
+| `IEC104_ENDPOINT_IMAGE` | `containd-iec104-endpoint:iec104-smoke-<source-hash>` | lib60870 endpoint image; hash covers the endpoint build context, including pinned dependencies in its Dockerfile |
 | `IEC104_PROJECT` | `iec104-smoke-<time>-<pid>` | compose project |
 | `IEC104_CC_SUBNET`, `IEC104_RTU_SUBNET` | `10.233.0`, `10.234.0` | first three octets of the two /24s, for a parallel run |
-| `IEC104_FRESHNESS_SECONDS` | `660` | telemetry freshness window (must exceed 10 minutes) |
+| `IEC104_FRESHNESS_SECONDS` | `660` | telemetry freshness window (at least 600 seconds for acceptance) |
 | `IEC104_HOLD` | `5s` | how long a malformed-case client waits for a reset |
 | `IEC104_REUSE_PORT` | `40404` | fixed client port for the same-5-tuple case |
 | `IEC104_RESULTS_DIR` | `build/iec104-smoke` | results location |
@@ -52,6 +56,22 @@ enforcement); `GATE-FAIL` (needs IEC104 enforcement);
 below ten minutes). Exit 0 is acceptance (everything passed); 1 is a `FAIL`
 or a setup error; 3 means the baseline passed but gate assertions remain.
 Passing with skips is not acceptance.
+
+The run also checks live observability:
+
+- Inventory identifies the control centre → RTU pair on port 2404 and CA 1 /
+  IOA 2001 type 46; allowed commands increase accepted counts, denied commands
+  increase only attempted counts, and all overflow counters stay zero.
+- Clean STARTDT, GI and monitoring produce no APCI anomaly events or alerts.
+  A malformer GI I-frame before STARTDT produces exactly one
+  `iec104_data_while_stopped` event and alert with the same session ID; that
+  session retains its enforce allow decision without a firewall abort or drop.
+- The flows API remains available. Settled holdback packet, byte and
+  oldest-pending gauges are zero in diagnostics and metrics; all abort totals
+  match between the two, with nonzero deny and queue-closure counts.
+
+Inventory snapshots, diagnostics, metrics, anomaly events and alerts are
+saved beside `results.json`.
 
 Two assertions use extra tooling. The stale-retransmit case (`malformer
 -scenario stale-retransmit`) opens a raw-socket TCP session (ports 40405 and
@@ -65,7 +85,8 @@ fail closed and report unhealthy.
 
 ## Endpoint points and state
 
-The RTU point map is in `testdata/README.md`. The policy allows only the
+The recorded capture point map is in `testdata/README.md`; the live endpoint
+also includes the monitoring points described below. The policy allows only the
 type 46 double command at CA 1 / IOA 2001. The RTU also actuates CA 1 /
 IOA 2002 and CA 2 / IOA 2001, so a forbidden command that gets through
 really changes the plant. The RTU writes `/state/rtu.json` after every
@@ -101,9 +122,27 @@ when its session closes or is reset it waits 1 s, reconnects, sends STARTDT
 and re-runs station GI. Every policy apply resets the enforce IEC sessions
 (on envelope changes or queue restarts), so the harness checks that each
 recovery (close to GI termination) fits the 5 s budget, waits for the session
-to settle after the last apply, and only then watches freshness: more than
-10 minutes with an update in every 30 s window and no session drop. Its log
+to settle after the last apply, and only then watches freshness: 660 seconds
+by default, with an update in every 30 s window and no session drop. Its log
 lines carry `t=<epoch ms>`; the script copies it to `cc.log` in the results
 directory, next to `compose.log` and `results.json`. The script deletes only
 those two log files at start, so a caller's own console log in the same
 directory survives.
+
+## NFQUEUE kernel preflight
+
+`bash scripts/preflight-iec104.sh` tests deferred ACCEPT/DROP verdicts,
+multiple held packets, callback progress, verdicts in both directions,
+large TCP payloads, two-sided resets and reconnects, challenge-ACK observation,
+verdict stalls, queue stability, and fail-closed behavior with an unbound
+queue. It tests kernel and queue behavior, not the appliance policy.
+
+Run from the repository root with Docker Compose, `jq` and Python 3. The
+Linux Docker host must permit `NET_ADMIN` and `NET_RAW`; Docker Desktop
+provides a Linux VM. Building requires network access for the Go and Alpine
+dependencies. The harness creates a unique project and image with private
+subnets `10.250.0.0/24` and `10.251.0.0/24`, publishes no host ports, and
+refuses overlaps with existing Docker networks. Results, packet captures and
+diagnostics remain in `build/iec104-preflight/`. The exit trap removes the
+run's containers, networks, volumes and image. Run one preflight at a time:
+its result directory and subnet pair are fixed.

@@ -17,14 +17,15 @@ import (
 
 // IEC104 decision reasons (logs and metrics only).
 const (
-	reasonIECAccept    = "iec104"
-	reasonIECHold      = "iec104_hold"
-	reasonIECAbort     = "iec104_abort"
-	reasonIECTombstone = "iec104_tombstone"
-	reasonIECClosed    = "iec104_closed"
-	reasonIECFailClose = "iec104_fail_closed"
-	reasonIECInvalid   = "iec104_invalid"
-	reasonIECUntracked = "iec104_untracked"
+	reasonIECAccept         = "iec104"
+	reasonIECHold           = "iec104_hold"
+	reasonIECAbort          = "iec104_abort"
+	reasonIECTombstone      = "iec104_tombstone"
+	reasonIECClosed         = "iec104_closed"
+	reasonIECFailClose      = "iec104_fail_closed"
+	reasonIECInvalid        = "iec104_invalid"
+	reasonIECUntracked      = "iec104_untracked"
+	reasonIECEstablishedSYN = "iec104_established_syn"
 )
 
 // iecResult is the outcome of one IEC104 envelope packet. Its actions are
@@ -77,11 +78,13 @@ func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture
 	}
 	res, ok := t.packet(pkt, state)
 	if !ok {
+		t.finish(res.acts)
 		if envelopeMarked(pkt) {
 			// nft steered this packet as IEC104 envelope traffic, but the
 			// engine finds no envelope for it: fail closed rather than let
 			// it through uninspected.
 			e.recordPacketStats(pkt, state)
+			countIECAbort(abortFailClose)
 			t.health.fault(faultEnvelope, "nft steering and the engine envelope disagree")
 			return capture.Decision{Action: capture.Drop, Reason: reasonIECFailClose}, true
 		}
@@ -99,6 +102,7 @@ func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture
 func (t *iecTable) packet(pkt capture.Packet, state *flow.State) (iecResult, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.pressureOffline = false
 	if !t.hasIEC {
 		return iecResult{}, false
 	}
@@ -110,14 +114,20 @@ func (t *iecTable) packet(pkt capture.Packet, state *flow.State) (iecResult, boo
 	}
 	s, dir := t.lookupLocked(src, dst)
 	switch {
+	case synRST(pkt.TCP.Flags):
+		return t.synRSTLocked(s, src, dst)
 	case s == nil:
 		return t.newPacketLocked(pkt, src, dst, now)
 	case s.state == iecAborted:
 		return t.tombstonePacketLocked(s, dir, pkt, now)
 	case s.state == iecClosed:
 		return t.closedPacketLocked(s, dir, pkt, now)
+	case reopensLocked(s, dir, pkt):
+		return t.reopenLocked(s, dir, pkt, now)
 	default:
-		return t.livePacketLocked(s, dir, pkt, state, now), true
+		res := t.livePacketLocked(s, dir, pkt, state, now)
+		_, res.decision.Notify = t.inventoryTokens[pkt.Token]
+		return res, true
 	}
 }
 
@@ -136,7 +146,7 @@ func (t *iecTable) nonIPv4Locked(pkt capture.Packet) (iecResult, bool) {
 	if pkt.DstPort != iec104Port {
 		ctx.SrcIP, ctx.DstIP = pkt.DstIP, pkt.SrcIP
 	}
-	ctx.SrcZone, ctx.DstZone = resolveZonesForFlow(t.snap, ctx.SrcIP, ctx.DstIP)
+	ctx.SrcZone, ctx.DstZone = t.zones.resolve(t.snap, ctx.SrcIP, ctx.DstIP)
 	matched, mode := t.envelopeLocked(ctx)
 	if !matched || mode != "enforce" {
 		return iecResult{}, false
@@ -146,14 +156,54 @@ func (t *iecTable) nonIPv4Locked(pkt capture.Packet) (iecResult, bool) {
 
 func isSYN(f capture.TCPFlags) bool { return f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK == 0 }
 
+func synRST(f capture.TCPFlags) bool { return f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagRST != 0 }
+
+// synRSTLocked decides a segment carrying both SYN and RST, which is no
+// handshake segment: it never opens, establishes, refuses or closes an
+// incarnation, so a SYN-ACK with RST cannot establish one whose client it
+// resets. Every session of either mode drops it, as does an enforce
+// envelope; learn traffic of no session passes it untracked, like every
+// other learn packet not observed from its SYN.
+func (t *iecTable) synRSTLocked(s *iecSession, src, dst netip.AddrPort) (iecResult, bool) {
+	if s != nil {
+		return dropped(reasonIECInvalid), true
+	}
+	matched, mode := t.envelopeLocked(t.sessionCtx(orient(src, dst)))
+	if !matched {
+		return iecResult{}, false
+	}
+	if mode == "enforce" {
+		return dropped(reasonIECInvalid), true
+	}
+	return accepted(reasonIECAccept), true
+}
+
+// opens reports whether a client SYN may start a session or incarnation of
+// mode: in an enforce envelope only a SYN of a handshake that connection
+// tracking has not seen complete (handshakeMarked). One sent into an
+// established connection would let its sender choose where the session's
+// byte stream starts.
+func opens(mode string, pkt capture.Packet) bool {
+	return mode != "enforce" || handshakeMarked(pkt)
+}
+
 // newPacketLocked handles a packet of no known session: a SYN to 2404 opens
-// one; any other packet was not observed from its SYN.
+// one; any other packet was not observed from its SYN. An enforce SYN sent
+// into an established connection opens nothing and, without payload,
+// passes: the server answers it with a challenge ACK, a packet not
+// observed from its SYN, and that closes the connection.
 func (t *iecTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, now time.Time) (iecResult, bool) {
 	if isSYN(pkt.TCP.Flags) && dst.Port() == iec104Port {
 		ctx := t.sessionCtx(src, dst)
 		matched, mode := t.envelopeLocked(ctx)
 		if !matched {
 			return iecResult{}, false
+		}
+		if !opens(mode, pkt) {
+			if len(pkt.Payload) > 0 {
+				return dropped(reasonIECInvalid), true
+			}
+			return accepted(reasonIECEstablishedSYN), true
 		}
 		return t.openLocked(nil, src, dst, ctx, mode, pkt, now), true
 	}
@@ -176,6 +226,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 	// The bound counts tuple keys; a retained tuple reuses its existing key.
 	if prev == nil && len(t.sessions) >= iecMaxSessions {
 		if mode == "enforce" {
+			countIECAbort(abortBound)
 			return dropped(reasonIECFailClose)
 		}
 		// Learn is fail open when observation capacity is exhausted. Do not
@@ -189,6 +240,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 	}
 	if mode == "enforce" && !t.health.injectorReady() {
 		// No session can be reset: none may start.
+		countIECAbort(abortInjector)
 		return dropped(reasonIECFailClose)
 	}
 	n := &iecSession{id: t.newID(), client: client, server: server, ctx: ctx, mode: mode, lastSeen: now}
@@ -210,6 +262,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.EvalContext, pkt capture.Packet, fromClient bool, now time.Time) iecResult {
 	if len(t.sessions) >= iecMaxSessions {
 		// Unobserved enforce traffic must not bypass the shared table bound.
+		countIECAbort(abortBound)
 		return dropped(reasonIECFailClose)
 	}
 	s := &iecSession{id: t.newID(), client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}
@@ -219,25 +272,22 @@ func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.Eval
 		dir = iecDirClient
 	}
 	acts := t.abortLocked(s, abortMidstream, "", &heldPacket{tok: pkt.Token, dir: dir}, now)
-	// The receiver expects the packet's sequence number; the sender's
-	// receive point is the packet's ACK.
-	sender, receiver := dir, 1-dir
 	src, dst := client, server
 	if !fromClient {
 		src, dst = server, client
 	}
-	s.reset.targets[receiver] = resetTarget{valid: true}
-	s.reset.targets[receiver].r.Src, s.reset.targets[receiver].r.Dst, s.reset.targets[receiver].r.Seq = src, dst, pkt.TCP.Seq
-	if pkt.TCP.Flags&capture.TCPFlagACK != 0 {
-		s.reset.targets[sender] = resetTarget{valid: true}
-		s.reset.targets[sender].r.Src, s.reset.targets[sender].r.Dst, s.reset.targets[sender].r.Seq = dst, src, pkt.TCP.Ack
+	toReceiver, toSender, hasSender := observedResets(src, dst, pkt.TCP)
+	s.reset.targets[1-dir] = resetTarget{valid: true, r: toReceiver}
+	if hasSender {
+		s.reset.targets[dir] = resetTarget{valid: true, r: toSender}
 	}
 	return droppedWith(reasonIECAbort, acts)
 }
 
 // tombstonePacketLocked drops every packet of an aborted incarnation and
-// answers challenge ACKs. A SYN with a new ISN starts the next incarnation;
-// a retransmitted old SYN does not.
+// answers challenge ACKs. A SYN with a new ISN starts the next incarnation
+// (opens); a retransmitted old SYN does not. The server's SYN-ACK of the
+// next incarnation, or its RST refusing that SYN (refuses), passes.
 func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) (iecResult, bool) {
 	f := pkt.TCP.Flags
 	if dir == iecDirClient && isSYN(f) {
@@ -250,10 +300,19 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 		ctx := t.sessionCtx(s.client, s.server)
 		matched, mode := t.envelopeLocked(ctx)
 		if !matched {
-			t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
-			return iecResult{}, false
+			acts := t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
+			return iecResult{acts: acts}, false
+		}
+		if !opens(mode, pkt) {
+			return dropped(reasonIECTombstone), true
 		}
 		return t.openLocked(s, s.client, s.server, ctx, mode, pkt, now), true
+	}
+	if n := s.next; n != nil && f&capture.TCPFlagSYN == 0 && refuses(n, dir, pkt) {
+		// The server refused the next incarnation: the tombstone stays,
+		// and the client's next SYN opens another.
+		s.next = nil
+		return accepted(reasonIECClosed), true
 	}
 	if n := s.next; dir == iecDirSrv && f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK != 0 && n != nil &&
 		pkt.TCP.Ack == n.dirs[iecDirClient].isn+1 && len(pkt.Payload) == 0 {
@@ -269,16 +328,18 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 }
 
 // closedPacketLocked passes the payload-free tail of a closed session and
-// lets a new SYN open the next incarnation.
+// lets a new SYN open the next incarnation (opens).
 func (t *iecTable) closedPacketLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) (iecResult, bool) {
 	if dir == iecDirClient && isSYN(pkt.TCP.Flags) && pkt.TCP.Seq != s.dirs[iecDirClient].isn {
 		ctx := t.sessionCtx(s.client, s.server)
 		matched, mode := t.envelopeLocked(ctx)
 		if !matched {
-			t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
-			return iecResult{}, false
+			acts := t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
+			return iecResult{acts: acts}, false
 		}
-		return t.openLocked(s, s.client, s.server, ctx, mode, pkt, now), true
+		if opens(mode, pkt) {
+			return t.openLocked(s, s.client, s.server, ctx, mode, pkt, now), true
+		}
 	}
 	if len(pkt.Payload) > 0 && s.mode == "enforce" {
 		return dropped(reasonIECClosed), true
@@ -286,7 +347,36 @@ func (t *iecTable) closedPacketLocked(s *iecSession, dir int, pkt capture.Packet
 	return accepted(reasonIECClosed), true
 }
 
-// handshakeLocked follows the SYN and SYN-ACK of a live incarnation.
+// reopensLocked reports a client SYN that starts a new connection on the
+// tuple of an established incarnation: a new ISN, no payload, and the
+// handshake mark, so connection tracking no longer holds the old
+// connection.
+func reopensLocked(s *iecSession, dir int, pkt capture.Packet) bool {
+	return s.state == iecEstablished && dir == iecDirClient && isSYN(pkt.TCP.Flags) &&
+		pkt.TCP.Seq != s.dirs[iecDirClient].isn && len(pkt.Payload) == 0 && handshakeMarked(pkt)
+}
+
+// reopenLocked ends an established incarnation whose tuple a new
+// connection's SYN reopens. An enforce incarnation aborts: the SYN drops,
+// both endpoints are reset, and the client's retransmitted SYN opens the
+// next incarnation from the tombstone. A learn incarnation closes, and the
+// SYN opens the next one at once.
+func (t *iecTable) reopenLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) (iecResult, bool) {
+	if s.mode == "enforce" {
+		return droppedWith(reasonIECAbort, t.abortLocked(s, abortMidstream, "", &heldPacket{tok: pkt.Token, dir: dir}, now)), true
+	}
+	acts := t.closeLocked(s, now)
+	res, ok := t.closedPacketLocked(s, dir, pkt, now)
+	res.acts.merge(acts)
+	return res, ok
+}
+
+// handshakeLocked follows the SYN and SYN-ACK of a live incarnation. A
+// client SYN with a new ISN sent into an established incarnation, as a
+// client that lost its connection and reconnects from the same port
+// sends, passes and changes nothing: the server answers it with a
+// challenge ACK, and the RST the client sends in reply closes the
+// incarnation (rstLocked). A SYN with payload is dropped.
 func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) iecResult {
 	f, seq := pkt.TCP.Flags, pkt.TCP.Seq
 	if len(pkt.Payload) > 0 {
@@ -298,7 +388,10 @@ func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, n
 		if seq == c2s.isn {
 			return accepted(reasonIECAccept)
 		}
-		if s.dirs[iecDirSrv] == nil {
+		if s.dirs[iecDirSrv] != nil {
+			return accepted(reasonIECEstablishedSYN)
+		}
+		if opens(s.mode, pkt) {
 			s.dirs[iecDirClient] = newIECDir(seq) // the client retried with a new ISN
 			return accepted(reasonIECAccept)
 		}
@@ -323,8 +416,13 @@ func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, 
 		return t.handshakeLocked(s, dir, pkt, now)
 	}
 	if s.dirs[iecDirSrv] == nil {
+		if refuses(s, dir, pkt) {
+			res := accepted(reasonIECClosed)
+			res.acts.merge(t.closeLocked(s, now))
+			return res
+		}
 		if enforce {
-			return dropped(reasonIECInvalid) // nothing before the SYN-ACK
+			return dropped(reasonIECInvalid) // nothing else before the SYN-ACK
 		}
 		return accepted(reasonIECAccept)
 	}
@@ -345,6 +443,17 @@ func (t *iecTable) livePacketLocked(s *iecSession, dir int, pkt capture.Packet, 
 		t.finLocked(s, dir, pkt, &res)
 	}
 	return res
+}
+
+// refuses reports the server's RST that refuses the client's SYN of s, an
+// incarnation awaiting its SYN-ACK: no payload, and the ACK the client
+// accepts in SYN-SENT, one past its ISN (RFC 9293). It reaches the client,
+// which fails at once instead of retransmitting its SYN until it times out.
+// The client's kernel ignores any other RST.
+func refuses(s *iecSession, dir int, pkt capture.Packet) bool {
+	f := pkt.TCP.Flags
+	return dir == iecDirSrv && f&capture.TCPFlagRST != 0 && f&capture.TCPFlagACK != 0 &&
+		len(pkt.Payload) == 0 && pkt.TCP.Ack == s.dirs[iecDirClient].isn+1
 }
 
 // ackLocked releases history the receiver of direction dir acknowledged, up
@@ -369,19 +478,27 @@ func (t *iecTable) ackLocked(s *iecSession, dir int, ack uint32) {
 	d.frames = d.frames[i:]
 }
 
-// rstLocked handles an endpoint RST: a bare RST closes the session after
-// its pending data is dropped; a RST with data is dropped and aborts.
+// rstLocked handles an endpoint RST. A RST with data is dropped and aborts.
+// A bare RST passes, but closes the session, after its pending data is
+// dropped, only at the sequence number its receiver expects next: the end
+// of what was forwarded to it (RFC 5961). Its receiver ignores any other,
+// or answers it with a challenge ACK, which a closed sender answers with a
+// RST at that sequence number.
 func (t *iecTable) rstLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) iecResult {
 	if len(pkt.Payload) > 0 {
 		if s.mode == "enforce" {
 			return droppedWith(reasonIECAbort, t.abortLocked(s, abortTransport, "", t.current(s, dir, pkt, now), now))
 		}
-		t.closeLocked(s, now)
-		return accepted(reasonIECClosed)
+		res := accepted(reasonIECClosed)
+		res.acts.merge(t.closeLocked(s, now))
+		return res
+	}
+	if pkt.TCP.Seq != forwardedSeq(s.dirs[dir]) {
+		return accepted(reasonIECAccept)
 	}
 	res := accepted(reasonIECClosed)
 	res.decision.Resolved = t.dropHeldLocked(s, -1)
-	t.closeLocked(s, now)
+	res.acts.merge(t.closeLocked(s, now))
 	return res
 }
 
@@ -406,7 +523,7 @@ func (t *iecTable) finForwardedLocked(s *iecSession, dir int, res *iecResult) {
 	d.fin, d.finFwd = true, true
 	if s.dirs[1-dir].fin {
 		res.decision.Resolved = append(res.decision.Resolved, t.dropHeldLocked(s, -1)...)
-		t.closeLocked(s, t.now())
+		res.acts.merge(t.closeLocked(s, t.now()))
 	}
 }
 
@@ -429,9 +546,12 @@ func (t *iecTable) dropHeldLocked(s *iecSession, dir int) []capture.Resolution {
 	return out
 }
 
-func (t *iecTable) closeLocked(s *iecSession, now time.Time) {
+func (t *iecTable) closeLocked(s *iecSession, now time.Time) iecActions {
+	acts := t.endInventoryLocked(s)
+	s.apci = nil
 	s.state, s.endedAt = iecClosed, now
 	t.dpi.EndStream(s.id)
+	return acts
 }
 
 func (t *iecTable) current(s *iecSession, dir int, pkt capture.Packet, now time.Time) *heldPacket {
@@ -456,7 +576,11 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 		if cur.off < 0 {
 			return droppedWith(reasonIECAbort, t.abortLocked(s, abortStream, "", cur, now))
 		}
-		return dropped(reasonIECInvalid)
+		// A below-floor retransmission is not parseable, but still carries
+		// bytes of any command awaiting its original verdict completion.
+		res := dropped(reasonIECInvalid)
+		t.inventoryPacketLocked(s, cur, &res.acts)
+		return res
 	}
 	start, fresh, err := d.bytes.Add(cur.off, pkt.Payload)
 	if err != nil {
@@ -472,6 +596,7 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 	}
 	d.seq.Advance(d.bytes.Next())
 	var res iecResult
+	t.inventoryPacketLocked(s, cur, &res.acts)
 	if len(fresh) > 0 && !s.stopParse {
 		denied, trigger, failed := t.inspectLocked(s, dir, pkt, state, start, fresh, &res, now)
 		if enforce && (denied || failed) {
@@ -481,7 +606,8 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 			}
 			r := droppedWith(reasonIECAbort, t.abortLocked(s, reason, trigger, cur, now))
 			r.inspect = res.inspect
-			r.acts.events = append(res.acts.events, r.acts.events...)
+			res.acts.merge(r.acts)
+			r.acts = res.acts
 			return r
 		}
 	}
@@ -512,6 +638,8 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 	}
 	var judged []dpi.Event
 	for _, f := range ir.Frames {
+		s.observeAPCILocked(dir, f, &res.acts, now)
+		t.observeInventoryLocked(s, dir, f, t.current(s, dir, pkt, now), &res.acts, now)
 		d.frames = append(d.frames, iecFrame{start: f.Start, end: f.End})
 		d.framedEnd = f.End
 		judged = append(judged, f.Events...)
@@ -531,6 +659,7 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 }
 
 func (t *iecTable) stopParseLocked(s *iecSession) {
+	s.apci = nil
 	if !s.stopParse {
 		s.stopParse = true
 		t.dpi.EndStream(s.id)
@@ -573,7 +702,8 @@ func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur
 		r := droppedWith(reasonIECAbort, t.abortLocked(s, abortBound, "", cur, now))
 		r.decision.Resolved = append(res.decision.Resolved, r.decision.Resolved...)
 		r.inspect = res.inspect
-		r.acts.events = append(res.acts.events, r.acts.events...)
+		res.acts.merge(r.acts)
+		r.acts = res.acts
 		return r
 	}
 	s.held = append(s.held, cur)

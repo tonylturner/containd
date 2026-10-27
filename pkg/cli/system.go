@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -13,6 +14,15 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
+
+const savedListenerNotice = "Listener settings: saved configuration (not environment overrides or live socket state)."
+
+// savedListeners resolves the listeners cfg saves, defaults included. An API
+// client does not see the management process's environment, so environment
+// overrides are not applied.
+func savedListeners(cfg *config.Config) config.ManagementListeners {
+	return config.ResolveManagementListeners(cfg, func(string) string { return "" })
+}
 
 func showRunningConfig(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
@@ -63,56 +73,65 @@ func showSystem(api *API) Command {
 			Time      string `json:"time,omitempty"`
 		}
 		var h health
-		_ = api.getJSON(ctx, "/api/v1/health", &h)
+		healthErr := api.getJSON(ctx, "/api/v1/health", &h)
 
 		var cfg config.Config
-		_ = api.getJSON(ctx, "/api/v1/config", &cfg)
+		configErr := api.getJSON(ctx, "/api/v1/config", &cfg)
 
-		fmt.Fprintf(out, "hostname: %s\n", cfg.System.Hostname)
-		mgmtHTTP := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
-		mgmtHTTPS := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
-		fmt.Fprintf(out, "mgmt.http_enabled: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTP, true)))
-		fmt.Fprintf(out, "mgmt.https_enabled: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTPS, true)))
-		fmt.Fprintf(out, "mgmt.http_listen: %s\n", mgmtHTTP)
-		fmt.Fprintf(out, "mgmt.https_listen: %s\n", mgmtHTTPS)
-		fmt.Fprintf(out, "mgmt.redirect_http_to_https: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.RedirectHTTPToHTTPS, false)))
-		fmt.Fprintf(out, "mgmt.hsts: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, false)))
-		if cfg.System.Mgmt.HSTSMaxAgeSeconds > 0 {
-			fmt.Fprintf(out, "mgmt.hsts_max_age_seconds: %d\n", cfg.System.Mgmt.HSTSMaxAgeSeconds)
+		if out == nil {
+			return errors.Join(healthErr, configErr)
 		}
-		if cfg.System.Mgmt.TLSCertFile != "" {
-			fmt.Fprintf(out, "mgmt.tls_cert_file: %s\n", cfg.System.Mgmt.TLSCertFile)
+		if configErr != nil {
+			configErr = monitoringUnavailable(out, "System configuration", configErr)
+		} else {
+			fmt.Fprintf(out, "hostname: %s\n", cfg.System.Hostname)
+			fmt.Fprintln(out, savedListenerNotice)
+			listeners := savedListeners(&cfg)
+			fmt.Fprintf(out, "mgmt.http_enabled: %s\n", yesNoStr(listeners.HTTP.Enabled))
+			fmt.Fprintf(out, "mgmt.https_enabled: %s\n", yesNoStr(listeners.HTTPS.Enabled))
+			fmt.Fprintf(out, "mgmt.http_listen: %s\n", listeners.HTTP.Addr)
+			fmt.Fprintf(out, "mgmt.https_listen: %s\n", listeners.HTTPS.Addr)
+			fmt.Fprintf(out, "mgmt.redirect_http_to_https: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.RedirectHTTPToHTTPS, false)))
+			fmt.Fprintf(out, "mgmt.hsts: %s\n", yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, true)))
+			if cfg.System.Mgmt.HSTSMaxAgeSeconds > 0 {
+				fmt.Fprintf(out, "mgmt.hsts_max_age_seconds: %d\n", cfg.System.Mgmt.HSTSMaxAgeSeconds)
+			}
+			if cfg.System.Mgmt.TLSCertFile != "" {
+				fmt.Fprintf(out, "mgmt.tls_cert_file: %s\n", cfg.System.Mgmt.TLSCertFile)
+			}
+			if cfg.System.Mgmt.TLSKeyFile != "" {
+				fmt.Fprintf(out, "mgmt.tls_key_file: %s\n", cfg.System.Mgmt.TLSKeyFile)
+			}
+			if cfg.System.Mgmt.TrustedCAFile != "" {
+				fmt.Fprintf(out, "mgmt.trusted_ca_file: %s\n", cfg.System.Mgmt.TrustedCAFile)
+			}
+			fmt.Fprintf(out, "ssh.listen: %s\n", listeners.SSH.Addr)
+			if cfg.System.SSH.AuthorizedKeysDir != "" {
+				fmt.Fprintf(out, "ssh.authorized_keys_dir: %s\n", cfg.System.SSH.AuthorizedKeysDir)
+			}
+			fmt.Fprintf(out, "ssh.allow_password: %s\n", sshPasswordSetting(cfg.System.SSH.AllowPassword))
+			shellMode := cfg.System.SSH.ShellMode
+			if shellMode == "" {
+				shellMode = "appliance"
+			}
+			fmt.Fprintf(out, "ssh.shell_mode: %s\n", shellMode)
 		}
-		if cfg.System.Mgmt.TLSKeyFile != "" {
-			fmt.Fprintf(out, "mgmt.tls_key_file: %s\n", cfg.System.Mgmt.TLSKeyFile)
-		}
-		if cfg.System.Mgmt.TrustedCAFile != "" {
-			fmt.Fprintf(out, "mgmt.trusted_ca_file: %s\n", cfg.System.Mgmt.TrustedCAFile)
-		}
-		if cfg.System.SSH.ListenAddr != "" {
-			fmt.Fprintf(out, "ssh.listen: %s\n", cfg.System.SSH.ListenAddr)
-		}
-		if cfg.System.SSH.AuthorizedKeysDir != "" {
-			fmt.Fprintf(out, "ssh.authorized_keys_dir: %s\n", cfg.System.SSH.AuthorizedKeysDir)
-		}
-		fmt.Fprintf(out, "ssh.allow_password: %s\n", yesNoStr(cfg.System.SSH.AllowPassword))
-		shellMode := cfg.System.SSH.ShellMode
-		if shellMode == "" {
-			shellMode = "appliance"
-		}
-		fmt.Fprintf(out, "ssh.shell_mode: %s\n", shellMode)
-		fmt.Fprintf(out, "component: %s\n", h.Component)
-		if h.Build != "" {
-			fmt.Fprintf(out, "build: %s\n", h.Build)
-		}
-		if h.Time != "" {
-			if t, err := time.Parse(time.RFC3339Nano, h.Time); err == nil {
-				fmt.Fprintf(out, "time: %s\n", t.UTC().Format(time.RFC3339Nano))
-			} else {
-				fmt.Fprintf(out, "time: %s\n", h.Time)
+		if healthErr != nil {
+			healthErr = monitoringUnavailable(out, "System health", healthErr)
+		} else {
+			fmt.Fprintf(out, "component: %s\n", h.Component)
+			if h.Build != "" {
+				fmt.Fprintf(out, "build: %s\n", h.Build)
+			}
+			if h.Time != "" {
+				if t, err := time.Parse(time.RFC3339Nano, h.Time); err == nil {
+					fmt.Fprintf(out, "time: %s\n", t.UTC().Format(time.RFC3339Nano))
+				} else {
+					fmt.Fprintf(out, "time: %s\n", h.Time)
+				}
 			}
 		}
-		return nil
+		return errors.Join(healthErr, configErr)
 	}
 }
 
@@ -120,27 +139,27 @@ func showMgmtListeners(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var cfg config.Config
 		if err := api.getJSON(ctx, "/api/v1/config", &cfg); err != nil {
-			return err
+			return monitoringUnavailable(out, "Management listener configuration", err)
 		}
 		if out == nil {
 			return nil
 		}
 
-		mgmtHTTP := firstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr, ":8080")
-		mgmtHTTPS := firstNonEmpty(cfg.System.Mgmt.HTTPSListenAddr, ":8443")
+		fmt.Fprintln(out, savedListenerNotice)
+		listeners := savedListeners(&cfg)
 		kvTable(out, map[string]string{
-			"http_enabled":            yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTP, true)),
-			"https_enabled":           yesNoStr(boolDefault(cfg.System.Mgmt.EnableHTTPS, true)),
-			"http_listen":             mgmtHTTP,
-			"https_listen":            mgmtHTTPS,
+			"http_enabled":            yesNoStr(listeners.HTTP.Enabled),
+			"https_enabled":           yesNoStr(listeners.HTTPS.Enabled),
+			"http_listen":             listeners.HTTP.Addr,
+			"https_listen":            listeners.HTTPS.Addr,
 			"redirect_http_to_https":  yesNoStr(boolDefault(cfg.System.Mgmt.RedirectHTTPToHTTPS, false)),
-			"hsts":                    yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, false)),
+			"hsts":                    yesNoStr(boolDefault(cfg.System.Mgmt.EnableHSTS, true)),
 			"hsts_max_age_seconds":    fmt.Sprintf("%d", max(0, cfg.System.Mgmt.HSTSMaxAgeSeconds)),
 			"tls_cert_file":           firstNonEmpty(cfg.System.Mgmt.TLSCertFile, "—"),
 			"tls_key_file":            firstNonEmpty(cfg.System.Mgmt.TLSKeyFile, "—"),
 			"trusted_ca_file":         firstNonEmpty(cfg.System.Mgmt.TrustedCAFile, "—"),
-			"ssh_listen":              firstNonEmpty(cfg.System.SSH.ListenAddr, ":2222"),
-			"ssh_allow_password":      yesNoStr(cfg.System.SSH.AllowPassword),
+			"ssh_listen":              listeners.SSH.Addr,
+			"ssh_allow_password":      sshPasswordSetting(cfg.System.SSH.AllowPassword),
 			"ssh_authorized_keys_dir": firstNonEmpty(cfg.System.SSH.AuthorizedKeysDir, "—"),
 		})
 
@@ -338,7 +357,7 @@ func setSystemSSHAllowPasswordAPI(api *API) Command {
 		if err != nil {
 			return err
 		}
-		cfg.System.SSH.AllowPassword = enabled
+		cfg.System.SSH.AllowPassword = &enabled
 		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
 	}
 }
@@ -377,7 +396,7 @@ func setSystemSSHHostKeyRotationAPI(api *API) Command {
 			return fmt.Errorf("usage: set system ssh host-key-rotation <days>")
 		}
 		days, err := strconv.Atoi(strings.TrimSpace(args[0]))
-		if err != nil || days < 0 {
+		if err != nil || days < 0 || days > config.MaxSSHHostKeyRotationDays {
 			return fmt.Errorf("invalid rotation days: %s", args[0])
 		}
 		cfg, err := loadCandidateOrRunning(ctx, api)
@@ -465,4 +484,11 @@ func boolDefault(v *bool, def bool) bool {
 		return def
 	}
 	return *v
+}
+
+func sshPasswordSetting(v *bool) string {
+	if v == nil {
+		return "auto (bootstrap/lab)"
+	}
+	return yesNoStr(*v)
 }

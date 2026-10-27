@@ -2,11 +2,16 @@
 
 import { useState } from "react";
 
-import type { FirewallRule, ICSPredicate } from "../../lib/api";
-import { InfoTip } from "../../components/InfoTip";
-import { RulePreviewButton } from "../../components/RulePreview";
 import {
-  buildICSRulePreview,
+  api,
+  type FirewallRule,
+  type ICSPredicate,
+  type ICSPredicatePatch,
+  type RulePreview,
+} from "../../lib/api";
+import { InfoTip } from "../../components/InfoTip";
+import { RuleImpactSummary } from "../firewall/firewall-rule-warnings";
+import {
   buildICSRuleUpdate,
   type ICSMode,
   type ICSModeSelection,
@@ -15,7 +20,6 @@ import {
   protoMeta,
 } from "./ics-shared";
 import {
-  buildIEC104RulePreview,
   buildIEC104RuleICS,
   iec104DraftFrom,
 } from "./iec104";
@@ -30,7 +34,8 @@ export function EditICSModal({
   rule: FirewallRule;
   globalMode?: ICSMode;
   onClose: () => void;
-  onSave: (ics: ICSPredicate | undefined) => void;
+  /** The predicate to stage; undefined removes it. */
+  onSave: (ics: ICSPredicatePatch | undefined) => void;
 }) {
   const [enabled, setEnabled] = useState(!!rule.ics?.protocol);
   const [protocol, setProtocol] = useState(rule.ics?.protocol ?? "modbus");
@@ -49,29 +54,23 @@ export function EditICSModal({
   const [mode, setMode] = useState<ICSModeSelection>(rule.ics?.mode ?? "");
   const [iec, setIec] = useState(() => iec104DraftFrom(rule.ics));
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<RulePreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   const meta = protoMeta(protocol);
   const isIEC104 = protocol === "iec104";
-  const iecBuild = isIEC104
-    ? buildIEC104RuleICS(iec, mode, rule.action, rule.ics, globalMode)
-    : null;
 
-  function save() {
-    setError(null);
-    if (!enabled) {
-      onSave(undefined);
-      return;
+  // The predicate Save would stage; preview checks the same one.
+  function buildICS():
+    | { ok: true; ics: ICSPredicate | undefined }
+    | { ok: false; error: string } {
+    if (!enabled) return { ok: true, ics: undefined };
+    if (isIEC104) {
+      return buildIEC104RuleICS(iec, mode, rule.action, rule.ics, globalMode);
     }
-    if (iecBuild) {
-      if (!iecBuild.ok) {
-        setError(iecBuild.error);
-        return;
-      }
-      onSave(iecBuild.ics);
-      return;
-    }
-    onSave(
-      buildICSRuleUpdate(
+    return {
+      ok: true,
+      ics: buildICSRuleUpdate(
         protocol,
         functionCodes,
         addresses,
@@ -81,20 +80,51 @@ export function EditICSModal({
         writeOnly,
         mode,
       ),
-    );
+    };
+  }
+
+  function save() {
+    setError(null);
+    const built = buildICS();
+    if (!built.ok) {
+      setError(built.error);
+      return;
+    }
+    // Rule updates merge, so inheriting clears a stored mode with an empty one.
+    onSave(built.ics && mode === "" && rule.ics?.mode ? { ...built.ics, mode: "" } : built.ics);
+  }
+
+  // Previews the whole rule with the edited predicate, so the zones, sources,
+  // identities and schedule this modal does not edit still apply.
+  async function previewImpact() {
+    setError(null);
+    const built = buildICS();
+    if (!built.ok) {
+      setError(built.error);
+      return;
+    }
+    setPreviewing(true);
+    const res = await api.previewFirewallRule({ ...rule, ics: built.ics });
+    setPreviewing(false);
+    if (!res.ok) {
+      setPreview(null);
+      setError(`Impact preview failed: ${res.error}`);
+      return;
+    }
+    setPreview(res.data);
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
-      <div className="w-full max-w-xl rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-5 shadow-card-lg animate-fade-in">
+      <div className="w-full max-w-xl rounded-xs border bg-(--surface) p-5 shadow-card-lg animate-fade-in">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-[var(--text)]">
+          <h2 className="text-lg font-semibold text-(--text)">
             ICS filter &mdash; rule{" "}
-            <span className="font-mono text-[var(--amber)]">{rule.id}</span>
+            <span className="font-mono text-(--amber)">{rule.id}</span>
           </h2>
           <button
             onClick={onClose}
-            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
           >
             Close
           </button>
@@ -106,14 +136,14 @@ export function EditICSModal({
               type="checkbox"
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
-              className="h-4 w-4 rounded border-white/20 bg-[var(--surface)]"
+              className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)"
             />
             Enable ICS protocol filter
           </label>
 
           <div className="grid gap-3 md:grid-cols-2">
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                 Protocol
                 <InfoTip label="Select the ICS/OT protocol for this rule." />
               </label>
@@ -131,21 +161,20 @@ export function EditICSModal({
               </select>
             </div>
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                 Safety mode
                 <InfoTip label="Safe learning only alerts; enforce will block on match." />
               </label>
               <select
+                aria-label="Safety mode"
                 value={mode}
                 onChange={(e) => setMode(e.target.value as ICSModeSelection)}
                 disabled={!enabled}
                 className="mt-1 w-full input-industrial disabled:opacity-60"
               >
-                {!rule.ics?.mode && (
-                  <option value="">
-                    Inherit ({globalMode === "enforce" ? "enforce" : "learning"})
-                  </option>
-                )}
+                <option value="">
+                  Inherit global ({globalMode === "enforce" ? "enforce" : "learning"})
+                </option>
                 <option value="learn">Safe learning (alert-only)</option>
                 <option value="enforce">Enforce (block)</option>
               </select>
@@ -157,7 +186,7 @@ export function EditICSModal({
           ) : (
             <>
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                 {meta.fcLabel}
                 <InfoTip label={meta.fcHelp} />
               </label>
@@ -171,7 +200,7 @@ export function EditICSModal({
             </div>
 
             <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                 {meta.addrLabel}
                 <InfoTip label={meta.addrHelp} />
               </label>
@@ -186,7 +215,7 @@ export function EditICSModal({
 
             {protocol === "modbus" && (
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                   Unit ID
                   <InfoTip label="Modbus unit identifier (slave address). 0-255. Leave empty for all." />
                 </label>
@@ -202,7 +231,7 @@ export function EditICSModal({
 
             {protocol === "cip" && (
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text)]">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
                   Object Classes
                   <InfoTip label="CIP object class IDs (comma-separated, hex with 0x prefix or decimal). Leave empty for all." />
                 </label>
@@ -226,7 +255,7 @@ export function EditICSModal({
                     if (e.target.checked) setWriteOnly(false);
                   }}
                   disabled={!enabled}
-                  className="h-4 w-4 rounded border-white/20 bg-[var(--surface)] disabled:opacity-60"
+                  className="h-4 w-4 rounded-sm border-white/20 bg-(--surface) disabled:opacity-60"
                 />
                 Read-only
                 <InfoTip label="Only match read operations. Mutually exclusive with write-only." />
@@ -240,7 +269,7 @@ export function EditICSModal({
                     if (e.target.checked) setReadOnly(false);
                   }}
                   disabled={!enabled}
-                  className="h-4 w-4 rounded border-white/20 bg-[var(--surface)] disabled:opacity-60"
+                  className="h-4 w-4 rounded-sm border-white/20 bg-(--surface) disabled:opacity-60"
                 />
                 Write-only
                 <InfoTip label="Only match write/control operations. Mutually exclusive with read-only." />
@@ -249,8 +278,8 @@ export function EditICSModal({
             </>
           )}
 
-          <div className="rounded-sm border border-amber-500/[0.1] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
-            <strong className="text-[var(--text)]">{meta.label}</strong> &mdash;
+          <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text-muted)">
+            <strong className="text-(--text)">{meta.label}</strong> &mdash;
             port {meta.port}.{" "}
             {protocol === "modbus" &&
               "Common: 3=Read Holding Regs, 4=Read Input Regs, 5=Write Single Coil, 6=Write Single Reg, 15=Write Multiple Coils, 16=Write Multiple Regs."}
@@ -272,32 +301,24 @@ export function EditICSModal({
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>
 
+        {preview && <RuleImpactSummary preview={preview} />}
         <div className="mt-5 flex items-center justify-end gap-2">
-          <RulePreviewButton
-            rule={
-              isIEC104
-                ? buildIEC104RulePreview(rule, enabled, iec, mode, globalMode)
-                : buildICSRulePreview(
-                    rule,
-                    enabled,
-                    protocol,
-                    functionCodes,
-                    addresses,
-                    readOnly,
-                    writeOnly,
-                    mode,
-                  )
-            }
-          />
+          <button
+            onClick={previewImpact}
+            disabled={previewing}
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
+          >
+            {previewing ? "Previewing..." : "Preview impact"}
+          </button>
           <button
             onClick={onClose}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Cancel
           </button>
           <button
             onClick={save}
-            className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
           >
             Save filter
           </button>

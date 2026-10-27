@@ -149,7 +149,7 @@ func (c *HTTPClient) ListInventory(ctx context.Context) ([]inventory.DiscoveredA
 		return nil, err
 	}
 	if out == nil {
-		return []inventory.DiscoveredAsset{}, nil
+		return nil, fmt.Errorf("invalid engine inventory list")
 	}
 	return out, nil
 }
@@ -195,7 +195,26 @@ func (c *HTTPClient) ClearInventory(ctx context.Context) error {
 	return nil
 }
 
-func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error) {
+// ClearBlocks removes every temporary block and connection revocation the
+// engine holds. It succeeds without change when enforcement is disabled.
+func (c *HTTPClient) ClearBlocks(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/blocks/clear", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return engineStatusError(resp, "engine blocks clear status")
+	}
+	return nil
+}
+
+// ListConntrack lists kernel connections with their TAG labels.
+func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]dpengine.TaggedConnection, error) {
 	u := c.BaseURL + "/internal/conntrack"
 	if limit > 0 {
 		u += "?limit=" + url.QueryEscape(fmt.Sprintf("%d", limit))
@@ -210,16 +229,16 @@ func (c *HTTPClient) ListConntrack(ctx context.Context, limit int) ([]conntrack.
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("engine conntrack status %d", resp.StatusCode)
+		return nil, engineStatusError(resp, "engine conntrack status")
 	}
 	var out struct {
-		Entries []conntrack.Entry `json:"entries"`
+		Entries []dpengine.TaggedConnection `json:"entries"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
 	if out.Entries == nil {
-		return []conntrack.Entry{}, nil
+		return nil, fmt.Errorf("engine conntrack snapshot missing entries")
 	}
 	return out.Entries, nil
 }
@@ -247,26 +266,32 @@ func (c *HTTPClient) ListDHCPLeases(ctx context.Context) ([]dhcpd.Lease, error) 
 	return out.Leases, nil
 }
 
-func (c *HTTPClient) DeleteConntrack(ctx context.Context, req conntrack.DeleteRequest) error {
+func (c *HTTPClient) DeleteConntrack(ctx context.Context, req conntrack.KillRequest) (conntrack.KillResult, error) {
+	var result conntrack.KillResult
 	body, err := json.Marshal(req)
 	if err != nil {
-		return err
+		return result, err
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/conntrack", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return result, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := c.Client.Do(httpReq)
 	if err != nil {
-		return err
+		return result, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("engine conntrack delete status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return result, engineStatusError(resp, "engine conntrack kill status")
 	}
-	return nil
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return result, err
+	}
+	if (result.Scope != "connection" && result.Scope != "client-service") || result.Matched < 1 || result.Deleted < 0 || result.Deleted > result.Matched || result.ConntrackDeleted != (result.Deleted == result.Matched) || (!result.RevocationInstalled && result.RevocationError == "") || result.Closure == "" || (result.RevocationInstalled && result.BlockedUntil == nil) {
+		return result, fmt.Errorf("engine conntrack kill response missing or invalid step details")
+	}
+	return result, nil
 }
 
 // ListFlows fetches recent flow summaries derived from events.

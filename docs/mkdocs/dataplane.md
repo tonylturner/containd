@@ -1,38 +1,105 @@
 # Data Plane Overview
 
-## Components
-- Capture manager (`pkg/dp/capture`): AF_PACKET capture worker (Linux) with interface validation.
-- Engine harness (`pkg/dp/engine`): starts capture, hot-swaps immutable rule snapshots, runs native IDS over DPI events, manages NFQUEUE selective DPI steering, per-flow verdict caching, ICS asset auto-discovery, anomaly detection, signature matching, learn mode, and protocol statistics.
-- Rule snapshots (`pkg/dp/rules`): immutable bundles with firewall entries, IDS rules, and default action; evaluator supports allow/deny matching on zones, CIDRs, protocol/port with ranges; ICS, identity, and schedule predicates are evaluated when present.
-- Flow tracking (`pkg/dp/flow`): flow key/state scaffolding with timeouts, hashing (strings.Builder optimized), and sweep outside mutex.
-- TCP reassembly (`pkg/dp/reassembly`): out-of-order segment handling with pre-allocated buffers.
-- Verdict cache (`pkg/dp/engine`): per-flow DPI verdict cache (TOCTOU-safe) to avoid redundant inspection of already-classified flows.
-- Kernel programming (Linux):
-  - Interface addressing + default routes applied via netlink (`pkg/dp/netcfg`).
-  - Static routes + basic policy routing rules (PBR) applied via netlink (`routing` config).
-  - nftables rules compiled/applied for zone firewall, NAT masquerade, and basic DNAT/port-forwards.
-  - Ownership loop in `containd engine` re-applies interface + routing intent periodically and on netlink change events (non-destructive by default; replace semantics are admin-triggered only).
+The Linux engine applies immutable policy snapshots and processes traffic on the
+interfaces and paths assigned to the appliance. Traffic taking another route is
+outside its control.
 
-## Pipeline
-1) Kernel enforcement via nftables/conntrack for fast path; userspace compiles/installs rules.
-2) Selective capture (NFQUEUE/AF_PACKET) for DPI/IDS flows.
-3) Flow tracker (5-tuple + direction, timestamps, state) for enrichment and IDS.
-4) Rule evaluation against immutable snapshot; actions: allow/drop/reset, tag, rate-limit; IPS verdicts update nftables sets and conntrack.
-5) DPI decoders (15 protocols via `DefaultDecoders()`, filtered by per-protocol enable/disable settings):
-   - ICS: Modbus, DNP3, CIP/EtherNet/IP (with full EPATH and MSP sub-service parsing), S7comm, IEC 61850 MMS, BACnet, OPC UA.
-   - IT: DNS (with compression pointer support), TLS (SNI/JA3), HTTP, SSH, SMB, NTP, SNMP, RDP.
-   - TCP reassembly with out-of-order handling feeds protocol parsers.
-   - Protocol-specific parsers emit `dpi.Event` structs.
-   - Same decoder set is shared between live engine and offline PCAP analysis.
-   - DPI operates in **learn** mode (passive observation) or **enforce** mode (active policy enforcement). See [ICS DPI](ics-dpi.md#dpi-modes).
-6) IDS/IPS engine consuming DPI events and flow context for signatures/behavioral rules.
-7) ICS asset auto-discovery builds inventory from observed traffic.
-8) Anomaly detection identifies malformed frames, protocol violations, and rate anomalies.
-9) Signature engine matches against 16 built-in ICS malware signatures.
-10) Learn mode records traffic profiles and generates allowlist rules.
-11) Protocol statistics and top talkers are tracked per flow.
+## Packet pipeline
 
-## Rule model
-- Source/dest zones, CIDRs, protocol+port (ranges). Default action fallback.
-- Snapshot swapping is atomic (pointer swap in engine).
+1. nftables and conntrack handle zone firewalling, NAT masquerade, and DNAT port
+   forwarding. The engine also applies interface addresses, routes, and basic
+   policy routing through netlink.
+2. NFQUEUE steers selected packets to inline DPI. AF_PACKET capture observes
+   copies instead; it cannot hold or retract the observed packet.
+3. Flow tracking and TCP reassembly supply connection context to protocol
+   decoders. Generic DPI uses a per-flow verdict cache. IEC 104 uses a separate
+   stateful inspection envelope and session gate rather than relying on that
+   generic cache.
+4. Firewall rules evaluate to `ALLOW` or `DENY`. Generic enforced DPI denials can
+   install temporary flow blocks. IEC 104 can drop the held packet and abort/reset
+   a session. A native IDS alert alone is not a packet drop.
+5. Decoded events feed bounded telemetry, anomaly and signature checks, and
+   protocol statistics. Asset discovery and automatic rule learning consume
+   non-IEC-104 ICS events only.
 
+## Protocol coverage
+
+`DefaultDecoders()` supplies **16 protocol decoders: 8 ICS + 8 IT**, shared with
+PCAP analysis:
+
+- ICS: Modbus, DNP3, IEC 60870-5-104, CIP/EtherNet/IP, S7comm, IEC 61850 MMS,
+  BACnet, and OPC UA.
+- IT: DNS, TLS, HTTP, SSH, SMB, NTP, SNMP, and RDP.
+- ICS marker and port detector are additional utility registrations, not protocols.
+
+Protocol toggles select decoders; they do not create matching firewall rules.
+See [ICS DPI](ics-dpi.md) for predicates, learn-mode limits, and IEC 104 behavior.
+
+## Policy and runtime state
+
+Rules match zones, CIDRs, transport/port ranges, identity bindings, schedules
+and ICS predicates; see
+[Identity and schedule predicates](policy-model.md#identity-and-schedule-predicates).
+A packet is allowed when any matching ALLOW rule exists; otherwise a matching
+DENY or RESET applies; otherwise the default action applies. Rule order does
+not decide. IEC 104 object evaluation instead defaults to deny inside its
+inspection envelope. Snapshot swaps are atomic.
+
+The [ruleset preview](policy-model.md#templates-and-preview) uses the same
+compiler construction as apply on an isolated candidate. Its runtime sample
+describes the IEC 104 queue-ownership decision, not a promise about later queue
+ownership or the last installed ruleset. Preview never binds queues or changes
+live enforcement.
+With enforcement disabled in the candidate, preview skips nftables compilation
+and reports that nothing would be applied.
+
+For enablement, privileges, capture modes, and failure limits, see
+[Enforcement](dataplane-enforcement.md). For staging and commit semantics, see
+[Policy Model](policy-model.md).
+
+## Routing ownership and upgrades
+
+Every routing apply, including commit, rollback, restart replay, periodic
+reconciliation, and explicit reconcile, converges the IPv4 routes and policy
+rules marked with protocol **98**. Reserve that protocol for containd in its
+network namespace. Priorities are ordering, not ownership: rules at any accepted
+priority are removed when absent from running config, while foreign rules even
+at priorities 10000–19999 remain. Empty routing intent clears all marked entries.
+Unchanged entries are retained without deleting and re-adding them.
+
+An existing foreign route with the same table, destination, TOS, metric and
+next hop satisfies intent without being adopted; an explicitly configured
+output interface must also match. Identical foreign policy rules likewise
+satisfy intent without being adopted or duplicated. Removing such intent leaves
+those entries unchanged. This includes a Docker-created default route that
+already matches the outbound quickstart configuration.
+
+If a simple foreign unicast route has the same table, destination, TOS and metric
+but a different next hop, containd saves its complete payload before replacing
+it with a protocol-98 route. Removing that route from intent restores the original
+foreign route, including its protocol, scope, preferred source and route metrics.
+Unsupported or ambiguous collisions (for example multipath or blackhole routes)
+fail with route details rather than replacing entries that cannot be represented
+by static-route intent. Unrelated Docker and reserved management entries remain
+untouched. A failed commit uses the existing running-config recovery path.
+
+The displaced-route journal is `/data/routing-displaced.json` in the engine data
+directory. `CONTAIND_ROUTING_STATE_PATH` overrides its location. Keep that path
+writable and persistent; failure to save the journal prevents replacement. The
+journal is scoped to the current kernel boot and network namespace, so it
+survives an engine process restart in that namespace but is not replayed into a
+new container namespace. Run only one engine per namespace, and use a separate
+journal path for each namespace. Do not delete the journal while routes are
+displaced. If an external actor installs a conflicting route before restoration,
+reconcile reports a conflict and retains the journal instead of overwriting it.
+
+Earlier versions already marked static routes with protocol 98, so those routes
+converge automatically on upgrade. Earlier policy rules have no reliable
+ownership marker. They are deliberately **not** deleted by priority range,
+including during explicit reconcile: doing so could remove another application's
+rules. Before the first upgraded apply, inspect `ip -4 -details rule show` in the
+appliance namespace against the old running configuration and remove only the
+individually verified old containd rules (with their exact priority, table and
+source/destination selectors). Do not flush the 10000–19999 range. Restarting the
+container with a fresh network namespace also discards legacy rules; preserve
+Docker and management networking through the normal deployment configuration.

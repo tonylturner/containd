@@ -4,6 +4,7 @@
 package enforce
 
 import (
+	"context"
 	"net"
 	"strings"
 	"testing"
@@ -21,15 +22,15 @@ func TestCompileFirewallBasic(t *testing.T) {
 			{ID: "20", Action: rules.ActionDeny, Sources: []string{"10.0.0.0/8"}},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	if !strings.Contains(ruleset, "table inet containd") {
 		t.Fatalf("missing table: %s", ruleset)
 	}
-	if !strings.Contains(ruleset, "set block_hosts") || !strings.Contains(ruleset, "set block_flows") {
-		t.Fatalf("missing dynamic sets")
+	if !strings.Contains(ruleset, "add set inet containd block_hosts") || !strings.Contains(ruleset, "add set inet containd block_flows") {
+		t.Fatalf("missing block sets: %s", ruleset)
 	}
 	if !strings.Contains(ruleset, "policy drop") {
 		t.Fatalf("missing default drop policy")
@@ -78,7 +79,7 @@ func TestCompileFirewallAllowsBeforeDrops(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -116,7 +117,7 @@ func TestCompileFirewallMultiProtocol(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -140,7 +141,7 @@ func TestCompileFirewallNoProtocolsStillEmits(t *testing.T) {
 			{ID: "no-proto", Action: rules.ActionDeny, Sources: []string{"10.10.10.0/24"}},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -167,11 +168,11 @@ func TestCompileFirewallZoneBindings(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if !strings.Contains(ruleset, "set zone_lan_ifaces") || !strings.Contains(ruleset, "type ifname") {
+	if !strings.Contains(ruleset, "set zone_6c616e") || !strings.Contains(ruleset, "type ifname") {
 		t.Fatalf("missing zone iface sets: %s", ruleset)
 	}
 	if !strings.Contains(ruleset, "iifname { \"lan2\", \"lan3\" }") || !strings.Contains(ruleset, "oifname { \"wan\" }") {
@@ -199,12 +200,12 @@ func TestCompileFirewallQueueRulesForDPIEntries(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	// The ICS entry should use queue instead of accept.
-	if !strings.Contains(ruleset, "tcp dport 502 queue num 42") {
+	if !strings.Contains(ruleset, "tcp dport 502 jump ics_queue") {
 		t.Fatalf("expected queue rule for ICS entry, got:\n%s", ruleset)
 	}
 	// The non-ICS entry should still use accept.
@@ -227,7 +228,7 @@ func TestCompileFirewallNoQueueWithoutQueueID(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -267,7 +268,7 @@ func TestCompileFirewallEmitsLogClauseForL4Rules(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -306,14 +307,14 @@ func TestCompileFirewallSuppressesLogForDPIRules(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	if strings.Contains(ruleset, "log prefix") {
 		t.Fatalf("did not expect log clause on DPI-eligible rule, got:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, "tcp dport 502 queue num 42") {
+	if !strings.Contains(ruleset, "tcp dport 502 jump ics_queue") {
 		t.Fatalf("expected queue verdict on DPI rule, got:\n%s", ruleset)
 	}
 }
@@ -335,7 +336,7 @@ func TestCompileFirewallNoLogWithoutNFLogGroup(t *testing.T) {
 			},
 		},
 	}
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -404,10 +405,45 @@ func TestNftUpdaterArgsFormatting(t *testing.T) {
 
 	src := net.ParseIP("10.0.0.1")
 	dst := net.ParseIP("10.0.0.2")
-	fargs := u.buildBlockFlowArgs(src, dst, "502", 0)
+	fargs := u.buildBlockFlowArgs(src, dst, "tcp", "502", 0)
 	fjoined := strings.Join(fargs, " ")
-	if !strings.Contains(fjoined, "block_flows") || !strings.Contains(fjoined, "10.0.0.1 . 10.0.0.2 . 502") {
+	if !strings.Contains(fjoined, "block_flows") || !strings.Contains(fjoined, "10.0.0.1 . 10.0.0.2 . tcp . 502") {
 		t.Fatalf("unexpected flow args: %s", fjoined)
+	}
+}
+
+func TestFlowBlockKeysIncludeProtocol(t *testing.T) {
+	u := NewNftUpdater("containd")
+	src, dst := net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2")
+	tcp := strings.Join(u.buildBlockFlowArgs(src, dst, "tcp", "502", 5*time.Second), " ")
+	udp := strings.Join(u.buildBlockFlowArgs(src, dst, "udp", "502", 5*time.Second), " ")
+	if tcp == udp || !strings.Contains(tcp, ". tcp . 502 timeout 5s") || !strings.Contains(udp, ". udp . 502 timeout 5s") {
+		t.Fatalf("protocol collision: tcp=%q udp=%q", tcp, udp)
+	}
+	text, err := NewCompiler().CompileFirewall(&rules.Snapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "type ipv4_addr . ipv4_addr . inet_proto . inet_service;") {
+		t.Fatalf("set type omits protocol:\n%s", text)
+	}
+	// The blocks chain hooks forward before the policy chain (priority 0)
+	// with its established accept, and a drop there is final.
+	lookup := "add rule inet containd forward meta l4proto { tcp, udp } ip saddr . ip daddr . meta l4proto . th dport @block_flows drop\n"
+	if !strings.Contains(text, lookup) || !strings.Contains(text, "add chain inet containd forward { type filter hook forward priority -10;") {
+		t.Fatalf("protocol-aware block must drop in the earlier blocks chain:\n%s", text)
+	}
+}
+
+func TestFlowBlockRejectsInvalidPort(t *testing.T) {
+	u := NewNftUpdater("containd")
+	// An invalid input must fail validation, without attempting to run nft.
+	u.Path = "/nonexistent/nft"
+	for _, port := range []string{"0", "-1", "65536", "not-a-port", "502; accept"} {
+		err := u.BlockFlowTemp(context.Background(), net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2"), "tcp", port, time.Second)
+		if err == nil || !strings.Contains(err.Error(), "invalid dport") {
+			t.Fatalf("port %q: %v", port, err)
+		}
 	}
 }
 
@@ -436,23 +472,23 @@ func TestCompileFirewallNATChains(t *testing.T) {
 		},
 	}
 
-	ruleset, err := compiler.CompileFirewall(snap)
+	ruleset, err := compileWithoutCounters(compiler, snap)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	if !strings.Contains(ruleset, "chain prerouting") {
 		t.Fatalf("missing prerouting chain:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, `iifname @zone_wan_ifaces ip saddr { 198.51.100.10, 203.0.113.0/24 } tcp dport 443 counter dnat ip to 10.0.0.10:8443`) {
+	if !strings.Contains(ruleset, `iifname @zone_77616e ip saddr { 198.51.100.10, 203.0.113.0/24 } tcp dport 443 counter dnat ip to 10.0.0.10:8443`) {
 		t.Fatalf("missing prerouting DNAT rule:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, `iifname @zone_wan_ifaces ct status dnat tcp dport 8443 ip saddr { 198.51.100.10, 203.0.113.0/24 } accept`) {
+	if !strings.Contains(ruleset, `iifname @zone_77616e ct status dnat tcp dport 8443 ip saddr { 198.51.100.10, 203.0.113.0/24 } accept`) {
 		t.Fatalf("missing DNAT accept rule:\n%s", ruleset)
 	}
 	if !strings.Contains(ruleset, "chain postrouting") {
 		t.Fatalf("missing postrouting chain:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, `iifname @zone_lan_ifaces oifname @zone_wan_ifaces masquerade`) {
+	if !strings.Contains(ruleset, `iifname @zone_6c616e oifname @zone_77616e masquerade`) {
 		t.Fatalf("missing zone masquerade rule:\n%s", ruleset)
 	}
 }
@@ -463,11 +499,11 @@ func TestCompileLocalInputRule(t *testing.T) {
 		Zone:  "mgmt",
 		Proto: "tcp",
 		Port:  22,
-	}, map[string][]string{"mgmt": {"eth7"}})
+	}, zoneIndex{"mgmt": {`"eth7"`}})
 	if err != nil {
 		t.Fatalf("compileLocalInputRule(valid): %v", err)
 	}
-	if line != `iifname @zone_mgmt_ifaces tcp dport 22 accept` {
+	if line != `iifname @zone_6d676d74 tcp dport 22 accept` {
 		t.Fatalf("unexpected local input rule %q", line)
 	}
 
@@ -562,7 +598,7 @@ func TestCompileEntryProtocolMatches(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := rules.Entry{ID: "r", Action: rules.ActionAllow, Sources: []string{"172.30.0.4"}, Protocols: []rules.Protocol{tc.proto}}
-			lines, err := compileEntry(e, nil, 0, 0)
+			lines, err := compileEntryWithoutCounters(e, nil, 0, 0)
 			if err != nil {
 				t.Fatalf("compileEntry: %v", err)
 			}
@@ -582,7 +618,7 @@ func TestCompileEntryRejectsInvalidProtocols(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := rules.Entry{ID: "r", Action: rules.ActionAllow, Protocols: []rules.Protocol{p}}
-			if lines, err := compileEntry(e, nil, 0, 0); err == nil {
+			if lines, err := compileEntryWithoutCounters(e, nil, 0, 0); err == nil {
 				t.Fatalf("expected error, got %q", lines)
 			}
 		})

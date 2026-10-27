@@ -23,7 +23,7 @@ import {
   RoutingSetupCallout,
   StaticRoutesCard,
 } from "./routing-sections";
-import { effectiveDev, firstHostInCIDR, normCIDR, pickWanCIDR, pickWanIface } from "./routing-utils";
+import { inferWanGateway, WAN_GATEWAY_NAME, wanGateway, withDefaultRoute } from "../../lib/wan-gateway";
 
 export default function RoutingPage() {
   const canEdit = isAdmin();
@@ -33,6 +33,7 @@ export default function RoutingPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [reconciling, setReconciling] = useState(false);
+  const [interfaceStateUnavailable, setInterfaceStateUnavailable] = useState(false);
   const [detecting, setDetecting] = useState(false);
 
   const confirm = useConfirm();
@@ -160,7 +161,7 @@ export default function RoutingPage() {
   async function addRoute() {
     if (!canEdit) return;
     setError(null);
-    const dst = normCIDR(routeDst);
+    const dst = routeDst.trim();
     if (!dst) {
       setError("Route destination is required (CIDR or 'default').");
       return;
@@ -210,8 +211,8 @@ export default function RoutingPage() {
     const nextRule: PolicyRule = {
       table: tableNum,
       priority: prioNum && Number.isFinite(prioNum) ? prioNum : undefined,
-      src: ruleSrc.trim() ? normCIDR(ruleSrc) : undefined,
-      dst: ruleDst.trim() ? normCIDR(ruleDst) : undefined,
+      src: ruleSrc.trim() || undefined,
+      dst: ruleDst.trim() || undefined,
     };
     const next: RoutingConfig = {
       gateways: cfg.gateways ?? [],
@@ -242,59 +243,24 @@ export default function RoutingPage() {
     setNotice(null);
     try {
       const [ifs, states] = await Promise.all([api.listInterfaces(), api.listInterfaceState()]);
-      const wanIface = pickWanIface(ifs ?? []);
-      if (!wanIface) {
-        setError("Could not determine WAN interface (expected an interface named 'wan' or in zone 'wan').");
+      setInterfaceStateUnavailable(states === null);
+      if (states === null) return;
+      if (ifs === null) {
+        setError("Interface configuration unavailable.");
         return;
       }
-      const wanDev = effectiveDev(wanIface);
-      const wanState = (states ?? []).find((s) => s.name === wanDev) ?? null;
-      const wanCIDR = pickWanCIDR(wanState);
-      if (!wanCIDR) {
-        setError(
-          `Could not determine WAN IPv4 address for '${wanDev}'. If you're using DHCP in Docker, restart the container so Docker assigns an IP at startup.`,
-        );
+      const inferred = inferWanGateway(ifs, states);
+      if (!inferred.ok) {
+        setError(inferred.error);
         return;
       }
-      const inferredGw = firstHostInCIDR(wanCIDR);
-      if (!inferredGw) {
-        setError(`Could not infer a WAN gateway from '${wanCIDR}'.`);
-        return;
-      }
-
-      const gwName = "wan-gw";
-      const nextGateway: Gateway = {
-        name: gwName,
-        address: inferredGw,
-        iface: wanDev,
-        description: "Auto (WAN) from OS address",
-      };
-      const gateways = cfg.gateways ?? [];
-      const existingGwIdx = gateways.findIndex((g) => g.name === gwName);
-      const nextGateways =
-        existingGwIdx >= 0 ? gateways.map((g, i) => (i === existingGwIdx ? nextGateway : g)) : [...gateways, nextGateway];
-
-      const routes = cfg.routes ?? [];
-      const isDefaultDst = (dst: string) => {
-        const d = dst.trim().toLowerCase();
-        return d === "default" || d === "0.0.0.0/0";
-      };
-      const existingDefaultIdx = routes.findIndex((r) => isDefaultDst(r.dst) && (r.table ?? 0) === 0);
-      const nextDefault: StaticRoute = {
-        dst: "default",
-        gateway: gwName,
-        iface: wanDev,
-        table: 0,
-      };
-      const nextRoutes =
-        existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
-
-      const result = await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
+      const { address, device } = inferred.wan;
+      const result = await save(withDefaultRoute(cfg, wanGateway(inferred.wan)));
       if (!result.ok) return;
       setNotice(
         result.warning
-          ? `Gateway and default route staged — commit to apply. '${gwName}' (${inferredGw} via ${wanDev}) with warning: ${result.warning}`
-          : `Gateway and default route staged — commit to apply. '${gwName}' (${inferredGw} via ${wanDev}) and a default route. If LAN still can't reach the Internet, ensure there's an allow rule for LAN\u2192WAN and SNAT is enabled.`,
+          ? `Gateway and default route staged — commit to apply. '${WAN_GATEWAY_NAME}' (${address} via ${device}) with warning: ${result.warning}`
+          : `Gateway and default route staged — commit to apply. '${WAN_GATEWAY_NAME}' (${address} via ${device}) and a default route. If LAN still can't reach the Internet, ensure there's an allow rule for LAN\u2192WAN and SNAT is enabled.`,
       );
     } catch (e) {
       setError(`Failed to auto-configure WAN default route: ${e instanceof Error ? e.message : String(e)}`);
@@ -333,29 +299,14 @@ export default function RoutingPage() {
           return;
         }
 
-        const gwName = "os-default-gw";
-        const nextGateway: Gateway = {
-          name: gwName,
-          address: gwIP,
-          iface: dev,
-          description: "Adopted from OS default route",
-        };
-        const gateways = cfg.gateways ?? [];
-        const existingGwIdx = gateways.findIndex((g) => g.name === gwName);
-        const nextGateways =
-          existingGwIdx >= 0 ? gateways.map((g, i) => (i === existingGwIdx ? nextGateway : g)) : [...gateways, nextGateway];
-
-        const routes = cfg.routes ?? [];
-        const isDefaultDst = (dst: string) => {
-          const d = dst.trim().toLowerCase();
-          return d === "default" || d === "0.0.0.0/0";
-        };
-        const existingDefaultIdx = routes.findIndex((r) => isDefaultDst(r.dst) && (r.table ?? 0) === 0);
-        const nextDefault: StaticRoute = { dst: "default", gateway: gwName, iface: dev, table: 0 };
-        const nextRoutes =
-          existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
-
-        const result = await save({ gateways: nextGateways, routes: nextRoutes, rules: cfg.rules ?? [] });
+        const result = await save(
+          withDefaultRoute(cfg, {
+            name: "os-default-gw",
+            address: gwIP,
+            iface: dev,
+            description: "Adopted from OS default route",
+          }),
+        );
         if (!result.ok) return;
         setNotice(
           result.warning
@@ -373,7 +324,7 @@ export default function RoutingPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refreshOSRouting}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
             title="Reload OS routing table snapshot"
           >
             {detecting ? "Detecting..." : "Detect from OS"}
@@ -381,7 +332,7 @@ export default function RoutingPage() {
           {canEdit && (
             <button
               onClick={autoWanDefaultRoute}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
               title="Auto-create a WAN gateway and default route based on the WAN interface OS address (best-effort)."
             >
               Auto WAN default
@@ -391,7 +342,7 @@ export default function RoutingPage() {
             <button
               onClick={reconcileReplace}
               disabled={reconciling}
-              className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-400 transition-ui hover:bg-amber-500/15 disabled:opacity-50"
+              className="rounded-xs border px-3 py-1.5 text-sm transition-ui disabled:opacity-50"
               title="Reconcile routing rules (replace semantics for containd-managed routes/rules)"
             >
               {reconciling ? "Reconciling..." : "Reconcile live"}
@@ -399,7 +350,7 @@ export default function RoutingPage() {
           )}
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
@@ -407,19 +358,26 @@ export default function RoutingPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
 
+      {interfaceStateUnavailable && (
+        <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <p>Interface runtime state unavailable — the engine could not be reached. Auto WAN setup cannot determine the WAN address; no routing changes were staged.</p>
+          <button onClick={autoWanDefaultRoute} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
+        </div>
+      )}
+
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
 
       {notice && (
-        <div className="mb-4 rounded-sm border border-amber-500/20 bg-amber-500/[0.1] px-4 py-3 text-sm text-[var(--amber)]">
+        <div className="mb-4 rounded-xs border px-4 py-3 text-sm text-(--amber)">
           {notice}
         </div>
       )}

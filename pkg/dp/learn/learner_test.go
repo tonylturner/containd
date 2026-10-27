@@ -157,8 +157,8 @@ func TestGenerateRulesProducesValidRules(t *testing.T) {
 	if r.ICS.Protocol != "modbus" {
 		t.Errorf("expected modbus protocol, got %s", r.ICS.Protocol)
 	}
-	if r.ICS.Mode != "enforce" {
-		t.Errorf("expected enforce mode, got %s", r.ICS.Mode)
+	if r.ICS.Mode != "" {
+		t.Errorf("expected inherited (empty) mode, got %s", r.ICS.Mode)
 	}
 	if len(r.ICS.FunctionCode) != 1 || r.ICS.FunctionCode[0] != 3 {
 		t.Errorf("unexpected function codes: %v", r.ICS.FunctionCode)

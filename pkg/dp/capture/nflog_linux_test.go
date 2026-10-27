@@ -8,12 +8,13 @@ package capture
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 	"time"
 
 	nflog "github.com/florianl/go-nflog/v2"
-	"github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 type fakeNFLogHandle struct {
@@ -47,10 +48,11 @@ func TestStartNFLogStopCancelsBeforeClosingAndIsIdempotent(t *testing.T) {
 	oldOpenNFLog := openNFLog
 	t.Cleanup(func() { openNFLog = oldOpenNFLog })
 	fake := &fakeNFLogHandle{}
-	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
+	var flags uint16
+	openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) { flags = cfg.Flags; return fake, nil }
 
 	var reported int
-	stop, err := StartNFLog(context.Background(), 100, events.NewStore(1), func(error) { reported++ })
+	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, func(error) { reported++ })
 	if err != nil {
 		t.Fatalf("StartNFLog: %v", err)
 	}
@@ -59,6 +61,9 @@ func TestStartNFLogStopCancelsBeforeClosingAndIsIdempotent(t *testing.T) {
 	}
 	if fake.ctx == nil || fake.ctx.Err() != nil {
 		t.Fatalf("registration context before stop = %v, want active child context", fake.ctx)
+	}
+	if flags != nflog.FlagConntrack {
+		t.Fatalf("nflog flags = %#x, want conntrack direction", flags)
 	}
 	stop()
 	if fake.ctx.Err() != context.Canceled {
@@ -89,7 +94,7 @@ func TestStartNFLogRegisterErrorCancelsAndCloses(t *testing.T) {
 	fake := &fakeNFLogHandle{registerErr: wantErr}
 	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
 
-	stop, err := StartNFLog(context.Background(), 100, events.NewStore(1), nil)
+	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("StartNFLog error = %v, want wrapped %v", err, wantErr)
 	}
@@ -118,7 +123,7 @@ func TestStartNFLogParentContextCancelClosesHandle(t *testing.T) {
 	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stop, err := StartNFLog(ctx, 100, events.NewStore(1), nil)
+	stop, err := StartNFLog(ctx, 100, &recordingSink{}, nil)
 	if err != nil {
 		t.Fatalf("StartNFLog: %v", err)
 	}
@@ -158,7 +163,7 @@ func TestStartNFLogDisabledReturnsNoOpStop(t *testing.T) {
 		group uint16
 		sink  RuleHitSink
 	}{
-		{name: "zero group", group: 0, sink: events.NewStore(1)},
+		{name: "zero group", group: 0, sink: &recordingSink{}},
 		{name: "nil sink", group: 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -189,9 +194,9 @@ func TestBuildRuleHitEventParsesPrefix(t *testing.T) {
 	a := nflog.Attribute{
 		Prefix: strPtr("containd:deny-ent-to-field:DENY "),
 	}
-	ev, ok := buildRuleHitEvent(a)
-	if !ok {
-		t.Fatal("expected event, got !ok")
+	ev, key, ok := buildRuleHitEvent(a)
+	if !ok || key != nil {
+		t.Fatalf("event %v key %v, want an event without a key", ok, key)
 	}
 	if ev.Kind != "firewall.rule.hit" {
 		t.Errorf("Kind = %q, want firewall.rule.hit", ev.Kind)
@@ -218,7 +223,7 @@ func TestBuildRuleHitEventRejectsForeignPrefix(t *testing.T) {
 		c := c
 		t.Run(c, func(t *testing.T) {
 			a := nflog.Attribute{Prefix: strPtr(c)}
-			if _, ok := buildRuleHitEvent(a); ok {
+			if _, _, ok := buildRuleHitEvent(a); ok {
 				t.Errorf("expected !ok for prefix %q", c)
 			}
 		})
@@ -227,7 +232,7 @@ func TestBuildRuleHitEventRejectsForeignPrefix(t *testing.T) {
 
 func TestBuildRuleHitEventNoPrefixIsNoop(t *testing.T) {
 	a := nflog.Attribute{} // Prefix nil
-	if _, ok := buildRuleHitEvent(a); ok {
+	if _, _, ok := buildRuleHitEvent(a); ok {
 		t.Error("expected !ok when no prefix is set")
 	}
 }
@@ -261,9 +266,13 @@ func TestBuildRuleHitEventExtractsPacketFields(t *testing.T) {
 		Prefix:  strPtr("containd:fw-test:DENY "),
 		Payload: bytesPtr(pkt),
 	}
-	ev, ok := buildRuleHitEvent(a)
+	ev, key, ok := buildRuleHitEvent(a)
 	if !ok {
 		t.Fatal("expected event, got !ok")
+	}
+	want := flow.Key{SrcIP: net.ParseIP("10.10.10.50"), DstIP: net.ParseIP("10.40.40.20"), SrcPort: 49152, DstPort: 502, Proto: 6}
+	if key == nil || key.Hash() != want.Hash() || ev.FlowID != want.Hash() {
+		t.Fatalf("key %+v flow %q, want the packet's original-direction key %q", key, ev.FlowID, want.Hash())
 	}
 	if ev.SrcIP != "10.10.10.50" {
 		t.Errorf("SrcIP = %q, want 10.10.10.50", ev.SrcIP)
@@ -286,6 +295,78 @@ func TestBuildRuleHitEventExtractsPacketFields(t *testing.T) {
 	if ev.Attributes["port"] != "502" {
 		t.Errorf("port attribute = %v, want \"502\"", ev.Attributes["port"])
 	}
+
+	// Conntrack's reply directions orient the key on the opener.
+	for ctinfo, dir := range map[uint32]flow.Direction{0: flow.DirForward, 2: flow.DirForward, 3: flow.DirReverse, 4: flow.DirReverse} {
+		a.CtInfo = &ctinfo
+		_, key, _ := buildRuleHitEvent(a)
+		if key == nil || key.Dir != dir {
+			t.Errorf("ctinfo %d: key %+v, want direction %d", ctinfo, key, dir)
+		}
+	}
+}
+
+// ICMP and ICMPv6 hits carry their addresses and protocol, and no ports.
+func TestBuildRuleHitEventICMPKeepsAddresses(t *testing.T) {
+	icmp := []byte{
+		0x45, 0x00, 0x00, 0x1c, // version 4, ihl 5, total length 28
+		0x00, 0x00, 0x40, 0x00, // identification, DF
+		0x40, 0x01, 0x00, 0x00, // ttl, protocol ICMP, checksum
+		10, 10, 10, 50, // src
+		10, 40, 40, 20, // dst
+		0x08, 0x00, 0x00, 0x00, 0x12, 0x34, 0x00, 0x01, // echo request, id 0x1234, seq 1
+	}
+	icmpv6 := []byte{
+		0x60, 0x00, 0x00, 0x00, // version 6
+		0x00, 0x08, 0x3a, 0x40, // payload length 8, next header ICMPv6, hop limit
+		0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01, // src fd00::1
+		0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02, // dst fd00::2
+		0x81, 0x00, 0x00, 0x00, 0x12, 0x34, 0x00, 0x01, // echo reply, id 0x1234, seq 1
+	}
+	for _, tc := range []struct {
+		name      string
+		pkt       []byte
+		ctinfo    uint32
+		src, dst  string
+		proto     uint8
+		transport string
+		dir       flow.Direction
+	}{
+		{"icmp", icmp, 2, "10.10.10.50", "10.40.40.20", 1, "icmp", flow.DirForward},
+		{"icmpv6", icmpv6, 3, "fd00::1", "fd00::2", 58, "icmpv6", flow.DirReverse},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := nflog.Attribute{Prefix: strPtr("containd:fw-ping:ALLOW "), Payload: bytesPtr(tc.pkt), CtInfo: &tc.ctinfo}
+			ev, key, ok := buildRuleHitEvent(a)
+			if !ok {
+				t.Fatal("expected event, got !ok")
+			}
+			if ev.SrcIP != tc.src || ev.DstIP != tc.dst || ev.Transport != tc.transport {
+				t.Errorf("event %s -> %s (%s), want %s -> %s (%s)", ev.SrcIP, ev.DstIP, ev.Transport, tc.src, tc.dst, tc.transport)
+			}
+			if ev.SrcPort != 0 || ev.DstPort != 0 {
+				t.Errorf("ports %d -> %d, want none", ev.SrcPort, ev.DstPort)
+			}
+			if ev.Attributes["proto"] != tc.transport {
+				t.Errorf("proto attribute = %v, want %s", ev.Attributes["proto"], tc.transport)
+			}
+			if port, ok := ev.Attributes["port"]; ok {
+				t.Errorf("port attribute = %v, want none", port)
+			}
+			want := flow.Key{SrcIP: net.ParseIP(tc.src), DstIP: net.ParseIP(tc.dst), Proto: tc.proto, Dir: tc.dir}
+			if key == nil || key.Hash() != want.Hash() || ev.FlowID != want.Hash() {
+				t.Fatalf("key %+v flow %q, want %q", key, ev.FlowID, want.Hash())
+			}
+		})
+	}
+
+	// Other protocols that do not decode keep no addressing.
+	gre := append([]byte(nil), icmp...)
+	gre[9] = 47
+	ev, key, ok := buildRuleHitEvent(nflog.Attribute{Prefix: strPtr("containd:fw-gre:DENY "), Payload: bytesPtr(gre)})
+	if !ok || key != nil || ev.SrcIP != "" || ev.Transport != "" {
+		t.Fatalf("GRE hit = %+v key %v, want an event without addressing", ev, key)
+	}
 }
 
 func TestRulePrefixREAcceptsTypicalForms(t *testing.T) {
@@ -298,6 +379,9 @@ func TestRulePrefixREAcceptsTypicalForms(t *testing.T) {
 		{"containd:deny-enterprise-to-field:DENY ", "deny-enterprise-to-field", "DENY"},
 		{"containd:rtac-to-field-modbus:ALLOW", "rtac-to-field-modbus", "ALLOW"},
 		{"containd:underscores_ok_too:ALLOW ", "underscores_ok_too", "ALLOW"},
+		{"containd:reject-telnet:RESET ", "reject-telnet", "RESET"},
+		{"containd:police-udp:RATE_LIMIT ", "police-udp", "RATE_LIMIT"},
+		{"containd:label-plc:TAG ", "label-plc", "TAG"},
 	}
 	for _, c := range cases {
 		c := c
@@ -328,7 +412,7 @@ func TestRulePrefixRERejectsUnsafeRuleIDs(t *testing.T) {
 		c := c
 		t.Run(c, func(t *testing.T) {
 			a := nflog.Attribute{Prefix: strPtr(c)}
-			if _, ok := buildRuleHitEvent(a); ok {
+			if _, _, ok := buildRuleHitEvent(a); ok {
 				t.Errorf("expected !ok for malformed prefix %q", c)
 			}
 		})

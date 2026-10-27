@@ -20,15 +20,17 @@ var newInjector = session.NewInjector
 // it.
 func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
 	store := e.eventStore
+	var t *iecTable
 	emit := func(evs []events.Event) {
-		for _, ev := range evs {
+		for _, ev := range t.withSessionTags(evs) {
 			store.Append(ev)
 		}
 	}
 	health := newIECHealth(func(outcome, errText string) {
 		store.Append(healthEvent(outcome, errText, time.Now()))
 	})
-	t := newIECTable(cfg.DPIMode)
+	t = newIECTable(cfg.DPIMode, &e.zones)
+	t.inventory = e.inventory
 	t.dpi = e.dpiMgr
 	t.health = health
 	t.jobs = e.hooks.blocks

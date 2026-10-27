@@ -1,0 +1,54 @@
+table inet containd_policy {
+  set zone_412042 {
+    type ifname;
+    elements = { "eth3" }
+  }
+  set zone_612d62 {
+    type ifname;
+    elements = { "eth1" }
+  }
+  set zone_615f62 {
+    type ifname;
+    elements = { "eth2" }
+  }
+  set zone_6162 {
+    type ifname;
+    elements = { "eth4" }
+  }
+  set zone_7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a {
+    type ifname;
+    elements = { "eth5" }
+  }
+  counter rule_17b5a00bc946a860 { }
+  chain input {
+    type filter hook input priority 0;
+    policy drop;
+    iifname "lo" accept;
+    ct state { established, related } accept;
+    ct state invalid drop;
+    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;
+    meta l4proto ipv6-icmp icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept;
+    iifname @zone_612d62 tcp dport 22 accept;
+    iifname @zone_615f62 tcp dport 22 accept;
+    iifname @zone_7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a tcp dport 22 accept;
+  }
+  chain forward {
+    type filter hook forward priority 0;
+    policy drop;
+    ct state { established, related } accept;
+    iifname @zone_615f62 ct status dnat tcp dport 443 accept;
+    iifname { "eth1" } oifname { "eth4" } counter name "rule_17b5a00bc946a860" accept;
+  }
+  chain prerouting {
+    type nat hook prerouting priority dstnat;
+    policy accept;
+    iifname @zone_615f62 tcp dport 8443 counter dnat ip to 192.0.2.10:443;
+  }
+  chain postrouting {
+    type nat hook postrouting priority srcnat;
+    policy accept;
+    iifname @zone_615f62 ct status dnat tcp dport 443 ip daddr 192.0.2.10 masquerade;
+    iifname @zone_412042 oifname @zone_6162 masquerade;
+    iifname @zone_612d62 oifname @zone_6162 masquerade;
+  }
+}

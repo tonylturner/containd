@@ -5,6 +5,7 @@ package dpi
 
 import (
 	"bytes"
+	"errors"
 	"sync"
 	"time"
 )
@@ -52,14 +53,39 @@ type stream struct {
 	synSeen bool
 	synSeq  uint32 // payload sequence following the SYN, for late capture copies
 	keep    bool   // session stream: lifetime owned by the caller, never idle-swept
+	// verify keeps consumed bytes in hist so that a retransmission of them
+	// is compared too; it follows the latest segment's request.
+	verify bool
 
 	base       int64  // absolute offset of buf[0]; the consumed watermark
 	buf        []byte // contiguous bytes from base
+	hist       []byte // verify: the last consumed bytes, [base-len(hist), base)
 	ooo        []oooSegment
 	lastUpdate time.Time
 
 	retransmits uint64 // segments that repeated bytes already held or consumed
 	failed      error  // session stream failure, until the caller ends it
+
+	// closed marks a fail-closed stream that an in-window FIN or RST ended.
+	// It holds no bytes; closeNext is the sequence number a later RST of
+	// this direction carries in window.
+	closed    bool
+	closeNext uint32
+	// lost marks a fail-closed stream that dropped its bytes: the idle
+	// sweep dropped its partial frame, or a handshake SYN began a new
+	// connection on its tuple. Its next bytes cannot be framed, as for a
+	// stream that began without a SYN.
+	lost bool
+}
+
+// pickedUp reports a stream whose bytes need not start at a frame: it
+// began without an observed SYN, or it is lost.
+func (s *stream) pickedUp() bool { return !s.synSeen || s.lost }
+
+// midStream reports a stream that failed as picked up mid-connection.
+func midStream(err error) bool {
+	var se *StreamError
+	return errors.As(err, &se) && se.Kind == StreamMidStream
 }
 
 func (s *stream) end() int64 { return s.base + int64(len(s.buf)) }
@@ -71,6 +97,9 @@ func (s *stream) stored() int {
 	}
 	return n
 }
+
+// held is every byte the stream keeps: stored bytes and consumed history.
+func (s *stream) held() int { return s.stored() + len(s.hist) }
 
 // feedResult is the stream state after one segment.
 type feedResult struct {
@@ -116,43 +145,116 @@ func seqDiff(a, b uint32) int32 {
 
 // open anchors a legacy stream at a handshake. A late second capture of the
 // same SYN must not reset bytes already parsed on the first interface.
-func (r *reassembler) open(key string, seq uint32, now time.Time) {
+//
+// A fail-closed SYN starts a stream, a new one or the next connection of a
+// closed one, only when it belongs to a handshake the kernel's connection
+// tracking has not seen complete (handshake). Any other was sent into an
+// established connection, which a stream picked up mid-connection, or none,
+// may belong to: anchoring at it would let its sender choose where framing
+// starts. A failed fail-closed stream stays failed, except one that failed
+// as picked up mid-connection: the engine closes that connection, so a
+// handshake SYN starts the client's next one on the tuple.
+//
+// A SYN with a new sequence number on a live fail-closed stream (one that
+// no in-window FIN or RST ended) carries no payload and anchors nothing.
+// Without the handshake mark, connection tracking still holds the
+// connection established and the stream keeps its position: the server
+// answers such a SYN with a challenge ACK, and the RST a reconnecting
+// client sends in reply ends the stream in window (CloseStream). With the
+// mark, connection tracking starts a new connection that the stream cannot
+// follow: the stream drops its bytes and is lost, so its next bytes are a
+// mid-stream pickup.
+//
+// open reports whether the stream is anchored at this SYN: it started a
+// stream, or repeats the SYN its live stream started at.
+func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, handshake bool) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if s, ok := r.streams[key]; ok {
-		if s.synSeen && s.synSeq == seq {
-			s.lastUpdate = now
-			return
+	s, ok := r.streams[key]
+	switch {
+	case !ok:
+		if failClosed && !handshake {
+			return false
 		}
-		r.bytesBuffered -= s.stored()
+	case failClosed && s.failed != nil:
+		if !midStream(s.failed) || !handshake {
+			return false
+		}
+	case s.synSeen && s.synSeq == seq && !s.closed:
+		s.lastUpdate = now
+		return true
+	case failClosed && !s.closed:
+		if handshake {
+			r.loseLocked(s)
+		}
+		s.lastUpdate = now
+		return false
+	case failClosed && !handshake:
+		return false
+	}
+	if ok {
+		r.bytesBuffered -= s.held()
 	} else {
 		r.activeStreams++
 	}
-	r.streams[key] = &stream{strict: true, mode: posSeq, seq0: seq, synSeen: true, synSeq: seq, lastUpdate: now}
+	r.streams[key] = &stream{strict: true, mode: posSeq, seq0: seq, synSeen: true, synSeq: seq, verify: failClosed, lastUpdate: now}
+	return true
+}
+
+// loseLocked drops the bytes of a live fail-closed stream, which keeps its
+// position: its next bytes need not start a frame (lost).
+func (r *reassembler) loseLocked(s *stream) {
+	r.bytesBuffered -= s.held()
+	s.base = s.end() // the position after the dropped bytes
+	s.buf, s.ooo, s.hist = nil, nil, nil
+	s.lost = true
 }
 
 // feed adds one segment. A new stream starts at offset 0 in the given
 // position mode; strict and keep are fixed at creation.
 //
-// Bytes below the consumed watermark are duplicates. Bytes the stream
-// still holds are compared byte for byte; a difference is a conflict.
-func (r *reassembler) feed(key string, pos position, payload []byte, now time.Time, strict, keep bool) feedResult {
+// A segment that asks to verify (it fails closed) is not taken by a stream
+// picked up mid-connection (pickedUp), which returns a StreamMidStream
+// error, nor by a closed stream, whose receiver delivers no bytes after
+// the close. Other segments start a new stream in a closed or lost
+// stream's direction.
+//
+// Bytes the stream still holds are compared byte for byte; a difference is
+// a conflict. Bytes below the consumed watermark are duplicates; with
+// verify set on a strict stream they are compared with the consumed
+// history as well, and a consumed byte older than the history cannot be
+// verified. verify applies from this segment on; turning it off drops the
+// history.
+func (r *reassembler) feed(key string, pos position, payload []byte, now time.Time, strict, keep, verify bool) feedResult {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	s, ok := r.streams[key]
-	if !ok {
+	if ok && s.closed && strict && verify {
+		s.lastUpdate = now
+		return feedResult{base: s.base}
+	}
+	if !ok || s.closed || s.lost && !verify { // neither holds bytes
+		if !ok {
+			r.activeStreams++
+		}
 		s = &stream{strict: strict, mode: pos.kind, seq0: pos.seq, keep: keep}
 		r.streams[key] = s
-		r.activeStreams++
 	}
 	if s.failed != nil {
 		return feedResult{failed: s.failed}
 	}
 	s.lastUpdate = now
-	before := s.stored()
+	if strict && verify && !keep && s.pickedUp() {
+		return feedResult{base: s.base, err: &StreamError{Kind: StreamMidStream, Offset: s.end()}}
+	}
+	before := s.held()
+	s.verify = strict && verify
+	if !s.verify {
+		s.hist = nil
+	}
 	err := s.add(s.resolve(pos), payload, r.maxSize)
-	r.bytesBuffered += s.stored() - before
+	r.bytesBuffered += s.held() - before
 	return feedResult{
 		buf:  append([]byte(nil), s.buf...),
 		base: s.base,
@@ -199,12 +301,15 @@ func (s *stream) add(off int64, data []byte, maxSize int) *StreamError {
 }
 
 // dropHeld removes the bytes of data at off that the stream has already
-// consumed or still holds contiguously, comparing the held ones. It reports
-// whether any byte was a repeat.
+// consumed or still holds contiguously, comparing the held ones (and, with
+// verify, the consumed ones). It reports whether any byte was a repeat.
 func (s *stream) dropHeld(off int64, data []byte) ([]byte, int64, bool, *StreamError) {
 	dup := false
 	if off < s.base { // already consumed
 		cut := min(s.base-off, int64(len(data)))
+		if err := s.verifyConsumed(off, data[:cut]); err != nil {
+			return nil, off, true, err
+		}
 		data, off, dup = data[cut:], off+cut, true
 	}
 	if end := s.end(); off < end && len(data) > 0 {
@@ -216,6 +321,23 @@ func (s *stream) dropHeld(off int64, data []byte) ([]byte, int64, bool, *StreamE
 		data, off, dup = data[n:], off+n, true
 	}
 	return data, off, dup, nil
+}
+
+// verifyConsumed compares consumed bytes at off with the history of a
+// verify stream. Other streams do not compare consumed bytes.
+func (s *stream) verifyConsumed(off int64, data []byte) *StreamError {
+	if !s.verify {
+		return nil
+	}
+	histBase := s.base - int64(len(s.hist))
+	if off < histBase {
+		return &StreamError{Kind: StreamUnverifiedRetransmission, Offset: off}
+	}
+	held := s.hist[off-histBase : off-histBase+int64(len(data))]
+	if i := firstDiff(held, data); i >= 0 {
+		return &StreamError{Kind: StreamOverlapConflict, Offset: off + int64(i)}
+	}
+	return nil
 }
 
 // checkOOOOverlap compares data at off with every buffered out-of-order
@@ -330,7 +452,8 @@ func firstDiff(a, b []byte) int {
 }
 
 // trim consumes the first n bytes of the stream if its watermark is still
-// base (the view that was parsed).
+// base (the view that was parsed). A verify stream moves them into its
+// history, which keeps the last maxSize consumed bytes.
 func (r *reassembler) trim(key string, base int64, n int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -338,25 +461,51 @@ func (r *reassembler) trim(key string, base int64, n int) {
 	if !ok || s.base != base || n <= 0 {
 		return
 	}
+	before := s.held()
 	n = min(n, len(s.buf))
+	if s.verify {
+		s.hist = append(s.hist, s.buf[:n]...)
+		if excess := len(s.hist) - r.maxSize; excess > 0 {
+			s.hist = s.hist[excess:]
+		}
+	}
 	s.buf = s.buf[n:]
 	s.base += int64(n)
-	r.bytesBuffered -= n
+	r.bytesBuffered += s.held() - before
 }
 
-// fail discards a session stream's bytes and marks it failed until
-// complete; later feeds return err.
+// fail discards a stream's bytes and marks it failed until complete,
+// creating the stream when there is none; later feeds return err. A failed
+// stream keeps its first error.
 func (r *reassembler) fail(key string, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if s, ok := r.streams[key]; ok {
-		r.bytesBuffered -= s.stored()
-		s.buf, s.ooo = nil, nil
-		s.failed = err
+	s, ok := r.streams[key]
+	if !ok {
+		s = &stream{strict: true}
+		r.streams[key] = s
+		r.activeStreams++
 	}
+	if s.failed != nil {
+		return
+	}
+	r.bytesBuffered -= s.held()
+	s.buf, s.ooo, s.hist = nil, nil, nil
+	s.closed, s.lost = false, false
+	s.failed = err
 }
 
-// failure returns the error a session stream failed with, or nil.
+// watermark returns a stream's consumed watermark, 0 without a stream.
+func (r *reassembler) watermark(key string) int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s, ok := r.streams[key]; ok {
+		return s.base
+	}
+	return 0
+}
+
+// failure returns the error a stream failed with, or nil.
 func (r *reassembler) failure(key string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -370,16 +519,23 @@ func (r *reassembler) failure(key string) error {
 func (r *reassembler) complete(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.completeLocked(key)
+}
+
+func (r *reassembler) completeLocked(key string) {
 	if s, ok := r.streams[key]; ok {
-		r.bytesBuffered -= s.stored()
+		r.bytesBuffered -= s.held()
 		delete(r.streams, key)
 		r.activeStreams--
 	}
 }
 
 // sweep removes streams idle longer than idleTimeout, except session
-// streams, whose lifetime the caller owns (EndStream). It runs at most once
-// per idleTimeout.
+// streams, whose lifetime the caller owns (EndStream), failed streams,
+// which hold no bytes and stay failed until their flow ends, and live
+// fail-closed streams, which keep their position until their flow ends:
+// one holding a partial frame drops it and is lost, another drops only its
+// consumed history. It runs at most once per idleTimeout.
 func (r *reassembler) sweep(now time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -388,10 +544,19 @@ func (r *reassembler) sweep(now time.Time) {
 	}
 	r.lastSweep = now
 	for key, s := range r.streams {
-		if !s.keep && now.Sub(s.lastUpdate) > r.idleTimeout {
-			r.bytesBuffered -= s.stored()
+		if s.keep || s.failed != nil || now.Sub(s.lastUpdate) <= r.idleTimeout {
+			continue
+		}
+		switch {
+		case !s.verify || s.closed:
+			r.bytesBuffered -= s.held()
 			delete(r.streams, key)
 			r.activeStreams--
+		case s.stored() > 0:
+			r.loseLocked(s)
+		default:
+			r.bytesBuffered -= len(s.hist)
+			s.hist = nil
 		}
 	}
 }

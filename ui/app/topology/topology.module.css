@@ -55,6 +55,7 @@
   font-size: 9px; letter-spacing: 1px;
 }
 .chipDot { width: 5px; height: 5px; border-radius: 50%; }
+.chipReason { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0; color: var(--text-dim); }
 
 .iconBtn {
   width: 28px; height: 28px; border: 1px solid var(--topo-border);
@@ -150,12 +151,6 @@
 }
 .nodeRowKey { color: var(--text-dim); }
 .nodeRowVal { color: var(--text-mid); text-align: right; }
-
-.sparkline {
-  display: flex; gap: 1px; align-items: flex-end;
-  height: 16px; margin-top: 4px;
-}
-.spark { flex: 1; border-radius: 1px 1px 0 0; min-width: 2px; opacity: .7; }
 
 /* ════════════════════════════════════════════════════════════════
    DETAIL PANEL
@@ -298,6 +293,9 @@
 .ruleAction { font-size: 8px; padding: 1px 5px; border-radius: 1px; }
 .ruleAllow .ruleAction { background: var(--green-dim); color: var(--topo-green); }
 .ruleDeny .ruleAction { background: var(--red-dim); color: var(--topo-red); }
+.ruleEffect { border-left-color: var(--amber); }
+.ruleEffect .ruleAction { background: var(--amber-dim); color: var(--amber); }
+.ruleNote { margin: -2px 0 6px; font-family: var(--mono); font-size: 9px; color: var(--text-dim); }
 .ruleDesc { flex: 1; color: var(--text-mid); }
 .ruleHits { color: var(--text-dim); }
 

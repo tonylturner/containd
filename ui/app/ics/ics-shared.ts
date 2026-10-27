@@ -3,12 +3,24 @@ import type { ICSPredicate } from "../../lib/api";
 export type ICSMode = "enforce" | "learn";
 export type ICSModeSelection = ICSMode | "";
 
+function normalizeMode(mode: string | undefined): ICSMode | "" | "other" {
+  const m = (mode ?? "").trim().toLowerCase();
+  if (m === "" || m === "enforce" || m === "learn") return m;
+  return "other";
+}
+
+/**
+ * Resolves the effective mode as the engine does: the rule mode, then the
+ * global DPI mode, then learn; anything but "enforce" never enforces.
+ */
 export function formatICSMode(
-  ruleMode: ICSMode | undefined,
-  globalMode: ICSMode | undefined,
+  ruleMode: string | undefined,
+  globalMode: string | undefined,
 ): { label: string; effectiveMode: ICSMode; inherited: boolean } {
-  const effectiveMode = ruleMode ?? globalMode ?? "learn";
-  const inherited = ruleMode === undefined;
+  const rule = normalizeMode(ruleMode);
+  const inherited = rule === "";
+  const resolved = inherited ? normalizeMode(globalMode) : rule;
+  const effectiveMode: ICSMode = resolved === "enforce" ? "enforce" : "learn";
   const effectiveLabel = effectiveMode === "learn" ? "learning" : "enforce";
   return {
     label: inherited ? `inherit (${effectiveLabel})` : effectiveLabel,
@@ -137,37 +149,6 @@ export function protoMeta(name: string): ProtocolMeta {
       addrHelp: "Protocol-specific address filter.",
     }
   );
-}
-
-export function buildICSRulePreview(
-  rule: { id: string },
-  enabled: boolean,
-  protocol: string,
-  functionCodes: string,
-  addresses: string,
-  readOnly: boolean,
-  writeOnly: boolean,
-  mode: ICSModeSelection,
-): Record<string, unknown> {
-  return {
-    id: rule.id,
-    ics: enabled
-      ? {
-          protocol,
-          functionCode: functionCodes
-            .split(",")
-            .map((v) => Number(v.trim()))
-            .filter((n) => Number.isFinite(n) && n >= 0),
-          addresses: addresses
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-          readOnly,
-          writeOnly,
-          ...(mode ? { mode } : {}),
-        }
-      : undefined,
-  };
 }
 
 export function buildICSRuleUpdate(

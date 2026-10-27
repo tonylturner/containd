@@ -1,15 +1,10 @@
 # Code Boundaries
 
-This page defines the current ownership boundaries for the largest contributor-facing files in `containd`.
+This page defines ownership boundaries for contributor-facing files in `containd`.
 
-The goal is simple: keep facade files small, keep domain logic near its route or feature, and stop regressing into another `3000+` line catch-all file.
-
-Current structural baseline:
-
-- No tracked `.go`, `.ts`, or `.tsx` source file is over the audit threshold of `1200` lines.
-- New work should preserve that state. Crossing the threshold again is treated as a structural regression, not normal growth.
-- Use `scripts/complexity-report.sh` during larger refactors to catch hotspots before they grow back into facade-style dumping grounds.
-- The current complexity report is also clean at the `>20` threshold. Treat new over-threshold functions as a regression signal, not just a cleanup suggestion.
+Keep facade files small and domain logic near its route or feature. Use
+`scripts/complexity-report.sh` during larger refactors to identify functions
+that need decomposition.
 
 ## General Rules
 
@@ -63,6 +58,13 @@ Primary auth facade:
 
 Rule:
 - new auth branches should become small helper functions by mode or remediation policy, not more nested conditionals inside `authMiddleware`
+
+## Engine Control API Boundaries
+
+The engine's internal HTTP routes are registered in `pkg/app/engine/engine.go`.
+Management-plane callers use the engine client in `api/engine/`. Keep engine control
+handlers with the engine application, separate from the public management
+API in `api/http/`.
 
 ## Config Model Boundaries
 
@@ -129,15 +131,39 @@ Domain files currently include:
 - `ui/lib/api-config.ts`
 - `ui/lib/api-services.ts`
 - `ui/lib/api-console.ts`
-- `api-network.ts`
-- `api-policy.ts`
-- `api-dataplane.ts`
+- `ui/lib/api-network.ts`
+- `ui/lib/api-policy.ts`
+- `ui/lib/api-firewall.ts` (rules, actions, warnings, counters, identity bindings)
+- `ui/lib/api-dataplane.ts`
+- `ui/lib/api-health.ts`, `ui/lib/api-service-status.ts`
+- `ui/lib/api-ics-coverage.ts`, `ui/lib/api-iec104.ts`, `ui/lib/api-iec-pressure.ts`, `ui/lib/api-inventory.ts`
+- `ui/lib/api-pcap.ts`
+- `ui/lib/api-normalize.ts` (response normalizers)
+
+Shared hooks live in `ui/hooks/` (`useHealth.ts` is the one health store that
+the shell banner and pages subscribe to; `useSaveAction.ts` runs one save at
+a time and owns pending state, toasts and the state line for settings pages).
 
 Placement rules:
 - session/base URL/auth state only in `api-core.ts`
 - generic fetch/JSON/result helpers only in `api-request.ts`
 - endpoint families in domain files named by feature area
 - keep `api.ts` as the facade and re-export surface, not the place where new feature families get implemented
+
+## Firewall Page Boundaries
+
+Primary page:
+- `ui/app/firewall/page.tsx`
+
+Supporting modules in `ui/app/firewall/`: `firewall-rule-table.tsx`,
+`firewall-rule-forms.tsx`, `firewall-rule-policy.ts` and
+`firewall-rule-policy-fields.tsx`, `firewall-ics-fields.tsx`,
+`firewall-rule-counters.tsx`, `firewall-rule-warnings.tsx`,
+`firewall-ruleset-status.tsx`, `firewall-dpi-config.tsx`,
+`firewall-dpi-modals.tsx` and `firewall-utils.ts`.
+
+Rule:
+- the page composes; each rule-editing concern lives in its own sibling
 
 ## Shell Boundaries
 
@@ -235,18 +261,15 @@ Before merging a new feature, ask:
 
 - Does this code belong in a facade or in a domain file?
 - Is this adding another unrelated responsibility to a large file?
-- Should this become a sibling module now instead of after the next three features?
+- Would a sibling module give this code a clearer responsibility?
 - Is the new location obvious to the next contributor?
 
-If the answer to any of those is "no", split first and then add the feature.
+If the placement is unclear or adds unrelated responsibilities, split first
+and then add the feature.
 
 For ongoing maintenance, pair this document with:
 - `scripts/complexity-report.sh` for complexity drift
 - `scripts/dev-verify.sh --with-semgrep` for local structural/safety verification
 - `scripts/coverage-report.sh` for coverage drift in refactored packages
-- the full stabilization pass used on this branch when a large refactor lands:
-  - `bash scripts/dev-verify.sh --with-semgrep`
-  - `bash scripts/dev-verify.sh --with-coverage`
-  - `bash scripts/smoketest`
-  - `bash scripts/perf-baseline.sh --bench-time 10x`
-  - `mkdocs build -f docs/mkdocs.yml`
+- [Testing and Coverage](testing.md) for test selection and smoke workflows
+- [Performance Baseline](performance.md) for dataplane benchmarks and profiles

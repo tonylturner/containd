@@ -188,7 +188,7 @@ func (m *VPNManager) Status() map[string]any {
 		"openvpn_enabled":     m.lastCfg.OpenVPN.Enabled,
 		"openvpn_mode":        strings.TrimSpace(m.lastCfg.OpenVPN.Mode),
 		"wg_peers":            len(m.lastCfg.WireGuard.Peers),
-		"last_render":         m.lastRender.Format(time.RFC3339Nano),
+		"last_render":         formatMaybe(m.lastRender),
 		"last_error":          m.lastError,
 		"openvpn_installed":   m.OpenVPNPath != "",
 		"openvpn_binary":      m.OpenVPNPath,

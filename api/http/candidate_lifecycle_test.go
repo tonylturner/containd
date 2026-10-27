@@ -84,7 +84,7 @@ func TestRunningExportsAndDiffAuthority(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &diff); err != nil || !reflect.DeepEqual(diff.Running, diff.Candidate) {
 		t.Fatalf("seed looks pending: %s %v", rec.Body, err)
 	}
-	if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+	if err := store.MutateCandidateIDS(ctx, func(cfg *config.Config) error {
 		cfg.System.Hostname = "staged"
 		cfg.IDS.Rules = config.DefaultIDSConfig().Rules[1:2]
 		return nil

@@ -8,7 +8,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/coverage"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
@@ -23,6 +25,13 @@ type PreviewRuleResponse struct {
 	SampleMatches []events.Event    `json:"sample_matches"`
 	TimeRange     *PreviewTimeRange `json:"time_range"`
 	TotalEvents   int               `json:"total_events"`
+	// Warnings reports a candidate that matches nothing under the running
+	// zone interfaces or identity bindings, which explains its zero matches;
+	// omitted when there are none.
+	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
+	// ICSCoverage is the candidate's coverage under the running settings
+	// and runtime state; omitted for a rule without an ICS protocol.
+	ICSCoverage *coverage.Rule `json:"icsCoverage,omitempty"`
 }
 
 type PreviewTimeRange struct {
@@ -32,8 +41,11 @@ type PreviewTimeRange struct {
 
 // PreviewRule tests a candidate in isolation, not against preceding rules or
 // default actions. It does not apply rules, log decisions or enforce verdicts.
+// A schedule is evaluated at each event's time. Identities are those the
+// running configuration binds to each event's opener now, not at the time
+// of the event.
 func (e *Engine) PreviewRule(entry rules.Entry) PreviewRuleResponse {
-	return e.previewRule(entry, resolveZonesForFlow)
+	return e.previewRule(entry, e.zones.resolve)
 }
 
 func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRuleResponse {
@@ -44,7 +56,16 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 	evs := e.eventStore.ListTelemetry(5000)
 	result.TotalEvents = len(evs)
 	snap := e.ruleSnap.Load()
-	evaluator := rules.NewEvaluator(&rules.Snapshot{Firewall: []rules.Entry{entry}})
+	candidate := &rules.Snapshot{Firewall: []rules.Entry{entry}}
+	if snap != nil {
+		candidate.IdentityBindings = snap.IdentityBindings
+		candidate.ZoneIfaces = snap.ZoneIfaces
+	}
+	result.Warnings = (&enforce.Compiler{QueueID: e.enforcedQueueID()}).RuleWarnings(candidate)
+	if cov := e.coverageOf(candidate); len(cov) == 1 {
+		result.ICSCoverage = &cov[0]
+	}
+	evaluator := rules.NewEvaluator(candidate)
 	for _, ev := range evs {
 		if result.TimeRange == nil {
 			result.TimeRange = &PreviewTimeRange{Start: ev.Timestamp, End: ev.Timestamp}
@@ -64,7 +85,7 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 		if entry.ICS.Protocol == rules.ProtocolIEC104 {
 			_, matched = evaluator.EvaluateIEC104(ctx)
 		} else {
-			_, matched = evaluator.EvaluateMatch(ctx)
+			matched = evaluator.AnyMatch(ctx)
 		}
 		if matched == nil {
 			continue
@@ -75,6 +96,17 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 		}
 	}
 	return result
+}
+
+// enforcedQueueID is the NFQUEUE group the running compiler steers ICS rules
+// to; 0 when enforcement is disabled or no queue is configured.
+func (e *Engine) enforcedQueueID() int {
+	e.flowMu.Lock()
+	defer e.flowMu.Unlock()
+	if e.compiler == nil {
+		return 0
+	}
+	return e.compiler.QueueID
 }
 
 func previewEventContext(snap *rules.Snapshot, entry rules.Entry, ev events.Event, resolve zoneResolver) (rules.EvalContext, bool) {
@@ -115,7 +147,7 @@ func previewEventContext(snap *rules.Snapshot, entry rules.Entry, ev events.Even
 	if entry.ICS.Protocol == "" {
 		srcZone, dstZone := resolve(snap, src, dst)
 		return rules.EvalContext{SrcIP: src, DstIP: dst, SrcZone: srcZone, DstZone: dstZone,
-			Proto: ev.Transport, Port: strconv.Itoa(int(ev.DstPort)), Now: ev.Timestamp}, true
+			Proto: ev.Transport, Port: strconv.Itoa(int(ev.DstPort)), Identities: snap.IdentitiesOf(src), Now: ev.Timestamp}, true
 	}
 	// DPI events retain the directional flow.Key.Hash. Use its direction,
 	// not the message kind (unsolicited server messages can be requests).

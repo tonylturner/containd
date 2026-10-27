@@ -18,11 +18,11 @@ const paddingMap = {
 
 export function Card({ title, titleRight, children, className = "", padding = "md" }: CardProps) {
   return (
-    <section aria-label={title} className={`card-industrial rounded-sm border border-amber-500/[0.15] bg-[#0d110d] shadow-card ${paddingMap[padding]} ${className}`}>
+    <section aria-label={title} className={`card-industrial rounded-xs border bg-surface shadow-card ${paddingMap[padding]} ${className}`}>
       {title && (
-        <div className="card-label mb-3 text-[var(--text-dim)]">
+        <div className="card-label mb-3 text-(--text-dim)">
           {title}
-          {titleRight && <span className="ml-auto text-[var(--text-dim)]">{titleRight}</span>}
+          {titleRight && <span className="ml-auto text-(--text-dim)">{titleRight}</span>}
         </div>
       )}
       {children}
@@ -42,7 +42,7 @@ export function InteractiveCard({
   href?: string;
   className?: string;
 }) {
-  const cls = `card-industrial rounded-sm border border-amber-500/[0.15] bg-[#0d110d] p-4 shadow-card transition-ui hover:border-amber-500/30 cursor-pointer ${className}`;
+  const cls = `card-industrial rounded-xs border bg-surface p-4 shadow-card transition-ui cursor-pointer ${className}`;
 
   if (href) {
     return (

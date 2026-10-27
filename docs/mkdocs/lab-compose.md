@@ -14,27 +14,16 @@ Use Docker Compose to define the world of possible networks and interface attach
 
 ## Start from the Starter Compose
 
-The supported base file is `deploy/docker-compose.yml`. Copy it plus `.env.example` into a lab-specific directory and edit the `.env` values there.
+Follow [Docker Compose onboarding](docker-compose.md#quickstart) to create a
+starter directory with a generated JWT secret. Stop before first boot if you
+need to change topology. That page also covers ports, runtime variables,
+persistent-data locations, and the unauthenticated engine trust boundary.
 
-If you want the project to do that setup for you, use:
-
-```bash
-curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/bootstrap-starter.sh
-sh bootstrap-starter.sh --dir my-lab --no-start
-```
-
-That writes `docker-compose.yml`, `.env.example`, and `.env` into `my-lab/`, generates a real `CONTAIND_JWT_SECRET`, auto-adjusts conflicting default starter subnets on fresh setup, and leaves the directory ready for lab-specific edits before `docker compose up -d`.
-
-Remember that `.env` and compose defaults seed a fresh appliance. If you keep the same `./data` directory between lab runs, the persisted containd config remains authoritative until you update it in the UI/API or remove that data directory.
-
-The starter compose already does the important appliance wiring:
-
-- combined `containd all` mode
-- management plane auto-wired to the local engine
-- nftables enforcement enabled by default
-- `user: "0"` so nftables, routing, and TUN operations work across Linux, Docker Desktop, and WSL-backed labs
-- stable `wan`/`dmz`/`lan1`-`lan6` network to `eth0`-`eth7` mapping
-- Docker `internal` networks for the non-WAN zones
+The starter runs combined mode with enforcement enabled and root/capabilities
+for network operations. Logical roles map to configured subnets/IPs; Docker's
+kernel device numbering is not guaranteed. Non-WAN networks are Docker
+`internal` networks. Config-seeding variables do not replace persisted policy;
+make policy changes through the UI/API and commit.
 
 ## Customizations That Usually Belong in `.env`
 
@@ -46,11 +35,10 @@ Use `.env` when you only need to change addressing or published ports:
 - `CONTAIND_JWT_SECRET`
 - `CONTAIND_LAB_MODE` — set to `1` for workshop / classroom / single-host lab deployments. Pins the canonical credential (`containd/containd`) and disables password change so reproducible lab docs and SSH-on-`:2222` keep working across student runs. Also relaxes session lifetime defaults for instructor-paced exercises. **This is a deliberate weakening of the default-password posture, scoped to the lab boundary.** Read the [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) transparency note before enabling. Do NOT set this on any deployment whose HTTP UI or SSH port is reachable from a hostile or shared network.
 
-If you change the starter subnets, keep the auto-assign hints aligned too:
-
-- `CONTAIND_AUTO_WAN_SUBNET`
-- `CONTAIND_AUTO_DMZ_SUBNET`
-- `CONTAIND_AUTO_LAN1_SUBNET` ... `CONTAIND_AUTO_LAN6_SUBNET`
+Auto-assign uses the topology subnet variables for the eight default roles.
+Optional `CONTAIND_AUTO_<NAME>_SUBNET` overrides take precedence; leave them unset
+unless needed. With explicit subnet authority, unmatched or ambiguous roles
+stay unbound. See [interface mapping](docker-compose.md#logical-roles-and-kernel-devices).
 
 ## Customizations That Belong in `docker-compose.yml`
 
@@ -70,7 +58,10 @@ To add a new `ot-control` zone:
 2. Optionally pin its `interface_name` if your Docker Engine supports that Compose feature
 3. Add the matching top-level network definition
 4. Add matching subnet/IP variables to your `.env`
-5. Add the matching `CONTAIND_AUTO_*_SUBNET` hint if you want auto-assign to stay deterministic
+5. In containd, create the `ot-control` zone and a physical logical interface
+6. Discover the new kernel device by its IP/subnet, bind the logical interface to
+   that device in Interfaces (or `set interface bind <logical> <device>`), assign
+   the zone, and commit
 
 Example service/network snippet:
 
@@ -92,7 +83,10 @@ networks:
         - subnet: ${CONTAIND_OT_CONTROL_SUBNET:-192.168.248.0/24}
 ```
 
-If you need older Docker Engine compatibility, rely on the subnet-based auto-assign hints and omit `interface_name`.
+Docker network creation does not create a containd zone or logical interface.
+Auto-assign only handles `wan`, `dmz`, and `lan1`–`lan6`; an arbitrary ninth
+`CONTAIND_AUTO_*_SUBNET` variable has no effect. Kernel names can change after
+network reattachment: verify custom bindings again after topology changes.
 
 ## Example: Add Student Workloads
 
@@ -115,7 +109,24 @@ services:
         ipv4_address: 192.168.242.20
 ```
 
-With that layout, traffic between `historian` and `plc` only crosses zones through containd.
+These images are illustrative, not runnable workload definitions. Network
+attachment alone does not install the routes needed for cross-zone traffic.
+Each workload needs `iproute2`, permission to change routes (`NET_ADMIN` during
+setup), and a route via containd's address on its own network. For example, run
+inside the respective workload network namespaces after attachment:
+
+```sh
+# historian (DMZ)
+ip route replace 192.168.242.0/24 via 192.168.241.2
+# plc (LAN1): return route
+ip route replace 192.168.241.0/24 via 192.168.242.2
+```
+
+Use the actual addresses if you changed the subnets. Ensure containd has both
+interfaces bound, forwarding/enforcement configured, and an allow rule for the
+intended flow. Check both directions; do not rely on Docker's bridge gateway
+for routed segmentation. With these prerequisites and no alternate path,
+cross-zone traffic traverses containd.
 
 ## Optional Management Network
 

@@ -1,9 +1,50 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 containd Authors
+
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
+	"io"
+	"net"
 	"testing"
+	"time"
 )
+
+func TestDataBeforeStart(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	wire := make(chan []byte, 1)
+	serverErr := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(time.Second))
+		data, err := io.ReadAll(conn)
+		wire <- data
+		serverErr <- err
+	}()
+	r := run(options{addr: listener.Addr().String(), scenario: "data-before-start", ca: 1, hold: 20 * time.Millisecond})
+	if r.fatal != nil {
+		t.Fatal(r.fatal)
+	}
+	// Exactly one valid GI, with initial sequence numbers and no U-frame.
+	want := []byte{0x68, 14, 0, 0, 0, 0, 100, 1, 6, 0, 1, 0, 0, 0, 0, 20}
+	if got := <-wire; !bytes.Equal(got, want) || r.sent != len(want) {
+		t.Fatalf("sent %d bytes, wire % x, want % x", r.sent, got, want)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestDoubleCommandLayout(t *testing.T) {
 	// SELECT, DCS=2 (close), CA 1, IOA 2001.

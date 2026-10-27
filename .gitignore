@@ -54,7 +54,7 @@ ui/public/docs/
 # Node/Next.js
 node_modules/
 ui/.next/
-ui/node_modules/
+ui/node_modules
 ui/.turbo/
 ui/.vercel/
 ui/out/

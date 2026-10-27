@@ -134,7 +134,34 @@ func blockFlowHandler(dp *engine.Engine) http.HandlerFunc {
 	}
 }
 
-func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager) http.HandlerFunc {
+// clearBlocksHandler removes every temporary block and connection revocation.
+func clearBlocksHandler(dp *engine.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if dp == nil {
+			http.Error(w, "engine unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := dp.ClearBlocks(r.Context()); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
+	}
+}
+
+// avApplyTimeout bounds how long a services apply waits for the scanner
+// backend to become ready; it stays within management's request timeout.
+const avApplyTimeout = 3 * time.Second
+
+type avConfigApplier interface {
+	Apply(ctx context.Context, cfg config.AVConfig) error
+}
+
+func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager, av avConfigApplier) http.HandlerFunc {
 	var current config.ServicesConfig
 	var currentMu sync.Mutex
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -167,12 +194,13 @@ func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownersh
 			}
 			currentMu.Lock()
 			defer currentMu.Unlock()
-			if dpEngine != nil && dpEngine.AVSink() != nil {
-				if adapter, ok := dpEngine.AVSink().(*avSinkAdapter); ok && adapter != nil {
-					avCtx, cancelAV := context.WithTimeout(r.Context(), 3*time.Second)
-					_ = adapter.ApplyAVConfig(avCtx, svc.AV)
-					cancelAV()
-				}
+			// AV applies independently of the other services; a backend
+			// that is not ready is reported after they are applied.
+			var avErr error
+			if av != nil {
+				avCtx, cancelAV := context.WithTimeout(r.Context(), avApplyTimeout)
+				avErr = av.Apply(avCtx, svc.AV)
+				cancelAV()
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 			defer cancel()
@@ -229,6 +257,10 @@ func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownersh
 				}
 			}
 			current = svc
+			if avErr != nil {
+				http.Error(w, "AV service apply failed: "+avErr.Error(), http.StatusServiceUnavailable)
+				return
+			}
 			writeJSON(w, map[string]any{"status": "applied"})
 			return
 		default:
@@ -256,9 +288,9 @@ func dhcpLeasesHandler(mgr *dhcpd.Manager) http.HandlerFunc {
 	}
 }
 
-func conntrackHandler() http.HandlerFunc {
+func conntrackHandler(dp *engine.Engine) http.HandlerFunc {
 	type resp struct {
-		Entries []conntrack.Entry `json:"entries"`
+		Entries []engine.TaggedConnection `json:"entries"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -269,26 +301,31 @@ func conntrackHandler() http.HandlerFunc {
 					limit = v
 				}
 			}
-			entries, err := conntrack.List(limit)
+			entries, err := conntrack.List(r.Context(), limit)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
-			writeJSON(w, resp{Entries: entries})
+			writeJSON(w, resp{Entries: dp.TagConnections(entries)})
 			return
 		case http.MethodPost:
-			var req conntrack.DeleteRequest
+			var req conntrack.KillRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, "invalid JSON", http.StatusBadRequest)
 				return
 			}
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-			defer cancel()
-			if err := conntrack.Delete(ctx, req); err != nil {
+			if err := req.Validate(); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			writeJSON(w, map[string]any{"status": "deleted"})
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+			result, err := conntrack.Kill(ctx, req, dp.RevokeConnections)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			writeJSON(w, result)
 			return
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

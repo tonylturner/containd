@@ -9,8 +9,7 @@ usage() {
 Usage: bash scripts/semgrep-verify.sh
 
 Runs Semgrep with the curated containd baseline. The baseline currently allows
-two appliance-specific findings:
-  - internal loopback/self-signed HTTPS for the in-app CLI transport
+one appliance-specific finding:
   - host-preserving HTTP->HTTPS appliance upgrade redirects
 
 Any additional finding fails the script.
@@ -30,17 +29,13 @@ fi
 
 allowed_findings='[
   {
-    "check_id": "problem-based-packs.insecure-transport.go-stdlib.bypass-tls-verification.bypass-tls-verification",
-    "path": "api/http/cli_handlers.go"
-  },
-  {
     "check_id": "go.lang.security.injection.open-redirect.open-redirect",
     "path": "pkg/app/mgmt/tls_support.go"
   }
 ]'
 
-json_out="$(mktemp "${TMPDIR:-/tmp}/containd-semgrep.XXXXXX.json")"
-log_out="$(mktemp "${TMPDIR:-/tmp}/containd-semgrep.XXXXXX.log")"
+json_out="$(mktemp "${TMPDIR:-/tmp}/containd-semgrep.json.XXXXXX")"
+log_out="$(mktemp "${TMPDIR:-/tmp}/containd-semgrep.log.XXXXXX")"
 cleanup() {
     rm -f "$json_out" "$log_out"
 }

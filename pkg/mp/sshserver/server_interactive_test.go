@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -59,7 +60,7 @@ func newSSHTestHTTPClient() *sshTestHTTPClient {
 	cfg.System.Mgmt.ListenAddr = ":8080"
 	cfg.System.SSH.ListenAddr = ":2222"
 	cfg.System.SSH.AuthorizedKeysDir = "/data/ssh"
-	cfg.System.SSH.AllowPassword = true
+	cfg.System.SSH.AllowPassword = new(true)
 	cfg.Interfaces = []config.Interface{
 		{Name: "wan", Device: "eth0", Zone: "wan", AddressMode: "dhcp"},
 		{Name: "lan1", Device: "eth1", Zone: "lan", AddressMode: "static", Addresses: []string{"192.0.2.2/24"}},
@@ -172,6 +173,7 @@ func newTestSSHServer(t *testing.T) (*Server, *users.SQLiteStore, *recordingAudi
 	srv, err := New(Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       filepath.Join(tmp, "host_key"),
 		AuthorizedKeysDir: filepath.Join(tmp, "keys"),
 		JWTSecret:         []byte(sshTestValue("jwt-signing")),
@@ -266,7 +268,7 @@ func TestInteractiveHelpers(t *testing.T) {
 		t.Fatalf("execWithOutput err=%v out=%q rw=%q", err, out.String(), rw.String())
 	}
 
-	session.writeAudit("ssh.test", "target")
+	session.writeAudit(audit.Record{Action: "ssh.test", Target: "target"})
 	if len(auditStore.records) != 1 || auditStore.records[0].Action != "ssh.test" {
 		t.Fatalf("unexpected audit records: %#v", auditStore.records)
 	}
@@ -312,6 +314,52 @@ func TestInteractiveMenus(t *testing.T) {
 	}
 	if !strings.Contains(rw.String(), "Unknown option.") {
 		t.Fatalf("expected diagnostics unknown output, got %q", rw.String())
+	}
+}
+
+type failedResetHTTPClient struct {
+	err error
+}
+
+func (c failedResetHTTPClient) Do(*http.Request) (*http.Response, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return jsonResponse(http.StatusInternalServerError, map[string]any{
+		"error":     "configuration apply failed",
+		"detail":    "services: unavailable",
+		"restored":  true,
+		"reapplied": true,
+	}), nil
+}
+
+func TestFactoryResetMenuFailureKeepsMenuOpen(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "apply failure", want: "configuration apply failed"},
+		{name: "transport failure", err: errors.New("management unavailable"), want: "management unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, _ := newTestSSHServer(t)
+			reg := cli.NewRegistry(nil, &cli.API{
+				BaseURL: "http://127.0.0.1:8080",
+				Client:  failedResetHTTPClient{err: tc.err},
+			})
+			session, rw := newTestSession(srv, reg, "NUCLEAR\n")
+			if !session.handleMainMenuChoice("10") {
+				t.Fatal("failed reset requested logout")
+			}
+			got := rw.String()
+			if !strings.Contains(got, tc.want) || !strings.Contains(got, "Factory reset failed.") {
+				t.Fatalf("missing reset error: %q", got)
+			}
+			if strings.Contains(got, "Factory reset complete.") || strings.Contains(got, "You will be logged out.") {
+				t.Fatalf("failed reset reported completion: %q", got)
+			}
+		})
 	}
 }
 
@@ -365,6 +413,7 @@ func TestInteractiveConfigurationMenus(t *testing.T) {
 }
 
 func TestInteractiveWizardAndPasswordFlows(t *testing.T) {
+	t.Setenv("CONTAIND_LAB_MODE", "")
 	srv, userStore, auditStore := newTestSSHServer(t)
 	httpClient := newSSHTestHTTPClient()
 	api := &cli.API{BaseURL: "http://127.0.0.1:8080", Client: httpClient}
@@ -380,7 +429,7 @@ func TestInteractiveWizardAndPasswordFlows(t *testing.T) {
 	}
 
 	resetPassword := sshTestValue("wizard-reset")
-	resetSession, _ := newTestSession(srv, reg, resetPassword+"\n")
+	resetSession, _ := newTestSession(srv, reg, "containd\n"+resetPassword+"\n"+resetPassword+"\n")
 	resetSession.menuResetPassword()
 	admin, err := userStore.GetByUsername(context.Background(), "containd")
 	if err != nil || admin == nil {
@@ -446,5 +495,66 @@ func TestInteractiveWizardAndPasswordFlows(t *testing.T) {
 
 	if len(auditStore.records) == 0 {
 		t.Fatal("expected password audit records")
+	}
+}
+
+// A failed write still permits reads, matching a store that cannot persist a password.
+type passwordWriteFailure struct{ users.Store }
+
+func (s passwordWriteFailure) SetPassword(context.Context, string, string) error {
+	return io.ErrClosedPipe
+}
+
+func TestWizardPasswordFailureStops(t *testing.T) {
+	t.Setenv("CONTAIND_LAB_MODE", "")
+	for _, failure := range []string{"weak", "store"} {
+		t.Run(failure, func(t *testing.T) {
+			srv, store, audits := newTestSSHServer(t)
+			before, err := store.GetByUsername(context.Background(), "containd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			password := "weak"
+			if failure == "store" {
+				password = sshTestValue("write-failure")
+				srv.opts.UserStore = passwordWriteFailure{store}
+			}
+			session, output := newTestSession(srv, cli.NewRegistry(nil, nil), "containd\n"+password+"\n"+password+"\n")
+			if session.wizardPromptPassword() {
+				t.Fatal("wizard continued after failed password write")
+			}
+			if !strings.Contains(output.String(), "error:") || strings.Contains(output.String(), "password updated") {
+				t.Fatal(output.String())
+			}
+			if len(audits.records) != 0 {
+				t.Fatalf("unexpected success audit: %+v", audits.records)
+			}
+			after, err := store.GetByUsername(context.Background(), "containd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.PasswordHash != after.PasswordHash {
+				t.Fatal("failed write changed credentials")
+			}
+		})
+	}
+}
+
+func TestWizardPasswordSuccessAuthenticates(t *testing.T) {
+	t.Setenv("CONTAIND_LAB_MODE", "")
+	srv, _, audits := newTestSSHServer(t)
+	password := sshTestValue("wizard-success")
+	session, output := newTestSession(srv, cli.NewRegistry(nil, nil), "containd\n"+password+"\n"+password+"\n")
+	if !session.wizardPromptPassword() || !strings.Contains(output.String(), "password updated") {
+		t.Fatal(output.String())
+	}
+	if len(audits.records) != 1 || audits.records[0].Action != "auth.password.change" {
+		t.Fatalf("audit: %+v", audits.records)
+	}
+	if _, err := srv.passwordCallback()(testConnMetadata{user: "containd"}, []byte(password)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.passwordCallback()(testConnMetadata{user: "containd"}, []byte("containd")); err == nil {
+		t.Fatal("old password accepted")
 	}
 }

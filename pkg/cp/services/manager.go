@@ -6,13 +6,14 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
+	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
@@ -34,21 +35,11 @@ type Manager struct {
 	Proxy  *ProxyManager
 	DHCP   *DHCPManager
 	VPN    *VPNManager
-	AV     *AVManager
 
 	telemetry *dpevents.Store
 	sparkMu   sync.Mutex
-	spark     map[string][]int // primary metric per service (events/traffic)
-	counts    map[string]int   // primary totals
-	buckets   map[string][]sparkBucket
-	errSpark  map[string][]int // error metric per service
-	errCounts map[string]int
-	errBks    map[string][]sparkBucket
-}
-
-type sparkBucket struct {
-	minute int64
-	count  int
+	primary   map[string]*meter // primary metric per service (events/traffic)
+	errs      map[string]*meter // error metric per service
 }
 
 func NewManager(opts ManagerOptions) *Manager {
@@ -73,17 +64,12 @@ func NewManager(opts ManagerOptions) *Manager {
 		}),
 		DHCP: NewDHCPManager(opts.BaseDir),
 		VPN:  NewVPNManager(opts.BaseDir),
-		AV:   NewAVManager(),
 	}
 	// Reserve the high bit for management-plane service events to avoid ID collisions
 	// with dataplane telemetry IDs.
 	m.telemetry = dpevents.NewStoreWithIDBase(2048, 1<<63)
-	m.spark = make(map[string][]int)
-	m.counts = make(map[string]int)
-	m.buckets = make(map[string][]sparkBucket)
-	m.errSpark = make(map[string][]int)
-	m.errCounts = make(map[string]int)
-	m.errBks = make(map[string][]sparkBucket)
+	m.primary = make(map[string]*meter)
+	m.errs = make(map[string]*meter)
 	if m.Syslog != nil {
 		m.Syslog.OnEvent = m.recordServiceEvent
 	}
@@ -99,17 +85,10 @@ func NewManager(opts ManagerOptions) *Manager {
 	if m.NTP != nil {
 		m.NTP.OnEvent = m.recordServiceEvent
 	}
-	if m.AV != nil {
-		m.AV.OnEvent = m.recordServiceEvent
-	}
 	if m.DHCP != nil {
-		if setter, ok := any(m.DHCP).(interface {
-			SetMetricEmitter(func(service string, delta int))
-		}); ok {
-			setter.SetMetricEmitter(func(service string, delta int) {
-				m.IncrementServiceMetric(service, delta)
-			})
-		}
+		m.DHCP.SetMetricEmitter(func(delta int, failure bool) {
+			m.incrementServiceMetric("dhcp", delta, failure)
+		})
 	}
 	return m
 }
@@ -175,31 +154,16 @@ func (m *Manager) incrementServiceMetric(service string, delta int, isErr bool) 
 	}
 	m.sparkMu.Lock()
 	defer m.sparkMu.Unlock()
-	targetCounts := m.counts
-	targetBks := m.buckets
-	targetSpark := m.spark
+	target := m.primary
 	if isErr {
-		targetCounts = m.errCounts
-		targetBks = m.errBks
-		targetSpark = m.errSpark
+		target = m.errs
 	}
-	targetCounts[service] += delta
-	minute := time.Now().UTC().Unix() / 60
-	bks := targetBks[service]
-	if len(bks) > 0 && bks[len(bks)-1].minute == minute {
-		bks[len(bks)-1].count += delta
-	} else {
-		bks = append(bks, sparkBucket{minute: minute, count: delta})
+	mt := target[service]
+	if mt == nil {
+		mt = &meter{}
+		target[service] = mt
 	}
-	if len(bks) > 7 {
-		bks = bks[len(bks)-7:]
-	}
-	targetBks[service] = bks
-	series := make([]int, len(bks))
-	for i, b := range bks {
-		series[i] = b.count
-	}
-	targetSpark[service] = series
+	mt.add(time.Now(), delta)
 }
 
 // ListTelemetryEvents returns most-recent-first service/system events recorded by the manager.
@@ -271,14 +235,6 @@ func (m *Manager) Validate(ctx context.Context, cfg config.ServicesConfig) error
 	return nil
 }
 
-// StartAVWorker starts the AV scan worker in the background.
-func (m *Manager) StartAVWorker(ctx context.Context) {
-	if m == nil || m.AV == nil {
-		return
-	}
-	m.AV.StartWorker(ctx)
-}
-
 // Apply updates in-memory configs and renders service config files.
 func (m *Manager) Apply(ctx context.Context, cfg config.ServicesConfig) error {
 	var errs []error
@@ -305,9 +261,6 @@ func (m *Manager) Apply(ctx context.Context, cfg config.ServicesConfig) error {
 	if m.VPN != nil {
 		apply(func() error { return m.VPN.Apply(ctx, cfg.VPN) })
 	}
-	if m.AV != nil {
-		apply(func() error { return m.AV.Apply(ctx, cfg.AV) })
-	}
 	m.updateServiceGauges(cfg)
 	if len(errs) > 0 {
 		return errors.Join(errs...)
@@ -329,15 +282,6 @@ func (m *Manager) updateServiceGauges(cfg config.ServicesConfig) {
 	set("proxy", cfg.Proxy.Forward.Enabled || cfg.Proxy.Reverse.Enabled)
 	set("dhcp", cfg.DHCP.Enabled)
 	set("vpn", cfg.VPN.WireGuard.Enabled || cfg.VPN.OpenVPN.Enabled)
-	set("av", cfg.AV.Enabled)
-}
-
-// TriggerAVUpdate runs a freshclam update once (best-effort) when available.
-func (m *Manager) TriggerAVUpdate(ctx context.Context) error {
-	if m == nil || m.AV == nil {
-		return fmt.Errorf("av manager unavailable")
-	}
-	return m.AV.RunFreshclamNow(ctx)
 }
 
 // Status returns a basic status bundle for UI/CLI.
@@ -371,67 +315,19 @@ func (m *Manager) Status() any {
 	if m.VPN != nil {
 		out["vpn"] = m.decorateStatus("vpn", m.VPN.Status())
 	}
-	if m.AV != nil {
-		out["av"] = m.decorateStatus("av", m.AV.Status())
-	}
 	return out
 }
 
 func (m *Manager) decorateStatus(svc string, base any) any {
 	m.sparkMu.Lock()
-	spark := append([]int(nil), m.spark[svc]...)
-	count := m.counts[svc]
-	bks := append([]sparkBucket(nil), m.buckets[svc]...)
-	errSpark := append([]int(nil), m.errSpark[svc]...)
-	errCount := m.errCounts[svc]
-	errBks := append([]sparkBucket(nil), m.errBks[svc]...)
+	metrics := meterStatus(m.primary[svc], m.errs[svc])
 	m.sparkMu.Unlock()
-	rate := 0.0
-	if len(bks) > 0 {
-		total := 0
-		first := bks[0].minute
-		last := bks[len(bks)-1].minute
-		for _, b := range bks {
-			total += b.count
-		}
-		minutes := float64((last - first) + 1)
-		if minutes <= 0 {
-			minutes = 1
-		}
-		rate = float64(total) / minutes
-	}
-	errRate := 0.0
-	if len(errBks) > 0 {
-		total := 0
-		first := errBks[0].minute
-		last := errBks[len(errBks)-1].minute
-		for _, b := range errBks {
-			total += b.count
-		}
-		minutes := float64((last - first) + 1)
-		if minutes <= 0 {
-			minutes = 1
-		}
-		errRate = float64(total) / minutes
-	}
 	if mp, ok := base.(map[string]any); ok {
-		mp["sparkline"] = spark
-		mp["count"] = count
-		mp["rate_per_min"] = rate
-		mp["errors_sparkline"] = errSpark
-		mp["errors_count"] = errCount
-		mp["errors_rate_per_min"] = errRate
+		maps.Copy(mp, metrics)
 		return mp
 	}
-	return map[string]any{
-		"status":              base,
-		"sparkline":           spark,
-		"count":               count,
-		"rate_per_min":        rate,
-		"errors_sparkline":    errSpark,
-		"errors_count":        errCount,
-		"errors_rate_per_min": errRate,
-	}
+	metrics["status"] = base
+	return metrics
 }
 
 func canonicalServicesFromKind(kind string) ([]string, bool) {
@@ -453,27 +349,7 @@ func canonicalServicesFromKind(kind string) ([]string, bool) {
 func (m *Manager) hasMetrics(service string) bool {
 	m.sparkMu.Lock()
 	defer m.sparkMu.Unlock()
-	if _, ok := m.counts[service]; ok {
-		return true
-	}
-	if _, ok := m.errCounts[service]; ok {
-		return true
-	}
-	if s, ok := m.spark[service]; ok && len(s) > 0 {
-		return true
-	}
-	if s, ok := m.errSpark[service]; ok && len(s) > 0 {
-		return true
-	}
-	return false
-}
-
-// CustomDefsPath proxies to AV manager for API handlers.
-func (m *Manager) CustomDefsPath() string {
-	if m == nil || m.AV == nil {
-		return ""
-	}
-	return m.AV.CustomDefsPath()
+	return m.primary[service].active() || m.errs[service].active()
 }
 
 // SetEventLister provides a function that returns recent events (newest-first) for syslog forwarding.
@@ -482,4 +358,12 @@ func (m *Manager) SetEventLister(fn func(limit int) []dpevents.Event) {
 		return
 	}
 	m.Syslog.SetEventLister(fn)
+}
+
+// SetAuditLog makes the syslog forwarders also deliver audit records.
+func (m *Manager) SetAuditLog(log audit.ForwardLog) {
+	if m == nil || m.Syslog == nil {
+		return
+	}
+	m.Syslog.SetAuditLog(log)
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { IEC104Inventory } from "./IEC104Inventory";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useEffect, useState } from "react";
@@ -12,6 +13,7 @@ import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
+import { zoneLabel, zoneName } from "../../lib/zones";
 
 const criticalityVariant = (c: string) =>
   c === "CRITICAL" ? "error" as const
@@ -21,6 +23,7 @@ const criticalityVariant = (c: string) =>
 
 export default function AssetsPage() {
   const toast = useToast();
+  const [inventoryRefresh, setInventoryRefresh] = useState(0);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -35,9 +38,8 @@ export default function AssetsPage() {
   const [ips, setIps] = useState("");
   const [criticality, setCriticality] = useState("HIGH");
 
-  const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
-
   async function refresh() {
+    setInventoryRefresh((key) => key + 1);
     const [a, z] = await Promise.all([api.listAssets(), api.listZones()]);
     setAssets(a ?? []);
     setZones(z ?? []);
@@ -107,14 +109,14 @@ export default function AssetsPage() {
   }
 
   return (
-    <Shell title="Assets" actions={<button onClick={refresh} className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui">Refresh</button>}>
+    <Shell title="Assets" actions={<button onClick={refresh} className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui">Refresh</button>}>
       {!isAdmin() && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
@@ -125,24 +127,24 @@ export default function AssetsPage() {
             value={id}
             onChange={(e) => setId(e.target.value)}
             placeholder="id (e.g. plc-1)"
-            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="name"
-            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
           <input
             value={alias}
             onChange={(e) => setAlias(e.target.value)}
             placeholder="alias (optional)"
-            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
           <select
             value={type}
             onChange={(e) => setType(e.target.value)}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
             {["PLC", "HMI", "SIS", "RTU", "HISTORIAN", "EWS", "GATEWAY", "LAPTOP", "OTHER"].map((t) => (
               <option key={t} value={t}>
@@ -153,7 +155,7 @@ export default function AssetsPage() {
           <select
             value={zone}
             onChange={(e) => setZone(e.target.value)}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
             <option value="">Zone (optional)</option>
             {zones.map((z) => (
@@ -166,12 +168,12 @@ export default function AssetsPage() {
             value={ips}
             onChange={(e) => setIps(e.target.value)}
             placeholder="IPs (csv)"
-            className="input-industrial md:col-span-2 transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial md:col-span-2 transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
           <select
             value={criticality}
             onChange={(e) => setCriticality(e.target.value)}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
             {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((c) => (
               <option key={c} value={c}>
@@ -183,7 +185,7 @@ export default function AssetsPage() {
         <div className="mt-3 flex justify-end">
           <button
             onClick={onCreate}
-            className="rounded-sm bg-[var(--amber)] hover:brightness-110 px-4 py-2 text-sm font-medium text-white transition-ui"
+            className="rounded-xs bg-(--amber) hover:brightness-110 px-4 py-2 text-sm font-medium text-white transition-ui"
           >
             Create asset
           </button>
@@ -191,9 +193,9 @@ export default function AssetsPage() {
       </Card>
       )}
 
-      <div className="mt-6 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden shadow-card">
+      <div className="mt-6 rounded-xs border bg-(--surface) overflow-hidden shadow-card">
         <table className="w-full text-sm">
-          <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
+          <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-4 py-3">ID</th>
               <th className="px-4 py-3">Name</th>
@@ -217,17 +219,17 @@ export default function AssetsPage() {
               </tr>
             )}
             {assets.map((a) => (
-              <tr key={a.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
+              <tr key={a.id} className="border-t table-row-hover transition-ui">
+                <td className="px-4 py-3 font-mono text-xs text-(--text)">
                   {a.id}
                 </td>
-                <td className="px-4 py-3 text-[var(--text)]">{a.name}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{a.alias || "\u2014"}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{a.type || "\u2014"}</td>
-                <td className="px-4 py-3 text-[var(--text)]">
-                  {a.zone ? zoneLabel(zones.find((z) => z.name === a.zone) ?? { name: a.zone }) : "\u2014"}
+                <td className="px-4 py-3 text-(--text)">{a.name}</td>
+                <td className="px-4 py-3 text-(--text)">{a.alias || "\u2014"}</td>
+                <td className="px-4 py-3 text-(--text)">{a.type || "\u2014"}</td>
+                <td className="px-4 py-3 text-(--text)">
+                  {a.zone ? zoneName(zones, a.zone) : "\u2014"}
                 </td>
-                <td className="px-4 py-3 text-[var(--text)]">
+                <td className="px-4 py-3 text-(--text)">
                   {(a.ips ?? []).join(", ") || "\u2014"}
                 </td>
                 <td className="px-4 py-3">
@@ -242,7 +244,7 @@ export default function AssetsPage() {
                     <>
                       <button
                         onClick={() => setEditing(a)}
-                        className="mr-2 rounded-md bg-[var(--surface2)] px-2 py-1 text-xs hover:bg-amber-500/[0.12] transition-ui"
+                        className="mr-2 rounded-md bg-(--surface2) px-2 py-1 text-xs transition-ui"
                       >
                         Edit
                       </button>
@@ -268,6 +270,8 @@ export default function AssetsPage() {
           </tbody>
         </table>
       </div>
+
+      <IEC104Inventory refreshKey={inventoryRefresh} />
 
       {editing && isAdmin() && (
         <EditAssetModal
@@ -303,7 +307,6 @@ function EditAssetModal({
   );
   const [tags, setTags] = useState((asset.tags ?? []).join(", "));
   const [description, setDescription] = useState(asset.description ?? "");
-  const zoneLabel = (z: Zone): string => (z.alias ? `${z.alias} (${z.name})` : z.name);
 
   function save() {
     onSave({
@@ -326,14 +329,14 @@ function EditAssetModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
-      <div className="w-full max-w-xl rounded-sm bg-[var(--surface)] border border-amber-500/[0.15] p-5 shadow-card-lg animate-fade-in animate-slide-down">
+      <div className="w-full max-w-xl rounded-xs bg-(--surface) border p-5 shadow-card-lg animate-fade-in animate-slide-down">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-[var(--text)]">
+          <h2 className="text-lg font-semibold text-(--text)">
             Edit asset {asset.id}
           </h2>
           <button
             onClick={onClose}
-            className="rounded-md bg-[var(--surface2)] px-2 py-1 text-xs hover:bg-amber-500/[0.12] transition-ui"
+            className="rounded-md bg-(--surface2) px-2 py-1 text-xs transition-ui"
           >
             Close
           </button>
@@ -344,18 +347,18 @@ function EditAssetModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="name"
-            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
           <input
             value={alias}
             onChange={(e) => setAlias(e.target.value)}
             placeholder="alias (optional)"
-            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
           <select
             value={type}
             onChange={(e) => setType(e.target.value)}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
             {["PLC", "HMI", "SIS", "RTU", "HISTORIAN", "EWS", "GATEWAY", "LAPTOP", "OTHER"].map((t) => (
               <option key={t} value={t}>
@@ -366,7 +369,7 @@ function EditAssetModal({
           <select
             value={zone}
             onChange={(e) => setZone(e.target.value)}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
             <option value="">Zone (optional)</option>
             {zones.map((z) => (
@@ -379,12 +382,12 @@ function EditAssetModal({
             value={ips}
             onChange={(e) => setIps(e.target.value)}
             placeholder="IPs (csv)"
-            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
           <select
             value={criticality}
             onChange={(e) => setCriticality(e.target.value)}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
           >
             {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((c) => (
               <option key={c} value={c}>
@@ -396,27 +399,27 @@ function EditAssetModal({
             value={tags}
             onChange={(e) => setTags(e.target.value)}
             placeholder="tags (csv)"
-            className="input-industrial transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="description"
             rows={3}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] md:col-span-2 transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+            className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) md:col-span-2 transition-ui focus-visible:shadow-focus-ring outline-hidden"
           />
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.08] transition-ui"
+            className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Cancel
           </button>
           <button
             onClick={save}
-            className="rounded-sm bg-[var(--amber)] hover:brightness-110 px-4 py-2 text-sm font-medium text-white transition-ui"
+            className="rounded-xs bg-(--amber) hover:brightness-110 px-4 py-2 text-sm font-medium text-white transition-ui"
           >
             Save changes
           </button>

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -201,6 +202,7 @@ func TestPasswordValidation(t *testing.T) {
 }
 
 func TestSetPassword(t *testing.T) {
+	t.Setenv("CONTAIND_LAB_MODE", "")
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -213,13 +215,15 @@ func TestSetPassword(t *testing.T) {
 	}
 
 	// Valid password
-	err = s.SetPassword(ctx, u.ID, storeCredential("frank-reset"))
-	if err == nil {
-		// verify it changed
-		got, _ := s.GetByID(ctx, u.ID)
-		if got.MustChangePassword {
-			t.Fatal("mustChangePassword should be cleared after SetPassword")
-		}
+	if err := s.SetPassword(ctx, u.ID, storeCredential("frank-reset")); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	got, err := s.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.MustChangePassword {
+		t.Fatal("mustChangePassword should be cleared after SetPassword")
 	}
 
 	// Nonexistent user
@@ -385,19 +389,90 @@ func TestSessionIdleTTLCappedByMaxTTL(t *testing.T) {
 	}
 }
 
-func TestWipeAll(t *testing.T) {
+func TestResetToDefaultAdmin(t *testing.T) {
+	t.Setenv("CONTAIND_DEFAULT_ADMIN_USERNAME", "")
+	t.Setenv("CONTAIND_DEFAULT_ADMIN_PASSWORD", "")
+	t.Setenv("CONTAIND_LAB_MODE", "")
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	u, _ := s.Create(ctx, User{Username: "wipe", Role: "admin"}, storeCredential("wipe-admin"))
-	s.CreateSession(ctx, u.ID, time.Hour, 2*time.Hour)
-
-	if err := s.WipeAll(ctx); err != nil {
-		t.Fatalf("WipeAll: %v", err)
+	u, err := s.Create(ctx, User{Username: "reset-operator", Role: "admin"}, storeCredential("reset-operator"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	session, err := s.CreateSession(ctx, u.ID, time.Hour, 2*time.Hour)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
 	}
 
-	list, _ := s.List(ctx)
-	if len(list) != 0 {
-		t.Fatalf("expected 0 users after wipe, got %d", len(list))
+	if err := s.ResetToDefaultAdmin(ctx); err != nil {
+		t.Fatalf("ResetToDefaultAdmin: %v", err)
+	}
+
+	if _, err := s.GetByID(ctx, u.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("old user should be removed, got %v", err)
+	}
+	if _, err := s.GetSession(ctx, session.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("old session should be removed, got %v", err)
+	}
+	admin, err := s.GetByUsername(ctx, "containd")
+	if err != nil {
+		t.Fatalf("default admin should exist: %v", err)
+	}
+	if admin.Role != "admin" || !admin.MustChangePassword {
+		t.Fatalf("default admin has unexpected state: %+v", admin.User)
+	}
+	list, err := s.List(ctx)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("expected only the default admin, got %+v (%v)", list, err)
+	}
+}
+
+func TestResetToDefaultAdminRollsBackOnReseedFailure(t *testing.T) {
+	t.Setenv("CONTAIND_DEFAULT_ADMIN_USERNAME", "")
+	t.Setenv("CONTAIND_DEFAULT_ADMIN_PASSWORD", "")
+	t.Setenv("CONTAIND_LAB_MODE", "")
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	u, err := s.Create(ctx, User{Username: "reset-operator", Role: "admin"}, storeCredential("reset-operator"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := s.SetTOTP(ctx, u.ID, "JBSWY3DPEHPK3PXP"); err != nil {
+		t.Fatalf("SetTOTP: %v", err)
+	}
+	beforeUser, err := s.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	beforeSession, err := s.CreateSession(ctx, u.ID, time.Hour, 2*time.Hour)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+CREATE TRIGGER reject_default_admin
+BEFORE INSERT ON users
+WHEN NEW.username = 'containd'
+BEGIN
+  SELECT RAISE(ABORT, 'injected reseed failure');
+END;`); err != nil {
+		t.Fatalf("create reseed-failure trigger: %v", err)
+	}
+
+	if err := s.ResetToDefaultAdmin(ctx); err == nil {
+		t.Fatal("ResetToDefaultAdmin succeeded despite reseed failure")
+	}
+	afterUser, err := s.GetByID(ctx, u.ID)
+	if err != nil || !reflect.DeepEqual(beforeUser, afterUser) {
+		t.Fatalf("user changed after rollback: before=%+v after=%+v err=%v", beforeUser, afterUser, err)
+	}
+	afterSession, err := s.GetSession(ctx, beforeSession.ID)
+	if err != nil || !reflect.DeepEqual(beforeSession, afterSession) {
+		t.Fatalf("session changed after rollback: before=%+v after=%+v err=%v", beforeSession, afterSession, err)
+	}
+	list, err := s.List(ctx)
+	if err != nil || len(list) != 1 || list[0].ID != u.ID {
+		t.Fatalf("users changed after rollback: %+v (%v)", list, err)
 	}
 }

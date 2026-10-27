@@ -40,8 +40,22 @@ func replaceCandidate(c *gin.Context, ctx context.Context, store config.Store, c
 // rejected edit has already sent its domain-specific HTTP error and is never
 // persisted. Responses are sent only after the store accepts the entire edit.
 func stageCandidate(c *gin.Context, store config.Store, edit func(*config.Config) bool) (*config.Config, bool) {
+	return stageCandidateWith(c, store.MutateCandidate, edit)
+}
+
+// stageCandidateIDS is reserved for edits or responses that need the bank.
+func stageCandidateIDS(c *gin.Context, store config.Store, edit func(*config.Config) bool) (*config.Config, bool) {
+	bankStore, ok := store.(config.IDSCandidateStore)
+	if !ok {
+		internalError(c, errors.New("store does not support IDS candidate edits"))
+		return nil, false
+	}
+	return stageCandidateWith(c, bankStore.MutateCandidateIDS, edit)
+}
+
+func stageCandidateWith(c *gin.Context, mutate func(context.Context, func(*config.Config) error) error, edit func(*config.Config) bool) (*config.Config, bool) {
 	var saved *config.Config
-	err := store.MutateCandidate(c.Request.Context(), func(cfg *config.Config) error {
+	err := mutate(c.Request.Context(), func(cfg *config.Config) error {
 		if !edit(cfg) {
 			return errCandidateRejected
 		}
@@ -56,4 +70,16 @@ func stageCandidate(c *gin.Context, store config.Store, edit func(*config.Config
 	}
 	configChangeResponse(c, "staged")
 	return saved, true
+}
+
+// Service discovery runs outside mutation callbacks because validators can read
+// the store. It needs only settings, never the potentially large IDS bank.
+func loadCandidateDocument(ctx context.Context, store config.Store) (*config.Config, error) {
+	reader, ok := store.(interface {
+		LoadCandidateDocument(context.Context) (*config.Config, error)
+	})
+	if !ok {
+		return nil, errors.New("store does not support bank-free document reads")
+	}
+	return reader.LoadCandidateDocument(ctx)
 }

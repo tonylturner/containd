@@ -1,4 +1,4 @@
-import type { Zone } from "../../lib/api";
+import { validateIPv4, validatePort } from "../../lib/validate";
 
 export const ICS_PROTOCOLS: Record<string, { label: string; port: number }> = {
   modbus: { label: "Modbus/TCP", port: 502 },
@@ -11,8 +11,17 @@ export const ICS_PROTOCOLS: Record<string, { label: string; port: number }> = {
   iec104: { label: "IEC 60870-5-104", port: 2404 },
 };
 
-export function zoneLabel(zone: Zone): string {
-  return zone.alias ? `${zone.alias} (${zone.name})` : zone.name;
+/**
+ * Why the publish-service server address cannot be staged, or null when it
+ * can. A port forward's destination must be IPv4.
+ */
+export function serverIpError(value: string): string | null {
+  return value.trim() ? validateIPv4(value) : "Enter an IPv4 address.";
+}
+
+/** Why the publish-service port cannot be staged, or null when it can. */
+export function serverPortError(value: string): string | null {
+  return value.trim() ? validatePort(value) : "Enter a port.";
 }
 
 export function genId(): string {
@@ -39,7 +48,7 @@ export const CARDS: CardDef[] = [
     title: "Allow LAN Internet Access",
     description:
       "Enable internal hosts to reach the Internet via SNAT masquerade.",
-    color: "bg-[var(--amber)]",
+    color: "bg-(--amber)",
     steps: ["Select LAN zone", "Select WAN zone", "Review & Apply"],
   },
   {
@@ -60,7 +69,7 @@ export const CARDS: CardDef[] = [
     title: "Allow ICS Communication",
     description:
       "Permit industrial protocol traffic between zones with DPI enforcement.",
-    color: "bg-cyan-400",
+    color: "",
     steps: [
       "Select ICS protocol",
       "Select zones",

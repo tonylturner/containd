@@ -15,18 +15,15 @@ import (
 
 // TestKernelIEC104SteeringLoads applies a compiled ruleset with IEC104
 // envelope steering to the kernel. It needs root, CAP_NET_ADMIN and nft
-// (it flushes the ruleset of its network namespace), so it skips otherwise
-// unless CONTAIND_KERNEL_TESTS=1. Run in a throwaway container:
-//
-//	GOOS=linux CGO_ENABLED=0 go test -c -o build/enforce.test ./pkg/dp/enforce
-//	docker run --rm --cap-add NET_ADMIN --user 0 -e CONTAIND_KERNEL_TESTS=1 \
-//	  -v "$PWD/build:/w" --entrypoint /w/enforce.test containd/containd:dev -test.run Kernel -test.v
+// (it replaces containd's tables in its network namespace), so it runs only
+// when CONTAIND_NETNS_KERNEL_TEST=1 in a disposable privileged container,
+// as the other kernel tests of this package (see netns_kernel_linux_test.go).
 func TestKernelIEC104SteeringLoads(t *testing.T) {
-	if os.Getenv("CONTAIND_KERNEL_TESTS") != "1" {
-		t.Skip("set CONTAIND_KERNEL_TESTS=1 in a throwaway network namespace: the test flushes the nft ruleset")
+	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" || os.Geteuid() != 0 {
+		t.Skip("requires CONTAIND_NETNS_KERNEL_TEST=1 in a disposable privileged Linux container with nft: the test replaces containd's nft tables")
 	}
-	if _, err := exec.LookPath("nft"); err != nil || os.Geteuid() != 0 {
-		t.Fatalf("CONTAIND_KERNEL_TESTS=1 needs root and nft (lookup err %v)", err)
+	if _, err := exec.LookPath("nft"); err != nil {
+		t.Fatalf("kernel test needs nft: %v", err)
 	}
 	c := NewCompiler()
 	c.QueueID = 100
@@ -38,9 +35,10 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 		t.Fatalf("apply: %v\n%s", err, ruleset)
 	}
 	listed := nftList(t, "forward")
+	counted := counterStmt("a-iec-allow") + " jump iec104_envelope"
 	for _, want := range []string{
-		"tcp dport 2404 ip saddr 10.60.60.0/24 ip daddr 10.70.0.5 jump iec104_envelope",
-		"tcp sport 2404 ip saddr 10.70.0.5 ip daddr 10.60.60.0/24 jump iec104_envelope",
+		"tcp dport 2404 ip saddr 10.60.60.0/24 ip daddr 10.70.0.5 " + counted,
+		"tcp sport 2404 ip saddr 10.70.0.5 ip daddr 10.60.60.0/24 " + counted,
 	} {
 		if !strings.Contains(listed, want) {
 			t.Fatalf("kernel ruleset lacks %q:\n%s", want, listed)
@@ -50,8 +48,14 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 		t.Fatalf("steering must precede the established accept:\n%s", listed)
 	}
 	// Compiled closed, the envelope drops; the switch opens and closes it
-	// in place without touching the forward chain.
-	const queued = "meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100"
+	// in place without touching the forward chain. Open, it queues with
+	// EnvelopeMark, and HandshakeMark too for a connection conntrack has
+	// not seen complete its handshake.
+	queued := []string{
+		"ct status assured meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100",
+		"ct state != { invalid, untracked } meta mark set meta mark & 0xf3ffffff | 0x03000000 queue to 100",
+		"meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100",
+	}
 	if env := nftList(t, IEC104EnvelopeChain); !strings.Contains(env, "drop") || strings.Contains(env, "queue") {
 		t.Fatalf("closed envelope chain:\n%s", env)
 	}
@@ -60,8 +64,11 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 			t.Fatalf("switch open=%v: %v", open, err)
 		}
 		env := nftList(t, IEC104EnvelopeChain)
-		if open != strings.Contains(env, queued) || open == strings.Contains(env, "drop") {
+		if open == strings.Contains(env, "drop") || open != strings.Contains(env, "queue") {
 			t.Fatalf("envelope chain after switch open=%v:\n%s", open, env)
+		}
+		if open && !strings.Contains(env, strings.Join(queued, "\n\t\t")+"\n") {
+			t.Fatalf("open envelope chain, want rules %q:\n%s", queued, env)
 		}
 		if got := nftList(t, "forward"); got != listed {
 			t.Fatalf("the switch changed the forward chain:\n%s", got)
@@ -71,7 +78,7 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 
 func nftList(t *testing.T, chain string) string {
 	t.Helper()
-	out, err := exec.Command("nft", "list", "chain", "inet", "containd", chain).CombinedOutput()
+	out, err := exec.Command("nft", "list", "chain", "inet", PolicyTable(""), chain).CombinedOutput()
 	if err != nil {
 		t.Fatalf("list %s: %v: %s", chain, err, out)
 	}

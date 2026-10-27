@@ -20,7 +20,6 @@ type Config struct {
 	Objects       []Object        `json:"objects,omitempty"`
 	Routing       RoutingConfig   `json:"routing,omitempty"`
 	DataPlane     DataPlaneConfig `json:"dataplane,omitempty"`
-	Export        ExportConfig    `json:"export,omitempty"`
 	PCAP          PCAPConfig      `json:"pcap,omitempty"`
 	Firewall      FirewallConfig  `json:"firewall"`
 	IDS           IDSConfig       `json:"ids,omitempty"`
@@ -103,6 +102,9 @@ type MgmtConfig struct {
 	HSTSMaxAgeSeconds int `json:"hstsMaxAgeSeconds,omitempty"`
 }
 
+// MaxSSHHostKeyRotationDays bounds rotation ages to avoid duration overflow.
+const MaxSSHHostKeyRotationDays = 36500
+
 // SSHConfig controls the embedded SSH server (interactive CLI).
 type SSHConfig struct {
 	// ListenAddr is the address the SSH server listens on (inside the appliance/container).
@@ -111,8 +113,9 @@ type SSHConfig struct {
 	// AuthorizedKeysDir is a directory containing OpenSSH authorized_keys files.
 	// Implementations may look up keys by username (e.g. "<dir>/<username>.pub").
 	AuthorizedKeysDir string `json:"authorizedKeysDir,omitempty"`
-	// AllowPassword enables SSH password authentication. Should only be enabled in lab mode.
-	AllowPassword bool `json:"allowPassword,omitempty"`
+	// AllowPassword controls SSH password authentication. Nil uses bootstrap/lab defaults;
+	// an explicit false disables passwords, including in lab mode.
+	AllowPassword *bool `json:"allowPassword,omitempty"`
 	// Banner is the SSH login banner displayed before authentication.
 	Banner string `json:"banner,omitempty"`
 	// HostKeyRotationDays controls automatic host key rotation (0 = disabled).
@@ -155,7 +158,7 @@ type DNSConfig struct {
 	CacheSizeMB     int      `json:"cacheSizeMB,omitempty"`     // optional cache size
 }
 
-// NTPConfig defines NTP client settings managed by containd (chrony or openntpd).
+// NTPConfig defines NTP client settings managed by containd (chrony).
 type NTPConfig struct {
 	Enabled         bool     `json:"enabled"`
 	Servers         []string `json:"servers,omitempty"`         // NTP servers/pools
@@ -198,14 +201,15 @@ type ReverseProxySite struct {
 // DHCPConfig defines an embedded DHCPv4 server (LAN-side) managed by containd.
 // Runtime integration is phased; this is the persisted configuration model.
 type DHCPConfig struct {
-	Enabled      bool              `json:"enabled"`
-	ListenIfaces []string          `json:"listenIfaces,omitempty"` // logical interface names (e.g. "lan2")
-	Pools        []DHCPPool        `json:"pools,omitempty"`        // address pools per interface (optional)
-	Reservations []DHCPReservation `json:"reservations,omitempty"` // MAC -> fixed IP per interface
-	LeaseSeconds int               `json:"leaseSeconds,omitempty"` // default lease time
-	Router       string            `json:"router,omitempty"`       // default gateway handed to clients
-	DNSServers   []string          `json:"dnsServers,omitempty"`   // DNS servers handed to clients
-	Domain       string            `json:"domain,omitempty"`       // optional domain
+	Authoritative bool              `json:"authoritative"` // send NAKs for invalid requests on served networks
+	Enabled       bool              `json:"enabled"`
+	ListenIfaces  []string          `json:"listenIfaces,omitempty"` // logical interface names (e.g. "lan2")
+	Pools         []DHCPPool        `json:"pools,omitempty"`        // address pools per interface (optional)
+	Reservations  []DHCPReservation `json:"reservations,omitempty"` // MAC -> fixed IP per interface
+	LeaseSeconds  int               `json:"leaseSeconds,omitempty"` // default lease time
+	Router        string            `json:"router,omitempty"`       // default gateway handed to clients
+	DNSServers    []string          `json:"dnsServers,omitempty"`   // DNS servers handed to clients
+	Domain        string            `json:"domain,omitempty"`       // optional domain
 }
 
 type DHCPPool struct {
@@ -421,12 +425,6 @@ func DefaultConfig() *Config {
 		}
 		ifaces = append(ifaces, iface)
 	}
-	allowMgmt := Rule{
-		ID:          "allow-mgmt-ui",
-		Description: "Allow access to management UI/API",
-		Protocols:   []Protocol{{Name: "tcp", Port: "8080"}},
-		Action:      ActionAllow,
-	}
 	return &Config{
 		Zones: []Zone{
 			{Name: "wan", Description: "Default WAN zone"},
@@ -436,8 +434,11 @@ func DefaultConfig() *Config {
 		},
 		Interfaces: ifaces,
 		Firewall: FirewallConfig{
+			// Firewall rules govern forwarded traffic only. Management access
+			// is an input-chain service rule, so the default forward policy
+			// starts empty.
 			DefaultAction: ActionDeny,
-			Rules:         []Rule{allowMgmt},
+			Rules:         []Rule{},
 		},
 		Services: ServicesConfig{
 			Syslog: SyslogConfig{
@@ -485,8 +486,8 @@ type DataPlaneConfig struct {
 	// decoders → enforceDPIEvents, which evaluates the rule's ICS
 	// predicate (function-code allowlist, register ranges, etc.) and
 	// uses ApplyVerdict / BlockFlowTemp to block out-of-policy flows.
-	// Without this, ICS rules compile to plain accept and the
-	// function-code allowlist is never enforced. Distinct from
+	// Without it, ICS rules compile to plain accept/drop, so validation
+	// rejects any ICS rule in effective enforce mode. Distinct from
 	// NFLogGroup since the two kernel subsystems (NFLOG vs NFQUEUE)
 	// are independent. Recommended value: 101.
 	NFQueueGroup uint16 `json:"nfqueueGroup,omitempty"`
@@ -498,14 +499,6 @@ type DPIExclusion struct {
 	Value  string `json:"value"`            // IP, CIDR, or domain
 	Type   string `json:"type"`             // "ip", "cidr", "domain"
 	Reason string `json:"reason,omitempty"` // optional user note
-}
-
-// ExportConfig controls DPI event export to SIEM systems.
-type ExportConfig struct {
-	Enabled bool   `json:"enabled,omitempty"` // enable DPI event export
-	Format  string `json:"format,omitempty"`  // cef, json, syslog
-	Target  string `json:"target,omitempty"`  // file:///path, udp://host:514, tcp://host:514
-	Filter  string `json:"filter,omitempty"`  // all, ics-only, alerts-only
 }
 
 // PCAPConfig controls packet capture storage and forwarding.
@@ -612,6 +605,25 @@ type FirewallConfig struct {
 	DefaultAction Action    `json:"defaultAction"`
 	Rules         []Rule    `json:"rules"`
 	NAT           NATConfig `json:"nat,omitempty"`
+	// IdentityBindings are admin-set, durable source-IP tags. A rule's
+	// identities match a flow whose opener IP is bound to any of them.
+	IdentityBindings []IdentityBinding `json:"identityBindings,omitempty"`
+}
+
+// IdentityBinding tags one IPv4 or IPv6 address with identity labels.
+type IdentityBinding struct {
+	IP         string   `json:"ip"`
+	Identities []string `json:"identities"`
+}
+
+// EffectiveDefaultAction is the action applied to forwarded traffic that no
+// rule matches. Only an explicit ALLOW allows; an omitted or empty
+// defaultAction means DENY.
+func (f FirewallConfig) EffectiveDefaultAction() Action {
+	if f.DefaultAction == ActionAllow {
+		return ActionAllow
+	}
+	return ActionDeny
 }
 
 // NATConfig defines minimal NAT behavior.
@@ -626,7 +638,8 @@ type NATConfig struct {
 }
 
 // PortForward defines a simple DNAT rule for inbound traffic.
-// Note: a corresponding firewall allow rule is still required for traffic to pass (forward chain).
+// An enabled forward also admits the translated traffic in the forward chain;
+// no separate firewall allow rule is needed.
 type PortForward struct {
 	ID             string   `json:"id"`
 	Enabled        bool     `json:"enabled"`
@@ -766,10 +779,29 @@ type IDSCondition struct {
 
 type Action string
 
+// Firewall rule actions. ALLOW, DENY and RESET are terminal; any matching
+// ALLOW takes precedence over every DENY and RESET. RATE_LIMIT and TAG are
+// effects: they never admit traffic on their own, and the packet continues
+// to the terminal decision. The default action is ALLOW or DENY only.
 const (
 	ActionAllow Action = "ALLOW"
 	ActionDeny  Action = "DENY"
+	// ActionReset rejects back to the sender: TCP RST for TCP, ICMP
+	// destination unreachable (administratively prohibited) otherwise.
+	ActionReset Action = "RESET"
+	// ActionRateLimit drops packets above Rule.RateLimit, counted per
+	// directional 5-tuple.
+	ActionRateLimit Action = "RATE_LIMIT"
+	// ActionTag labels matching flows and their events with Rule.Tag.
+	ActionTag Action = "TAG"
 )
+
+// RateLimitConfig is a packet policer for one directional 5-tuple. Excess
+// packets are dropped; nothing is queued or shaped.
+type RateLimitConfig struct {
+	PacketsPerSecond uint32 `json:"packetsPerSecond"`
+	Burst            uint32 `json:"burst,omitempty"` // packets; 0 means PacketsPerSecond
+}
 
 // ScheduleConfig restricts a firewall rule to a recurring time window.
 type ScheduleConfig struct {
@@ -791,7 +823,11 @@ type Rule struct {
 	ICS          ICSPredicate    `json:"ics"`
 	Schedule     *ScheduleConfig `json:"schedule,omitempty"`
 	Action       Action          `json:"action"`
-	Log          bool            `json:"log,omitempty"` // log matching traffic
+	// RateLimit is required for RATE_LIMIT and forbidden otherwise.
+	RateLimit *RateLimitConfig `json:"rateLimit,omitempty"`
+	// Tag is required for TAG and forbidden otherwise.
+	Tag string `json:"tag,omitempty"`
+	Log bool   `json:"log,omitempty"` // log matching traffic
 }
 
 type Protocol struct {

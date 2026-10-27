@@ -20,6 +20,8 @@ import {
   COMMON_PROTOCOLS,
   genId,
   ICS_PROTOCOLS,
+  serverIpError,
+  serverPortError,
   type WizardId,
 } from "./wizard-shared";
 import {
@@ -149,22 +151,24 @@ export default function WizardPage() {
     setApplying(true);
     setError(null);
     try {
-      const port = parseInt(serverPort, 10);
-      if (!port || port < 1 || port > 65535) {
-        setError("Invalid port number.");
+      const fieldError = serverIpError(serverIp) ?? serverPortError(serverPort);
+      if (fieldError) {
+        setError(fieldError);
         setApplying(false);
         return;
       }
+      const destIp = serverIp.trim();
+      const port = Number(serverPort.trim());
 
       // Add port forward via NAT
       const pf: PortForward = {
         id: genId(),
         enabled: true,
-        description: `Port forward ${pubProto.toUpperCase()}/${port} to ${serverIp} (wizard)`,
+        description: `Port forward ${pubProto.toUpperCase()}/${port} to ${destIp} (wizard)`,
         ingressZone: ingressZone,
         proto: pubProto,
         listenPort: port,
-        destIp: serverIp,
+        destIp,
         destPort: port,
       };
       const updatedNat: NATConfig = {
@@ -183,9 +187,9 @@ export default function WizardPage() {
       // Create matching firewall allow rule
       const ruleRes = await api.createFirewallRule({
         id: genId(),
-        description: `Allow inbound ${pubProto.toUpperCase()}/${port} to ${serverIp} (wizard)`,
+        description: `Allow inbound ${pubProto.toUpperCase()}/${port} to ${destIp} (wizard)`,
         sourceZones: [ingressZone],
-        destinations: [serverIp],
+        destinations: [destIp],
         protocols: [{ name: pubProto, port: String(port) }],
         action: "ALLOW",
       });
@@ -303,7 +307,7 @@ export default function WizardPage() {
         if (step === 1) return !!wanZone;
         return true;
       case "publish-service":
-        if (step === 0) return !!serverIp && !!serverPort;
+        if (step === 0) return !serverIpError(serverIp) && !serverPortError(serverPort);
         if (step === 1) return true;
         if (step === 2) return !!ingressZone;
         return true;
@@ -324,20 +328,20 @@ export default function WizardPage() {
 
   return (
     <Shell title="Policy Wizard">
-      <p className="mb-6 text-sm text-[var(--text-muted)]">
+      <p className="mb-6 text-sm text-(--text-muted)">
         Select a common connectivity scenario below. The wizard will walk you through each step and stage the necessary firewall rules and NAT configuration automatically.
       </p>
 
       {loading && (
         <Card>
-          <p className="text-sm text-[var(--text)]">Loading configuration...</p>
+          <p className="text-sm text-(--text)">Loading configuration...</p>
         </Card>
       )}
 
       {!loading && zones.length === 0 && (
-        <div className="mb-6 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-6 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           No zones configured. Please{" "}
-          <Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+          <Link href="/zones/" className="font-semibold text-(--amber) hover:text-(--amber)">
             create zones
           </Link>{" "}
           before using the wizard.
@@ -356,7 +360,7 @@ export default function WizardPage() {
 
       {/* ── inline wizard flow ──────────────────────────────────── */}
       {active && card && !success && (
-        <div className="mt-6 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-6 shadow-card">
+        <div className="mt-6 rounded-xs border bg-(--surface) p-6 shadow-card">
           {/* step pills */}
           <div className="mb-6 flex flex-wrap gap-2">
             {card.steps.map((s, i) => (
@@ -366,10 +370,10 @@ export default function WizardPage() {
                 onClick={() => i < step && setStep(i)}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition-ui ${
                   i === step
-                    ? "bg-amber-500/[0.2] text-[var(--amber)]"
+                    ? "text-(--amber)"
                     : i < step
-                      ? "bg-amber-500/[0.1] text-[var(--text)] cursor-pointer hover:bg-amber-500/[0.12]"
-                      : "bg-[var(--surface)] text-[var(--text-dim)]"
+                      ? "text-(--text) cursor-pointer "
+                      : "bg-(--surface) text-(--text-dim)"
                 }`}
               >
                 {i + 1}. {s}
@@ -416,17 +420,17 @@ export default function WizardPage() {
 
           {/* error */}
           {error && (
-            <div className="mt-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+            <div className="mt-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
               {error}
             </div>
           )}
 
           {/* navigation */}
-          <div className="mt-6 flex items-center justify-between border-t border-amber-500/[0.15] pt-4">
+          <div className="mt-6 flex items-center justify-between border-t pt-4">
             <button
               type="button"
               onClick={() => (step === 0 ? reset() : setStep(step - 1))}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-4 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.1]"
+              className="rounded-xs border bg-(--surface2) px-4 py-2 text-sm text-(--text) transition-ui"
             >
               {step === 0 ? "Cancel" : "Back"}
             </button>
@@ -436,7 +440,7 @@ export default function WizardPage() {
                 type="button"
                 onClick={() => setStep(step + 1)}
                 disabled={!canAdvance()}
-                className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Next
               </button>
@@ -445,7 +449,7 @@ export default function WizardPage() {
                 type="button"
                 onClick={handleApply}
                 disabled={applying}
-                className="rounded-sm bg-[var(--amber)] px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
+                className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
               >
                 {applying ? "Staging..." : "Stage"}
               </button>
@@ -456,35 +460,35 @@ export default function WizardPage() {
 
       {/* ── success message ─────────────────────────────────────── */}
       {success && (
-        <div className="mt-6 rounded-sm border border-emerald-500/30 bg-emerald-500/10 p-6">
+        <div className="mt-6 rounded-xs border border-emerald-500/30 bg-emerald-500/10 p-6">
           <h3 className="mb-2 text-sm font-semibold text-emerald-400">Success</h3>
-          <p className="mb-4 text-sm text-[var(--text)]">{success}</p>
-          <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+          <p className="mb-4 text-sm text-(--text)">{success}</p>
+          <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
             These changes were saved to the candidate config. Review and commit them before expecting runtime behavior to change.
           </div>
           <div className="flex flex-wrap gap-3 text-sm">
             <Link
               href="/config/?tab=diff"
-              className="rounded-sm bg-[var(--amber)] px-3 py-2 font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-xs bg-(--amber) px-3 py-2 font-medium text-white transition-ui hover:brightness-110"
             >
               Review &amp; Commit
             </Link>
             <Link
               href="/firewall/"
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-[var(--text)] transition-ui hover:bg-amber-500/[0.1]"
+              className="rounded-xs border bg-(--surface2) px-3 py-2 text-(--text) transition-ui"
             >
               View firewall rules
             </Link>
             <Link
               href="/nat/"
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-[var(--text)] transition-ui hover:bg-amber-500/[0.1]"
+              className="rounded-xs border bg-(--surface2) px-3 py-2 text-(--text) transition-ui"
             >
               View NAT config
             </Link>
             <button
               type="button"
               onClick={reset}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-[var(--text)] transition-ui hover:bg-amber-500/[0.1]"
+              className="rounded-xs border bg-(--surface2) px-3 py-2 text-(--text) transition-ui"
             >
               Run another wizard
             </button>

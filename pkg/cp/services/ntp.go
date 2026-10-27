@@ -20,17 +20,17 @@ import (
 )
 
 // NTPManager renders and optionally supervises NTP client configuration.
-// Uses chrony (chronyd) as the NTP implementation. Falls back to openntpd
-// if chrony is not available and openntpd is present.
+// Uses chrony (chronyd) as the NTP implementation.
 type NTPManager struct {
 	BaseDir   string
 	Supervise bool
-	// NTPDPath is the path to the NTP daemon binary (chronyd or openntpd).
+	// NTPDPath is the path to the NTP daemon binary (chronyd).
 	NTPDPath string
-	// NTPDName identifies the active implementation ("chrony" or "openntpd").
+	// NTPDName identifies the active implementation ("chrony").
 	NTPDName string
 	OnEvent  func(kind string, attrs map[string]any)
 
+	applyMu    sync.Mutex // serialize renders and daemon restarts
 	mu         sync.Mutex
 	lastCfg    config.NTPConfig
 	lastRender time.Time
@@ -67,7 +67,7 @@ func NewNTPManager(baseDir string) *NTPManager {
 		supervise = false
 	}
 
-	// Prefer chrony (Wolfi), fall back to openntpd (Debian/other).
+	// Locate chrony, the supported NTP implementation.
 	ntpdPath, ntpdName := detectNTPD()
 
 	return &NTPManager{
@@ -79,33 +79,18 @@ func NewNTPManager(baseDir string) *NTPManager {
 	}
 }
 
-// detectNTPD finds the best available NTP daemon. Prefers chrony, falls back to openntpd.
+// detectNTPD locates chronyd. CONTAIND_NTPD_PATH must point to chronyd.
 func detectNTPD() (path string, name string) {
-	// Check for env override first.
 	if p := strings.TrimSpace(os.Getenv("CONTAIND_NTPD_PATH")); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			base := filepath.Base(p)
-			if strings.Contains(base, "chrony") {
-				return p, "chrony"
-			}
-			return p, "openntpd"
+		if _, err := os.Stat(p); err == nil && filepath.Base(p) == "chronyd" {
+			return p, "chrony"
 		}
+		return "", "chrony"
 	}
-	// Legacy env var for backward compatibility.
-	if p := strings.TrimSpace(os.Getenv("CONTAIND_OPENNTPD_PATH")); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p, "openntpd"
-		}
-	}
-	// Prefer chrony (available in Wolfi).
 	if p, ok := detectBinary([]string{"/usr/sbin/chronyd", "/usr/bin/chronyd"}); ok {
 		return p, "chrony"
 	}
-	// Fall back to openntpd (available in Debian/Alpine).
-	if p, ok := detectBinary([]string{"/usr/sbin/openntpd", "/usr/bin/openntpd"}); ok {
-		return p, "openntpd"
-	}
-	return "", ""
+	return "", "chrony"
 }
 
 func newNTPLogger() *zap.SugaredLogger {
@@ -121,32 +106,26 @@ func newNTPLogger() *zap.SugaredLogger {
 }
 
 func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
-	_ = ctx
-	m.mu.Lock()
-	m.lastCfg = cfg
-	m.mu.Unlock()
-
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
 	if err := os.MkdirAll(m.BaseDir, 0o755); err != nil {
 		return err
 	}
 	path := m.configPath()
 	if !cfg.Enabled {
-		m.stopLocked()
-		_ = os.Remove(path)
-		// Also clean up the other config file name to avoid stale files.
-		if m.NTPDName == "chrony" {
-			_ = os.Remove(filepath.Join(m.BaseDir, "openntpd.conf"))
-		} else {
-			_ = os.Remove(filepath.Join(m.BaseDir, "chrony.conf"))
-		}
 		m.mu.Lock()
+		m.stopLocked()
+		m.mu.Unlock()
+		_ = os.Remove(path)
+		m.mu.Lock()
+		m.lastCfg = cfg
 		m.lastRender = time.Now().UTC()
 		m.lastError = ""
 		m.mu.Unlock()
 		return nil
 	}
 
-	content := m.renderConfig(cfg)
+	content := m.renderChronyConfig(cfg)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		m.mu.Lock()
 		m.lastError = err.Error()
@@ -157,6 +136,7 @@ func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
 		return err
 	}
 	m.mu.Lock()
+	m.lastCfg = cfg
 	m.lastRender = time.Now().UTC()
 	m.lastError = ""
 	m.mu.Unlock()
@@ -167,18 +147,7 @@ func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {
 }
 
 func (m *NTPManager) configPath() string {
-	if m.NTPDName == "chrony" {
-		return filepath.Join(m.BaseDir, "chrony.conf")
-	}
-	return filepath.Join(m.BaseDir, "openntpd.conf")
-}
-
-// renderConfig produces the appropriate config file content for the active NTP daemon.
-func (m *NTPManager) renderConfig(cfg config.NTPConfig) string {
-	if m.NTPDName == "chrony" {
-		return m.renderChronyConfig(cfg)
-	}
-	return m.renderOpenNTPDConfig(cfg)
+	return filepath.Join(m.BaseDir, "chrony.conf")
 }
 
 func (m *NTPManager) renderChronyConfig(cfg config.NTPConfig) string {
@@ -208,24 +177,7 @@ func (m *NTPManager) renderChronyConfig(cfg config.NTPConfig) string {
 	return b.String()
 }
 
-func (m *NTPManager) renderOpenNTPDConfig(cfg config.NTPConfig) string {
-	var b strings.Builder
-	for _, s := range cfg.Servers {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		b.WriteString("servers ")
-		b.WriteString(s)
-		b.WriteString("\n")
-	}
-	if cfg.IntervalSeconds > 0 {
-		fmt.Fprintf(&b, "\n# poll-interval-seconds: %d\n", cfg.IntervalSeconds)
-	}
-	return b.String()
-}
-
-// intervalToPoll converts seconds to the nearest log2 poll value for chrony.
+// intervalToPoll rounds seconds up to a bounded log2 poll value for chrony.
 // chrony poll values: 4=16s, 6=64s, 8=256s, 10=1024s, 12=4096s.
 func intervalToPoll(seconds int) int {
 	poll := 4 // minimum: 16 seconds
@@ -249,29 +201,36 @@ func (m *NTPManager) Status() map[string]any {
 	if running {
 		pid = m.cmd.Process.Pid
 	}
+	// A zero interval uses chrony's adaptive default (64–1024 seconds).
+	var interval any
+	var minPoll, maxPoll any
+	if m.lastCfg.Enabled && !m.lastRender.IsZero() {
+		minPoll, maxPoll = 64, 1024
+		if m.lastCfg.IntervalSeconds > 0 {
+			seconds := 1 << intervalToPoll(m.lastCfg.IntervalSeconds)
+			interval, minPoll, maxPoll = seconds, seconds, seconds
+		}
+	}
 	return map[string]any{
+		"min_poll_seconds": minPoll,
+		"max_poll_seconds": maxPoll,
 		"enabled":          m.lastCfg.Enabled,
 		"servers_count":    len(m.lastCfg.Servers),
-		"last_render":      m.lastRender.Format(time.RFC3339Nano),
+		"last_render":      formatMaybe(m.lastRender),
 		"last_error":       m.lastError,
-		"interval_seconds": m.lastCfg.IntervalSeconds,
+		"interval_seconds": interval,
 		"supervise":        m.Supervise,
 		"ntpd_path":        m.NTPDPath,
 		"ntpd_name":        m.NTPDName,
 		"running":          running,
 		"pid":              pid,
-		"last_start":       m.lastStart,
-		"last_stop":        m.lastStop,
+		"last_start":       formatMaybe(m.lastStart),
+		"last_stop":        formatMaybe(m.lastStop),
 		"last_exit":        m.lastExit,
-		// Backward compatibility: keep openntpd_path for existing UI/API consumers.
-		"openntpd_path": m.NTPDPath,
 	}
 }
 
 func (m *NTPManager) validate(ctx context.Context, configPath string) error {
-	if !m.lastCfg.Enabled {
-		return nil
-	}
 	if m.NTPDPath == "" {
 		m.mu.Lock()
 		m.lastError = "NTP daemon not found (validation skipped)"
@@ -283,16 +242,9 @@ func (m *NTPManager) validate(ctx context.Context, configPath string) error {
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	var cmd *exec.Cmd
-	if m.NTPDName == "chrony" {
-		// chronyd -p: parse config and exit.
-		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-		cmd = exec.CommandContext(testCtx, m.NTPDPath, "-p", "-f", configPath)
-	} else {
-		// openntpd -n: check config.
-		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-		cmd = exec.CommandContext(testCtx, m.NTPDPath, "-n", "-f", configPath)
-	}
+	// chronyd -p: parse config and exit.
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	cmd := exec.CommandContext(testCtx, m.NTPDPath, "-p", "-f", configPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg != "" {
@@ -308,28 +260,44 @@ func (m *NTPManager) validate(ctx context.Context, configPath string) error {
 }
 
 func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
+	earlyExit := m.startDaemon(configPath)
+	if earlyExit == nil {
+		return
+	}
+	// Brief stability check: if the daemon dies within 1 second, report failure immediately.
+	select {
+	case exit := <-earlyExit:
+		if exit != "ok" {
+			m.log.Errorw("NTP daemon failed immediately after start", "impl", m.NTPDName, "exit", exit)
+		}
+	case <-time.After(1 * time.Second):
+		// Daemon survived initial startup — considered stable.
+	}
+}
+
+func (m *NTPManager) startDaemon(configPath string) <-chan string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.lastCfg.Enabled {
-		return
+		return nil
 	}
 	if m.NTPDPath == "" {
 		m.lastError = "NTP daemon not found; supervision skipped"
 		m.emit("service.ntp.start_skipped", map[string]any{"reason": m.lastError})
 		m.log.Warnw("NTP daemon not found; supervision skipped")
-		return
+		return nil
 	}
 	if syscall.Geteuid() != 0 {
 		m.lastError = "NTP supervision skipped (requires root)"
 		m.emit("service.ntp.start_skipped", map[string]any{"reason": m.lastError})
 		m.log.Warnw("NTP supervision skipped; not running as root")
-		return
+		return nil
 	}
 	if !hasSysTimeCap() {
 		m.lastError = "NTP supervision skipped: CAP_SYS_TIME not available (add --cap-add SYS_TIME to docker run)"
 		m.emit("service.ntp.start_skipped", map[string]any{"reason": m.lastError})
 		m.log.Warnw("NTP supervision skipped; CAP_SYS_TIME missing")
-		return
+		return nil
 	}
 	if m.cmd != nil && m.cmd.Process != nil {
 		_ = m.cmd.Process.Signal(os.Interrupt)
@@ -337,23 +305,16 @@ func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
 	}
 
 	// Use background context so the daemon outlives the API request that triggered it.
-	var cmd *exec.Cmd
-	if m.NTPDName == "chrony" {
-		// chronyd -d: foreground mode; -f: config file.
-		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-		cmd = exec.CommandContext(context.Background(), m.NTPDPath, "-d", "-f", configPath)
-	} else {
-		// openntpd -d: foreground mode; -f: config file.
-		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-		cmd = exec.CommandContext(context.Background(), m.NTPDPath, "-d", "-f", configPath)
-	}
+	// chronyd -d: foreground mode; -f: config file.
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	cmd := exec.CommandContext(context.Background(), m.NTPDPath, "-d", "-f", configPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		m.lastError = err.Error()
 		m.emit("service.ntp.start_failed", map[string]any{"error": err.Error(), "error_count": 1})
 		m.log.Errorw("failed to start NTP daemon", "impl", m.NTPDName, "error", err)
-		return
+		return nil
 	}
 	m.cmd = cmd
 	m.lastError = ""
@@ -370,27 +331,21 @@ func (m *NTPManager) startOrRestart(ctx context.Context, configPath string) {
 			exit = err.Error()
 		}
 		m.mu.Lock()
-		m.lastExit = exit
-		m.lastStop = time.Now().UTC()
-		if exit != "ok" {
-			m.lastError = "NTP daemon exited unexpectedly: " + exit + " (check CAP_SYS_TIME capability)"
+		if m.cmd == cmd {
+			m.lastExit = exit
+			m.lastStop = time.Now().UTC()
+			if exit != "ok" {
+				m.lastError = "NTP daemon exited unexpectedly: " + exit + " (check CAP_SYS_TIME capability)"
+			}
+			m.cmd = nil
 		}
-		m.cmd = nil
 		m.mu.Unlock()
 		m.log.Infow("NTP daemon exited", "impl", m.NTPDName, "pid", cmd.Process.Pid, "exit", exit)
 		m.emit("service.ntp.exited", map[string]any{"pid": cmd.Process.Pid, "exit": exit, "error_count": 1})
 		earlyExit <- exit
 	}()
 
-	// Brief stability check: if the daemon dies within 1 second, report failure immediately.
-	select {
-	case exit := <-earlyExit:
-		if exit != "ok" {
-			m.log.Errorw("NTP daemon failed immediately after start", "impl", m.NTPDName, "exit", exit)
-		}
-	case <-time.After(1 * time.Second):
-		// Daemon survived initial startup — considered stable.
-	}
+	return earlyExit
 }
 
 func (m *NTPManager) stopLocked() {

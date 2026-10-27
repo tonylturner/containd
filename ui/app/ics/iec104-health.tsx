@@ -1,9 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { StatusIndicator } from "../../components/StatusBadge";
-import { fetchHealth, type IEC104EnforcementHealth } from "../../lib/api";
+import type { IEC104EnforcementHealth } from "../../lib/api";
 
 type Indicator = {
   status: "healthy" | "degraded" | "unknown";
@@ -11,7 +9,12 @@ type Indicator = {
   sublabel?: string;
 };
 
-/** Maps IEC104 enforcement health to the indicator. Unhealthy is amber with its reason. */
+/**
+ * Maps IEC104 enforcement health to the indicator. Unhealthy is amber with
+ * its reason. Without an IEC 104 enforce envelope the object is unhealthy
+ * only when the engine failed to reset an ICS connection of another
+ * protocol, such as Modbus or DNP3, that it picked up mid-stream.
+ */
 export function iec104HealthIndicator(
   health: IEC104EnforcementHealth | undefined,
 ): Indicator {
@@ -21,7 +24,7 @@ export function iec104HealthIndicator(
   if (!health.healthy) {
     return {
       status: "degraded",
-      label: "IEC 104 enforcement unhealthy",
+      label: health.active ? "IEC 104 enforcement unhealthy" : "ICS connection reset unhealthy",
       sublabel: health.reason || "no reason reported",
     };
   }
@@ -31,29 +34,7 @@ export function iec104HealthIndicator(
   return { status: "unknown", label: "IEC 104 enforcement inactive", sublabel: "no enforce envelope loaded" };
 }
 
-/** Polls GET /api/v1/health and shows the runtime IEC 104 enforcement state. */
-export function IEC104HealthStatus() {
-  const [health, setHealth] = useState<IEC104EnforcementHealth | undefined>();
-
-  useEffect(() => {
-    const controller = new AbortController();
-    async function refresh() {
-      try {
-        const res = await fetchHealth(controller.signal);
-        setHealth(res?.iec104Enforcement);
-      } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setHealth(undefined);
-      }
-    }
-    refresh();
-    const id = setInterval(() => { if (!document.hidden) refresh(); }, 10000);
-    return () => {
-      controller.abort();
-      clearInterval(id);
-    };
-  }, []);
-
+export function IEC104HealthIndicator({ health }: { health: IEC104EnforcementHealth | undefined }) {
   const view = iec104HealthIndicator(health);
   return <StatusIndicator status={view.status} label={view.label} sublabel={view.sublabel} />;
 }

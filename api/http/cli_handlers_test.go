@@ -5,13 +5,28 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"io"
+	"log"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -47,6 +62,7 @@ func TestCLICommandsHandlerIncludesExpectedCommands(t *testing.T) {
 }
 
 func TestCLIExecuteHandlerSupportsBlankAndCommandExecution(t *testing.T) {
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
 	store := &mockStore{cfg: config.DefaultConfig()}
 	s := NewServer(store, nil)
 
@@ -120,6 +136,7 @@ func TestCLICompleteHandlerSuggestsConfigAwareArgs(t *testing.T) {
 }
 
 func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: config.DefaultManagementHTTPAddr, Enabled: true}})
 	store := &mockStore{cfg: config.DefaultConfig()}
 	srv := httptest.NewServer(NewServer(store, nil))
 	defer srv.Close()
@@ -175,4 +192,393 @@ func containsString(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// Each certificate uses a fresh key, unlike httptest's shared default certificate.
+func consoleTestCertificate(t *testing.T) (*tls.Certificate, []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "appliance.example"},
+		DNSNames:     []string{"appliance.example"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key},
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+func consoleTestRouter(store config.Store) *gin.Engine {
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set(ctxRoleKey, "admin") })
+	r.POST("/execute", cliExecuteHandler(store))
+	r.GET("/ws", cliWSHandler(store))
+	return r
+}
+
+// bindConsoleTest records l as the listeners this process has bound until
+// the test ends.
+func bindConsoleTest(t *testing.T, l config.ManagementListeners) {
+	t.Helper()
+	config.SetBoundManagementListeners(l)
+	t.Cleanup(func() { config.SetBoundManagementListeners(config.ManagementListeners{}) })
+}
+
+// bindConsoleHTTPS records a bound HTTPS listener on addr serving certFile,
+// and no HTTP one.
+func bindConsoleHTTPS(t *testing.T, addr, certFile string) {
+	t.Helper()
+	bindConsoleTest(t, config.ManagementListeners{HTTPS: config.ManagementListener{Addr: addr, Enabled: true}})
+	SetServedManagement(ServedManagement{CertFile: certFile})
+	t.Cleanup(func() { SetServedManagement(ServedManagement{}) })
+}
+
+// consoleTestConfig saves certFile and the default listeners, neither of
+// which the console uses: it calls the bound listener and pins the
+// certificate it serves.
+func consoleTestConfig(certFile string) *config.Config {
+	cfg := config.DefaultConfig()
+	cfg.System.Mgmt.TLSCertFile = certFile
+	return cfg
+}
+
+func executeConsoleTest(t *testing.T, router http.Handler, host string) (string, string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/execute", strings.NewReader(`{"line":"show health"}`))
+	req.Host = host
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer console-secret")
+	req.Header.Set("X-Forwarded-Proto", "http")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	var result struct{ Output, Error string }
+	if rec.Code != http.StatusOK {
+		t.Fatalf("console status = %d, body=%s", rec.Code, rec.Body)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	return result.Output, result.Error
+}
+
+func TestConsoleTLSVerificationAndRotation(t *testing.T) {
+	first, firstPEM := consoleTestCertificate(t)
+	second, secondPEM := consoleTestCertificate(t)
+	var served atomic.Pointer[tls.Certificate]
+	served.Store(first)
+	var calls atomic.Int32
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		n := calls.Add(1)
+		wantToken := "Bearer console-secret"
+		if n == 4 {
+			wantToken = "Bearer console-renewed"
+		}
+		if r.Header.Get("Authorization") != wantToken || r.URL.Path != "/api/v1/health" {
+			t.Errorf("unexpected request: %s %v", r.URL.Path, r.Header)
+		}
+		if n == 3 {
+			w.Header().Set("X-Auth-Token", "console-renewed")
+		}
+		_, _ = io.WriteString(w, `{"status":"verified"}`)
+	}))
+	srv.TLS = &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return served.Load(), nil
+		},
+	}
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	srv.StartTLS()
+	defer srv.Close()
+
+	path := filepath.Join(t.TempDir(), "server.crt")
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "/not-the-served-certificate")
+	bindConsoleHTTPS(t, srv.Listener.Addr().String(), path)
+	store := &mockStore{cfg: consoleTestConfig("/not-the-served-certificate")}
+	router := consoleTestRouter(store)
+	write := func(data []byte) {
+		t.Helper()
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(firstPEM)
+	output, errText := executeConsoleTest(t, router, "untrusted.example")
+	if errText != "" || !strings.Contains(output, "verified") || calls.Load() != 1 {
+		t.Fatalf("verified call: output=%q error=%q calls=%d", output, errText, calls.Load())
+	}
+
+	// A different valid certificate must fail before the bearer reaches HTTP.
+	served.Store(second)
+	_, errText = executeConsoleTest(t, router, "untrusted.example")
+	if errText == "" || calls.Load() != 1 {
+		t.Fatalf("mismatched certificate: error=%q calls=%d", errText, calls.Load())
+	}
+	write(secondPEM)
+	output, errText = executeConsoleTest(t, router, "untrusted.example")
+	if errText != "" || !strings.Contains(output, "verified") || calls.Load() != 2 {
+		t.Fatalf("rotated certificate: output=%q error=%q calls=%d", output, errText, calls.Load())
+	}
+
+	// An open WebSocket must also refresh its trust for each command.
+	wsServer := httptest.NewServer(router)
+	defer wsServer.Close()
+	headers := http.Header{"Origin": {wsServer.URL}, "Authorization": {"Bearer console-secret"}}
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(wsServer.URL, "http")+"/ws", headers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var response struct{ Output, Error string }
+	if err := conn.ReadJSON(&response); err != nil {
+		t.Fatal(err)
+	}
+	for i, cert := range []*tls.Certificate{second, first} {
+		served.Store(cert)
+		if i == 1 {
+			write(firstPEM)
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, []byte("show health")); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.ReadJSON(&response); err != nil {
+			t.Fatal(err)
+		}
+		if response.Error != "" || !strings.Contains(response.Output, "verified") {
+			t.Fatalf("websocket command %d: %+v", i, response)
+		}
+	}
+	if calls.Load() != 4 {
+		t.Fatalf("expected four verified API calls, got %d", calls.Load())
+	}
+}
+
+func TestConsoleTLSCertificateFileErrors(t *testing.T) {
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+	for _, tt := range []struct{ name, data, want string }{
+		{"missing", "", "read management TLS certificate"},
+		{"empty", "", "no certificates"},
+		{"invalid PEM", "not PEM", "expected PEM certificate"},
+		{"invalid DER", "-----BEGIN CERTIFICATE-----\nYWJj\n-----END CERTIFICATE-----\n", "parse management TLS certificate"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "server.crt")
+			if tt.name != "missing" {
+				if err := os.WriteFile(path, []byte(tt.data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bindConsoleHTTPS(t, ":1", path)
+			router := consoleTestRouter(&mockStore{cfg: consoleTestConfig(path)})
+			_, errText := executeConsoleTest(t, router, "untrusted.example")
+			if !strings.Contains(errText, tt.want) {
+				t.Fatalf("error = %q; want %q", errText, tt.want)
+			}
+		})
+	}
+}
+
+func TestConsoleWithoutBoundListenerNeverUsesRequestHost(t *testing.T) {
+	var calls atomic.Int32
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		calls.Add(1)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer host.Close()
+	hostAddr := strings.TrimPrefix(host.URL, "http://")
+	for _, tt := range []struct {
+		name string
+		bind func(*testing.T)
+		want string
+	}{
+		{"no listener bound", func(*testing.T) {}, "console: no management HTTP or HTTPS listener bound"},
+		{"HTTPS without a recorded certificate", func(t *testing.T) { bindConsoleHTTPS(t, hostAddr, "") }, "console: the bound HTTPS listener recorded no certificate"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.bind(t)
+			_, errText := executeConsoleTest(t, consoleTestRouter(&mockStore{cfg: consoleTestConfig("")}), hostAddr)
+			if errText != tt.want {
+				t.Fatalf("console error = %q, want %q", errText, tt.want)
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("contacted request Host %d times", calls.Load())
+			}
+		})
+	}
+}
+
+func TestConsoleHTTPStillPreferred(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		calls.Add(1)
+		if r.Header.Get("Authorization") != "Bearer console-secret" {
+			t.Error("missing bearer token")
+		}
+		_, _ = io.WriteString(w, `{"status":"http"}`)
+	}))
+	defer srv.Close()
+	bindConsoleTest(t, config.ManagementListeners{
+		HTTP:  config.ManagementListener{Addr: srv.Listener.Addr().String(), Enabled: true},
+		HTTPS: config.ManagementListener{Addr: ":1", Enabled: true},
+	})
+	SetServedManagement(ServedManagement{CertFile: "/unreadable"})
+	t.Cleanup(func() { SetServedManagement(ServedManagement{}) })
+	output, errText := executeConsoleTest(t, consoleTestRouter(&mockStore{cfg: config.DefaultConfig()}), "untrusted.example")
+	if errText != "" || !strings.Contains(output, "http") || calls.Load() != 1 {
+		t.Fatalf("HTTP call: output=%q error=%q calls=%d", output, errText, calls.Load())
+	}
+}
+
+// A saved or environment listener that is not bound yet is never dialled.
+func TestConsoleCallsTheBoundListener(t *testing.T) {
+	counting := func(calls *atomic.Int32) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := io.Copy(io.Discard, r.Body); err != nil {
+				t.Errorf("read body: %v", err)
+				return
+			}
+			calls.Add(1)
+			_, _ = io.WriteString(w, `{"status":"bound"}`)
+		}))
+	}
+	var boundCalls, savedCalls atomic.Int32
+	bound, saved := counting(&boundCalls), counting(&savedCalls)
+	defer bound.Close()
+	defer saved.Close()
+	t.Setenv(config.EnvManagementHTTPAddr, saved.Listener.Addr().String())
+	cfg := config.DefaultConfig()
+	cfg.System.Mgmt.HTTPListenAddr = saved.Listener.Addr().String()
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: bound.Listener.Addr().String(), Enabled: true}})
+	output, errText := executeConsoleTest(t, consoleTestRouter(&mockStore{cfg: cfg}), "untrusted.example")
+	if errText != "" || !strings.Contains(output, "bound") || boundCalls.Load() != 1 || savedCalls.Load() != 0 {
+		t.Fatalf("output=%q error=%q bound calls=%d saved calls=%d", output, errText, boundCalls.Load(), savedCalls.Load())
+	}
+}
+
+func TestConsoleTLSRefusesRedirect(t *testing.T) {
+	var leaked atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		leaked.Add(1)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer target.Close()
+	var calls atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		calls.Add(1)
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "server.crt")
+	// Accept a PEM bundle while retaining an exact first-certificate pin.
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	if err := os.WriteFile(path, append(certPEM, certPEM...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bindConsoleHTTPS(t, srv.Listener.Addr().String(), path)
+	cfg := consoleTestConfig("/not-the-served-certificate")
+	_, errText := executeConsoleTest(t, consoleTestRouter(&mockStore{cfg: cfg}), "untrusted.example")
+	if !strings.Contains(errText, "redirect refused") || calls.Load() != 1 || leaked.Load() != 0 {
+		t.Fatalf("redirect: error=%q verified calls=%d leaked calls=%d", errText, calls.Load(), leaked.Load())
+	}
+}
+
+// With HTTP off the console calls the bound HTTPS listener and pins the
+// certificate it serves, whatever the saved setting or the environment name
+// now: the listener can serve a fallback default or a boot-time override.
+func TestConsolePinsTheServedCertificate(t *testing.T) {
+	served, servedPEM := consoleTestCertificate(t)
+	_, savedPEM := consoleTestCertificate(t)
+	_, envPEM := consoleTestCertificate(t)
+	var calls atomic.Int32
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		calls.Add(1)
+		_, _ = io.WriteString(w, `{"status":"served"}`)
+	}))
+	srv.TLS = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{*served}}
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	srv.StartTLS()
+	defer srv.Close()
+	dir := t.TempDir()
+	files := map[string][]byte{"served.crt": servedPEM, "saved.crt": savedPEM, "env.crt": envPEM}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("CONTAIND_TLS_CERT_FILE", filepath.Join(dir, "env.crt"))
+	router := consoleTestRouter(&mockStore{cfg: consoleTestConfig(filepath.Join(dir, "saved.crt"))})
+
+	bindConsoleHTTPS(t, srv.Listener.Addr().String(), filepath.Join(dir, "served.crt"))
+	output, errText := executeConsoleTest(t, router, "untrusted.example")
+	if errText != "" || !strings.Contains(output, "served") || calls.Load() != 1 {
+		t.Fatalf("served certificate: output=%q error=%q calls=%d", output, errText, calls.Load())
+	}
+	// Trusting any other file refuses the listener before the bearer is sent.
+	for _, other := range []string{"saved.crt", "env.crt"} {
+		SetServedManagement(ServedManagement{CertFile: filepath.Join(dir, other)})
+		if _, errText := executeConsoleTest(t, router, "untrusted.example"); errText == "" || calls.Load() != 1 {
+			t.Fatalf("pinned %s: error=%q calls=%d", other, errText, calls.Load())
+		}
+	}
+}
+
+func TestConsoleTLSInfoUsesServedEnvironmentPaths(t *testing.T) {
+	_, certPEM := consoleTestCertificate(t)
+	path := filepath.Join(t.TempDir(), "server.crt")
+	if err := os.WriteFile(path, certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONTAIND_TLS_CERT_FILE", path)
+	t.Setenv("CONTAIND_TLS_KEY_FILE", "/env/server.key")
+	cfg := consoleTestConfig("/config/server.crt")
+	cfg.System.Mgmt.TLSKeyFile = "/config/server.key"
+	router := gin.New()
+	router.GET("/tls", getTLSHandler(&mockStore{cfg: cfg}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
+	var result tlsInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || result.CertFile != path || result.KeyFile != "/env/server.key" ||
+		!containsString(result.CertDNSNames, "appliance.example") {
+		t.Fatalf("TLS info status=%d result=%+v", rec.Code, result)
+	}
 }

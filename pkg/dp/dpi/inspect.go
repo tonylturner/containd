@@ -22,8 +22,19 @@ import (
 // framed. A framed stream's buffer bounds, out-of-order bound and
 // conflicting overlaps are *StreamError; the manager adds their malformed
 // event. Any framed error discards the direction's buffer: a legacy stream
-// starts fresh with the next packet, a session stream stays failed until
-// EndStream. Feed, parse and trim are serialized across capture workers.
+// starts fresh with the next packet unless the packet asks to fail closed;
+// a fail-closed legacy stream stays failed until its flow ends, a session
+// stream until EndStream. A failed stream returns its error without
+// parsing. Feed, parse and trim are serialized across capture workers.
+//
+// A SYN anchors a legacy stream. A stream that fails closed has stricter
+// rules: only a SYN of a handshake the kernel's connection tracking has
+// not seen complete (TCPHandshake) anchors it, never one on its live
+// stream (see open), the payload of a SYN it is not anchored at is a
+// StreamResync error, and its bytes are not framed when the stream was
+// picked up mid-connection, a StreamMidStream error without a malformed
+// event (see feed). The payload of a fail-closed RST is not fed, as no
+// receiver delivers it.
 func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	var res InspectResult
 	if m == nil || len(m.decoders) == 0 {
@@ -33,8 +44,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	defer m.streamMu.Unlock()
 	candidates := m.candidates(state)
 	tcp := pkt.Proto == "tcp"
-	stream := tcp && m.reassembler != nil &&
-		!(pkt.HasOffset && (pkt.Session == "" || pkt.Dir == DirUnknown))
+	stream := m.reassembles(pkt)
 	var framer StreamDecoder
 	if stream {
 		framer = firstFramer(candidates, state)
@@ -44,34 +54,41 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 		res.Proto = framer.Protocol()
 	}
 	key, session, pos := streamKey(state, pkt)
+	var errEvent *Event
 	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
-		m.reassembler.open(key, pkt.TCPSeq, time.Now())
+		anchored := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake)
+		if pkt.FailClosed && len(pkt.Payload) > 0 && !anchored {
+			errEvent = streamError(state, pkt, &res, &StreamError{Kind: StreamResync, Offset: m.reassembler.watermark(key)})
+		}
 	}
-	if stream && pkt.HasOffset {
+	if stream && res.Err == nil {
 		if err := m.reassembler.failure(key); err != nil {
-			res.Err = err // already reported with its event; not re-emitted
-			return res
+			if pkt.HasOffset || pkt.FailClosed {
+				res.Err, res.Failed = err, true // already reported with its event; not re-emitted
+				return res
+			}
+			m.reassembler.complete(key) // the flow no longer fails closed: start fresh
 		}
 	}
 
-	var errEvent *Event
-	if framer != nil && len(pkt.Payload) > 0 {
+	if framer != nil && res.Err == nil && len(pkt.Payload) > 0 && !(pkt.FailClosed && pkt.TCPRst) {
 		now := time.Now()
 		m.reassembler.sweep(now)
-		fed := m.reassembler.feed(key, pos, pkt.Payload, now, framer != nil, pkt.HasOffset)
+		fed := m.reassembler.feed(key, pos, pkt.Payload, now, true, pkt.HasOffset, pkt.FailClosed)
 		res.Gap = fed.gap
 		switch {
-		case fed.err != nil:
+		case fed.err != nil && fed.err.Kind == StreamMidStream:
 			fed.err.Proto = res.Proto
-			ev := malformedEvent(state, pkt, res.Proto, fed.err)
-			errEvent, res.Err = &ev, fed.err
-		case framer != nil && len(fed.buf) > 0:
+			res.Err = fed.err // nothing was inspected: not malformed
+		case fed.err != nil:
+			errEvent = streamError(state, pkt, &res, fed.err)
+		case len(fed.buf) > 0:
 			view := StreamView{Session: session, Dir: pkt.Dir, Base: fed.base, Bytes: fed.buf}
 			errEvent = m.parseFramed(state, pkt, framer, &res, key, view)
 		}
-		if res.Err != nil {
-			m.discard(key, pkt.HasOffset, res.Err)
-		}
+	}
+	if res.Err != nil {
+		m.discard(key, pkt.HasOffset || pkt.FailClosed, res.Err)
 	}
 
 	for _, d := range candidates {
@@ -94,6 +111,22 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 		res.Events = append(res.Events, *errEvent)
 	}
 	return res
+}
+
+// reassembles reports whether pkt's bytes go through the reassembler: TCP,
+// and a HasOffset packet only with its Session and Dir.
+func (m *Manager) reassembles(pkt *ParsedPacket) bool {
+	return pkt.Proto == "tcp" && m.reassembler != nil &&
+		!(pkt.HasOffset && (pkt.Session == "" || pkt.Dir == DirUnknown))
+}
+
+// streamError records a manager-side error of the framed stream in res and
+// returns its malformed event.
+func streamError(state *flow.State, pkt *ParsedPacket, res *InspectResult, se *StreamError) *Event {
+	se.Proto = res.Proto
+	ev := malformedEvent(state, pkt, res.Proto, se)
+	res.Err = se
+	return &ev
 }
 
 // firstFramer returns the first registered StreamDecoder supporting the
@@ -161,10 +194,11 @@ func frameContractViolation(v StreamView, sr StreamResult, continues bool) strin
 	return ""
 }
 
-// discard drops a direction's buffer after a framed error: a session
-// stream stays failed until EndStream, a legacy stream starts fresh.
-func (m *Manager) discard(key string, session bool, err error) {
-	if session {
+// discard drops a direction's buffer after a framed error: a session or
+// fail-closed stream stays failed until it ends, a legacy stream starts
+// fresh.
+func (m *Manager) discard(key string, keepFailed bool, err error) {
+	if keepFailed {
 		m.reassembler.fail(key, err)
 		return
 	}

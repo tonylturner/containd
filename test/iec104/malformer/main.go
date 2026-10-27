@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 containd Authors
+
 // Command malformer is an Apache-2.0, pure-Go IEC 60870-5-104 test client for
 // the containd truth harness. It hand-builds APDU bytes so the
 // harness can drive malformed, unsupported, split and coalesced cases that a
@@ -15,6 +18,7 @@
 //
 //	startdt            APCI STARTDT act only
 //	gi                 STARTDT act, then a station GI (type 100) request
+//	data-before-start  a valid GI I-frame without STARTDT (APCI anomaly only)
 //	dc-select          a valid type 46 double-command SELECT to CA/IOA/value
 //	dc-execute         a valid type 46 double-command EXECUTE to CA/IOA/value
 //	dc-split           a dc-select written in -chunk byte segments, -gap-ms apart
@@ -300,6 +304,9 @@ func run(o options) result {
 	switch scenario {
 	case "startdt":
 		r.sent, r.fatal = writeAll(conn, startdtAct)
+	case "data-before-start":
+		r.note = "GI before STARTDT con"
+		r.sent, r.fatal = writeAll(conn, iFrame(0, 0, interrogation(ca)))
 	case "gi":
 		if err := handshake(conn); err != nil {
 			r.fatal = err

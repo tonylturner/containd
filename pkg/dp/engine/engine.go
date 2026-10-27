@@ -16,6 +16,7 @@ import (
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/coverage"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
@@ -42,11 +43,13 @@ type captureRunner interface {
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
 	managementReservation *mgmtpath.Reservation
+	engineAPI             *enforce.EngineAPIPath
 	capture               captureRunner
 	runCapture            captureRunner
 	runCancel             context.CancelFunc
 	runDone               chan struct{}
 	ruleSnap              ruleSnapshots
+	zones                 zoneCache // outlives Reconfigure, as the namespace does
 	started               atomic.Bool
 	epoch                 atomic.Uint64 // counts Reconfigure calls; ends stale start retries
 	compiler              *enforce.Compiler
@@ -57,11 +60,13 @@ type Engine struct {
 	rulesetStatus         atomic.Pointer[RulesetStatus]
 	avSink                AVSink
 	inspectAll            bool
-	dpiEnabled            bool           // master DPI on/off
-	dpiMode               string         // "learn" or "enforce"
-	dpiExclusions         []DPIExclusion // IPs/domains excluded from DPI
-	nflogGroup            uint16         // 0 disables nflog consumer + log clauses
-	nflogStop             func()         // stops the running nflog consumer; nil before Start or after disable
+	dpiEnabled            bool              // master DPI on/off
+	dpiMode               string            // "learn" or "enforce"
+	dpiExclusions         []DPIExclusion    // IPs/domains excluded from DPI
+	exclusionHits         *exclusionHits    // flows each exclusion exempted since the last apply
+	coverage              coverage.Settings // static coverage inputs of this configuration
+	nflogGroup            uint16            // 0 disables nflog consumer + log clauses
+	nflogStop             func()            // stops the running nflog consumer; nil before Start or after disable
 	onError               func(error)
 	nfqueueGroup          uint16     // 0 disables NFQUEUE consumer + queue verdicts on dpiEligible rules
 	lifecycleMu           sync.Mutex // serializes Start, Reconfigure and ApplyRules
@@ -77,21 +82,38 @@ type Engine struct {
 	hooks                 *inlineHooks
 	iec                   *iecTable
 	gate                  *envelopeGate // outlives Reconfigure, as the kernel ruleset does
+	domains               *domainExclusions
 }
 
-// RulesetStatus captures the last compiled/applied ruleset and any error.
+// RulesetStatus describes the installed ruleset: its compiled text,
+// snapshot version, apply time and warnings (enforce.RuleWarnings), which a
+// failed apply leaves in place, as it leaves the ruleset installed. Error,
+// FailedSnapshotVersion and FailedAt describe the last apply when it
+// failed; the next successful apply clears them. ICSCoverage is the live
+// coverage of the ICS rules in force (none before the first success, never
+// a failed snapshot's); omitted when there are none. SchedulePlanner is the
+// schedule planner's state for the installed ruleset; omitted when it has
+// no scheduled rule.
 type RulesetStatus struct {
-	Ruleset   string    `json:"ruleset"`
-	AppliedAt time.Time `json:"appliedAt"`
-	Error     string    `json:"error,omitempty"`
+	Ruleset               string                `json:"ruleset"`
+	SnapshotVersion       string                `json:"snapshotVersion,omitempty"`
+	AppliedAt             time.Time             `json:"appliedAt"`
+	Error                 string                `json:"error,omitempty"`
+	FailedSnapshotVersion string                `json:"failedSnapshotVersion,omitempty"`
+	FailedAt              *time.Time            `json:"failedAt,omitempty"`
+	Warnings              []enforce.RuleWarning `json:"warnings,omitempty"`
+	ICSCoverage           []coverage.Rule       `json:"icsCoverage,omitempty"`
+	SchedulePlanner       *SchedulePlan         `json:"schedulePlanner,omitempty"`
 }
 
 type EnforceConfig struct {
 	ManagementReservation *mgmtpath.Reservation
-	Enabled               bool
-	TableName             string
-	Applier               enforce.Applier
-	Updater               enforce.Updater
+	// EngineAPI is the process's non-loopback engine API path, if any.
+	EngineAPI *enforce.EngineAPIPath
+	Enabled   bool
+	TableName string
+	Applier   enforce.Applier
+	Updater   enforce.Updater
 }
 
 type Config struct {
@@ -116,11 +138,14 @@ type Config struct {
 	NFLogGroup uint16
 
 	// NFQueueGroup, when non-zero, enables NFQUEUE-based DPI enforcement
-	// for dpiEligible rules. The compiler emits `queue num <N>` instead
-	// of accept/drop on rules with an ICS predicate, and the capture
-	// manager runs an NFQUEUE consumer at that group. Zero disables
+	// for dpiEligible rules. The compiler queues the traffic of rules with
+	// an ICS predicate to queue <N> instead of accepting or dropping it
+	// (through enforce.ICSQueueChain, or enforce.IEC104EnvelopeChain for
+	// IEC104 rules), and the capture manager runs an NFQUEUE consumer at
+	// that group. Zero disables
 	// (ICS rules fall back to plain accept/drop with no function-code
-	// inspection — the legacy v0.1.25 behavior). See config.DataPlaneConfig.NFQueueGroup
+	// inspection, so management validation refuses ICS rules in enforce
+	// mode). See config.DataPlaneConfig.NFQueueGroup
 	// for full rationale.
 	NFQueueGroup uint16
 
@@ -143,9 +168,9 @@ func New(cfg Config) (*Engine, error) {
 		cfg.Capture.OnError = cfg.OnError
 	}
 	// If NFQueueGroup is set, drive the capture manager via NFQUEUE
-	// rather than AFPACKET. This pairs with the compiler emitting
-	// `queue num <NFQueueGroup>` as the verdict for dpiEligible rules
-	// (below), so ICS-flagged packets land in handlePacket where the
+	// rather than AFPACKET. This pairs with the compiler queueing the
+	// traffic of dpiEligible rules to NFQueueGroup (below), so ICS-flagged
+	// packets land in handlePacket where the
 	// DPI decoders + enforceDPIEvents can apply function-code-level
 	// verdicts. Explicit NFQUEUE config overrides any inherited Mode.
 	if cfg.NFQueueGroup != 0 {
@@ -161,12 +186,16 @@ func New(cfg Config) (*Engine, error) {
 	}
 	e := &Engine{
 		managementReservation: cfg.Enforce.ManagementReservation,
+		engineAPI:             cfg.Enforce.EngineAPI,
 		capture:               capManager,
 		onError:               cfg.OnError,
 		inspectAll:            cfg.InspectAll,
 		dpiEnabled:            cfg.DPIEnabled,
 		dpiMode:               cfg.DPIMode,
 		dpiExclusions:         cfg.DPIExclusions,
+		exclusionHits:         newExclusionHits(cfg.DPIExclusions),
+		coverage:              coverageSettings(cfg),
+		domains:               newDomainExclusions(cfg.DPIExclusions),
 		nflogGroup:            cfg.NFLogGroup,
 		nfqueueGroup:          cfg.NFQueueGroup,
 		flows:                 make(map[string]*flow.State),
@@ -188,21 +217,10 @@ func New(cfg Config) (*Engine, error) {
 	e.gate = &envelopeGate{}
 	e.bindGate()
 	if cfg.Enforce.Enabled {
-		comp := enforce.NewCompiler()
-		comp.ManagementReservation = e.managementReservation
-		if cfg.Enforce.TableName != "" {
-			comp.TableName = cfg.Enforce.TableName
-		}
-		// Wire the nflog group through to the compiler so rules with
-		// Log:true emit the appropriate `log prefix ... group N` clause.
-		// Compiler operates on int; cast safely (NFLogGroup is uint16).
-		comp.NFLogGroup = int(cfg.NFLogGroup)
-		// Wire NFQueueGroup so dpiEligible rules compile to
-		// `queue num N` instead of plain accept/drop. The capture
-		// manager (above) is set to nfqueue mode at the same group
-		// so the queued packets reach handlePacket → DPI →
-		// enforceDPIEvents and get an ICS-aware verdict.
-		comp.QueueID = int(cfg.NFQueueGroup)
+		comp := enforce.NewCompilerWithSettings(enforce.CompilerSettings{
+			TableName: cfg.Enforce.TableName, NFLogGroup: cfg.NFLogGroup, NFQueueGroup: cfg.NFQueueGroup,
+		}, e.managementReservation)
+		comp.EngineAPI = e.engineAPI
 		e.compiler = comp
 		if cfg.Enforce.Applier != nil {
 			e.applier = cfg.Enforce.Applier
@@ -229,9 +247,20 @@ func New(cfg Config) (*Engine, error) {
 // The lifecycle lock serializes the full swap/stop with Start: if Reconfigure
 // finishes before a queued Start runs, that Start binds the latest state and
 // later Start calls see the engine as already started.
-func (e *Engine) Reconfigure(fresh *Engine) {
+//
+// When fresh does not enforce, Reconfigure first deletes the nft tables this
+// engine installed, so the kernel stops enforcing too, and the ruleset status
+// stops describing them. If that fails it returns the error and changes
+// nothing.
+func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
+	if fresh.compiler == nil {
+		if err := e.gate.release(); err != nil {
+			return fmt.Errorf("remove enforcement tables: %w", err)
+		}
+		e.releaseRulesetStatus()
+	}
 
 	prevCancel := e.runCancel
 	prevCapture := e.runCapture
@@ -260,6 +289,9 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	if prevRunDone != nil {
 		<-prevRunDone
 	}
+	if prevIEC != nil {
+		prevIEC.stopInventory()
+	}
 	e.runCancel = nil
 	e.runCapture = nil
 	e.runDone = nil
@@ -269,6 +301,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.compiler = fresh.compiler
 	if e.compiler != nil {
 		e.compiler.ManagementReservation = e.managementReservation
+		e.compiler.EngineAPI = e.engineAPI
 	}
 	e.applier = fresh.applier
 	e.updater = fresh.updater
@@ -282,6 +315,9 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.dpiEnabled = fresh.dpiEnabled
 	e.dpiMode = fresh.dpiMode
 	e.dpiExclusions = fresh.dpiExclusions
+	e.exclusionHits = fresh.exclusionHits
+	e.coverage = fresh.coverage
+	e.domains = fresh.domains
 	e.nflogGroup = fresh.nflogGroup
 	e.nfqueueGroup = fresh.nfqueueGroup
 	e.onError = fresh.onError
@@ -289,6 +325,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
+	fresh.iec.zones = &e.zones
 	e.iec = fresh.iec
 	e.flowMu.Unlock()
 	e.epoch.Add(1)
@@ -305,6 +342,7 @@ func (e *Engine) Reconfigure(fresh *Engine) {
 	if prevIEC != nil && prevIEC.injector != nil && prevIEC.injector != e.iec.injector {
 		_ = prevIEC.injector.Close()
 	}
+	return nil
 }
 
 func (e *Engine) Start(ctx context.Context) error {
@@ -349,7 +387,7 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	// case the kernel log clause still fires but the userspace consumer
 	// just won't translate the packets into events.
 	if e.nflogGroup != 0 && e.eventStore != nil {
-		stop, err := startNFLog(runCtx, e.nflogGroup, e.eventStore, func(perr error) {
+		stop, err := startNFLog(runCtx, e.nflogGroup, nflogRuleHits{e}, func(perr error) {
 			// Per-packet hook errors — drop. Surface only at debug.
 			_ = perr
 		})
@@ -378,14 +416,23 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	runDone := make(chan struct{})
 	e.runDone = runDone
 	var run sync.WaitGroup
-	run.Add(3)
+	run.Add(5)
 	go func() {
 		defer run.Done()
 		e.hooks.blocks.run(runCtx)
 	}()
+	onError := e.onError
+	go func() {
+		defer run.Done()
+		e.runSchedulePlanner(runCtx, onError)
+	}()
 	go func() {
 		defer run.Done()
 		e.iec.run(runCtx.Done())
+	}()
+	go func() {
+		defer run.Done()
+		e.zones.watch(runCtx, onError)
 	}()
 	// Periodically update the active goroutine gauge.
 	go func() {
@@ -422,22 +469,24 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 		return err
 	}
 	var compiled string
-	var applyErr error
+	var warnings []enforce.RuleWarning
 
 	if e.compiler != nil {
 		start := time.Now()
-		compiled, applyErr = e.gate.apply(ctx, e.compiler, e.applier, &snap)
-		if applyErr != nil {
-			e.setRulesetStatus(compiled, applyErr)
-			return applyErr
+		var err error
+		if compiled, err = e.gate.apply(ctx, e.compiler, e.applier, &snap); err != nil {
+			e.recordApplyFailure(snap.Version, err)
+			return err
 		}
 		metrics.NFTablesApplyDuration.Observe(time.Since(start).Seconds())
+		warnings = e.compiler.RuleWarnings(&snap)
 	}
 
 	e.ruleSnap.Store(&snap)
 	e.iec.setPolicy(&snap)
 	metrics.RulesCount.Set(float64(len(snap.Firewall)))
-	e.setRulesetStatus(compiled, nil)
+	e.rulesetStatus.Store(&RulesetStatus{Ruleset: compiled, SnapshotVersion: snap.Version, AppliedAt: time.Now().UTC(), Warnings: warnings})
+	e.resetExclusionHits()
 	return nil
 }
 
@@ -569,8 +618,11 @@ func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
 // (DirForward) or accepted it (DirReverse).
 func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 	e.flowMu.Lock()
-	state := e.connectionStateLocked(pkt, now)
+	state, forgotten := e.connectionStateLocked(pkt, now)
 	state.Touch(uint64(len(pkt.Payload)), now)
+	if state.Packets == 1 && state.Key.Dir == flow.DirForward {
+		e.countAddressExclusionLocked(state)
+	}
 	// Only check if sweep is due under the existing lock; do the actual
 	// sweep outside the critical path if needed.
 	needsSweep := now.Sub(e.lastSweep) >= 30*time.Second
@@ -579,6 +631,11 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 	}
 	e.flowMu.Unlock()
 
+	// End the forgotten connection's streams before this packet starts the
+	// new one.
+	for _, st := range forgotten {
+		e.endFlowStream(st, nil)
+	}
 	if needsSweep {
 		e.sweepFlows(now)
 	}
@@ -588,9 +645,11 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 // connectionStateLocked finds or creates the direction state for pkt. A
 // SYN marks its sender as the opener and a SYN-ACK as the server; without
 // a handshake, the opposite direction or a known ICS service port orients
-// it. Ambiguous or unknown ports retain first-seen orientation. Must
-// be called with e.flowMu held.
-func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.State {
+// it. Ambiguous or unknown ports retain first-seen orientation. When the
+// handshake contradicts the recorded orientation, the states of the old
+// connection are forgotten and returned, for the caller to end their
+// streams once it releases e.flowMu. Must be called with e.flowMu held.
+func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow.State, []*flow.State) {
 	key := flow.Key{
 		SrcIP:   pkt.SrcIP,
 		DstIP:   pkt.DstIP,
@@ -599,6 +658,7 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.
 		Proto:   pkt.Proto,
 	}
 	hint, hinted := handshakeDirection(pkt)
+	var forgotten []*flow.State
 	for _, dir := range []flow.Direction{flow.DirForward, flow.DirReverse} {
 		key.Dir = dir
 		state, ok := e.flows[key.Hash()]
@@ -606,12 +666,15 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.
 			continue
 		}
 		if !hinted || hint == dir {
-			return state
+			return state, nil
 		}
 		// The handshake contradicts the recorded orientation: the tuple
 		// carries a new connection. Forget both of the old directions.
-		e.dropFlowLocked(key)
-		e.dropFlowLocked(key.Reversed())
+		for _, old := range []flow.Key{key, key.Reversed()} {
+			if st := e.dropFlowLocked(old); st != nil {
+				forgotten = append(forgotten, st)
+			}
+		}
 		break
 	}
 
@@ -634,9 +697,10 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) *flow.
 	}
 	state := flow.NewState(key, now)
 	state.IdleTimeout = 5 * time.Minute
+	state.Tags = e.flowTags(key)
 	e.flows[key.Hash()] = state
 	metrics.FlowsActive.Inc()
-	return state
+	return state, forgotten
 }
 
 // handshakeDirection reports the direction a TCP handshake segment
@@ -651,12 +715,19 @@ func handshakeDirection(pkt capture.Packet) (flow.Direction, bool) {
 	return flow.DirForward, true
 }
 
-func (e *Engine) dropFlowLocked(key flow.Key) {
+// dropFlowLocked forgets the state of key and returns it, nil when there
+// is none. Every state the engine forgets has its streams ended exactly
+// once by endFlowStream: here by the caller, outside e.flowMu, and by
+// sweepFlows for expired ones. Must be called with e.flowMu held.
+func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 	hash := key.Hash()
-	if _, ok := e.flows[hash]; ok {
-		delete(e.flows, hash)
-		metrics.FlowsActive.Dec()
+	st, ok := e.flows[hash]
+	if !ok {
+		return nil
 	}
+	delete(e.flows, hash)
+	metrics.FlowsActive.Dec()
+	return st
 }
 
 func (e *Engine) sweepFlows(now time.Time) {

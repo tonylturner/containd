@@ -16,6 +16,14 @@ type Snapshot struct {
 	// ZoneIfaces maps zone name -> interface names. Used for nftables bindings.
 	ZoneIfaces map[string][]string
 	Default    Action
+	// IdentityBindings tag opener IPs with identity labels, sorted by IP.
+	IdentityBindings []IdentityBinding
+}
+
+// IdentityBinding tags one address with identity labels.
+type IdentityBinding struct {
+	IP         string
+	Identities []string
 }
 
 // LocalServiceRule is a minimal allow rule for traffic destined to the appliance itself.
@@ -69,19 +77,45 @@ type Entry struct {
 	Destinations []string
 	Protocols    []Protocol
 	Action       Action
-	Log          bool // log matching traffic
-	// Future predicates
-	Identities []string // user/group roles
+	RateLimit    *RateLimit // RATE_LIMIT only
+	Tag          string     // TAG only
+	Log          bool       // log matching traffic
+	// Identities restricts the entry to flows whose opener address is bound
+	// (Snapshot.IdentityBindings) to any of these labels.
+	Identities []string
 	ICS        ICSPredicate
 	Schedule   SchedulePredicate
 }
 
+// HasIdentityPredicate reports whether the entry is restricted to flows of
+// the listed identities.
+func (e Entry) HasIdentityPredicate() bool {
+	return len(e.Identities) > 0
+}
+
+// HasSchedulePredicate reports whether the entry is restricted to a
+// recurring time window. A timezone alone is no restriction.
+func (e Entry) HasSchedulePredicate() bool {
+	return !schedulePredicateEmpty(e.Schedule)
+}
+
 type Action string
 
+// Actions mirror config.Action. ALLOW, DENY and RESET are terminal, with
+// ALLOW taking precedence; RATE_LIMIT and TAG are effects that never decide.
 const (
-	ActionAllow Action = "ALLOW"
-	ActionDeny  Action = "DENY"
+	ActionAllow     Action = "ALLOW"
+	ActionDeny      Action = "DENY"
+	ActionReset     Action = "RESET"
+	ActionRateLimit Action = "RATE_LIMIT"
+	ActionTag       Action = "TAG"
 )
+
+// RateLimit is a packet policer for one directional 5-tuple.
+type RateLimit struct {
+	PacketsPerSecond uint32
+	Burst            uint32
+}
 
 type Protocol struct {
 	Name string

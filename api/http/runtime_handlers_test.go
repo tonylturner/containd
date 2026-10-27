@@ -22,6 +22,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
@@ -54,9 +55,9 @@ type runtimeMockEngine struct {
 	anomaliesResp       []anomaly.Anomaly
 	anomaliesErr        error
 	anomaliesCleared    bool
-	conntrackResp       []conntrack.Entry
+	conntrackResp       []dpengine.TaggedConnection
 	conntrackErr        error
-	conntrackDeleteReq  conntrack.DeleteRequest
+	conntrackDeleteReq  conntrack.KillRequest
 	wireGuardStatusResp netcfg.WireGuardStatus
 }
 
@@ -151,13 +152,13 @@ func (m *runtimeMockEngine) ClearAnomalies(ctx context.Context) error {
 	return nil
 }
 
-func (m *runtimeMockEngine) ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error) {
+func (m *runtimeMockEngine) ListConntrack(ctx context.Context, limit int) ([]dpengine.TaggedConnection, error) {
 	return m.conntrackResp, m.conntrackErr
 }
 
-func (m *runtimeMockEngine) DeleteConntrack(ctx context.Context, req conntrack.DeleteRequest) error {
+func (m *runtimeMockEngine) DeleteConntrack(ctx context.Context, req conntrack.KillRequest) (conntrack.KillResult, error) {
 	m.conntrackDeleteReq = req
-	return nil
+	return conntrack.KillResult{Scope: req.Scope, Matched: 1, Deleted: 1, ConntrackDeleted: true, RevocationInstalled: true, Closure: "TCP reset signalled on next packet"}, nil
 }
 
 func (m *runtimeMockEngine) GetWireGuardStatus(ctx context.Context, iface string) (netcfg.WireGuardStatus, error) {
@@ -399,7 +400,7 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 	eng.protoStatsResp = []stats.ProtoStats{{Protocol: "modbus", PacketCount: 4}}
 	eng.topTalkersResp = []stats.FlowStats{{SrcIP: "10.0.0.1", DstIP: "10.0.0.2", Protocol: "tcp", Packets: 4}}
 	eng.anomaliesResp = []anomaly.Anomaly{{Type: "malformed_frame", Protocol: "modbus", Severity: "high"}}
-	eng.conntrackResp = []conntrack.Entry{{Proto: "tcp", Src: "10.0.0.1", Dst: "10.0.0.2", Dport: "502"}}
+	eng.conntrackResp = []dpengine.TaggedConnection{{Entry: conntrack.Entry{Proto: "tcp", Src: "10.0.0.1", Dst: "10.0.0.2", Dport: "502"}, Tags: []string{"plc"}}}
 
 	s := NewServerWithEngine(&mockStore{}, nil, eng)
 
@@ -473,7 +474,7 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/conntrack?limit=5", nil)
 	s.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"dport":"502"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"dport":"502"`) || !strings.Contains(rec.Body.String(), `"tags":["plc"]`) {
 		t.Fatalf("conntrack list: expected payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
@@ -526,36 +527,36 @@ func TestRuntimeTelemetryFallbackAndUnavailablePaths(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/flows", nil)
 	noEngine.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
-		t.Fatalf("flows without engine: expected empty array, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("flows without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/stats/protocols", nil)
 	noEngine.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
-		t.Fatalf("proto stats without engine: expected empty array, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("proto stats without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/stats/top-talkers", nil)
 	noEngine.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
-		t.Fatalf("top talkers without engine: expected empty array, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("top talkers without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/anomalies", nil)
 	noEngine.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
-		t.Fatalf("anomalies without engine: expected empty array, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("anomalies without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/simulation", bytes.NewBufferString(`{"action":"start"}`))
 	req.Header.Set("Content-Type", "application/json")
 	noEngine.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "simulation unavailable") {
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "simulation unavailable") {
 		t.Fatalf("simulation without engine: expected unavailable error, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
@@ -581,8 +582,12 @@ func TestRuntimeTelemetryGatewayErrorsAndStoreLoadFailures(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodGet, tc.path, nil)
 		s.ServeHTTP(rec, req)
-		if rec.Code != http.StatusBadGateway {
-			t.Fatalf("%s gateway error: expected 502, got %d body=%s", tc.name, rec.Code, rec.Body.String())
+		expected := http.StatusServiceUnavailable
+		if tc.name == "conntrack" {
+			expected = http.StatusBadGateway
+		}
+		if rec.Code != expected {
+			t.Fatalf("%s gateway error: expected %d, got %d body=%s", tc.name, expected, rec.Code, rec.Body.String())
 		}
 	}
 

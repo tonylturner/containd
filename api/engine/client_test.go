@@ -16,6 +16,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	"github.com/tonylturner/containd/pkg/dp/coverage"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
@@ -279,14 +280,20 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 				t.Fatalf("conntrack limit = %q", got)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"entries": []conntrack.Entry{{Proto: "tcp", State: "ESTABLISHED", Src: "192.0.2.10", Dst: "192.0.2.20"}},
+				"entries": []dpengine.TaggedConnection{{Entry: conntrack.Entry{Proto: "tcp", State: "ESTABLISHED", Src: "192.0.2.10", Dst: "192.0.2.20"}, Tags: []string{"plc"}}},
 			})
 		case http.MethodPost:
-			var req conntrack.DeleteRequest
+			var req conntrack.KillRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("decode conntrack delete: %v", err)
 			}
-			w.WriteHeader(http.StatusOK)
+			if err := req.Validate(); err != nil {
+				t.Errorf("invalid kill request: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			until := time.Now().Add(time.Minute)
+			_ = json.NewEncoder(w).Encode(conntrack.KillResult{Scope: req.Scope, Matched: 1, Deleted: 1, ConntrackDeleted: true, RevocationInstalled: true, BlockedUntil: &until, Closure: "TCP reset signalled on next packet"})
 		default:
 			t.Fatalf("conntrack method = %s", r.Method)
 		}
@@ -359,7 +366,9 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(pcap.AnalysisResult{PacketCount: 2, Protocols: map[string]int{"modbus": 1}})
 	})
 	mux.HandleFunc("/internal/ruleset_status", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(dpengine.RulesetStatus{Ruleset: "loaded"})
+		_ = json.NewEncoder(w).Encode(dpengine.RulesetStatus{Ruleset: "loaded", ICSCoverage: []coverage.Rule{
+			{RuleID: "read", Protocol: "modbus", Mode: "enforce", State: coverage.Partial,
+				Reasons: []coverage.Reason{{Code: coverage.ExclusionOverlap, Message: "excluded", Value: "10.0.0.2", Matches: 3}}}}})
 	})
 
 	srv := httptest.NewServer(mux)
@@ -387,10 +396,10 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		t.Fatalf("ClearInventory: %v", err)
 	}
 	entries, err := c.ListConntrack(ctx, 2)
-	if err != nil || len(entries) != 1 || entries[0].State != "ESTABLISHED" {
+	if err != nil || len(entries) != 1 || entries[0].State != "ESTABLISHED" || len(entries[0].Tags) != 1 || entries[0].Tags[0] != "plc" {
 		t.Fatalf("ListConntrack = %#v, %v", entries, err)
 	}
-	if err := c.DeleteConntrack(ctx, conntrack.DeleteRequest{Proto: "tcp", Src: "192.0.2.10", Dst: "192.0.2.20"}); err != nil {
+	if result, err := c.DeleteConntrack(ctx, conntrack.KillRequest{DeleteRequest: conntrack.DeleteRequest{Proto: "tcp", Src: "192.0.2.10", Dst: "192.0.2.20", Sport: 1234, Dport: 443}}); err != nil || !result.RevocationInstalled {
 		t.Fatalf("DeleteConntrack: %v", err)
 	}
 	flows, err := c.ListFlows(ctx, 4)
@@ -448,7 +457,7 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		t.Fatalf("AnalyzePcapByName = %#v, %v", analysis, err)
 	}
 	ruleset, err := c.RulesetStatus(ctx)
-	if err != nil || ruleset.Ruleset != "loaded" {
+	if err != nil || ruleset.Ruleset != "loaded" || len(ruleset.ICSCoverage) != 1 || ruleset.ICSCoverage[0].Reasons[0].Matches != 3 {
 		t.Fatalf("RulesetStatus = %#v, %v", ruleset, err)
 	}
 }

@@ -7,6 +7,617 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-10-26
+
+### Security
+
+- In IEC 104 envelopes a segment carrying both SYN and RST no longer opens, establishes or closes a session: every session and every enforce envelope drops it, and learn mode no longer starts a session at it.
+- The web console and SSH CLI sessions call a management listener on 127.0.0.1 only through a socket management itself bound. A failed loopback or HTTPS bind, or a reserved-endpoint fallback after a failed wildcard bind, no longer sends bearer tokens to another process holding that port. With no bound listener reachable on 127.0.0.1 the console reports it and SSH stays off with a listener fault.
+- In IEC 104 envelopes a RST without payload closes a session only at the
+  sequence number its receiver expects next. A forged or stale RST no longer
+  makes the engine stop following a live connection.
+- In an IEC 104 enforce envelope a session starts only at a SYN of a handshake
+  that connection tracking has not seen complete; a SYN sent into an
+  established connection no longer opens one. The `iec104_envelope` nft chain
+  now has three rules and sets the handshake mark bit `0x02000000` alongside
+  `0x01000000`.
+- With NFQUEUE, a SYN sent into an established Modbus or DNP3 connection
+  covered by an enforce ICS rule no longer restarts inspection. After an
+  engine restart, or once the engine forgot an idle connection, such a SYN
+  could choose where the engine started framing the connection's bytes.
+  Inspection now starts only at a handshake that connection tracking has not
+  seen complete; otherwise the connection stays dropped as
+  `stream_midstream`. Generic ICS rules now jump to the new `ics_queue` nft
+  chain, which queues with skb mark `0x02000000` for such handshakes.
+- Outside lab mode, wrong TOTP codes and wrong current passwords are limited
+  per account across all client addresses, on web/API and SSH. Five wrong
+  codes, or ten wrong current passwords, without a success lock that check
+  for 15 minutes. A locked check is refused before the guess is checked
+  (web/API `429` with `Retry-After`), and each lock writes one denied audit
+  record. The counts survive a restart. Password login is never locked by
+  these limits; resetting the account's password lifts them.
+- A TOTP code is accepted once per account. Web/API login, MFA self-disable
+  and SSH login refuse a code whose time step is not later than the last
+  accepted one, including after a restart.
+- Outside lab mode, refused SSH logins write `ssh.login` denied records naming
+  the account and client address: unknown or non-admin account, wrong
+  password, unauthorized key (once per unauthenticated connection, with
+  fingerprints), and wrong or reused TOTP code. SSH key logins now share the
+  password login rate limit.
+- Wrong codes at MFA enrollment and a wrong password or code when turning MFA
+  off write denied `auth.mfa.enable` / `auth.mfa.disable` records.
+- Outside lab mode, the SSH menu password reset and the setup wizard ask for
+  the current password before changing it, and record a wrong one as denied.
+- Outside lab mode, SSH applies the web login's account checks. The bootstrap
+  admin must change its password at SSH login, for password and key logins,
+  before the CLI, menu or shell opens. Password login of an account with TOTP
+  MFA asks for the code through keyboard-interactive authentication, and an
+  account past its MFA enrollment grace period cannot log in over SSH. Clients
+  limited to the `password` method, such as `sshpass`, cannot complete these
+  steps. Lab-mode SSH is unchanged.
+- A password or MFA change from the web UI, the API or the SSH console ends the
+  account's other sessions and closes their SSH connections. Deleting an
+  account closes its SSH connections. A new password must differ from the
+  current one.
+- SSH login rate limiting counts attempts per client address and account;
+  previously every connection started a new count.
+- User creation, change and deletion, profile changes, password changes,
+  management TLS certificate replacement, SSH key enrollment and refused SSH
+  logins now write audit records. SSH console password changes are recorded as
+  `auth.password.change` (was `user.password.set`).
+- While enforcing, the unauthenticated engine API is admitted only from
+  loopback and, when `CONTAIND_ENGINE_ADDR` names one address, on that
+  address's interface. TCP 8081 is no longer accepted on every interface.
+- Firewall rules with identity or schedule predicates no longer compile to
+  always-on rules. A predicate that cannot be evaluated resolves toward denial:
+  such an ALLOW rule is inactive and such a DENY rule always applies. Schedules
+  still apply to ICS rules inspected through NFQUEUE. The maintenance-window
+  template's scheduled allows are inactive. Affected rules are listed as
+  warnings in the engine ruleset status, in `GET /api/v1/dataplane/ruleset`
+  (`warnings` and `engineStatus.warnings`) and in the firewall page's ruleset
+  preview. The rule impact preview and the userspace evaluator decide these
+  rules the same way, and the evaluator admits by default only when the
+  firewall default action is exactly `ALLOW`.
+- New and factory-reset configurations no longer include the `allow-mgmt-ui`
+  firewall rule. It never governed management access, but it allowed any
+  forwarded traffic to tcp/8080. Existing configurations keep it; delete it
+  unless you need forwarded tcp/8080 from every zone.
+- The SSH console no longer echoes new passwords. The menu reset and the
+  setup wizard ask twice and refuse a mismatch.
+- The web console's internal API calls over HTTPS verify the management
+  certificate and pin it, instead of skipping verification. The console never
+  falls back to the request's Host header and refuses redirects.
+- Release SBOMs are signed CycloneDX attestations bound to each image digest,
+  and promotion verifies them. The management SBOM includes the UI's production
+  npm packages. A manual release run can no longer move `:latest` to an older
+  version.
+- Bind the unauthenticated engine API to `127.0.0.1:8081` by default in combined
+  mode and starter/dev Compose; explicit `CONTAIND_ENGINE_ADDR` overrides still
+  apply, and split engine mode retains `:8081`. Management derives its local
+  engine URL from the same listener setting, including with a reservation.
+- Update Next.js to 15.5.28 and PostCSS to 8.5.31, clearing the critical and
+  high npm advisories in the UI build.
+- Upgrade the UI to Tailwind CSS 4.3.3 with no visual change. `npm audit`
+  now reports no vulnerabilities.
+- A firewall rule scoped to `vpn:*`, `vpn:wireguard` or `vpn:openvpn` no
+  longer matches every address when that VPN is not configured. A source or
+  destination that resolves to no address now matches nothing, so the rule has
+  no effect until the VPN is configured.
+- With NFQUEUE, a Modbus or DNP3 connection covered by an enforce ICS rule is
+  dropped and its flow blocked when its TCP stream cannot be inspected:
+  conflicting or rewritten retransmitted bytes, framing the decoder rejects,
+  reassembly limits, or a decoder fault. Before, inspection restarted at a
+  later segment and a prohibited command could pass. An `ics.decision` event
+  with reason `stream_error` or `decoder_panic` names the rule. Learn mode and
+  IEC 104 are unchanged.
+- With NFQUEUE, a Modbus or DNP3 connection covered by an enforce ICS rule no
+  longer restarts inspection at a FIN or RST that its receiver ignores. A FIN
+  or RST ends the stream only when it is in window, and never on a connection
+  already denied. A SYN with a new sequence number on a live connection now
+  drops and blocks it with reason `stream_resync`. After a decoder fault, the
+  bytes held before it are not inspected again. Before, a crafted RST, FIN or
+  SYN could make a later prohibited command be framed from the middle of a
+  message, so it passed.
+- With NFQUEUE, a Modbus or DNP3 connection covered by an enforce ICS rule
+  that the engine did not see from its SYN is dropped, as IEC 104 sessions
+  already are. This covers connections open across an engine restart or a
+  data-plane configuration change, and connections idle longer than the
+  engine's 5-minute flow timeout. Inspection used to start at the first segment
+  it saw, which could fall inside a message. An `ics.decision` event with
+  reason `stream_midstream` names the rule. No flow block is installed: the
+  client's next connection is inspected from its first byte. Learn mode is
+  unchanged.
+- With NFQUEUE, a Modbus or DNP3 connection covered by an enforce ICS rule now
+  stays dropped after a denied command until the connection ends. If the nft
+  flow block could not be installed, the client's retransmission of the denied
+  command could reach the device about 30 s after the denial.
+- Validation refuses a firewall rule that names an ICS protocol and is in
+  effective enforce mode while `dataplane.nfqueueGroup` is 0. Without an
+  inline path the first prohibited command reached the device while the UI
+  showed "enforce". Set a queue, or set the rule's `ics.mode` to `learn`.
+  Rules without an ICS protocol and a global `dpiMode: enforce` alone stay
+  valid. `dataplane.dpiMode` accepts only `learn` or `enforce`.
+
+### Added
+
+- System Settings shows the subject alternative names (DNS names and IP addresses) of the certificate the HTTPS listener serves, and of the saved certificate where the next management start serves other files. GET /system/tls adds `servedCertDnsNames` and `servedCertIps`.
+- The topology security view summarizes how many zones fall below their SL target, counting every zone and not only those in the matrix, and names each with its achieved and target level.
+- `GET /api/v1/dataplane/ruleset/status` reports the installed ruleset's status (failed apply, schedule planner, applied rule warnings, ICS coverage) to any authenticated user, without compiling the candidate and without the ruleset text.
+- `show syslog status` shows audit record forwarding: totals, backlog and, per
+  forwarder, cursor, backlog, last send and last error.
+- Syslog forwarders also send audit records, oldest first, as JSON
+  (`"kind":"audit"`) or RFC 5424 (MSGID `audit`). Each forwarder keeps a
+  cursor in the audit database, so records written during a collector outage
+  or before a restart are delivered later; a new forwarder starts at the
+  newest record. `GET /api/v1/services/status` reports the audit backlog and
+  last error per forwarder under `syslog.audit`.
+- The ruleset status reports schedule planner health (last refill, horizon
+  end, last error). A failing refill, or a schedule horizon within an hour of
+  its end, makes enforcement health `degraded`.
+- Kernel-logged `firewall.rule.hit` events carry TAG labels and a
+  per-direction `flowId`, and `/api/v1/flows` items carry `tags`.
+- Web UI: RESET, RATE_LIMIT and TAG rule actions with rate limit and tag
+  fields; rule identities and schedules; an Identity Bindings page; per-rule hit
+  counters; connection tags on Sessions; unbound-identity and shadowed rule
+  warnings, including zones without interfaces and rules whose addresses share
+  no family; boot recovery state on every page, with or without a management
+  reservation; enforcement health with the failed apply and schedule planner
+  state; tags on Active Flows; and the audit forwarding backlog on the syslog
+  service page.
+- The engine image ships ClamAV, FreshClam and CA roots. The engine renders
+  and supervises clamd and a single FreshClam schedule, reports live readiness
+  and the definitions version, and validates custom definitions before
+  activating them with a clamd reload. ICAP `useTls` uses verified TLS 1.2 or
+  newer with no plaintext fallback.
+- The Sessions page and `GET /api/v1/conntrack` show the kernel's real IPv4
+  and IPv6 connections, including NAT reply tuples, and report an unavailable
+  backend as an error instead of an empty list. The list comes from a
+  ctnetlink dump only, so it works on kernels that do not export
+  `/proc/net/nf_conntrack`. A cancelled request stops the dump, and the
+  `limit` bounds the records held in memory. Kill now works for TCP and UDP:
+  it deletes the connection and refuses reconnects for a chosen interval
+  (1–3600 s, default 60 s), for the exact connection or the client's service.
+- DPI domain exclusions now work: a flow is excluded when its TLS SNI or an
+  observed DNS answer for its server address matches an exact name or a
+  `*.suffix`, decided at the first client payload. IEC 104 is never excluded
+  by domain. Invalid domain values are rejected at commit.
+- IEC 104 holdback-pressure diagnostics: a Diagnostics panel, a read-only
+  `GET /api/v1/diagnostics/iec104` API and `containd_dp_iec104_*` Prometheus
+  series show held packets and bytes, oldest pending age and sessions against
+  the fixed limits, plus abort reasons and failure totals. They separate denied
+  commands from queue pressure.
+- Passive IEC 104 inventory: a read-only section on the Assets page and
+  `GET /api/v1/inventory/iec104` list controlling and controlled station pairs,
+  their common addresses, IOAs and type IDs, first and last seen, and command
+  attempt and acceptance counts, fed from decoded traffic. A command counts as
+  accepted only in inline enforce mode, after it was allowed and every packet
+  carrying it completed an Accept verdict. Fixed caps, LRU eviction, 24-hour
+  idle expiry and overflow counters bound it. It never feeds the learner or
+  auto-ALLOW.
+- Observational IEC 104 APCI alerts: I-frames outside STARTDT/STOPDT (one per
+  stopped period), N(S)/N(R) gaps, backward steps or ACKs of unsent frames,
+  and TESTFR act without con within t1. Alerts carry the session ID and show
+  their evidence in Events and Alerts. They never change firewall decisions.
+- The IEC 104 Linux smoke (`scripts/smoke-iec104.sh`) also checks live
+  inventory counts, APCI alerts and settled holdback-pressure gauges against
+  their Prometheus series.
+- `show system ssh` reports the effective SSH password policy and where it
+  comes from (saved setting, lab default, bootstrap or environment).
+- SIGHUP reapplies the running configuration in management and combined mode,
+  repairing runtime drift. Failures are logged, audited and shown in health.
+  Environment variables and flags still need a restart.
+- ICS rule coverage: each rule that names an ICS protocol reports `enforcing`,
+  `partial`, `not_enforcing` or `monitoring`, with reasons (no inline path,
+  enforcement off, DPI or decoder off, an unbound queue, overlapping or domain
+  exclusions with their match counts). Any signed-in user can read it at
+  `GET /api/v1/dataplane/ics-coverage`. The ruleset preview, the engine ruleset
+  status and the rule preview carry it, and `/api/v1/health` gains a count-only
+  `icsEnforcement` summary. The ICS page, the firewall rules table and the rule
+  preview show coverage instead of a badge based on mode alone.
+
+### Changed
+
+- The Firewall and ICS pages show every role why firewall enforcement is degraded; the applied ruleset status no longer needs an admin ruleset preview.
+- `GET /api/v1/system/tls` returns cleaned certificate paths, the subject and expiry of the certificate the bound HTTPS listener serves (`servedCertSubject`, `servedCertNotAfter`), and the bound listener addresses (`boundHttpListenAddr`, `boundHttpsListenAddr`), with `httpListenChanges` and `httpsListenChanges` saying whether the next start binds another listener. Every wildcard spelling of a port is the same listener; a listener bound at a specific address in place of a configured wildcard shows its next-start row.
+- System Settings shows the listeners, certificate files and certificate served now, and adds a "(next start)" row only where the next start differs.
+- The UI shows the detail of API errors, such as why a certificate upload was rejected.
+- The ICS and firewall pages label enforcement health "ICS connection reset unhealthy" when the engine fails to reset a Modbus or DNP3 connection it picked up mid-stream and no IEC 104 enforce envelope is active.
+- System Settings reports a certificate upload that is stored for the next start as a warning instead of "updated".
+- `GET /api/v1/system/tls` adds `servedCertFile` and `servedKeyFile`, the
+  files the bound HTTPS listener serves now. A certificate upload returns
+  status `updated` when the listener serves the uploaded files (from its next
+  TLS handshake), and `stored` with a warning when they are served from the
+  next start. An upload that would replace only one of the served certificate
+  and key is refused with 409.
+- After resetting a fail-closed ICS connection it picked up mid-stream, the
+  engine answers the endpoints' challenge ACKs by sending the reset again, up
+  to three times within a second, as it does for IEC 104 sessions.
+- A failed reset of such a connection makes the `iec104Enforcement` health
+  object unhealthy while an enforce rule of another ICS protocol is loaded
+  (`active` stays false).
+- A client of a fail-closed ICS connection (Modbus, DNP3 and the other
+  non-IEC 104 ICS rules in enforce mode with NFQUEUE) that loses its
+  connection, for example by restarting, can reconnect at once from the same
+  source port. A SYN without payload sent into an established connection no
+  longer blocks the client for 10 minutes; it passes without restarting
+  inspection. A SYN with payload that does not start the connection's stream
+  is still dropped and blocked (`stream_resync`).
+- A fail-closed ICS connection the engine picks up mid-stream (after an engine
+  restart, an idle timeout or a new handshake on its tuple) is reset once at
+  both endpoints (reason `stream_midstream`, no flow block), so clients
+  reconnect at once instead of waiting for their TCP timeout. IPv6 connections
+  and engines without the reset injector still only drop.
+- ICS firewall rule `addresses` entries are validated where they are saved. An
+  entry is one value or an inclusive `low-high` range, each unsigned decimal or
+  `0x` hex, with low <= high. Modbus entries end at 65535; other protocols at
+  4294967295. Entries such as `0x01G0`, `-5` or `0x200-0x100` are refused with
+  an error naming the rule and the entry. A stored configuration with such an
+  entry starts in management recovery until a valid configuration is
+  committed. Before, the engine skipped such entries, so a rule matched only
+  its valid entries.
+- SSH CLI sessions call the management API over HTTPS when the HTTP listener
+  is disabled, trusting only the certificate the HTTPS listener serves. SSH now
+  stays off only when neither listener is bound. The in-app console and SSH use
+  the same loopback connection, and neither follows a redirect.
+- Firewall rules with a schedule no longer re-read the schedule or its
+  timezone for each packet: schedules are parsed once per applied ruleset.
+- Rule matching parses addresses once per applied ruleset, and the engine
+  caches each zone's networks until the kernel reports a link or address
+  change. Inline ICS packets no longer read the interfaces or allocate memory
+  for rule and zone scope checks.
+- In split mode the ruleset preview admits the same management listeners
+  that management applies, including listeners still bound until a restart:
+  management compiles the previewed snapshot, as it does for apply.
+- Validation refuses zone names that are blank, longer than 125 bytes, or
+  have leading or trailing whitespace. A stored configuration with such a
+  zone fails validation at boot, and management starts in recovery until it
+  is fixed.
+- A failed ruleset apply no longer hides the ruleset still in force. The
+  engine ruleset status keeps the installed revision and adds the failed
+  snapshot and its error, rule counters keep working, and health reports
+  `enforcement.state: degraded`.
+- The Secure by Design page maps all seven CISA pledge goals again and credits
+  the default design. Operator steps are deployment guidance. No goal has a
+  design gap.
+- `containd engine` has no default listener. Set `CONTAIND_ENGINE_ADDR` to the
+  engine's address on the management network; loopback and wildcard
+  listeners are refused at start, except loopback with a reserved management
+  path. This also applies to the engine-only image.
+- The Compose files no longer carry a commented engine-port mapping, and the
+  smoke compose no longer publishes 18081. Call the engine API with
+  `docker compose exec containd curl http://127.0.0.1:8081/...`.
+- `dataplane.enforceTable` must start with a letter or underscore and be at most
+  248 characters, which is what nftables can address, and must not be
+  `containd_dhcp` or an nft keyword such as `table` or `inet`. Staging and the
+  engine apply the same rule. Revocations now work with
+  table names that contain upper case or hyphens.
+- Staging rejects a ClamAV `updateSchedule` that is not a positive duration, a
+  `timeoutSec` outside 0–300, a `maxSizeBytes` outside 0–100 MiB and a
+  negative `blockTtlSeconds` or `cacheTtl`.
+  `clamav.socketPath` is optional and defaults to `/run/clamav/clamd.sock`.
+- The Compose files keep ClamAV databases in the `clamav-db` volume across
+  container replacement.
+- The engine is the only antivirus owner in split and combined deployments.
+  Management's AV status, update and custom-definition routes delegate to the
+  engine and return 503 when it is unreachable. A cron-style
+  `clamav.updateSchedule` is rejected at apply instead of silently becoming 6h.
+- The additional trusted CA bundle applies at runtime: it is sent to the
+  engine on upload and on every apply, ICAP TLS and FreshClam trust it, and an
+  upload the engine cannot apply returns 503.
+- The forwarding smoke (`scripts/smoke-forward.sh`) proves each deny against a
+  live listener, proves masquerade by the source address the server sees and
+  requires the DNAT counter to rise. `scripts/smoke-forward-mutations.sh`
+  shows it fails on an allow-all policy and on disabled masquerade.
+- Lab mode refuses every password change, for every user, through the
+  users store: web, admin, SSH menu and the setup wizard give the same reason.
+- UI builds always regenerate the embedded documentation and fail if MkDocs
+  cannot produce it; `CONTAIND_SKIP_DOCS=1` is only for builds that supply the
+  docs separately. UI builds use Node.js 24.
+- Commit, commit-confirmed and rollback now fail on every firewall ruleset or
+  dataplane configuration apply error, including nft permission failures. The
+  warning-only nft failure path is removed. Auxiliary infrastructure warnings
+  remain best-effort; imports still stage only.
+- Health reports general firewall state separately as `enforcement: {state,
+  reason}` (`enforcing`, `disabled`, `unavailable` or `unknown`), including
+  persisted replay/recovery failures. Protocol-specific `iec104Enforcement` is
+  unchanged. Confirmed-commit TTLs that overflow a duration are rejected
+  rather than promoting without a timer.
+- Condensed the project overview and centralized contributor setup and verification;
+  documented SSH authentication limits, the engine API trust boundary and the published advisory.
+- Reorganized documentation navigation and standardized changelog categories and version links.
+- Focus update and reserved-management documentation on operator behavior and
+  limitations; consolidate VPN guidance under System Services.
+- Pass `CONTAIND_ALLOWED_ORIGINS` through starter/dev Compose and remove the
+  ineffective `CONTAIND_MODE` knob from Compose environment lists and the example
+  environment file; select split modes with command overrides.
+- An explicit SSH `allowPassword: false` now holds in lab mode, with an empty
+  or unreadable key directory and over environment defaults. Staging or
+  committing it is refused unless an admin has a usable authorized key, so the
+  setting cannot lock out SSH management. Committed SSH authentication
+  settings apply to new logins without a restart.
+- Replace the deprecated `xterm` terminal packages with the maintained
+  `@xterm/xterm` 6 and `@xterm/addon-fit` releases.
+
+### Fixed
+
+- A gateway whose interface is a logical name (such as `wan`) now resolves to the interface's device, as route interfaces already did. Before, a route without its own interface through such a gateway failed with "route interface not found".
+- `set outbound quickstart` guesses the WAN gateway as the web UI does: the other address of a /31, and no gateway for a /32 or when the WAN interface holds the first address of its subnet (it used to stage the interface's own address).
+- The routing page's Auto WAN default route reads the WAN address as strictly as the firewall quick start, and both infer the gateway the same way: the other address of a /31, and no gateway for a /32 or when the WAN interface holds the first address of its subnet.
+- The firewall's outbound quick start binds the wan-gw gateway and default route to the WAN interface's OS device, as Auto WAN and the CLI quick start do.
+- The ICS templates and NAT pages show loading until the first answer instead of "No templates available", disabled SNAT, no port forwards or setup tips. NAT settings the server did not return are reported as unavailable instead of being shown, and saved, as disabled NAT.
+- The flows list keeps its rows and "Showing x of y" footer during its 10-second refresh.
+- Diagnostics refuses IPv4 addresses with leading zeros (such as 192.0.2.07) for temporary host and flow blocks.
+- Port fields accept decimal digits only ("1e3" and "0x50" are refused). IPv6 address and CIDR checks now match the server's parser, so inputs such as ":::", "1::2::3" and "10.0.0.0/" are refused.
+- The NAT port-forward ingress zone defaults to "wan" only when that zone exists; otherwise a zone must be chosen. Before, the row could show one zone, stage "wan", and fail on save.
+- The Publish Internal Service wizard checks the internal server address on the server step and shows the error under the field. A port forward's destination must be IPv4, so other text no longer passes the step only to fail at Stage.
+- Adding a port forward on the NAT page refuses a fractional port (it took `1.5` as port 1) and a destination that is not an IPv4 address, instead of failing on save.
+- IP address and CIDR fields refuse IPv4 octets with leading zeros (`192.0.2.05`), which the server rejects.
+- The Alerts page shows a loading placeholder until the first alert list arrives, instead of the "No alerts yet" empty state.
+- The Alerts page hides the earlier alert list while loading fails, as Flows, Templates and Sessions do, instead of showing it beside the error.
+- The Publish Internal Service wizard checks the port (1-65535) on the server step and shows the error under the port field, instead of accepting any value until Stage.
+- The topology status chip no longer reads ALL NOMINAL while firewall enforcement is degraded or unavailable. It shows the firewall enforcement state from health and, unless enforcing, why: a failed ruleset apply, a degraded schedule planner or health's reason.
+- The sessions, NAT, policy wizard, diagnostics (block flow) and dataplane (forward targets) pages format endpoints like the events and flows pages: a missing or zero port shows the address alone, and an IPv6 address with a port is bracketed (`[2001:db8::5]:502`).
+- Syslog RFC 5424 events and the web UI (events, flows, alerts, dashboard) show an endpoint without a port when the event has none, as for ICMP and ICMPv6 rule hits, and bracket an IPv6 address that has a port (`[2001:db8::1]:2404`). Before, syslog printed `addr:0` and the UI printed `addr:`.
+- Firewall rule hits logged through NFLOG for ICMP and ICMPv6 packets now carry their source and destination addresses and transport `icmp` or `icmpv6`, without ports.
+- SSH is recorded as a bound management listener only after its socket binds. A failed SSH bind leaves SSH off with a listener fault instead of reporting it enabled; HTTP and HTTPS are unaffected.
+- HTTP redirects to HTTPS only when the HTTPS listener bound.
+- SSH exec requests report exit status 0 on success and 1 on a failed or empty command, and the appliance shell reports 0 when it closes, so OpenSSH clients no longer exit 255.
+- With the Linux shell (`ssh.shellMode` linux), a shell killed by a signal reports exit-signal with the signal's name (RFC 4254) instead of exit status 4294967295, and a shell wait error reports 1 instead of 0.
+- In an IEC 104 enforce envelope, the server's RST refusing a client's SYN (for example, a station that does not listen on 2404) now reaches the client, which fails at once instead of retrying its SYN until it times out. Every other packet before the SYN-ACK, apart from the client's SYN, is still dropped.
+- An IEC 104 client that lost its connection without closing it, for example
+  by restarting, reconnects at once from the same source port in an enforce
+  envelope instead of being dropped until the session idles out.
+- With redirect-http-to-https enabled and HTTPS not served (disabled, or its
+  certificate failed at boot), the HTTP listener no longer redirects to a port
+  nothing listens on.
+- The in-app console and SSH no longer call an HTTP listener that redirects to
+  HTTPS; they call HTTPS.
+- The in-app console pins the certificate the HTTPS listener serves. Before,
+  it pinned the saved setting, which a listener fallback or a certificate path
+  saved after boot can make differ.
+- Management listener readouts agree with what is served. The TLS settings
+  show the effective listeners, including environment overrides. The console
+  calls the bound HTTP listener. SSH no longer falls back to port 8080: with no
+  bound HTTP or HTTPS listener it stays off and reports a fault. `show system` always
+  shows `ssh.listen`, and both saved-settings views say they exclude
+  environment overrides.
+- Web UI: the zone form refuses names longer than 125 bytes or with leading
+  or trailing whitespace before saving, as the server does, and shows the
+  server's error if one comes back.
+- A rule whose ICS `addresses` list holds only unparseable values no longer
+  matches every address; it matches none.
+- Management-reservation validation treats a blank HTTPS or SSH listen
+  address as the default address that management binds, so a blank value no
+  longer hides a conflict with the reserved port.
+- `containd healthcheck` and `containd cli` refuse a `CONTAIND_MGMT_ADDR`
+  with no port instead of probing it.
+- Web UI: the login password and MFA steps, own password change and MFA
+  disable show the server's lock message and when to try again after a `429`,
+  instead of a generic failure. A wrong current password or code in the
+  profile dialog shows the server's message instead of "Unauthorized".
+- Web UI: user management actions, MFA actions included, and the AV, DNS,
+  NTP and syslog Save buttons show pending and saved feedback. The acting
+  button is disabled while its save runs, so a double click submits once.
+- Web UI: a page shows the data as unavailable instead of crashing when an
+  API response has the wrong shape. Shape checks cover 18 list and object
+  routes. The topology view reads health from the shared health store.
+- Management INPUT admits the listeners management serves: HTTPS on its
+  default port when its settings are unset, the addresses set by
+  `CONTAIND_MGMT_ADDR`, `CONTAIND_MGMT_HTTPS_ADDR` and `CONTAIND_SSH_ADDR`,
+  and, until a restart binds a committed listener change, the listeners still
+  bound. Management recovery admits the bound listeners instead of always
+  adding the appliance defaults.
+- Zones whose names differ only in case, spaces, hyphens or underscores get
+  separate nftables interface sets; before, their sets merged, so local input
+  and NAT rules for one also matched the others' interfaces. Zone sets are
+  named `zone_<hex-encoded name>`; a zone with interfaces can have a name of at
+  most 125 bytes.
+- The rule impact preview no longer warns that a zone has no interfaces when
+  the running configuration assigns some.
+- After enforcement is turned off, the ruleset status reports no installed
+  ruleset instead of the deleted one.
+- The engine ends the inspection streams of a connection it forgets when a
+  handshake contradicts the connection's recorded direction, so failed and
+  fail-closed streams no longer stay in memory until the next reconfiguration.
+- The syslog forwarder no longer reads its format without a lock while a
+  configuration is applied.
+- `show syslog status` and `show services status` print the forwarders'
+  protocols.
+- A firewall rule naming a zone with no interfaces no longer makes nftables
+  reject the whole ruleset; the rule matches nothing and the ruleset warnings
+  name it (`zone`, with `zones`).
+- IPv6 source and destination CIDRs in firewall rules are written as `ip6`
+  matches, one line per address family for mixed rules, instead of an invalid
+  `ip` match; identity sets and `RATE_LIMIT` meters follow the rule's
+  families. A rule whose sources and destinations share no family is reported
+  (`addressFamily`).
+- `RATE_LIMIT` meters replies too, each direction of a flow in its own bucket.
+- When an identity binding is removed or a schedule window ends, replies and
+  server packets of ICS connections queued to the engine under a conditional
+  `ALLOW` stop too.
+- Interface names are validated before they reach nftables: an interface's
+  device, the name of an interface without a device, and DHCP listen devices
+  must be valid Linux interface names (1–15 bytes, no `/`, `:`, whitespace,
+  control characters, `"`, `*` or `\`, not `.` or `..`).
+- A commit, rollback or factory reset that fails during management recovery
+  returns to recovery instead of reapplying the refused configuration.
+- Without a reservation, stored management listeners that cannot be bound no
+  longer stop management: it serves the default listeners in management
+  recovery.
+- Management recovery without a reservation restores the stored static
+  addresses of management interfaces.
+- Syslog forwarding no longer stops after a configuration commit through the
+  API, and it starts at boot without needing another apply.
+- Disabling an ICS filter removes it from the rule. Before, the UI sent an
+  empty patch and reported success while the filter stayed. Clearing a rule's
+  description, logging, zones or address lists in the editor now clears them.
+- Service pages and topology no longer show simulated or random activity
+  charts. Service series are evenly spaced per minute, with zeros for quiet
+  minutes. The proxies page shows the Envoy and Nginx request rates it
+  reports.
+- Factory reset clears the engine's temporary blocks and connection
+  revocations. A failed clear is reported as a `dynamic blocks:` warning.
+- The rule impact preview returns `warnings`, and the firewall rule editor's
+  Preview impact explains why an ALLOW rule with an identity or schedule
+  matches nothing.
+- Trusted CA upload shows the applied bundle revision, or the stored revision
+  and why the engine did not apply it. `POST /api/v1/system/tls/trusted-ca`
+  then returns 200 with `status: "stored"` and `warnings`; 503 now means only
+  that the config store is unavailable.
+- Committing a candidate that moves an interface to another device and gives
+  its old device to another interface no longer fails with `duplicate
+  interface device binding`. Commits and engine replay apply explicit
+  interface bindings as staged and fill only unbound default interfaces.
+- The ICS filter editor's impact preview works again: it uses the signed-in
+  session, previews the whole rule and lists predicates that resolve toward
+  denial.
+- The services overview charts only series that services report, and no
+  longer shows simulated trends or default antivirus settings when the engine
+  is unreachable.
+- When the engine runs as root, each ClamAV apply gives the persisted
+  `clamav-db` volume's files to the image's clamav account, without following
+  symbolic links.
+- The services overview no longer shows a made-up antivirus trend.
+- The engine no longer flushes the whole nftables ruleset on every apply and
+  at boot. Docker's embedded DNS (so CLI `diag`, FreshClam and other name
+  lookups), the DHCP redirect and any other table in the namespace now survive
+  commits. The policy now lives in `inet <enforceTable>_policy` (default
+  `inet containd_policy`) and is replaced atomically. Temporary blocks and
+  connection revocations stay in `inet <enforceTable>` (default
+  `inet containd`, so `block_flows` keeps its name) and survive commits. The
+  first apply after an upgrade removes the older policy from `inet containd`
+  and carries existing flow blocks over with their remaining timeout.
+- Connection revocations never refuse access to the management listeners from
+  the management interfaces or through the reserved management path.
+- Disabling enforcement removes containd's nftables tables, and renaming
+  `enforceTable` replaces them, so the kernel matches the reported state.
+- The DHCP server's redirect applies when its table does not exist yet. Before,
+  the DHCP server never started. Failures to remove the redirect are reported.
+- Antivirus scanning reports what the scanner said: clamd replies are parsed in
+  NUL mode, ICAP RESPMOD and OPTIONS follow RFC 3507, truncated or unknown
+  replies are errors instead of clean, and `timeoutSec`/`maxSizeBytes` apply to
+  both backends and reset correctly.
+- The firewall admits essential ICMPv6 to the appliance (neighbor discovery,
+  destination unreachable, packet too big, time exceeded, parameter problem),
+  so IPv6 interfaces keep working with enforcement on.
+- An omitted or empty firewall `defaultAction` means DENY everywhere. The
+  security conduits view used to show such configs as unmodeled while the
+  dataplane already dropped unmatched traffic.
+- SSH console prompts no longer see an extra empty line from clients that send
+  CR LF.
+- A TLS certificate upload whose resolved path is outside `/data` now returns
+  409 and names the path and the setting that chose it (environment variable,
+  config field or default).
+- The OpenAPI document lists every error status of the password routes and the
+  TLS certificate upload.
+- The nftables ruleset preview is compiled by the live engine with the
+  candidate's table and queue settings, the management reservation and the IEC
+  104 queue ownership sampled at request time, and states which envelope state
+  it used. With enforcement disabled it says nothing would be applied. Without
+  a reachable engine it returns an error instead of a default-compiler guess.
+- Temporary flow blocks key on the transport protocol, so blocking a TCP flow
+  no longer blocks UDP to the same port. The connections list keeps the
+  engine's error detail when the backend fails.
+- Factory reset brings the firewall and service daemons to the default
+  configuration and reports any part that did not converge. It revokes web and
+  API sessions (lab-mode tokens stay valid by design) and closes SSH sessions.
+  The SSH console reports a failed reset instead of claiming success.
+- Disabling DNS, the proxy or ClamAV waits, within a bound, for the daemon to
+  exit; ClamAV is now stopped when disabled.
+- DHCP `authoritative` is stored and applied; it defaults to off. Authoritative
+  servers send DHCPNAK for a requested address that is not leasable on the
+  served link; non-authoritative servers stay silent. Both modes adopt a free
+  in-pool address that a client renews or reboots with after lease data is lost,
+  so it is not handed out twice. Relayed requests and requests for another
+  server are ignored.
+- NTP status reports the polling interval chrony was configured with.
+- Service reconfiguration can no longer be overwritten by a stale worker.
+- Port forwards and masquerade compile from the configured zones: custom zone
+  names work, disabled forwards emit nothing, and the ruleset never references
+  an undeclared set.
+- Commit and restart converge static routes and policy rules. Removed entries
+  leave the kernel at every valid priority, and only containd-owned entries
+  (protocol 98) are removed. Docker and management routes stay. A configured
+  route that matches an existing one reuses it; one that differs only in next
+  hop replaces it and restores it on removal (journal in
+  `/data/routing-displaced.json`). `set outbound quickstart` works with the
+  Docker-provided default route.
+- The SSH setup wizard stops and reports a failed password change instead of
+  auditing and announcing success.
+- SSH host keys rotate on schedule on a long-running server; existing sessions
+  keep their connection.
+- Staging a configuration edit no longer copies the IDS rule bank. With a
+  30,000-rule bank, an edit drops from about 180 ms and 200 MB of allocation to
+  well under 1 ms. Banks are stored once per running, candidate and previous
+  configuration; obsolete banks are reclaimed after commit, rollback and reset.
+  The Config page diff uses bounded memory for large configurations.
+- Monitoring APIs (flows, protocol and top-talker stats, anomalies, learning,
+  signatures, interface state, simulation and inventory) return a JSON 503
+  when the engine or capability is unavailable, instead of an empty list, a
+  stopped simulation or a successful clear. Engine call failures that returned
+  502 now return 503. The UI views and CLI `show` commands that use them show
+  "unavailable" with a retry, distinct from empty. `show system` labels
+  listener settings as saved configuration and shows the HSTS default.
+- `GET /api/v1/anomalies` and `show anomalies` list the protocol anomalies the
+  engine detected, and `DELETE /api/v1/anomalies` clears them. Before,
+  management never reached the engine's anomaly detector: the list was always
+  empty and a clear did nothing.
+- The learn mode API reads the engine's learner: `GET /api/v1/learn/profiles`
+  lists learned profiles, `POST /api/v1/learn/generate` and
+  `POST /api/v1/learn/apply` use rules generated from them, and
+  `DELETE /api/v1/learn` clears them. Before, management never reached the
+  engine's learner: profiles and generated rules were always empty.
+- The signatures API reads and changes the engine's signature set:
+  `GET /api/v1/signatures` lists the loaded signatures, `POST` adds a live
+  signature until the engine restarts, `DELETE /api/v1/signatures/{id}` removes
+  one and `GET /api/v1/signatures/matches` lists recent matches. Adding an ID
+  that is already loaded returns `409`. Before, management never reached the
+  engine: the lists were always empty and adds and deletes failed.
+- Discovered ICS assets, their peers and station addresses have fixed caps
+  with counted overflow.
+- Complete the management OpenAPI route reference and guard it against the
+  registered router, including optional identity and audit endpoints.
+- Document staged dataplane settings, session and lab authentication, filtered
+  event queries, and binary environment names separately from Compose inputs.
+- Failed runtime applies restore the pre-request running config and IDS bank,
+  previous/pending state and candidate, then reapply the restored snapshot using
+  an independent recovery context. JSON errors report restore/reapply outcomes;
+  failed recovery is visible in health. Boot and expiry replay no longer treat
+  nft failures as success.
+- Factory reset replaces configuration through the same restore/reapply path as
+  commit. A failed runtime apply restores the prior configuration and leaves
+  users, sessions and audit history in place. After apply succeeds, users and
+  sessions are replaced by the default admin in one transaction.
+- Keep liveness responsive during commits and recovery with a deadline-bounded
+  running metadata/fault snapshot and one shared observation timeout. Brief
+  store contention does not hide real state; contention past the budget or
+  unreadable state reports `unknown` without exposing an unapplied document.
+- Correct Compose onboarding, secret initialization, data locations, interface
+  binding and engine API exposure guidance; consolidate lab and WSL setup links.
+- Correct CLI lab authentication and IEC 104 monitoring examples, service runtime
+  ownership, and the importable configuration example; test its schema and validation.
+- Correct DPI protocol coverage, supported rule predicates, learn-mode and PCAP
+  behavior, IDS conversion, and the distinction between nftables enforcement and
+  experimental eBPF code.
+- Document working log sinks and unwired SIEM export, the unauthenticated engine
+  API boundary, authentication limits, and published CSAF advisories; align runtime
+  package provenance and image-verification examples with the release workflow.
+- The dashboard shows only reported activity: no generated packets or made-up
+  baselines. NTP, proxy, DHCP, VPN and DNS service status show "never" instead
+  of a zero timestamp, and the DHCP error meter counts real failures.
+
+### Removed
+
+- The unused top-level `export` configuration section and the unwired `pkg/dp/export` DPI event exporter. Stored and imported configurations that still contain `export` load normally; the section is ignored and dropped on the next save.
+- The unused OpenNTPD fallback; chrony is the only NTP daemon the images ship.
+- Removed the redundant documentation-directory landing page.
+- Remove the incomplete host/systemd deployment guide; Docker Compose remains
+  the documented appliance installation path.
+- Refresh contributor testing, performance and code-boundary guidance and
+  package navigation; remove the empty internal API placeholder.
+- Clarify regression harness setup, isolation, endpoint image tags and
+  cleanup behavior without changing script execution.
+
 ## [0.1.34] - 2026-10-26
 
 ### Security
@@ -98,7 +709,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commits are on `main`, with rebuild-free manual promotion after a later
   merge.
 
-### Changed (visible in API, events and logs)
+### Changed
+
+Visible in API, events and logs:
 
 - **Unknown firewall rule keys are rejected with HTTP 400.** The error names
   the key. Before, unknown keys were silently dropped.
@@ -267,7 +880,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flood DoS). The bump also moves x/crypto, x/sys, x/text, x/sync and x/mod
   to their current releases.
 
-### Changed (visible in events and logs)
+### Changed
+
+Visible in events and logs:
 
 - Modbus and DNP3 produce one event per frame in each direction. 0.1.31
   repeated the first PDU's event and missed later ones.
@@ -419,7 +1034,7 @@ a sharp gap in v0.1.27's supervise loop.
   (redundant with the deferred close + the main `<-ctx.Done()`).
   Codex review on PR #22 caught this as P1.
 
-### Tests
+**Tests**
 
 1 new test (`TestNFQueueSuperviseCleansUpBetweenRetries`) that
 asserts the supervise loop cannot re-enter `runFn` while a previous
@@ -449,7 +1064,7 @@ way the comment claimed it did.
   [PR #21](https://github.com/tonylturner/containd/pull/21) caught
   the original silent-exit as P1.
 
-### Tests
+**Tests**
 
 3 new tests covering panic-then-restart, give-up-after-max-retries,
 and clean-cancel paths. Test-only `withFastBackoff` seam compresses
@@ -553,14 +1168,14 @@ macOS Docker Desktop. Builds on v0.1.25's L4 event pipeline.
   template". `buildICSTemplateRules` now normalizes hyphens to
   underscores at the boundary.
 
-### Tests
+**Tests**
 
 10 new test functions across affected packages: hyphenated template
 acceptance, multi-value warning header propagation, NFQUEUE manager
 with no interfaces, NFQUEUE + chain-reorder snapshot fixtures,
 boot-time autobind no-op vs repair paths.
 
-### Note for downstream consumers
+**Note for downstream consumers**
 
 The `Compiler.QueueID` field added in this release pairs with
 `NFQueueGroup` in the runtime config. Set both or neither — a queue
@@ -569,7 +1184,9 @@ would freeze inspected traffic at the kernel hook.
 
 ## [0.1.25] - 2026-05-12
 
-### Added — closes #19
+### Added
+
+Closes #19.
 
 - **L4 firewall rule events** now flow into `/api/v1/events` for rules
   with `log: true` that don't have an `ics:` block. `Compiler.NFLogGroup`
@@ -620,7 +1237,7 @@ would freeze inspected traffic at the kernel hook.
   sibling `templates.ApplyWithOpts(name, cfg, ApplyOpts{Mode: ...})`
   is the mode-aware path used by the new handler/CLI surfaces.
 
-### Security / dependencies
+### Security
 
 - Bumped Go toolchain `1.25.8` → `1.25.10` (in go.mod and both
   build/Dockerfile.{mgmt,engine}) to clear 5 HIGH stdlib CVEs flagged
@@ -629,7 +1246,7 @@ would freeze inspected traffic at the kernel hook.
 
 - Added `github.com/florianl/go-nflog/v2 v2.3.0`.
 
-### Tests
+**Tests**
 
 23 new test functions across the changed packages, covering log
 clause emission, DPI suppression, no-group disables logging, prefix
@@ -640,7 +1257,7 @@ global fallback, learn default, case normalization), template
 factories ship `Log: true`, `ApplyWithOpts` overrides, HTTP apply
 with `mode=enforce`/blank/invalid.
 
-### Note on v0.1.24
+**Note on v0.1.24**
 
 v0.1.24 was tagged briefly but the release workflow failed at its
 VERSION-vs-tag guard (VERSION file lagged the tag). No image was
@@ -649,7 +1266,7 @@ these changes.
 
 ## [0.1.23] - 2026-05-08
 
-### Documentation
+### Changed
 - Transparency note in `docs/mkdocs/secure-by-design.md` under **§ 2 Default Passwords** documenting the v0.1.22 lab-mode credential pinning openly. Calls it out as a deliberate weakening of the default-password posture, scoped to the lab boundary, with explicit "when lab mode is appropriate" and "when lab mode is NOT appropriate" lists, the trade-offs (no credential rotation, SSH-on-:2222 uses the same pinned cred), and roadmap for a future per-instance bootstrap that preserves classroom usability without a universal shared credential.
 - `docs/mkdocs/threat-model.md` § Auth Bypass / Privilege Escalation residual-risk list now flags lab mode and links to the secure-by-design transparency note.
 - `docs/mkdocs/lab-compose.md` `.env` reference documents `CONTAIND_LAB_MODE` and explicitly warns it should not be enabled on deployments reachable from hostile or shared networks.
@@ -926,7 +1543,7 @@ these changes.
 - Path traversal protection on all file-serving endpoints.
 - Rate limiting on authentication and sensitive API endpoints.
 
-### Performance
+### Changed
 - Flow hash uses strings.Builder for reduced allocations.
 - Verdict cache with TOCTOU fix for concurrent access safety.
 - Flow sweep runs outside mutex to reduce lock contention.
@@ -934,3 +1551,35 @@ these changes.
 - Regex caching in IDS rule evaluation.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
+
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.35...HEAD
+[0.1.35]: https://github.com/tonylturner/containd/compare/v0.1.34...v0.1.35
+[0.1.34]: https://github.com/tonylturner/containd/compare/v0.1.33...v0.1.34
+[0.1.33]: https://github.com/tonylturner/containd/compare/v0.1.32...v0.1.33
+[0.1.32]: https://github.com/tonylturner/containd/compare/v0.1.31...v0.1.32
+[0.1.31]: https://github.com/tonylturner/containd/compare/v0.1.30...v0.1.31
+[0.1.30]: https://github.com/tonylturner/containd/compare/v0.1.29...v0.1.30
+[0.1.29]: https://github.com/tonylturner/containd/compare/v0.1.28...v0.1.29
+[0.1.28]: https://github.com/tonylturner/containd/compare/v0.1.27...v0.1.28
+[0.1.27]: https://github.com/tonylturner/containd/compare/v0.1.26...v0.1.27
+[0.1.26]: https://github.com/tonylturner/containd/compare/v0.1.25...v0.1.26
+[0.1.25]: https://github.com/tonylturner/containd/compare/v0.1.23...v0.1.25
+[0.1.23]: https://github.com/tonylturner/containd/compare/v0.1.22...v0.1.23
+[0.1.22]: https://github.com/tonylturner/containd/compare/v0.1.21...v0.1.22
+[0.1.21]: https://github.com/tonylturner/containd/compare/v0.1.20...v0.1.21
+[0.1.20]: https://github.com/tonylturner/containd/compare/v0.1.19...v0.1.20
+[0.1.19]: https://github.com/tonylturner/containd/compare/v0.1.18...v0.1.19
+[0.1.18]: https://github.com/tonylturner/containd/compare/v0.1.17...v0.1.18
+[0.1.17]: https://github.com/tonylturner/containd/compare/v0.1.16...v0.1.17
+[0.1.16]: https://github.com/tonylturner/containd/compare/v0.1.15...v0.1.16
+[0.1.15]: https://github.com/tonylturner/containd/compare/v0.1.14...v0.1.15
+[0.1.14]: https://github.com/tonylturner/containd/compare/v0.1.13...v0.1.14
+[0.1.13]: https://github.com/tonylturner/containd/compare/v0.1.12...v0.1.13
+[0.1.12]: https://github.com/tonylturner/containd/compare/v0.1.11...v0.1.12
+[0.1.11]: https://github.com/tonylturner/containd/compare/v0.1.10...v0.1.11
+[0.1.10]: https://github.com/tonylturner/containd/compare/v0.1.9...v0.1.10
+[0.1.9]: https://github.com/tonylturner/containd/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/tonylturner/containd/compare/v0.1.7...v0.1.8
+[0.1.7]: https://github.com/tonylturner/containd/compare/v0.1.6...v0.1.7
+[0.1.6]: https://github.com/tonylturner/containd/compare/v0.1.5-beta...v0.1.6
+[0.1.5-beta]: https://github.com/tonylturner/containd/releases/tag/v0.1.5-beta

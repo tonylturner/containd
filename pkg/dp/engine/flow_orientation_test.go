@@ -13,6 +13,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -88,7 +89,17 @@ func connSegment(fromServer bool, clientPort, serverPort uint16, seq uint32, fla
 		pkt.SrcIP, pkt.DstIP = pkt.DstIP, pkt.SrcIP
 		pkt.SrcPort, pkt.DstPort = pkt.DstPort, pkt.SrcPort
 	}
+	markHandshake(&pkt)
 	return pkt
+}
+
+// markHandshake gives a SYN or SYN-ACK the mark nft sets on a queued
+// handshake segment (enforce.HandshakeMark); tests of a SYN sent into an
+// established connection clear it.
+func markHandshake(pkt *capture.Packet) {
+	if pkt.TCP.Flags&capture.TCPFlagSYN != 0 {
+		pkt.HasMark, pkt.Mark = true, enforce.HandshakeMark
+	}
 }
 
 func newOrientationEngine(t *testing.T) *Engine {

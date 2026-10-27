@@ -5,7 +5,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,10 +20,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	engineclient "github.com/tonylturner/containd/api/engine"
+	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/cp/identity"
+	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/users"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
@@ -73,6 +73,17 @@ type EngineClient interface {
 	DownloadPcap(ctx context.Context, name string) (*http.Response, error)
 	BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Duration) error
 	BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error
+	// ClearBlocks removes every temporary block and connection revocation.
+	ClearBlocks(ctx context.Context) error
+
+	// Antivirus: the engine is the only scanner owner; management delegates.
+	AVStatus(ctx context.Context) (map[string]any, error)
+	TriggerAVUpdate(ctx context.Context) error
+	ListAVDefs(ctx context.Context) (cpservices.AVDefinitionList, error)
+	UploadAVDef(ctx context.Context, name string, r io.Reader) (cpservices.AVDefinition, error)
+	DeleteAVDef(ctx context.Context, name string) error
+	// ConfigureTrust distributes the additional CA bundle to the engine.
+	ConfigureTrust(ctx context.Context, b trust.Bundle) error
 }
 
 // RulePreviewClient delegates impact evaluation to the engine's live policy context.
@@ -86,11 +97,11 @@ type TelemetryClient interface {
 }
 
 type ConntrackClient interface {
-	ListConntrack(ctx context.Context, limit int) ([]conntrack.Entry, error)
+	ListConntrack(ctx context.Context, limit int) ([]dpengine.TaggedConnection, error)
 }
 
 type ConntrackKiller interface {
-	DeleteConntrack(ctx context.Context, req conntrack.DeleteRequest) error
+	DeleteConntrack(ctx context.Context, req conntrack.KillRequest) (conntrack.KillResult, error)
 }
 
 type DHCPLeasesClient interface {
@@ -109,6 +120,7 @@ type SimulationClient interface {
 
 // InventoryClient is an optional interface for querying the ICS asset inventory.
 type InventoryClient interface {
+	IEC104Inventory(ctx context.Context) (inventory.IEC104Snapshot, error)
 	ListInventory(ctx context.Context) ([]inventory.DiscoveredAsset, error)
 	GetInventoryAsset(ctx context.Context, ip string) (*inventory.DiscoveredAsset, error)
 	ClearInventory(ctx context.Context) error
@@ -151,26 +163,22 @@ type ServicesApplier interface {
 	Apply(ctx context.Context, cfg config.ServicesConfig) error
 }
 
-type AVUpdater interface {
-	TriggerAVUpdate(ctx context.Context) error
-}
-
-type AVDefsManager interface {
-	CustomDefsPath() string
-}
-
 // NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
 func NewServerWithEngine(store config.Store, auditStore audit.Store, engine EngineClient) *gin.Engine {
 	return NewServerWithEngineAndServices(store, auditStore, engine, nil, nil)
 }
 
 // NewServerWithEngineAndServices builds a Gin engine and optionally wires engine, services, and users stores.
-// opts may contain an *identity.Resolver as the first element and a
-// ManagementGuardHealth provider; absent identity disables identity endpoints.
+// opts may contain ManagementGuardHealth, ManagementListenerFaults and
+// FactoryResetSessions providers.
 func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, engine EngineClient, services ServicesApplier, userStore users.Store, opts ...any) *gin.Engine {
 	var guardHealth ManagementGuardHealth
 	var listenerFaults ManagementListenerFaults
+	var resetSessions FactoryResetSessions
 	for _, opt := range opts {
+		if provider, ok := opt.(FactoryResetSessions); ok {
+			resetSessions = provider
+		}
 		if provider, ok := opt.(ManagementGuardHealth); ok {
 			guardHealth = provider
 		}
@@ -240,8 +248,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/system/inspection", systemInspectionHandler())
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), setTLSCertHandler(store))
-		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store))
-		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), factoryResetHandler(store, userStore, engine, services))
+		protected.POST("/system/tls/trusted-ca", requireAdmin(), setTrustedCAHandler(store, engine))
+		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), factoryResetHandler(store, userStore, engine, services, resetSessions))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), saveConfigHandler(store))
 		protected.POST("/config/validate", requireAdmin(), validateConfigHandler(store))
@@ -276,15 +284,15 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/services/vpn/wireguard/status", getWireGuardStatusHandler(engine))
 		protected.GET("/services/av", getAVHandler(store))
 		protected.POST("/services/av", requireAdmin(), setAVHandler(store, services))
-		protected.POST("/services/av/update", requireAdmin(), triggerAVUpdateHandler(services))
-		protected.GET("/services/av/defs", listAVDefsHandler(store, services))
-		protected.POST("/services/av/defs", requireAdmin(), uploadAVDefHandler(store, services))
-		protected.DELETE("/services/av/defs", requireAdmin(), deleteAVDefHandler(store, services))
+		protected.POST("/services/av/update", requireAdmin(), triggerAVUpdateHandler(engine))
+		protected.GET("/services/av/defs", listAVDefsHandler(engine))
+		protected.POST("/services/av/defs", requireAdmin(), uploadAVDefHandler(engine))
+		protected.DELETE("/services/av/defs", requireAdmin(), deleteAVDefHandler(engine))
 		protected.GET("/services/proxy/forward", getForwardProxyHandler(store))
 		protected.POST("/services/proxy/forward", requireAdmin(), setForwardProxyHandler(store))
 		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))
 		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store))
-		protected.GET("/services/status", getServicesStatusHandler(services))
+		protected.GET("/services/status", getServicesStatusHandler(services, engine))
 		protected.GET("/events", listEventsHandler(engine, services))
 		protected.GET("/events/:id", eventDetailHandler(engine, services))
 		protected.GET("/flows", listFlowsHandler(engine))
@@ -295,11 +303,14 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/anomalies", listAnomaliesHandler(engine))
 		protected.DELETE("/anomalies", requireAdmin(), clearAnomaliesHandler(engine))
 		protected.GET("/conntrack", listConntrackHandler(engine))
+		protected.GET("/firewall/counters", ruleCountersHandler(engine))
 		protected.POST("/conntrack/kill", requireAdmin(), killConntrackHandler(engine))
 		protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
 		protected.GET("/dataplane", getDataPlaneHandler(store))
 		protected.POST("/dataplane", requireAdmin(), setDataPlaneHandler(store))
 		protected.GET("/dataplane/ruleset", requireAdmin(), getRulesetPreviewHandler(store, engine))
+		protected.GET("/dataplane/ruleset/status", getInstalledRulesetStatusHandler(engine))
+		protected.GET("/dataplane/ics-coverage", getICSCoverageHandler(store, engine))
 		protected.POST("/dataplane/blocks/host", requireAdmin(), blockHostHandler(engine))
 		protected.POST("/dataplane/blocks/flow", requireAdmin(), blockFlowHandler(engine))
 		protected.GET("/pcap/config", getPCAPConfigHandler(store))
@@ -315,7 +326,9 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/pcap/replay", requireAdmin(), replayPCAPHandler(engine))
 		protected.POST("/pcap/analyze", requireAdmin(), analyzePCAPUploadHandler(engine))
 		protected.POST("/pcap/analyze/:name", requireAdmin(), analyzePCAPNameHandler(engine))
+		protected.GET("/diagnostics/iec104", iec104DiagnosticsHandler(engine))
 		protected.GET("/inventory", listInventoryHandler(engine))
+		protected.GET("/inventory/iec104", iec104InventoryHandler(engine))
 		protected.GET("/inventory/:ip", getInventoryAssetHandler(engine))
 		protected.DELETE("/inventory", requireAdmin(), clearInventoryHandler(engine))
 		protected.GET("/signatures", listSignaturesHandler(engine))
@@ -392,14 +405,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		// ICS protocol templates.
 		protected.GET("/templates/ics", listICSTemplatesHandler())
 		protected.POST("/templates/ics/apply", requireAdmin(), applyICSTemplateHandler(store))
-		// Identity resolver routes (optional).
-		for _, o := range opts {
-			if resolver, ok := o.(*identity.Resolver); ok && resolver != nil {
-				protected.GET("/identities", listIdentitiesHandler(resolver))
-				protected.POST("/identities", requireAdmin(), setIdentityHandler(resolver))
-				protected.DELETE("/identities/:ip", requireAdmin(), deleteIdentityHandler(resolver))
-			}
-		}
+		// Identity bindings (candidate firewall.identityBindings).
+		protected.GET("/identities", listIdentitiesHandler(store))
+		protected.POST("/identities", requireAdmin(), setIdentityHandler(store))
+		protected.DELETE("/identities/:ip", requireAdmin(), deleteIdentityHandler(store))
 	}
 
 	return r
@@ -473,7 +482,11 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if _, ok := stageCandidate(c, store, func(existing *config.Config) bool {
+		stage := stageCandidate
+		if cfg.IDS.Rules != nil {
+			stage = stageCandidateIDS
+		}
+		if _, ok := stage(c, store, func(existing *config.Config) bool {
 			cfg.RestoreRedactedSecrets(existing)
 			if cfg.IDS.Rules == nil {
 				cfg.IDS.Rules = existing.IDS.Rules
@@ -488,104 +501,6 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
-func commitConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		previous, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := store.Commit(c.Request.Context()); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services, previous)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		setWarningHeader(c, warnings)
-		auditLog(c, audit.Record{Action: "config.commit", Target: "running"})
-		committedConfigResponse(c, "committed")
-	}
-}
-
-func commitConfirmedHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		const defaultTTLSeconds = 60
-		body, _ := io.ReadAll(io.LimitReader(c.Request.Body, 4096))
-		ttlSeconds := int64(defaultTTLSeconds)
-		if len(body) > 0 {
-			var req struct {
-				TTLSeconds int64 `json:"ttl_seconds"`
-			}
-			if err := json.Unmarshal(body, &req); err != nil {
-				apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
-				return
-			}
-			if req.TTLSeconds > 0 {
-				ttlSeconds = req.TTLSeconds
-			}
-		}
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		previous, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := store.CommitConfirmed(c.Request.Context(), time.Duration(ttlSeconds)*time.Second); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services, previous)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		setWarningHeader(c, warnings)
-		auditLog(c, audit.Record{Action: "config.commit_confirmed", Target: "running"})
-		committedConfigResponse(c, "committed")
-	}
-}
-
-func confirmCommitHandler(store config.Store) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if err := store.ConfirmCommit(c.Request.Context()); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		auditLog(c, audit.Record{Action: "config.confirm_commit", Target: "running"})
-		committedConfigResponse(c, "confirmed")
-	}
-}
-
-func rollbackConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		runningConfigApplyMu.Lock()
-		defer runningConfigApplyMu.Unlock()
-		previous, err := loadOrInitConfig(c.Request.Context(), store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := store.Rollback(c.Request.Context()); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		warnings, err := applyRunningConfigLocked(c.Request.Context(), store, engine, services, previous)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		setWarningHeader(c, warnings)
-		auditLog(c, audit.Record{Action: "config.rollback", Target: "running"})
-		committedConfigResponse(c, "rolled back")
-	}
-}
-
 // ApplyRunningConfig replays the current stored running config through the same
 // serialized apply path used by commits and rollback.
 func ApplyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
@@ -595,7 +510,6 @@ func ApplyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 // runningConfigApplyMu protects replay and running-store mutations coupled to
 // runtime applies. Hold it before loading a config to modify, through its apply.
 var runningConfigApplyMu sync.Mutex
-var bindDefaultInterfaceDevices = autoBindDefaultInterfaceDevices
 
 func applyRunningConfig(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier) ([]string, error) {
 	// Load only after acquiring the lock: a queued replay must not push a
@@ -607,7 +521,8 @@ func applyRunningConfig(ctx context.Context, store config.Store, engine EngineCl
 
 // applyRunningConfigLocked is the single apply sequence. Callers must hold
 // runningConfigApplyMu, including across any preceding store mutation.
-func applyRunningConfigLocked(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous *config.Config) ([]string, error) {
+func applyRunningConfigLocked(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous *config.Config) (warnings []string, applyErr error) {
+	defer func() { applyErr = recordRuntimeApplyResult(ctx, store, applyErr) }()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -621,8 +536,15 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 		}
 		return nil, err
 	}
-	// Re-bind logical interface names to physical kernel devices before
-	// applying them. Keep this change in memory only: applying a previously
+	return applyConfigSnapshot(ctx, store, engine, services, previous, cfg)
+}
+
+// applyConfigSnapshot must not load or mutate the store: a transition holds its
+// mutex across this callback. Validation uses only immutable boot authority.
+func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous, cfg *config.Config) ([]string, error) {
+	// Bind unbound default logical interfaces to discovered kernel devices
+	// before applying them. Explicit bindings are applied exactly as staged
+	// and validated. Keep this change in memory only: applying a previously
 	// loaded snapshot must never persist it over a newer store mutation.
 	// Bootstrap owns persisted default device bindings.
 	if err := config.ValidateForStore(store, cfg); err != nil {
@@ -631,7 +553,7 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 	// Reserved bindings were persisted by bootstrap. Never normalize them during
 	// replay: preflight must precede every runtime side effect.
 	if config.ReservationForStore(store) == nil {
-		bindDefaultInterfaceDevices(cfg)
+		bindUnboundDefaultInterfaceDevices(cfg)
 	}
 	if err := config.ValidateForStore(store, cfg); err != nil {
 		return nil, err
@@ -642,67 +564,55 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 		}
 	}
 	var warnings []string
-	if engine != nil {
-		// Infrastructure steps (interfaces, routing, services, pcap) may fail in
-		// unprivileged environments (e.g. Docker without NET_ADMIN). Collect those
-		// errors but always proceed to compile and apply rules so that IDS/firewall
-		// rule evaluation works even when nftables is unavailable.
-		if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
-			warnings = append(warnings, fmt.Sprintf("interfaces: %v", err))
+	if engine == nil {
+		return nil, errors.New("engine unavailable")
+	}
+	// Auxiliary infrastructure remains best-effort. Dataplane configuration
+	// and ruleset application are mandatory: they control enforcement.
+	if err := engine.ConfigureInterfaces(ctx, cfg.Interfaces); err != nil {
+		warnings = append(warnings, fmt.Sprintf("interfaces: %v", err))
+	}
+	if warning := ipv4ForwardingCommitWarning(ctx, cfg, engine); warning != "" {
+		warnings = append(warnings, warning)
+	}
+	if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
+		warnings = append(warnings, fmt.Sprintf("routing: %v", err))
+	}
+	// Trust precedes services so AV clients verify with the current bundle.
+	if err := pushTrustedCA(ctx, cfg, engine); err != nil {
+		warnings = append(warnings, fmt.Sprintf("trust: %v", err))
+	}
+	if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
+		warnings = append(warnings, fmt.Sprintf("services: %v", err))
+	}
+	if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
+		return nil, fmt.Errorf("dataplane: %w", err)
+	}
+	// Replay config on boot/reconnect, but preserve operational captures
+	// across promotions that do not change saved capture settings.
+	if previous == nil || !reflect.DeepEqual(previous.PCAP, cfg.PCAP) {
+		if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
+			warnings = append(warnings, fmt.Sprintf("pcap config: %v", err))
 		}
-		if warning := ipv4ForwardingCommitWarning(ctx, cfg, engine); warning != "" {
-			warnings = append(warnings, warning)
-		}
-		if err := engine.ConfigureRouting(ctx, cfg.Routing); err != nil {
-			warnings = append(warnings, fmt.Sprintf("routing: %v", err))
-		}
-		if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
-			warnings = append(warnings, fmt.Sprintf("services: %v", err))
-		}
-		if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
-			warnings = append(warnings, fmt.Sprintf("dataplane: %v", err))
-		}
-		// Replay config on boot/reconnect, but preserve operational captures
-		// across promotions that do not change saved capture settings.
-		if previous == nil || !reflect.DeepEqual(previous.PCAP, cfg.PCAP) {
-			if _, err := engine.SetPcapConfig(ctx, cfg.PCAP); err != nil {
-				warnings = append(warnings, fmt.Sprintf("pcap config: %v", err))
+		if cfg.PCAP.Enabled {
+			if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
+				warnings = append(warnings, fmt.Sprintf("pcap start: %v", err))
 			}
-			if cfg.PCAP.Enabled {
-				if _, err := engine.StartPcap(ctx, cfg.PCAP); err != nil && !strings.Contains(err.Error(), "already running") {
-					warnings = append(warnings, fmt.Sprintf("pcap start: %v", err))
-				}
-			} else {
-				if _, err := engine.StopPcap(ctx); err != nil {
-					warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
-				}
+		} else {
+			if _, err := engine.StopPcap(ctx); err != nil {
+				warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
 			}
 		}
-		// Always compile and push rules regardless of infrastructure errors.
-		snap, err := compile.CompileSnapshot(cfg)
-		if err != nil {
-			return nil, err
-		}
-		if err := engine.ApplyRules(ctx, snap); err != nil {
-			if isRuntimeApplyWarning(err) {
-				warnings = append(warnings, fmt.Sprintf("ruleset: %v", err))
-				return warnings, nil
-			}
-			return nil, err
-		}
+	}
+	// Always compile and push rules regardless of infrastructure errors.
+	snap, err := compile.CompileSnapshot(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := engine.ApplyRules(ctx, snap); err != nil {
+		return nil, fmt.Errorf("ruleset: %w", err)
 	}
 	return warnings, nil
-}
-
-func isRuntimeApplyWarning(err error) bool {
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	if msg == "" {
-		return false
-	}
-	return strings.Contains(msg, "operation not permitted") ||
-		strings.Contains(msg, "permission denied") ||
-		strings.Contains(msg, "not supported") ||
-		strings.Contains(msg, "nft apply failed")
 }
 
 // loadOrInitConfig only supplies an in-memory default for an uninitialized
@@ -765,5 +675,3 @@ func auditLog(c *gin.Context, rec audit.Record) {
 	}
 	_ = store.Add(c.Request.Context(), rec)
 }
-
-// --- Identity mapping handlers ---

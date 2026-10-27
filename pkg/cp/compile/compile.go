@@ -5,9 +5,7 @@ package compile
 
 import (
 	"fmt"
-	"net"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -28,7 +26,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 		Version:    cfg.Version,
 		Firewall:   make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
 		LocalInput: make([]dprules.LocalServiceRule, 0, 8),
-		Default:    dprules.Action(cfg.Firewall.DefaultAction),
+		Default:    dprules.Action(cfg.Firewall.EffectiveDefaultAction()),
 		NAT: dprules.NATConfig{
 			Enabled:      cfg.Firewall.NAT.Enabled,
 			EgressZone:   cfg.Firewall.NAT.EgressZone,
@@ -71,8 +69,13 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	}
 
 	for _, r := range cfg.Firewall.Rules {
-		srcs := expandCIDRTokens(append([]string(nil), r.Sources...), cfg)
-		dsts := expandCIDRTokens(append([]string(nil), r.Destinations...), cfg)
+		srcs, srcMatchable := expandCIDRTokens(r.Sources, cfg)
+		dsts, dstMatchable := expandCIDRTokens(r.Destinations, cfg)
+		if !srcMatchable || !dstMatchable {
+			// The snapshot has no never-match form: an empty side means
+			// any address. A rule that can match nothing is left out.
+			continue
+		}
 		entry := dprules.Entry{
 			ID:           r.ID,
 			SourceZones:  append([]string(nil), r.SourceZones...),
@@ -81,23 +84,20 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			Destinations: dsts,
 			Protocols:    make([]dprules.Protocol, 0, len(r.Protocols)),
 			Action:       dprules.Action(r.Action),
+			RateLimit:    rateLimit(r.RateLimit),
+			Tag:          r.Tag,
 			Log:          r.Log,
 			Identities:   append([]string(nil), r.Identities...),
 			ICS:          ICSPredicate(r.ICS),
 		}
-		if r.Schedule != nil {
-			entry.Schedule = dprules.SchedulePredicate{
-				DaysOfWeek: append([]string(nil), r.Schedule.DaysOfWeek...),
-				StartTime:  r.Schedule.StartTime,
-				EndTime:    r.Schedule.EndTime,
-				Timezone:   r.Schedule.Timezone,
-			}
-		}
+		entry.Schedule = r.Schedule.Predicate()
 		for _, p := range r.Protocols {
 			entry.Protocols = append(entry.Protocols, dprules.Protocol{Name: p.Name, Port: p.Port})
 		}
 		snap.Firewall = append(snap.Firewall, entry)
 	}
+
+	snap.IdentityBindings = compileIdentityBindings(cfg.Firewall.IdentityBindings)
 
 	// Local input allow rules (management plane + VPN listeners).
 	snap.LocalInput = append(snap.LocalInput, compileLocalInput(cfg)...)
@@ -169,9 +169,13 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	return snap, nil
 }
 
-func expandCIDRTokens(in []string, cfg *config.Config) []string {
+// expandCIDRTokens resolves a rule side's CIDRs and VPN tokens. An empty
+// side matches any address. A side whose tokens all resolve to no address
+// (a VPN token with that VPN unconfigured) matches nothing and reports
+// matchable false.
+func expandCIDRTokens(in []string, cfg *config.Config) (cidrs []string, matchable bool) {
 	if len(in) == 0 {
-		return nil
+		return nil, true
 	}
 	out := make([]string, 0, len(in))
 	for _, raw := range in {
@@ -196,7 +200,7 @@ func expandCIDRTokens(in []string, cfg *config.Config) []string {
 		}
 	}
 	out = compactAndSortCIDRs(out)
-	return out
+	return out, len(out) > 0
 }
 
 func vpnCIDRs(cfg *config.Config) []string {
@@ -270,7 +274,7 @@ func compileLocalInput(cfg *config.Config) []dprules.LocalServiceRule {
 	}
 
 	var out []dprules.LocalServiceRule
-	out = append(out, compileMgmtLocalInput(cfg)...)
+	out = append(out, ManagementLocalInput(cfg)...)
 	out = append(out, compileInfraServiceLocalInput(cfg)...)
 	out = append(out, compileProxyLocalInput(cfg)...)
 	out = append(out, compileVPNLocalInput(cfg)...)
@@ -468,28 +472,6 @@ func sanitizeIdent(s string) string {
 		return "id"
 	}
 	return out.String()
-}
-
-func listenPortOrDefault(addr string, def int) int {
-	addr = strings.TrimSpace(addr)
-	if addr == "" {
-		return def
-	}
-	// Accept ":8080", "0.0.0.0:8080", "127.0.0.1:8080", "[::]:8080".
-	_, portStr, err := net.SplitHostPort(addr)
-	if err != nil {
-		// Might be ":8080" (host missing) => SplitHostPort fails unless we add dummy host.
-		if strings.HasPrefix(addr, ":") {
-			portStr = strings.TrimPrefix(addr, ":")
-		} else {
-			return def
-		}
-	}
-	p, err := strconv.Atoi(portStr)
-	if err != nil || p < 1 || p > 65535 {
-		return def
-	}
-	return p
 }
 
 func compileIDSConds(in []config.IDSCondition) []dprules.IDSCondition {

@@ -10,18 +10,20 @@ import (
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cli"
+	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
-func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter, reader *bufio.Reader, reg *cli.Registry) {
+func (s *Server) runMenu(ctx context.Context, username string, rw io.ReadWriter, reader *bufio.Reader, reg *cli.Registry) bool {
 	session := newInteractiveSession(s, ctx, username, rw, reader, reg)
 	for {
 		session.renderMainMenu()
 		choice, ok := session.ask("Select option (0-10): ")
 		if !ok {
-			return
+			return false
 		}
 		if !session.handleMainMenuChoice(strings.TrimSpace(choice)) {
-			return
+			return true
 		}
 	}
 }
@@ -152,25 +154,16 @@ func (s *interactiveSession) menuSetInterfaceIP() {
 }
 
 func (s *interactiveSession) menuResetPassword() {
-	pw, ok := s.ask("New password (blank to cancel): ")
-	if !ok {
-		return
-	}
-	if pw == "" {
-		s.writeLn("Cancelled.")
-		return
-	}
-	u, err := s.server.opts.UserStore.GetByUsername(s.ctx, s.username)
-	if err != nil || u == nil {
-		s.writeLn("error: failed to load user")
-		return
-	}
-	if err := s.server.opts.UserStore.SetPassword(s.ctx, u.ID, pw); err != nil {
+	if err := users.CheckPasswordChange(); err != nil {
 		s.writeLn("error: " + err.Error())
 		return
 	}
-	s.writeAudit("user.password.set", s.username)
-	s.writeLn("Password updated.")
+	switch s.changeOwnPassword("ssh menu", "Current password (blank to cancel): ", "New password (blank to cancel): ") {
+	case ownPasswordChanged:
+		s.writeLn("Password updated.")
+	case ownPasswordSkipped:
+		s.writeLn("Cancelled.")
+	}
 }
 
 func (s *interactiveSession) menuFactoryReset() bool {
@@ -182,7 +175,17 @@ func (s *interactiveSession) menuFactoryReset() bool {
 		s.writeLn("Cancelled.")
 		return false
 	}
-	_ = s.exec("factory reset NUCLEAR")
+	if !s.exec("factory reset NUCLEAR") {
+		s.writeLn("Factory reset failed. Review the error before retrying.")
+		if conn := connectionFromContext(s.ctx); conn != nil && conn.reset.Load() {
+			s.writeLn("Authentication was revoked. You will be logged out.")
+			return true
+		}
+		return false
+	}
+	if s.server.writeResetResult(s.ctx, s.rw) {
+		return true
+	}
 	s.writeLn("Factory reset complete. You will be logged out.")
 	return true
 }
@@ -438,22 +441,17 @@ func (s *interactiveSession) wizardPromptSSHPasswordAuth() bool {
 }
 
 func (s *interactiveSession) wizardPromptPassword() bool {
-	v, ok := s.ask("Set a new password for this user now? (blank to skip): ")
-	if !ok {
+	if err := users.CheckPasswordChange(); err != nil {
+		s.writeLn("password step skipped: " + err.Error())
+		return true
+	}
+	switch s.changeOwnPassword("ssh setup wizard", "Current password, to change it (blank to skip): ", "New password for this user: ") {
+	case ownPasswordChanged:
+		s.writeLn("password updated")
+	case ownPasswordFailed:
 		s.writeLn("Wizard cancelled.")
 		return false
 	}
-	if v == "" {
-		return true
-	}
-	u, err := s.server.opts.UserStore.GetByUsername(s.ctx, s.username)
-	if err == nil && u != nil {
-		_ = s.server.opts.UserStore.SetPassword(s.ctx, u.ID, v)
-		s.writeAudit("user.password.set", s.username)
-		s.writeLn("password updated")
-		return true
-	}
-	s.writeLn("failed to update password")
 	return true
 }
 
@@ -470,6 +468,7 @@ func (s *interactiveSession) wizardPromptSSHKey() (bool, bool) {
 		s.writeLn("error: failed to add key: " + err.Error())
 		return false, true
 	}
+	s.writeAudit(audit.Record{Action: "ssh.authorized_key.add", Target: s.username, Detail: authorizedKeyFingerprint(v)})
 	s.writeLn("ssh key added")
 	return true, true
 }
@@ -537,39 +536,6 @@ func shellEscape(s string) string {
 		return "'" + s + "'"
 	}
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
-func readLineInteractive(r *bufio.Reader, echo io.Writer) (string, bool) {
-	var buf []byte
-	for {
-		b, err := r.ReadByte()
-		if err != nil {
-			return "", false
-		}
-		if b == 0x04 && len(buf) == 0 {
-			return "", false
-		}
-		if b == 0x03 {
-			return "\x03", true
-		}
-		if b == '\n' || b == '\r' {
-			writeTTY(echo, "\n")
-			break
-		}
-		if b == 0x08 || b == 0x7f {
-			if len(buf) > 0 {
-				buf = buf[:len(buf)-1]
-				writeRaw(echo, "\b \b")
-			}
-			continue
-		}
-		if b < 0x20 {
-			continue
-		}
-		buf = append(buf, b)
-		writeRaw(echo, string([]byte{b}))
-	}
-	return string(buf), true
 }
 
 func writeTTY(w io.Writer, s string) {

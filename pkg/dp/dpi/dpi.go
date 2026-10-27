@@ -24,12 +24,23 @@ type ParsedPacket struct {
 	DstPort uint16
 	TCPSeq  uint32 // TCP sequence number (0 for UDP)
 	TCPSyn  bool   // TCPSeq is the first payload sequence (after the SYN)
+	TCPFin  bool   // the segment carries FIN
+	TCPRst  bool   // the segment carries RST
+	// TCPHandshake marks a SYN or SYN-ACK of a connection whose handshake
+	// the kernel's connection tracking has not seen complete. A fail-closed
+	// one without it anchors no stream: it was sent into an established
+	// connection.
+	TCPHandshake bool
 
 	TCPSeqValid bool      // TCPSeq is real (Seq 0 valid)
 	Offset      int64     // absolute start of Payload in this direction (only when HasOffset)
 	HasOffset   bool      // the caller tracked the handshake and computed Offset
 	Session     string    // required when HasOffset
 	Dir         StreamDir // required when HasOffset
+	// FailClosed asks for a flow stream that cannot resynchronize: its
+	// consumed bytes are kept to verify retransmissions, and a framed
+	// error fails it until the flow ends instead of restarting it.
+	FailClosed bool
 }
 
 // Event is emitted by decoders and fed to rules/IDS/telemetry.
@@ -164,7 +175,12 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 	if m.reassembler != nil {
 		m.reassembler.complete(state.Key.Hash())
 	}
+	return m.flowEnd(state)
+}
 
+// flowEnd returns the decoders' flow-end events. Must be called with
+// streamMu held.
+func (m *Manager) flowEnd(state *flow.State) ([]Event, error) {
 	var out []Event
 	for _, d := range m.candidates(state) {
 		if d == nil || !d.Supports(state) {

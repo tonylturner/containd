@@ -14,8 +14,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/dp/capture"
@@ -30,6 +32,7 @@ import (
 type Options struct {
 	Reservation       *mgmtpath.Reservation
 	Ready             chan<- struct{}
+	Combined          bool
 	Addr              string
 	CaptureInterfaces []string
 	EnforceEnabled    *bool
@@ -77,9 +80,14 @@ func Run(ctx context.Context, opts Options) error {
 	defer cancel()
 	addr := opts.Addr
 	if addr == "" {
-		addr = common.Env("CONTAIND_ENGINE_ADDR", ":8081")
+		addr = ListenAddr(opts.Combined)
 	}
-	if err := opts.Reservation.ValidateEngineBind(addr); err != nil {
+	nics, err := interfaceAddrs()
+	if err != nil {
+		return fmt.Errorf("engine listener: %w", err)
+	}
+	apiPath, err := engineListener(addr, opts.Combined, opts.Reservation, nics)
+	if err != nil {
 		return err
 	}
 	logger := logging.NewService("engine")
@@ -102,6 +110,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	engineCfg := initialEngineConfig(ifaces, enforceEnabled, enforceTable)
 	engineCfg.Enforce.ManagementReservation = opts.Reservation
+	engineCfg.Enforce.EngineAPI = apiPath
 	engineCfg.Events = dpevents.NewStore(4096)
 	engineCfg.OnError = func(err error) {
 		logger.Errorf("data plane capture error: %v", err)
@@ -119,12 +128,17 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	defer guard.Close()
 	ownership.guard = guard
-	avMgr := services.NewAVManager()
-	if avMgr != nil {
-		wireAVEvents(avMgr, dpEngine)
-		avMgr.StartWorker(ctx)
-		dpEngine.SetAVSink(&avSinkAdapter{av: avMgr, dp: dpEngine})
-	}
+	// The engine is the only AV owner: clamd, FreshClam and the scan worker
+	// live with this process and stop with it.
+	avMgr := services.NewAVManager(ctx, services.DefaultAVOptions())
+	defer func() {
+		if err := avMgr.Stop(); err != nil {
+			logger.Errorf("stop antivirus: %v", err)
+		}
+	}()
+	wireAVEvents(avMgr, dpEngine)
+	avMgr.StartWorker()
+	dpEngine.SetAVSink(&avSinkAdapter{av: avMgr})
 	// Start capture (no-op if no interfaces).
 	go func() {
 		if err := dpEngine.StartWithRetry(ctx); err != nil {
@@ -172,6 +186,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules/preview", previewRuleHandler(dpEngine))
+	mux.HandleFunc("/internal/ruleset/preview", previewRulesetHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset_status", rulesetStatusHandler(dpEngine))
 	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine, simMgr))
 	mux.HandleFunc("/internal/pcap/config", pcapConfigHandler(pcapMgr, ownership))
@@ -194,12 +209,27 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 	mux.HandleFunc("/internal/stats/protocols", protoStatsHandler(dpEngine))
 	mux.HandleFunc("/internal/stats/top-talkers", topTalkersHandler(dpEngine))
+	metrics.SetIEC104PressureReader(dpEngine.IEC104PressureMetrics)
+	// Combined mode shares this registry with management; split mode needs
+	// its own engine scrape endpoint for live dataplane metrics.
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/internal/diagnostics/iec104", iec104PressureHandler(dpEngine))
 	mux.HandleFunc("/internal/inventory", inventoryHandler(dpEngine))
 	mux.HandleFunc("/internal/inventory/", inventoryItemHandler(dpEngine))
-	mux.HandleFunc("/internal/conntrack", conntrackHandler())
+	mux.HandleFunc("/internal/anomalies", anomaliesHandler(dpEngine))
+	mux.HandleFunc("/internal/learn", learnHandler(dpEngine))
+	mux.HandleFunc("/internal/learn/profiles", learnProfilesHandler(dpEngine))
+	mux.HandleFunc("/internal/learn/rules", learnRulesHandler(dpEngine))
+	mux.HandleFunc("/internal/signatures", signaturesHandler(dpEngine))
+	mux.HandleFunc("/internal/signatures/matches", signatureMatchesHandler(dpEngine))
+	mux.HandleFunc("/internal/conntrack", conntrackHandler(dpEngine))
+	mux.HandleFunc("/internal/firewall/counters", ruleCountersHandler(dpEngine))
 	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine))
 	mux.HandleFunc("/internal/blocks/flow", blockFlowHandler(dpEngine))
-	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr))
+	mux.HandleFunc("/internal/blocks/clear", clearBlocksHandler(dpEngine))
+	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr, avMgr))
+	registerAVHandlers(mux, avMgr)
+	mux.HandleFunc("/internal/trust", trustHandler(avMgr))
 	mux.HandleFunc("/internal/wireguard/status", wireguardStatusHandler())
 	mux.HandleFunc("/internal/dhcp/leases", dhcpLeasesHandler(dhcpMgr))
 	mux.HandleFunc("/internal/simulation", simulationHandler(simMgr))

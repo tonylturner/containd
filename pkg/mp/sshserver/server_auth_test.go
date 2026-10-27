@@ -7,7 +7,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"net"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +19,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/tonylturner/containd/pkg/common/ratelimit"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
@@ -50,6 +54,7 @@ func TestNewValidatesRequiredOptions(t *testing.T) {
 	base := Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       filepath.Join(t.TempDir(), "host_key"),
 		AuthorizedKeysDir: filepath.Join(t.TempDir(), "keys"),
 		JWTSecret:         []byte(sshTestValue("jwt-signing")),
@@ -63,8 +68,9 @@ func TestNewValidatesRequiredOptions(t *testing.T) {
 	}{
 		{name: "missing listen addr", opts: Options{}, want: "listen addr required"},
 		{name: "missing base url", opts: Options{ListenAddr: ":2222"}, want: "baseURL required"},
-		{name: "missing user store", opts: Options{ListenAddr: ":2222", BaseURL: "http://127.0.0.1:8080"}, want: "user store required"},
-		{name: "missing jwt secret", opts: Options{ListenAddr: ":2222", BaseURL: "http://127.0.0.1:8080", UserStore: userStore, HostKeyPath: "x", AuthorizedKeysDir: "y"}, want: "JWT secret required"},
+		{name: "missing API client", opts: Options{ListenAddr: ":2222", BaseURL: "http://127.0.0.1:8080"}, want: "API client required"},
+		{name: "missing user store", opts: Options{ListenAddr: ":2222", BaseURL: "http://127.0.0.1:8080", APIClient: http.DefaultClient}, want: "user store required"},
+		{name: "missing jwt secret", opts: Options{ListenAddr: ":2222", BaseURL: "http://127.0.0.1:8080", APIClient: http.DefaultClient, UserStore: userStore, HostKeyPath: "x", AuthorizedKeysDir: "y"}, want: "JWT secret required"},
 		{name: "valid", opts: base, want: ""},
 	}
 
@@ -110,6 +116,7 @@ func TestEnsureHostKeyAndAuthorizedKeys(t *testing.T) {
 	srv, err := New(Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       hostKeyPath,
 		AuthorizedKeysDir: filepath.Join(tmp, "authorized_keys"),
 		JWTSecret:         []byte(sshTestValue("jwt-signing")),
@@ -151,6 +158,7 @@ func TestIssueTokenAndSignJWT(t *testing.T) {
 	srv, err := New(Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       filepath.Join(t.TempDir(), "host_key"),
 		AuthorizedKeysDir: filepath.Join(t.TempDir(), "keys"),
 		JWTSecret:         []byte(sshTestValue("jwt-signing")),
@@ -189,6 +197,7 @@ func TestIssueTokenAndSignJWT(t *testing.T) {
 	labServer, err := New(Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       filepath.Join(t.TempDir(), "host_key_lab"),
 		AuthorizedKeysDir: filepath.Join(t.TempDir(), "keys_lab"),
 		LabMode:           true,
@@ -231,6 +240,7 @@ func TestPasswordAndPublicKeyCallbacks(t *testing.T) {
 	srv, err := New(Options{
 		ListenAddr:        ":2222",
 		BaseURL:           "http://127.0.0.1:8080",
+		APIClient:         http.DefaultClient,
 		HostKeyPath:       filepath.Join(tmp, "host_key"),
 		AuthorizedKeysDir: filepath.Join(tmp, "keys"),
 		JWTSecret:         []byte(sshTestValue("jwt-signing")),
@@ -242,9 +252,11 @@ func TestPasswordAndPublicKeyCallbacks(t *testing.T) {
 	}
 
 	pwcb := srv.passwordCallback()
+	// The bootstrap admin must change its password in a keyboard-interactive step.
 	perms, err := pwcb(testConnMetadata{user: "containd"}, []byte("containd"))
-	if err != nil || perms == nil {
-		t.Fatalf("passwordCallback admin error=%v perms=%#v", err, perms)
+	var partial *ssh.PartialSuccessError
+	if !errors.As(err, &partial) || partial.Next.KeyboardInteractiveCallback == nil || perms != nil {
+		t.Fatalf("passwordCallback bootstrap admin error=%v perms=%#v", err, perms)
 	}
 	if _, err := pwcb(testConnMetadata{user: "viewer"}, []byte(viewerPassword)); err == nil {
 		t.Fatal("expected non-admin ssh password auth to be rejected")
@@ -257,7 +269,7 @@ func TestPasswordAndPublicKeyCallbacks(t *testing.T) {
 	if err := srv.SeedAuthorizedKey("containd", line); err != nil {
 		t.Fatalf("SeedAuthorizedKey: %v", err)
 	}
-	pkcb := srv.publicKeyCallback()
+	pkcb := srv.publicKeyCallback(&keyRefusals{})
 	perms, err = pkcb(testConnMetadata{user: "containd"}, pub)
 	if err != nil || perms == nil {
 		t.Fatalf("publicKeyCallback admin error=%v perms=%#v", err, perms)
@@ -278,4 +290,94 @@ func authorizedKeyLineForTest(t *testing.T) (ssh.PublicKey, string) {
 		t.Fatalf("ssh.NewPublicKey: %v", err)
 	}
 	return pub, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub)))
+}
+
+func TestPasswordDisableIncludesLabMode(t *testing.T) {
+	srv, _, _ := newTestSSHServer(t)
+	unreadable := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(unreadable, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, lab := range []bool{false, true} {
+		srv.opts.LabMode = lab
+		srv.opts.AllowPassword = false
+		for _, dir := range []string{t.TempDir(), unreadable, filepath.Join(t.TempDir(), "missing")} {
+			srv.opts.AuthorizedKeysDir = dir
+			if _, err := srv.passwordCallback()(testConnMetadata{user: "containd"}, []byte("containd")); err == nil {
+				t.Fatalf("password accepted with lab=%v keys=%s", lab, dir)
+			}
+		}
+	}
+}
+
+func TestRunningSSHAuthPolicy(t *testing.T) {
+	srv, _, _ := newTestSSHServer(t)
+	srv.opts.LabMode = true
+	allow := true
+	dir := t.TempDir()
+	var readErr error
+	srv.opts.AuthPolicy = func(context.Context) (bool, string, error) { return allow, dir, readErr }
+	auth := func() error {
+		_, err := srv.passwordCallback()(testConnMetadata{user: "containd"}, []byte("containd"))
+		return err
+	}
+	if err := auth(); err != nil {
+		t.Fatal(err)
+	}
+	pub, key := authorizedKeyLineForTest(t)
+	if err := srv.SeedAuthorizedKey("containd", key); err != nil {
+		t.Fatal(err)
+	}
+	allow = false
+	if err := auth(); err == nil {
+		t.Fatal("running disable did not take effect")
+	}
+	if _, err := srv.publicKeyCallback(&keyRefusals{})(testConnMetadata{user: "containd"}, pub); err != nil {
+		t.Fatalf("key in running directory was not usable: %v", err)
+	}
+	readErr = errors.New("config unavailable")
+	if err := auth(); err == nil {
+		t.Fatal("unavailable policy allowed password auth")
+	}
+	if _, err := srv.publicKeyCallback(&keyRefusals{})(testConnMetadata{user: "containd"}, pub); err == nil {
+		t.Fatal("unavailable policy allowed key auth")
+	}
+}
+
+func TestAuthorizedKeyRejectsPathUsername(t *testing.T) {
+	srv, _, _ := newTestSSHServer(t)
+	pub, key := authorizedKeyLineForTest(t)
+	for _, username := range []string{"", ".", "..", "../outside", "/outside"} {
+		if err := srv.SeedAuthorizedKey(username, key); err == nil {
+			t.Fatalf("seed accepted username %q", username)
+		}
+		if ok, err := isAuthorizedKey(srv.opts.AuthorizedKeysDir, username, pub); err != nil || ok {
+			t.Fatalf("lookup accepted username %q: %v", username, err)
+		}
+	}
+}
+
+// portConnMetadata is a connection from the same host on a given source port.
+type portConnMetadata struct {
+	testConnMetadata
+	port int
+}
+
+func (m portConnMetadata) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: m.port}
+}
+
+func TestPasswordLimiterCountsPerHost(t *testing.T) {
+	srv, _, _ := newTestSSHServer(t)
+	srv.pwLimiter = ratelimit.NewAttemptLimiter(time.Minute, 2, time.Minute)
+	auth := srv.passwordCallback()
+	for port := 40000; port < 40002; port++ {
+		if _, err := auth(portConnMetadata{testConnMetadata{user: "containd"}, port}, []byte("wrong")); err == nil {
+			t.Fatal("wrong password accepted")
+		}
+	}
+	// A new connection gets a new source port; it must not reset the count.
+	if _, err := auth(portConnMetadata{testConnMetadata{user: "containd"}, 40002}, []byte("containd")); err == nil || !strings.Contains(err.Error(), "too many login attempts") {
+		t.Fatalf("limiter did not apply across source ports: %v", err)
+	}
 }

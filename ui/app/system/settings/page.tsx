@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Shell } from "../../../components/Shell";
 import { Card } from "../../../components/Card";
@@ -12,6 +12,7 @@ import {
   setPersistCLIHistory,
   setShowTips,
 } from "../../../lib/prefs";
+import { certUploadNotice, tlsView } from "./tls-view";
 
 export default function SystemSettingsPage() {
   const canEdit = isAdmin();
@@ -21,6 +22,7 @@ export default function SystemSettingsPage() {
   const [caFile, setCAFile] = useState<File | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [showTips, setShowTipsState] = useState(true);
   const [persistHistory, setPersistHistory] = useState(false);
 
@@ -35,14 +37,7 @@ export default function SystemSettingsPage() {
     setPersistHistory(getPersistCLIHistory());
   }, []);
 
-  const certSummary = useMemo(() => {
-    if (!tlsInfo?.certNotAfter) return "—";
-    try {
-      return new Date(tlsInfo.certNotAfter).toLocaleString();
-    } catch {
-      return tlsInfo.certNotAfter;
-    }
-  }, [tlsInfo?.certNotAfter]);
+  const view = tlsView(tlsInfo);
 
   async function readFileText(f: File): Promise<string> {
     return await f.text();
@@ -51,6 +46,7 @@ export default function SystemSettingsPage() {
   async function uploadCert() {
     if (!canEdit) return;
     setError(null);
+    setWarning(null);
     setStatus(null);
     if (!certFile || !keyFile) {
       setError("Select both certificate and private key PEM files.");
@@ -58,17 +54,20 @@ export default function SystemSettingsPage() {
     }
     const [certPEM, keyPEM] = await Promise.all([readFileText(certFile), readFileText(keyFile)]);
     const res = await api.setTLSCert(certPEM, keyPEM);
-    if (!res.ok) {
-      setError(res.error || "Failed to upload certificate.");
+    const notice = certUploadNotice(res);
+    if (notice.kind === "error") {
+      setError(notice.text);
       return;
     }
-    setStatus(res.warning ? `Certificate updated with warning: ${res.warning}` : "Certificate updated. New connections will use it immediately.");
+    if (notice.kind === "warning") setWarning(notice.text);
+    else setStatus(notice.text);
     await refresh();
   }
 
   async function uploadCA() {
     if (!canEdit) return;
     setError(null);
+    setWarning(null);
     setStatus(null);
     if (!caFile) {
       setError("Select a PEM bundle file.");
@@ -76,27 +75,35 @@ export default function SystemSettingsPage() {
     }
     const pem = await readFileText(caFile);
     const res = await api.setTrustedCA(pem);
-    if (!res.ok) {
+    if (res.state === "failed") {
       setError(res.error || "Failed to upload trusted CA bundle.");
-      return;
+    } else if (res.state === "stored") {
+      const reason = res.warnings.length > 0 ? `: ${res.warnings.join("; ")}` : "";
+      setWarning(`Trusted CA bundle stored (revision ${res.revision}), but the engine did not apply it${reason}. The next commit retries it.`);
+    } else {
+      setStatus(`Trusted CA bundle applied by the engine (revision ${res.revision}).`);
     }
-    setStatus(res.warning ? `Trusted CA bundle saved with warning: ${res.warning}` : "Trusted CA bundle saved.");
   }
 
   return (
     <Shell title="System Settings">
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: admin access required to change system settings.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
+      {warning && (
+        <div role="status" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+          {warning}
+        </div>
+      )}
       {status && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text)">
           {status}
         </div>
       )}
@@ -104,73 +111,70 @@ export default function SystemSettingsPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <Card padding="lg">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-[var(--text)]">Management HTTPS</h2>
+            <h2 className="text-lg font-semibold text-(--text)">Management HTTPS</h2>
             <button
               onClick={refresh}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+              className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
             >
               Refresh
             </button>
           </div>
 
           <div className="mt-4 space-y-1 text-sm">
-            <Row label="HTTP" value={tlsInfo ? (tlsInfo.httpEnabled ? "enabled" : "disabled") : "—"} />
-            <Row label="HTTP listen" value={tlsInfo?.httpListenAddr ?? "—"} />
-            <Row label="HTTPS" value={tlsInfo ? (tlsInfo.httpsEnabled ? "enabled" : "disabled") : "—"} />
-            <Row label="HTTPS listen" value={tlsInfo?.httpsListenAddr ?? "—"} />
-            <Row label="Cert file" value={tlsInfo?.certFile ?? "—"} />
-            <Row label="Key file" value={tlsInfo?.keyFile ?? "—"} />
-            <Row label="Cert expires" value={certSummary} />
+            {view.rows.map((row) => (
+              <Row key={row.label} label={row.label} value={row.value} />
+            ))}
+            {view.note && <p className="pt-1 text-xs text-amber">{view.note}</p>}
           </div>
 
           <div className="mt-5 grid gap-2">
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Certificate (PEM)</label>
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">Certificate (PEM)</label>
             <input
               type="file"
               accept=".pem,.crt,.cer"
               disabled={!canEdit}
               onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
             />
-            <label className="mt-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">Private key (PEM)</label>
+            <label className="mt-2 text-xs uppercase tracking-wide text-(--text-muted)">Private key (PEM)</label>
             <input
               type="file"
               accept=".pem,.key"
               disabled={!canEdit}
               onChange={(e) => setKeyFile(e.target.files?.[0] ?? null)}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
             />
             <button
               onClick={uploadCert}
               disabled={!canEdit}
-              className="mt-2 rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
+              className="mt-2 rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
               Upload cert/key
             </button>
-            <p className="text-xs text-[var(--text-muted)]">
+            <p className="text-xs text-(--text-muted)">
               Self-signed is generated by default. Upload a CA-signed certificate to remove browser warnings.
             </p>
           </div>
         </Card>
 
         <Card padding="lg">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Trusted CAs (outbound)</h2>
-          <p className="mt-1 text-sm text-[var(--text)]">
+          <h2 className="text-lg font-semibold text-(--text)">Trusted CAs (outbound)</h2>
+          <p className="mt-1 text-sm text-(--text)">
             By default, containd uses the OS trust store. You can optionally provide an additional PEM bundle for outbound TLS.
           </p>
           <div className="mt-4 grid gap-2">
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Additional CA bundle (PEM)</label>
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">Additional CA bundle (PEM)</label>
             <input
               type="file"
               accept=".pem,.crt,.cer"
               disabled={!canEdit}
               onChange={(e) => setCAFile(e.target.files?.[0] ?? null)}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] transition-ui focus:border-amber-500/40 focus-visible:shadow-focus-ring outline-none"
+              className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
             />
             <button
               onClick={uploadCA}
               disabled={!canEdit}
-              className="mt-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-2 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08] disabled:opacity-60"
+              className="mt-2 rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui disabled:opacity-60"
             >
               Upload CA bundle
             </button>
@@ -179,9 +183,9 @@ export default function SystemSettingsPage() {
       </div>
 
       <Card className="mt-4" padding="lg">
-        <h2 className="text-lg font-semibold text-[var(--text)]">User Preferences</h2>
-        <div className="mt-4 grid gap-4 text-sm text-[var(--text)] md:grid-cols-2">
-          <label className="flex items-center justify-between gap-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
+        <h2 className="text-lg font-semibold text-(--text)">User Preferences</h2>
+        <div className="mt-4 grid gap-4 text-sm text-(--text) md:grid-cols-2">
+          <label className="flex items-center justify-between gap-3 rounded-xs border bg-(--surface) px-3 py-2">
             <span>Show contextual tips</span>
             <input
               type="checkbox"
@@ -194,7 +198,7 @@ export default function SystemSettingsPage() {
               className="h-4 w-4"
             />
           </label>
-          <label className="flex items-center justify-between gap-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2">
+          <label className="flex items-center justify-between gap-3 rounded-xs border bg-(--surface) px-3 py-2">
             <span>Persist CLI history</span>
             <input
               type="checkbox"
@@ -208,12 +212,12 @@ export default function SystemSettingsPage() {
             />
           </label>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-(--text-muted)">
           <button
             onClick={() => {
               clearDismissedTips();
             }}
-            className="rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-md border bg-(--surface2) px-2 py-1 text-(--text) transition-ui"
           >
             Reset dismissed tips
           </button>
@@ -222,10 +226,10 @@ export default function SystemSettingsPage() {
       </Card>
 
       <Card className="mt-4" padding="lg">
-        <p className="text-sm text-[var(--text)]">
+        <p className="text-sm text-(--text)">
           CLI shortcuts:
         </p>
-        <pre className="mt-3 rounded-sm bg-[var(--surface)] p-3 text-xs text-[var(--text)]">
+        <pre className="mt-3 rounded-xs bg-(--surface) p-3 text-xs text-(--text)">
 show system{"\n"}
 set system mgmt listen &lt;addr&gt;{"\n"}
 set system mgmt http enable &lt;true|false&gt;{"\n"}
@@ -240,11 +244,11 @@ commit
   );
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <span className="text-[var(--text)]">{label}</span>
-      <span className="truncate text-[var(--text)]">{value}</span>
+      <span className="text-(--text)">{label}</span>
+      <span className="truncate text-(--text)" title={value}>{value}</span>
     </div>
   );
 }

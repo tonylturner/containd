@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 containd Authors
+
 //go:build linux
 
 // Command queueholder binds an NFQUEUE number before the containd engine

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -15,19 +16,30 @@ func ApplianceDefaults(r *mgmtpath.Reservation) *config.Config {
 	return applianceDefaults(r, AutoBindDefaultInterfaceDevicesReserved)
 }
 
+// WithApplianceListeners returns a copy of cfg whose management HTTP,
+// HTTPS and SSH listener settings are the appliance defaults for r. They
+// are what management binds when stored listener settings cannot serve.
+func WithApplianceListeners(cfg *config.Config, r *mgmtpath.Reservation) *config.Config {
+	defaults := applianceDefaults(r, func(*config.Config, *mgmtpath.Reservation) bool { return false })
+	out := *cfg
+	out.System.Mgmt = defaults.System.Mgmt
+	out.System.SSH.ListenAddr = defaults.System.SSH.ListenAddr
+	return &out
+}
+
 func applianceDefaults(r *mgmtpath.Reservation, bind func(*config.Config, *mgmtpath.Reservation) bool) *config.Config {
 	def := config.DefaultConfig()
 	config.ApplyBootstrapEnvDefaults(def)
 	def.System.Hostname = "containd"
-	def.System.Mgmt.ListenAddr = ":8080"
-	def.System.Mgmt.HTTPListenAddr = ":8080"
-	def.System.Mgmt.HTTPSListenAddr = ":8443"
+	def.System.Mgmt.ListenAddr = config.DefaultManagementHTTPAddr
+	def.System.Mgmt.HTTPListenAddr = config.DefaultManagementHTTPAddr
+	def.System.Mgmt.HTTPSListenAddr = config.DefaultManagementHTTPSAddr
 	t := true
 	def.System.Mgmt.EnableHTTP = &t
 	def.System.Mgmt.EnableHTTPS = &t
-	def.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
-	def.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
-	def.System.SSH.ListenAddr = ":2222"
+	def.System.Mgmt.TLSCertFile = mgmttls.DefaultCertFile
+	def.System.Mgmt.TLSKeyFile = mgmttls.DefaultKeyFile
+	def.System.SSH.ListenAddr = config.DefaultSSHAddr
 	def.System.SSH.AuthorizedKeysDir = "/data/ssh/authorized_keys.d"
 	if r != nil {
 		// Enforcement is part of the reservation substrate, not a student

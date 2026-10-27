@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 )
 
 // Lease represents a DHCPv4 lease handed out by the embedded DHCP server.
@@ -50,7 +51,7 @@ type listener struct {
 // It is designed for lab/early appliance workflows and intentionally limited:
 // - IPv4 only
 // - Broadcast replies only
-// - No conflict detection, no authoritative NAK behavior yet
+// - No conflict detection
 // - Leases are in-memory with best-effort persistence to `/data/dhcp-leases.json`
 //
 // Because the engine runs as non-root, the manager installs a small nftables redirect
@@ -213,7 +214,11 @@ func (m *Manager) disableLocked(ctx context.Context) error {
 		l.cancel()
 		delete(m.listeners, dev)
 	}
-	_ = ensureRedirect(ctx, nil, false)
+	if err := ensureRedirect(ctx, nil, false); err != nil {
+		m.lastErr = err.Error()
+		go m.emit("service.dhcp.redirect_failed", map[string]any{"error": err.Error()})
+		return err
+	}
 	m.lastErr = ""
 	go m.emit("service.dhcp.disabled", map[string]any{"enabled": false})
 	return nil
@@ -277,6 +282,9 @@ func (m *Manager) startMissingListenersLocked(cfg config.DHCPConfig, devs []stri
 
 func dhcpListenerNeedsRestart(l listener, cfg config.DHCPConfig, pl pool) bool {
 	// Note: we only compare fields that affect on-wire behavior.
+	if l.cfg.Authoritative != cfg.Authoritative {
+		return true
+	}
 	if l.pool.Start == nil || l.pool.End == nil || pl.Start == nil || pl.End == nil {
 		return true
 	}
@@ -449,11 +457,11 @@ func (m *Manager) emit(kind string, attrs map[string]any) {
 	m.OnEvent(kind, attrs)
 }
 
-func (m *Manager) isIPInUse(dev, ip string) bool {
+func (m *Manager) isIPInUseByOther(dev, mac, ip string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, l := range m.leases {
-		if l.Iface != dev || l.IP != ip {
+		if l.Iface != dev || l.IP != ip || strings.EqualFold(l.MAC, mac) {
 			continue
 		}
 		t, err := time.Parse(time.RFC3339Nano, l.ExpiresAt)
@@ -543,20 +551,21 @@ func (m *Manager) startListenerLocked(dev string, cfg config.DHCPConfig, pl pool
 		if err == nil || errors.Is(err, context.Canceled) {
 			return
 		}
-		m.handleListenerExit(dev, err)
+		m.handleListenerExit(dev, errCh, err)
 	}(dev)
 }
 
-func (m *Manager) handleListenerExit(dev string, err error) {
+func (m *Manager) handleListenerExit(dev string, exited <-chan error, err error) {
 	m.mu.Lock()
 	l, ok := m.listeners[dev]
-	if !ok {
+	if !ok || l.errCh != exited {
 		m.mu.Unlock()
 		return
 	}
-	// Listener exited unexpectedly; clear it so we can restart.
-	delete(m.listeners, dev)
+	// Retain this listener identity while waiting to retry. Apply may replace
+	// or remove it in the meantime; an old worker must never resurrect it.
 	l.retry++
+	m.listeners[dev] = l
 	m.lastErr = fmt.Sprintf("listener %s failed: %v", dev, err)
 	cfg := l.cfg
 	pl := l.pool
@@ -578,8 +587,9 @@ func (m *Manager) handleListenerExit(dev string, err error) {
 	time.Sleep(backoff)
 
 	m.mu.Lock()
-	// Only restart if DHCP is still enabled and this dev is still desired.
-	if !cfg.Enabled || containsListener(m.listeners, dev) {
+	// Only restart if Apply has not removed or replaced this listener.
+	current, ok := m.listeners[dev]
+	if !ok || current.errCh != exited {
 		m.mu.Unlock()
 		return
 	}
@@ -590,11 +600,6 @@ func (m *Manager) handleListenerExit(dev string, err error) {
 	m.listeners[dev] = nl
 	m.mu.Unlock()
 	go m.emit("service.dhcp.listener_restarted", map[string]any{"dev": dev, "retry": l.retry})
-}
-
-func containsListener(listeners map[string]listener, dev string) bool {
-	_, ok := listeners[dev]
-	return ok
 }
 
 func (m *Manager) pruneExpiredLeasesLocked() {
@@ -617,14 +622,25 @@ func ensureRedirect(ctx context.Context, devs []string, enabled bool) error {
 		return nil
 	}
 
-	if !enabled {
-		cmd := exec.CommandContext(ctx, "nft", "delete", "table", "inet", "containd_dhcp")
-		_ = cmd.Run()
-		return nil
+	script := enforce.DeleteTable(enforce.DHCPRedirectTable)
+	if enabled {
+		script = redirectScript(devs)
 	}
+	cmd := exec.CommandContext(ctx, "nft", "-f", "-")
+	cmd.Stdin = strings.NewReader(script)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("dhcp: nft apply failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
 
+// redirectScript replaces the redirect table atomically, whether or not it
+// exists, with one UDP/67 redirect to the listener port per device.
+func redirectScript(devs []string) string {
 	var b strings.Builder
-	b.WriteString("table inet containd_dhcp {\n")
+	b.WriteString(enforce.DeleteTable(enforce.DHCPRedirectTable))
+	b.WriteString("table inet " + enforce.DHCPRedirectTable + " {\n")
 	b.WriteString("  chain prerouting {\n")
 	b.WriteString("    type nat hook prerouting priority -100; policy accept;\n")
 	for _, dev := range devs {
@@ -634,16 +650,7 @@ func ensureRedirect(ctx context.Context, devs []string, enabled bool) error {
 	}
 	b.WriteString("  }\n")
 	b.WriteString("}\n")
-
-	// Replace the table atomically.
-	script := "delete table inet containd_dhcp\n" + b.String()
-	cmd := exec.CommandContext(ctx, "nft", "-f", "-")
-	cmd.Stdin = strings.NewReader(script)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("dhcp: nft apply failed: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return b.String()
 }
 
 func contains(list []string, s string) bool {
@@ -700,19 +707,4 @@ func ipToU32(ip net.IP) uint32 {
 
 func u32ToIP(v uint32) net.IP {
 	return net.IPv4(byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
-}
-
-func nextFreeIP(dev string, pl pool, m *Manager) (net.IP, error) {
-	start := ipToU32(pl.Start)
-	end := ipToU32(pl.End)
-	if start == 0 || end == 0 || end < start {
-		return nil, errors.New("invalid pool range")
-	}
-	for v := start; v <= end; v++ {
-		ip := u32ToIP(v)
-		if !m.isIPInUse(dev, ip.String()) {
-			return ip, nil
-		}
-	}
-	return nil, errors.New("no free leases available")
 }

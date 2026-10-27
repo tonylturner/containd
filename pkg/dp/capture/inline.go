@@ -70,6 +70,8 @@ type Decision struct {
 	Action   Disposition  // current packet
 	Reason   string       // machine reason; logs/metrics only
 	Resolved []Resolution // earlier Held tokens of the same source
+	// Notify requests OnVerdict even for a successful immediate Accept.
+	Notify bool
 }
 
 // Handler receives decoded capture packets and decides the current packet.

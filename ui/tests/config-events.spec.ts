@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { policyAPI } from "../lib/api-policy";
+import { idsAPI } from "../lib/api-ids";
 import { servicesAPI } from "../lib/api-services";
-import { uploadPcap } from "../lib/api-dataplane";
+import { uploadPcap } from "../lib/api-pcap";
 import { CONFIG_COMMITTED, CONFIG_STAGED, notifyConfigMutation, subscribeConfigChanges } from "../lib/config-events";
 import { deleteJSON, deleteJSONResult, patchJSON, patchJSONResult, postJSON, postJSONResult } from "../lib/api-request";
 
@@ -71,7 +71,7 @@ for (const [name, mutate] of Object.entries({
 }
 
 for (const [name, mutate] of Object.entries({
-  importIDSRules: () => policyAPI.importIDSRules(new File(["[]"], "rules.json")),
+  importIDSRules: () => idsAPI.importIDSRules(new File(["[]"], "rules.json")),
   uploadAVDef: () => servicesAPI.uploadAVDef(new File(["definition"], "definition.ndb")),
   deleteAVDef: () => servicesAPI.deleteAVDef("definition.ndb"),
   uploadPcap: () => uploadPcap(new File(["capture"], "capture.pcap")),

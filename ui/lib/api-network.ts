@@ -1,15 +1,13 @@
 import {
   deleteJSONResult,
   getJSON,
+  getJSONList,
   patchJSONResult,
   postJSONResult,
 } from "./api-request";
-import { normalizeFirewallRule, normalizeFirewallRules } from "./api-normalize";
 
 import type {
-  ApiResult,
   ConduitMap,
-  FirewallRule,
   Interface,
   InterfaceState,
   NATConfig,
@@ -19,7 +17,7 @@ import type {
 } from "./api";
 
 export const networkAPI = {
-  listZones: (signal?: AbortSignal) => getJSON<Zone[]>("/api/v1/zones", signal),
+  listZones: (signal?: AbortSignal) => getJSONList<Zone>("/api/v1/zones", signal),
   createZone: (z: Zone) => postJSONResult<Zone>("/api/v1/zones", z),
   updateZone: (name: string, z: Partial<Zone>) =>
     patchJSONResult<Zone>(`/api/v1/zones/${encodeURIComponent(name)}`, z),
@@ -29,9 +27,9 @@ export const networkAPI = {
     getJSON<ConduitMap>("/api/v1/security/conduits", signal),
 
   listInterfaces: (signal?: AbortSignal) =>
-    getJSON<Interface[]>("/api/v1/interfaces", signal),
+    getJSONList<Interface>("/api/v1/interfaces", signal),
   listInterfaceState: (signal?: AbortSignal) =>
-    getJSON<InterfaceState[]>("/api/v1/interfaces/state", signal),
+    getJSONList<InterfaceState>("/api/v1/interfaces/state", signal),
   assignInterfaces: (
     mode: "auto" | "explicit",
     mappings?: Record<string, string>,
@@ -65,31 +63,6 @@ export const networkAPI = {
       confirm: "REPLACE",
     }),
 
-  listFirewallRules: async (signal?: AbortSignal) => {
-    const rules = await getJSON<unknown>("/api/v1/firewall/rules", signal);
-    if (rules == null) return null;
-    return normalizeFirewallRules(rules);
-  },
-  createFirewallRule: async (
-    r: FirewallRule,
-  ): Promise<ApiResult<FirewallRule>> => {
-    const result = await postJSONResult<unknown>("/api/v1/firewall/rules", r);
-    if (!result.ok) return result;
-    return { ...result, data: normalizeFirewallRule(result.data) };
-  },
-  updateFirewallRule: async (
-    id: string,
-    r: Partial<FirewallRule>,
-  ): Promise<ApiResult<FirewallRule>> => {
-    const result = await patchJSONResult<unknown>(
-      `/api/v1/firewall/rules/${encodeURIComponent(id)}`,
-      r,
-    );
-    if (!result.ok) return result;
-    return { ...result, data: normalizeFirewallRule(result.data) };
-  },
-  deleteFirewallRule: (id: string) =>
-    deleteJSONResult(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
   getNAT: () => getJSON<NATConfig>("/api/v1/firewall/nat"),
   setNAT: (cfg: NATConfig) =>
     postJSONResult<NATConfig>("/api/v1/firewall/nat", cfg),

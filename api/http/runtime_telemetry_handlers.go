@@ -5,16 +5,17 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
-	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
@@ -139,7 +140,7 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tc, ok := engine.(TelemetryClient)
 		if !ok || tc == nil {
-			c.JSON(http.StatusOK, []dpevents.FlowSummary{})
+			apiError(c, http.StatusServiceUnavailable, "engine flows unavailable")
 			return
 		}
 		limit := 200
@@ -150,7 +151,7 @@ func listFlowsHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		flows, err := tc.ListFlows(c.Request.Context(), limit)
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine flows unavailable")
 			return
 		}
 		if flows == nil {
@@ -164,12 +165,12 @@ func simulationStatusHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(SimulationClient)
 		if !ok || sc == nil {
-			c.JSON(http.StatusOK, engineclient.SimulationStatus{Running: false})
+			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
 			return
 		}
 		st, err := sc.SimulationStatus(c.Request.Context())
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
 			return
 		}
 		c.JSON(http.StatusOK, st)
@@ -180,7 +181,7 @@ func simulationControlHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(SimulationClient)
 		if !ok || sc == nil {
-			apiError(c, http.StatusBadRequest, "simulation unavailable")
+			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
 			return
 		}
 		var req struct {
@@ -192,7 +193,7 @@ func simulationControlHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		st, err := sc.SimulationControl(c.Request.Context(), req.Action)
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine simulation unavailable")
 			return
 		}
 		auditLog(c, audit.Record{Action: "simulation." + req.Action, Target: "synth"})
@@ -204,12 +205,12 @@ func protoStatsHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(StatsClient)
 		if !ok || sc == nil {
-			c.JSON(http.StatusOK, []stats.ProtoStats{})
+			apiError(c, http.StatusServiceUnavailable, "engine protocol statistics unavailable")
 			return
 		}
 		result, err := sc.ListProtoStats(c.Request.Context())
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine protocol statistics unavailable")
 			return
 		}
 		if result == nil {
@@ -223,7 +224,7 @@ func topTalkersHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(StatsClient)
 		if !ok || sc == nil {
-			c.JSON(http.StatusOK, []stats.FlowStats{})
+			apiError(c, http.StatusServiceUnavailable, "engine top talkers unavailable")
 			return
 		}
 		n := 10
@@ -234,7 +235,7 @@ func topTalkersHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		result, err := sc.ListTopTalkers(c.Request.Context(), n)
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine top talkers unavailable")
 			return
 		}
 		if result == nil {
@@ -248,7 +249,7 @@ func listAnomaliesHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ac, ok := engine.(AnomalyClient)
 		if !ok || ac == nil {
-			c.JSON(http.StatusOK, []anomaly.Anomaly{})
+			apiError(c, http.StatusServiceUnavailable, "engine anomalies unavailable")
 			return
 		}
 		limit := 200
@@ -259,7 +260,7 @@ func listAnomaliesHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		anomalies, err := ac.ListAnomalies(c.Request.Context(), limit)
 		if err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine anomalies unavailable")
 			return
 		}
 		if anomalies == nil {
@@ -273,11 +274,11 @@ func clearAnomaliesHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ac, ok := engine.(AnomalyClient)
 		if !ok || ac == nil {
-			c.JSON(http.StatusOK, gin.H{"status": "ok"})
+			apiError(c, http.StatusServiceUnavailable, "engine anomalies unavailable")
 			return
 		}
 		if err := ac.ClearAnomalies(c.Request.Context()); err != nil {
-			apiError(c, http.StatusBadGateway, err.Error())
+			apiError(c, http.StatusServiceUnavailable, "engine anomalies unavailable")
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -288,7 +289,7 @@ func listConntrackHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cc, ok := engine.(ConntrackClient)
 		if !ok || cc == nil {
-			c.JSON(http.StatusOK, []conntrack.Entry{})
+			apiError(c, http.StatusServiceUnavailable, "conntrack backend unavailable")
 			return
 		}
 		limit := 200
@@ -302,6 +303,9 @@ func listConntrackHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
+		if ents == nil {
+			ents = []dpengine.TaggedConnection{}
+		}
 		c.JSON(http.StatusOK, ents)
 	}
 }
@@ -313,16 +317,25 @@ func killConntrackHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusNotImplemented, "conntrack delete not supported")
 			return
 		}
-		var req conntrack.DeleteRequest
+		var req conntrack.KillRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if err := ck.DeleteConntrack(c.Request.Context(), req); err != nil {
+		if err := req.Validate(); err != nil {
+			apiError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		result, err := ck.DeleteConntrack(c.Request.Context(), req)
+		if err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
-		auditLog(c, audit.Record{Action: "conntrack.delete", Target: "dataplane"})
-		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+		outcome := "success"
+		if !result.RevocationInstalled || !result.ConntrackDeleted {
+			outcome = "failure"
+		}
+		auditLog(c, audit.Record{Action: "conntrack.kill", Target: fmt.Sprintf("%s [%s]:%d → [%s]:%d", req.Proto, req.Src, req.Sport, req.Dst, req.Dport), Result: outcome, Detail: fmt.Sprintf("scope=%s deleted=%d/%d revocation=%t %s %s", result.Scope, result.Deleted, result.Matched, result.RevocationInstalled, result.DeleteError, result.RevocationError)})
+		c.JSON(http.StatusOK, result)
 	}
 }

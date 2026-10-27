@@ -207,7 +207,7 @@ func TestSystemTLSHandlersAndHelpers(t *testing.T) {
 	router := gin.New()
 	router.GET("/system/tls", getTLSHandler(store))
 	router.POST("/system/tls/cert", setTLSCertHandler(store))
-	router.POST("/system/tls/trusted-ca", setTrustedCAHandler(store))
+	router.POST("/system/tls/trusted-ca", setTrustedCAHandler(store, nil))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/system/tls", nil)
@@ -247,9 +247,6 @@ func TestSystemTLSHandlersAndHelpers(t *testing.T) {
 		t.Fatalf("setTrustedCA invalid status/body = %d %s", rec.Code, rec.Body.String())
 	}
 
-	if _, err := readAnyPEM(certPEM); err != nil {
-		t.Fatalf("readAnyPEM(valid): %v", err)
-	}
 	if got, ok := parseDockerBindMount("/host/path:/container/path:ro"); !ok || got.Mode != "ro" {
 		t.Fatalf("parseDockerBindMount(valid) = %#v, %v", got, ok)
 	}
@@ -340,7 +337,7 @@ func TestSystemInspectionAndFactoryResetHandlers(t *testing.T) {
 		c.Set("actor", "alice")
 		c.Next()
 	})
-	router.POST("/system/factory-reset", factoryResetHandler(cfgStore, userStore, nil, nil))
+	router.POST("/system/factory-reset", factoryResetHandler(cfgStore, userStore, &mockEngine{}, nil))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))

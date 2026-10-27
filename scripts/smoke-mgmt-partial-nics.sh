@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
+# Regression-test management reachability with 5/7/8 NICs and NIC renumbering,
+# with and without a management reservation. Run from the repository root.
+# Requirements: Go, Docker with a Linux kernel, jq, Python 3 and image/package
+# download access; containers need NET_ADMIN, NET_RAW and SYS_ADMIN.
+# Uses private network namespaces with no host ports. Removes its container,
+# image and data volumes on exit; diagnostics stay in build/mgmt-partial-nics.*.
+# Scenarios and fixture details: test/mgmt-partial-nics/README.md.
 set -Eeuo pipefail
 trap 'echo "FAIL: line $LINENO: $BASH_COMMAND" >&2' ERR
 ROOT=$(git rev-parse --show-toplevel)

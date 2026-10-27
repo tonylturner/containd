@@ -7,7 +7,7 @@ This file tracks third‑party/external components that containd embeds, vendors
 - Prefer SPDX identifiers from https://spdx.org/licenses/.
 - If a component has multiple valid licenses, list the one we are using and note the alternative.
 - Keep this list aligned with actual build/runtime packaging.
-- This list is intentionally **not exhaustive** for every transitive Go/npm dependency; use `go.mod` and `ui/package.json` for the complete dependency graphs.
+- This list is intentionally **not exhaustive** for every transitive Go/npm dependency; consult `go.mod`/`go.sum`, `ui/package-lock.json`, and the [release SBOMs](sbom.md) for dependency inventory. Final-image scans may not identify every bundled UI dependency. This manual summary is not a complete SBOM or legal audit.
 
 ---
 
@@ -24,13 +24,13 @@ This file tracks third‑party/external components that containd embeds, vendors
 | React | UI library | MIT | Via Next.js. |
 | Tailwind CSS | UI styling | MIT | Built into UI assets. |
 | Envoy Proxy | Optional explicit forward proxy | Apache-2.0 | Copied into the mgmt appliance image from `envoyproxy/envoy`. |
-| Nginx | Optional reverse proxy | BSD-2-Clause | Copied into the mgmt appliance image from `nginxinc/nginx-unprivileged`. |
+| Nginx | Optional reverse proxy | BSD-2-Clause | Installed as Wolfi `nginx-mainline` in the mgmt image. |
 | Unbound | DNS caching/forwarding resolver | BSD-3-Clause | Embedded in the mgmt image (forwarder-first config; supervised by `containd mgmt`). |
-| OpenNTPD | NTP client | ISC | Embedded in the mgmt image; supervised by `containd mgmt` when enabled. |
+| chrony | NTP client/server | GPL-2.0-only | Installed as Wolfi `chrony` in the mgmt image; supervised when enabled. The [upstream program header](https://github.com/mlichvar/chrony/blob/master/main.c) specifies GPL version 2. |
 | WireGuard (Linux kernel) | Remote access VPN dataplane | GPL-2.0-only | WireGuard runs via Linux kernel interfaces + generic netlink control; we do not bundle the `wg` CLI in the appliance image. |
 | OpenVPN | Compatibility VPN | GPL-2.0-only WITH OpenSSL-exception | Embedded in the mgmt image; supervised by `containd mgmt` when enabled with a foreground config (no `daemon`). |
 | xterm.js | In-app terminal emulator | MIT | Used by the in-app console UI (`ui/components/Console.tsx`). |
-| nftables (`nft`) | Kernel firewall programming | GPL-2.0-or-later | Userspace `nft` binary is copied into the engine image from Debian packages. |
+| nftables (`nft`) | Kernel firewall programming | GPL-2.0-or-later | Installed as Wolfi `nftables` in both mgmt and engine images. |
 | ClamAV | Antivirus scanning (ICAP pipeline) | GPL-2.0-only | Embedded `clamd`/`freshclam` binaries; executed as separate processes, not linked into `containd`. |
 | tini | PID 1 init | MIT | Lightweight init for the mgmt container entrypoint. |
 | React Flow | Topology UI | MIT | Used for topology/graph screens in the UI. |

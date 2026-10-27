@@ -63,4 +63,25 @@ test("Interfaces omits the note when no reservation is configured", async ({ pag
   await page.goto("/interfaces/");
   await expect(page.getByRole("heading", { name: "Interfaces", exact: true })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Reserved management path" })).toHaveCount(0);
+  await expect(page.getByRole("complementary", { name: "Boot fault" })).toHaveCount(0);
+});
+
+test("Interfaces shows a boot fault without a reservation", async ({ page }) => {
+  const bootFault = "firewall.rules[3]: rule plc-write: action RESET cannot take an ics protocol";
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const data = path.endsWith("/management-reservation") ? { active: false, bootFault, recovery: "recovery: new transit dropped" }
+      : path.endsWith("/interfaces") || path.endsWith("/state") || path.endsWith("/zones") ? []
+        : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
+    await route.fulfill({ json: data });
+  });
+  await page.goto("/interfaces/");
+  await expect(page.getByRole("complementary", { name: "Reserved management path" })).toHaveCount(0);
+  const fault = page.getByRole("complementary", { name: "Boot fault" }).getByRole("status");
+  await expect(fault).toContainText("Configuration apply paused");
+  await expect(fault).toContainText("recovery: new transit dropped");
+  await expect(fault).toContainText(bootFault);
+  await expect(fault).toContainText("keeps the stored management listener access");
+  await expect(fault).not.toContainText("Reserved management");
+  await expect(fault).toHaveClass(/text-amber/);
 });

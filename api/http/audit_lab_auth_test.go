@@ -34,20 +34,21 @@ func TestLabModeAuthRequiresAndAcceptsOptionalJWT(t *testing.T) {
 	req = jwtAuthedRequest(http.MethodGet, "/api/v1/auth/session", nil, tok+"broken")
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for invalid optional lab JWT, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 401 for invalid lab JWT, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = jwtAuthedRequest(http.MethodGet, "/api/v1/auth/session", nil, tok)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid optional lab JWT, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 200 for valid lab JWT, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	var resp map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("invalid /auth/session JSON: %v", err)
 	}
-	if resp["role"] != "admin" || resp["sessionId"] != "lab" {
+	sessionID, _ := resp["sessionId"].(string)
+	if resp["role"] != "admin" || sessionID != "lab" {
 		t.Fatalf("unexpected lab auth session response: %+v", resp)
 	}
 	userObj, ok := resp["user"].(map[string]any)

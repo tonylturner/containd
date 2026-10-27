@@ -1,24 +1,27 @@
 "use client";
 
-import React, { createContext, useContext } from "react";
+import React from "react";
 import { Edge, Handle, Node, NodeProps, Position } from "reactflow";
 
 import {
   api,
+  type ApiResult,
   type FirewallRule,
-  type FlowSummary,
+  type RuleAction,
+  type RuleCounters,
   type Interface,
   type OSRoutingSnapshot,
   type RoutingConfig,
   type SystemStats,
   type TelemetryEvent,
   type Zone,
-  fetchHealth,
+  type HealthResponse,
 } from "../../lib/api";
 import s from "./topology.module.css";
 import { normalizeFirewallRules } from "../../lib/api-normalize";
 import { interfaceAddresses, runtimeFor, type InterfaceAddresses } from "../../lib/interface-addresses";
 import { TopologyAddress } from "./topology-address";
+import { formatRateLimit } from "../firewall/firewall-rule-policy";
 
 export interface BuiltIface {
   name: string;
@@ -40,9 +43,36 @@ export interface BuiltRoute {
 }
 
 export interface BuiltRule {
-  action: "allow" | "deny";
+  id: string;
+  action: RuleAction;
+  /** ALLOW admits; DENY and RESET refuse; RATE_LIMIT and TAG are effects that decide nothing. */
+  kind: "allow" | "deny" | "effect";
   desc: string;
-  hits: number;
+  /** Packets since the last apply (connection openers for TAG); null when not counted. */
+  hits: number | null;
+}
+
+/** The firewall node's rule list, with the applied ruleset's counters. */
+export function buildTopologyRules(rules: FirewallRule[], counters: ApiResult<RuleCounters>): BuiltRule[] {
+  const counts = new Map(counters.ok ? counters.data.rules.map((c) => [c.ruleId, c.packets]) : []);
+  return rules.map((r) => {
+    const src = (r.sourceZones || []).join(",") || "*";
+    const dst = (r.destZones || []).join(",") || "*";
+    const ports = (r.protocols || [])
+      .map((p) => (p.port ? `${p.name}/${p.port}` : p.name))
+      .join(",");
+    const effect =
+      r.action === "RATE_LIMIT" && r.rateLimit ? ` \u00b7 ${formatRateLimit(r.rateLimit)}`
+        : r.action === "TAG" && r.tag ? ` \u00b7 tag ${r.tag}`
+          : "";
+    return {
+      id: r.id,
+      action: r.action,
+      kind: r.action === "ALLOW" ? "allow" : r.action === "DENY" || r.action === "RESET" ? "deny" : "effect",
+      desc: `${src} \u2192 ${dst}${ports ? " " + ports : ""}${effect}`,
+      hits: counts.get(r.id) ?? null,
+    };
+  });
 }
 
 export interface TopoNodeData {
@@ -72,7 +102,6 @@ export interface TopoNodeData {
   tx?: string;
   vlan?: number | null;
   desc?: string;
-  spark?: number[];
   selected?: boolean;
 }
 
@@ -94,13 +123,6 @@ export const STATUS_COLORS: Record<string, string> = {
   crit: "#ef4444",
   down: "#6b7280",
 };
-
-export const sparkStore: { data: Record<string, number[]>; tick: number } = {
-  data: {},
-  tick: 0,
-};
-
-export const SparkTickContext = createContext(0);
 
 const hStyle: React.CSSProperties = {
   opacity: 0,
@@ -127,7 +149,7 @@ function InternetNode({ data }: NodeProps<TopoNodeData>) {
   );
 }
 
-function GatewayNode({ id, data }: NodeProps<TopoNodeData>) {
+function GatewayNode({ data }: NodeProps<TopoNodeData>) {
   const sc = STATUS_COLORS[data.status || "ok"];
   return (
     <div
@@ -145,13 +167,12 @@ function GatewayNode({ id, data }: NodeProps<TopoNodeData>) {
       <div className={s.nodeBody}>
         <NRow k="ip" v={data.ip || "\u2014"} />
         <NRow k="latency" v={data.latency || "\u2014"} />
-        <Spark nodeId={id} color="#06b6d4" />
       </div>
     </div>
   );
 }
 
-function FirewallNode({ id, data }: NodeProps<TopoNodeData>) {
+function FirewallNode({ data }: NodeProps<TopoNodeData>) {
   return (
     <div
       className={`${s.nodeCard} ${s.accentAmber} ${data.selected ? s.nodeCardSelected : ""}`}
@@ -170,21 +191,18 @@ function FirewallNode({ id, data }: NodeProps<TopoNodeData>) {
         <NRow k="sessions" v={String(data.sessions ?? 0)} />
         <NRow k="cpu" v={`${data.cpu ?? 0}%`} />
         <NRow k="mem" v={`${data.mem ?? 0}%`} />
-        <Spark nodeId={id} color="#f59e0b" />
       </div>
     </div>
   );
 }
 
-function ZoneNode({ id, data }: NodeProps<TopoNodeData>) {
+function ZoneNode({ data }: NodeProps<TopoNodeData>) {
   const st = data.status || "ok";
   const sc = STATUS_COLORS[st];
   const accentCls =
     st === "crit" ? s.accentRed : st === "warn" ? s.accentAmber : s.accentGreen;
   const nameCls =
     st === "crit" ? s.nameRed : st === "warn" ? s.nameAmber : s.nameGreen;
-  const sparkColor =
-    st === "crit" ? "#ef4444" : st === "warn" ? "#f59e0b" : "#22c55e";
   return (
     <div
       className={`${s.nodeCard} ${accentCls} ${data.selected ? s.nodeCardSelected : ""}`}
@@ -202,7 +220,6 @@ function ZoneNode({ id, data }: NodeProps<TopoNodeData>) {
         <NRow k="subnet" v={<TopologyAddress address={data.address} fullAddrs={data.fullAddrs} />} />
         <NRow k="hosts" v={String(data.hosts ?? 0)} />
         <NRow k="flows" v={String(data.flows ?? 0)} />
-        <Spark nodeId={id} color={sparkColor} />
       </div>
     </div>
   );
@@ -213,28 +230,6 @@ function NRow({ k, v }: { k: string; v: React.ReactNode }) {
     <div className={s.nodeRow}>
       <span className={s.nodeRowKey}>{k}</span>
       <span className={s.nodeRowVal}>{v}</span>
-    </div>
-  );
-}
-
-function Spark({ nodeId, color }: { nodeId?: string; color: string }) {
-  useContext(SparkTickContext);
-  const data = nodeId ? sparkStore.data[nodeId] : undefined;
-  if (!data?.length) {
-    return null;
-  }
-  return (
-    <div className={s.sparkline}>
-      {data.map((v, i) => (
-        <div
-          key={i}
-          className={s.spark}
-          style={{
-            height: Math.max(2, Math.floor(v * 16)),
-            background: color,
-          }}
-        />
-      ))}
     </div>
   );
 }
@@ -387,17 +382,40 @@ export function nodeOperatorHint(data: TopoNodeData): string {
   }
 }
 
+function uptimeSince(time: string | undefined): string | undefined {
+  const ms = time ? Date.now() - new Date(time).getTime() : NaN;
+  if (!(ms > 0)) return undefined;
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor((ms % 86400000) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return `${d}d ${h}h ${m}m`;
+}
+
+/**
+ * The firewall node's identity from the shared health poll: hostname and
+ * version, and uptime when system stats did not report one.
+ */
+export function withHealth(data: TopoNodeData, health: HealthResponse | undefined): TopoNodeData {
+  if (data.nodeType !== "firewall") return data;
+  return {
+    ...data,
+    hostname: health?.component || "containd",
+    version: health?.build || "dev-build",
+    uptime: data.uptime ?? uptimeSince(health?.time) ?? "\u2014",
+  };
+}
+
 export async function buildTopology(): Promise<TopoResult | null> {
-  const [health, running, ifaceState, osRouting, flows, events, sysStats] = await Promise.all([
-    fetchHealth(),
+  const [running, ifaceState, osRouting, flows, events, sysStats, counters] = await Promise.all([
     api.getRunningConfig(),
     api.listInterfaceState(),
     api.getOSRouting(),
     api.listFlows(),
     api.listEvents(),
     api.getSystemStats().catch(() => null),
+    api.getRuleCounters(),
   ]);
-  if (!running) return null;
+  if (!running || ifaceState === null || flows === null) return null;
   const zones = running.zones;
   const ifaces = running.interfaces;
   const routing = running.routing;
@@ -406,13 +424,13 @@ export async function buildTopology(): Promise<TopoResult | null> {
   const zoneSubnet: Record<string, string> = {};
   const zoneAddresses: Record<string, { address: InterfaceAddresses; fullAddrs: string[] }> = {};
   for (const ifc of ifaces || []) {
-    const address = interfaceAddresses(ifc, ifaceState || []);
+    const address = interfaceAddresses(ifc, ifaceState);
     if (ifc.zone && address.addrs.length &&
         (!zoneSubnet[ifc.zone] || (address.source === "config" && zoneAddresses[ifc.zone]?.address.source !== "config"))) {
       zoneSubnet[ifc.zone] = address.addrs[0];
       zoneAddresses[ifc.zone] = {
         address,
-        fullAddrs: (address.source === "config" ? ifc.addresses : runtimeFor(ifc, ifaceState || [])?.addrs) || [],
+        fullAddrs: (address.source === "config" ? ifc.addresses : runtimeFor(ifc, ifaceState)?.addrs) || [],
       };
     }
   }
@@ -435,7 +453,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
       }
     }
   }
-  for (const fl of (flows as FlowSummary[]) || []) {
+  for (const fl of flows) {
     for (const ip of [fl.srcIp, fl.dstIp]) {
       if (!ip) {
         continue;
@@ -452,7 +470,7 @@ export async function buildTopology(): Promise<TopoResult | null> {
   }
 
   const zoneFlowCount: Record<string, { rx: number; tx: number }> = {};
-  for (const fl of (flows as FlowSummary[]) || []) {
+  for (const fl of flows) {
     for (const [zn, sub] of Object.entries(zoneSubnet)) {
       if (fl.srcIp && ipInCidr(fl.srcIp, sub)) {
         (zoneFlowCount[zn] ??= { rx: 0, tx: 0 }).tx += fl.eventCount || 1;
@@ -464,8 +482,8 @@ export async function buildTopology(): Promise<TopoResult | null> {
   }
 
   const builtIfaces: BuiltIface[] = ((ifaces as Interface[]) || []).map((ifc) => {
-    const st = runtimeFor(ifc, ifaceState || []);
-    const address = interfaceAddresses(ifc, ifaceState || []);
+    const st = runtimeFor(ifc, ifaceState);
+    const address = interfaceAddresses(ifc, ifaceState);
     const zfc = ifc.zone ? zoneFlowCount[ifc.zone] : undefined;
     const rxStr = zfc ? `${zfc.rx} pkts` : "0 pkts";
     const txStr = zfc ? `${zfc.tx} pkts` : "0 pkts";
@@ -522,34 +540,11 @@ export async function buildTopology(): Promise<TopoResult | null> {
     });
   }
 
-  const builtRules: BuiltRule[] = ((fwRules as FirewallRule[]) || []).map((r) => {
-    const src = (r.sourceZones || []).join(",") || "*";
-    const dst = (r.destZones || []).join(",") || "*";
-    const ports = (r.protocols || [])
-      .map((p) => (p.port ? `${p.name}/${p.port}` : p.name))
-      .join(",");
-    return {
-      action: (r.action || "DENY").toLowerCase() as "allow" | "deny",
-      desc: `${src} \u2192 ${dst}${ports ? " " + ports : ""}`,
-      hits: 0,
-    };
-  });
+  const builtRules = buildTopologyRules(fwRules, counters);
 
   const gwCfg = (routing as RoutingConfig)?.gateways?.[0];
 
   const stats = sysStats as SystemStats | null;
-  let uptimeStr = "\u2014";
-  if (stats?.runtime?.uptime) {
-    uptimeStr = stats.runtime.uptime;
-  } else if (health?.time) {
-    const ms = Date.now() - new Date(health.time).getTime();
-    if (ms > 0) {
-      const d = Math.floor(ms / 86400000);
-      const h = Math.floor((ms % 86400000) / 3600000);
-      const m = Math.floor((ms % 3600000) / 60000);
-      uptimeStr = `${d}d ${h}h ${m}m`;
-    }
-  }
 
   const zoneAlerts: Record<string, number> = {};
   for (const ev of (events as TelemetryEvent[]) || []) {
@@ -597,14 +592,13 @@ export async function buildTopology(): Promise<TopoResult | null> {
   const fwData: TopoNodeData = {
     label: "CONTAIND",
     nodeType: "firewall",
-    hostname: health?.component || "containd",
-    version: health?.build || "dev-build",
-    uptime: uptimeStr,
+    // Hostname, version and an uptime fallback come from health: withHealth.
+    uptime: stats?.runtime?.uptime || undefined,
     cpu: stats?.cpu?.usagePercent != null ? Math.round(stats.cpu.usagePercent) : 0,
     mem: stats?.memory?.usagePercent != null
       ? Math.round(stats.memory.usagePercent)
       : 0,
-    sessions: ((flows as FlowSummary[]) || []).length,
+    sessions: flows.length,
     interfaces: builtIfaces,
     routes: builtRoutes,
     rules: builtRules,

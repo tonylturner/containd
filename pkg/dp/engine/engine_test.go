@@ -6,11 +6,13 @@ package engine
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
@@ -69,6 +71,10 @@ func (r *recordingApplier) Apply(ctx context.Context, ruleset string) error {
 	return r.err
 }
 
+func (r *recordingApplier) ReadTable(context.Context, string) (enforce.TableLayout, error) {
+	return enforce.TableLayout{}, nil
+}
+
 func TestApplyRulesEnforcesBeforeSwap(t *testing.T) {
 	applier := &recordingApplier{}
 	e, err := New(Config{
@@ -95,8 +101,8 @@ func TestApplyRulesEnforcesBeforeSwap(t *testing.T) {
 	if err := e.ApplyRules(context.Background(), snap); err != nil {
 		t.Fatalf("apply rules: %v", err)
 	}
-	if applier.ruleset == "" || applier.ruleset == "flush ruleset\n" {
-		t.Fatalf("expected compiled ruleset to be applied")
+	if !strings.Contains(applier.ruleset, "table inet containd_policy {\n") {
+		t.Fatalf("expected compiled ruleset to be applied, got %q", applier.ruleset)
 	}
 	if got := e.CurrentRules(); got == nil || got.Version != "2" {
 		t.Fatalf("expected snapshot version 2 after apply, got %+v", got)

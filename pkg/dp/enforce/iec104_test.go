@@ -40,14 +40,20 @@ func iecSnapshot() *rules.Snapshot {
 	}
 }
 
-const (
-	envelopeVerdict = "meta mark set meta mark and 0xf0ffffff or 0x01000000 queue num 100"
-	envelopeJump    = "jump iec104_envelope"
-)
+const envelopeJump = "jump iec104_envelope"
+
+// envelopeRules are the golden rules of the open IEC104 envelope chain: a
+// packet of a connection whose handshake conntrack has not seen complete
+// also gets HandshakeMark.
+var envelopeRules = []string{
+	"ct status assured meta mark set meta mark and 0xf0ffffff or 0x01000000 queue num 100",
+	"ct state != { invalid, untracked } meta mark set meta mark and 0xf0ffffff or 0x03000000 queue num 100",
+	"meta mark set meta mark and 0xf0ffffff or 0x01000000 queue num 100",
+}
 
 // envelopeChain is the golden IEC104 envelope chain in each state.
 var envelopeChain = map[bool]string{
-	true:  "  chain iec104_envelope {\n    " + envelopeVerdict + ";\n  }\n",
+	true:  "  chain iec104_envelope {\n    " + strings.Join(envelopeRules, ";\n    ") + ";\n  }\n",
 	false: "  chain iec104_envelope {\n    drop;\n  }\n",
 }
 
@@ -57,7 +63,7 @@ func TestCompileFirewallSteersIEC104EnvelopeBothDirections(t *testing.T) {
 		c.QueueID = 100
 		c.NFLogGroup = 7
 		c.IEC104EnvelopeOpen = open
-		full, err := c.CompileFirewall(iecSnapshot())
+		full, err := compileWithoutCounters(c, iecSnapshot())
 		if err != nil {
 			t.Fatalf("compile: %v", err)
 		}
@@ -72,7 +78,7 @@ func TestCompileFirewallSteersIEC104EnvelopeBothDirections(t *testing.T) {
 			`    iifname { "eth2" } oifname { "eth1" } tcp sport 2404 ip saddr { 10.70.0.5 } ip daddr { 10.60.60.0/24 } ` + envelopeJump + ";\n",
 			`    tcp dport 2404 ip saddr { 10.60.61.7 } ` + envelopeJump + ";\n",
 			`    tcp sport 2404 ip daddr { 10.60.61.7 } ` + envelopeJump + ";\n",
-			"    tcp dport 502 queue num 100;\n",
+			"    tcp dport 502 jump ics_queue;\n",
 			"    ct state { established, related } accept;\n",
 			"    tcp dport 2404 accept;\n",
 		}
@@ -87,7 +93,7 @@ func TestCompileFirewallSteersIEC104EnvelopeBothDirections(t *testing.T) {
 			}
 			last = i
 		}
-		if n := strings.Count(ruleset, "queue num 100"); n != 1 {
+		if n := strings.Count(ruleset, "jump "+ICSQueueChain); n != 1 {
 			t.Fatalf("open=%v: forward queue lines = %d, want only the modbus one:\n%s", open, n, ruleset)
 		}
 		if strings.Contains(ruleset, `log prefix "containd:a-iec-allow`) {
@@ -131,12 +137,15 @@ func TestIEC104EnvelopeSwitchGolden(t *testing.T) {
 	c := NewCompiler()
 	c.QueueID = 100
 	c.TableName = "containd"
-	if got, want := c.IEC104EnvelopeSwitch(true),
-		"flush chain inet containd iec104_envelope\nadd rule inet containd iec104_envelope "+envelopeVerdict+"\n"; got != want {
+	open := "flush chain inet containd_policy iec104_envelope\n"
+	for _, rule := range envelopeRules {
+		open += "add rule inet containd_policy iec104_envelope " + rule + "\n"
+	}
+	if got, want := c.IEC104EnvelopeSwitch(true), open; got != want {
 		t.Fatalf("open switch = %q, want %q", got, want)
 	}
 	if got, want := c.IEC104EnvelopeSwitch(false),
-		"flush chain inet containd iec104_envelope\nadd rule inet containd iec104_envelope drop\n"; got != want {
+		"flush chain inet containd_policy iec104_envelope\nadd rule inet containd_policy iec104_envelope drop\n"; got != want {
 		t.Fatalf("close switch = %q, want %q", got, want)
 	}
 }
@@ -144,7 +153,7 @@ func TestIEC104EnvelopeSwitchGolden(t *testing.T) {
 // Without a queue the envelope cannot be inspected; the IEC rule compiles
 // like any other rule, as before.
 func TestCompileFirewallIEC104WithoutQueueIsUnchanged(t *testing.T) {
-	ruleset, err := NewCompiler().CompileFirewall(iecSnapshot())
+	ruleset, err := compileWithoutCounters(NewCompiler(), iecSnapshot())
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -202,9 +211,9 @@ func TestEnvelopeMarked(t *testing.T) {
 		0x01000000: true,
 		0x01000001: true, // other mark bits are kept
 		0xf1ffffff: true,
+		0x03000000: true, // an envelope handshake segment
 		0x00000000: false,
 		0x02000000: false,
-		0x03000000: false,
 		0x00ffffff: false,
 	} {
 		if got := EnvelopeMarked(mark); got != want {

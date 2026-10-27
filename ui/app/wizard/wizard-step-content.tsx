@@ -3,13 +3,16 @@
 import type React from "react";
 
 import type { Zone } from "../../lib/api";
+import { formatEndpoint } from "../../lib/endpoint";
+import { zoneLabel } from "../../lib/zones";
 
 import {
   CARDS,
   COMMON_PROTOCOLS,
   ICS_PROTOCOLS,
+  serverIpError,
+  serverPortError,
   type WizardId,
-  zoneLabel,
 } from "./wizard-shared";
 
 type WizardStepContentProps = {
@@ -92,7 +95,7 @@ export function WizardStepContent({
     const filtered = exclude ? zones.filter((z) => z.name !== exclude) : zones;
     return (
       <div>
-        <label className="mb-2 block text-sm font-medium text-[var(--text)]">
+        <label className="mb-2 block text-sm font-medium text-(--text)">
           {label}
         </label>
         <select
@@ -124,9 +127,9 @@ export function WizardStepContent({
       );
     }
     return (
-      <div className="space-y-3 text-sm text-[var(--text)]">
-        <h3 className="text-base font-semibold text-[var(--text)]">Summary</h3>
-        <div className="space-y-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
+      <div className="space-y-3 text-sm text-(--text)">
+        <h3 className="text-base font-semibold text-(--text)">Summary</h3>
+        <div className="space-y-2 rounded-xs border bg-(--surface) p-4">
           <p>
             Firewall rule: <span className="text-emerald-400">ALLOW</span> from{" "}
             <strong>{lanZone}</strong> to <strong>{wanZone}</strong>
@@ -142,21 +145,31 @@ export function WizardStepContent({
 
   if (active === "publish-service") {
     if (step === 0) {
+      // A blank field only disables Next; the messages are for what was typed.
+      const ipError = serverIp.trim() ? serverIpError(serverIp) : null;
+      const portError = serverPort.trim() ? serverPortError(serverPort) : null;
       return (
         <div className="space-y-3">
           <div>
-            <label className="mb-2 block text-sm font-medium text-[var(--text)]">
+            <label className="mb-2 block text-sm font-medium text-(--text)">
               Internal server IP
             </label>
             <input
               value={serverIp}
               onChange={(e) => setServerIp(e.target.value)}
               placeholder="e.g. 192.168.1.10"
+              aria-invalid={ipError ? true : undefined}
+              aria-describedby={ipError ? "wizard-ip-error" : undefined}
               className="input-industrial w-full"
             />
+            {ipError && (
+              <p id="wizard-ip-error" role="alert" className="mt-1 text-xs text-red-400">
+                {ipError}
+              </p>
+            )}
           </div>
           <div>
-            <label className="mb-2 block text-sm font-medium text-[var(--text)]">
+            <label className="mb-2 block text-sm font-medium text-(--text)">
               Port
             </label>
             <input
@@ -166,8 +179,15 @@ export function WizardStepContent({
               type="number"
               min={1}
               max={65535}
+              aria-invalid={portError ? true : undefined}
+              aria-describedby={portError ? "wizard-port-error" : undefined}
               className="input-industrial w-full"
             />
+            {portError && (
+              <p id="wizard-port-error" role="alert" className="mt-1 text-xs text-red-400">
+                {portError}
+              </p>
+            )}
           </div>
         </div>
       );
@@ -175,7 +195,7 @@ export function WizardStepContent({
     if (step === 1) {
       return (
         <div>
-          <label className="mb-2 block text-sm font-medium text-[var(--text)]">
+          <label className="mb-2 block text-sm font-medium text-(--text)">
             Protocol
           </label>
           <div className="flex gap-3">
@@ -184,10 +204,10 @@ export function WizardStepContent({
                 key={p}
                 type="button"
                 onClick={() => setPubProto(p)}
-                className={`rounded-sm border px-4 py-2 text-sm transition-ui ${
+                className={`rounded-xs border px-4 py-2 text-sm transition-ui ${
                   pubProto === p
-                    ? "border-amber-500/40 bg-amber-500/[0.2] text-[var(--amber)]"
-                    : "border-amber-500/[0.15] bg-[var(--surface)] text-[var(--text)] hover:bg-amber-500/[0.1]"
+                    ? "text-(--amber)"
+                    : "bg-(--surface) text-(--text) "
                 }`}
               >
                 {p.toUpperCase()}
@@ -205,20 +225,18 @@ export function WizardStepContent({
       );
     }
     return (
-      <div className="space-y-3 text-sm text-[var(--text)]">
-        <h3 className="text-base font-semibold text-[var(--text)]">Summary</h3>
-        <div className="space-y-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
+      <div className="space-y-3 text-sm text-(--text)">
+        <h3 className="text-base font-semibold text-(--text)">Summary</h3>
+        <div className="space-y-2 rounded-xs border bg-(--surface) p-4">
           <p>
             Port forward (DNAT): <strong>{ingressZone}</strong>{" "}
             {pubProto.toUpperCase()}/{serverPort} &#8594;{" "}
-            <strong>
-              {serverIp}:{serverPort}
-            </strong>
+            <strong>{formatEndpoint(serverIp.trim(), serverPort)}</strong>
           </p>
           <p>
             Firewall rule: <span className="text-emerald-400">ALLOW</span>{" "}
             inbound from <strong>{ingressZone}</strong> to{" "}
-            <strong>{serverIp}</strong> on {pubProto.toUpperCase()}/{serverPort}
+            <strong>{serverIp.trim()}</strong> on {pubProto.toUpperCase()}/{serverPort}
           </p>
         </div>
       </div>
@@ -229,7 +247,7 @@ export function WizardStepContent({
     if (step === 0) {
       return (
         <div>
-          <label className="mb-2 block text-sm font-medium text-[var(--text)]">
+          <label className="mb-2 block text-sm font-medium text-(--text)">
             ICS Protocol
           </label>
           <select
@@ -262,7 +280,7 @@ export function WizardStepContent({
     if (step === 2) {
       return (
         <div>
-          <label className="mb-2 block text-sm font-medium text-[var(--text)]">
+          <label className="mb-2 block text-sm font-medium text-(--text)">
             Access level
           </label>
           <div className="flex flex-col gap-2">
@@ -287,18 +305,18 @@ export function WizardStepContent({
                 key={opt.key}
                 type="button"
                 onClick={() => setIcsAccess(opt.key)}
-                className={`rounded-sm border p-3 text-left transition-ui ${
+                className={`rounded-xs border p-3 text-left transition-ui ${
                   icsAccess === opt.key
-                    ? "border-amber-500/40 bg-amber-500/[0.1]"
-                    : "cursor-pointer border-amber-500/[0.15] bg-[var(--surface)] hover:border-amber-500/30 hover:bg-amber-500/[0.08]"
+                    ? ""
+                    : "cursor-pointer bg-(--surface) "
                 }`}
               >
                 <div
-                  className={`text-sm font-medium ${icsAccess === opt.key ? "text-[var(--amber)]" : "text-[var(--text)]"}`}
+                  className={`text-sm font-medium ${icsAccess === opt.key ? "text-(--amber)" : "text-(--text)"}`}
                 >
                   {opt.label}
                 </div>
-                <div className="text-xs text-[var(--text-muted)]">
+                <div className="text-xs text-(--text-muted)">
                   {opt.desc}
                 </div>
               </button>
@@ -309,9 +327,9 @@ export function WizardStepContent({
     }
     const protoMeta = ICS_PROTOCOLS[icsProto];
     return (
-      <div className="space-y-3 text-sm text-[var(--text)]">
-        <h3 className="text-base font-semibold text-[var(--text)]">Summary</h3>
-        <div className="space-y-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
+      <div className="space-y-3 text-sm text-(--text)">
+        <h3 className="text-base font-semibold text-(--text)">Summary</h3>
+        <div className="space-y-2 rounded-xs border bg-(--surface) p-4">
           <p>
             Protocol: <strong>{protoMeta?.label ?? icsProto}</strong> (port{" "}
             {protoMeta?.port})
@@ -354,12 +372,12 @@ export function WizardStepContent({
     if (step === 2) {
       return (
         <div className="space-y-3">
-          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+          <label className="flex items-center gap-2 text-sm text-(--text)">
             <input
               type="checkbox"
               checked={izAny}
               onChange={(e) => setIzAny(e.target.checked)}
-              className="rounded"
+              className="rounded-sm"
             />
             Allow any protocol / port
           </label>
@@ -383,10 +401,10 @@ export function WizardStepContent({
                         return next;
                       });
                     }}
-                    className={`rounded-sm border px-3 py-2 text-left text-sm transition-ui ${
+                    className={`rounded-xs border px-3 py-2 text-left text-sm transition-ui ${
                       selected
-                        ? "border-amber-500/40 bg-amber-500/[0.2] text-[var(--amber)]"
-                        : "border-amber-500/[0.15] bg-[var(--surface)] text-[var(--text)] hover:bg-amber-500/[0.1]"
+                        ? "text-(--amber)"
+                        : "bg-(--surface) text-(--text) "
                     }`}
                   >
                     {p.label}
@@ -399,9 +417,9 @@ export function WizardStepContent({
       );
     }
     return (
-      <div className="space-y-3 text-sm text-[var(--text)]">
-        <h3 className="text-base font-semibold text-[var(--text)]">Summary</h3>
-        <div className="space-y-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4">
+      <div className="space-y-3 text-sm text-(--text)">
+        <h3 className="text-base font-semibold text-(--text)">Summary</h3>
+        <div className="space-y-2 rounded-xs border bg-(--surface) p-4">
           <p>
             Direction: <strong>{izSrcZone}</strong> &#8594;{" "}
             <strong>{izDstZone}</strong>
@@ -455,21 +473,21 @@ export function WizardScenarioCards({
             type="button"
             onClick={() => (isActive ? onReset() : onOpenWizard(c.id))}
             disabled={zones.length === 0}
-            className={`rounded-sm border p-5 text-left transition-ui ${
+            className={`rounded-xs border p-5 text-left transition-ui ${
               isActive
-                ? "border-amber-500/40 bg-amber-500/[0.1]"
+                ? ""
                 : zones.length === 0
-                  ? "cursor-not-allowed border-amber-500/[0.08] bg-[var(--surface)] opacity-50"
-                  : "cursor-pointer border-amber-500/[0.15] bg-[var(--surface)] hover:border-amber-500/30 hover:bg-amber-500/[0.08]"
+                  ? "cursor-not-allowed bg-(--surface) opacity-50"
+                  : "cursor-pointer bg-(--surface) "
             }`}
           >
             <div className="mb-3 flex items-center gap-3">
-              <div className={`h-4 w-4 shrink-0 rounded ${c.color}`} />
-              <h3 className="text-sm font-semibold text-[var(--text)]">
+              <div className={`h-4 w-4 shrink-0 rounded-sm ${c.color}`} />
+              <h3 className="text-sm font-semibold text-(--text)">
                 {c.title}
               </h3>
             </div>
-            <p className="text-xs text-[var(--text-muted)]">{c.description}</p>
+            <p className="text-xs text-(--text-muted)">{c.description}</p>
           </button>
         );
       })}

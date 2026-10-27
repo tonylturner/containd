@@ -72,11 +72,11 @@ export function ConfigStatusBar() {
   }
 
   if (status === "clean" && !confirmedPending && !warning && !error) return null;
-  const buttonClass = "rounded-lg bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300 transition-ui hover:bg-amber-500/25 disabled:opacity-60";
+  const buttonClass = "rounded-lg px-3 py-1 text-xs font-semibold transition-ui disabled:opacity-60";
   return (
     <>
-      <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/8 px-4 py-2.5 text-sm">
-        <div className="text-amber-400">
+      <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-2.5 text-sm">
+        <div>
           <span>{status === "unknown" ? "Configuration status unknown — unable to check pending changes." : status === "dirty" ? "Uncommitted changes — not active until you commit." : "No uncommitted changes."}</span>
           {confirmedPending && <span className="ml-2">Commit-confirmed requested (60s). Confirm in Config before the deadline to prevent rollback.</span>}
           {warning && <span className="ml-2">Warning: {warning}</span>}

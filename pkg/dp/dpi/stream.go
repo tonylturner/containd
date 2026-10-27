@@ -71,6 +71,25 @@ const (
 	StreamOverflow StreamErrKind = iota + 1
 	StreamOverlapConflict
 	StreamOutOfOrderLimit
+	// StreamUnverifiedRetransmission is a retransmission of consumed bytes
+	// older than the history a verifying stream keeps.
+	StreamUnverifiedRetransmission
+	// StreamResync is the payload of a SYN that does not anchor the stream
+	// it belongs to, which fails closed: the payload's place in the stream
+	// is unknown.
+	StreamResync
+	// StreamDecoderPanic is a stream whose framing decoder panicked
+	// (Manager.FailStream).
+	StreamDecoderPanic
+	// StreamMidStream is a stream that fails closed but was picked up
+	// mid-connection: it began without an observed SYN (the flow was first
+	// seen after its handshake, or ended and was seen again), or the idle
+	// sweep dropped its partial frame. Its bytes need not start a frame.
+	StreamMidStream
+	// StreamDenied is a stream that fails closed whose connection the
+	// policy denied (Manager.FailStream). The denied bytes were consumed,
+	// so a retransmission of them would otherwise pass as a duplicate.
+	StreamDenied
 )
 
 func (k StreamErrKind) String() string {
@@ -81,6 +100,16 @@ func (k StreamErrKind) String() string {
 		return "overlap_conflict"
 	case StreamOutOfOrderLimit:
 		return "out_of_order_limit"
+	case StreamUnverifiedRetransmission:
+		return "unverified_retransmission"
+	case StreamResync:
+		return "resync"
+	case StreamDecoderPanic:
+		return "decoder_panic"
+	case StreamMidStream:
+		return "midstream"
+	case StreamDenied:
+		return "denied"
 	default:
 		return "unknown(" + strconv.Itoa(int(k)) + ")"
 	}
@@ -108,4 +137,7 @@ type InspectResult struct {
 	// Err is the framed decoder's *FrameError or a *StreamError. A legacy
 	// decoder's OnPacket error passes through unchanged, as OnPacket did.
 	Err error
+	// Failed reports a stream that had failed before this packet: Err is
+	// the error it failed with, and nothing was inspected.
+	Failed bool
 }

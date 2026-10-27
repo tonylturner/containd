@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -18,7 +19,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -73,7 +76,52 @@ func (m *mockStore) Load(ctx context.Context) (*config.Config, error) {
 	return m.cfg, nil
 }
 
+func (m *mockStore) ReadHealthSnapshot(ctx context.Context) (config.HealthSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return config.HealthSnapshot{}, err
+	}
+	cfg, err := m.Load(ctx)
+	if err != nil && err != config.ErrNotFound {
+		return config.HealthSnapshot{}, err
+	}
+	return config.HealthSnapshot{Config: cfg}, nil
+}
+
+func (m *mockStore) LoadCandidateDocument(ctx context.Context) (*config.Config, error) {
+	cfg, err := m.LoadCandidate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cp := *cfg
+	cp.IDS.Rules = nil
+	return &cp, nil
+}
+
+func (m *mockStore) LoadPair(ctx context.Context) (*config.Config, *config.Config, error) {
+	running, err := m.Load(ctx)
+	if err != nil && err != config.ErrNotFound {
+		return nil, nil, err
+	}
+	candidate, err := m.LoadCandidate(ctx)
+	return running, candidate, err
+}
+
 func (m *mockStore) MutateCandidate(ctx context.Context, edit func(*config.Config) error) error {
+	return m.MutateCandidateIDS(ctx, func(cfg *config.Config) error {
+		bank := cfg.IDS.Rules
+		cfg.IDS.Rules = nil
+		if err := edit(cfg); err != nil {
+			return err
+		}
+		if cfg.IDS.Rules != nil {
+			return fmt.Errorf("bank-free candidate edit supplied IDS rules")
+		}
+		cfg.IDS.Rules = bank
+		return nil
+	})
+}
+
+func (m *mockStore) MutateCandidateIDS(ctx context.Context, edit func(*config.Config) error) error {
 	cfg, err := m.LoadCandidate(ctx)
 	if err != nil && err != config.ErrNotFound {
 		return err
@@ -134,6 +182,16 @@ type mockEngine struct {
 	lastSvc config.ServicesConfig
 	state   []config.InterfaceState
 	ruleset dpengine.RulesetStatus
+
+	avErr        error
+	avUpdates    int
+	avUploadName string
+	avUpload     []byte
+	avDeleted    string
+	trustErr     error
+	trustPushes  []trust.Bundle
+	clearErr     error
+	blockClears  int
 }
 
 func (m *mockEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
@@ -233,6 +291,59 @@ func (m *mockEngine) BlockHostTemp(ctx context.Context, ip net.IP, ttl time.Dura
 
 func (m *mockEngine) BlockFlowTemp(ctx context.Context, srcIP, dstIP net.IP, proto string, dport string, ttl time.Duration) error {
 	return nil
+}
+
+func (m *mockEngine) ClearBlocks(ctx context.Context) error {
+	m.blockClears++
+	return m.clearErr
+}
+
+func (m *mockEngine) AVStatus(ctx context.Context) (map[string]any, error) {
+	if m.avErr != nil {
+		return nil, m.avErr
+	}
+	return map[string]any{"enabled": true, "ready": true}, nil
+}
+
+func (m *mockEngine) TriggerAVUpdate(ctx context.Context) error {
+	if m.avErr == nil {
+		m.avUpdates++
+	}
+	return m.avErr
+}
+
+func (m *mockEngine) ListAVDefs(ctx context.Context) (cpservices.AVDefinitionList, error) {
+	if m.avErr != nil {
+		return cpservices.AVDefinitionList{}, m.avErr
+	}
+	return cpservices.AVDefinitionList{Path: "/engine/defs", Files: []string{"engine.ndb"}}, nil
+}
+
+func (m *mockEngine) UploadAVDef(ctx context.Context, name string, r io.Reader) (cpservices.AVDefinition, error) {
+	if m.avErr != nil {
+		return cpservices.AVDefinition{}, m.avErr
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return cpservices.AVDefinition{}, err
+	}
+	m.avUploadName, m.avUpload = name, data
+	return cpservices.AVDefinition{Name: name, Size: int64(len(data)), Active: true}, nil
+}
+
+func (m *mockEngine) ConfigureTrust(ctx context.Context, b trust.Bundle) error {
+	if m.trustErr != nil {
+		return m.trustErr
+	}
+	m.trustPushes = append(m.trustPushes, b)
+	return nil
+}
+
+func (m *mockEngine) DeleteAVDef(ctx context.Context, name string) error {
+	if m.avErr == nil {
+		m.avDeleted = name
+	}
+	return m.avErr
 }
 
 func TestGetConfigNotFound(t *testing.T) {
@@ -411,4 +522,37 @@ func TestUpdateInterfaceNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
 	}
+}
+
+func (m *mockStore) ApplyChange(ctx context.Context, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) error {
+	return mockApplyChange(ctx, m, change, ttl, apply)
+}
+func (m *mockStore) RuntimeApplyFault(context.Context) (string, error)  { return "", nil }
+func (m *mockStore) SetRuntimeApplyFault(context.Context, string) error { return nil }
+
+func mockApplyChange(ctx context.Context, store config.Store, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) error {
+	previous, err := loadOrInitConfig(ctx, store)
+	if err != nil {
+		return err
+	}
+	switch change {
+	case config.ChangeCommit:
+		err = store.Commit(ctx)
+	case config.ChangeCommitConfirmed:
+		err = store.CommitConfirmed(ctx, ttl)
+	case config.ChangeRollback:
+		err = store.Rollback(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	next, err := loadOrInitConfig(ctx, store)
+	if err != nil {
+		return err
+	}
+	if err := apply(ctx, previous, next); err != nil {
+		restoreErr := store.Save(context.WithoutCancel(ctx), previous)
+		return &config.ApplyError{Err: err, RestoreError: restoreErr, ReapplyError: apply(context.WithoutCancel(ctx), next, previous)}
+	}
+	return nil
 }

@@ -57,7 +57,7 @@ run_gocyclo() {
         gocyclo -over "$threshold" .
         return
     fi
-    GOFLAGS= go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -over "$threshold" .
+    GOFLAGS='' go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -over "$threshold" .
 }
 
 tmp_out="$(mktemp "${TMPDIR:-/tmp}/containd-gocyclo.XXXXXX")"

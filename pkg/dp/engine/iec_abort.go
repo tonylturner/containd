@@ -4,14 +4,13 @@
 package engine
 
 import (
-	"context"
 	"errors"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/capture"
-	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/session"
@@ -25,15 +24,21 @@ var (
 // iecActions is the work an IEC104 state change produces. It is collected
 // under the session lock and carried out after the lock is released.
 type iecActions struct {
-	drops  []capture.Resolution // held tokens to drop
-	events []events.Event
-	jobs   []func()
+	drops             []capture.Resolution // held tokens to drop
+	events            []events.Event
+	jobs              []func()
+	inventoryObserve  []*iecInventoryCommand
+	inventoryOutcome  []*iecInventoryCommand
+	inventoryOverflow uint64
 }
 
 func (a *iecActions) merge(b iecActions) {
 	a.drops = append(a.drops, b.drops...)
 	a.events = append(a.events, b.events...)
 	a.jobs = append(a.jobs, b.jobs...)
+	a.inventoryObserve = append(a.inventoryObserve, b.inventoryObserve...)
+	a.inventoryOutcome = append(a.inventoryOutcome, b.inventoryOutcome...)
+	a.inventoryOverflow += b.inventoryOverflow
 }
 
 // abortTxn waits for the verdict completions of an aborted session's
@@ -46,19 +51,6 @@ type abortTxn struct {
 	trigger string
 }
 
-// iecReset is the reset state of an aborted session, per target endpoint
-// (index iecDirClient or iecDirSrv).
-type iecReset struct {
-	targets [2]resetTarget
-}
-
-type resetTarget struct {
-	valid   bool
-	r       session.Reset
-	sent    time.Time
-	retries int
-}
-
 var targetNames = [2]string{"client", "server"}
 
 // abortLocked begins the abort transaction: it marks the incarnation
@@ -66,11 +58,13 @@ var targetNames = [2]string{"client", "server"}
 // held packet (returned in drops) and the current packet cur, and keeps the
 // session as a tombstone. The resets start once every drop has its
 // verdict completion. A learn envelope never aborts; callers ensure that.
-func (t *iecTable) abortLocked(s *iecSession, reason, trigger string, cur *heldPacket, now time.Time) iecActions {
+func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger string, cur *heldPacket, now time.Time) iecActions {
 	var acts iecActions
 	if s.state == iecAborted {
 		return acts
 	}
+	acts.merge(t.endInventoryLocked(s))
+	countIECAbort(reason)
 	dropped := append([]*heldPacket(nil), s.held...)
 	if cur != nil {
 		dropped = append(dropped, cur)
@@ -93,6 +87,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason, trigger string, cur *heldP
 		}
 	}
 	s.state, s.endedAt = iecAborted, now
+	s.apci = nil
 	t.tombstones++
 	t.evictTombstoneLocked()
 	s.reset = resetTargets(s)
@@ -101,7 +96,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason, trigger string, cur *heldP
 		t.markAbort(s.id)
 	}
 	t.reconnect[pairKey(s.client, s.server)] = now
-	acts.events = append(acts.events, s.sessionEvent(outcomeAborted, map[string]any{eventfields.KeyReason: reason}, now))
+	acts.events = append(acts.events, s.sessionEvent(outcomeAborted, map[string]any{eventfields.KeyReason: reason.name}, now))
 	if txn.pending == 0 {
 		acts.merge(t.finishLocked(txn, now))
 	}
@@ -149,12 +144,12 @@ func dirLetter(dir int) byte {
 // resetTargets computes one RST per endpoint: for target X, seq is the end
 // of the last byte forwarded to X. Without both ISNs the
 // connection was never established and nothing is reset.
-func resetTargets(s *iecSession) *iecReset {
+func resetTargets(s *iecSession) *connReset {
 	c2s, s2c := s.dirs[iecDirClient], s.dirs[iecDirSrv]
 	if c2s == nil || s2c == nil {
-		return &iecReset{}
+		return &connReset{}
 	}
-	return &iecReset{targets: [2]resetTarget{
+	return &connReset{targets: [2]resetTarget{
 		iecDirClient: {valid: true, r: session.Reset{Src: s.server, Dst: s.client, Seq: forwardedSeq(s2c)}},
 		iecDirSrv:    {valid: true, r: session.Reset{Src: s.client, Dst: s.server, Seq: forwardedSeq(c2s)}},
 	}}
@@ -219,20 +214,8 @@ func (t *iecTable) resetJob(s *iecSession) func() {
 		t.mu.Lock()
 		established := s.reset.targets[iecDirSrv].valid
 		t.mu.Unlock()
-		if !established {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		err := t.ctDelete(ctx, conntrack.DeleteRequest{
-			Proto: "tcp",
-			Src:   s.client.Addr().String(),
-			Dst:   s.server.Addr().String(),
-			Sport: int(s.client.Port()),
-			Dport: int(s.server.Port()),
-		})
-		if err != nil && t.onError != nil {
-			t.onError(errors.New("iec104 abort: conntrack delete " + s.id + ": " + err.Error()))
+		if established {
+			t.deleteConntrack(s.client, s.server, "iec104 abort "+s.id)
 		}
 	}
 }
@@ -240,10 +223,7 @@ func (t *iecTable) resetJob(s *iecSession) func() {
 // sendReset sends one RST and reports it. A failure keeps the session
 // dropped and makes enforcement unhealthy.
 func (t *iecTable) sendReset(s *iecSession, target int, r session.Reset) {
-	err := errInjectorUnavailable
-	if t.injector != nil {
-		err = t.injector.SendRST(r)
-	}
+	err := t.sendRST(r)
 	t.mu.Lock()
 	now := t.now()
 	s.reset.targets[target].sent = now
@@ -252,26 +232,20 @@ func (t *iecTable) sendReset(s *iecSession, target int, r session.Reset) {
 	outcome := outcomeResetSent
 	if err != nil {
 		outcome = outcomeResetFailed
+		pressureTotals.injector.Add(1)
+		metrics.IEC104InjectorFailuresTotal.Inc()
 		extra[eventfields.KeyError] = err.Error()
-		t.health.fault(faultReset, "reset: "+err.Error())
 	}
 	t.emit([]events.Event{s.sessionEvent(outcome, extra, now)})
 }
 
-// challengeLocked answers a challenge ACK (RFC 5961) from a reset target:
-// it retries at the ACK number, at most iecResetRetries times within
-// iecResetWindow of the first reset.
+// challengeLocked answers a challenge ACK from a reset target of an aborted
+// session (connReset.challenge).
 func (t *iecTable) challengeLocked(s *iecSession, from int, pkt capture.Packet, now time.Time) iecActions {
-	if s.reset == nil || pkt.TCP.Flags&capture.TCPFlagACK == 0 || pkt.TCP.Flags&capture.TCPFlagRST != 0 {
+	r, ok := s.reset.challenge(from, pkt.TCP, now)
+	if !ok {
 		return iecActions{}
 	}
-	tr := &s.reset.targets[from]
-	if !tr.valid || tr.sent.IsZero() || tr.retries >= iecResetRetries || now.Sub(tr.sent) > iecResetWindow || pkt.TCP.Ack == tr.r.Seq {
-		return iecActions{}
-	}
-	tr.retries++
-	tr.r.Seq = pkt.TCP.Ack
-	r := tr.r
 	return iecActions{jobs: []func(){func() { t.sendReset(s, from, r) }}}
 }
 
@@ -285,6 +259,7 @@ func (t *iecTable) apply(acts iecActions) {
 		now := t.now()
 		for i, err := range errs {
 			if err != nil {
+				countIECVerdictFailure(err)
 				acts.merge(t.completeLocked(acts.drops[i].Token, err, now))
 			}
 		}
@@ -296,11 +271,14 @@ func (t *iecTable) apply(acts iecActions) {
 
 // finish emits events and queues jobs; drops were resolved by the caller.
 func (t *iecTable) finish(acts iecActions) {
+	t.finishInventory(acts)
 	if len(acts.events) > 0 {
 		t.emit(acts.events)
 	}
 	for _, job := range acts.jobs {
 		if !t.jobs.submit(job) {
+			pressureTotals.worker.Add(1)
+			metrics.IEC104ResetWorkerRejectionsTotal.Inc()
 			t.health.fault(faultWorker, "reset worker queue full")
 		}
 	}
@@ -323,10 +301,12 @@ func (t *iecTable) settle(res []capture.Resolution) []error {
 
 // onVerdict records a verdict completion. A held token completes only when
 // its generation went down: the kernel dropped it, so it leaves the ledger.
-func (t *iecTable) onVerdict(tok capture.Token, err error) {
+func (t *iecTable) onVerdict(tok capture.Token, v capture.Verdict, err error) {
 	t.mu.Lock()
+	countIECVerdictFailure(err)
 	now := t.now()
 	acts := t.completeLocked(tok, err, now)
+	t.inventoryVerdictLocked(tok, v, err, &acts)
 	if s := t.held[tok]; s != nil {
 		t.unholdLocked(s, tok)
 	}
@@ -353,6 +333,7 @@ func (t *iecTable) unholdLocked(s *iecSession, tok capture.Token) {
 func (t *iecTable) onSourceDown() {
 	var acts iecActions
 	t.mu.Lock()
+	t.pressureOffline = true
 	now := t.now()
 	for _, s := range t.sessions {
 		if s.mode == "enforce" && (s.state == iecSynSent || s.state == iecEstablished) {

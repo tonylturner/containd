@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tonylturner/containd/pkg/dp/coverage"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -20,7 +22,11 @@ import (
 func TestClientPreviewRule(t *testing.T) {
 	entry := rules.Entry{ID: "candidate", SourceZones: []string{"control"}, DestZones: []string{"plant"},
 		Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", TypeIDs: []int{46}}}
-	want := engine.PreviewRuleResponse{MatchCount: 2, TotalEvents: 20, SampleMatches: []events.Event{{ID: 3}}}
+	want := engine.PreviewRuleResponse{MatchCount: 2, TotalEvents: 20, SampleMatches: []events.Event{{ID: 3}},
+		Warnings: []enforce.RuleWarning{{RuleID: "candidate", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow,
+			Message: "no bound address can match identities operator; the rule matches nothing until one is bound"}},
+		ICSCoverage: &coverage.Rule{RuleID: "candidate", Protocol: "iec104", Mode: "enforce", State: coverage.NotEnforcing,
+			Reasons: []coverage.Reason{{Code: coverage.QueueUnavailable, Message: "queue not held"}}}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var got rules.Entry
 		if r.Method != http.MethodPost || r.URL.Path != "/internal/rules/preview" ||

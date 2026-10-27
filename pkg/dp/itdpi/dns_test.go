@@ -6,12 +6,82 @@ package itdpi
 import (
 	"encoding/binary"
 	"net"
+	"net/netip"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
+
+func TestDNSAnswers(t *testing.T) {
+	response := buildDNSResponse(1, "Example.COM", 1)
+	want := []DNSAnswer{{Name: "example.com", IP: netip.MustParseAddr("93.184.216.34"), TTL: 300}}
+	if got := DNSAnswers(response, false); !reflect.DeepEqual(got, want) {
+		t.Fatalf("answers = %+v, want %+v", got, want)
+	}
+	tcp := binary.BigEndian.AppendUint16(nil, uint16(len(response)))
+	tcp = append(tcp, response...)
+	if got := DNSAnswers(tcp, true); !reflect.DeepEqual(got, want) {
+		t.Fatalf("TCP answers = %+v", got)
+	}
+	if got := DNSAnswers(append(append([]byte(nil), tcp...), tcp...), true); !reflect.DeepEqual(got, append(append([]DNSAnswer(nil), want...), want...)) {
+		t.Fatalf("coalesced TCP answers = %+v", got)
+	}
+	for n := range len(response) {
+		if got := DNSAnswers(response[:n], false); len(got) != 0 {
+			t.Fatalf("truncated at %d: %+v", n, got)
+		}
+	}
+	for _, flags := range []uint16{0x0100, 0x8380, 0x8183, 0x8980} {
+		bad := append([]byte(nil), response...)
+		binary.BigEndian.PutUint16(bad[2:4], flags)
+		if got := DNSAnswers(bad, false); len(got) != 0 {
+			t.Fatalf("flags %x: %+v", flags, got)
+		}
+	}
+	if got := DNSAnswers(tcp[:len(tcp)-1], true); len(got) != 0 {
+		t.Fatalf("truncated TCP: %+v", got)
+	}
+}
+
+func appendDNSRR(p []byte, name string, typ uint16, ttl uint32, data []byte) []byte {
+	p = append(p, encodeDNSName(name)...)
+	p = binary.BigEndian.AppendUint16(p, typ)
+	p = binary.BigEndian.AppendUint16(p, 1)
+	p = binary.BigEndian.AppendUint32(p, ttl)
+	p = binary.BigEndian.AppendUint16(p, uint16(len(data)))
+	return append(p, data...)
+}
+
+func TestDNSAnswersCNAME(t *testing.T) {
+	p := buildDNSQuery(2, "alias.example", 28)
+	binary.BigEndian.PutUint16(p[2:4], 0x8180)
+	binary.BigEndian.PutUint16(p[6:8], 4)
+	// Deliberately out of order; unrelated addresses must not be associated.
+	ip := netip.MustParseAddr("2001:db8::1")
+	p = appendDNSRR(p, "target.example", 28, 300, ip.AsSlice())
+	p = appendDNSRR(p, "alias.example", 5, 50, encodeDNSName("middle.example"))
+	p = appendDNSRR(p, "middle.example", 5, 90, encodeDNSName("target.example"))
+	p = appendDNSRR(p, "unrelated.example", 1, 10, []byte{1, 2, 3, 4})
+	want := []DNSAnswer{
+		{Name: "target.example", IP: ip, TTL: 300},
+		{Name: "middle.example", IP: ip, TTL: 90},
+		{Name: "alias.example", IP: ip, TTL: 50},
+	}
+	if got := DNSAnswers(p, false); !reflect.DeepEqual(got, want) {
+		t.Fatalf("chain = %+v, want %+v", got, want)
+	}
+	cycle := buildDNSQuery(3, "alias.example", 1)
+	binary.BigEndian.PutUint16(cycle[2:4], 0x8180)
+	binary.BigEndian.PutUint16(cycle[6:8], 2)
+	cycle = appendDNSRR(cycle, "alias.example", 5, 30, encodeDNSName("middle.example"))
+	cycle = appendDNSRR(cycle, "middle.example", 5, 30, encodeDNSName("alias.example"))
+	if got := DNSAnswers(cycle, false); len(got) != 0 {
+		t.Fatalf("cycle = %+v", got)
+	}
+}
 
 func dnsFlowState(srcPort, dstPort uint16, proto uint8) *flow.State {
 	return flow.NewState(flow.Key{

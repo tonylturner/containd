@@ -17,14 +17,8 @@ import (
 	nflog "github.com/florianl/go-nflog/v2"
 
 	"github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
-
-// RuleHitSink receives firewall.rule.hit events derived from kernel nflog
-// messages. Implemented by *events.Store (Append). Defined as an interface
-// so the capture package doesn't take a hard dep on the engine for tests.
-type RuleHitSink interface {
-	Append(e events.Event) events.Event
-}
 
 // nflog log-prefix shape produced by enforce.logPrefix:
 //
@@ -35,7 +29,7 @@ type RuleHitSink interface {
 // ensures rule IDs containing `:` (which would otherwise be valid per
 // config validation) don't silently get dropped here. The trailing
 // space is consumed by \s* and then anchored by $.
-var rulePrefixRE = regexp.MustCompile(`^containd:([A-Za-z0-9_-]+):([A-Z]+)\s*$`)
+var rulePrefixRE = regexp.MustCompile(`^containd:([A-Za-z0-9_-]+):([A-Z_]+)\s*$`)
 
 type nfLogHandle interface {
 	Close() error
@@ -64,9 +58,12 @@ func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(
 		return func() {}, nil
 	}
 
+	// The conntrack flag adds each packet's conntrack direction, which
+	// orients its connection key on the side that opened the connection.
 	cfg := nflog.Config{
 		Group:    group,
 		Copymode: nflog.CopyPacket,
+		Flags:    nflog.FlagConntrack,
 	}
 
 	nf, err := openNFLog(&cfg)
@@ -77,8 +74,8 @@ func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(
 	nflogCtx, cancel := context.WithCancel(ctx)
 
 	hook := func(a nflog.Attribute) int {
-		if ev, ok := buildRuleHitEvent(a); ok {
-			sink.Append(ev)
+		if ev, key, ok := buildRuleHitEvent(a); ok {
+			sink.RuleHit(ev, key)
 		}
 		return 0
 	}
@@ -118,17 +115,33 @@ func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(
 	return stop, nil
 }
 
+// Conntrack ctinfo values of a reply-direction packet: from
+// IP_CT_IS_REPLY (IP_CT_ESTABLISHED_REPLY) up to IP_CT_NUMBER.
+const (
+	ctInfoIsReply = 3
+	ctInfoNumber  = 5
+)
+
+// IP protocol numbers of ICMP and ICMPv6.
+const (
+	protoICMP   = 1
+	protoICMPv6 = 58
+)
+
 // buildRuleHitEvent converts an nflog Attribute into a firewall.rule.hit
-// event. Returns (zero, false) if the prefix doesn't match the containd
-// format — those are foreign log messages and should be ignored, not
-// emitted as malformed events.
-func buildRuleHitEvent(a nflog.Attribute) (events.Event, bool) {
+// event and the connection key of the logged packet. Returns ok false if
+// the prefix doesn't match the containd format: those are foreign log
+// messages and should be ignored, not emitted as malformed events. The
+// key is nil when the packet's tuple does not decode; otherwise it is
+// the packet's wire tuple with the conntrack direction (DirReverse for a
+// reply), and it also names the event's flow.
+func buildRuleHitEvent(a nflog.Attribute) (events.Event, *flow.Key, bool) {
 	if a.Prefix == nil {
-		return events.Event{}, false
+		return events.Event{}, nil, false
 	}
 	m := rulePrefixRE.FindStringSubmatch(strings.TrimSpace(*a.Prefix))
 	if m == nil {
-		return events.Event{}, false
+		return events.Event{}, nil, false
 	}
 	ruleID := m[1]
 	action := m[2]
@@ -146,20 +159,48 @@ func buildRuleHitEvent(a nflog.Attribute) (events.Event, bool) {
 	// Decode the captured packet, if present, to populate addressing
 	// fields. nflog can be configured to copy meta-only (no payload) by
 	// the operator; skip silently in that case.
-	if a.Payload != nil && len(*a.Payload) > 0 {
-		if pkt, ok := decodeIP(*a.Payload); ok {
-			ev.SrcIP = pkt.SrcIP.String()
-			ev.DstIP = pkt.DstIP.String()
-			ev.SrcPort = pkt.SrcPort
-			ev.DstPort = pkt.DstPort
-			ev.Transport = pkt.Transport
-			if pkt.Transport != "" {
-				ev.Attributes["proto"] = pkt.Transport
-			}
-			if pkt.DstPort != 0 {
-				ev.Attributes["port"] = strconv.Itoa(int(pkt.DstPort))
-			}
-		}
+	if a.Payload == nil || len(*a.Payload) == 0 {
+		return ev, nil, true
 	}
-	return ev, true
+	pkt, ok := ruleHitTuple(*a.Payload)
+	if !ok {
+		return ev, nil, true
+	}
+	ev.SrcIP = pkt.SrcIP.String()
+	ev.DstIP = pkt.DstIP.String()
+	ev.SrcPort = pkt.SrcPort
+	ev.DstPort = pkt.DstPort
+	ev.Transport = pkt.Transport
+	if pkt.Transport != "" {
+		ev.Attributes["proto"] = pkt.Transport
+	}
+	if pkt.DstPort != 0 {
+		ev.Attributes["port"] = strconv.Itoa(int(pkt.DstPort))
+	}
+	key := flow.Key{SrcIP: pkt.SrcIP, DstIP: pkt.DstIP, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort, Proto: pkt.Proto}
+	if a.CtInfo != nil && *a.CtInfo >= ctInfoIsReply && *a.CtInfo < ctInfoNumber {
+		key.Dir = flow.DirReverse
+	}
+	ev.FlowID = key.Hash()
+	return ev, &key, true
+}
+
+// ruleHitTuple decodes the addressing of a logged packet: the TCP or UDP
+// tuple, or for ICMP and ICMPv6, which carry no ports, the addresses and
+// protocol with Transport "icmp" or "icmpv6" and both ports zero. ok is
+// false when neither decodes.
+func ruleHitTuple(data []byte) (Packet, bool) {
+	pkt, ok := decodeIP(data)
+	if ok || pkt.Invalid != InvalidProtocol {
+		return pkt, ok
+	}
+	switch pkt.Proto {
+	case protoICMP:
+		pkt.Transport = "icmp"
+	case protoICMPv6:
+		pkt.Transport = "icmpv6"
+	default:
+		return pkt, false
+	}
+	return pkt, true
 }

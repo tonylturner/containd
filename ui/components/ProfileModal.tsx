@@ -5,6 +5,7 @@ import Image from "next/image";
 
 import { type MFAEnrollResponse, type User, api } from "../lib/api";
 import { formatOptionalDate } from "./shell-nav";
+import { withRetryTime } from "../lib/utils";
 
 export function ProfileModal({
   me,
@@ -92,7 +93,7 @@ export function ProfileModal({
     if (!ok.ok) {
       setState("error");
       setError(
-        ok.error || "Failed to change password. Check your current password.",
+        withRetryTime(ok.error || "Failed to change password. Check your current password.", ok.retryAfter),
       );
       return;
     }
@@ -152,7 +153,7 @@ export function ProfileModal({
     const res = await api.disableMFA(mfaDisablePassword, mfaDisableCode);
     if (!res.ok) {
       setState("error");
-      setError(res.error || "Failed to disable MFA.");
+      setError(withRetryTime(res.error || "Failed to disable MFA.", res.retryAfter));
       return;
     }
     setMfaEnabled(false);
@@ -165,7 +166,7 @@ export function ProfileModal({
   }
 
   const inputClass =
-    "w-full rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-none";
+    "w-full rounded-lg border border-white/8 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-slate-500 transition-ui focus:border-blue-500/40 focus-visible:shadow-focus-ring outline-hidden";
 
   return (
     <div
@@ -173,7 +174,7 @@ export function ProfileModal({
       role="dialog"
       aria-labelledby="profile-modal-title"
     >
-      <div className="w-full max-w-lg rounded-xl border border-white/[0.08] bg-surface-raised p-6 shadow-card-lg animate-slide-down">
+      <div className="w-full max-w-lg rounded-xl border border-white/8 bg-surface-raised p-6 shadow-card-lg animate-slide-down">
         <div className="mb-4 flex items-center justify-between">
           <h2
             id="profile-modal-title"
@@ -185,7 +186,7 @@ export function ProfileModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md p-1 text-slate-400 transition-ui hover:bg-white/[0.06] hover:text-white"
+              className="rounded-md p-1 text-slate-400 transition-ui hover:bg-white/6 hover:text-white"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -201,7 +202,7 @@ export function ProfileModal({
         </div>
 
         {forcePassword && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+          <div className="mb-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
             <svg
               viewBox="0 0 24 24"
               className="h-4 w-4 shrink-0"
@@ -240,19 +241,19 @@ export function ProfileModal({
           </div>
         )}
 
-        <div className="mb-4 flex gap-1 rounded-lg bg-white/[0.04] p-1">
+        <div className="mb-4 flex gap-1 rounded-lg bg-white/4 p-1">
           <button
             type="button"
             onClick={() => setTab("profile")}
             disabled={forcePassword || forceMFA}
-            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-ui ${tab === "profile" ? "bg-white/[0.08] text-white" : "text-slate-400 hover:text-slate-200"} disabled:opacity-50`}
+            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-ui ${tab === "profile" ? "bg-white/8 text-white" : "text-slate-400 hover:text-slate-200"} disabled:opacity-50`}
           >
             Profile
           </button>
           <button
             type="button"
             onClick={() => setTab("password")}
-            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-ui ${tab === "password" ? "bg-white/[0.08] text-white" : "text-slate-400 hover:text-slate-200"}`}
+            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-ui ${tab === "password" ? "bg-white/8 text-white" : "text-slate-400 hover:text-slate-200"}`}
           >
             Password
           </button>
@@ -260,7 +261,7 @@ export function ProfileModal({
             <button
               type="button"
               onClick={() => setTab("mfa")}
-              className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-ui ${tab === "mfa" ? "bg-white/[0.08] text-white" : "text-slate-400 hover:text-slate-200"}`}
+              className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-ui ${tab === "mfa" ? "bg-white/8 text-white" : "text-slate-400 hover:text-slate-200"}`}
             >
               MFA
             </button>
@@ -325,7 +326,7 @@ export function ProfileModal({
                 type="button"
                 onClick={saveProfile}
                 disabled={state === "saving"}
-                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50"
+                className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-ui disabled:opacity-50"
               >
                 {state === "saving" ? "Saving..." : "Save profile"}
               </button>
@@ -374,7 +375,7 @@ export function ProfileModal({
               type="button"
               onClick={changePassword}
               disabled={state === "saving"}
-              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-ui disabled:opacity-50"
             >
               {state === "saving" ? "Updating..." : "Update password"}
             </button>
@@ -383,7 +384,7 @@ export function ProfileModal({
 
         {tab === "mfa" && !forcePassword && (
           <div className="grid gap-4">
-            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-3 text-sm text-slate-300">
+            <div className="rounded-lg border border-white/8 bg-black/20 px-3 py-3 text-sm text-slate-300">
               <div className="font-medium text-white">
                 Authenticator app MFA
               </div>
@@ -394,7 +395,7 @@ export function ProfileModal({
               </div>
             </div>
 
-            <div className="rounded-lg border border-white/[0.08] bg-black/20 px-3 py-3">
+            <div className="rounded-lg border border-white/8 bg-black/20 px-3 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-medium text-white">Status</div>
@@ -412,12 +413,12 @@ export function ProfileModal({
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <span
-                    className={`rounded-full px-2 py-1 text-[11px] ${mfaEnabled ? "bg-emerald-500/10 text-emerald-400" : "bg-white/[0.06] text-slate-300"}`}
+                    className={`rounded-full px-2 py-1 text-[11px] ${mfaEnabled ? "bg-emerald-500/10 text-emerald-400" : "bg-white/6 text-slate-300"}`}
                   >
                     {mfaEnabled ? "Enabled" : "Disabled"}
                   </span>
                   {mfaRequired && (
-                    <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300">
+                    <span className="rounded-full px-2 py-1 text-[11px]">
                       Required
                     </span>
                   )}
@@ -435,7 +436,7 @@ export function ProfileModal({
                   type="button"
                   onClick={startMFAEnrollment}
                   disabled={state === "saving"}
-                  className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50"
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-ui disabled:opacity-50"
                 >
                   {state === "saving" ? "Preparing..." : "Set up MFA"}
                 </button>
@@ -444,8 +445,8 @@ export function ProfileModal({
 
             {!mfaEnabled && mfaEnrollment && (
               <div className="grid gap-4">
-                <div className="grid gap-4 md:grid-cols-[220px,1fr]">
-                  <div className="rounded-lg border border-white/[0.08] bg-white p-2">
+                <div className="grid gap-4 md:grid-cols-[220px_1fr]">
+                  <div className="rounded-lg border border-white/8 bg-white p-2">
                     <Image
                       src={mfaEnrollment.qrDataURL}
                       alt="MFA enrollment QR code"
@@ -460,7 +461,7 @@ export function ProfileModal({
                       <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
                         Manual entry secret
                       </div>
-                      <div className="mt-1 rounded-md border border-white/[0.08] bg-black/20 px-3 py-2 font-mono text-sm text-white break-all">
+                      <div className="mt-1 rounded-md border border-white/8 bg-black/20 px-3 py-2 font-mono text-sm text-white break-all">
                         {mfaEnrollment.secret}
                       </div>
                     </div>
@@ -486,7 +487,7 @@ export function ProfileModal({
                         type="button"
                         onClick={enableMFA}
                         disabled={state === "saving"}
-                        className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-ui hover:bg-amber-500 disabled:opacity-50"
+                        className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-ui disabled:opacity-50"
                       >
                         {state === "saving" ? "Enabling..." : "Enable MFA"}
                       </button>
@@ -498,7 +499,7 @@ export function ProfileModal({
                           setError(null);
                           setState("idle");
                         }}
-                        className="rounded-lg border border-white/[0.08] px-4 py-2 text-sm text-white transition-ui hover:bg-white/[0.06]"
+                        className="rounded-lg border border-white/8 px-4 py-2 text-sm text-white transition-ui hover:bg-white/6"
                       >
                         Cancel setup
                       </button>

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
-import { api, type FlowSummary, type TelemetryEvent } from "../../lib/api";
+import { api, type FlowSummary, type ServicesStatus, type TelemetryEvent } from "../../lib/api";
 import { staticAssetURL } from "../../lib/api-core";
 import { Shell } from "../../components/Shell";
 import { Sparkline } from "../../components/Sparkline";
@@ -12,8 +12,9 @@ import { Card } from "../../components/Card";
 
 export default function MonitoringOverviewPage() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
+  const [flowStatus, setFlowStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
-  const [services, setServices] = useState<Record<string, unknown> | null>(null);
+  const [services, setServices] = useState<ServicesStatus | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -26,6 +27,7 @@ export default function MonitoringOverviewPage() {
           api.getServicesStatus(controller.signal),
         ]);
         setFlows(f ?? []);
+        setFlowStatus(f === null ? "unavailable" : "ready");
         setEvents(e ?? []);
         setServices(s);
       } catch (e) {
@@ -43,6 +45,12 @@ export default function MonitoringOverviewPage() {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
+
+  async function retryFlows() {
+    const result = await api.listFlows(200);
+    setFlows(result ?? []);
+    setFlowStatus(result === null ? "unavailable" : "ready");
+  }
 
   const alertCount = events.filter(
     (ev) => ev.proto === "ids" && ev.kind === "alert",
@@ -143,18 +151,9 @@ export default function MonitoringOverviewPage() {
     };
   }, [flows]);
 
-  const envoyRate =
-    typeof (services as any)?.envoy?.rate_per_min === "number"
-      ? (services as any).envoy.rate_per_min
-      : null;
-  const envoyErrors =
-    typeof (services as any)?.envoy?.errors_rate_per_min === "number"
-      ? (services as any).envoy.errors_rate_per_min
-      : null;
-  const nginxRate =
-    typeof (services as any)?.nginx?.rate_per_min === "number"
-      ? (services as any).nginx.rate_per_min
-      : null;
+  const envoyRate = services?.envoy?.rate_per_min ?? null;
+  const envoyErrors = services?.envoy?.errors_rate_per_min ?? null;
+  const nginxRate = services?.nginx?.rate_per_min ?? null;
 
   const serviceCards = services
     ? [
@@ -162,45 +161,42 @@ export default function MonitoringOverviewPage() {
           key: "dns",
           label: "DNS",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: (services as any)?.dns?.running ? "running" : "stopped",
+          status: services.dns?.running ? "running" : "stopped",
           hint: "Unbound resolver",
         },
         {
           key: "ntp",
           label: "NTP",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: (services as any)?.ntp?.running ? "running" : "stopped",
-          hint: "OpenNTPD client",
+          status: services.ntp?.running ? "running" : "stopped",
+          hint: "chrony NTP client",
         },
         {
           key: "dhcp",
           label: "DHCP",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: (services as any)?.dhcp?.enabled ? "enabled" : "off",
+          status: services.dhcp?.enabled ? "enabled" : "off",
           hint: "LAN leases",
         },
         {
           key: "vpn",
           label: "VPN",
           icon: staticAssetURL("/icons/wireguard.svg"),
-          status:
-            (services as any)?.vpn?.wireguard_enabled || (services as any)?.vpn?.openvpn_running
-              ? "active"
-              : "off",
+          status: services.vpn?.wireguard_enabled || services.vpn?.openvpn_running ? "active" : "off",
           hint: "WireGuard/OpenVPN",
         },
         {
           key: "proxy",
           label: "Proxies",
           icon: staticAssetURL("/icons/nginx.svg"),
-          status: (services as any)?.proxy?.envoy_running || (services as any)?.proxy?.nginx_running ? "running" : "stopped",
+          status: services.proxy?.envoy_running || services.proxy?.nginx_running ? "running" : "stopped",
           hint: "Envoy + Nginx",
         },
         {
           key: "av",
           label: "AV",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: (services as any)?.av?.enabled ? "enabled" : "off",
+          status: !services.av.available ? "unavailable" : services.av.enabled ? "enabled" : "off",
           hint: "ICAP/ClamAV",
         },
       ]
@@ -208,31 +204,35 @@ export default function MonitoringOverviewPage() {
 
   return (
     <Shell title="Monitoring Overview">
-      <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-[var(--text-muted)]">
+      <div className="mb-4 rounded-xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-(--text-muted)">
         Live telemetry and service activity.
         {" "}
-        <Link href="/" className="text-[var(--text)] hover:text-white">
+        <Link href="/" className="text-(--text) hover:text-white">
           Use Dashboard
         </Link>
         {" "}
         for setup, policy workflow, and config state.
       </div>
+      {flowStatus === "unavailable" && <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+        Flows unavailable — the engine could not be reached.
+        <button onClick={retryFlows} className="ml-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
+      </div>}
       <div className="grid gap-4 md:grid-cols-3">
         <Card title="Flows">
-          <div className="text-3xl font-bold text-[var(--text)]">{flows.length}</div>
-          <Link href="/flows/" className="text-xs text-[var(--text)] hover:text-[var(--text)]">
+          <div className="text-3xl font-bold text-(--text)">{flowStatus === "ready" ? flows.length : flowStatus === "loading" ? "Loading…" : "Unavailable"}</div>
+          <Link href="/flows/" className="text-xs text-(--text) hover:text-(--text)">
             View flows →
           </Link>
         </Card>
         <Card title="DPI Events">
-          <div className="text-3xl font-bold text-[var(--text)]">{dpiCount}</div>
-          <Link href="/events/" className="text-xs text-[var(--text)] hover:text-[var(--text)]">
+          <div className="text-3xl font-bold text-(--text)">{dpiCount}</div>
+          <Link href="/events/" className="text-xs text-(--text) hover:text-(--text)">
             View events →
           </Link>
         </Card>
         <Card title="IDS Alerts">
-          <div className="text-3xl font-bold text-[var(--text)]">{alertCount}</div>
-          <Link href="/alerts/" className="text-xs text-[var(--text)] hover:text-[var(--text)]">
+          <div className="text-3xl font-bold text-(--text)">{alertCount}</div>
+          <Link href="/alerts/" className="text-xs text-(--text) hover:text-(--text)">
             View alerts →
           </Link>
         </Card>
@@ -240,19 +240,19 @@ export default function MonitoringOverviewPage() {
 
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         <Card title="Services Health">
-          <div className="space-y-3 text-xs text-[var(--text)]">
+          <div className="space-y-3 text-xs text-(--text)">
             <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2 text-[var(--text-muted)]">
+              <span className="flex items-center gap-2 text-(--text-muted)">
                 <Image src={staticAssetURL("/icons/nginx.svg")} alt="" width={16} height={16} className="h-4 w-4" />
                 Proxies
               </span>
               <span>
                 {envoyRate !== null ? envoyRate.toFixed(1) : "0.0"} /min
                 {nginxRate !== null && (
-                  <span className="text-[var(--text-dim)]"> · nginx {nginxRate.toFixed(1)}/min</span>
+                  <span className="text-(--text-dim)"> · nginx {nginxRate.toFixed(1)}/min</span>
                 )}
                 {envoyErrors !== null && (
-                  <span className="text-amber-400"> · {envoyErrors.toFixed(1)} err/min</span>
+                  <span> · {envoyErrors.toFixed(1)} err/min</span>
                 )}
               </span>
             </div>
@@ -260,36 +260,36 @@ export default function MonitoringOverviewPage() {
               {serviceCards.slice(0, 4).map((svc) => (
                 <div
                   key={svc.key}
-                  className="flex items-center justify-between rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 transition-ui"
+                  className="flex items-center justify-between rounded-lg border bg-(--surface) px-3 py-2 transition-ui"
                 >
-                  <span className="flex items-center gap-2 text-[var(--text)]">
+                  <span className="flex items-center gap-2 text-(--text)">
                     <Image src={svc.icon} alt="" width={16} height={16} className="h-4 w-4" />
                     {svc.label}
                   </span>
-                  <span className="rounded-full bg-amber-500/[0.1] px-2 py-1 text-[10px] text-[var(--text)]">
+                  <span className="rounded-full px-2 py-1 text-[10px] text-(--text)">
                     {svc.status}
                   </span>
                 </div>
               ))}
             </div>
-            <Link href="/system/services/" className="text-xs text-[var(--text)] hover:text-[var(--text)]">
+            <Link href="/system/services/" className="text-xs text-(--text) hover:text-(--text)">
               Configure services →
             </Link>
           </div>
         </Card>
         <Card title="Top Protocols">
           {protoSeries.length === 0 && (
-            <div className="text-sm text-[var(--text-muted)]">No telemetry yet.</div>
+            <div className="text-sm text-(--text-muted)">No telemetry yet.</div>
           )}
           {protoSeries.length > 0 && (
-            <div className="space-y-2 text-xs text-[var(--text)]">
+            <div className="space-y-2 text-xs text-(--text)">
               {protoSeries.map((row) => (
                 <div key={row.proto} className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="uppercase text-[var(--text-muted)]">{row.proto}</span>
+                    <span className="uppercase text-(--text-muted)">{row.proto}</span>
                     <span>{row.count}</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-[var(--surface)]">
+                  <div className="h-2 w-full rounded-full bg-(--surface)">
                     <div
                       className="h-2 rounded-full"
                       style={{ width: `${row.pct}%`, background: row.color }}
@@ -302,17 +302,17 @@ export default function MonitoringOverviewPage() {
         </Card>
         <Card title="Recent Alerts">
           {alertCount === 0 && (
-            <div className="text-sm text-[var(--text-muted)]">No alerts.</div>
+            <div className="text-sm text-(--text-muted)">No alerts.</div>
           )}
           {events
             .filter((ev) => ev.proto === "ids" && ev.kind === "alert")
             .slice(0, 5)
             .map((ev) => (
-              <div key={ev.id} className="mb-2 rounded-lg bg-[var(--surface)] p-2 text-xs">
+              <div key={ev.id} className="mb-2 rounded-lg bg-(--surface) p-2 text-xs">
                 <div className="text-slate-100">
                   {(ev.attributes?.["message"] as string) ?? "IDS alert"}
                 </div>
-                <div className="text-[var(--text-muted)]">
+                <div className="text-(--text-muted)">
                   {new Date(ev.timestamp).toLocaleString()}
                 </div>
               </div>
@@ -322,35 +322,35 @@ export default function MonitoringOverviewPage() {
 
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         <Card title="Traffic Pulse">
-          <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+          <div className="flex items-center justify-between text-xs text-(--text-muted)">
             <span>Last 60 min</span>
-            <span className="text-[var(--text)]">{events.length.toLocaleString()} events</span>
+            <span className="text-(--text)">{events.length.toLocaleString()} events</span>
           </div>
           <div className="mt-3">
             <Sparkline values={activitySeries} color="var(--primary)" />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[var(--text)]">
-            <div className="rounded-lg border border-amber-500/[0.15] bg-black/20 px-2 py-1">
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-(--text)">
+            <div className="rounded-lg border bg-black/20 px-2 py-1">
               DPI {dpiCount.toLocaleString()}
             </div>
-            <div className="rounded-lg border border-amber-500/[0.15] bg-black/20 px-2 py-1">
+            <div className="rounded-lg border bg-black/20 px-2 py-1">
               Alerts {alertCount.toLocaleString()}
             </div>
           </div>
         </Card>
         <Card title="Top Applications">
-          {appSeries.length === 0 && (
-            <div className="text-sm text-[var(--text-muted)]">No flow apps yet.</div>
+          {flowStatus === "ready" && appSeries.length === 0 && (
+            <div className="text-sm text-(--text-muted)">No flow apps yet.</div>
           )}
-          {appSeries.length > 0 && (
-            <div className="space-y-2 text-xs text-[var(--text)]">
+          {flowStatus === "ready" && appSeries.length > 0 && (
+            <div className="space-y-2 text-xs text-(--text)">
               {appSeries.map((row) => (
                 <div key={row.app} className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="uppercase text-[var(--text-muted)]">{row.app}</span>
+                    <span className="uppercase text-(--text-muted)">{row.app}</span>
                     <span>{row.count}</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-[var(--surface)]">
+                  <div className="h-2 w-full rounded-full bg-(--surface)">
                     <div
                       className="h-2 rounded-full"
                       style={{ width: `${row.pct}%`, background: row.color }}
@@ -362,25 +362,25 @@ export default function MonitoringOverviewPage() {
           )}
         </Card>
         <Card title="Endpoints">
-          <div className="space-y-3 text-xs text-[var(--text)]">
+          <div className="space-y-3 text-xs text-(--text)">
             <div className="flex items-center justify-between">
-              <span className="text-[var(--text-muted)]">Sources</span>
-              <span className="text-[var(--text)]">{endpointStats.srcCount}</span>
+              <span className="text-(--text-muted)">Sources</span>
+              <span className="text-(--text)">{flowStatus === "ready" ? endpointStats.srcCount : "Unknown"}</span>
             </div>
-            <div className="h-2 w-full rounded-full bg-[var(--surface)]">
+            <div className="h-2 w-full rounded-full bg-(--surface)">
               <div
                 className="h-2 rounded-full"
-                style={{ width: `${endpointStats.srcPct}%`, background: "var(--teal)" }}
+                style={{ width: `${flowStatus === "ready" ? endpointStats.srcPct : 0}%`, background: "var(--teal)" }}
               />
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[var(--text-muted)]">Destinations</span>
-              <span className="text-[var(--text)]">{endpointStats.dstCount}</span>
+              <span className="text-(--text-muted)">Destinations</span>
+              <span className="text-(--text)">{flowStatus === "ready" ? endpointStats.dstCount : "Unknown"}</span>
             </div>
-            <div className="h-2 w-full rounded-full bg-[var(--surface)]">
+            <div className="h-2 w-full rounded-full bg-(--surface)">
               <div
                 className="h-2 rounded-full"
-                style={{ width: `${endpointStats.dstPct}%`, background: "var(--orange)" }}
+                style={{ width: `${flowStatus === "ready" ? endpointStats.dstPct : 0}%`, background: "var(--orange)" }}
               />
             </div>
           </div>

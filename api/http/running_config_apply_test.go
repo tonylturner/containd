@@ -150,47 +150,6 @@ func TestApplyRunningConfigMissingAndLoadError(t *testing.T) {
 	}
 }
 
-func TestApplyRunningConfigBindsInterfacesWithoutSaving(t *testing.T) {
-	previousBinder := bindDefaultInterfaceDevices
-	bindDefaultInterfaceDevices = func(cfg *config.Config) bool {
-		cfg.Interfaces[0].Device = "en0"
-		return true
-	}
-	t.Cleanup(func() { bindDefaultInterfaceDevices = previousBinder })
-
-	cfg := config.DefaultConfig()
-	cfg.Interfaces = []config.Interface{{Name: "wan", Zone: "wan"}}
-	store := &mockStore{
-		cfg: cfg,
-		load: func() (*config.Config, error) {
-			loaded := *cfg
-			loaded.Interfaces = append([]config.Interface(nil), cfg.Interfaces...)
-			return &loaded, nil
-		},
-	}
-	engine := &mockEngine{}
-
-	warnings, err := ApplyRunningConfig(context.Background(), store, engine, nil)
-	if err != nil {
-		t.Fatalf("ApplyRunningConfig() error = %v", err)
-	}
-	if len(warnings) != 0 {
-		t.Fatalf("ApplyRunningConfig() warnings = %v", warnings)
-	}
-	if store.calls != 0 {
-		t.Fatalf("apply called Store.Save %d times, want 0", store.calls)
-	}
-	if cfg.Interfaces[0].Device != "" {
-		t.Fatalf("apply modified stored config device to %q", cfg.Interfaces[0].Device)
-	}
-	if len(engine.lastIf) != 1 || engine.lastIf[0].Device == "" {
-		t.Fatalf("engine interfaces = %+v, want the autobound device", engine.lastIf)
-	}
-	if engine.lastIf[0].Device == cfg.Interfaces[0].Device {
-		t.Fatalf("engine interface device was not bound: %+v", engine.lastIf[0])
-	}
-}
-
 func TestApplyRunningConfigCanceledWaiterDoesNotLoad(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Interfaces = nil
@@ -306,3 +265,9 @@ func TestRuntimeMutationsWaitForReplay(t *testing.T) {
 		})
 	}
 }
+
+func (s *commitApplyStore) ApplyChange(ctx context.Context, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) error {
+	return mockApplyChange(ctx, s, change, ttl, apply)
+}
+func (s *commitApplyStore) RuntimeApplyFault(context.Context) (string, error)  { return "", nil }
+func (s *commitApplyStore) SetRuntimeApplyFault(context.Context, string) error { return nil }

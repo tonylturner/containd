@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Terminal } from "xterm";
-import type { FitAddon } from "xterm-addon-fit";
-import "xterm/css/xterm.css";
+import type { Terminal } from "@xterm/xterm";
+import type { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 
 import { api, getSessionToken } from "../lib/api";
 import { apiWebSocketURL } from "../lib/api-core";
@@ -59,8 +59,8 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
         } catch {}
       }
       const [{ Terminal }, { FitAddon }] = await Promise.all([
-        import("xterm"),
-        import("xterm-addon-fit"),
+        import("@xterm/xterm"),
+        import("@xterm/addon-fit"),
       ]);
       if (disposed || !containerRef.current) return;
       term = new Terminal({
@@ -86,15 +86,6 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
         term?.write(`\r\n${prompt}`);
         lineRef.current = "";
         cursorRef.current = 0;
-      }
-
-      function writeOutput(text: string) {
-        if (!text || !term) return;
-        const normalized = text.replace(/\r?\n/g, "\r\n");
-        term.write(normalized);
-        if (!normalized.endsWith("\r\n")) {
-          term.write("\r\n");
-        }
       }
 
       function writeError(text: string) {
@@ -502,7 +493,7 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
   }, []);
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/40 p-4 shadow-inner backdrop-blur">
+    <div className="rounded-2xl border border-white/10 bg-black/40 p-4 inset-shadow-sm backdrop-blur-sm">
       <div className="mb-3 flex items-center justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-slate-300">

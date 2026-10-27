@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -36,7 +37,9 @@ func (e *previewMockEngine) PreviewRule(_ context.Context, entry rules.Entry) (d
 func TestPreviewFirewallRuleDelegates(t *testing.T) {
 	result := dpengine.PreviewRuleResponse{MatchCount: 123, TotalEvents: 456,
 		SampleMatches: []events.Event{{ID: 99, SrcIP: "10.30.30.30"}},
-		TimeRange:     &dpengine.PreviewTimeRange{Start: time.Unix(1, 0).UTC(), End: time.Unix(20, 0).UTC()}}
+		TimeRange:     &dpengine.PreviewTimeRange{Start: time.Unix(1, 0).UTC(), End: time.Unix(20, 0).UTC()},
+		Warnings: []enforce.RuleWarning{{RuleID: "candidate", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow,
+			Message: "no bound address can match identities operator; the rule matches nothing until one is bound"}}}
 	eng := &previewMockEngine{result: result}
 	body := `{"id":"candidate","sourceZones":["control"],"destZones":["plant"],
 		"sources":["10.60.60.10/32"],"destinations":["10.30.30.30/32"],"action":"ALLOW",
@@ -66,6 +69,25 @@ func TestPreviewFirewallRuleDelegates(t *testing.T) {
 			TypeIDs: []int{1, 30}, Classes: []string{"monitor"}, CA: []uint16{1}, IOA: []rules.IOARange{{Start: 1, End: 100}}}}
 	if eng.calls != 1 || !reflect.DeepEqual(eng.entry, want) {
 		t.Fatalf("engine calls=%d entry=%+v, want %+v", eng.calls, eng.entry, want)
+	}
+}
+
+// The previewed entry carries the action parameters of RATE_LIMIT and
+// TAG rules.
+func TestPreviewFirewallRuleCarriesActionParameters(t *testing.T) {
+	for body, want := range map[string]rules.Entry{
+		`{"id":"police","action":"RATE_LIMIT","rateLimit":{"packetsPerSecond":50,"burst":5}}`: {ID: "police", Action: rules.ActionRateLimit,
+			RateLimit: &rules.RateLimit{PacketsPerSecond: 50, Burst: 5}},
+		`{"id":"label","action":"TAG","tag":"plc"}`: {ID: "label", Action: rules.ActionTag, Tag: "plc"},
+	} {
+		eng := &previewMockEngine{}
+		rec := httptest.NewRecorder()
+		req := authedRequest(http.MethodPost, "/api/v1/firewall/rules/preview", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		NewServerWithEngine(&mockStore{}, nil, eng).ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || eng.calls != 1 || !reflect.DeepEqual(eng.entry, want) {
+			t.Fatalf("%s: status=%d entry=%+v, want %+v", body, rec.Code, eng.entry, want)
+		}
 	}
 }
 

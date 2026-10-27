@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 )
 
 func validateServices(s ServicesConfig, ifaces []Interface, zones []Zone) error {
@@ -112,13 +113,47 @@ func validateAV(cfg AVConfig) error {
 			}
 		}
 	}
+	if cfg.TimeoutSec < 0 || cfg.TimeoutSec > maxAVTimeoutSec {
+		return fmt.Errorf("services.av.timeoutSec must be between 0 (default) and %d", maxAVTimeoutSec)
+	}
+	if cfg.MaxSizeBytes < 0 || cfg.MaxSizeBytes > maxAVScanBytes {
+		return fmt.Errorf("services.av.maxSizeBytes must be between 0 (no limit) and %d", maxAVScanBytes)
+	}
+	if cfg.BlockTTL < 0 {
+		return errors.New("services.av.blockTtlSeconds must not be negative; 0 selects 600")
+	}
+	if cfg.CacheTTL < 0 {
+		return errors.New("services.av.cacheTtl must not be negative; 0 selects 10m")
+	}
 	if mode == "clamav" {
-		if strings.TrimSpace(cfg.ClamAV.SocketPath) == "" {
-			return fmt.Errorf("services.av.clamav.socketPath required when mode=clamav")
+		if _, err := cfg.ClamAV.UpdateInterval(); err != nil {
+			return err
 		}
 	}
 	return nil
 }
+
+// UpdateInterval parses UpdateSchedule, the FreshClam interval. It is a
+// positive Go duration such as "4h", not a cron expression. A blank schedule
+// returns zero, which selects the engine's default interval.
+func (c ClamAVConfig) UpdateInterval() (time.Duration, error) {
+	s := strings.TrimSpace(c.UpdateSchedule)
+	if s == "" {
+		return 0, nil
+	}
+	if d, err := time.ParseDuration(s); err == nil && d > 0 {
+		return d, nil
+	}
+	return 0, fmt.Errorf("services.av.clamav.updateSchedule %q must be a positive duration such as 4h", s)
+}
+
+const (
+	// maxAVTimeoutSec bounds the per-scan and per-probe deadline.
+	maxAVTimeoutSec = 300
+	// maxAVScanBytes is clamd's default StreamMaxLength (100 MiB); clamd
+	// rejects larger INSTREAM payloads.
+	maxAVScanBytes = 100 << 20
+)
 
 func validateProxy(p ProxyConfig) error {
 	if p.Forward.ListenPort != 0 && (p.Forward.ListenPort < 1 || p.Forward.ListenPort > 65535) {

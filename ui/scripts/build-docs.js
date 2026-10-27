@@ -8,6 +8,7 @@ const uiRoot = path.join(__dirname, "..");
 const docsDir = path.join(repoRoot, "docs", "mkdocs");
 const docsOutDir = path.join(uiRoot, "public", "docs");
 const hashFile = path.join(docsOutDir, ".build-hash");
+const indexPath = path.join(docsOutDir, "index.html");
 
 function collectFiles(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -27,9 +28,9 @@ function collectFiles(dir) {
 function buildHash() {
   const hasher = crypto.createHash("sha256");
   const inputs = [
+    __filename,
     path.join(repoRoot, "docs", "mkdocs.yml"),
     path.join(repoRoot, "docs", "requirements-mkdocs.txt"),
-    path.join(repoRoot, "linear-dashboard-cursor-rule.md"),
     ...collectFiles(docsDir),
   ].sort();
   for (const file of inputs) {
@@ -42,37 +43,21 @@ function buildHash() {
   return hasher.digest("hex");
 }
 
-function readStoredHash() {
-  if (!fs.existsSync(hashFile)) return "";
-  try {
-    return fs.readFileSync(hashFile, "utf8").trim();
-  } catch {
-    return "";
-  }
-}
-
 function writeStoredHash(value) {
   fs.mkdirSync(docsOutDir, { recursive: true });
   fs.writeFileSync(hashFile, `${value}\n`, "utf8");
 }
 
 function runMkdocs() {
-  const check = spawnSync("mkdocs", ["--version"], {
-    cwd: uiRoot,
-    stdio: "ignore",
-  });
-  if (check.status !== 0) {
-    return null;
-  }
   const result = spawnSync(
     "mkdocs",
-    ["build", "-f", "../docs/mkdocs.yml", "-d", "./public/docs"],
+    ["build", "-f", "../docs/mkdocs.yml", "-d", docsOutDir],
     {
       cwd: uiRoot,
       stdio: "inherit",
     },
   );
-  return result.status === 0;
+  return result.status === 0 && fs.existsSync(indexPath);
 }
 
 if (process.env.CONTAIND_SKIP_DOCS === "1") {
@@ -80,26 +65,13 @@ if (process.env.CONTAIND_SKIP_DOCS === "1") {
 }
 
 const currentHash = buildHash();
-const previousHash = readStoredHash();
-if (currentHash && currentHash === previousHash) {
-  process.exit(0);
-}
-
-const ran = runMkdocs();
-if (ran === true) {
+if (runMkdocs()) {
   writeStoredHash(currentHash);
-  process.exit(0);
-}
-
-const indexPath = path.join(docsOutDir, "index.html");
-if (ran === null && fs.existsSync(indexPath)) {
-  writeStoredHash(currentHash);
-  process.exit(0);
-}
-
-if (ran === false) {
+} else {
   console.error(
-    "Docs build failed. Install MkDocs deps via `pip install -r docs/requirements-mkdocs.txt`.",
+    "Docs build failed: MkDocs must be on PATH and produce public/docs/index.html. " +
+      "Install dependencies with `pip install -r docs/requirements-mkdocs.txt`. " +
+      "Use CONTAIND_SKIP_DOCS=1 only when documentation is supplied separately.",
   );
   process.exit(1);
 }

@@ -6,19 +6,24 @@ package engine
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
 // nftModel replays applied scripts like the kernel would for the envelope
-// chain: a full ruleset sets it, a switch replaces its rule.
+// chain of table containd_policy: replacing or deleting the table sets or
+// removes it, a switch replaces its rule.
 type nftModel struct {
 	mu       sync.Mutex
+	live     enforce.TableLayout // what ReadTable reports
+	readErr  error               // what ReadTable fails with
 	scripts  []string
 	envelope string // "", "drop" or "queue N"
 	failNext bool
@@ -32,18 +37,24 @@ func (m *nftModel) Apply(_ context.Context, script string) error {
 		return errors.New("nft: netlink busy")
 	}
 	m.scripts = append(m.scripts, script)
-	if strings.HasPrefix(script, "flush ruleset") {
+	if strings.Contains(script, enforce.DeleteTable("containd_policy")) {
 		m.envelope = ""
 		if i := strings.Index(script, "chain iec104_envelope {\n    "); i >= 0 {
 			m.envelope = envelopeState(script[i+len("chain iec104_envelope {\n    "):])
 		}
 		return nil
 	}
-	const add = "add rule inet containd iec104_envelope "
+	const add = "add rule inet containd_policy iec104_envelope "
 	if i := strings.Index(script, add); i >= 0 {
 		m.envelope = envelopeState(script[i+len(add):])
 	}
 	return nil
+}
+
+func (m *nftModel) ReadTable(context.Context, string) (enforce.TableLayout, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.live, m.readErr
 }
 
 func envelopeState(rule string) string {
@@ -224,7 +235,24 @@ func TestUSRulesetUnchangedByEnvelopeState(t *testing.T) {
 	if got := nft.scripts[len(nft.scripts)-1]; got != before || len(nft.scripts) != 2 {
 		t.Fatalf("a US-only ruleset changed with the queue state (%d scripts):\n%s", len(nft.scripts), got)
 	}
-	if !strings.Contains(before, "tcp dport 502 queue num 101") {
+	if !regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" jump ics_queue;`).MatchString(before) ||
+		!strings.Contains(before, "meta mark set meta mark and 0xf0ffffff queue num 101;") {
 		t.Fatalf("US Modbus steering missing:\n%s", before)
+	}
+}
+
+func TestEnvelopeSampleUsesCandidateQueue(t *testing.T) {
+	g := &envelopeGate{}
+	for _, owned := range []uint16{0, 101, 102} {
+		g.own(owned)
+		for _, queue := range []int{0, 101, 102} {
+			want := owned != 0 && int(owned) == queue
+			if got := g.sampleOpen(queue); got != want {
+				t.Fatalf("owned=%d candidate=%d open=%v want=%v", owned, queue, got, want)
+			}
+			if g.comp != nil || g.installed || g.open {
+				t.Fatal("sample changed gate state")
+			}
+		}
 	}
 }

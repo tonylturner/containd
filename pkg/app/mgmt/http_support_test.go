@@ -101,29 +101,32 @@ func TestConnContextWithLocalIPAndRequestLookup(t *testing.T) {
 func TestBuildListenerServersHTTP(t *testing.T) {
 	t.Parallel()
 
-	servers, listeners, err := buildListenerServers(http.NewServeMux(), ":0", "127.0.0.1:0", nil, "", nil)
+	var b mgmtBinds
+	bound, err := b.bindListener(http.NewServeMux(), ":0", "127.0.0.1:0", nil, "", nil)
+	defer b.close()
 	if err != nil {
 		t.Fatalf("buildHTTPServers error: %v", err)
 	}
-	if len(servers) != 2 || len(listeners) != 2 {
-		t.Fatalf("unexpected server/listener counts: %d/%d", len(servers), len(listeners))
+	if len(b.servers) != 2 || len(b.listeners) != 2 {
+		t.Fatalf("unexpected server/listener counts: %d/%d", len(b.servers), len(b.listeners))
 	}
-	for _, ln := range listeners {
-		_ = ln.Close()
+	if bound.addr != b.listeners[0].Addr().String() || bound.loopback != b.listeners[1].Addr().String() {
+		t.Fatalf("bound = %+v, want the addresses of %v and %v", bound, b.listeners[0].Addr(), b.listeners[1].Addr())
 	}
 }
 
 func TestBuildListenerServersHTTPS(t *testing.T) {
 	t.Parallel()
 
-	servers, listeners, err := buildListenerServers(http.NewServeMux(), "127.0.0.1:0", "", &tls.Config{}, "", nil)
+	var b mgmtBinds
+	bound, err := b.bindListener(http.NewServeMux(), "127.0.0.1:0", "", &tls.Config{}, "", nil)
+	defer b.close()
 	if err != nil {
 		t.Fatalf("buildHTTPSServers error: %v", err)
 	}
-	if len(servers) != 1 || len(listeners) != 1 {
-		t.Fatalf("unexpected server/listener counts: %d/%d", len(servers), len(listeners))
+	if len(b.servers) != 1 || len(b.listeners) != 1 || bound.addr != b.listeners[0].Addr().String() || bound.loopback != "" {
+		t.Fatalf("unexpected binds %+v: %d/%d", bound, len(b.servers), len(b.listeners))
 	}
-	_ = listeners[0].Close()
 }
 
 func TestIPInterfaceIndexLookupAndMgmtAccessHandler(t *testing.T) {

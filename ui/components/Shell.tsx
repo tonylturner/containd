@@ -2,12 +2,12 @@
 
 import * as React from "react";
 import { ReactNode } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type User, api } from "../lib/api";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { ConfigStatusBar } from "./ConfigStatusBar";
+import { ShellRecoveryBanner } from "./ManagementRecoveryBanner";
 import { ProfileModal } from "./ProfileModal";
 import {
   buildNavGroups,
@@ -271,15 +271,15 @@ export function Shell({
         {/* ── Sidebar ─────────────────────────────────────────── */}
         <aside
           aria-label="Sidebar"
-          className="flex h-screen w-60 shrink-0 flex-col border-r border-amber-500/[0.15] bg-[#0a0d0a]/90 backdrop-blur-sm"
+          className="flex h-screen w-60 shrink-0 flex-col border-r bg-[#0a0d0a]/90 backdrop-blur-xs"
         >
           {/* Brand */}
           <Link
             href="/"
-            className="flex items-center gap-3 px-4 py-4 border-b border-amber-500/[0.15] transition-ui hover:bg-amber-500/[0.03]"
+            className="flex items-center gap-3 px-4 py-4 border-b transition-ui"
           >
             <div
-              className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-amber-500/60"
+              className="flex h-8 w-8 items-center justify-center rounded-full border-2"
               style={{
                 boxShadow:
                   "0 0 12px rgba(245,158,11,0.15), inset 0 0 8px rgba(245,158,11,0.1)",
@@ -297,7 +297,7 @@ export function Shell({
                 />
               </svg>
             </div>
-            <span className="text-sm font-bold tracking-[2px] uppercase text-amber-500">
+            <span className="text-sm font-bold tracking-[2px] uppercase">
               containd
             </span>
           </Link>
@@ -314,8 +314,8 @@ export function Shell({
                 aria-current={pathname === "/" ? "page" : undefined}
                 className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-ui ${
                   pathname === "/"
-                    ? "bg-amber-500/[0.12] text-amber-400 font-medium border-l-2 border-amber-500"
-                    : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200 border-l-2 border-transparent"
+                    ? "font-medium border-l-2 "
+                    : "text-slate-400 hover:bg-white/4 hover:text-slate-200 border-l-2 border-transparent"
                 }`}
               >
                 <svg
@@ -350,8 +350,8 @@ export function Shell({
                     aria-expanded={!collapsed[group.label]}
                     className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium uppercase tracking-wider transition-ui ${
                       isGroupActive && collapsed[group.label]
-                        ? "text-amber-400/80 hover:text-amber-300"
-                        : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.03]"
+                        ? ""
+                        : "text-slate-500 hover:text-slate-300 hover:bg-white/3"
                     }`}
                   >
                     {IconFn && (
@@ -384,8 +384,8 @@ export function Shell({
                             aria-current={active ? "page" : undefined}
                             className={`block rounded-lg px-2.5 py-1.5 transition-ui border-l-2 ${
                               active
-                                ? "bg-amber-500/[0.08] text-amber-400 font-medium border-amber-500"
-                                : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200 border-transparent"
+                                ? "font-medium "
+                                : "text-slate-400 hover:bg-white/4 hover:text-slate-200 border-transparent"
                             }`}
                           >
                             {item.label}
@@ -401,15 +401,15 @@ export function Shell({
 
           {/* User section */}
           {authChecked && me && (
-            <div className="shrink-0 border-t border-amber-500/[0.15] bg-black/20 p-2">
+            <div className="shrink-0 border-t bg-black/20 p-2">
               <button
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
                 aria-expanded={menuOpen}
                 aria-label="User menu"
-                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-ui hover:bg-white/[0.05]"
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-ui hover:bg-white/5"
               >
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15 text-xs font-medium text-amber-400">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium">
                   {(me.username?.[0] ?? "U").toUpperCase()}
                 </span>
                 <div className="min-w-0 flex-1 text-left">
@@ -429,7 +429,7 @@ export function Shell({
                 </svg>
               </button>
               {menuOpen && (
-                <div className="mt-1 rounded-lg border border-white/[0.08] bg-surface-raised p-1 animate-fade-in">
+                <div className="mt-1 rounded-lg border border-white/8 bg-surface-raised p-1 animate-fade-in">
                   <button
                     type="button"
                     onClick={() => {
@@ -437,7 +437,7 @@ export function Shell({
                       setProfileOpen(true);
                       setMenuOpen(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-slate-300 transition-ui hover:bg-white/[0.06]"
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-slate-300 transition-ui hover:bg-white/6"
                   >
                     Profile
                   </button>
@@ -448,11 +448,11 @@ export function Shell({
                       setProfileOpen(true);
                       setMenuOpen(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-slate-300 transition-ui hover:bg-white/[0.06]"
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-slate-300 transition-ui hover:bg-white/6"
                   >
                     Change password
                   </button>
-                  <div className="my-1 border-t border-white/[0.06]" />
+                  <div className="my-1 border-t border-white/6" />
                   <button
                     type="button"
                     onClick={async () => {
@@ -478,7 +478,7 @@ export function Shell({
         >
           <div className="mx-auto max-w-6xl">
             {!authChecked && (
-              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 text-sm text-slate-300">
+              <div className="rounded-xl border border-white/8 bg-white/3 p-4 text-sm text-slate-300">
                 {authError ? (
                   <div className="flex items-center justify-between gap-3">
                     <div>{authError}</div>
@@ -488,7 +488,7 @@ export function Shell({
                         if (typeof window !== "undefined")
                           window.location.reload();
                       }}
-                      className="rounded-lg bg-white/[0.08] px-3 py-1.5 text-xs text-white transition-ui hover:bg-white/[0.12]"
+                      className="rounded-lg bg-white/8 px-3 py-1.5 text-xs text-white transition-ui hover:bg-white/12"
                     >
                       Reload
                     </button>
@@ -504,7 +504,7 @@ export function Shell({
             {authChecked && (
               <>
                 {me?.labMode && (
-                  <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-400">
+                  <div className="mb-4 flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm">
                     <svg
                       viewBox="0 0 24 24"
                       className="h-4 w-4 shrink-0"
@@ -523,12 +523,12 @@ export function Shell({
                   </div>
                 )}
                 {pendingMFA && !forceMFA && (
-                  <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+                  <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm">
                     <div>
-                      <div className="font-medium text-amber-200">
+                      <div className="font-medium">
                         MFA setup is required for this account
                       </div>
-                      <div className="mt-1 text-xs text-amber-200/90">
+                      <div className="mt-1 text-xs">
                         You can still sign in without MFA during the grace
                         period, but you should complete setup soon.
                         {mfaGraceDisplay
@@ -542,7 +542,7 @@ export function Shell({
                         setProfileTab("mfa");
                         setProfileOpen(true);
                       }}
-                      className="shrink-0 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-100 transition-ui hover:bg-amber-500/30"
+                      className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-ui"
                     >
                       Set up MFA
                     </button>
@@ -559,6 +559,7 @@ export function Shell({
                     </div>
                   </div>
                 )}
+                <ShellRecoveryBanner />
                 <ConfigStatusBar />
                 <div className="mb-5 flex items-center justify-between gap-4">
                   <div>
@@ -574,7 +575,7 @@ export function Shell({
                       rel="noreferrer"
                       title="Help & documentation"
                       aria-label="Help & documentation"
-                      className="inline-flex items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] p-2 text-slate-400 transition-ui hover:bg-white/[0.08] hover:text-slate-200"
+                      className="inline-flex items-center justify-center rounded-lg border border-white/8 bg-white/4 p-2 text-slate-400 transition-ui hover:bg-white/8 hover:text-slate-200"
                     >
                       <svg
                         viewBox="0 0 24 24"
@@ -595,7 +596,7 @@ export function Shell({
                 </div>
                 <Breadcrumbs />
                 {forceMFA ? (
-                  <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-6 text-sm text-slate-300">
+                  <div className="rounded-xl border border-white/8 bg-white/3 p-6 text-sm text-slate-300">
                     Only account and MFA setup actions are available until MFA
                     is enabled for this account.
                   </div>

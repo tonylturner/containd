@@ -1,6 +1,8 @@
-import { getJSON, postJSON } from "./api-request";
+import { failureOf, getJSON, getJSONList, getJSONShaped, postJSON, postJSONResult } from "./api-request";
+import { authHeaders, clearAuthExpired, fetchWithSession, handleUnauthorized } from "./api-core";
 
 import type {
+  ApiResult,
   CLIExecuteResponse,
   ConntrackEntry,
   FlowSummary,
@@ -30,23 +32,49 @@ export type ManagementReservation = {
   listenerFaults?: string[] | null;
 };
 
+export type ConntrackKillRequest = {
+  proto: string; src: string; dst: string; sport: number; dport: number;
+  scope: "connection" | "client-service"; durationSecs: number;
+};
+export type ConntrackKillResult = {
+  scope: "connection" | "client-service";
+  matched: number; deleted: number; conntrackDeleted: boolean; deleteError?: string;
+  revocationInstalled: boolean; revocationError?: string; blockedUntil?: string;
+  closure: string;
+};
+
+async function listConntrack(limit: number): Promise<ApiResult<ConntrackEntry[]>> {
+  try {
+    const res = await fetchWithSession(`/api/v1/conntrack?limit=${limit}`, { cache: "no-store", headers: authHeaders() });
+    if (handleUnauthorized(res)) return failureOf(res);
+    clearAuthExpired();
+    if (!res.ok) return failureOf(res);
+    const body: unknown = await res.json();
+    // A list is the only valid snapshot; anything else is not "verified empty".
+    if (!Array.isArray(body)) return { ok: false, error: "malformed connection list" };
+    return { ok: true, data: body as ConntrackEntry[] };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Network error" };
+  }
+}
+
 export const consoleAPI = {
   getManagementReservation: () => getJSON<ManagementReservation>("/api/v1/system/management-reservation"),
-  listCLICommands: () => getJSON<string[]>("/api/v1/cli/commands"),
+  listCLICommands: () => getJSONList<string>("/api/v1/cli/commands"),
   executeCLI: (line: string) =>
     postJSON<CLIExecuteResponse>("/api/v1/cli/execute", { line }),
   completeCLI: (line: string) =>
-    getJSON<string[]>(`/api/v1/cli/complete?line=${encodeURIComponent(line)}`),
+    getJSONList<string>(`/api/v1/cli/complete?line=${encodeURIComponent(line)}`),
 
   listEvents: (limit = 500, signal?: AbortSignal) =>
-    getJSON<TelemetryEvent[]>(`/api/v1/events?limit=${limit}`, signal),
+    getJSONList<TelemetryEvent>(`/api/v1/events?limit=${limit}`, signal),
   queryEvents: (query: EventQuery, signal?: AbortSignal) => {
     const params = new URLSearchParams({ query: "1", limit: "500" });
     for (const [key, value] of Object.entries(query)) if (value) params.set(key, value);
-    return getJSON<EventPage>(`/api/v1/events?${params}`, signal);
+    return getJSONShaped<EventPage>(`/api/v1/events?${params}`, { lists: ["events"] }, signal);
   },
   listFlows: (limit = 200, signal?: AbortSignal) =>
-    getJSON<FlowSummary[]>(`/api/v1/flows?limit=${limit}`, signal),
+    getJSONList<FlowSummary>(`/api/v1/flows?limit=${limit}`, signal),
   getEvent: (id: number) => getJSON<TelemetryEvent>(`/api/v1/events/${id}`),
 
   getSimulationStatus: (signal?: AbortSignal) =>
@@ -56,13 +84,7 @@ export const consoleAPI = {
   stopSimulation: () =>
     postJSON<{ running: boolean }>("/api/v1/simulation", { action: "stop" }),
 
-  listConntrack: (limit = 200) =>
-    getJSON<ConntrackEntry[]>(`/api/v1/conntrack?limit=${limit}`),
-  killConntrack: (req: {
-    proto: string;
-    src: string;
-    dst: string;
-    sport?: number;
-    dport?: number;
-  }) => postJSON<{ status: string }>("/api/v1/conntrack/kill", req),
+  listConntrack: (limit = 200) => listConntrack(limit),
+  killConntrack: (req: ConntrackKillRequest) =>
+    postJSONResult<ConntrackKillResult>("/api/v1/conntrack/kill", req),
 };

@@ -5,27 +5,25 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type DNSConfig, type ServicesStatus } from "../../../../lib/api";
+import { api, isAdmin, type DNSConfig, type DNSStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
-import { useToast } from "../../../../components/ToastProvider";
+import { SaveStateLine } from "../../../../components/SaveStateLine";
+import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { InfoTip } from "../../../../components/InfoTip";
 import { Card } from "../../../../components/Card";
 
-type SaveState = "idle" | "saving" | "saved" | "error";
-
 export default function DNSPage() {
   const canEdit = isAdmin();
-  const toast = useToast();
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<DNSStatus | null>(null);
   const [cfg, setCfg] = useState<DNSConfig>({
     enabled: false,
     listenPort: 53,
     upstreamServers: [],
     cacheSizeMB: 0,
   });
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -33,8 +31,8 @@ export default function DNSPage() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const svc = (await api.getServicesStatus()) as ServicesStatus | any;
-    setStatus((svc as any)?.dns ?? null);
+    const svc = await api.getServicesStatus();
+    setStatus(svc?.dns ?? null);
     const s = await api.getDNS();
     setCfg({
       enabled: s?.enabled ?? false,
@@ -65,26 +63,17 @@ export default function DNSPage() {
     () => (cfg.upstreamServers ?? []).join("\n"),
     [cfg.upstreamServers],
   );
-  const dnsSpark = useMemo(
-    () => [4, 8, 6, (cfg.upstreamServers?.length ?? 1) + 6, 12, 9, 14],
-    [cfg.upstreamServers],
-  );
 
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    setSaveState("saving");
-    const saved = await api.setDNS(cfg);
-    setSaveState(saved.ok ? "saved" : "error");
-    if (!saved.ok) {
-      const msg = saved.error || "Failed to save DNS settings.";
-      setError(msg);
-      toast(msg, "error");
-    } else {
-      setCfg(saved.data);
-      toast(saved.warning ? `DNS settings staged — commit to apply. Warning: ${saved.warning}` : "DNS settings staged — commit to apply.", "success");
-    }
-    setTimeout(() => setSaveState("idle"), 1500);
+    const saved = await save.run("save", () => api.setDNS(cfg), {
+      success: "DNS settings staged — commit to apply.",
+      failure: "Failed to save DNS settings.",
+    });
+    if (!saved) return;
+    if (saved.ok) setCfg(saved.data);
+    else setError(saved.error);
     await refresh();
   }
 
@@ -95,24 +84,25 @@ export default function DNSPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              disabled={save.pending !== null}
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
-              Save
+              {save.pending ? "Saving\u2026" : "Save"}
             </button>
           )}
-          <label className="ml-2 flex items-center gap-2 text-xs text-[var(--text)]">
+          <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
+              className="h-4 w-4 rounded-sm bg-(--surface)"
             />
             Auto
           </label>
@@ -120,7 +110,7 @@ export default function DNSPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -129,11 +119,11 @@ export default function DNSPage() {
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-[var(--text-muted)]">
+      <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
 
-      <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/[0.15] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text)]">
+      <div className="mb-4 flex items-center justify-between rounded-lg border bg-(--surface) px-3 py-2 text-xs text-(--text)">
         <span>Related LAN services</span>
         <Link href="/dhcp/" className="text-emerald-400 hover:text-emerald-400/80">
           DHCP server &rarr;
@@ -141,33 +131,33 @@ export default function DNSPage() {
       </div>
 
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Live runtime status</h2>
+        <h2 className="text-sm font-semibold text-(--text)">Live runtime status</h2>
         {loading ? (
           <div className="mt-3">
             <Skeleton className="h-20 w-full" />
           </div>
         ) : (
-          <div className="mt-3 grid gap-2 text-sm text-[var(--text)] md:grid-cols-2">
+          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
             <div>
               Installed:{" "}
-              <span className="text-[var(--text)]">
+              <span className="text-(--text)">
                 {status?.installed ? "yes" : "no"}
               </span>
             </div>
             <div>
               Running:{" "}
-              <span className="text-[var(--text)]">{status?.running ? "yes" : "no"}</span>
-              {status?.pid ? <span className="text-[var(--text-muted)]"> (pid {status.pid})</span> : null}
+              <span className="text-(--text)">{status?.running ? "yes" : "no"}</span>
+              {status?.pid ? <span className="text-(--text-muted)"> (pid {status.pid})</span> : null}
             </div>
             <div>
-              Rate: <span className="text-[var(--text)]">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             <div>
-              Errors: <span className="text-amber-300">{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             <div className="md:col-span-2">
               Config:{" "}
-              <span className="text-[var(--text)]">
+              <span className="text-(--text)">
                 {status?.config_path ?? "(unknown)"}
               </span>
             </div>
@@ -176,26 +166,28 @@ export default function DNSPage() {
                 {status.last_error}
               </div>
             ) : null}
-            <div className="md:col-span-2">
-              <Sparkline
-                values={dnsSpark}
-                color="var(--primary)"
-                background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
-                title="Resolver query trend"
-              />
-            </div>
+            {status?.sparkline.length ? (
+              <div className="md:col-span-2">
+                <Sparkline
+                  values={status.sparkline}
+                  color="var(--primary)"
+                  background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))"
+                  title="DNS events per minute"
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </Card>
 
       <Card>
-        <h2 className="text-lg font-semibold text-[var(--text)]">Resolver</h2>
-        <p className="mt-1 text-sm text-[var(--text)]">
+        <h2 className="text-lg font-semibold text-(--text)">Resolver</h2>
+        <p className="mt-1 text-sm text-(--text)">
           Configure the embedded Unbound DNS resolver.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+          <label className="flex items-center gap-2 text-sm text-(--text)">
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
@@ -210,7 +202,7 @@ export default function DNSPage() {
           </label>
 
           <div className="md:col-span-2">
-            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
               Upstream Servers (one per line)
               <InfoTip label="Forward-only DNS servers used by Unbound for resolution." />
             </label>
@@ -232,11 +224,11 @@ export default function DNSPage() {
             />
           </div>
 
-          <details className="md:col-span-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3">
-            <summary className="cursor-pointer text-sm text-[var(--text)]">Advanced options</summary>
+          <details className="md:col-span-2 rounded-xs border bg-(--surface) px-4 py-3">
+            <summary className="cursor-pointer text-sm text-(--text)">Advanced options</summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                   Listen Port
                   <InfoTip label="Local port for the DNS resolver (default 53)." />
                 </label>
@@ -252,7 +244,7 @@ export default function DNSPage() {
               </div>
 
               <div>
-                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                   Cache Size (MB)
                   <InfoTip label="In-memory cache size for DNS responses." />
                 </label>
@@ -270,16 +262,7 @@ export default function DNSPage() {
           </details>
         </div>
 
-        <p className="mt-3 text-xs text-[var(--text-muted)]">
-          State:{" "}
-          {saveState === "saving"
-            ? "saving\u2026"
-            : saveState === "saved"
-              ? "staged — commit to apply."
-              : saveState === "error"
-                ? "error"
-                : "idle"}
-        </p>
+        <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </Card>
     </Shell>
   );

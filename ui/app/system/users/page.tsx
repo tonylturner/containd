@@ -4,22 +4,25 @@ import { useEffect, useState } from "react";
 
 import { Shell } from "../../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../../components/ConfirmDialog";
-import { api, isAdmin, type User, type UserRole } from "../../../lib/api";
+import { SaveStateLine } from "../../../components/SaveStateLine";
+import { useSaveAction } from "../../../hooks/useSaveAction";
+import { api, isAdmin, type ApiResult, type User, type UserRole } from "../../../lib/api";
 import {
   CreateUserPanel,
   ManageUsersPanel,
   ResetPasswordModal,
+  type PendingAction,
 } from "./users-sections";
 
-type SaveState = "idle" | "saving" | "saved" | "error";
 type UsersTab = "manage" | "create";
 
 export default function UsersPage() {
   const confirm = useConfirm();
+  const save = useSaveAction<Exclude<PendingAction, null>>();
+  const pending = save.pending;
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<{
     firstName: string;
@@ -66,16 +69,29 @@ export default function UsersPage() {
     refresh();
   }, []);
 
-  async function onCreate() {
+  /**
+   * Runs one user action at a time through the shared save hook: the acting
+   * button is disabled while it runs, then a toast and the state line confirm
+   * it, or the error is shown. True when it succeeded.
+   */
+  async function runAction<T>(
+    key: Exclude<PendingAction, null>,
+    action: () => Promise<ApiResult<T>>,
+    messages: { success: string; failure: string },
+  ): Promise<boolean> {
     setError(null);
-    setSaveState("saving");
-    const created = await api.createUser(newUser as any);
-    if (!created.ok) {
-      setSaveState("error");
-      setError(created.error || "Failed to create user.");
-      setTimeout(() => setSaveState("idle"), 5000);
-      return;
-    }
+    const result = await save.run(key, action, messages);
+    if (result && !result.ok) setError(result.error);
+    return !!result?.ok;
+  }
+
+  async function onCreate() {
+    const username = newUser.username;
+    const created = await runAction("create", () => api.createUser(newUser as any), {
+      success: `User ${username} created.`,
+      failure: "Failed to create user.",
+    });
+    if (!created) return;
     setNewUser({
       username: "",
       firstName: "",
@@ -85,8 +101,6 @@ export default function UsersPage() {
       password: "",
     });
     await refresh();
-    setSaveState("saved");
-    setTimeout(() => setSaveState("idle"), 1200);
   }
 
   function startEdit(user: User) {
@@ -106,20 +120,15 @@ export default function UsersPage() {
 
   async function saveEdit(id: string) {
     if (!editDraft) return;
-    setError(null);
-    setSaveState("saving");
-    const updated = await api.updateUser(id, editDraft);
-    if (!updated.ok) {
-      setSaveState("error");
-      setError(updated.error || "Failed to update user.");
-      setTimeout(() => setSaveState("idle"), 5000);
-      return;
-    }
+    const draft = editDraft;
+    const updated = await runAction(`edit:${id}`, () => api.updateUser(id, draft), {
+      success: "User saved.",
+      failure: "Failed to update user.",
+    });
+    if (!updated) return;
     await refresh();
-    setSaveState("saved");
     setEditingUserId(null);
     setEditDraft(null);
-    setTimeout(() => setSaveState("idle"), 1200);
   }
 
   function onResetPassword(id: string) {
@@ -129,19 +138,16 @@ export default function UsersPage() {
 
   async function submitResetPassword() {
     if (!resetPwUserId || !resetPwValue) return;
-    setError(null);
-    setSaveState("saving");
-    const ok = await api.setUserPassword(resetPwUserId, resetPwValue);
-    if (!ok.ok) {
-      setSaveState("error");
-      setError(ok.error || "Failed to set password.");
-      setTimeout(() => setSaveState("idle"), 5000);
-      return;
-    }
+    const id = resetPwUserId;
+    const password = resetPwValue;
+    const username = users.find((u) => u.id === id)?.username ?? "the user";
+    const set = await runAction(`password:${id}`, () => api.setUserPassword(id, password), {
+      success: `Password set for ${username}.`,
+      failure: "Failed to set password.",
+    });
+    if (!set) return;
     setResetPwUserId(null);
     setResetPwValue("");
-    setSaveState("saved");
-    setTimeout(() => setSaveState("idle"), 1200);
   }
 
   function onDeleteUser(user: User) {
@@ -152,21 +158,11 @@ export default function UsersPage() {
       confirmLabel: "Delete",
       variant: "danger",
       onConfirm: async () => {
-        setError(null);
-        setSaveState("saving");
-        const ok = await api.deleteUser(user.id);
-        if (!ok.ok) {
-          setSaveState("error");
-          setError(
-            ok.error ||
-              "Failed to delete user. Ensure at least one admin remains.",
-          );
-          setTimeout(() => setSaveState("idle"), 5000);
-          return;
-        }
-        await refresh();
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1200);
+        const deleted = await runAction(`delete:${user.id}`, () => api.deleteUser(user.id), {
+          success: `User ${user.username} deleted.`,
+          failure: "Failed to delete user. Ensure at least one admin remains.",
+        });
+        if (deleted) await refresh();
       },
     });
   }
@@ -179,18 +175,11 @@ export default function UsersPage() {
       confirmLabel: "Disable MFA",
       variant: "warning",
       onConfirm: async () => {
-        setError(null);
-        setSaveState("saving");
-        const ok = await api.disableUserMFA(user.id);
-        if (!ok.ok) {
-          setSaveState("error");
-          setError(ok.error || "Failed to disable MFA.");
-          setTimeout(() => setSaveState("idle"), 5000);
-          return;
-        }
-        await refresh();
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1200);
+        const done = await runAction(`mfa-disable:${user.id}`, () => api.disableUserMFA(user.id), {
+          success: `${user.mfaRequired ? "MFA reset" : "MFA disabled"} for ${user.username}.`,
+          failure: "Failed to disable MFA.",
+        });
+        if (done) await refresh();
       },
     });
   }
@@ -205,18 +194,11 @@ export default function UsersPage() {
       confirmLabel: "Require MFA",
       variant: "warning",
       onConfirm: async () => {
-        setError(null);
-        setSaveState("saving");
-        const ok = await api.requireUserMFA(user.id);
-        if (!ok.ok) {
-          setSaveState("error");
-          setError(ok.error || "Failed to require MFA.");
-          setTimeout(() => setSaveState("idle"), 5000);
-          return;
-        }
-        await refresh();
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1200);
+        const done = await runAction(`mfa-require:${user.id}`, () => api.requireUserMFA(user.id), {
+          success: `MFA required for ${user.username}.`,
+          failure: "Failed to require MFA.",
+        });
+        if (done) await refresh();
       },
     });
   }
@@ -229,18 +211,11 @@ export default function UsersPage() {
       confirmLabel: "Clear requirement",
       variant: "warning",
       onConfirm: async () => {
-        setError(null);
-        setSaveState("saving");
-        const ok = await api.clearUserMFARequirement(user.id);
-        if (!ok.ok) {
-          setSaveState("error");
-          setError(ok.error || "Failed to clear MFA requirement.");
-          setTimeout(() => setSaveState("idle"), 5000);
-          return;
-        }
-        await refresh();
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1200);
+        const done = await runAction(`mfa-clear:${user.id}`, () => api.clearUserMFARequirement(user.id), {
+          success: `MFA requirement cleared for ${user.username}.`,
+          failure: "Failed to clear MFA requirement.",
+        });
+        if (done) await refresh();
       },
     });
   }
@@ -253,18 +228,11 @@ export default function UsersPage() {
       confirmLabel: "Extend grace",
       variant: "warning",
       onConfirm: async () => {
-        setError(null);
-        setSaveState("saving");
-        const ok = await api.extendUserMFAGrace(user.id);
-        if (!ok.ok) {
-          setSaveState("error");
-          setError(ok.error || "Failed to extend MFA grace.");
-          setTimeout(() => setSaveState("idle"), 5000);
-          return;
-        }
-        await refresh();
-        setSaveState("saved");
-        setTimeout(() => setSaveState("idle"), 1200);
+        const done = await runAction(`mfa-grace:${user.id}`, () => api.extendUserMFAGrace(user.id), {
+          success: `MFA grace extended for ${user.username}.`,
+          failure: "Failed to extend MFA grace.",
+        });
+        if (done) await refresh();
       },
     });
   }
@@ -282,31 +250,32 @@ export default function UsersPage() {
           setResetPwValue("");
         }}
         onSubmit={submitResetPassword}
+        pending={!!resetPwUserId && pending === `password:${resetPwUserId}`}
       />
 
       {!isAdmin() && (
-        <div className="mb-4 rounded-sm border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-400">
+        <div className="mb-4 rounded-xs border p-4 text-sm">
           Admin access required.
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
 
-      <div className="mb-4 flex max-w-md gap-1 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-1">
+      <div className="mb-4 flex max-w-md gap-1 rounded-xs border bg-(--surface) p-1">
         <button
           type="button"
           onClick={() => setActiveTab("manage")}
-          className={`flex-1 rounded-sm px-3 py-2 text-sm font-medium transition-ui ${activeTab === "manage" ? "bg-amber-500/[0.12] text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-amber-500/[0.08]"}`}
+          className={`flex-1 rounded-xs px-3 py-2 text-sm font-medium transition-ui ${activeTab === "manage" ? "text-(--text)" : "text-(--text-muted) "}`}
         >
           Manage Users
         </button>
         <button
           type="button"
           onClick={() => setActiveTab("create")}
-          className={`flex-1 rounded-sm px-3 py-2 text-sm font-medium transition-ui ${activeTab === "create" ? "bg-amber-500/[0.12] text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-amber-500/[0.08]"}`}
+          className={`flex-1 rounded-xs px-3 py-2 text-sm font-medium transition-ui ${activeTab === "create" ? "text-(--text)" : "text-(--text-muted) "}`}
         >
           Add User
         </button>
@@ -331,6 +300,7 @@ export default function UsersPage() {
           onRequireUserMFA={onRequireUserMFA}
           onClearUserMFARequirement={onClearUserMFARequirement}
           onExtendUserMFAGrace={onExtendUserMFAGrace}
+          pending={pending}
         />
       )}
 
@@ -340,8 +310,11 @@ export default function UsersPage() {
           newUser={newUser}
           setNewUser={setNewUser}
           onCreate={onCreate}
+          pending={pending === "create"}
         />
       )}
+
+      <SaveStateLine state={save.state} saved="saved." />
     </Shell>
   );
 }

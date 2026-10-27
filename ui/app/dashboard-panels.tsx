@@ -9,6 +9,8 @@ import type {
 } from "../lib/api";
 
 import { Skeleton } from "../components/Skeleton";
+import { formatEndpoint } from "../lib/endpoint";
+import { formatBytes } from "../lib/utils";
 
 export type ServiceInfo = {
   name: string;
@@ -66,7 +68,7 @@ export function SetupChecklist({
   ];
 
   return (
-    <div className="mb-5 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-card">
+    <div className="mb-5 rounded-xl border border-white/8 bg-white/3 p-4 shadow-card">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
@@ -78,7 +80,7 @@ export function SetupChecklist({
         </div>
         <Link
           href="/monitoring/"
-          className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300 transition-ui hover:bg-white/[0.08] hover:text-white"
+          className="rounded-lg border border-white/8 bg-white/4 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-ui hover:bg-white/8 hover:text-white"
         >
           Open Monitoring
         </Link>
@@ -87,7 +89,7 @@ export function SetupChecklist({
         {steps.map((step) => (
           <div
             key={step.title}
-            className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3"
+            className="rounded-lg border border-white/6 bg-white/2 p-3"
           >
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="text-sm font-semibold text-slate-100">{step.title}</span>
@@ -95,7 +97,7 @@ export function SetupChecklist({
                 className={`rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider ${
                   step.complete
                     ? "bg-emerald-500/15 text-emerald-400"
-                    : "bg-amber-500/15 text-amber-400"
+                    : ""
                 }`}
               >
                 {step.complete ? "Ready" : "Action"}
@@ -104,7 +106,7 @@ export function SetupChecklist({
             <p className="mb-3 text-xs text-slate-500">{step.detail}</p>
             <Link
               href={step.href}
-              className="text-xs font-semibold text-amber-300 transition-colors hover:text-amber-200"
+              className="text-xs font-semibold transition-colors"
             >
               {step.cta} →
             </Link>
@@ -122,10 +124,10 @@ export function ServiceGrid({ services }: { services: ServiceInfo[] }) {
         <Link
           key={service.name}
           href={service.href}
-          className={`block rounded-lg border p-3 transition-colors hover:border-white/[0.12] ${
+          className={`block rounded-lg border p-3 transition-colors hover:border-white/12 ${
             service.active
-              ? "border-emerald-500/20 bg-emerald-500/[0.04] hover:bg-emerald-500/[0.07]"
-              : "border-white/[0.06] bg-white/[0.02] opacity-50 hover:opacity-70"
+              ? "border-emerald-500/20 bg-emerald-500/4 hover:bg-emerald-500/[0.07]"
+              : "border-white/6 bg-white/2 opacity-50 hover:opacity-70"
           }`}
         >
           <div
@@ -146,7 +148,7 @@ export function ServiceGrid({ services }: { services: ServiceInfo[] }) {
                 return (
                   <div
                     key={index}
-                    className="flex-1 rounded-t-sm transition-all duration-300"
+                    className="flex-1 rounded-t-xs transition-all duration-300"
                     style={{
                       height: `${height}px`,
                       background: service.active
@@ -179,7 +181,7 @@ export function TrafficCounter({
   color: string;
 }) {
   return (
-    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5">
+    <div className="rounded-lg border border-white/6 bg-white/2 p-2.5">
       <div className={`text-lg font-bold tabular-nums leading-none ${color}`}>
         {value.toLocaleString()}
       </div>
@@ -212,11 +214,11 @@ export function EventStream({ events }: { events: TelemetryEvent[] }) {
         return (
           <div
             key={event.id}
-            className="grid grid-cols-[70px_50px_100px_1fr_auto] gap-3 items-center px-2 py-1 rounded hover:bg-white/[0.02] transition-colors"
+            className="grid grid-cols-[70px_50px_100px_1fr_auto] gap-3 items-center px-2 py-1 rounded-sm hover:bg-white/2 transition-colors"
           >
             <span className="text-slate-500">{time}</span>
             <span
-              className={`text-center px-1 py-0.5 rounded text-[9px] tracking-wider uppercase ${levelClass(level)}`}
+              className={`text-center px-1 py-0.5 rounded-sm text-[9px] tracking-wider uppercase ${levelClass(level)}`}
             >
               {level}
             </span>
@@ -249,7 +251,7 @@ function eventMessage(event: TelemetryEvent): string {
   }
   const parts = [event.kind];
   if (event.proto) parts.push(event.proto);
-  if (event.dstIp) parts.push(`-> ${event.dstIp}:${event.dstPort ?? ""}`);
+  if (event.dstIp) parts.push(`-> ${formatEndpoint(event.dstIp, event.dstPort)}`);
   return parts.join(" ");
 }
 
@@ -258,11 +260,11 @@ function levelClass(level: string): string {
     case "block":
       return "bg-red-500/15 text-red-400";
     case "warn":
-      return "bg-amber-500/15 text-amber-400";
+      return "";
     case "ok":
       return "bg-emerald-500/15 text-emerald-400";
     default:
-      return "bg-cyan-500/10 text-cyan-400";
+      return "";
   }
 }
 
@@ -341,9 +343,9 @@ export function SystemHealthPanel({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="grid gap-3">
       {stats && (
-        <div className="flex justify-between text-2xs font-mono text-slate-500 mb-1">
+        <div className="flex justify-between text-2xs font-mono text-slate-500">
           <span>Uptime: {stats.runtime.uptime}</span>
           <span>{stats.runtime.goroutines} goroutines</span>
         </div>
@@ -357,7 +359,7 @@ export function SystemHealthPanel({
             </span>
             <span className="text-slate-300 tabular-nums">{item.value}</span>
           </div>
-          <div className="h-1 w-full rounded-full bg-white/[0.06]">
+          <div className="h-1 w-full rounded-full bg-white/6">
             <div
               className="h-1 rounded-full transition-all duration-700"
               style={{ width: `${Math.max(1, item.pct)}%`, background: item.color }}
@@ -367,15 +369,4 @@ export function SystemHealthPanel({
       ))}
     </div>
   );
-}
-
-function formatBytes(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }

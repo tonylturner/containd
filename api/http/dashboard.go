@@ -7,11 +7,11 @@ import (
 	"context"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -69,7 +69,7 @@ func dashboardHandler(store config.Store, engine EngineClient, services Services
 
 func buildDashboardHealth() dashboardHealth {
 	hostname, _ := os.Hostname()
-	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
+	lab := labmode.Enabled()
 	return dashboardHealth{
 		Status:    "ok",
 		Component: "mgmt",

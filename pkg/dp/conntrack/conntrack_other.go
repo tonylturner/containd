@@ -5,8 +5,13 @@
 
 package conntrack
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
-func List(limit int) ([]Entry, error) {
+func List(ctx context.Context, limit int) ([]Entry, error) {
+	_ = ctx
+	_ = limit
 	return nil, fmt.Errorf("conntrack is only available on Linux")
 }

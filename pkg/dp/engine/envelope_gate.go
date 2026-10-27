@@ -6,7 +6,9 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/enforce"
@@ -41,21 +43,54 @@ type envelopeGate struct {
 	// fault reports a failed switch; ok reports a successful one.
 	fault func(reason string)
 	ok    func()
+	// snap is the snapshot of the installed ruleset and planned the start of
+	// the schedule horizon its time sets hold (schedule_planner.go).
+	snap    *rules.Snapshot
+	planned time.Time
+	// clock plans schedule horizons; nil is time.Now.
+	clock func() time.Time
+	// plan is the planner's state for the installed ruleset; nil when that
+	// has no scheduled rule. Written under mu, read without it.
+	plan atomic.Pointer[SchedulePlan]
+}
+
+// now is the time schedule horizons start from.
+func (g *envelopeGate) now() time.Time {
+	if g.clock != nil {
+		return g.clock()
+	}
+	return time.Now()
 }
 
 // wantOpenLocked reports whether the installed envelope may queue: only to
 // the queue this engine owns.
 func (g *envelopeGate) wantOpenLocked() bool {
-	return g.installed && g.owned != 0 && g.comp != nil && g.comp.QueueID == int(g.owned)
+	return g.installed && g.comp != nil && g.queueOpenLocked(g.comp.QueueID)
+}
+
+// queueOpenLocked is the envelope decision for both candidate and live applies.
+func (g *envelopeGate) queueOpenLocked(queue int) bool {
+	return g.owned != 0 && queue == int(g.owned)
+}
+
+// sampleOpen reads the decision for a candidate queue without changing the gate.
+func (g *envelopeGate) sampleOpen(queue int) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.queueOpenLocked(queue)
 }
 
 // apply compiles snap in the current envelope state and installs it. The
-// compiler's envelope state is set here and nowhere else.
+// compiler's envelope state is set here and nowhere else. The transaction
+// also converges comp's dynamic table from its live layout and, when comp
+// owns differently named tables than the installed ruleset, removes the
+// installed ones; the returned ruleset is comp's alone.
 func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applier enforce.Applier, snap *rules.Snapshot) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	open := g.owned != 0 && comp.QueueID == int(g.owned)
+	open := g.queueOpenLocked(comp.QueueID)
 	comp.IEC104EnvelopeOpen = open
+	comp.ScheduleFrom = g.now()
 	compiled, err := comp.CompileFirewall(snap)
 	if err != nil {
 		return compiled, err
@@ -63,16 +98,45 @@ func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applie
 	if applier == nil {
 		return compiled, errors.New("no applier configured")
 	}
-	if err := applier.Apply(ctx, compiled); err != nil {
+	live, err := applier.ReadTable(ctx, comp.DynamicTable())
+	if err != nil {
+		return compiled, fmt.Errorf("read nft table %s: %w", comp.DynamicTable(), err)
+	}
+	retire := ""
+	if g.comp != nil {
+		retire = g.comp.RetireTables(comp)
+	}
+	if err := applier.Apply(ctx, comp.InstallScript(live, retire, compiled)); err != nil {
 		return compiled, err
 	}
 	g.comp, g.applier = comp, applier
+	g.snap, g.planned = snap, comp.ScheduleFrom
+	g.plan.Store(newSchedulePlan(snap, comp))
 	g.installed = comp.SteersIEC104(snap)
 	g.open = g.installed && open
 	if g.ok != nil {
 		g.ok() // the kernel holds the current state again
 	}
 	return compiled, nil
+}
+
+// release deletes the tables of the installed ruleset, if any, and forgets
+// it. On failure the ruleset stays installed and recorded.
+func (g *envelopeGate) release() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.comp == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), envelopeSwitchTimeout)
+	defer cancel()
+	if err := g.applier.Apply(ctx, g.comp.DeleteTables()); err != nil {
+		return err
+	}
+	g.comp, g.applier, g.snap = nil, nil, nil
+	g.plan.Store(nil)
+	g.installed, g.open = false, false
+	return nil
 }
 
 // own records the queue group this engine has bound (0: none) and writes

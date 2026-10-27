@@ -1,92 +1,113 @@
 # Logging and Intrusion Evidence
 
-containd is meant to help operators understand what happened, not just enforce policy.
+## Evidence sources and storage
 
-## Built-in Evidence Sources
+- Administrative audit records persist in SQLite. `CONTAIND_AUDIT_DB` defaults
+  to `data/audit.db` for the binary; the container deployment uses `/data/audit.db`.
+- Firewall, DPI, IDS, AV, proxy, and service events are exposed through
+  `GET /api/v1/events`. Engine event history is bounded and in memory, not an
+  audit database or a durable delivery queue.
+- Management and engine application logs go to stdout. Embedded service managers
+  also configure JSON files under `/data/logs/`: `proxy.log`, `dns.log`, `ntp.log`,
+  `dhcp.log`, `vpn.log`, `av.log`, and `syslog-forwarder.log`. These file sinks
+  depend on a writable directory; generic `NewService` application loggers do not
+  configure a file path. `CONTAIND_LOG_FILE=0` disables configured file sinks.
+- `GET /metrics` exposes Prometheus metrics, not a replacement for event evidence.
 
-Relevant built-in sources include:
+File rotation defaults are **20 MB per file, 5 backups, and 7 days**. These are
+library defaults for configured files, not a guarantee of complete retention.
+`CONTAIND_LOG_LEVEL` and `CONTAIND_LOG_LEVEL_<SERVICE>` control application log
+levels. CLI queries include `show audit` and `show events`; see
+[API Reference](api-reference.md) for wire contracts.
 
-- **audit log** for administrative and sensitive management actions
-- **events** for firewall, DPI, IDS, AV, proxy, and service activity
-- **service/runtime logs** from the management and service processes
-- **syslog forwarding** and **event export** for off-box handling
-- **Prometheus metrics** for operational monitoring and trend detection
+## Account and credential audit records
 
-## What containd Logs by Default
+Every account and credential change writes an audit record with its actor and
+source (`api` or `ssh`). Refused logins, own password changes with a wrong
+current password and refused MFA changes are recorded with result `denied`.
+Records never hold the password or code that was tried.
 
-By default, the appliance records:
+| Action | Change |
+| ------ | ------ |
+| `auth.login` | Web/API logins, wrong passwords and wrong or reused TOTP codes |
+| `ssh.login`, `ssh.logout` | SSH logins and logouts. Refused: unknown or non-admin account, wrong password, unauthorized key (with its fingerprint), wrong or reused TOTP code, wrong current password at a forced change, and expired MFA enrollment grace |
+| `auth.user.create`, `auth.user.update`, `auth.user.delete` | User creation, profile or role change, and deletion |
+| `auth.profile.update` | A user's change to their own profile |
+| `auth.password.change` | A user's own password change, on the web/API, the SSH menu or wizard, or at a forced SSH login change |
+| `auth.password.set_admin` | An admin setting another account's password |
+| `auth.mfa.*` | MFA enable, disable, requirement, grace and admin reset. Refused: a wrong code at enrollment, and a wrong password or a wrong or reused code when turning MFA off |
+| `ssh.authorized_key.add` | SSH key enrollment in the setup wizard, with the key fingerprint |
+| `system.tls.cert.set`, `system.tls.trusted_ca.set` | Management TLS certificate and additional CA bundle replacement |
 
-- administrative actions in the audit database (`CONTAIND_AUDIT_DB`, default `/data/audit.db`)
-- runtime events exposed through `/api/v1/events`
-- service and management logs on stdout, with optional rotating file logs under `/data/logs/`
+A refused SSH key is recorded once per connection that ends without logging
+in, since clients offer every key they hold. Each refused SSH check counts
+against the login limit for its client address and account: 10 failures, then
+2 minutes blocked. Blocked attempts write no record, so a sustained attempt
+against one account from one address writes about 5 records a minute. Each new
+account name or address starts its own count. Lab mode writes no refused-SSH or
+refused-MFA-change records.
 
-Structured application logging uses the shared logging layer in [`pkg/common/logging`](https://github.com/tonylturner/containd/blob/main/pkg/common/logging/logging.go). Default file rotation settings are:
+## Off-box forwarding
 
-- 20 MB per file
-- 5 backups
-- 7 days retention
+Two working syslog paths are distinct:
 
-These defaults are for convenience, not a universal compliance statement.
+- **Service syslog forwarder**: `services.syslog.forwarders` sends polled engine
+  and service telemetry over UDP or TCP. `services.syslog.format` selects JSON or
+  RFC5424 output. Retries/backoff and status counters expose failures; event
+  forwarding is best-effort, not a durable acknowledged stream. Bounded polling,
+  mixed event-source IDs, and failures can leave gaps. The same forwarders also
+  carry audit records; see [Audit records over syslog](#audit-records-over-syslog).
+- **Application logger sink**: `CONTAIND_LOG_SYSLOG_ADDR` and
+  `CONTAIND_LOG_SYSLOG_PROTO` add a remote sink to shared structured loggers.
+  The default protocol is UDP; TCP and Unix sockets are also supported. These
+  logs are not the complete DPI event stream. Verify reception at the collector.
 
-## Key APIs and Outputs
+### Audit records over syslog
 
-- `GET /api/v1/audit` — administrative audit records
-- `GET /api/v1/events` — normalized security and telemetry events
-- `GET /metrics` — Prometheus metrics
-- service-specific status and event surfaces in the System and Monitoring pages
+Every syslog forwarder also sends the audit database's records, oldest first,
+in the configured format:
 
-For CLI users:
+```text
+<109>1 2026-10-26T09:14:03Z fw1 containd - audit [audit@47450 id="42" actor="admin" source="api" action="config.commit" target="running" result="success" detail=""] admin config.commit running: success
+{"kind":"audit","host":"fw1","id":43,"timestamp":"2026-10-26T09:14:09Z","actor":"eve","source":"api","action":"auth.login","target":"eve","result":"denied","detail":"invalid credentials"}
+```
 
-- `show audit`
-- `show events`
+- RFC5424 messages use MSGID `audit`, facility 13 (log audit), severity notice
+  for `success`, `ok` and `requested` results and warning otherwise. JSON
+  messages carry `"kind":"audit"`. Event messages never use either marker.
+- Detail is cut to 1024 bytes, target to 256 bytes and the other fields to 128
+  bytes; a cut ends in `…`. Control characters are escaped, so a value cannot
+  start a new line or message.
+- Each forwarder keeps a cursor, the last audit ID it delivered, in the audit
+  database. A forwarder is identified by protocol, address and port. Failed
+  delivery keeps the cursor and the next flush retries, so records sent during
+  a collector outage or before a restart are delivered later. A batch holds at
+  most `services.syslog.batchSize` records per forwarder and flush.
+- Delivery is at least once: after a crash a collector can receive a record
+  twice. Use `id` to deduplicate; IDs keep increasing, also across a factory
+  reset. TCP delivery means the local TCP stack accepted the message; UDP has
+  no delivery signal.
+- A newly configured forwarder starts after the newest record and does not
+  replay history. Removing a forwarder deletes its cursor. A factory reset
+  wipes the records and rewinds the cursors, so records written afterwards are
+  forwarded.
 
-## Off-box Forwarding
+`GET /api/v1/services/status` reports `syslog.audit`: `enabled`, `sent_total`,
+`failed_total`, `last_error`, `last_flush`, total `backlog`, and per forwarder
+`forwarder`, `last_id`, `backlog` (records not yet delivered), `last_error`
+and `last_sent`. A growing backlog or a set `last_error` means the collector is
+not receiving audit records. The CLI command `show syslog status` prints the
+same fields.
 
-For stronger environments, containd should not be the only place logs live.
+## Retention checklist
 
-Recommended pattern:
-
-1. Forward normalized events or syslog to an external collector.
-2. Preserve config backups and the audit database during upgrades.
-3. Export or snapshot relevant evidence before destructive lab resets.
-4. Use metrics to detect health regressions even when you are not tailing logs directly.
-
-Relevant controls already present:
-
-- service syslog forwarders under `services.syslog`
-- event export in CEF, JSON, and Syslog formats
-- optional remote syslog sink for structured logs via `CONTAIND_LOG_SYSLOG_ADDR` and `CONTAIND_LOG_SYSLOG_PROTO`
-
-## Recommended Lab Posture
-
-For classroom and lab use, a good minimum posture is:
-
-- keep audit logging enabled
-- forward syslog/events when the lab design allows it
-- preserve evidence for the duration of the exercise
-- review audit and event timelines as part of the teaching workflow
-
-This matters because containd is often used to teach secure operations. A lab that drops all evidence on the floor teaches the wrong habit.
-
-## Recommended Production-style Posture
-
-For more serious deployments or longer-lived labs:
-
-- treat audit and event data as operational records
-- forward evidence off-box
-- preserve evidence through upgrades
-- define your own retention period based on organizational needs
-- review authentication, password change, MFA, config commit, and service failure events regularly
-
-## Current Gaps and Limits
-
-containd provides useful evidence surfaces, but operators still need to decide:
-
-- where long-term retention lives
-- which logs are authoritative in their environment
-- whether external SIEM / log management is required
-
-The project documents the built-in capabilities, but evidence handling policy remains an operator responsibility.
+1. Choose an external collector and retention period; test delivery and inspect
+   forwarder status rather than assuming an empty collector means no activity.
+2. Preserve audit databases and configuration backups through upgrades.
+3. Retrieve relevant event pages before process restarts, bounded-cache eviction,
+   or destructive lab resets. Pagination cannot recover already lost events.
+4. Review authentication, config commits, and service failures alongside packet
+   evidence. Metrics can reveal health regressions but cannot reconstruct events.
 
 ## Bounded IEC 104 incident evidence
 
@@ -113,9 +134,9 @@ more than 32 evidence rows loses its oldest retained rows. The firewall bank
 still evicts only on DENY overflow. No age expiry or durable retention applies;
 configuration rebuilds preserve stores, process restarts do not. Already-evicted
 decoded context cannot be recovered. Small priority-selected pages can omit
-context: narrow by session and use a sufficiently large page. Export evidence
-off-box for a complete, durable record; this bounded cache cannot promise an
-unlimited session history.
+context: narrow by session and use a sufficiently large page. Retrieve and
+preserve evidence off-box before eviction or restart; the built-in cache and best-effort syslog forwarding cannot promise a complete, durable
+session history.
 
 
 ## Search a session before applying the page limit
@@ -144,8 +165,8 @@ engine evidence and service rows before limiting. It returns:
 
 Limits are 1–5000 (default 500); invalid limits/bounds return 400. `query=1`
 requests a chronological query page without narrowing. With no query/filter
-parameters, `?limit=N` still returns the **bare event array** expected by
-RangerDanger and other existing callers, with evidence-priority selection.
+parameters, `?limit=N` still returns the legacy **bare event array**, with
+evidence-priority selection.
 The engine endpoint `/internal/events` and management client share this contract.
 
 `historyTruncated` conservatively warns of possible gaps: any general or protected

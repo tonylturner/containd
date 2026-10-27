@@ -52,7 +52,7 @@ func EffectiveMode(ruleMode, globalMode string) string {
 func (e *Evaluator) IEC104Envelope(ctx EvalContext, globalMode string) (matched bool, mode string) {
 	for i := range e.compiled {
 		ce := &e.compiled[i]
-		if ce.iec == nil || !matchZones(ce.Entry, ctx) || !matchCIDRs(ce.Entry, ctx) || !matchProtoCompiled(ce, ctx) {
+		if ce.iec == nil || !matchZones(&ce.Entry, ctx) || !matchCIDRs(ce, ctx) || !matchProtoCompiled(ce, ctx) {
 			continue
 		}
 		matched = true
@@ -67,21 +67,17 @@ func (e *Evaluator) IEC104Envelope(ctx EvalContext, globalMode string) (matched 
 }
 
 // EvaluateIEC104 evaluates one IEC104 object (or S/U/error APDU) against
-// the IEC104 rules only, in order. Other rules, including a
-// broad tcp/2404 ALLOW, do not take part. No match is DENY whatever
+// the IEC104 rules only, in DecisionOrder: any matching ALLOW wins, else
+// the first matching DENY by rule ID. Other rules, including a broad
+// tcp/2404 ALLOW, do not take part. No match is DENY whatever
 // firewall.defaultAction says. ctx carries the session tuple, as for
 // IEC104Envelope, and ICS.IEC104 must be set.
 func (e *Evaluator) EvaluateIEC104(ctx EvalContext) (Action, *Entry) {
 	if ctx.ICS == nil || ctx.ICS.IEC104 == nil {
 		return ActionDeny, nil
 	}
-	for i := range e.compiled {
-		ce := &e.compiled[i]
-		if ce.iec == nil {
-			continue
-		}
-		if matchZones(ce.Entry, ctx) && matchCIDRs(ce.Entry, ctx) && matchProtoCompiled(ce, ctx) &&
-			matchIdentities(ce.Entry, ctx) && matchIEC104(ce, ctx) && matchSchedule(ce.Entry, ctx) {
+	for _, i := range e.decide {
+		if ce := &e.compiled[i]; ce.iec != nil && ce.matches(ctx) {
 			return ce.Action, &ce.Entry
 		}
 	}

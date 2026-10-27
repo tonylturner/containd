@@ -38,7 +38,12 @@ test/iec104/capture/capture.sh            # writes into test/iec104/testdata/
   the APDU bytes do not, apart from CP56Time2a values and the drifting feeder
   current.
 
-## RTU point map (test/iec104/endpoint/iec104ep.c)
+## Recorded corpus RTU point map
+
+This is the point map used when these captures were recorded from
+`test/iec104/endpoint/iec104ep.c`, not an inventory of the live endpoint.
+See the [harness guide](../README.md#endpoint-points-and-state) for its
+additional monitoring points.
 
 | CA | IOA | Type | Meaning |
 |---:|---:|---|---|
@@ -138,7 +143,7 @@ The control centre closes last with FIN.
 Types 45, 47-51, 58-64 and 103-107, SQ = 1 objects, IPv4 fragments and
 out-of-order delivery are not here; use documented synthetic fixtures for
 those. The `abort-reconnect` evidence comes from
-`scripts/smoke-iec104.sh` once the integrated engine resets sessions.
+`scripts/smoke-iec104.sh`, which checks resets against the live endpoints.
 
 ## Go decoder regression corpus
 

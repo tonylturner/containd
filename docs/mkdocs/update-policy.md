@@ -1,86 +1,53 @@
 # Update Policy
 
-containd ships frequently and treats security fixes as normal product work, not separate premium functionality.
+## Supported releases
 
-## Supported Release Posture
+- The **latest stable release** is the primary supported line.
+- Prereleases such as `-beta` tags are for evaluation, not long-term support.
+- Do not assume security backports for older releases unless release notes or
+  an advisory explicitly state otherwise.
 
-At the current stage of the project, the practical support policy is:
+## Release artifacts and security information
 
-- the **latest stable release** is the primary supported line
-- prereleases such as `-beta` tags are for evaluation and validation, not long-term support
-- older releases may remain usable, but operators should not assume ongoing security backports unless the project says so explicitly in release notes or an advisory
+Releases include signed images, SBOMs, image digests, and packaged CSAF provider
+metadata and published advisory JSON. Read GitHub Releases and the
+[Changelog](https://github.com/tonylturner/containd/blob/main/CHANGELOG.md) for
+changes. See [Advisories](advisories.md) for machine-readable security information
+and [SECURITY.md](https://github.com/tonylturner/containd/blob/main/SECURITY.md) for
+disclosure and reporting.
 
-This policy is intentionally simple and transparent. containd is not yet claiming a large matrix of maintained branches.
+## Operator update checklist
 
-## How Security Fixes Are Published
+1. Read release notes and linked advisories; identify whether management, engine,
+   or both images are affected.
+2. Export config and securely preserve the persistent `/data` volume, including
+   users, audit/event data, and service files needed for rollback. See
+   [Compose data locations](docker-compose.md#persistent-data-paths-inside-container).
+3. Choose a version tag or digest. Verify image signatures and signed
+   [SBOM attestations](sbom.md#verifying-image-signatures-and-sbom-attestations)
+   according to your deployment policy.
+4. Update deployment image references, pull the images, and recreate the appliance.
+   For split mode, update the affected processes together as required by release notes.
+5. Verify `/api/v1/health`, `/metrics`, login, cross-zone enforcement, and key
+   services. Keep the backup until the deployment is verified.
 
-Security-relevant changes should be reflected in:
+### When `:latest` moves
 
-- GitHub Releases
-- `CHANGELOG.md`
-- `SECURITY.md` when the disclosure process matters
-- GitHub Security Advisories and CSAF documents when the issue warrants a formal advisory
+`:latest` points to signed, SBOM-attested **stable** images whose tagged commit
+is in main's history. Version-tagged images can exist before they are eligible
+for that channel. Prereleases and commits outside main's history do not move it.
+The release tag must be at least the highest stable semantic-version `v*` tag
+reachable from `origin/main`. Promotion refuses older tags, including manual
+requests, and records the reason in the workflow summary.
+Both management and engine tags are promoted to their signed digests only after
+image signature and CycloneDX attestation verification succeed with the exact
+release-tag workflow identity, GitHub OIDC issuer, and peeled release commit.
+Missing or unsigned SBOM evidence cannot pass these checks.
 
-Release artifacts already include:
+Pin a version tag or digest for repeatable deployments rather than relying on the
+moving `:latest` channel. Pin digests when you require an exact image identity.
 
-- signed images
-- SBOMs
-- release image digests
+## Classroom guidance
 
-The release workflow now also packages CSAF provider metadata and any published advisory JSON documents so machine-readable advisory data can travel with the release process.
-
-## Operator Update Expectations
-
-When a security-relevant release is published, operators should:
-
-1. Read the release notes and any linked advisory.
-2. Identify whether the release affects the mgmt image, engine image, or both.
-3. Back up config and preserve audit/event data before upgrading.
-4. Pull the fixed image, update the running compose or deployment reference, and restart the appliance.
-5. Verify health, login, enforcement, and key services after the upgrade.
-
-For Docker-based labs, this usually means updating the image tag and redeploying the stack.
-
-## Recommended Secure Update Workflow
-
-For a careful update:
-
-1. Create a config backup from the UI/API.
-2. Preserve `/data` or snapshot the volume if you need rollback confidence.
-3. Verify image signatures and inspect the attached SBOM if your environment requires it.
-4. Deploy the new image.
-5. Confirm `/api/v1/health`, `/metrics`, login, and your core policy path still work.
-
-## Versioning and Security Notes
-
-containd single-sources release version metadata from the repo `VERSION` file. Before building or pushing images, the release workflow requires `VERSION` to use SemVer `MAJOR.MINOR.PATCH` with an optional `-prerelease` suffix and the pushed tag to match it exactly with a `v` prefix. Leading zeros in numeric identifiers, build metadata (`+...`), and versions longer than the container tag limit of 128 characters are rejected. Reserved channels such as `latest` are not release versions. Release notes are extracted from the matching `CHANGELOG.md` section.
-
-This helps keep:
-
-- shipped image tags
-- release notes
-- changelog history
-- security update communication
-
-in sync.
-
-### When `:latest` Moves
-
-A valid version tag publishes version-tagged mgmt and engine images, digest signatures, SBOMs, and a GitHub release. It does **not** immediately update `:latest`.
-
-Only after signing and SBOM attachment succeed does a separate promotion job move both images' `:latest` tags to the exact signed digests. Promotion requires a stable tag (no `-`) whose tagged commit is an ancestor of `origin/main`, verified using full Git history. Prereleases and tags whose commits have not reached main never move `:latest`.
-
-If a stable tag was published before its commit reached main (for example `v0.1.33` on `iec104`), merge it to main first, then run the **Release** workflow manually with the `tag` input set to that existing tag. The shared promotion job rechecks eligibility, resolves the existing version images, verifies their signatures against this repository's tag-triggered release workflow identity, and checks their attached SBOMs before moving either `:latest` tag. On both tag push and manual dispatch, signature verification also requires the certificate's workflow SHA to equal the exact peeled tag commit used for the main ancestry check. Moving a tag onto main cannot authorize images signed from its old commit. Dispatch does not rebuild images or create another GitHub release. Malformed release tags fail validation; prereleases and tags outside main's history are skipped; missing images, invalid signatures, or missing SBOMs fail promotion.
-
-The merge must preserve the tagged commit in main's history; squashing or rebasing it into a different commit does not satisfy the ancestry check.
-
-Operators who need a fixed release should pin a version tag or digest rather than the moving `:latest` tag.
-
-## Classroom Guidance
-
-For teaching environments, the most important update habit is consistency:
-
-- keep the class on one known release
-- use the same image tags across lab instructions
-- update deliberately, not ad hoc mid-exercise
-- treat security releases as opportunities to teach how operators evaluate and apply fixes
+Keep a class on the same known image versions. Schedule upgrades deliberately
+and verify the exercise's policy and workload paths before students use them.

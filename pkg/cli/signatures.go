@@ -16,7 +16,7 @@ func showSignaturesAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var sigs []signatures.Signature
 		if err := api.getJSON(ctx, "/api/v1/signatures", &sigs); err != nil {
-			return err
+			return monitoringUnavailable(out, "Signatures", err)
 		}
 		if out == nil {
 			return nil
@@ -46,7 +46,7 @@ func showSignatureMatchesAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var matches []signatures.Match
 		if err := api.getJSON(ctx, "/api/v1/signatures/matches?limit=100", &matches); err != nil {
-			return err
+			return monitoringUnavailable(out, "Signature matches", err)
 		}
 		if out == nil {
 			return nil

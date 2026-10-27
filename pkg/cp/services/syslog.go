@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	commonlog "github.com/tonylturner/containd/pkg/common/logging"
+	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"go.uber.org/zap"
@@ -23,8 +25,7 @@ import (
 type SyslogManager struct {
 	mu         sync.Mutex
 	config     config.SyslogConfig
-	runCh      chan struct{}
-	stop       chan struct{}
+	applied    bool // config holds an applied configuration
 	OnEvent    func(kind string, attrs map[string]any)
 	listEvents func(limit int) []dpevents.Event
 	lastID     uint64
@@ -39,13 +40,21 @@ type SyslogManager struct {
 	hitLimit   bool
 	batchSize  int
 	flushEvery time.Duration
+
+	// Audit forwarding. auditMu serializes audit flushes with cursor
+	// changes. Lock order is mu, then auditMu; a flush never holds both.
+	auditMu         sync.Mutex
+	auditLog        audit.ForwardLog
+	auditForwarders map[string]auditForwarderStatus
+	auditSentTotal  int
+	auditFailTotal  int
+	auditLastError  string
+	auditLastFlush  time.Time
 }
 
 func NewSyslogManager() *SyslogManager {
 	host, _ := os.Hostname()
 	return &SyslogManager{
-		runCh:    make(chan struct{}),
-		stop:     make(chan struct{}),
 		hostname: host,
 		log:      newSyslogLogger(),
 	}
@@ -63,8 +72,9 @@ func newSyslogLogger() *zap.SugaredLogger {
 	return lg
 }
 
-// Apply updates the in-memory syslog forwarding configuration.
-// Future versions should start/stop forwarders accordingly.
+// Apply updates the syslog forwarding configuration and restarts the forwarder
+// loop. The loop outlives ctx, which may belong to the request that applied
+// the configuration; Stop ends it.
 func (m *SyslogManager) Apply(ctx context.Context, cfg config.SyslogConfig) error {
 	for _, f := range cfg.Forwarders {
 		if err := ValidateSyslogForwarder(f); err != nil {
@@ -88,12 +98,15 @@ func (m *SyslogManager) Apply(ctx context.Context, cfg config.SyslogConfig) erro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.config = cfg
+	m.applied = true
 	m.batchSize = cfg.BatchSize
 	m.flushEvery = time.Duration(cfg.FlushEvery) * time.Second
 	if m.OnEvent != nil {
 		m.OnEvent("service.syslog.updated", map[string]any{"forwarders": len(cfg.Forwarders), "count": 1})
 	}
-	m.restartForwarder(ctx)
+	m.stopForwarder()
+	m.syncAuditCursors()
+	m.restartForwarder()
 	m.log.Infow("applied syslog config", "forwarders", len(cfg.Forwarders), "format", cfg.Format)
 	return nil
 }
@@ -110,7 +123,9 @@ func (m *SyslogManager) Run(ctx context.Context) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	m.restartForwarder(ctx)
+	m.mu.Lock()
+	m.restartForwarder()
+	m.mu.Unlock()
 	<-ctx.Done()
 	m.Stop()
 	return ctx.Err()
@@ -125,27 +140,29 @@ func (m *SyslogManager) emit(kind string, attrs map[string]any) {
 }
 
 // SetEventLister injects a function that returns recent events (newest-first).
+// It starts the forwarder loop when forwarders were applied before the lister
+// was available.
 func (m *SyslogManager) SetEventLister(fn func(limit int) []dpevents.Event) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.listEvents = fn
+	if m.cancel == nil {
+		m.restartForwarder()
+	}
 }
 
-func (m *SyslogManager) restartForwarder(ctx context.Context) {
-	if m.cancel != nil {
-		m.cancel()
-		m.cancel = nil
-	}
-	if len(m.config.Forwarders) == 0 || m.listEvents == nil {
+// restartForwarder replaces the forwarder loop. Callers hold m.mu.
+func (m *SyslogManager) restartForwarder() {
+	m.stopForwarder()
+	if len(m.config.Forwarders) == 0 || (m.listEvents == nil && m.auditLog == nil) {
 		return
 	}
-	fwdCtx, cancel := context.WithCancel(ctx)
+	fwdCtx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	go m.forwardLoop(fwdCtx)
+	go m.forwardLoop(fwdCtx, m.flushEvery)
 }
 
-func (m *SyslogManager) forwardLoop(ctx context.Context) {
-	interval := m.flushEvery
+func (m *SyslogManager) forwardLoop(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
@@ -157,6 +174,7 @@ func (m *SyslogManager) forwardLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			m.flushEvents(ctx)
+			m.flushAudit(ctx)
 		}
 	}
 }
@@ -166,6 +184,7 @@ func (m *SyslogManager) flushEvents(ctx context.Context) {
 	listFn := m.listEvents
 	lastID := m.lastID
 	forwarders := append([]config.SyslogForwarder{}, m.config.Forwarders...)
+	format := m.config.Format
 	batchSize := m.batchSize
 	m.mu.Unlock()
 	if listFn == nil || len(forwarders) == 0 {
@@ -188,7 +207,7 @@ func (m *SyslogManager) flushEvents(ctx context.Context) {
 		if ev.ID != 0 && ev.ID <= lastID {
 			continue
 		}
-		payload := m.formatEvent(ev, forwarders[0].Proto)
+		payload := m.formatEvent(ev, format)
 		for _, fwd := range forwarders {
 			network := fwd.Proto
 			if network == "" {
@@ -256,6 +275,7 @@ func (m *SyslogManager) Status() map[string]any {
 		"batch_limit":           m.batchSize,
 		"hit_limit":             m.hitLimit,
 		"flush_interval_sec":    int(m.flushEvery.Seconds()),
+		"audit":                 m.auditStatus(),
 	}
 }
 
@@ -291,11 +311,9 @@ func formatTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-func (m *SyslogManager) formatEvent(ev dpevents.Event, proto string) string {
-	format := m.config.Format
-	if format == "" {
-		format = "rfc5424"
-	}
+// formatEvent formats ev for the configured format, which the caller reads
+// under m.mu with the forwarders it sends to; anything but json is RFC 5424.
+func (m *SyslogManager) formatEvent(ev dpevents.Event, format string) string {
 	if format == "json" {
 		b, _ := json.Marshal(ev)
 		return string(b)
@@ -304,10 +322,7 @@ func (m *SyslogManager) formatEvent(ev dpevents.Event, proto string) string {
 }
 
 func (m *SyslogManager) formatRFC5424(ev dpevents.Event) string {
-	host := m.hostname
-	if strings.TrimSpace(host) == "" {
-		host = "containd"
-	}
+	host := syslogHostname(m.hostname)
 	timestamp := ev.Timestamp.UTC().Format(time.RFC3339Nano)
 	sdata := map[string]any{
 		"proto": ev.Proto,
@@ -317,10 +332,10 @@ func (m *SyslogManager) formatRFC5424(ev dpevents.Event) string {
 		sdata[k] = v
 	}
 	if ev.SrcIP != "" {
-		sdata["src"] = fmt.Sprintf("%s:%d", ev.SrcIP, ev.SrcPort)
+		sdata["src"] = syslogEndpoint(ev.SrcIP, ev.SrcPort)
 	}
 	if ev.DstIP != "" {
-		sdata["dst"] = fmt.Sprintf("%s:%d", ev.DstIP, ev.DstPort)
+		sdata["dst"] = syslogEndpoint(ev.DstIP, ev.DstPort)
 	}
 	if ev.Transport != "" {
 		sdata["transport"] = ev.Transport
@@ -330,11 +345,34 @@ func (m *SyslogManager) formatRFC5424(ev dpevents.Event) string {
 	return fmt.Sprintf("%s1 %s %s containd - - - [containd@47450 %s]", pri, timestamp, host, string(sdJSON))
 }
 
-// Stop stops the manager loop.
+// syslogEndpoint is ip alone when port is zero, as for ICMP, and ip:port
+// otherwise, with an IPv6 address in brackets: [ip]:port.
+func syslogEndpoint(ip string, port uint16) string {
+	if port == 0 {
+		return ip
+	}
+	return net.JoinHostPort(ip, strconv.Itoa(int(port)))
+}
+
+func syslogHostname(host string) string {
+	if strings.TrimSpace(host) == "" {
+		return "containd"
+	}
+	return host
+}
+
+// Stop ends the forwarder loop until the next Apply.
 func (m *SyslogManager) Stop() {
-	select {
-	case m.stop <- struct{}{}:
-	default:
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopForwarder()
+}
+
+// stopForwarder cancels the running forwarder loop. Callers hold m.mu.
+func (m *SyslogManager) stopForwarder() {
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
 	}
 }
 

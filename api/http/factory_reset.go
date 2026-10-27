@@ -4,10 +4,14 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -17,7 +21,12 @@ type factoryResetRequest struct {
 	Confirm string `json:"confirm"`
 }
 
-func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+// FactoryResetSessions terminates management transports after a successful reset.
+// sessionID identifies the initiating API session, if it belongs to a transport.
+type FactoryResetSessions func(ctx context.Context, sessionID string)
+
+func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine EngineClient, services ServicesApplier, revoke ...FactoryResetSessions) gin.HandlerFunc {
+	lab := labmode.Enabled()
 	return func(c *gin.Context) {
 		var req factoryResetRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -56,53 +65,105 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 			apiError(c, http.StatusNotImplemented, "factory reset requires SQLite stores")
 			return
 		}
-		// Revoke the current session even if the caller keeps its token.
-		if sid := strings.TrimSpace(c.GetString(ctxSessionKey)); sid != "" {
-			_ = userStore.RevokeSession(ctx, sid)
-		}
-		if err := us.WipeAll(ctx); err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := userStore.EnsureDefaultAdmin(ctx); err != nil {
-			internalError(c, err)
-			return
-		}
-
-		// Wipe config store and re-seed defaults.
-		if err := cs.WipeAll(ctx); err != nil {
-			internalError(c, err)
-			return
-		}
-
-		if err := cfgStore.Save(ctx, def); err != nil {
-			internalError(c, err)
-			return
-		}
-		warnings, err := applyRunningConfigLocked(ctx, cfgStore, engine, services, nil)
+		// Preserve the full config state until runtime apply succeeds. In
+		// particular, do not stage defaults over the caller's candidate.
+		var warnings []string
+		attempt := 0
+		err := cs.ApplyReset(ctx, def, func(ctx context.Context, previous, next *config.Config) error {
+			w, err := applyConfigSnapshot(ctx, cfgStore, engine, services, previous, next)
+			if attempt == 0 {
+				warnings = w
+			}
+			attempt++
+			return err
+		})
+		recoveryWarnings := reenterRecoveryLocked(ctx, cfgStore, engine, err)
 		if err != nil {
+			setWarningHeader(c, recoveryWarnings)
+			factoryResetApplyError(c, err)
+			return
+		}
+		// Dynamic blocks and connection revocations are runtime state the
+		// applied defaults do not replace. A failed clear leaves them in
+		// force, so it is reported as incomplete convergence.
+		if err := engine.ClearBlocks(ctx); err != nil {
+			warnings = append(warnings, fmt.Sprintf("dynamic blocks: %v", err))
+		}
+		// Wiping sessions revokes session-backed tokens outside lab mode. Lab
+		// authentication deliberately does not consult session records. No user
+		// state changes until the configuration has been successfully applied.
+		if err := us.ResetToDefaultAdmin(ctx); err != nil {
 			internalError(c, err)
 			return
 		}
-		setWarningHeader(c, warnings)
 
 		// Wipe audit log (after the reset) and then write a completion record.
 		if storeVal, ok := c.Get("auditStore"); ok && storeVal != nil {
 			if a, ok := storeVal.(audit.Store); ok && a != nil {
 				if sqlite, ok := a.(*audit.SQLiteStore); ok {
-					_ = sqlite.WipeAll(ctx)
+					if err := sqlite.WipeAll(ctx); err != nil {
+						warnings = append(warnings, fmt.Sprintf("audit reset: %v", err))
+					}
 				}
 			}
 		}
-		auditLog(c, audit.Record{Action: "system.factory_reset.completed", Target: "all", Result: "success"})
+		if len(warnings) == 0 {
+			auditLog(c, audit.Record{Action: "system.factory_reset.completed", Target: "all", Result: "success"})
+		} else {
+			auditLog(c, audit.Record{Action: "system.factory_reset.applied", Target: "all", Result: "warning", Detail: strings.Join(warnings, "; ")})
+		}
+		setWarningHeader(c, warnings)
 
 		// Clear cookies on the response so browser sessions immediately drop auth.
 		clearAuthCookie(c)
 
+		for _, closeSessions := range revoke {
+			if closeSessions != nil {
+				sessionID := c.GetString(ctxSessionKey)
+				// Lab authentication does not identify the JWT session, even
+				// with a secret. Preserve the initiating SSH transport by ID.
+				if lab || len(jwtSecret()) == 0 {
+					sessionID = c.GetHeader("X-Containd-SSH-Connection")
+				}
+				closeSessions(ctx, sessionID)
+			}
+		}
+		message := "Factory reset completed. Log in with the default credentials."
+		if len(warnings) > 0 {
+			message = "Factory reset applied with warnings; runtime convergence is incomplete. " + strings.Join(warnings, "; ") + ". Log in with the default credentials."
+		}
+		if lab {
+			message += " Lab web/API tokens remain valid; factory reset does not revoke them."
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "reset",
 			"loggedOut": true,
-			"message":   "Factory reset completed. Log in with the default credentials and change the password immediately.",
+			"message":   message,
+			"warnings":  append([]string{}, warnings...),
 		})
 	}
+}
+
+func factoryResetApplyError(c *gin.Context, err error) {
+	var failure *config.ApplyError
+	if !errors.As(err, &failure) {
+		internalError(c, err)
+		return
+	}
+	body := gin.H{
+		"error":     "configuration apply failed",
+		"detail":    failure.Err.Error(),
+		"restored":  failure.RestoreError == nil,
+		"reapplied": failure.ReapplyError == nil,
+	}
+	for key, recoveryErr := range map[string]error{
+		"restoreError": failure.RestoreError,
+		"reapplyError": failure.ReapplyError,
+		"healthError":  failure.HealthError,
+	} {
+		if recoveryErr != nil {
+			body[key] = recoveryErr.Error()
+		}
+	}
+	c.JSON(http.StatusInternalServerError, body)
 }

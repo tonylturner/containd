@@ -12,25 +12,28 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	engineapi "github.com/tonylturner/containd/api/engine"
 	httpapi "github.com/tonylturner/containd/api/http"
-	"github.com/tonylturner/containd/pkg/common"
+	engineapp "github.com/tonylturner/containd/pkg/app/engine"
+	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/cp/identity"
 	"github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/cp/users"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/mp/sshserver"
 	"go.uber.org/zap"
 )
 
 type Options struct {
 	Reservation *mgmtpath.Reservation
 	Combined    bool
+	Reload      <-chan struct{}
 }
 
 type mgmtStores struct {
@@ -64,7 +67,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	if err := opts.Reservation.ValidateEngineBind(common.EnvTrimmed("CONTAIND_ENGINE_ADDR", ":8081")); err != nil {
+	if err := opts.Reservation.ValidateEngineBind(engineapp.ListenAddr(opts.Combined)); err != nil {
 		return err
 	}
 	if err := validateReservedEnvironment(opts.Reservation); err != nil {
@@ -104,8 +107,34 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
 	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
-	identityResolver := identity.NewResolver()
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, identityResolver, managementGuardHealth(resolveEngineURL(logger, opts)), httpapi.ManagementListenerFaults(listenerFaults.list))
+	auditLog, ok := stores.auditStore.(audit.ForwardLog)
+	if !ok {
+		return fmt.Errorf("audit store %T cannot be forwarded to syslog", stores.auditStore)
+	}
+	serviceManager.SetAuditLog(auditLog)
+	var sshServer atomic.Pointer[sshserver.Server]
+	resetSessions := httpapi.FactoryResetSessions(func(_ context.Context, initiator string) {
+		if srv := sshServer.Load(); srv != nil {
+			srv.RevokeConnections(initiator)
+		}
+	})
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(resolveEngineURL(logger, opts)), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions)
+	serveStaticUI(router)
+	// Enforce per-interface access toggles based on the destination IP.
+	ipIndex := newIPInterfaceIndex()
+	access := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
+	// Bind before any runtime apply: a listener fallback enters recovery.
+	bound, err := bindManagement(logger, stores, runtimeCfg, opts.Reservation, listenerCfg, func(lc mgmtListenerConfig) (mgmtBinds, error) {
+		return buildMgmtServers(applyMgmtHTTPMiddleware(logger, access, lc), lc)
+	})
+	if err != nil {
+		return err
+	}
+	if bound.event != nil {
+		serviceManager.event = bound.event
+	}
+	runtimeCfg, listenerCfg = bound.cfg, bound.listener
+	publishBoundManagement(listenerCfg, bound.binds)
 	// Best-effort initial service render on startup.
 	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
@@ -125,30 +154,20 @@ func Run(ctx context.Context, opts Options) error {
 		out = append(out, serviceManager.ListTelemetryEvents(limit)...)
 		return out
 	})
-	serviceManager.StartAVWorker(context.Background())
-	serveStaticUI(router)
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
 	defer stopEngineSync()
-
-	// Enforce per-interface access toggles based on the destination IP.
-	ipIndex := newIPInterfaceIndex()
-	handler := mgmtAccessHandler(stores.store, ipIndex, opts.Reservation, router)
+	stopReload := startConfigReload(ctx, logger, stores.store, stores.auditStore, engineClient, serviceManager, opts.Reload)
+	defer stopReload()
 
 	// Start SSH server (admin-only) for interactive CLI.
-	sshAddr, sshEnabled := startSSH(ctx, logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, ipIndex, optionalFault)
-	handler = applyMgmtHTTPMiddleware(logger, handler, listenerCfg)
+	sshAddr, sshEnabled := startSSH(ctx, logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, ipIndex, optionalFault, sshServer.Store)
 	printStartupHints(logger, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, listenerCfg.enableHTTP, listenerCfg.enableHTTPS, sshAddr, sshEnabled)
-
-	servers, listeners, err := buildMgmtServers(handler, listenerCfg)
-	if err != nil {
-		return err
-	}
-	return serveMgmtServers(ctx, servers, listeners)
+	return serveMgmtServers(ctx, bound.binds.servers, bound.binds.listeners)
 }
 
 func validateJWTSecret(logger *zap.SugaredLogger) error {
 	jwtSecret := strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))
-	labMode := isLabMode()
+	labMode := labmode.Enabled()
 	switch {
 	case jwtSecret == "containd-dev-secret-change-me":
 		if !labMode {
@@ -222,7 +241,7 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		stores.userStore.Close()
 		return fail(err)
 	}
-	event, err := recordReservationBootDecision(logger, stores, cfg, r)
+	event, err := recordBootDecision(logger, stores, cfg, r)
 	if err != nil {
 		stores.auditStore.Close()
 		stores.userStore.Close()
@@ -267,11 +286,12 @@ func blankDefaultInterfaceDevicesExcept(cfg *config.Config, r *mgmtpath.Reservat
 }
 
 func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, optionalFault func(error)) (mgmtListenerConfig, error) {
+	listeners := config.EffectiveManagementListeners(cfg)
 	listenerCfg := mgmtListenerConfig{
-		httpAddr:      resolveHTTPAddr(cfg),
-		httpsAddr:     resolveHTTPSAddr(cfg),
-		enableHTTP:    boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTP }), true),
-		enableHTTPS:   boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true),
+		httpAddr:      listeners.HTTP.Addr,
+		httpsAddr:     listeners.HTTPS.Addr,
+		enableHTTP:    listeners.HTTP.Enabled,
+		enableHTTPS:   listeners.HTTPS.Enabled,
 		optionalFault: optionalFault,
 	}
 	listenerCfg.httpLoopbackAddr = ensureLoopbackHTTPAddr(listenerCfg.httpAddr)
@@ -301,25 +321,45 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	return listenerCfg, nil
 }
 
-func resolveHTTPAddr(cfg *config.Config) string {
-	httpAddr := common.EnvTrimmed("CONTAIND_MGMT_ADDR", "")
-	if httpAddr == "" && cfg != nil {
-		httpAddr = common.FirstNonEmpty(cfg.System.Mgmt.HTTPListenAddr, cfg.System.Mgmt.ListenAddr)
-	}
-	if httpAddr == "" {
-		return ":8080"
-	}
-	return httpAddr
+// publishBoundManagement records the sockets b holds as this process's
+// bound management: every compile in this process admits them until the
+// next start, and the console and SSH CLI sessions call them on loopback
+// (see httpapi.LoopbackManagementAPI). SSH is not bound yet: startSSH adds
+// it once its socket binds (publishBoundSSH).
+func publishBoundManagement(lc mgmtListenerConfig, b mgmtBinds) {
+	httpapi.SetServedManagement(lc.servedManagement(b))
+	config.SetBoundManagementListeners(b.record())
 }
 
-func resolveHTTPSAddr(cfg *config.Config) string {
-	if httpsAddr := common.EnvTrimmed("CONTAIND_MGMT_HTTPS_ADDR", ""); httpsAddr != "" {
-		return httpsAddr
+// publishBoundSSH adds the SSH socket bound at addr to the bound management
+// that publishBoundManagement recorded. Both run once, in order, at startup.
+func publishBoundSSH(addr string) {
+	bound := config.BoundManagementListeners()
+	bound.SSH = config.ManagementListener{Addr: addr, Enabled: true}
+	config.SetBoundManagementListeners(bound)
+}
+
+// record is the HTTP and HTTPS listeners b holds, each at the address its
+// own socket bound, else at its loopback socket, and off when neither bound.
+func (b mgmtBinds) record() config.ManagementListeners {
+	return config.ManagementListeners{HTTP: b.http.record(), HTTPS: b.https.record()}
+}
+
+// servedManagement is what the listeners b holds serve beyond their
+// addresses. The certificate and key are the resolved, possibly generated,
+// files of the HTTPS listener, which a listener fallback or an environment
+// override can make differ from the saved settings; empty when no HTTPS
+// socket is bound.
+func (lc mgmtListenerConfig) servedManagement(b mgmtBinds) httpapi.ServedManagement {
+	served := httpapi.ServedManagement{
+		HTTPRedirects: b.redirects,
+		HTTPLoopback:  b.http.loopback != "",
+		HTTPSLoopback: b.https.loopback != "",
 	}
-	if cfg != nil && cfg.System.Mgmt.HTTPSListenAddr != "" {
-		return cfg.System.Mgmt.HTTPSListenAddr
+	if b.https.record().Enabled {
+		served.CertFile, served.KeyFile = lc.tlsCert, lc.tlsKey
 	}
-	return ":8443"
+	return served
 }
 
 func applyMgmtHTTPMiddleware(logger *zap.SugaredLogger, handler http.Handler, listenerCfg mgmtListenerConfig) http.Handler {
@@ -332,39 +372,38 @@ func applyMgmtHTTPMiddleware(logger *zap.SugaredLogger, handler http.Handler, li
 	return frameOptionsHandler(handler, listenerCfg.allowedOrigins)
 }
 
-func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) ([]*http.Server, []net.Listener, error) {
-	errChPrefix := func(proto string, err error) error {
-		return fmt.Errorf("%s disabled: %w", proto, err)
-	}
-	var servers []*http.Server
-	var listeners []net.Listener
-	if listenerCfg.enableHTTP {
-		httpHandler := handler
-		if listenerCfg.redirectHTTPToHTTPS {
-			httpHandler = redirectToHTTPSHandler(listenerCfg.httpsAddr, httpHandler)
-		}
-		srv, lns, err := buildListenerServers(httpHandler, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, nil, listenerCfg.reservedHTTPAddr, listenerCfg.optionalFault)
-		if err != nil {
-			return nil, nil, errChPrefix("http", err)
-		}
-		servers = append(servers, srv...)
-		listeners = append(listeners, lns...)
+// buildMgmtServers binds the listeners of listenerCfg. HTTPS binds first:
+// the HTTP listener redirects to HTTPS only when configured to and HTTPS
+// bound its own socket.
+func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) (mgmtBinds, error) {
+	var b mgmtBinds
+	fail := func(proto string, err error) (mgmtBinds, error) {
+		b.close()
+		return mgmtBinds{}, fmt.Errorf("%s disabled: %w", proto, err)
 	}
 	if listenerCfg.enableHTTPS {
-		srv, lns, err := buildListenerServers(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsCert, listenerCfg.tlsKey), "", listenerCfg.optionalFault)
+		bound, err := b.bindListener(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsCert, listenerCfg.tlsKey), "", listenerCfg.optionalFault)
 		if err != nil {
-			for _, listener := range listeners {
-				_ = listener.Close()
-			}
-			return nil, nil, errChPrefix("https", err)
+			return fail("https", err)
 		}
-		servers = append(servers, srv...)
-		listeners = append(listeners, lns...)
+		b.https = bound
 	}
-	if len(servers) == 0 {
-		return nil, nil, fmt.Errorf("no management listeners enabled")
+	if listenerCfg.enableHTTP {
+		httpHandler := handler
+		if listenerCfg.redirectHTTPToHTTPS && b.https.addr != "" {
+			httpHandler = redirectToHTTPSHandler(listenerCfg.httpsAddr, httpHandler)
+			b.redirects = true
+		}
+		bound, err := b.bindListener(httpHandler, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, nil, listenerCfg.reservedHTTPAddr, listenerCfg.optionalFault)
+		if err != nil {
+			return fail("http", err)
+		}
+		b.http = bound
 	}
-	return servers, listeners, nil
+	if len(b.servers) == 0 {
+		return mgmtBinds{}, fmt.Errorf("no management listeners enabled")
+	}
+	return b, nil
 }
 
 func newMgmtTLSConfig(tlsCert, tlsKey string) *tls.Config {
@@ -414,8 +453,4 @@ func serveMgmtServer(server *http.Server, listener net.Listener, errCh chan<- er
 		return
 	}
 	errCh <- server.Serve(listener)
-}
-
-func isLabMode() bool {
-	return os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 }

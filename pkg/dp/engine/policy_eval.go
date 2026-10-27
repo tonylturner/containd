@@ -31,36 +31,10 @@ func protocolPortMatches(entry rules.Entry, p rules.Protocol, state *flow.State,
 	return port >= min && port <= max
 }
 
-// isExcluded checks whether either endpoint of a flow matches a DPI exclusion.
+// isExcluded checks whether either endpoint of a flow matches a DPI
+// exclusion. Domain exclusions were decided by the pre-selection observer.
 func (e *Engine) isExcluded(state *flow.State) bool {
-	for _, excl := range e.dpiExclusions {
-		switch excl.Type {
-		case "ip":
-			ip := net.ParseIP(excl.Value)
-			if ip == nil {
-				continue
-			}
-			if state.Key.SrcIP.Equal(ip) || state.Key.DstIP.Equal(ip) {
-				return true
-			}
-		case "cidr":
-			_, cidr, err := net.ParseCIDR(excl.Value)
-			if err != nil {
-				continue
-			}
-			if cidr.Contains(state.Key.SrcIP) || cidr.Contains(state.Key.DstIP) {
-				return true
-			}
-		case "domain":
-			// Domain exclusions are matched against flow metadata if available.
-			// In practice, DNS responses populate flow state with resolved names.
-			// For now, domain exclusions match the SNI or query_name if the flow
-			// has been tagged by TLS/DNS decoders — this will be enhanced when
-			// TLS interception is added.
-			continue
-		}
-	}
-	return false
+	return e.addressExclusion(state) != "" || e.domainExcluded(state)
 }
 
 // enforceDPIEvents evaluates decoded ICS events against the firewall rules
@@ -81,7 +55,7 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 	// action governs requests only: a reply is enforced only when a rule
 	// matches it. NFQUEUE mode behaves the same, because replies take the
 	// established conntrack path there and are never queued.
-	srcZone, dstZone := resolveZonesForFlow(snap, state.Key.OpenerIP(), state.Key.ServerIP())
+	srcZone, dstZone := e.zones.resolve(snap, state.Key.OpenerIP(), state.Key.ServerIP())
 	applyDefault := !isReply(state)
 	for _, ev := range evs {
 		ctx, ok := evalContextFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
@@ -97,7 +71,8 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 			// but not applied: the rule is in learn mode.
 			continue
 		}
-		if v.Action == verdict.DenyDrop {
+		if v.Denies() {
+			// A queued packet cannot be rejected: RESET drops here.
 			v.Action = verdict.BlockFlowTemp
 			if v.TTL <= 0 {
 				v.TTL = dpiEnforceBlockTTL
@@ -108,7 +83,7 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 	return verdict.Verdict{}, rules.EvalContext{}, false
 }
 
-func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, srcZone, dstZone string) (rules.EvalContext, bool) {
+func evalContextFromDPIEvent(snap *rules.Snapshot, state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, srcZone, dstZone string) (rules.EvalContext, bool) {
 	if state == nil || pkt == nil || !isRuleEvaluableICSEvent(ev.Proto) || isStreamErrorEvent(ev) {
 		return rules.EvalContext{}, false
 	}
@@ -123,6 +98,8 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 		DstIP:   state.Key.ServerIP(),
 		Proto:   strings.ToLower(pkt.Proto),
 		Port:    strconv.Itoa(int(service)),
+		// Identities are bound to the connection's opener.
+		Identities: snap.IdentitiesOf(state.Key.OpenerIP()),
 		ICS: &rules.ICSContext{
 			Protocol:  strings.ToLower(ev.Proto),
 			Address:   attrString(ev.Attributes, "address"),
@@ -145,10 +122,6 @@ func evalContextFromDPIEvent(_ *rules.Snapshot, state *flow.State, pkt *dpi.Pars
 
 type zoneResolver func(*rules.Snapshot, net.IP, net.IP) (string, string)
 
-func resolveZonesForFlow(snap *rules.Snapshot, srcIP, dstIP net.IP) (string, string) {
-	return resolveZonesWithAddrs(snap, srcIP, dstIP, interfaceAddrs)
-}
-
 // interfaceAddrs keeps OS interface lookup in the engine's network namespace.
 func interfaceAddrs(name string) ([]net.Addr, error) {
 	iface, err := net.InterfaceByName(name)
@@ -158,15 +131,21 @@ func interfaceAddrs(name string) ([]net.Addr, error) {
 	return iface.Addrs()
 }
 
-func resolveZonesWithAddrs(snap *rules.Snapshot, srcIP, dstIP net.IP, addrsFor func(string) ([]net.Addr, error)) (string, string) {
+// zoneIndex maps addresses to the zone whose interface networks hold them.
+type zoneIndex []zoneNets
+
+type zoneNets struct {
+	name string
+	nets []*net.IPNet
+}
+
+// newZoneIndex reads the networks of snap's zone interfaces once, for any
+// number of lookups.
+func newZoneIndex(snap *rules.Snapshot, addrsFor func(string) ([]net.Addr, error)) zoneIndex {
 	if snap == nil || len(snap.ZoneIfaces) == 0 {
-		return "", ""
+		return nil
 	}
-	type zoneNets struct {
-		name string
-		nets []*net.IPNet
-	}
-	var zones []zoneNets
+	var zones zoneIndex
 	for zone, ifaces := range snap.ZoneIfaces {
 		zn := zoneNets{name: zone}
 		for _, ifaceName := range ifaces {
@@ -191,20 +170,22 @@ func resolveZonesWithAddrs(snap *rules.Snapshot, srcIP, dstIP net.IP, addrsFor f
 			zones = append(zones, zn)
 		}
 	}
-	zoneForIP := func(ip net.IP) string {
-		if ip == nil {
-			return ""
-		}
-		for _, zone := range zones {
-			for _, network := range zone.nets {
-				if network.Contains(ip) {
-					return zone.name
-				}
-			}
-		}
+	return zones
+}
+
+// zoneFor returns the zone of ip, or "".
+func (z zoneIndex) zoneFor(ip net.IP) string {
+	if ip == nil {
 		return ""
 	}
-	return zoneForIP(srcIP), zoneForIP(dstIP)
+	for _, zone := range z {
+		for _, network := range zone.nets {
+			if network.Contains(ip) {
+				return zone.name
+			}
+		}
+	}
+	return ""
 }
 
 func isRuleEvaluableICSEvent(proto string) bool {
@@ -217,9 +198,9 @@ func isRuleEvaluableICSEvent(proto string) bool {
 }
 
 // isStreamErrorEvent reports a malformed or unsupported event. Such events
-// are evidence only: on US protocols the packet passes, so they
 // never reach rule evaluation, where a missing function code would read as
-// FC 0.
+// FC 0. The packet passes, except on an inline flow in the scope of an
+// enforce ICS rule, which fails closed (failClosedRule).
 func isStreamErrorEvent(ev dpi.Event) bool {
 	return ev.Kind == "malformed" || ev.Kind == "unsupported"
 }

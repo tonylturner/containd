@@ -14,6 +14,30 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
+func TestClientHelloSNI(t *testing.T) {
+	p := buildClientHello("Example.COM", nil)
+	if got := ClientHelloSNI(p); got != "example.com" {
+		t.Fatalf("SNI = %q", got)
+	}
+	for n := range len(p) {
+		if got := ClientHelloSNI(p[:n]); got != "" {
+			t.Fatalf("truncated at %d: SNI = %q", n, got)
+		}
+	}
+	if got := ClientHelloSNI(buildClientHello("", nil)); got != "" {
+		t.Fatalf("absent SNI = %q", got)
+	}
+	listOffset := len(p) - len("Example.COM") - 5
+	for _, off := range []int{listOffset, listOffset - 2, listOffset - 6} {
+		bad := append([]byte(nil), p...)
+		n := binary.BigEndian.Uint16(bad[off : off+2])
+		binary.BigEndian.PutUint16(bad[off:off+2], n+1)
+		if got := ClientHelloSNI(bad); got != "" {
+			t.Fatalf("inconsistent length at %d: SNI = %q", off, got)
+		}
+	}
+}
+
 func tlsFlowState(srcPort, dstPort uint16) *flow.State {
 	return flow.NewState(flow.Key{
 		SrcIP:   net.ParseIP("10.0.0.1"),

@@ -5,13 +5,13 @@ package httpapi
 
 import (
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/common/ratelimit"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -139,7 +139,7 @@ func logoutHandler(userStore users.Store) gin.HandlerFunc {
 }
 
 func meHandler(userStore users.Store) gin.HandlerFunc {
-	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
+	lab := labmode.Enabled()
 	return func(c *gin.Context) {
 		if userStore == nil {
 			c.JSON(http.StatusOK, gin.H{"role": c.GetString(ctxRoleKey), "labMode": lab})
@@ -179,9 +179,8 @@ func meHandler(userStore users.Store) gin.HandlerFunc {
 		// reproducible default students depend on across docs and SSH. We
 		// suppress the must-change-password flag so the UI doesn't prompt
 		// for a change that would (a) drift the cred away from what the
-		// labs document and (b) hit the password-change endpoint which is
-		// itself locked in lab mode (see changeMyPasswordHandler /
-		// setUserPasswordHandler).
+		// labs document and (b) be refused, because lab mode refuses every
+		// password change (users.CheckPasswordChange).
 		if u.MustChangePassword && !lab {
 			resp["mustChangePassword"] = true
 		}
@@ -242,6 +241,7 @@ func updateMeHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		auditLog(c, audit.Record{Action: "auth.profile.update", Target: u.Username})
 		c.JSON(http.StatusOK, u)
 	}
 }
@@ -252,15 +252,11 @@ type changePasswordRequest struct {
 }
 
 func changeMyPasswordHandler(userStore users.Store) gin.HandlerFunc {
-	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 	return func(c *gin.Context) {
-		// Lab mode pins credentials to the documented canonical default
-		// (containd/containd) so workshop docs, lab YAMLs, and SSH
-		// terminal commands keep working across student runs. Allowing
-		// password change here would drift the cred and break SSH-on-:2222
-		// auth in every lab that uses the firewall terminal.
-		if lab {
-			apiError(c, http.StatusForbidden, "password change disabled in lab mode (CONTAIND_LAB_MODE=1) — credentials are pinned to the documented canonical default for reproducible workshop runs")
+		// Refuse before verifying the current password so a lab-mode
+		// caller always learns the real reason.
+		if err := users.CheckPasswordChange(); err != nil {
+			apiError(c, http.StatusForbidden, err.Error())
 			return
 		}
 		if userStore == nil {
@@ -286,14 +282,18 @@ func changeMyPasswordHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusNotFound, "user not found")
 			return
 		}
-		if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.CurrentPassword)) != nil {
-			apiError(c, http.StatusUnauthorized, "current password invalid")
+		if err := userStore.CheckCurrentPassword(c.Request.Context(), u.ID, req.CurrentPassword, time.Now()); err != nil {
+			refuseFactor(c, err, func(detail string) {
+				auditLog(c, audit.Record{Action: "auth.password.change", Target: u.Username, Result: "denied", Detail: detail})
+			})
 			return
 		}
+		// SetPassword also revokes this account's other sessions.
 		if err := userStore.SetPassword(c.Request.Context(), uid, req.NewPassword); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			apiError(c, setPasswordErrorStatus(err), err.Error())
 			return
 		}
+		auditLog(c, audit.Record{Action: "auth.password.change", Target: u.Username})
 		c.JSON(http.StatusOK, gin.H{"status": "password_set"})
 	}
 }

@@ -5,12 +5,14 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
@@ -354,6 +356,7 @@ func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) 
 		if ctx.DstZone != "" {
 			attrs["dstZone"] = ctx.DstZone
 		}
+		attrs = events.WithTags(attrs, ev.Tags(ctx))
 		logEvent := events.Event{
 			Kind:       "firewall.rule.hit",
 			Timestamp:  time.Now().UTC(),
@@ -420,25 +423,51 @@ func applyVerdict(ctx context.Context, updater enforce.Updater, v verdict.Verdic
 	}
 }
 
-// RulesetStatus returns the last compiled/applied nftables ruleset snapshot.
+// RulesetStatus returns the status of the installed nftables ruleset with
+// the live ICS coverage of its rules and its schedule planner's state.
 func (e *Engine) RulesetStatus() RulesetStatus {
 	if e == nil {
 		return RulesetStatus{}
 	}
-	ptr := e.rulesetStatus.Load()
-	if ptr == nil {
-		return RulesetStatus{}
+	var st RulesetStatus
+	if ptr := e.rulesetStatus.Load(); ptr != nil {
+		st = *ptr
 	}
-	return *ptr
+	st.ICSCoverage = e.ICSCoverage()
+	st.SchedulePlanner = e.gate.schedulePlanAt(e.gate.now())
+	return st
 }
 
-func (e *Engine) setRulesetStatus(ruleset string, err error) {
-	st := &RulesetStatus{
-		Ruleset:   ruleset,
-		AppliedAt: time.Now().UTC(),
+// recordApplyFailure adds a failed apply of the snapshot version to the
+// status of the installed ruleset, which the failure left in place.
+// Callers hold lifecycleMu.
+func (e *Engine) recordApplyFailure(version string, err error) {
+	var st RulesetStatus
+	if prev := e.rulesetStatus.Load(); prev != nil {
+		st = *prev
 	}
-	if err != nil {
-		st.Error = err.Error()
+	at := time.Now().UTC()
+	st.Error, st.FailedSnapshotVersion, st.FailedAt = err.Error(), version, &at
+	e.rulesetStatus.Store(&st)
+}
+
+// releaseRulesetStatus records that no ruleset is installed after the
+// tables were deleted. The loaded snapshot stays, so the status is the one
+// an engine without enforcement reports for it. Callers hold lifecycleMu.
+func (e *Engine) releaseRulesetStatus() {
+	prev := e.rulesetStatus.Load()
+	if prev == nil {
+		return
 	}
-	e.rulesetStatus.Store(st)
+	e.rulesetStatus.Store(&RulesetStatus{SnapshotVersion: prev.SnapshotVersion, AppliedAt: prev.AppliedAt})
+}
+
+// RevokeConnections installs operator revocations through the active enforcement
+// backend. Unsupported or disabled backends cannot report a successful kill.
+func (e *Engine) RevokeConnections(ctx context.Context, entries []conntrack.Entry, scope string, ttl time.Duration) error {
+	revoker, ok := e.Updater().(enforce.ConnectionRevoker)
+	if !ok {
+		return fmt.Errorf("connection revocation unavailable: nftables enforcement is not active")
+	}
+	return revoker.RevokeConnections(ctx, entries, scope, ttl)
 }

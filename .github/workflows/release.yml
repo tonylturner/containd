@@ -113,7 +113,7 @@ jobs:
       - name: Sign engine image
         run: cosign sign --yes ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
 
-      # SBOM generation with Syft (CycloneDX 1.6), attached to the signed images
+      # Scan final images, then add the static UI's production npm inventory.
       - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
@@ -126,11 +126,60 @@ jobs:
           output-file: sbom-engine.cdx.json
           format: cyclonedx-json
 
-      - name: Attach SBOM to mgmt image
-        run: cosign attach sbom --sbom sbom-mgmt.cdx.json ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
+      - name: Merge production UI packages into management SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.parse import quote
 
-      - name: Attach SBOM to engine image
-        run: cosign attach sbom --sbom sbom-engine.cdx.json ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
+          lock = json.loads(Path("ui/package-lock.json").read_text())
+          if lock["lockfileVersion"] != 3:
+              raise ValueError("Expected npm lockfile version 3")
+          sbom_path = Path("sbom-mgmt.cdx.json")
+          sbom = json.loads(sbom_path.read_text())
+          if sbom["bomFormat"] != "CycloneDX":
+              raise ValueError("Expected a CycloneDX image inventory")
+          components = sbom.setdefault("components", [])
+          inventory = {}
+          for location, package in sorted(lock["packages"].items()):
+              if not location or package.get("dev", False):
+                  continue
+              if "node_modules/" not in location or package.get("link", False):
+                  raise ValueError(f"Unsupported production lock entry: {location}")
+              name = package.get("name") or location.rsplit("node_modules/", 1)[1]
+              version = package["version"]
+              if not name or not version:
+                  raise ValueError(f"Missing npm name/version: {location}")
+              purl = f"pkg:npm/{quote(name, safe='/')}@{quote(version, safe='')}"
+              components.append({
+                  "type": "library",
+                  "bom-ref": f"containd:ui:{location}",
+                  "name": name,
+                  "version": version,
+                  "purl": purl,
+                  "properties": [{
+                      "name": "containd:inventory-source",
+                      "value": f"ui/package-lock.json:{location}",
+                  }],
+              })
+              inventory[location] = (name, version)
+          for name in ("next", "react"):
+              location = f"node_modules/{name}"
+              expected = (name, lock["packages"][location]["version"])
+              if inventory.get(location) != expected:
+                  raise ValueError(f"Missing production UI component: {name}")
+          sbom_path.write_text(json.dumps(sbom, indent=2) + "\n")
+          print(f"Added {len(inventory)} production npm entries (including next and react)")
+          PY
+
+      - name: Attest management SBOM
+        run: cosign attest --yes --type cyclonedx --predicate sbom-mgmt.cdx.json ${{ env.IMAGE_MGMT }}@${{ steps.build-mgmt.outputs.digest }}
+
+      - name: Attest engine SBOM
+        run: cosign attest --yes --type cyclonedx --predicate sbom-engine.cdx.json ${{ env.IMAGE_ENGINE }}@${{ steps.build-engine.outputs.digest }}
 
       - name: Write release image manifest
         run: |
@@ -220,14 +269,37 @@ jobs:
           # Refresh explicit refs; neither the dispatch branch nor the push ref proves main ancestry.
           git fetch --force --no-tags origin \
             "+refs/heads/main:refs/remotes/origin/main" \
-            "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            "+refs/tags/*:refs/tags/*"
           commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           if [[ "$RELEASE_TAG" == *-* ]]; then
             echo "Not promoting prerelease $RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
             echo "promote=false" >> "$GITHUB_OUTPUT"
           elif git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
-            echo "promote=true" >> "$GITHUB_OUTPUT"
+            highest="$(git tag --merged refs/remotes/origin/main | python3 -c '
+          import re
+          import sys
+          stable = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+          versions = [tuple(map(int, m.groups())) for tag in sys.stdin
+                      if (m := stable.fullmatch(tag.strip()))]
+          print("v" + ".".join(map(str, max(versions))))
+          ')"
+            if python3 - "$RELEASE_TAG" "$highest" <<'PY'
+          import sys
+          def version(tag):
+              return tuple(map(int, tag.removeprefix("v").split(".")))
+          sys.exit(0 if version(sys.argv[1]) >= version(sys.argv[2]) else 1)
+          PY
+            then
+              echo "promote=true" >> "$GITHUB_OUTPUT"
+            else
+              status=$?
+              if (( status != 1 )); then
+                exit "$status"
+              fi
+              echo "Not promoting $RELEASE_TAG: highest stable tag on origin/main is $highest" | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "promote=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             status=$?
             if (( status != 1 )); then
@@ -274,8 +346,12 @@ jobs:
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
               --certificate-github-workflow-sha "$RELEASE_COMMIT" \
               "$image@$digest"
-            # Fail closed if an earlier release run signed but did not finish attaching SBOMs.
-            cosign download sbom "$image@$digest" > /dev/null
+            # Both images require a signed CycloneDX predicate from this exact release.
+            cosign verify-attestation --type cyclonedx \
+              --certificate-identity "$identity" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --certificate-github-workflow-sha "$RELEASE_COMMIT" \
+              "$image@$digest" > /dev/null
             echo "$output=$digest" >> "$GITHUB_OUTPUT"
           }
           verify_image "$IMAGE_MGMT" "$BUILT_MGMT_DIGEST" mgmt

@@ -1,10 +1,22 @@
-# CLI Design
+# CLI
 
-The CLI mirrors appliance-style workflows. Commands will call control-plane APIs/config store for configuration and show operations.
+Use `containd cli` or the `configure` symlink inside the appliance to open the
+interactive CLI and log in to management. The authenticated web console and
+admin SSH console expose the same commands. For the starter's default SSH port:
 
-## Current CLI
+```sh
+ssh -p 2222 containd@localhost
+```
 
-- Command registry in `pkg/cli` with appliance-style commands:
+Use `help`, `show help`, or `set help` to discover commands. Configuration
+commands stage candidate edits: review `show diff`, then `commit` or
+`commit confirmed [ttl_seconds]`. Use `confirm` to retain a confirmed commit and
+`rollback` to restore the previous running configuration. Listener changes can
+require a restart; committing does not rebind management sockets.
+
+## Command reference
+
+- Inspection and help:
   - `show version`
   - `help` / `show help` / `set help`
   - `show zones`
@@ -12,7 +24,7 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
 - Local diagnostics:
   - `show ip route` (Linux only)
   - `show ip rule` (Linux only)
-  - `show neighbors` (Linux only; IPv4 ARP for now)
+  - `show neighbors` (Linux only; IPv4 ARP)
   - `diag ping <host> [count]`
   - `diag traceroute <host> [max_hops]`
   - `diag reach <src_iface> <dst_host|dst_ip|dst_iface> [tcp_port]` (legacy; TCP)
@@ -27,6 +39,7 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `show diff`
   - `show system`
   - `show services status`
+  - `show syslog status` (event forwarding counters, then audit record forwarding: totals, backlog and, per forwarder, cursor, backlog, last send and last error)
   - `show routing`
   - `show nat`
   - `show port-forwards` (DNAT config)
@@ -72,16 +85,24 @@ The CLI mirrors appliance-style workflows. Commands will call control-plane APIs
   - `import config <path>`
 - Backed by the management API and config store; exposed via SSH and the in-app console.
 
-## Auth (current)
+## Authentication
 
 Management APIs and the in-app CLI use short-lived JWT sessions stored in a cookie by default.
 
 Environment variables (common):
-- `CONTAIND_LAB_MODE=1` disables auth checks (lab/dev only).
-- `CONTAIND_JWT_SECRET=<secret>` enables JWT signing/verification (required when not in lab mode).
+- `CONTAIND_LAB_MODE=1` pins the lab credential to `containd/containd` and refuses
+  every password change, including the SSH menu reset and the wizard's password
+  step. Protected API routes still require a bearer token or cookie.
+  With a JWT secret, the token's signature and expiry are validated without a
+  session lookup. Without a secret, **any nonempty token passes**. Factory reset
+  does not revoke lab web/API tokens in either case. Lab requests receive admin
+  access rather than ordinary role enforcement. Use only in isolated, disposable environments; see
+  [default-password and lab-mode limits](secure-by-design.md#2-default-passwords).
+- `CONTAIND_JWT_SECRET=<secret>` enables JWT signing/verification. Compose requires
+  a non-empty value even for labs; follow [onboarding](docker-compose.md#quickstart).
 - `CONTAIND_COOKIE_SECURE=1` forces the `Secure` flag on the auth cookie (use when serving over HTTPS).
 
-Roles (current):
+Roles:
 - `admin` (full access)
 - `view` (read-only)
 
@@ -94,10 +115,84 @@ Interactive commands:
 - `wizard` - guided setup that writes to candidate config and optionally commits
 - `diagnostics` / `diag` - diagnostics submenu
 
+The menu's factory reset requires `NUCLEAR`. If the management API rejects the
+reset or cannot be reached, the console displays the error and keeps the menu
+open; it does not report completion. See [factory reset](api-reference.md#factory-reset)
+for configuration recovery and credential-reset behavior.
+An applied reset with warnings shows incomplete convergence and the warnings,
+not a completion claim. The initiating appliance console disconnects after
+printing its result; other SSH connections, including Linux shells, are closed.
+
 Notes:
 - The SSH console is implemented without allocating a PTY; basic line editing/echo is handled internally.
 - `diag capture` and `show ip route` require Linux (inside the container) and typically `CAP_NET_RAW`.
 - The `wizard` includes an optional step to run `set outbound quickstart` (equivalent to the UI "Quick start (LAN→WAN)").
+
+### SSH authentication and host keys
+
+`set system ssh allow-password false` stages an authoritative password disable,
+including in lab mode. Staging and commit both refuse this setting unless an
+existing admin has a usable public key in the effective authorized-keys directory.
+Enroll and test an admin key before disabling passwords. Keys for view-only or
+unknown users, empty files and malformed keys do not satisfy this check.
+HTTP management authentication is unchanged.
+
+When `allowPassword` is omitted or null, passwords are allowed in lab mode or
+when the authorized-keys directory is empty or cannot be read. `show system`
+and `show mgmt listeners` display this saved policy as `auto (bootstrap/lab)`;
+explicit values display `yes` or `no`. `show system ssh` reports the effective
+password policy and its source from the appliance, including any
+`CONTAIND_SSH_ALLOW_PASSWORD` override. An explicit saved `false` takes precedence
+over that environment variable; otherwise the environment override still applies.
+`CONTAIND_SSH_AUTH_KEYS_DIR` selects the
+effective keys directory ahead of the saved `authorizedKeysDir` setting.
+
+Committed password and authorized-keys-directory changes apply to new logins.
+Existing sessions remain open. If keys later disappear, passwords stay disabled;
+restore the keys or change the SSH policy through HTTP management. A wizard
+password change writes the user store immediately, rather than waiting for a
+config commit. A rejected password or store error stops the wizard and is not
+reported or audited as a successful change. In lab mode the wizard prints why
+password changes are refused, skips its password step and continues. Outside
+lab mode, the menu reset and the wizard's password step first ask for the
+current password; a wrong one stops the step and is audited as denied.
+
+`set system ssh host-key-rotation <days>` accepts 0 (disabled) through 36500.
+The server checks host-key age at startup and every minute while running.
+Committed rotation-setting changes take effect at the next check, without a
+restart. At the age boundary the server atomically publishes a new host key for
+new connections; existing sessions are unaffected. Rotation errors retain the
+active key and are logged. Clients with a pinned host key must verify the new
+fingerprint through a trusted channel before updating their known-hosts entry.
+
+### Account checks at SSH login
+
+Outside lab mode, SSH applies the web login's account checks after the password
+or key:
+
+- An account marked for a password change, such as the bootstrap `containd`
+  admin, must change it before the CLI, menu or shell opens. SSH asks for the new
+  password twice without echo and applies the web password rules; the new
+  password must differ from the current one. A key login also asks for the
+  current password. The change is audited.
+- A password login of an account with TOTP MFA asks for an authentication code.
+  A wrong code counts against the login rate limit, which is per client address
+  and account. A key login does not ask: the key is the possession factor.
+- An account whose required MFA enrollment grace period has ended cannot log in
+  over SSH. The server's banner says to enroll through the web UI.
+
+These steps use keyboard-interactive authentication, which OpenSSH enables by
+default. Clients limited to the `password` method, such as `sshpass`, cannot
+complete them.
+
+A password or MFA change from the web UI, the API or the SSH menu ends the
+account's other sessions and closes their SSH connections, including Linux
+shells. The session or SSH connection that made the change stays open. Deleting
+an account also closes its SSH connections.
+
+Lab mode (`CONTAIND_LAB_MODE=1`) skips these checks. Password login with
+`containd` / `containd` opens the CLI directly, and an MFA change or account
+deletion leaves SSH connections open.
 
 ## ICS firewall rules
 
@@ -114,10 +209,11 @@ and `--mode`). For IEC 104 (`protocol` is `iec104`), use:
 - `--direction <request|response>` — select the session half.
 - `--mode <learn|enforce>` — choose the rule's ICS mode.
 
-Example:
+Example: allow supported monitoring types 1 (single-point) and 30 (timestamped
+single-point) in server responses for common address 1 and the selected IOAs:
 
 ```text
-set firewall ics-rule allow-measurements ALLOW iec104 --type-ids 45,46 --classes monitor --ca 1 --ioa 65536-65567 --direction response --mode enforce
+set firewall ics-rule allow-measurements ALLOW iec104 --type-ids 1,30 --classes monitor --ca 1 --ioa 65536-65567 --direction response --mode enforce
 ```
 
 `show firewall ics-rules` displays these IEC fields alongside the existing

@@ -1,15 +1,13 @@
 # Software Bill of Materials (SBOM)
 
-containd generates and publishes a Software Bill of Materials for every release. SBOMs provide a machine-readable inventory of all components, libraries, and dependencies packaged in the container images.
+containd generates and publishes a Software Bill of Materials for every release. SBOMs inventory components detected by the scanner in the final container images; their presence does not prove every dependency was identified.
 
 ## Format and Standard
 
 - **Format**: CycloneDX JSON (`cyclonedx-json`)
-- **Version**: CycloneDX 1.6 (latest stable, as produced by Syft)
-- **Generator**: [Anchore Syft](https://github.com/anchore/syft) via the `anchore/sbom-action` GitHub Action
+- **Schema version**: inspect the artifact's `specVersion`; the workflow requests CycloneDX JSON without pinning a schema version
+- **Generator**: [Anchore Syft](https://github.com/anchore/syft) via the `anchore/sbom-action` GitHub Action, supplemented with the management UI's production npm lockfile inventory
 - **Standard**: [CycloneDX](https://cyclonedx.org/) -- an OWASP standard for software supply chain component analysis
-
-CycloneDX was chosen over SPDX for its richer vulnerability correlation support (VEX), broader tooling ecosystem, and first-class support in dependency-track, Grype, and other supply chain security tools.
 
 ## What the SBOM Covers
 
@@ -20,24 +18,26 @@ Each release produces two SBOMs:
 | `ghcr.io/tonylturner/containd` | `sbom-mgmt.cdx.json` | Management appliance (Go binary, UI, embedded services, base image) |
 | `ghcr.io/tonylturner/containd-engine` | `sbom-engine.cdx.json` | Data plane engine (Go binary, nftables, base image) |
 
-The SBOMs enumerate:
-
-- Go modules compiled into the `containd` binary (from `go.mod`)
-- npm packages included in the UI static export (from `package-lock.json`)
-- OS packages from the base image (Wolfi)
-- Embedded service binaries (Envoy, Nginx, Unbound, ClamAV, etc.)
+Syft scans the final images for Go modules, Wolfi OS packages, and embedded
+service binaries. The management image contains the UI's static export, not the
+build-stage npm dependency tree. Its SBOM also includes versioned production
+packages from `ui/package-lock.json` (including transitive and optional packages,
+excluding dev-only entries). These components carry a `containd:inventory-source`
+property identifying their lockfile entry. This is a conservative inventory of
+the UI's production dependencies, not proof that every package or file survives
+bundling. The release checks that `next` and `react` are present before signing.
 
 ## How SBOMs Are Published
 
-SBOMs are generated and attached as part of the [release workflow](https://github.com/tonylturner/containd/actions/workflows/release.yml):
+SBOMs are generated and signed as part of the [release workflow](https://github.com/tonylturner/containd/actions/workflows/release.yml):
 
 1. The release version and matching `v`-prefixed tag are validated as `MAJOR.MINOR.PATCH[-prerelease]` before container images are built and pushed to GHCR. Reserved channels such as `latest` cannot be built as release versions.
 2. Images are signed with [Cosign](https://github.com/sigstore/cosign) (keyless, GitHub OIDC).
-3. Syft generates CycloneDX JSON SBOMs for each image.
-4. SBOMs are attached to the signed images via `cosign attach sbom`.
-5. SBOMs are uploaded as GitHub Actions artifacts for each release.
+3. Syft generates CycloneDX JSON SBOMs for each image; the management SBOM merges the production npm inventory.
+4. Each SBOM is signed with `cosign attest --type cyclonedx`, bound to its immutable image digest using the release workflow's GitHub OIDC identity.
+5. SBOMs are attached as GitHub Release assets and uploaded in the `sboms` GitHub Actions artifact.
 
-Only then can a stable tag whose commit is an ancestor of `origin/main` promote both images' `:latest` tags to the signed digests. Prereleases never move `:latest`. If a stable tag reaches main later, a manual **Release** workflow run with its `tag` input verifies the existing images' release-workflow signatures and attached SBOMs before promoting, without rebuilding. Both push and dispatch promotion bind signature verification to the exact peeled commit checked for main ancestry using Cosign's `--certificate-github-workflow-sha`, in addition to the tag-specific workflow identity and GitHub OIDC issuer. See [Update Policy](update-policy.md#when-latest-moves).
+Only then can a stable tag whose commit is an ancestor of `origin/main` promote both images' `:latest` tags to the signed digests. It must be at least the highest stable semantic-version tag reachable from `origin/main`; older tags and prereleases do not move `:latest`. A manual **Release** workflow run with its `tag` input verifies existing image signatures and signed SBOM attestations without rebuilding. Both push and dispatch promotion bind image and attestation verification to the exact peeled commit using Cosign's `--certificate-github-workflow-sha`, in addition to the tag-specific workflow identity and GitHub OIDC issuer. Missing or unverifiable attestations block promotion. See [Update Policy](update-policy.md#when-latest-moves).
 
 ## Retrieving an SBOM
 
@@ -47,14 +47,19 @@ Only then can a stable tag whose commit is an ancestor of `origin/main` promote 
 # Install cosign
 brew install cosign  # or see https://github.com/sigstore/cosign#installation
 
-# Download the attached SBOM
-cosign download sbom ghcr.io/tonylturner/containd:latest > sbom-mgmt.cdx.json
-cosign download sbom ghcr.io/tonylturner/containd-engine:latest > sbom-engine.cdx.json
+# Download signed envelopes for inspection, using an immutable release reference.
+# Downloading alone does NOT verify their signatures.
+cosign download attestation --predicate-type cyclonedx "$IMAGE_REF" > attestations.jsonl
 ```
 
-### From GitHub Actions artifacts
+Use the verification commands below before extracting a trusted SBOM.
 
-Navigate to the [Releases](https://github.com/tonylturner/containd/actions/workflows/release.yml) workflow and download the `sboms` artifact from any release run.
+### From GitHub Releases or Actions
+
+Prefer the versioned [GitHub Release assets](https://github.com/tonylturner/containd/releases):
+`sbom-mgmt.cdx.json` and `sbom-engine.cdx.json`. The matching `release-images.txt`
+records version-tagged image names and their immutable digests. The [Release workflow](https://github.com/tonylturner/containd/actions/workflows/release.yml)
+also uploads these in its `sboms` Actions artifact, subject to artifact retention.
 
 ### Generate locally with Syft
 
@@ -75,20 +80,48 @@ curl -X POST https://dtrack.example.com/api/v1/bom \
   -F "bom=@sbom-mgmt.cdx.json"
 ```
 
-## Verifying Image Signatures
+## Verifying Image Signatures and SBOM Attestations
 
-Released images are signed with Cosign keyless signing (GitHub OIDC). Verify with:
+Released images use Cosign keyless signing. Match the release workflow's trust
+policy: exact workflow identity **at the release tag**, GitHub OIDC issuer,
+peeled tag commit, and an immutable image digest. Do not verify a mutable
+`:latest` reference against a broad repository-prefix identity regex.
+
+In a trusted source checkout with the intended release tag fetched, set
+`RELEASE_TAG` to that tag (for example `v0.1.34`) and `IMAGE_REF` to the matching
+`ghcr.io/tonylturner/containd@sha256:...` reference constructed with its
+`mgmt_digest` from `release-images.txt`:
 
 ```bash
+set -euo pipefail
+: "${RELEASE_TAG:?set the intended release tag}"
+: "${IMAGE_REF:?set the immutable image reference from release-images.txt}"
+[[ "$IMAGE_REF" =~ ^ghcr.io/tonylturner/containd(-engine)?@sha256:[a-f0-9]{64}$ ]]
+RELEASE_COMMIT="$(git rev-parse --verify "${RELEASE_TAG}^{commit}")"
 cosign verify \
-  --certificate-identity-regexp="https://github.com/tonylturner/containd" \
-  --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
-  ghcr.io/tonylturner/containd:latest
+  --certificate-identity "https://github.com/tonylturner/containd/.github/workflows/release.yml@refs/tags/${RELEASE_TAG}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --certificate-github-workflow-sha "$RELEASE_COMMIT" \
+  "$IMAGE_REF"
+cosign verify-attestation --type cyclonedx \
+  --certificate-identity "https://github.com/tonylturner/containd/.github/workflows/release.yml@refs/tags/${RELEASE_TAG}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --certificate-github-workflow-sha "$RELEASE_COMMIT" \
+  "$IMAGE_REF" > verified-attestations.jsonl
+# Decode only the verified envelope payload; the predicate is the CycloneDX SBOM.
+jq -s 'map(.payload | @base64d | fromjson | .predicate)
+  | if length == 1 then .[0] else error("expected one SBOM; inspect verified predicates") end' \
+  verified-attestations.jsonl > sbom-verified.cdx.json
 ```
+
+Repeat with the engine digest if deploying the split engine image. Obtain tags
+and release metadata from a source you trust; a digest alone does not identify
+the intended release. See [Update Policy](update-policy.md) for the surrounding
+backup, deployment, and post-update checks.
 
 ## Vulnerability Scanning
 
-Every CI build runs [Trivy](https://github.com/aquasecurity/trivy) against the container image with `--severity HIGH,CRITICAL --exit-code 1`. The build fails if any HIGH or CRITICAL vulnerabilities are found.
+The CI Trivy job scans the built management image (`containd/containd:ci`) with `--severity HIGH,CRITICAL --exit-code 1` and the repository `.trivyignore`. Unsuppressed findings fail that job. This does not assert that both images or every workflow run are scanned, nor that a passing scan proves an absence of vulnerabilities.
 
 You can scan locally:
 

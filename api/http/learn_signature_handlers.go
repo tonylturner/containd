@@ -4,11 +4,13 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/learn"
@@ -19,12 +21,12 @@ func learnProfilesHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		lc, ok := engine.(LearnClient)
 		if !ok || lc == nil {
-			c.JSON(http.StatusOK, []learn.LearnedProfile{})
+			apiError(c, http.StatusServiceUnavailable, "engine learning unavailable")
 			return
 		}
 		profiles, err := lc.ListLearnProfiles(c.Request.Context())
 		if err != nil {
-			internalError(c, err)
+			apiError(c, http.StatusServiceUnavailable, "engine learning unavailable")
 			return
 		}
 		if profiles == nil {
@@ -38,13 +40,16 @@ func learnGenerateHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		lc, ok := engine.(LearnClient)
 		if !ok || lc == nil {
-			c.JSON(http.StatusOK, []config.Rule{})
+			apiError(c, http.StatusServiceUnavailable, "engine learning unavailable")
 			return
 		}
 		genRules, err := lc.GenerateLearnRules(c.Request.Context())
 		if err != nil {
-			internalError(c, err)
+			apiError(c, http.StatusServiceUnavailable, "engine learning unavailable")
 			return
+		}
+		if genRules == nil {
+			genRules = []config.Rule{}
 		}
 		c.JSON(http.StatusOK, genRules)
 	}
@@ -54,12 +59,12 @@ func learnApplyHandler(store config.Store, engine EngineClient) gin.HandlerFunc 
 	return func(c *gin.Context) {
 		lc, ok := engine.(LearnClient)
 		if !ok || lc == nil {
-			apiError(c, http.StatusBadRequest, "learn mode not available")
+			apiError(c, http.StatusServiceUnavailable, "engine learning unavailable")
 			return
 		}
 		generated, err := lc.GenerateLearnRules(c.Request.Context())
 		if err != nil {
-			internalError(c, err)
+			apiError(c, http.StatusServiceUnavailable, "engine learning unavailable")
 			return
 		}
 		if len(generated) == 0 {
@@ -79,9 +84,6 @@ func learnApplyHandler(store config.Store, engine EngineClient) gin.HandlerFunc 
 				cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
 				added++
 			}
-			if cfg.Firewall.DefaultAction == "" {
-				cfg.Firewall.DefaultAction = config.ActionDeny
-			}
 			return true
 		})
 		if !staged {
@@ -97,11 +99,11 @@ func learnClearHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		lc, ok := engine.(LearnClient)
 		if !ok || lc == nil {
-			c.JSON(http.StatusOK, gin.H{"status": "cleared"})
+			apiError(c, http.StatusServiceUnavailable, "engine learning unavailable")
 			return
 		}
 		if err := lc.ClearLearnData(c.Request.Context()); err != nil {
-			internalError(c, err)
+			apiError(c, http.StatusServiceUnavailable, "engine learning unavailable")
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "cleared"})
@@ -112,12 +114,12 @@ func listSignaturesHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(SignaturesClient)
 		if !ok || sc == nil {
-			c.JSON(http.StatusOK, []signatures.Signature{})
+			apiError(c, http.StatusServiceUnavailable, "engine signatures unavailable")
 			return
 		}
 		sigs, err := sc.ListSignatures(c.Request.Context())
 		if err != nil {
-			internalError(c, err)
+			apiError(c, http.StatusServiceUnavailable, "engine signatures unavailable")
 			return
 		}
 		if sigs == nil {
@@ -131,7 +133,7 @@ func addSignatureHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(SignaturesClient)
 		if !ok || sc == nil {
-			apiError(c, http.StatusNotImplemented, "signatures not available")
+			apiError(c, http.StatusServiceUnavailable, "engine signatures unavailable")
 			return
 		}
 		var sig signatures.Signature
@@ -144,7 +146,11 @@ func addSignatureHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 		if err := sc.AddSignature(c.Request.Context(), sig); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			if errors.Is(err, engineclient.ErrSignatureExists) {
+				apiError(c, http.StatusConflict, "signature already exists")
+				return
+			}
+			apiError(c, http.StatusServiceUnavailable, "engine signatures unavailable")
 			return
 		}
 		auditLog(c, audit.Record{Action: "signatures.add", Target: sig.ID})
@@ -156,13 +162,13 @@ func deleteSignatureHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(SignaturesClient)
 		if !ok || sc == nil {
-			apiError(c, http.StatusNotImplemented, "signatures not available")
+			apiError(c, http.StatusServiceUnavailable, "engine signatures unavailable")
 			return
 		}
 		id := c.Param("id")
 		removed, err := sc.RemoveSignature(c.Request.Context(), id)
 		if err != nil {
-			internalError(c, err)
+			apiError(c, http.StatusServiceUnavailable, "engine signatures unavailable")
 			return
 		}
 		if !removed {
@@ -178,7 +184,7 @@ func listSignatureMatchesHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sc, ok := engine.(SignaturesClient)
 		if !ok || sc == nil {
-			c.JSON(http.StatusOK, []signatures.Match{})
+			apiError(c, http.StatusServiceUnavailable, "engine signature matches unavailable")
 			return
 		}
 		limit := 100
@@ -189,7 +195,7 @@ func listSignatureMatchesHandler(engine EngineClient) gin.HandlerFunc {
 		}
 		matches, err := sc.ListSignatureMatches(c.Request.Context(), limit)
 		if err != nil {
-			internalError(c, err)
+			apiError(c, http.StatusServiceUnavailable, "engine signature matches unavailable")
 			return
 		}
 		if matches == nil {

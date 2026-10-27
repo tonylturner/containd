@@ -3,7 +3,11 @@
 
 package config
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tonylturner/containd/pkg/dp/rules"
+)
 
 // ICSProtocolIEC104 is the ICS predicate protocol of IEC 60870-5-104 rules.
 const ICSProtocolIEC104 = "iec104"
@@ -38,6 +42,24 @@ func validateICSPredicate(p ICSPredicate, ruleID string) error {
 	}
 	if len(p.ObjectClasses) > 0 && p.Protocol != "cip" {
 		return fmt.Errorf("rule %s ics objectClasses only supported for cip protocol", ruleID)
+	}
+	return validateICSAddresses(p, ruleID)
+}
+
+// validateICSAddresses refuses an addresses entry the evaluator cannot
+// parse (rules.ParseICSAddressSpec) or that exceeds what the protocol
+// carries (rules.ICSAddressMax).
+func validateICSAddresses(p ICSPredicate, ruleID string) error {
+	limit := rules.ICSAddressMax(p.Protocol)
+	for _, spec := range p.Addresses {
+		_, high, err := rules.ParseICSAddressSpec(spec)
+		if err == nil && high > limit {
+			err = fmt.Errorf("%s addresses end at %d", p.Protocol, limit)
+		}
+		if err != nil {
+			return fmt.Errorf("rule %s ics addresses entry %q: %v; use one value or a low-high range, "+
+				"each decimal or 0x hex, low <= high", ruleID, spec, err)
+		}
 	}
 	return nil
 }

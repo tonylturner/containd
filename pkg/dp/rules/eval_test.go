@@ -38,11 +38,18 @@ func TestEvaluatorMatch(t *testing.T) {
 	}
 }
 
-func TestEvaluatorDefaultDeny(t *testing.T) {
-	ev := NewEvaluator(&Snapshot{Default: ActionDeny})
-	ctx := EvalContext{}
-	if got := ev.Evaluate(ctx); got != ActionDeny {
-		t.Fatalf("expected deny, got %s", got)
+func TestEvaluatorDefaultAction(t *testing.T) {
+	for _, tc := range []struct {
+		def, want Action
+	}{
+		{ActionAllow, ActionAllow},
+		{ActionDeny, ActionDeny},
+		{"", ActionDeny},
+		{"REJECT", ActionDeny},
+	} {
+		if got := NewEvaluator(&Snapshot{Default: tc.def}).Evaluate(EvalContext{}); got != tc.want {
+			t.Fatalf("default %q evaluated to %s, want %s", tc.def, got, tc.want)
+		}
 	}
 }
 
@@ -121,6 +128,12 @@ func TestICSMatch(t *testing.T) {
 	if got := ev.Evaluate(ctx); got != ActionDeny {
 		t.Fatalf("expected deny, got %s", got)
 	}
+}
+
+// matchAddress reports whether the compiled specifications hold the ICS
+// address contextAddr.
+func matchAddress(specs []string, contextAddr string) bool {
+	return matchICSAddresses(compileAddrs(specs), EvalContext{ICS: &ICSContext{Address: contextAddr}})
 }
 
 func TestMatchAddressSingleDecimal(t *testing.T) {
@@ -340,5 +353,28 @@ func TestScheduleNoScheduleAlwaysMatches(t *testing.T) {
 	}
 	if got := ev.Evaluate(ctx); got != ActionAllow {
 		t.Fatalf("expected allow with no schedule, got %s", got)
+	}
+}
+
+// TestUnparseableICSAddressesMatchNothing checks that an address predicate
+// with an entry that fails to parse matches no address, as a CIDR side that
+// lists only unparseable networks matches no host: it must neither widen an
+// ALLOW to every address nor narrow it to the entries that parse.
+func TestUnparseableICSAddressesMatchNothing(t *testing.T) {
+	for _, specs := range [][]string{{"junk", "1-"}, {"5", "0x01G0"}, {"0-0x200", "0x200-0x100"}} {
+		ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{{
+			ID:     "write-one",
+			ICS:    ICSPredicate{Protocol: "modbus", Addresses: specs},
+			Action: ActionAllow,
+		}}})
+		for _, addr := range []string{"5", "0x0100", ""} {
+			ctx := EvalContext{ICS: &ICSContext{Protocol: "modbus", Address: addr}}
+			if got := ev.Evaluate(ctx); got != ActionDeny {
+				t.Fatalf("addresses %q at %q = %s, want DENY", specs, addr, got)
+			}
+		}
+	}
+	if matchAddress([]string{"junk"}, "5") {
+		t.Fatal("an unparseable specification matched")
 	}
 }

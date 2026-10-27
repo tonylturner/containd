@@ -4,11 +4,11 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
-	"os"
-	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/users"
 )
 
@@ -63,6 +63,7 @@ func createUserHandler(store users.Store) gin.HandlerFunc {
 			apiError(c, code, err.Error())
 			return
 		}
+		auditLog(c, audit.Record{Action: "auth.user.create", Target: created.Username, Detail: "role=" + created.Role})
 		c.JSON(http.StatusOK, created)
 	}
 }
@@ -88,6 +89,7 @@ func updateUserHandler(store users.Store) gin.HandlerFunc {
 			apiError(c, code, err.Error())
 			return
 		}
+		auditLog(c, audit.Record{Action: "auth.user.update", Target: updated.Username, Detail: "role=" + updated.Role})
 		c.JSON(http.StatusOK, updated)
 	}
 }
@@ -97,35 +99,45 @@ type setPasswordRequest struct {
 }
 
 func setUserPasswordHandler(store users.Store) gin.HandlerFunc {
-	lab := os.Getenv("CONTAIND_LAB_MODE") == "1" || strings.EqualFold(os.Getenv("CONTAIND_LAB_MODE"), "true")
 	return func(c *gin.Context) {
-		// Mirror changeMyPasswordHandler: in lab mode the canonical
-		// credential is pinned. Admins reaching this endpoint via the
-		// users-management UI also get the same lock so a single
-		// codepath enforces the cred-pinning invariant.
-		if lab {
-			apiError(c, http.StatusForbidden, "password change disabled in lab mode (CONTAIND_LAB_MODE=1) — credentials are pinned to the documented canonical default for reproducible workshop runs")
+		if err := users.CheckPasswordChange(); err != nil {
+			apiError(c, http.StatusForbidden, err.Error())
 			return
 		}
 		if store == nil {
 			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
-		id := c.Param("id")
 		var req setPasswordRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		if err := store.SetPassword(c.Request.Context(), id, req.Password); err != nil {
-			code := http.StatusBadRequest
-			if err == users.ErrNotFound {
-				code = http.StatusNotFound
-			}
-			apiError(c, code, err.Error())
+		u, err := store.GetByID(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			apiError(c, setPasswordErrorStatus(err), err.Error())
 			return
 		}
+		// SetPassword also revokes the account's sessions, except the
+		// caller's own when an admin sets their own password here.
+		if err := store.SetPassword(c.Request.Context(), u.ID, req.Password); err != nil {
+			apiError(c, setPasswordErrorStatus(err), err.Error())
+			return
+		}
+		auditLog(c, audit.Record{Action: "auth.password.set_admin", Target: u.Username})
 		c.JSON(http.StatusOK, gin.H{"status": "password_set"})
+	}
+}
+
+// setPasswordErrorStatus maps a users.Store SetPassword error to its HTTP status.
+func setPasswordErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, users.ErrPasswordChangeLabMode):
+		return http.StatusForbidden
+	case errors.Is(err, users.ErrNotFound):
+		return http.StatusNotFound
+	default:
+		return http.StatusBadRequest
 	}
 }
 
@@ -135,18 +147,22 @@ func deleteUserHandler(store users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusServiceUnavailable, "user store unavailable")
 			return
 		}
-		id := c.Param("id")
-		if err := store.Delete(c.Request.Context(), id); err != nil {
+		u, err := store.GetByID(c.Request.Context(), c.Param("id"))
+		if err == nil {
+			err = store.Delete(c.Request.Context(), u.ID)
+		}
+		if err != nil {
 			code := http.StatusBadRequest
-			switch err {
-			case users.ErrNotFound:
+			switch {
+			case errors.Is(err, users.ErrNotFound):
 				code = http.StatusNotFound
-			case users.ErrLastAdmin:
+			case errors.Is(err, users.ErrLastAdmin):
 				code = http.StatusConflict
 			}
 			apiError(c, code, err.Error())
 			return
 		}
+		auditLog(c, audit.Record{Action: "auth.user.delete", Target: u.Username})
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	}
 }

@@ -16,10 +16,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/audit"
-	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	cpids "github.com/tonylturner/containd/pkg/cp/ids"
-	"github.com/tonylturner/containd/pkg/dp/enforce"
+	"github.com/tonylturner/containd/pkg/dp/coverage"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
@@ -34,6 +33,12 @@ func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 	}
 }
 
+// RulesetPreviewClient is an optional interface for previewing the compiled
+// ruleset of a candidate configuration on the live engine.
+type RulesetPreviewClient interface {
+	PreviewRuleset(context.Context, *config.Config) (dpengine.RulesetPreview, error)
+}
+
 func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := store.LoadCandidate(c.Request.Context())
@@ -41,33 +46,39 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 			internalError(c, err)
 			return
 		}
-		snap, err := compile.CompileSnapshot(cfg)
-		if err != nil {
+		if err := cfg.Validate(); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		comp := enforce.NewCompiler()
-		ruleset, err := comp.CompileFirewall(&snap)
+		ec, ok := engine.(RulesetPreviewClient)
+		if !ok || ec == nil {
+			apiError(c, http.StatusServiceUnavailable, "engine unavailable: ruleset preview requires a live engine")
+			return
+		}
+		preview, err := ec.PreviewRuleset(c.Request.Context(), cfg)
 		if err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
 
 		resp := gin.H{
-			"snapshot": snap,
-			"ruleset":  ruleset,
+			"snapshot": preview.Snapshot,
+			"runtime":  preview.Runtime,
 		}
-		if engine != nil {
-			type rulesetStatusClient interface {
-				RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
-			}
-			if ec, ok := engine.(rulesetStatusClient); ok && ec != nil {
-				if st, err := ec.RulesetStatus(c.Request.Context()); err == nil {
-					resp["engineStatus"] = st
-				} else {
-					resp["engineStatusError"] = err.Error()
-				}
-			}
+		if preview.Ruleset != "" {
+			resp["ruleset"] = preview.Ruleset
+		}
+		if len(preview.Warnings) > 0 {
+			resp["warnings"] = preview.Warnings
+		}
+		// Static candidate coverage; engineStatus carries the applied one.
+		if cov := coverage.Evaluate(&preview.Snapshot, cfg.DataPlane.CoverageSettings()); len(cov) > 0 {
+			resp["icsCoverage"] = cov
+		}
+		if st, err := engine.RulesetStatus(c.Request.Context()); err == nil {
+			resp["engineStatus"] = st
+		} else {
+			resp["engineStatusError"] = err.Error()
 		}
 		c.JSON(http.StatusOK, resp)
 	}
@@ -170,7 +181,7 @@ func setIDSHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+		cfg, ok := stageCandidateIDS(c, store, func(cfg *config.Config) bool {
 			cfg.IDS.Enabled = idsCfg.Enabled
 			cfg.IDS.RuleGroups = idsCfg.RuleGroups
 			if idsCfg.Rules != nil {
@@ -237,7 +248,7 @@ func idsImportHandler(store config.Store) gin.HandlerFunc {
 		}
 
 		added, skipped := 0, 0
-		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+		cfg, ok := stageCandidateIDS(c, store, func(cfg *config.Config) bool {
 			existing := make(map[string]bool, len(cfg.IDS.Rules))
 			for _, r := range cfg.IDS.Rules {
 				existing[r.ID] = true
@@ -337,7 +348,7 @@ func idsRestoreHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if _, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+		if _, ok := stageCandidateIDS(c, store, func(cfg *config.Config) bool {
 			cfg.IDS.Rules = rules
 			return true
 		}); !ok {

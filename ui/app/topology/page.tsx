@@ -38,19 +38,18 @@ const SecurityView = dynamic(() => import("./SecurityView"), {
   loading: () => <div style={{ padding: 24, color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading security view...</div>,
 });
 import { Shell } from "../../components/Shell";
-import {
-  type FlowSummary,
-} from "../../lib/api";
 import { CONFIG_COMMITTED } from "../../lib/config-events";
+import { useHealth } from "../../hooks/useHealth";
+import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 import s from "./topology.module.css";
 import { DetailContent } from "./topology-detail";
 import {
   buildTopology,
+  withHealth,
   nodeTypes,
-  sparkStore,
-  SparkTickContext,
   type TopoNodeData,
 } from "./topology-shared";
+import { TONE_COLORS, topologyStatus } from "./topology-status";
 
 /* ════════════════════════════════════════════════════════════════════
    INNER COMPONENT (needs ReactFlowProvider)
@@ -65,7 +64,8 @@ function TopologyInner() {
   const [currentView, setCurrentView] = useState("logical");
   const [topoError, setTopoError] = useState<string | null>(null);
   const nodeDataRef = useRef<Record<string, TopoNodeData>>({});
-  const [sparkTick, setSparkTick] = useState(0);
+  const health = useHealth();
+  const installed = useInstalledRuleset();
   const { fitView } = useReactFlow();
 
   // ── Fetch & build ──
@@ -73,16 +73,11 @@ function TopologyInner() {
     try {
       const result = await buildTopology();
       if (!result) {
-        setTopoError("Failed to load topology data. Check API connectivity.");
+        setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
         return;
       }
 
       setTopoError(null);
-
-      // Merge sparkline history into shared store (not on node data)
-      for (const n of result.nodes) {
-        if (!sparkStore.data[n.id]) sparkStore.data[n.id] = Array.from({ length: 14 }, () => Math.random() * 0.6 + 0.1);
-      }
 
       nodeDataRef.current = result.nodeDataMap;
       setNodes(result.nodes);
@@ -90,7 +85,7 @@ function TopologyInner() {
       setSyncTime(new Date().toLocaleTimeString("en-US", { hour12: false }));
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
-      setTopoError("Failed to load topology data. Check API connectivity.");
+      setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
     }
   }, []);
 
@@ -118,24 +113,6 @@ function TopologyInner() {
     };
   }, [fetchData, fitView]);
 
-  // ── Sparkline traffic simulation ──
-  // Mutate sparkStore data in-place; Spark components re-render via
-  // SparkTickContext without causing ReactFlow node object replacement.
-  useEffect(() => {
-    const iv = setInterval(() => {
-      if (document.hidden) return;
-      const hist = sparkStore.data;
-      for (const id of Object.keys(hist)) {
-        hist[id].shift();
-        hist[id].push(Math.max(0.05, Math.min(1, hist[id][hist[id].length - 1] + (Math.random() - 0.5) * 0.2)));
-      }
-      sparkStore.tick += 1;
-      // Bump state to propagate via context — does NOT touch ReactFlow nodes
-      setSparkTick((t) => t + 1);
-    }, 2000);
-    return () => clearInterval(iv);
-  }, []);
-
   // ── Update selection highlight on nodes ──
   useEffect(() => {
     setNodes((prev) =>
@@ -158,7 +135,10 @@ function TopologyInner() {
     setNodes((prev) => applyNodeChanges(changes, prev));
   }, []);
 
-  const selectedData = selectedId ? nodeDataRef.current[selectedId] : null;
+  const selected = selectedId ? nodeDataRef.current[selectedId] : null;
+  const selectedData = selected ? withHealth(selected, health) : null;
+  const status = topologyStatus(health, installed);
+  const statusColor = TONE_COLORS[status.tone];
 
   return (
     <div className={s.page}>
@@ -173,9 +153,10 @@ function TopologyInner() {
           ))}
         </div>
         <div className={s.topbarRight}>
-          <div className={s.statusChip}>
-            <div className={s.chipDot} style={{ background: "#22c55e", boxShadow: "0 0 6px #22c55e" }} />
-            <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "#22c55e" }}>ALL NOMINAL</span>
+          <div role="status" aria-label="Firewall enforcement" className={s.statusChip} title={status.reason ? `Firewall enforcement: ${status.reason}` : "Firewall enforcement"}>
+            <div className={s.chipDot} style={{ background: statusColor }} />
+            <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: statusColor }}>{status.label}</span>
+            {status.reason && <span className={s.chipReason}>{status.reason}</span>}
           </div>
           <div className={s.statusChip}>
             <span style={{ color: "#4a4030" }}>LAST SYNC</span>
@@ -189,7 +170,7 @@ function TopologyInner() {
       </div>
 
       {/* Error banner */}
-      {topoError && (
+      {currentView === "logical" && topoError && (
         <div role="alert" style={{ margin: "8px 12px 0", padding: "8px 14px", fontFamily: "var(--mono)", fontSize: 10, color: "#ef4444", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 2 }}>
           {topoError}
           <button onClick={() => fetchData()} style={{ marginLeft: 12, color: "#f59e0b", background: "transparent", border: "1px solid rgba(245,158,11,0.3)", padding: "2px 10px", cursor: "pointer", fontFamily: "var(--mono)", fontSize: 9 }}>Retry</button>
@@ -201,10 +182,9 @@ function TopologyInner() {
         <PhysicalView />
       ) : currentView === "security" ? (
         <SecurityView />
-      ) : (
+      ) : topoError ? null : (
         <div className={s.workspace} style={panelOpen ? undefined : { gridTemplateColumns: "1fr" }}>
           <div className={s.flowWrap}>
-            <SparkTickContext.Provider value={sparkTick}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -236,7 +216,6 @@ function TopologyInner() {
                 style={{ background: "#0a0e0a", border: "1px solid rgba(245,158,11,0.14)", borderRadius: 0 }}
               />
             </ReactFlow>
-            </SparkTickContext.Provider>
 
             {/* Legend overlay */}
             <div className={s.canvasLegend}>

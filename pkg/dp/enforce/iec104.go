@@ -14,29 +14,17 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// containd reserves the skb-mark bits in EnvelopeMarkMask. EnvelopeMark
-// within them means "steered to the queue by an IEC104 envelope rule"; the
-// other mark bits are preserved.
-const (
-	EnvelopeMarkMask uint32 = 0x0f000000
-	EnvelopeMark     uint32 = 0x01000000
-)
-
 // iec104Port is the only supported IEC104 server port.
 const iec104Port = 2404
 
 // IEC104EnvelopeChain is the regular chain every IEC104 envelope steering
-// rule jumps to. It holds one rule: the marked queue verdict while the
-// engine owns its queue, and drop otherwise. Switching
-// replaces that one rule in a single nft transaction, so the ruleset never
+// rule jumps to. While the engine owns its queue it queues every packet
+// with EnvelopeMark, and HandshakeMark as the generic ICS queue does
+// (queueRules); otherwise it holds one rule, drop. Switching flushes and
+// refills the chain in a single nft transaction, so the ruleset never
 // passes through a state where envelope traffic is neither queued to the
 // engine nor dropped, and no other rule changes.
 const IEC104EnvelopeChain = "iec104_envelope"
-
-// EnvelopeMarked reports whether an NFQUEUE skb mark carries EnvelopeMark.
-func EnvelopeMarked(mark uint32) bool {
-	return mark&EnvelopeMarkMask == EnvelopeMark
-}
 
 // SteersIEC104 reports whether CompileFirewall steers IEC104 envelope
 // traffic to the queue for snap: a queue is configured and at least one
@@ -65,7 +53,7 @@ func isIEC104Rule(e rules.Entry) bool {
 // action: the engine judges the content. These lines go before the
 // conntrack established accept and every ordinary accept, so neither
 // direction of an envelope session can bypass inspection.
-func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot) {
+func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot, zones zoneIndex) error {
 	entries := make([]rules.Entry, 0, len(snap.Firewall))
 	for _, e := range snap.Firewall {
 		if isIEC104Rule(e) && admitsIEC104Port(e.Protocols) {
@@ -74,69 +62,74 @@ func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot)
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 	for _, e := range entries {
-		for _, line := range compileIEC104Steering(e, snap.ZoneIfaces) {
+		steering, err := compileIEC104Steering(e, zones)
+		if err != nil {
+			return err
+		}
+		for _, line := range steering {
 			lines(line)
 		}
 	}
+	return nil
 }
 
-// iec104EnvelopeVerdict is the one rule of IEC104EnvelopeChain: the marked
-// queue verdict when open, drop when closed.
-func (c *Compiler) iec104EnvelopeVerdict(open bool) string {
+// iec104EnvelopeRules are the rules of IEC104EnvelopeChain: the marked
+// queue rules when open, drop when closed.
+func (c *Compiler) iec104EnvelopeRules(open bool) []string {
 	if !open {
-		return "drop"
+		return []string{"drop"}
 	}
-	return fmt.Sprintf("meta mark set meta mark and 0x%08x or 0x%08x queue num %d",
-		^EnvelopeMarkMask, EnvelopeMark, c.QueueID)
+	return c.queueRules(EnvelopeMark)
 }
 
 // writeIEC104EnvelopeChain emits IEC104EnvelopeChain in the state of
 // c.IEC104EnvelopeOpen.
 func (c *Compiler) writeIEC104EnvelopeChain(buf *bytes.Buffer) {
 	buf.WriteString("  chain " + IEC104EnvelopeChain + " {\n")
-	buf.WriteString("    " + c.iec104EnvelopeVerdict(c.IEC104EnvelopeOpen) + ";\n")
+	for _, rule := range c.iec104EnvelopeRules(c.IEC104EnvelopeOpen) {
+		buf.WriteString("    " + rule + ";\n")
+	}
 	buf.WriteString("  }\n")
 }
 
 // IEC104EnvelopeSwitch returns the nft script that sets the envelope state
-// of an installed ruleset: one transaction that replaces the single rule of
-// IEC104EnvelopeChain. Apply it only to a ruleset compiled for a snapshot
-// that SteersIEC104.
+// of an installed ruleset: one transaction that flushes IEC104EnvelopeChain
+// and adds the rules of the state. Apply it only to a ruleset compiled for
+// a snapshot that SteersIEC104.
 func (c *Compiler) IEC104EnvelopeSwitch(open bool) string {
-	table := c.TableName
-	if table == "" {
-		table = "containd"
+	table := c.policyTable()
+	var b strings.Builder
+	fmt.Fprintf(&b, "flush chain inet %s %s\n", table, IEC104EnvelopeChain)
+	for _, rule := range c.iec104EnvelopeRules(open) {
+		fmt.Fprintf(&b, "add rule inet %s %s %s\n", table, IEC104EnvelopeChain, rule)
 	}
-	return fmt.Sprintf("flush chain inet %s %s\nadd rule inet %s %s %s\n",
-		table, IEC104EnvelopeChain, table, IEC104EnvelopeChain, c.iec104EnvelopeVerdict(open))
+	return b.String()
 }
 
 // compileIEC104Steering returns the client-to-server and server-to-client
-// steering lines for one IEC104 rule.
-func compileIEC104Steering(e rules.Entry, zoneIfaces map[string][]string) []string {
-	verdict := "jump " + IEC104EnvelopeChain
-	steer := func(inZones, outZones []string, port string, src, dst []string) string {
-		parts := []string{}
-		if c := zoneClause("iifname", inZones, zoneIfaces); c != "" {
-			parts = append(parts, c)
-		}
-		if c := zoneClause("oifname", outZones, zoneIfaces); c != "" {
-			parts = append(parts, c)
-		}
-		parts = append(parts, port)
-		if len(src) > 0 {
-			parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(src, ", ")))
-		}
-		if len(dst) > 0 {
-			parts = append(parts, fmt.Sprintf("ip daddr { %s }", strings.Join(dst, ", ")))
-		}
-		return strings.Join(append(parts, verdict), " ")
+// steering lines for one IEC104 rule, per address family, which count into
+// the rule's counter. A rule that matches nothing has none.
+func compileIEC104Steering(e rules.Entry, zones zoneIndex) ([]string, error) {
+	scopes, err := addrScopes(e)
+	if err != nil {
+		return nil, err
 	}
+	in, inOK := zones.clause("iifname", e.SourceZones)
+	out, outOK := zones.clause("oifname", e.DestZones)
+	if !inOK || !outOK {
+		return nil, nil
+	}
+	replyIn, _ := zones.clause("iifname", e.DestZones)
+	replyOut, _ := zones.clause("oifname", e.SourceZones)
+	verdict := counterStmt(e.ID) + " jump " + IEC104EnvelopeChain
 	port := strconv.Itoa(iec104Port)
-	return []string{
-		steer(e.SourceZones, e.DestZones, "tcp dport "+port, e.Sources, e.Destinations),
-		steer(e.DestZones, e.SourceZones, "tcp sport "+port, e.Destinations, e.Sources),
+	var lines []string
+	for _, s := range scopes {
+		lines = append(lines,
+			joinClauses(append(append([]string{in, out, "tcp dport " + port}, s.header(false)...), verdict)),
+			joinClauses(append(append([]string{replyIn, replyOut, "tcp sport " + port}, s.header(true)...), verdict)))
 	}
+	return lines, nil
 }
 
 // admitsIEC104Port reports whether a rule's protocol list matches TCP

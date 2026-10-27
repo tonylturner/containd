@@ -120,6 +120,7 @@ func (t *iecTable) judgeLocked(s *iecSession, evs []dpi.Event, now time.Time) (d
 			continue
 		}
 		d := t.decideLocked(s, ev)
+		s.inventoryDecisionLocked(ev, d)
 		if d.enforced() && !denied {
 			denied = true
 			trigger, _ = eventfields.String(ev.Attributes, eventfields.KeyAPDUID)

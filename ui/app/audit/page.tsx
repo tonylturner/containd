@@ -39,14 +39,14 @@ export default function AuditPage() {
       actions={
         <button
           onClick={refresh}
-          className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-amber-500/[0.1] transition-ui"
+          className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
         >
           Refresh
         </button>
       }
     >
       {error && (
-        <div className="mb-4 rounded-sm border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <div className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           {error}
         </div>
       )}
@@ -60,9 +60,9 @@ export default function AuditPage() {
           description="Administrative actions will appear here automatically."
         />
       ) : (
-      <div className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] overflow-hidden shadow-card">
+      <div className="rounded-xs border bg-(--surface) overflow-hidden shadow-card">
         <table className="w-full text-sm">
-          <thead className="bg-[var(--surface)]">
+          <thead className="bg-(--surface)">
             <tr>
               <SortableHeader label="Time" sortKey="timestamp" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
               <SortableHeader label="Actor" sortKey="actor" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
@@ -75,23 +75,23 @@ export default function AuditPage() {
           <tbody>
             {table.data.length === 0 && (
               <tr>
-                <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={6}>
+                <td className="px-4 py-4 text-(--text-muted)" colSpan={6}>
                   No audit records match your search.
                 </td>
               </tr>
             )}
             {table.data.map((r) => (
-              <tr key={r.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                <td className="px-4 py-3 text-[var(--text)]">
+              <tr key={r.id} className="border-t table-row-hover transition-ui">
+                <td className="px-4 py-3 text-(--text)">
                   {new Date(r.timestamp).toLocaleString()}
                 </td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.actor}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.source}</td>
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">
+                <td className="px-4 py-3 text-(--text)">{r.actor}</td>
+                <td className="px-4 py-3 text-(--text)">{r.source}</td>
+                <td className="px-4 py-3 font-mono text-xs text-(--text)">
                   {r.action}
                 </td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.target}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.result}</td>
+                <td className="px-4 py-3 text-(--text)">{r.target}</td>
+                <td className="px-4 py-3 text-(--text)">{r.result}</td>
               </tr>
             ))}
           </tbody>

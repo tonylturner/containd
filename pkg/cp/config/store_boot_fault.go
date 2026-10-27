@@ -9,11 +9,13 @@ import (
 	"time"
 )
 
+// The key predates boot recovery without a reservation; it holds every boot
+// fault so an upgrade needs no migration.
 const bootFaultKey = "management_reservation_boot_fault"
 
 // ErrManagementBootFault gates runtime replay until a validated promotion,
-// rollback or factory reset replaces the conflicting running configuration.
-var ErrManagementBootFault = errors.New("reserved management path boot fault")
+// rollback or factory reset replaces the refused running configuration.
+var ErrManagementBootFault = errors.New("management recovery: stored running configuration refused at boot")
 
 func (s *SQLiteStore) ManagementBootFault(ctx context.Context) (string, error) {
 	var fault string
@@ -24,8 +26,10 @@ func (s *SQLiteStore) ManagementBootFault(ctx context.Context) (string, error) {
 	return fault, err
 }
 
-// SetManagementBootFault records the post-normalization boot decision. Normal
-// recovery clears it transactionally with promotion/rollback, not with staging.
+// SetManagementBootFault records the post-normalization boot decision. Every
+// boot records it, so a fault never outlives the condition that caused it,
+// such as a removed reservation. Normal recovery clears it transactionally
+// with promotion/rollback, not with staging.
 func (s *SQLiteStore) SetManagementBootFault(ctx context.Context, fault string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -47,11 +51,6 @@ func ManagementBootFaultForStore(ctx context.Context, store Store) (string, erro
 }
 
 func CheckManagementBootFault(ctx context.Context, store Store) error {
-	// Removing the deployment reservation must not leave its historical fault
-	// gating ordinary replay. The fault remains available as persisted history.
-	if ReservationForStore(store) == nil {
-		return nil
-	}
 	fault, err := ManagementBootFaultForStore(ctx, store)
 	if err != nil {
 		return err

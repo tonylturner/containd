@@ -11,6 +11,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -25,14 +26,22 @@ import (
 )
 
 type Options struct {
-	ListenAddr          string
+	ListenAddr string
+	// CLI sessions call the management API at BaseURL with APIClient,
+	// adding the X-Containd-SSH-Connection header to every request.
 	BaseURL             string
+	APIClient           cli.HTTPClient
 	HostKeyPath         string
 	AuthorizedKeysDir   string
 	AllowPassword       bool
 	Banner              string
 	HostKeyRotationDays int
-	LabMode             bool
+	// HostKeyRotationDaysFunc reads the running setting at each bounded check.
+	HostKeyRotationDaysFunc func(context.Context) (int, error)
+	// AuthPolicy reads the effective password setting and authorized-keys directory
+	// together. Nil uses AllowPassword and AuthorizedKeysDir.
+	AuthPolicy func(context.Context) (bool, string, error)
+	LabMode    bool
 	// ShellMode controls the default SSH login experience.
 	// "linux": drops into a real bash shell; "appliance" (default): the CLI REPL.
 	ShellMode string
@@ -49,10 +58,20 @@ type Server struct {
 	opts   Options
 	logger *zap.SugaredLogger
 
-	ln net.Listener
-	wg sync.WaitGroup
+	lnMu sync.Mutex
+	ln   net.Listener
+	// base is the server configuration without host keys; current adds the
+	// host key new connections use. Listen sets both; host key rotation
+	// replaces current.
+	base    *ssh.ServerConfig
+	current atomic.Pointer[ssh.ServerConfig]
+	wg      sync.WaitGroup
+
+	hostKeyClock hostKeyClock
 
 	pwLimiter *ratelimit.AttemptLimiter
+	connMu    sync.Mutex
+	conns     map[*sshConnection]struct{}
 }
 
 func New(opts Options) (*Server, error) {
@@ -61,6 +80,9 @@ func New(opts Options) (*Server, error) {
 	}
 	if opts.BaseURL == "" {
 		return nil, errors.New("ssh baseURL required")
+	}
+	if opts.APIClient == nil {
+		return nil, errors.New("ssh API client required")
 	}
 	if opts.UserStore == nil {
 		return nil, errors.New("user store required")
@@ -75,21 +97,30 @@ func New(opts Options) (*Server, error) {
 		return nil, errors.New("authorized keys dir required")
 	}
 	return &Server{
-		opts:      opts,
-		logger:    logging.NewService("ssh"),
-		pwLimiter: ratelimit.NewAttemptLimiter(1*time.Minute, 10, 2*time.Minute),
+		opts:         opts,
+		logger:       logging.NewService("ssh"),
+		pwLimiter:    ratelimit.NewAttemptLimiter(1*time.Minute, 10, 2*time.Minute),
+		hostKeyClock: realHostKeyClock(),
 	}, nil
 }
 
-func (s *Server) ListenAndServe(ctx context.Context) error {
-	signer, err := ensureHostKey(s.opts.HostKeyPath, s.opts.HostKeyRotationDays)
+// Listen loads the host key and binds ListenAddr. The socket accepts no
+// connection until Serve; Close releases it.
+func (s *Server) Listen(ctx context.Context) error {
+	days, err := s.rotationDays(ctx)
+	if err != nil {
+		return err
+	}
+	signer, err := ensureHostKeyAt(s.opts.HostKeyPath, days, s.hostKeyClock.now())
 	if err != nil {
 		return err
 	}
 
-	cfg := &ssh.ServerConfig{
-		PasswordCallback:  s.passwordCallback(),
-		PublicKeyCallback: s.publicKeyCallback(),
+	// handleConn adds the PublicKeyCallback, which collects one connection's
+	// refused keys.
+	base := &ssh.ServerConfig{
+		PasswordCallback:          s.passwordCallback(),
+		VerifiedPublicKeyCallback: s.verifiedPublicKeyCallback(),
 		BannerCallback: func(conn ssh.ConnMetadata) string {
 			if s.opts.Banner != "" {
 				return s.opts.Banner + "\r\n"
@@ -97,18 +128,61 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			return "containd ICS/OT firewall\r\n"
 		},
 	}
-	cfg.AddHostKey(signer)
-
+	s.lnMu.Lock()
+	defer s.lnMu.Unlock()
+	if s.ln != nil {
+		return errors.New("ssh server already listening")
+	}
 	ln, err := net.Listen("tcp", s.opts.ListenAddr)
 	if err != nil {
 		return err
 	}
 	s.ln = ln
-	s.logger.Infof("ssh listening on %s", s.opts.ListenAddr)
+	s.base = base
+	s.current.Store(configWithHostKey(base, signer))
+	s.logger.Infof("ssh listening on %s", ln.Addr())
+	return nil
+}
 
+// Addr is the address of the socket Listen bound; nil before Listen.
+func (s *Server) Addr() net.Addr {
+	s.lnMu.Lock()
+	defer s.lnMu.Unlock()
+	if s.ln == nil {
+		return nil
+	}
+	return s.ln.Addr()
+}
+
+// Serve accepts connections on the socket Listen bound until ctx ends or
+// Close is called. Call it once per Listen.
+func (s *Server) Serve(ctx context.Context) error {
+	s.lnMu.Lock()
+	ln, base := s.ln, s.base
+	s.lnMu.Unlock()
+	if ln == nil {
+		return errors.New("ssh server is not listening")
+	}
+	if !s.opts.LabMode {
+		defer s.opts.UserStore.SubscribeSessionRevocations(s.closeRevokedSessions)()
+	}
+
+	lifetime, cancel := context.WithCancel(ctx)
+	workersDone := make(chan struct{})
+	defer func() { cancel(); <-workersDone }()
 	go func() {
-		<-ctx.Done()
-		_ = s.Close()
+		defer close(workersDone)
+		rotationDone := make(chan struct{})
+		go func() {
+			defer close(rotationDone)
+			s.rotateHostKeys(lifetime, base, &s.current)
+		}()
+		select {
+		case <-ctx.Done():
+			_ = s.Close()
+		case <-lifetime.Done():
+		}
+		<-rotationDone
 	}()
 
 	for {
@@ -121,16 +195,20 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			continue
 		}
 		s.wg.Add(1)
-		go func(conn net.Conn) {
+		go func(conn net.Conn, connConfig *ssh.ServerConfig) {
 			defer s.wg.Done()
-			s.handleConn(conn, cfg)
-		}(c)
+			s.handleConn(conn, connConfig)
+		}(c, s.current.Load())
 	}
+	cancel()
 	s.wg.Wait()
 	return nil
 }
 
 func (s *Server) Close() error {
+	s.RevokeConnections("")
+	s.lnMu.Lock()
+	defer s.lnMu.Unlock()
 	if s.ln != nil {
 		return s.ln.Close()
 	}
@@ -139,6 +217,11 @@ func (s *Server) Close() error {
 
 func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	defer nc.Close()
+	connCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn := s.trackConnection(nc, cancel)
+	defer s.untrackConnection(conn)
+	connCtx = context.WithValue(connCtx, connectionContextKey{}, conn)
 
 	if s.opts.AllowLocalIP != nil {
 		host, _, err := net.SplitHostPort(nc.LocalAddr().String())
@@ -151,8 +234,12 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		}
 	}
 
-	sc, chans, reqs, err := ssh.NewServerConn(nc, cfg)
+	refusals := &keyRefusals{}
+	connCfg := *cfg
+	connCfg.PublicKeyCallback = s.publicKeyCallback(refusals)
+	sc, chans, reqs, err := ssh.NewServerConn(nc, &connCfg)
 	if err != nil {
+		s.recordKeyRefusals(refusals)
 		return
 	}
 	defer sc.Close()
@@ -166,11 +253,17 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		userID = sc.Permissions.Extensions["user_id"]
 	}
 
-	connCtx := context.Background()
 	token, sessionID, err := s.issueToken(connCtx, username, userID)
 	if err != nil {
 		_ = sc.Close()
 		return
+	}
+	s.connMu.Lock()
+	conn.sessionID = sessionID
+	s.connMu.Unlock()
+	if sessionID != "" {
+		// Credential changes made by this connection keep its own session.
+		connCtx = users.WithActingSession(connCtx, sessionID)
 	}
 	if s.opts.AuditStore != nil {
 		_ = s.opts.AuditStore.Add(connCtx, audit.Record{
@@ -182,7 +275,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		})
 	}
 
-	api := &cli.API{BaseURL: s.opts.BaseURL, Token: token}
+	api := &cli.API{BaseURL: s.opts.BaseURL, Token: token, Client: &resetAwareClient{client: s.opts.APIClient, connection: conn}}
 	reg := cli.NewRegistry(nil, api)
 	cmdCtx := cli.WithRole(connCtx, string(cli.RoleAdmin))
 
@@ -218,6 +311,11 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 }
 
 func (s *Server) handleSession(ctx context.Context, username, remote string, reg *cli.Registry, ch ssh.Channel, in <-chan *ssh.Request) {
+	defer func() {
+		if conn := connectionFromContext(ctx); conn != nil && conn.reset.Load() {
+			conn.close()
+		}
+	}()
 	type execMsg struct {
 		Command string
 	}
@@ -257,6 +355,7 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 					writeTTY(ch, "Warning: no PTY requested, falling back to appliance CLI.\n")
 				}
 				s.repl(ctx, username, remote, reg, ch, &pr, windowCh)
+				sendExitStatus(ch, exitSuccess)
 			}
 			return
 		case "exec":
@@ -265,6 +364,8 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 			_ = req.Reply(true, nil)
 			line := strings.TrimSpace(m.Command)
 			if line == "" {
+				writeTTY(ch, "no command given\n")
+				sendExitStatus(ch, exitFailure)
 				return
 			}
 			var buf strings.Builder
@@ -292,6 +393,12 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 			}
 			if err != nil {
 				writeTTY(ch, err.Error()+"\n")
+			}
+			s.writeResetResult(ctx, ch)
+			if err != nil {
+				sendExitStatus(ch, exitFailure)
+			} else {
+				sendExitStatus(ch, exitSuccess)
 			}
 			return
 		default:
@@ -334,7 +441,9 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 			writeTTY(rw, "shell access requires a PTY-enabled SSH session\n")
 			continue
 		case "menu":
-			s.runMenu(ctx, username, rw, reader, reg)
+			if s.runMenu(ctx, username, rw, reader, reg) {
+				return
+			}
 			continue
 		case "diagnostics", "diag":
 			s.runDiagnosticsMenu(ctx, rw, reader, reg)
@@ -368,6 +477,12 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		}
 		if err != nil {
 			writeTTY(rw, err.Error()+"\n")
+		}
+		if s.writeResetResult(ctx, rw) {
+			return
+		}
+		if conn := connectionFromContext(ctx); conn != nil && conn.reset.Load() {
+			return
 		}
 	}
 }

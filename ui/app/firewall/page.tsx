@@ -9,35 +9,33 @@ import {
   api,
   isAdmin,
   fetchDataPlane,
-  setDataPlane,
   getRulesetPreview,
   type DataPlaneConfig,
-  type DPIExclusion,
   type FirewallRule,
-  type Gateway,
-  type Interface,
-  type InterfaceState,
+  type FirewallRulePatch,
   type RoutingConfig,
-  type StaticRoute,
   type Zone,
   type NATConfig,
   type RulesetPreview,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
-import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { Card } from "../../components/Card";
-import {
-  firstHostInCIDR,
-  pickWanCIDR,
-  pickWanIface,
-  zoneName,
-} from "./firewall-utils";
+import { inferWanGateway, WAN_GATEWAY_NAME, wanGateway, withDefaultRoute } from "../../lib/wan-gateway";
 import { DPIConfigSection } from "./firewall-dpi-config";
-import { summarizeIEC104 } from "../ics/iec104";
 import { CreateRuleForm, EditRuleModal } from "./firewall-rule-forms";
+import { RuleWarningList } from "./firewall-rule-warnings";
+import { AppliedRulesetStatus, InstalledRulesetUnavailable } from "./firewall-ruleset-status";
+import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
+import { ICSCoverageNotice } from "../ics/ics-coverage";
+import { FirewallRuleTable } from "./firewall-rule-table";
+import { tagsInUse } from "./firewall-rule-policy";
+import type { CountersState } from "./firewall-rule-counters";
+import { useICSCoverage } from "../ics/use-ics-coverage";
+import { useHealth } from "../../hooks/useHealth";
+import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 
 // This page should own firewall page orchestration and top-level state.
 // Large forms, modals, and static protocol metadata belong in sibling modules
@@ -51,8 +49,13 @@ export default function FirewallPage() {
   const [dpiConfig, setDpiConfig] = useState<DataPlaneConfig>({ captureInterfaces: [], dpiMock: false });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [counters, setCounters] = useState<CountersState>(null);
   const [rulesetPreview, setRulesetPreview] = useState<RulesetPreview | null>(null);
   const [rulesetState, setRulesetState] = useState<"idle" | "loading" | "error">("idle");
+  const [rulesetError, setRulesetError] = useState("");
+  const coverage = useICSCoverage();
+  const health = useHealth();
+  const installed = useInstalledRuleset();
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [quickStarting, setQuickStarting] = useState(false);
   const confirm = useConfirm();
@@ -63,7 +66,7 @@ export default function FirewallPage() {
       body: (
         <>
           Define zones in{" "}
-          <Link href="/zones/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+          <Link href="/zones/" className="font-semibold text-(--amber) hover:text-(--amber)">
             Zones
           </Link>{" "}
           so you can target them in rules.
@@ -83,7 +86,7 @@ export default function FirewallPage() {
       body: (
         <>
           Turn on SNAT in{" "}
-          <Link href="/nat/" className="font-semibold text-[var(--amber)] hover:text-[var(--amber)]">
+          <Link href="/nat/" className="font-semibold text-(--amber) hover:text-(--amber)">
             NAT
           </Link>{" "}
           to allow LAN hosts to reach the Internet.
@@ -100,14 +103,16 @@ export default function FirewallPage() {
   ];
 
   async function refresh() {
-    const [r, z, n, rt, dp] = await Promise.all([
+    const [r, z, n, rt, dp, c] = await Promise.all([
       api.listFirewallRules(),
       api.listZones(),
       api.getNAT(),
       api.getRouting(),
       fetchDataPlane(),
+      api.getRuleCounters(),
     ]);
     setRules(r ?? []);
+    setCounters(c);
     setZones(z ?? []);
     setNat(n ?? { enabled: false });
     setRouting(rt);
@@ -124,13 +129,15 @@ export default function FirewallPage() {
 
   async function loadRulesetPreview() {
     if (!isAdmin()) return;
+    setRulesetPreview(null);
     setRulesetState("loading");
     const preview = await getRulesetPreview();
-    if (!preview) {
+    if (!preview.ok) {
+      setRulesetError(preview.error);
       setRulesetState("error");
       return;
     }
-    setRulesetPreview(preview);
+    setRulesetPreview(preview.data);
     setRulesetState("idle");
   }
 
@@ -158,7 +165,7 @@ export default function FirewallPage() {
     refresh();
   }
 
-  async function onUpdate(id: string, patch: Partial<FirewallRule>) {
+  async function onUpdate(id: string, patch: FirewallRulePatch) {
     setError(null);
     setNotice(null);
     const updated = await api.updateFirewallRule(id, patch);
@@ -221,47 +228,11 @@ export default function FirewallPage() {
         api.listInterfaceState(),
         api.getRouting(),
       ]);
-      const wanIface = pickWanIface(ifs ?? []);
-      if (!wanIface) throw new Error("Could not determine WAN interface (expected an interface named 'wan' or in zone 'wan').");
-      const wanState = (states ?? []).find((s) => s.name === wanIface.name) ?? null;
-      const wanCIDR = pickWanCIDR(wanState);
-      if (!wanCIDR) {
-        throw new Error(
-          `Could not determine WAN IPv4 address for '${wanIface.name}'. If you're using DHCP in Docker, restart the container so Docker assigns an IP at startup.`,
-        );
-      }
-      const inferredGw = firstHostInCIDR(wanCIDR);
-      if (!inferredGw) throw new Error(`Could not infer a WAN gateway from '${wanCIDR}'.`);
-
-      const gwName = "wan-gw";
-      const nextGateway: Gateway = {
-        name: gwName,
-        address: inferredGw,
-        iface: wanIface.name,
-        description: "Auto (WAN) from OS address",
-      };
-
-      const nextRouting: RoutingConfig = {
-        gateways: curRouting?.gateways ?? [],
-        routes: curRouting?.routes ?? [],
-        rules: curRouting?.rules ?? [],
-      };
-
-      const existingGwIdx = (nextRouting.gateways ?? []).findIndex((g) => g.name === gwName);
-      nextRouting.gateways =
-        existingGwIdx >= 0
-          ? (nextRouting.gateways ?? []).map((g, i) => (i === existingGwIdx ? nextGateway : g))
-          : [...(nextRouting.gateways ?? []), nextGateway];
-
-      const isDefaultDst = (dst: string) => {
-        const d = dst.trim().toLowerCase();
-        return d === "default" || d === "0.0.0.0/0";
-      };
-      const routes = nextRouting.routes ?? [];
-      const existingDefaultIdx = routes.findIndex((r) => isDefaultDst(r.dst) && (r.table ?? 0) === 0);
-      const nextDefault: StaticRoute = { dst: "default", gateway: gwName, iface: wanIface.name, table: 0 };
-      nextRouting.routes =
-        existingDefaultIdx >= 0 ? routes.map((r, i) => (i === existingDefaultIdx ? nextDefault : r)) : [...routes, nextDefault];
+      if (states === null) throw new Error("Interface state unavailable — WAN address discovery failed; no quick-start changes were staged.");
+      if (ifs === null) throw new Error("Interface configuration unavailable — WAN discovery failed; no quick-start changes were staged.");
+      const inferred = inferWanGateway(ifs, states);
+      if (!inferred.ok) throw new Error(inferred.error);
+      const nextRouting = withDefaultRoute(curRouting, wanGateway(inferred.wan));
 
       const routingUpdated = await api.setRouting(nextRouting);
       if (!routingUpdated.ok) throw new Error(routingUpdated.error || "Failed to update routing configuration.");
@@ -300,7 +271,7 @@ export default function FirewallPage() {
       setNotice(
         warnings.length > 0
           ? `Outbound quick start staged — commit to apply. Warnings: ${warnings.join(" | ")}`
-          : `Outbound quick start staged — commit to apply: default route via ${gwName}, SNAT (LAN+MGMT \u2192 WAN), and firewall allow rule '${allowID}'.`,
+          : `Outbound quick start staged — commit to apply: default route via ${WAN_GATEWAY_NAME}, SNAT (LAN+MGMT \u2192 WAN), and firewall allow rule '${allowID}'.`,
       );
       await refresh();
     } catch (e) {
@@ -319,7 +290,7 @@ export default function FirewallPage() {
             <button
               onClick={quickStartLanWanOutbound}
               disabled={quickStarting}
-              className="rounded-sm border border-amber-500/30 bg-amber-500/[0.1] px-3 py-1.5 text-sm text-[var(--amber)] transition-ui hover:brightness-110/15 disabled:opacity-50"
+              className="rounded-xs border px-3 py-1.5 text-sm text-(--amber) transition-ui disabled:opacity-50"
               title="Best-effort: default route + SNAT + allow rule for LAN/MGMT \u2192 WAN"
             >
               {quickStarting ? "Enabling..." : "Quick start (LAN\u2192WAN)"}
@@ -327,7 +298,7 @@ export default function FirewallPage() {
           )}
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
@@ -335,14 +306,24 @@ export default function FirewallPage() {
       }
     >
       {!isAdmin() && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
       <TipsBanner tips={tips} className="mb-4" />
       <Card padding="md" className="mb-4">
+        <EnforcementHealthIndicator health={health?.enforcement} />
+        {installed.state === "loaded" && (
+          <>
+            <AppliedRulesetStatus status={installed.status} />
+            <RuleWarningList scope="applied" warnings={installed.status.warnings} />
+          </>
+        )}
+        <InstalledRulesetUnavailable view={installed} />
+      </Card>
+      <Card padding="md" className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="font-semibold text-[var(--text)]">Outbound readiness</div>
+          <div className="font-semibold text-(--text)">Outbound readiness</div>
           <div className="flex flex-wrap gap-2 text-xs">
             <StatusBadge variant={outboundStatus.hasDefaultRoute ? "success" : "warning"} dot>
               default route
@@ -362,22 +343,22 @@ export default function FirewallPage() {
           </div>
         </div>
         {!outboundStatus.ok && (
-          <div className="mt-2 text-xs text-[var(--text-muted)]">
+          <div className="mt-2 text-xs text-(--text-muted)">
             {"To reach the Internet from LAN, you typically need a default route, a LAN\u2192WAN allow rule, and "}
-            <Link href="/nat/" className="font-semibold text-[var(--text)] hover:text-[var(--text)]">SNAT</Link>
+            <Link href="/nat/" className="font-semibold text-(--text) hover:text-(--text)">SNAT</Link>
             {" out WAN. Use "}
-            <span className="font-semibold text-[var(--text)]">{"Quick start (LAN\u2192WAN)"}</span>
+            <span className="font-semibold text-(--text)">{"Quick start (LAN\u2192WAN)"}</span>
             {" to auto-configure these (including NAT)."}
           </div>
         )}
       </Card>
       {error && (
-        <div className="mb-4 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>
       )}
       {notice && (
-        <div className="mb-4 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+        <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
           {notice}
         </div>
       )}
@@ -385,139 +366,83 @@ export default function FirewallPage() {
       <Card padding="lg" className="mt-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-[var(--text)]">nftables ruleset preview</h2>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Preview the compiled ruleset before it is applied to the dataplane.
+            <h2 className="text-sm font-semibold text-(--text)">nftables ruleset preview</h2>
+            <p className="mt-1 text-xs text-(--text-muted)">
+              Compile the candidate using the engine&apos;s current queue ownership, without applying it.
             </p>
           </div>
           {isAdmin() && (
             <button
               onClick={loadRulesetPreview}
-              className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+              disabled={rulesetState === "loading"}
+              className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
             >
               {rulesetState === "loading" ? "Loading..." : "Preview"}
             </button>
           )}
         </div>
         {!isAdmin() && (
-          <div className="mt-3 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+          <div className="mt-3 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
             View-only mode: ruleset preview requires admin access.
           </div>
         )}
         {rulesetState === "error" && (
-          <div className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            Failed to load ruleset preview.
+          <div className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            Ruleset preview unavailable: {rulesetError}. A live engine must be reachable and able to compile the candidate. Try again after checking engine health and candidate settings.
           </div>
         )}
-        {rulesetPreview?.engineStatusError && (
-          <div className="mt-3 rounded-sm border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            Engine status unavailable: {rulesetPreview.engineStatusError}
-          </div>
+        {rulesetPreview?.runtime && (
+          <p className="mt-3 text-xs text-(--text-muted)">
+            {rulesetPreview.runtime.reason}.
+            {rulesetPreview.ruleset && " Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering."}
+          </p>
         )}
+        <RuleWarningList scope="candidate" warnings={rulesetPreview?.warnings} />
         {rulesetPreview?.ruleset && (
-          <pre className="mt-4 max-h-[360px] overflow-auto rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-4 text-xs text-[var(--text)]">
+          <pre className="mt-4 max-h-[360px] overflow-auto rounded-xs border bg-(--surface) p-4 text-xs text-(--text)">
             {rulesetPreview.ruleset}
           </pre>
         )}
       </Card>
 
-      <DPIConfigSection config={dpiConfig} onChange={setDpiConfig} />
+      <DPIConfigSection config={dpiConfig} health={health} onChange={setDpiConfig} />
 
-      {isAdmin() && <CreateRuleForm zones={zones} onCreate={onCreate} />}
+      {isAdmin() && (
+        <CreateRuleForm
+          zones={zones}
+          globalMode={dpiConfig.dpiMode}
+          tagsInUse={tagsInUse(rules)}
+          onCreate={onCreate}
+        />
+      )}
 
-      <div className="mt-6 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] shadow-card">
-        <table className="w-full text-sm">
-          <thead className="bg-[var(--surface)] text-left text-xs uppercase tracking-wide text-[var(--text)]">
-            <tr>
-              <th className="px-4 py-3">ID</th>
-              <th className="px-4 py-3">Description</th>
-              <th className="px-4 py-3">Zones</th>
-              <th className="px-4 py-3">Protocols</th>
-              <th className="px-4 py-3">ICS Filter</th>
-              <th className="px-4 py-3">Action</th>
-              <th className="px-4 py-3">Log</th>
-              <th className="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rules.length === 0 && (
-              <tr>
-                <td className="px-4 py-4" colSpan={8}>
-                  <EmptyState
-                    title="No firewall rules configured"
-                    description="Create rules below to control traffic between zones."
-                  />
-                </td>
-              </tr>
-            )}
-            {rules.map((r) => (
-              <tr key={r.id} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">{r.id}</td>
-                <td className="px-4 py-3 text-[var(--text)]">{r.description || "\u2014"}</td>
-                <td className="px-4 py-3 text-[var(--text)]">
-                  {(r.sourceZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}{" \u2192 "}
-                  {(r.destZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}
-                </td>
-                <td className="px-4 py-3 text-[var(--text)]">
-                  {(r.protocols ?? []).map((p) => `${p.name}${p.port ? ":" + p.port : ""}`).join(", ") || "any"}
-                </td>
-                <td className="px-4 py-3 text-[var(--text)]">
-                  {r.ics?.protocol ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge variant="neutral">
-                        {r.ics.mode === "learn" ? "safe learning" : "enforce"}
-                      </StatusBadge>
-                      <span className="text-xs text-[var(--text)]">
-                        {r.ics.protocol === "iec104"
-                          ? `iec104 ${summarizeIEC104(r.ics).types} ${summarizeIEC104(r.ics).addresses}`
-                          : `${r.ics.protocol} fc=${(r.ics.functionCode ?? []).join(",") || "*"}`}
-                      </span>
-                    </div>
-                  ) : "\u2014"}
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge variant={r.action === "ALLOW" ? "success" : "error"}>
-                    {r.action}
-                  </StatusBadge>
-                </td>
-                <td className="px-4 py-3">
-                  {r.log ? (
-                    <StatusBadge variant="info">log</StatusBadge>
-                  ) : (
-                    <span className="text-xs text-[var(--text-muted)]">&mdash;</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {isAdmin() && (
-                    <>
-                      <button onClick={() => setEditing(r)} className="mr-2 rounded-md border border-amber-500/[0.15] bg-[var(--surface2)] px-2 py-1 text-xs transition-ui hover:bg-amber-500/[0.08]">Edit</button>
-                      <button
-                        onClick={() => {
-                          confirm.open({
-                            title: "Delete rule?",
-                            message: `Are you sure you want to delete rule "${r.id}"? This action cannot be undone.`,
-                            confirmLabel: "Delete",
-                            variant: "danger",
-                            onConfirm: () => onDelete(r.id),
-                          });
-                        }}
-                        className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="mt-6">
+        {rules.some((r) => r.ics?.protocol) && <ICSCoverageNotice view={coverage.view} />}
       </div>
+      <FirewallRuleTable
+        rules={rules}
+        zones={zones}
+        dpiMode={dpiConfig.dpiMode}
+        coverage={coverage.view}
+        counters={counters}
+        onEdit={setEditing}
+        onDelete={(id) => {
+          confirm.open({
+            title: "Delete rule?",
+            message: `Are you sure you want to delete rule "${id}"? This action cannot be undone.`,
+            confirmLabel: "Delete",
+            variant: "danger",
+            onConfirm: () => onDelete(id),
+          });
+        }}
+      />
 
       {editing && isAdmin() && (
         <EditRuleModal
           zones={zones}
           rule={editing}
+          globalMode={dpiConfig.dpiMode}
+          tagsInUse={tagsInUse(rules, editing.id)}
           onClose={() => setEditing(null)}
           onSave={(patch) => onUpdate(editing.id, patch)}
         />

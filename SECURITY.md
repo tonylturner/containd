@@ -119,53 +119,78 @@ Machine-readable publication points:
 
 - `/.well-known/security.txt`
 - `/.well-known/csaf/provider-metadata.json`
-- `security/csaf/advisories/` in the repository for published CSAF documents when real vulnerability advisories exist
+- [`security/csaf/advisories/`](security/csaf/advisories/) in the repository for published CSAF documents
 
-Current CSAF posture:
-
-- containd publishes CSAF provider metadata today
-- the repository includes CSAF authoring templates and the advisory output directory
-- no published CSAF advisory JSON documents exist yet because the project has not issued a vulnerability advisory that warrants one
+Published advisory: [containd-2026-001](security/csaf/advisories/containd-2026-001.json).
+See the [CSAF index](security/csaf/README.md) for discovery and publication details.
 
 The presence of CVEs is not treated as a failure by itself. The project cares more about root-cause reduction, clarity, and remediation quality than raw counts.
 
 ## Logging, Forensics, and Evidence of Intrusions
 
-containd is intended to help operators gather evidence when something goes wrong. Relevant built-in capabilities include:
-
-- audit logs for administrative actions
-- events from services and dataplane components
-- firewall and DPI telemetry
-- syslog forwarding and event export
-- Prometheus metrics for operational monitoring
-
-Operators should still decide how long to retain logs and where to forward them. For stronger deployments:
-
-- forward logs/events off-box
-- preserve audit and event data during upgrades
-- document retention expectations for your environment
+See [Logging and Evidence](docs/mkdocs/logging-evidence.md) for audit logs,
+service/dataplane events, syslog forwarding and retention limits. Preserve audit
+and event data during upgrades, and choose off-box storage and retention for
+your environment rather than relying only on appliance-local data.
 
 ## Hardening Guidance
 
-For production-style deployments and serious training environments:
+- Set a unique, non-empty `CONTAIND_JWT_SECRET` for every deployment.
+- Rotate the bootstrap password immediately through the web UI or management API.
+- Keep `CONTAIND_LAB_MODE=0`; lab mode pins predictable credentials and prevents
+  password rotation. Use it only in disposable, isolated labs.
+- Prefer HTTPS, replace the generated self-signed certificate for trusted remote
+  access, and restrict management ports to authorized operators.
+- Enable TOTP MFA for administrative accounts. SSH password login then asks for
+  the code; see the authentication limits below.
+- Prefer SSH keys and disable SSH password authentication when feasible.
+- Review policy exceptions and apply supported security releases promptly.
 
-- set a unique `CONTAIND_JWT_SECRET`
-- change the bootstrap password immediately on first login
-- enable app-based MFA for administrative accounts when practical, and use the admin-side MFA requirement control for accounts that should not remain password-only
-- prefer HTTPS and restrict plain HTTP where possible
-- use SSH keys and disable SSH password auth when feasible
-- keep `CONTAIND_LAB_MODE=0`
-- review and minimize policy exceptions from the default-deny posture
-- stay on a supported release line and apply security releases promptly
+Canonical operational guidance: [Secure by Design](docs/mkdocs/secure-by-design.md),
+[Threat Model](docs/mkdocs/threat-model.md) and [Update Policy](docs/mkdocs/update-policy.md).
 
-## Current Auth Caveat
+## Authentication Limits
 
-Fresh local-account installs still use a predictable bootstrap credential that must be changed on first login.
+Fresh local-account installs use the predictable bootstrap credential
+`containd` / `containd`. Outside lab mode, web/API and SSH enforce the required
+password-change flow, and both support optional TOTP MFA for local accounts:
 
-Project rationale:
+- SSH requires an admin account. The bootstrap admin must change its password at
+  SSH login before the CLI, menu or shell opens.
+- SSH password login of an MFA account asks for a TOTP code. SSH public-key login
+  does not: the key is treated as the possession factor, so a key alone signs in.
+- An account whose MFA enrollment grace period has ended cannot log in over SSH
+  until it enrolls through the web UI.
+- A password or MFA change ends the account's other sessions and SSH connections.
+- A TOTP code is accepted once per account, on web/API and SSH.
+- The SSH menu and setup wizard ask for the current password before changing it.
+- Refused SSH logins are audited. SSH password, key and TOTP failures share one
+  rate limit per client address and account, so many addresses or account
+  names are not limited together.
+- TOTP codes and the current password asked before a password or MFA change
+  are also limited per account, from every client address, web and SSH
+  together. After 5 wrong codes, or 10 wrong current passwords, without a
+  success, that check alone is locked for 15 minutes: it is refused (web/API
+  `429` with `Retry-After`) before the guess is checked, and the first refusal
+  of each lock is audited. Password login is not locked, so someone without
+  the password cannot lock an account out; reaching the TOTP lock takes the
+  right password. Resetting the password or MFA lifts the locks.
 
-- containd is frequently deployed in offline classroom, lab, and demo environments where first-access reliability matters
-- the product already enforces password change on first login
-- containd now supports optional app-based TOTP MFA for local accounts; stronger external auth and richer role management remain on the roadmap
+Lab mode (`CONTAIND_LAB_MODE=1`) skips these SSH checks and the per-account
+limits, accepts a reused TOTP code and pins the bootstrap credential. An authenticated SSH PTY can reach the appliance's Linux shell, not
+just a restricted configuration CLI. The supplied appliance runs as root inside
+its container; treat SSH access as privileged appliance access. Keep it
+unreachable from untrusted networks.
 
-This is a documented caveat, not a hidden one.
+## Engine API Trust Boundary
+
+The engine HTTP API is **unauthenticated**. Management authentication and MFA do
+not protect direct engine requests. It must be reachable only by the management
+process or through a trusted private network, never by untrusted clients.
+
+Combined mode (`containd all`) defaults to `127.0.0.1:8081`. Split engine mode
+(`containd engine`) defaults to `:8081` so a separate management container can
+reach it. `CONTAIND_ENGINE_ADDR` overrides these defaults; a wildcard override
+in combined mode broadens exposure too. Do not publish the engine port to
+untrusted networks. An unpublished Docker port can still be reachable by peers
+on attached networks; Docker network attachment is part of this trust boundary.

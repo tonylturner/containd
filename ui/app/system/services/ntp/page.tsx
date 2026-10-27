@@ -4,25 +4,23 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type NTPConfig } from "../../../../lib/api";
+import { api, isAdmin, type NTPConfig, type NTPStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
-import { useToast } from "../../../../components/ToastProvider";
+import { SaveStateLine } from "../../../../components/SaveStateLine";
+import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { Card } from "../../../../components/Card";
 
-type SaveState = "idle" | "saving" | "saved" | "error";
-
 export default function NTPPage() {
   const canEdit = isAdmin();
-  const toast = useToast();
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<NTPStatus | null>(null);
   const [cfg, setCfg] = useState<NTPConfig>({
     enabled: false,
     servers: [],
     intervalSeconds: 0,
   });
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -30,7 +28,7 @@ export default function NTPPage() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const svc = (await api.getServicesStatus()) as any;
+    const svc = await api.getServicesStatus();
     setStatus(svc?.ntp ?? null);
     const s = await api.getNTP();
     setCfg({
@@ -60,26 +58,17 @@ export default function NTPPage() {
     () => (cfg.servers ?? []).join("\n"),
     [cfg.servers],
   );
-  const ntpSpark = useMemo(
-    () => [2, 3, 5, (cfg.servers?.length ?? 1) + 4, 6, 5, 7],
-    [cfg.servers],
-  );
 
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    setSaveState("saving");
-    const saved = await api.setNTP(cfg);
-    setSaveState(saved.ok ? "saved" : "error");
-    if (!saved.ok) {
-      const msg = saved.error || "Failed to save NTP settings.";
-      setError(msg);
-      toast(msg, "error");
-    } else {
-      setCfg(saved.data);
-      toast(saved.warning ? `NTP settings staged — commit to apply. Warning: ${saved.warning}` : "NTP settings staged — commit to apply.", "success");
-    }
-    setTimeout(() => setSaveState("idle"), 1500);
+    const saved = await save.run("save", () => api.setNTP(cfg), {
+      success: "NTP settings staged — commit to apply.",
+      failure: "Failed to save NTP settings.",
+    });
+    if (!saved) return;
+    if (saved.ok) setCfg(saved.data);
+    else setError(saved.error);
   }
 
   return (
@@ -89,24 +78,25 @@ export default function NTPPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              disabled={save.pending !== null}
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
-              Save
+              {save.pending ? "Saving\u2026" : "Save"}
             </button>
           )}
-          <label className="ml-2 flex items-center gap-2 text-xs text-[var(--text)]">
+          <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
+              className="h-4 w-4 rounded-sm bg-(--surface)"
             />
             Auto
           </label>
@@ -114,7 +104,7 @@ export default function NTPPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -123,39 +113,39 @@ export default function NTPPage() {
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-[var(--text-muted)]">
+      <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
 
       <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Live runtime status</h2>
+        <h2 className="text-sm font-semibold text-(--text)">Live runtime status</h2>
         {loading ? (
           <div className="mt-3">
             <Skeleton className="h-20 w-full" />
           </div>
         ) : (
-          <div className="mt-3 grid gap-2 text-sm text-[var(--text)] md:grid-cols-2">
+          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
             <div>
               Running:{" "}
-              <span className="text-[var(--text)]">{status?.running ? "yes" : "no"}</span>
-              {status?.pid ? <span className="text-[var(--text-muted)]"> (pid {status.pid})</span> : null}
+              <span className="text-(--text)">{status?.running ? "yes" : "no"}</span>
+              {status?.pid ? <span className="text-(--text-muted)"> (pid {status.pid})</span> : null}
             </div>
             <div>
               Last start:{" "}
-              <span className="text-[var(--text)]">
-                {status?.last_start ?? "n/a"}
+              <span className="text-(--text)">
+                {status?.last_start || "never"}
               </span>
             </div>
             <div>
-              Rate: <span className="text-[var(--text)]">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             <div>
-              Errors: <span className="text-amber-300">{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
             <div className="md:col-span-2">
               Binary:{" "}
-              <span className="text-[var(--text)]">
-                {status?.ntpd_path || status?.openntpd_path || "not found"}{status?.ntpd_name ? ` (${status.ntpd_name})` : ""}
+              <span className="text-(--text)">
+                {status?.ntpd_path || "not found"}{status?.ntpd_name ? ` (${status.ntpd_name})` : ""}
               </span>
             </div>
             {status?.last_error ? (
@@ -163,26 +153,28 @@ export default function NTPPage() {
                 {status.last_error}
               </div>
             ) : null}
-            <div className="md:col-span-2">
-              <Sparkline
-                values={ntpSpark}
-                color="var(--teal)"
-                background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
-                title="NTP sync trend (simulated)"
-              />
-            </div>
+            {status?.sparkline.length ? (
+              <div className="md:col-span-2">
+                <Sparkline
+                  values={status.sparkline}
+                  color="var(--teal)"
+                  background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
+                  title="NTP events per minute"
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </Card>
 
       <Card>
-        <h2 className="text-lg font-semibold text-[var(--text)]">Client</h2>
-        <p className="mt-1 text-sm text-[var(--text)]">
-          Configure the embedded OpenNTPD client.
+        <h2 className="text-lg font-semibold text-(--text)">Client</h2>
+        <p className="mt-1 text-sm text-(--text)">
+          Configure the embedded chrony NTP client.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+          <label className="flex items-center gap-2 text-sm text-(--text)">
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
@@ -196,7 +188,7 @@ export default function NTPPage() {
           </label>
 
           <div>
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Interval Seconds (hint)
             </label>
             <input
@@ -214,7 +206,7 @@ export default function NTPPage() {
           </div>
 
           <div className="md:col-span-2">
-            <label className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+            <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Servers / Pools (one per line)
             </label>
             <textarea
@@ -236,16 +228,7 @@ export default function NTPPage() {
           </div>
         </div>
 
-        <p className="mt-3 text-xs text-[var(--text-muted)]">
-          State:{" "}
-          {saveState === "saving"
-            ? "saving\u2026"
-            : saveState === "saved"
-              ? "staged — commit to apply."
-              : saveState === "error"
-                ? "error"
-                : "idle"}
-        </p>
+        <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </Card>
     </Shell>
   );

@@ -70,34 +70,34 @@ export function TipsBanner({ tips, className = "" }: { tips: Tip[]; className?: 
   }
 
   return (
-    <div className={`card-industrial rounded-sm border border-[var(--cyan)]/15 bg-[rgba(6,182,212,0.06)] px-4 py-2.5 text-sm ${className}`}>
+    <div className={`card-industrial rounded-xs border border-(--border) bg-[rgba(6,182,212,0.06)] px-4 py-2.5 text-sm ${className}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-start gap-2.5">
-          <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 shrink-0 text-[var(--cyan)]" fill="none" stroke="currentColor" strokeWidth={2}>
+          <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 shrink-0 text-(--cyan)" fill="none" stroke="currentColor" strokeWidth={2}>
             <circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" />
           </svg>
           <div className="min-w-0">
-            <div className="text-sm font-medium text-[var(--cyan)]">{tip.title}</div>
-            <div className="text-[13px] text-[var(--text-muted)]">{tip.body}</div>
+            <div className="text-sm font-medium text-(--cyan)">{tip.title}</div>
+            <div className="text-[13px] text-(--text-muted)">{tip.body}</div>
           </div>
         </div>
         <div className="flex items-center gap-1.5 font-mono text-[10px]">
           {count > 1 && (
             <>
-              <button onClick={prev} className="rounded-sm px-2 py-1 text-[var(--text-dim)] transition-ui hover:bg-amber-500/[0.06] hover:text-[var(--text)]">
+              <button onClick={prev} className="rounded-xs px-2 py-1 text-(--text-dim) transition-ui hover:text-(--text)">
                 Prev
               </button>
-              <span className="tabular-nums text-[var(--text-dim)]">{index + 1}/{count}</span>
-              <button onClick={next} className="rounded-sm px-2 py-1 text-[var(--text-dim)] transition-ui hover:bg-amber-500/[0.06] hover:text-[var(--text)]">
+              <span className="tabular-nums text-(--text-dim)">{index + 1}/{count}</span>
+              <button onClick={next} className="rounded-xs px-2 py-1 text-(--text-dim) transition-ui hover:text-(--text)">
                 Next
               </button>
-              <span className="mx-1 text-[var(--text-dim)]">|</span>
+              <span className="mx-1 text-(--text-dim)">|</span>
             </>
           )}
-          <button onClick={dismiss} className="rounded-sm px-2 py-1 text-[var(--text-dim)] transition-ui hover:bg-amber-500/[0.06] hover:text-[var(--text)]">
+          <button onClick={dismiss} className="rounded-xs px-2 py-1 text-(--text-dim) transition-ui hover:text-(--text)">
             Dismiss
           </button>
-          <button onClick={clearAll} className="rounded-sm px-2 py-1 text-[var(--text-dim)] transition-ui hover:bg-amber-500/[0.06] hover:text-[var(--text-muted)]" title="Show all previously dismissed tips">
+          <button onClick={clearAll} className="rounded-xs px-2 py-1 text-(--text-dim) transition-ui hover:text-(--text-muted)" title="Show all previously dismissed tips">
             Show all
           </button>
         </div>

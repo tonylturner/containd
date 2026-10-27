@@ -11,7 +11,7 @@ import (
 var ruleJSONKeys = []string{
 	"id", "description", "sourceZones", "destZones", "sources",
 	"destinations", "protocols", "identities", "ics", "schedule",
-	"action", "log",
+	"action", "rateLimit", "tag", "log",
 }
 
 // UnmarshalJSON rejects unknown and duplicate rule keys instead of silently
@@ -50,4 +50,21 @@ func ruleJSONError(id string, err error) error {
 		return fmt.Errorf("rule (id %q): %w", id, err)
 	}
 	return fmt.Errorf("rule: %w", err)
+}
+
+var rateLimitJSONKeys = []string{"packetsPerSecond", "burst"}
+
+// UnmarshalJSON rejects unknown and duplicate rateLimit keys, so that a
+// misspelt burst is an error rather than a default.
+func (r *RateLimitConfig) UnmarshalJSON(data []byte) error {
+	if _, err := decodeStrictObject(data, rateLimitJSONKeys); err != nil {
+		return fmt.Errorf("rateLimit: %w", err)
+	}
+	type rateLimitAlias RateLimitConfig
+	var decoded rateLimitAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return fmt.Errorf("rateLimit: %w", err)
+	}
+	*r = RateLimitConfig(decoded)
+	return nil
 }

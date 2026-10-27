@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -21,10 +22,14 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// Run only in the disposable Docker namespace described in management-reservation.md.
+// TestManagementKernelMatrix creates links, network namespaces and nft
+// tables, so it runs only when CONTAIND_NETNS_KERNEL_TEST=1 in a disposable
+// Linux container with root, NET_ADMIN, SYS_ADMIN, /dev/net/tun, rp_filter
+// enabled, iproute2, nft, Python and OpenVPN. management-kernel.sh in this
+// directory builds that container and runs it.
 func TestManagementKernelMatrix(t *testing.T) {
-	if os.Getenv("CONTAIND_MANAGEMENT_KERNEL_TEST") != "1" {
-		t.Skip("requires opt-in isolated Docker, root, NET_ADMIN, SYS_ADMIN, iproute2, nft, Python and OpenVPN")
+	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" {
+		t.Skip("requires CONTAIND_NETNS_KERNEL_TEST=1 in a disposable Linux container; see management-kernel.sh")
 	}
 	if os.Geteuid() != 0 {
 		t.Skip("requires root and CAP_NET_ADMIN")
@@ -69,6 +74,26 @@ func TestManagementKernelMatrix(t *testing.T) {
 	if r.Device != "reserved" || r.Local.String() != "10.99.99.2/24" {
 		t.Fatalf("live discovery lost host/interface identity: %+v", r)
 	}
+	// The nft tables, the management pins and the routing rule outlive the
+	// links this test deletes. Remove them once the guard has stopped
+	// restoring the pins, so that the other kernel tests in this namespace
+	// start from its baseline.
+	var loaded string
+	defer func() {
+		tables := map[string]bool{}
+		for _, m := range regexp.MustCompile(`(?m)^add table inet (\S+)$`).FindAllStringSubmatch(loaded, -1) {
+			if !tables[m[1]] {
+				tables[m[1]] = true
+				command(t, "nft", "delete", "table", "inet", m[1])
+			}
+		}
+		for _, source := range r.Sources {
+			command(t, "ip", "rule", "del", "priority", fmt.Sprint(mgmtpath.PinPriority), "from", r.Local.Addr().String(), "to", source.String(), "lookup", fmt.Sprint(ManagementTable))
+		}
+		if err := ApplyRoutingReplace(ctx, config.RoutingConfig{}); err != nil {
+			t.Errorf("remove routing intent: %v", err)
+		}
+	}()
 	faults := make(chan ManagementFault, 64)
 	g, err := StartManagementGuard(ctx, r, func(f ManagementFault) { faults <- f })
 	if err != nil {
@@ -104,6 +129,7 @@ func TestManagementKernelMatrix(t *testing.T) {
 	if out, err := nft.CombinedOutput(); err != nil {
 		t.Fatalf("nft: %v %s", err, out)
 	}
+	loaded = text
 	connect := func(source string) error {
 		program := fmt.Sprintf("import socket; s=socket.socket(); s.settimeout(1); s.bind(('%s',0)); s.connect(('10.99.99.2',8080)); assert s.recv(2)==b'ok'", source)
 		out, err := exec.CommandContext(ctx, "ip", "netns", "exec", "c1peer", "python3", "-c", program).CombinedOutput()

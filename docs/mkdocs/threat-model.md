@@ -49,7 +49,27 @@ The UI uses cookie-backed auth for normal use. Unsafe browser writes are constra
 
 ### Management Plane to Dataplane
 
-The management service validates, stages, and commits policy, then pushes a runtime snapshot to the dataplane engine over the internal API boundary.
+The management service validates, stages, and commits policy, then pushes a
+runtime snapshot to the engine. The engine API is an **unauthenticated privileged
+control interface**, not protected by the management `/api/v1` authentication or
+RBAC middleware. Access permits runtime policy/configuration mutation.
+
+In combined mode (`containd all`), its default bind is `127.0.0.1:8081`. Split
+mode (`containd engine`) has no default: `CONTAIND_ENGINE_ADDR` must name the
+engine's address on the management network, and the engine refuses to start
+with a loopback or wildcard listener. The
+[reserved management profile](management-reservation.md) is the exception: it
+runs both processes in one network namespace and requires a loopback engine
+bind.
+
+While enforcing, the input chain admits the engine API from loopback and, for a
+listener bound to one address, only on that address's own interface; no other
+zone reaches it, not even by routing to that address, and revocations never cut
+that path. Without enforcement nothing filters it, so every network that can
+route to the listener reaches it. Only the management process or a trusted
+private network may reach this listener: never publish or route it to an
+untrusted network. Container-network isolation and bind configuration remain
+part of the security boundary.
 
 ### Dataplane to Traffic
 
@@ -71,12 +91,12 @@ Examples:
 Current mitigations:
 
 - parser entry points validate lengths and return parse failure instead of emitting invalid events
-- fuzz targets now cover the major ICS decoders, core IT-DPI decoders, and TCP reassembly
+- fuzz targets cover the major ICS decoders, core IT-DPI decoders, and TCP reassembly
 - malformed-input regression tests exist alongside parser packages
 
 Residual risk:
 
-- some remaining IT-DPI decoders still need the same fuzz depth as the currently covered set
+- parser test and fuzz coverage varies by decoder; malformed traffic remains an untrusted input
 
 ### 2. Control-Plane Compromise
 
@@ -89,17 +109,21 @@ Examples:
 
 Current mitigations:
 
-- session auth with forced password change on first login (default deployments only — see lab-mode caveat below)
-- optional TOTP MFA and admin-required MFA with grace periods
+- session auth with forced password change on first login, on web/API and SSH (standard deployments only)
+- TOTP MFA and admin-required MFA with grace periods; SSH password login asks for the TOTP code, and SSH key login counts the key as the possession factor
+- a password or MFA change ends the account's other sessions and SSH connections
+- SSH password, key and TOTP failures are rate-limited per client address and account, and refused logins are audited; a TOTP code is accepted once
+- wrong TOTP codes (5) and wrong current passwords at password or MFA changes (10) lock that check for the account for 15 minutes, across all client addresses and web and SSH; password login is never locked by them, and each lock is audited once
 - route-level admin/view enforcement
 - request body limits and same-origin protection for cookie-authenticated unsafe requests
-- audit/event logging for important auth and config actions
+- audit logging for logins, account, password, MFA and certificate changes, SSH sessions and key enrollment, and config saves and commits
 
 Residual risk:
 
-- RBAC is still intentionally simple compared with a mature enterprise policy model
+- RBAC provides admin/view roles, not resource-scoped authorization
 - the bootstrap password remains a conscious lab-usability tradeoff
-- when `CONTAIND_LAB_MODE=1` is set, the canonical credential (`containd/containd`) is pinned and password change is disabled (`POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password` both return 403). This trades credential rotation for reproducible workshop credentials. Lab mode is an opt-in flag; standard deployments retain the forced first-login change. See [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) for the full transparency note, including when lab mode is and is not appropriate. Operationally, lab-mode deployments should bind containd's HTTP/SSH ports to loopback (or an instructor-private network) and treat any inbound exposure of `:2222` as high-risk because the SSH appliance shell uses the same pinned credential.
+- someone who holds an account's password can keep its TOTP check locked, which blocks that account's MFA login until the password is reset; the lock audit records show it
+- when `CONTAIND_LAB_MODE=1` is set, the canonical credential (`containd/containd`) is pinned and every password change is refused (`POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password` both return 403, and the SSH menu and setup wizard refuse their password steps). This trades credential rotation for reproducible workshop credentials. Lab mode is an opt-in flag that also skips the SSH account checks; standard deployments enforce the forced first-login change and MFA on web/API and SSH. See [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) for the full transparency note, including when lab mode is and is not appropriate. Operationally, lab-mode deployments should bind containd's HTTP/SSH ports to loopback (or an instructor-private network) and treat any inbound exposure of `:2222` as high-risk because the SSH appliance shell uses the same pinned credential.
 
 ### 3. Configuration Tampering
 
@@ -116,11 +140,11 @@ Current mitigations:
 - explicit commit and rollback flows
 - config backup/export/import support
 - redaction on user-facing config surfaces where required
-- improved UI cues for staged changes and commit behavior
+- UI cues for staged changes and commit behavior
 
 Residual risk:
 
-- complex service and VPN configuration still deserve continued save/apply regression coverage
+- service and VPN changes can disrupt connectivity; review candidate state and retain a rollback path
 
 ### 4. Supply-Chain Attacks
 
@@ -155,7 +179,7 @@ Current mitigations:
 - audit, events, anomaly, inventory, and learn surfaces
 - syslog forwarding and metrics endpoint
 - service/runtime status APIs
-- improved UI messaging for engine availability and staged-vs-live state
+- UI messaging for engine availability and staged-vs-live state
 
 Residual risk:
 
@@ -170,18 +194,3 @@ For the supported container-lab model:
 - traffic can bypass the appliance if the topology multi-homes workloads across zones or otherwise leaves alternate paths.
 
 This is a security property of the deployment, not just the code. The lab compose must be designed so `containd` is the intended routed path between zones.
-
-## Abuse Cases To Revisit Periodically
-
-- malformed multi-packet protocol traffic that crosses TCP segment boundaries
-- config import/export and backup restore edge cases
-- auth/session behavior when MFA is required but not yet enrolled
-- service profile uploads and generated client/profile artifacts
-- release workflow tampering and advisory completeness
-
-## Near-Term Priorities
-
-1. extend fuzzing to the remaining IT-DPI decoders and additional malformed packet paths
-2. keep the config save/apply surfaces under regression test as service coverage grows
-3. deepen performance baselines for dataplane packet handling and representative decoder paths
-4. continue improving auth maturity with stronger RBAC and external auth support

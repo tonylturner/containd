@@ -47,9 +47,6 @@ func createFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 					return false
 				}
 			}
-			if cfg.Firewall.DefaultAction == "" {
-				cfg.Firewall.DefaultAction = config.ActionDeny
-			}
 			cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
 			return true
 		})
@@ -212,8 +209,13 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 			Sources:      req.Sources,
 			Destinations: req.Destinations,
 			Action:       rules.Action(req.Action),
+			Tag:          req.Tag,
 			Identities:   req.Identities,
 			ICS:          compile.ICSPredicate(req.ICS),
+		}
+		// A zero burst means packetsPerSecond here as in the snapshot.
+		if rl := req.RateLimit; rl != nil {
+			entry.RateLimit = &rules.RateLimit{PacketsPerSecond: rl.PacketsPerSecond, Burst: rl.Burst}
 		}
 		if req.Schedule != nil {
 			entry.Schedule = rules.SchedulePredicate{
@@ -291,9 +293,6 @@ func createICSRuleHandler(store config.Store) gin.HandlerFunc {
 					apiError(c, http.StatusBadRequest, "rule already exists")
 					return false
 				}
-			}
-			if cfg.Firewall.DefaultAction == "" {
-				cfg.Firewall.DefaultAction = config.ActionDeny
 			}
 			cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
 			return true

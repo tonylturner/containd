@@ -4,26 +4,27 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type ServicesStatus, type SyslogConfig, type SyslogForwarder } from "../../../../lib/api";
+import { api, isAdmin, type SyslogConfig, type SyslogForwarder, type SyslogStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
+import { SaveStateLine } from "../../../../components/SaveStateLine";
+import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { Card } from "../../../../components/Card";
-
-type SaveState = "idle" | "saving" | "saved" | "error";
+import { SyslogAuditStatusPanel } from "./syslog-audit-status";
 
 export default function SyslogPage() {
   const canEdit = isAdmin();
   const toast = useToast();
   const [cfg, setCfg] = useState<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 });
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<SyslogStatus | null>(null);
   const [newFwd, setNewFwd] = useState<SyslogForwarder>({
     address: "",
     port: 514,
     proto: "udp",
   });
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -33,8 +34,8 @@ export default function SyslogPage() {
     setLoading(true);
     setError(null);
     try {
-      const svc = (await api.getServicesStatus()) as ServicesStatus | any;
-      setStatus((svc as any)?.syslog ?? null);
+      const svc = await api.getServicesStatus();
+      setStatus(svc?.syslog ?? null);
       const s = await api.getSyslog();
       setCfg(
         s ?? {
@@ -97,18 +98,13 @@ export default function SyslogPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    setSaveState("saving");
-    const saved = await api.setSyslog(cfg);
-    setSaveState(saved.ok ? "saved" : "error");
-    if (!saved.ok) {
-      const msg = saved.error || "Failed to save syslog settings.";
-      setError(msg);
-      toast(msg, "error");
-    } else {
-      setCfg(saved.data);
-      toast(saved.warning ? `Syslog staged — commit to apply. Warning: ${saved.warning}` : "Syslog staged — commit to apply.", "success");
-    }
-    setTimeout(() => setSaveState("idle"), 1500);
+    const saved = await save.run("save", () => api.setSyslog(cfg), {
+      success: "Syslog staged — commit to apply.",
+      failure: "Failed to save syslog settings.",
+    });
+    if (!saved) return;
+    if (saved.ok) setCfg(saved.data);
+    else setError(saved.error);
   }
 
   return (
@@ -118,24 +114,25 @@ export default function SyslogPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => refresh()}
-            className="rounded-sm border border-amber-500/[0.15] bg-[var(--surface2)] px-3 py-1.5 text-sm text-[var(--text)] transition-ui hover:bg-amber-500/[0.08]"
+            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
           </button>
           {canEdit && (
             <button
               onClick={onSave}
-              className="rounded-sm bg-[var(--amber)] px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
+              disabled={save.pending !== null}
+              className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
-              Save
+              {save.pending ? "Saving\u2026" : "Save"}
             </button>
           )}
-          <label className="ml-2 flex items-center gap-2 text-xs text-[var(--text)]">
+          <label className="ml-2 flex items-center gap-2 text-xs text-(--text)">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="h-4 w-4 rounded border-amber-500/[0.15] bg-[var(--surface)]"
+              className="h-4 w-4 rounded-sm bg-(--surface)"
             />
               Auto
           </label>
@@ -143,7 +140,7 @@ export default function SyslogPage() {
       }
     >
       {!canEdit && (
-        <div className="mb-4 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+        <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
         </div>
       )}
@@ -152,11 +149,11 @@ export default function SyslogPage() {
           {error}
         </div>
       )}
-      <p className="mb-4 text-xs text-[var(--text-muted)]">
+      <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
       {status && (
-        <div className="mb-4 grid gap-2 rounded-sm border border-amber-500/[0.15] bg-[var(--surface)] p-3 text-xs text-[var(--text)] md:grid-cols-4">
+        <div className="mb-4 grid gap-2 rounded-xs border bg-(--surface) p-3 text-xs text-(--text) md:grid-cols-4">
           <div>Forwarders: {status?.configured_forwarders ?? 0}</div>
           <div>Sent: {status?.sent_total ?? 0}</div>
           <div>Failed: {status?.failed_total ?? 0}</div>
@@ -166,20 +163,21 @@ export default function SyslogPage() {
           <div>Hit limit: {status?.hit_limit ? "yes" : "no"}</div>
           <div>Flush interval: {status?.flush_interval_sec ?? cfg.flushEvery ?? 0}s</div>
           {status?.last_error ? (
-            <div className="md:col-span-4 text-amber-300">Last error: {status.last_error}</div>
+            <div className="md:col-span-4">Last error: {status.last_error}</div>
           ) : null}
         </div>
       )}
+      {status?.audit && <SyslogAuditStatusPanel audit={status.audit} />}
 
       <Card>
-        <h2 className="text-lg font-semibold text-[var(--text)]">Forwarders</h2>
-        <p className="mt-1 text-sm text-[var(--text)]">
+        <h2 className="text-lg font-semibold text-(--text)">Forwarders</h2>
+        <p className="mt-1 text-sm text-(--text)">
           Send unified events to external syslog collectors.
         </p>
-        <p className="mt-2 text-xs text-[var(--text-muted)]">
+        <p className="mt-2 text-xs text-(--text-muted)">
           Active forwarders: {status?.configured_forwarders ?? 0}
         </p>
-        <div className="mt-2 grid gap-3 text-xs text-[var(--text-muted)] md:grid-cols-3">
+        <div className="mt-2 grid gap-3 text-xs text-(--text-muted) md:grid-cols-3">
           <div>
             Log format:
             <select
@@ -239,29 +237,21 @@ export default function SyslogPage() {
               <Skeleton className="h-14 w-full" />
               <Skeleton className="h-14 w-full" />
             </div>
-          ) : (
+          ) : status?.sparkline.length ? (
             <Sparkline
-              values={[
-                (status?.configured_forwarders ?? 0) + 2,
-                5,
-                7,
-                (cfg.forwarders?.length ?? 0) + 4,
-                9,
-                6,
-                10,
-              ]}
+              values={status.sparkline}
               color="var(--primary)"
               background="linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.04))"
-              title="Recent forwarding volume (simulated)"
+              title="Syslog events per minute"
             />
-          )}
+          ) : null}
           {!loading && typeof status?.rate_per_min === "number" ? (
-            <p className="mt-2 text-xs text-[var(--text-muted)]">
+            <p className="mt-2 text-xs text-(--text-muted)">
               Rate: {status?.rate_per_min.toFixed(1)} / min
             </p>
           ) : null}
           {!loading && typeof status?.errors_rate_per_min === "number" ? (
-            <p className="mt-1 text-xs text-amber-300">
+            <p className="mt-1 text-xs">
               Errors: {status?.errors_rate_per_min.toFixed(1)} / min
             </p>
           ) : null}
@@ -295,16 +285,16 @@ export default function SyslogPage() {
           {canEdit && (
             <button
               onClick={addForwarder}
-              className="rounded-sm bg-[var(--amber)] px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
+              className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Add
             </button>
           )}
         </div>
 
-        <div className="mt-4 overflow-hidden rounded-sm border border-amber-500/[0.15] bg-[var(--surface)]">
+        <div className="mt-4 overflow-hidden rounded-xs border bg-(--surface)">
           <table className="w-full text-sm">
-            <thead className="bg-black/40 text-left text-xs uppercase tracking-wide text-[var(--text)]">
+            <thead className="bg-black/40 text-left text-xs uppercase tracking-wide text-(--text)">
               <tr>
                 <th className="px-4 py-3">Address</th>
                 <th className="px-4 py-3">Port</th>
@@ -315,16 +305,16 @@ export default function SyslogPage() {
             <tbody>
               {fwdCount === 0 && (
                 <tr>
-                  <td className="px-4 py-4 text-[var(--text-muted)]" colSpan={4}>
+                  <td className="px-4 py-4 text-(--text-muted)" colSpan={4}>
                     No forwarders configured.
                   </td>
                 </tr>
               )}
               {(cfg.forwarders ?? []).map((f, i) => (
-                <tr key={`${f.address}-${i}`} className="border-t border-amber-500/[0.1] table-row-hover transition-ui">
-                  <td className="px-4 py-3 text-[var(--text)]">{f.address}</td>
-                  <td className="px-4 py-3 text-[var(--text)]">{f.port}</td>
-                  <td className="px-4 py-3 text-[var(--text)]">{f.proto ?? "udp"}</td>
+                <tr key={`${f.address}-${i}`} className="border-t table-row-hover transition-ui">
+                  <td className="px-4 py-3 text-(--text)">{f.address}</td>
+                  <td className="px-4 py-3 text-(--text)">{f.port}</td>
+                  <td className="px-4 py-3 text-(--text)">{f.proto ?? "udp"}</td>
                   <td className="px-4 py-3 text-right">
                     {canEdit && (
                       <button
@@ -341,16 +331,7 @@ export default function SyslogPage() {
           </table>
         </div>
 
-        <p className="mt-3 text-xs text-[var(--text-muted)]">
-          State:{" "}
-          {saveState === "saving"
-            ? "saving\u2026"
-            : saveState === "saved"
-              ? "staged — commit to apply."
-              : saveState === "error"
-                ? "error"
-                : "idle"}
-        </p>
+        <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </Card>
     </Shell>
   );

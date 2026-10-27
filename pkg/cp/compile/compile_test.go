@@ -116,6 +116,29 @@ func TestCompileSnapshotFirewallMapping(t *testing.T) {
 	}
 }
 
+func TestCompileSnapshotDefaultAction(t *testing.T) {
+	for _, tc := range []struct {
+		stored config.Action
+		want   rules.Action
+	}{
+		{"", rules.ActionDeny},
+		{config.ActionDeny, rules.ActionDeny},
+		{config.ActionAllow, rules.ActionAllow},
+	} {
+		cfg := &config.Config{
+			System:   config.SystemConfig{Hostname: "containd"},
+			Firewall: config.FirewallConfig{DefaultAction: tc.stored},
+		}
+		snap, err := CompileSnapshot(cfg)
+		if err != nil {
+			t.Fatalf("compile defaultAction %q: %v", tc.stored, err)
+		}
+		if snap.Default != tc.want {
+			t.Fatalf("defaultAction %q compiled to %q, want %q", tc.stored, snap.Default, tc.want)
+		}
+	}
+}
+
 func TestCompileSnapshotIdentities(t *testing.T) {
 	cfg := &config.Config{
 		System: config.SystemConfig{Hostname: "containd"},

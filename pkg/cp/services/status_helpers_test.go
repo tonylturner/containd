@@ -16,7 +16,7 @@ import (
 func TestManagerTelemetryStatusAndValidation(t *testing.T) {
 	dir := t.TempDir()
 	mgr := NewManager(ManagerOptions{BaseDir: dir, SuperviseProxies: false})
-	if mgr == nil || mgr.Syslog == nil || mgr.DNS == nil || mgr.Proxy == nil || mgr.DHCP == nil || mgr.VPN == nil || mgr.AV == nil {
+	if mgr == nil || mgr.Syslog == nil || mgr.DNS == nil || mgr.Proxy == nil || mgr.DHCP == nil || mgr.VPN == nil {
 		t.Fatalf("unexpected manager wiring: %#v", mgr)
 	}
 
@@ -67,10 +67,6 @@ func TestManagerTelemetryStatusAndValidation(t *testing.T) {
 		DNS: config.DNSConfig{Enabled: true, ListenPort: -1},
 	}); err == nil {
 		t.Fatal("expected invalid DNS validation error")
-	}
-
-	if err := (*Manager)(nil).TriggerAVUpdate(context.Background()); err == nil {
-		t.Fatal("expected nil manager TriggerAVUpdate error")
 	}
 }
 
@@ -139,13 +135,6 @@ func TestServiceCurrentAndStatusHelpers(t *testing.T) {
 	dhcpStatus := dhcpMgr.Status()
 	if !dhcpMgr.Current().Enabled || dhcpStatus["listen_ifaces"] != 1 || dhcpStatus["pools"] != 1 {
 		t.Fatalf("unexpected dhcp status: %#v", dhcpStatus)
-	}
-	metricsSeen := map[string]int{}
-	dhcpMgr.SetMetricEmitter(func(service string, delta int) { metricsSeen[service] += delta })
-	dhcpMgr.IncrementLeaseMetric(2, false)
-	dhcpMgr.IncrementLeaseMetric(1, true)
-	if metricsSeen["dhcp"] != 2 || metricsSeen["dhcp_error"] != 1 {
-		t.Fatalf("unexpected dhcp metrics: %#v", metricsSeen)
 	}
 
 	syslogMgr := NewSyslogManager()

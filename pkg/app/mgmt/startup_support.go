@@ -17,8 +17,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	httpapi "github.com/tonylturner/containd/api/http"
+	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	"github.com/tonylturner/containd/pkg/common"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
@@ -28,10 +30,7 @@ import (
 func resolveEngineURL(logger *zap.SugaredLogger, opts Options) string {
 	engineURL := common.EnvTrimmed("CONTAIND_ENGINE_URL", "")
 	if engineURL == "" && (opts.Combined || opts.Reservation != nil) {
-		engineAddr := common.EnvTrimmed("CONTAIND_ENGINE_ADDR", "")
-		if engineAddr == "" {
-			engineAddr = ":8081"
-		}
+		engineAddr := engineapp.ListenAddr(opts.Combined)
 		if derived, ok := localEngineURL(engineAddr); ok {
 			engineURL = derived
 			logger.Infof("CONTAIND_ENGINE_URL not set; using local engine URL %q for combined mode", engineURL)
@@ -270,13 +269,13 @@ func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) error {
 				next.System.Hostname = "containd"
 			}
 			if strings.TrimSpace(next.System.Mgmt.ListenAddr) == "" {
-				next.System.Mgmt.ListenAddr = ":8080"
+				next.System.Mgmt.ListenAddr = config.DefaultManagementHTTPAddr
 			}
 			if strings.TrimSpace(next.System.Mgmt.HTTPListenAddr) == "" {
-				next.System.Mgmt.HTTPListenAddr = ":8080"
+				next.System.Mgmt.HTTPListenAddr = config.DefaultManagementHTTPAddr
 			}
 			if strings.TrimSpace(next.System.Mgmt.HTTPSListenAddr) == "" {
-				next.System.Mgmt.HTTPSListenAddr = ":8443"
+				next.System.Mgmt.HTTPSListenAddr = config.DefaultManagementHTTPSAddr
 			}
 			if next.System.Mgmt.EnableHTTP == nil {
 				next.System.Mgmt.EnableHTTP = boolPtr(true)
@@ -285,10 +284,10 @@ func ensureDefaultConfig(logger *zap.SugaredLogger, store config.Store) error {
 				next.System.Mgmt.EnableHTTPS = boolPtr(true)
 			}
 			if strings.TrimSpace(next.System.Mgmt.TLSCertFile) == "" {
-				next.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+				next.System.Mgmt.TLSCertFile = mgmttls.DefaultCertFile
 			}
 			if strings.TrimSpace(next.System.Mgmt.TLSKeyFile) == "" {
-				next.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
+				next.System.Mgmt.TLSKeyFile = mgmttls.DefaultKeyFile
 			}
 			return nil
 		})
@@ -329,20 +328,14 @@ func validateReservedStartup(cfg *config.Config, r *mgmtpath.Reservation) error 
 	if r == nil {
 		return nil
 	}
-	if err := r.ValidateListen(resolveHTTPAddr(cfg)); err != nil {
+	l := config.EffectiveManagementListeners(cfg)
+	if err := r.ValidateListen(l.HTTP.Addr); err != nil {
 		return err
 	}
-	if boolDefault(cfgGetBool(cfg, func(c *config.Config) *bool { return c.System.Mgmt.EnableHTTPS }), true) && config.ManagementListenerConflictsHTTP(resolveHTTPSAddr(cfg), resolveHTTPAddr(cfg), true, r) {
+	if l.HTTPS.Enabled && config.ManagementListenerConflictsHTTP(l.HTTPS.Addr, l.HTTP.Addr, true, r) {
 		return fmt.Errorf("effective HTTPS listener conflicts with reserved management path")
 	}
-	ssh := common.EnvTrimmed("CONTAIND_SSH_ADDR", "")
-	if ssh == "" && cfg != nil {
-		ssh = cfg.System.SSH.ListenAddr
-	}
-	if ssh == "" {
-		ssh = ":2222"
-	}
-	if config.ManagementListenerConflictsHTTP(ssh, resolveHTTPAddr(cfg), false, r) {
+	if config.ManagementListenerConflictsHTTP(l.SSH.Addr, l.HTTP.Addr, false, r) {
 		return fmt.Errorf("effective SSH listener conflicts with reserved management path")
 	}
 	return nil

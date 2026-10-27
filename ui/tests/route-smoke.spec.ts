@@ -1,43 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { routes } from "./fixtures/routes";
+import { snapshot } from "./fixtures/iec104-inventory";
+import { pressure } from "./fixtures/iec104-pressure";
 import { interfaceAddresses, OS_ADDRESS_HINT, runtimeFor } from "../lib/interface-addresses";
 import type { Interface, SystemInspection } from "../lib/api";
-
-const routes = [
-  "/",
-  "/alerts",
-  "/assets",
-  "/audit",
-  "/config",
-  "/dataplane",
-  "/dhcp",
-  "/diagnostics",
-  "/events",
-  "/firewall",
-  "/flows",
-  "/forbidden",
-  "/ics",
-  "/ids",
-  "/interfaces",
-  "/login",
-  "/monitoring",
-  "/nat",
-  "/pcap",
-  "/proxies",
-  "/routing",
-  "/sessions",
-  "/system/services",
-  "/system/services/av",
-  "/system/services/dns",
-  "/system/services/ntp",
-  "/system/services/syslog",
-  "/system/settings",
-  "/system/users",
-  "/templates",
-  "/topology",
-  "/vpn",
-  "/wizard",
-  "/zones",
-] as const;
 
 const adminUser = {
   id: "admin-1",
@@ -112,6 +78,20 @@ const interfaceState = [
     addrs: ["198.51.100.99/24"],
   },
 ];
+
+const rulesetPreview = {
+  snapshot: {},
+  ruleset: "table inet containd {\n}\n",
+  runtime: { iec104EnvelopeOpen: false, reason: "IEC 104 envelope not used by this candidate" },
+  warnings: [
+    {
+      ruleId: "tpl-modbus-deny-writes",
+      shadowedBy: "tpl-modbus-allow-reads",
+      action: "DENY",
+      message: "shadowed by ALLOW rule tpl-modbus-allow-reads, which matches all of its traffic; a matching ALLOW takes precedence over every DENY and RESET",
+    },
+  ],
+};
 
 const malformedFirewallRules = [
   {
@@ -267,6 +247,8 @@ function responseFor(pathname: string) {
   if (pathname === "/api/v1/auth/me" || pathname === "/api/v1/auth/session") {
     return json(adminUser);
   }
+  if (pathname === "/api/v1/inventory/iec104") return json(snapshot);
+  if (pathname === "/api/v1/diagnostics/iec104") return json(pressure);
   if (pathname === "/api/v1/dashboard") return json(dashboard);
   if (pathname === "/api/v1/zones") return json(zones);
   if (pathname === "/api/v1/interfaces") return json(interfaces);
@@ -276,6 +258,13 @@ function responseFor(pathname: string) {
     pathname === "/api/v1/firewall/ics-rules"
   ) {
     return json(malformedFirewallRules);
+  }
+  if (pathname === "/api/v1/firewall/counters") {
+    return json({
+      snapshotVersion: "v1",
+      since: "2026-03-14T00:00:00Z",
+      rules: malformedFirewallRules.map((r) => ({ ruleId: r.id, action: r.action, packets: 10, bytes: 600 })),
+    });
   }
   if (pathname === "/api/v1/audit") return json(auditRecords);
   if (pathname === "/api/v1/firewall/nat") {
@@ -304,7 +293,10 @@ function responseFor(pathname: string) {
     });
   }
   if (pathname === "/api/v1/dataplane/ruleset") {
-    return json({ compiled: "", status: "ok" });
+    return json(rulesetPreview);
+  }
+  if (pathname === "/api/v1/dataplane/ruleset/status") {
+    return json({ installed: true, appliedAt: "2026-10-26T06:00:00Z", snapshotVersion: "v1" });
   }
   if (
     pathname === "/api/v1/assets" ||
@@ -325,9 +317,9 @@ function responseFor(pathname: string) {
   ) {
     return json([]);
   }
-  if (pathname === "/api/v1/identities") return json({ mappings: {} });
+  if (pathname === "/api/v1/identities") return json({ mappings: [] });
   if (pathname === "/api/v1/security/conduits") return json({});
-  if (pathname === "/api/v1/services/status") return json({});
+  if (pathname === "/api/v1/services/status") return json({ av: { available: false, error: "engine unavailable" } });
   if (
     pathname === "/api/v1/services/syslog" ||
     pathname === "/api/v1/services/dns" ||
@@ -413,6 +405,35 @@ for (const path of routes) {
     expect(consoleErrors).toEqual([]);
   });
 }
+
+test("firewall ruleset preview lists rules that do not act as written", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
+  await page.goto("/firewall");
+  const button = page.getByRole("button", { name: "Preview", exact: true });
+  await expect(button).toBeVisible();
+  const response = page.waitForResponse((res) => new URL(res.url()).pathname === "/api/v1/dataplane/ruleset");
+  await button.click();
+  await response;
+  const warning = page.getByRole("status").filter({ hasText: "Rules that do not act as written" });
+  await expect(warning).toContainText("shadowed");
+  await expect(warning).toContainText("tpl-modbus-deny-writes: shadowed by ALLOW rule tpl-modbus-allow-reads");
+});
+
+test("templates describe maintenance windows as scheduled allows", async ({ page }) => {
+  await page.goto("/templates");
+  await expect(page.getByText("Maintenance window rules are scheduled ALLOW rules")).toBeVisible();
+  await expect(page.getByText("inactive", { exact: false })).toHaveCount(0);
+});
+
+test("dashboard health keeps twelve pixels between uptime and gauges", async ({ page }) => {
+  await page.goto("/");
+  const uptime = page.getByText("Uptime: 12m", { exact: true }).locator("..");
+  const cpu = page.getByText("CPU", { exact: true }).locator("..");
+  await expect(uptime).toBeVisible();
+  const uptimeBox = (await uptime.boundingBox())!;
+  const cpuBox = (await cpu.boundingBox())!;
+  expect(cpuBox.y - uptimeBox.y - uptimeBox.height).toBe(12);
+});
 
 test("interface addresses prefer config, then the bound device, without mutating either", () => {
   const before = JSON.stringify({ interfaces, interfaceState });

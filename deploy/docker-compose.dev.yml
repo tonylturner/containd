@@ -1,6 +1,6 @@
 # containd — local development compose
 # This file builds from source and creates simulated zone networks.
-# For production deployment, see deploy/docker-compose.yml.
+# For the image-based lab starter, see deploy/docker-compose.yml.
 #
 # ── Production hardening (uncomment when deploying for real) ────
 # See deploy/docker-compose.yml for the full list. Key additions:
@@ -26,14 +26,13 @@ services:
       - NET_BIND_SERVICE
     environment:
       - CONTAIND_MGMT_RESERVATION=${CONTAIND_MGMT_RESERVATION:-}
-      - CONTAIND_MODE=${CONTAIND_MODE:-all}
       # Management listeners
       - CONTAIND_MGMT_ADDR=${CONTAIND_MGMT_HTTP_ADDR:-:8080}
       - CONTAIND_MGMT_HTTPS_ADDR=${CONTAIND_MGMT_HTTPS_ADDR:-:8443}
       - CONTAIND_ENGINE_URL=${CONTAIND_ENGINE_URL:-http://127.0.0.1:8081}
 
       # Engine runtime
-      - CONTAIND_ENGINE_ADDR=${CONTAIND_ENGINE_ADDR:-:8081}
+      - CONTAIND_ENGINE_ADDR=${CONTAIND_ENGINE_ADDR:-127.0.0.1:8081}
       - CONTAIND_CAPTURE_IFACES=${CONTAIND_CAPTURE_IFACES:-}
       - CONTAIND_ENFORCE_ENABLED=${CONTAIND_ENFORCE_ENABLED:-1}
       - CONTAIND_WAN_SUBNET=${CONTAIND_WAN_SUBNET:-192.168.240.0/24}
@@ -64,7 +63,9 @@ services:
       - CONTAIND_SSH_HOST_KEY=${CONTAIND_SSH_HOST_KEY:-/data/ssh/host_key}
       - CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY=${CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY:-}
       - CONTAIND_SSH_BOOTSTRAP_ADMIN_USER=${CONTAIND_SSH_BOOTSTRAP_ADMIN_USER:-containd}
-      # Optional: override password auth (default enabled only in lab mode).
+      # Password auth defaults on in lab mode or when authorized keys are absent/empty.
+      # Stored SSH allowPassword can also enable it outside lab mode.
+      # Disable it explicitly after provisioning keys to avoid password bootstrap.
       # - CONTAIND_SSH_ALLOW_PASSWORD=0
 
       # Auth + session cookie behavior
@@ -72,6 +73,7 @@ services:
       - CONTAIND_JWT_SECRET=${CONTAIND_JWT_SECRET:?Set CONTAIND_JWT_SECRET to a random 32+ character string}
       - CONTAIND_COOKIE_SECURE=${CONTAIND_COOKIE_SECURE:-0}
       - CONTAIND_TRUSTED_PROXIES=${CONTAIND_TRUSTED_PROXIES:-}
+      - CONTAIND_ALLOWED_ORIGINS=${CONTAIND_ALLOWED_ORIGINS:-}
       - CONTAIND_DEFAULT_ADMIN_USERNAME=${CONTAIND_DEFAULT_ADMIN_USERNAME:-}
       - CONTAIND_DEFAULT_ADMIN_PASSWORD=${CONTAIND_DEFAULT_ADMIN_PASSWORD:-}
       - CONTAIND_DPI_MOCK=${CONTAIND_DPI_MOCK:-0}
@@ -79,11 +81,14 @@ services:
       - "${CONTAIND_PUBLISH_HTTP_PORT:-8080}:8080"
       - "${CONTAIND_PUBLISH_HTTPS_PORT:-8443}:8443"
       - "${CONTAIND_PUBLISH_SSH_PORT:-2222}:2222"
-      # Optional: publish the engine API to the host for external diagnostics.
-      # Uncomment and set CONTAIND_PUBLISH_ENGINE_PORT if needed.
-      # - "${CONTAIND_PUBLISH_ENGINE_PORT:-8081}:8081"
+      # The engine API is unauthenticated; management JWT auth does not protect it.
+      # It stays on the container's loopback and is never published. For host
+      # diagnostics, call it inside the container, for example
+      # `docker compose exec containd curl -s http://127.0.0.1:8081/health`.
     volumes:
       - ../data:/data
+      # ClamAV signature databases survive container replacement.
+      - clamav-db:/var/lib/clamav
       - /var/run/docker.sock:/var/run/docker.sock:ro
     devices:
       - /dev/net/tun:/dev/net/tun
@@ -163,3 +168,6 @@ networks:
     ipam:
       config:
         - subnet: ${CONTAIND_LAN6_SUBNET:-192.168.247.0/24}
+
+volumes:
+  clamav-db:

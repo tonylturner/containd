@@ -6,45 +6,133 @@ import {
   handleUnauthorized,
 } from "./api-core";
 
-import type { ApiResult } from "./api";
+import type { ApiFailure, ApiResult } from "./api";
 
-export async function getJSON<T>(
+/**
+ * A JSON object body type. Lists have a length, so `getJSON<Zone[]>` does
+ * not type-check: list endpoints use getJSONList.
+ */
+export type ObjectBody = object & { length?: never };
+
+/** A JSON object: not null, not an array. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Reads a successful body of the expected shape. Any other body, such as a
+ * list endpoint answering an object, is malformed: callers treat it like an
+ * unavailable endpoint, never as data or as a verified-empty list.
+ */
+type Shape = "object" | "list";
+
+function fits(body: unknown, shape: Shape): boolean {
+  return shape === "list" ? Array.isArray(body) : isRecord(body);
+}
+
+async function getBody(
+  path: string,
+  shape: Shape,
+  signal?: AbortSignal,
+): Promise<{ status: number; body: unknown } | { status: number; failure: ApiFailure }> {
+  const res = await fetchWithSession(path, { cache: "no-store", headers: authHeaders() }, signal);
+  if (handleUnauthorized(res)) return { status: 401, failure: await failureOf(res) };
+  clearAuthExpired();
+  if (!res.ok) return { status: res.status, failure: await failureOf(res) };
+  const body: unknown = await res.json().catch(() => undefined);
+  if (!fits(body, shape)) return { status: res.status, failure: { ok: false, error: `malformed response from ${path}` } };
+  return { status: res.status, body };
+}
+
+function isAbort(e: unknown): boolean {
+  return e instanceof DOMException && e.name === "AbortError";
+}
+
+/** GET of a JSON object; null when unavailable or malformed. */
+export async function getJSON<T extends ObjectBody>(
   path: string,
   signal?: AbortSignal,
 ): Promise<T | null> {
   try {
-    const res = await fetchWithSession(
-      path,
-      {
-        cache: "no-store",
-        headers: authHeaders(),
-      },
-      signal,
-    );
-    if (handleUnauthorized(res)) return null;
-    clearAuthExpired();
-    if (!res.ok) return null;
-    return (await res.json()) as T;
+    const res = await getBody(path, "object", signal);
+    return "body" in res ? (res.body as T) : null;
   } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    if (isAbort(e)) throw e;
     return null;
   }
 }
 
-export async function getJSONWithStatus<T>(
+/** Fields of an object body that pages read without checking. */
+export type RequiredFields<T> = {
+  lists?: (keyof T & string)[];
+  objects?: (keyof T & string)[];
+};
+
+function hasFields(body: unknown, required: { lists?: string[]; objects?: string[] }): boolean {
+  const record = body as Record<string, unknown>;
+  return (required.lists ?? []).every((k) => Array.isArray(record[k])) &&
+    (required.objects ?? []).every((k) => isRecord(record[k]));
+}
+
+/**
+ * GET of a JSON object with required list and object fields, such as a page
+ * of events; null when unavailable or any of them has the wrong shape.
+ */
+export async function getJSONShaped<T extends ObjectBody>(
   path: string,
+  required: RequiredFields<T>,
+  signal?: AbortSignal,
+): Promise<T | null> {
+  const body = await getJSON<T>(path, signal);
+  return body && hasFields(body, required) ? body : null;
+}
+
+/** GET of a JSON list; null when unavailable or malformed. */
+export async function getJSONList<T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T[] | null> {
+  try {
+    const res = await getBody(path, "list", signal);
+    return "body" in res ? (res.body as T[]) : null;
+  } catch (e) {
+    if (isAbort(e)) throw e;
+    return null;
+  }
+}
+
+export async function getJSONWithStatus<T extends ObjectBody>(
+  path: string,
+  required: RequiredFields<T> = {},
 ): Promise<{ status: number; data: T | null }> {
   try {
-    const res = await fetchWithSession(path, {
-      cache: "no-store",
-      headers: authHeaders(),
-    });
-    if (handleUnauthorized(res)) return { status: 401, data: null };
-    clearAuthExpired();
-    if (!res.ok) return { status: res.status, data: null };
-    return { status: res.status, data: (await res.json()) as T };
+    const res = await getBody(path, "object");
+    const ok = "body" in res && hasFields(res.body, required);
+    return { status: res.status, data: ok ? (res.body as T) : null };
   } catch {
     return { status: 0, data: null };
+  }
+}
+
+/** GET of a JSON object that surfaces the server's error message instead of a bare null. */
+export async function getJSONResult<T extends ObjectBody>(path: string): Promise<ApiResult<T>> {
+  return getResult<T>(path, "object");
+}
+
+/** GET of a JSON list that surfaces the server's error message. */
+export async function getJSONListResult<T>(path: string): Promise<ApiResult<T[]>> {
+  return getResult<T[]>(path, "list");
+}
+
+async function getResult<T>(path: string, shape: Shape): Promise<ApiResult<T>> {
+  try {
+    const res = await getBody(path, shape);
+    return "body" in res ? { ok: true, data: res.body as T } : res.failure;
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Network error",
+    };
   }
 }
 
@@ -103,10 +191,43 @@ export async function deleteJSON(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * Retry-After in seconds: a delay, or an HTTP date turned into one.
+ * Undefined when the header is absent or unreadable.
+ */
+export function parseRetryAfter(res: Response, now = Date.now()): number | undefined {
+  const raw = (res.headers.get("retry-after") || "").trim();
+  if (!raw) return undefined;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  const at = Date.parse(raw);
+  return Number.isNaN(at) ? undefined : Math.max(0, Math.ceil((at - now) / 1000));
+}
+
+/**
+ * The failure of a non-ok response: the server's message and Retry-After.
+ * Callers run handleUnauthorized first, so a 401 still starts the
+ * session-expired check while its message is kept.
+ */
+export async function failureOf(res: Response): Promise<ApiFailure> {
+  const retryAfter = parseRetryAfter(res);
+  // A 401 keeps the server's reason, such as an invalid current password;
+  // only an empty body falls back to the bare status.
+  const error = (await parseErrorBody(res)) || (res.status === 401 ? "Unauthorized" : `request failed (${res.status})`);
+  return retryAfter === undefined ? { ok: false, error } : { ok: false, error, retryAfter };
+}
+
+/**
+ * The message of an error body: its error (or message) followed by its
+ * detail when it carries one, such as the parse reason of a rejected
+ * certificate.
+ */
 export async function parseErrorBody(res: Response): Promise<string> {
   try {
     const body = await res.json();
-    return body.error || body.message || res.statusText;
+    const error = body.error || body.message || res.statusText;
+    const detail = typeof body.detail === "string" ? body.detail.trim() : "";
+    if (!detail) return error;
+    return error ? `${error}: ${detail}` : detail;
   } catch {
     return res.statusText;
   }
@@ -135,9 +256,9 @@ export async function postJSONResult<T>(
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (handleUnauthorized(res)) return failureOf(res);
     clearAuthExpired();
-    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
     return {
       ok: true,
@@ -162,9 +283,9 @@ export async function patchJSONResult<T>(
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (handleUnauthorized(res)) return failureOf(res);
     clearAuthExpired();
-    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
     return {
       ok: true,
@@ -185,9 +306,9 @@ export async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
       method: "DELETE",
       headers: authHeaders(),
     });
-    if (handleUnauthorized(res)) return { ok: false, error: "Unauthorized" };
+    if (handleUnauthorized(res)) return failureOf(res);
     clearAuthExpired();
-    if (!res.ok) return { ok: false, error: await parseErrorBody(res) };
+    if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
     return { ok: true, data: undefined, warning: parseWarningHeader(res) };
   } catch (e) {

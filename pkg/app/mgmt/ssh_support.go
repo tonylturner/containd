@@ -12,7 +12,9 @@ import (
 
 	"go.uber.org/zap"
 
+	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/labmode"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
@@ -20,34 +22,72 @@ import (
 )
 
 type sshRuntimeConfig struct {
-	sshAddr       string
-	authKeysDir   string
-	hostKeyPath   string
-	bootstrapKey  string
-	bootstrapUser string
-	allowPassword bool
-	banner        string
-	rotationDays  int
-	shellMode     string
-	baseURL       string
+	sshAddr        string
+	authKeysDir    string
+	hostKeyPath    string
+	bootstrapKey   string
+	bootstrapUser  string
+	allowPassword  bool
+	passwordSource string
+	banner         string
+	rotationDays   int
+	shellMode      string
 }
 
-func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, httpAddr string, loopbackAddr string, idx *ipInterfaceIndex, optionalFault func(error)) (string, bool) {
-	rt := resolveSSHRuntimeConfig(cfg, httpAddr, loopbackAddr)
+// startSSH binds the SSH socket and serves it best effort: SSH CLI sessions
+// call the management listeners this process has bound (see
+// httpapi.LoopbackManagementAPI). It records SSH as bound management only
+// once its socket bound, and returns that socket's address. SSH stays off
+// with a fault when CLI sessions have no listener to call or the socket does
+// not bind; neither stops HTTP or HTTPS.
+func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config, store config.Store, userStore users.Store, auditStore audit.Store, idx *ipInterfaceIndex, optionalFault func(error), ready ...func(*sshserver.Server)) (string, bool) {
+	configureSSHPolicy(store, userStore)
+	rt := resolveSSHRuntimeConfig(cfg)
+	baseURL, apiClient, err := httpapi.LoopbackManagementAPI()
+	if err != nil {
+		err = fmt.Errorf("ssh disabled: CLI sessions have no management API to call: %w", err)
+		logger.Warn(err)
+		if optionalFault != nil {
+			optionalFault(err)
+		}
+		return "", false
+	}
 
 	opts := sshserver.Options{
 		ListenAddr:          rt.sshAddr,
-		BaseURL:             rt.baseURL,
+		BaseURL:             baseURL,
+		APIClient:           apiClient,
 		HostKeyPath:         rt.hostKeyPath,
 		AuthorizedKeysDir:   rt.authKeysDir,
 		AllowPassword:       rt.allowPassword,
 		Banner:              rt.banner,
 		HostKeyRotationDays: rt.rotationDays,
-		ShellMode:           rt.shellMode,
-		LabMode:             isLabMode(),
-		JWTSecret:           []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
-		UserStore:           userStore,
-		AuditStore:          auditStore,
+		HostKeyRotationDaysFunc: func(ctx context.Context) (int, error) {
+			if store == nil {
+				return rt.rotationDays, nil
+			}
+			running, err := store.Load(ctx)
+			if err != nil {
+				return 0, err
+			}
+			return running.System.SSH.HostKeyRotationDays, nil
+		},
+		AuthPolicy: func(ctx context.Context) (bool, string, error) {
+			if store == nil {
+				return rt.allowPassword, rt.authKeysDir, nil
+			}
+			running, err := store.Load(ctx)
+			if err != nil {
+				return false, "", err
+			}
+			live := resolveSSHRuntimeConfig(running)
+			return live.allowPassword, live.authKeysDir, nil
+		},
+		ShellMode:  rt.shellMode,
+		LabMode:    labmode.Enabled(),
+		JWTSecret:  []byte(strings.TrimSpace(os.Getenv("CONTAIND_JWT_SECRET"))),
+		UserStore:  userStore,
+		AuditStore: auditStore,
 		AllowLocalIP: func(ip net.IP) bool {
 			if ip == nil || ip.IsLoopback() {
 				return true
@@ -69,38 +109,71 @@ func startSSH(ctx context.Context, logger *zap.SugaredLogger, cfg *config.Config
 		return "", false
 	}
 	srv.EnsureAuthorizedKeysDir()
-
 	if rt.bootstrapKey != "" {
 		if err := srv.SeedAuthorizedKey(rt.bootstrapUser, rt.bootstrapKey); err != nil {
 			logger.Errorf("ssh bootstrap key seed failed: %v", err)
 		}
 	}
 
+	if err := srv.Listen(ctx); err != nil {
+		err = fmt.Errorf("ssh disabled: %s: %w", rt.sshAddr, err)
+		logger.Warn(err)
+		if optionalFault != nil {
+			optionalFault(err)
+		}
+		return "", false
+	}
+	for _, notify := range ready {
+		notify(srv)
+	}
+	addr := srv.Addr().String()
+	publishBoundSSH(addr)
 	go func() {
-		if err := srv.ListenAndServe(ctx); err != nil {
+		if err := srv.Serve(ctx); err != nil {
 			logger.Errorf("ssh server exited: %v", err)
-			if optionalFault != nil {
-				optionalFault(fmt.Errorf("ssh %s: %w", rt.sshAddr, err))
-			}
 		}
 	}()
-	logger.Infof("ssh enabled on %s (admin only)", rt.sshAddr)
-	return rt.sshAddr, true
+	logger.Infof("ssh enabled on %s (admin only)", addr)
+	return addr, true
 }
 
-func resolveSSHRuntimeConfig(cfg *config.Config, httpAddr string, loopbackAddr string) sshRuntimeConfig {
+func configureSSHPolicy(store config.Store, userStore users.Store) {
+	if reporter, ok := store.(interface {
+		SetSSHRuntimePolicyReader(func(context.Context) (config.SSHRuntimePolicy, error))
+	}); ok {
+		reporter.SetSSHRuntimePolicyReader(func(ctx context.Context) (config.SSHRuntimePolicy, error) {
+			running, err := store.Load(ctx)
+			if err != nil {
+				return config.SSHRuntimePolicy{}, err
+			}
+			rt := resolveSSHRuntimeConfig(running)
+			return config.SSHRuntimePolicy{
+				AllowPassword:       rt.allowPassword,
+				PasswordSource:      rt.passwordSource,
+				AuthorizedKeysDir:   rt.authKeysDir,
+				HostKeyRotationDays: rt.rotationDays,
+			}, nil
+		})
+	}
+	if validator, ok := store.(interface {
+		SetSSHAccessValidator(func(context.Context, config.SSHConfig) error)
+	}); ok {
+		validator.SetSSHAccessValidator(func(ctx context.Context, ssh config.SSHConfig) error {
+			candidate := &config.Config{}
+			candidate.System.SSH = ssh
+			rt := resolveSSHRuntimeConfig(candidate)
+			return sshserver.ValidateAdminAuthorizedKey(ctx, userStore, rt.authKeysDir)
+		})
+	}
+}
+
+func resolveSSHRuntimeConfig(cfg *config.Config) sshRuntimeConfig {
 	rt := sshRuntimeConfig{
-		sshAddr:       common.EnvTrimmed("CONTAIND_SSH_ADDR", ""),
+		sshAddr:       config.EffectiveManagementListeners(cfg).SSH.Addr,
 		authKeysDir:   common.Env("CONTAIND_SSH_AUTH_KEYS_DIR", ""),
 		hostKeyPath:   common.Env("CONTAIND_SSH_HOST_KEY", ""),
 		bootstrapKey:  common.EnvTrimmed("CONTAIND_SSH_BOOTSTRAP_ADMIN_KEY", ""),
 		bootstrapUser: common.EnvTrimmed("CONTAIND_SSH_BOOTSTRAP_ADMIN_USER", ""),
-	}
-	if rt.sshAddr == "" && cfg != nil && cfg.System.SSH.ListenAddr != "" {
-		rt.sshAddr = cfg.System.SSH.ListenAddr
-	}
-	if rt.sshAddr == "" {
-		rt.sshAddr = ":2222"
 	}
 	if rt.authKeysDir == "" && cfg != nil && cfg.System.SSH.AuthorizedKeysDir != "" {
 		rt.authKeysDir = cfg.System.SSH.AuthorizedKeysDir
@@ -122,24 +195,25 @@ func resolveSSHRuntimeConfig(cfg *config.Config, httpAddr string, loopbackAddr s
 	if env := common.EnvTrimmed("CONTAIND_SSH_SHELL_MODE", ""); env != "" {
 		rt.shellMode = env
 	}
-	rt.allowPassword = resolveSSHAllowPassword(cfg, rt.authKeysDir)
-	rt.baseURL = resolveSSHBaseURL(httpAddr, loopbackAddr)
+	rt.allowPassword, rt.passwordSource = resolveSSHPasswordPolicy(cfg, rt.authKeysDir)
 	return rt
 }
 
-func resolveSSHAllowPassword(cfg *config.Config, authKeysDir string) bool {
-	lab := isLabMode()
-	allowPassword := lab
-	if cfg != nil && cfg.System.SSH.AllowPassword {
-		allowPassword = true
-	}
-	if !allowPassword && !lab && authKeysDirNeedsBootstrap(authKeysDir) {
-		allowPassword = true
+func resolveSSHPasswordPolicy(cfg *config.Config, authKeysDir string) (bool, string) {
+	// A persisted disable is authoritative, including over environment/lab defaults.
+	if cfg != nil && cfg.System.SSH.AllowPassword != nil && !*cfg.System.SSH.AllowPassword {
+		return false, "config"
 	}
 	if env := common.EnvTrimmed("CONTAIND_SSH_ALLOW_PASSWORD", ""); env != "" {
-		return env == "1" || strings.EqualFold(env, "true") || strings.EqualFold(env, "yes")
+		return env == "1" || strings.EqualFold(env, "true") || strings.EqualFold(env, "yes"), "environment (CONTAIND_SSH_ALLOW_PASSWORD)"
 	}
-	return allowPassword
+	if cfg != nil && cfg.System.SSH.AllowPassword != nil {
+		return *cfg.System.SSH.AllowPassword, "config"
+	}
+	if labmode.Enabled() {
+		return true, "lab default"
+	}
+	return authKeysDirNeedsBootstrap(authKeysDir), "bootstrap default"
 }
 
 func authKeysDirNeedsBootstrap(authKeysDir string) bool {
@@ -148,17 +222,4 @@ func authKeysDirNeedsBootstrap(authKeysDir string) bool {
 		return true
 	}
 	return len(entries) == 0
-}
-
-func resolveSSHBaseURL(httpAddr string, loopbackAddr string) string {
-	if loopbackAddr != "" && loopbackAddr != httpAddr {
-		return "http://" + loopbackAddr
-	}
-	if httpAddr != "" {
-		_, port, err := net.SplitHostPort(httpAddr)
-		if err == nil && port != "" {
-			return "http://127.0.0.1:" + port
-		}
-	}
-	return "http://127.0.0.1:8080"
 }
