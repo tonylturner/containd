@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   event fields of each ICS decoder, a Modbus function-code and address rule
   example, and how the TLS `ja3` fingerprint differs from reference JA3.
 
+### Fixed
+
+- Without a client PTY, `shell` and `bash` in the SSH appliance CLI no
+  longer start a Linux shell that has no terminal and hangs the session.
+  They print that the Linux shell needs an interactive session and the CLI
+  keeps running.
+
 ## [0.1.35] - 2026-10-26
 
 ### Security

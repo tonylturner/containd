@@ -354,7 +354,12 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 				if s.isLinuxShellMode() && !hasPTY {
 					writeTTY(ch, "Warning: no PTY requested, falling back to appliance CLI.\n")
 				}
-				s.repl(ctx, username, remote, reg, ch, &pr, windowCh)
+				// Without a client PTY the CLI has no terminal to give a shell.
+				var shellPTY *ptyRequest
+				if hasPTY {
+					shellPTY = &pr
+				}
+				s.repl(ctx, username, remote, reg, ch, shellPTY, windowCh)
 				sendExitStatus(ch, exitSuccess)
 			}
 			return
@@ -411,6 +416,8 @@ func (s *Server) isLinuxShellMode() bool {
 	return strings.EqualFold(s.opts.ShellMode, "linux")
 }
 
+// repl runs the appliance CLI. pr is the client's PTY request, or nil when the
+// client requested none; the shell command needs it.
 func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Registry, rw io.ReadWriter, pr *ptyRequest, windowCh <-chan ptyRequest) {
 	reader := bufio.NewReader(rw)
 	prompt := "containd# "
@@ -438,7 +445,7 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 				s.startLinuxShellInline(ctx, username, ch, pr, windowCh)
 				continue
 			}
-			writeTTY(rw, "shell access requires a PTY-enabled SSH session\n")
+			writeTTY(rw, "The Linux shell needs a terminal: reconnect with an interactive ssh session (not ssh -T).\n")
 			continue
 		case "menu":
 			if s.runMenu(ctx, username, rw, reader, reg) {
