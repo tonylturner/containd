@@ -98,8 +98,12 @@ type icapRequest struct {
 	URI          string
 	Header       textproto.MIMEHeader
 	Encapsulated string
-	HTTPHeader   string
-	Body         []byte
+	// ReqHeader and ResHeader are the encapsulated HTTP heads, when sent.
+	ReqHeader string
+	ResHeader string
+	// NullBody says the request declared no body.
+	NullBody bool
+	Body     []byte
 }
 
 // startFakeICAP parses each request per RFC 3507 (Encapsulated offsets and a
@@ -144,6 +148,11 @@ func startFakeICAP(t *testing.T, tlsCfg *tls.Config, respond func(icapRequest) s
 	return ln.Addr().String(), requests
 }
 
+// readStrictICAPRequest checks the request line, Host, the Encapsulated
+// list (offset 0 first, increasing, ending with a body entity that matches
+// the method), every encapsulated head, and that the head owning the body
+// describes it: Content-Length equal to the chunked body, no
+// Transfer-Encoding, and neither for null-body.
 func readStrictICAPRequest(r *bufio.Reader) (icapRequest, error) {
 	tp := textproto.NewReader(r)
 	line, err := tp.ReadLine()
@@ -165,44 +174,60 @@ func readStrictICAPRequest(r *bufio.Reader) (icapRequest, error) {
 	if req.Encapsulated == "" {
 		return icapRequest{}, fmt.Errorf("missing Encapsulated")
 	}
-	offsets := map[string]int{}
-	var order []string
+	type entity struct {
+		name   string
+		offset int
+	}
+	var entities []entity
 	for _, field := range strings.Split(req.Encapsulated, ",") {
 		name, val, ok := strings.Cut(strings.TrimSpace(field), "=")
 		n, err := strconv.Atoi(val)
-		if !ok || err != nil || n < 0 {
+		if !ok || err != nil || n < 0 || (len(entities) == 0 && n != 0) || (len(entities) > 0 && n <= entities[len(entities)-1].offset) {
 			return icapRequest{}, fmt.Errorf("bad Encapsulated %q", req.Encapsulated)
 		}
-		offsets[name] = n
-		order = append(order, name)
+		entities = append(entities, entity{name, n})
 	}
-	last := order[len(order)-1]
-	if last != "null-body" && last != "res-body" && last != "req-body" && last != "opt-body" {
-		return icapRequest{}, fmt.Errorf("Encapsulated must end with a body entity: %q", req.Encapsulated)
+	last := entities[len(entities)-1].name
+	wantBody := map[string]string{"OPTIONS": "null-body", "REQMOD": "req-body", "RESPMOD": "res-body"}[req.Method]
+	if last != "null-body" && last != wantBody {
+		return icapRequest{}, fmt.Errorf("%s must end with %s or null-body: %q", req.Method, wantBody, req.Encapsulated)
 	}
-	if resHdr, ok := offsets["res-hdr"]; ok {
-		if resHdr != 0 {
-			return icapRequest{}, fmt.Errorf("res-hdr offset %d", resHdr)
-		}
-		hdrLen := offsets[last]
-		buf := make([]byte, hdrLen)
+	for i, e := range entities[:len(entities)-1] {
+		buf := make([]byte, entities[i+1].offset-e.offset)
 		if _, err := io.ReadFull(r, buf); err != nil {
-			return icapRequest{}, fmt.Errorf("short encapsulated header: %w", err)
+			return icapRequest{}, fmt.Errorf("short encapsulated %s: %w", e.name, err)
 		}
-		req.HTTPHeader = string(buf)
-		if !strings.HasSuffix(req.HTTPHeader, "\r\n\r\n") || strings.Count(req.HTTPHeader, "\r\n\r\n") != 1 {
-			return icapRequest{}, fmt.Errorf("res-body offset does not end the HTTP header: %q", req.HTTPHeader)
+		head := string(buf)
+		if !strings.HasSuffix(head, "\r\n\r\n") || strings.Count(head, "\r\n\r\n") != 1 {
+			return icapRequest{}, fmt.Errorf("%s offset does not end the HTTP head: %q", e.name, head)
+		}
+		switch e.name {
+		case "req-hdr":
+			req.ReqHeader = head
+		case "res-hdr":
+			req.ResHeader = head
+		default:
+			return icapRequest{}, fmt.Errorf("unexpected entity %s", e.name)
 		}
 	}
-	if last == "res-body" {
-		body, err := readChunked(r)
-		if err != nil {
-			return icapRequest{}, err
+	owner := map[string]string{"REQMOD": req.ReqHeader, "RESPMOD": req.ResHeader}[req.Method]
+	if strings.Contains(strings.ToLower(owner), "transfer-encoding:") {
+		return icapRequest{}, fmt.Errorf("encapsulated head still declares Transfer-Encoding: %q", owner)
+	}
+	if last == "null-body" {
+		req.NullBody = true
+		if strings.Contains(strings.ToLower(owner), "content-length:") {
+			return icapRequest{}, fmt.Errorf("null-body head declares Content-Length: %q", owner)
 		}
-		req.Body = body
-		if want := fmt.Sprintf("Content-Length: %d\r\n", len(body)); !strings.Contains(req.HTTPHeader, want) {
-			return icapRequest{}, fmt.Errorf("encapsulated Content-Length does not match %d-byte body", len(body))
-		}
+		return req, nil
+	}
+	body, err := readChunked(r)
+	if err != nil {
+		return icapRequest{}, err
+	}
+	req.Body = body
+	if want := fmt.Sprintf("Content-Length: %d\r\n", len(body)); !strings.Contains(owner, want) {
+		return icapRequest{}, fmt.Errorf("encapsulated Content-Length does not match %d-byte body: %q", len(body), owner)
 	}
 	return req, nil
 }

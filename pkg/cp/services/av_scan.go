@@ -104,26 +104,18 @@ func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 	}
 	stop := context.AfterFunc(m.ctx, cancel)
 	defer func() { stop(); cancel() }()
-	body := io.NewSectionReader(obj.Body, 0, obj.Size)
 	var verdict, signature string
 	var err error
 	switch avMode(cfg) {
 	case "clamav":
 		var res ClamdVerdict
+		body := io.NewSectionReader(obj.Body, 0, obj.Size)
 		res, err = (&ClamAVClient{Timeout: avTimeout(cfg), Socket: clamdSocket(cfg)}).Scan(ctx, body, obj.Size)
 		verdict, signature = res.Verdict, res.Signature
 	case "icap":
-		// Transitional adapter: the ICAP backend currently accepts bytes only.
-		var payload []byte
-		payload, err = io.ReadAll(body)
-		if err == nil && int64(len(payload)) != obj.Size {
-			err = io.ErrUnexpectedEOF
-		}
-		if err == nil {
-			var res ICAPVerdict
-			res, err = m.icapClient(cfg).Scan(ctx, firstICAPServer(cfg), payload)
-			verdict, signature = res.Verdict, res.Status
-		}
+		var res ICAPVerdict
+		res, err = m.icapClient(cfg).Scan(ctx, firstICAPServer(cfg), obj)
+		verdict, signature = res.Verdict, res.Signature
 	default:
 		err = fmt.Errorf("unsupported av mode %q", avMode(cfg))
 	}
@@ -203,11 +195,26 @@ func avCacheTTL(cfg config.AVConfig) time.Duration {
 	return defaultAVCacheTTL
 }
 
+// firstICAPServer is the one configured server; validation admits exactly
+// one in icap mode.
 func firstICAPServer(cfg config.AVConfig) config.ICAPServer {
 	if len(cfg.ICAP.Servers) == 0 {
 		return config.ICAPServer{}
 	}
 	return cfg.ICAP.Servers[0]
+}
+
+// icapMethods lists the ICAP methods the configured scan directions need:
+// REQMOD for uploads and RESPMOD for downloads.
+func icapMethods(cfg config.AVConfig) []string {
+	var methods []string
+	if cfg.HTTPUpload {
+		methods = append(methods, icapREQMOD)
+	}
+	if cfg.HTTPDownload {
+		methods = append(methods, icapRESPMOD)
+	}
+	return methods
 }
 
 func clamdSocket(cfg config.AVConfig) string {

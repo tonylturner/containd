@@ -72,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - An empty `services.av.mode` now selects the native ClamAV backend; ICAP is
   an optional remote backend that accepts exactly one server.
+- ICAP scanning follows RFC 3507: uploads are sent as `REQMOD` and downloads
+  as `RESPMOD` with the original HTTP heads, streaming the body with
+  `X-Client-IP`/`X-Server-IP`. A reply is infected on `X-Infection-Found`,
+  `X-Violations-Found`, `X-Virus-ID` or a `VirusFound` ICAP status, clean only
+  on `204`, and a scan error otherwise. The `OPTIONS` probe requires `REQMOD`
+  when uploads are scanned and `RESPMOD` when downloads are scanned.
 - `MODBUS-WRITE-COIL-ALL` now matches only FC 15 requests, not quantity echoes
   in replies. `ICS-WRITE-STORM` now alerts on 20 initiator write commands per
   connection within 10 seconds; replies and exceptions do not count, and an
