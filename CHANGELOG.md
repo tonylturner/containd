@@ -209,6 +209,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The scanning gate tracks connections by both TCP endpoints, so connections
   sharing a client IP and port keep their own masquerading, events and resets.
+- The scanning gate keeps a client connection open after a completed upload
+  when the origin answers before the gate's last write returns; it no longer
+  treats the upload as truncated and drops the next pipelined response.
 - The DHCP page keeps unsaved edits when its configuration is reloaded after a
   staged save, a commit or an auto refresh, and says when the server copy
   changed underneath them. Only the Refresh button discards them.
