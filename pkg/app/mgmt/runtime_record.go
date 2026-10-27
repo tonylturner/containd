@@ -110,7 +110,21 @@ type runtimeRecordPublisher struct {
 // returned for logging: management keeps serving, and local CLIs report
 // that it is not running.
 func (p *runtimeRecordPublisher) publish() error {
-	return writeRuntimeRecord(p.path, RuntimeRecord{Listeners: config.BoundManagementListeners(), Served: p.served})
+	served := p.served
+	var err error
+	if served.CertFile != "" {
+		served.CertFile, err = filepath.Abs(served.CertFile)
+		if err != nil {
+			return fmt.Errorf("resolve served TLS certificate path: %w", err)
+		}
+	}
+	if served.KeyFile != "" {
+		served.KeyFile, err = filepath.Abs(served.KeyFile)
+		if err != nil {
+			return fmt.Errorf("resolve served TLS key path: %w", err)
+		}
+	}
+	return writeRuntimeRecord(p.path, RuntimeRecord{Listeners: config.BoundManagementListeners(), Served: served})
 }
 
 func (p *runtimeRecordPublisher) remove() error {
