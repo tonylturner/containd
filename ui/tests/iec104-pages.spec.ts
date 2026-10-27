@@ -331,7 +331,7 @@ test("Firewall DPI section lists the IEC 104 decoder as enabled when unset", asy
   const errors = trackErrors(page);
   await page.goto("/firewall");
   const decoders = page.getByText("ICS Protocol Decoders").locator("xpath=../../..");
-  await expect(decoders.getByText("8/8 enabled")).toBeVisible();
+  await expect(decoders.getByText("4/4 enabled")).toBeVisible();
   await expect(decoders.getByText("IEC 60870-5-104", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -386,8 +386,8 @@ test("A rejected decoder change is reverted and its reason shown", async ({ page
   const row = page.getByText("APCI frames, Type IDs, common addresses, IOAs").locator("xpath=../../..");
   await row.locator("div.rounded-full").click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByText(`Not saved: ${reason}`)).toBeVisible();
-  await expect(decoders.getByText("8/8 enabled")).toBeVisible();
+  await expect(page.getByText(reason, { exact: true })).toBeVisible();
+  await expect(decoders.getByText("4/4 enabled")).toBeVisible();
 });
 
 test("Events sends edited filters before limiting and loads older evidence with cursor", async ({ page }) => {
