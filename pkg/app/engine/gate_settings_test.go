@@ -10,6 +10,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/common/avscan"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/dp/httpgate"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -25,7 +26,7 @@ func TestGateSettingsDefaults(t *testing.T) {
 	if set.MaxObjectBytes != gateDefaultMaxObjectBytes || set.MemoryThreshold != gateMemoryThreshold {
 		t.Fatalf("size bounds %d/%d", set.MaxObjectBytes, set.MemoryThreshold)
 	}
-	if set.ScanTimeout != max(gateScanTimeoutPerUnit*gateDefaultBackendTimeout, gateMinScanTimeout) {
+	if set.ScanTimeout != max(gateScanTimeoutPerUnit*services.DefaultAVTimeout, gateMinScanTimeout) {
 		t.Fatalf("scan timeout %s", set.ScanTimeout)
 	}
 	if !set.ICSBypass || set.IsICS != nil {
