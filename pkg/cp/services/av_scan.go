@@ -179,11 +179,12 @@ func avCacheKey(cfg config.AVConfig, gen uint64, hash string) string {
 	return backend + "|" + strconv.FormatUint(gen, 10) + "|" + strconv.FormatInt(cfg.MaxSizeBytes, 10) + "|" + hash
 }
 
+// avMode is the configured backend; an empty mode is the native clamd.
 func avMode(cfg config.AVConfig) string {
 	if mode := strings.ToLower(strings.TrimSpace(cfg.Mode)); mode != "" {
 		return mode
 	}
-	return "icap"
+	return "clamav"
 }
 
 // avTimeout is the backend connect bound, the per-probe deadline and the

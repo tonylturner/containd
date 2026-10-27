@@ -231,6 +231,18 @@ func TestAVObjectTimeoutIsNotCached(t *testing.T) {
 	}
 }
 
+func TestAVEmptyModeIsClamAV(t *testing.T) {
+	socket := startFakeClamd(t, nulReply("stream: OK"))
+	m := newTestAVManager(t, AVOptions{})
+	m.lastCfg = config.AVConfig{Enabled: true, Mode: " ", ClamAV: config.ClamAVConfig{SocketPath: socket}}
+	if r := m.Scan(context.Background(), scanObject([]byte("content"))); r.Verdict != avscan.Clean || r.Backend != "clamav" {
+		t.Fatalf("empty mode = %+v", r)
+	}
+	if status := m.Status(context.Background()); status["mode"] != "clamav" {
+		t.Fatalf("status mode = %v", status["mode"])
+	}
+}
+
 func TestAVReloadProbeAloneIsNotReady(t *testing.T) {
 	fake := newFakeClamAV(t)
 	fake.opts.DatabaseDir = t.TempDir()

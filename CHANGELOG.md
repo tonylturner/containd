@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An empty `services.av.mode` now selects the native ClamAV backend; ICAP is
+  an optional remote backend that accepts exactly one server.
 - `MODBUS-WRITE-COIL-ALL` now matches only FC 15 requests, not quantity echoes
   in replies. `ICS-WRITE-STORM` now alerts on 20 initiator write commands per
   connection within 10 seconds; replies and exceptions do not count, and an

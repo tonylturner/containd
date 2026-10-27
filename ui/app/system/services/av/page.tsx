@@ -22,7 +22,7 @@ export default function AVPage() {
   const confirm = useConfirm();
   const [cfg, setCfg] = useState<AVConfig>({
     enabled: false,
-    mode: "icap",
+    mode: "clamav",
     failPolicy: "open",
     failOpenIcs: true,
     icap: { servers: [] },
@@ -229,7 +229,7 @@ export default function AVPage() {
             <div>Definitions: <span className="text-(--text)">{status?.db_version || "n/a"}</span></div>
             <div>Detections: <span className="text-(--text)">{status?.detections ?? 0}</span></div>
             <div>Additional CA: <span className="text-(--text)">{status?.trust_revision && status.trust_revision !== "none" ? status.trust_revision.slice(0, 19) : "none"}</span></div>
-            <div>Mode: <span className="text-(--text)">{status?.mode ?? cfg.mode ?? "icap"}</span></div>
+            <div>Mode: <span className="text-(--text)">{status?.mode ?? cfg.mode ?? "clamav"}</span></div>
             <div>Fail policy: <span className="text-(--text)">{status?.failPolicy ?? cfg.failPolicy ?? "open"}</span></div>
             <div>
               Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
@@ -279,7 +279,7 @@ export default function AVPage() {
           <div>
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">Mode</label>
             <select
-              value={cfg.mode ?? "icap"}
+              value={cfg.mode ?? "clamav"}
               disabled={!canEdit}
               onChange={(e) => {
                 const mode = e.target.value as AVConfig["mode"];
@@ -298,8 +298,8 @@ export default function AVPage() {
               }}
               className="mt-1 w-full input-industrial"
             >
-              <option value="icap">ICAP (external)</option>
-              <option value="clamav">ClamAV (embedded)</option>
+              <option value="clamav">ClamAV (native)</option>
+              <option value="icap">ICAP (remote server)</option>
             </select>
           </div>
           <div>
@@ -347,7 +347,7 @@ export default function AVPage() {
         </div>
         <div className="mt-6">
           <h3 className="text-sm font-semibold text-(--text)">ICAP servers</h3>
-          <p className="text-xs text-(--text-muted)">Use when mode is ICAP; leave empty to disable.</p>
+          <p className="text-xs text-(--text-muted)">Used when mode is ICAP: one RFC 3507 server (REQMOD for uploads, RESPMOD for downloads).</p>
           <div className="mt-3 space-y-2">
             {icapServers.map((srv, idx) => (
               <div key={idx} className="grid gap-2 rounded-lg border bg-(--surface) p-3 md:grid-cols-4">
@@ -385,7 +385,7 @@ export default function AVPage() {
                 )}
               </div>
             ))}
-            {canEdit && (
+            {canEdit && icapServers.length === 0 && (
               <button
                 onClick={addICAPServer}
                 className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui"
@@ -398,7 +398,7 @@ export default function AVPage() {
 
         <div className="mt-6">
           <h3 className="text-sm font-semibold text-(--text)">ClamAV</h3>
-          <p className="text-xs text-(--text-muted)">Used when mode is ClamAV (embedded).</p>
+          <p className="text-xs text-(--text-muted)">Used when mode is ClamAV (native, the default).</p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div>
               <label className="text-xs uppercase tracking-wide text-(--text-muted)">Socket path</label>
