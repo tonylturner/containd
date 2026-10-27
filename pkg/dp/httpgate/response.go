@@ -168,6 +168,9 @@ func (tx *transaction) refuseDownload(h *head, res avscan.Result, size int64, sp
 
 // writeResponse sends the head as received and the body in its original
 // framing. pass, when set, is emitted once the body has been forwarded.
+// A body that fails part way, on either side, resets both connections:
+// the client holds a prefix that must not pass for the object, and with
+// close-delimited framing a FIN would complete it.
 func (tx *transaction) writeResponse(h *head, src bodySource, pass *avscan.Result) bool {
 	c := tx.c
 	if _, err := c.client.Write(h.raw); err != nil {
@@ -177,5 +180,9 @@ func (tx *transaction) writeResponse(h *head, src bodySource, pass *avscan.Resul
 	if pass != nil {
 		tx.emit(avscan.Download, *pass, avscan.PassUnscanned, sent, src.held, true, h.status)
 	}
-	return err == nil
+	if err != nil {
+		c.resetAll()
+		return false
+	}
+	return true
 }

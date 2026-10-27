@@ -5,10 +5,14 @@ package httpgate
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/common/avscan"
 )
@@ -52,5 +56,54 @@ func TestPartialObjectFollowsPolicy(t *testing.T) {
 				})
 			})
 		}
+	}
+}
+
+// A relayed body the origin fails to complete resets the client instead
+// of closing it: with close-delimited framing a FIN would turn the
+// prefix into a complete-looking object. Covers the oversized
+// pass-through under fail-open and the unselected relay alike.
+func TestRelayedBodyOriginFailureResetsClient(t *testing.T) {
+	const cap = 128 << 10
+	body := pattern(2*cap, 402)
+	for _, tc := range []struct {
+		name   string
+		adjust func(*Settings)
+		event  bool
+	}{
+		{"oversized-pass", func(s *Settings) { s.FailPolicy = avscan.FailOpen; s.MaxObjectBytes = cap }, true},
+		{"downloads-unselected", func(s *Settings) { s.ScanDownloads = false }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stall := make(chan struct{})
+			t.Cleanup(func() { close(stall) })
+			o := rawOrigin(t, func(c net.Conn, _ int) {
+				if _, _, err := readRequestHead(c); err != nil {
+					return
+				}
+				_, _ = c.Write([]byte("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n"))
+				_, _ = c.Write(body)
+				// The origin stalls without closing: the gate's idle
+				// timeout is the only way the relay ends.
+				<-stall
+			})
+			g := startGate(t, o, func(s *Settings) { tc.adjust(s); s.IdleTimeout = 300 * time.Millisecond })
+			c := g.client()
+			c.write(getRequest("/stalled", ""))
+			_ = c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+			h, got, err := decodeResponse(t, nil, c.conn, "GET")
+			if h.status != 200 || !errors.Is(err, syscall.ECONNRESET) || len(got) > len(body) || !bytes.Equal(got, body[:len(got)]) {
+				t.Fatalf("status %d, %d bytes, err %v: want a prefix of the body then a reset", h.status, len(got), err)
+			}
+			if !tc.event {
+				g.events.expectNone(t, 100*time.Millisecond)
+				return
+			}
+			ev := g.events.next(t)
+			expectEvent(t, ev, avscan.Download, avscan.Unscanned, avscan.ReasonOversized, avscan.PassUnscanned)
+			if !ev.SHA256Partial || ev.Size != int64(len(body)) {
+				t.Fatalf("event %+v", ev)
+			}
+		})
 	}
 }
