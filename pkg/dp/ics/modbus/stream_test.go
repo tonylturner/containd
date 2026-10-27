@@ -337,7 +337,7 @@ func TestStreamEventShapeMatchesSingleFrame(t *testing.T) {
 		"function_code":  uint8(6),
 		"is_write":       true,
 		"address":        uint16(1),
-		"quantity":       uint16(0x1234),
+		"value":          uint16(0x1234),
 		"raw_hex":        hex.EncodeToString(write),
 	}
 	if !reflect.DeepEqual(ev.Attributes, want) {

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Modbus address rules now cover the whole request span. An `ALLOW` with
+  `addresses` matches only when every register or coil the request reads or
+  writes lies inside the listed entries; previously only the starting address
+  was checked, so an `ALLOW` of `10-11` admitted a read or write of 8 registers
+  at address 11. A `DENY` with `addresses` matches any overlap, and also
+  matches any Modbus request whose span cannot be bounded (unknown function
+  code, malformed PDU, quantity outside protocol limits, byte count that
+  disagrees with the quantity).
+
 ### Added
 
 - Scheduled workflows check the published `:latest` management and engine
@@ -18,6 +29,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Restored the full README overview and dashboard screenshot.
+- A Modbus `ALLOW` whose `addresses` covered only the start of the requests it
+  admitted now denies them: `10-11` no longer admits a read of 8 registers from
+  address 11. Before upgrading, compare each Modbus rule's `addresses` with the
+  `address` and `quantity` of the requests it admits on the Events page, and
+  widen the entries to cover whole requests.
+
+### Fixed
+
+- The Modbus decoder no longer invents fields. Replies no longer report their
+  byte count and data as `address` and `quantity`, and FC 5/6 report `value`
+  instead of `quantity`. Requests report fields per function code, including
+  `byte_count` for FC 15/16 and `read_*`/`write_*` for FC 23; read replies
+  report `byte_count` and `register_count`.
+- Learned Modbus rules list each observed address span (for example `10-11`)
+  instead of only start addresses, so they keep admitting the traffic they
+  observed.
+- Sigma rules can match the Modbus fields `byte_count`, `register_count`,
+  `and_mask`, `or_mask`, `read_address`, `read_quantity`, `write_address` and
+  `write_quantity`.
+- Synthetic lab-mode Modbus events carry the same fields as decoded traffic
+  and include FC 23 requests.
+- Modbus alert details show the value of FC 5/6 writes and the read and write
+  ranges of FC 23 requests.
 
 ## [0.1.35] - 2026-10-26
 

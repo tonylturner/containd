@@ -34,7 +34,7 @@ func TestLearnedRulesLoadIntoRangerDangerPolicies(t *testing.T) {
 	l := New()
 	l.RecordEvent("10.40.40.10", "10.40.40.20", dpi.Event{
 		Proto: "modbus", Kind: "request", Timestamp: time.Now().UTC(),
-		Attributes: map[string]any{"function_code": uint8(3), "unit_id": uint8(1), "address": "40001", "is_write": false},
+		Attributes: map[string]any{"function_code": uint8(3), "unit_id": uint8(1), "address": uint16(40001), "quantity": uint16(1), "is_write": false},
 	})
 	learned := l.GenerateRules()
 	if len(learned) != 1 || learned[0].ICS.Mode != "" {

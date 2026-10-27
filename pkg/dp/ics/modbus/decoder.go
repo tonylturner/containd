@@ -140,12 +140,10 @@ func aduEvent(state *flow.State, frame *TCPFrame, adu []byte) dpi.Event {
 				}
 			}
 		default:
-			// Best-effort parse for common request fields (address/quantity).
-			if len(frame.PDU) >= 4 {
-				addr := binary.BigEndian.Uint16(frame.PDU[0:2])
-				qty := binary.BigEndian.Uint16(frame.PDU[2:4])
-				attrs["address"] = addr
-				attrs["quantity"] = qty
+			if kind == "response" {
+				addResponseFields(fc, frame.PDU, attrs)
+			} else {
+				addRequestFields(fc, frame.PDU, attrs)
 			}
 		}
 	}

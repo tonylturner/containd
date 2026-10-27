@@ -31,18 +31,18 @@ type ICSContext struct {
 	Protocol     string
 	FunctionCode uint8
 	UnitID       *uint8
-	Address      string
 	ObjectClass  uint16
 	ReadOnly     bool
 	WriteOnly    bool
 	Direction    string // "request" or "response"
+	// Spans are the address ranges the message reads or writes, for
+	// address predicates; empty when it touches none. SpansUnknown marks a
+	// message that may touch addresses its decoder cannot bound, such as a
+	// Modbus request with an unknown function code or a malformed PDU.
+	Spans        []AddressSpan
+	SpansUnknown bool
 	// IEC104 is set only for IEC 60870-5-104 events.
 	IEC104 *IEC104Context
-}
-
-// compiledAddr holds a pre-parsed ICS address or address range.
-type compiledAddr struct {
-	low, high uint32
 }
 
 // compiledPort holds a pre-parsed protocol port or port range.
@@ -149,27 +149,6 @@ func compileEntry(entry Entry) compiledEntry {
 	return ce
 }
 
-// addrSet is an ICS address predicate's parsed specifications. listed
-// records that the predicate names any. An entry ParseICSAddressSpec
-// refuses, which validation rejects, leaves ranges empty: the predicate
-// then matches no address rather than only its parseable entries.
-type addrSet struct {
-	listed bool
-	ranges []compiledAddr
-}
-
-func compileAddrs(specs []string) addrSet {
-	set := addrSet{listed: len(specs) > 0}
-	for _, spec := range specs {
-		low, high, err := ParseICSAddressSpec(spec)
-		if err != nil {
-			return addrSet{listed: true}
-		}
-		set.ranges = append(set.ranges, compiledAddr{low: low, high: high})
-	}
-	return set
-}
-
 // PreviewMatch tests a single rule against an EvalContext to determine if it
 // would match, as the Evaluator matches it. This is used for dry-run/impact
 // preview without affecting enforcement. The entry is compiled on the fly;
@@ -261,7 +240,7 @@ func matchICSCompiled(ce *compiledEntry, ctx EvalContext) bool {
 	return matchICSProtocol(ce.ICS, ctx) &&
 		matchICSFunctionCode(ce.ICS, ctx) &&
 		matchICSUnitID(ce.ICS, ctx) &&
-		matchICSAddresses(ce.addresses, ctx) &&
+		matchICSAddresses(ce, ctx) &&
 		matchICSObjectClass(ce.ICS, ctx) &&
 		matchICSDirection(ce.ICS, ctx) &&
 		matchICSAccessMode(ce.ICS, ctx)
@@ -290,20 +269,21 @@ func matchICSUnitID(pred ICSPredicate, ctx EvalContext) bool {
 	return ctx.ICS.UnitID != nil && *pred.UnitID == *ctx.ICS.UnitID
 }
 
-func matchICSAddresses(addresses addrSet, ctx EvalContext) bool {
-	if !addresses.listed {
+// matchICSAddresses applies an address predicate to the spans the message
+// touches. A DENY or RESET matches when any span meets the predicate's
+// ranges, or when the spans are unknown, so a message whose addresses
+// cannot be bounded never slips past a deny. Every other action matches
+// only a message with at least one span, all of them inside the ranges:
+// an ALLOW never admits addresses beyond what it names, nor a message
+// whose addresses are unknown.
+func matchICSAddresses(ce *compiledEntry, ctx EvalContext) bool {
+	if !ce.addresses.listed {
 		return true
 	}
-	ctxVal, err := parseICSAddress(ctx.ICS.Address)
-	if err != nil {
-		return false
+	if ce.Action == ActionDeny || ce.Action == ActionReset {
+		return ctx.ICS.SpansUnknown || ce.addresses.meetsAny(ctx.ICS.Spans)
 	}
-	for _, a := range addresses.ranges {
-		if ctxVal >= a.low && ctxVal <= a.high {
-			return true
-		}
-	}
-	return false
+	return !ctx.ICS.SpansUnknown && ce.addresses.holdsAll(ctx.ICS.Spans)
 }
 
 func matchICSObjectClass(pred ICSPredicate, ctx EvalContext) bool {
