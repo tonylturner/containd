@@ -1,0 +1,128 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 containd Authors
+
+// Package avscan is the contract between the HTTP object gate, which holds a
+// complete transferred object, and the scanner backends (clamd INSTREAM and
+// ICAP). It holds types and the pass/block decision only.
+package avscan
+
+import (
+	"context"
+	"io"
+	"net/netip"
+)
+
+// Direction names which HTTP message carries the object.
+type Direction string
+
+const (
+	// Upload is an HTTP request body (client to server; ICAP REQMOD).
+	Upload Direction = "upload"
+	// Download is an HTTP response body (server to client; ICAP RESPMOD).
+	Download Direction = "download"
+)
+
+// Object is one complete HTTP message body held by the gate. The gate owns
+// Body for the duration of Scan and releases it afterwards.
+type Object struct {
+	// ID identifies the transaction in events and logs.
+	ID        string
+	Direction Direction
+	// Client is the connection opener; Server is the original destination.
+	Client netip.AddrPort
+	Server netip.AddrPort
+	// RequestHead is the HTTP/1.x request line and header fields as they
+	// will be sent upstream, ending with the blank line. Always set.
+	RequestHead []byte
+	// ResponseHead is the status line and header fields, ending with the
+	// blank line. Set for Download only.
+	ResponseHead []byte
+	// Body is the message body after transfer decoding (chunked framing
+	// removed) and before content decoding (gzip stays as sent). Size is
+	// its exact length.
+	Body io.ReaderAt
+	Size int64
+	// SHA256 is the lowercase hex SHA-256 of Body, computed while spooling.
+	SHA256 string
+	// ICS is true when Client or Server lies in an operator-marked ICS zone
+	// or asset range.
+	ICS bool
+}
+
+// Verdict is the scan outcome.
+type Verdict string
+
+const (
+	Clean    Verdict = "clean"
+	Infected Verdict = "infected"
+	// Unscanned means no backend verdict exists; Reason says why. It is
+	// never reported as clean.
+	Unscanned Verdict = "unscanned"
+)
+
+// Reason explains an Unscanned verdict.
+type Reason string
+
+const (
+	ReasonScannerError Reason = "scanner_error"
+	ReasonTimeout      Reason = "timeout"
+	ReasonOversized    Reason = "oversized"
+	ReasonUnsupported  Reason = "unsupported"
+	ReasonNotReady     Reason = "not_ready"
+	// ReasonBusy means the gate's spool or concurrency limit was reached.
+	ReasonBusy Reason = "busy"
+)
+
+// Result is a scanner backend's answer for one Object.
+type Result struct {
+	Verdict Verdict
+	Reason  Reason // set when Verdict is Unscanned
+	// Signature is the detection name when Verdict is Infected.
+	Signature string
+	// Backend names the scanner (for example "clamav" or "icap|host:port|service").
+	Backend string
+	// Detail is a human-readable error or note; never a verdict.
+	Detail string
+}
+
+// Scanner scans complete objects. Scan must honour ctx and never report
+// Clean for bytes it did not receive in full.
+type Scanner interface {
+	Scan(ctx context.Context, obj Object) Result
+	// Ready reports whether the backend can scan now, with a reason when not.
+	Ready() (bool, string)
+}
+
+// FailPolicy is the configured treatment of Unscanned objects.
+type FailPolicy string
+
+const (
+	FailOpen   FailPolicy = "open"
+	FailClosed FailPolicy = "closed"
+)
+
+// Action is what the gate does with the held object.
+type Action string
+
+const (
+	Deliver Action = "deliver"
+	Block   Action = "block"
+	// PassUnscanned delivers the object and records that it was not scanned.
+	PassUnscanned Action = "pass_unscanned"
+)
+
+// Decide maps a result to an action. Infected is always blocked, ICS
+// included. Unscanned follows the fail policy, except that ICS objects pass
+// when icsBypass is set.
+func Decide(r Result, policy FailPolicy, ics, icsBypass bool) Action {
+	switch r.Verdict {
+	case Clean:
+		return Deliver
+	case Infected:
+		return Block
+	}
+	if policy == FailClosed && !(ics && icsBypass) {
+		return Block
+	}
+	return PassUnscanned
+}
