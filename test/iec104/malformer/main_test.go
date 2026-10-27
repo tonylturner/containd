@@ -183,3 +183,79 @@ func TestSeqGreaterWraps(t *testing.T) {
 		}
 	}
 }
+
+func TestIFramesRepeatAndReservedBit(t *testing.T) {
+	asdu := interrogation(1)
+	frameLen := 6 + len(asdu)
+	plain := iFrames(2, asdu, false)
+	if len(plain) != 2*frameLen {
+		t.Fatalf("two frames: %d bytes, want %d", len(plain), 2*frameLen)
+	}
+	// N(S) counts up from 0 (octet 2 = N(S) << 1); N(R) stays 0; no reserved bit.
+	if plain[2] != 0x00 || plain[frameLen+2] != 0x02 || plain[4] != 0 || plain[frameLen+4] != 0 {
+		t.Fatalf("control octets % x / % x, want N(S) 0 then 1 with N(R) 0", plain[2:6], plain[frameLen+2:frameLen+6])
+	}
+	if len(iFrames(0, asdu, false)) != frameLen {
+		t.Fatalf("repeat 0 must still send one frame")
+	}
+	reserved := iFrames(1, asdu, true)
+	if reserved[4] != 0x01 || reserved[5] != 0x00 || reserved[1] != byte(4+len(asdu)) {
+		t.Fatalf("reserved frame % x: want octet 3 bit 0 set, N(R) 0 and the length unchanged", reserved[:6])
+	}
+	if !bytes.Equal(reserved[6:], asdu) {
+		t.Fatalf("reserved bit must not touch the ASDU")
+	}
+}
+
+func TestSinglePointLayout(t *testing.T) {
+	// M_SP_NA_1 at CA 1 / IOA 1002 (0x3ea), spontaneous, SIQ off/good.
+	want := []byte{1, 0x01, 3, 0, 1, 0, 0xea, 0x03, 0x00, 0x00}
+	if got := singlePoint(1, 1002); !bytes.Equal(got, want) {
+		t.Fatalf("single point % x, want % x", got, want)
+	}
+}
+
+func TestReservedBitsRepeatsOnOneConnection(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	wire := make(chan []byte, 1)
+	serverErr := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(time.Second))
+		act := make([]byte, 6)
+		if _, err := io.ReadFull(conn, act); err != nil || !bytes.Equal(act, startdtAct) {
+			serverErr <- err
+			return
+		}
+		if _, err := conn.Write(uFrame(0x0b)); err != nil { // STARTDT con
+			serverErr <- err
+			return
+		}
+		data, err := io.ReadAll(conn)
+		wire <- data
+		serverErr <- err
+	}()
+	r := run(options{addr: listener.Addr().String(), scenario: "reserved-bits", ca: 1, ioa: 2001, dcs: 2, repeat: 2, hold: 20 * time.Millisecond})
+	if r.fatal != nil {
+		t.Fatal(r.fatal)
+	}
+	want := iFrames(2, doubleCommand(1, 2001, 2, false), true)
+	if got := <-wire; !bytes.Equal(got, want) || r.sent != len(want) {
+		t.Fatalf("sent %d bytes, wire % x, want % x", r.sent, got, want)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+	if r.port == 0 {
+		t.Fatalf("client port not reported")
+	}
+}

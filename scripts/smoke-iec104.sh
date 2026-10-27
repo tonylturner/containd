@@ -6,7 +6,8 @@ set -euo pipefail
 # Brings up the two-endpoint compose (lib60870 RTU + control centre on two
 # disposable networks, locally built containd firewall routing between them,
 # loopback-only management), routes the endpoints through the firewall, and
-# runs every enforcement assertion. The proof of plant state is the RTU's own
+# runs every enforcement assertion, including strict and tolerant IEC 104
+# parsing of nonconformant content. The proof of plant state is the RTU's own
 # state file and command confirmations, never a timeout.
 #
 # Every assertion is a real check; nothing is hard-coded to pass or fail.
@@ -691,39 +692,12 @@ else
   gate_fail "stale retransmit after a new handshake cannot bypass" "the stale segment reached the RTU: $STALE_DETAIL"
 fi
 
-# 9. Malformed/unknown: reset in enforce, alert (event) and pass in learn.
-for scen in bad-length malformed-dcs unsupported-type; do
-  since=$(timestamp)
-  out=$(malformer -scenario "$scen" -ca "$ALLOWED_CA" -ioa "$ALLOWED_IOA" -hold "$HOLD")
-  sock=$(socket_of "$out")
-  sleep 1
-  if [[ "$sock" == reset ]] && iec_event_since "$since"; then
-    gate_pass "enforce: $scen resets the session and raises an IEC104 event" "client_socket=$sock"
-  else
-    gate_fail "enforce: $scen resets the session and raises an IEC104 event" \
-      "client_socket=${sock:-none}; IEC104 malformed/unsupported event: $(iec_event_since "$since" && echo yes || echo no)"
-  fi
-done
-
-LEARN_POLICY=$(echo "$EU_POLICY" | jq '.dataPlane.dpiMode = "learn" | .firewall.rules |= map(.ics.mode = "learn")')
-if apply_config "$LEARN_POLICY" "EU learn policy"; then
-  sleep 2
-  for scen in bad-length malformed-dcs unsupported-type; do
-    since=$(timestamp)
-    out=$(malformer -scenario "$scen" -ca "$ALLOWED_CA" -ioa "$ALLOWED_IOA" -hold 2s)
-    sock=$(socket_of "$out")
-    sleep 1
-    if [[ "$sock" != reset ]] && iec_event_since "$since"; then
-      gate_pass "learn: $scen raises an IEC104 event and is not reset" "client_socket=$sock"
-    else
-      gate_fail "learn: $scen raises an IEC104 event and is not reset" \
-        "client_socket=${sock:-none}; IEC104 malformed/unsupported event: $(iec_event_since "$since" && echo yes || echo no)"
-    fi
-  done
-  apply_config "$EU_POLICY" "EU enforce policy (restore)" || fail "could not restore the EU enforce policy"
-else
-  fail "could not apply the EU learn policy"
-fi
+# 9. Parsing modes (scripts/smoke-iec104-lib-parsing.sh): strict resets on
+#    every finding, strict learn reports without a reset, and the tolerant
+#    default evaluates the decoded fields; a lost length resets in both.
+# shellcheck source=scripts/smoke-iec104-lib-parsing.sh
+source "$ROOT/scripts/smoke-iec104-lib-parsing.sh"
+run_parsing_gates
 
 # 10. Decoder off or capture not NFQUEUE: enforce is refused before save.
 #     Queue failure at start: enforcement health reports unhealthy.
