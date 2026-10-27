@@ -192,7 +192,7 @@ var scenarios = []scenario{
 	}},
 
 	// CIP/EtherNet/IP — attribute keys match pkg/dp/ics/cip/decoder.go
-	{proto: "enip", kind: "request", transport: "tcp", dstPort: 44818, weight: 12, attrFn: func(rng *rand.Rand) map[string]any {
+	{proto: "cip", kind: "request", transport: "tcp", dstPort: 44818, weight: 12, attrFn: func(rng *rand.Rand) map[string]any {
 		type cipSvc struct {
 			code uint8
 			name string

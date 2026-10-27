@@ -39,6 +39,11 @@ func TestProtocolScopeLegacyImport(t *testing.T) {
 			server := NewServer(store, log)
 			cfg := config.DefaultConfig()
 			cfg.SchemaVersion = "0.1.7"
+			for i, rule := range cfg.IDS.Rules {
+				if rule.Proto == "cip" {
+					cfg.IDS.Rules[i].Proto = "enip"
+				}
+			}
 			cfg.IDS.Rules = append(cfg.IDS.Rules, historicalScopeRule())
 			rec := requestStage(t, server, "POST", path, cfg)
 			if rec.Code != http.StatusOK {
@@ -54,7 +59,7 @@ func TestProtocolScopeLegacyImport(t *testing.T) {
 			}
 			count := 0
 			for _, row := range rows {
-				if row.Action == scopeaudit.Kind && row.Target == "IDS-S7-001" {
+				if row.Action == scopeaudit.Kind && strings.Contains(row.Target, "IDS-S7-001") && strings.Contains(row.Detail, "Updated unchanged builtin IDS rules: IDS-CIP-001, IDS-CIP-002") {
 					count++
 				}
 			}
@@ -62,12 +67,12 @@ func TestProtocolScopeLegacyImport(t *testing.T) {
 				t.Fatalf("migration audits: %+v", rows)
 			}
 			records, err := store.IndustrialScopeMigrations(ctx)
-			if err != nil || len(records) != 1 {
+			if err != nil || len(records) != 1 || len(records[0].Updated) != 2 {
 				t.Fatalf("outbox: %+v %v", records, err)
 			}
 			for _, endpoint := range []string{"/events", fmt.Sprintf("/events/%d", records[0].ID)} {
 				rec = requestStage(t, server, "GET", endpoint, nil)
-				if rec.Code != 200 || !strings.Contains(rec.Body.String(), scopeaudit.Kind) || !strings.Contains(rec.Body.String(), "IDS-S7-001") {
+				if rec.Code != 200 || !strings.Contains(rec.Body.String(), scopeaudit.Kind) || !strings.Contains(rec.Body.String(), "IDS-S7-001") || !strings.Contains(rec.Body.String(), "updatedRuleIds") || !strings.Contains(rec.Body.String(), "IDS-CIP-001") {
 					t.Fatalf("event: %d %s", rec.Code, rec.Body)
 				}
 			}

@@ -33,7 +33,7 @@ func Events(ctx context.Context, store config.Store) ([]dpevents.Event, error) {
 	var events []dpevents.Event
 	for _, rec := range records {
 		events = append(events, dpevents.Event{ID: rec.ID, Timestamp: rec.Timestamp, Proto: "system", Kind: Kind,
-			Attributes: map[string]any{"removedRuleIds": rec.Removed}})
+			Attributes: map[string]any{"removedRuleIds": rec.Removed, "updatedRuleIds": rec.Updated}})
 	}
 	return events, nil
 }
@@ -56,10 +56,14 @@ func Publish(ctx context.Context, store config.Store, log audit.Store) ([]dpeven
 		return nil, fmt.Errorf("audit store does not support idempotent migration records")
 	}
 	for _, rec := range records {
-		ids := strings.Join(rec.Removed, ", ")
+		ids := strings.Join(append(append([]string{}, rec.Removed...), rec.Updated...), ", ")
+		detail := "Removed unchanged builtin IDS rules: " + strings.Join(rec.Removed, ", ")
+		if len(rec.Updated) > 0 {
+			detail += "; Updated unchanged builtin IDS rules: " + strings.Join(rec.Updated, ", ")
+		}
 		if err := once.AddOnce(ctx, fmt.Sprintf("%s.%d", Kind, rec.ID), audit.Record{
 			Timestamp: rec.Timestamp, Actor: "system", Source: "management", Action: Kind,
-			Target: ids, Result: "success", Detail: "Removed unchanged builtin IDS rules: " + ids,
+			Target: ids, Result: "success", Detail: detail,
 		}); err != nil {
 			return nil, err
 		}

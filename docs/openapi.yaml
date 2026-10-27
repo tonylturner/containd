@@ -993,7 +993,7 @@ components:
         mitreAttackIDs: {items: {type: string}, type: array}
         proto:
           type: string
-          description: 'Generic and IT names remain valid. Removed industrial names return 400: ids rule <id> proto "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
+          description: 'Generic and IT names remain valid. Obsolete industrial labels, including enip (use cip), return 400: ids rule <id> proto "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
         rawSource: {type: string}
         references: {items: {type: string}, type: array}
         severity: {type: string}

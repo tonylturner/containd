@@ -25,11 +25,12 @@ func Learnable(name string) bool {
 	return Supported(name) && name != "iec104"
 }
 
-// Removed identifies obsolete semantic references, not generic numeric ports
+// Removed identifies obsolete industrial labels, including the non-emitted
+// enip label for CIP, not generic numeric ports
 // or historical telemetry. IT and generic IDS protocols remain valid.
 func Removed(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "s7comm", "s7", "mms", "iec61850", "goose", "bacnet", "opcua":
+	case "s7comm", "s7", "mms", "iec61850", "goose", "bacnet", "opcua", "enip":
 		return true
 	}
 	return false

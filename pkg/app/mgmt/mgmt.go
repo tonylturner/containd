@@ -153,6 +153,14 @@ func Run(ctx context.Context, opts Options) error {
 			}
 		}
 		out = append(out, serviceManager.ListTelemetryEvents(limit)...)
+		migrationCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		migrations, err := publishScopeMigrations(migrationCtx, stores)
+		if err != nil {
+			logger.Errorw("deliver industrial scope migration telemetry", "error", err)
+		} else {
+			out = append(out, migrations...)
+		}
 		return out
 	})
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)

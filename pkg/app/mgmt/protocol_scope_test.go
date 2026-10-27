@@ -54,6 +54,11 @@ func seedOldScopeConfig(t *testing.T, path string, edit func(*config.Config)) {
 	}
 	cfg.SchemaVersion = "0.1.7"
 	cfg.IDS.Rules = append(config.DefaultIDSConfig().Rules, oldScopeBuiltin())
+	for i, rule := range cfg.IDS.Rules {
+		if rule.Proto == "cip" {
+			cfg.IDS.Rules[i].Proto = "enip"
+		}
+	}
 	edit(&cfg)
 	bank, err := json.Marshal(cfg.IDS.Rules)
 	if err != nil {
@@ -84,7 +89,7 @@ func seedOldScopeConfig(t *testing.T, path string, edit func(*config.Config)) {
 
 func TestRemovedProtocolBootRecovery(t *testing.T) {
 	for _, reserved := range []bool{false, true} {
-		for _, scenario := range []string{"rule", "toggle", "edited-bank", "stock-bank"} {
+		for _, scenario := range []string{"rule", "toggle", "edited-bank", "edited-cip", "stock-bank"} {
 			t.Run(fmt.Sprintf("reserved=%t/%s", reserved, scenario), func(t *testing.T) {
 				ctx := context.Background()
 				dir := t.TempDir()
@@ -114,6 +119,13 @@ func TestRemovedProtocolBootRecovery(t *testing.T) {
 					case "toggle":
 						c.DataPlane.DPIICSProtocols = map[string]bool{"bacnet": false}
 						want = `dataplane.dpiIcsProtocols: protocol "bacnet" is not supported`
+					case "edited-cip":
+						for i, rule := range c.IDS.Rules {
+							if rule.ID == "IDS-CIP-001" {
+								c.IDS.Rules[i].Title += " operator edit"
+							}
+						}
+						want = `ids rule IDS-CIP-001 proto "enip" is not supported`
 					case "edited-bank":
 						c.IDS.Rules[len(c.IDS.Rules)-1].Title += " operator edit"
 						want = `ids rule IDS-S7-001 proto "s7comm" is not supported`
@@ -141,7 +153,7 @@ func TestRemovedProtocolBootRecovery(t *testing.T) {
 					t.Fatalf("invalid config not exportable unchanged: %v", err)
 				}
 				if scenario == "stock-bank" {
-					if len(stores.scopeEvents) != 1 || len(running.IDS.Rules) != len(config.DefaultIDSConfig().Rules) {
+					if len(stores.scopeEvents) != 1 || len(stores.scopeEvents[0].Attributes["updatedRuleIds"].([]string)) != 2 || len(running.IDS.Rules) != len(config.DefaultIDSConfig().Rules) {
 						t.Fatal("stock bank did not migrate with an event")
 					}
 					events, err := publishScopeMigrations(ctx, stores)
@@ -171,6 +183,16 @@ func TestRemovedProtocolBootRecovery(t *testing.T) {
 				case "toggle":
 					if v, ok := exported.DataPlane.DPIICSProtocols["bacnet"]; !ok || v {
 						t.Fatal("invalid false toggle dropped")
+					}
+				case "edited-cip":
+					found := false
+					for _, rule := range exported.IDS.Rules {
+						if rule.ID == "IDS-CIP-001" {
+							found = rule.Proto == "enip" && strings.HasSuffix(rule.Title, " operator edit")
+						}
+					}
+					if !found {
+						t.Fatal("edited CIP builtin changed")
 					}
 				case "edited-bank":
 					if exported.IDS.Rules[len(exported.IDS.Rules)-1].Title != oldScopeBuiltin().Title+" operator edit" {

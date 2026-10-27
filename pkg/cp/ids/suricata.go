@@ -16,8 +16,8 @@ import (
 // Well-known port-to-protocol mappings for ICS/OT enrichment.
 var portProtoMap = map[string]string{
 	"502":   "modbus",
-	"44818": "enip",
-	"2222":  "enip",
+	"44818": "cip",
+	"2222":  "cip",
 	"20000": "dnp3",
 	"161":   "snmp",
 	"162":   "snmp",
@@ -165,6 +165,10 @@ func buildBaseIDSRule(raw, sourceFormat string, fields suricataHeaderFields) con
 }
 
 func deriveRuleProtocol(protocol, srcPort, dstPort string) string {
+	// enip is the external rules-file keyword, never a containd event name.
+	if protocol == "enip" {
+		return "cip"
+	}
 	if protocol != "ip" {
 		if protocol != "tcp" && protocol != "udp" {
 			return protocol
