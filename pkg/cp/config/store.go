@@ -266,6 +266,7 @@ func readKindFrom(ctx context.Context, db configReader, kind string, withBank bo
 	if err := UpgradeInPlace(&cfg); err != nil {
 		return nil, err
 	}
+	normalizeStoredSSHShellMode(&cfg.System.SSH)
 	if !withBank {
 		cfg.IDS.Rules = nil
 		return &cfg, nil

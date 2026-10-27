@@ -1320,7 +1320,7 @@ components:
           maximum: 36500
           description: "Rotate host keys at this age in days; 0 disables rotation. Running settings are checked every minute."
         listenAddr: {type: string}
-        shellMode: {type: string}
+        shellMode: {type: string, enum: ['', appliance, linux], description: 'What an interactive SSH login opens. Empty means appliance. A non-empty CONTAIND_SSH_SHELL_MODE overrides it; SSH reads it at startup.'}
       type: object
     ScheduleConfig:
       description: >-

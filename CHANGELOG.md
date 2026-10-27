@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CLI, the CLI no longer loses the next input: the shell's input copy kept
   reading the SSH channel and discarded it. The shell also receives lines
   typed ahead of it, and stops taking window-size changes when it exits.
+- `system.ssh.shellMode` accepts only `appliance`, `linux` or empty. Any
+  other value, such as `Linux` or `bash`, is rejected on save, import and
+  commit instead of silently meaning `appliance`. A value stored by an
+  earlier release loads as the mode it ran (`linux` in any letter case
+  becomes `linux`, any other value `appliance`), so it does not start
+  management in recovery. `CONTAIND_SSH_SHELL_MODE` keeps accepting any
+  letter case.
 
 ## [0.1.35] - 2026-10-26
 
