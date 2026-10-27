@@ -291,7 +291,6 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	out["enabled"] = cfg.Enabled
 	out["mode"] = avMode(cfg)
 	out["failPolicy"] = firstNonEmpty(strings.ToLower(cfg.FailPolicy), "open")
-	out["failOpenICS"] = cfg.FailOpenICS
 	out["max_size"] = cfg.MaxSizeBytes
 	out["timeout"] = int(avTimeout(cfg) / time.Second)
 	out["cache_ttl"] = avCacheTTL(cfg).String()

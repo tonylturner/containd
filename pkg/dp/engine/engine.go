@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -470,6 +469,9 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	if err := snap.ValidateIndustrialProtocols(); err != nil {
 		return err
 	}
+	if err := snap.Gate.Validate(); err != nil {
+		return err
+	}
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
 	if err := enforce.ValidateManagementSnapshot(&snap, e.managementReservation); err != nil {
@@ -561,7 +563,7 @@ func shouldInspectFirewallEntry(entry rules.Entry, state *flow.State, pkt *dpi.P
 	if len(entry.Protocols) > 0 {
 		return entryMatchesProtocolPorts(entry, state, pkt)
 	}
-	return matchesICSDefaultPort(entry.ICS.Protocol, servicePort(state, pkt))
+	return rules.IsICSDecoderPort(entry.ICS.Protocol, servicePort(state, pkt))
 }
 
 func entryMatchesProtocolPorts(entry rules.Entry, state *flow.State, pkt *dpi.ParsedPacket) bool {
@@ -571,21 +573,6 @@ func entryMatchesProtocolPorts(entry rules.Entry, state *flow.State, pkt *dpi.Pa
 		}
 	}
 	return false
-}
-
-func matchesICSDefaultPort(proto string, port uint16) bool {
-	switch strings.ToLower(proto) {
-	case "modbus":
-		return port == 502
-	case "dnp3":
-		return port == 20000
-	case "cip":
-		return port == 44818 || port == 2222
-	case "iec104":
-		return port == iec104Port
-	default:
-		return false
-	}
 }
 
 // handlePacket runs flow tracking, DPI and enforcement for one captured

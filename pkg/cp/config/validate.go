@@ -72,6 +72,9 @@ func (c *Config) Validate() error {
 	if err := validateServices(c.Services, c.Interfaces, c.Zones); err != nil {
 		return err
 	}
+	if _, err := ValidateScanSelection(c); err != nil {
+		return err
+	}
 	if c.Services.DHCP.Enabled {
 		if err := validateDHCPListenIfaceNames(c.Services.DHCP.ListenIfaces, c.Interfaces); err != nil {
 			return err

@@ -37,7 +37,6 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			Enabled: cfg.IDS.Enabled,
 			Rules:   make([]dprules.IDSRule, 0, len(cfg.IDS.Rules)),
 		},
-		ZoneIfaces: make(map[string][]string),
 	}
 	if snap.NAT.Enabled {
 		if strings.TrimSpace(snap.NAT.EgressZone) == "" {
@@ -102,22 +101,10 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	// Local input allow rules (management plane + VPN listeners).
 	snap.LocalInput = append(snap.LocalInput, compileLocalInput(cfg)...)
 
-	// Build deterministic zone->interfaces mapping for nftables bindings.
-	for _, iface := range cfg.Interfaces {
-		z := iface.Zone
-		if z == "" {
-			continue
-		}
-		name := iface.Name
-		if strings.TrimSpace(iface.Device) != "" {
-			name = iface.Device
-		}
-		snap.ZoneIfaces[z] = append(snap.ZoneIfaces[z], name)
-	}
-	for z, ifs := range snap.ZoneIfaces {
-		sort.Strings(ifs)
-		snap.ZoneIfaces[z] = ifs
-	}
+	// Deterministic zone->devices mapping for nftables bindings, shared with
+	// the gate selection.
+	snap.ZoneIfaces = config.ZoneDevices(cfg.Interfaces)
+	snap.Gate = compileGate(cfg, snap.ZoneIfaces)
 
 	for _, r := range cfg.IDS.Rules {
 		dr := dprules.IDSRule{
