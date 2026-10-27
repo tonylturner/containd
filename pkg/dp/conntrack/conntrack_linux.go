@@ -55,26 +55,22 @@ func parseEntry(data []byte) (Entry, error) {
 	if err != nil {
 		return e, err
 	}
-	proto, tuple, err := parseTuple(a[1])
+	orig, err := parseTuple(a[1])
 	if err != nil {
 		return e, err
 	}
-	e.Proto = proto
-	e.Src = tuple[0]
-	e.Dst = tuple[1]
-	e.Sport = tuple[2]
-	e.Dport = tuple[3]
-	replyProto, reply, err := parseTuple(a[2])
+	reply, err := parseTuple(a[2])
 	if err != nil {
 		return e, err
 	}
-	if proto != replyProto {
+	if orig.proto != reply.proto {
 		return e, fmt.Errorf("conntrack tuple protocol mismatch")
 	}
-	e.ReplySrc = reply[0]
-	e.ReplyDst = reply[1]
-	e.ReplySport = reply[2]
-	e.ReplyDport = reply[3]
+	e.Proto = orig.proto
+	e.Src, e.Dst, e.Sport, e.Dport = orig.src, orig.dst, orig.sport, orig.dport
+	e.ICMPID, e.ICMPType, e.ICMPCode = orig.icmpID, orig.icmpType, orig.icmpCode
+	e.ReplySrc, e.ReplyDst, e.ReplySport, e.ReplyDport = reply.src, reply.dst, reply.sport, reply.dport
+	e.ReplyICMPID, e.ReplyICMPType, e.ReplyICMPCode = reply.icmpID, reply.icmpType, reply.icmpCode
 	if v := a[7]; len(v) == 4 {
 		e.TimeoutSecs = int(binary.BigEndian.Uint32(v))
 	}
@@ -101,46 +97,82 @@ func parseEntry(data []byte) (Entry, error) {
 	return e, nil
 }
 
-func parseTuple(data []byte) (string, [4]string, error) {
-	var t [4]string
+// tuple is one direction of a conntrack entry. TCP and UDP set the ports;
+// ICMP and ICMPv6 set the identifier, type and code.
+type tuple struct {
+	proto, src, dst, sport, dport, icmpID, icmpType, icmpCode string
+}
+
+// CTA_PROTO_* attributes of a tuple's protocol nest
+// (linux/netfilter/nfnetlink_conntrack.h).
+const (
+	ctaProtoNum        = 1
+	ctaProtoSrcPort    = 2
+	ctaProtoDstPort    = 3
+	ctaProtoICMPID     = 4
+	ctaProtoICMPType   = 5
+	ctaProtoICMPCode   = 6
+	ctaProtoICMPv6ID   = 7
+	ctaProtoICMPv6Type = 8
+	ctaProtoICMPv6Code = 9
+)
+
+// icmpAttrs are the identifier, type and code attributes of each ICMP protocol number.
+var icmpAttrs = map[byte][3]uint16{
+	1:  {ctaProtoICMPID, ctaProtoICMPType, ctaProtoICMPCode},
+	58: {ctaProtoICMPv6ID, ctaProtoICMPv6Type, ctaProtoICMPv6Code},
+}
+
+func parseTuple(data []byte) (tuple, error) {
+	var t tuple
 	a, err := attributes(data)
 	if err != nil {
-		return "", t, err
+		return t, err
 	}
 	ip, err := attributes(a[1])
 	if err != nil {
-		return "", t, err
+		return t, err
 	}
 	p, err := attributes(a[2])
 	if err != nil {
-		return "", t, err
+		return t, err
 	}
 	src, dst := ip[1], ip[2]
 	if len(src) == 0 {
 		src, dst = ip[3], ip[4]
 	}
-	if (len(src) != 4 && len(src) != 16) || len(src) != len(dst) || len(p[1]) != 1 {
-		return "", t, fmt.Errorf("incomplete conntrack tuple")
+	if (len(src) != 4 && len(src) != 16) || len(src) != len(dst) || len(p[ctaProtoNum]) != 1 {
+		return t, fmt.Errorf("incomplete conntrack tuple")
 	}
-	t[0] = net.IP(src).String()
-	t[1] = net.IP(dst).String()
-	proto := strconv.Itoa(int(p[1][0]))
-	switch p[1][0] {
+	t.src = net.IP(src).String()
+	t.dst = net.IP(dst).String()
+	num := p[ctaProtoNum][0]
+	t.proto = strconv.Itoa(int(num))
+	switch num {
 	case 6:
-		proto = "tcp"
+		t.proto = "tcp"
 	case 17:
-		proto = "udp"
+		t.proto = "udp"
 	case 1:
-		proto = "icmp"
+		t.proto = "icmp"
 	case 58:
-		proto = "icmpv6"
+		t.proto = "icmpv6"
 	}
-	if proto == "tcp" || proto == "udp" {
-		if len(p[2]) != 2 || len(p[3]) != 2 {
-			return "", t, fmt.Errorf("incomplete conntrack ports")
+	if t.proto == "tcp" || t.proto == "udp" {
+		if len(p[ctaProtoSrcPort]) != 2 || len(p[ctaProtoDstPort]) != 2 {
+			return t, fmt.Errorf("incomplete conntrack ports")
 		}
-		t[2] = strconv.Itoa(int(binary.BigEndian.Uint16(p[2])))
-		t[3] = strconv.Itoa(int(binary.BigEndian.Uint16(p[3])))
+		t.sport = strconv.Itoa(int(binary.BigEndian.Uint16(p[ctaProtoSrcPort])))
+		t.dport = strconv.Itoa(int(binary.BigEndian.Uint16(p[ctaProtoDstPort])))
 	}
-	return proto, t, nil
+	if attrs, ok := icmpAttrs[num]; ok {
+		id, typ, code := p[attrs[0]], p[attrs[1]], p[attrs[2]]
+		if len(id) != 2 || len(typ) != 1 || len(code) != 1 {
+			return t, fmt.Errorf("incomplete conntrack %s tuple", t.proto)
+		}
+		t.icmpID = strconv.Itoa(int(binary.BigEndian.Uint16(id)))
+		t.icmpType = strconv.Itoa(int(typ[0]))
+		t.icmpCode = strconv.Itoa(int(code[0]))
+	}
+	return t, nil
 }

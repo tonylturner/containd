@@ -770,19 +770,32 @@ components:
       type: object
     ConntrackKillRequest:
       type: object
-      required: [proto, src, dst, sport, dport]
-      description: Select the original tuple from the connections list, including for NAT flows. TCP and UDP support IPv4 and IPv6.
+      required: [proto, src, dst]
+      description: >-
+        Select the original tuple from the connections list, including for NAT flows. TCP and UDP
+        (IPv4 and IPv6) require sport and dport. ICMP (IPv4) and ICMPv6 (IPv6) have no ports and
+        require icmpId and icmpType instead.
       properties:
-        proto: {type: string, enum: [tcp, udp]}
+        proto: {type: string, enum: [tcp, udp, icmp, icmpv6]}
         src: {type: string, description: Original source IP}
         dst: {type: string, description: Original destination IP}
-        sport: {type: integer, minimum: 1, maximum: 65535}
-        dport: {type: integer, minimum: 1, maximum: 65535}
+        sport: {type: integer, minimum: 1, maximum: 65535, description: TCP and UDP only}
+        dport: {type: integer, minimum: 1, maximum: 65535, description: TCP and UDP only}
+        icmpId: {type: integer, minimum: 0, maximum: 65535, default: 0, description: ICMP and ICMPv6 only; the query identifier}
+        icmpType:
+          type: integer
+          description: ICMP and ICMPv6 only; the original query type, which opens the connection (icmp 8, 13, 15 or 17; icmpv6 128 or 139; 8 and 128 are echo requests)
+        icmpCode: {type: integer, minimum: 0, maximum: 255, default: 0, description: ICMP and ICMPv6 only}
         scope:
           type: string
           enum: [connection, client-service]
           default: connection
-          description: Connection blocks the exact tuple in both directions; a fresh source port is allowed. Client-service ends all this client's connections to the service and prevents reconnects during the interval.
+          description: >-
+            Connection blocks the exact tuple in both directions; a fresh source port, or a new ICMP
+            identifier, is allowed. Client-service ends all this client's connections to the service
+            and prevents reconnects during the interval. For ICMP and ICMPv6 the service is the query
+            type and code sent to the destination, so client-service ends all of the client's pings
+            to that host.
         durationSecs: {type: integer, minimum: 1, maximum: 3600, default: 60}
     ConntrackKillResult:
       type: object
@@ -798,17 +811,23 @@ components:
         blockedUntil: {type: string, format: date-time}
         closure:
           type: string
-          description: TCP resets are signalled on each endpoint's next matching packet, not proof of endpoint closure. UDP matching packets are dropped.
+          description: TCP resets are signalled on each endpoint's next matching packet, not proof of endpoint closure. UDP, ICMP and ICMPv6 matching packets are dropped.
     ConntrackEntry:
       properties:
         assured: {type: boolean}
         dport: {type: string}
         dst: {type: string}
+        icmpId: {type: string, description: ICMP and ICMPv6 entries only; the query identifier of the original tuple, in place of ports}
+        icmpType: {type: string, description: ICMP and ICMPv6 entries only; the query type of the original tuple}
+        icmpCode: {type: string, description: ICMP and ICMPv6 entries only}
         mark: {type: string}
         proto: {type: string}
         raw: {type: string}
         replyDport: {type: string}
         replyDst: {type: string}
+        replyIcmpId: {type: string, description: ICMP and ICMPv6 entries only; NAT can rewrite it}
+        replyIcmpType: {type: string, description: ICMP and ICMPv6 entries only; the reply type, such as an echo reply}
+        replyIcmpCode: {type: string}
         replySport: {type: string}
         replySrc: {type: string}
         sport: {type: string}

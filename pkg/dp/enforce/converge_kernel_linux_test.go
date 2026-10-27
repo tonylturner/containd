@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -75,6 +76,60 @@ func TestKernelConvergesFromLegacyTable(t *testing.T) {
 		}
 		if len(live.Chains) != len(dynamicChains)+1 || len(live.Objects) != len(dynamicSets()) {
 			t.Fatalf("%s: stale objects remain: %+v", pass, live)
+		}
+	}
+}
+
+// TestKernelRevocationsSurviveApplies upgrades a dynamic table without the
+// ICMP identifier sets, as containd 0.1.35 left it, keeping its revocation.
+// It then installs revocations in every revocation set, typeof sets
+// included, and applies the same policy and a changed one. The live table
+// reads back as the current layout before each apply, so no install
+// deletes a set, and every revocation stays.
+func TestKernelRevocationsSurviveApplies(t *testing.T) {
+	lab := newNetnsLab(t, "rsv", 170, 30*time.Second)
+	lab.nft(t, "add table inet containd\n"+
+		"add set inet containd revoke_service4 { type ipv4_addr . ipv4_addr . inet_proto . inet_service; flags timeout; }\n"+
+		"add element inet containd revoke_service4 { 198.18.170.9 . 198.18.180.9 . udp . 18171 timeout 1h }\n")
+	c := NewCompiler()
+	lab.apply(t, c, &rules.Snapshot{Default: rules.ActionAllow})
+	if listing := lab.run(t, "nft", "list", "set", "inet", "containd", "revoke_service4"); !strings.Contains(listing, "198.18.170.9 . 198.18.180.9 . udp . 18171 timeout 1h expires") {
+		t.Fatalf("upgrade lost a revocation:\n%s", listing)
+	}
+	entries := []conntrack.Entry{
+		{Proto: "tcp", Src: "198.18.170.2", Dst: "198.18.180.2", Sport: "41000", Dport: "18170",
+			ReplySrc: "198.18.180.2", ReplyDst: "198.18.170.2", ReplySport: "18170", ReplyDport: "41000"},
+		{Proto: "icmp", Src: "198.18.170.2", Dst: "198.18.180.3", ICMPID: "4660", ICMPType: "8", ICMPCode: "0",
+			ReplySrc: "198.18.180.3", ReplyDst: "198.18.170.1", ReplyICMPID: "7", ReplyICMPType: "0", ReplyICMPCode: "0"},
+		{Proto: "icmpv6", Src: "2001:db8:170::2", Dst: "2001:db8:180::2", ICMPID: "4661", ICMPType: "128", ICMPCode: "0",
+			ReplySrc: "2001:db8:180::2", ReplyDst: "2001:db8:170::2", ReplyICMPID: "4661", ReplyICMPType: "129", ReplyICMPCode: "0"},
+	}
+	for _, e := range entries {
+		if err := NewNftUpdater("").RevokeConnections(lab.ctx, []conntrack.Entry{e}, "client-service", time.Hour); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := map[string]string{
+		"revoke4": "198.18.170.2 . 198.18.180.3 . icmp . 4660 . 2048", "revoke_service4": "198.18.170.2 . 198.18.180.2 . tcp . 18170",
+		"revoke_icmp4": "198.18.180.3 . 198.18.170.1 . 7", "revoke6": "2001:db8:170::2 . 2001:db8:180::2 . ipv6-icmp . 4661 . 32768",
+		"revoke_service6": "2001:db8:170::2 . 2001:db8:180::2 . ipv6-icmp . 32768", "revoke_icmp6": "2001:db8:180::2 . 2001:db8:170::2 . 4661",
+	}
+	for _, pass := range []struct {
+		name string
+		snap *rules.Snapshot
+	}{{"unchanged", &rules.Snapshot{Default: rules.ActionAllow}}, {"changed", &rules.Snapshot{Default: rules.ActionDeny}}} {
+		live, err := NewNftApplier().ReadTable(lab.ctx, "containd")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if script := c.InstallScript(live, "", ""); script != "" {
+			t.Fatalf("%s: an install would recreate dynamic objects:\n%s\nlive: %+v", pass.name, script, live.Objects)
+		}
+		lab.apply(t, c, pass.snap)
+		for set, element := range want {
+			if listing := lab.run(t, "nft", "list", "set", "inet", "containd", set); !strings.Contains(listing, element+" timeout 1h expires") {
+				t.Fatalf("%s apply lost %s from %s:\n%s", pass.name, element, set, listing)
+			}
 		}
 	}
 }

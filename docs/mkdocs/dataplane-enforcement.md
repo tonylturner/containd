@@ -232,7 +232,8 @@ Administrators can request temporary blocks through:
 
 Temporary blocks and connection revocations live in the persistent nftables
 table `inet <enforceTable>` (default `inet containd`; sets `block_hosts`,
-`block_flows`, `revoke4`, `revoke6`, `revoke_service4` and `revoke_service6`).
+`block_flows`, `revoke4`, `revoke6`, `revoke_service4`, `revoke_service6`,
+`revoke_icmp4` and `revoke_icmp6`).
 They act before the policy table's rules, including on established connections,
 and they persist across commits until their timeouts expire. Revocations skip
 traffic to the management listeners on the management interfaces and to the
