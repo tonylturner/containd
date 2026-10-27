@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The DHCP page keeps unsaved edits when its configuration is reloaded after a
+  staged save, a commit or an auto refresh, and says when the server copy
+  changed underneath them. Only the Refresh button discards them.
 - Modbus request/reply decoding and ICS policy direction follow the connection
   opener, including clients bound to port 502. Offline PCAP analysis uses
   SYN/SYN-ACK orientation, with service-port hints only for midstream captures.
