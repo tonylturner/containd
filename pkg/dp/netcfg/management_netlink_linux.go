@@ -17,9 +17,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// managementRequest uses a private socket per transaction, bounded by context
+// netlinkRequest uses a private socket per transaction, bounded by context
 // and a two-second ceiling. No replies can be consumed by the subscription.
-func managementRequest(ctx context.Context, kind uint16, flags uint16, payload []byte) ([]syscall.NetlinkMessage, error) {
+func netlinkRequest(ctx context.Context, kind uint16, flags uint16, payload []byte) ([]syscall.NetlinkMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_ROUTE)
@@ -60,7 +60,7 @@ func managementRequest(ctx context.Context, kind uint16, flags uint16, payload [
 			return nil, err
 		}
 		if recvflags&unix.MSG_TRUNC != 0 {
-			return nil, fmt.Errorf("management netlink response truncated")
+			return nil, fmt.Errorf("netlink response truncated")
 		}
 		msgs, err := syscall.ParseNetlinkMessage(buf[:n])
 		if err != nil {
@@ -71,7 +71,7 @@ func managementRequest(ctx context.Context, kind uint16, flags uint16, payload [
 				continue
 			}
 			if m.Header.Flags&unix.NLM_F_DUMP_INTR != 0 {
-				return nil, fmt.Errorf("management netlink dump interrupted")
+				return nil, fmt.Errorf("netlink dump interrupted")
 			}
 			if m.Header.Type == unix.NLMSG_DONE {
 				return out, nil
@@ -91,28 +91,28 @@ func managementRequest(ctx context.Context, kind uint16, flags uint16, payload [
 		}
 	}
 }
-func managementPayload(v any) []byte {
+func netlinkPayload(v any) []byte {
 	var b bytes.Buffer
 	_ = binary.Write(&b, binary.NativeEndian, v)
 	return b.Bytes()
 }
-func managementAttrU32(b *bytes.Buffer, kind uint16, value uint32) {
+func netlinkAttrU32(b *bytes.Buffer, kind uint16, value uint32) {
 	data := make([]byte, 4)
 	binary.NativeEndian.PutUint32(data, value)
 	addRtAttr(b, kind, data)
 }
 
-func managementDump(ctx context.Context, kind uint16) ([]syscall.NetlinkMessage, error) {
+func netlinkDump(ctx context.Context, kind uint16) ([]syscall.NetlinkMessage, error) {
 	var payload []byte
 	switch kind {
 	case unix.RTM_GETADDR:
-		payload = managementPayload(unix.IfAddrmsg{Family: unix.AF_INET})
+		payload = netlinkPayload(unix.IfAddrmsg{Family: unix.AF_INET})
 	case unix.RTM_GETROUTE:
-		payload = managementPayload(unix.RtMsg{Family: unix.AF_INET})
+		payload = netlinkPayload(unix.RtMsg{Family: unix.AF_INET})
 	case unix.RTM_GETRULE:
-		payload = managementPayload(fibRuleHdr{Family: unix.AF_INET})
+		payload = netlinkPayload(fibRuleHdr{Family: unix.AF_INET})
 	}
-	return managementRequest(ctx, kind, unix.NLM_F_DUMP, payload)
+	return netlinkRequest(ctx, kind, unix.NLM_F_DUMP, payload)
 }
 
 type managementRoute struct {
