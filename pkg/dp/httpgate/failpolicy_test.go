@@ -310,6 +310,9 @@ func TestUnsupportedRequestsFollowPolicy(t *testing.T) {
 		{"obs-fold", []byte("GET /x HTTP/1.1\r\nHost: origin.test\r\nX-A: 1\r\n 2\r\n\r\n")},
 		{"connection-nominates-framing", []byte("GET /x HTTP/1.1\r\nHost: origin.test\r\nConnection: Content-Length\r\n\r\n")},
 		{"duplicate-cl", []byte("POST /x HTTP/1.1\r\nHost: origin.test\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\na")},
+		{"bare-lf", []byte("GET /x HTTP/1.1\nHost: origin.test\n\n")},
+		{"http10-te", []byte("POST /x HTTP/1.0\r\nHost: origin.test\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n0\r\n\r\n")},
+		{"authority-mismatch", []byte("GET http://real.test/x HTTP/1.1\r\nHost: origin.test\r\n\r\n")},
 	}
 	for _, tc := range cases {
 		forPolicies(t, func(t *testing.T, policy avscan.FailPolicy) {
