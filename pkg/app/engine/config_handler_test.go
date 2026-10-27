@@ -19,8 +19,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -405,4 +407,33 @@ func TestConfigFailedRebuildIsRetried(t *testing.T) {
 		t.Fatalf("retry after a failed rebuild = %v reconfigs=%d", out, dp.reconfigs.Load())
 	}
 	dp.waitStart(t)
+}
+
+// TestCompilerSettingsGatePorts: the scanning gate's listener ports follow
+// enforcement, so a preview and an apply of the same candidate steer the
+// gate alike, and a candidate without enforcement compiles no gate.
+func TestCompilerSettingsGatePorts(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		enforcement bool
+		plain, masq uint16
+	}{
+		{"enforcement on", true, enforce.DefaultGatePlainPort, enforce.DefaultGateMasqPort},
+		{"enforcement off", false, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dp := config.DataPlaneConfig{Enforcement: tc.enforcement, EnforceTable: "candidate", NFLogGroup: 205, NFQueueGroup: 209}
+			got := compilerSettings(dp)
+			want := enforce.CompilerSettings{TableName: "candidate", NFLogGroup: 205, NFQueueGroup: 209, GatePlainPort: tc.plain, GateMasqPort: tc.masq}
+			if got != want {
+				t.Fatalf("compilerSettings = %+v, want %+v", got, want)
+			}
+			if steers := enforce.NewCompilerWithSettings(got, nil).SteersGate(); steers != tc.enforcement {
+				t.Fatalf("SteersGate = %v with enforcement %v", steers, tc.enforcement)
+			}
+		})
+	}
+	if got := compilerSettings(config.DataPlaneConfig{Enforcement: true}).TableName; got != "containd" {
+		t.Fatalf("default table = %q", got)
+	}
 }
