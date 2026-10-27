@@ -102,9 +102,17 @@ type AVManager struct {
 
 	slots        chan struct{}
 	backendReady bool
-	reloadError  string
-	defsPath     string
-	log          *zap.SugaredLogger
+	// reload is the database activation awaiting clamd's proof, if any;
+	// reloadError records the last activation failure until a retry
+	// succeeds; reloadAttempt grows the retry backoff; retrySeq lets a newer
+	// retry supersede an older one; bounds holds the timing.
+	reload        *pendingReload
+	reloadError   string
+	reloadAttempt int
+	retrySeq      uint64
+	bounds        reloadBounds
+	defsPath      string
+	log           *zap.SugaredLogger
 	// validateDef checks a candidate signature database before activation.
 	validateDef func(ctx context.Context, path string) error
 }
@@ -126,6 +134,7 @@ func NewAVManager(ctx context.Context, opts AVOptions) *AVManager {
 		cache:    make(map[string]cachedVerdict),
 		maxCache: 1024,
 		slots:    make(chan struct{}, 8),
+		bounds:   defaultReloadBounds(),
 		log:      newAVLogger(),
 	}
 	m.validateDef = m.clamscanValidate
@@ -162,14 +171,16 @@ func (m *AVManager) lock(ctx context.Context) error {
 
 func (m *AVManager) unlock() { <-m.op }
 
-// Stop ends the FreshClam schedule, stops clamd, and
-// waits for every goroutine and child process the manager started.
+// Stop ends the FreshClam schedule, stops clamd, and waits for every
+// goroutine and child process the manager started. It cancels the manager
+// before taking the operation lock so an activation retry holding it,
+// possibly for minutes, releases it at once.
 func (m *AVManager) Stop() error {
+	m.cancel()
 	m.op <- struct{}{}
 	defer m.unlock()
 	m.stopFreshclam()
 	err := m.stopClamd()
-	m.cancel()
 	m.mu.Lock()
 	m.backendReady = false
 	m.mu.Unlock()
@@ -181,7 +192,17 @@ func (m *AVManager) Stop() error {
 // Apply makes cfg the running AV configuration. Settings that do not affect
 // clamd or FreshClam leave them running. It returns an error when the
 // configured backend is missing, cannot start or does not answer in time.
+// A database activation that clamd accepted is confirmed in the background:
+// Apply waits for the proof only until ctx ends, and Status reports the
+// activation as pending until then.
 func (m *AVManager) Apply(ctx context.Context, cfg config.AVConfig) error {
+	if err := m.applyLocked(ctx, cfg); err != nil {
+		return err
+	}
+	return m.awaitReload(ctx)
+}
+
+func (m *AVManager) applyLocked(ctx context.Context, cfg config.AVConfig) error {
 	if err := m.lock(ctx); err != nil {
 		return err
 	}
@@ -190,6 +211,7 @@ func (m *AVManager) Apply(ctx context.Context, cfg config.AVConfig) error {
 	m.lastCfg = cfg
 	if !cfg.Enabled || avMode(cfg) != "clamav" {
 		m.reloadError = ""
+		m.reloadAttempt = 0
 	}
 	m.lastRender = time.Now().UTC()
 	m.mu.Unlock()
@@ -270,7 +292,6 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	out["mode"] = avMode(cfg)
 	out["failPolicy"] = firstNonEmpty(strings.ToLower(cfg.FailPolicy), "open")
 	out["failOpenICS"] = cfg.FailOpenICS
-	out["block_ttl"] = cfg.BlockTTL
 	out["max_size"] = cfg.MaxSizeBytes
 	out["timeout"] = int(avTimeout(cfg) / time.Second)
 	out["cache_ttl"] = avCacheTTL(cfg).String()
@@ -278,6 +299,7 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	out["icap_servers"] = len(cfg.ICAP.Servers)
 	out["detections"] = m.detections
 	out["definitions_generation"] = m.defsGen
+	out["reload_pending"] = m.reload != nil
 	out["clamav_socket"] = clamdSocket(cfg)
 	out["clamav_path"] = m.opts.ClamdPath
 	out["clamav_running"] = m.clamd.running()

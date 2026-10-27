@@ -200,8 +200,10 @@ func (m *AVManager) startClamd(conf string) error {
 	return nil
 }
 
-// stopClamd stops the supervised clamd and waits until it is reaped.
+// stopClamd stops the supervised clamd and waits until it is reaped. An
+// activation it was confirming is abandoned with it.
 func (m *AVManager) stopClamd() error {
+	m.cancelReload()
 	m.mu.Lock()
 	cmd, done := m.clamd.cmd, m.clamd.done
 	m.mu.Unlock()
@@ -222,13 +224,17 @@ func (m *AVManager) stopClamd() error {
 	return nil
 }
 
-// waitClamdReady polls PING until clamd answers, exits or ctx ends.
+// waitClamdReady polls PING until clamd answers, exits or ctx ends. Each
+// PING has its own probe deadline so a hung clamd cannot stall one attempt
+// for the whole of a long ctx.
 func (m *AVManager) waitClamdReady(ctx context.Context, cfg config.AVConfig) error {
 	client := &ClamAVClient{Timeout: avStatusProbeTimeout, Socket: clamdSocket(cfg)}
 	ticker := time.NewTicker(clamdReadyPoll)
 	defer ticker.Stop()
 	for {
-		err := client.Ping(ctx)
+		pingCtx, cancel := context.WithTimeout(ctx, avStatusProbeTimeout)
+		err := client.Ping(pingCtx)
+		cancel()
 		if err == nil {
 			return nil
 		}

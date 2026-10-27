@@ -5,6 +5,7 @@ package services
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -315,25 +316,90 @@ func TestAVReloadCompletionFence(t *testing.T) {
 	if generation() != old+2 || countLines(fake.clamdLog, "RELOAD") != 2 {
 		t.Fatal("customDefsPath change did not reload and advance generation")
 	}
+	if err := m.DeleteDefinition(context.Background(), "missing.ndb"); !errors.Is(err, ErrAVInvalid) {
+		t.Fatalf("missing definition = %v", err)
+	}
+
+	// A caller's deadline does not decide an activation. With the proof
+	// withheld, a short Apply returns with the activation pending, the old
+	// database keeps serving under the old generation, and the backend turns
+	// not ready only when the confirmation window expires.
 	if err := os.Remove(gate); err != nil {
 		t.Fatal(err)
 	}
-	timeout, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	m.mu.Lock()
+	m.bounds = reloadBounds{confirm: 2 * time.Second, retryMin: 50 * time.Millisecond, retryMax: 200 * time.Millisecond}
+	m.mu.Unlock()
+	cfg.ClamAV.CustomDefsPath = t.TempDir()
+	short, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	if err := m.DeleteDefinition(timeout, "missing.ndb"); !errors.Is(err, ErrAVInvalid) {
-		t.Fatalf("missing definition = %v", err)
+	if err := m.Apply(short, cfg); err != nil {
+		t.Fatalf("Apply with the activation pending = %v", err)
 	}
-	_, err := m.UploadDefinition(timeout, "test.ndb", strings.NewReader("Test:0:*:4142434445"))
-	if err == nil || !strings.Contains(err.Error(), "completion unconfirmed") {
-		t.Fatalf("unconfirmed reload = %v", err)
+	if generation() != old+2 {
+		t.Fatal("unconfirmed reload advanced generation")
+	}
+	if ready, why := m.Ready(); !ready {
+		t.Fatalf("usable old database is not ready while the activation is pending: %s", why)
+	}
+	if m.Status(context.Background())["reload_pending"] != true {
+		t.Fatal("pending activation not reported")
+	}
+	if r := m.Scan(context.Background(), obj); r.Verdict != avscan.Clean {
+		t.Fatal(r)
+	}
+	waitFor(t, 4*time.Second, func() bool { ready, _ := m.Ready(); return !ready })
+	if ready, why := m.Ready(); ready || !strings.Contains(why, "completion unconfirmed") {
+		t.Fatalf("expired confirmation readiness = %v, %s", ready, why)
 	}
 	if generation() != old+2 {
 		t.Fatal("failed proof advanced generation")
 	}
-	if ready, why := m.Ready(); ready || !strings.Contains(why, "completion unconfirmed") {
-		t.Fatalf("failed reload readiness = %v, %s", ready, why)
-	}
 	if r := m.Scan(context.Background(), obj); r.Reason != avscan.ReasonNotReady {
 		t.Fatalf("failed reload served old cache: %+v", r)
+	}
+
+	// The retry re-issues the reload and clears the failure once clamd
+	// proves the activation.
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, func() bool { return generation() == old+3 })
+	if ready, why := m.Ready(); !ready {
+		t.Fatalf("confirmed retry not ready: %s", why)
+	}
+	status := m.Status(context.Background())
+	if status["reload_pending"] != false || status["ready_error"] != "" {
+		t.Fatalf("status after confirmed retry = %+v", status)
+	}
+	if countLines(fake.clamdLog, "RELOAD") < 4 {
+		t.Fatalf("retry did not re-issue RELOAD: %v", readLines(fake.clamdLog))
+	}
+}
+
+func TestAVScanCallerDeadlineGovernsScan(t *testing.T) {
+	// Scanning a large object outlasts timeoutSec, which bounds only the
+	// connection when the caller sets a deadline.
+	var streamed atomic.Int64
+	socket := startFakeClamd(t, func(_ string, stream []byte) []byte {
+		streamed.Store(int64(len(stream)))
+		time.Sleep(1500 * time.Millisecond)
+		return []byte("stream: OK\x00")
+	})
+	m := newTestAVManager(t, AVOptions{})
+	m.lastCfg = config.AVConfig{Enabled: true, Mode: "clamav", TimeoutSec: 1, ClamAV: config.ClamAVConfig{SocketPath: socket}}
+	large := bytes.Repeat([]byte("clean"), 3*clamdChunkSize/5+1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if r := m.Scan(ctx, scanObject(large)); r.Verdict != avscan.Clean {
+		t.Fatalf("large object under the caller's deadline = %+v", r)
+	}
+	if streamed.Load() != int64(len(large)) {
+		t.Fatalf("clamd received %d of %d bytes", streamed.Load(), len(large))
+	}
+	// Without a caller deadline, timeoutSec bounds the scan instead.
+	other := bytes.Repeat([]byte("other"), 3*clamdChunkSize/5+1)
+	if r := m.Scan(context.Background(), scanObject(other)); r.Reason != avscan.ReasonTimeout {
+		t.Fatalf("scan without a deadline = %+v", r)
 	}
 }

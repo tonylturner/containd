@@ -44,6 +44,12 @@ func (m *AVManager) Ready() (bool, string) {
 
 // Scan sends a complete held object to the configured backend. Policy belongs
 // to the gate; errors never become clean or bypass verdicts here.
+//
+// Deadline ownership: the caller's ctx governs the scan. When ctx carries a
+// deadline it bounds the whole exchange, so a large clean object may
+// legitimately take longer than timeoutSec. timeoutSec bounds connecting to
+// the backend, and bounds the whole scan only for a caller without a
+// deadline, so no scan is ever unbounded.
 func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 	if m == nil {
 		return avscan.Result{Verdict: avscan.Unscanned, Reason: avscan.ReasonNotReady, Detail: "av manager nil"}
@@ -90,7 +96,12 @@ func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 			return res
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, avTimeout(cfg))
+	var cancel context.CancelFunc
+	if _, bounded := ctx.Deadline(); bounded {
+		ctx, cancel = context.WithCancel(ctx)
+	} else {
+		ctx, cancel = context.WithTimeout(ctx, avTimeout(cfg))
+	}
 	stop := context.AfterFunc(m.ctx, cancel)
 	defer func() { stop(); cancel() }()
 	body := io.NewSectionReader(obj.Body, 0, obj.Size)
@@ -175,7 +186,8 @@ func avMode(cfg config.AVConfig) string {
 	return "icap"
 }
 
-// avTimeout is the per-scan and per-probe deadline; zero selects the default.
+// avTimeout is the backend connect bound, the per-probe deadline and the
+// scan deadline for callers without one; zero selects the default.
 func avTimeout(cfg config.AVConfig) time.Duration {
 	if cfg.TimeoutSec > 0 {
 		return time.Duration(cfg.TimeoutSec) * time.Second

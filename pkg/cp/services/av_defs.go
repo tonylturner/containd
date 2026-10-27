@@ -102,8 +102,20 @@ func (m *AVManager) ListDefinitions() (AVDefinitionList, error) {
 }
 
 // UploadDefinition validates and stores a custom database read from r, then
-// activates it and reloads a running clamd.
+// activates it and reloads a running clamd. It waits for clamd's proof of
+// the activation only until ctx ends; the activation itself continues.
 func (m *AVManager) UploadDefinition(ctx context.Context, name string, r io.Reader) (AVDefinition, error) {
+	def, err := m.uploadDefinitionLocked(ctx, name, r)
+	if err != nil {
+		return AVDefinition{}, err
+	}
+	if err := m.awaitReload(ctx); err != nil {
+		return AVDefinition{}, err
+	}
+	return def, nil
+}
+
+func (m *AVManager) uploadDefinitionLocked(ctx context.Context, name string, r io.Reader) (AVDefinition, error) {
 	if err := ValidateDefinitionName(name); err != nil {
 		return AVDefinition{}, err
 	}
@@ -153,8 +165,16 @@ func (m *AVManager) UploadDefinition(ctx context.Context, name string, r io.Read
 	return AVDefinition{Name: name, Size: n, Modified: time.Now().UTC(), Active: active}, nil
 }
 
-// DeleteDefinition removes a custom database and reloads a running clamd.
+// DeleteDefinition removes a custom database and reloads a running clamd,
+// waiting for clamd's proof of the activation only until ctx ends.
 func (m *AVManager) DeleteDefinition(ctx context.Context, name string) error {
+	if err := m.deleteDefinitionLocked(ctx, name); err != nil {
+		return err
+	}
+	return m.awaitReload(ctx)
+}
+
+func (m *AVManager) deleteDefinitionLocked(ctx context.Context, name string) error {
 	if err := ValidateDefinitionName(name); err != nil {
 		return err
 	}
