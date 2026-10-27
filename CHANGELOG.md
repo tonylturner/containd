@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   events it searched and the newest matching events, and says when there were
   no events to search.
 
+### Changed
+
+- Restored the full README overview and dashboard screenshot.
+
 ## [0.1.35] - 2026-10-26
 
 ### Security
