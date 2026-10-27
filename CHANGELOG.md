@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Restored the full README overview and dashboard screenshot.
 - The CLI guide documents SSH shell modes again: `appliance` and `linux`,
   how `CONTAIND_SSH_SHELL_MODE` and `set system ssh shell-mode` select them,
   switching between the CLI and the Linux shell, the PTY requirement, and the
