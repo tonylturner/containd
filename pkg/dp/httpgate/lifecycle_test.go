@@ -6,8 +6,10 @@ package httpgate
 import (
 	"context"
 	"errors"
+	"io"
 	"math"
 	"net"
+	"net/netip"
 	"runtime"
 	"strings"
 	"testing"
@@ -77,6 +79,25 @@ func TestInvalidUpdateRejected(t *testing.T) {
 	}
 }
 
+// The largest cap is accepted and handled without overflowing the
+// spool's lookahead arithmetic.
+func TestMaxIntObjectCapHandled(t *testing.T) {
+	log := &bodyLog{}
+	o := echoOrigin(t, log)
+	g := startGate(t, o, func(s *Settings) {
+		s.ScanDownloads = false
+		s.MaxConcurrentObjects, s.MaxObjectBytes = 1, math.MaxInt64
+	})
+	c := g.client()
+	c.write(requestCL("POST", "/max", "", pattern(1000, 74)))
+	resp, rb := c.response("POST")
+	ev := g.events.next(t)
+	if resp.StatusCode != 200 || string(rb) != "ok" {
+		t.Fatalf("upload under MaxInt64 cap: %d %q (event %+v)", resp.StatusCode, rb, ev)
+	}
+	expectEvent(t, ev, avscan.Upload, avscan.Clean, "", avscan.Deliver)
+}
+
 func TestServeRequiresUpdateAndHooks(t *testing.T) {
 	ln, _ := listenLoopback(t)
 	s := &Server{}
@@ -97,13 +118,16 @@ func TestServeRequiresUpdateAndHooks(t *testing.T) {
 	}
 }
 
+// Shutdown ends a held scan, and that end is the gate's, not a verdict:
+// even under fail-open the infected object never reaches the origin.
 func TestShutdownCancelsScansAndIsFinite(t *testing.T) {
 	log := &bodyLog{}
 	o := echoOrigin(t, log)
-	g := startGate(t, o, func(s *Settings) { s.ScanTimeout = time.Minute })
+	g := startGate(t, o, func(s *Settings) { s.ScanTimeout = time.Minute; s.FailPolicy = avscan.FailOpen })
 	g.scanner.holdScans()
 	c := g.client()
-	c.write(requestCL("POST", "/stuck", "", pattern(100, 73)))
+	body := append(pattern(4096, 73), []byte(infectedMarker)...)
+	c.write(requestCL("POST", "/stuck", "", body))
 	g.scanner.waitScanStarted(t)
 	start := time.Now()
 	if err := g.shutdown(10 * time.Second); err != nil {
@@ -112,9 +136,17 @@ func TestShutdownCancelsScansAndIsFinite(t *testing.T) {
 	if took := time.Since(start); took > 3*time.Second {
 		t.Fatalf("Shutdown took %v", took)
 	}
-	resp, rb := c.response("POST")
-	if resp.StatusCode != 403 || !strings.Contains(string(rb), "timeout") {
-		t.Fatalf("client got %d %q", resp.StatusCode, rb)
+	c.expectClosed()
+	if n := len(c.rec.bytes()); n != 0 {
+		t.Fatalf("client received %d bytes for an aborted transaction", n)
+	}
+	ev := g.events.next(t)
+	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonTimeout, avscan.Block)
+	if ev.Detail != "shutdown before the verdict" || ev.SHA256 != sha256hex(body) || ev.SHA256Partial {
+		t.Fatalf("event %+v", ev)
+	}
+	if o.rec.connections() != 0 || len(o.rec.bytes()) != 0 {
+		t.Fatalf("origin got %d connections, %d bytes during Shutdown under fail-open", o.rec.connections(), len(o.rec.bytes()))
 	}
 	calls := g.scanner.scanCalls()
 	if len(calls) != 1 || !errors.Is(calls[0].ctxErr, context.Canceled) {
@@ -168,6 +200,38 @@ func TestShutdownForcesActiveConnectionsAtDeadline(t *testing.T) {
 	c.expectClosed()
 }
 
+// An upstream whose dial completes after Shutdown's forced close must be
+// closed at once, or the handler would wait on it until the idle timeout.
+func TestShutdownClosesLateDialledUpstream(t *testing.T) {
+	o := rawOrigin(t, func(c net.Conn, _ int) {
+		_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, _ = io.Copy(io.Discard, c)
+	})
+	dialling := make(chan struct{})
+	proceed := make(chan struct{})
+	o.dial = func(_ context.Context, _, server netip.AddrPort) (net.Conn, error) {
+		close(dialling)
+		<-proceed
+		return net.Dial("tcp", server.String())
+	}
+	g := startGate(t, o, func(s *Settings) { s.IdleTimeout = time.Minute; s.ScanUploads = false })
+	c := g.client()
+	c.write(getRequest("/late", ""))
+	<-dialling
+	shutdownErr := make(chan error, 1)
+	go func() { shutdownErr <- g.shutdown(200 * time.Millisecond) }()
+	c.expectClosed()
+	close(proceed)
+	select {
+	case err := <-shutdownErr:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Shutdown returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown hung on an upstream dialled after the forced close")
+	}
+}
+
 func TestNoGoroutineLeakAndCleanSpool(t *testing.T) {
 	log := &bodyLog{}
 	o := echoOrigin(t, log)
@@ -215,6 +279,23 @@ func TestSpoolSlotHeldThroughDelivery(t *testing.T) {
 	eventually(t, "slot release", func() bool { return g.srv.heldObjects.Load() == 0 })
 }
 
+// With one object slot and both directions selected, a held upload must
+// free its slot once sent so the response can be held with it.
+func TestUploadSlotFreedBeforeResponse(t *testing.T) {
+	log := &bodyLog{}
+	o := echoOrigin(t, log)
+	g := startGate(t, o, func(s *Settings) { s.MaxConcurrentObjects = 1 })
+	c := g.client()
+	c.write(requestCL("POST", "/slot", "", pattern(100, 93)))
+	resp, rb := c.response("POST")
+	if resp.StatusCode != 200 || string(rb) != "ok" {
+		t.Fatalf("status %d body %q", resp.StatusCode, rb)
+	}
+	expectEvent(t, g.events.next(t), avscan.Upload, avscan.Clean, "", avscan.Deliver)
+	expectEvent(t, g.events.next(t), avscan.Download, avscan.Clean, "", avscan.Deliver)
+	eventually(t, "slot release", func() bool { return g.srv.heldObjects.Load() == 0 })
+}
+
 func TestClientCloseDuringScanCancelsIt(t *testing.T) {
 	log := &bodyLog{}
 	o := echoOrigin(t, log)
@@ -226,6 +307,9 @@ func TestClientCloseDuringScanCancelsIt(t *testing.T) {
 	c.conn.Close()
 	ev := g.events.next(t)
 	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonTimeout, avscan.Block)
+	if ev.Detail != "client closed before the verdict" || ev.SHA256Partial {
+		t.Fatalf("event %+v", ev)
+	}
 	if calls := g.scanner.scanCalls(); len(calls) != 1 || !errors.Is(calls[0].ctxErr, context.Canceled) {
 		t.Fatalf("scan calls %+v", calls)
 	}

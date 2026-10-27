@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -25,8 +26,21 @@ func TestParseRequestHead(t *testing.T) {
 		{"post-cl", "POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 12\r\n\r\n", bodyLength, 12, ""},
 		{"post-cl-zero", "POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 0\r\n\r\n", bodyNone, 0, ""},
 		{"chunked-mixed-case", "POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: Chunked\r\n\r\n", bodyChunked, 0, ""},
-		{"bare-lf", "GET /a HTTP/1.1\nHost: h\n\n", bodyNone, 0, ""},
-		{"leading-crlf", "\r\nGET /a HTTP/1.1\r\nHost: h\r\n\r\n", bodyNone, 0, ""},
+		{"absolute-form", "GET http://h/a HTTP/1.1\r\nHost: h\r\n\r\n", bodyNone, 0, ""},
+		{"absolute-form-case", "GET http://H:80/a HTTP/1.1\r\nHost: h:80\r\n\r\n", bodyNone, 0, ""},
+		{"absolute-form-no-host", "GET http://h/a HTTP/1.1\r\n\r\n", bodyNone, 0, ""},
+		{"bare-lf", "GET /a HTTP/1.1\nHost: h\n\n", 0, 0, "line without CRLF"},
+		{"mixed-lf", "POST /a HTTP/1.1\r\nHost: h\r\nX: a\nContent-Length: 5\r\n\r\n", 0, 0, "line without CRLF"},
+		{"lf-blank-line", "GET /a HTTP/1.1\r\nHost: h\r\n\n", 0, 0, "line without CRLF"},
+		{"leading-crlf", "\r\nGET /a HTTP/1.1\r\nHost: h\r\n\r\n", 0, 0, "blank line before the start line"},
+		{"bare-cr-value", "POST /a HTTP/1.1\r\nHost: h\r\nX: a\rContent-Length: 5\r\n\r\n", 0, 0, "control character in header field"},
+		{"nul-value", "GET /a HTTP/1.1\r\nHost: h\r\nX: a\x00b\r\n\r\n", 0, 0, "control character in header field"},
+		{"del-value", "GET /a HTTP/1.1\r\nHost: h\r\nX: a\x7fb\r\n\r\n", 0, 0, "control character in header field"},
+		{"htab-value", "GET /a HTTP/1.1\r\nHost: h\r\nX: a\tb\r\n\r\n", bodyNone, 0, ""},
+		{"ctl-target", "GET /a\x01b HTTP/1.1\r\nHost: h\r\n\r\n", 0, 0, "invalid request line"},
+		{"http10-te", "POST /a HTTP/1.0\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n", 0, 0, "HTTP/1.0 with Transfer-Encoding"},
+		{"dup-host", "GET /a HTTP/1.1\r\nHost: h\r\nHost: h\r\n\r\n", 0, 0, "duplicate Host"},
+		{"authority-mismatch", "GET http://real.test/a HTTP/1.1\r\nHost: logged.test\r\n\r\n", 0, 0, "absolute-form authority differs from Host"},
 		{"http2", "PRI * HTTP/2.0\r\n\r\n", 0, 0, "not HTTP/1.x"},
 		{"http09", "GET /a\r\n\r\n", 0, 0, "invalid request line"},
 		{"connect", "CONNECT h:443 HTTP/1.1\r\nHost: h\r\n\r\n", 0, 0, "CONNECT"},
@@ -91,6 +105,12 @@ func TestParseResponseHead(t *testing.T) {
 		{"alpha-status", "HTTP/1.1 2x0 OK\r\n\r\n", "GET", 0, 0, "invalid status code"},
 		{"not-http", "SSH-2.0-x\r\n\r\n", "GET", 0, 0, "invalid status line"},
 		{"h2", "HTTP/2 200\r\n\r\n", "GET", 0, 0, "not HTTP/1.x"},
+		{"bare-lf", "HTTP/1.1 200 OK\nContent-Length: 5\n\n", "GET", 0, 0, "line without CRLF"},
+		{"mixed-lf", "HTTP/1.1 200 OK\r\nX: a\nContent-Length: 5\r\n\r\n", "GET", 0, 0, "line without CRLF"},
+		{"leading-crlf", "\r\nHTTP/1.1 200 OK\r\n\r\n", "GET", 0, 0, "blank line before the start line"},
+		{"ctl-reason", "HTTP/1.1 200 O\x00K\r\n\r\n", "GET", 0, 0, "invalid status line"},
+		{"bare-cr-value", "HTTP/1.1 200 OK\r\nX: a\rContent-Length: 5\r\n\r\n", "GET", 0, 0, "control character in header field"},
+		{"http10-te", "HTTP/1.0 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n", "GET", 0, 0, "HTTP/1.0 with Transfer-Encoding"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, err := parseResponseHead([]byte(tc.raw), tc.method)
@@ -108,6 +128,20 @@ func TestParseResponseHead(t *testing.T) {
 				t.Fatalf("body %d status %d", h.body, h.status)
 			}
 		})
+	}
+}
+
+func TestEffectiveHost(t *testing.T) {
+	for raw, want := range map[string]string{
+		"GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n":                    "h.test",
+		"GET http://real.test/a HTTP/1.1\r\nHost: REAL.test\r\n\r\n": "real.test",
+		"GET https://real.test:8443/a?q HTTP/1.1\r\n\r\n":            "real.test:8443",
+		"OPTIONS * HTTP/1.1\r\nHost: h.test\r\n\r\n":                 "h.test",
+	} {
+		h, err := parseRequestHead([]byte(raw))
+		if err != nil || h.host != want {
+			t.Errorf("%q: host %q err %v, want %q", raw, h.host, err, want)
+		}
 	}
 }
 
@@ -264,6 +298,11 @@ func TestSpoolFillOutcomes(t *testing.T) {
 	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), 4)
 	if outcome != fillComplete || err != nil || len(excess) != 0 || sp.size != 4 {
 		t.Fatalf("exact: %d %q %v", outcome, excess, err)
+	}
+	sp = newSpool(t.TempDir(), 1<<20)
+	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), math.MaxInt64)
+	if outcome != fillComplete || err != nil || len(excess) != 0 || sp.size != 4 {
+		t.Fatalf("MaxInt64 cap: %d %q %v", outcome, excess, err)
 	}
 	sp = newSpool("/nonexistent/httpgate-spool", 2)
 	outcome, excess, err = sp.fill(bytes.NewReader([]byte("0123")), 10)

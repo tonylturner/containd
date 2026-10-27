@@ -160,6 +160,15 @@ func TestOversizedUploadFollowsPolicy(t *testing.T) {
 					if o.rec.connections() != 0 {
 						t.Fatal("origin reached for a refused oversized upload")
 					}
+					// A declared length over the cap is refused unread; a chunked
+					// body is refused after its 1 MiB prefix was held and hashed.
+					wantHash, wantSize := "", int64(threeMiB)
+					if framing == "chunked" {
+						wantHash, wantSize = sha256hex(body[:1<<20]), 1<<20
+					}
+					if !ev.SHA256Partial || ev.SHA256 != wantHash || ev.Size != wantSize {
+						t.Fatalf("refused prefix digest not marked partial: %+v", ev)
+					}
 					return
 				}
 				got := log.list()
@@ -214,6 +223,13 @@ func TestOversizedDownloadFollowsPolicy(t *testing.T) {
 						t.Fatalf("status %d, leaked=%v", resp.StatusCode, bytes.Contains(c.rec.bytes(), body[:4096]))
 					}
 					c.expectEOF()
+					wantHash, wantSize := "", int64(threeMiB)
+					if framing == "chunked" {
+						wantHash, wantSize = sha256hex(body[:1<<20]), 1<<20
+					}
+					if !ev.SHA256Partial || ev.SHA256 != wantHash || ev.Size != wantSize {
+						t.Fatalf("refused prefix digest not marked partial: %+v", ev)
+					}
 					return
 				}
 				if resp.StatusCode != 200 || !bytes.Equal(rb, body) {
@@ -230,6 +246,32 @@ func TestOversizedDownloadFollowsPolicy(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// A spool that cannot open its file refuses as busy under closed policy;
+// the digest of the bytes held in memory is marked partial.
+func TestSpoolDiskErrorRefusalIsPartial(t *testing.T) {
+	log := &bodyLog{}
+	o := echoOrigin(t, log)
+	g := startGate(t, o, func(s *Settings) {
+		s.ScanDownloads = false
+		s.MemoryThreshold = 1024
+		s.SpoolDir = "/nonexistent/httpgate-spool"
+	})
+	body := pattern(5000, 53)
+	c := g.client()
+	c.write(requestCL("POST", "/disk", "", body))
+	expectRefusedOrDelivered(t, c, avscan.FailClosed, avscan.ReasonBusy)
+	ev := g.events.next(t)
+	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonBusy, avscan.Block)
+	// The first write already exceeds the threshold, so nothing was held:
+	// the object is still reported by its declared length as partial.
+	if ev.Backend != "gate" || ev.SHA256 != "" || !ev.SHA256Partial || ev.Size != int64(len(body)) {
+		t.Fatalf("event %+v", ev)
+	}
+	if o.rec.connections() != 0 {
+		t.Fatal("origin reached for a refused upload")
 	}
 }
 
@@ -272,23 +314,63 @@ func TestBusyObjectLimitFollowsPolicy(t *testing.T) {
 	})
 }
 
-func TestBusyConnectionLimit(t *testing.T) {
+// MaxConnections is a hard admission bound: a connection over it is
+// closed at accept time with nothing allocated for it, a flood of them
+// yields one bounded-rate event, and the limit-holding connection keeps
+// working.
+func TestConnectionLimitRefusesAtAccept(t *testing.T) {
 	log := &bodyLog{}
 	o := echoOrigin(t, log)
 	g := startGate(t, o, func(s *Settings) { s.ScanDownloads = false; s.MaxConnections = 1 })
 	first := g.client()
-	second := g.client()
-	eventually(t, "both connections tracked", func() bool { return g.srv.activeConns.Load() == 2 })
-	second.write(requestCL("POST", "/over", "", pattern(100, 49)))
-	if resp, rb := second.response("POST"); resp.StatusCode != 403 || !strings.Contains(string(rb), "busy") {
-		t.Fatalf("over-limit connection: %d %q", resp.StatusCode, rb)
-	}
-	expectEvent(t, g.events.next(t), avscan.Upload, avscan.Unscanned, avscan.ReasonBusy, avscan.Block)
 	first.write(requestCL("POST", "/within", "", pattern(100, 50)))
 	if resp, _ := first.response("POST"); resp.StatusCode != 200 {
 		t.Fatalf("within-limit connection status %d", resp.StatusCode)
 	}
 	expectEvent(t, g.events.next(t), avscan.Upload, avscan.Clean, "", avscan.Deliver)
+	var refused []*client
+	for range 20 {
+		c := g.client()
+		c.write([]byte("G"))
+		refused = append(refused, c)
+	}
+	for _, c := range refused {
+		c.expectClosed()
+	}
+	ev := g.events.next(t)
+	if ev.Verdict != "" || ev.Action != avscan.Block || !strings.Contains(ev.Error, "connection limit reached") {
+		t.Fatalf("event %+v", ev)
+	}
+	g.events.expectNone(t, 100*time.Millisecond)
+	if n := g.srv.activeConns.Load(); n != 1 {
+		t.Fatalf("active connections %d, want the one within the limit", n)
+	}
+	first.write(requestCL("POST", "/again", "", pattern(100, 51)))
+	if resp, _ := first.response("POST"); resp.StatusCode != 200 {
+		t.Fatalf("within-limit connection status %d after the flood", resp.StatusCode)
+	}
+	expectEvent(t, g.events.next(t), avscan.Upload, avscan.Clean, "", avscan.Deliver)
+}
+
+// A connection draining after its refusal still occupies its slot.
+func TestRefusalDrainCountsAgainstConnectionLimit(t *testing.T) {
+	log := &bodyLog{}
+	o := echoOrigin(t, log)
+	g := startGate(t, o, func(s *Settings) { s.ScanDownloads = false; s.MaxConnections = 1 })
+	first := g.client()
+	first.write(requestCL("POST", "/bad", "", []byte(infectedMarker)))
+	if resp, _ := first.response("POST"); resp.StatusCode != 403 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	expectEvent(t, g.events.next(t), avscan.Upload, avscan.Infected, "", avscan.Block)
+	// The gate half-closed and is draining first; a newcomer is refused.
+	second := g.client()
+	second.write(getRequest("/over", ""))
+	second.expectClosed()
+	if ev := g.events.next(t); !strings.Contains(ev.Error, "connection limit reached") {
+		t.Fatalf("event %+v", ev)
+	}
+	first.expectEOF()
 }
 
 // bigHeadRequest is a request whose head exceeds the 64 KiB cap.
@@ -310,6 +392,9 @@ func TestUnsupportedRequestsFollowPolicy(t *testing.T) {
 		{"obs-fold", []byte("GET /x HTTP/1.1\r\nHost: origin.test\r\nX-A: 1\r\n 2\r\n\r\n")},
 		{"connection-nominates-framing", []byte("GET /x HTTP/1.1\r\nHost: origin.test\r\nConnection: Content-Length\r\n\r\n")},
 		{"duplicate-cl", []byte("POST /x HTTP/1.1\r\nHost: origin.test\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\na")},
+		{"bare-lf", []byte("GET /x HTTP/1.1\nHost: origin.test\n\n")},
+		{"http10-te", []byte("POST /x HTTP/1.0\r\nHost: origin.test\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n0\r\n\r\n")},
+		{"authority-mismatch", []byte("GET http://real.test/x HTTP/1.1\r\nHost: origin.test\r\n\r\n")},
 	}
 	for _, tc := range cases {
 		forPolicies(t, func(t *testing.T, policy avscan.FailPolicy) {

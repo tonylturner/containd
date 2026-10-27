@@ -277,6 +277,30 @@ func TestMultipleInterimResponsesRelayed(t *testing.T) {
 	expectEvent(t, ev, avscan.Download, avscan.Clean, "", avscan.Deliver)
 }
 
+// An HTTP/1.0 client would take a relayed 1xx for the final response, so
+// interim responses are dropped for it.
+func TestInterimResponsesNotRelayedToHTTP10(t *testing.T) {
+	o := rawOrigin(t, func(c net.Conn, _ int) {
+		if _, _, err := readRequestHead(c); err != nil {
+			return
+		}
+		_, _ = io.WriteString(c, "HTTP/1.1 102 Processing\r\n\r\nHTTP/1.1 103 Early Hints\r\nLink: </s.css>; rel=preload\r\n\r\n")
+		_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfinal")
+	})
+	g := startGate(t, o, nil)
+	c := g.client()
+	c.write([]byte("GET /interim HTTP/1.0\r\nHost: origin.test\r\n\r\n"))
+	resp, rb := c.response("GET")
+	if resp.StatusCode != 200 || string(rb) != "final" {
+		t.Fatalf("status %d body %q", resp.StatusCode, rb)
+	}
+	c.expectEOF()
+	if raw := c.rec.bytes(); bytes.Contains(raw, []byte(" 102 ")) || bytes.Contains(raw, []byte(" 103 ")) {
+		t.Fatalf("1xx relayed to an HTTP/1.0 client: %q", raw)
+	}
+	expectEvent(t, g.events.next(t), avscan.Download, avscan.Clean, "", avscan.Deliver)
+}
+
 func TestTooManyInterimResponsesUnsupported(t *testing.T) {
 	for _, policy := range []avscan.FailPolicy{avscan.FailClosed, avscan.FailOpen} {
 		t.Run(string(policy), func(t *testing.T) {

@@ -145,6 +145,65 @@ func TestSlowDripHitsObjectDeadline(t *testing.T) {
 	}
 }
 
+// A head dripped faster than the idle timeout still ends at the object
+// deadline, on either side.
+func TestDrippedHeadHitsObjectDeadline(t *testing.T) {
+	t.Run("request", func(t *testing.T) {
+		log := &bodyLog{}
+		o := echoOrigin(t, log)
+		g := startGate(t, o, func(s *Settings) {
+			s.IdleTimeout = 2 * time.Second
+			s.ObjectTimeout = 400 * time.Millisecond
+		})
+		c := g.client()
+		start := time.Now()
+		var sent int
+		for time.Since(start) < 3*time.Second {
+			if _, err := c.conn.Write([]byte("X-Drip: a\r\n")); err != nil {
+				break
+			}
+			sent++
+			time.Sleep(40 * time.Millisecond)
+		}
+		if elapsed := time.Since(start); elapsed < 350*time.Millisecond || elapsed > 1500*time.Millisecond {
+			t.Fatalf("connection lived %v for a dripped head (%d lines)", elapsed, sent)
+		}
+		if o.rec.connections() != 0 {
+			t.Fatal("origin dialled for an incomplete head")
+		}
+	})
+	t.Run("response", func(t *testing.T) {
+		o := rawOrigin(t, func(c net.Conn, _ int) {
+			if _, _, err := readRequestHead(c); err != nil {
+				return
+			}
+			_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\n")
+			for range 50 {
+				if _, err := io.WriteString(c, "X-Drip: a\r\n"); err != nil {
+					return
+				}
+				time.Sleep(40 * time.Millisecond)
+			}
+		})
+		g := startGate(t, o, func(s *Settings) {
+			s.IdleTimeout = 2 * time.Second
+			s.ObjectTimeout = 400 * time.Millisecond
+		})
+		c := g.client()
+		start := time.Now()
+		c.write(getRequest("/drip", ""))
+		ev := g.events.next(t)
+		elapsed := time.Since(start)
+		if ev.Verdict != "" || !strings.Contains(ev.Error, "response head") {
+			t.Fatalf("event %+v", ev)
+		}
+		if elapsed < 350*time.Millisecond || elapsed > 1500*time.Millisecond {
+			t.Fatalf("response head deadline fired after %v", elapsed)
+		}
+		c.expectClosed()
+	})
+}
+
 func TestIdleGapHitsIdleTimeout(t *testing.T) {
 	log := &bodyLog{}
 	o := echoOrigin(t, log)
@@ -177,6 +236,67 @@ func TestOriginalDstErrorClosesConnection(t *testing.T) {
 	if ev.Verdict != "" || !strings.Contains(ev.Error, "original destination: no SO_ORIGINAL_DST") {
 		t.Fatalf("event %+v", ev)
 	}
+}
+
+// A scanner that panics ends one connection on either side, with the
+// response goroutine recovered, both peers closed and the owner signalled.
+func TestPanicInScannerEndsOnlyThatConnection(t *testing.T) {
+	for _, dir := range []avscan.Direction{avscan.Upload, avscan.Download} {
+		t.Run(string(dir), func(t *testing.T) {
+			log := &bodyLog{}
+			o := echoOrigin(t, log)
+			g := startGate(t, o, nil)
+			g.scanner.setVerdict(func(obj avscan.Object, _ []byte) avscan.Result {
+				if obj.Direction == dir {
+					panic("scanner exploded on " + string(obj.Direction))
+				}
+				return avscan.Result{Verdict: avscan.Clean, Backend: "fake"}
+			})
+			c := g.client()
+			c.write(requestCL("POST", "/boom", "", pattern(100, 62)))
+			c.expectClosed()
+			var ev Event
+			for ev = g.events.next(t); ev.Error == ""; ev = g.events.next(t) {
+			}
+			if !strings.Contains(ev.Error, "panic: scanner exploded on "+string(dir)) || ev.Action != avscan.Block {
+				t.Fatalf("event %+v", ev)
+			}
+			// The gate still serves.
+			c2 := g.client()
+			c2.write(getRequest("/after", ""))
+			if dir == avscan.Download {
+				c2.expectClosed()
+			} else if resp, _ := c2.response("GET"); resp.StatusCode != 200 {
+				t.Fatalf("status %d after the panic", resp.StatusCode)
+			}
+			start := time.Now()
+			if err := g.shutdown(5 * time.Second); err != nil || time.Since(start) > 2*time.Second {
+				t.Fatalf("Shutdown after a panic: %v in %v", err, time.Since(start))
+			}
+		})
+	}
+}
+
+// A panicking OnEvent loses one event and is reported; the gate goes on.
+func TestPanicInOnEventIsRecovered(t *testing.T) {
+	log := &bodyLog{}
+	o := echoOrigin(t, log)
+	g := startGate(t, o, func(s *Settings) { s.ScanUploads = false })
+	g.events.panicNext.Store(true)
+	c := g.client()
+	c.write(getRequest("/one", ""))
+	if resp, rb := c.response("GET"); resp.StatusCode != 200 || string(rb) != "ok" {
+		t.Fatalf("status %d body %q", resp.StatusCode, rb)
+	}
+	ev := g.events.next(t)
+	if !strings.Contains(ev.Error, "OnEvent panic: hook exploded on download") || ev.Action != avscan.Block {
+		t.Fatalf("event %+v", ev)
+	}
+	c.write(getRequest("/two", ""))
+	if resp, _ := c.response("GET"); resp.StatusCode != 200 {
+		t.Fatalf("status %d after the hook panic", resp.StatusCode)
+	}
+	expectEvent(t, g.events.next(t), avscan.Download, avscan.Clean, "", avscan.Deliver)
 }
 
 func TestPanicInHookIsRecovered(t *testing.T) {

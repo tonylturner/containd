@@ -54,7 +54,16 @@ type Server struct {
 	connSeq     atomic.Int64
 	activeConns atomic.Int64
 	heldObjects atomic.Int64
+	// refusedConns counts connections closed over MaxConnections;
+	// reportedRefusals and lastRefusalReport bound how often they are
+	// reported.
+	refusedConns      atomic.Int64
+	reportedRefusals  atomic.Int64
+	lastRefusalReport atomic.Int64
 }
+
+// refusalReportInterval bounds how often refused connections are reported.
+const refusalReportInterval = time.Second
 
 func (s *Server) init() {
 	s.initOnce.Do(func() {
@@ -138,18 +147,27 @@ func (s *Server) isClosing() bool {
 	return s.closing
 }
 
-// track registers nc and starts its handler; false after Shutdown.
+// track registers nc and starts its handler; false after Shutdown. A
+// connection over MaxConnections is refused before its reader or
+// goroutine exists. The count covers a handler until it has exited, so
+// connections draining after a refusal stay inside the bound.
 func (s *Server) track(nc net.Conn) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closing {
+		s.mu.Unlock()
 		return false
 	}
 	set := s.settings.Load()
-	active := s.activeConns.Add(1)
-	c := newConn(s, nc, set, active > int64(set.MaxConnections))
+	if s.activeConns.Add(1) > int64(set.MaxConnections) {
+		s.activeConns.Add(-1)
+		s.mu.Unlock()
+		s.refuseConnection(nc)
+		return true
+	}
+	c := newConn(s, nc, set)
 	s.conns[c] = struct{}{}
 	s.wg.Add(1)
+	s.mu.Unlock()
 	go func() {
 		defer s.wg.Done()
 		defer s.activeConns.Add(-1)
@@ -157,6 +175,27 @@ func (s *Server) track(nc net.Conn) bool {
 		c.serve()
 	}()
 	return true
+}
+
+// refuseConnection closes nc at once and reports the refusals since the
+// last report, at most once per refusalReportInterval.
+func (s *Server) refuseConnection(nc net.Conn) {
+	var client netip.AddrPort
+	if ap, err := netip.ParseAddrPort(nc.RemoteAddr().String()); err == nil {
+		client = unmap(ap)
+	}
+	nc.Close()
+	refused := s.refusedConns.Add(1)
+	now := time.Now()
+	last := s.lastRefusalReport.Load()
+	if now.UnixNano()-last < int64(refusalReportInterval) || !s.lastRefusalReport.CompareAndSwap(last, now.UnixNano()) {
+		return
+	}
+	since := refused - s.reportedRefusals.Swap(refused)
+	s.emit(Event{
+		Time: now, Client: client, Action: avscan.Block,
+		Error: fmt.Sprintf("connection limit reached: %d connections refused", since),
+	})
 }
 
 func (s *Server) untrack(c *conn) {
@@ -220,7 +259,9 @@ func (s *Server) acquireObject(limit int) bool {
 
 func (s *Server) releaseObject() { s.heldObjects.Add(-1) }
 
-// emit delivers ev to OnEvent.
+// emit delivers ev to OnEvent. A hook that panics loses that event and
+// is reported through one more delivery; a hook that panics on that too
+// is left alone.
 func (s *Server) emit(ev Event) {
 	if s.OnEvent == nil {
 		return
@@ -228,7 +269,19 @@ func (s *Server) emit(ev Event) {
 	if ev.Time.IsZero() {
 		ev.Time = time.Now()
 	}
+	if r := s.callHook(ev); r != nil {
+		_ = s.callHook(Event{
+			Time: time.Now(), ID: ev.ID, Client: ev.Client, Server: ev.Server, Action: avscan.Block,
+			Error: fmt.Sprintf("OnEvent panic: %v", r),
+		})
+	}
+}
+
+// callHook runs OnEvent and returns what it panicked with, if anything.
+func (s *Server) callHook(ev Event) (panicked any) {
+	defer func() { panicked = recover() }()
 	s.OnEvent(ev)
+	return nil
 }
 
 // dial opens the upstream connection through the Dial hook.

@@ -151,12 +151,9 @@ func TestInfectedUploadNeverReachesOrigin(t *testing.T) {
 	c := g.client()
 	c.write(requestChunked("POST", "/malware", "", body, 4096))
 	g.scanner.waitScanStarted(t)
-	time.Sleep(50 * time.Millisecond)
+	c.expectSilence(100 * time.Millisecond)
 	if n := o.rec.connections(); n != 0 {
 		t.Fatalf("origin accepted %d connections before the verdict", n)
-	}
-	if n := len(c.rec.bytes()); n != 0 {
-		t.Fatalf("client received %d bytes before the verdict", n)
 	}
 	release()
 	resp, rb := c.response("POST")
@@ -188,10 +185,7 @@ func TestInfectedDownloadBlocked(t *testing.T) {
 	c := g.client()
 	c.write(getRequest("/malware", ""))
 	g.scanner.waitScanStarted(t)
-	time.Sleep(50 * time.Millisecond)
-	if n := len(c.rec.bytes()); n != 0 {
-		t.Fatalf("client received %d bytes before the verdict", n)
-	}
+	c.expectSilence(100 * time.Millisecond)
 	release()
 	resp, rb := c.response("GET")
 	if resp.StatusCode != 403 || !strings.Contains(string(rb), testSignature) {
@@ -220,23 +214,21 @@ func TestCleanTransfersHoldUntilVerdict(t *testing.T) {
 		_, _ = w.Write(body)
 	}))
 	g := startGate(t, o, nil)
-	release := g.scanner.holdScans()
+	releaseUpload := g.scanner.holdScans()
 	c := g.client()
 	c.write(requestCL("POST", "/hold", "", body))
 	g.scanner.waitScanStarted(t)
-	time.Sleep(50 * time.Millisecond)
-	if o.rec.connections() != 0 || len(c.rec.bytes()) != 0 {
-		t.Fatalf("leak before upload verdict: origin conns %d, client bytes %d", o.rec.connections(), len(c.rec.bytes()))
+	c.expectSilence(100 * time.Millisecond)
+	if o.rec.connections() != 0 {
+		t.Fatalf("origin accepted %d connections before the upload verdict", o.rec.connections())
 	}
-	release()
-	// The download is held next: the response head must not reach the
-	// client before the scanner releases it.
+	// A separate latch for the download, installed before the upload is
+	// released so the response is really held until it is released.
+	releaseDownload := g.scanner.holdScans()
+	releaseUpload()
 	g.scanner.waitScanStarted(t)
-	time.Sleep(50 * time.Millisecond)
-	if n := len(c.rec.bytes()); n != 0 {
-		t.Fatalf("client received %d bytes before the download verdict", n)
-	}
-	release()
+	c.expectSilence(100 * time.Millisecond)
+	releaseDownload()
 	resp, rb := c.response("POST")
 	if resp.StatusCode != 200 || !bytes.Equal(rb, body) {
 		t.Fatalf("status %d, identical=%v", resp.StatusCode, bytes.Equal(rb, body))

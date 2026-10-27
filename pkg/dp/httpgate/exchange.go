@@ -12,11 +12,14 @@ import (
 
 // bodySource is a message body as the gate forwards it: an optional held
 // prefix, bytes read past the hold cap, and the still-unread remainder.
+// release, when set, frees the held prefix and its object slot once the
+// body has been sent.
 type bodySource struct {
-	kind   bodyKind
-	held   *spool
-	excess []byte
-	rest   io.Reader
+	kind    bodyKind
+	held    *spool
+	excess  []byte
+	rest    io.Reader
+	release func()
 }
 
 // writeBody frames src on w in order and returns the bytes written.
@@ -71,11 +74,19 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 		tx.sendDone.Store(false)
 		tx.spliceCh = make(chan struct{})
 		done := make(chan respResult, 1)
-		go func() { done <- tx.readResponse(u, stop) }()
+		go func() {
+			// A recovered panic leaves r zero: the exchange closes both.
+			var r respResult
+			c.guard(func() { r = tx.readResponse(u, stop) })
+			done <- r
+		}()
 
 		sent, sendErr := tx.send(u, body, stop)
 		if pass != nil {
-			tx.emit(avscan.Upload, *pass, avscan.PassUnscanned, sent, body.held, 0)
+			tx.emit(avscan.Upload, *pass, avscan.PassUnscanned, sent, body.held, true, 0)
+		}
+		if body.release != nil {
+			body.release()
 		}
 		if sendErr != nil && !errors.Is(sendErr, errStopped) {
 			u.close()
@@ -108,7 +119,7 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 
 // send writes the request head and body upstream. When stop closes while
 // the body is still streaming from the client, the rest of it is drained
-// briefly so the client can read the early response.
+// for the drain window so the client can read the early response.
 func (tx *transaction) send(u *upstream, body bodySource, stop <-chan struct{}) (int64, error) {
 	if _, err := u.Write(tx.reqHead); err != nil {
 		return 0, err
@@ -120,7 +131,7 @@ func (tx *transaction) send(u *upstream, body bodySource, stop <-chan struct{}) 
 		if err != nil {
 			if errors.Is(err, errStopped) && body.rest != nil {
 				tx.c.client.bound(drainWindow)
-				_, _ = io.CopyN(io.Discard, body.rest, drainLimit)
+				_, _ = io.Copy(io.Discard, body.rest)
 				tx.c.client.setObjectDeadline(0)
 			}
 			return sent, err

@@ -18,12 +18,9 @@ import (
 	"github.com/tonylturner/containd/pkg/common/avscan"
 )
 
-const (
-	// drainWindow and drainLimit bound the read after a refusal so the
-	// client sees the response instead of a reset.
-	drainWindow = 500 * time.Millisecond
-	drainLimit  = 256 << 10
-)
+// drainWindow bounds the read after a refusal or an early response so
+// the client sees the response instead of a reset.
+const drainWindow = 500 * time.Millisecond
 
 // conn is one client connection and its lazily dialled upstream.
 type conn struct {
@@ -32,11 +29,12 @@ type conn struct {
 	client     *peer
 	clientAddr netip.AddrPort
 	serverAddr netip.AddrPort
-	// overLimit marks a connection accepted beyond MaxConnections.
-	overLimit bool
-	up        *upstream
-	txSeq     int
-	closeOnce sync.Once
+	txSeq      int
+	// mu guards up and closed: the serve goroutine replaces the upstream
+	// while Shutdown closes the connection from another goroutine.
+	mu     sync.Mutex
+	up     *upstream
+	closed bool
 }
 
 // upstream is the origin connection. watch runs while it idles between
@@ -47,8 +45,8 @@ type upstream struct {
 	watch *closeWatch
 }
 
-func newConn(s *Server, nc net.Conn, set *Settings, overLimit bool) *conn {
-	c := &conn{srv: s, id: s.nextConnID(), overLimit: overLimit}
+func newConn(s *Server, nc net.Conn, set *Settings) *conn {
+	c := &conn{srv: s, id: s.nextConnID()}
 	c.client = newPeer(nc, set.IdleTimeout)
 	if ap, err := netip.ParseAddrPort(nc.RemoteAddr().String()); err == nil {
 		c.clientAddr = unmap(ap)
@@ -59,11 +57,10 @@ func newConn(s *Server, nc net.Conn, set *Settings, overLimit bool) *conn {
 // serve runs transactions until the connection ends.
 func (c *conn) serve() {
 	defer c.closeAll()
-	defer func() {
-		if r := recover(); r != nil {
-			c.srv.emit(c.connEvent(fmt.Sprintf("panic: %v\n%s", r, debug.Stack())))
-		}
-	}()
+	c.guard(c.serveTransactions)
+}
+
+func (c *conn) serveTransactions() {
 	dst, err := c.srv.OriginalDst(c.client.conn)
 	if err != nil {
 		c.srv.emit(c.connEvent("original destination: " + err.Error()))
@@ -75,16 +72,33 @@ func (c *conn) serve() {
 			return
 		}
 		if c.up != nil {
-			c.up.watch = watchClose(c.up.peer)
+			c.up.watch = watchClose(c.up.peer, c.guard)
 		}
 	}
 }
 
+// guard runs fn on the calling goroutine and turns a panic into a
+// connection event after closing both peers: one broken hook or scanner
+// call ends one connection, never the process. Every goroutine a
+// connection owns runs under it.
+func (c *conn) guard(fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.closeAll()
+			c.srv.emit(c.connEvent(fmt.Sprintf("panic: %v\n%s", r, debug.Stack())))
+		}
+	}()
+	fn()
+}
+
 // transaction serves one request and reports whether the connection
-// persists.
+// persists. The request head must complete within ObjectTimeout of its
+// first byte; the idle timeout alone would let a dripped head live on.
 func (c *conn) transaction() bool {
 	c.client.active.Store(false)
+	c.client.boundFromFirstByte(c.srv.settings.Load().ObjectTimeout)
 	raw, err := readHead(c.client.r)
+	c.client.setObjectDeadline(0)
 	set := c.srv.settings.Load()
 	c.client.idle = set.IdleTimeout
 	switch {
@@ -148,7 +162,7 @@ func (c *conn) splice(u *upstream) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		copyRaw(c.client, u.peer)
+		c.guard(func() { copyRaw(c.client, u.peer) })
 	}()
 	copyRaw(u.peer, c.client)
 	wg.Wait()
@@ -177,10 +191,22 @@ func (c *conn) upstream(set *Settings) (*upstream, error) {
 		if err != nil {
 			return nil, err
 		}
-		c.up = &upstream{peer: newPeer(nc, set.IdleTimeout)}
+		c.setUpstream(&upstream{peer: newPeer(nc, set.IdleTimeout)})
 	}
 	c.up.idle = set.IdleTimeout
 	return c.up, nil
+}
+
+// setUpstream installs u; an upstream dialled after the connection was
+// closed is closed at once so Shutdown never misses it.
+func (c *conn) setUpstream(u *upstream) {
+	c.mu.Lock()
+	c.up = u
+	closed := c.closed
+	c.mu.Unlock()
+	if closed && u != nil {
+		u.close()
+	}
 }
 
 func (c *conn) closeUpstream() {
@@ -189,7 +215,7 @@ func (c *conn) closeUpstream() {
 			c.up.watch.stop()
 		}
 		c.up.close()
-		c.up = nil
+		c.setUpstream(nil)
 	}
 }
 
@@ -199,21 +225,28 @@ func (c *conn) idle() bool { return !c.client.active.Load() }
 
 // closeAll closes both connections; safe to call concurrently with serve.
 func (c *conn) closeAll() {
-	c.closeOnce.Do(func() {
-		c.client.close()
-		if c.up != nil {
-			c.up.close()
-		}
-	})
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
+	up := c.up
+	c.mu.Unlock()
+	c.client.close()
+	if up != nil {
+		up.close()
+	}
 }
 
 // refuse writes a generated response and ends the connection. With drain
-// the client side is half-closed and read briefly first.
+// the client side is half-closed and read until it stops or the drain
+// window passes, so the response is read rather than reset.
 func (c *conn) refuse(resp []byte, drain bool) {
 	_, _ = c.client.Write(resp)
 	if drain {
 		c.client.closeWrite()
-		c.client.drain(drainWindow, drainLimit)
+		c.client.drain(drainWindow)
 	}
 	c.closeAll()
 }

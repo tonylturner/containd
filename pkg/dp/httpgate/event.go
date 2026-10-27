@@ -35,12 +35,13 @@ type Event struct {
 	Host   string
 	Target string
 	Status int
-	// Size is the body length delivered or refused; for a body that was
-	// never read it is the declared Content-Length or 0.
+	// Size is the body length delivered or refused: the declared
+	// Content-Length when known, else the bytes received.
 	Size int64
-	// SHA256 covers the held bytes; SHA256Partial is set when fewer bytes
-	// than Size were hashed (oversized or passed-through bodies). It is
-	// empty when nothing was held.
+	// SHA256 covers the held bytes. SHA256Partial is set when they are not
+	// the whole object: oversized, disk-error or incomplete prefixes and
+	// bodies streamed on after the hold, refused or passed alike. SHA256
+	// is empty when nothing was held.
 	SHA256        string
 	SHA256Partial bool
 	Verdict       avscan.Verdict

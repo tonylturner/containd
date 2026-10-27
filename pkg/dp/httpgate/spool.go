@@ -61,7 +61,10 @@ func (s *spool) openFile() error {
 		return err
 	}
 	if err := os.Remove(f.Name()); err != nil {
+		// A platform that cannot unlink an open file gets a second chance
+		// after the close; the spool fails either way.
 		f.Close()
+		_ = os.Remove(f.Name())
 		return fmt.Errorf("unlink %s: %w", f.Name(), err)
 	}
 	if len(s.mem) > 0 {
@@ -135,7 +138,13 @@ const (
 func (s *spool) fill(src io.Reader, max int64) (fillOutcome, []byte, error) {
 	buf := make([]byte, copyBufSize)
 	for {
-		want := min(int64(len(buf)), max-s.size+1)
+		// Read one byte past the room left so an exact fit and an
+		// oversized body are told apart; room is at most max, so the
+		// lookahead never overflows even for max == MaxInt64.
+		want := int64(len(buf))
+		if room := max - s.size; room < want {
+			want = room + 1
+		}
 		n, err := src.Read(buf[:want])
 		if n > 0 {
 			keep := int64(n)

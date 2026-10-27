@@ -19,6 +19,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,8 +70,10 @@ func (f *fakeScanner) setVerdict(v func(obj avscan.Object, body []byte) avscan.R
 	f.verdict = v
 }
 
-// holdScans makes Scan block until the returned release runs or the
-// context ends.
+// holdScans makes every Scan that starts from now block until the
+// returned release runs or the context ends. Calling it again installs a
+// fresh latch for later scans, so one transaction's upload and download
+// can be released separately.
 func (f *fakeScanner) holdScans() (release func()) {
 	ch := make(chan struct{})
 	f.mu.Lock()
@@ -191,11 +194,13 @@ func (l *recListener) Accept() (net.Conn, error) {
 }
 
 // origin is a loopback server standing in for the real destination. dst,
-// when set, replaces the OriginalDst hook that would return addr.
+// when set, replaces the OriginalDst hook that would return addr; dial,
+// when set, is installed as the Dial hook.
 type origin struct {
 	addr netip.AddrPort
 	rec  *recorder
 	dst  func(net.Conn) (netip.AddrPort, error)
+	dial func(ctx context.Context, client, server netip.AddrPort) (net.Conn, error)
 }
 
 func listenLoopback(t *testing.T) (net.Listener, netip.AddrPort) {
@@ -298,14 +303,21 @@ func (l *bodyLog) list() []bodyEntry {
 	return append([]bodyEntry(nil), l.entries...)
 }
 
-// eventLog collects gate events.
+// eventLog collects gate events. panicNext makes the next delivery
+// panic instead, to prove the hook is isolated.
 type eventLog struct {
-	ch chan Event
+	ch        chan Event
+	panicNext atomic.Bool
 }
 
 func newEventLog() *eventLog { return &eventLog{ch: make(chan Event, 256)} }
 
-func (l *eventLog) add(ev Event) { l.ch <- ev }
+func (l *eventLog) add(ev Event) {
+	if l.panicNext.Swap(false) {
+		panic("hook exploded on " + string(ev.Direction))
+	}
+	l.ch <- ev
+}
 
 // next returns the next event, failing after 5 s.
 func (l *eventLog) next(t *testing.T) Event {
@@ -372,7 +384,7 @@ func startGate(t *testing.T, o *origin, adjust func(*Settings)) *gate {
 	if dst == nil {
 		dst = func(net.Conn) (netip.AddrPort, error) { return o.addr, nil }
 	}
-	g.srv = &Server{Scanner: g.scanner, OriginalDst: dst, OnEvent: g.events.add}
+	g.srv = &Server{Scanner: g.scanner, OriginalDst: dst, Dial: o.dial, OnEvent: g.events.add}
 	if err := g.srv.Update(set); err != nil {
 		t.Fatal(err)
 	}
@@ -468,6 +480,18 @@ func (c *client) expectEOF() {
 	n, err := c.br.Read(make([]byte, 1))
 	if n != 0 || !errors.Is(err, io.EOF) {
 		c.t.Fatalf("expected EOF from gate, got n=%d err=%v", n, err)
+	}
+}
+
+// expectSilence asserts that nothing arrives from the gate within d, with
+// a deadline-bounded socket read rather than a look at the recorder, which
+// only sees bytes once something reads them.
+func (c *client) expectSilence(d time.Duration) {
+	c.t.Helper()
+	_ = c.conn.SetReadDeadline(time.Now().Add(d))
+	n, err := c.conn.Read(make([]byte, 1))
+	if n != 0 || !isTimeout(err) {
+		c.t.Fatalf("expected nothing from the gate within %v, got n=%d err=%v", d, n, err)
 	}
 }
 
