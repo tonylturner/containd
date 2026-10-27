@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 )
 
 // LearnedProfile accumulates observed ICS traffic for a single communication pair and protocol.
@@ -97,6 +98,8 @@ func recordProtocolAttributes(proto string, p *LearnedProfile, ev dpi.Event) {
 		recordCIPAttributes(p, ev)
 	case "dnp3":
 		recordDNP3Attributes(p, ev)
+	case eventfields.ProtoModbus:
+		recordModbusAttributes(p, ev)
 	case "s7comm":
 		recordFunctionAndAddress(p, ev)
 	case "bacnet":
@@ -125,6 +128,27 @@ func recordDNP3Attributes(p *LearnedProfile, ev dpi.Event) {
 		p.FunctionCodes[v] = true
 	}
 	recordStringAddress(p, ev.Attributes["object_groups"])
+}
+
+// recordModbusAttributes records each address span the message touches as
+// an address entry, so a rule generated from the profile covers the whole
+// spans observed: an ALLOW's address predicate holds a message only when
+// every span it touches lies inside the predicate.
+func recordModbusAttributes(p *LearnedProfile, ev dpi.Event) {
+	if v, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode); ok {
+		p.FunctionCodes[v] = true
+	}
+	if v, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyUnitID); ok {
+		p.UnitIDs[v] = true
+	}
+	spans, _ := modbus.AddressSpans(ev.Attributes)
+	for _, sp := range spans {
+		if sp.First == sp.Last {
+			p.Addresses[fmt.Sprintf("%d", sp.First)] = true
+		} else {
+			p.Addresses[fmt.Sprintf("%d-%d", sp.First, sp.Last)] = true
+		}
+	}
 }
 
 func recordFunctionAndAddress(p *LearnedProfile, ev dpi.Event) {

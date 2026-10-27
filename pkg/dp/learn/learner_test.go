@@ -19,7 +19,8 @@ func TestRecordEventCreatesProfile(t *testing.T) {
 		Attributes: map[string]any{
 			"function_code": uint8(3),
 			"unit_id":       uint8(1),
-			"address":       "40001",
+			"address":       uint16(40001),
+			"quantity":      uint16(1),
 			"is_write":      false,
 		},
 	}
@@ -70,7 +71,8 @@ func TestMultipleEventsSamePairMerge(t *testing.T) {
 		Attributes: map[string]any{
 			"function_code": uint8(3),
 			"unit_id":       uint8(1),
-			"address":       "40001",
+			"address":       uint16(40001),
+			"quantity":      uint16(1),
 			"is_write":      false,
 		},
 	}
@@ -81,7 +83,9 @@ func TestMultipleEventsSamePairMerge(t *testing.T) {
 		Attributes: map[string]any{
 			"function_code": uint8(16),
 			"unit_id":       uint8(1),
-			"address":       "40002",
+			"address":       uint16(40002),
+			"quantity":      uint16(1),
+			"byte_count":    uint8(2),
 			"is_write":      true,
 		},
 	}
@@ -92,7 +96,8 @@ func TestMultipleEventsSamePairMerge(t *testing.T) {
 		Attributes: map[string]any{
 			"function_code": uint8(3),
 			"unit_id":       uint8(2),
-			"address":       "40001",
+			"address":       uint16(40001),
+			"quantity":      uint16(1),
 			"is_write":      false,
 		},
 	}
@@ -137,7 +142,8 @@ func TestGenerateRulesProducesValidRules(t *testing.T) {
 		Attributes: map[string]any{
 			"function_code": uint8(3),
 			"unit_id":       uint8(1),
-			"address":       "40001",
+			"address":       uint16(40001),
+			"quantity":      uint16(1),
 			"is_write":      false,
 		},
 	}

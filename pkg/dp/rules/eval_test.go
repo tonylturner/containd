@@ -130,61 +130,61 @@ func TestICSMatch(t *testing.T) {
 	}
 }
 
-// matchAddress reports whether the compiled specifications hold the ICS
-// address contextAddr.
-func matchAddress(specs []string, contextAddr string) bool {
-	return matchICSAddresses(compileAddrs(specs), EvalContext{ICS: &ICSContext{Address: contextAddr}})
+// matchAddress reports whether an ALLOW with the specifications matches a
+// message touching the single address addr.
+func matchAddress(specs []string, addr uint32) bool {
+	return allowMatches(specs, AddressSpan{Low: addr, High: addr})
 }
 
 func TestMatchAddressSingleDecimal(t *testing.T) {
-	if !matchAddress([]string{"256"}, "256") {
+	if !matchAddress([]string{"256"}, 256) {
 		t.Fatal("expected decimal single address to match")
 	}
-	if matchAddress([]string{"256"}, "257") {
+	if matchAddress([]string{"256"}, 257) {
 		t.Fatal("expected decimal single address not to match different value")
 	}
 }
 
 func TestMatchAddressSingleHex(t *testing.T) {
 	// 0x0100 == 256
-	if !matchAddress([]string{"0x0100"}, "0x0100") {
+	if !matchAddress([]string{"0x0100"}, 0x0100) {
 		t.Fatal("expected hex single address to match")
 	}
-	if !matchAddress([]string{"0x0100"}, "256") {
+	if !matchAddress([]string{"0x0100"}, 256) {
 		t.Fatal("expected hex entry to match decimal context with same value")
 	}
-	if matchAddress([]string{"0x0100"}, "0x0101") {
+	if matchAddress([]string{"0x0100"}, 0x0101) {
 		t.Fatal("expected hex single address not to match different value")
 	}
 }
 
 func TestMatchAddressRangeHex(t *testing.T) {
 	// 0x0150 (=336) is within 0x0100-0x01FF (=256-511)
-	if !matchAddress([]string{"0x0100-0x01FF"}, "0x0150") {
+	if !matchAddress([]string{"0x0100-0x01FF"}, 0x0150) {
 		t.Fatal("expected address within hex range to match")
 	}
 	// 0x0200 (=512) is outside 0x0100-0x01FF
-	if matchAddress([]string{"0x0100-0x01FF"}, "0x0200") {
+	if matchAddress([]string{"0x0100-0x01FF"}, 0x0200) {
 		t.Fatal("expected address outside hex range not to match")
 	}
 }
 
 func TestMatchAddressRangeDecimal(t *testing.T) {
-	if !matchAddress([]string{"100-511"}, "300") {
+	if !matchAddress([]string{"100-511"}, 300) {
 		t.Fatal("expected address within decimal range to match")
 	}
-	if matchAddress([]string{"100-511"}, "512") {
+	if matchAddress([]string{"100-511"}, 512) {
 		t.Fatal("expected address outside decimal range not to match")
 	}
 }
 
 func TestMatchAddressMixedFormat(t *testing.T) {
 	// Hex range, decimal context: 336 is within 0x0100-0x01FF (256-511)
-	if !matchAddress([]string{"0x0100-0x01FF"}, "336") {
+	if !matchAddress([]string{"0x0100-0x01FF"}, 336) {
 		t.Fatal("expected decimal context addr within hex range to match")
 	}
 	// Decimal range, hex context: 0x012C (=300) is within 100-511
-	if !matchAddress([]string{"100-511"}, "0x012C") {
+	if !matchAddress([]string{"100-511"}, 0x012C) {
 		t.Fatal("expected hex context addr within decimal range to match")
 	}
 }
@@ -212,13 +212,13 @@ func TestICSAddressRangeEval(t *testing.T) {
 			Protocol:     "modbus",
 			FunctionCode: 3,
 			UnitID:       &unit,
-			Address:      "0x0150",
+			Spans:        []AddressSpan{{Low: 0x0150, High: 0x0150}},
 		},
 	}
 	if got := ev.Evaluate(ctx); got != ActionAllow {
 		t.Fatalf("expected allow for address in range, got %s", got)
 	}
-	ctx.ICS.Address = "0x0200"
+	ctx.ICS.Spans = []AddressSpan{{Low: 0x0200, High: 0x0200}}
 	if got := ev.Evaluate(ctx); got != ActionDeny {
 		t.Fatalf("expected deny for address out of range, got %s", got)
 	}
@@ -367,14 +367,14 @@ func TestUnparseableICSAddressesMatchNothing(t *testing.T) {
 			ICS:    ICSPredicate{Protocol: "modbus", Addresses: specs},
 			Action: ActionAllow,
 		}}})
-		for _, addr := range []string{"5", "0x0100", ""} {
-			ctx := EvalContext{ICS: &ICSContext{Protocol: "modbus", Address: addr}}
+		for _, addr := range []uint32{5, 0x0100} {
+			ctx := EvalContext{ICS: &ICSContext{Protocol: "modbus", Spans: []AddressSpan{{Low: addr, High: addr}}}}
 			if got := ev.Evaluate(ctx); got != ActionDeny {
-				t.Fatalf("addresses %q at %q = %s, want DENY", specs, addr, got)
+				t.Fatalf("addresses %q at %d = %s, want DENY", specs, addr, got)
 			}
 		}
 	}
-	if matchAddress([]string{"junk"}, "5") {
+	if matchAddress([]string{"junk"}, 5) {
 		t.Fatal("an unparseable specification matched")
 	}
 }

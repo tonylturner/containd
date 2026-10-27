@@ -148,7 +148,7 @@ than IEC 104 are:
 | `protocol` | `modbus`, `dnp3`, `cip`, `s7comm`, `mms`, `bacnet`, or `opcua` |
 | `functionCode` | Array of numeric function/service codes, 0–255; evaluated from `function_code` |
 | `unitId` | Optional Modbus unit ID, 0–255; evaluated from `unit_id` |
-| `addresses` | Array of address entries, each one value or an inclusive `low-high` range (see below); evaluated from `address` |
+| `addresses` | Array of address entries, each one value or an inclusive `low-high` range (see below); evaluated against the addresses the message touches |
 | `objectClasses` | CIP object-class IDs, 0–65535; evaluated from `object_class`; CIP only |
 | `readOnly`, `writeOnly` | Read/write class from an explicitly present `is_write`; not both true |
 | `direction` | `request` or `response`; omit for both |
@@ -162,6 +162,34 @@ accept 0–4294967295 (`0xFFFFFFFF`). Validation refuses any other entry, such a
 `0x01G0`, `-5` or `0x200-0x100`, and names the rule and the entry. A stored
 configuration with such an entry starts in management recovery until a valid
 configuration is committed.
+
+A message touches a set of address spans. A Modbus request touches the span
+from its starting address for its quantity: function codes 1–4, 15 and 16 name
+a start and a quantity, 5, 6 and 22 one address, and 23 a read span and a write
+span. On an `ALLOW`, `addresses` holds a message only when every span it touches
+lies inside the listed entries, which may together cover a span. A read of
+address 11 count 8 therefore matches neither `10-11` nor `11`, but matches
+`10-20` or `10-11` plus `12-19`. On a `DENY`, `addresses` holds a message when
+any span it touches shares an address with an entry. A message with no address
+(Modbus diagnostics, device identification, other function codes that address
+no data) matches no `addresses` predicate. A Modbus request whose span cannot be
+bounded matches every `DENY` with `addresses` and no `ALLOW` with `addresses`:
+an unknown or unlisted function code (including file record and FIFO access), a
+PDU whose length does not fit its function code, a quantity outside the
+protocol's limits (1–2000 bits, 1–125 registers read, 1–1968 coils or 1–123
+registers written, 1–121 registers written by function code 23), a byte count
+that disagrees with the quantity, or a span past 65535. So is a message from the
+connection's opener that the decoder does not decode as a request. Modbus replies
+carry no request address: a read reply touches no address, and a write reply
+touches only the address and quantity it echoes. For the other protocols a
+message touches the one numeric `address` its decoder emits, or none.
+
+Modbus events carry only fields present on the wire: requests have `address`
+with `quantity` (function codes 1–4, 15, 16, plus `byte_count` for 15 and 16),
+`value` (5, 6), `and_mask` and `or_mask` (22), or `read_address`,
+`read_quantity`, `write_address`, `write_quantity` and `byte_count` (23). Read
+replies have `byte_count` and, for registers, `register_count`; write replies
+have the fields they echo.
 
 Only metadata actually emitted by the decoder can satisfy these conditions.
 There are no firewall selectors for DNP3 station addresses/object headers, CIP
@@ -219,7 +247,9 @@ both automatic learning and asset discovery. Review learned rules before use:
 observation is not authorization.
 
 1. Commit an explicit learn-mode firewall entry and configure capture/DPI.
-2. Inspect `GET /api/v1/learn/profiles`.
+2. Inspect `GET /api/v1/learn/profiles`. A Modbus profile lists each observed
+   address span (`10-11`, `100`), so its learned rule admits the whole spans it
+   saw.
 3. Use `POST /api/v1/learn/generate` to return proposed rules for review.
 4. `POST /api/v1/learn/apply` stages generated rules in candidate configuration
    (`status: staged`); it does not activate them. Generated rules leave

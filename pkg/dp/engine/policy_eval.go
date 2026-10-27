@@ -11,6 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
@@ -102,12 +103,12 @@ func evalContextFromDPIEvent(snap *rules.Snapshot, state *flow.State, pkt *dpi.P
 		Identities: snap.IdentitiesOf(state.Key.OpenerIP()),
 		ICS: &rules.ICSContext{
 			Protocol:  strings.ToLower(ev.Proto),
-			Address:   attrString(ev.Attributes, "address"),
 			ReadOnly:  hasWrite && !isWrite,
 			WriteOnly: hasWrite && isWrite,
 			Direction: messageDirection(state, ev.Kind),
 		},
 	}
+	ctx.ICS.Spans, ctx.ICS.SpansUnknown = addressSpans(state, ev)
 	if fc, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode); ok {
 		ctx.ICS.FunctionCode = fc
 	}
@@ -118,6 +119,42 @@ func evalContextFromDPIEvent(snap *rules.Snapshot, state *flow.State, pkt *dpi.P
 		ctx.ICS.ObjectClass = objectClass
 	}
 	return ctx, true
+}
+
+// addressSpans returns the address spans an event touches for address
+// predicates, and whether they are unknown. Modbus messages carry their
+// spans in function-code-specific fields (modbus.AddressSpans). Other
+// protocols touch the one numeric address their decoder emits, or none.
+func addressSpans(state *flow.State, ev dpi.Event) ([]rules.AddressSpan, bool) {
+	if strings.EqualFold(ev.Proto, eventfields.ProtoModbus) {
+		return modbusAddressSpans(state, ev)
+	}
+	if v, err := rules.ParseICSAddress(attrString(ev.Attributes, "address")); err == nil {
+		return []rules.AddressSpan{{Low: v, High: v}}, false
+	}
+	return nil, false
+}
+
+// modbusAddressSpans bounds a Modbus message's spans by the connection's
+// orientation, not the decoder's message kind. A message from the
+// connection's opener is a request: unless the decoder decoded it as a
+// request with bounded spans, its spans are unknown, so a request the
+// decoder labelled a reply (a client using source port 502) cannot pass as
+// touching nothing. A reply reads or writes nothing by itself: it touches
+// only the spans it echoes (FC 5, 6, 15, 16, 22).
+func modbusAddressSpans(state *flow.State, ev dpi.Event) ([]rules.AddressSpan, bool) {
+	spans, ok := modbus.AddressSpans(ev.Attributes)
+	if !isReply(state) && (ev.Kind != "request" || !ok) {
+		return nil, true
+	}
+	if len(spans) == 0 {
+		return nil, false
+	}
+	out := make([]rules.AddressSpan, len(spans))
+	for i, sp := range spans {
+		out[i] = rules.AddressSpan{Low: uint32(sp.First), High: uint32(sp.Last)}
+	}
+	return out, false
 }
 
 type zoneResolver func(*rules.Snapshot, net.IP, net.IP) (string, string)
