@@ -197,7 +197,7 @@ func restoreRoute(raw []byte) error {
 	defer unix.Close(fd)
 	seq := atomic.AddUint32(&nlSeq, 1)
 	var request bytes.Buffer
-	_ = binary.Write(&request, binary.LittleEndian, unix.NlMsghdr{Len: uint32(unix.NLMSG_HDRLEN + len(raw)), Type: unix.RTM_NEWROUTE, Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_EXCL, Seq: seq, Pid: uint32(unix.Getpid())})
+	_ = binary.Write(&request, binary.NativeEndian, unix.NlMsghdr{Len: uint32(unix.NLMSG_HDRLEN + len(raw)), Type: unix.RTM_NEWROUTE, Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_EXCL, Seq: seq, Pid: uint32(unix.Getpid())})
 	request.Write(raw)
 	if err := unix.Sendto(fd, request.Bytes(), 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return err

@@ -43,14 +43,14 @@ func setLinkUp(name string) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	ifi := unix.IfInfomsg{
 		Family: unix.AF_UNSPEC,
 		Index:  int32(nic.Index),
 		Flags:  unix.IFF_UP,
 		Change: unix.IFF_UP,
 	}
-	_ = binary.Write(&req, binary.LittleEndian, ifi)
+	_ = binary.Write(&req, binary.NativeEndian, ifi)
 
 	b := req.Bytes()
 	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
@@ -88,9 +88,9 @@ func ensureBridge(name string) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	ifi := unix.IfInfomsg{Family: unix.AF_UNSPEC}
-	_ = binary.Write(&req, binary.LittleEndian, ifi)
+	_ = binary.Write(&req, binary.NativeEndian, ifi)
 
 	addRtAttr(&req, unix.IFLA_IFNAME, append([]byte(name), 0))
 	addNestedRtAttr(&req, unix.IFLA_LINKINFO, func(b *bytes.Buffer) {
@@ -133,13 +133,13 @@ func ensureVLAN(name string, parentIndex int, vlanID int) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	ifi := unix.IfInfomsg{Family: unix.AF_UNSPEC}
-	_ = binary.Write(&req, binary.LittleEndian, ifi)
+	_ = binary.Write(&req, binary.NativeEndian, ifi)
 
 	addRtAttr(&req, unix.IFLA_IFNAME, append([]byte(name), 0))
 	link := make([]byte, 4)
-	binary.LittleEndian.PutUint32(link, uint32(parentIndex))
+	binary.NativeEndian.PutUint32(link, uint32(parentIndex))
 	addRtAttr(&req, unix.IFLA_LINK, link)
 
 	addNestedRtAttr(&req, unix.IFLA_LINKINFO, func(b *bytes.Buffer) {
@@ -147,7 +147,7 @@ func ensureVLAN(name string, parentIndex int, vlanID int) error {
 		addNestedRtAttr(b, unix.IFLA_INFO_DATA, func(d *bytes.Buffer) {
 			// IFLA_VLAN_ID is 1 in linux/if_link.h.
 			v := make([]byte, 2)
-			binary.LittleEndian.PutUint16(v, uint16(vlanID))
+			binary.NativeEndian.PutUint16(v, uint16(vlanID))
 			addRtAttr(d, 1 /* IFLA_VLAN_ID */, v)
 		})
 	})
@@ -186,15 +186,15 @@ func setLinkMaster(member string, masterIndex int) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	ifi := unix.IfInfomsg{
 		Family: unix.AF_UNSPEC,
 		Index:  int32(nic.Index),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, ifi)
+	_ = binary.Write(&req, binary.NativeEndian, ifi)
 
 	m := make([]byte, 4)
-	binary.LittleEndian.PutUint32(m, uint32(masterIndex))
+	binary.NativeEndian.PutUint32(m, uint32(masterIndex))
 	addRtAttr(&req, unix.IFLA_MASTER, m)
 
 	b := req.Bytes()
