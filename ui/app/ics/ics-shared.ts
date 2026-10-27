@@ -65,61 +65,6 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     addrHelp:
       "DNP3 outstation destination addresses (decimal). Use ranges for address groups.",
   },
-  cip: {
-    label: "CIP / EtherNet/IP",
-    port: "44818",
-    fcLabel: "Service codes",
-    fcPlaceholder: "76, 77",
-    fcHelp:
-      "CIP service codes (0x0E=Get_Attribute, 0x10=Set_Attribute, 0x4C/76=Read_Tag, 0x4D/77=Write_Tag, 0x52=Unconnected_Send).",
-    addrLabel: "CIP path",
-    addrPlaceholder: "",
-    addrHelp: "Optional CIP class/instance path filter (hex string).",
-  },
-  s7comm: {
-    label: "S7comm (Siemens)",
-    port: "102",
-    fcLabel: "Function codes",
-    fcPlaceholder: "4, 5",
-    fcHelp:
-      "S7comm parameter function codes (4=Read Var, 5=Write Var, 0x1A=Download, 0x28=PLC Control, 0x29=PLC Stop).",
-    addrLabel: "DB / address",
-    addrPlaceholder: "",
-    addrHelp: "Optional S7 data block or address filter.",
-  },
-  mms: {
-    label: "IEC 61850 MMS",
-    port: "102",
-    fcLabel: "Service codes",
-    fcPlaceholder: "",
-    fcHelp:
-      "MMS confirmed-request service tags (Read=0xA4, Write=0xA5, GetVariableAccessAttributes=0xA6).",
-    addrLabel: "Named variable",
-    addrPlaceholder: "",
-    addrHelp: "Optional MMS named-variable filter.",
-  },
-  bacnet: {
-    label: "BACnet/IP",
-    port: "47808",
-    fcLabel: "Service codes",
-    fcPlaceholder: "12, 15",
-    fcHelp:
-      "BACnet service choice (12=ReadProperty, 14=ReadPropertyMultiple, 15=WriteProperty, 16=WritePropertyMultiple, 8=WhoIs).",
-    addrLabel: "Object instance",
-    addrPlaceholder: "",
-    addrHelp: "Optional BACnet object instance filter.",
-  },
-  opcua: {
-    label: "OPC UA",
-    port: "4840",
-    fcLabel: "Service IDs",
-    fcPlaceholder: "",
-    fcHelp:
-      "OPC UA service node IDs (631=ReadRequest, 673=WriteRequest, 527=BrowseRequest).",
-    addrLabel: "Node ID",
-    addrPlaceholder: "",
-    addrHelp: "Optional OPC UA node ID filter.",
-  },
   iec104: {
     label: "IEC 60870-5-104",
     port: "2404",
@@ -132,23 +77,38 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     addrHelp:
       "Common address (station, 0-65534) and information object address ranges (0-16777215).",
   },
+  cip: {
+    label: "CIP / EtherNet/IP",
+    port: "44818",
+    fcLabel: "Service codes",
+    fcPlaceholder: "76, 77",
+    fcHelp:
+      "CIP service codes (0x0E=Get_Attribute, 0x10=Set_Attribute, 0x4C/76=Read_Tag, 0x4D/77=Write_Tag, 0x52=Unconnected_Send).",
+    addrLabel: "CIP path",
+    addrPlaceholder: "",
+    addrHelp: "Optional CIP class/instance path filter (hex string).",
+  },
 };
 
 export const PROTOCOL_KEYS = Object.keys(PROTOCOLS);
 
 export function protoMeta(name: string): ProtocolMeta {
-  return (
-    PROTOCOLS[name] ?? {
-      label: name,
-      port: "",
-      fcLabel: "Function codes",
-      fcPlaceholder: "",
-      fcHelp: "Protocol-specific function or service codes.",
-      addrLabel: "Addresses",
-      addrPlaceholder: "",
-      addrHelp: "Protocol-specific address filter.",
-    }
-  );
+  return Object.prototype.hasOwnProperty.call(PROTOCOLS, name)
+    ? PROTOCOLS[name]
+    : {
+        label: name,
+        port: "",
+        fcLabel: "Function codes",
+        fcPlaceholder: "",
+        fcHelp: "Protocol-specific function or service codes.",
+        addrLabel: "Addresses",
+        addrPlaceholder: "",
+        addrHelp: "Protocol-specific address filter.",
+      };
+}
+
+export function isSupportedICSProtocol(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(PROTOCOLS, name);
 }
 
 export function buildICSRuleUpdate(
