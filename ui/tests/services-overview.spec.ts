@@ -76,7 +76,6 @@ test("antivirus charts the scans the engine reports", async ({ page }) => {
     available: true,
     enabled: true,
     mode: "clamav",
-    block_ttl: 0,
     ready: true,
     ...meter([4, 1], 2.5),
   }));
@@ -85,5 +84,4 @@ test("antivirus charts the scans the engine reports", async ({ page }) => {
   await expect(av).toBeVisible();
   await expect(av.locator(":scope > div")).toHaveCount(2);
   await expect(page.getByText("Mode: clamav, Enabled: yes")).toBeVisible();
-  await expect(page.getByText("Block TTL: 600s")).toBeVisible();
 });

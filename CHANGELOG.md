@@ -198,6 +198,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Asynchronous antivirus scanning of HTTP packet previews and the AV block TTL
+  setting (`services.av.blockTtlSeconds`). Antivirus backends scan complete
+  HTTP objects instead; no dynamic block follows a detection, so the setting
+  had no effect. A stored or exported configuration that still contains it
+  loads and the value is ignored. The AV page no longer shows a queue depth or
+  block TTL.
 - Removed S7comm, BACnet/IP, OPC UA and IEC 61850 MMS inspection, templates and
   protocol-specific detections. Industrial inspection supports Modbus/TCP,
   DNP3, IEC 60870-5-104 and optional CIP/EtherNet/IP.

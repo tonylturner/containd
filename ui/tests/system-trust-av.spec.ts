@@ -73,7 +73,7 @@ async function openServices(page: Page, av: Record<string, unknown>, sparkline: 
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/status");
   await page.goto("/system/services/");
   await loaded;
-  await expect(page.getByText("Async AV scanning")).toBeVisible();
+  await expect(page.getByText("AV scanning", { exact: true })).toBeVisible();
 }
 
 test("antivirus card shows no fabricated scan series", async ({ page }) => {

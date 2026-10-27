@@ -169,15 +169,12 @@ export type AVRuntimeStatus = ServiceMeter & {
   mode: string;
   failPolicy: string;
   failOpenICS: boolean;
-  /** Configured seconds; 0 selects the default. */
-  block_ttl: number;
   max_size: number;
   /** Scan timeout in seconds. */
   timeout: number;
   /** Go duration string, such as "10m0s". */
   cache_ttl: string;
   cache_size: number;
-  queue_depth: number;
   icap_servers: number;
   detections: number;
   definitions_generation: number;

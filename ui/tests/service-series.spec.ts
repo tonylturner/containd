@@ -27,7 +27,7 @@ function servicesStatus(sparkline: number[]) {
     nginx: { note: "Telemetry-only counters derived from proxy access logs.", ...m },
     dhcp: { enabled: true, listen_ifaces: 1, pools: 1, reservations: 0, last_error: "", note: "", ...m },
     vpn: { wireguard_enabled: false, openvpn_running: false, openvpn_mode: "client", last_error: "", ...m },
-    av: { available: true, enabled: true, mode: "clamav", ready: true, block_ttl: 0, ...m },
+    av: { available: true, enabled: true, mode: "clamav", ready: true, ...m },
   };
 }
 

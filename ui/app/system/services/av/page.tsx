@@ -240,14 +240,12 @@ export default function AVPage() {
             <div>ICS fail-open: <span className="text-(--text)">{status?.failOpenICS ?? cfg.failOpenIcs ? "yes" : "no"}</span></div>
             <div>ICAP servers: <span className="text-(--text)">{status?.icap_servers ?? 0}</span></div>
             <div>Cache: <span className="text-(--text)">{status?.cache_size ?? 0}</span></div>
-            <div>Queue depth: <span className="text-(--text)">{status?.queue_depth ?? 0}</span></div>
             <div>ClamAV running: <span className="text-(--text)">{status?.clamav_running ? `yes (pid ${status?.clamav_pid ?? ""})` : "no"}</span></div>
             <div>ClamAV socket: <span className="text-(--text)">{status?.clamav_socket || "n/a"}</span></div>
             <div>ClamAV last start: <span className="text-(--text)">{status?.clamav_last_start || "never"}</span></div>
             <div>Freshclam: <span className="text-(--text)">{status?.freshclam_enabled ? (status?.freshclam_running ? "running" : "enabled") : "disabled"}</span></div>
             <div>Freshclam last: <span className="text-(--text)">{status?.freshclam_last || "never"}</span></div>
             <div>Freshclam interval: <span className="text-(--text)">{status?.freshclam_interval || "6h"}</span></div>
-            <div>Block TTL: <span className="text-(--text)">{status.block_ttl || 600}s</span></div>
             <div>Custom defs path (engine): <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
             {status.sparkline.length ? (
               <div className="md:col-span-3">
@@ -333,16 +331,6 @@ export default function AVPage() {
               value={cfg.maxSizeBytes ?? 0}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, maxSizeBytes: Number(e.target.value) }))}
-              className="mt-1 w-full input-industrial"
-            />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-(--text-muted)">Block TTL (seconds)</label>
-            <input
-              type="number"
-              value={cfg.blockTtlSeconds ?? 600}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, blockTtlSeconds: Number(e.target.value) }))}
               className="mt-1 w-full input-industrial"
             />
           </div>

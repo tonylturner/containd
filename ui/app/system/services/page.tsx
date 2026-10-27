@@ -388,8 +388,8 @@ export default function ServicesOverviewPage() {
           errorsRate={errRate("av")}
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>Async AV scanning</span>
-            <InfoTip label="Optional ICAP or embedded ClamAV scanning without inline latency spikes." />
+            <span>AV scanning</span>
+            <InfoTip label="Optional ICAP or embedded ClamAV scanning of complete HTTP objects." />
           </div>
           {av?.available === false ? (
             <p className="mt-2 text-xs text-(--text-muted)">
@@ -398,10 +398,12 @@ export default function ServicesOverviewPage() {
           ) : av ? (
             <p className="mt-2 text-xs text-(--text-muted)">
               Mode: {av.mode}, Enabled: {av.enabled ? "yes" : "no"}
-              <br />
-              {/* The engine blocks for 600 seconds when no TTL is set. */}
-              Block TTL: {av.block_ttl || 600}s{" "}
-              {av.freshclam_last && `freshclam ${av.freshclam_last}`}
+              {av.freshclam_last && (
+                <>
+                  <br />
+                  freshclam {av.freshclam_last}
+                </>
+              )}
               {av.clamav_custom_defs && (
                 <>
                   <br />
