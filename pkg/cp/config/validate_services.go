@@ -98,11 +98,7 @@ func validateAV(cfg AVConfig) error {
 	default:
 		return fmt.Errorf("services.av.mode must be icap or clamav")
 	}
-	fail := strings.ToLower(strings.TrimSpace(cfg.FailPolicy))
-	if fail == "" {
-		fail = "open"
-	}
-	if fail != "open" && fail != "closed" {
+	if fail := cfg.EffectiveFailPolicy(); fail != "open" && fail != "closed" {
 		return fmt.Errorf("services.av.failPolicy must be open or closed")
 	}
 	if mode == "icap" {

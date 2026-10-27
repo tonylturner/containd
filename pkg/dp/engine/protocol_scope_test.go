@@ -65,7 +65,7 @@ func TestRemovedProtocolSnapshotAtomic(t *testing.T) {
 				t.Fatal("rejected snapshot changed runtime state")
 			}
 		}
-		if isICSEvent(name, "request") || isRuleEvaluableICSEvent(name) || matchesICSDefaultPort(name, 102) || ics.Supported(name) {
+		if isICSEvent(name, "request") || isRuleEvaluableICSEvent(name) || rules.IsICSDecoderPort(name, 102) || ics.Supported(name) {
 			t.Fatalf("retired protocol classified as industrial: %s", name)
 		}
 	}

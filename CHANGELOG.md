@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `services.av.scan` selects the traffic the scanning gate intercepts:
+  include and exclude entries of directional zone pairs, destination ports
+  and CIDRs, a download mode (`hold` or `stream_tail`) and the ICS-marked
+  zones and assets that pass unscanned content under a closed fail policy.
+  Exclusions win, and a selection may not include an ICS decoder port.
+
+### Changed
+
+- `services.av.failOpenIcs` is retired in favour of `scan.icsZones` and
+  `scan.icsAssets`; a stored value still loads and is ignored.
+
 ### Fixed
 
 - The DHCP page keeps unsaved edits when its configuration is reloaded after a
