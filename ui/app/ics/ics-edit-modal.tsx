@@ -13,6 +13,8 @@ import { InfoTip } from "../../components/InfoTip";
 import { RuleImpactSummary } from "../firewall/firewall-rule-warnings";
 import {
   buildICSRuleUpdate,
+  addressFilterError,
+  icsAddressDraftFrom,
   type ICSMode,
   type ICSModeSelection,
   PROTOCOL_KEYS,
@@ -24,6 +26,7 @@ import {
   iec104DraftFrom,
 } from "./iec104";
 import { IEC104Fields } from "./iec104-fields";
+import { ICSAddressFields } from "./ics-address-fields";
 
 export function EditICSModal({
   rule,
@@ -43,7 +46,7 @@ export function EditICSModal({
     (rule.ics?.functionCode ?? []).join(", "),
   );
   const [addresses, setAddresses] = useState(
-    (rule.ics?.addresses ?? []).join(", "),
+    icsAddressDraftFrom(rule.ics),
   );
   const [unitId, setUnitId] = useState(rule.ics?.unitId?.toString() ?? "");
   const [objectClasses, setObjectClasses] = useState(
@@ -65,6 +68,8 @@ export function EditICSModal({
     | { ok: true; ics: ICSPredicate | undefined }
     | { ok: false; error: string } {
     if (!enabled) return { ok: true, ics: undefined };
+    const addressError = addressFilterError(protocol, addresses);
+    if (addressError) return { ok: false, error: addressError };
     if (isIEC104) {
       return buildIEC104RuleICS(iec, mode, rule.action, rule.ics, globalMode);
     }
@@ -79,6 +84,7 @@ export function EditICSModal({
         readOnly,
         writeOnly,
         mode,
+        rule.ics,
       ),
     };
   }
@@ -199,19 +205,7 @@ export function EditICSModal({
               />
             </div>
 
-            <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
-                {meta.addrLabel}
-                <InfoTip label={meta.addrHelp} />
-              </label>
-              <input
-                value={addresses}
-                onChange={(e) => setAddresses(e.target.value)}
-                disabled={!enabled}
-                className="mt-1 w-full input-industrial disabled:opacity-60"
-                placeholder={meta.addrPlaceholder || "Leave empty for all"}
-              />
-            </div>
+            <ICSAddressFields protocol={protocol} addresses={addresses} onChange={setAddresses} disabled={!enabled} />
 
             {protocol === "modbus" && (
               <div>

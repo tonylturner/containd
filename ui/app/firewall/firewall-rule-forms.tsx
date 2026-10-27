@@ -17,7 +17,7 @@ import {
 } from "../../lib/api";
 import { validateIPOrCIDRList } from "../../lib/validate";
 import { iec104DraftFrom, type IEC104Draft } from "../ics/iec104";
-import type { ICSMode, ICSModeSelection } from "../ics/ics-shared";
+import { icsAddressDraftFrom, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
 import { zoneLabel } from "../../lib/zones";
 import { ICSPredicateFields, buildRuleICS } from "./firewall-ics-fields";
 import {
@@ -48,13 +48,13 @@ type ICSDraft = {
 
 // A new filter starts from example values; an existing one keeps its own,
 // so editing never narrows a predicate the user did not touch.
-function icsDraftFrom(ics: ICSPredicate | undefined, mode: ICSModeSelection): ICSDraft {
+export function icsDraftFrom(ics: ICSPredicate | undefined, mode: ICSModeSelection): ICSDraft {
   const existing = !!ics?.protocol;
   return {
     enabled: existing,
     protocol: ics?.protocol ?? "modbus",
     functionCodes: existing ? (ics?.functionCode ?? []).join(", ") : "3,16",
-    addresses: existing ? (ics?.addresses ?? []).join(", ") : "0-100",
+    addresses: icsAddressDraftFrom(ics),
     unitId: ics?.unitId?.toString() ?? "",
     objectClasses: (ics?.objectClasses ?? []).map((v) => "0x" + v.toString(16)).join(", "),
     readOnly: ics?.readOnly ?? false,

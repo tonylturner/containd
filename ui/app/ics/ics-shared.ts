@@ -3,6 +3,24 @@ import type { ICSPredicate } from "../../lib/api";
 export type ICSMode = "enforce" | "learn";
 export type ICSModeSelection = ICSMode | "";
 
+export const UNSUPPORTED_ADDRESSES =
+  "Address filters are not supported for DNP3 or CIP. Remove this filter before saving; protocol-specific station, point and CIP path selectors are not available yet.";
+
+export function addressFilterError(protocol: string, addresses: string): string | null {
+  return (protocol === "dnp3" || protocol === "cip") && addresses.trim()
+    ? UNSUPPORTED_ADDRESSES
+    : null;
+}
+
+export function icsAddressDraftFrom(ics: ICSPredicate | undefined): string {
+  const values = ics?.addresses ?? [];
+  const text = values.join(", ");
+  // Even [""] is a nonempty, invalid stored predicate. Do not hide it.
+  return values.length && !text.trim() && (ics?.protocol === "dnp3" || ics?.protocol === "cip")
+    ? JSON.stringify(values)
+    : text;
+}
+
 function normalizeMode(mode: string | undefined): ICSMode | "" | "other" {
   const m = (mode ?? "").trim().toLowerCase();
   if (m === "" || m === "enforce" || m === "learn") return m;
@@ -60,10 +78,9 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     fcPlaceholder: "1, 2, 3",
     fcHelp:
       "DNP3 application function codes (1=Read, 2=Write, 3=Select, 4=Operate, 5=Direct Operate, 13=Cold Restart, 14=Warm Restart).",
-    addrLabel: "Station addresses",
-    addrPlaceholder: "1-10",
-    addrHelp:
-      "DNP3 outstation destination addresses (decimal). Use ranges for address groups.",
+    addrLabel: "Address filters unavailable",
+    addrPlaceholder: "",
+    addrHelp: UNSUPPORTED_ADDRESSES,
   },
   iec104: {
     label: "IEC 60870-5-104",
@@ -84,9 +101,9 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     fcPlaceholder: "76, 77",
     fcHelp:
       "CIP service codes (0x0E=Get_Attribute, 0x10=Set_Attribute, 0x4C/76=Read_Tag, 0x4D/77=Write_Tag, 0x52=Unconnected_Send).",
-    addrLabel: "CIP path",
+    addrLabel: "Address filters unavailable",
     addrPlaceholder: "",
-    addrHelp: "Optional CIP class/instance path filter (hex string).",
+    addrHelp: UNSUPPORTED_ADDRESSES,
   },
 };
 
@@ -120,6 +137,7 @@ export function buildICSRuleUpdate(
   readOnly: boolean,
   writeOnly: boolean,
   mode: ICSModeSelection,
+  existing?: ICSPredicate,
 ): ICSPredicate {
   const ics: ICSPredicate = {
     protocol,
@@ -152,7 +170,8 @@ export function buildICSRuleUpdate(
   }
 
   if (ics.functionCode?.length === 0) delete ics.functionCode;
-  if (ics.addresses?.length === 0) delete ics.addresses;
+  // PATCH merges omitted fields. Explicitly empty a removed stored filter.
+  if (ics.addresses?.length === 0 && !existing?.addresses?.length) delete ics.addresses;
   if ((ics.objectClasses?.length ?? 0) === 0) delete ics.objectClasses;
 
   return ics;

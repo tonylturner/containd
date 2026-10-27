@@ -6,7 +6,8 @@ import { InfoTip } from "../../components/InfoTip";
 import type { FirewallRule, ICSPredicate } from "../../lib/api";
 import { buildIEC104RuleICS, type IEC104Draft } from "../ics/iec104";
 import { IEC104Fields } from "../ics/iec104-fields";
-import { formatICSMode, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
+import { addressFilterError, formatICSMode, protoMeta, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
+import { ICSAddressFields } from "../ics/ics-address-fields";
 import { ICS_PROTOCOL_KEYS, ICS_PROTOCOLS, icsProtoMeta } from "./firewall-utils";
 
 // The ICS predicate part of the firewall rule forms: its fields and the
@@ -74,8 +75,8 @@ export function ICSPredicateFields({
               <div className="text-[10px] text-(--text-muted) mt-0.5 leading-relaxed">{meta.fcHelp}</div>
             </div>
             <div>
-              <div className="text-[10px] font-medium text-(--text)">{meta.addrLabel}</div>
-              <div className="text-[10px] text-(--text-muted) mt-0.5 leading-relaxed">{meta.addrHelp}</div>
+              <div className="text-[10px] font-medium text-(--text)">{protoMeta(protocol).addrLabel}</div>
+              <div className="text-[10px] text-(--text-muted) mt-0.5 leading-relaxed">{protoMeta(protocol).addrHelp}</div>
             </div>
           </div>
           {meta.notes && (
@@ -93,10 +94,7 @@ export function ICSPredicateFields({
               <label className="block text-[10px] font-medium text-(--text-muted) mb-1">{meta.fcLabel} <span className="text-(--text-dim)">(comma-separated)</span></label>
               <input value={functionCodes} onChange={(e) => onFunctionCodesChange(e.target.value)} placeholder={meta.fcPlaceholder || `${meta.fcLabel}`} className="input-industrial w-full" />
             </div>
-            <div>
-              <label className="block text-[10px] font-medium text-(--text-muted) mb-1">{meta.addrLabel} <span className="text-(--text-dim)">(comma-separated)</span></label>
-              <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder={meta.addrPlaceholder || meta.addrLabel} className="input-industrial w-full" />
-            </div>
+            <ICSAddressFields protocol={protocol} addresses={addresses} onChange={onAddressesChange} />
           </div>
 
           <div className="grid gap-3 md:grid-cols-3">
@@ -110,12 +108,6 @@ export function ICSPredicateFields({
               <div className="md:col-span-2">
                 <label className="block text-[10px] font-medium text-(--text-muted) mb-1">CIP Object Classes <span className="text-(--text-dim)">(hex csv)</span></label>
                 <input value={objectClasses} onChange={(e) => onObjectClassesChange(e.target.value)} placeholder="0x02, 0x04, 0x66" className="input-industrial w-full" />
-              </div>
-            )}
-            {meta.showStationAddrs && (
-              <div className="md:col-span-2">
-                <label className="block text-[10px] font-medium text-(--text-muted) mb-1">Station Addresses <span className="text-(--text-dim)">(source/destination, 0-65534)</span></label>
-                <input value={addresses} onChange={(e) => onAddressesChange(e.target.value)} placeholder="1-10" className="input-industrial w-full" />
               </div>
             )}
           </div>
@@ -158,6 +150,8 @@ export function buildRuleICS(
   input: RuleICSInput,
 ): { ok: true; ics: ICSPredicate | undefined } | { ok: false; error: string } {
   if (!input.enabled) return { ok: true, ics: undefined };
+  const addressError = addressFilterError(input.protocol, input.addresses);
+  if (addressError) return { ok: false, error: addressError };
   if (input.protocol === "iec104") {
     return buildIEC104RuleICS(input.iec, input.mode, input.action, input.existing, input.globalMode);
   }
@@ -173,6 +167,7 @@ function buildICSPredicate({
   readOnly,
   writeOnly,
   mode,
+  existing,
 }: RuleICSInput): ICSPredicate {
   const icsMeta = icsProtoMeta(protocol);
   const ics: ICSPredicate = {
@@ -200,7 +195,8 @@ function buildICSPredicate({
       .filter((n) => Number.isFinite(n) && n >= 0);
   }
   if ((ics.functionCode?.length ?? 0) === 0) delete ics.functionCode;
-  if ((ics.addresses?.length ?? 0) === 0) delete ics.addresses;
+  // An omitted PATCH field would retain the unsupported stored filter.
+  if ((ics.addresses?.length ?? 0) === 0 && !existing?.addresses?.length) delete ics.addresses;
   if ((ics.objectClasses?.length ?? 0) === 0) delete ics.objectClasses;
   return ics;
 }
