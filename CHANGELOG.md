@@ -48,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reconnected. Each request now uses a fresh token for the connection's
   session, which stays valid until the connection closes or reaches the
   4-hour session limit.
+- `configure` and `containd cli` in a Linux shell opened over SSH act as the
+  SSH login instead of logging in as `CONTAIND_CLI_USER` with
+  `CONTAIND_CLI_PASSWORD` (default `containd` / `containd`). They worked only
+  while that account kept its default password, and acted as that account
+  rather than the SSH user. The SSH server forwards their requests from a
+  socket that exists only while the shell runs, so the shell holds no token
+  or password. `containd cli` outside an SSH shell, such as through
+  `docker exec`, still logs in with those variables.
 
 ## [0.1.35] - 2026-10-26
 

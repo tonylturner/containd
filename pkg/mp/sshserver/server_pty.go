@@ -15,6 +15,8 @@ import (
 
 	"github.com/creack/pty"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/tonylturner/containd/pkg/cli"
 )
 
 // ptyRequest holds parsed data from an SSH "pty-req" request.
@@ -58,15 +60,8 @@ func parseWindowChange(data []byte) (uint32, uint32, bool) {
 // startLinuxShell launches /bin/bash with a real PTY and wires it to the SSH channel.
 // It consumes the remaining SSH request channel to handle window-change events.
 func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Channel, requests <-chan *ssh.Request, pr *ptyRequest) {
-	shell := "/bin/bash"
-	if _, err := os.Stat(shell); err != nil {
-		shell = "/bin/sh"
-	}
-
-	cmd := exec.CommandContext(ctx, shell, "--login")
-	cmd.Env = buildShellEnv(username, pr)
-	// Use a new session so we can signal the process group on cleanup.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd, release := s.shellCommand(ctx, username, pr, ch)
+	defer release()
 
 	winSize := &pty.Winsize{Rows: uint16(pr.Height), Cols: uint16(pr.Width)}
 	ptmx, err := pty.StartWithSize(cmd, winSize)
@@ -128,14 +123,8 @@ func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Ch
 // when it exits. The shell first receives what the CLI has buffered but not
 // read; input it has not taken when it exits stays for the CLI.
 func (s *Server) startLinuxShellInline(ctx context.Context, username string, term *sessionIO, buffered *bufio.Reader, pr *ptyRequest, windowCh <-chan ptyRequest) {
-	shell := "/bin/bash"
-	if _, err := os.Stat(shell); err != nil {
-		shell = "/bin/sh"
-	}
-
-	cmd := exec.CommandContext(ctx, shell, "--login")
-	cmd.Env = buildShellEnv(username, pr)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd, release := s.shellCommand(ctx, username, pr, term)
+	defer release()
 
 	winSize := &pty.Winsize{Rows: uint16(pr.Height), Cols: uint16(pr.Width)}
 	ptmx, err := pty.StartWithSize(cmd, winSize)
@@ -180,6 +169,32 @@ func (s *Server) startLinuxShellInline(ctx context.Context, username string, ter
 	close(exited)
 	_ = ptmx.Close()
 	wg.Wait()
+}
+
+// shellCommand prepares a Linux login shell for an SSH login. CLI processes
+// in it reach management as that login through its shell API, which
+// release closes. The shell starts in a new session so its process group
+// can be signalled.
+func (s *Server) shellCommand(ctx context.Context, username string, pr *ptyRequest, out io.Writer) (*exec.Cmd, func()) {
+	shell := "/bin/bash"
+	if _, err := os.Stat(shell); err != nil {
+		shell = "/bin/sh"
+	}
+	cmd := exec.CommandContext(ctx, shell, "--login")
+	cmd.Env = buildShellEnv(username, pr)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	release := func() {}
+	if conn := connectionFromContext(ctx); conn != nil {
+		api, err := s.openShellAPI(conn)
+		if err != nil {
+			s.logger.Errorf("ssh shell API: %v", err)
+			writeTTY(out, "warning: containd cli cannot use this SSH login in this shell: "+err.Error()+"\n")
+		} else {
+			cmd.Env = append(cmd.Env, cli.EnvSSHAPISocket+"="+api.socket)
+			release = api.close
+		}
+	}
+	return cmd, release
 }
 
 func buildShellEnv(username string, pr *ptyRequest) []string {

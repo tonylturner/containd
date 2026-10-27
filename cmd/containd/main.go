@@ -129,17 +129,10 @@ func runHealthcheck() error {
 }
 
 func runCLI(ctx context.Context) error {
-	baseURL, err := loopbackManagementURL()
+	api, err := cliAPI(ctx)
 	if err != nil {
 		return err
 	}
-
-	token, err := cliLogin(baseURL)
-	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
-	}
-
-	api := &cli.API{BaseURL: baseURL, Token: token}
 	reg := cli.NewRegistry(nil, api)
 	cmdCtx := cli.WithRole(ctx, string(cli.RoleAdmin))
 
@@ -236,6 +229,28 @@ func cliHistoryPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".containd_history")
+}
+
+// cliAPI connects the CLI to management. In a Linux shell opened over SSH
+// it acts as that SSH login; elsewhere it logs in as CONTAIND_CLI_USER with
+// CONTAIND_CLI_PASSWORD.
+func cliAPI(ctx context.Context) (*cli.API, error) {
+	if socket := os.Getenv(cli.EnvSSHAPISocket); socket != "" {
+		api, err := cli.ConnectSSHSession(ctx, socket)
+		if err != nil {
+			return nil, fmt.Errorf("SSH login unavailable: %w", err)
+		}
+		return api, nil
+	}
+	baseURL, err := loopbackManagementURL()
+	if err != nil {
+		return nil, err
+	}
+	token, err := cliLogin(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("authentication failed: %w", err)
+	}
+	return &cli.API{BaseURL: baseURL, Token: token}, nil
 }
 
 func cliLogin(baseURL string) (string, error) {

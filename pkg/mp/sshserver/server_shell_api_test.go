@@ -1,0 +1,190 @@
+// SPDX-License-Identifier: Apache-2.0
+package sshserver
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/ssh"
+
+	"github.com/tonylturner/containd/pkg/cli"
+)
+
+// shellAPIUpstream records the requests the shell API forwards to
+// management, after reading their bodies.
+type shellAPIUpstream struct {
+	mu       sync.Mutex
+	requests []*http.Request
+	bodies   []string
+}
+
+func (u *shellAPIUpstream) Do(req *http.Request) (*http.Response, error) {
+	var body []byte
+	if req.Body != nil {
+		body, _ = io.ReadAll(req.Body)
+	}
+	u.mu.Lock()
+	u.requests = append(u.requests, req)
+	u.bodies = append(u.bodies, string(body))
+	u.mu.Unlock()
+	resp := jsonResponse(http.StatusOK, map[string]string{"username": "shell-api-admin"})
+	resp.Header.Set("X-Auth-Token", "refreshed")
+	resp.Header.Set("Set-Cookie", "containd_token=refreshed")
+	return resp, nil
+}
+
+func (u *shellAPIUpstream) last() (*http.Request, string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if len(u.requests) == 0 {
+		return nil, ""
+	}
+	return u.requests[len(u.requests)-1], u.bodies[len(u.bodies)-1]
+}
+
+// The CLI in a Linux shell calls management as the SSH login: each request
+// carries a token for the connection's session and names the connection,
+// and the shell never sees a credential. Closing the shell API removes it.
+func TestShellAPIActsAsTheSSHLogin(t *testing.T) {
+	srv, store, _ := newAssuranceServer(t)
+	upstream := &shellAPIUpstream{}
+	srv.opts.APIClient = upstream
+	srv.opts.BaseURL = "http://127.0.0.1:8080"
+	u, _ := createAdmin(t, store, "shell-api-admin")
+	ctx := context.Background()
+	sessionID, err := srv.openSession(ctx, u.Username, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := &sshConnection{id: "conn-1", sessionID: sessionID}
+	api, err := srv.openShellAPI(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Dir(api.socket)); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("socket directory: %v, %v", info, err)
+	}
+
+	client, err := cli.ConnectSSHSession(ctx, api.socket)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if client.Token != "" {
+		t.Fatalf("CLI received a credential: %q", client.Token)
+	}
+	req, _ := upstream.last()
+	if req == nil || req.URL.String() != "http://127.0.0.1:8080/api/v1/auth/me" {
+		t.Fatalf("forwarded request: %+v", req)
+	}
+	if req.Header.Get("X-Containd-SSH-Connection") != "conn-1" {
+		t.Fatalf("connection header: %q", req.Header.Get("X-Containd-SSH-Connection"))
+	}
+	raw := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
+	claims := jwt.MapClaims{}
+	if _, err := jwt.ParseWithClaims(raw, claims, func(*jwt.Token) (any, error) { return srv.opts.JWTSecret, nil }); err != nil || claims["jti"] != sessionID || claims["sub"] != u.ID {
+		t.Fatalf("token %v, claims %v", err, claims)
+	}
+
+	// Bodies, queries and the method reach management; credentials do not
+	// come back.
+	resp, err := client.Client.Do(mustRequest(t, http.MethodPost, "http://ssh-session/api/v1/config/candidate?x=1", `{"a":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	req, body := upstream.last()
+	if req.Method != http.MethodPost || req.URL.RawQuery != "x=1" || body != `{"a":1}` || req.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("forwarded %s %s %q %q", req.Method, req.URL, body, req.Header.Get("Content-Type"))
+	}
+	if resp.Header.Get("X-Auth-Token") != "" || resp.Header.Get("Set-Cookie") != "" {
+		t.Fatalf("credential returned to the shell: %v", resp.Header)
+	}
+	for _, p := range []string{"/metrics", "/api/v1/../metrics", "/api/v1/%2e%2e/metrics", "/api/v1/", "/api/v1//health", "/internal/config"} {
+		resp, err := client.Client.Do(mustRequest(t, http.MethodGet, "http://ssh-session"+p, ""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s: status %d", p, resp.StatusCode)
+		}
+	}
+
+	// A revoked login fails with the reason.
+	if err := store.RevokeSession(ctx, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cli.ConnectSSHSession(ctx, api.socket); err == nil || !strings.Contains(err.Error(), "session") {
+		t.Fatalf("revoked login: %v", err)
+	}
+
+	api.close()
+	if _, err := os.Stat(filepath.Dir(api.socket)); !os.IsNotExist(err) {
+		t.Fatalf("socket directory remains: %v", err)
+	}
+	if _, err := cli.ConnectSSHSession(ctx, api.socket); err == nil {
+		t.Fatal("closed shell API still answers")
+	}
+}
+
+func mustRequest(t *testing.T, method, url, body string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(method, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req
+}
+
+// A Linux shell opened over SSH, in linux mode or from the appliance CLI,
+// receives the socket of its login's shell API, which is removed when the
+// shell exits.
+func TestLinuxShellReceivesShellAPISocket(t *testing.T) {
+	if _, err := os.Stat("/bin/bash"); err != nil {
+		t.Skip("needs /bin/bash")
+	}
+	for _, mode := range []string{"linux", "appliance"} {
+		t.Run(mode, func(t *testing.T) {
+			srv, store, _ := newAssuranceServer(t)
+			srv.opts.ShellMode = mode
+			addr := serveSSH(t, srv)
+			u, password := createAdmin(t, store, "socket-"+mode)
+			client, err := dialSSH(addr, u.Username, nil, ssh.Password(password))
+			if err != nil {
+				t.Fatalf("login: %v", err)
+			}
+			defer client.Close()
+			tty := openTTY(t, client)
+			if mode == "appliance" {
+				tty.waitFor(t, "containd# ", 1)
+				tty.send(t, "shell\n")
+				tty.waitFor(t, "shell\r\n", 1)
+			}
+			tty.send(t, `test -S "$CONTAIND_SSH_API_SOCKET" && echo "socket=[$CONTAIND_SSH_API_SOCKET]"`+"\n")
+			tty.waitFor(t, "socket=[/", 1)
+			socket := regexp.MustCompile(`socket=\[(/[^\]]+)\]`).FindStringSubmatch(tty.output())[1]
+			tty.send(t, "exit\n")
+			if mode == "appliance" {
+				tty.waitFor(t, "containd# ", 2)
+				tty.send(t, "exit\n")
+			}
+			if err := tty.session.Wait(); err != nil {
+				t.Fatalf("session: %v: %q", err, tty.output())
+			}
+			if _, err := os.Stat(socket); !os.IsNotExist(err) {
+				t.Fatalf("socket %s remains: %v", socket, err)
+			}
+		})
+	}
+}
