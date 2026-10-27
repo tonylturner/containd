@@ -34,26 +34,48 @@ func TestMatchModbusWriteCoilAll(t *testing.T) {
 	e := New()
 	e.LoadBuiltins()
 
-	ev := dpi.Event{
-		Proto:     "modbus",
-		Kind:      "request",
-		Timestamp: time.Now(),
-		Attributes: map[string]any{
-			"function_code": uint8(15),
-			"quantity":      uint16(2000),
-			"is_write":      true,
-		},
-	}
-	matches := e.Match(ev)
-	found := false
-	for _, m := range matches {
-		if m.Signature.ID == "MODBUS-WRITE-COIL-ALL" {
-			found = true
-			break
+	coilRequest := func(kind string, quantity uint16) dpi.Event {
+		return dpi.Event{
+			Proto:     "modbus",
+			Kind:      kind,
+			Timestamp: time.Now(),
+			Attributes: map[string]any{
+				"function_code": uint8(15),
+				"quantity":      quantity,
+				"is_write":      true,
+			},
 		}
 	}
-	if !found {
-		t.Errorf("expected MODBUS-WRITE-COIL-ALL to match; got %d matches", len(matches))
+
+	hasMatch := func(ev dpi.Event) bool {
+		for _, m := range e.Match(ev) {
+			if m.Signature.ID == "MODBUS-WRITE-COIL-ALL" {
+				return true
+			}
+		}
+		return false
+	}
+	if hasMatch(coilRequest("request", 1000)) {
+		t.Fatal("quantity 1000 matched; want the strict >1000 boundary")
+	}
+	if !hasMatch(coilRequest("request", 1001)) {
+		t.Fatal("quantity 1001 did not match the request")
+	}
+
+	// FC 15 responses echo the quantity. The decoder must retain it, but an
+	// echoed reply must not trigger the request signature.
+	reply := modbusResponse(t, 40000, 0x0f, 0x00, 0x00, 0x03, 0xe9)
+	if got := reply.Attributes["quantity"]; got != uint16(1001) {
+		t.Fatalf("decoded reply quantity = %#v, want 1001", got)
+	}
+	if reply.Kind != "response" {
+		t.Fatalf("decoded FC 15 reply kind = %q, want response", reply.Kind)
+	}
+	if hasMatch(reply) {
+		t.Fatal("FC 15 reply echo matched the request signature")
+	}
+	if hasMatch(coilRequest("exception", 1001)) {
+		t.Fatal("exception event matched the request signature")
 	}
 }
 

@@ -7,6 +7,8 @@ package signatures
 const (
 	modbusExceptionStormCount         = 10
 	modbusExceptionStormWindowSeconds = 60
+	icsWriteStormCount                = 20
+	icsWriteStormWindowSeconds        = 10
 )
 
 // builtinSignatures returns the set of built-in ICS threat signatures.
@@ -56,6 +58,7 @@ func builtinSignatures() []Signature {
 			Severity:    "critical",
 			Protocol:    "modbus",
 			Conditions: []Condition{
+				{Field: "kind", Op: "equals", Value: "request"},
 				{Field: "function_code", Op: "equals", Value: float64(15)},
 				{Field: "quantity", Op: "gt", Value: float64(1000)},
 			},
@@ -166,8 +169,10 @@ func builtinSignatures() []Signature {
 			Severity:    "high",
 			Protocol:    "",
 			Conditions: []Condition{
+				{Field: "kind", Op: "in", Value: []any{"request", "restart", "control"}},
 				{Field: "is_write", Op: "equals", Value: true},
 			},
+			Threshold:  &Threshold{Count: icsWriteStormCount, WindowSeconds: icsWriteStormWindowSeconds},
 			References: []string{"https://attack.mitre.org/techniques/T0855/"},
 		},
 	}

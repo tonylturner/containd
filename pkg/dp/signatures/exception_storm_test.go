@@ -123,3 +123,27 @@ func TestThresholdCountersAreBounded(t *testing.T) {
 		t.Fatalf("threshold counters = %d, bound %d", len(e.thresholds), maxThresholdKeys)
 	}
 }
+
+func TestCustomThresholdStillCountsEveryEventWithAnAPDUID(t *testing.T) {
+	e := New()
+	e.Add(Signature{
+		ID:         "CUSTOM-IEC-EVENT-COUNT",
+		Protocol:   "iec104",
+		Conditions: []Condition{{Field: "kind", Op: "equals", Value: "request"}},
+		Threshold:  &Threshold{Count: 2, WindowSeconds: 10},
+	})
+	ev := dpi.Event{
+		FlowID:     "custom-flow",
+		Proto:      "iec104",
+		Kind:       "request",
+		Attributes: map[string]any{"apdu_id": "same-apdu"},
+		Timestamp:  time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC),
+	}
+	if got := len(e.Match(ev)); got != 0 {
+		t.Fatalf("first matching event produced %d alerts, want 0", got)
+	}
+	ev.Timestamp = ev.Timestamp.Add(time.Second)
+	if got := len(e.Match(ev)); got != 1 {
+		t.Fatalf("second matching event with the same APDU ID produced %d alerts, want 1", got)
+	}
+}

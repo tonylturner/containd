@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `MODBUS-WRITE-COIL-ALL` now matches only FC 15 requests, not quantity echoes
+  in replies. `ICS-WRITE-STORM` now alerts on 20 initiator write commands per
+  connection within 10 seconds; replies and exceptions do not count, and an
+  IEC 104 APDU with multiple object events counts once.
 - DPI denials now drop the packet and best-effort reset only that TCP session,
   without installing a host or service block. Fresh connections, including
   same-source-port reconnects, can start immediately and other sessions are

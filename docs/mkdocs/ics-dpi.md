@@ -462,6 +462,10 @@ storms, and 7 for IEC 104. A match is recorded as an `ids` /
 `description`, plus the identity attributes of a matched IEC 104 event.
 Matches are observations only and never block traffic.
 
+The built-in `ICS-WRITE-STORM` signature alerts after 20 initiator write
+commands on one connection within 10 seconds. Replies and exceptions do not
+count, and an IEC 104 APDU with multiple object events counts once.
+
 | Request | Purpose |
 | --- | --- |
 | `GET /api/v1/signatures` | List the loaded signatures, built-in and custom |
