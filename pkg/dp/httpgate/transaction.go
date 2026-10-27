@@ -173,7 +173,7 @@ func incompleteResult(outcome fillOutcome, detail string) avscan.Result {
 func (tx *transaction) scan(obj avscan.Object, watch *peer) avscan.Result {
 	ctx, cancel := context.WithTimeout(tx.c.srv.ctx, tx.set.ScanTimeout)
 	if watch != nil {
-		w := watchClose(watch)
+		w := watchClose(watch, tx.c.guard)
 		defer w.stop()
 		go func() {
 			select {

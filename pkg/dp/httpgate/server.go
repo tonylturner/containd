@@ -259,7 +259,9 @@ func (s *Server) acquireObject(limit int) bool {
 
 func (s *Server) releaseObject() { s.heldObjects.Add(-1) }
 
-// emit delivers ev to OnEvent.
+// emit delivers ev to OnEvent. A hook that panics loses that event and
+// is reported through one more delivery; a hook that panics on that too
+// is left alone.
 func (s *Server) emit(ev Event) {
 	if s.OnEvent == nil {
 		return
@@ -267,7 +269,19 @@ func (s *Server) emit(ev Event) {
 	if ev.Time.IsZero() {
 		ev.Time = time.Now()
 	}
+	if r := s.callHook(ev); r != nil {
+		_ = s.callHook(Event{
+			Time: time.Now(), ID: ev.ID, Client: ev.Client, Server: ev.Server, Action: avscan.Block,
+			Error: fmt.Sprintf("OnEvent panic: %v", r),
+		})
+	}
+}
+
+// callHook runs OnEvent and returns what it panicked with, if anything.
+func (s *Server) callHook(ev Event) (panicked any) {
+	defer func() { panicked = recover() }()
 	s.OnEvent(ev)
+	return nil
 }
 
 // dial opens the upstream connection through the Dial hook.

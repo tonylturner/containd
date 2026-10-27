@@ -203,15 +203,16 @@ type closeWatch struct {
 	done   chan struct{}
 }
 
-func watchClose(p *peer) *closeWatch {
+// guard wraps the watcher goroutine so that a panic in it is contained.
+func watchClose(p *peer, guard func(func())) *closeWatch {
 	w := &closeWatch{p: p, closed: make(chan struct{}), done: make(chan struct{})}
-	go func() {
+	go guard(func() {
 		defer close(w.done)
 		_, err := p.r.Peek(1)
 		if err != nil && !isTimeout(err) {
 			close(w.closed)
 		}
-	}()
+	})
 	return w
 }
 

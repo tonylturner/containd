@@ -238,6 +238,67 @@ func TestOriginalDstErrorClosesConnection(t *testing.T) {
 	}
 }
 
+// A scanner that panics ends one connection on either side, with the
+// response goroutine recovered, both peers closed and the owner signalled.
+func TestPanicInScannerEndsOnlyThatConnection(t *testing.T) {
+	for _, dir := range []avscan.Direction{avscan.Upload, avscan.Download} {
+		t.Run(string(dir), func(t *testing.T) {
+			log := &bodyLog{}
+			o := echoOrigin(t, log)
+			g := startGate(t, o, nil)
+			g.scanner.setVerdict(func(obj avscan.Object, _ []byte) avscan.Result {
+				if obj.Direction == dir {
+					panic("scanner exploded on " + string(obj.Direction))
+				}
+				return avscan.Result{Verdict: avscan.Clean, Backend: "fake"}
+			})
+			c := g.client()
+			c.write(requestCL("POST", "/boom", "", pattern(100, 62)))
+			c.expectClosed()
+			var ev Event
+			for ev = g.events.next(t); ev.Error == ""; ev = g.events.next(t) {
+			}
+			if !strings.Contains(ev.Error, "panic: scanner exploded on "+string(dir)) || ev.Action != avscan.Block {
+				t.Fatalf("event %+v", ev)
+			}
+			// The gate still serves.
+			c2 := g.client()
+			c2.write(getRequest("/after", ""))
+			if dir == avscan.Download {
+				c2.expectClosed()
+			} else if resp, _ := c2.response("GET"); resp.StatusCode != 200 {
+				t.Fatalf("status %d after the panic", resp.StatusCode)
+			}
+			start := time.Now()
+			if err := g.shutdown(5 * time.Second); err != nil || time.Since(start) > 2*time.Second {
+				t.Fatalf("Shutdown after a panic: %v in %v", err, time.Since(start))
+			}
+		})
+	}
+}
+
+// A panicking OnEvent loses one event and is reported; the gate goes on.
+func TestPanicInOnEventIsRecovered(t *testing.T) {
+	log := &bodyLog{}
+	o := echoOrigin(t, log)
+	g := startGate(t, o, func(s *Settings) { s.ScanUploads = false })
+	g.events.panicNext.Store(true)
+	c := g.client()
+	c.write(getRequest("/one", ""))
+	if resp, rb := c.response("GET"); resp.StatusCode != 200 || string(rb) != "ok" {
+		t.Fatalf("status %d body %q", resp.StatusCode, rb)
+	}
+	ev := g.events.next(t)
+	if !strings.Contains(ev.Error, "OnEvent panic: hook exploded on download") || ev.Action != avscan.Block {
+		t.Fatalf("event %+v", ev)
+	}
+	c.write(getRequest("/two", ""))
+	if resp, _ := c.response("GET"); resp.StatusCode != 200 {
+		t.Fatalf("status %d after the hook panic", resp.StatusCode)
+	}
+	expectEvent(t, g.events.next(t), avscan.Download, avscan.Clean, "", avscan.Deliver)
+}
+
 func TestPanicInHookIsRecovered(t *testing.T) {
 	var calls atomic.Int32
 	g := startGate(t, &origin{rec: &recorder{}, dst: func(net.Conn) (netip.AddrPort, error) {

@@ -74,7 +74,12 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 		tx.sendDone.Store(false)
 		tx.spliceCh = make(chan struct{})
 		done := make(chan respResult, 1)
-		go func() { done <- tx.readResponse(u, stop) }()
+		go func() {
+			// A recovered panic leaves r zero: the exchange closes both.
+			var r respResult
+			c.guard(func() { r = tx.readResponse(u, stop) })
+			done <- r
+		}()
 
 		sent, sendErr := tx.send(u, body, stop)
 		if pass != nil {

@@ -19,6 +19,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -300,14 +301,21 @@ func (l *bodyLog) list() []bodyEntry {
 	return append([]bodyEntry(nil), l.entries...)
 }
 
-// eventLog collects gate events.
+// eventLog collects gate events. panicNext makes the next delivery
+// panic instead, to prove the hook is isolated.
 type eventLog struct {
-	ch chan Event
+	ch        chan Event
+	panicNext atomic.Bool
 }
 
 func newEventLog() *eventLog { return &eventLog{ch: make(chan Event, 256)} }
 
-func (l *eventLog) add(ev Event) { l.ch <- ev }
+func (l *eventLog) add(ev Event) {
+	if l.panicNext.Swap(false) {
+		panic("hook exploded on " + string(ev.Direction))
+	}
+	l.ch <- ev
+}
 
 // next returns the next event, failing after 5 s.
 func (l *eventLog) next(t *testing.T) Event {

@@ -57,11 +57,10 @@ func newConn(s *Server, nc net.Conn, set *Settings) *conn {
 // serve runs transactions until the connection ends.
 func (c *conn) serve() {
 	defer c.closeAll()
-	defer func() {
-		if r := recover(); r != nil {
-			c.srv.emit(c.connEvent(fmt.Sprintf("panic: %v\n%s", r, debug.Stack())))
-		}
-	}()
+	c.guard(c.serveTransactions)
+}
+
+func (c *conn) serveTransactions() {
 	dst, err := c.srv.OriginalDst(c.client.conn)
 	if err != nil {
 		c.srv.emit(c.connEvent("original destination: " + err.Error()))
@@ -73,9 +72,23 @@ func (c *conn) serve() {
 			return
 		}
 		if c.up != nil {
-			c.up.watch = watchClose(c.up.peer)
+			c.up.watch = watchClose(c.up.peer, c.guard)
 		}
 	}
+}
+
+// guard runs fn on the calling goroutine and turns a panic into a
+// connection event after closing both peers: one broken hook or scanner
+// call ends one connection, never the process. Every goroutine a
+// connection owns runs under it.
+func (c *conn) guard(fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.closeAll()
+			c.srv.emit(c.connEvent(fmt.Sprintf("panic: %v\n%s", r, debug.Stack())))
+		}
+	}()
+	fn()
 }
 
 // transaction serves one request and reports whether the connection
@@ -149,7 +162,7 @@ func (c *conn) splice(u *upstream) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		copyRaw(c.client, u.peer)
+		c.guard(func() { copyRaw(c.client, u.peer) })
 	}()
 	copyRaw(u.peer, c.client)
 	wg.Wait()
