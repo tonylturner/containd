@@ -135,7 +135,11 @@ Combined mode auto-connects the management plane to the local dataplane engine. 
 
 ## From Source
 
+Needs Go, Node.js, and Python with MkDocs: the UI build embeds the documentation. See [CONTRIBUTING.md](CONTRIBUTING.md) for versions.
+
 ```bash
+python3 -m venv build/docs-venv && . build/docs-venv/bin/activate
+python -m pip install -r docs/requirements-mkdocs.txt
 go build -o containd ./cmd/containd
 cd ui && npm ci && npm run build && cd ..
 CONTAIND_JWT_SECRET=$(openssl rand -hex 32) CONTAIND_UI_DIR=ui/out ./containd all
