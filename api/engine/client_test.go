@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -164,7 +165,7 @@ func TestHTTPClientRepresentativeEndpoints(t *testing.T) {
 	if err := c.Configure(ctx, config.DataPlaneConfig{Enforcement: true}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if err := c.ConfigureServices(ctx, config.ServicesConfig{}); err == nil || !strings.Contains(err.Error(), "service apply failed") {
+	if _, err := c.ConfigureServices(ctx, config.ServicesConfig{}); err == nil || !strings.Contains(err.Error(), "service apply failed") {
 		t.Fatalf("ConfigureServices error = %v", err)
 	}
 	if err := c.ConfigureInterfacesReplace(ctx, []config.Interface{{Name: "wan"}}); err != nil {
@@ -496,5 +497,53 @@ func TestRuntimeHealthWithoutBootID(t *testing.T) {
 	health, err := NewHTTPClient(srv.URL).RuntimeHealth(context.Background())
 	if err != nil || health.BootID != "" {
 		t.Fatalf("legacy RuntimeHealth = %+v, %v", health, err)
+	}
+}
+
+// TestConfigureServicesWarnings: a services apply the engine accepted with
+// warnings returns them; a failed one is an error carrying the engine's
+// detail.
+func TestConfigureServicesWarnings(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		status   int
+		body     string
+		warnings []string
+		errText  string
+	}{
+		{"applied", http.StatusOK, `{"status":"applied"}`, nil, ""},
+		{"pending", http.StatusOK, `{"status":"applied","warnings":["AV backend is still starting: clamd not ready; scanning is pending until it is ready"]}`,
+			[]string{"AV backend is still starting: clamd not ready; scanning is pending until it is ready"}, ""},
+		{"no body", http.StatusNoContent, "", nil, ""},
+		{"malformed", http.StatusOK, `{"status":`, nil, "engine services response"},
+		{"unavailable", http.StatusServiceUnavailable, "AV service apply failed: clamd exited", nil, "engine services status 503: AV service apply failed: clamd exited"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/internal/services" || r.Method != http.MethodPost {
+					t.Errorf("%s %s", r.Method, r.URL.Path)
+				}
+				var svc config.ServicesConfig
+				if err := json.NewDecoder(r.Body).Decode(&svc); err != nil {
+					t.Errorf("decode services: %v", err)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			warnings, err := NewHTTPClient(srv.URL).ConfigureServices(context.Background(), config.ServicesConfig{})
+			if tc.errText != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.errText) || warnings != nil {
+					t.Fatalf("warnings=%v err=%v, want error %q", warnings, err, tc.errText)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(warnings, tc.warnings) {
+				t.Fatalf("warnings=%v err=%v, want %v", warnings, err, tc.warnings)
+			}
+		})
 	}
 }
