@@ -24,6 +24,9 @@ const (
 // only that segment starts with the application header.
 const TransportFIR = 0x40
 
+// TransportFIN marks the last transport segment of an application fragment.
+const TransportFIN = 0x80
+
 // frameLinkFrame returns the length of the link frame at the start of b, 0
 // when b holds only part of one, or an error when b cannot start a frame.
 // The header CRC covers the length octet, so a header CRC mismatch is

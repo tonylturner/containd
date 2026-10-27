@@ -102,11 +102,12 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 
 func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 	var codes []string
+	final := len(frame.Data) > 0 && frame.Data[0]&TransportFIN != 0
 	if frame.badDataCRC {
 		codes = append(codes, "dnp3.data_crc")
 	}
 	if !frame.HasApplicationHeader() {
-		if len(frame.Data) > 0 && frame.Data[0]&TransportFIR != 0 {
+		if len(frame.Data) > 0 && frame.Data[0]&TransportFIR != 0 && final {
 			codes = append(codes, "dnp3.application_header")
 		}
 		if len(codes) == 0 {
@@ -157,11 +158,13 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 	}
 	var objHeaders []ObjectHeader
 	if objOffset > len(frame.Data) {
-		codes = append(codes, "dnp3.application_header")
+		if final {
+			codes = append(codes, "dnp3.application_header")
+		}
 	} else {
-		var stopped bool
+		var stopped objectWalkStop
 		objHeaders, stopped = parseObjectHeaders(frame.Data, objOffset, fc)
-		if stopped {
+		if stopped == walkInvalid || stopped == walkTruncated && final {
 			codes = append(codes, "dnp3.object_walk")
 		}
 	}
