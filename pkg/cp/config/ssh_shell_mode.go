@@ -21,10 +21,13 @@ func validateSSHShellMode(mode string) error {
 	return fmt.Errorf("ssh.shellMode %q: use appliance or linux", mode)
 }
 
-// normalizeStoredSSHShellMode maps a stored shellMode that earlier releases
-// saved without validation to the mode they ran: linux in any letter case
-// runs the Linux shell, every other value the appliance CLI.
-func normalizeStoredSSHShellMode(ssh *SSHConfig) {
+// NormalizeLegacySSHShellMode maps a shellMode that earlier releases saved
+// without validation to the mode they ran: linux in any letter case runs the
+// Linux shell, every other value the appliance CLI. It applies to
+// configuration those releases wrote, stored or exported (import restores an
+// exported backup); new edits are validated strictly.
+func NormalizeLegacySSHShellMode(cfg *Config) {
+	ssh := &cfg.System.SSH
 	switch {
 	case ssh.ShellMode == "":
 	case strings.EqualFold(ssh.ShellMode, SSHShellModeLinux):

@@ -29,12 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reading the SSH channel and discarded it. The shell also receives lines
   typed ahead of it, and stops taking window-size changes when it exits.
 - `system.ssh.shellMode` accepts only `appliance`, `linux` or empty. Any
-  other value, such as `Linux` or `bash`, is rejected on save, import and
-  commit instead of silently meaning `appliance`. A value stored by an
-  earlier release loads as the mode it ran (`linux` in any letter case
-  becomes `linux`, any other value `appliance`), so it does not start
-  management in recovery. `CONTAIND_SSH_SHELL_MODE` keeps accepting any
-  letter case.
+  other value, such as `Linux` or `bash`, is rejected on save and commit
+  instead of silently meaning `appliance`. A value written by an earlier
+  release, whether stored or in an imported backup, becomes the mode that
+  release ran (`linux` in any letter case becomes `linux`, any other value
+  `appliance`): a stored one does not start management in recovery, and a
+  backup restores without an error. `CONTAIND_SSH_SHELL_MODE` keeps
+  accepting any letter case.
 - `show system` displayed the saved SSH shell mode, even when
   `CONTAIND_SSH_SHELL_MODE` overrode it or a committed change had not yet
   been applied by a restart. It now shows the mode SSH runs
