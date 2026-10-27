@@ -23,10 +23,15 @@
 // licensed editions and the lib60870 captures before release.
 //
 // Decoder profile restrictions (the standard allows these forms; containd
-// rejects them as malformed with an error that starts with "profile:"): control and system
+// reports them as malformed with an error that starts with "profile:"): control and system
 // types with SQ=1 or more than one object; monitor-direction types (1..44)
 // from the client; control or system types from the server with cause 6 or 8.
 // The descriptor table marks untimed monitor types that accept SQ=1.
+//
+// Content the decoder cannot accept inside a framed APDU (malformed,
+// unsupported, profile and reserved-bit findings) is reported as conformance
+// findings (findings.go) next to whatever was decoded; the parsing mode and
+// the rules decide it, not the decoder.
 //
 // The decoder never resynchronises: bytes that cannot start an APDU end the
 // parse with a *dpi.FrameError, and nothing after them is parsed.
@@ -35,7 +40,6 @@ package iec104
 import (
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"maps"
 	"time"
 
@@ -80,10 +84,10 @@ func (d *Decoder) OnFlowEnd(*flow.State) ([]dpi.Event, error) { return nil, nil 
 // dpi.DecodedFrame whose events are one per information object (I-format)
 // or one for the APDU (S- and U-format, malformed or unsupported). An APDU
 // whose framing is intact but whose content is bad is a malformed or
-// unsupported event, and parsing continues. Bytes that cannot be framed end
-// the parse with a *dpi.FrameError. Direction comes only from v.Dir and IDs
-// only from v.Session: without both the stream cannot be attributed, so the
-// parse fails closed.
+// unsupported event with conformance findings, and parsing continues.
+// Bytes that cannot be framed end the parse with a *dpi.FrameError.
+// Direction comes only from v.Dir and IDs only from v.Session: without both
+// the stream cannot be attributed, so the parse fails closed.
 func (d *Decoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.StreamResult, error) {
 	var res dpi.StreamResult
 	dc, err := newDirContext(state, v)
@@ -165,17 +169,21 @@ func (dc dirContext) apduEvents(start int64, apdu []byte) []dpi.Event {
 	a := decodeAPCI(apdu)
 	base := dc.baseAttrs(start, apdu)
 	base[eventfields.KeyAPCIType] = a.format
+	for _, code := range a.findings {
+		addFinding(base, code)
+	}
 	switch a.format {
 	case "S", "U":
 		base[eventfields.KeyClass] = ClassSystem
 		base[eventfields.KeyIsWrite] = false
 		if a.format == "S" {
 			base[eventfields.KeyReceiveSequence] = a.recvSeq
-		} else {
+		} else if a.uFunction != "" {
 			base[eventfields.KeyUFunction] = a.uFunction
 		}
 		if a.length != minAPDULength {
-			return dc.single(eventfields.KindMalformed, base, fmt.Errorf("%s-format APDU length %d, want 4", a.format, a.length))
+			return dc.single(eventfields.KindMalformed, base,
+				findingError(FindingAPCILength, "%s-format APDU length %d, want 4", a.format, a.length))
 		}
 		return dc.single(eventfields.KindAPCI, base, nil)
 	}
@@ -184,10 +192,12 @@ func (dc dirContext) apduEvents(start int64, apdu []byte) []dpi.Event {
 	return dc.iFrameEvents(base, apdu[apciLen:])
 }
 
-// iFrameEvents decodes the ASDU of an I-format APDU.
+// iFrameEvents decodes the ASDU of an I-format APDU. Every event of the
+// APDU shares base, including the findings already on it.
 func (dc dirContext) iFrameEvents(base map[string]any, asdu []byte) []dpi.Event {
 	if len(asdu) < asduHeaderLen {
-		return dc.single(eventfields.KindMalformed, base, fmt.Errorf("ASDU of %d octets is shorter than its 6-octet header", len(asdu)))
+		return dc.single(eventfields.KindMalformed, base,
+			findingError(FindingShortASDU, "ASDU of %d octets is shorter than its 6-octet header", len(asdu)))
 	}
 	h := decodeASDUHeader(asdu)
 	h.attrs(base)
@@ -195,13 +205,16 @@ func (dc dirContext) iFrameEvents(base map[string]any, asdu []byte) []dpi.Event 
 	d, ok := descriptors[h.typeID]
 	if !ok {
 		if roleErr != nil {
+			// Both findings hold; the role violation names the event.
+			addFinding(base, FindingUnsupportedType)
 			return dc.single(eventfields.KindMalformed, base, roleErr)
 		}
-		return dc.single(eventfields.KindUnsupported, base, fmt.Errorf("type %d is not in the supported IEC 104 type set", h.typeID))
+		return dc.single(eventfields.KindUnsupported, base,
+			findingError(FindingUnsupportedType, "type %d is not in the supported IEC 104 type set", h.typeID))
 	}
 	base[eventfields.KeyIsWrite] = isWrite(dc.direction, h.typeID)
 	if h.count == 0 {
-		return dc.single(eventfields.KindMalformed, base, errors.New("ASDU with zero information objects"))
+		return dc.single(eventfields.KindMalformed, base, findingError(FindingZeroObjects, "ASDU with zero information objects"))
 	}
 	if err := checkProfile(h, d); err != nil {
 		return dc.single(eventfields.KindMalformed, base, err)
@@ -239,10 +252,16 @@ func (dc dirContext) baseAttrs(start int64, raw []byte) map[string]any {
 	}
 }
 
-// single returns the one event of an S/U-format or error APDU.
+// single returns the one event of an S/U-format or error APDU. A non-nil
+// err is a conformanceError: its text is the error attribute and its code
+// a conformance finding.
 func (dc dirContext) single(kind string, attrs map[string]any, err error) []dpi.Event {
 	if err != nil {
 		attrs[eventfields.KeyError] = err.Error()
+		var ce *conformanceError
+		if errors.As(err, &ce) {
+			addFinding(attrs, ce.code)
+		}
 	}
 	return []dpi.Event{dc.event(kind, attrs)}
 }

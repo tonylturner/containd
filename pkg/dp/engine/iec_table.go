@@ -139,6 +139,11 @@ type iecTable struct {
 	newID      func() string
 	ctDelete   func(context.Context, conntrack.DeleteRequest) error // after the resets
 	globalMode string
+	// parsing is the IEC104 parsing mode of the packet under decision. The
+	// engine resolves it per packet (ICSParsing) and packet stores it under
+	// mu, so a mode change applies to later decisions without retiring
+	// sessions. The zero value is tolerant.
+	parsing ics.Parsing
 
 	inventory       iecInventoryInput
 	inventoryTokens map[capture.Token]*iecSession
@@ -336,6 +341,7 @@ func (t *iecTable) expire() {
 
 func (t *iecTable) deleteLocked(key iecKey, s *iecSession) iecActions {
 	acts := t.endInventoryLocked(s)
+	acts.retired = true
 	s.apci = nil
 	if s.state == iecAborted {
 		t.tombstones--

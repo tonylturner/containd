@@ -92,6 +92,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unavailable backend, ICS assets, an exclusion, an inbound port forward and
   an unselected port. Fixtures are under `test/data-smoke/av/`;
   `SMOKE_MUTATION=no-gate` must fail its refusal checks.
+- Per-protocol `dataplane.dpiIcsParsing` settings (`tolerant` or `strict`) for
+  Modbus, DNP3, CIP and IEC 104, with Parsing controls in Firewall DPI settings.
+  Tolerant evaluates decoded fields and alerts on nonconformant content; strict
+  drops nonconformant frames and resets the session when enforcing.
 - Scheduled workflows check the published `:latest` management and engine
   images daily and after each release: Cosign signatures, signed CycloneDX SBOM
   attestations, and a Trivy HIGH/CRITICAL scan of every platform image.
@@ -143,6 +147,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when uploads are scanned and `RESPMOD` when downloads are scanned. The
   encapsulated request head is the client's, `Cookie` and `Authorization`
   included, as ICAP specifies.
+- Upgraded configurations default to tolerant ICS parsing without migration.
+  IEC 104 malformed or profile-violating APDUs with a known length now reach
+  the rules with a conformance alert instead of resetting the session. Set
+  `dataplane.dpiIcsParsing.iec104` to `strict` to retain that reset behavior.
+  Lost frame boundaries and integrity faults still fail closed in enforce
+  scope in both parsing modes.
+- ICS rule predicates no longer treat a function code or CIP object class that
+  was not decoded as zero, so such a message matches no function-code or
+  object-class predicate. Modbus, DNP3 and CIP decoders now report conformance
+  findings, and EtherNet/IP UDP 2222 is decoded as implicit I/O while
+  encapsulated UDP is decoded on 44818.
+- IEC 104 `ics.decision` events no longer use the reasons `role` and
+  `unsupported`: decoded content carries `conformance` codes instead, and a
+  strict rejection uses reason `nonconformant`. `malformed` now means only
+  unframeable bytes or a stream fault.
 - `MODBUS-WRITE-COIL-ALL` now matches only FC 15 requests, not quantity echoes
   in replies. `ICS-WRITE-STORM` now alerts on 20 initiator write commands per
   connection within 10 seconds; replies and exceptions do not count, and an

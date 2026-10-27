@@ -147,6 +147,7 @@ func aduEvent(state *flow.State, frame *TCPFrame, adu []byte) dpi.Event {
 		}
 	}
 
+	addConformance(state, frame, kind, attrs)
 	attrs["raw_hex"] = rawHex(adu)
 
 	return dpi.Event{

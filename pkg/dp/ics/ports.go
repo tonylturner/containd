@@ -18,7 +18,7 @@ const (
 	CIPImplicitPort = 2222  // EtherNet/IP implicit (I/O) messaging over UDP
 	IEC104Port      = 2404  // IEC 60870-5-104 (clause 5)
 	DNP3Port        = 20000 // DNP3 over TCP
-	CIPPort         = 44818 // EtherNet/IP explicit messaging over TCP
+	CIPPort         = 44818 // EtherNet/IP encapsulation: explicit messaging over TCP, packet-only commands over UDP
 )
 
 // IP protocol numbers of the decoder transports, as flow keys carry them.
@@ -39,13 +39,15 @@ func (p DecoderPort) String() string {
 	return p.Protocol + "/" + strconv.Itoa(int(p.Port))
 }
 
-// decoderPorts is kept in ascending port order; DecoderPortIn relies on it.
+// decoderPorts is kept in ascending port order, TCP before UDP on one port;
+// DecoderPortIn relies on it.
 var decoderPorts = []DecoderPort{
 	{Protocol: "modbus", Transport: TCP, Port: ModbusPort},
 	{Protocol: "cip", Transport: UDP, Port: CIPImplicitPort},
 	{Protocol: "iec104", Transport: TCP, Port: IEC104Port},
 	{Protocol: "dnp3", Transport: TCP, Port: DNP3Port},
 	{Protocol: "cip", Transport: TCP, Port: CIPPort},
+	{Protocol: "cip", Transport: UDP, Port: CIPPort},
 }
 
 // DecoderPorts lists every decoder port in ascending port order. The slice

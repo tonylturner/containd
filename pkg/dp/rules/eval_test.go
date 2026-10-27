@@ -116,9 +116,10 @@ func TestICSMatch(t *testing.T) {
 	ev := NewEvaluator(&snap)
 	ctx := EvalContext{
 		ICS: &ICSContext{
-			Protocol:     "modbus",
-			FunctionCode: 3,
-			UnitID:       &unit,
+			Protocol:        "modbus",
+			HasFunctionCode: true,
+			FunctionCode:    3,
+			UnitID:          &unit,
 		},
 	}
 	if got := ev.Evaluate(ctx); got != ActionAllow {
@@ -209,10 +210,11 @@ func TestICSAddressRangeEval(t *testing.T) {
 	ev := NewEvaluator(&snap)
 	ctx := EvalContext{
 		ICS: &ICSContext{
-			Protocol:     "modbus",
-			FunctionCode: 3,
-			UnitID:       &unit,
-			Spans:        []AddressSpan{{Low: 0x0150, High: 0x0150}},
+			Protocol:        "modbus",
+			HasFunctionCode: true,
+			FunctionCode:    3,
+			UnitID:          &unit,
+			Spans:           []AddressSpan{{Low: 0x0150, High: 0x0150}},
 		},
 	}
 	if got := ev.Evaluate(ctx); got != ActionAllow {

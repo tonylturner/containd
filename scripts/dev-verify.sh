@@ -84,10 +84,12 @@ shellcheck_targets=(
     scripts/quickstart.sh
     scripts/semgrep-verify.sh
     scripts/smoke-dpi.sh
+    scripts/smoke-dpi-lib-parsing.sh
     scripts/smoke-forward-mutations.sh
     scripts/smoke-forward.sh
     scripts/smoke-iec104-observe.sh
     scripts/smoke-iec104.sh
+    scripts/smoke-iec104-lib-parsing.sh
     scripts/smoke-mgmt-partial-nics.sh
     scripts/smoke-mgmt-reservation.sh
     scripts/smoke-quickstart.sh

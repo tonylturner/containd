@@ -24,10 +24,13 @@ const (
 // only that segment starts with the application header.
 const TransportFIR = 0x40
 
+// TransportFIN marks the last transport segment of an application fragment.
+const TransportFIN = 0x80
+
 // frameLinkFrame returns the length of the link frame at the start of b, 0
 // when b holds only part of one, or an error when b cannot start a frame.
 // The header CRC covers the length octet, so a header CRC mismatch is
-// unframeable. Data block CRCs are not checked.
+// unframeable. Data block CRCs are checked during content decoding.
 func frameLinkFrame(b []byte) (int, error) {
 	if (len(b) >= 1 && b[0] != startByte1) || (len(b) >= 2 && b[1] != startByte2) {
 		return 0, ErrInvalidStart
@@ -62,6 +65,9 @@ func decodeLinkFrame(raw []byte) *DNP3Frame {
 	data := make([]byte, 0, userLen)
 	for rest := raw[linkHeaderLen:]; len(rest) > 0; {
 		size := min(blockLen, len(rest)-crcLen)
+		if binary.LittleEndian.Uint16(rest[size:size+crcLen]) != crc16DNP3(rest[:size]) {
+			frame.badDataCRC = true
+		}
 		data = append(data, rest[:size]...)
 		rest = rest[size+crcLen:]
 	}

@@ -976,6 +976,21 @@ components:
         captureInterfaces: {items: {type: string}, type: array}
         dpiEnabled: {type: boolean}
         dpiExclusions: {items: {$ref: '#/components/schemas/DPIExclusion'}, type: array}
+        dpiIcsParsing:
+          type: object
+          additionalProperties: false
+          properties:
+            modbus: {type: string, enum: [tolerant, strict], default: tolerant}
+            dnp3: {type: string, enum: [tolerant, strict], default: tolerant}
+            iec104: {type: string, enum: [tolerant, strict], default: tolerant}
+            cip: {type: string, enum: [tolerant, strict], default: tolerant}
+          description: >-
+            Per-protocol parsing. Omitted map or keys mean tolerant; the API also accepts an empty
+            string as the default. Unknown protocols or other values return 400.
+            Tolerant evaluates decoded fields and alerts on nonconformance inside known-length frames.
+            Strict drops nonconformant frames and resets the session in enforce scope; learn scope
+            reports would_drop without blocking. Lost frame boundaries and integrity faults fail
+            closed in enforce scope in both parsing modes.
         dpiIcsProtocols:
           type: object
           additionalProperties: false

@@ -111,7 +111,8 @@ func TestEvaluateIEC104EUPolicy(t *testing.T) {
 		{"clock sync", "request", iFrame(103, "system", 1, 0, false), ActionDeny, "deny-other-iec104"},
 		{"broadcast never allowed", "request", broadcastGI, ActionDeny, "deny-other-iec104"},
 		{"CA 65535 is broadcast without the flag", "request", iFrame(100, "system", 65535, 0, true), ActionDeny, "deny-other-iec104"},
-		{"malformed never allowed", "request", IEC104Context{APCIType: "I", TypeID: u8(46), Class: "control", Malformed: true, SafeRead: true}, ActionDeny, "deny-other-iec104"},
+		{"malformed without decoded IOA falls through", "request", IEC104Context{APCIType: "I", TypeID: u8(46), CA: u16(1), Class: "control"}, ActionDeny, "deny-other-iec104"},
+		{"malformed is never safe-read", "request", IEC104Context{APCIType: "S", Class: "system"}, ActionDeny, "deny-other-iec104"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,7 +149,7 @@ func TestMonitorClassAndGIEnforcePolicy(t *testing.T) {
 		}
 	}
 	unknown := IEC104Context{
-		APCIType: "I", TypeID: u8(104), CA: u16(1), Class: "unknown", Unsupported: true,
+		APCIType: "I", TypeID: u8(104), CA: u16(1), Class: "unknown",
 	}
 	if action, entry := evaluator.EvaluateIEC104(sessionCtx("response", unknown)); action != ActionDeny || entry == nil || entry.ID != "deny-other" {
 		t.Errorf("unsupported type = %s by %v, want deny-other DENY", action, entry)
@@ -194,7 +195,7 @@ func TestEvaluateIEC104Predicates(t *testing.T) {
 		{"type 30 matches monitor class", ICSPredicate{Classes: []string{"monitor"}, ReadOnly: true}, iFrame(30, "monitor", 1, 1002, true), true},
 		{"readOnly needs SafeRead", ICSPredicate{ReadOnly: true}, iFrame(101, "system", 1, 0, false), false},
 		{"readOnly false is no constraint", ICSPredicate{}, iFrame(46, "control", 1, 1, false), true},
-		{"unsupported type by class", ICSPredicate{Classes: []string{"unknown"}}, IEC104Context{APCIType: "I", TypeID: u8(104), CA: u16(1), Class: "unknown", Unsupported: true}, true},
+		{"unsupported type by class", ICSPredicate{Classes: []string{"unknown"}}, IEC104Context{APCIType: "I", TypeID: u8(104), CA: u16(1), Class: "unknown"}, true},
 		{"out-of-range type id never matches", ICSPredicate{TypeIDs: []int{300}}, iFrame(44, "unknown", 1, 1, false), false},
 		{"writeOnly is invalid for iec104", ICSPredicate{WriteOnly: true}, iFrame(46, "control", 1, 1, false), false},
 		{"generic fields are invalid for iec104", ICSPredicate{FunctionCode: []uint8{46}}, iFrame(46, "control", 1, 1, false), false},

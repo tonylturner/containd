@@ -77,7 +77,7 @@ func TestICSAddressSpanSemantics(t *testing.T) {
 func TestEvaluatorRangeCrossingRead(t *testing.T) {
 	unit := uint8(1)
 	read := func(first, last uint32) EvalContext {
-		return EvalContext{ICS: &ICSContext{Protocol: "modbus", FunctionCode: 3, UnitID: &unit, Direction: "request",
+		return EvalContext{ICS: &ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: 3, UnitID: &unit, Direction: "request",
 			Spans: []AddressSpan{span(first, last)}}}
 	}
 	allow := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{{
@@ -99,7 +99,7 @@ func TestEvaluatorRangeCrossingRead(t *testing.T) {
 	if got := deny.Evaluate(read(90, 99)); got != ActionAllow {
 		t.Fatalf("read below the denied range = %s, want ALLOW", got)
 	}
-	unknown := EvalContext{ICS: &ICSContext{Protocol: "modbus", FunctionCode: 0x41, SpansUnknown: true}}
+	unknown := EvalContext{ICS: &ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: 0x41, SpansUnknown: true}}
 	if got := deny.Evaluate(unknown); got != ActionDeny {
 		t.Fatalf("undecodable request = %s, want DENY", got)
 	}

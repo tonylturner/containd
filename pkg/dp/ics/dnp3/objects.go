@@ -7,11 +7,12 @@ import "encoding/binary"
 
 // ObjectHeader represents a parsed DNP3 object group header.
 type ObjectHeader struct {
-	Group     uint8
-	Variation uint8
-	Qualifier uint8
-	Count     uint32 // objects named by the range field; 0 when it names none or is invalid
-	Size      int    // bytes of the header itself (group, variation, qualifier, range)
+	hasQualifier, hasCount bool
+	Group                  uint8
+	Variation              uint8
+	Qualifier              uint8
+	Count                  uint32 // objects named by the range field; 0 when it names none or is invalid
+	Size                   int    // bytes of the header itself (group, variation, qualifier, range)
 }
 
 // Qualifier fields (IEEE 1815-2012 application layer object header): bits
@@ -42,33 +43,59 @@ const (
 // reserved code, or truncated data) instead of reading values as headers; that
 // header is still returned because its group is known.
 func ParseObjectHeaders(data []byte, offset int, fc uint8) []ObjectHeader {
-	if offset < 0 || offset >= len(data) {
-		return nil
+	headers, _ := parseObjectHeaders(data, offset, fc)
+	return headers
+}
+
+// A stop distinguishes exhausted segment bytes from content we cannot size or
+// accept. Only exhaustion can be normal at a non-final transport boundary.
+type objectWalkStop uint8
+
+const (
+	walkComplete objectWalkStop = iota
+	walkTruncated
+	walkInvalid
+)
+
+func parseObjectHeaders(data []byte, offset int, fc uint8) ([]ObjectHeader, objectWalkStop) {
+	if offset < 0 || offset > len(data) {
+		return nil, walkInvalid
+	}
+	if offset == len(data) {
+		return nil, walkComplete
 	}
 	headers := make([]ObjectHeader, 0, 4)
 	pos := offset
-	for pos+3 <= len(data) {
-		oh := ObjectHeader{Group: data[pos], Variation: data[pos+1], Qualifier: data[pos+2]}
-		rangeLen, count, valid, ok := readRange(data[pos+3:], oh.Qualifier&0x0F)
-		if !ok {
-			return headers // range field truncated
+	for pos < len(data) {
+		oh := ObjectHeader{Group: data[pos]}
+		if len(data)-pos < 3 {
+			return append(headers, oh), walkTruncated
 		}
+		oh.Variation, oh.Qualifier, oh.hasQualifier = data[pos+1], data[pos+2], true
+		rangeLen, count, valid, ok := readRange(data[pos+3:], oh.Qualifier&0x0F)
 		oh.Size = 3 + rangeLen
-		if valid {
+		oh.hasCount = ok && valid
+		if oh.hasCount {
 			oh.Count = count
 		}
 		headers = append(headers, oh)
+		if oh.Qualifier&0x80 != 0 || (oh.Qualifier>>4)&7 == 7 {
+			return headers, walkInvalid
+		}
+		if !ok {
+			return headers, walkTruncated
+		}
 		if !valid {
-			return headers // reserved range code or stop < start: objects cannot be located
+			return headers, walkInvalid
 		}
 		pos += oh.Size
-		n, ok := objectsLen(data[pos:], oh, fc)
-		if !ok {
-			return headers
+		n, stop := objectsLen(data[pos:], oh, fc)
+		if stop != walkComplete {
+			return headers, stop
 		}
 		pos += n
 	}
-	return headers
+	return headers, walkComplete
 }
 
 // readRange decodes the range field for range code rc. It returns the field
@@ -123,16 +150,16 @@ func readUint(b []byte) uint32 {
 }
 
 // objectsLen returns the bytes that oh's objects occupy at the start of b.
-func objectsLen(b []byte, oh ObjectHeader, fc uint8) (int, bool) {
+func objectsLen(b []byte, oh ObjectHeader, fc uint8) (int, objectWalkStop) {
 	if oh.Qualifier&0x0F == rangeNone || oh.Count == 0 {
-		return 0, true
+		return 0, walkComplete
 	}
 	prefix := int(oh.Qualifier>>4) & 0x07
 	switch {
 	case prefix >= prefixSize1 && prefix <= prefixSize1+2:
 		return sizePrefixedLen(b, oh.Count, 1<<(prefix-prefixSize1))
 	case prefix > prefixSize1+2:
-		return 0, false // reserved prefix code
+		return 0, walkInvalid // reserved prefix code
 	}
 	indexLen := 0
 	if prefix != prefixNone {
@@ -145,40 +172,40 @@ func objectsLen(b []byte, oh ObjectHeader, fc uint8) (int, bool) {
 	key := uint16(oh.Group)<<8 | uint16(oh.Variation)
 	if bits, ok := packedObjectBits[key]; ok {
 		if prefix != prefixNone {
-			return 0, false
+			return 0, walkInvalid
 		}
 		return fit(b, (count*uint64(bits)+7)/8)
 	}
 	size, ok := fixedObjectSize[key]
 	if !ok {
-		return 0, false
+		return 0, walkInvalid
 	}
 	return fit(b, count*uint64(indexLen+size))
 }
 
 // sizePrefixedLen walks count objects that each start with a width-octet
 // object size (free-format objects such as group 70).
-func sizePrefixedLen(b []byte, count uint32, width int) (int, bool) {
+func sizePrefixedLen(b []byte, count uint32, width int) (int, objectWalkStop) {
 	pos := 0
 	for i := uint32(0); i < count; i++ {
 		if len(b)-pos < width {
-			return 0, false
+			return 0, walkTruncated
 		}
 		size := uint64(readUint(b[pos : pos+width]))
 		pos += width
 		if size > uint64(len(b)-pos) {
-			return 0, false
+			return 0, walkTruncated
 		}
 		pos += int(size)
 	}
-	return pos, true
+	return pos, walkComplete
 }
 
-func fit(b []byte, n uint64) (int, bool) {
+func fit(b []byte, n uint64) (int, objectWalkStop) {
 	if n > uint64(len(b)) {
-		return 0, false
+		return 0, walkTruncated
 	}
-	return int(n), true
+	return int(n), walkComplete
 }
 
 // headerOnlyFunction reports request function codes whose object headers

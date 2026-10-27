@@ -19,7 +19,7 @@ import (
 type fixture struct {
 	name  string
 	dir   dpi.StreamDir
-	kinds []string // nil for frame_error
+	kinds []string // nil for frame_error (a lost frame boundary)
 	bytes []byte
 }
 

@@ -57,7 +57,9 @@ type Engine struct {
 	eventStore            *events.Store
 	rulesetStatus         atomic.Pointer[RulesetStatus]
 	inspectAll            bool
-	dpiEnabled            bool              // master DPI on/off
+	dpiEnabled            bool // master DPI on/off
+	icsParsing            atomic.Pointer[map[string]string]
+	conformance           conformanceAlerts
 	dpiMode               string            // "learn" or "enforce"
 	dpiExclusions         []DPIExclusion    // IPs/domains excluded from DPI
 	exclusionHits         *exclusionHits    // flows each exclusion exempted since the last apply
@@ -136,11 +138,12 @@ type Config struct {
 	OnError         func(error)
 	Enforce         EnforceConfig
 	InspectAll      bool
-	DPIEnabled      bool            // master DPI toggle
-	DPIMode         string          // "learn" or "enforce"
-	DPIProtocols    map[string]bool // per-IT-protocol enable/disable
-	DPIICSProtocols map[string]bool // per-ICS-protocol enable/disable
-	DPIExclusions   []DPIExclusion  // IPs/domains excluded from DPI
+	DPIEnabled      bool              // master DPI toggle
+	DPIMode         string            // "learn" or "enforce"
+	DPIProtocols    map[string]bool   // per-IT-protocol enable/disable
+	DPIICSProtocols map[string]bool   // per-ICS-protocol enable/disable
+	DPIICSParsing   map[string]string // per-ICS-protocol tolerant/strict policy
+	DPIExclusions   []DPIExclusion    // IPs/domains excluded from DPI
 	// NFLogGroup, when non-zero, enables kernel-side logging for rules
 	// with Log:true via nftables `log group <N>` and starts a userspace
 	// nflog consumer that translates each logged packet into a
@@ -214,6 +217,7 @@ func New(cfg Config) (*Engine, error) {
 		verdictCache:          NewVerdictCache(30*time.Second, 65536),
 		hooks:                 hooks,
 	}
+	e.SetICSParsing(cfg.DPIICSParsing)
 	e.inventory = inventory.New()
 	e.anomalyDetector = anomaly.New()
 	e.learner = learn.New()
@@ -326,6 +330,8 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.inspectAll = fresh.inspectAll
 	e.dpiEnabled = fresh.dpiEnabled
 	e.dpiMode = fresh.dpiMode
+	e.icsParsing.Store(fresh.icsParsing.Load())
+	e.conformance.clear()
 	e.dpiExclusions = fresh.dpiExclusions
 	e.exclusionHits = fresh.exclusionHits
 	e.coverage = fresh.coverage

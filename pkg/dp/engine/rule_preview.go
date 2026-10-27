@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -66,6 +67,7 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 		result.ICSCoverage = &cov[0]
 	}
 	evaluator := rules.NewEvaluator(candidate)
+	parsing := e.ICSParsing(iecProtocol)
 	for _, ev := range evs {
 		if result.TimeRange == nil {
 			result.TimeRange = &PreviewTimeRange{Start: ev.Timestamp, End: ev.Timestamp}
@@ -77,7 +79,7 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 				result.TimeRange.End = ev.Timestamp
 			}
 		}
-		ctx, ok := previewEventContext(snap, entry, ev, resolve)
+		ctx, ok := previewEventContext(snap, entry, ev, resolve, parsing)
 		if !ok {
 			continue
 		}
@@ -109,14 +111,19 @@ func (e *Engine) enforcedQueueID() int {
 	return e.compiler.QueueID
 }
 
-func previewEventContext(snap *rules.Snapshot, entry rules.Entry, ev events.Event, resolve zoneResolver) (rules.EvalContext, bool) {
+// previewEventContext builds the context a candidate would be evaluated
+// with for one retained event. parsing is the IEC104 parsing mode the live
+// verdict uses: under strict, an event with findings is denied before any
+// ALLOW, so an ALLOW candidate cannot match it.
+func previewEventContext(snap *rules.Snapshot, entry rules.Entry, ev events.Event, resolve zoneResolver, parsing ics.Parsing) (rules.EvalContext, bool) {
 	decoded := dpi.Event{FlowID: ev.FlowID, Proto: ev.Proto, Kind: ev.Kind, Attributes: ev.Attributes, Timestamp: ev.Timestamp}
 	src, dst := net.ParseIP(ev.SrcIP), net.ParseIP(ev.DstIP)
 	if src == nil || dst == nil {
 		return rules.EvalContext{}, false
 	}
 	if entry.ICS.Protocol == rules.ProtocolIEC104 {
-		if ev.Proto != iecProtocol || ev.Transport != "tcp" || !iecWireEvent(ev.Kind) || iecEventDenialReason(decoded) != "" {
+		if ev.Proto != iecProtocol || ev.Transport != "tcp" || !iecWireEvent(ev.Kind) || iecEventDenialReason(decoded) != "" ||
+			entry.Action == rules.ActionAllow && iecStrictPreempts(decoded, parsing) {
 			return rules.EvalContext{}, false
 		}
 		from, okFrom := addrPort(src, ev.SrcPort)

@@ -25,6 +25,7 @@ import (
 type dataPlane interface {
 	ManagementReservation() *mgmtpath.Reservation
 	Events() *events.Store
+	SetICSParsing(map[string]string)
 	Reconfigure(fresh *engine.Engine) error
 	StartWithRetry(ctx context.Context) error
 }
@@ -47,7 +48,8 @@ func (a *appliedConfig) get() config.DataPlaneConfig {
 // configHandler applies a data-plane configuration. A configuration equal to
 // the applied one does not rebuild the engine: its events, inventory,
 // sessions and NFQUEUE binding survive, and the DPI mock simulation keeps
-// running. It still asks the engine to start, which is a no-op while it runs
+// running. Parsing-only changes atomically update policy without retiring
+// sessions. It still asks the engine to start, which is a no-op while it runs
 // and retries the queue bind after an earlier attempt gave up. A changed
 // configuration rebuilds the engine as before. A rebuild that cannot take
 // effect (the nft tables of a disabled enforcement cannot be removed) fails
@@ -84,8 +86,17 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 			defer post.Unlock()
 			current.mu.Lock()
 			unchanged := current.applied && sameDataPlane(current.dp, next)
+			previous := current.dp
+			previous.DPIICSParsing = next.DPIICSParsing
+			parsingOnly := current.applied && sameDataPlane(previous, next)
 			current.mu.Unlock()
-			if !unchanged {
+			if !unchanged && parsingOnly {
+				dp.SetICSParsing(next.DPIICSParsing)
+				current.mu.Lock()
+				current.dp = next
+				current.mu.Unlock()
+			}
+			if !unchanged && !parsingOnly {
 				fresh, err := newEngineFor(logger, next, store, dp.ManagementReservation())
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusBadRequest)
@@ -144,6 +155,7 @@ func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *e
 		DPIMode:         dp.DPIMode,
 		DPIProtocols:    dp.DPIProtocols,
 		DPIICSProtocols: dp.DPIICSProtocols,
+		DPIICSParsing:   dp.DPIICSParsing,
 		DPIExclusions:   excl,
 		NFLogGroup:      settings.NFLogGroup,
 		NFQueueGroup:    settings.NFQueueGroup,

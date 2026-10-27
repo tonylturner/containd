@@ -7,11 +7,12 @@ import "testing"
 
 func TestDecoderPorts(t *testing.T) {
 	ports := DecoderPorts()
-	if len(ports) != 5 {
+	if len(ports) != 6 {
 		t.Fatalf("ports = %v", ports)
 	}
 	for i := 1; i < len(ports); i++ {
-		if ports[i-1].Port >= ports[i].Port {
+		prev, cur := ports[i-1], ports[i]
+		if prev.Port > cur.Port || prev.Port == cur.Port && prev.Transport >= cur.Transport {
 			t.Fatalf("ports not ascending: %v", ports)
 		}
 	}
@@ -44,7 +45,7 @@ func TestDecoderPortOn(t *testing.T) {
 	for _, c := range []struct {
 		transport uint8
 		port      uint16
-	}{{UDP, 502}, {UDP, 20000}, {UDP, 44818}, {UDP, 2404}, {TCP, 2222}, {1, 502}, {TCP, 80}, {UDP, 53}} {
+	}{{UDP, 502}, {UDP, 20000}, {UDP, 2404}, {TCP, 2222}, {1, 502}, {TCP, 80}, {UDP, 53}} {
 		if IsDecoderPortOn(c.transport, c.port) {
 			t.Errorf("%d/%d reported as a decoder port", c.transport, c.port)
 		}

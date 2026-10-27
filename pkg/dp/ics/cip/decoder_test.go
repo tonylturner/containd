@@ -112,8 +112,7 @@ func TestParseCIPMessageFromSendRRData(t *testing.T) {
 
 func TestParseCIPMessageResponse(t *testing.T) {
 	// Response has bit 0x80 set: 0x4C | 0x80 = 0xCC
-	path := []byte{0x20, 0x02}
-	payload := buildSendRRDataPayload(0xCC, 1, path)
+	payload := buildCPFItems(cpfTestItem{0x00b2, []byte{0xcc, 0, 0, 0}})
 
 	cipMsg, err := ParseCIPMessage(payload)
 	if err != nil {

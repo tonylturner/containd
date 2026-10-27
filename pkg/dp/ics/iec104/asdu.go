@@ -5,7 +5,6 @@ package iec104
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 
@@ -68,21 +67,15 @@ func (h asduHeader) attrs(a map[string]any) {
 	a[eventfields.KeyCA] = h.ca
 }
 
-// profileError marks a decoder profile restriction: the standard allows it,
-// but containd rejects it.
-func profileError(format string, args ...any) error {
-	return fmt.Errorf("profile: "+format, args...)
-}
-
 // checkProfile applies the B SQ/count restrictions: SQ=1 is accepted for
 // monitor descriptors that mark it valid; control and system types need SQ=0
 // and one object.
 func checkProfile(h asduHeader, d descriptor) error {
 	switch {
 	case d.single && (h.sq || h.count != 1):
-		return profileError("type %d needs SQ=0 and one object, got SQ=%d with %d", h.typeID, b2i(h.sq), h.count)
+		return profileError(FindingProfileSQ, "type %d needs SQ=0 and one object, got SQ=%d with %d", h.typeID, b2i(h.sq), h.count)
 	case h.sq && !d.sqOK:
-		return profileError("SQ=1 is not accepted for type %d", h.typeID)
+		return profileError(FindingProfileSQ, "SQ=1 is not accepted for type %d", h.typeID)
 	}
 	return nil
 }
@@ -101,10 +94,10 @@ func checkRole(h asduHeader, direction string) error {
 	class := ClassOf(h.typeID)
 	switch {
 	case direction == DirectionRequest && monitorDirectionType(h.typeID):
-		return profileError("client sent monitor-direction type %d", h.typeID)
+		return profileError(FindingRole, "client sent monitor-direction type %d", h.typeID)
 	case direction == DirectionResponse && (class == ClassControl || class == ClassSystem) &&
 		(h.cause == causeActivation || h.cause == causeDeactivation):
-		return profileError("server sent %s type %d with cause %d", class, h.typeID, h.cause)
+		return profileError(FindingRole, "server sent %s type %d with cause %d", class, h.typeID, h.cause)
 	}
 	return nil
 }
@@ -119,7 +112,7 @@ func decodeObjects(h asduHeader, d descriptor, body []byte) ([]map[string]any, e
 		want = ioaLen + int(h.count)*size
 	}
 	if len(body) != want {
-		return nil, fmt.Errorf("ASDU body is %d octets, want %d for %d objects of type %d", len(body), want, h.count, h.typeID)
+		return nil, findingError(FindingBodyLength, "ASDU body is %d octets, want %d for %d objects of type %d", len(body), want, h.count, h.typeID)
 	}
 	objects := make([]map[string]any, 0, h.count)
 	var base uint32
@@ -133,7 +126,7 @@ func decodeObjects(h asduHeader, d descriptor, body []byte) ([]map[string]any, e
 		case i == 0:
 			base = readIOA(body)
 			if uint64(base)+uint64(h.count)-1 > maxIOA {
-				return nil, fmt.Errorf("SQ=1 IOA range %d+%d overflows 24 bits", base, h.count)
+				return nil, findingError(FindingIOARange, "SQ=1 IOA range %d+%d overflows 24 bits", base, h.count)
 			}
 			pos += ioaLen
 			ioa = base
@@ -145,7 +138,7 @@ func decodeObjects(h asduHeader, d descriptor, body []byte) ([]map[string]any, e
 			eventfields.KeyObjectIndex: uint8(i),
 		}
 		if err := decodeElement(d, body[pos:pos+size], obj); err != nil {
-			return nil, fmt.Errorf("object %d (IOA %d): %w", i, ioa, err)
+			return nil, &conformanceError{code: err.code, msg: fmt.Sprintf("object %d (IOA %d): %s", i, ioa, err.msg)}
 		}
 		pos += size
 		objects = append(objects, obj)
@@ -159,7 +152,7 @@ func readIOA(b []byte) uint32 {
 
 // decodeElement decodes one information element (and its CP56Time2a for
 // timed types) into obj. Element layouts are IEC 60870-5-101 7.2.6.
-func decodeElement(d descriptor, b []byte, obj map[string]any) error {
+func decodeElement(d descriptor, b []byte, obj map[string]any) *conformanceError {
 	n := elementSize[d.elem]
 	if err := decodeValue(d.elem, b[:n], obj); err != nil {
 		return err
@@ -170,7 +163,17 @@ func decodeElement(d descriptor, b []byte, obj map[string]any) error {
 	return nil
 }
 
-func decodeValue(kind elementKind, b []byte, obj map[string]any) error {
+// elementError is a FindingElement error.
+func elementError(format string, args ...any) *conformanceError {
+	return &conformanceError{code: FindingElement, msg: fmt.Sprintf(format, args...)}
+}
+
+// timeError is a FindingTime error.
+func timeError(format string, args ...any) *conformanceError {
+	return &conformanceError{code: FindingTime, msg: fmt.Sprintf(format, args...)}
+}
+
+func decodeValue(kind elementKind, b []byte, obj map[string]any) *conformanceError {
 	switch kind {
 	case elemSIQ: // SIQ: SPI bit 0, quality (BL, SB, NT, IV) bits 4-7
 		obj[eventfields.KeyValue] = b[0] & 0x01
@@ -204,13 +207,13 @@ func decodeValue(kind elementKind, b []byte, obj map[string]any) error {
 		obj[eventfields.KeyQuality] = b[4]
 	case elemSCO: // SCS bit 0, bit 1 reserved 0, QU bits 2-6, S/E bit 7
 		if b[0]&0x02 != 0 {
-			return errors.New("SCO reserved bit 1 set")
+			return elementError("SCO reserved bit 1 set")
 		}
 		commandQualifier(b[0], b[0]&0x01, obj)
 	case elemDCO, elemRCO: // DCS/RCS bits 0-1 (1 or 2), QU bits 2-6, S/E bit 7
 		state := b[0] & 0x03
 		if state == 0 || state == 3 {
-			return fmt.Errorf("command state %d is not a command (only 1 and 2)", state)
+			return elementError("command state %d is not a command (only 1 and 2)", state)
 		}
 		commandQualifier(b[0], state, obj)
 	case elemNVAQOS, elemSVAQOS: // NVA or SVA (int16) + QOS
@@ -263,7 +266,7 @@ func shortFloat(b []byte, obj map[string]any) {
 // is 2000 + the year field (the decoder's century assumption), and a field of 100..127
 // or any date that cannot exist is malformed. source_time is ISO 8601
 // without a zone; the profile, not the decoder, says the RTU runs UTC.
-func decodeCP56(b []byte, obj map[string]any) error {
+func decodeCP56(b []byte, obj map[string]any) *conformanceError {
 	ms := int(binary.LittleEndian.Uint16(b[0:2]))
 	minute := int(b[2] & 0x3F)
 	hour := int(b[3] & 0x1F)
@@ -272,17 +275,17 @@ func decodeCP56(b []byte, obj map[string]any) error {
 	year := int(b[6] & 0x7F)
 	switch {
 	case ms > 59999:
-		return fmt.Errorf("CP56Time2a milliseconds %d above 59999", ms)
+		return timeError("CP56Time2a milliseconds %d above 59999", ms)
 	case minute > 59:
-		return fmt.Errorf("CP56Time2a minute %d", minute)
+		return timeError("CP56Time2a minute %d", minute)
 	case hour > 23:
-		return fmt.Errorf("CP56Time2a hour %d", hour)
+		return timeError("CP56Time2a hour %d", hour)
 	case year > 99:
-		return fmt.Errorf("CP56Time2a year field %d above 99", year)
+		return timeError("CP56Time2a year field %d above 99", year)
 	case month < 1 || month > 12:
-		return fmt.Errorf("CP56Time2a month %d", month)
+		return timeError("CP56Time2a month %d", month)
 	case day < 1 || day > daysIn(month, 2000+year):
-		return fmt.Errorf("CP56Time2a day %d in %04d-%02d", day, 2000+year, month)
+		return timeError("CP56Time2a day %d in %04d-%02d", day, 2000+year, month)
 	}
 	obj[eventfields.KeySourceTime] = fmt.Sprintf("%04d-%02d-%02dT%02d:%02d:%02d.%03d",
 		2000+year, month, day, hour, minute, ms/1000, ms%1000)
