@@ -76,6 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   object-class predicate. Modbus, DNP3 and CIP decoders now report conformance
   findings, and EtherNet/IP UDP 2222 is decoded as implicit I/O while
   encapsulated UDP is decoded on 44818.
+- IEC 104 `ics.decision` events no longer use the reasons `role` and
+  `unsupported`: decoded content carries `conformance` codes instead, and a
+  strict rejection uses reason `nonconformant`. `malformed` now means only
+  unframeable bytes or a stream fault.
 
 - `MODBUS-WRITE-COIL-ALL` now matches only FC 15 requests, not quantity echoes
   in replies. `ICS-WRITE-STORM` now alerts on 20 initiator write commands per
