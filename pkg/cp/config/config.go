@@ -869,13 +869,12 @@ type IOARange struct {
 
 type AVConfig struct {
 	Enabled      bool          `json:"enabled"`
-	Mode         string        `json:"mode,omitempty"`            // icap|clamav
-	FailPolicy   string        `json:"failPolicy,omitempty"`      // open|closed
-	FailOpenICS  bool          `json:"failOpenIcs,omitempty"`     // force fail-open for ICS protocols
-	BlockTTL     int           `json:"blockTtlSeconds,omitempty"` // seconds to keep dynamic blocks on malware
-	MaxSizeBytes int64         `json:"maxSizeBytes,omitempty"`    // 0 = unlimited
-	TimeoutSec   int           `json:"timeoutSec,omitempty"`      // ICAP scan timeout
-	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`        // verdict cache TTL
+	Mode         string        `json:"mode,omitempty"`         // icap|clamav
+	FailPolicy   string        `json:"failPolicy,omitempty"`   // open|closed
+	FailOpenICS  bool          `json:"failOpenIcs,omitempty"`  // force fail-open for ICS protocols
+	MaxSizeBytes int64         `json:"maxSizeBytes,omitempty"` // 0 = unlimited
+	TimeoutSec   int           `json:"timeoutSec,omitempty"`   // ICAP scan timeout
+	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`     // verdict cache TTL
 	ICAP         ICAPConfig    `json:"icap,omitempty"`
 	ClamAV       ClamAVConfig  `json:"clamav,omitempty"`
 	HTTPDownload bool          `json:"httpDownload,omitempty"` // scan HTTP responses
