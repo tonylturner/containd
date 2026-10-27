@@ -11,8 +11,8 @@ import (
 
 // readResponse runs on its own goroutine for the lifetime of one upstream
 // exchange: it relays interim responses, then holds or streams the final
-// one. Closing stop tells the request sender that a final response
-// arrived before the request body was done.
+// one. The sender is stopped once the final head is in; whether that
+// truncated the request is the sender's finding, not this side's.
 func (tx *transaction) readResponse(u *upstream, stop chan struct{}) respResult {
 	c := tx.c
 	interim := 0
@@ -49,18 +49,8 @@ func (tx *transaction) readResponse(u *upstream, stop chan struct{}) respResult 
 			}
 			continue
 		}
-		early := !tx.sendDone.Load()
-		if early {
-			close(stop)
-			c.client.bound(drainWindow)
-		}
-		persist := tx.deliverResponse(u, h)
-		if early {
-			u.close()
-			c.client.closeWrite()
-			persist = false
-		}
-		return respResult{persist: persist}
+		tx.stopSend(u, stop)
+		return respResult{persist: tx.deliverResponse(u, h)}
 	}
 }
 
@@ -76,10 +66,7 @@ func (tx *transaction) unsupportedResponse(u *upstream, h *head, raw []byte, det
 	}
 	tx.emit(avscan.Download, res, action, 0, nil, false, status)
 	if action == avscan.Block {
-		if !tx.sendDone.Load() {
-			close(stop)
-			c.client.bound(drainWindow)
-		}
+		tx.stopSend(u, stop)
 		_, _ = c.client.Write(refusal(502, "Bad Gateway", "containd: unsupported HTTP response: "+detail, tx.headOnly()))
 		return respResult{}
 	}
@@ -118,9 +105,16 @@ func (tx *transaction) deliverResponse(u *upstream, h *head) bool {
 	outcome, excess, detail := tx.receive(sp, body.rest, u.peer)
 	switch outcome {
 	case fillComplete:
-		var watch *peer
-		if tx.sendDone.Load() {
-			watch = c.client
+		// The watcher reads the client socket: a sender still streaming
+		// the request body from it must have returned first, and one that
+		// did not finish the body left the client mid-request, whose
+		// bytes are no pipelined request and would overflow the watch.
+		watch := c.client
+		if tx.streaming {
+			<-tx.sendDone
+			if tx.sendErr != nil {
+				watch = nil
+			}
 		}
 		res, aborted := tx.scan(tx.object(avscan.Download, sp, h.raw), watch)
 		if aborted {
