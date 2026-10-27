@@ -86,7 +86,7 @@ func (t icapTarget) uri() string {
 
 func (c *ICAPClient) timeout() time.Duration {
 	if c.Timeout <= 0 {
-		return defaultAVTimeout
+		return DefaultAVTimeout
 	}
 	return c.Timeout
 }

@@ -334,27 +334,16 @@ func (g *gateManager) syncAdmit() {
 	st := g.statusLocked()
 	g.mu.Unlock()
 	if err != nil {
-		g.logger.Errorf("scanning gate admission %s: %v", gateAdmitName(want), err)
+		g.logger.Errorf("scanning gate admission %s: %v", want, err)
 	} else {
-		g.logger.Infof("scanning gate admission %s (state %s)", gateAdmitName(want), st.State)
+		g.logger.Infof("scanning gate admission %s (state %s)", want, st.State)
 	}
 	if g.events != nil {
-		attrs := map[string]any{"state": st.State, "admit": gateAdmitName(want), "fail_policy": st.FailPolicy}
+		attrs := map[string]any{"state": st.State, "admit": want.String(), "fail_policy": st.FailPolicy}
 		if err != nil {
 			attrs["error"] = err.Error()
 		}
 		g.events.Append(events.Event{Proto: "av", Kind: gateEventState, Timestamp: time.Now().UTC(), Attributes: attrs})
-	}
-}
-
-func gateAdmitName(s enforce.GateAdmitState) string {
-	switch s {
-	case enforce.GateAdmitOpen:
-		return "open"
-	case enforce.GateAdmitPass:
-		return "pass"
-	default:
-		return "refuse"
 	}
 }
 
@@ -390,7 +379,7 @@ type gateScannerStatus struct {
 
 func (g *gateManager) status() gateStatus {
 	if g == nil {
-		return gateStatus{State: "off", Admit: gateAdmitName(enforce.GateAdmitRefuse), Listeners: []gateListenerStatus{}}
+		return gateStatus{State: "off", Admit: enforce.GateAdmitRefuse.String(), Listeners: []gateListenerStatus{}}
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -401,7 +390,7 @@ func (g *gateManager) statusLocked() gateStatus {
 	st := gateStatus{
 		Enabled:      g.gate.Enabled,
 		FailPolicy:   string(g.settings.FailPolicy),
-		Admit:        gateAdmitName(g.applied),
+		Admit:        g.applied.String(),
 		AdmitError:   g.admitErr,
 		Listeners:    []gateListenerStatus{},
 		Connections:  g.registry.count(),
@@ -416,7 +405,7 @@ func (g *gateManager) statusLocked() gateStatus {
 	case g.server == nil:
 		st.State = "off"
 	case !g.routingOK || !g.listenersUpLocked():
-		st.State = gateAdmitName(g.desiredAdmitLocked())
+		st.State = g.desiredAdmitLocked().String()
 	case !st.Scanner.Ready:
 		st.State = "pending"
 	default:

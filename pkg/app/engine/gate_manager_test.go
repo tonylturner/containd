@@ -58,7 +58,7 @@ func (a *gateTestAdmitter) await(t *testing.T, want enforce.GateAdmitState) {
 				return
 			}
 		case <-deadline:
-			t.Fatalf("admission %s not applied", gateAdmitName(want))
+			t.Fatalf("admission %s not applied", want)
 		}
 	}
 }
@@ -213,7 +213,7 @@ func TestGateManagerAdmissionFollowsListenersAndPolicy(t *testing.T) {
 	g.setEnforcing(true) // idempotent
 	select {
 	case s := <-env.admit.states:
-		t.Fatalf("second start switched admission to %s", gateAdmitName(s))
+		t.Fatalf("second start switched admission to %s", s)
 	case <-time.After(50 * time.Millisecond):
 	}
 

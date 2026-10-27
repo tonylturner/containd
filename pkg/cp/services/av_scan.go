@@ -185,7 +185,7 @@ func avTimeout(cfg config.AVConfig) time.Duration {
 	if cfg.TimeoutSec > 0 {
 		return time.Duration(cfg.TimeoutSec) * time.Second
 	}
-	return defaultAVTimeout
+	return DefaultAVTimeout
 }
 
 func avCacheTTL(cfg config.AVConfig) time.Duration {

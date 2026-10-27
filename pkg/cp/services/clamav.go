@@ -51,7 +51,7 @@ func (c *ClamAVClient) dial(ctx context.Context) (net.Conn, error) {
 	}
 	timeout := c.Timeout
 	if timeout <= 0 {
-		timeout = defaultAVTimeout
+		timeout = DefaultAVTimeout
 	}
 	dialer := net.Dialer{Timeout: timeout}
 	conn, err := dialer.DialContext(ctx, "unix", c.Socket)
