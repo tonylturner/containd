@@ -106,10 +106,10 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 		if pkt.Proto != 17 {
 			e.verdictCache.Put(flowHash, v)
 		}
-		e.closeDeniedTCP(pkt, state, evalCtx.ICS.Protocol, reasonDPIDeny)
 		if scope != nil {
 			e.dpiMgr.FailStream(state, &parsed, dpi.StreamDenied)
 		}
+		e.closeDeniedTCP(pkt, state, evalCtx.ICS.Protocol, reasonDPIDeny)
 		return capture.Decision{Action: capture.Drop, Reason: reasonDPIDeny}
 	}
 	if scope != nil && deniedStream(res.Err) {

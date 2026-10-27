@@ -4,28 +4,45 @@
 package engine
 
 import (
+	"container/list"
 	"hash/fnv"
 	"sync"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 // deniedTCP is a tuple tombstone, independent of verdict/reassembly cache
-// expiry. Only a kernel-marked new handshake retires it. The reset job and
-// retirement serialize per tuple so a delayed job cannot delete a reconnect's
-// conntrack entry. Reset I/O never holds the global flow lock.
+// expiry. Expiry, capacity eviction or a kernel-marked new handshake retires it.
+// Reset jobs and retirement serialize per tuple so a delayed job cannot delete
+// a reconnect's conntrack entry. Reset I/O never holds the global flow lock.
 type deniedTCP struct {
 	mu      sync.Mutex
 	retired bool
 	isn     uint32
 	hasISN  bool
+	key     flow.Key
+	tuple   string
+	expires time.Time
+	order   *list.Element
 }
 
 func (e *Engine) isDeniedTCP(state *flow.State) bool {
-	e.flowMu.Lock()
-	defer e.flowMu.Unlock()
-	return e.deniedTCP[tcpTupleHash(state.Key)] != nil
+	for {
+		e.flowMu.Lock()
+		d := e.deniedTCP[tcpTupleHash(state.Key)]
+		e.flowMu.Unlock()
+		if d == nil {
+			return false
+		}
+		if e.deniedTCPNow().Before(d.expires) {
+			return true
+		}
+		// Enforce the lifetime even between the periodic flow sweeps.
+		e.retireDeniedTCP(d, false)
+	}
 }
 
 func (e *Engine) closeDeniedTCP(pkt capture.Packet, state *flow.State, proto, reason string) {
@@ -33,23 +50,17 @@ func (e *Engine) closeDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 		return
 	}
 	e.flowMu.Lock()
-	if e.deniedTCP == nil {
-		e.deniedTCP = make(map[string]*deniedTCP)
-	}
-	key := tcpTupleHash(state.Key)
-	if e.deniedTCP[key] != nil {
-		e.flowMu.Unlock()
-		return
-	}
-	openerKey := state.Key
-	if openerKey.Dir == flow.DirReverse {
-		openerKey = openerKey.Reversed()
-	}
-	isn, hasISN := e.tcpISNs[openerKey.Hash()]
-	d := &deniedTCP{isn: isn, hasISN: hasISN}
-	e.deniedTCP[key] = d
+	rev := e.flows[state.Key.Reversed().Hash()]
 	e.flowMu.Unlock()
-	e.resetDeniedTCP(pkt, state, proto, reason, d)
+	if rev != nil {
+		e.dpiMgr.FailStream(rev, &dpi.ParsedPacket{Proto: "tcp", FailClosed: true}, dpi.StreamDenied)
+	}
+	// Publish the guard only after both streams and the verdict cache have
+	// failed. An immediate capacity eviction must clear all of that state;
+	// nothing may recreate it after the guard has been retired.
+	if d := e.rememberDeniedTCP(state.Key); d != nil {
+		e.resetDeniedTCP(pkt, state, proto, reason, d)
+	}
 }
 
 func (e *Engine) reopenDeniedTCP(pkt capture.Packet) {
@@ -63,38 +74,16 @@ func (e *Engine) reopenDeniedTCP(pkt capture.Packet) {
 	tuple := tcpTupleHash(key)
 	d := e.deniedTCP[tuple]
 	e.flowMu.Unlock()
-	if d == nil || d.hasISN && d.isn == pkt.TCP.Seq {
+	if d == nil || e.deniedTCPNow().Before(d.expires) && d.hasISN && d.isn == pkt.TCP.Seq {
 		return
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.retired {
-		return
-	}
-	d.retired = true
-	e.flowMu.Lock()
-	var forgotten []*flow.State
-	delete(e.deniedTCP, tuple)
-	// Orientation hints can change while the tuple is denied. Forget both
-	// possible orientations of its two wire directions, never other tuples.
-	reverseOrientation := key
-	reverseOrientation.Dir = flow.DirReverse
-	for _, k := range []flow.Key{key, key.Reversed(), reverseOrientation, reverseOrientation.Reversed()} {
-		e.verdictCache.Invalidate(k.Hash())
-		if st := e.dropFlowLocked(k); st != nil {
-			forgotten = append(forgotten, st)
-		}
-	}
-	e.flowMu.Unlock()
-	for _, st := range forgotten {
-		e.endFlowStream(st, nil)
-	}
+	e.retireDeniedTCP(d, false)
 }
 
 // lockGenericTCP serializes decisions in both directions of a generic TCP
 // tuple. Otherwise an already-waiting duplicate can finish DPI between the
 // original packet's inspection and its denial, and pass as consumed bytes.
-// Fixed stripes bound synchronization state without expiring denied tuples.
+// Fixed stripes bound synchronization state independently of tuple retention.
 func (e *Engine) lockGenericTCP(pkt capture.Packet) func() {
 	if pkt.Proto != 6 || isIECPort(pkt) {
 		return func() {}

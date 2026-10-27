@@ -108,8 +108,15 @@ malformed framing, reassembly limits, a decoder fault, or a SYN with payload
 that does not start the connection's stream (reason `stream_resync`). The
 packet is dropped and only that session is reset, like a decoded denial,
 without restarting inspection of its old bytes. A tuple tombstone keeps the
-denied incarnation dropping independently of cache expiry. A fresh,
-kernel-tracked handshake retires only that tuple's state.
+denied incarnation dropping independently of verdict-cache expiry for a fixed
+10 seconds; duplicates do not refresh it. At most 16,384 tombstones are kept,
+with the oldest evicted first. Capacity evictions increment
+`containd_dp_denied_tcp_evictions_total`. Ten seconds covers early payload
+retransmissions and the challenge-reset window, not every possible delayed
+duplicate. Expiry and eviction clear only the guarded tuple's verdicts, flow
+state and failed streams: later payload fails closed as a mid-stream pickup
+and triggers another reset, while a fresh kernel-tracked handshake can start
+inspection immediately. A fresh handshake also retires a still-live tombstone.
 
 Generic resets are **best-effort**, not confirmation that either peer closed.
 The engine uses the denied packet's SEQ for its receiver and ACK for its
@@ -128,8 +135,9 @@ A connection the engine did not see from its SYN is dropped (reason
 a data-plane configuration change, connections idle longer than the engine's
 5-minute flow timeout, and a connection whose tuple carries the SYN of a new
 handshake while the engine still follows the old one. No flow block is
-installed. The engine resets the connection once, at both endpoints, and
-drops its later packets, so the client reconnects at once and its next
+installed. The engine resets the connection at both endpoints and drops its
+later packets; after tombstone expiry or eviction, another pickup can trigger
+another reset. The client reconnects at once and its next
 connection is inspected from its first byte. An endpoint that answers its
 reset with a challenge ACK gets it again at that ACK's sequence number, up
 to three times within a second, as IEC 104 sessions do. Without the reset

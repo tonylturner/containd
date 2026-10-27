@@ -17,8 +17,10 @@ outside its control.
    generic cache.
 4. Firewall rules evaluate to `ALLOW` or `DENY`. Enforced DPI denials drop the
    packet and best-effort reset only that TCP session, without installing a host
-   or service block. UDP denials drop only the datagram. IEC 104 retains its
-   stateful abort/reset path. A native IDS alert alone is not a packet drop.
+   or service block. Generic TCP denial tombstones last 10 seconds and are
+   capped at 16,384; later payload still fails closed as a mid-stream pickup.
+   UDP denials drop only the datagram. IEC 104 retains its stateful abort/reset
+   path. A native IDS alert alone is not a packet drop.
 5. Decoded events feed bounded telemetry, anomaly and signature checks, and
    protocol statistics. Asset discovery and automatic rule learning consume
    non-IEC-104 ICS events only.

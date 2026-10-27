@@ -10,7 +10,6 @@ import (
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/capture"
-	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
@@ -25,12 +24,6 @@ func (e *Engine) resetDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 	src, okSrc := addrPort(pkt.SrcIP, pkt.SrcPort)
 	dst, okDst := addrPort(pkt.DstIP, pkt.DstPort)
 	available := okSrc && okDst && pkt.TCP.Valid && t.health.injectorReady()
-	e.flowMu.Lock()
-	rev := e.flows[state.Key.Reversed().Hash()]
-	e.flowMu.Unlock()
-	if rev != nil {
-		e.dpiMgr.FailStream(rev, &dpi.ParsedPacket{Proto: "tcp", FailClosed: true}, dpi.StreamDenied)
-	}
 	key := iecKey{client: src, server: dst}
 	if state.Key.Dir == flow.DirReverse {
 		key = iecKey{client: dst, server: src}

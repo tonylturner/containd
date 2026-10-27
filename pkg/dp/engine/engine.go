@@ -4,6 +4,7 @@
 package engine
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"runtime"
@@ -71,6 +72,8 @@ type Engine struct {
 	flowMu                sync.Mutex
 	flows                 map[string]*flow.State
 	deniedTCP             map[string]*deniedTCP
+	deniedTCPOrder        list.List // oldest first; protected by flowMu
+	deniedTCPNow          func() time.Time
 	tcpISNs               map[string]uint32
 	tcpDecisions          [256]sync.Mutex
 	lastSweep             time.Time
@@ -200,6 +203,7 @@ func New(cfg Config) (*Engine, error) {
 		nflogGroup:            cfg.NFLogGroup,
 		nfqueueGroup:          cfg.NFQueueGroup,
 		flows:                 make(map[string]*flow.State),
+		deniedTCPNow:          time.Now,
 		verdictCache:          NewVerdictCache(30*time.Second, 65536),
 		hooks:                 hooks,
 	}
@@ -723,9 +727,9 @@ func handshakeDirection(pkt capture.Packet) (flow.Direction, bool) {
 }
 
 // dropFlowLocked forgets the state of key and returns it, nil when there
-// is none. Every state the engine forgets has its streams ended exactly
-// once by endFlowStream: here by the caller, outside e.flowMu, and by
-// sweepFlows for expired ones. Must be called with e.flowMu held.
+// is none. The caller ends its stream: normally outside flowMu, but denial
+// retirement tears down streams atomically under that lock before exposing an
+// unguarded tuple. sweepFlows ends idle streams too. Requires e.flowMu held.
 func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 	hash := key.Hash()
 	st, ok := e.flows[hash]
@@ -739,6 +743,7 @@ func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 }
 
 func (e *Engine) sweepFlows(now time.Time) {
+	e.expireDeniedTCP(now)
 	var expired []*flow.State
 	e.flowMu.Lock()
 	for k, st := range e.flows {

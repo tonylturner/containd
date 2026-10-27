@@ -118,7 +118,14 @@ func TestDenyResetReconnect(t *testing.T) {
 			// Expire/evict the entire verdict cache, not the tuple tombstone.
 			other.accept("concurrent session survives denial", p.read(2))
 			f.e.verdictCache = NewVerdictCache(time.Nanosecond, 1)
-			f.e.sweepFlows(time.Now().Add(time.Hour))
+			// Forget idle flows without also advancing the independent,
+			// short-lived tombstone past its lifetime.
+			f.e.flowMu.Lock()
+			for _, st := range f.e.flows {
+				st.IdleTimeout = time.Nanosecond
+			}
+			f.e.flowMu.Unlock()
+			f.e.sweepFlows(time.Now().Add(time.Millisecond))
 			if d := f.handle(pkt); d.Action != capture.Drop {
 				t.Fatalf("retransmitted denied command = %+v", d)
 			}
