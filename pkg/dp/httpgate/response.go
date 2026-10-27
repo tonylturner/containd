@@ -122,9 +122,9 @@ func (tx *transaction) deliverResponse(u *upstream, h *head) bool {
 		if tx.sendDone.Load() {
 			watch = c.client
 		}
-		res, abort := tx.scan(tx.object(avscan.Download, sp, h.raw), watch)
-		if abort != "" {
-			tx.emit(avscan.Download, abortResult(abort), avscan.Block, sp.size, sp, false, h.status)
+		res, aborted := tx.scan(tx.object(avscan.Download, sp, h.raw), watch)
+		if aborted {
+			tx.emit(avscan.Download, res, avscan.Block, sp.size, sp, false, h.status)
 			return false
 		}
 		action := tx.set.decide(res, tx.ics)

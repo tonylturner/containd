@@ -157,7 +157,7 @@ func TestPipelinedBytesDuringScan(t *testing.T) {
 			_, _ = c.conn.Write(bytes.Repeat([]byte("G"), pipelineCap+1))
 		}()
 		ev := g.events.next(t)
-		expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonTimeout, avscan.Block)
+		expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonUnsupported, avscan.Block)
 		if !strings.Contains(ev.Detail, "pipelined before the verdict") {
 			t.Fatalf("event %+v", ev)
 		}

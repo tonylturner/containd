@@ -35,8 +35,8 @@ type Event struct {
 	Host   string
 	Target string
 	Status int
-	// Size is the body length delivered or refused; for a body that was
-	// never read it is the declared Content-Length or 0.
+	// Size is the body length delivered or refused: the declared
+	// Content-Length when known, else the bytes received.
 	Size int64
 	// SHA256 covers the held bytes. SHA256Partial is set when they are not
 	// the whole object: oversized, disk-error or incomplete prefixes and
