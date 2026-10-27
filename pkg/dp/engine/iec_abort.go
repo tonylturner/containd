@@ -30,6 +30,10 @@ type iecActions struct {
 	inventoryObserve  []*iecInventoryCommand
 	inventoryOutcome  []*iecInventoryCommand
 	inventoryOverflow uint64
+	// retired reports that the tuple's connection ended or a new one
+	// started on it, so the engine ends the connection's conformance
+	// alert identity.
+	retired bool
 }
 
 func (a *iecActions) merge(b iecActions) {
@@ -39,6 +43,7 @@ func (a *iecActions) merge(b iecActions) {
 	a.inventoryObserve = append(a.inventoryObserve, b.inventoryObserve...)
 	a.inventoryOutcome = append(a.inventoryOutcome, b.inventoryOutcome...)
 	a.inventoryOverflow += b.inventoryOverflow
+	a.retired = a.retired || b.retired
 }
 
 // abortTxn waits for the verdict completions of an aborted session's
@@ -64,6 +69,7 @@ func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger st
 		return acts
 	}
 	acts.merge(t.endInventoryLocked(s))
+	acts.retired = true
 	countIECAbort(reason)
 	dropped := append([]*heldPacket(nil), s.held...)
 	if cur != nil {

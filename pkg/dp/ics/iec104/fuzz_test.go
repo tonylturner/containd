@@ -18,8 +18,8 @@ var validKinds = map[string]bool{
 }
 
 // checkEvents enforces the event shape every parse must keep: a known kind,
-// one APDU's identity, at most 127 events per APDU, and attributes that
-// marshal to JSON (no NaN or infinite values).
+// one APDU's identity, at most 127 events per APDU, catalogued conformance
+// findings, and attributes that marshal to JSON (no NaN or infinite values).
 func checkEvents(t *testing.T, res dpi.StreamResult) {
 	t.Helper()
 	for _, f := range res.Frames {
@@ -37,6 +37,7 @@ func checkEvents(t *testing.T, res dpi.StreamResult) {
 			if hasErr != (ev.Kind == eventfields.KindMalformed || ev.Kind == eventfields.KindUnsupported) {
 				t.Fatalf("%s event error presence %v", ev.Kind, hasErr)
 			}
+			checkFindings(t, ev)
 			if _, err := json.Marshal(ev.Attributes); err != nil {
 				t.Fatalf("attributes do not marshal: %v", err)
 			}

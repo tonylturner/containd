@@ -5,6 +5,7 @@ package iec104
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,7 +13,8 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
-// Wire rules of IEC 60870-5-104 clause 5 that make bytes unframeable.
+// Wire rules of IEC 60870-5-104 clause 5 that make bytes unframeable: only
+// the start octet and the length octet bound an APDU.
 func TestFrameAPDUErrors(t *testing.T) {
 	cases := []struct {
 		name string
@@ -23,20 +25,75 @@ func TestFrameAPDUErrors(t *testing.T) {
 		{"length 3", []byte{0x68, 3}, "APDU length 3"},
 		{"length 254", []byte{0x68, 254}, "APDU length 254"},
 		{"length 0", []byte{0x68, 0}, "APDU length 0"},
-		{"I reserved bit", []byte{0x68, 14, 0x00, 0x00, 0x01, 0x00}, "I-format control octet 3"},
-		{"S octet 1 bits", []byte{0x68, 4, 0x05, 0x00, 0x00, 0x00}, "S-format control field"},
-		{"S octet 2", []byte{0x68, 4, 0x01, 0x01, 0x00, 0x00}, "S-format control field"},
-		{"S octet 3 bit 0", []byte{0x68, 4, 0x01, 0x00, 0x01, 0x00}, "S-format control field"},
-		{"U two functions", []byte{0x68, 4, 0x47, 0, 0, 0}, "U-format"},
-		{"U no function", []byte{0x68, 4, 0x03, 0, 0, 0}, "U-format"},
-		{"U octet 2", []byte{0x68, 4, 0x07, 1, 0, 0}, "U-format"},
-		{"U octet 4", []byte{0x68, 4, 0x43, 0, 0, 0x80}, "U-format"},
 	}
 	for _, tc := range cases {
 		n, err := frameAPDU(tc.b)
 		if err == nil || n != 0 || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: frameAPDU(% x) = %d, %v; want error %q", tc.name, tc.b, n, err, tc.want)
 		}
+	}
+}
+
+// Reserved control bits never lose the frame boundary: the APDU frames, its
+// readable fields are decoded and the event carries the finding. A U-format
+// octet that is not exactly one function leaves u_function absent.
+func TestControlFieldFindings(t *testing.T) {
+	cases := []struct {
+		name     string
+		b        []byte
+		kind     string
+		findings []string
+		attrs    objWant
+		absent   []string
+	}{
+		{"I reserved bit", iFrame(1, 2, asdu(100, 1, cotAct, 0, 1, cat(ioa(0), []byte{20})...)), eventfields.KindRequest,
+			[]string{FindingReservedBits}, objWant{eventfields.KeySendSequence: uint16(1), eventfields.KeyReceiveSequence: uint16(2), eventfields.KeyTypeID: uint8(100)}, nil},
+		{"S octet 1 bits", []byte{0x68, 4, 0x05, 0x00, 0x04, 0x00}, eventfields.KindAPCI,
+			[]string{FindingReservedBits}, objWant{eventfields.KeyAPCIType: "S", eventfields.KeyReceiveSequence: uint16(2)}, nil},
+		{"S octet 2", []byte{0x68, 4, 0x01, 0x01, 0x04, 0x00}, eventfields.KindAPCI,
+			[]string{FindingReservedBits}, objWant{eventfields.KeyAPCIType: "S", eventfields.KeyReceiveSequence: uint16(2)}, nil},
+		{"S octet 3 bit 0", []byte{0x68, 4, 0x01, 0x00, 0x05, 0x00}, eventfields.KindAPCI,
+			[]string{FindingReservedBits}, objWant{eventfields.KeyAPCIType: "S", eventfields.KeyReceiveSequence: uint16(2)}, nil},
+		{"U two functions", []byte{0x68, 4, 0x47, 0, 0, 0}, eventfields.KindAPCI,
+			[]string{FindingUFunction}, objWant{eventfields.KeyAPCIType: "U"}, []string{eventfields.KeyUFunction}},
+		{"U no function", []byte{0x68, 4, 0x03, 0, 0, 0}, eventfields.KindAPCI,
+			[]string{FindingUFunction}, objWant{eventfields.KeyAPCIType: "U"}, []string{eventfields.KeyUFunction}},
+		{"U octet 2", []byte{0x68, 4, 0x07, 1, 0, 0}, eventfields.KindAPCI,
+			[]string{FindingReservedBits}, objWant{eventfields.KeyAPCIType: "U", eventfields.KeyUFunction: "startdt_act"}, nil},
+		{"U octet 4", []byte{0x68, 4, 0x43, 0, 0, 0x80}, eventfields.KindAPCI,
+			[]string{FindingReservedBits}, objWant{eventfields.KeyAPCIType: "U", eventfields.KeyUFunction: "testfr_act"}, nil},
+		{"U no function and reserved octets", []byte{0x68, 4, 0x0f, 0, 1, 0}, eventfields.KindAPCI,
+			[]string{FindingReservedBits, FindingUFunction}, objWant{eventfields.KeyAPCIType: "U"}, []string{eventfields.KeyUFunction}},
+		{"S reserved bit and wrong length", []byte{0x68, 5, 0x05, 0x00, 0x04, 0x00, 0xAA}, eventfields.KindMalformed,
+			[]string{FindingAPCILength, FindingReservedBits}, objWant{eventfields.KeyAPCIType: "S", eventfields.KeyReceiveSequence: uint16(2)}, nil},
+	}
+	for _, tc := range cases {
+		frame := append([]byte(nil), tc.b...)
+		if tc.name == "I reserved bit" {
+			frame[4] |= 0x01
+		}
+		evs := events(parseOne(t, cli, frame))
+		if len(evs) != 1 || evs[0].Kind != tc.kind {
+			t.Errorf("%s: %d events, kind %s, want one %s", tc.name, len(evs), evs[0].Kind, tc.kind)
+			continue
+		}
+		a := evs[0].Attributes
+		codes, _ := eventfields.Strings(a, eventfields.KeyConformance)
+		if !reflect.DeepEqual(codes, tc.findings) {
+			t.Errorf("%s: conformance %v, want %v", tc.name, codes, tc.findings)
+		}
+		if _, hasErr := a[eventfields.KeyError]; hasErr != (tc.kind == eventfields.KindMalformed) {
+			t.Errorf("%s: error attribute present %v on %s", tc.name, hasErr, tc.kind)
+		}
+		if SafeRead(a) {
+			t.Errorf("%s: SafeRead accepted nonconformant content", tc.name)
+		}
+		checkAttrs(t, tc.name, a, tc.attrs, tc.absent...)
+	}
+	// Reserved bits do not stop the stream: the next APDU parses.
+	stream := cat([]byte{0x68, 4, 0x01, 0x00, 0x05, 0x00}, uFrame(testfrAct))
+	if evs := events(parseOne(t, cli, stream)); len(evs) != 2 || evs[1].Kind != eventfields.KindAPCI {
+		t.Fatalf("stream after a reserved-bit APDU: %+v", evs)
 	}
 }
 
@@ -122,6 +179,9 @@ func TestSAndUFrameWrongLength(t *testing.T) {
 	for i, want := range []string{"S-format APDU length 6", "U-format APDU length 5"} {
 		if evs[i].Kind != eventfields.KindMalformed || !strings.Contains(evs[i].Attributes[eventfields.KeyError].(string), want) {
 			t.Fatalf("event %d: %s %+v", i, evs[i].Kind, evs[i].Attributes)
+		}
+		if codes, _ := eventfields.Strings(evs[i].Attributes, eventfields.KeyConformance); !reflect.DeepEqual(codes, []string{FindingAPCILength}) {
+			t.Fatalf("event %d: conformance %v", i, codes)
 		}
 	}
 	if evs[2].Kind != eventfields.KindAPCI {

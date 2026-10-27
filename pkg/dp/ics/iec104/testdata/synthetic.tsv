@@ -75,5 +75,5 @@ unsupported_type_2	s	unsupported	680e0000000002010300010001000001	101 7.3.1 Type
 unsupported_c_cd_na_1	c	unsupported	680f000000006a01060001000000000000	101 7.3.4 C_CD_NA_1 is not used in 104
 frame_bad_start	c	frame_error	670407000000	104 cl.5 start octet must be 0x68
 frame_bad_length	c	frame_error	68020700	104 cl.5 length octet 4..253
-frame_i_reserved_bit	s	frame_error	680400000100	104 cl.5 I-format control octet 3 bit 0
-frame_u_two_functions	c	frame_error	68040f000000	104 cl.5 U-format exactly one function
+i_reserved_bit_no_asdu	s	malformed	680400000100	104 cl.5 I-format control octet 3 bit 0 is a finding; the missing ASDU is malformed
+u_two_functions	c	apci	68040f000000	104 cl.5 U-format exactly one function: decoded APCI with a finding

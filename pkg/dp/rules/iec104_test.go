@@ -111,7 +111,8 @@ func TestEvaluateIEC104EUPolicy(t *testing.T) {
 		{"clock sync", "request", iFrame(103, "system", 1, 0, false), ActionDeny, "deny-other-iec104"},
 		{"broadcast never allowed", "request", broadcastGI, ActionDeny, "deny-other-iec104"},
 		{"CA 65535 is broadcast without the flag", "request", iFrame(100, "system", 65535, 0, true), ActionDeny, "deny-other-iec104"},
-		{"malformed never allowed", "request", IEC104Context{APCIType: "I", TypeID: u8(46), Class: "control", Malformed: true, SafeRead: true}, ActionDeny, "deny-other-iec104"},
+		{"malformed without decoded IOA falls through", "request", IEC104Context{APCIType: "I", TypeID: u8(46), CA: u16(1), Class: "control", Malformed: true}, ActionDeny, "deny-other-iec104"},
+		{"malformed is never safe-read", "request", IEC104Context{APCIType: "S", Class: "system", Malformed: true}, ActionDeny, "deny-other-iec104"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

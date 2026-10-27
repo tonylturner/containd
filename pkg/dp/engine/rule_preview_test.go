@@ -14,6 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -71,43 +72,61 @@ func TestPreviewRuleZones(t *testing.T) {
 	}
 }
 
+// TestPreviewRuleIEC104RuntimeParity checks that a candidate's preview
+// counts exactly the events the live table would decide by that rule, in
+// both parsing modes: with findings, a tolerant ALLOW can match on decoded
+// fields, a strict ALLOW never matches, and a DENY matches in both.
 func TestPreviewRuleIEC104RuntimeParity(t *testing.T) {
+	unsupported := map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(2), "ca": uint16(1),
+		"class": "unknown", "error": "type 2 is not in the supported IEC 104 type set", "conformance": []string{"iec104.unsupported_type"}}
+	reserved := map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(100), "ca": uint16(1),
+		"class": "system", "conformance": []string{"iec104.reserved_bits"}}
+	profile := map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(46), "ca": uint16(1), "class": "control",
+		"error": "profile: type 46 needs SQ=0 and one object", "conformance": []string{"iec104.profile_sq"}}
 	evs := []events.Event{
 		iecEvent(0, "request", true, map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(100), "ca": uint16(1)}),
 		iecEvent(0, "response", false, map[string]any{"apci_type": "I", "direction": "response", "type_id": uint8(1), "ca": uint16(1)}),
 		iecEvent(0, "request", true, map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(46), "ca": uint16(1)}),
 		iecEvent(0, "response", false, map[string]any{"apci_type": "I", "direction": "response", "type_id": uint8(46), "ca": uint16(1)}),
-		iecEvent(0, "unsupported", true, map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(2), "ca": uint16(1)}),
+		iecEvent(0, "unsupported", true, unsupported),
+		iecEvent(0, "request", true, reserved),
+		iecEvent(0, "malformed", true, profile),
 		iecEvent(0, "request", true, map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(100), "ca": uint16(65535)}),
-		iecEvent(0, "malformed", true, nil),
+		iecEvent(0, "malformed", true, map[string]any{"direction": "request", "error": "start octet 0x69, want 0x68"}),
 	}
-	for _, action := range []rules.Action{rules.ActionAllow, rules.ActionDeny} {
-		for _, readOnly := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s/readOnly=%t", action, readOnly), func(t *testing.T) {
-				entry := rules.Entry{ID: "candidate", Action: action, SourceZones: []string{"control"}, DestZones: []string{"plant"},
-					ICS: rules.ICSPredicate{Protocol: "iec104", ReadOnly: readOnly, Mode: "enforce"}}
-				snap := &rules.Snapshot{Firewall: []rules.Entry{entry},
-					ZoneIfaces: map[string][]string{"control": {"cc0"}, "plant": {"rtu0"}}}
-				table := newIECTable("enforce", &zoneCache{})
-				table.policy = newRulesPolicy(snap)
-				client, _ := addrPort(net.ParseIP(evs[0].SrcIP), evs[0].SrcPort)
-				server, _ := addrPort(net.ParseIP(evs[0].DstIP), evs[0].DstPort)
-				s := &iecSession{ctx: iecSessionContext(snap, client, server, previewZoneResolver), mode: "enforce"}
-				e := &Engine{eventStore: events.NewStore(100)}
-				e.ruleSnap.Store(snap)
-				want := 0
-				for _, ev := range evs {
-					e.eventStore.Append(ev)
-					decision := table.decideLocked(s, dpi.Event{Proto: ev.Proto, Kind: ev.Kind, Attributes: ev.Attributes})
-					if decision.ruleID == entry.ID {
-						want++
+	for _, parsing := range []ics.Parsing{ics.Tolerant, ics.Strict} {
+		for _, action := range []rules.Action{rules.ActionAllow, rules.ActionDeny} {
+			for _, predicate := range []rules.ICSPredicate{{ReadOnly: true}, {}, {TypeIDs: []int{2}}, {TypeIDs: []int{46}}} {
+				t.Run(fmt.Sprintf("%s/%s/%+v", parsing, action, predicate), func(t *testing.T) {
+					predicate.Protocol, predicate.Mode = "iec104", "enforce"
+					entry := rules.Entry{ID: "candidate", Action: action, SourceZones: []string{"control"}, DestZones: []string{"plant"}, ICS: predicate}
+					snap := &rules.Snapshot{Firewall: []rules.Entry{entry},
+						ZoneIfaces: map[string][]string{"control": {"cc0"}, "plant": {"rtu0"}}}
+					table := newIECTable("enforce", &zoneCache{})
+					table.policy = newRulesPolicy(snap)
+					table.parsing = parsing
+					client, _ := addrPort(net.ParseIP(evs[0].SrcIP), evs[0].SrcPort)
+					server, _ := addrPort(net.ParseIP(evs[0].DstIP), evs[0].DstPort)
+					s := &iecSession{ctx: iecSessionContext(snap, client, server, previewZoneResolver), mode: "enforce"}
+					e := &Engine{eventStore: events.NewStore(100)}
+					e.ruleSnap.Store(snap)
+					e.SetICSParsing(map[string]string{iecProtocol: string(parsing)})
+					want := 0
+					for _, ev := range evs {
+						e.eventStore.Append(ev)
+						decision := table.decideLocked(s, dpi.Event{Proto: ev.Proto, Kind: ev.Kind, Attributes: ev.Attributes})
+						if decision.ruleID == entry.ID {
+							want++
+						}
 					}
-				}
-				got := e.previewRule(entry, previewZoneResolver)
-				if got.MatchCount != want || want == 0 {
-					t.Fatalf("preview=%d runtime=%d", got.MatchCount, want)
-				}
-			})
+					// A strict ALLOW naming only the unsupported type matches nothing.
+					nothing := parsing == ics.Strict && action == rules.ActionAllow && reflect.DeepEqual(predicate.TypeIDs, []int{2})
+					got := e.previewRule(entry, previewZoneResolver)
+					if got.MatchCount != want || (want == 0) != nothing {
+						t.Fatalf("preview=%d runtime=%d", got.MatchCount, want)
+					}
+				})
+			}
 		}
 	}
 }
@@ -126,7 +145,7 @@ func TestPreviewRuleUSUsesRuntimeContext(t *testing.T) {
 				Attributes: map[string]any{"function_code": uint8(3), "is_write": false, "unit_id": uint8(1)}}
 			entry := rules.Entry{Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "modbus", ReadOnly: true}}
 			snap := &rules.Snapshot{ZoneIfaces: map[string][]string{"control": {"cc0"}, "plant": {"rtu0"}}}
-			got, ok := previewEventContext(snap, entry, ev, previewZoneResolver)
+			got, ok := previewEventContext(snap, entry, ev, previewZoneResolver, ics.Tolerant)
 			want, runtimeOK := evalContextFromDPIEvent(snap, &flow.State{Key: key},
 				&dpi.ParsedPacket{Proto: "tcp", SrcPort: key.SrcPort, DstPort: key.DstPort},
 				dpi.Event{Proto: ev.Proto, Kind: ev.Kind, Attributes: ev.Attributes}, "control", "plant")
@@ -155,23 +174,46 @@ func TestPreviewRuleIEC104EqualPorts(t *testing.T) {
 	}
 }
 
+// Broadcast objects and unframeable bytes (a malformed event without
+// findings) are denied by the envelope in both parsing modes and never
+// count as a candidate's match. Decoded content with findings is matched:
+// in tolerant by ALLOW and DENY, in strict by DENY only.
 func TestPreviewRuleEnvelopeDenialsNeverMatch(t *testing.T) {
-	for _, action := range []rules.Action{rules.ActionAllow, rules.ActionDeny} {
-		for _, kind := range []string{"unsupported", "malformed", "request"} {
-			t.Run(string(action)+"/"+kind, func(t *testing.T) {
-				e := &Engine{eventStore: events.NewStore(10)}
-				ca := uint16(1)
-				if kind == "request" {
-					ca = 65535
-				}
-				e.eventStore.Append(iecEvent(0, kind, true, map[string]any{
-					"apci_type": "I", "direction": "request", "type_id": uint8(100), "ca": ca,
-				}))
-				got := e.PreviewRule(rules.Entry{Action: action, ICS: rules.ICSPredicate{Protocol: "iec104"}})
-				if got.MatchCount != 0 {
-					t.Fatalf("envelope denial counted as rule match: %+v", got)
-				}
-			})
+	for _, parsing := range []ics.Parsing{ics.Tolerant, ics.Strict} {
+		for _, action := range []rules.Action{rules.ActionAllow, rules.ActionDeny} {
+			for _, kind := range []string{"unsupported", "malformed", "request", "unframeable"} {
+				t.Run(fmt.Sprintf("%s/%s/%s", parsing, action, kind), func(t *testing.T) {
+					e := &Engine{eventStore: events.NewStore(10)}
+					e.SetICSParsing(map[string]string{iecProtocol: string(parsing)})
+					attrs := map[string]any{"apci_type": "I", "direction": "request", "type_id": uint8(100), "ca": uint16(1)}
+					want := 0
+					switch kind {
+					case "request":
+						attrs["ca"] = uint16(65535)
+					case "unframeable":
+						kind = "malformed"
+						attrs = map[string]any{"direction": "request", "error": "APDU length 2 outside 4..253"}
+					case "malformed":
+						attrs["error"] = "profile: client sent monitor-direction type 1"
+						attrs["conformance"] = []string{"iec104.role"}
+						attrs["type_id"] = uint8(1)
+						fallthrough
+					default:
+						if kind == "unsupported" {
+							attrs["error"] = "type 100 is not in the supported IEC 104 type set"
+							attrs["conformance"] = []string{"iec104.unsupported_type"}
+						}
+						if parsing == ics.Tolerant || action == rules.ActionDeny {
+							want = 1
+						}
+					}
+					e.eventStore.Append(iecEvent(0, kind, true, attrs))
+					got := e.PreviewRule(rules.Entry{Action: action, ICS: rules.ICSPredicate{Protocol: "iec104"}})
+					if got.MatchCount != want {
+						t.Fatalf("matches = %d, want %d: %+v", got.MatchCount, want, got)
+					}
+				})
+			}
 		}
 	}
 }

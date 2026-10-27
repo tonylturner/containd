@@ -4,10 +4,14 @@
 package engine
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -81,21 +85,27 @@ func TestIECRealDecoderAndEvaluator(t *testing.T) {
 		t.Fatal("STOPDT passed without its alert signature")
 	}
 	// Wrong IOA, wrong CA, and monitor data sent by the client are denied.
+	// The role violation is decoded content with a finding: the policy's
+	// DENY decides it in both parsing modes, and keeps its own reason.
 	for _, bad := range []struct {
-		name    string
-		payload []byte
-		reason  string
+		name     string
+		parsing  ics.Parsing
+		payload  []byte
+		reason   string
+		findings []string
 	}{
-		{"wrong IOA", apdu(46, 6, 1, 2002, 0x01), "rule"},
-		{"wrong CA", apdu(46, 6, 2, 2001, 0x01), "rule"},
-		{"broadcast CA", apdu(46, 6, 65535, 2001, 0x01), "broadcast"},
-		{"client sends monitor data", apdu(3, 3, 1, 1001, 0x02), "role"},
+		{"wrong IOA", ics.Tolerant, apdu(46, 6, 1, 2002, 0x01), "rule", nil},
+		{"wrong CA", ics.Tolerant, apdu(46, 6, 2, 2001, 0x01), "rule", nil},
+		{"broadcast CA", ics.Tolerant, apdu(46, 6, 65535, 2001, 0x01), "broadcast", nil},
+		{"client sends monitor data", ics.Tolerant, apdu(3, 3, 1, 1001, 0x02), "rule", []string{iec104.FindingRole}},
+		{"client sends monitor data, strict", ics.Strict, apdu(3, 3, 1, 1001, 0x02), "rule", []string{iec104.FindingRole}},
 	} {
 		h2 := newIECHarness(t, "enforce")
 		h2.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
 		h2.e.iec.dpi = h2.e.dpiMgr
 		h2.e.iec.newPolicy = newRulesPolicy
 		h2.e.LoadRules(euSnapshot())
+		h2.e.SetICSParsing(map[string]string{iecProtocol: string(bad.parsing)})
 		h2.handshake()
 		h2.send(true, startdtAct)
 		if _, d := h2.send(true, bad.payload); d.Action != capture.Drop {
@@ -110,8 +120,15 @@ func TestIECRealDecoderAndEvaluator(t *testing.T) {
 		if denied == nil || denied["reason"] != bad.reason {
 			t.Fatalf("%s: deny decision = %v, want reason %s", bad.name, denied, bad.reason)
 		}
+		if codes, _ := eventfields.Strings(denied, eventfields.KeyConformance); !reflect.DeepEqual(codes, bad.findings) {
+			t.Fatalf("%s: decision findings = %v, want %v", bad.name, codes, bad.findings)
+		}
 		if got := h2.outcomes(); len(got) == 0 || got[0] != "aborted" {
 			t.Fatalf("%s: outcomes = %v", bad.name, got)
+		}
+		if alerts := findingEvents(h2.e, "alert"); (len(alerts) == 1) != (bad.findings != nil) ||
+			len(alerts) == 1 && alerts[0].Attributes["action"] != "dropped and reset" {
+			t.Fatalf("%s: conformance alerts = %+v", bad.name, alerts)
 		}
 	}
 }

@@ -296,9 +296,10 @@ func TestSQ1TimedMonitorDescriptorsRejected(t *testing.T) {
 				t.Fatalf("got %d events, want one profile error", len(evs))
 			}
 			want := fmt.Sprintf("profile: SQ=1 is not accepted for type %d", typeID)
-			if evs[0].Kind != eventfields.KindMalformed || evs[0].Attributes[eventfields.KeyError] != want {
-				t.Errorf("type %d = %s %q, want malformed %q",
-					typeID, evs[0].Kind, evs[0].Attributes[eventfields.KeyError], want)
+			codes, _ := eventfields.Strings(evs[0].Attributes, eventfields.KeyConformance)
+			if evs[0].Kind != eventfields.KindMalformed || evs[0].Attributes[eventfields.KeyError] != want || !reflect.DeepEqual(codes, []string{FindingProfileSQ}) {
+				t.Errorf("type %d = %s %q %v, want malformed %q [%s]",
+					typeID, evs[0].Kind, evs[0].Attributes[eventfields.KeyError], codes, want, FindingProfileSQ)
 			}
 		})
 	}
@@ -311,32 +312,33 @@ func TestMalformedAndProfile(t *testing.T) {
 		frame []byte
 		kind  string
 		err   string
+		code  string
 	}{
-		{"I-format without ASDU", cli, iFrame(0, 0, nil), eventfields.KindMalformed, "shorter than its 6-octet header"},
-		{"ASDU header cut", cli, iFrame(0, 0, []byte{100, 1, 6, 0, 1}), eventfields.KindMalformed, "shorter than its 6-octet header"},
-		{"zero objects", cli, iFrame(0, 0, asdu(100, 0, cotAct, 0, 1)), eventfields.KindMalformed, "zero information objects"},
-		{"type 1 missing SIQ", srv, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, ioa(1)...)), eventfields.KindMalformed, "ASDU body is 3 octets, want 4"},
-		{"type 1 extra byte", srv, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1, 0})...)), eventfields.KindMalformed, "ASDU body is 5 octets, want 4"},
-		{"type 30 missing CP56 byte", srv, iFrame(0, 0, asdu(30, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, courseTime[:6])...)), eventfields.KindMalformed, "ASDU body is 10 octets, want 11"},
-		{"extra byte", cli, iFrame(0, 0, asdu(100, 1, cotAct, 0, 1, cat(ioa(0), []byte{20, 0})...)), eventfields.KindMalformed, "ASDU body is 5 octets, want 4"},
-		{"missing byte", srv, iFrame(0, 0, asdu(13, 1, cotSpont, 0, 1, cat(ioa(1), f32(1))...)), eventfields.KindMalformed, "ASDU body is 7 octets, want 8"},
-		{"SQ=1 IOA overflow", srv, iFrame(0, 0, asdu(3, vsqSQ|2, cotSpont, 0, 1, cat(ioa(16777215), []byte{1, 1})...)), eventfields.KindMalformed, "overflows 24 bits"},
-		{"SCO reserved bit", cli, iFrame(0, 0, asdu(45, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x03})...)), eventfields.KindMalformed, "SCO reserved bit 1"},
-		{"DCO state 0", cli, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x80})...)), eventfields.KindMalformed, "command state 0"},
-		{"DCO state 3", cli, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x03})...)), eventfields.KindMalformed, "command state 3"},
-		{"RCO state 0", cli, iFrame(0, 0, asdu(60, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x00}, courseTime)...)), eventfields.KindMalformed, "command state 0"},
-		{"bad CP56", srv, iFrame(0, 0, asdu(31, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, cp56(25, 2, 29, 0, 0, 0))...)), eventfields.KindMalformed, "CP56Time2a day 29"},
-		{"profile: SQ=1 on 46", cli, iFrame(0, 0, asdu(46, vsqSQ|1, cotAct, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: type 46 needs SQ=0 and one object"},
-		{"profile: two commands", cli, iFrame(0, 0, asdu(46, 2, cotAct, 0, 1, cat(ioa(1), []byte{1}, ioa(2), []byte{1})...)), eventfields.KindMalformed, "profile: type 46 needs SQ=0 and one object"},
-		{"profile: two GI", cli, iFrame(0, 0, asdu(100, 2, cotAct, 0, 1, cat(ioa(0), []byte{20}, ioa(0), []byte{20})...)), eventfields.KindMalformed, "profile: type 100 needs SQ=0"},
-		{"role: client sends 3", cli, iFrame(0, 0, asdu(3, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: client sent monitor-direction type 3"},
-		{"role: client sends 1", cli, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: client sent monitor-direction type 1"},
-		{"role: server activates 46", srv, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: server sent control type 46 with cause 6"},
-		{"role: server deactivates 100", srv, iFrame(0, 0, asdu(100, 1, cotDeact, 0, 1, cat(ioa(0), []byte{20})...)), eventfields.KindMalformed, "profile: server sent system type 100 with cause 8"},
-		{"unsupported 2", srv, iFrame(0, 0, asdu(2, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindUnsupported, "type 2 is not in the supported IEC 104 type set"},
-		{"unsupported 104", cli, iFrame(0, 0, asdu(104, 1, cotAct, 0, 1, cat(ioa(0), []byte{0xAA, 0x55})...)), eventfields.KindUnsupported, "type 104"},
-		{"unsupported 106", cli, iFrame(0, 0, asdu(106, 1, cotAct, 0, 1, cat(ioa(0), []byte{0, 0})...)), eventfields.KindUnsupported, "type 106"},
-		{"unsupported 255", srv, iFrame(0, 0, asdu(255, 0, 0, 0, 0)), eventfields.KindUnsupported, "type 255"},
+		{"I-format without ASDU", cli, iFrame(0, 0, nil), eventfields.KindMalformed, "shorter than its 6-octet header", FindingShortASDU},
+		{"ASDU header cut", cli, iFrame(0, 0, []byte{100, 1, 6, 0, 1}), eventfields.KindMalformed, "shorter than its 6-octet header", FindingShortASDU},
+		{"zero objects", cli, iFrame(0, 0, asdu(100, 0, cotAct, 0, 1)), eventfields.KindMalformed, "zero information objects", FindingZeroObjects},
+		{"type 1 missing SIQ", srv, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, ioa(1)...)), eventfields.KindMalformed, "ASDU body is 3 octets, want 4", FindingBodyLength},
+		{"type 1 extra byte", srv, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1, 0})...)), eventfields.KindMalformed, "ASDU body is 5 octets, want 4", FindingBodyLength},
+		{"type 30 missing CP56 byte", srv, iFrame(0, 0, asdu(30, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, courseTime[:6])...)), eventfields.KindMalformed, "ASDU body is 10 octets, want 11", FindingBodyLength},
+		{"extra byte", cli, iFrame(0, 0, asdu(100, 1, cotAct, 0, 1, cat(ioa(0), []byte{20, 0})...)), eventfields.KindMalformed, "ASDU body is 5 octets, want 4", FindingBodyLength},
+		{"missing byte", srv, iFrame(0, 0, asdu(13, 1, cotSpont, 0, 1, cat(ioa(1), f32(1))...)), eventfields.KindMalformed, "ASDU body is 7 octets, want 8", FindingBodyLength},
+		{"SQ=1 IOA overflow", srv, iFrame(0, 0, asdu(3, vsqSQ|2, cotSpont, 0, 1, cat(ioa(16777215), []byte{1, 1})...)), eventfields.KindMalformed, "overflows 24 bits", FindingIOARange},
+		{"SCO reserved bit", cli, iFrame(0, 0, asdu(45, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x03})...)), eventfields.KindMalformed, "SCO reserved bit 1", FindingElement},
+		{"DCO state 0", cli, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x80})...)), eventfields.KindMalformed, "command state 0", FindingElement},
+		{"DCO state 3", cli, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x03})...)), eventfields.KindMalformed, "command state 3", FindingElement},
+		{"RCO state 0", cli, iFrame(0, 0, asdu(60, 1, cotAct, 0, 1, cat(ioa(1), []byte{0x00}, courseTime)...)), eventfields.KindMalformed, "command state 0", FindingElement},
+		{"bad CP56", srv, iFrame(0, 0, asdu(31, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1}, cp56(25, 2, 29, 0, 0, 0))...)), eventfields.KindMalformed, "CP56Time2a day 29", FindingTime},
+		{"profile: SQ=1 on 46", cli, iFrame(0, 0, asdu(46, vsqSQ|1, cotAct, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: type 46 needs SQ=0 and one object", FindingProfileSQ},
+		{"profile: two commands", cli, iFrame(0, 0, asdu(46, 2, cotAct, 0, 1, cat(ioa(1), []byte{1}, ioa(2), []byte{1})...)), eventfields.KindMalformed, "profile: type 46 needs SQ=0 and one object", FindingProfileSQ},
+		{"profile: two GI", cli, iFrame(0, 0, asdu(100, 2, cotAct, 0, 1, cat(ioa(0), []byte{20}, ioa(0), []byte{20})...)), eventfields.KindMalformed, "profile: type 100 needs SQ=0", FindingProfileSQ},
+		{"role: client sends 3", cli, iFrame(0, 0, asdu(3, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: client sent monitor-direction type 3", FindingRole},
+		{"role: client sends 1", cli, iFrame(0, 0, asdu(1, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: client sent monitor-direction type 1", FindingRole},
+		{"role: server activates 46", srv, iFrame(0, 0, asdu(46, 1, cotAct, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindMalformed, "profile: server sent control type 46 with cause 6", FindingRole},
+		{"role: server deactivates 100", srv, iFrame(0, 0, asdu(100, 1, cotDeact, 0, 1, cat(ioa(0), []byte{20})...)), eventfields.KindMalformed, "profile: server sent system type 100 with cause 8", FindingRole},
+		{"unsupported 2", srv, iFrame(0, 0, asdu(2, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), eventfields.KindUnsupported, "type 2 is not in the supported IEC 104 type set", FindingUnsupportedType},
+		{"unsupported 104", cli, iFrame(0, 0, asdu(104, 1, cotAct, 0, 1, cat(ioa(0), []byte{0xAA, 0x55})...)), eventfields.KindUnsupported, "type 104", FindingUnsupportedType},
+		{"unsupported 106", cli, iFrame(0, 0, asdu(106, 1, cotAct, 0, 1, cat(ioa(0), []byte{0, 0})...)), eventfields.KindUnsupported, "type 106", FindingUnsupportedType},
+		{"unsupported 255", srv, iFrame(0, 0, asdu(255, 0, 0, 0, 0)), eventfields.KindUnsupported, "type 255", FindingUnsupportedType},
 	}
 	for _, tc := range cases {
 		evs := events(parseOne(t, tc.dir, tc.frame))
@@ -350,10 +352,25 @@ func TestMalformedAndProfile(t *testing.T) {
 		if strings.Contains(tc.err, "profile:") != strings.HasPrefix(msg, "profile: ") {
 			t.Errorf("%s: profile prefix on %q", tc.name, msg)
 		}
+		if codes, _ := eventfields.Strings(evs[0].Attributes, eventfields.KeyConformance); !reflect.DeepEqual(codes, []string{tc.code}) {
+			t.Errorf("%s: conformance %v, want [%s]", tc.name, codes, tc.code)
+		}
 		if SafeRead(evs[0].Attributes) {
 			t.Errorf("%s: SafeRead on an error event", tc.name)
 		}
 	}
+}
+
+// A monitor-direction type without a descriptor sent by the client is both
+// a role violation and unsupported: the role names the event, both codes
+// stay, sorted.
+func TestRoleAndUnsupportedFindings(t *testing.T) {
+	ev := events(parseOne(t, cli, iFrame(0, 0, asdu(2, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...))))[0]
+	codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyConformance)
+	if ev.Kind != eventfields.KindMalformed || !reflect.DeepEqual(codes, []string{FindingRole, FindingUnsupportedType}) {
+		t.Fatalf("%s %v", ev.Kind, codes)
+	}
+	checkAttrs(t, "role+unsupported", ev.Attributes, objWant{eventfields.KeyTypeID: uint8(2), eventfields.KeyClass: ClassUnknown}, eventfields.KeyIOA)
 }
 
 // Header-only events keep the decoded header; unsupported types are class

@@ -11,6 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -33,7 +34,8 @@ const (
 // already in decision.Resolved.
 type iecResult struct {
 	decision capture.Decision
-	inspect  []dpi.Event // decoder events, recorded like any DPI events
+	inspect  []dpi.Event  // decoder events, recorded like any DPI events
+	findings []iecFinding // judged events with conformance findings
 	acts     iecActions
 }
 
@@ -70,13 +72,15 @@ func dirName(dir int) string {
 
 // handleIECPacket decides a TCP packet to or from port 2404 when an IEC104
 // envelope may apply. ok is false for packets outside every envelope; they
-// take the flow path unchanged.
+// take the flow path unchanged. The packet is judged in the IEC104 parsing
+// mode in force now; conformance alerts and the connection's alert identity
+// are the engine's, so they are settled here, after the table decided.
 func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture.Decision, bool) {
 	t := e.iec
 	if t == nil || !isIECPort(pkt) {
 		return capture.Decision{}, false
 	}
-	res, ok := t.packet(pkt, state)
+	res, ok := t.packet(pkt, state, e.ICSParsing(iecProtocol))
 	if !ok {
 		t.finish(res.acts)
 		if envelopeMarked(pkt) {
@@ -91,18 +95,40 @@ func (e *Engine) handleIECPacket(pkt capture.Packet, state *flow.State) (capture
 		return capture.Decision{}, false
 	}
 	e.recordPacketStats(pkt, state)
+	parsed := dpi.ParsedPacket{Payload: pkt.Payload, Proto: pkt.Transport, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
 	if len(res.inspect) > 0 {
-		parsed := dpi.ParsedPacket{Payload: pkt.Payload, Proto: pkt.Transport, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
 		e.RecordDPIEvents(state, &parsed, res.inspect)
+	}
+	for _, f := range res.findings {
+		e.recordConformanceAlert(state, &parsed, f.ev, iecConformanceAction(res.decision, f.decision))
+	}
+	if res.acts.retired {
+		e.conformance.end(state, true)
 	}
 	t.finish(res.acts)
 	return res.decision, true
 }
 
-func (t *iecTable) packet(pkt capture.Packet, state *flow.State) (iecResult, bool) {
+// iecConformanceAction names the outcome of an event with findings for its
+// conformance alert: a dropped packet aborted the session (every judged
+// event of the packet goes with it), a non-allow decision would have, and
+// an allowed event passed.
+func iecConformanceAction(packet capture.Decision, decision string) string {
+	switch {
+	case packet.Action == capture.Drop:
+		return "dropped and reset"
+	case decision != decisionAllow:
+		return "would drop"
+	default:
+		return "passed"
+	}
+}
+
+func (t *iecTable) packet(pkt capture.Packet, state *flow.State, parsing ics.Parsing) (iecResult, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.pressureOffline = false
+	t.parsing = parsing
 	if !t.hasIEC {
 		return iecResult{}, false
 	}
@@ -253,7 +279,9 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 	default:
 		t.sessions[key] = n
 	}
-	return accepted(reasonIECAccept)
+	res := accepted(reasonIECAccept)
+	res.acts.retired = true // a new connection on the tuple: the previous one is over
+	return res
 }
 
 // midstreamLocked drops a packet of a session not observed from its SYN
@@ -548,6 +576,7 @@ func (t *iecTable) dropHeldLocked(s *iecSession, dir int) []capture.Resolution {
 
 func (t *iecTable) closeLocked(s *iecSession, now time.Time) iecActions {
 	acts := t.endInventoryLocked(s)
+	acts.retired = true
 	s.apci = nil
 	s.state, s.endedAt = iecClosed, now
 	t.dpi.EndStream(s.id)
@@ -605,7 +634,7 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 				reason = abortFraming
 			}
 			r := droppedWith(reasonIECAbort, t.abortLocked(s, reason, trigger, cur, now))
-			r.inspect = res.inspect
+			r.inspect, r.findings = res.inspect, res.findings
 			res.acts.merge(r.acts)
 			r.acts = res.acts
 			return r
@@ -650,12 +679,13 @@ func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, sta
 	if streamErr && len(ir.Events) > 0 {
 		judged = append(judged, ir.Events[len(ir.Events)-1]) // the error's malformed event
 	}
-	denied, trigger, evs := t.judgeLocked(s, judged, now)
-	res.acts.events = append(res.acts.events, evs...)
+	j := t.judgeLocked(s, judged, now)
+	res.acts.events = append(res.acts.events, j.events...)
+	res.findings = append(res.findings, j.findings...)
 	if streamErr {
 		t.stopParseLocked(s)
 	}
-	return denied, trigger, streamErr
+	return j.denied, j.trigger, streamErr
 }
 
 func (t *iecTable) stopParseLocked(s *iecSession) {
@@ -701,7 +731,7 @@ func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur
 	if len(s.held) >= iecMaxHeldPerSession || s.heldBytes+n > iecMaxHeldBytes || t.heldTotal >= iecMaxHeldGlobal {
 		r := droppedWith(reasonIECAbort, t.abortLocked(s, abortBound, "", cur, now))
 		r.decision.Resolved = append(res.decision.Resolved, r.decision.Resolved...)
-		r.inspect = res.inspect
+		r.inspect, r.findings = res.inspect, res.findings
 		res.acts.merge(r.acts)
 		r.acts = res.acts
 		return r
