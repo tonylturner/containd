@@ -558,12 +558,16 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	if err := config.ValidateForStore(store, cfg); err != nil {
 		return nil, err
 	}
+	scanWarnings, err := config.ValidateScanSelection(cfg)
+	if err != nil {
+		return nil, err
+	}
 	if services != nil {
 		if err := services.Apply(ctx, cfg.Services); err != nil {
 			return nil, err
 		}
 	}
-	var warnings []string
+	warnings := scanWarnings
 	if engine == nil {
 		return nil, errors.New("engine unavailable")
 	}
