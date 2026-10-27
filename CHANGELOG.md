@@ -14,6 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attestations, and a Trivy HIGH/CRITICAL scan of every platform image.
   `scripts/verify-published-images.sh` runs the same checks locally. The README
   badges for Trivy, Cosign and SBOM show these results.
+- The Sessions page can kill ICMP and ICMPv6 connections. The connections
+  list shows the identifier, type and code of each ICMP entry where ports would
+  be, original and reply. A connection-scope kill revokes the exact flow, NAT
+  included; a client-service kill ends all of the client's pings to that host.
+- An ICMP or ICMPv6 kill also drops echo requests and replies that have no
+  connection state: ICMP that a `notrack` rule exempts from connection
+  tracking, and replies that arrive after the connection's state was deleted.
+  They are matched by the addresses and identifier of each direction, in the
+  new `revoke_icmp4` and `revoke_icmp6` sets of `inet <enforceTable>`. Existing
+  tables gain these sets on their next apply, and existing revocations are kept.
+- `show conntrack` shows the identifier, type and code of ICMP and ICMPv6
+  connections in place of ports.
+- The firewall and ICS rule impact preview shows the time range of retained
+  events it searched and the newest matching events, and says when there were
+  no events to search.
 
 ## [0.1.35] - 2026-10-26
 
