@@ -364,8 +364,7 @@ test("Turning the IEC 104 decoder off saves an explicit false", async ({ page })
   await page.goto("/firewall");
   const decoders = page.getByText("ICS Protocol Decoders").locator("xpath=../../..");
   await decoders.getByRole("button", { name: "Configure" }).click();
-  const row = page.getByText("APCI frames, Type IDs, common addresses, IOAs").locator("xpath=../../..");
-  await row.locator("div.rounded-full").click();
+  await page.getByRole("switch", { name: "IEC 60870-5-104 decoder" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0].path).toBe("/api/v1/dataplane");
@@ -383,8 +382,7 @@ test("A rejected decoder change is reverted and its reason shown", async ({ page
   await page.goto("/firewall");
   const decoders = page.getByText("ICS Protocol Decoders").locator("xpath=../../..");
   await decoders.getByRole("button", { name: "Configure" }).click();
-  const row = page.getByText("APCI frames, Type IDs, common addresses, IOAs").locator("xpath=../../..");
-  await row.locator("div.rounded-full").click();
+  await page.getByRole("switch", { name: "IEC 60870-5-104 decoder" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(`Not saved: ${reason}`)).toBeVisible();
   await expect(decoders.getByText("4/4 enabled")).toBeVisible();

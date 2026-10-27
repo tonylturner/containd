@@ -245,6 +245,51 @@ test("evidence events decode with typed attributes", () => {
   expect(allowed?.alert).toBe(false);
 });
 
+test("a strict nonconformant decision shows its conformance codes", () => {
+  const strict = describeICSEvidence(
+    ev("ics.decision", {
+      session_id: "ab-1",
+      decision: "deny",
+      ruleId: "",
+      action: "DENY",
+      mode: "enforce",
+      reason: "nonconformant",
+      conformance: ["iec104.reserved_bits", "iec104.role"],
+      apdu_id: "ab-1/c/16",
+      type_id: 45,
+      ca: 1,
+      ioa: 2002,
+    }),
+  );
+  expect(strict?.alert).toBe(true);
+  expect(strict?.message).toBe(
+    "deny: type 45 CA 1 IOA 2002 (nonconformant under strict parsing, envelope default; iec104.reserved_bits, iec104.role)",
+  );
+  expect(strict?.rows).toContainEqual({ label: "Reason", value: "nonconformant under strict parsing" });
+  expect(strict?.rows).toContainEqual({ label: "Conformance", value: "iec104.reserved_bits, iec104.role" });
+
+  // Tolerant parsing keeps the codes on an ordinary rule decision.
+  const tolerant = parseICSEvidence(
+    ev("ics.decision", { session_id: "ab-1", decision: "allow", ruleId: "r", reason: "rule", conformance: ["iec104.time", 7] }),
+  );
+  expect(tolerant?.kind === "ics.decision" && tolerant.attrs.conformance).toEqual(["iec104.time"]);
+  const plain = describeICSEvidence(
+    ev("ics.decision", { session_id: "ab-1", decision: "allow", ruleId: "r", reason: "rule" }),
+  );
+  expect(plain?.message).toBe("allow: APDU (matched rule, r)");
+  expect(plain?.rows.map((r) => r.label)).not.toContain("Conformance");
+
+  // The engine no longer emits role or unsupported; a reason without a
+  // label is shown raw instead of hiding the decision.
+  for (const reason of ["role", "unsupported", "future"]) {
+    const raw = describeICSEvidence(
+      ev("ics.decision", { session_id: "ab-1", decision: "deny", ruleId: "", reason }),
+    );
+    expect(raw?.rows, reason).toContainEqual({ label: "Reason", value: reason });
+  }
+  expect(parseICSEvidence(ev("ics.decision", { session_id: "ab-1", decision: "deny", ruleId: "" }))).toBeNull();
+});
+
 test("health indicator names IEC 104 only while an IEC 104 envelope is active", () => {
   expect(iec104HealthIndicator({ active: true, healthy: false, reason: "queue bind failed" })).toEqual({
     status: "degraded", label: "IEC 104 enforcement unhealthy", sublabel: "queue bind failed",

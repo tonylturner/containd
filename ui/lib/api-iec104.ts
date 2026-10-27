@@ -15,14 +15,6 @@ const DECISIONS = new Set<ICSDecisionAttributes["decision"]>([
   "deny",
   "would_drop",
 ]);
-const REASONS = new Set<ICSDecisionAttributes["reason"]>([
-  "rule",
-  "default",
-  "broadcast",
-  "malformed",
-  "unsupported",
-  "role",
-]);
 const VERDICT_OUTCOMES = new Set<ICSVerdictAttributes["outcome"]>([
   "dropped",
   "drop_failed",
@@ -76,7 +68,9 @@ export function parseICSEvidence(ev: TelemetryEvent): ICSEvidence | null {
 
   if (ev.kind === "ics.decision") {
     const decision = oneOf(DECISIONS, str(a, "decision"));
-    const reason = oneOf(REASONS, str(a, "reason"));
+    // The reason is free text from the engine: a reason this build does not
+    // label is still evidence, so only a missing one hides the decision.
+    const reason = str(a, "reason");
     if (!decision || !reason) return null;
     const direction = str(a, "direction");
     return {
@@ -85,6 +79,7 @@ export function parseICSEvidence(ev: TelemetryEvent): ICSEvidence | null {
         session_id: sessionID,
         decision,
         reason,
+        conformance: strings(a, "conformance"),
         ruleId: str(a, "ruleId") ?? "",
         action: str(a, "action"),
         mode: str(a, "mode"),
