@@ -146,7 +146,7 @@ test("decoder toggles list only supported protocols and preserve unsupported key
   await expect(modal).toContainText("unsupported");
 
   await modal.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByText(unsupportedMapError, { exact: true })).toBeVisible();
+  await expect(page.getByText(`Not saved: ${unsupportedMapError}`)).toBeVisible();
   expect(seen.dataPlanePosts[0]?.dpiIcsProtocols).toEqual({ s7comm: false });
 
   await page.getByRole("button", { name: "Configure", exact: true }).first().click();
