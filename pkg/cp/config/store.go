@@ -181,7 +181,7 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 		return errors.New("config is nil")
 	}
 	if err := s.ValidateConfig(cfg); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+		return err
 	}
 
 	s.mu.Lock()
@@ -209,7 +209,7 @@ func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) er
 		return errors.New("config is nil")
 	}
 	if err := s.ValidateConfig(cfg); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+		return err
 	}
 	if err := s.validateSSHAccessLocked(ctx, cfg); err != nil {
 		return err

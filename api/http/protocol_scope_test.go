@@ -55,7 +55,7 @@ func TestRemovedProtocolStageAtomic(t *testing.T) {
 				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 					t.Fatal(err)
 				}
-				if rec.Code != http.StatusBadRequest || !strings.Contains(body.Error, want) {
+				if rec.Code != http.StatusBadRequest || body.Error != want {
 					t.Fatalf("%s %s: %d %s", name, kind, rec.Code, rec.Body)
 				}
 			}
