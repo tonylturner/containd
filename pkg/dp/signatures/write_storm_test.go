@@ -152,9 +152,133 @@ func TestICSWriteStormCountsIEC104APDUOnce(t *testing.T) {
 			t.Fatalf("three APDUs alerted before the 20-command threshold")
 		}
 	}
-	st := e.thresholds[thresholdKey{sigID: "ICS-WRITE-STORM", flowID: connectionFlowID(flowID)}]
+	key, ok := flow.ParseKey(flowID)
+	if !ok {
+		t.Fatalf("could not parse test flow ID %q", flowID)
+	}
+	st := e.thresholds[thresholdKey{sigID: "ICS-WRITE-STORM", flowID: key.Hash()}]
 	if st == nil || st.count != 2 {
 		t.Fatalf("distinct APDU command count = %v, want 2", st)
+	}
+}
+
+func TestCustomThresholdUsesConnectionScopeAndDedupAttribute(t *testing.T) {
+	e := New()
+	e.Add(Signature{
+		ID:         "CUSTOM-CONNECTION-WRITES",
+		Protocol:   "test",
+		Conditions: []Condition{{Field: "kind", Op: "equals", Value: "request"}},
+		Threshold: &Threshold{
+			Count: 2, WindowSeconds: 10,
+			Scope: thresholdScopeConnection, DedupAttr: "command_id",
+		},
+	})
+	start := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	forward := flow.Key{
+		SrcIP: net.ParseIP("10.0.0.1"), DstIP: net.ParseIP("10.0.0.2"),
+		SrcPort: 40000, DstPort: 502, Proto: 6, Dir: flow.DirForward,
+	}
+	makeEvent := func(flowID, commandID string, offset time.Duration) dpi.Event {
+		return dpi.Event{
+			FlowID: flowID, Proto: "test", Kind: "request", Timestamp: start.Add(offset),
+			Attributes: map[string]any{"command_id": commandID},
+		}
+	}
+	if got := len(e.Match(makeEvent(forward.Hash(), "same", 0))); got != 0 {
+		t.Fatalf("first command produced %d alerts, want 0", got)
+	}
+	if got := len(e.Match(makeEvent(forward.Reversed().Hash(), "same", time.Second))); got != 0 {
+		t.Fatalf("duplicate identity in reverse direction produced %d alerts, want 0", got)
+	}
+	if got := len(e.Match(makeEvent(forward.Reversed().Hash(), "different", 2*time.Second))); got != 1 {
+		t.Fatalf("second distinct command produced %d alerts, want 1", got)
+	}
+}
+
+func TestThresholdScopeFlowAndUnparseableConnectionFallback(t *testing.T) {
+	start := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name  string
+		scope string
+		ids   []string
+	}{
+		{name: "flow scope keeps directions separate", scope: thresholdScopeFlow, ids: []string{"forward", "reverse", "forward"}},
+		{name: "unparseable connection IDs remain separate", scope: thresholdScopeConnection, ids: []string{"not-a-flow-forward", "not-a-flow-reverse", "not-a-flow-forward"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := New()
+			e.Add(Signature{
+				ID:         "CUSTOM-SCOPE",
+				Protocol:   "test",
+				Conditions: []Condition{{Field: "kind", Op: "equals", Value: "request"}},
+				Threshold:  &Threshold{Count: 2, WindowSeconds: 10, Scope: tc.scope},
+			})
+			for i, flowID := range tc.ids {
+				ev := dpi.Event{
+					FlowID: flowID, Proto: "test", Kind: "request", Timestamp: start.Add(time.Duration(i) * time.Second),
+				}
+				got := len(e.Match(ev)) != 0
+				if got != (i == 2) {
+					t.Fatalf("event %d on FlowID %q alerted = %v, want %v", i+1, flowID, got, i == 2)
+				}
+			}
+		})
+	}
+}
+
+func TestCustomThresholdDedupSetCapCountsUnretainedValues(t *testing.T) {
+	e := New()
+	e.Add(Signature{
+		ID:         "CUSTOM-DEDUP-CAP",
+		Protocol:   "test",
+		Conditions: []Condition{{Field: "kind", Op: "equals", Value: "request"}},
+		Threshold:  &Threshold{Count: maxThresholdDedupValues + 2, WindowSeconds: 10, DedupAttr: "command_id"},
+	})
+	start := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	match := func(id string) bool {
+		ev := dpi.Event{
+			FlowID: "cap-test", Proto: "test", Kind: "request", Timestamp: start,
+			Attributes: map[string]any{"command_id": id},
+		}
+		return len(e.Match(ev)) != 0
+	}
+	for i := 0; i < maxThresholdDedupValues; i++ {
+		if match("unique-" + strconv.Itoa(i)) {
+			t.Fatalf("alerted at retained value %d", i+1)
+		}
+	}
+	if match("overflow") {
+		t.Fatal("alerted on the first unretained value")
+	}
+	st := e.thresholds[thresholdKey{sigID: "CUSTOM-DEDUP-CAP", flowID: "cap-test"}]
+	if st == nil {
+		t.Fatal("no threshold state for dedup cap test")
+	}
+	if len(st.seen) != maxThresholdDedupValues {
+		t.Fatalf("retained dedup values = %d, want cap %d", len(st.seen), maxThresholdDedupValues)
+	}
+	if !match("overflow") {
+		t.Fatal("repeated unretained value was not counted at the documented cap")
+	}
+}
+
+func TestThresholdDoesNotDeduplicateEmptyAttributeValues(t *testing.T) {
+	e := New()
+	e.Add(Signature{
+		ID:         "CUSTOM-EMPTY-IDENTITY",
+		Protocol:   "test",
+		Conditions: []Condition{{Field: "kind", Op: "equals", Value: "request"}},
+		Threshold:  &Threshold{Count: 2, WindowSeconds: 10, DedupAttr: "command_id"},
+	})
+	start := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 2; i++ {
+		ev := dpi.Event{
+			FlowID: "empty-id", Proto: "test", Kind: "request", Timestamp: start.Add(time.Duration(i) * time.Second),
+			Attributes: map[string]any{"command_id": ""},
+		}
+		if got := len(e.Match(ev)) != 0; got != (i == 1) {
+			t.Fatalf("empty identity event %d alerted = %v, want %v", i+1, got, i == 1)
+		}
 	}
 }
 
@@ -183,16 +307,5 @@ func TestICSWriteStormWindowBoundary(t *testing.T) {
 	}
 	if !writeStormAlert(e, writeStormEvent(flowID, "modbus", "request", true, afterBoundary, "")) {
 		t.Fatal("20 commands in the restarted window did not alert")
-	}
-}
-
-func TestConnectionFlowIDCanonicalizesBothDirections(t *testing.T) {
-	forward := flow.Key{
-		SrcIP: net.ParseIP("10.0.0.1"), DstIP: net.ParseIP("10.0.0.2"),
-		SrcPort: 40000, DstPort: 502, Proto: 6, Dir: flow.DirForward,
-	}
-	reverse := forward.Reversed()
-	if got, want := connectionFlowID(forward.Hash()), connectionFlowID(reverse.Hash()); got != want {
-		t.Fatalf("forward connection ID %q differs from reverse %q", got, want)
 	}
 }

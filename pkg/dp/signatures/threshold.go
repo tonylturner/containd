@@ -4,17 +4,27 @@
 package signatures
 
 import (
+	"encoding/json"
 	"errors"
-	"net"
-	"strconv"
-	"strings"
+	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
-// maxThresholdKeys bounds the per-flow counters of threshold signatures.
-const maxThresholdKeys = 4096
+const (
+	// maxThresholdKeys bounds the per-flow counters of threshold signatures.
+	maxThresholdKeys = 4096
+	// maxThresholdDedupValues bounds distinct identity values retained in one
+	// threshold window. At the cap, unseen values are still counted but not
+	// retained; repeated unseen values can therefore count more than once.
+	maxThresholdDedupValues = 256
+
+	thresholdScopeFlow       = "flow"
+	thresholdScopeConnection = "connection"
+)
 
 // Threshold turns a signature into a rate signature: it alerts once when
 // Count qualifying observations of one flow scope fall inside one window,
@@ -22,8 +32,10 @@ const maxThresholdKeys = 4096
 // JSON, as in the rest of the config and API (ttlSeconds, intervalSeconds,
 // rotateSeconds).
 type Threshold struct {
-	Count         int `json:"count"`
-	WindowSeconds int `json:"windowSeconds"`
+	Count         int    `json:"count"`
+	WindowSeconds int    `json:"windowSeconds"`
+	Scope         string `json:"scope,omitempty"`
+	DedupAttr     string `json:"dedupAttr,omitempty"`
 }
 
 // Window returns the threshold window.
@@ -40,17 +52,20 @@ func (t Threshold) validate() error {
 	if t.WindowSeconds < 1 {
 		return errors.New("threshold windowSeconds must be at least 1")
 	}
+	if t.Scope != "" && t.Scope != thresholdScopeFlow && t.Scope != thresholdScopeConnection {
+		return fmt.Errorf("threshold scope must be %q or %q", thresholdScopeFlow, thresholdScopeConnection)
+	}
 	return nil
 }
 
 type thresholdKey struct{ sigID, flowID string }
 
 type thresholdState struct {
-	start     time.Time
-	window    time.Duration
-	count     int
-	fired     bool
-	seenAPDUs map[string]struct{}
+	start  time.Time
+	window time.Duration
+	count  int
+	fired  bool
+	seen   map[string]struct{}
 }
 
 // passThreshold counts a matching event and reports whether the signature
@@ -66,8 +81,14 @@ func (e *Engine) passThreshold(sig Signature, ev dpi.Event, now time.Time) bool 
 		e.thresholds = make(map[thresholdKey]*thresholdState)
 	}
 	flowID := ev.FlowID
-	if sig.ID == "ICS-WRITE-STORM" {
-		flowID = connectionFlowID(flowID)
+	if t.Scope == thresholdScopeConnection {
+		if key, ok := flow.ParseKey(flowID); ok {
+			if key.Dir == flow.DirReverse {
+				key = key.Reversed()
+			}
+			key.Dir = flow.DirForward
+			flowID = key.Hash()
+		}
 	}
 	key := thresholdKey{sigID: sig.ID, flowID: flowID}
 	st := e.thresholds[key]
@@ -81,15 +102,17 @@ func (e *Engine) passThreshold(sig Signature, ev dpi.Event, now time.Time) bool 
 	if st.fired {
 		return false
 	}
-	if sig.ID == "ICS-WRITE-STORM" {
-		if apduID := eventAPDUID(ev); apduID != "" {
-			if st.seenAPDUs == nil {
-				st.seenAPDUs = make(map[string]struct{})
-			}
-			if _, seen := st.seenAPDUs[apduID]; seen {
+	if t.DedupAttr != "" {
+		if dedupKey, ok := eventDedupKey(ev, t.DedupAttr); ok {
+			if _, seen := st.seen[dedupKey]; seen {
 				return false
 			}
-			st.seenAPDUs[apduID] = struct{}{}
+			if len(st.seen) < maxThresholdDedupValues {
+				if st.seen == nil {
+					st.seen = make(map[string]struct{})
+				}
+				st.seen[dedupKey] = struct{}{}
+			}
 		}
 	}
 	st.count++
@@ -97,44 +120,39 @@ func (e *Engine) passThreshold(sig Signature, ev dpi.Event, now time.Time) bool 
 		return false
 	}
 	st.fired = true
-	st.seenAPDUs = nil
+	st.seen = nil
 	return true
 }
 
-// connectionFlowID removes the direction bit from the flow.Key.Hash format
-// used by ICS decoders and puts reverse tuples in opener-to-server order.
-// Other FlowID formats are left unchanged.
-func connectionFlowID(flowID string) string {
-	parts := strings.Split(flowID, "|")
-	if len(parts) != 6 || (parts[5] != "0" && parts[5] != "1") {
-		return flowID
+// eventDedupKey serializes a nonempty attribute value for identity comparison.
+func eventDedupKey(ev dpi.Event, attr string) (string, bool) {
+	if ev.Attributes == nil {
+		return "", false
 	}
-	if net.ParseIP(parts[0]) == nil || net.ParseIP(parts[1]) == nil {
-		return flowID
+	value, ok := ev.Attributes[attr]
+	if !ok || isEmptyDedupValue(value) {
+		return "", false
 	}
-	if _, err := strconv.ParseUint(parts[2], 10, 16); err != nil {
-		return flowID
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", false
 	}
-	if _, err := strconv.ParseUint(parts[3], 10, 16); err != nil {
-		return flowID
-	}
-	if _, err := strconv.ParseUint(parts[4], 10, 8); err != nil {
-		return flowID
-	}
-	if parts[5] == "1" {
-		parts[0], parts[1] = parts[1], parts[0]
-		parts[2], parts[3] = parts[3], parts[2]
-	}
-	return strings.Join(parts[:5], "|")
+	return string(encoded), true
 }
 
-// eventAPDUID identifies IEC 104 object events emitted from one APDU.
-func eventAPDUID(ev dpi.Event) string {
-	if ev.Attributes == nil {
-		return ""
+func isEmptyDedupValue(value any) bool {
+	if value == nil {
+		return true
 	}
-	id, _ := ev.Attributes["apdu_id"].(string)
-	return id
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.String, reflect.Array, reflect.Slice, reflect.Map:
+		return v.Len() == 0
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Pointer:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 // evictThresholds drops expired windows, and every window if none expired,

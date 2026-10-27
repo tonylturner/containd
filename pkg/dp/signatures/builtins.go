@@ -172,7 +172,12 @@ func builtinSignatures() []Signature {
 				{Field: "kind", Op: "in", Value: []any{"request", "restart", "control"}},
 				{Field: "is_write", Op: "equals", Value: true},
 			},
-			Threshold:  &Threshold{Count: icsWriteStormCount, WindowSeconds: icsWriteStormWindowSeconds},
+			Threshold: &Threshold{
+				Count:         icsWriteStormCount,
+				WindowSeconds: icsWriteStormWindowSeconds,
+				Scope:         thresholdScopeConnection,
+				DedupAttr:     "apdu_id",
+			},
 			References: []string{"https://attack.mitre.org/techniques/T0855/"},
 		},
 	}

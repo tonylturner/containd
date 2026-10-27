@@ -20,7 +20,10 @@ func modbusResponse(t *testing.T, sport uint16, fc byte, body ...byte) dpi.Event
 	t.Helper()
 	pdu := append([]byte{fc}, body...)
 	adu := append([]byte{0x00, 0x01, 0x00, 0x00, 0x00, byte(1 + len(pdu)), 0x01}, pdu...)
-	key := flow.Key{SrcIP: net.ParseIP("10.0.0.2"), DstIP: net.ParseIP("10.0.0.1"), SrcPort: 502, DstPort: sport, Proto: 6}
+	key := flow.Key{
+		SrcIP: net.ParseIP("10.0.0.2"), DstIP: net.ParseIP("10.0.0.1"),
+		SrcPort: 502, DstPort: sport, Proto: 6, Dir: flow.DirReverse,
+	}
 	evs, err := modbus.NewDecoder().OnPacket(flow.NewState(key, time.Now()), &dpi.ParsedPacket{Payload: adu, Proto: "tcp", SrcPort: 502, DstPort: sport})
 	if err != nil || len(evs) != 1 {
 		t.Fatalf("decode FC %#x: events=%d err=%v", fc, len(evs), err)
