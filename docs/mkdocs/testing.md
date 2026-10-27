@@ -131,6 +131,31 @@ for LAN traffic disabled. It passes only when each run fails exactly the
 checks that its change breaks. Both scripts accept the isolation variables
 described in the smoke fixture README linked below.
 
+## Scanning Gate Smoke
+
+`bash scripts/smoke-av-gate.sh` brings up the same harness, enables the
+native clamd with FreshClam off and the EICAR test file's MD5 as its only
+custom definition, and commits a scan selection for LAN-to-WAN tcp/8080 and
+the port forward's WAN-to-LAN tcp/80. It checks, with the EICAR and clean
+objects served by `test/data-smoke/av/`, that:
+
+- under fail-open and fail-closed with the scanner ready, the EICAR
+  download and upload are refused with `403` and no EICAR byte reaches the
+  client or the origin, clean objects pass whole, the origin sees the
+  engine's WAN address, a detection event names the client, the inbound
+  port forward is gated the same way with the target seeing the engine's
+  LAN address, and an unselected port passes EICAR without a gate event;
+- with the backend switched to an ICAP server that refuses connections,
+  fail-open passes everything unscanned, fail-closed refuses downloads and
+  uploads while management stays reachable, and a client marked as an ICS
+  asset passes under fail-closed;
+- an exclude entry wins over the include entry: EICAR passes and the gate
+  records no event for it.
+
+Exit codes follow the forwarding smoke. `SMOKE_MUTATION=no-gate` commits an
+empty scan selection and must fail the refusal checks. The script accepts
+the isolation variables described in the smoke fixture README.
+
 ## Selecting Tests
 
 | Change | Checks |
@@ -139,6 +164,7 @@ described in the smoke fixture README linked below.
 | Protocol parsing or stream reassembly | Adjacent malformed-input tests, fuzz targets and benchmarks |
 | UI routes or forms | Playwright specs and UI lint; mocked API tests do not validate the live backend |
 | Forwarding, NAT or live DPI | `bash scripts/smoketest`; set `SMOKE_INCLUDE_DPI=0` for forwarding only |
+| Scanning gate, AV fail policy or scan selection | `bash scripts/smoke-av-gate.sh` |
 | Linux networking or runtime behavior | Tests on Linux with the capabilities required by the package or harness |
 
 Keep regression tests beside the code they exercise, following
