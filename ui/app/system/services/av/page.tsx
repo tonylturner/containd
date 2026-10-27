@@ -4,7 +4,7 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type AVConfig, type AVStatus } from "../../../../lib/api";
+import { api, isAdmin, type Asset, type AVConfig, type AVStatus, type Zone } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { SaveStateLine } from "../../../../components/SaveStateLine";
@@ -13,6 +13,9 @@ import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { Card } from "../../../../components/Card";
 import { CustomDefinitions } from "./custom-defs";
+import { GateStatus } from "./gate-status";
+import { normalizeScan } from "./scan-model";
+import { ScanSelectionEditor } from "./scan-selection";
 
 const emptyICAPServer = { address: "", useTls: false, service: "" };
 
@@ -23,10 +26,11 @@ export default function AVPage() {
     enabled: false,
     mode: "clamav",
     failPolicy: "open",
-    failOpenIcs: true,
     icap: { servers: [] },
     clamav: { freshclamEnabled: true },
   });
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [assets, setAssets] = useState<Asset[]>([]);
   const [status, setStatus] = useState<AVStatus | null>(null);
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +51,9 @@ export default function AVPage() {
       setStatus(svc?.av ?? null);
       const s = await api.getAV();
       if (s) setCfg(s);
+      const [zoneList, assetList] = await Promise.all([api.listZones(), api.listAssets()]);
+      setZones(zoneList ?? []);
+      setAssets(assetList ?? []);
       const defsResp = await api.listAVDefs();
       setDefs(defsResp?.files ?? []);
       setDefsPath(defsResp?.path ?? "");
@@ -87,6 +94,7 @@ export default function AVPage() {
         ...(cfg.clamav ?? {}),
         freshclamEnabled: cfg.clamav?.freshclamEnabled ?? true,
       },
+      scan: normalizeScan(cfg.scan),
     };
     const result = await save.run("save", () => api.setAV(payload), {
       success: "AV settings staged — commit to apply.",
@@ -234,7 +242,6 @@ export default function AVPage() {
             <div>
               Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
-            <div>ICS fail-open: <span className="text-(--text)">{status?.failOpenICS ?? cfg.failOpenIcs ? "yes" : "no"}</span></div>
             <div>ICAP servers: <span className="text-(--text)">{status?.icap_servers ?? 0}</span></div>
             <div>Cache: <span className="text-(--text)">{status?.cache_size ?? 0}</span></div>
             <div>ClamAV running: <span className="text-(--text)">{status?.clamav_running ? `yes (pid ${status?.clamav_pid ?? ""})` : "no"}</span></div>
@@ -256,6 +263,9 @@ export default function AVPage() {
             ) : null}
             <div className="md:col-span-3 text-xs">{status?.last_error}</div>
             <div className="md:col-span-3 text-xs">{status?.freshclam_error}</div>
+            <div className="md:col-span-3">
+              <GateStatus gate={status.gate} />
+            </div>
           </div>
         )}
       </Card>
@@ -311,16 +321,6 @@ export default function AVPage() {
               <option value="closed">Fail closed</option>
             </select>
           </div>
-          <label className="flex items-center gap-2 text-sm text-(--text)">
-            <input
-              type="checkbox"
-              checked={cfg.failOpenIcs ?? true}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, failOpenIcs: e.target.checked }))}
-              className="h-4 w-4"
-            />
-            Always fail open for ICS traffic
-          </label>
           <div>
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">Max size (bytes)</label>
             <input
@@ -458,6 +458,13 @@ export default function AVPage() {
           }}
           refresh={refresh}
         />
+      </Card>
+
+      <Card className="mt-4">
+        <h2 className="text-lg font-semibold text-(--text)">Scanned traffic</h2>
+        <div className="mt-3">
+          <ScanSelectionEditor cfg={cfg} update={setCfg} zones={zones} assets={assets} canEdit={canEdit} />
+        </div>
       </Card>
 
       <SaveStateLine state={save.state} saved="staged — commit to apply." />
