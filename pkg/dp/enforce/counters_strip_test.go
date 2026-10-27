@@ -26,7 +26,7 @@ func compileEntryWithoutCounters(e rules.Entry, zoneIfaces map[string][]string, 
 	if err != nil {
 		return nil, err
 	}
-	lines, err := compileEntry(e, zones, queueID, nflogGroup)
+	lines, err := compileEntry(e, zoneLowering{idx: zones}, queueID, nflogGroup)
 	texts := make([]string, 0, len(lines))
 	for _, l := range lines {
 		texts = append(texts, withoutRuleCounters(l.text))
@@ -36,7 +36,7 @@ func compileEntryWithoutCounters(e rules.Entry, zoneIfaces map[string][]string, 
 
 // guardedWithoutCounters is compileEntryWithoutCounters with p's predicates.
 func guardedWithoutCounters(p *predicates, e rules.Entry) ([]string, error) {
-	lines, err := compileEntry(e, p.zones, p.queueID, 0)
+	lines, err := compileEntry(e, p.lowering(targetForward), p.queueID, 0)
 	if err != nil {
 		return nil, err
 	}

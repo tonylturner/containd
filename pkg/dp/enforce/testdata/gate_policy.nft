@@ -1,0 +1,220 @@
+table inet containd_policy {
+  set zone_646d7a {
+    type ifname;
+    elements = { "eth3" }
+  }
+  set zone_6974 {
+    type ifname;
+    elements = { "eth1" }
+  }
+  set zone_6f74 {
+    type ifname;
+    elements = { "eth2" }
+  }
+  set zone_77616e {
+    type ifname;
+    elements = { "eth0" }
+  }
+  counter rule_460f6c21f6fd9c4d { }
+  counter rule_373d14435c0acc95 { }
+  counter rule_d6f5171bdd2d709a { }
+  counter rule_62ce1ee73fba51d4 { }
+  counter rule_0fcbbe08bd166a2d { }
+  counter rule_1366fac71146793a { }
+  counter rule_1366fac71146793a_excess { }
+  set rule_1366fac71146793a_m4p {
+    type ipv4_addr . ipv4_addr . inet_proto . inet_service . inet_service;
+    size 65536;
+    flags dynamic,timeout;
+    timeout 10s;
+  }
+  set rule_1366fac71146793a_m6p {
+    type ipv6_addr . ipv6_addr . inet_proto . inet_service . inet_service;
+    size 65536;
+    flags dynamic,timeout;
+    timeout 10s;
+  }
+  counter rule_b9c04fa43386cc28 { }
+  counter rule_098969ebacadd68b { }
+  counter rule_84737161a7f1b4eb { }
+  counter rule_f07ca10904fa3309 { }
+  set identity4_6f7073 {
+    type ipv4_addr;
+    elements = { 10.1.0.5 }
+  }
+  chain conditional_scope {
+    ct direction original oifname { "eth2" } meta l4proto tcp ct reply proto-src 8080 goto conditional_policy;
+    ct direction reply iifname { "eth2" } meta l4proto tcp ct reply proto-src 8080 goto conditional_policy;
+  }
+  chain conditional_policy {
+    ct status dnat return;
+    ct direction original iifname { "eth1" } oifname { "eth2" } meta l4proto tcp ct reply proto-src 502 return;
+    ct direction reply iifname { "eth2" } oifname { "eth1" } meta l4proto tcp ct reply proto-src 502 return;
+    ct original ip saddr { 10.1.0.0/24 } ct reply ip saddr { 10.2.0.0/24 } return;
+    ct direction original oifname { "eth2" } meta l4proto tcp ct reply proto-src 8080 ct original ip saddr @identity4_6f7073 return;
+    ct direction reply iifname { "eth2" } meta l4proto tcp ct reply proto-src 8080 ct original ip saddr @identity4_6f7073 return;
+    ct direction original iifname { "eth1", "eth3" } oifname { "eth0" } return;
+    ct direction reply iifname { "eth0" } oifname { "eth1", "eth3" } return;
+    ct direction original iifname { "eth1" } oifname { "eth2" } meta l4proto tcp ct reply proto-src 80 return;
+    ct direction reply iifname { "eth2" } oifname { "eth1" } meta l4proto tcp ct reply proto-src 80 return;
+    ct direction original oifname { "eth3" } drop;
+    ct direction reply iifname { "eth3" } drop;
+    meta l4proto tcp ct reply proto-src 23 reject with tcp reset;
+    drop;
+  }
+  chain gate_in_scope {
+    ct direction original ct mark & 0x0000ff00 == 0x00000100 meta l4proto tcp ct reply proto-src 8080 goto gate_in_policy;
+  }
+  chain gate_in_policy {
+    ct status dnat return;
+    ct direction original iifname { "eth1" } ct mark & 0x0000ff00 == 0x00000100 meta l4proto tcp ct reply proto-src 502 return;
+    ct original ip saddr { 10.1.0.0/24 } ct reply ip saddr { 10.2.0.0/24 } return;
+    ct direction original ct mark & 0x0000ff00 == 0x00000100 meta l4proto tcp ct reply proto-src 8080 ct original ip saddr @identity4_6f7073 return;
+    ct direction original iifname { "eth1", "eth3" } ct mark & 0x0000ff00 == 0x00000200 return;
+    ct direction original iifname { "eth1" } ct mark & 0x0000ff00 == 0x00000100 meta l4proto tcp ct reply proto-src 80 return;
+    meta l4proto tcp ct reply proto-src 23 reject with tcp reset;
+    drop;
+  }
+  chain gate_out_reply_scope {
+    ct direction reply ct mark & 0x0000ff00 == 0x00000100 meta l4proto tcp ct reply proto-src 8080 goto gate_out_reply_policy;
+  }
+  chain gate_out_reply_policy {
+    ct status dnat return;
+    ct direction reply ct mark & 0x0000ff00 == 0x00000100 oifname { "eth1" } meta l4proto tcp ct reply proto-src 502 return;
+    ct original ip saddr { 10.1.0.0/24 } ct reply ip saddr { 10.2.0.0/24 } return;
+    ct direction reply ct mark & 0x0000ff00 == 0x00000100 meta l4proto tcp ct reply proto-src 8080 ct original ip saddr @identity4_6f7073 return;
+    ct direction reply ct mark & 0x0000ff00 == 0x00000200 oifname { "eth1", "eth3" } return;
+    ct direction reply ct mark & 0x0000ff00 == 0x00000100 oifname { "eth1" } meta l4proto tcp ct reply proto-src 80 return;
+    meta l4proto tcp ct reply proto-src 23 reject with tcp reset;
+    drop;
+  }
+  chain iec104_envelope {
+    drop;
+  }
+  chain ics_queue {
+    ct status assured meta mark set meta mark and 0xf0ffffff queue num 100;
+    ct state != { invalid, untracked } meta mark set meta mark and 0xf0ffffff or 0x02000000 queue num 100;
+    meta mark set meta mark and 0xf0ffffff queue num 100;
+  }
+  chain gate_deliver {
+    meta l4proto tcp ct mark & 0x00120000 == 0x00120000 tproxy ip to 127.0.0.1:18101 meta mark set meta mark | 0x00400000 accept;
+    meta l4proto tcp ct mark & 0x00120000 == 0x00120000 tproxy ip6 to [::1]:18101 meta mark set meta mark | 0x00400000 accept;
+    meta l4proto tcp ct mark & 0x00120000 == 0x00100000 tproxy ip to 127.0.0.1:18100 meta mark set meta mark | 0x00400000 accept;
+    meta l4proto tcp ct mark & 0x00120000 == 0x00100000 tproxy ip6 to [::1]:18100 meta mark set meta mark | 0x00400000 accept;
+  }
+  chain gate_ics {
+    iifname { "eth3" } ct mark set ct mark & 0xffed00ff return;
+    fib daddr oifname { "eth3" } ct mark set ct mark & 0xffed00ff return;
+    ip saddr { 10.2.0.50/32 } ct mark set ct mark & 0xffed00ff return;
+    ip daddr { 10.2.0.50/32 } ct mark set ct mark & 0xffed00ff return;
+    ip6 saddr { 2001:db8:2::50/128 } ct mark set ct mark & 0xffed00ff return;
+    ip6 daddr { 2001:db8:2::50/128 } ct mark set ct mark & 0xffed00ff return;
+  }
+  chain gate_admit {
+    jump gate_ics;
+    ct mark & 0x00100000 == 0x00100000 reject with tcp reset;
+  }
+  chain gate_select {
+    ip6 saddr fe80::/10 return;
+    ip6 daddr fe80::/10 return;
+    meta nfproto ipv4 ip daddr { 10.2.0.99/32 } return;
+    iifname { "eth3" } fib daddr oifname { "eth2" } tcp dport { 80 } return;
+    meta nfproto ipv6 ip6 saddr { 2001:db8:1::/64 } return;
+    ct mark & 0x00100000 == 0x00000000 iifname { "eth1" } fib daddr oifname { "eth2" } tcp dport { 80, 8000-8099 } ct mark set ct mark | 0x00100100;
+    ct mark & 0x00100000 == 0x00000000 iifname { "eth1" } fib daddr oifname { "eth0" } tcp dport { 80, 8000-8099 } ct mark set ct mark | 0x00100200;
+    ct mark & 0x00100000 == 0x00000000 fib daddr oifname { "eth2" } tcp dport { 8080 } ct mark set ct mark | 0x00100100;
+    ct mark & 0x00100000 == 0x00100000 iifname @zone_77616e ct status dnat tcp dport 80 ip daddr 10.2.0.10 ct mark set ct mark | 0x00020000;
+    ct mark & 0x00100000 == 0x00100000 iifname @zone_6974 fib daddr oifname { "eth0" } ct mark set ct mark | 0x00020000;
+    ct mark & 0x00100000 == 0x00100000 iifname @zone_646d7a fib daddr oifname { "eth0" } ct mark set ct mark | 0x00020000;
+    ct mark & 0x00100000 == 0x00100000 goto gate_admit;
+  }
+  chain gate_pre {
+    type filter hook prerouting priority -90;
+    policy accept;
+    iifname "lo" return;
+    ct mark & 0x00200000 == 0x00200000 ct direction reply meta mark set meta mark | 0x00400000 accept;
+    fib daddr type local return;
+    ct mark & 0x00100000 == 0x00100000 jump gate_deliver;
+    ct state new tcp flags & (fin | syn | rst | ack) == syn jump gate_select;
+    ct mark & 0x00100000 == 0x00100000 reject with tcp reset;
+  }
+  chain gate_in {
+    meta nfproto ipv4 ct state != { invalid, untracked } ct direction original iifname { "eth1" } ct mark & 0x0000ff00 == 0x00000100 meta l4proto tcp counter name "rule_1366fac71146793a" update @rule_1366fac71146793a_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_1366fac71146793a_excess" drop;
+    meta nfproto ipv6 ct state != { invalid, untracked } ct direction original iifname { "eth1" } ct mark & 0x0000ff00 == 0x00000100 meta l4proto tcp counter name "rule_1366fac71146793a" update @rule_1366fac71146793a_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_1366fac71146793a_excess" drop;
+    iifname { "eth1" } ct mark & 0x0000ff00 == 0x00000100 tcp dport 502 counter name "rule_f07ca10904fa3309" jump ics_queue;
+    ct state established jump gate_in_scope;
+    ct state { established, related } accept;
+    iifname @zone_77616e ct status dnat tcp dport 80 accept;
+    iifname { "eth1" } counter name "rule_b9c04fa43386cc28";
+    ip saddr { 10.1.0.0/24 } ip daddr { 10.2.0.0/24 } counter name "rule_373d14435c0acc95" accept;
+    ip saddr @identity4_6f7073 ct mark & 0x0000ff00 == 0x00000100 tcp dport 8080 counter name "rule_098969ebacadd68b" accept;
+    iifname { "eth1", "eth3" } ct mark & 0x0000ff00 == 0x00000200 counter name "rule_d6f5171bdd2d709a" log prefix "containd:wan-out:ALLOW " group 7 accept;
+    iifname { "eth1" } ct mark & 0x0000ff00 == 0x00000100 tcp dport 80 counter name "rule_460f6c21f6fd9c4d" accept;
+    tcp dport 23 counter name "rule_0fcbbe08bd166a2d" reject with tcp reset;
+    drop;
+  }
+  chain gate_out_reply {
+    tcp flags & rst == rst accept;
+    meta nfproto ipv4 ct state != { invalid, untracked } ct direction reply ct mark & 0x0000ff00 == 0x00000100 oifname { "eth1" } meta l4proto tcp counter name "rule_1366fac71146793a" update @rule_1366fac71146793a_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_1366fac71146793a_excess" drop;
+    meta nfproto ipv6 ct state != { invalid, untracked } ct direction reply ct mark & 0x0000ff00 == 0x00000100 oifname { "eth1" } meta l4proto tcp counter name "rule_1366fac71146793a" update @rule_1366fac71146793a_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_1366fac71146793a_excess" drop;
+    ct state established jump gate_out_reply_scope;
+    accept;
+  }
+  chain output {
+    type filter hook output priority 0;
+    policy accept;
+    ct mark & 0x00100000 == 0x00100000 ct direction reply goto gate_out_reply;
+  }
+  chain gate_out {
+    type filter hook output priority -150;
+    policy accept;
+    meta mark & 0x00800000 == 0x00800000 ct mark set ct mark | 0x00200000;
+  }
+  chain input {
+    type filter hook input priority 0;
+    policy drop;
+    iifname "lo" accept;
+    ct mark & 0x00100000 == 0x00100000 ct direction original goto gate_in;
+    ct state { established, related } accept;
+    ct state invalid drop;
+    ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, time-exceeded } accept;
+    meta l4proto ipv6-icmp icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept;
+  }
+  chain forward {
+    type filter hook forward priority 0;
+    policy drop;
+    ct mark & 0x00100000 == 0x00100000 drop;
+    meta nfproto ipv4 ct state { invalid, untracked } iifname { "eth1" } oifname { "eth2" } meta l4proto tcp counter name "rule_1366fac71146793a" update @rule_1366fac71146793a_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_1366fac71146793a_excess" drop;
+    meta nfproto ipv4 ct state != { invalid, untracked } ct direction original iifname { "eth1" } oifname { "eth2" } meta l4proto tcp counter name "rule_1366fac71146793a" update @rule_1366fac71146793a_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_1366fac71146793a_excess" drop;
+    meta nfproto ipv4 ct state != { invalid, untracked } ct direction reply iifname { "eth2" } oifname { "eth1" } meta l4proto tcp counter name "rule_1366fac71146793a" update @rule_1366fac71146793a_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_1366fac71146793a_excess" drop;
+    meta nfproto ipv6 ct state { invalid, untracked } iifname { "eth1" } oifname { "eth2" } meta l4proto tcp counter name "rule_1366fac71146793a" update @rule_1366fac71146793a_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_1366fac71146793a_excess" drop;
+    meta nfproto ipv6 ct state != { invalid, untracked } ct direction original iifname { "eth1" } oifname { "eth2" } meta l4proto tcp counter name "rule_1366fac71146793a" update @rule_1366fac71146793a_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_1366fac71146793a_excess" drop;
+    meta nfproto ipv6 ct state != { invalid, untracked } ct direction reply iifname { "eth2" } oifname { "eth1" } meta l4proto tcp counter name "rule_1366fac71146793a" update @rule_1366fac71146793a_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_1366fac71146793a_excess" drop;
+    iifname { "eth1" } oifname { "eth2" } tcp dport 2404 counter name "rule_84737161a7f1b4eb" jump iec104_envelope;
+    iifname { "eth2" } oifname { "eth1" } tcp sport 2404 counter name "rule_84737161a7f1b4eb" jump iec104_envelope;
+    iifname { "eth1" } oifname { "eth2" } tcp dport 502 counter name "rule_f07ca10904fa3309" jump ics_queue;
+    ct state established jump conditional_scope;
+    ct state { established, related } accept;
+    iifname @zone_77616e ct status dnat tcp dport 80 accept;
+    iifname { "eth1" } counter name "rule_b9c04fa43386cc28";
+    ip saddr { 10.1.0.0/24 } ip daddr { 10.2.0.0/24 } counter name "rule_373d14435c0acc95" accept;
+    ip saddr @identity4_6f7073 oifname { "eth2" } tcp dport 8080 counter name "rule_098969ebacadd68b" accept;
+    iifname { "eth1", "eth3" } oifname { "eth0" } counter name "rule_d6f5171bdd2d709a" log prefix "containd:wan-out:ALLOW " group 7 accept;
+    iifname { "eth1" } oifname { "eth2" } tcp dport 80 counter name "rule_460f6c21f6fd9c4d" accept;
+    oifname { "eth3" } counter name "rule_62ce1ee73fba51d4" drop;
+    tcp dport 23 counter name "rule_0fcbbe08bd166a2d" reject with tcp reset;
+  }
+  chain prerouting {
+    type nat hook prerouting priority dstnat;
+    policy accept;
+    iifname @zone_77616e tcp dport 8080 counter dnat ip to 10.2.0.10:80;
+  }
+  chain postrouting {
+    type nat hook postrouting priority srcnat;
+    policy accept;
+    meta mark & 0x00810000 == 0x00810000 masquerade;
+    iifname @zone_77616e ct status dnat tcp dport 80 ip daddr 10.2.0.10 masquerade;
+    iifname @zone_6974 oifname @zone_77616e masquerade;
+    iifname @zone_646d7a oifname @zone_77616e masquerade;
+  }
+}

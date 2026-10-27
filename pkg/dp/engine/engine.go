@@ -84,7 +84,11 @@ type Engine struct {
 	hooks                 *inlineHooks
 	iec                   *iecTable
 	gate                  *envelopeGate // outlives Reconfigure, as the kernel ruleset does
-	domains               *domainExclusions
+	// gateAdmit is the admission state of the scanning gate (scan_admit.go):
+	// written by SetGateAdmit and into every applied ruleset, under
+	// lifecycleMu. It outlives Reconfigure, as the kernel ruleset does.
+	gateAdmit enforce.GateAdmitState
+	domains   *domainExclusions
 }
 
 // RulesetStatus describes the installed ruleset: its compiled text,
@@ -114,8 +118,13 @@ type EnforceConfig struct {
 	EngineAPI *enforce.EngineAPIPath
 	Enabled   bool
 	TableName string
-	Applier   enforce.Applier
-	Updater   enforce.Updater
+	// GatePlainPort and GateMasqPort are the scanning gate's loopback
+	// listener ports (enforce.CompilerSettings); both zero compiles no
+	// gate. The application passes the same values to preview.
+	GatePlainPort uint16
+	GateMasqPort  uint16
+	Applier       enforce.Applier
+	Updater       enforce.Updater
 }
 
 type Config struct {
@@ -222,6 +231,7 @@ func New(cfg Config) (*Engine, error) {
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompilerWithSettings(enforce.CompilerSettings{
 			TableName: cfg.Enforce.TableName, NFLogGroup: cfg.NFLogGroup, NFQueueGroup: cfg.NFQueueGroup,
+			GatePlainPort: cfg.Enforce.GatePlainPort, GateMasqPort: cfg.Enforce.GateMasqPort,
 		}, e.managementReservation)
 		comp.EngineAPI = e.engineAPI
 		e.compiler = comp
@@ -483,6 +493,7 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	if e.compiler != nil {
 		start := time.Now()
 		var err error
+		e.compiler.GateAdmit = e.gateAdmit
 		if compiled, err = e.gate.apply(ctx, e.compiler, e.applier, &snap); err != nil {
 			e.recordApplyFailure(snap.Version, err)
 			return err

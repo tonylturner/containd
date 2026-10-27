@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Runs the transparent-steering kernel test (pkg/dp/enforce/gate_spike_kernel_linux_test.go)
-# headless in a disposable golang container on Docker's Linux kernel. Network
-# namespaces need SYS_ADMIN in addition to NET_ADMIN and NET_RAW; no host
-# ports or shared networks are used. Build and module caches live in named
-# Docker volumes, never inside the repository.
+# Runs the scanning-gate kernel tests (pkg/dp/enforce/gate_kernel_linux_test.go
+# and the nft load of every golden ruleset) headless in a disposable golang
+# container on Docker's Linux kernel. Network namespaces need SYS_ADMIN in
+# addition to NET_ADMIN and NET_RAW; no host ports or shared networks are
+# used. Build and module caches live in named Docker volumes, never inside
+# the repository.
 set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
 go_version="$(sed -n 's/^go \([0-9.]*\)$/\1/p' "$root/go.mod")"
@@ -20,4 +21,4 @@ docker run --rm --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN \
   -e CONTAIND_NETNS_KERNEL_TEST=1 -e GOFLAGS=-mod=mod \
   -v "$root:/src" -v containd-gate-spike-gocache:/root/.cache/go-build -v containd-gate-spike-gomod:/go/pkg/mod \
   -w /src "$image" \
-  go test -count=1 -timeout 240s -run '^TestGateSteeringKernel$' -v ./pkg/dp/enforce "$@"
+  go test -count=1 -timeout 300s -run '^TestGateKernel$|^TestKernelNFTLoadsGoldens$' -v ./pkg/dp/enforce "$@"

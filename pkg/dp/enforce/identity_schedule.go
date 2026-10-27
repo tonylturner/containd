@@ -45,9 +45,12 @@ type predicates struct {
 	queueID    int
 	identities identityIndex
 	zones      zoneIndex
-	// recheck is set once writeRecheckChains has declared the recheck
-	// chains.
-	recheck bool
+	// gate maps the egress zones of the gate selection to their
+	// connection-mark indices (zoneLowering.gate).
+	gate map[string]uint8
+	// recheck is set, per target, once writeRecheckChains has declared
+	// its recheck chains.
+	recheck [3]bool
 }
 
 func newPredicates(snap *rules.Snapshot, queueID int) (*predicates, error) {
@@ -59,7 +62,28 @@ func newPredicates(snap *rules.Snapshot, queueID int) (*predicates, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &predicates{snap: snap, queueID: queueID, identities: idx, zones: zones}, nil
+	gate := make(map[string]uint8, len(snap.Gate.Zones))
+	for _, z := range snap.Gate.Zones {
+		gate[z.Name] = z.Index
+	}
+	return &predicates{snap: snap, queueID: queueID, identities: idx, zones: zones, gate: gate}, nil
+}
+
+// lowering returns the zone lowering of target.
+func (p *predicates) lowering(target chainTarget) zoneLowering {
+	return zoneLowering{idx: p.zones, target: target, gate: p.gate}
+}
+
+// recheckChains names the recheck chains of target: the scope chain and
+// the policy chain it sends established packets to.
+func (t chainTarget) recheckChains() (scope, policy string) {
+	switch t {
+	case targetGateInput:
+		return GateInputChain + "_scope", GateInputChain + "_policy"
+	case targetGateReply:
+		return GateReplyChain + "_scope", GateReplyChain + "_policy"
+	}
+	return conditionalScopeChain, conditionalPolicyChain
 }
 
 func conditional(e rules.Entry) bool {
@@ -214,22 +238,23 @@ func (p *predicates) writeSets(buf *bytes.Buffer, c *Compiler) error {
 	return nil
 }
 
-// writeRecheckJump sends established packets to the recheck, when
+// writeRecheckJump sends established packets to target's recheck, when
 // writeRecheckChains declared it. It goes before the established accept of
-// the forward chain.
-func (p *predicates) writeRecheckJump(buf *bytes.Buffer) {
-	if p.recheck {
-		buf.WriteString("    ct state established jump " + conditionalScopeChain + ";\n")
+// target's chain.
+func (p *predicates) writeRecheckJump(buf *bytes.Buffer, target chainTarget) {
+	if p.recheck[target] {
+		scope, _ := target.recheckChains()
+		buf.WriteString("    ct state established jump " + scope + ";\n")
 	}
 }
 
-// writeRecheckChains declares the recheck chains, when needed: the scope
-// chain sends established packets in the scope of a conditional rule
+// writeRecheckChains declares target's recheck chains, when needed: the
+// scope chain sends established packets in the scope of a conditional rule
 // (kernel-decided, or a queued ALLOW) to the policy chain, which decides
 // the connection's original tuple as the forward chain decides a new
 // connection. return passes the packet on to the established accept. No
 // conditional rule that can match anything, no recheck.
-func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
+func (p *predicates) writeRecheckChains(buf *bytes.Buffer, target chainTarget) error {
 	var entries []rules.Entry
 	for _, i := range rules.DecisionOrder(p.snap.Firewall) {
 		entries = append(entries, p.snap.Firewall[i])
@@ -243,6 +268,7 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 		}
 	}
 	unguarded := []alternative{{family: familyAny}}
+	scopeChain, policyChain := target.recheckChains()
 	// Port forwards admit their connections ahead of every rule; the
 	// engine decides the client messages of queued rules, and a queued
 	// conditional ALLOW admits the rest of its connections while its
@@ -254,7 +280,7 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 		}
 		alts := unguarded
 		if p.rechecksQueued(e) {
-			lines, err := p.ctLines(e, unguarded, "goto "+conditionalPolicyChain)
+			lines, err := p.ctLines(target, e, unguarded, "goto "+policyChain)
 			if err != nil {
 				return err
 			}
@@ -263,7 +289,7 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 				return err
 			}
 		}
-		lines, err := p.ctLines(e, alts, "return")
+		lines, err := p.ctLines(target, e, alts, "return")
 		if err != nil {
 			return err
 		}
@@ -274,7 +300,7 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 			continue
 		}
 		if conditional(e) {
-			lines, err := p.ctLines(e, unguarded, "goto "+conditionalPolicyChain)
+			lines, err := p.ctLines(target, e, unguarded, "goto "+policyChain)
 			if err != nil {
 				return err
 			}
@@ -284,7 +310,7 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 		if err != nil {
 			return err
 		}
-		lines, err := p.ctLines(e, alts, recheckVerdict(e.Action))
+		lines, err := p.ctLines(target, e, alts, recheckVerdict(e.Action))
 		if err != nil {
 			return err
 		}
@@ -293,7 +319,7 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 	if len(scope) == 0 {
 		return nil
 	}
-	p.recheck = true
+	p.recheck[target] = true
 	if p.snap.Default == rules.ActionAllow {
 		policy = append(policy, "return")
 	} else {
@@ -302,7 +328,7 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer) error {
 	for _, ch := range []struct {
 		name  string
 		lines []string
-	}{{conditionalScopeChain, scope}, {conditionalPolicyChain, policy}} {
+	}{{scopeChain, scope}, {policyChain, policy}} {
 		buf.WriteString("  chain " + ch.name + " {\n")
 		for _, l := range ch.lines {
 			buf.WriteString("    " + l + ";\n")
@@ -325,13 +351,14 @@ func recheckVerdict(a rules.Action) string {
 	}
 }
 
-// ctLines lowers e's scope for an established packet of either direction:
-// the original tuple the forward chain saw on the connection's first packet,
-// read from conntrack (opener and post-DNAT server address and port), with
-// the zones swapped on replies (zoneIndex.ctDirections). Each line carries
-// one of alts in its address family. A rule that matches nothing has none.
-func (p *predicates) ctLines(e rules.Entry, alts []alternative, verdict string) ([]string, error) {
-	dirs, ok := p.zones.ctDirections(e)
+// ctLines lowers e's scope for an established packet of the directions
+// target sees: the original tuple the forward chain saw on the connection's
+// first packet, read from conntrack (opener and post-DNAT server address
+// and port), with the zones swapped on replies (zoneLowering.ctDirections).
+// Each line carries one of alts in its address family. A rule that matches
+// nothing has none.
+func (p *predicates) ctLines(target chainTarget, e rules.Entry, alts []alternative, verdict string) ([]string, error) {
+	dirs, ok := p.lowering(target).ctDirections(e)
 	if !ok {
 		return nil, nil
 	}
