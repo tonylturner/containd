@@ -174,11 +174,14 @@ Download modes (`scan.downloadMode`):
 - `stream_tail` forwards a download as it arrives except its last 64 KiB,
   which the gate holds until the verdict. A verdict that delivers releases
   the tail; one that blocks resets both connections, because the client
-  already holds a prefix. The gate then remembers the URL (client address,
-  origin, host and path) for 10 minutes, at most 4096 entries, and refuses a
-  later request for it with `403` before contacting the origin, so the
-  withheld tail cannot be fetched with a `Range` request. Uploads are held
-  in every mode.
+  already holds a prefix. Uploads are held in every mode.
+
+In both modes the gate remembers each download it refused as infected
+(client address, origin, host, path and query) for 10 minutes, at most 4096
+entries, and refuses a later request for that URL with `403` before
+contacting the origin, so a withheld `stream_tail` tail cannot be fetched
+with a `Range` request. The memory is a detection: it refuses the URL under
+either fail policy, with the scanner unavailable and for ICS endpoints.
 
 Fail policy and ICS endpoints:
 

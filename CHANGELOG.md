@@ -63,10 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connections, so a truncated object never looks complete.
 - `scan.downloadMode: stream_tail` forwards a download as it arrives except
   its last 64 KiB, which the gate holds until the verdict; a blocking verdict
-  resets both connections. The gate then remembers the URL for 10 minutes
-  (at most 4096 entries) and refuses a later request for it before contacting
-  the origin, so the withheld tail cannot be fetched with a `Range` request.
-  Uploads are held in every mode.
+  resets both connections. Uploads are held in every mode. In both download
+  modes the gate remembers a URL whose download it refused as infected for
+  10 minutes (at most 4096 entries) and refuses a later request for it before
+  contacting the origin under either fail policy, so a withheld tail cannot
+  be fetched with a `Range` request.
 - The `av` entry of `GET /services/status` reports the scanning gate under
   `gate`: its state (`off`, `refuse`, `pass`, `pending` or `open`), the
   admission installed in nftables, the loopback listeners, scanner readiness,
@@ -86,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   effective destination and, for a port forward, the original destination,
   with direction, verdict, action, backend, reason (including `aborted` for
   an object the client abandoned before the verdict) and size.
+- `scripts/smoke-av-gate.sh` smokes the scanning gate on a live engine with
+  the EICAR test file: fail-open and fail-closed with the scanner ready, an
+  unavailable backend, ICS assets, an exclusion, an inbound port forward and
+  an unselected port. Fixtures are under `test/data-smoke/av/`;
+  `SMOKE_MUTATION=no-gate` must fail its refusal checks.
 - Scheduled workflows check the published `:latest` management and engine
   images daily and after each release: Cosign signatures, signed CycloneDX SBOM
   attestations, and a Trivy HIGH/CRITICAL scan of every platform image.
