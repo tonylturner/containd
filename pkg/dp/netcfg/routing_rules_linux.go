@@ -113,7 +113,7 @@ func addRule(r kernelRule) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	fr := fibRuleHdr{
 		Family: unix.AF_INET,
 		DstLen: uint8(r.dstLen),
@@ -121,14 +121,14 @@ func addRule(r kernelRule) error {
 		Table:  uint8(r.table),
 		Action: frActToTbl,
 	}
-	_ = binary.Write(&req, binary.LittleEndian, fr)
+	_ = binary.Write(&req, binary.NativeEndian, fr)
 
 	prio := make([]byte, 4)
-	binary.LittleEndian.PutUint32(prio, r.priority)
+	binary.NativeEndian.PutUint32(prio, r.priority)
 	addRtAttr(&req, fraPriority, prio)
 
 	tbl := make([]byte, 4)
-	binary.LittleEndian.PutUint32(tbl, r.table)
+	binary.NativeEndian.PutUint32(tbl, r.table)
 	addRtAttr(&req, fraTable, tbl)
 
 	if r.src != nil {
@@ -177,9 +177,9 @@ func kernelRules(ctx context.Context) ([]kernelRule, error) {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	fr := fibRuleHdr{Family: unix.AF_INET}
-	_ = binary.Write(&req, binary.LittleEndian, fr)
+	_ = binary.Write(&req, binary.NativeEndian, fr)
 
 	b := req.Bytes()
 	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
@@ -226,7 +226,7 @@ func extractKernelRules(msgs []syscall.NetlinkMessage, seq uint32, hdrSize int) 
 			if len(m.Data) < 4 {
 				return false, nil, errors.New("netlink error")
 			}
-			code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+			code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
 			if code == 0 {
 				continue
 			}
@@ -257,11 +257,11 @@ func decodeKernelRule(data []byte, hdrSize int) (kernelRule, bool) {
 			}
 		case fraPriority:
 			if len(a.Value) >= 4 {
-				kr.priority = binary.LittleEndian.Uint32(a.Value[:4])
+				kr.priority = binary.NativeEndian.Uint32(a.Value[:4])
 			}
 		case fraTable:
 			if len(a.Value) >= 4 {
-				kr.table = binary.LittleEndian.Uint32(a.Value[:4])
+				kr.table = binary.NativeEndian.Uint32(a.Value[:4])
 			}
 		case fraSrc:
 			kr.src = net.IP(append([]byte(nil), a.Value...)).To4()
@@ -269,7 +269,7 @@ func decodeKernelRule(data []byte, hdrSize int) (kernelRule, bool) {
 			kr.dst = net.IP(append([]byte(nil), a.Value...)).To4()
 		default:
 			// Kernel dumps include default suppress-prefixlen and padding attributes.
-			if a.Type != unix.FRA_PAD && !(a.Type == unix.FRA_SUPPRESS_PREFIXLEN && len(a.Value) == 4 && binary.LittleEndian.Uint32(a.Value) == ^uint32(0)) {
+			if a.Type != unix.FRA_PAD && !(a.Type == unix.FRA_SUPPRESS_PREFIXLEN && len(a.Value) == 4 && binary.NativeEndian.Uint32(a.Value) == ^uint32(0)) {
 				kr.simple = false
 			}
 		}
@@ -295,7 +295,7 @@ func delRule(r kernelRule) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	fr := fibRuleHdr{
 		Family: unix.AF_INET,
 		DstLen: uint8(r.dstLen),
@@ -303,14 +303,14 @@ func delRule(r kernelRule) error {
 		Table:  uint8(r.table),
 		Action: frActToTbl,
 	}
-	_ = binary.Write(&req, binary.LittleEndian, fr)
+	_ = binary.Write(&req, binary.NativeEndian, fr)
 
 	prio := make([]byte, 4)
-	binary.LittleEndian.PutUint32(prio, r.priority)
+	binary.NativeEndian.PutUint32(prio, r.priority)
 	addRtAttr(&req, fraPriority, prio)
 
 	tbl := make([]byte, 4)
-	binary.LittleEndian.PutUint32(tbl, r.table)
+	binary.NativeEndian.PutUint32(tbl, r.table)
 	addRtAttr(&req, fraTable, tbl)
 
 	if r.src != nil {

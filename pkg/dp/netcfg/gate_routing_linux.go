@@ -95,11 +95,11 @@ func (r gateRule) wanted(family uint8) bool {
 func gateRulePayload(family uint8) []byte {
 	var b bytes.Buffer
 	// Tables above 255 travel in FRA_TABLE; the header table stays unspecified.
-	b.Write(managementPayload(fibRuleHdr{Family: family, Table: unix.RT_TABLE_UNSPEC, Action: frActToTbl}))
-	managementAttrU32(&b, unix.FRA_PRIORITY, GateRulePriority)
-	managementAttrU32(&b, unix.FRA_FWMARK, GateLocalMark)
-	managementAttrU32(&b, unix.FRA_FWMASK, GateLocalMark)
-	managementAttrU32(&b, unix.FRA_TABLE, GateRoutingTable)
+	b.Write(netlinkPayload(fibRuleHdr{Family: family, Table: unix.RT_TABLE_UNSPEC, Action: frActToTbl}))
+	netlinkAttrU32(&b, unix.FRA_PRIORITY, GateRulePriority)
+	netlinkAttrU32(&b, unix.FRA_FWMARK, GateLocalMark)
+	netlinkAttrU32(&b, unix.FRA_FWMASK, GateLocalMark)
+	netlinkAttrU32(&b, unix.FRA_TABLE, GateRoutingTable)
 	addRtAttr(&b, unix.FRA_PROTOCOL, []byte{GateRouteProtocol})
 	return b.Bytes()
 }
@@ -146,7 +146,7 @@ func gateAttrU32(a netlinkAttr) uint32 {
 }
 
 func reconcileGateRule(ctx context.Context, family uint8, install bool) error {
-	msgs, err := managementRequest(ctx, unix.RTM_GETRULE, unix.NLM_F_DUMP, managementPayload(fibRuleHdr{Family: family}))
+	msgs, err := netlinkRequest(ctx, unix.RTM_GETRULE, unix.NLM_F_DUMP, netlinkPayload(fibRuleHdr{Family: family}))
 	if err != nil {
 		return fmt.Errorf("list rules: %w", err)
 	}
@@ -167,7 +167,7 @@ func reconcileGateRule(ctx context.Context, family uint8, install bool) error {
 	if !install || present {
 		return nil
 	}
-	if _, err := managementRequest(ctx, unix.RTM_NEWRULE, unix.NLM_F_ACK|unix.NLM_F_CREATE|unix.NLM_F_EXCL, gateRulePayload(family)); err != nil {
+	if _, err := netlinkRequest(ctx, unix.RTM_NEWRULE, unix.NLM_F_ACK|unix.NLM_F_CREATE|unix.NLM_F_EXCL, gateRulePayload(family)); err != nil {
 		return fmt.Errorf("add rule: %w", err)
 	}
 	return nil
@@ -195,9 +195,9 @@ func (r gateRoute) wanted(family uint8, lo uint32) bool {
 
 func gateRoutePayload(family uint8, lo uint32) []byte {
 	var b bytes.Buffer
-	b.Write(managementPayload(unix.RtMsg{Family: family, Table: unix.RT_TABLE_UNSPEC, Protocol: GateRouteProtocol, Scope: unix.RT_SCOPE_HOST, Type: unix.RTN_LOCAL}))
-	managementAttrU32(&b, unix.RTA_TABLE, GateRoutingTable)
-	managementAttrU32(&b, unix.RTA_OIF, lo)
+	b.Write(netlinkPayload(unix.RtMsg{Family: family, Table: unix.RT_TABLE_UNSPEC, Protocol: GateRouteProtocol, Scope: unix.RT_SCOPE_HOST, Type: unix.RTN_LOCAL}))
+	netlinkAttrU32(&b, unix.RTA_TABLE, GateRoutingTable)
+	netlinkAttrU32(&b, unix.RTA_OIF, lo)
 	return b.Bytes()
 }
 
@@ -219,7 +219,7 @@ func decodeGateRoute(m syscall.NetlinkMessage) (gateRoute, bool) {
 }
 
 func reconcileGateRoute(ctx context.Context, family uint8, lo uint32, install bool) error {
-	msgs, err := managementRequest(ctx, unix.RTM_GETROUTE, unix.NLM_F_DUMP, managementPayload(unix.RtMsg{Family: family}))
+	msgs, err := netlinkRequest(ctx, unix.RTM_GETROUTE, unix.NLM_F_DUMP, netlinkPayload(unix.RtMsg{Family: family}))
 	if err != nil {
 		return fmt.Errorf("list routes: %w", err)
 	}
@@ -240,7 +240,7 @@ func reconcileGateRoute(ctx context.Context, family uint8, lo uint32, install bo
 	if !install || present {
 		return nil
 	}
-	if _, err := managementRequest(ctx, unix.RTM_NEWROUTE, unix.NLM_F_ACK|unix.NLM_F_CREATE|unix.NLM_F_EXCL, gateRoutePayload(family, lo)); err != nil {
+	if _, err := netlinkRequest(ctx, unix.RTM_NEWROUTE, unix.NLM_F_ACK|unix.NLM_F_CREATE|unix.NLM_F_EXCL, gateRoutePayload(family, lo)); err != nil {
 		return fmt.Errorf("add route: %w", err)
 	}
 	return nil
@@ -250,7 +250,7 @@ func reconcileGateRoute(ctx context.Context, family uint8, lo uint32, install bo
 // is removed exactly as the kernel reported it. An object that vanished in
 // the meantime is already in the wanted state.
 func gateDelete(ctx context.Context, kind uint16, payload []byte) error {
-	_, err := managementRequest(ctx, kind, unix.NLM_F_ACK, payload)
+	_, err := netlinkRequest(ctx, kind, unix.NLM_F_ACK, payload)
 	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
 		return nil
 	}

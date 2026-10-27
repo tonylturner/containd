@@ -25,7 +25,7 @@ func TestGateRuleRoundTripIsWanted(t *testing.T) {
 		// The kernel echoes the unset suppressor and padding in every dump.
 		payload := append([]byte(nil), gateRulePayload(family)...)
 		var extra bytes.Buffer
-		managementAttrU32(&extra, unix.FRA_SUPPRESS_PREFIXLEN, ^uint32(0))
+		netlinkAttrU32(&extra, unix.FRA_SUPPRESS_PREFIXLEN, ^uint32(0))
 		addRtAttr(&extra, unix.FRA_PAD, nil)
 		payload = append(payload, extra.Bytes()...)
 		r, ok := decodeGateRule(gateDumpMessage(unix.RTM_NEWRULE, payload))
@@ -50,7 +50,7 @@ func TestGateRuleOwnershipAndExactness(t *testing.T) {
 	build := func(hdr fibRuleHdr, attrs func(*bytes.Buffer)) gateRule {
 		t.Helper()
 		var b bytes.Buffer
-		b.Write(managementPayload(hdr))
+		b.Write(netlinkPayload(hdr))
 		attrs(&b)
 		r, ok := decodeGateRule(gateDumpMessage(unix.RTM_NEWRULE, b.Bytes()))
 		if !ok {
@@ -60,10 +60,10 @@ func TestGateRuleOwnershipAndExactness(t *testing.T) {
 	}
 	wantedAttrs := func(proto uint8, table, priority, mark, mask uint32) func(*bytes.Buffer) {
 		return func(b *bytes.Buffer) {
-			managementAttrU32(b, unix.FRA_PRIORITY, priority)
-			managementAttrU32(b, unix.FRA_FWMARK, mark)
-			managementAttrU32(b, unix.FRA_FWMASK, mask)
-			managementAttrU32(b, unix.FRA_TABLE, table)
+			netlinkAttrU32(b, unix.FRA_PRIORITY, priority)
+			netlinkAttrU32(b, unix.FRA_FWMARK, mark)
+			netlinkAttrU32(b, unix.FRA_FWMASK, mask)
+			netlinkAttrU32(b, unix.FRA_TABLE, table)
 			addRtAttr(b, unix.FRA_PROTOCOL, []byte{proto})
 		}
 	}
@@ -72,8 +72,8 @@ func TestGateRuleOwnershipAndExactness(t *testing.T) {
 	// table range but never both protocol and table.
 	for name, r := range map[string]gateRule{
 		"management pin": build(fibRuleHdr{Family: unix.AF_INET, SrcLen: 32, DstLen: 32, Action: frActToTbl}, func(b *bytes.Buffer) {
-			managementAttrU32(b, unix.FRA_TABLE, ManagementTable)
-			managementAttrU32(b, unix.FRA_PRIORITY, 1)
+			netlinkAttrU32(b, unix.FRA_TABLE, ManagementTable)
+			netlinkAttrU32(b, unix.FRA_PRIORITY, 1)
 		}),
 		"containd config":        build(base, wantedAttrs(routeProtoContaind, GateRoutingTable, GateRulePriority, GateLocalMark, GateLocalMark)),
 		"foreign same table":     build(base, wantedAttrs(unix.RTPROT_STATIC, GateRoutingTable, 5, 2, 2)),
@@ -97,13 +97,13 @@ func TestGateRuleOwnershipAndExactness(t *testing.T) {
 		}),
 		"suppress set": build(base, func(b *bytes.Buffer) {
 			wantedAttrs(GateRouteProtocol, GateRoutingTable, GateRulePriority, GateLocalMark, GateLocalMark)(b)
-			managementAttrU32(b, unix.FRA_SUPPRESS_PREFIXLEN, 8)
+			netlinkAttrU32(b, unix.FRA_SUPPRESS_PREFIXLEN, 8)
 		}),
 		"header table": build(fibRuleHdr{Family: unix.AF_INET, Table: 201, Action: frActToTbl}, func(b *bytes.Buffer) {
-			managementAttrU32(b, unix.FRA_PRIORITY, GateRulePriority)
-			managementAttrU32(b, unix.FRA_FWMARK, GateLocalMark)
-			managementAttrU32(b, unix.FRA_FWMASK, GateLocalMark)
-			managementAttrU32(b, unix.FRA_TABLE, GateRoutingTable)
+			netlinkAttrU32(b, unix.FRA_PRIORITY, GateRulePriority)
+			netlinkAttrU32(b, unix.FRA_FWMARK, GateLocalMark)
+			netlinkAttrU32(b, unix.FRA_FWMASK, GateLocalMark)
+			netlinkAttrU32(b, unix.FRA_TABLE, GateRoutingTable)
 			addRtAttr(b, unix.FRA_PROTOCOL, []byte{GateRouteProtocol})
 		}),
 	} {
@@ -125,7 +125,7 @@ func TestGateRouteRoundTripIsWanted(t *testing.T) {
 	for _, family := range gateFamilies {
 		payload := append([]byte(nil), gateRoutePayload(family, lo)...)
 		var extra bytes.Buffer
-		managementAttrU32(&extra, unix.RTA_PRIORITY, 1024)
+		netlinkAttrU32(&extra, unix.RTA_PRIORITY, 1024)
 		payload = append(payload, extra.Bytes()...)
 		r, ok := decodeGateRoute(gateDumpMessage(unix.RTM_NEWROUTE, payload))
 		if !ok || !r.owned() || !r.wanted(family, lo) {
@@ -148,9 +148,9 @@ func TestGateRouteRoundTripIsWanted(t *testing.T) {
 		"unicast gate route is not wanted": {hdr: unix.RtMsg{Family: unix.AF_INET, Protocol: GateRouteProtocol, Type: unix.RTN_UNICAST}, table: GateRoutingTable, owned: true},
 	} {
 		var b bytes.Buffer
-		b.Write(managementPayload(c.hdr))
-		managementAttrU32(&b, unix.RTA_TABLE, c.table)
-		managementAttrU32(&b, unix.RTA_OIF, lo)
+		b.Write(netlinkPayload(c.hdr))
+		netlinkAttrU32(&b, unix.RTA_TABLE, c.table)
+		netlinkAttrU32(&b, unix.RTA_OIF, lo)
 		r, ok := decodeGateRoute(gateDumpMessage(unix.RTM_NEWROUTE, b.Bytes()))
 		if !ok || r.owned() != c.owned {
 			t.Fatalf("%s: decoded %+v ok=%v, want owned=%v", name, r, ok, c.owned)

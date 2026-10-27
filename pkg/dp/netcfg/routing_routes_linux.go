@@ -135,7 +135,7 @@ func buildAddRouteRequest(seq uint32, ipnet *net.IPNet, prefixLen int, table uin
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	rtm := unix.RtMsg{
 		Family:   unix.AF_INET,
 		Dst_len:  uint8(prefixLen),
@@ -144,12 +144,12 @@ func buildAddRouteRequest(seq uint32, ipnet *net.IPNet, prefixLen int, table uin
 		Scope:    unix.RT_SCOPE_UNIVERSE,
 		Type:     unix.RTN_UNICAST,
 	}
-	_ = binary.Write(&req, binary.LittleEndian, rtm)
+	_ = binary.Write(&req, binary.NativeEndian, rtm)
 
 	addRtAttr(&req, unix.RTA_DST, ipnet.IP.To4())
 	if ifIndex != 0 {
 		oif := make([]byte, 4)
-		binary.LittleEndian.PutUint32(oif, uint32(ifIndex))
+		binary.NativeEndian.PutUint32(oif, uint32(ifIndex))
 		addRtAttr(&req, unix.RTA_OIF, oif)
 	}
 	if gw4 != nil {
@@ -157,7 +157,7 @@ func buildAddRouteRequest(seq uint32, ipnet *net.IPNet, prefixLen int, table uin
 	}
 	if metric > 0 {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, uint32(metric))
+		binary.NativeEndian.PutUint32(buf, uint32(metric))
 		addRtAttr(&req, unix.RTA_PRIORITY, buf)
 	}
 
@@ -196,9 +196,9 @@ func kernelRoutes(ctx context.Context) ([]kernelRoute, error) {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	rtm := unix.RtMsg{Family: unix.AF_INET}
-	_ = binary.Write(&req, binary.LittleEndian, rtm)
+	_ = binary.Write(&req, binary.NativeEndian, rtm)
 	b := req.Bytes()
 	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
 	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
@@ -256,7 +256,7 @@ func extractKernelRoutes(msgs []syscall.NetlinkMessage, seq uint32) (bool, []ker
 			if len(m.Data) < 4 {
 				return false, nil, errors.New("netlink error")
 			}
-			code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+			code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
 			if code == 0 {
 				continue
 			}
@@ -293,15 +293,15 @@ func decodeKernelRoute(data []byte) (kernelRoute, bool) {
 			kr.gateway = net.IP(append([]byte(nil), a.Value...)).To4()
 		case unix.RTA_OIF:
 			if len(a.Value) >= 4 {
-				kr.ifIndex = int(binary.LittleEndian.Uint32(a.Value[:4]))
+				kr.ifIndex = int(binary.NativeEndian.Uint32(a.Value[:4]))
 			}
 		case unix.RTA_TABLE:
 			if len(a.Value) >= 4 {
-				kr.table = binary.LittleEndian.Uint32(a.Value[:4])
+				kr.table = binary.NativeEndian.Uint32(a.Value[:4])
 			}
 		case unix.RTA_PRIORITY:
 			if len(a.Value) >= 4 {
-				kr.metric = binary.LittleEndian.Uint32(a.Value[:4])
+				kr.metric = binary.NativeEndian.Uint32(a.Value[:4])
 			}
 		}
 	}
@@ -347,7 +347,7 @@ func delRoute(r kernelRoute) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	rtm := unix.RtMsg{
 		Family:   unix.AF_INET,
 		Dst_len:  uint8(r.dstLen),
@@ -356,14 +356,14 @@ func delRoute(r kernelRoute) error {
 		Scope:    unix.RT_SCOPE_UNIVERSE,
 		Type:     unix.RTN_UNICAST,
 	}
-	_ = binary.Write(&req, binary.LittleEndian, rtm)
+	_ = binary.Write(&req, binary.NativeEndian, rtm)
 
 	if r.dstLen > 0 {
 		addRtAttr(&req, unix.RTA_DST, r.dst.To4())
 	}
 	if r.ifIndex != 0 {
 		oif := make([]byte, 4)
-		binary.LittleEndian.PutUint32(oif, uint32(r.ifIndex))
+		binary.NativeEndian.PutUint32(oif, uint32(r.ifIndex))
 		addRtAttr(&req, unix.RTA_OIF, oif)
 	}
 	if r.gateway != nil && !r.gateway.Equal(net.IPv4zero) {
@@ -371,7 +371,7 @@ func delRoute(r kernelRoute) error {
 	}
 	if r.metric != 0 {
 		metric := make([]byte, 4)
-		binary.LittleEndian.PutUint32(metric, r.metric)
+		binary.NativeEndian.PutUint32(metric, r.metric)
 		addRtAttr(&req, unix.RTA_PRIORITY, metric)
 	}
 
