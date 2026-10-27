@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -54,23 +55,32 @@ func (tx *transaction) run() bool {
 		}
 		return tx.exchange(body, &res)
 	}
-	defer tx.c.srv.releaseObject()
 	return tx.holdUpload(body.rest)
 }
 
 // holdUpload spools the request body, has it scanned and acts on the
-// decision. The object slot is held by the caller through delivery.
+// decision. It owns the object slot admit took: the slot and the spool
+// are released as soon as the body has been sent upstream, so the
+// response that follows can be held with the same slot.
 func (tx *transaction) holdUpload(body io.Reader) bool {
 	h := tx.req
 	if h.hasExpect {
 		if _, err := tx.c.client.Write([]byte("HTTP/1.1 100 Continue\r\n\r\n")); err != nil {
+			tx.c.srv.releaseObject()
 			return false
 		}
 		tx.sent100 = true
 		tx.reqHead = h.without("Expect")
 	}
 	sp := newSpool(tx.set.SpoolDir, tx.set.MemoryThreshold)
-	defer sp.close()
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			sp.close()
+			tx.c.srv.releaseObject()
+		})
+	}
+	defer release()
 	outcome, excess, detail := tx.receive(sp, body, tx.c.client)
 	switch outcome {
 	case fillComplete:
@@ -81,14 +91,14 @@ func (tx *transaction) holdUpload(body io.Reader) bool {
 			tx.c.refuse(refusal(403, "Forbidden", blockBody(res), tx.headOnly()), true)
 			return false
 		}
-		return tx.exchange(bodySource{kind: h.body, held: sp}, nil)
+		return tx.exchange(bodySource{kind: h.body, held: sp, release: release}, nil)
 	case fillOversized, fillDisk:
 		res := partialResult(outcome, detail)
 		if tx.set.decide(res, tx.ics) == avscan.Block {
 			tx.refuseUpload(res, sp.size, sp)
 			return false
 		}
-		return tx.exchange(bodySource{kind: h.body, held: sp, excess: excess, rest: body}, &res)
+		return tx.exchange(bodySource{kind: h.body, held: sp, excess: excess, rest: body, release: release}, &res)
 	default:
 		tx.emitIncomplete(avscan.Upload, incompleteResult(outcome, detail), sp, 0)
 		tx.c.closeAll()

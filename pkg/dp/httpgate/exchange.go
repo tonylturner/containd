@@ -12,11 +12,14 @@ import (
 
 // bodySource is a message body as the gate forwards it: an optional held
 // prefix, bytes read past the hold cap, and the still-unread remainder.
+// release, when set, frees the held prefix and its object slot once the
+// body has been sent.
 type bodySource struct {
-	kind   bodyKind
-	held   *spool
-	excess []byte
-	rest   io.Reader
+	kind    bodyKind
+	held    *spool
+	excess  []byte
+	rest    io.Reader
+	release func()
 }
 
 // writeBody frames src on w in order and returns the bytes written.
@@ -76,6 +79,9 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 		sent, sendErr := tx.send(u, body, stop)
 		if pass != nil {
 			tx.emit(avscan.Upload, *pass, avscan.PassUnscanned, sent, body.held, 0)
+		}
+		if body.release != nil {
+			body.release()
 		}
 		if sendErr != nil && !errors.Is(sendErr, errStopped) {
 			u.close()

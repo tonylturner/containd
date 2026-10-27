@@ -234,6 +234,23 @@ func TestSpoolSlotHeldThroughDelivery(t *testing.T) {
 	eventually(t, "slot release", func() bool { return g.srv.heldObjects.Load() == 0 })
 }
 
+// With one object slot and both directions selected, a held upload must
+// free its slot once sent so the response can be held with it.
+func TestUploadSlotFreedBeforeResponse(t *testing.T) {
+	log := &bodyLog{}
+	o := echoOrigin(t, log)
+	g := startGate(t, o, func(s *Settings) { s.MaxConcurrentObjects = 1 })
+	c := g.client()
+	c.write(requestCL("POST", "/slot", "", pattern(100, 93)))
+	resp, rb := c.response("POST")
+	if resp.StatusCode != 200 || string(rb) != "ok" {
+		t.Fatalf("status %d body %q", resp.StatusCode, rb)
+	}
+	expectEvent(t, g.events.next(t), avscan.Upload, avscan.Clean, "", avscan.Deliver)
+	expectEvent(t, g.events.next(t), avscan.Download, avscan.Clean, "", avscan.Deliver)
+	eventually(t, "slot release", func() bool { return g.srv.heldObjects.Load() == 0 })
+}
+
 func TestClientCloseDuringScanCancelsIt(t *testing.T) {
 	log := &bodyLog{}
 	o := echoOrigin(t, log)
