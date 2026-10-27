@@ -118,13 +118,16 @@ func TestServeRequiresUpdateAndHooks(t *testing.T) {
 	}
 }
 
+// Shutdown ends a held scan, and that end is the gate's, not a verdict:
+// even under fail-open the infected object never reaches the origin.
 func TestShutdownCancelsScansAndIsFinite(t *testing.T) {
 	log := &bodyLog{}
 	o := echoOrigin(t, log)
-	g := startGate(t, o, func(s *Settings) { s.ScanTimeout = time.Minute })
+	g := startGate(t, o, func(s *Settings) { s.ScanTimeout = time.Minute; s.FailPolicy = avscan.FailOpen })
 	g.scanner.holdScans()
 	c := g.client()
-	c.write(requestCL("POST", "/stuck", "", pattern(100, 73)))
+	body := append(pattern(4096, 73), []byte(infectedMarker)...)
+	c.write(requestCL("POST", "/stuck", "", body))
 	g.scanner.waitScanStarted(t)
 	start := time.Now()
 	if err := g.shutdown(10 * time.Second); err != nil {
@@ -133,9 +136,17 @@ func TestShutdownCancelsScansAndIsFinite(t *testing.T) {
 	if took := time.Since(start); took > 3*time.Second {
 		t.Fatalf("Shutdown took %v", took)
 	}
-	resp, rb := c.response("POST")
-	if resp.StatusCode != 403 || !strings.Contains(string(rb), "timeout") {
-		t.Fatalf("client got %d %q", resp.StatusCode, rb)
+	c.expectClosed()
+	if n := len(c.rec.bytes()); n != 0 {
+		t.Fatalf("client received %d bytes for an aborted transaction", n)
+	}
+	ev := g.events.next(t)
+	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonTimeout, avscan.Block)
+	if ev.Detail != "shutdown before the verdict" || ev.SHA256 != sha256hex(body) || ev.SHA256Partial {
+		t.Fatalf("event %+v", ev)
+	}
+	if o.rec.connections() != 0 || len(o.rec.bytes()) != 0 {
+		t.Fatalf("origin got %d connections, %d bytes during Shutdown under fail-open", o.rec.connections(), len(o.rec.bytes()))
 	}
 	calls := g.scanner.scanCalls()
 	if len(calls) != 1 || !errors.Is(calls[0].ctxErr, context.Canceled) {
@@ -296,6 +307,9 @@ func TestClientCloseDuringScanCancelsIt(t *testing.T) {
 	c.conn.Close()
 	ev := g.events.next(t)
 	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonTimeout, avscan.Block)
+	if ev.Detail != "client closed before the verdict" || ev.SHA256Partial {
+		t.Fatalf("event %+v", ev)
+	}
 	if calls := g.scanner.scanCalls(); len(calls) != 1 || !errors.Is(calls[0].ctxErr, context.Canceled) {
 		t.Fatalf("scan calls %+v", calls)
 	}

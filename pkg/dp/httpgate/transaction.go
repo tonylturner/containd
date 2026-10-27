@@ -84,7 +84,12 @@ func (tx *transaction) holdUpload(body io.Reader) bool {
 	outcome, excess, detail := tx.receive(sp, body, tx.c.client)
 	switch outcome {
 	case fillComplete:
-		res := tx.scan(tx.object(avscan.Upload, sp, nil), tx.c.client)
+		res, abort := tx.scan(tx.object(avscan.Upload, sp, nil), tx.c.client)
+		if abort != "" {
+			tx.emit(avscan.Upload, abortResult(abort), avscan.Block, sp.size, sp, false, 0)
+			tx.c.closeAll()
+			return false
+		}
 		action := tx.set.decide(res, tx.ics)
 		tx.emit(avscan.Upload, res, action, sp.size, sp, false, 0)
 		if action == avscan.Block {
@@ -169,22 +174,39 @@ func incompleteResult(outcome fillOutcome, detail string) avscan.Result {
 }
 
 // scan classifies obj. The context ends with the scan timeout, Shutdown,
-// or the watched peer closing.
-func (tx *transaction) scan(obj avscan.Object, watch *peer) avscan.Result {
+// or the watched client going away. A scan the gate itself ended
+// (Shutdown, client closed, pipeline overflow) is not a scanner outcome:
+// it is returned as a non-empty abort detail and must never reach the
+// fail policy, since under fail-open it would let a client opt out of
+// scanning by closing its sending side. Only a Scan that returns on its
+// own, the scan timeout included, is policy-decidable.
+func (tx *transaction) scan(obj avscan.Object, watch *peer) (res avscan.Result, abort string) {
 	ctx, cancel := context.WithTimeout(tx.c.srv.ctx, tx.set.ScanTimeout)
+	defer cancel()
+	var w *closeWatch
 	if watch != nil {
-		w := watchClose(watch, tx.c.guard)
-		defer w.stop()
-		go func() {
+		w = watchClose(watch, tx.c.guard)
+		go tx.c.guard(func() {
 			select {
 			case <-w.closed:
 				cancel()
 			case <-ctx.Done():
 			}
-		}()
+		})
 	}
-	defer cancel()
-	res := tx.c.srv.Scanner.Scan(ctx, obj)
+	res = tx.c.srv.Scanner.Scan(ctx, obj)
+	if w != nil && w.stop() {
+		abort = "client closed before the verdict"
+		if w.overflow {
+			abort = fmt.Sprintf("more than %d KiB pipelined before the verdict", pipelineCap>>10)
+		}
+	}
+	if tx.c.srv.ctx.Err() != nil {
+		abort = "shutdown before the verdict"
+	}
+	if abort != "" {
+		return res, abort
+	}
 	switch res.Verdict {
 	case avscan.Clean, avscan.Infected, avscan.Unscanned:
 	default:
@@ -193,7 +215,14 @@ func (tx *transaction) scan(obj avscan.Object, watch *peer) avscan.Result {
 			Detail: fmt.Sprintf("scanner returned verdict %q", res.Verdict),
 		}
 	}
-	return res
+	return res, ""
+}
+
+// abortResult is the gate result recorded for a transaction the gate
+// ended before a verdict existed. The object was complete; the
+// transaction's lifetime ran out, hence the timeout reason.
+func abortResult(detail string) avscan.Result {
+	return gateResult(avscan.ReasonTimeout, detail)
 }
 
 // object describes the held body for the scanner.

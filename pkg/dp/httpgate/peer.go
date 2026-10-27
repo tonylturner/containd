@@ -23,19 +23,14 @@ const (
 	maxInterim = 16
 	// copyBufSize is the unit of body streaming and re-chunking.
 	copyBufSize = 32 << 10
+	// pipelineCap bounds the bytes a close watcher keeps for the next read
+	// while the gate is not reading: requests pipelined during a hold.
+	// Beyond it the peer counts as gone, so liveness is never traded for
+	// buffering.
+	pipelineCap = headCap
 )
 
-var (
-	errHeadTooLarge = errors.New("httpgate: head exceeds 64 KiB")
-	errInterrupted  = &timeoutError{"read interrupted"}
-)
-
-// timeoutError satisfies net.Error with Timeout true.
-type timeoutError struct{ msg string }
-
-func (e *timeoutError) Error() string   { return e.msg }
-func (e *timeoutError) Timeout() bool   { return true }
-func (e *timeoutError) Temporary() bool { return true }
+var errHeadTooLarge = errors.New("httpgate: head exceeds 64 KiB")
 
 // peer is one TCP connection with a buffered reader whose every read and
 // write carries the idle deadline, plus an optional object deadline while
@@ -52,9 +47,12 @@ type peer struct {
 	objectDeadline  atomic.Int64
 	objectArmed     atomic.Bool
 	firstByteWindow atomic.Int64
-	// interrupt makes the next read fail at once instead of blocking; a
-	// close watcher is stopped with it.
+	// interrupt tells a close watcher that its read was cut short by stop
+	// rather than by the peer.
 	interrupt atomic.Bool
+	// pending holds bytes a close watcher read from the socket; the next
+	// Read drains it before touching the socket again.
+	pending []byte
 	// active is set by the first byte read since it was last cleared; a
 	// client peer that is not active awaits its next request.
 	active    atomic.Bool
@@ -71,27 +69,36 @@ func newPeer(c net.Conn, idle time.Duration) *peer {
 type peerReader peer
 
 func (p *peerReader) Read(b []byte) (int, error) {
-	if p.interrupt.Load() {
-		return 0, errInterrupted
+	if len(p.pending) > 0 {
+		n := copy(b, p.pending)
+		p.pending = p.pending[n:]
+		if len(p.pending) == 0 {
+			p.pending = nil
+		}
+		p.noteBytes()
+		return n, nil
 	}
 	od := p.objectDeadline.Load()
 	p.armDeadline(od)
-	// A watcher stop or a bound set between the load and the deadline
-	// would otherwise be overwritten by the longer idle deadline.
-	if p.interrupt.Load() {
-		return 0, errInterrupted
-	}
+	// A bound set from another goroutine between the load and the
+	// deadline would otherwise be overwritten by the longer idle deadline.
 	if od2 := p.objectDeadline.Load(); od2 != od {
 		p.armDeadline(od2)
 	}
 	n, err := p.conn.Read(b)
 	if n > 0 {
-		p.active.Store(true)
-		if w := p.firstByteWindow.Swap(0); w != 0 {
-			p.objectDeadline.Store(time.Now().Add(time.Duration(w)).UnixNano())
-		}
+		p.noteBytes()
 	}
 	return n, err
+}
+
+// noteBytes records that the peer delivered bytes: it is active, and a
+// pending first-byte window becomes the object deadline.
+func (p *peerReader) noteBytes() {
+	p.active.Store(true)
+	if w := p.firstByteWindow.Swap(0); w != 0 {
+		p.objectDeadline.Store(time.Now().Add(time.Duration(w)).UnixNano())
+	}
 }
 
 // armDeadline sets the sooner of the idle deadline and object deadline od
@@ -194,29 +201,52 @@ func isBlankLine(line []byte) bool {
 	return len(line) == 1 || (len(line) == 2 && line[0] == '\r')
 }
 
-// closeWatch reports when a peer closes or fails while the gate is not
-// reading from it. Stop before reading from the peer again; the returned
-// channel is closed only when the peer went away before sending a byte.
+// closeWatch observes a peer while the gate is not reading from it and
+// reports when it closes or fails. closed is closed when the peer went
+// away or sent more than pipelineCap bytes meanwhile; overflow tells the
+// two apart once done is closed. Stop before reading from the peer again.
 type closeWatch struct {
-	p      *peer
-	closed chan struct{}
-	done   chan struct{}
+	p        *peer
+	closed   chan struct{}
+	done     chan struct{}
+	overflow bool
 }
 
-// guard wraps the watcher goroutine so that a panic in it is contained.
+// watchClose reads the socket itself rather than peeking through the
+// buffered reader, so bytes already buffered (a pipelined request) cannot
+// satisfy the watch and hide a later close. What the peer sends is kept
+// for the next read. guard contains a panic in the watcher goroutine.
 func watchClose(p *peer, guard func(func())) *closeWatch {
 	w := &closeWatch{p: p, closed: make(chan struct{}), done: make(chan struct{})}
+	p.interrupt.Store(false)
+	_ = p.conn.SetReadDeadline(time.Time{})
 	go guard(func() {
 		defer close(w.done)
-		_, err := p.r.Peek(1)
-		if err != nil && !isTimeout(err) {
-			close(w.closed)
+		buf := make([]byte, 4096)
+		for {
+			n, err := p.conn.Read(buf)
+			if n > 0 {
+				if len(p.pending)+n > pipelineCap {
+					w.overflow = true
+					close(w.closed)
+					return
+				}
+				p.pending = append(p.pending, buf[:n]...)
+			}
+			if err != nil {
+				// Only stop sets a deadline while watching, so a timeout
+				// is the stop itself.
+				if !isTimeout(err) || !p.interrupt.Load() {
+					close(w.closed)
+				}
+				return
+			}
 		}
 	})
 	return w
 }
 
-// stop ends the watch and reports whether the peer closed.
+// stop ends the watch and reports whether the peer went away.
 func (w *closeWatch) stop() bool {
 	w.p.interrupt.Store(true)
 	_ = w.p.conn.SetReadDeadline(time.Now())
