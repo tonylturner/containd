@@ -15,8 +15,9 @@ type RulesetPreviewRuntime struct {
 	IEC104EnvelopeOpen bool   `json:"iec104EnvelopeOpen"`
 	Reason             string `json:"reason"`
 	// GateAdmit is the admission state of the scanning gate held by the
-	// engine (GateAdmitName) and GateAdmitReason what it means for the
-	// candidate; both are empty when nothing would be applied.
+	// engine (named by enforce.GateAdmitState.String) and GateAdmitReason
+	// what it means for the candidate; both are empty when nothing would
+	// be applied.
 	GateAdmit       string `json:"gateAdmit,omitempty"`
 	GateAdmitReason string `json:"gateAdmitReason,omitempty"`
 }
@@ -28,18 +29,6 @@ type RulesetPreview struct {
 	// Warnings lists the rules of the candidate that match nothing (see
 	// enforce.RuleWarnings); omitted when there are none.
 	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
-}
-
-// GateAdmitName is the operator-facing name of a gate admission state.
-func GateAdmitName(state enforce.GateAdmitState) string {
-	switch state {
-	case enforce.GateAdmitOpen:
-		return "open"
-	case enforce.GateAdmitPass:
-		return "pass"
-	default:
-		return "refuse"
-	}
 }
 
 // PreviewRuleset compiles an isolated candidate with the queue ownership and
@@ -55,7 +44,7 @@ func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSe
 	comp.IEC104EnvelopeOpen = e.gate.sampleOpen(comp.QueueID)
 	comp.GateAdmit = e.GateAdmit()
 	comp.ScheduleFrom = e.gate.now()
-	runtime := RulesetPreviewRuntime{IEC104EnvelopeOpen: comp.IEC104EnvelopeOpen, GateAdmit: GateAdmitName(comp.GateAdmit)}
+	runtime := RulesetPreviewRuntime{IEC104EnvelopeOpen: comp.IEC104EnvelopeOpen, GateAdmit: comp.GateAdmit.String()}
 	switch {
 	case !comp.SteersIEC104(&snap):
 		runtime.Reason = "IEC 104 envelope not used by this candidate"

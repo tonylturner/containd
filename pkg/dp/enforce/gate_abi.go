@@ -58,3 +58,16 @@ const (
 	// fail policy while the listeners or their routing are down.
 	GateAdmitPass
 )
+
+// String is the operator-facing name of the admission state, shared by the
+// engine's AV status, its events and the ruleset preview.
+func (s GateAdmitState) String() string {
+	switch s {
+	case GateAdmitOpen:
+		return "open"
+	case GateAdmitPass:
+		return "pass"
+	default:
+		return "refuse"
+	}
+}

@@ -31,7 +31,6 @@ const (
 	// AV configuration sets no timeout; the scanning gate derives its scan
 	// deadline from the same value.
 	DefaultAVTimeout  = 5 * time.Second
-	defaultAVTimeout  = DefaultAVTimeout
 	defaultAVCacheTTL = 10 * time.Minute
 	// avStatusProbeTimeout bounds the live readiness check in Status.
 	avStatusProbeTimeout = 2 * time.Second

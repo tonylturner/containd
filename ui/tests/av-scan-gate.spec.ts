@@ -150,12 +150,13 @@ test("a starting scanner is pending, not a failure", async ({ page }) => {
   await mockAPI(page, { gate: gate({ state: "pending", scanner: { ready: false, error: "clamd is starting" } }) });
   await openPage(page);
   await expect(gateBlock(page).getByRole("status")).toHaveText("pending");
+  await expect(gateBlock(page).getByRole("status")).toHaveClass(/badge-warning/);
   await expect(gateBlock(page).getByText("waiting for the scanner to become ready")).toBeVisible();
   await expect(gateBlock(page).getByText("Scanner ready: no (clamd is starting)")).toBeVisible();
   await expect(gateBlock(page).locator(".text-red-400")).toHaveCount(0);
 });
 
-test("a refusing gate names the listener and routing faults", async ({ page }) => {
+test("a refusing gate is a failure and names the listener and routing faults", async ({ page }) => {
   await mockAPI(page, {
     gate: gate({
       state: "refuse", admit: "refuse",
@@ -166,7 +167,9 @@ test("a refusing gate names the listener and routing faults", async ({ page }) =
     }),
   });
   await openPage(page);
+  // Refuse is a failure: the gate is down and the closed policy resets the selected traffic.
   await expect(gateBlock(page).getByRole("status")).toHaveText("refusing");
+  await expect(gateBlock(page).getByRole("status")).toHaveClass(/badge-critical/);
   await expect(gateBlock(page).getByText("selected connections are refused; ICS endpoints pass")).toBeVisible();
   await expect(gateBlock(page).getByText("Listeners up: 1/2")).toBeVisible();
   await expect(gateBlock(page).getByText("Listener [::1]:18100: down — bind: address already in use")).toBeVisible();
@@ -179,6 +182,7 @@ test("a passing gate says it is not scanning", async ({ page }) => {
   await mockAPI(page, { gate: gate({ state: "pass", admit: "pass", fail_policy: "open", listeners: [{ ...listeners[0], up: false, unavailable: true }] }) });
   await openPage(page);
   await expect(gateBlock(page).getByRole("status")).toHaveText("passing");
+  await expect(gateBlock(page).getByRole("status")).toHaveClass(/badge-warning/);
   await expect(gateBlock(page).getByText("not scanning", { exact: true })).toBeVisible();
   await expect(gateBlock(page).getByText("selected connections pass unscanned")).toBeVisible();
   await expect(gateBlock(page).getByText("Listener 127.0.0.1:18100: unavailable on this host")).toBeVisible();

@@ -4,12 +4,16 @@ import type { AVGateStatus } from "../../../../lib/api-service-status";
 import { StatusBadge } from "../../../../components/StatusBadge";
 
 type Presentation = {
-  variant: "success" | "warning" | "neutral";
+  variant: "success" | "warning" | "error" | "neutral";
   badge: string;
   description: string;
 };
 
-/** How each gate state reads: only open scans; refuse and pass are the fail policy acting. */
+/**
+ * How each gate state reads: only open scans; refuse and pass are the fail
+ * policy acting. Refuse is the failure variant: the gate is down and the
+ * closed policy resets the selected traffic. Pending and pass are warnings.
+ */
 function present(gate: AVGateStatus): Presentation {
   switch (gate.state) {
     case "open":
@@ -20,7 +24,7 @@ function present(gate: AVGateStatus): Presentation {
       return { variant: "warning", badge: "pending", description: "The gate is up and waiting for the scanner to become ready." };
     case "refuse":
       return {
-        variant: "warning",
+        variant: "error",
         badge: "refusing",
         description: "Not scanning: a listener or the routing is down and the fail policy is closed, so selected connections are refused; ICS endpoints pass.",
       };
