@@ -1,6 +1,6 @@
 # ICS/OT Deep Packet Inspection
 
-containd has **16 native Go protocol decoders: 8 ICS + 8 IT**. Live capture and
+containd has **12 native Go protocol decoders: 4 ICS + 8 IT**. Live capture and
 PCAP analysis share `DefaultDecoders()`. ICS marker and port detector are two
 additional utility registrations, not protocol decoders. Decoding a field does
 not make it an enforceable firewall predicate.
@@ -50,17 +50,17 @@ replacement request:
     "modbus": true,
     "dnp3": true,
     "iec104": true,
-    "cip": false,
-    "s7comm": false,
-    "mms": true,
-    "bacnet": false,
-    "opcua": false
+    "cip": false
   }
 }
 ```
 
-An omitted protocol toggle leaves its decoder enabled. `dpiProtocols` controls
-the IT decoders separately. Enabling a decoder does not create a policy rule.
+The four supported industrial decoders are Modbus/TCP, DNP3, IEC 60870-5-104
+and CIP/EtherNet/IP. CIP is optional and can be disabled. An omitted protocol
+toggle leaves its decoder enabled. `dpiProtocols` controls the IT decoders
+separately. Enabling a decoder does not create a policy rule. For saved
+configurations affected by removed protocol support, see
+[upgrade recovery](config-format.md#unsupported-protocols-during-upgrade).
 
 ## DPI exclusions
 
@@ -128,10 +128,6 @@ and selection reason.
 | DNP3 | TCP 20000 | `pkg/dp/ics/dnp3` |
 | IEC 60870-5-104 | TCP 2404 | `pkg/dp/ics/iec104` |
 | CIP/EtherNet/IP | TCP 44818 | `pkg/dp/ics/cip` |
-| S7comm | TCP 102 | `pkg/dp/ics/s7comm` |
-| IEC 61850 MMS | TCP 102 | `pkg/dp/ics/iec61850` |
-| BACnet | UDP 47808 | `pkg/dp/ics/bacnet` |
-| OPC UA | TCP 4840 | `pkg/dp/ics/opcua` |
 
 The eight IT decoders live in `pkg/dp/itdpi`: DNS, TLS, HTTP, SSH, SMB, NTP, SNMP,
 and RDP. Protocol events carry `proto`, `kind`, `flowId`, timestamp, and a decoder-
@@ -145,7 +141,7 @@ than IEC 104 are:
 
 | JSON field | Meaning and limits |
 | --- | --- |
-| `protocol` | `modbus`, `dnp3`, `cip`, `s7comm`, `mms`, `bacnet`, or `opcua` |
+| `protocol` | `modbus`, `dnp3`, or `cip` |
 | `functionCode` | Array of numeric function/service codes, 0–255; evaluated from `function_code` |
 | `unitId` | Optional Modbus unit ID, 0–255; evaluated from `unit_id` |
 | `addresses` | Array of address entries, each one value or an inclusive `low-high` range (see below); evaluated from `address` |
@@ -165,9 +161,8 @@ configuration is committed.
 
 Only metadata actually emitted by the decoder can satisfy these conditions.
 There are no firewall selectors for DNP3 station addresses/object headers, CIP
-instance/attribute/EPATH/MSP, S7 DB numbers, MMS named variables/domains, BACnet
-objects/properties, or OPC UA message/service/Node ID patterns. Decoder telemetry
-and IDS attributes are not additional firewall selector fields.
+instance/attribute/EPATH/MSP. Decoder telemetry and IDS attributes are not
+additional firewall selector fields.
 
 ICS messages follow the firewall's precedence (see
 [Actions and precedence](policy-model.md#actions-and-precedence)): any matching
@@ -290,10 +285,11 @@ The passive IEC 104 inventory is separate from the learner. Native IDS rules and
 are separate consumers. See [Logging and Evidence](logging-evidence.md) for
 bounded retention, queries, and syslog forwarding.
 
-Seven ICS API templates provide two Modbus variants and DNP3, S7comm, CIP,
-BACnet, and OPC UA examples. Purdue and maintenance-window templates belong to
-the general registry, not this seven-template set. Applying templates stages
-candidate changes; see [Policy Model](policy-model.md#templates-and-preview).
+Four ICS API templates provide two Modbus variants, one DNP3 example, and one
+CIP example. There is no IEC 104 template. Purdue and maintenance-window
+templates belong to the general registry, not this four-template set. Applying
+templates stages candidate changes; see
+[Policy Model](policy-model.md#templates-and-preview).
 
 ## IEC 104 Holdback Diagnostics
 
