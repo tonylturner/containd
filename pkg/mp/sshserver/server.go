@@ -253,7 +253,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		userID = sc.Permissions.Extensions["user_id"]
 	}
 
-	token, sessionID, err := s.issueToken(connCtx, username, userID)
+	sessionID, err := s.openSession(connCtx, username, userID)
 	if err != nil {
 		_ = sc.Close()
 		return
@@ -275,7 +275,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		})
 	}
 
-	api := &cli.API{BaseURL: s.opts.BaseURL, Token: token, Client: &resetAwareClient{client: s.opts.APIClient, connection: conn}}
+	api := &cli.API{BaseURL: s.opts.BaseURL, Client: s.connectionClient(conn)}
 	reg := cli.NewRegistry(nil, api)
 	cmdCtx := cli.WithRole(connCtx, string(cli.RoleAdmin))
 

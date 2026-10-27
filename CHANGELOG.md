@@ -42,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   differ, the saved mode (`ssh.shell_mode_saved`). `show system ssh` lists
   the same mode and source. A CLI without the appliance's store, such as
   `containd cli` or the SSH console, runs `show system` on the appliance.
+- The SSH console no longer loses management access while the connection is
+  open. Its token expired 5 minutes after login, or 30 minutes after the last
+  command, and later commands failed with `invalid token` until the user
+  reconnected. Each request now uses a fresh token for the connection's
+  session, which stays valid until the connection closes or reaches the
+  4-hour session limit.
 
 ## [0.1.35] - 2026-10-26
 

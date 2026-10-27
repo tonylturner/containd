@@ -89,15 +89,38 @@ func connectionFromContext(ctx context.Context) *sshConnection {
 	return conn
 }
 
-// The CLI HTTP facade intentionally discards success bodies. Preserve reset
-// warnings here for SSH presentation without changing ordinary CLI commands.
+// resetAwareClient sends a connection's management requests: it
+// authenticates each with a fresh token for the connection's session and
+// names the connection. The CLI HTTP facade intentionally discards success
+// bodies, so it also preserves factory reset warnings for SSH presentation
+// without changing ordinary CLI commands.
 type resetAwareClient struct {
 	client     cli.HTTPClient
 	connection *sshConnection
+	token      func(context.Context) (string, error)
+}
+
+// connectionClient is the management client of one SSH connection.
+func (s *Server) connectionClient(conn *sshConnection) *resetAwareClient {
+	return &resetAwareClient{
+		client:     s.opts.APIClient,
+		connection: conn,
+		token: func(ctx context.Context) (string, error) {
+			s.connMu.Lock()
+			sessionID := conn.sessionID
+			s.connMu.Unlock()
+			return s.sessionToken(ctx, sessionID)
+		},
+	}
 }
 
 func (c *resetAwareClient) Do(req *http.Request) (*http.Response, error) {
+	token, err := c.token(req.Context())
+	if err != nil {
+		return nil, err
+	}
 	clone := req.Clone(req.Context())
+	clone.Header.Set("Authorization", "Bearer "+token)
 	clone.Header.Set("X-Containd-SSH-Connection", c.connection.id)
 	resp, err := c.client.Do(clone)
 	if err != nil || req.Method != http.MethodPost || req.URL.Path != "/api/v1/system/factory-reset" || resp.StatusCode != http.StatusOK {
