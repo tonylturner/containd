@@ -136,6 +136,14 @@ func Run(ctx context.Context, opts Options) error {
 			logger.Errorf("stop antivirus: %v", err)
 		}
 	}()
+	// The scanning gate runs beside the data plane while it enforces. Its
+	// admission switch is nil until *engine.Engine provides SetGateAdmit;
+	// pass dpEngine there once it does.
+	gateMgr := newGateManager(logger, avMgr, nil, dpEngine.Events(), enforce.DefaultGatePlainPort, enforce.DefaultGateMasqPort)
+	engine.SetGateCloser(gateMgr)
+	defer engine.SetGateCloser(nil)
+	defer gateMgr.close()
+	gateMgr.setEnforcing(enforceEnabled)
 	// Start capture (no-op if no interfaces).
 	go func() {
 		if err := dpEngine.StartWithRetry(ctx); err != nil {
@@ -180,12 +188,12 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		writeJSON(w, map[string]string{"status": "ready"})
 	})
-	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine))
+	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine, gateMgr))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules/preview", previewRuleHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset/preview", previewRulesetHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset_status", rulesetStatusHandler(dpEngine))
-	mux.HandleFunc("/internal/config", configHandler(logger, dpEngine, simMgr))
+	mux.HandleFunc("/internal/config", configHandler(logger, gateFollower{Engine: dpEngine, gate: gateMgr}, simMgr))
 	mux.HandleFunc("/internal/pcap/config", pcapConfigHandler(pcapMgr, ownership))
 	mux.HandleFunc("/internal/pcap/start", pcapStartHandler(pcapMgr, ownership))
 	mux.HandleFunc("/internal/pcap/stop", pcapStopHandler(pcapMgr))
@@ -221,11 +229,11 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/signatures/matches", signatureMatchesHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler(dpEngine))
 	mux.HandleFunc("/internal/firewall/counters", ruleCountersHandler(dpEngine))
-	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine))
-	mux.HandleFunc("/internal/blocks/flow", blockFlowHandler(dpEngine))
+	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine, gateMgr))
+	mux.HandleFunc("/internal/blocks/flow", blockFlowHandler(dpEngine, gateMgr))
 	mux.HandleFunc("/internal/blocks/clear", clearBlocksHandler(dpEngine))
-	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr, avMgr))
-	registerAVHandlers(mux, avMgr)
+	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr, avMgr, gateMgr))
+	registerAVHandlers(mux, avMgr, gateMgr)
 	mux.HandleFunc("/internal/trust", trustHandler(avMgr))
 	mux.HandleFunc("/internal/wireguard/status", wireguardStatusHandler())
 	mux.HandleFunc("/internal/dhcp/leases", dhcpLeasesHandler(dhcpMgr))

@@ -260,7 +260,7 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/apply_rules", bytes.NewBufferString(`{"firewall":[],"nat":{"snat":[],"dnat":[]},"ids":{"enabled":false,"rules":null}}`))
-		applyRulesHandler(dp).ServeHTTP(rec, req)
+		applyRulesHandler(dp, nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("apply_rules status = %d body=%s", rec.Code, rec.Body.String())
 		}
@@ -281,7 +281,7 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/apply_rules", bytes.NewBufferString("{"))
-		applyRulesHandler(dp).ServeHTTP(rec, req)
+		applyRulesHandler(dp, nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected invalid JSON status, got %d", rec.Code)
 		}
@@ -344,14 +344,14 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 	t.Run("block handlers unavailable and validation", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/internal/blocks/host", bytes.NewBufferString(`{"ip":"198.51.100.2","ttlSeconds":10}`))
-		blockHostHandler(dp).ServeHTTP(rec, req)
+		blockHostHandler(dp, nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("block host unavailable status = %d", rec.Code)
 		}
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/blocks/flow", bytes.NewBufferString(`{"srcIp":"bad","dstIp":"198.51.100.2","proto":"tcp","dstPort":"80"}`))
-		blockFlowHandler(nil).ServeHTTP(rec, req)
+		blockFlowHandler(nil, nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("block flow unavailable status = %d", rec.Code)
 		}
@@ -361,21 +361,21 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 		logger := zap.NewNop().Sugar()
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/internal/services", nil)
-		servicesHandler(logger, dp, nil, nil, nil).ServeHTTP(rec, req)
+		servicesHandler(logger, dp, nil, nil, nil, nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("services GET status = %d", rec.Code)
 		}
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/services", bytes.NewBufferString("{"))
-		servicesHandler(logger, dp, nil, nil, nil).ServeHTTP(rec, req)
+		servicesHandler(logger, dp, nil, nil, nil, nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("services invalid JSON status = %d", rec.Code)
 		}
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/services", bytes.NewBufferString(`{"vpn":{"wireguard":{"enabled":false}}}`))
-		servicesHandler(logger, dp, nil, nil, nil).ServeHTTP(rec, req)
+		servicesHandler(logger, dp, nil, nil, nil, nil).ServeHTTP(rec, req)
 		if runtime.GOOS == "linux" {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("services valid POST status = %d body=%s", rec.Code, rec.Body.String())
@@ -386,7 +386,7 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPatch, "/internal/services", nil)
-		servicesHandler(logger, dp, nil, nil, nil).ServeHTTP(rec, req)
+		servicesHandler(logger, dp, nil, nil, nil, nil).ServeHTTP(rec, req)
 		if rec.Code != http.StatusMethodNotAllowed {
 			t.Fatalf("services method status = %d", rec.Code)
 		}
