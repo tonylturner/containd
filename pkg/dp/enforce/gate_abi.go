@@ -17,9 +17,8 @@ const (
 	// masqueraded without the gate; it picks the masquerading listener.
 	GateMasqSelCtMark uint32 = 0x00020000
 	// GateZoneCtMask holds the egress zone index (1-255) of a gated
-	// connection; GateZoneCtShift positions it.
-	GateZoneCtMask  uint32 = 0x0000ff00
-	GateZoneCtShift        = 8
+	// connection, shifted by GateZoneCtShift.
+	GateZoneCtMask uint32 = 0x0000ff00
 
 	// GateLocalPktMark routes a packet to the local stack (policy routing
 	// rule in pkg/dp/netcfg, which carries the same value).
@@ -30,6 +29,9 @@ const (
 	// client was accepted on the masquerading listener.
 	GateMasqSockMark uint32 = 0x00010000
 )
+
+// GateZoneCtShift positions the egress zone index in GateZoneCtMask.
+const GateZoneCtShift uint = 8
 
 // Gate chain names in the policy table.
 const (
@@ -46,13 +48,13 @@ type GateAdmitState uint8
 
 const (
 	// GateAdmitRefuse resets new gated connections, except those with an
-	// ICS endpoint, which pass ungated. It is the state until the engine
-	// knows the listeners are up, and the state for a closed fail policy
-	// while they are down.
+	// ICS endpoint, which pass ungated. It is the initial state of the
+	// kernel switch and the state for a closed fail policy while the
+	// listeners or their routing are down.
 	GateAdmitRefuse GateAdmitState = iota
 	// GateAdmitOpen delivers new gated connections to the listeners.
 	GateAdmitOpen
 	// GateAdmitPass lets new selected connections through ungated: an open
-	// fail policy while the listeners are down.
+	// fail policy while the listeners or their routing are down.
 	GateAdmitPass
 )

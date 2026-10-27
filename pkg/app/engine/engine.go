@@ -136,10 +136,9 @@ func Run(ctx context.Context, opts Options) error {
 			logger.Errorf("stop antivirus: %v", err)
 		}
 	}()
-	// The scanning gate runs beside the data plane while it enforces. Its
-	// admission switch is nil until *engine.Engine provides SetGateAdmit;
-	// pass dpEngine there once it does.
-	gateMgr := newGateManager(logger, avMgr, nil, dpEngine.Events(), enforce.DefaultGatePlainPort, enforce.DefaultGateMasqPort)
+	// The scanning gate runs beside the data plane while it enforces and
+	// drives the data plane's gate admission switch.
+	gateMgr := newGateManager(logger, avMgr, dpEngine, dpEngine.Events(), enforce.DefaultGatePlainPort, enforce.DefaultGateMasqPort)
 	engine.SetGateCloser(gateMgr)
 	defer engine.SetGateCloser(nil)
 	defer gateMgr.close()
