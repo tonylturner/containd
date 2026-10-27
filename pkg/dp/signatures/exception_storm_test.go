@@ -20,7 +20,10 @@ func modbusResponse(t *testing.T, sport uint16, fc byte, body ...byte) dpi.Event
 	t.Helper()
 	pdu := append([]byte{fc}, body...)
 	adu := append([]byte{0x00, 0x01, 0x00, 0x00, 0x00, byte(1 + len(pdu)), 0x01}, pdu...)
-	key := flow.Key{SrcIP: net.ParseIP("10.0.0.2"), DstIP: net.ParseIP("10.0.0.1"), SrcPort: 502, DstPort: sport, Proto: 6}
+	key := flow.Key{
+		SrcIP: net.ParseIP("10.0.0.2"), DstIP: net.ParseIP("10.0.0.1"),
+		SrcPort: 502, DstPort: sport, Proto: 6, Dir: flow.DirReverse,
+	}
 	evs, err := modbus.NewDecoder().OnPacket(flow.NewState(key, time.Now()), &dpi.ParsedPacket{Payload: adu, Proto: "tcp", SrcPort: 502, DstPort: sport})
 	if err != nil || len(evs) != 1 {
 		t.Fatalf("decode FC %#x: events=%d err=%v", fc, len(evs), err)
@@ -121,5 +124,29 @@ func TestThresholdCountersAreBounded(t *testing.T) {
 	}
 	if len(e.thresholds) > maxThresholdKeys {
 		t.Fatalf("threshold counters = %d, bound %d", len(e.thresholds), maxThresholdKeys)
+	}
+}
+
+func TestCustomThresholdStillCountsEveryEventWithAnAPDUID(t *testing.T) {
+	e := New()
+	e.Add(Signature{
+		ID:         "CUSTOM-IEC-EVENT-COUNT",
+		Protocol:   "iec104",
+		Conditions: []Condition{{Field: "kind", Op: "equals", Value: "request"}},
+		Threshold:  &Threshold{Count: 2, WindowSeconds: 10},
+	})
+	ev := dpi.Event{
+		FlowID:     "custom-flow",
+		Proto:      "iec104",
+		Kind:       "request",
+		Attributes: map[string]any{"apdu_id": "same-apdu"},
+		Timestamp:  time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC),
+	}
+	if got := len(e.Match(ev)); got != 0 {
+		t.Fatalf("first matching event produced %d alerts, want 0", got)
+	}
+	ev.Timestamp = ev.Timestamp.Add(time.Second)
+	if got := len(e.Match(ev)); got != 1 {
+		t.Fatalf("second matching event with the same APDU ID produced %d alerts, want 1", got)
 	}
 }

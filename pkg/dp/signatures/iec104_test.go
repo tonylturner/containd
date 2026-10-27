@@ -45,13 +45,13 @@ func TestIEC104Signatures(t *testing.T) {
 		want  []string
 	}{
 		{"execute", "request", map[string]any{"class": "control", "type_id": uint8(46), "select": false, "ca": uint16(1), "is_write": true},
-			[]string{"ICS-WRITE-STORM", "IEC104-CONTROL-CMD"}},
+			[]string{"IEC104-CONTROL-CMD"}},
 		{"select", "request", map[string]any{"class": "control", "type_id": uint8(46), "select": true, "ca": uint16(1), "is_write": true},
-			[]string{"ICS-WRITE-STORM", "IEC104-CONTROL-CMD", "IEC104-SELECT"}},
+			[]string{"IEC104-CONTROL-CMD", "IEC104-SELECT"}},
 		{"confirmation", "response", map[string]any{"class": "control", "type_id": uint8(46), "select": false, "ca": uint16(1), "is_write": false}, nil},
 		{"telemetry", "response", map[string]any{"class": "monitor", "type_id": uint8(13), "ca": uint16(1), "is_write": false}, nil},
 		{"reset process", "request", map[string]any{"class": "system", "type_id": uint8(105), "ca": uint16(1), "is_write": true},
-			[]string{"ICS-WRITE-STORM", "IEC104-SYSTEM-CMD"}},
+			[]string{"IEC104-SYSTEM-CMD"}},
 		{"broadcast GI", "request", map[string]any{"class": "system", "type_id": uint8(100), "ca": uint16(65535), "is_write": false}, []string{"IEC104-BROADCAST"}},
 		{"stopdt", "apci", map[string]any{"apci_type": "U", "u_function": "stopdt_act"}, []string{"IEC104-STOPDT"}},
 		{"startdt", "apci", map[string]any{"apci_type": "U", "u_function": "startdt_act"}, nil},
