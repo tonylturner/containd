@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,15 +48,17 @@ func TestShellAPIResetRawClientHelper(t *testing.T) {
 	if os.Getenv(shellAPIResetRawHelperEnv) != "1" {
 		return
 	}
-	api, err := cli.ConnectSSHSession(context.Background(), os.Getenv(cli.EnvSSHAPISocket))
-	if err != nil {
-		t.Fatal(err)
-	}
+	socket := os.Getenv(cli.EnvSSHAPISocket)
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport}
 	req, err := http.NewRequest(http.MethodPost, "http://ssh-session/api/v1/system/factory-reset", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := api.Client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,14 +280,14 @@ func TestFactoryResetDisconnectsLinuxShellRawClient(t *testing.T) {
 	go func() { connectionClosed <- client.Conn.Wait() }()
 	select {
 	case <-exited:
-	case <-time.After(3 * time.Second):
+	case <-time.After(shellResetCloseGrace + time.Second):
 		tty.send(t, "echo shell-survived-$((6*7))\n")
 		tty.waitFor(t, "shell-survived-42", 1)
 		t.Fatalf("raw factory reset response reached the socket client, but its SSH Linux shell remained usable: %q", tty.output())
 	}
 	select {
 	case <-connectionClosed:
-	case <-time.After(3 * time.Second):
+	case <-time.After(shellResetCloseGrace + time.Second):
 		t.Fatal("SSH connection remained open after raw factory reset")
 	}
 }

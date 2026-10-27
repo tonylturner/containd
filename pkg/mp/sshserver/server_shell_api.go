@@ -14,6 +14,8 @@ import (
 	"github.com/tonylturner/containd/pkg/cli"
 )
 
+const shellResetCloseGrace = 2 * time.Second
+
 // shellAPI lets CLI processes in one Linux shell call management as the SSH
 // login that opened the shell. It listens on a Unix socket in a private
 // directory and forwards /api/v1 requests with the connection's credentials,
@@ -100,6 +102,12 @@ func (s *Server) shellAPIHandler(conn *sshConnection) http.Handler {
 		}
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
+		if conn.reset.Load() {
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			time.AfterFunc(shellResetCloseGrace, conn.close)
+		}
 	})
 }
 
