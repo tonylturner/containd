@@ -27,12 +27,10 @@ const (
 	decisionDeny      = "deny"
 	decisionWouldDrop = "would_drop"
 
-	reasonRule        = "rule"
-	reasonDefault     = "default"
-	reasonBroadcast   = "broadcast"
-	reasonMalformed   = "malformed"
-	reasonUnsupported = "unsupported"
-	reasonRole        = "role"
+	reasonRule      = "rule"
+	reasonDefault   = "default"
+	reasonBroadcast = "broadcast"
+	reasonMalformed = "malformed" // unframeable bytes or a stream fault, never decoded content
 )
 
 // ics.verdict and ics.session outcomes.
@@ -122,10 +120,11 @@ func (s *iecSession) sessionEvent(outcome string, extra map[string]any, now time
 	return s.event(eventfields.KindSession, attrs, now)
 }
 
-// decisionKeys are the decoded attributes an ics.decision event repeats.
+// decisionKeys are the decoded attributes an ics.decision event repeats,
+// including the conformance findings the decision was made with.
 var decisionKeys = []string{
 	eventfields.KeyAPDUID, eventfields.KeyTypeID, eventfields.KeyCA, eventfields.KeyIOA,
-	eventfields.KeySelect, eventfields.KeyDirection,
+	eventfields.KeySelect, eventfields.KeyDirection, eventfields.KeyConformance,
 }
 
 func (s *iecSession) decisionEvent(ev dpi.Event, d iecDecision, now time.Time) events.Event {

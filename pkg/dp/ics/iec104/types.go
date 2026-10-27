@@ -192,12 +192,15 @@ func isWrite(direction string, typeID uint8) bool {
 // interrogation (100) in either direction; read (102) requests only; end of
 // initialization (70). It is false for anything else: counter interrogation
 // (101), clock sync (103), reset process (105), test with time (107),
-// control commands and confirmations, broadcast CA, and every malformed or
-// unsupported event (those carry an error attribute). It reads attributes
-// through the strict eventfields accessors, so it accepts the in-memory and
-// the JSON form.
+// control commands and confirmations, broadcast CA, and every event with
+// conformance findings (malformed and unsupported events carry an error
+// attribute as well). It reads attributes through the strict eventfields
+// accessors, so it accepts the in-memory and the JSON form.
 func SafeRead(attrs map[string]any) bool {
 	if _, failed := attrs[eventfields.KeyError]; failed {
+		return false
+	}
+	if codes, _ := eventfields.Strings(attrs, eventfields.KeyConformance); len(codes) > 0 {
 		return false
 	}
 	apci, _ := eventfields.String(attrs, eventfields.KeyAPCIType)

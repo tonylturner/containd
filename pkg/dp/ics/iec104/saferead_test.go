@@ -60,6 +60,8 @@ func TestSafeRead(t *testing.T) {
 		{"broadcast monitor data", srv, iFrame(0, 0, asdu(3, 1, cotSpont, 0, BroadcastCA, cat(ioa(1), []byte{1})...)), false},
 		{"malformed (role)", cli, iFrame(0, 0, asdu(3, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), false},
 		{"malformed S-frame length", srv, []byte{0x68, 6, 0x01, 0x00, 0x02, 0x00, 0, 0}, false},
+		{"S-frame with a reserved bit", srv, []byte{0x68, 4, 0x01, 0x00, 0x03, 0x00}, false},
+		{"GI request with a reserved bit", cli, []byte{0x68, 14, 0x00, 0x00, 0x01, 0x00, 100, 1, cotAct, 0, 1, 0, 0, 0, 0, 20}, false},
 		{"unsupported", srv, iFrame(0, 0, asdu(2, 1, cotSpont, 0, 1, cat(ioa(1), []byte{1})...)), false},
 	}
 	for _, tc := range cases {
