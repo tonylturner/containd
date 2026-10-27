@@ -276,8 +276,9 @@ func matchICSUnitID(pred ICSPredicate, ctx EvalContext) bool {
 
 // matchICSAddresses applies an address predicate to the spans the message
 // touches. A DENY or RESET matches when any span meets the predicate's
-// ranges. Unknown or absent addresses never prove a predicate. Every other
-// action matches only a message with at least one span, all inside the ranges:
+// ranges, or when the spans are unknown, so a message whose addresses
+// cannot be bounded never slips past a deny. Every other action matches
+// only a message with at least one span, all of them inside the ranges:
 // an ALLOW never admits addresses beyond what it names, nor a message
 // whose addresses are unknown.
 func matchICSAddresses(ce *compiledEntry, ctx EvalContext) bool {
@@ -285,7 +286,7 @@ func matchICSAddresses(ce *compiledEntry, ctx EvalContext) bool {
 		return true
 	}
 	if ce.Action == ActionDeny || ce.Action == ActionReset {
-		return ce.addresses.meetsAny(ctx.ICS.Spans)
+		return ctx.ICS.SpansUnknown || ce.addresses.meetsAny(ctx.ICS.Spans)
 	}
 	return !ctx.ICS.SpansUnknown && ce.addresses.holdsAll(ctx.ICS.Spans)
 }

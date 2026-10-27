@@ -19,7 +19,8 @@ func addressMatch(action Action, specs []string, ics *ICSContext) bool {
 
 // An address predicate on an ALLOW holds a message only when every span it
 // touches lies inside the predicate; on a DENY or RESET it holds when any
-// decoded span meets the predicate. Unknown spans never prove a match.
+// span meets the predicate. Unknown spans never match an ALLOW and always
+// match a DENY or RESET.
 func TestICSAddressSpanSemantics(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -49,7 +50,7 @@ func TestICSAddressSpanSemantics(t *testing.T) {
 		// Diagnostics, device identification and read replies touch no address.
 		{"no address", []string{"0-65535"}, ICSContext{}, false, false},
 		// Unknown function code or malformed PDU.
-		{"unknown", []string{"10-11"}, ICSContext{SpansUnknown: true}, false, false},
+		{"unknown", []string{"10-11"}, ICSContext{SpansUnknown: true}, false, true},
 		{"unknown with spans", []string{"0-65535"}, ICSContext{SpansUnknown: true, Spans: []AddressSpan{span(1, 1)}}, false, true},
 		{"top of the address space", []string{"0xFFFFFFF0-0xFFFFFFFF"}, ICSContext{Spans: []AddressSpan{span(0xFFFFFFFE, 0xFFFFFFFF)}}, true, true},
 	}
@@ -99,7 +100,7 @@ func TestEvaluatorRangeCrossingRead(t *testing.T) {
 		t.Fatalf("read below the denied range = %s, want ALLOW", got)
 	}
 	unknown := EvalContext{ICS: &ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: 0x41, SpansUnknown: true}}
-	if got := deny.Evaluate(unknown); got != ActionAllow {
-		t.Fatalf("absent addresses = %s, want default ALLOW", got)
+	if got := deny.Evaluate(unknown); got != ActionDeny {
+		t.Fatalf("undecodable request = %s, want DENY", got)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -114,8 +115,8 @@ func TestEvalContextOtherProtocolAddress(t *testing.T) {
 
 // Inline enforcement of decoded pymodbus ADUs: an ALLOW of 10-11 admits the
 // in-range read and not the range-crossing read or write; a DENY of 12-19
-// under an ALLOW default drops decoded spans reaching into it. Missing
-// addresses do not satisfy that DENY and fall to the configured default.
+// under an ALLOW default drops whatever reaches into it and anything it
+// cannot bound.
 func TestEnforceModbusRequestSpans(t *testing.T) {
 	unit := uint8(1)
 	allow := &rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{
@@ -138,8 +139,8 @@ func TestEnforceModbusRequestSpans(t *testing.T) {
 		{deny, aduReadInRange, false},
 		{deny, aduReadCrossing, true},
 		{deny, aduWriteCrossing, true},
-		{deny, aduUnknownFC, false},
-		{deny, aduShortPDU, false},
+		{deny, aduUnknownFC, true},
+		{deny, aduShortPDU, true},
 	}
 	for _, tc := range cases {
 		e := &Engine{eventStore: events.NewStore(10), dpiMode: "enforce"}
@@ -149,6 +150,49 @@ func TestEnforceModbusRequestSpans(t *testing.T) {
 		if dropped := enforced && v.Denies(); dropped != tc.dropped {
 			t.Errorf("%s under %s: dropped=%v (%+v), want %v", tc.adu, tc.snap.Firewall[0].ID, dropped, v, tc.dropped)
 		}
+	}
+}
+
+func TestConformanceUnknownSpansCannotMatchAllow(t *testing.T) {
+	assertConformanceUnknownSpanMatch(t, rules.ActionAllow, false)
+}
+
+func TestConformanceUnknownSpansMatchDenyReset(t *testing.T) {
+	for _, action := range []rules.Action{rules.ActionDeny, rules.ActionReset} {
+		t.Run(string(action), func(t *testing.T) {
+			assertConformanceUnknownSpanMatch(t, action, true)
+		})
+	}
+}
+
+func assertConformanceUnknownSpanMatch(t *testing.T, action rules.Action, wantMatch bool) {
+	t.Helper()
+	state, pkt, ev := decodeModbus(t, modbusKey(40000, flow.DirForward), aduShortPDU)
+	ev.Attributes[eventfields.KeyConformance] = []string{"modbus.truncated_pdu"}
+	ctx, ok := evalContextFromDPIEvent(nil, state, pkt, ev, "", "")
+	if !ok || !ctx.ICS.HasFunctionCode || ctx.ICS.FunctionCode != 3 || !ctx.ICS.SpansUnknown {
+		t.Fatalf("expected decoded FC 3 with unknown address coverage: %+v", ctx.ICS)
+	}
+	entry := rules.Entry{ID: "address-rule", Action: action,
+		ICS: rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}, Addresses: []string{"12-19"}}}
+	if got := rules.PreviewMatch(entry, ctx); got != wantMatch {
+		t.Fatalf("%s matched=%v, want %v", action, got, wantMatch)
+	}
+	// Tolerant findings must preserve the address predicate's asymmetry:
+	// an unprovable ALLOW falls to default DENY; DENY/RESET overrides ALLOW default.
+	defaultAction, wantReason := rules.ActionAllow, reasonRule
+	if action == rules.ActionAllow {
+		defaultAction, wantReason = rules.ActionDeny, reasonDefault
+	}
+	e := &Engine{eventStore: events.NewStore(10), dpiMode: "enforce"}
+	e.ruleSnap.Store(&rules.Snapshot{Default: defaultAction, Firewall: []rules.Entry{entry}})
+	v, _, enforced := e.enforceDPIEvents(state, pkt, []dpi.Event{ev}, false)
+	if !enforced || !v.Denies() {
+		t.Fatalf("unknown address coverage passed: %+v", v)
+	}
+	decisions := findingEvents(e, eventfields.KindDecision)
+	if len(decisions) != 1 || decisions[0].Attributes[eventfields.KeyReason] != wantReason {
+		t.Fatalf("decision=%+v, want reason %s", decisions, wantReason)
 	}
 }
 
