@@ -52,6 +52,12 @@ func TestRulesetPreviewHandler(t *testing.T) {
 	if err != nil || preview.Ruleset != want || preview.Runtime.IEC104EnvelopeOpen {
 		t.Fatalf("preview=%+v err=%v", preview, err)
 	}
+	// The engine refuses gated connections until its gate manager opens the
+	// gate; the preview compiles the candidate's gate with that admission.
+	if preview.Runtime.GateAdmit != "refuse" || !strings.Contains(preview.Runtime.GateAdmitReason, "scanning gate refusing") ||
+		!strings.Contains(preview.Ruleset, "chain "+enforce.GateAdmitChain+" {") {
+		t.Fatalf("gate admission runtime = %+v", preview.Runtime)
+	}
 	if !strings.Contains(preview.Ruleset, "group 205") || !strings.Contains(preview.Ruleset, "table inet candidate") ||
 		!regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" jump ics_queue;`).MatchString(preview.Ruleset) ||
 		!strings.Contains(preview.Ruleset, "ct status assured meta mark set meta mark and 0xf0ffffff queue num 209;") ||
@@ -106,8 +112,9 @@ func TestRulesetPreviewHandlerEnforcementDisabled(t *testing.T) {
 			}
 			var runtime engine.RulesetPreviewRuntime
 			if json.Unmarshal(got["runtime"], &runtime) != nil || runtime.IEC104EnvelopeOpen ||
-				runtime.Reason != "Enforcement is disabled; nothing would be applied" {
-				t.Fatalf("runtime = %+v", runtime)
+				runtime.Reason != "Enforcement is disabled; nothing would be applied" ||
+				strings.Contains(string(got["runtime"]), "gateAdmit") {
+				t.Fatalf("runtime = %+v (%s)", runtime, got["runtime"])
 			}
 			if dp.CurrentRules() != nil || !reflect.DeepEqual(dp.RulesetStatus(), before) {
 				t.Fatal("disabled preview changed live enforcement")

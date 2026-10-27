@@ -9,6 +9,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/common/avscan"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/services"
 	"github.com/tonylturner/containd/pkg/dp/httpgate"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -29,9 +30,6 @@ const (
 	gateIdleTimeout                = 90 * time.Second
 	gateObjectTimeout              = 10 * time.Minute
 	gateDialTimeout                = 10 * time.Second
-	// gateDefaultBackendTimeout mirrors the scanner's default when
-	// timeoutSec is unset.
-	gateDefaultBackendTimeout = 5 * time.Second
 	// gateMinScanTimeout is the least time one scan may take. The backend
 	// timeout bounds connecting; a large clean object legitimately takes
 	// longer, so the scan deadline is a multiple of it.
@@ -47,7 +45,7 @@ const (
 func gateSettings(gate rules.GateSelection, av config.AVConfig) httpgate.Settings {
 	backend := time.Duration(av.TimeoutSec) * time.Second
 	if backend <= 0 {
-		backend = gateDefaultBackendTimeout
+		backend = services.DefaultAVTimeout
 	}
 	maxObject := av.MaxSizeBytes
 	if maxObject <= 0 {

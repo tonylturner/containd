@@ -27,8 +27,12 @@ const (
 	DefaultClamdSocket = "/run/clamav/clamd.sock"
 	// DefaultCustomDefsPath stores uploaded custom signature databases.
 	DefaultCustomDefsPath = "/data/clamav/custom"
-	defaultAVTimeout      = 5 * time.Second
-	defaultAVCacheTTL     = 10 * time.Minute
+	// DefaultAVTimeout bounds a scanner connection, probe and scan when the
+	// AV configuration sets no timeout; the scanning gate derives its scan
+	// deadline from the same value.
+	DefaultAVTimeout  = 5 * time.Second
+	defaultAVTimeout  = DefaultAVTimeout
+	defaultAVCacheTTL = 10 * time.Minute
 	// avStatusProbeTimeout bounds the live readiness check in Status.
 	avStatusProbeTimeout = 2 * time.Second
 )

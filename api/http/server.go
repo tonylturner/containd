@@ -56,7 +56,9 @@ type EngineClient interface {
 	ConfigureInterfacesReplace(ctx context.Context, ifaces []config.Interface) error
 	ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error
 	ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error
-	ConfigureServices(ctx context.Context, services config.ServicesConfig) error
+	// ConfigureServices applies the services configuration and returns the
+	// warnings the engine applied it with.
+	ConfigureServices(ctx context.Context, services config.ServicesConfig) ([]string, error)
 	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
 	RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
@@ -586,8 +588,12 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	if err := pushTrustedCA(ctx, cfg, engine); err != nil {
 		warnings = append(warnings, fmt.Sprintf("trust: %v", err))
 	}
-	if err := engine.ConfigureServices(ctx, cfg.Services); err != nil {
+	serviceWarnings, err := engine.ConfigureServices(ctx, cfg.Services)
+	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("services: %v", err))
+	}
+	for _, warning := range serviceWarnings {
+		warnings = append(warnings, "services: "+warning)
 	}
 	if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
 		return nil, fmt.Errorf("dataplane: %w", err)

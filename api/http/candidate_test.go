@@ -39,9 +39,9 @@ func (e *stageEngine) ConfigureRouting(context.Context, config.RoutingConfig) er
 	e.mutations++
 	return nil
 }
-func (e *stageEngine) ConfigureServices(context.Context, config.ServicesConfig) error {
+func (e *stageEngine) ConfigureServices(context.Context, config.ServicesConfig) ([]string, error) {
 	e.mutations++
-	return nil
+	return nil, nil
 }
 func (e *stageEngine) SetPcapConfig(_ context.Context, cfg config.PCAPConfig) (config.PCAPConfig, error) {
 	e.mutations++
