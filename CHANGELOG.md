@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/verify-published-images.sh` runs the same checks locally. The README
   badges for Trivy, Cosign and SBOM show these results.
 
+### Changed
+
+- Restored the full README overview and dashboard screenshot.
+
 ## [0.1.35] - 2026-10-26
 
 ### Security
