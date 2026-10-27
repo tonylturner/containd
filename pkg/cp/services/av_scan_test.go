@@ -277,6 +277,38 @@ func TestAVObjectICAPErrorsAreUnscanned(t *testing.T) {
 	}
 }
 
+func TestAVObjectICAPVerdictsAreNotCached(t *testing.T) {
+	for _, verdict := range []avscan.Verdict{avscan.Clean, avscan.Infected} {
+		t.Run(string(verdict), func(t *testing.T) {
+			var calls atomic.Int32
+			addr, _ := startFakeICAP(t, nil, func(icapRequest) string {
+				calls.Add(1)
+				if verdict == avscan.Infected {
+					return "ICAP/1.0 204 No Content\r\nX-Infection-Found: Type=0; Resolution=2; Threat=Test;\r\n\r\n"
+				}
+				return "ICAP/1.0 204 No Content\r\n\r\n"
+			})
+			m := newTestAVManager(t, AVOptions{})
+			m.lastCfg = config.AVConfig{Enabled: true, Mode: "icap", ICAP: config.ICAPConfig{Servers: []config.ICAPServer{icapServer(addr)}}}
+			payload := []byte("same content")
+			// Even identical contexts must reach ICAP again, as must a
+			// change of direction with the same digest.
+			for i, obj := range []avscan.Object{scanObject(payload), scanObject(payload), uploadObject(payload)} {
+				r := m.Scan(context.Background(), obj)
+				if r.Verdict != verdict {
+					t.Fatalf("scan %d = %+v, want %s", i, r, verdict)
+				}
+				if verdict == avscan.Infected && r.Signature != "Test" {
+					t.Fatalf("scan %d lost signature: %+v", i, r)
+				}
+				if calls.Load() != int32(i+1) || len(m.cache) != 0 {
+					t.Fatalf("scan %d: %d backend calls, %d cached verdicts", i, calls.Load(), len(m.cache))
+				}
+			}
+		})
+	}
+}
+
 func TestAVReloadProbeAloneIsNotReady(t *testing.T) {
 	fake := newFakeClamAV(t)
 	fake.opts.DatabaseDir = t.TempDir()

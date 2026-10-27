@@ -877,7 +877,7 @@ type AVConfig struct {
 	FailPolicy   string        `json:"failPolicy,omitempty"`   // open|closed
 	MaxSizeBytes int64         `json:"maxSizeBytes,omitempty"` // 0 = unlimited
 	TimeoutSec   int           `json:"timeoutSec,omitempty"`   // backend connect/scan bound
-	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`     // verdict cache TTL
+	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`     // native ClamAV verdict cache TTL; ICAP is never cached
 	ICAP         ICAPConfig    `json:"icap,omitempty"`
 	ClamAV       ClamAVConfig  `json:"clamav,omitempty"`
 	HTTPDownload bool          `json:"httpDownload,omitempty"` // scan HTTP responses

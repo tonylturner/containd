@@ -281,9 +281,11 @@ Scanning:
   at most 104857600, clamd's default stream limit of 100 MiB). Both apply to
   ClamAV and ICAP, and resetting either to 0 restores the default. Staging
   rejects negative or larger values.
-- Every result records the backend that produced it, and cached verdicts are
-  keyed by content hash, backend and definitions generation, so new
-  definitions or another server never reuse old verdicts.
+- Every result records the backend that produced it. Native ClamAV verdicts
+  are cached by content hash, clamd socket, definitions generation and size
+  limit, so new definitions or another socket never reuse old verdicts.
+  ICAP verdicts are never cached because the server may decide by direction,
+  HTTP headers and endpoints.
 - ICAP is a generic RFC 3507 backend with exactly one server and no
   failover. Uploads go as `REQMOD` with the request head, downloads as
   `RESPMOD` with the request and response heads. The request head is sent

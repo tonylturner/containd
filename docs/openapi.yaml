@@ -711,7 +711,7 @@ components:
         scan.icsAssets replace it. The scanning gate intercepts traffic only with enabled, at least
         one scan.include entry and httpDownload or httpUpload set.
       properties:
-        cacheTtl: {type: integer, format: int64, minimum: 0, description: Verdict cache lifetime in nanoseconds; 0 selects 10 minutes}
+        cacheTtl: {type: integer, format: int64, minimum: 0, description: Native ClamAV verdict cache lifetime in nanoseconds; 0 selects 10 minutes. ICAP verdicts are never cached}
         clamav: {$ref: '#/components/schemas/ClamAVConfig'}
         enabled: {type: boolean}
         failPolicy: {type: string, enum: ["", open, closed], description: "Treatment of every unscanned outcome: open passes it, closed refuses it; empty selects open"}

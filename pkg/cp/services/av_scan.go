@@ -90,7 +90,9 @@ func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 		return unscanned(avscan.ReasonNotReady, reloadError)
 	}
 	key := ""
-	if obj.SHA256 != "" {
+	// ICAP policy may depend on direction, HTTP heads and endpoints, not
+	// just content. Only native clamd verdicts can be reused by digest.
+	if avMode(cfg) == "clamav" && obj.SHA256 != "" {
 		key = avCacheKey(cfg, gen, obj.SHA256)
 		if res, ok := m.cachedVerdict(key); ok {
 			return res
@@ -150,7 +152,9 @@ func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 	default:
 		return unscanned(avscan.ReasonScannerError, "unrecognized backend verdict")
 	}
-	m.recordVerdict(key, avCacheTTL(cfg), res)
+	if key != "" {
+		m.recordVerdict(key, avCacheTTL(cfg), res)
+	}
 	return res
 }
 
@@ -164,11 +168,7 @@ func avBackend(cfg config.AVConfig) string {
 }
 
 func avCacheKey(cfg config.AVConfig, gen uint64, hash string) string {
-	backend := avBackend(cfg)
-	if avMode(cfg) == "clamav" {
-		backend += "|" + clamdSocket(cfg)
-	}
-	return backend + "|" + strconv.FormatUint(gen, 10) + "|" + strconv.FormatInt(cfg.MaxSizeBytes, 10) + "|" + hash
+	return "clamav|" + clamdSocket(cfg) + "|" + strconv.FormatUint(gen, 10) + "|" + strconv.FormatInt(cfg.MaxSizeBytes, 10) + "|" + hash
 }
 
 // avMode is the configured backend; an empty mode is the native clamd.

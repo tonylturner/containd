@@ -119,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- ICAP verdicts are never cached: each scan reaches the server with its direction, HTTP headers and endpoints; native ClamAV caching is unchanged.
 - `services.av.failOpenIcs` is retired in favour of `scan.icsZones` and
   `scan.icsAssets`; a stored value still loads and is ignored, and the
   Antivirus page no longer offers the ICS fail-open setting.
