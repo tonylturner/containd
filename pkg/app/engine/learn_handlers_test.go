@@ -44,8 +44,9 @@ func TestLearnRoundTripThroughEngineClient(t *testing.T) {
 
 	e.Learner().RecordEvent("192.0.2.10", "192.0.2.20", dpi.Event{
 		Proto:      "modbus",
+		Kind:       "request",
 		Timestamp:  time.Unix(1000, 0).UTC(),
-		Attributes: map[string]any{"unit_id": uint8(1), "function_code": uint8(3), "address": "40001", "is_write": false},
+		Attributes: map[string]any{"unit_id": uint8(1), "function_code": uint8(3), "address": uint16(40001), "quantity": uint16(1), "is_write": false},
 	})
 	profiles, err = client.ListLearnProfiles(ctx)
 	if err != nil {
@@ -58,7 +59,7 @@ func TestLearnRoundTripThroughEngineClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(generated) != 1 || generated[0].ID != "learned-modbus-192.0.2.10-192.0.2.20" || generated[0].ICS.UnitID == nil || *generated[0].ICS.UnitID != 1 || len(generated[0].ICS.FunctionCode) != 1 || generated[0].ICS.FunctionCode[0] != 3 {
+	if len(generated) != 1 || generated[0].ID != "learned-modbus-192.0.2.10-192.0.2.20-u1-fc03" || generated[0].ICS.UnitID == nil || *generated[0].ICS.UnitID != 1 || len(generated[0].ICS.FunctionCode) != 1 || generated[0].ICS.FunctionCode[0] != 3 {
 		t.Fatalf("generated rules = %#v", generated)
 	}
 
