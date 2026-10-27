@@ -5,17 +5,19 @@ package cip
 
 import (
 	"encoding/binary"
-	"encoding/hex"
+	"errors"
 	"net"
 	"strings"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
-// Decoder implements dpi.StreamDecoder for TCP CIP/EtherNet/IP visibility
-// and dpi.Decoder for UDP I/O traffic.
+// Decoder implements dpi.StreamDecoder for TCP EtherNet/IP encapsulation on
+// port 44818 and dpi.Decoder for UDP: implicit I/O datagrams on port 2222 and
+// packet-only encapsulation (ListIdentity and other commands) on port 44818.
 type Decoder struct{}
 
 func NewDecoder() *Decoder { return &Decoder{} }
@@ -27,8 +29,9 @@ func (d *Decoder) Supports(state *flow.State) bool {
 	switch state.Key.Proto {
 	case 6: // TCP — explicit messaging on port 44818
 		return state.Key.SrcPort == 44818 || state.Key.DstPort == 44818
-	case 17: // UDP — implicit/IO messaging on port 2222
-		return state.Key.SrcPort == 2222 || state.Key.DstPort == 2222
+	case 17: // UDP — implicit I/O on 2222, packet-only encapsulation on 44818
+		return state.Key.SrcPort == 2222 || state.Key.DstPort == 2222 ||
+			state.Key.SrcPort == 44818 || state.Key.DstPort == 44818
 	default:
 		return false
 	}
@@ -36,7 +39,7 @@ func (d *Decoder) Supports(state *flow.State) bool {
 
 // Ports implements dpi.PortHinter for port-based dispatch.
 func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
-	return []uint16{44818}, []uint16{2222}
+	return []uint16{44818}, []uint16{2222, 44818}
 }
 
 // cipCommands are EIP commands that carry CIP messages.
@@ -46,7 +49,15 @@ var cipCommands = map[uint16]bool{
 }
 
 func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Event, error) {
-	if pkt == nil || len(pkt.Payload) == 0 {
+	if pkt == nil {
+		return nil, nil
+	}
+	// Every datagram on the I/O port is one bounded frame, so an empty or
+	// malformed one is still reported rather than silently skipped.
+	if state != nil && state.Key.Proto == 17 && (state.Key.SrcPort == 2222 || state.Key.DstPort == 2222) {
+		return []dpi.Event{ioEvent(state, pkt.Payload)}, nil
+	}
+	if len(pkt.Payload) == 0 {
 		return nil, nil
 	}
 	hdr, err := ParseEIPHeader(pkt.Payload)
@@ -65,15 +76,33 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 		"enip_session_handle": hdr.SessionHandle,
 	}
 
+	if _, known := commandNames[hdr.Command]; !known {
+		addFinding(attrs, "cip.unknown_command")
+	}
 	// For commands that carry CIP messages, extract and classify.
-	if cipCommands[hdr.Command] && len(hdr.Data) > 0 {
+	if cipCommands[hdr.Command] && hdr.Status == 0 {
 		itemTypes, item, cpfErr := parseCPF(hdr.Data)
 		var cipMsg *CIPMessage
-		if cpfErr == nil {
+		if len(hdr.Data) >= 8 {
 			attrs["cpf_item_types"] = strings.Join(itemTypes, ",")
 		}
+		if cpfErr != nil || item == nil {
+			code := "cip.cpf_layout"
+			if errors.Is(cpfErr, ErrTruncated) {
+				code = "cip.item_truncated"
+			}
+			addFinding(attrs, code)
+		}
 		if item != nil {
-			cipMsg, _ = parseCIPFromItem(item)
+			var msgErr error
+			cipMsg, msgErr = parseCIPFromItem(item)
+			if msgErr != nil {
+				code := "cip.message_short"
+				if errors.Is(msgErr, ErrPathTruncated) {
+					code = "cip.epath_truncated"
+				}
+				addFinding(attrs, code)
+			}
 		}
 		if cipMsg != nil {
 			attrs["service_code"] = cipMsg.ServiceCode
@@ -81,17 +110,10 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 			attrs["function_code"] = cipMsg.ServiceCode
 			attrs["is_write"] = IsWriteService(cipMsg.ServiceCode)
 			attrs["is_control"] = IsControlService(cipMsg.ServiceCode)
-			if len(cipMsg.Path) > 0 {
-				attrs["cip_path"] = hex.EncodeToString(cipMsg.Path)
-				ep := ParseEPath(cipMsg.Path)
-				if ep.ClassID != 0 {
-					attrs["object_class"] = ep.ClassID
-					attrs["object_class_name"] = ObjectClassName(ep.ClassID)
-				}
-				attrs["instance_id"] = ep.InstanceID
-				attrs["attribute_id"] = ep.AttributeID
-				attrs["address"] = FormatAddress(ep)
+			if cipMsg.hasStatus {
+				attrs["general_status"] = cipMsg.status
 			}
+			addPathFields(cipMsg.Path, attrs)
 
 			kind := "request"
 			if cipMsg.IsResponse {
@@ -99,9 +121,14 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 			}
 
 			// Multiple_Service_Packet: extract service count and emit per-sub-service events.
-			if cipMsg.ServiceCode == 0x0A && len(cipMsg.Data) >= 2 {
-				svcCount := binary.LittleEndian.Uint16(cipMsg.Data[0:2])
-				attrs["multi_service_count"] = svcCount
+			if cipMsg.ServiceCode == 0x0A && (!cipMsg.IsResponse || cipMsg.hasStatus && cipMsg.status == 0) {
+				if len(cipMsg.Data) >= 2 {
+					attrs["multi_service_count"] = binary.LittleEndian.Uint16(cipMsg.Data[0:2])
+				}
+				subs, stopped := parseMSPServices(cipMsg.Data)
+				if stopped {
+					addFinding(attrs, "cip.msp_layout")
+				}
 
 				parentEv := dpi.Event{
 					FlowID:     state.Key.Hash(),
@@ -111,7 +138,6 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 					Timestamp:  time.Now().UTC(),
 				}
 
-				subs := ParseMSPServices(cipMsg.Data)
 				if len(subs) == 0 {
 					return []dpi.Event{parentEv}
 				}
@@ -120,6 +146,7 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 				results = append(results, parentEv)
 				now := time.Now().UTC()
 				flowID := state.Key.Hash()
+				parentCodes, _ := eventfields.Strings(attrs, eventfields.KeyConformance)
 				for _, sub := range subs {
 					subAttrs := map[string]any{
 						"enip_command":        attrs["enip_command"],
@@ -135,16 +162,21 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 					if itemTypes, ok := attrs["cpf_item_types"]; ok {
 						subAttrs["cpf_item_types"] = itemTypes
 					}
-					if len(sub.Path) > 0 {
-						subAttrs["cip_path"] = hex.EncodeToString(sub.Path)
-						ep := ParseEPath(sub.Path)
-						if ep.ClassID != 0 {
-							subAttrs["object_class"] = ep.ClassID
-							subAttrs["object_class_name"] = ObjectClassName(ep.ClassID)
-						}
-						subAttrs["instance_id"] = ep.InstanceID
-						subAttrs["attribute_id"] = ep.AttributeID
-						subAttrs["address"] = FormatAddress(ep)
+					if sub.hasStatus {
+						subAttrs["general_status"] = sub.status
+					}
+					if len(parentCodes) > 0 {
+						subAttrs[eventfields.KeyConformance] = parentCodes
+					}
+					for _, code := range sub.findings {
+						addFinding(subAttrs, code)
+					}
+					addPathFields(sub.Path, subAttrs)
+					// The envelope is uncertain too; do not let an intact
+					// MSP wrapper hide incomplete child content from consumers.
+					subCodes, _ := eventfields.Strings(subAttrs, eventfields.KeyConformance)
+					for _, code := range subCodes {
+						addFinding(attrs, code)
 					}
 					subKind := kind
 					results = append(results, dpi.Event{

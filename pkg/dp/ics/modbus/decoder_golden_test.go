@@ -57,7 +57,7 @@ var goldenADUs = []goldenADU{
 	{"fc23 reply", "0007000000070117040029002a", true, map[string]any{"byte_count": uint8(4), "register_count": uint16(2)}, nil, false},
 	// Unknown function code 0x5a and a PDU of only a function code.
 	{"unknown fc request", "007000000006015a000a0002", false, map[string]any{}, nil, false},
-	{"short pdu request", "0073000000020103", false, map[string]any{}, nil, false},
+	{"short pdu request", "0073000000020103", false, map[string]any{"conformance": []string{"modbus.pdu_layout"}}, nil, false},
 }
 
 func TestGoldenADUFields(t *testing.T) {

@@ -5,6 +5,7 @@ package modbus
 
 import (
 	"math"
+	"slices"
 
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
@@ -32,8 +33,8 @@ const (
 //
 // ok is false when the message's function code may address data but the
 // attributes do not bound it: a function code without a decoded layout, a
-// PDU whose length did not fit its function code (the decoder then emits no
-// address), a quantity outside the specification's limits, a byte count that
+// PDU whose layout did not fit its function code, a quantity outside the
+// specification's limits, a byte count that
 // disagrees with the quantity, or a span past address 65535. A read response
 // carries no address and is ok false as well; callers that know the message
 // is a reply treat that as touching nothing.
@@ -42,6 +43,11 @@ const (
 // comm event counter and log, report server ID, read device
 // identification) return no spans with ok true.
 func AddressSpans(attrs map[string]any) (spans []Span, ok bool) {
+	// A partial layout retains readable scalars for policy, but does not
+	// establish the complete access span. PID findings alone do not affect it.
+	if codes, _ := eventfields.Strings(attrs, eventfields.KeyConformance); slices.Contains(codes, "modbus.pdu_layout") {
+		return nil, false
+	}
 	fc, ok := eventfields.Uint8(attrs, eventfields.KeyFunctionCode)
 	if !ok {
 		return nil, false

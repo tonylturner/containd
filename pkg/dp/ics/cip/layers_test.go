@@ -114,8 +114,10 @@ func TestDecoderMalformedCPF(t *testing.T) {
 		if err != nil || len(events) != 1 {
 			t.Fatalf("events=%v err=%v", events, err)
 		}
-		if _, ok := events[0].Attributes["cpf_item_types"]; ok {
-			t.Fatal("partial CPF item list emitted")
+		if len(data) >= 8 {
+			if _, ok := events[0].Attributes["cpf_item_types"]; !ok {
+				t.Fatal("readable CPF item list lost")
+			}
 		}
 		if len(data) == len(trailing)-1 {
 			msg, err := ParseCIPMessage(data)

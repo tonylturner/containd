@@ -200,15 +200,20 @@ func TestManagerMidStreamFailsClosed(t *testing.T) {
 }
 
 func TestManagerUDPRemainsPacketOnly(t *testing.T) {
-	mgr := dpi.NewManager(NewDecoder())
-	st := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 2222, 17), time.Now())
-	raw := streamFixtures()[1].raw
-	for _, payload := range [][]byte{raw[:10], raw[10:], append(bytes.Clone(raw), raw...), raw} {
-		res := mgr.Inspect(st, &dpi.ParsedPacket{Proto: "udp", Payload: payload, FailClosed: true})
-		want, err := NewDecoder().OnPacket(st, &dpi.ParsedPacket{Payload: payload})
-		if res.Err != nil || err != nil || res.Framed || res.Proto != "" || len(res.Frames) != 0 {
-			t.Fatalf("UDP result = %+v, packet err = %v", res, err)
+	for _, port := range []uint16{2222, 44818} {
+		mgr := dpi.NewManager(NewDecoder())
+		st := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, port, 17), time.Now())
+		raw := streamFixtures()[1].raw
+		if port == 2222 {
+			raw = testIOPacket([]byte{0x10, 0, 1, 2})
 		}
-		assertSameEvents(t, res.Events, want)
+		for _, payload := range [][]byte{raw[:10], raw[10:], append(bytes.Clone(raw), raw...), raw} {
+			res := mgr.Inspect(st, &dpi.ParsedPacket{Proto: "udp", Payload: payload, FailClosed: true})
+			want, err := NewDecoder().OnPacket(st, &dpi.ParsedPacket{Payload: payload})
+			if res.Err != nil || err != nil || res.Framed || res.Proto != "" || len(res.Frames) != 0 {
+				t.Fatalf("UDP port %d result = %+v, packet err = %v", port, res, err)
+			}
+			assertSameEvents(t, res.Events, want)
+		}
 	}
 }
