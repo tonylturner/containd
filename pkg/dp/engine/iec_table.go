@@ -18,6 +18,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
@@ -25,7 +26,7 @@ import (
 
 // IEC104 session bounds.
 const (
-	iec104Port              = 2404
+	iec104Port              = ics.IEC104Port
 	iecMaxHeldPerSession    = 32
 	iecMaxHeldBytes         = 64 << 10
 	iecMaxHeldGlobal        = 256

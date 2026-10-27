@@ -12,6 +12,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 // Decoder implements dpi.StreamDecoder for TCP CIP/EtherNet/IP visibility
@@ -25,10 +26,10 @@ func (d *Decoder) Supports(state *flow.State) bool {
 		return false
 	}
 	switch state.Key.Proto {
-	case 6: // TCP — explicit messaging on port 44818
-		return state.Key.SrcPort == 44818 || state.Key.DstPort == 44818
-	case 17: // UDP — implicit/IO messaging on port 2222
-		return state.Key.SrcPort == 2222 || state.Key.DstPort == 2222
+	case 6: // TCP — explicit messaging
+		return state.Key.SrcPort == ics.CIPPort || state.Key.DstPort == ics.CIPPort
+	case 17: // UDP — implicit/IO messaging
+		return state.Key.SrcPort == ics.CIPImplicitPort || state.Key.DstPort == ics.CIPImplicitPort
 	default:
 		return false
 	}
@@ -36,7 +37,7 @@ func (d *Decoder) Supports(state *flow.State) bool {
 
 // Ports implements dpi.PortHinter for port-based dispatch.
 func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
-	return []uint16{44818}, []uint16{2222}
+	return []uint16{ics.CIPPort}, []uint16{ics.CIPImplicitPort}
 }
 
 // cipCommands are EIP commands that carry CIP messages.
