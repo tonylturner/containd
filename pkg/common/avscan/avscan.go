@@ -79,14 +79,19 @@ type Result struct {
 	Reason  Reason // set when Verdict is Unscanned
 	// Signature is the detection name when Verdict is Infected.
 	Signature string
-	// Backend names the scanner (for example "clamav" or "icap|host:port|service").
+	// Backend names the scanner (for example "clamav" or "icap|host:port|service");
+	// "gate" when the gate decided without a backend (busy, oversized,
+	// not ready, unsupported).
 	Backend string
 	// Detail is a human-readable error or note; never a verdict.
 	Detail string
 }
 
-// Scanner scans complete objects. Scan must honour ctx and never report
-// Clean for bytes it did not receive in full.
+// Scanner scans complete objects. Implementations are safe for concurrent
+// use. Scan must honour ctx, must not touch Body after it returns, and must
+// never report Clean for bytes it did not receive in full or for an answer it
+// cannot positively classify (that is Unscanned). Results carry a verdict
+// only: a backend never returns adapted content. Ready must return promptly.
 type Scanner interface {
 	Scan(ctx context.Context, obj Object) Result
 	// Ready reports whether the backend can scan now, with a reason when not.
@@ -112,8 +117,9 @@ const (
 )
 
 // Decide maps a result to an action. Infected is always blocked, ICS
-// included. Unscanned follows the fail policy, except that ICS objects pass
-// when icsBypass is set.
+// included. Any other non-clean result is unscanned: it passes only under
+// FailOpen, or for ICS objects when icsBypass is set. An empty or unknown
+// policy is treated as FailClosed.
 func Decide(r Result, policy FailPolicy, ics, icsBypass bool) Action {
 	switch r.Verdict {
 	case Clean:
@@ -121,8 +127,8 @@ func Decide(r Result, policy FailPolicy, ics, icsBypass bool) Action {
 	case Infected:
 		return Block
 	}
-	if policy == FailClosed && !(ics && icsBypass) {
-		return Block
+	if policy == FailOpen || (ics && icsBypass) {
+		return PassUnscanned
 	}
-	return PassUnscanned
+	return Block
 }
