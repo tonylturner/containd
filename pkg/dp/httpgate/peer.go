@@ -44,11 +44,14 @@ type peer struct {
 	conn net.Conn
 	r    *bufio.Reader
 	idle time.Duration
-	// objectDeadline is the unix-nanosecond deadline of the body being
-	// received; 0 when none. objectArmed records whether the last read
-	// was bounded by it rather than by the idle deadline.
-	objectDeadline atomic.Int64
-	objectArmed    atomic.Bool
+	// objectDeadline is the unix-nanosecond deadline of the head or body
+	// being received; 0 when none. objectArmed records whether the last
+	// read was bounded by it rather than by the idle deadline.
+	// firstByteWindow, when non-zero, is the duration the object deadline
+	// is set to once the next byte arrives.
+	objectDeadline  atomic.Int64
+	objectArmed     atomic.Bool
+	firstByteWindow atomic.Int64
 	// interrupt makes the next read fail at once instead of blocking; a
 	// close watcher is stopped with it.
 	interrupt atomic.Bool
@@ -84,6 +87,9 @@ func (p *peerReader) Read(b []byte) (int, error) {
 	n, err := p.conn.Read(b)
 	if n > 0 {
 		p.active.Store(true)
+		if w := p.firstByteWindow.Swap(0); w != 0 {
+			p.objectDeadline.Store(time.Now().Add(time.Duration(w)).UnixNano())
+		}
 	}
 	return n, err
 }
@@ -108,13 +114,21 @@ func (p *peer) Write(b []byte) (int, error) {
 	return p.conn.Write(b)
 }
 
-// setObjectDeadline bounds body receipt; a zero duration clears it.
+// setObjectDeadline bounds body receipt from now; a zero duration clears
+// it along with any pending first-byte window.
 func (p *peer) setObjectDeadline(d time.Duration) {
 	if d == 0 {
+		p.firstByteWindow.Store(0)
 		p.objectDeadline.Store(0)
 		return
 	}
 	p.objectDeadline.Store(time.Now().Add(d).UnixNano())
+}
+
+// boundFromFirstByte bounds the receipt of what the peer sends next to d
+// from its first byte, so a dripped head cannot outlive the idle timeout.
+func (p *peer) boundFromFirstByte(d time.Duration) {
+	p.firstByteWindow.Store(int64(d))
 }
 
 // bound gives the peer window to finish what it is sending, including a

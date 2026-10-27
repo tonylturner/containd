@@ -145,6 +145,65 @@ func TestSlowDripHitsObjectDeadline(t *testing.T) {
 	}
 }
 
+// A head dripped faster than the idle timeout still ends at the object
+// deadline, on either side.
+func TestDrippedHeadHitsObjectDeadline(t *testing.T) {
+	t.Run("request", func(t *testing.T) {
+		log := &bodyLog{}
+		o := echoOrigin(t, log)
+		g := startGate(t, o, func(s *Settings) {
+			s.IdleTimeout = 2 * time.Second
+			s.ObjectTimeout = 400 * time.Millisecond
+		})
+		c := g.client()
+		start := time.Now()
+		var sent int
+		for time.Since(start) < 3*time.Second {
+			if _, err := c.conn.Write([]byte("X-Drip: a\r\n")); err != nil {
+				break
+			}
+			sent++
+			time.Sleep(40 * time.Millisecond)
+		}
+		if elapsed := time.Since(start); elapsed < 350*time.Millisecond || elapsed > 1500*time.Millisecond {
+			t.Fatalf("connection lived %v for a dripped head (%d lines)", elapsed, sent)
+		}
+		if o.rec.connections() != 0 {
+			t.Fatal("origin dialled for an incomplete head")
+		}
+	})
+	t.Run("response", func(t *testing.T) {
+		o := rawOrigin(t, func(c net.Conn, _ int) {
+			if _, _, err := readRequestHead(c); err != nil {
+				return
+			}
+			_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\n")
+			for range 50 {
+				if _, err := io.WriteString(c, "X-Drip: a\r\n"); err != nil {
+					return
+				}
+				time.Sleep(40 * time.Millisecond)
+			}
+		})
+		g := startGate(t, o, func(s *Settings) {
+			s.IdleTimeout = 2 * time.Second
+			s.ObjectTimeout = 400 * time.Millisecond
+		})
+		c := g.client()
+		start := time.Now()
+		c.write(getRequest("/drip", ""))
+		ev := g.events.next(t)
+		elapsed := time.Since(start)
+		if ev.Verdict != "" || !strings.Contains(ev.Error, "response head") {
+			t.Fatalf("event %+v", ev)
+		}
+		if elapsed < 350*time.Millisecond || elapsed > 1500*time.Millisecond {
+			t.Fatalf("response head deadline fired after %v", elapsed)
+		}
+		c.expectClosed()
+	})
+}
+
 func TestIdleGapHitsIdleTimeout(t *testing.T) {
 	log := &bodyLog{}
 	o := echoOrigin(t, log)

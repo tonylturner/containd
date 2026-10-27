@@ -314,23 +314,63 @@ func TestBusyObjectLimitFollowsPolicy(t *testing.T) {
 	})
 }
 
-func TestBusyConnectionLimit(t *testing.T) {
+// MaxConnections is a hard admission bound: a connection over it is
+// closed at accept time with nothing allocated for it, a flood of them
+// yields one bounded-rate event, and the limit-holding connection keeps
+// working.
+func TestConnectionLimitRefusesAtAccept(t *testing.T) {
 	log := &bodyLog{}
 	o := echoOrigin(t, log)
 	g := startGate(t, o, func(s *Settings) { s.ScanDownloads = false; s.MaxConnections = 1 })
 	first := g.client()
-	second := g.client()
-	eventually(t, "both connections tracked", func() bool { return g.srv.activeConns.Load() == 2 })
-	second.write(requestCL("POST", "/over", "", pattern(100, 49)))
-	if resp, rb := second.response("POST"); resp.StatusCode != 403 || !strings.Contains(string(rb), "busy") {
-		t.Fatalf("over-limit connection: %d %q", resp.StatusCode, rb)
-	}
-	expectEvent(t, g.events.next(t), avscan.Upload, avscan.Unscanned, avscan.ReasonBusy, avscan.Block)
 	first.write(requestCL("POST", "/within", "", pattern(100, 50)))
 	if resp, _ := first.response("POST"); resp.StatusCode != 200 {
 		t.Fatalf("within-limit connection status %d", resp.StatusCode)
 	}
 	expectEvent(t, g.events.next(t), avscan.Upload, avscan.Clean, "", avscan.Deliver)
+	var refused []*client
+	for range 20 {
+		c := g.client()
+		c.write([]byte("G"))
+		refused = append(refused, c)
+	}
+	for _, c := range refused {
+		c.expectClosed()
+	}
+	ev := g.events.next(t)
+	if ev.Verdict != "" || ev.Action != avscan.Block || !strings.Contains(ev.Error, "connection limit reached") {
+		t.Fatalf("event %+v", ev)
+	}
+	g.events.expectNone(t, 100*time.Millisecond)
+	if n := g.srv.activeConns.Load(); n != 1 {
+		t.Fatalf("active connections %d, want the one within the limit", n)
+	}
+	first.write(requestCL("POST", "/again", "", pattern(100, 51)))
+	if resp, _ := first.response("POST"); resp.StatusCode != 200 {
+		t.Fatalf("within-limit connection status %d after the flood", resp.StatusCode)
+	}
+	expectEvent(t, g.events.next(t), avscan.Upload, avscan.Clean, "", avscan.Deliver)
+}
+
+// A connection draining after its refusal still occupies its slot.
+func TestRefusalDrainCountsAgainstConnectionLimit(t *testing.T) {
+	log := &bodyLog{}
+	o := echoOrigin(t, log)
+	g := startGate(t, o, func(s *Settings) { s.ScanDownloads = false; s.MaxConnections = 1 })
+	first := g.client()
+	first.write(requestCL("POST", "/bad", "", []byte(infectedMarker)))
+	if resp, _ := first.response("POST"); resp.StatusCode != 403 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	expectEvent(t, g.events.next(t), avscan.Upload, avscan.Infected, "", avscan.Block)
+	// The gate half-closed and is draining first; a newcomer is refused.
+	second := g.client()
+	second.write(getRequest("/over", ""))
+	second.expectClosed()
+	if ev := g.events.next(t); !strings.Contains(ev.Error, "connection limit reached") {
+		t.Fatalf("event %+v", ev)
+	}
+	first.expectEOF()
 }
 
 // bigHeadRequest is a request whose head exceeds the 64 KiB cap.

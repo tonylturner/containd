@@ -38,9 +38,9 @@ type Settings struct {
 	SpoolDir string
 	// MemoryThreshold is the largest body held entirely in memory.
 	MemoryThreshold int64
-	// MaxConnections bounds the client connections served concurrently;
-	// a connection accepted over the limit treats every selected body as
-	// Unscanned/busy.
+	// MaxConnections bounds the client connections served concurrently,
+	// refusal drains included; a connection accepted over the limit is
+	// closed at once and reported at a bounded rate.
 	MaxConnections int
 	// MaxConcurrentObjects bounds the bodies held at once. Memory stays
 	// below MaxConcurrentObjects × MemoryThreshold and disk below
@@ -48,7 +48,8 @@ type Settings struct {
 	MaxConcurrentObjects int
 	// IdleTimeout bounds every single read or write on either connection.
 	IdleTimeout time.Duration
-	// ObjectTimeout bounds the receipt of one body from its first byte.
+	// ObjectTimeout bounds the receipt of one head or body from its first
+	// byte.
 	ObjectTimeout time.Duration
 	// DialTimeout bounds the upstream connection attempt.
 	DialTimeout time.Duration

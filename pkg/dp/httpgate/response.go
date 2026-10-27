@@ -17,7 +17,9 @@ func (tx *transaction) readResponse(u *upstream, stop chan struct{}) respResult 
 	c := tx.c
 	interim := 0
 	for {
+		u.boundFromFirstByte(tx.set.ObjectTimeout)
 		raw, err := readHead(u.r)
+		u.setObjectDeadline(0)
 		if err != nil {
 			if errors.Is(err, errHeadTooLarge) {
 				return tx.unsupportedResponse(u, nil, raw, "response head over 64 KiB", stop)

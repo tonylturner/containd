@@ -114,14 +114,11 @@ func (tx *transaction) refuseUpload(res avscan.Result, size int64, sp *spool, pa
 }
 
 // admit runs the checks that precede holding a body: readiness, the
-// connection and object limits, then the declared length. On success one
-// object slot is held.
+// object limit, then the declared length. On success one object slot is
+// held.
 func (tx *transaction) admit(declared int64) (avscan.Result, bool) {
 	if ok, why := tx.c.srv.Scanner.Ready(); !ok {
 		return gateResult(avscan.ReasonNotReady, why), false
-	}
-	if tx.c.overLimit {
-		return gateResult(avscan.ReasonBusy, "connection limit reached"), false
 	}
 	if !tx.c.srv.acquireObject(tx.set.MaxConcurrentObjects) {
 		return gateResult(avscan.ReasonBusy, "object limit reached"), false

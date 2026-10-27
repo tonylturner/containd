@@ -29,9 +29,7 @@ type conn struct {
 	client     *peer
 	clientAddr netip.AddrPort
 	serverAddr netip.AddrPort
-	// overLimit marks a connection accepted beyond MaxConnections.
-	overLimit bool
-	txSeq     int
+	txSeq      int
 	// mu guards up and closed: the serve goroutine replaces the upstream
 	// while Shutdown closes the connection from another goroutine.
 	mu     sync.Mutex
@@ -47,8 +45,8 @@ type upstream struct {
 	watch *closeWatch
 }
 
-func newConn(s *Server, nc net.Conn, set *Settings, overLimit bool) *conn {
-	c := &conn{srv: s, id: s.nextConnID(), overLimit: overLimit}
+func newConn(s *Server, nc net.Conn, set *Settings) *conn {
+	c := &conn{srv: s, id: s.nextConnID()}
 	c.client = newPeer(nc, set.IdleTimeout)
 	if ap, err := netip.ParseAddrPort(nc.RemoteAddr().String()); err == nil {
 		c.clientAddr = unmap(ap)
@@ -81,10 +79,13 @@ func (c *conn) serve() {
 }
 
 // transaction serves one request and reports whether the connection
-// persists.
+// persists. The request head must complete within ObjectTimeout of its
+// first byte; the idle timeout alone would let a dripped head live on.
 func (c *conn) transaction() bool {
 	c.client.active.Store(false)
+	c.client.boundFromFirstByte(c.srv.settings.Load().ObjectTimeout)
 	raw, err := readHead(c.client.r)
+	c.client.setObjectDeadline(0)
 	set := c.srv.settings.Load()
 	c.client.idle = set.IdleTimeout
 	switch {
