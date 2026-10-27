@@ -439,11 +439,11 @@ func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 		return nil
 	}
 
-	service, _ := ev.Attributes["service"].(int)
+	service, hasService := eventfields.Uint8(ev.Attributes, "service_code")
 
 	// Program mode change: Stop (0x07), Start/Run (0x06).
-	switch service {
-	case 0x07: // Stop
+	switch {
+	case hasService && service == 0x07: // Stop
 		out = append(out, Anomaly{
 			Type:     "protocol_violation",
 			Protocol: "cip",
@@ -452,11 +452,11 @@ func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 			SourceIP: srcIP,
 			DestIP:   dstIP,
 			Attributes: map[string]any{
-				"service": service,
+				"service_code": service,
 			},
 			Timestamp: ev.Timestamp,
 		})
-	case 0x06: // Start/Run
+	case hasService && service == 0x06: // Start/Run
 		out = append(out, Anomaly{
 			Type:     "protocol_violation",
 			Protocol: "cip",
@@ -465,7 +465,7 @@ func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 			SourceIP: srcIP,
 			DestIP:   dstIP,
 			Attributes: map[string]any{
-				"service": service,
+				"service_code": service,
 			},
 			Timestamp: ev.Timestamp,
 		})
