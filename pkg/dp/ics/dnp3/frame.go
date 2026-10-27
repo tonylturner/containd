@@ -11,6 +11,7 @@ import (
 
 // DNP3Frame represents a parsed DNP3 data-link layer frame.
 type DNP3Frame struct {
+	badDataCRC   bool
 	Length       uint8  // Data length (excluding start, length, CRC)
 	Control      uint8  // Control byte
 	Destination  uint16 // Destination address (little-endian)

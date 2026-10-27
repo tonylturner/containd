@@ -22,78 +22,53 @@ const (
 	attrWriteQuantity = "write_quantity"
 )
 
-// addRequestFields adds the data-access fields of a request PDU (data after
-// the function code). A PDU whose length does not fit its function code's
-// layout adds none: it is malformed for that function code, and the server
-// rejects it rather than reading any field at a guessed offset.
+// addRequestFields retains each complete scalar at its specified wire offset,
+// even if later bytes or the overall layout are nonconformant.
 func addRequestFields(fc uint8, pdu []byte, attrs map[string]any) {
 	switch fc {
-	case 1, 2, 3, 4: // read coils, discrete inputs, holding or input registers
-		if len(pdu) == 4 {
-			attrs[attrAddress] = be16(pdu, 0)
-			attrs[attrQuantity] = be16(pdu, 2)
-		}
-	case 5, 6: // write single coil or register: the second word is the value
-		if len(pdu) == 4 {
-			attrs[attrAddress] = be16(pdu, 0)
-			attrs[attrValue] = be16(pdu, 2)
-		}
-	case 15, 16: // write multiple coils or registers
-		if len(pdu) >= 5 && len(pdu) == 5+int(pdu[4]) {
-			attrs[attrAddress] = be16(pdu, 0)
-			attrs[attrQuantity] = be16(pdu, 2)
+	case 1, 2, 3, 4, 15, 16:
+		addWords(pdu, attrs, attrAddress, attrQuantity)
+		if (fc == 15 || fc == 16) && len(pdu) >= 5 {
 			attrs[attrByteCount] = pdu[4]
 		}
-	case 22: // mask write register
-		if len(pdu) == 6 {
-			addMaskWrite(pdu, attrs)
-		}
-	case 23: // read/write multiple registers
-		if len(pdu) >= 9 && len(pdu) == 9+int(pdu[8]) {
-			attrs[attrReadAddress] = be16(pdu, 0)
-			attrs[attrReadQuantity] = be16(pdu, 2)
-			attrs[attrWriteAddress] = be16(pdu, 4)
-			attrs[attrWriteQuantity] = be16(pdu, 6)
+	case 5, 6:
+		addWords(pdu, attrs, attrAddress, attrValue)
+	case 22:
+		addWords(pdu, attrs, attrAddress, attrAndMask, attrOrMask)
+	case 23:
+		addWords(pdu, attrs, attrReadAddress, attrReadQuantity, attrWriteAddress, attrWriteQuantity)
+		if len(pdu) >= 9 {
 			attrs[attrByteCount] = pdu[8]
 		}
 	}
 }
 
-// addResponseFields adds the data-access fields of a normal response PDU.
-// Read responses carry a byte count and data, never the request's address
-// or quantity; write responses echo the request's address with its value
-// (FC 5, 6), quantity (FC 15, 16) or masks (FC 22).
+// Read responses carry counts, never the request's address or quantity.
 func addResponseFields(fc uint8, pdu []byte, attrs map[string]any) {
 	switch fc {
 	case 1, 2, 3, 4, 23:
-		if len(pdu) < 1 || len(pdu) != 1+int(pdu[0]) {
-			return
-		}
-		attrs[attrByteCount] = pdu[0]
-		if fc != 1 && fc != 2 && pdu[0]%2 == 0 {
-			attrs[attrRegisterCount] = uint16(pdu[0] / 2)
+		if len(pdu) >= 1 {
+			attrs[attrByteCount] = pdu[0]
+			if fc != 1 && fc != 2 && pdu[0]%2 == 0 {
+				attrs[attrRegisterCount] = uint16(pdu[0] / 2)
+			}
 		}
 	case 5, 6:
-		if len(pdu) == 4 {
-			attrs[attrAddress] = be16(pdu, 0)
-			attrs[attrValue] = be16(pdu, 2)
-		}
+		addWords(pdu, attrs, attrAddress, attrValue)
 	case 15, 16:
-		if len(pdu) == 4 {
-			attrs[attrAddress] = be16(pdu, 0)
-			attrs[attrQuantity] = be16(pdu, 2)
-		}
+		addWords(pdu, attrs, attrAddress, attrQuantity)
 	case 22:
-		if len(pdu) == 6 {
-			addMaskWrite(pdu, attrs)
-		}
+		addWords(pdu, attrs, attrAddress, attrAndMask, attrOrMask)
 	}
 }
 
-func addMaskWrite(pdu []byte, attrs map[string]any) {
-	attrs[attrAddress] = be16(pdu, 0)
-	attrs[attrAndMask] = be16(pdu, 2)
-	attrs[attrOrMask] = be16(pdu, 4)
+func addWords(pdu []byte, attrs map[string]any, keys ...string) {
+	for i, key := range keys {
+		if len(pdu) < 2*i+2 {
+			return
+		}
+		attrs[key] = be16(pdu, 2*i)
+	}
 }
 
 func be16(b []byte, off int) uint16 { return binary.BigEndian.Uint16(b[off : off+2]) }

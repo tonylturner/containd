@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -45,7 +46,8 @@ func (d *Decoder) Protocol() string { return eventfields.ProtoDNP3 }
 // complete frame is one dpi.DecodedFrame. A frame whose user data starts an
 // application fragment (transport FIR) yields one event describing that
 // fragment's application header and the objects in this frame; continuation
-// segments and link-only frames yield none. Application fragments that span
+// segments and link-only frames yield none unless a content finding needs
+// visibility (then a session event carries the readable link fields). Fragments that span
 // several link frames are not reassembled. An incomplete tail is NeedMore;
 // bytes that cannot start a frame (start octets, header CRC, length) end the
 // parse with a *dpi.FrameError carrying its malformed event.
@@ -99,8 +101,21 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 }
 
 func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
+	var codes []string
+	if frame.badDataCRC {
+		codes = append(codes, "dnp3.data_crc")
+	}
 	if !frame.HasApplicationHeader() {
-		return nil
+		if len(frame.Data) > 0 && frame.Data[0]&TransportFIR != 0 {
+			codes = append(codes, "dnp3.application_header")
+		}
+		if len(codes) == 0 {
+			return nil
+		}
+		return []dpi.Event{{FlowID: flowID(state), Proto: eventfields.ProtoDNP3, Kind: "session",
+			Attributes: map[string]any{"source_address": frame.Source, "destination_address": frame.Destination,
+				eventfields.KeyDirection: linkDirection(frame.Control), "raw_hex": rawHex(raw), eventfields.KeyConformance: sortedFindings(codes)},
+			Timestamp: time.Now().UTC()}}
 	}
 	fc := frame.FunctionCode
 	isWrite := IsWriteFunctionCode(fc)
@@ -140,7 +155,16 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 	if IsResponse(fc) {
 		objOffset = 5 // +2 IIN bytes
 	}
-	objHeaders := ParseObjectHeaders(frame.Data, objOffset, fc)
+	var objHeaders []ObjectHeader
+	if objOffset > len(frame.Data) {
+		codes = append(codes, "dnp3.application_header")
+	} else {
+		var stopped bool
+		objHeaders, stopped = parseObjectHeaders(frame.Data, objOffset, fc)
+		if stopped {
+			codes = append(codes, "dnp3.object_walk")
+		}
+	}
 	if len(objHeaders) > 0 {
 		// Emit comma-separated object groups.
 		var b strings.Builder
@@ -153,12 +177,17 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 		attrs[eventfields.KeyObjectGroups] = b.String()
 
 		// Emit first header's qualifier and count for primary inspection.
-		attrs["qualifier"] = objHeaders[0].Qualifier
-		if count := objHeaders[0].Count; count <= math.MaxUint16 {
+		if objHeaders[0].hasQualifier {
+			attrs["qualifier"] = objHeaders[0].Qualifier
+		}
+		if count := objHeaders[0].Count; objHeaders[0].hasCount && count <= math.MaxUint16 {
 			attrs["object_count"] = uint16(count)
 		}
 	}
 
+	if len(codes) > 0 {
+		attrs[eventfields.KeyConformance] = sortedFindings(codes)
+	}
 	attrs["raw_hex"] = rawHex(raw)
 
 	return []dpi.Event{{
@@ -226,4 +255,9 @@ func keyFor(src, dst string, sport, dport uint16) flow.Key {
 		Proto:   6,
 		Dir:     flow.DirForward,
 	}
+}
+
+func sortedFindings(codes []string) []string {
+	slices.Sort(codes)
+	return slices.Compact(codes)
 }

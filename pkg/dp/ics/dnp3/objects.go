@@ -7,11 +7,12 @@ import "encoding/binary"
 
 // ObjectHeader represents a parsed DNP3 object group header.
 type ObjectHeader struct {
-	Group     uint8
-	Variation uint8
-	Qualifier uint8
-	Count     uint32 // objects named by the range field; 0 when it names none or is invalid
-	Size      int    // bytes of the header itself (group, variation, qualifier, range)
+	hasQualifier, hasCount bool
+	Group                  uint8
+	Variation              uint8
+	Qualifier              uint8
+	Count                  uint32 // objects named by the range field; 0 when it names none or is invalid
+	Size                   int    // bytes of the header itself (group, variation, qualifier, range)
 }
 
 // Qualifier fields (IEEE 1815-2012 application layer object header): bits
@@ -42,33 +43,45 @@ const (
 // reserved code, or truncated data) instead of reading values as headers; that
 // header is still returned because its group is known.
 func ParseObjectHeaders(data []byte, offset int, fc uint8) []ObjectHeader {
-	if offset < 0 || offset >= len(data) {
-		return nil
+	headers, _ := parseObjectHeaders(data, offset, fc)
+	return headers
+}
+
+// The boolean marks an incomplete walk, including unsupported object sizes.
+// It is coverage evidence, not a claim that unknown vendor objects are illegal.
+func parseObjectHeaders(data []byte, offset int, fc uint8) ([]ObjectHeader, bool) {
+	if offset < 0 || offset > len(data) {
+		return nil, true
+	}
+	if offset == len(data) {
+		return nil, false
 	}
 	headers := make([]ObjectHeader, 0, 4)
 	pos := offset
-	for pos+3 <= len(data) {
-		oh := ObjectHeader{Group: data[pos], Variation: data[pos+1], Qualifier: data[pos+2]}
-		rangeLen, count, valid, ok := readRange(data[pos+3:], oh.Qualifier&0x0F)
-		if !ok {
-			return headers // range field truncated
+	for pos < len(data) {
+		oh := ObjectHeader{Group: data[pos]}
+		if len(data)-pos < 3 {
+			return append(headers, oh), true
 		}
+		oh.Variation, oh.Qualifier, oh.hasQualifier = data[pos+1], data[pos+2], true
+		rangeLen, count, valid, ok := readRange(data[pos+3:], oh.Qualifier&0x0F)
 		oh.Size = 3 + rangeLen
-		if valid {
+		oh.hasCount = ok && valid
+		if oh.hasCount {
 			oh.Count = count
 		}
 		headers = append(headers, oh)
-		if !valid {
-			return headers // reserved range code or stop < start: objects cannot be located
+		if !ok || !valid || oh.Qualifier&0x80 != 0 || (oh.Qualifier>>4)&7 == 7 {
+			return headers, true
 		}
 		pos += oh.Size
 		n, ok := objectsLen(data[pos:], oh, fc)
 		if !ok {
-			return headers
+			return headers, true
 		}
 		pos += n
 	}
-	return headers
+	return headers, false
 }
 
 // readRange decodes the range field for range code rc. It returns the field

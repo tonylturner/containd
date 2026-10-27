@@ -119,10 +119,10 @@ func TestParseObjectHeaders(t *testing.T) {
 			want: []headerWant{{30, 2, 0x00, 0}},
 		},
 		{
-			name: "truncated range field: header dropped",
+			name: "truncated range field: readable header retained",
 			fc:   FuncRead,
 			data: []byte{0x1E, 0x02, 0x01, 0x05},
-			want: []headerWant{},
+			want: []headerWant{{30, 2, 0x01, 0}},
 		},
 		{
 			name: "values shorter than the range: header kept, walk stops",
