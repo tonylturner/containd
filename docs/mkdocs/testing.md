@@ -49,6 +49,9 @@ That complements the other validation workflows:
 - `bash scripts/dev-verify.sh --with-route-smoke`
 - `bash scripts/smoketest`
 - `bash scripts/perf-baseline.sh`
+- `bash scripts/verify-published-images.sh signature|sbom|vulnerabilities`, the
+  scheduled checks of the published images (see
+  [SBOM](sbom.md#scheduled-checks-of-published-images))
 
 ## UI Route Smoke
 

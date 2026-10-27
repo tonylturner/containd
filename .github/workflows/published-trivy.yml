@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 containd Authors
+
+name: Published image scan
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/published-trivy.yml
+      - scripts/verify-published-images.sh
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Scan the latest images for HIGH and CRITICAL vulnerabilities
+        run: bash scripts/verify-published-images.sh vulnerabilities

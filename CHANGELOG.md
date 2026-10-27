@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Scheduled workflows check the published `:latest` management and engine
+  images daily and after each release: Cosign signatures, signed CycloneDX SBOM
+  attestations, and a Trivy HIGH/CRITICAL scan of every platform image.
+  `scripts/verify-published-images.sh` runs the same checks locally. The README
+  badges for Trivy, Cosign and SBOM show these results.
+
 ### Changed
 
 - The CLI guide documents SSH shell modes again: `appliance` and `linux`,
