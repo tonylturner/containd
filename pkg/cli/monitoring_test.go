@@ -83,11 +83,11 @@ func TestShowSystemPartialUnavailable(t *testing.T) {
 				},
 			}}
 			var out bytes.Buffer
-			err := showSystem(&API{BaseURL: "http://test", Client: client})(context.Background(), &out, nil)
+			err := showSystem(shellModeStore(t, config.SSHRuntimePolicy{ShellMode: "appliance", ShellModeSource: "default"}), &API{BaseURL: "http://test", Client: client})(context.Background(), &out, nil)
 			if (err != nil) != (!healthOK || !configOK) {
 				t.Fatalf("error: %v", err)
 			}
-			for text, want := range map[string]bool{"System health unavailable": !healthOK, "System configuration unavailable": !configOK, "hostname: real-host": configOK, "component: mgmt": healthOK, "mgmt.http_enabled:": configOK} {
+			for text, want := range map[string]bool{"System health unavailable": !healthOK, "System configuration unavailable": !configOK, "hostname: real-host": configOK, "component: mgmt": healthOK, "mgmt.http_enabled:": configOK, "ssh.shell_mode: appliance": configOK} {
 				if strings.Contains(out.String(), text) != want {
 					t.Fatalf("health=%v config=%v missing/unexpected %q: %s", healthOK, configOK, text, &out)
 				}
@@ -119,7 +119,7 @@ func TestSavedListenerViewsHSTS(t *testing.T) {
 		command func(*API) Command
 		key     string
 	}{
-		{"system", showSystem, "mgmt.hsts:"},
+		{"system", applianceShowSystem(t), "mgmt.hsts:"},
 		{"listeners", showMgmtListeners, "hsts"},
 	} {
 		for _, tc := range []struct {

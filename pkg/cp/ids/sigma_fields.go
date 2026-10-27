@@ -69,7 +69,13 @@ func decoderAttribute(field string) bool {
 		"qualifier", "quality", "value", "value_invalid", "source_time",
 		"time_valid", "time_summer", "apdu_id", "raw_hex", "transient":
 		return true
-	// Additional keys emitted by the retained industrial decoders.
+	// Modbus data-access keys emitted per function code and direction in
+	// pkg/dp/ics/modbus/pdu.go (address, quantity and value are listed with
+	// the other protocols' keys).
+	case "byte_count", "register_count", "and_mask", "or_mask", "read_address",
+		"read_quantity", "write_address", "write_quantity":
+		return true
+	// Other keys emitted by the retained industrial decoders.
 	case "service_code", "address", "attribute_id",
 		"cip_path", "enip_command", "enip_command_code", "cpf_item_types", "instance_id", "is_control", "msp",
 		"multi_service_count", "object_class", "object_class_name", "service_name",

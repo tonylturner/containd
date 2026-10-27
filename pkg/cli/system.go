@@ -64,8 +64,14 @@ func showDiff(api *API) Command {
 	}
 }
 
-func showSystem(api *API) Command {
+// showSystem shows saved system settings, health, and the SSH shell mode the
+// appliance runs. A client without the appliance's store runs the command on
+// the appliance, so its own environment never stands in for the appliance's.
+func showSystem(store config.Store, api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
+		if store == nil {
+			return executeOnAppliance(ctx, api, out, "show system")
+		}
 		type health struct {
 			Status    string `json:"status"`
 			Component string `json:"component"`
@@ -110,11 +116,7 @@ func showSystem(api *API) Command {
 				fmt.Fprintf(out, "ssh.authorized_keys_dir: %s\n", cfg.System.SSH.AuthorizedKeysDir)
 			}
 			fmt.Fprintf(out, "ssh.allow_password: %s\n", sshPasswordSetting(cfg.System.SSH.AllowPassword))
-			shellMode := cfg.System.SSH.ShellMode
-			if shellMode == "" {
-				shellMode = "appliance"
-			}
-			fmt.Fprintf(out, "ssh.shell_mode: %s\n", shellMode)
+			configErr = showSSHShellMode(ctx, store, out, cfg.System.SSH.ShellMode)
 		}
 		if healthErr != nil {
 			healthErr = monitoringUnavailable(out, "System health", healthErr)

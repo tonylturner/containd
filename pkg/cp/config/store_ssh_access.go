@@ -12,6 +12,10 @@ type SSHRuntimePolicy struct {
 	PasswordSource      string
 	AuthorizedKeysDir   string
 	HostKeyRotationDays int
+	// ShellMode is the shell mode the SSH server started with, and
+	// ShellModeSource where it came from (see ResolveSSHShellMode).
+	ShellMode       string
+	ShellModeSource string
 }
 
 // SetSSHRuntimePolicyReader registers management's runtime policy resolver.

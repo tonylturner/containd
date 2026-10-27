@@ -5,6 +5,7 @@ package enforce
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -109,7 +110,7 @@ func (c *Compiler) ClearBlocks() string {
 	table := c.DynamicTable()
 	writeDynamicSets(&buf, table)
 	for _, set := range dynamicSets() {
-		buf.WriteString(fmt.Sprintf("flush set inet %s %s\n", table, set[0]))
+		buf.WriteString(fmt.Sprintf("flush set inet %s %s\n", table, set.name))
 	}
 	return buf.String()
 }
@@ -164,11 +165,38 @@ func (c *Compiler) writeDynamicTable(buf *bytes.Buffer, locals []rules.LocalServ
 	return nil
 }
 
-// dynamicSets returns the name and type of each set of the dynamic table.
-func dynamicSets() [][2]string {
-	return append([][2]string{
-		{"block_hosts", "ipv4_addr"},
-		{"block_flows", "ipv4_addr . ipv4_addr . inet_proto . inet_service"},
+// dynamicSet is one timeout set of the dynamic table.
+type dynamicSet struct {
+	name string
+	// key is the set's key in the form the layout reader renders a live
+	// set's type (see LiveObject): a datatype concatenation for a type set,
+	// or "typeof " and the key expression for a typeof set.
+	key string
+	// datatypes is, for a typeof set, the datatype concatenation nft 1.1.1
+	// lists in its place: that version's JSON omits typeof expressions.
+	datatypes string
+}
+
+// declaration returns the set's key declaration: "type <datatypes>" or
+// "typeof <expression>".
+func (s dynamicSet) declaration() string {
+	if strings.HasPrefix(s.key, "typeof ") {
+		return s.key
+	}
+	return "type " + s.key
+}
+
+// matches reports whether a live set type, as the layout reader renders it,
+// is this set's key under any supported nft version.
+func (s dynamicSet) matches(liveType string) bool {
+	return liveType == s.key || (s.datatypes != "" && liveType == s.datatypes)
+}
+
+// dynamicSets returns the sets of the dynamic table.
+func dynamicSets() []dynamicSet {
+	return append([]dynamicSet{
+		{name: "block_hosts", key: "ipv4_addr"},
+		{name: "block_flows", key: "ipv4_addr . ipv4_addr . inet_proto . inet_service"},
 	}, revocationSets()...)
 }
 
@@ -177,6 +205,6 @@ func dynamicSets() [][2]string {
 func writeDynamicSets(buf *bytes.Buffer, table string) {
 	buf.WriteString(fmt.Sprintf("add table inet %s\n", table))
 	for _, set := range dynamicSets() {
-		buf.WriteString(fmt.Sprintf("add set inet %s %s { type %s; flags timeout; }\n", table, set[0], set[1]))
+		buf.WriteString(fmt.Sprintf("add set inet %s %s { %s; flags timeout; }\n", table, set.name, set.declaration()))
 	}
 }

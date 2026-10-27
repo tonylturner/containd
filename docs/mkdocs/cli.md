@@ -76,6 +76,7 @@ require a restart; committing does not rebind management sockets.
   - `set system ssh listen <addr>` (candidate)
   - `set system ssh allow-password <true|false>` (candidate)
   - `set system ssh authorized-keys-dir <dir>` (candidate)
+  - `set system ssh shell-mode <appliance|linux>` (candidate; see [shell modes](#shell-modes))
   - `commit`
   - `commit confirmed [ttl_seconds]`
   - `confirm`
@@ -127,6 +128,85 @@ Notes:
 - The SSH console is implemented without allocating a PTY; basic line editing/echo is handled internally.
 - `diag capture` and `show ip route` require Linux (inside the container) and typically `CAP_NET_RAW`.
 - The `wizard` includes an optional step to run `set outbound quickstart` (equivalent to the UI "Quick start (LAN→WAN)").
+
+### Shell modes
+
+The SSH shell mode selects what an interactive SSH login opens:
+
+- `appliance` (default): the containd CLI. Type `shell` or `bash` to open a
+  Linux shell. Type `exit` in that shell to return to the CLI.
+- `linux`: a Linux `bash` login shell with the image's tools, such as
+  `tcpdump` and `nft`. Type `configure` or `containd cli` to open the containd
+  CLI. Type `exit`, `shell` or `bash` in that CLI to return to the shell.
+
+A command on the `ssh` command line, such as
+`ssh -p 2222 containd@localhost show version`, runs as one CLI command in both
+modes.
+
+containd reads the mode once, when management starts. A non-empty
+`CONTAIND_SSH_SHELL_MODE` takes precedence over the saved
+`system.ssh.shellMode`: `linux` in any letter case selects the Linux shell,
+and any other value the appliance CLI. The saved value accepts only
+`appliance`, `linux` or empty, which means `appliance`.
+`set system ssh shell-mode <appliance|linux>` stages it. Commit it, then
+restart containd. The starter Compose file (`deploy/docker-compose.yml`)
+always sets `CONTAIND_SSH_SHELL_MODE` (default `appliance`); to change the
+mode there, set the variable in `.env` and run `docker compose up -d`.
+
+`show system` shows the mode SSH runs as `ssh.shell_mode` and its source as
+`ssh.shell_mode_source`: `environment (CONTAIND_SSH_SHELL_MODE)`, `config` or
+`default`. When the saved value differs, `ssh.shell_mode_saved` shows it and
+says whether the environment overrides it or it applies after a restart.
+`show system ssh` also lists the mode and its source.
+
+The Linux shell needs a PTY. Interactive `ssh` requests one by default;
+`ssh -T` does not. Without a PTY, a `linux` mode login opens the appliance CLI
+with a warning. There, `shell` and `bash` say that the Linux shell needs an
+interactive session, and the CLI keeps running.
+
+In a Linux shell opened over SSH, `configure` and `containd cli` act as the
+SSH login: they ask for no password and have the login's role. The shell
+holds no token or password. Its CLI reaches management through the SSH
+server, over a socket that exists only while the shell runs
+(`CONTAIND_SSH_API_SOCKET`). After the shell or the SSH connection ends, or
+the login's session is revoked, `containd cli` stops with
+`SSH login unavailable`.
+
+Elsewhere, for example with `docker exec <container> containd cli`, the CLI
+calls the listeners management bound, as the SSH console does. When it binds
+them, management records them in `run/management.json` in the directory of
+the configuration store (`CONTAIND_CONFIG_DB`, default `/data/config.db` in
+the image), readable only by its own user. It removes the file when it stops.
+The CLI calls the HTTP listener on `127.0.0.1` unless it redirects to HTTPS,
+and otherwise the HTTPS listener, trusting only the certificate management
+serves. It follows no redirect. It logs in as `CONTAIND_CLI_USER` with
+`CONTAIND_CLI_PASSWORD`; both default to `containd`. Without the file, the
+CLI stops with `management is not running`. The container health check
+(`containd healthcheck`) uses the same file.
+
+The SSH CLI, and `containd cli` in an SSH shell, stay authorized while the
+connection is open. With a JWT secret, the login's session also ends after 4
+hours; reconnect after that. Lab mode without a JWT secret has no session
+and no such limit.
+The `menu`, `wizard` and `diagnostics` commands exist only in the appliance
+SSH CLI. There, `configure` opens the setup wizard, the same as `wizard`.
+
+Access and lab caveats:
+
+- Only admin accounts can log in over SSH. Every admin can open the Linux
+  shell in both modes, in and outside lab mode.
+- Outside lab mode, the [account checks](#account-checks-at-ssh-login) finish
+  before the CLI or shell opens. Lab mode skips them.
+- The shell runs as the containd process user. The starter Compose file runs
+  containd as root with `NET_ADMIN` and `NET_RAW`. In the default `all` mode the
+  engine runs in the same container. The shell can therefore change nftables,
+  routes and files directly, without candidate validation or commit.
+- containd audits SSH logins and appliance CLI commands. Management audits
+  the changes `containd cli` makes from an SSH shell, as for any API client.
+  Commands typed in the Linux shell itself are not audited.
+
+Use `linux` mode only where every SSH admin can have root access to the
+appliance container.
 
 ### SSH authentication and host keys
 

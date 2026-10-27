@@ -99,25 +99,20 @@ func main() {
 	}
 }
 
-// loopbackManagementURL is the loopback base URL of the management HTTP
-// listener this process's environment selects: CONTAIND_MGMT_ADDR, else
-// the default. Management serves its HTTP port on 127.0.0.1 too.
-func loopbackManagementURL() (string, error) {
-	l := config.ResolveManagementListeners(nil, config.ProcessEnv).HTTP
-	port := l.Port()
-	if port == 0 {
-		return "", fmt.Errorf("management HTTP address %q names no port", l.Addr)
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d", port), nil
-}
-
+// runHealthcheck asks the management this container runs for its health,
+// through the listener its runtime record names.
 func runHealthcheck() error {
-	baseURL, err := loopbackManagementURL()
+	baseURL, client, err := mgmtapp.LocalManagementAPI()
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(baseURL + "/api/v1/health")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/health", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
@@ -129,17 +124,10 @@ func runHealthcheck() error {
 }
 
 func runCLI(ctx context.Context) error {
-	baseURL, err := loopbackManagementURL()
+	api, err := cliAPI(ctx)
 	if err != nil {
 		return err
 	}
-
-	token, err := cliLogin(baseURL)
-	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
-	}
-
-	api := &cli.API{BaseURL: baseURL, Token: token}
 	reg := cli.NewRegistry(nil, api)
 	cmdCtx := cli.WithRole(ctx, string(cli.RoleAdmin))
 
@@ -238,13 +226,44 @@ func cliHistoryPath() string {
 	return filepath.Join(home, ".containd_history")
 }
 
-func cliLogin(baseURL string) (string, error) {
+// cliAPI connects the CLI to management. In a Linux shell opened over SSH
+// it acts as that SSH login. Elsewhere it calls the listener management's
+// runtime record names and logs in as CONTAIND_CLI_USER with
+// CONTAIND_CLI_PASSWORD.
+func cliAPI(ctx context.Context) (*cli.API, error) {
+	if socket := os.Getenv(cli.EnvSSHAPISocket); socket != "" {
+		api, err := cli.ConnectSSHSession(ctx, socket)
+		if err != nil {
+			return nil, fmt.Errorf("SSH login unavailable: %w", err)
+		}
+		return api, nil
+	}
+	baseURL, client, err := mgmtapp.LocalManagementAPI()
+	if err != nil {
+		return nil, err
+	}
+	token, err := cliLogin(ctx, baseURL, client)
+	if err != nil {
+		return nil, fmt.Errorf("authentication failed: %w", err)
+	}
+	return &cli.API{BaseURL: baseURL, Token: token, Client: client}, nil
+}
+
+// cliLogin logs in through client, which calls only the listener baseURL
+// names and follows no redirects.
+func cliLogin(ctx context.Context, baseURL string, client *http.Client) (string, error) {
 	username := common.EnvTrimmed("CONTAIND_CLI_USER", "containd")
 	password := common.EnvTrimmed("CONTAIND_CLI_PASSWORD", "containd")
 
 	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Post(baseURL+"/api/v1/auth/login", "application/json", bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/v1/auth/login", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

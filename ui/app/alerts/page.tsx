@@ -224,6 +224,15 @@ const MODBUS_FC: Record<number, string> = {
   43: "Encapsulated Interface Transport",
 };
 
+// modbusRange is the inclusive address run of quantity items from start.
+function modbusRange(start: unknown, quantity: unknown): string {
+  return `${Number(start)}–${Number(start) + Number(quantity) - 1}`;
+}
+
+function hex4(v: unknown): string {
+  return `0x${Number(v).toString(16).padStart(4, "0")}`;
+}
+
 function formatHexDump(hexStr: string): { offset: string; hex: string; ascii: string }[] {
   const bytes = hexStr.match(/.{1,2}/g) ?? [];
   const rows: { offset: string; hex: string; ascii: string }[] = [];
@@ -331,13 +340,28 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
               <DetailRow label="Transaction ID" value={String(eventAttrs["transaction_id"])} mono />
             )}
             {eventAttrs["address"] != null && (
-              <DetailRow label="Start Address" value={`${eventAttrs["address"]} (0x${Number(eventAttrs["address"]).toString(16).padStart(4, "0")})`} mono />
+              <DetailRow label={eventAttrs["quantity"] != null ? "Start Address" : "Address"} value={`${eventAttrs["address"]} (${hex4(eventAttrs["address"])})`} mono />
             )}
             {eventAttrs["quantity"] != null && (
               <DetailRow label="Quantity" value={`${eventAttrs["quantity"]} registers/coils`} mono />
             )}
             {eventAttrs["address"] != null && eventAttrs["quantity"] != null && (
-              <DetailRow label="Address Range" value={`${eventAttrs["address"]}–${Number(eventAttrs["address"]) + Number(eventAttrs["quantity"]) - 1}`} mono />
+              <DetailRow label="Address Range" value={modbusRange(eventAttrs["address"], eventAttrs["quantity"])} mono />
+            )}
+            {eventAttrs["value"] != null && (
+              <DetailRow
+                label="Value"
+                value={Number(eventAttrs["function_code"]) === 5
+                  ? `${hex4(eventAttrs["value"])} (${Number(eventAttrs["value"]) === 0xff00 ? "ON" : Number(eventAttrs["value"]) === 0 ? "OFF" : "invalid"})`
+                  : `${eventAttrs["value"]} (${hex4(eventAttrs["value"])})`}
+                mono
+              />
+            )}
+            {eventAttrs["read_address"] != null && eventAttrs["read_quantity"] != null && (
+              <DetailRow label="Read Range" value={`${modbusRange(eventAttrs["read_address"], eventAttrs["read_quantity"])} (${eventAttrs["read_quantity"]} registers)`} mono />
+            )}
+            {eventAttrs["write_address"] != null && eventAttrs["write_quantity"] != null && (
+              <DetailRow label="Write Range" value={`${modbusRange(eventAttrs["write_address"], eventAttrs["write_quantity"])} (${eventAttrs["write_quantity"]} registers)`} mono />
             )}
             {eventAttrs["exception_code"] != null && (
               <div className="rounded-xs border border-red-500/20 bg-red-500/6 px-3 py-2 mt-1">

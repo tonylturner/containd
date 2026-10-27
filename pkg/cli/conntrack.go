@@ -31,13 +31,19 @@ func showConntrackAPI(api *API) Command {
 
 		t := newTable("PROTO", "STATE", "SRC", "SPORT", "DST", "DPORT", "MARK", "ASSURED", "TTL")
 		for _, e := range entries {
+			sport, dport := e.Sport, e.Dport
+			if conntrack.IsICMP(e.Proto) {
+				// ICMP tuples carry the identifier, type and code in place of ports.
+				sport = "id " + firstNonEmpty(e.ICMPID, "—")
+				dport = "type " + firstNonEmpty(e.ICMPType, "—") + "/" + firstNonEmpty(e.ICMPCode, "—")
+			}
 			t.addRow(
 				firstNonEmpty(e.Proto, "—"),
 				firstNonEmpty(e.State, "—"),
 				firstNonEmpty(e.Src, "—"),
-				firstNonEmpty(e.Sport, "—"),
+				firstNonEmpty(sport, "—"),
 				firstNonEmpty(e.Dst, "—"),
-				firstNonEmpty(e.Dport, "—"),
+				firstNonEmpty(dport, "—"),
 				firstNonEmpty(e.Mark, "—"),
 				yesNoStr(e.Assured),
 				func() string {

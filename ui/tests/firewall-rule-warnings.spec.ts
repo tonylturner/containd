@@ -15,7 +15,15 @@ const shadowed = {
   message: "shadowed by ALLOW rule allow-all-ssh, which matches all of its traffic; a matching ALLOW takes precedence over every DENY and RESET",
 };
 
-async function openFirewall(page: Page, previews: unknown[], installed: unknown = { installed: true, appliedAt: "2026-10-26T06:00:00Z" }) {
+const range = { start: "2026-10-26T08:00:00Z", end: "2026-10-26T09:15:02Z" };
+const noMatch = { match_count: 0, sample_matches: [], time_range: range, total_events: 12, warnings: [unbound] };
+
+async function openFirewall(
+  page: Page,
+  previews: unknown[],
+  installed: unknown = { installed: true, appliedAt: "2026-10-26T06:00:00Z" },
+  preview: unknown = noMatch,
+) {
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
     localStorage.setItem("containd.auth.role", "admin");
@@ -35,7 +43,7 @@ async function openFirewall(page: Page, previews: unknown[], installed: unknown 
     if (path === "/api/v1/dataplane/ruleset/status") body = installed;
     if (path === "/api/v1/firewall/rules/preview") {
       previews.push(request.postDataJSON());
-      body = { match_count: 0, sample_matches: [], time_range: null, total_events: 12, warnings: [unbound] };
+      body = preview;
     }
     await route.fulfill({ json: body });
   });
@@ -54,12 +62,72 @@ test("rule impact preview explains an identity rule that matches nothing", async
   await page.getByRole("button", { name: "Preview impact" }).click();
   const summary = page.getByLabel("Rule impact preview");
   await expect(summary).toContainText("0 of 12 recent events match this rule on its own.");
+  await expect(summary.locator(`time[datetime="${range.start}"]`)).toBeVisible();
+  await expect(summary.locator(`time[datetime="${range.end}"]`)).toBeVisible();
+  await expect(summary.getByText(/sample event/)).toHaveCount(0);
   const warning = summary.getByRole("status");
   await expect(warning).toContainText("Rules that do not act as written");
   await expect(warning).toContainText(`unbound identity`);
   await expect(warning).toContainText(`contractor-ssh: ${unbound.message}`);
   expect(previews).toHaveLength(1);
   expect(previews[0]).toMatchObject({ id: "contractor-ssh", action: "ALLOW", identities: ["contractor"] });
+});
+
+async function previewContractor(page: Page, preview: unknown) {
+  await openFirewall(page, [], undefined, preview);
+  await page.getByRole("row").filter({ hasText: "contractor-ssh" }).getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("button", { name: "Preview impact" }).click();
+  return page.getByLabel("Rule impact preview");
+}
+
+test("rule impact preview lists the time range and collapsed sample events", async ({ page }) => {
+  const modbus = {
+    id: 41, flowId: "flow-1", proto: "modbus", kind: "request", timestamp: "2026-10-26T09:15:02Z",
+    attributes: { function_code: 3, unit_id: 1 },
+    srcIp: "10.10.0.5", dstIp: "10.20.0.7", srcPort: 40100, dstPort: 502, transport: "tcp",
+  };
+  const iec = {
+    id: 40, flowId: "flow-2", proto: "iec104", kind: "request", timestamp: "2026-10-26T09:10:00Z",
+    attributes: { type_id: 45, direction: "request" },
+    srcIp: "2001:db8::5", dstIp: "2001:db8::7", srcPort: 40200, dstPort: 2404, transport: "tcp",
+  };
+  const ping = {
+    id: 39, flowId: "flow-3", proto: "firewall", kind: "flow.allow", timestamp: "2026-10-26T08:00:00Z",
+    srcIp: "10.10.0.6", dstIp: "10.20.0.8", transport: "icmp",
+  };
+  const summary = await previewContractor(page, {
+    match_count: 1234, sample_matches: [modbus, iec, ping], time_range: range, total_events: 5000,
+  });
+  await expect(summary).toContainText("1234 of 5000 recent events match this rule on its own.");
+  const searched = summary.locator("p", { hasText: "Events searched:" });
+  await expect(searched.locator(`time[datetime="${range.start}"]`)).toBeVisible();
+  await expect(searched.locator(`time[datetime="${range.end}"]`)).toBeVisible();
+
+  const samples = summary.getByRole("list", { name: "Sample matching events" });
+  const toggle = summary.getByText("Show 3 sample events");
+  await expect(toggle).toContainText("(the newest of 1234 matches)");
+  await expect(samples).toBeHidden();
+  await toggle.click();
+  await expect(summary.getByText("Hide 3 sample events")).toBeVisible();
+  const rows = samples.getByRole("listitem");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toContainText("modbus / request");
+  await expect(rows.nth(0)).toContainText("function 3");
+  await expect(rows.nth(0)).toContainText("10.10.0.5:40100 → 10.20.0.7:502 (tcp)");
+  await expect(rows.nth(0).locator(`time[datetime="${modbus.timestamp}"]`)).toBeVisible();
+  await expect(rows.nth(1)).toContainText("type 45 C_SC_NA_1 single command");
+  await expect(rows.nth(1)).toContainText("[2001:db8::5]:40200 → [2001:db8::7]:2404 (tcp)");
+  await expect(rows.nth(2)).toContainText("firewall / flow.allow");
+  await expect(rows.nth(2)).toContainText("10.10.0.6 → 10.20.0.8 (icmp)");
+  await expect(rows.nth(2)).not.toContainText(/function|service|type/);
+});
+
+test("rule impact preview says when there were no events to search", async ({ page }) => {
+  const summary = await previewContractor(page, { match_count: 0, sample_matches: [], time_range: null, total_events: 0 });
+  await expect(summary).toContainText("No recent events to search: the engine has retained none yet.");
+  await expect(summary).not.toContainText("of 0 recent events");
+  await expect(summary).not.toContainText("Events searched");
+  await expect(summary.getByText(/sample event/)).toHaveCount(0);
 });
 
 test("ruleset preview lists unbound identities and shadowed rules", async ({ page }) => {

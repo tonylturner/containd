@@ -3,7 +3,6 @@
 package rules
 
 import (
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -84,17 +83,17 @@ func TestEvaluatorMatchesAcceptedICSAddresses(t *testing.T) {
 		ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{{
 			ID: "addr", ICS: ICSPredicate{Protocol: "modbus", Addresses: []string{tc.spec}}, Action: ActionAllow,
 		}}})
-		decide := func(addr uint64) Action {
-			return ev.Evaluate(EvalContext{ICS: &ICSContext{Protocol: "modbus", Address: strconv.FormatUint(addr, 10)}})
+		decide := func(addr uint32) Action {
+			return ev.Evaluate(EvalContext{ICS: &ICSContext{Protocol: "modbus", Spans: []AddressSpan{{Low: addr, High: addr}}}})
 		}
-		if decide(uint64(tc.low)) != ActionAllow || decide(uint64(tc.high)) != ActionAllow {
+		if decide(tc.low) != ActionAllow || decide(tc.high) != ActionAllow {
 			t.Errorf("%q does not match its ends %d, %d", tc.spec, tc.low, tc.high)
 		}
-		if tc.low > 0 && decide(uint64(tc.low)-1) != ActionDeny {
+		if tc.low > 0 && decide(tc.low-1) != ActionDeny {
 			t.Errorf("%q matches %d", tc.spec, tc.low-1)
 		}
-		if decide(uint64(tc.high)+1) != ActionDeny {
-			t.Errorf("%q matches %d", tc.spec, uint64(tc.high)+1)
+		if tc.high < MaxICSAddress && decide(tc.high+1) != ActionDeny {
+			t.Errorf("%q matches %d", tc.spec, tc.high+1)
 		}
 	}
 }
@@ -107,21 +106,10 @@ func TestEvaluatorRefusedICSAddressMatchesNothing(t *testing.T) {
 		ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{{
 			ID: "addr", ICS: ICSPredicate{Protocol: "modbus", Addresses: []string{"0-65535", tc.spec}}, Action: ActionAllow,
 		}}})
-		for _, addr := range []string{"0", "5", "256", "512", "-5"} {
-			if got := ev.Evaluate(EvalContext{ICS: &ICSContext{Protocol: "modbus", Address: addr}}); got != ActionDeny {
-				t.Errorf("addresses [0-65535 %q] at %s = %s, want DENY", tc.spec, addr, got)
+		for _, addr := range []uint32{0, 5, 256, 512} {
+			if got := ev.Evaluate(EvalContext{ICS: &ICSContext{Protocol: "modbus", Spans: []AddressSpan{{Low: addr, High: addr}}}}); got != ActionDeny {
+				t.Errorf("addresses [0-65535 %q] at %d = %s, want DENY", tc.spec, addr, got)
 			}
-		}
-	}
-}
-
-// A packet address is one value: a range, a negative or a junk context
-// address matches no entry.
-func TestEvaluatorRefusesMalformedContextAddress(t *testing.T) {
-	set := compileAddrs([]string{"0-0xFFFFFFFF"})
-	for _, addr := range []string{"", "1-2", "-1", "0x", "junk", "4294967296"} {
-		if matchICSAddresses(set, EvalContext{ICS: &ICSContext{Address: addr}}) {
-			t.Errorf("context address %q matched", addr)
 		}
 	}
 }

@@ -12,13 +12,16 @@ package synth
 
 import (
 	"context"
-	"encoding/hex"
+	"encoding/binary"
 	"fmt"
 	"math/rand" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- synthetic lab traffic does not require cryptographic randomness.
 	"net"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/dpi"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 )
 
 // Subnet defines a zone-to-prefix mapping for synthetic traffic generation.
@@ -333,97 +336,100 @@ func (g *generator) next() dpevents.Event {
 // These produce events with the exact attribute keys that the real DPI
 // decoders emit, so IDS rules can match them and produce genuine alerts.
 
-// synthModbusRequest generates a Modbus/TCP request event matching the
-// attribute keys from pkg/dp/ics/modbus/decoder.go.
+// synthModbusRequest generates a Modbus/TCP request ADU and returns the
+// attributes the Modbus decoder emits for it.
 func synthModbusRequest(rng *rand.Rand) map[string]any {
-	type mbReq struct {
-		fc      uint8
-		isWrite bool
+	fcs := []uint8{
+		1, 2, 3, 4, // reads
+		5, 6, 15, 16, 23, // writes
+		8,  // diagnostics
+		43, // MEI
 	}
-	requests := []mbReq{
-		{1, false}, {2, false}, {3, false}, {4, false}, // reads
-		{5, true}, {6, true}, {15, true}, {16, true}, // writes
-		{8, false},  // diagnostics
-		{43, false}, // MEI
-	}
-	r := requests[rng.Intn(len(requests))]
+	fc := fcs[rng.Intn(len(fcs))]
 	unitID := uint8(rng.Intn(10) + 1)
 	txnID := uint16(rng.Intn(65535))
+	addr := uint16(rng.Intn(1000))
+	qty := uint16(rng.Intn(50) + 1)
 
-	attrs := map[string]any{
-		"function_code":  r.fc,
-		"unit_id":        unitID,
-		"is_write":       r.isWrite,
-		"transaction_id": txnID,
-	}
-
-	// Build a realistic MBAP+PDU frame for raw_hex
-	switch r.fc {
-	case 8: // Diagnostics
-		sub := uint16(0)
+	var pdu []byte
+	switch fc {
+	case 1, 2, 3, 4:
+		pdu = be16s(addr, qty)
+	case 5: // a coil is set with 0xFF00 and cleared with 0x0000
+		value := uint16(0)
+		if rng.Intn(2) == 0 {
+			value = 0xFF00
+		}
+		pdu = be16s(addr, value)
+	case 6:
+		pdu = be16s(addr, uint16(rng.Intn(65536)))
+	case 15:
+		pdu = withData(rng, be16s(addr, qty), (int(qty)+7)/8)
+	case 16:
+		pdu = withData(rng, be16s(addr, qty), 2*int(qty))
+	case 23:
+		writeQty := uint16(rng.Intn(50) + 1)
+		pdu = withData(rng, be16s(addr, qty, uint16(rng.Intn(1000)), writeQty), 2*int(writeQty))
+	case 8:
+		sub := uint16(0) // return query data
 		if rng.Intn(3) == 0 {
-			sub = 1 // restart comm
-			attrs["is_write"] = true
+			sub = 1 // restart communications
 		}
-		attrs["sub_function"] = sub
-		names := map[uint16]string{0: "return_query_data", 1: "restart_comm", 4: "force_listen_only", 10: "clear_counters"}
-		if n, ok := names[sub]; ok {
-			attrs["sub_function_name"] = n
-		}
-		// MBAP(7) + FC(1) + sub(2) + data(2)
-		frame := modbusFrame(txnID, unitID, r.fc, []byte{byte(sub >> 8), byte(sub), 0x00, 0x00})
-		attrs["raw_hex"] = hex.EncodeToString(frame)
-	case 43: // MEI
-		attrs["mei_type"] = uint8(14)
-		attrs["mei_type_name"] = "read_device_identification"
-		frame := modbusFrame(txnID, unitID, r.fc, []byte{14, 1, 0})
-		attrs["raw_hex"] = hex.EncodeToString(frame)
-	default:
-		addr := uint16(rng.Intn(1000))
-		qty := uint16(rng.Intn(50) + 1)
-		attrs["address"] = addr
-		attrs["quantity"] = qty
-		pdu := []byte{byte(addr >> 8), byte(addr), byte(qty >> 8), byte(qty)}
-		if r.isWrite && (r.fc == 15 || r.fc == 16) {
-			// Write multiple: add byte count + data
-			byteCount := byte(qty * 2)
-			if r.fc == 15 {
-				byteCount = byte((qty + 7) / 8)
-			}
-			pdu = append(pdu, byteCount)
-			for i := 0; i < int(byteCount); i++ {
-				pdu = append(pdu, byte(rng.Intn(256)))
-			}
-		}
-		frame := modbusFrame(txnID, unitID, r.fc, pdu)
-		attrs["raw_hex"] = hex.EncodeToString(frame)
+		pdu = be16s(sub, 0)
+	case 43:
+		pdu = []byte{14, 1, 0} // read device identification, basic, from object 0
 	}
-
-	return attrs
+	return decodeModbus(modbusFrame(txnID, unitID, fc, pdu), false)
 }
 
-// synthModbusException generates a Modbus exception response.
+// synthModbusException generates a Modbus exception response ADU and
+// returns the attributes the Modbus decoder emits for it.
 func synthModbusException(rng *rand.Rand) map[string]any {
 	baseFcs := []uint8{1, 3, 5, 6, 15, 16}
 	baseFc := baseFcs[rng.Intn(len(baseFcs))]
 	exCodes := []uint8{1, 2, 3, 4}
 	exCode := exCodes[rng.Intn(len(exCodes))]
-	exNames := map[uint8]string{1: "illegal_function", 2: "illegal_data_address", 3: "illegal_data_value", 4: "server_device_failure"}
 	unitID := uint8(rng.Intn(10) + 1)
 	txnID := uint16(rng.Intn(65535))
 
 	// Exception response: FC = baseFc + 128, PDU = exception code
-	frame := modbusFrame(txnID, unitID, baseFc+128, []byte{exCode})
+	return decodeModbus(modbusFrame(txnID, unitID, baseFc+128, []byte{exCode}), true)
+}
 
-	return map[string]any{
-		"function_code":         baseFc,
-		"unit_id":               unitID,
-		"is_write":              baseFc == 5 || baseFc == 6 || baseFc == 15 || baseFc == 16,
-		"transaction_id":        txnID,
-		"exception_code":        exCode,
-		"exception_description": exNames[exCode],
-		"raw_hex":               hex.EncodeToString(frame),
+// decodeModbus decodes one complete ADU with the Modbus decoder, so synthetic
+// events carry exactly the attributes a captured ADU with the same bytes
+// does. reply orients the ADU from the server's port 502.
+func decodeModbus(adu []byte, reply bool) map[string]any {
+	key := flow.Key{SrcIP: net.IPv4(192, 0, 2, 1), DstIP: net.IPv4(192, 0, 2, 2), SrcPort: 49152, DstPort: 502, Proto: 6}
+	if reply {
+		key = flow.Key{SrcIP: key.DstIP, DstIP: key.SrcIP, SrcPort: 502, DstPort: 49152, Proto: 6, Dir: flow.DirReverse}
 	}
+	events, err := modbus.NewDecoder().OnPacket(&flow.State{Key: key}, &dpi.ParsedPacket{
+		Proto: "tcp", SrcPort: key.SrcPort, DstPort: key.DstPort, Payload: adu,
+	})
+	if err != nil || len(events) != 1 {
+		// The generator builds only complete, well-formed ADUs.
+		panic(fmt.Sprintf("synth: Modbus ADU %x decoded to %d events: %v", adu, len(events), err))
+	}
+	return events[0].Attributes
+}
+
+// be16s encodes words big-endian, the Modbus byte order.
+func be16s(words ...uint16) []byte {
+	b := make([]byte, 0, 2*len(words))
+	for _, w := range words {
+		b = binary.BigEndian.AppendUint16(b, w)
+	}
+	return b
+}
+
+// withData appends a byte count and that many random data bytes.
+func withData(rng *rand.Rand, pdu []byte, byteCount int) []byte {
+	pdu = append(pdu, byte(byteCount))
+	for range byteCount {
+		pdu = append(pdu, byte(rng.Intn(256)))
+	}
+	return pdu
 }
 
 // modbusFrame builds a Modbus/TCP MBAP header + PDU.

@@ -123,7 +123,7 @@ func validateSSH(s SSHConfig) error {
 	if s.HostKeyRotationDays < 0 || s.HostKeyRotationDays > MaxSSHHostKeyRotationDays {
 		return fmt.Errorf("ssh.hostKeyRotationDays must be in 0..%d", MaxSSHHostKeyRotationDays)
 	}
-	return nil
+	return validateSSHShellMode(s.ShellMode)
 }
 
 func validateManagementListenerAddress(field, addr string) error {

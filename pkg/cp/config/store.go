@@ -261,6 +261,7 @@ func readKindFrom(ctx context.Context, db configReader, kind string, withBank bo
 	if err := UpgradeInPlace(cfg); err != nil {
 		return nil, err
 	}
+	NormalizeLegacySSHShellMode(cfg)
 	return cfg, nil
 }
 
