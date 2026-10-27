@@ -121,9 +121,6 @@ func validateAV(cfg AVConfig) error {
 	if cfg.MaxSizeBytes < 0 || cfg.MaxSizeBytes > maxAVScanBytes {
 		return fmt.Errorf("services.av.maxSizeBytes must be between 0 (no limit) and %d", maxAVScanBytes)
 	}
-	if cfg.BlockTTL < 0 {
-		return errors.New("services.av.blockTtlSeconds must not be negative; 0 selects 600")
-	}
 	if cfg.CacheTTL < 0 {
 		return errors.New("services.av.cacheTtl must not be negative; 0 selects 10m")
 	}

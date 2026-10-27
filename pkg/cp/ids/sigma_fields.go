@@ -47,7 +47,7 @@ func decoderAttribute(field string) bool {
 	switch field {
 	// pkg/dp/itdpi/{http,dns,tls}.go
 	case "method", "path", "host", "target", "scheme", "user_agent", "status",
-		"preview", "hash", "id", "qr", "opcode", "rcode", "questions", "answers",
+		"id", "qr", "opcode", "rcode", "questions", "answers",
 		"qname", "qtype", "qclass", "sni", "alpn", "tls_version", "ja3", "ja3_hash":
 		return true
 	// Common IT metadata and itdpi/{detect,ics_marker,ntp,rdp,smb,snmp,ssh}.go.

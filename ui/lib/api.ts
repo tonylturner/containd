@@ -342,7 +342,6 @@ export type AVConfig = {
   mode?: "icap" | "clamav";
   failPolicy?: "open" | "closed";
   failOpenIcs?: boolean;
-  blockTtlSeconds?: number;
   maxSizeBytes?: number;
   timeoutSec?: number;
   /** Verdict cache lifetime in nanoseconds; 0 selects 10 minutes. */

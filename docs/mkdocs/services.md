@@ -104,8 +104,9 @@ To configure managed server mode:
 
 The engine is the only antivirus owner, in split and combined (`all`)
 deployments alike. It applies the committed AV settings, runs clamd and the
-FreshClam schedule, stores custom definitions and scans the HTTP previews the
-dataplane queues. Management delegates status, updates and definitions to the
+FreshClam schedule, and stores custom definitions. Antivirus backends scan
+complete HTTP objects; packet-preview scanning has been removed. Management
+delegates status, updates and definitions to the
 engine over its internal API; when the engine is unreachable these routes
 return `503` and the status `av` entry reports `"available": false`.
 
