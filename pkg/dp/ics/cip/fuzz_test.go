@@ -3,7 +3,32 @@
 
 package cip
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
+)
+
+func FuzzParseStream(f *testing.F) {
+	f.Add([]byte{})
+	f.Add([]byte{0x6f, 0})
+	for _, fixture := range streamFixtures() {
+		f.Add(fixture.raw)
+	}
+	f.Add(buildEIPHeader(0x6f, 1, make([]byte, 65535))[:eipHeaderSize])
+	var coalesced []byte
+	for _, fixture := range streamFixtures() {
+		coalesced = append(coalesced, fixture.raw...)
+	}
+	f.Add(coalesced)
+	f.Add(coalesced[:len(coalesced)-1])
+	f.Fuzz(func(t *testing.T, data []byte) {
+		decodertest.CheckStream(t, NewDecoder(), cipState(), dpi.StreamView{
+			Session: "fuzz", Base: 123, Bytes: data,
+		})
+	})
+}
 
 func FuzzParseEIPHeader(f *testing.F) {
 	valid := buildEIPHeader(0x006F, 0x12345678, buildSendRRDataPayload(0x4C, 1, []byte{0x20, 0x02}))
@@ -27,6 +52,8 @@ func FuzzParseCIPMessage(f *testing.F) {
 	f.Add(readTag)
 	f.Add(response)
 	f.Add(msp)
+	f.Add(buildCPFItems(cpfTestItem{0x00a1, []byte{1, 0, 0, 0}}, cpfTestItem{0x00b1, []byte{1, 0, 0x4c, 0}}))
+	f.Add(buildCPFItems(cpfTestItem{0x00b2, []byte{0x4c, 0}}, cpfTestItem{0x1234, []byte{1}}))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = ParseCIPMessage(data)

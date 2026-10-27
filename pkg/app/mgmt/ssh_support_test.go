@@ -57,7 +57,7 @@ func TestSSHDisableStageAndCommitAdminKeyGuard(t *testing.T) {
 	if _, err := userStore.Create(ctx, users.User{Username: "viewer", Role: "view"}, "ViewerPassword1"); err != nil {
 		t.Fatal(err)
 	}
-	configureSSHPolicy(store, userStore)
+	configureSSHPolicy(store, userStore, sshRuntimeConfig{})
 	cfg := config.DefaultConfig()
 	if err := store.Save(ctx, cfg); err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestSSHRuntimePolicyReportsEnvironmentSource(t *testing.T) {
 	if err := store.Save(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	configureSSHPolicy(store, nil)
+	configureSSHPolicy(store, nil, sshRuntimeConfig{})
 	t.Setenv("CONTAIND_SSH_ALLOW_PASSWORD", "0")
 	policy, err := store.SSHRuntimePolicy(context.Background())
 	if err != nil {
@@ -209,6 +209,45 @@ func TestSSHRuntimePolicyReportsEnvironmentSource(t *testing.T) {
 	policy, err = store.SSHRuntimePolicy(context.Background())
 	if err != nil || policy.AllowPassword || policy.PasswordSource != "config" {
 		t.Fatalf("environment overrode persisted disable: %+v, %v", policy, err)
+	}
+}
+
+// The policy reports the shell mode SSH started with and its source: the
+// environment overrides the saved mode, and a later saved change applies
+// only at the next start.
+func TestSSHRuntimePolicyReportsStartedShellMode(t *testing.T) {
+	for _, tc := range []struct {
+		saved, env, mode, source string
+	}{
+		{"", "", "appliance", "default"},
+		{"linux", "", "linux", "config"},
+		{"appliance", "", "appliance", "config"},
+		{"appliance", "Linux", "linux", "environment (CONTAIND_SSH_SHELL_MODE)"},
+		{"linux", "bash", "appliance", "environment (CONTAIND_SSH_SHELL_MODE)"},
+	} {
+		store, err := config.NewSQLiteStore(filepath.Join(t.TempDir(), "config.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := config.DefaultConfig()
+		cfg.System.SSH.ShellMode = tc.saved
+		if err := store.Save(context.Background(), cfg); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("CONTAIND_SSH_SHELL_MODE", tc.env)
+		configureSSHPolicy(store, nil, resolveSSHRuntimeConfig(cfg))
+		cfg.System.SSH.ShellMode = "linux"
+		if tc.saved == "linux" {
+			cfg.System.SSH.ShellMode = "appliance"
+		}
+		if err := store.Save(context.Background(), cfg); err != nil {
+			t.Fatal(err)
+		}
+		policy, err := store.SSHRuntimePolicy(context.Background())
+		if err != nil || policy.ShellMode != tc.mode || policy.ShellModeSource != tc.source {
+			t.Fatalf("%+v: policy %+v, %v", tc, policy, err)
+		}
+		_ = store.Close()
 	}
 }
 

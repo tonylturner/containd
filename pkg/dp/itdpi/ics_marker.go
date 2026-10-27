@@ -8,6 +8,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 // ICSMarker tags DPI events with ICS=true when they originate from ICS protocols.
@@ -27,8 +28,7 @@ func (d *ICSMarker) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {
 
 // MarkICS returns a cloned event with ICS flag set when applicable.
 func MarkICS(ev dpi.Event) dpi.Event {
-	switch ev.Proto {
-	case "modbus", "dnp3", "iec104", "s7", "s7comm", "cip", "bacnet", "opcua", "mms", "ics":
+	if ev.Proto == "ics" || ics.Supported(ev.Proto) {
 		attrs := ev.Attributes
 		if attrs == nil {
 			attrs = map[string]any{}

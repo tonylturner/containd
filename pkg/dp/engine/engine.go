@@ -465,6 +465,9 @@ func (e *Engine) LoadRules(snap rules.Snapshot) {
 // ApplyRules compiles and applies a snapshot to nftables (when enabled) and atomically swaps it.
 // If enforcement is disabled, it simply swaps the snapshot.
 func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
+	if err := snap.ValidateIndustrialProtocols(); err != nil {
+		return err
+	}
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
 	if err := enforce.ValidateManagementSnapshot(&snap, e.managementReservation); err != nil {
@@ -576,12 +579,6 @@ func matchesICSDefaultPort(proto string, port uint16) bool {
 		return port == 20000
 	case "cip":
 		return port == 44818 || port == 2222
-	case "s7comm", "mms":
-		return port == 102
-	case "bacnet":
-		return port == 47808
-	case "opcua":
-		return port == 4840
 	case "iec104":
 		return port == iec104Port
 	default:

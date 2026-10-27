@@ -70,7 +70,7 @@ func TestICSAddressMax(t *testing.T) {
 	if got := ICSAddressMax("modbus"); got != 65535 {
 		t.Errorf("modbus maximum = %d", got)
 	}
-	for _, proto := range []string{"dnp3", "cip", "s7comm", "mms", "bacnet", "opcua"} {
+	for _, proto := range []string{"dnp3", "cip"} {
 		if got := ICSAddressMax(proto); got != MaxICSAddress {
 			t.Errorf("%s maximum = %d", proto, got)
 		}

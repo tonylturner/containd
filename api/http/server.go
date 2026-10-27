@@ -215,7 +215,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	}
 	_ = r.SetTrustedProxies(proxies)
 	if auditStore != nil {
-		r.Use(withAuditStore(auditStore))
+		r.Use(withAuditStore(auditStore), deliverScopeMigrations(store, auditStore))
 	}
 
 	api := r.Group("/api/v1")
@@ -293,8 +293,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/services/proxy/reverse", getReverseProxyHandler(store))
 		protected.POST("/services/proxy/reverse", requireAdmin(), setReverseProxyHandler(store))
 		protected.GET("/services/status", getServicesStatusHandler(services, engine))
-		protected.GET("/events", listEventsHandler(engine, services))
-		protected.GET("/events/:id", eventDetailHandler(engine, services))
+		protected.GET("/events", listEventsHandler(engine, services, store))
+		protected.GET("/events/:id", eventDetailHandler(engine, services, store))
 		protected.GET("/flows", listFlowsHandler(engine))
 		protected.GET("/simulation", simulationStatusHandler(engine))
 		protected.POST("/simulation", requireAdmin(), simulationControlHandler(engine))

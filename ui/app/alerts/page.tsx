@@ -269,9 +269,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
   const isModbus = eventProto === "modbus";
   const isTLS = eventProto === "tls";
   const isDNP3 = eventProto === "dnp3";
-  const isS7 = eventProto === "s7comm";
-  const isCIP = eventProto === "enip" || eventProto === "cip";
-  const isBACnet = eventProto === "bacnet";
+  const isCIP = eventProto === "cip";
   const isIEC104 = eventProto === "iec104";
 
   return (
@@ -459,41 +457,15 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
           </DetailSection>
         )}
 
-        {/* ── Protocol Analysis (S7comm) ── */}
-        {isS7 && Object.keys(eventAttrs).length > 0 && (
-          <DetailSection label="S7comm Protocol Analysis">
-            {eventAttrs["function_code"] != null && (
-              <DetailRow label="Function" value={`${eventAttrs["function_name"] ?? eventAttrs["function_code"]}`} mono />
-            )}
-            {eventAttrs["area"] != null && (
-              <DetailRow label="Memory Area" value={String(eventAttrs["area"])} mono />
-            )}
-            {eventAttrs["address"] != null && (
-              <DetailRow label="Address" value={String(eventAttrs["address"])} mono />
-            )}
-            {eventAttrs["db_number"] != null && (
-              <DetailRow label="DB Number" value={String(eventAttrs["db_number"])} mono />
-            )}
-            {eventAttrs["item_count"] != null && (
-              <DetailRow label="Item Count" value={String(eventAttrs["item_count"])} mono />
-            )}
-            {eventAttrs["is_write"] === true && (
-              <div className="text-xs font-medium text-red-400">WRITE OPERATION</div>
-            )}
-            {eventAttrs["is_control"] === true && (
-              <div className="text-xs font-medium text-orange-400">CONTROL OPERATION (CPU Start/Stop)</div>
-            )}
-            {eventAttrs["safety_critical"] === true && (
-              <div className="rounded-xs border border-red-500/20 bg-red-500/10 px-2 py-1 text-xs text-red-400 font-medium">
-                SAFETY-CRITICAL DB ACCESS
-              </div>
-            )}
-          </DetailSection>
-        )}
-
         {/* ── Protocol Analysis (CIP/EtherNet/IP) ── */}
         {isCIP && Object.keys(eventAttrs).length > 0 && (
           <DetailSection label="CIP/EtherNet/IP Analysis">
+            {eventAttrs["enip_command"] != null && (
+              <DetailRow label="Encapsulation" value={String(eventAttrs["enip_command"])} mono />
+            )}
+            {eventAttrs["cpf_item_types"] != null && (
+              <DetailRow label="CPF Items" value={String(eventAttrs["cpf_item_types"])} mono />
+            )}
             {eventAttrs["service_name"] != null && (
               <DetailRow label="Service" value={String(eventAttrs["service_name"])} mono />
             )}
@@ -502,27 +474,6 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
             )}
             {eventAttrs["address"] != null && (
               <DetailRow label="CIP Path" value={String(eventAttrs["address"])} mono />
-            )}
-            {eventAttrs["is_write"] === true && (
-              <div className="text-xs font-medium text-red-400">WRITE OPERATION</div>
-            )}
-          </DetailSection>
-        )}
-
-        {/* ── Protocol Analysis (BACnet) ── */}
-        {isBACnet && Object.keys(eventAttrs).length > 0 && (
-          <DetailSection label="BACnet Analysis">
-            {eventAttrs["service"] != null && (
-              <DetailRow label="Service" value={String(eventAttrs["service"])} mono />
-            )}
-            {eventAttrs["object_type"] != null && (
-              <DetailRow label="Object Type" value={String(eventAttrs["object_type"])} mono />
-            )}
-            {eventAttrs["object_instance"] != null && (
-              <DetailRow label="Object Instance" value={String(eventAttrs["object_instance"])} mono />
-            )}
-            {eventAttrs["property_id"] != null && (
-              <DetailRow label="Property" value={String(eventAttrs["property_id"])} mono />
             )}
             {eventAttrs["is_write"] === true && (
               <div className="text-xs font-medium text-red-400">WRITE OPERATION</div>
@@ -574,7 +525,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
         )}
 
         {/* Generic event attributes (for protocols without dedicated section) */}
-        {Object.keys(eventAttrs).length > 0 && !isModbus && !isTLS && !isDNP3 && !isS7 && !isCIP && !isBACnet && !isIEC104 && (
+        {Object.keys(eventAttrs).length > 0 && !isModbus && !isTLS && !isDNP3 && !isCIP && !isIEC104 && (
           <DetailSection label="Event Attributes">
             <div className="rounded-xs border bg-[#060808] p-3 font-mono text-[11px] leading-relaxed overflow-x-auto">
               {Object.entries(eventAttrs).filter(([k]) => k !== "raw_hex").map(([key, val]) => {

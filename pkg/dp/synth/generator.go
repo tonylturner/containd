@@ -195,7 +195,7 @@ var scenarios = []scenario{
 	}},
 
 	// CIP/EtherNet/IP — attribute keys match pkg/dp/ics/cip/decoder.go
-	{proto: "enip", kind: "request", transport: "tcp", dstPort: 44818, weight: 12, attrFn: func(rng *rand.Rand) map[string]any {
+	{proto: "cip", kind: "request", transport: "tcp", dstPort: 44818, weight: 12, attrFn: func(rng *rand.Rand) map[string]any {
 		type cipSvc struct {
 			code uint8
 			name string
@@ -210,81 +210,8 @@ var scenarios = []scenario{
 		return map[string]any{
 			"service_code": s.code, "service_name": s.name,
 			"function_code": s.code, "is_write": s.w, "is_control": s.c,
-			"command": "SendRRData", "command_code": uint16(0x6F),
-		}
-	}},
-
-	// S7comm — attribute keys match pkg/dp/ics/s7comm/decoder.go
-	{proto: "s7comm", kind: "request", transport: "tcp", dstPort: 102, weight: 8, attrFn: func(rng *rand.Rand) map[string]any {
-		type s7fn struct {
-			fc   uint8
-			name string
-			w, c bool
-		}
-		fns := []s7fn{
-			{4, "Read Var", false, false}, {5, "Write Var", true, false},
-			{0, "Setup Communication", false, false},
-			{0x28, "PLC Control", false, true}, {0x29, "PLC Stop", false, true},
-		}
-		f := fns[rng.Intn(len(fns))]
-		attrs := map[string]any{
-			"function_code": f.fc, "function_name": f.name,
-			"is_write": f.w, "is_control": f.c,
-		}
-		if f.fc == 4 || f.fc == 5 {
-			areas := []string{"DB", "MK", "PE", "PA"}
-			attrs["area"] = areas[rng.Intn(len(areas))]
-			attrs["address"] = fmt.Sprintf("DBX%d.%d", rng.Intn(100), rng.Intn(8))
-			attrs["item_count"] = rng.Intn(10) + 1
-			if rng.Intn(5) == 0 {
-				attrs["db_number"] = rng.Intn(200) + 1
-			}
-		}
-		return attrs
-	}},
-
-	// BACnet/IP — attribute keys match pkg/dp/ics/bacnet/decoder.go
-	{proto: "bacnet", kind: "request", transport: "udp", dstPort: 47808, weight: 6, attrFn: func(rng *rand.Rand) map[string]any {
-		type bsvc struct {
-			code uint8
-			name string
-			w    bool
-		}
-		svcs := []bsvc{
-			{12, "ReadProperty", false}, {14, "ReadPropertyMultiple", false},
-			{15, "WriteProperty", true}, {16, "WritePropertyMultiple", true},
-			{8, "WhoIs", false}, {0, "IAm", false},
-		}
-		s := svcs[rng.Intn(len(svcs))]
-		attrs := map[string]any{
-			"service_code": s.code, "service": s.name,
-			"is_write": s.w, "is_critical": false,
-		}
-		if s.code == 12 || s.code == 14 || s.code == 15 || s.code == 16 {
-			objTypes := []string{"analog-input", "analog-output", "binary-input", "binary-output", "device"}
-			attrs["object_type"] = objTypes[rng.Intn(len(objTypes))]
-			attrs["object_instance"] = rng.Intn(200)
-			props := []string{"present-value", "object-name", "description", "status-flags"}
-			attrs["property_id"] = props[rng.Intn(len(props))]
-		}
-		return attrs
-	}},
-
-	// OPC UA — attribute keys match pkg/dp/ics/opcua/decoder.go
-	{proto: "opcua", kind: "request", transport: "tcp", dstPort: 4840, weight: 5, attrFn: func(rng *rand.Rand) map[string]any {
-		type oSvc struct {
-			id   uint16
-			name string
-			w    bool
-		}
-		svcs := []oSvc{
-			{527, "BrowseRequest", false}, {631, "ReadRequest", false},
-			{673, "WriteRequest", true}, {787, "CreateSubscriptionRequest", false},
-			{826, "PublishRequest", false},
-		}
-		s := svcs[rng.Intn(len(svcs))]
-		return map[string]any{
-			"service": s.name, "is_write": s.w,
+			"enip_command": "SendRRData", "enip_command_code": uint16(0x6F),
+			"enip_session_handle": uint32(1), "cpf_item_types": "0x0000,0x00b2",
 		}
 	}},
 

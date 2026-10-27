@@ -253,7 +253,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		userID = sc.Permissions.Extensions["user_id"]
 	}
 
-	token, sessionID, err := s.issueToken(connCtx, username, userID)
+	sessionID, err := s.openSession(connCtx, username, userID)
 	if err != nil {
 		_ = sc.Close()
 		return
@@ -275,8 +275,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		})
 	}
 
-	api := &cli.API{BaseURL: s.opts.BaseURL, Token: token, Client: &resetAwareClient{client: s.opts.APIClient, connection: conn}}
-	reg := cli.NewRegistry(nil, api)
+	client := s.connectionClient(conn)
 	cmdCtx := cli.WithRole(connCtx, string(cli.RoleAdmin))
 
 	for ch := range chans {
@@ -288,6 +287,9 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		if err != nil {
 			continue
 		}
+		// Each channel owns its CLI client state; channels of one
+		// connection share only the connection's management client.
+		reg := cli.NewRegistry(nil, &cli.API{BaseURL: s.opts.BaseURL, Client: client})
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
@@ -354,7 +356,14 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 				if s.isLinuxShellMode() && !hasPTY {
 					writeTTY(ch, "Warning: no PTY requested, falling back to appliance CLI.\n")
 				}
-				s.repl(ctx, username, remote, reg, ch, &pr, windowCh)
+				// Without a client PTY the CLI has no terminal to give a shell.
+				var shellPTY *ptyRequest
+				if hasPTY {
+					shellPTY = &pr
+				}
+				input := newSessionInput(ch)
+				s.repl(ctx, username, remote, reg, &sessionIO{sessionInput: input, Writer: ch}, shellPTY, windowCh)
+				input.close()
 				sendExitStatus(ch, exitSuccess)
 			}
 			return
@@ -411,7 +420,9 @@ func (s *Server) isLinuxShellMode() bool {
 	return strings.EqualFold(s.opts.ShellMode, "linux")
 }
 
-func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Registry, rw io.ReadWriter, pr *ptyRequest, windowCh <-chan ptyRequest) {
+// repl runs the appliance CLI. pr is the client's PTY request, or nil when the
+// client requested none; the shell command needs it.
+func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Registry, rw *sessionIO, pr *ptyRequest, windowCh <-chan ptyRequest) {
 	reader := bufio.NewReader(rw)
 	prompt := "containd# "
 	// Gentle bootstrap hint.
@@ -434,11 +445,11 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		case "exit", "quit", "logout":
 			return
 		case "shell", "bash":
-			if ch, ok := rw.(ssh.Channel); ok && pr != nil {
-				s.startLinuxShellInline(ctx, username, ch, pr, windowCh)
+			if pr != nil {
+				s.startLinuxShellInline(ctx, username, rw, reader, pr, windowCh)
 				continue
 			}
-			writeTTY(rw, "shell access requires a PTY-enabled SSH session\n")
+			writeTTY(rw, "The Linux shell needs a terminal: reconnect with an interactive ssh session (not ssh -T).\n")
 			continue
 		case "menu":
 			if s.runMenu(ctx, username, rw, reader, reg) {

@@ -205,7 +205,10 @@ func TestAccountingProtocolAttribution(t *testing.T) {
 	}{
 		{"HTTP without events", 6, 80, "tcp", "http"},
 		{"DNS without events", 17, 53, "udp", "dns"},
-		{"shared MMS S7 port", 6, 102, "tcp", "tcp"},
+		{"unsupported port", 6, 102, "tcp", "tcp"},
+		{"unsupported TCP port", 6, 4840, "tcp", "tcp"},
+		{"unsupported UDP port", 17, 47808, "udp", "udp"},
+		{"unclassified UDP port", 17, 18245, "udp", "udp"},
 		{"unknown service", 6, 9999, "tcp", "tcp"},
 		{"reverse Modbus", 6, 502, "tcp", "modbus"},
 	} {

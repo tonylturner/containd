@@ -10,6 +10,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -219,12 +220,9 @@ func (z zoneIndex) zoneFor(ip net.IP) string {
 }
 
 func isRuleEvaluableICSEvent(proto string) bool {
-	switch strings.ToLower(strings.TrimSpace(proto)) {
-	case "modbus", "dnp3", "cip", "s7comm", "mms", "bacnet", "opcua":
-		return true
-	default:
-		return false
-	}
+	proto = strings.ToLower(strings.TrimSpace(proto))
+	// IEC104 is evaluated through its APDU envelope path, not generic events.
+	return proto != "iec104" && ics.Supported(proto)
 }
 
 // isStreamErrorEvent reports a malformed or unsupported event. Such events

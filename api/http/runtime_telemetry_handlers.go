@@ -13,6 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/tonylturner/containd/pkg/cp/audit"
+	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/cp/scopeaudit"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
@@ -20,7 +22,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
 
-func listEventsHandler(engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+func listEventsHandler(engine EngineClient, services ServicesApplier, store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		q, filtered, err := dpevents.ParseQuery(c.Request.URL.Query())
 		if err != nil {
@@ -28,12 +30,19 @@ func listEventsHandler(engine EngineClient, services ServicesApplier) gin.Handle
 			return
 		}
 		if filtered {
-			queryEvents(c, engine, services, q)
+			queryEvents(c, engine, services, store, q)
 			return
 		}
 		limit := q.Limit
 
-		out := []dpevents.Event{}
+		out, err := scopeaudit.Events(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if out == nil {
+			out = []dpevents.Event{}
+		}
 		var engineErr error
 
 		if tc, ok := engine.(TelemetryClient); ok && tc != nil {
@@ -74,14 +83,18 @@ type EventQueryClient interface {
 	QueryEvents(context.Context, dpevents.Query) (dpevents.Page, error)
 }
 
-func queryEvents(c *gin.Context, engine EngineClient, services ServicesApplier, q dpevents.Query) {
+func queryEvents(c *gin.Context, engine EngineClient, services ServicesApplier, store config.Store, q dpevents.Query) {
 	tc, ok := engine.(EventQueryClient)
 	if !ok {
 		apiError(c, http.StatusBadGateway, "engine does not support event queries")
 		return
 	}
 	source, err := tc.QueryEvents(c.Request.Context(), q)
-	var candidates []dpevents.Event
+	candidates, migrationErr := scopeaudit.Events(c.Request.Context(), store)
+	if migrationErr != nil {
+		internalError(c, migrationErr)
+		return
+	}
 	serviceHistoryUnknown := false
 	if err == nil {
 		candidates = append(candidates, source.Events...)
@@ -104,7 +117,7 @@ func queryEvents(c *gin.Context, engine EngineClient, services ServicesApplier, 
 	c.JSON(http.StatusOK, page)
 }
 
-func eventDetailHandler(engine EngineClient, services ServicesApplier) gin.HandlerFunc {
+func eventDetailHandler(engine EngineClient, services ServicesApplier, store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
 		id, err := strconv.ParseUint(idStr, 10, 64)
@@ -113,7 +126,11 @@ func eventDetailHandler(engine EngineClient, services ServicesApplier) gin.Handl
 			return
 		}
 
-		var all []dpevents.Event
+		all, err := scopeaudit.Events(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
 		if tc, ok := engine.(EventQueryClient); ok && tc != nil {
 			page, err := tc.QueryEvents(c.Request.Context(), dpevents.Query{EventID: id, Limit: 1})
 			if err == nil {

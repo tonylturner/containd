@@ -134,10 +134,7 @@ func TestICSTemplatesShipWithLogTrue(t *testing.T) {
 	icsTemplates := []string{
 		"modbus-read-only",
 		"dnp3-secure-operations",
-		"s7comm-read-only",
 		"cip-monitor-only",
-		"bacnet-read-only",
-		"opcua-monitor-only",
 	}
 	for _, name := range icsTemplates {
 		name := name
@@ -168,10 +165,7 @@ func TestICSTemplatesLeaveModeBlank(t *testing.T) {
 	icsTemplates := []string{
 		"modbus-read-only",
 		"dnp3-secure-operations",
-		"s7comm-read-only",
 		"cip-monitor-only",
-		"bacnet-read-only",
-		"opcua-monitor-only",
 	}
 	for _, name := range icsTemplates {
 		name := name

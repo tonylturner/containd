@@ -177,29 +177,6 @@ func validKeyUsername(username string) bool {
 	return username != "" && username != "." && username != ".." && filepath.Base(username) == username
 }
 
-func (s *Server) issueToken(ctx context.Context, username, userID string) (token string, sessionID string, err error) {
-	if s.opts.LabMode && len(s.opts.JWTSecret) == 0 {
-		return "lab", "", nil
-	}
-	u, err := s.opts.UserStore.GetByUsername(ctx, username)
-	if err != nil || u == nil {
-		return "", "", errors.New("user not found")
-	}
-	if userID != "" && u.ID != userID {
-		return "", "", errors.New("user mismatch")
-	}
-	sess, err := s.opts.UserStore.CreateSession(ctx, u.ID, 5*time.Minute, 4*time.Hour)
-	if err != nil {
-		return "", "", err
-	}
-	tok, err := signJWT(s.opts.JWTSecret, u.ID, u.Username, u.Role, sess.ID, sess.ExpiresAt)
-	if err != nil {
-		_ = s.opts.UserStore.RevokeSession(ctx, sess.ID)
-		return "", "", err
-	}
-	return tok, sess.ID, nil
-}
-
 func signJWT(secret []byte, userID string, username any, role any, jti string, exp time.Time) (string, error) {
 	claims := jwt.MapClaims{
 		"sub":      userID,

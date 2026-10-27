@@ -12,9 +12,8 @@ import (
 )
 
 // MaxICSAddress is the largest address an ICS rule can name. 32 bits hold
-// every address the protocols carry: DNP3 point indices and OPC UA numeric
-// node IDs are 32-bit, S7 byte offsets fit in 24 bits and Modbus register
-// addresses in 16.
+// every address the protocols carry: DNP3 point indices are 32-bit and
+// Modbus register addresses are 16-bit.
 const MaxICSAddress = math.MaxUint32
 
 // ICSAddressMax is the largest address an ICS rule for protocol can name:

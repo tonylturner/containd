@@ -6,6 +6,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -236,17 +237,21 @@ func TestStoreRejectsUnactivatableIEC104Enforce(t *testing.T) {
 	}
 }
 
-func TestSchemaVersion017(t *testing.T) {
-	if SchemaVersionCurrent != "0.1.7" {
-		t.Fatalf("SchemaVersionCurrent = %s, want 0.1.7", SchemaVersionCurrent)
+func TestSchemaVersion018(t *testing.T) {
+	if SchemaVersionCurrent != "0.1.8" {
+		t.Fatalf("SchemaVersionCurrent = %s, want 0.1.8", SchemaVersionCurrent)
 	}
 	old := &Config{SchemaVersion: "0.1.0"}
-	if err := UpgradeInPlace(old); err != nil || old.SchemaVersion != "0.1.7" {
+	if err := UpgradeInPlace(old); err != nil || old.SchemaVersion != "0.1.8" {
 		t.Fatalf("0.1.0 upgrade = %s, %v", old.SchemaVersion, err)
 	}
-	newer := &Config{SchemaVersion: "0.1.8"}
+	current, err := parseSemver(SchemaVersionCurrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer := &Config{SchemaVersion: fmt.Sprintf("%d.%d.%d", current.major, current.minor, current.patch+1)}
 	if err := UpgradeInPlace(newer); err == nil {
-		t.Fatal("0.1.8 must be rejected as newer than supported")
+		t.Fatal("future schema must be rejected as newer than supported")
 	}
 }
 

@@ -12,6 +12,9 @@ import "time"
 // Domain validation should live in validate*.go siblings rather than growing
 // this file with large validation implementations again.
 type Config struct {
+	// Pending schema-upgrade evidence is persisted with the next successful write.
+	scopeMigration *IndustrialScopeMigration
+
 	SchemaVersion string          `json:"schema_version,omitempty"`
 	System        SystemConfig    `json:"system"`
 	Interfaces    []Interface     `json:"interfaces"`
@@ -120,9 +123,9 @@ type SSHConfig struct {
 	Banner string `json:"banner,omitempty"`
 	// HostKeyRotationDays controls automatic host key rotation (0 = disabled).
 	HostKeyRotationDays int `json:"hostKeyRotationDays,omitempty"`
-	// ShellMode controls what users get on SSH login.
-	// "appliance" (default): the containd CLI REPL. Type "shell" to enter Linux shell.
-	// "linux": a real bash shell. Type "containd" or "configure" to enter the CLI REPL.
+	// ShellMode selects what an interactive SSH login opens: "appliance" or
+	// empty for the containd CLI, "linux" for a bash shell. A non-empty
+	// CONTAIND_SSH_SHELL_MODE overrides it; SSH reads it at startup.
 	ShellMode string `json:"shellMode,omitempty"`
 }
 
@@ -467,7 +470,7 @@ type DataPlaneConfig struct {
 	DPIEnabled      bool            `json:"dpiEnabled,omitempty"`      // master DPI on/off
 	DPIMode         string          `json:"dpiMode,omitempty"`         // "learn" or "enforce" (ICS DPI global mode)
 	DPIProtocols    map[string]bool `json:"dpiProtocols,omitempty"`    // per-IT-protocol enable: "dns","tls","http","ssh","smb","ntp","snmp","rdp"
-	DPIICSProtocols map[string]bool `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","s7comm","mms","bacnet","opcua","iec104"; an absent key is enabled
+	DPIICSProtocols map[string]bool `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","iec104"; an absent key is enabled
 	DPIExclusions   []DPIExclusion  `json:"dpiExclusions,omitempty"`   // IPs/domains excluded from DPI
 
 	// NFLogGroup, when non-zero, enables kernel-side logging for rules
@@ -836,10 +839,10 @@ type Protocol struct {
 }
 
 // ICSPredicate captures ICS-specific primitives for rules.
-// It covers modbus, dnp3, cip, s7comm, mms, bacnet, opcua and iec104.
+// It covers modbus, dnp3, cip and iec104.
 // JSON decoding is strict (ics_json.go).
 type ICSPredicate struct {
-	Protocol      string   `json:"protocol,omitempty"`      // modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104
+	Protocol      string   `json:"protocol,omitempty"`      // modbus, dnp3, cip, iec104
 	FunctionCode  []uint8  `json:"functionCode,omitempty"`  // function/service codes (all protocols)
 	UnitID        *uint8   `json:"unitId,omitempty"`        // optional Modbus unit id
 	Addresses     []string `json:"addresses,omitempty"`     // register/address ranges as strings

@@ -89,8 +89,8 @@ func TestEvalContextModbusSpans(t *testing.T) {
 // Protocols other than Modbus touch the one numeric address their decoder
 // emits; a non-numeric address touches none and is not unknown.
 func TestEvalContextOtherProtocolAddress(t *testing.T) {
-	state := &flow.State{Key: flow.Key{SrcIP: net.ParseIP("10.0.0.1"), DstIP: net.ParseIP("10.0.0.2"), SrcPort: 40000, DstPort: 102, Proto: 6}}
-	pkt := &dpi.ParsedPacket{Proto: "tcp", SrcPort: 40000, DstPort: 102}
+	state := &flow.State{Key: flow.Key{SrcIP: net.ParseIP("10.0.0.1"), DstIP: net.ParseIP("10.0.0.2"), SrcPort: 40000, DstPort: 44818, Proto: 6}}
+	pkt := &dpi.ParsedPacket{Proto: "tcp", SrcPort: 40000, DstPort: 44818}
 	cases := []struct {
 		addr  any
 		spans []rules.AddressSpan
@@ -98,16 +98,16 @@ func TestEvalContextOtherProtocolAddress(t *testing.T) {
 		{uint16(256), []rules.AddressSpan{{Low: 256, High: 256}}},
 		{"0x0100", []rules.AddressSpan{{Low: 256, High: 256}}},
 		{float64(7), []rules.AddressSpan{{Low: 7, High: 7}}},
-		{"DB1.DBX0.0", nil},
+		{"0x02/1/1", nil},
 		{"1-2", nil},
 		{nil, nil},
 	}
 	for _, tc := range cases {
-		attrs := map[string]any{"function_code": uint8(4)}
+		attrs := map[string]any{"service_code": uint8(0x0e)}
 		if tc.addr != nil {
 			attrs["address"] = tc.addr
 		}
-		ctx, ok := evalContextFromDPIEvent(nil, state, pkt, dpi.Event{Proto: "s7comm", Kind: "request", Attributes: attrs}, "", "")
+		ctx, ok := evalContextFromDPIEvent(nil, state, pkt, dpi.Event{Proto: "cip", Kind: "request", Attributes: attrs}, "", "")
 		if !ok || !reflect.DeepEqual(ctx.ICS.Spans, tc.spans) || ctx.ICS.SpansUnknown {
 			t.Errorf("address %#v: spans %v unknown %v, want %v", tc.addr, ctx.ICS.Spans, ctx.ICS.SpansUnknown, tc.spans)
 		}

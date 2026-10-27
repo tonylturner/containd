@@ -124,7 +124,7 @@ type Protocol struct {
 
 // ICSPredicate captures ICS-specific fields for all supported protocols.
 type ICSPredicate struct {
-	Protocol      string   // modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104
+	Protocol      string   // modbus, dnp3, cip, iec104
 	FunctionCode  []uint8  // function/service codes (all protocols)
 	UnitID        *uint8   // optional Modbus unit id
 	Addresses     []string // address/register ranges as strings

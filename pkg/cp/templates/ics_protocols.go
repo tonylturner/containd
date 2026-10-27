@@ -21,24 +21,9 @@ func init() {
 		Rules:       DNP3SecureOperations(),
 	})
 	register(Template{
-		Name:        "s7comm-read-only",
-		Description: "S7comm read-only – allow read variable (FC 0x04), deny write and PLC control",
-		Rules:       S7commReadOnly(),
-	})
-	register(Template{
 		Name:        "cip-monitor-only",
 		Description: "CIP/EtherNet-IP monitor-only – allow read services, deny writes and control commands",
 		Rules:       CIPMonitorOnly(),
-	})
-	register(Template{
-		Name:        "bacnet-read-only",
-		Description: "BACnet read-only – allow read properties, deny writes and device control",
-		Rules:       BACnetReadOnly(),
-	})
-	register(Template{
-		Name:        "opcua-monitor-only",
-		Description: "OPC UA monitor-only – allow browse/read/subscribe, deny writes and node management",
-		Rules:       OPCUAMonitorOnly(),
 	})
 }
 
@@ -128,36 +113,6 @@ func DNP3SecureOperations() []config.Rule {
 	}
 }
 
-// S7commReadOnly returns rules that allow S7comm read variable and deny
-// write and PLC control operations.
-func S7commReadOnly() []config.Rule {
-	return []config.Rule{
-		{
-			ID:          "tpl-s7comm-allow-read",
-			Description: "Allow S7comm read variable (FC 0x04)",
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "102"}},
-			ICS: config.ICSPredicate{
-				Protocol:     "s7comm",
-				FunctionCode: []uint8{0x04},
-				ReadOnly:     true,
-			},
-			Log:    true,
-			Action: config.ActionAllow,
-		},
-		{
-			ID:          "tpl-s7comm-deny-write-control",
-			Description: "Deny S7comm write and control (FC 0x05: Write Variable, FC 0x28: PLC Start, FC 0x29: PLC Stop)",
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "102"}},
-			ICS: config.ICSPredicate{
-				Protocol:     "s7comm",
-				FunctionCode: []uint8{0x05, 0x28, 0x29},
-			},
-			Log:    true,
-			Action: config.ActionDeny,
-		},
-	}
-}
-
 // CIPMonitorOnly returns rules that allow CIP/EtherNet-IP read services and
 // deny write and control commands.
 func CIPMonitorOnly() []config.Rule {
@@ -180,67 +135,6 @@ func CIPMonitorOnly() []config.Rule {
 			ICS: config.ICSPredicate{
 				Protocol:     "cip",
 				FunctionCode: []uint8{0x05, 0x06, 0x07, 0x4D, 0x4F},
-			},
-			Log:    true,
-			Action: config.ActionDeny,
-		},
-	}
-}
-
-// BACnetReadOnly returns rules that allow BACnet read property services and
-// deny write and device control operations.
-func BACnetReadOnly() []config.Rule {
-	return []config.Rule{
-		{
-			ID:          "tpl-bacnet-allow-reads",
-			Description: "Allow BACnet read services (12: ReadProperty, 14: ReadPropertyMultiple, 26: ReadRange)",
-			Protocols:   []config.Protocol{{Name: "udp", Port: "47808"}},
-			ICS: config.ICSPredicate{
-				Protocol:     "bacnet",
-				FunctionCode: []uint8{12, 14, 26},
-			},
-			Log:    true,
-			Action: config.ActionAllow,
-		},
-		{
-			ID:          "tpl-bacnet-deny-write-control",
-			Description: "Deny BACnet write and control services (15: WriteProperty, 16: WritePropertyMultiple, 20: ReinitializeDevice, 17: DeviceCommunicationControl)",
-			Protocols:   []config.Protocol{{Name: "udp", Port: "47808"}},
-			ICS: config.ICSPredicate{
-				Protocol:     "bacnet",
-				FunctionCode: []uint8{15, 16, 20, 17},
-			},
-			Log:    true,
-			Action: config.ActionDeny,
-		},
-	}
-}
-
-// OPCUAMonitorOnly returns rules that allow OPC UA browse, read, and
-// subscribe services, and deny write, call, and node management services.
-// Because OPC UA service node IDs exceed uint8 range, they are stored in the
-// Addresses field as string representations.
-func OPCUAMonitorOnly() []config.Rule {
-	return []config.Rule{
-		{
-			ID:          "tpl-opcua-allow-monitor",
-			Description: "Allow OPC UA monitoring services (525: Browse, 629: Read, 785: CreateSubscription, 749: CreateMonitoredItems)",
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "4840"}},
-			ICS: config.ICSPredicate{
-				Protocol:  "opcua",
-				Addresses: []string{"525", "629", "785", "749"},
-				ReadOnly:  true,
-			},
-			Log:    true,
-			Action: config.ActionAllow,
-		},
-		{
-			ID:          "tpl-opcua-deny-write-control",
-			Description: "Deny OPC UA write and control services (671: Write, 710: Call, 486: AddNodes, 498: DeleteNodes)",
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "4840"}},
-			ICS: config.ICSPredicate{
-				Protocol:  "opcua",
-				Addresses: []string{"671", "710", "486", "498"},
 			},
 			Log:    true,
 			Action: config.ActionDeny,

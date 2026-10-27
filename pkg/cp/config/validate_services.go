@@ -9,6 +9,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 func validateServices(s ServicesConfig, ifaces []Interface, zones []Zone) error {
@@ -516,6 +518,9 @@ func validateVPNListenTargets(prefix, zone string, ifaces []string, zoneSet, ifa
 func validateIDS(ids IDSConfig) error {
 	seen := map[string]struct{}{}
 	for _, r := range ids.Rules {
+		if err := ics.ValidateIDS(r.ID, r.Proto); err != nil {
+			return err
+		}
 		if r.ID == "" {
 			return errors.New("ids rule id cannot be empty")
 		}

@@ -7,13 +7,15 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
-// Decoder implements dpi.Decoder for CIP/EtherNet/IP visibility.
+// Decoder implements dpi.StreamDecoder for TCP CIP/EtherNet/IP visibility
+// and dpi.Decoder for UDP I/O traffic.
 type Decoder struct{}
 
 func NewDecoder() *Decoder { return &Decoder{} }
@@ -52,16 +54,28 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		return nil, nil
 	}
 
+	return encapsulationEvents(state, hdr), nil
+}
+
+// encapsulationEvents is shared by TCP stream framing and packet-only UDP.
+func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 	attrs := map[string]any{
-		"command":        CommandName(hdr.Command),
-		"command_code":   hdr.Command,
-		"session_handle": hdr.SessionHandle,
+		"enip_command":        CommandName(hdr.Command),
+		"enip_command_code":   hdr.Command,
+		"enip_session_handle": hdr.SessionHandle,
 	}
 
 	// For commands that carry CIP messages, extract and classify.
 	if cipCommands[hdr.Command] && len(hdr.Data) > 0 {
-		cipMsg, cipErr := ParseCIPMessage(hdr.Data)
-		if cipErr == nil && cipMsg != nil {
+		itemTypes, item, cpfErr := parseCPF(hdr.Data)
+		var cipMsg *CIPMessage
+		if cpfErr == nil {
+			attrs["cpf_item_types"] = strings.Join(itemTypes, ",")
+		}
+		if item != nil {
+			cipMsg, _ = parseCIPFromItem(item)
+		}
+		if cipMsg != nil {
 			attrs["service_code"] = cipMsg.ServiceCode
 			attrs["service_name"] = cipMsg.ServiceName
 			attrs["function_code"] = cipMsg.ServiceCode
@@ -99,7 +113,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 
 				subs := ParseMSPServices(cipMsg.Data)
 				if len(subs) == 0 {
-					return []dpi.Event{parentEv}, nil
+					return []dpi.Event{parentEv}
 				}
 
 				results := make([]dpi.Event, 0, 1+len(subs))
@@ -108,15 +122,18 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 				flowID := state.Key.Hash()
 				for _, sub := range subs {
 					subAttrs := map[string]any{
-						"command":        attrs["command"],
-						"command_code":   attrs["command_code"],
-						"session_handle": attrs["session_handle"],
-						"service_code":   sub.ServiceCode,
-						"service_name":   sub.ServiceName,
-						"function_code":  sub.ServiceCode,
-						"is_write":       sub.IsWrite,
-						"is_control":     sub.IsControl,
-						"msp":            "true",
+						"enip_command":        attrs["enip_command"],
+						"enip_command_code":   attrs["enip_command_code"],
+						"enip_session_handle": attrs["enip_session_handle"],
+						"service_code":        sub.ServiceCode,
+						"service_name":        sub.ServiceName,
+						"function_code":       sub.ServiceCode,
+						"is_write":            sub.IsWrite,
+						"is_control":          sub.IsControl,
+						"msp":                 "true",
+					}
+					if itemTypes, ok := attrs["cpf_item_types"]; ok {
+						subAttrs["cpf_item_types"] = itemTypes
 					}
 					if len(sub.Path) > 0 {
 						subAttrs["cip_path"] = hex.EncodeToString(sub.Path)
@@ -138,7 +155,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 						Timestamp:  now,
 					})
 				}
-				return results, nil
+				return results
 			}
 
 			ev := dpi.Event{
@@ -148,7 +165,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 				Attributes: attrs,
 				Timestamp:  time.Now().UTC(),
 			}
-			return []dpi.Event{ev}, nil
+			return []dpi.Event{ev}
 		}
 	}
 
@@ -160,7 +177,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		Attributes: attrs,
 		Timestamp:  time.Now().UTC(),
 	}
-	return []dpi.Event{ev}, nil
+	return []dpi.Event{ev}
 }
 
 func (d *Decoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {

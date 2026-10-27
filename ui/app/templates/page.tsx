@@ -91,10 +91,7 @@ const PROTO_COLORS: Record<string, string> = {
   modbus: "text-(--amber)",
   dnp3: "bg-purple-500/20 text-purple-300",
   cip: "bg-orange-500/20 text-orange-300",
-  s7comm: "bg-teal-500/20 text-teal-300",
-  mms: "bg-yellow-500/20 text-yellow-300",
-  bacnet: "bg-green-500/20 text-green-300",
-  opcua: "bg-pink-500/20 text-pink-300",
+  iec104: "bg-cyan-500/20 text-cyan-300",
 };
 
 function protoBadgeClass(proto: string): string {

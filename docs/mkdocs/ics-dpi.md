@@ -1,6 +1,6 @@
 # ICS/OT Deep Packet Inspection
 
-containd has **16 native Go protocol decoders: 8 ICS + 8 IT**. Live capture and
+containd has **12 native Go protocol decoders: 4 ICS + 8 IT**. Live capture and
 PCAP analysis share `DefaultDecoders()`. ICS marker and port detector are two
 additional utility registrations, not protocol decoders. Decoding a field does
 not make it an enforceable firewall predicate.
@@ -50,17 +50,17 @@ replacement request:
     "modbus": true,
     "dnp3": true,
     "iec104": true,
-    "cip": false,
-    "s7comm": false,
-    "mms": true,
-    "bacnet": false,
-    "opcua": false
+    "cip": false
   }
 }
 ```
 
-An omitted protocol toggle leaves its decoder enabled. `dpiProtocols` controls
-the IT decoders separately. Enabling a decoder does not create a policy rule.
+The four supported industrial decoders are Modbus/TCP, DNP3, IEC 60870-5-104
+and CIP/EtherNet/IP. CIP is optional and can be disabled. An omitted protocol
+toggle leaves its decoder enabled. `dpiProtocols` controls the IT decoders
+separately. Enabling a decoder does not create a policy rule. For saved
+configurations affected by removed protocol support, see
+[upgrade recovery](config-format.md#unsupported-protocols-during-upgrade).
 
 ## DPI exclusions
 
@@ -127,16 +127,106 @@ and selection reason.
 | Modbus/TCP | TCP 502 | `pkg/dp/ics/modbus` |
 | DNP3 | TCP 20000 | `pkg/dp/ics/dnp3` |
 | IEC 60870-5-104 | TCP 2404 | `pkg/dp/ics/iec104` |
-| CIP/EtherNet/IP | TCP 44818 | `pkg/dp/ics/cip` |
-| S7comm | TCP 102 | `pkg/dp/ics/s7comm` |
-| IEC 61850 MMS | TCP 102 | `pkg/dp/ics/iec61850` |
-| BACnet | UDP 47808 | `pkg/dp/ics/bacnet` |
-| OPC UA | TCP 4840 | `pkg/dp/ics/opcua` |
+| CIP/EtherNet/IP | TCP 44818, UDP 2222 | `pkg/dp/ics/cip` |
 
 The eight IT decoders live in `pkg/dp/itdpi`: DNS, TLS, HTTP, SSH, SMB, NTP, SNMP,
 and RDP. Protocol events carry `proto`, `kind`, `flowId`, timestamp, and a decoder-
 specific attribute map. Inspect emitted events before authoring attribute-based
 [IDS conditions](ids-rules.md).
+
+### Decoded event fields
+
+`GET /api/v1/events` returns decoded events. A Modbus read of ten holding
+registers looks like this:
+
+```json
+{
+  "id": 1,
+  "flowId": "192.168.10.20|192.168.20.5|49152|502|006|0",
+  "proto": "modbus",
+  "kind": "request",
+  "attributes": {
+    "address": 0,
+    "function_code": 3,
+    "ics": true,
+    "is_write": false,
+    "quantity": 10,
+    "raw_hex": "00010000000601030000000a",
+    "transaction_id": 1,
+    "unit_id": 1
+  },
+  "timestamp": "2026-10-26T09:14:02.123Z",
+  "srcIp": "192.168.10.20",
+  "dstIp": "192.168.20.5",
+  "srcPort": 49152,
+  "dstPort": 502,
+  "transport": "tcp"
+}
+```
+
+Live ICS events also carry `ics: true`. Where present, `raw_hex` holds at most
+the first 512 payload bytes (IEC 104: the APDU). An attribute is present only
+when the decoder found its value. The tables list what each ICS decoder emits;
+the value in brackets is the event's `proto`.
+
+| Protocol | `kind` values | Attributes |
+| --- | --- | --- |
+| Modbus/TCP (`modbus`) | `request`, `response`, `exception`, `malformed` | `transaction_id`, `unit_id`, `function_code`, `is_write`, `raw_hex`; data-access fields per function code (see [ICS Firewall Rule Predicates](#ics-firewall-rule-predicates)): requests `address` with `quantity` (1–4, 15, 16; plus `byte_count` for 15, 16), `value` (5, 6), `and_mask`, `or_mask` (22), or `read_address`, `read_quantity`, `write_address`, `write_quantity`, `byte_count` (23); read responses `byte_count` and, for registers, `register_count`; write responses the fields they echo; `sub_function`, `sub_function_name` (code 8); `mei_type` (code 43), `mei_type_name` (MEI type 14); `exception_code`, `exception_description` (exceptions, with `function_code` set to the base code); `error` (malformed) |
+| DNP3 (`dnp3`) | `request`, `response`, `restart` (codes 13, 14), `control` (codes 18, 19), `malformed` | `function_code`, `function_name`, `is_write`, `is_control`, `source_address`, `destination_address`, `direction` (`master` or `outstation`, from the link DIR bit), `iin_flags`, `object_groups` (comma-separated), `qualifier`, `object_count` (first object header), `raw_hex`; `error` (malformed) |
+| IEC 104 (`iec104`) | `apci`, `request`, `response`, `malformed`, `unsupported` | See below |
+| CIP/EtherNet/IP (`cip`) | `request`, `response`, `session` (EtherNet/IP commands without a CIP message) | See below |
+
+The DNP3 decoder emits one event per link frame that starts an application
+fragment. It does not reassemble fragments that span several link frames.
+
+IEC 104 events carry `direction` (`request` from the client, `response` from
+the server), `session_id`, `apdu_id`, `apci_type` (`I`, `S` or `U`) and
+`raw_hex`. Further attributes depend on the frame:
+
+| Frame | Attributes |
+| --- | --- |
+| S-format | `class: system`, `is_write: false`, `receive_sequence` |
+| U-format | `class: system`, `is_write: false`, `u_function` (`startdt_act`, `startdt_con`, `stopdt_act`, `stopdt_con`, `testfr_act`, `testfr_con`) |
+| I-format | `send_sequence`, `receive_sequence`, `type_id`, `class`, `vsq`, `object_count`, `sq`, `cause`, `cot_negative`, `cot_test`, `originator`, `ca`, `is_write` |
+| Information object | `ioa`, `object_index`, and by type `value`, `quality`, `qualifier`, `select`, `transient`, `value_invalid`, `source_time`, `time_valid`, `time_summer` |
+| Malformed or unsupported | `error`, with the identity attributes the decoder could read |
+
+An I-format APDU emits one event per information object. Types outside the
+supported set emit `unsupported`.
+
+CIP events report each EtherNet/IP layer as attributes. The protocol name `cip` covers the whole EtherNet/IP stack: one decoder toggle
+and one protocol match. The name `enip` is rejected at rule, signature, Sigma
+and toggle boundaries with: `EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`.
+
+TCP CIP on port 44818 is reassembled and framed per EtherNet/IP encapsulation,
+including split headers and bodies and multiple encapsulations in one segment.
+UDP 2222 remains packet-only, without stream reassembly.
+
+| CIP event layer | Attributes |
+| --- | --- |
+| Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle` |
+| Common Packet Format (CPF) | `cpf_item_types`: all item types in packet order as one comma-joined lowercase hex string with no spaces, such as `"0x0000,0x00b2"`, on SendRRData/SendUnitData with a valid item list |
+| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; MSP parents also carry `multi_service_count`, sub-events carry `msp` |
+
+MSP sub-events retain the encapsulation and CPF fields. Non-CPF commands such as
+RegisterSession have no `cpf_item_types`. The encapsulation fields replace
+`command`, `command_code` and `session_handle`; CIP events do not emit aliases.
+
+For a `cip` IDS rule, this condition matches a connected-data CPF item using
+`contains "0x00b1"`:
+
+```json
+{"field": "attr.cpf_item_types", "op": "contains", "value": "0x00b1"}
+```
+
+The TLS decoder emits a `client_hello` event with `sni`, `alpn`,
+`tls_version`, `cipher_suites`, `extensions`, `ja3`, `ja3_hash`, `src_port`,
+`dst_port` and `transport`. `ja3` follows the JA3 layout but is **not
+reference JA3**: it holds the ClientHello version, at most 50 cipher suites and
+the extension types. GREASE values are not removed, and the elliptic-curve and
+point-format fields are always empty. `ja3_hash` is the MD5 of that string. Do
+not compare it with JA3 values from other tools. `tls_version` is the
+ClientHello version field, so TLS 1.3 clients usually show `TLS1.2`.
 
 ## ICS Firewall Rule Predicates
 
@@ -145,7 +235,7 @@ than IEC 104 are:
 
 | JSON field | Meaning and limits |
 | --- | --- |
-| `protocol` | `modbus`, `dnp3`, `cip`, `s7comm`, `mms`, `bacnet`, or `opcua` |
+| `protocol` | `modbus`, `dnp3`, or `cip` |
 | `functionCode` | Array of numeric function/service codes, 0–255; evaluated from `function_code` |
 | `unitId` | Optional Modbus unit ID, 0–255; evaluated from `unit_id` |
 | `addresses` | Array of address entries, each one value or an inclusive `low-high` range (see below); evaluated against the addresses the message touches |
@@ -191,11 +281,34 @@ with `quantity` (function codes 1–4, 15, 16, plus `byte_count` for 15 and 16),
 replies have `byte_count` and, for registers, `register_count`; write replies
 have the fields they echo.
 
+Example: a firewall rule that allows Modbus reads of holding registers 0–99
+(function code 3) on unit 1, over TCP 502 from the `lan` zone to the `dmz` zone:
+
+```json
+{
+  "id": "modbus-read-setpoints",
+  "sourceZones": ["lan"],
+  "destZones": ["dmz"],
+  "protocols": [{"name": "tcp", "port": "502"}],
+  "ics": {
+    "protocol": "modbus",
+    "functionCode": [3],
+    "unitId": 1,
+    "addresses": ["0-99"],
+    "direction": "request",
+    "mode": "learn"
+  },
+  "action": "ALLOW"
+}
+```
+
+With `mode: "enforce"` the rule needs a nonzero `dataplane.nfqueueGroup` (see
+[DPI Modes](#dpi-modes)).
+
 Only metadata actually emitted by the decoder can satisfy these conditions.
 There are no firewall selectors for DNP3 station addresses/object headers, CIP
-instance/attribute/EPATH/MSP, S7 DB numbers, MMS named variables/domains, BACnet
-objects/properties, or OPC UA message/service/Node ID patterns. Decoder telemetry
-and IDS attributes are not additional firewall selector fields.
+instance/attribute/EPATH/MSP. Decoder telemetry and IDS attributes are not
+additional firewall selector fields.
 
 ICS messages follow the firewall's precedence (see
 [Actions and precedence](policy-model.md#actions-and-precedence)): any matching
@@ -300,6 +413,112 @@ Timers run without incoming packets. State is bounded by the session table,
 discarded when observation ends, and fresh for each reconnect. These alerts
 never change firewall decisions, enforcement health, or learned rules.
 
+## Protocol anomaly detection
+
+The anomaly detector checks every decoded ICS event. Each finding is stored in
+the detector and recorded as an `ids` / `anomaly` event with `anomaly_type`,
+`protocol`, `severity`, `message`, `source_ip` and `dest_ip`. Findings are
+observations only: they never block traffic or change firewall decisions.
+Detectors have no tuning controls.
+
+| `type` | Severity | Finding |
+| --- | --- | --- |
+| `malformed_frame` | medium | An ICS event with an `error` attribute: malformed Modbus, DNP3 or IEC 104 data, an unsupported IEC 104 type, or an IEC 104 role violation |
+| `protocol_violation` | high | Modbus write to broadcast unit ID 0 |
+| `protocol_violation` | medium | Modbus response whose transaction ID matches no earlier request in the opposite direction |
+| `protocol_violation` | critical | DNP3 cold or warm restart (function code 13 or 14) from an outstation |
+| `protocol_violation` | high | Every DNP3 unsolicited response (function code 130) |
+| `protocol_violation` | high | DNP3 request with an undefined function code (34–127) |
+| `protocol_violation` | critical | CIP message with service code 0x07 (Stop), request or reply |
+| `protocol_violation` | high | CIP message with service code 0x06 (Start), request or reply |
+| `protocol_violation` | high | IEC 104 role violation: a monitor type (1–44) from the client, or a control or system activation/deactivation from the server |
+| `protocol_violation` | high | More than one ICS protocol from one source to one destination address |
+| `rate_anomaly` | high | More than 1,000 ICS events from one source to one destination address in the current and previous clock minute |
+| `rate_anomaly` | critical | More than 100 write events (`is_write: true`) in the same window |
+
+These checks use the source and destination IP addresses, not ports. While a
+pair is above a rate limit, each further event raises another finding. After a
+pair shows a second protocol, each further ICS event of that pair raises that
+finding again. IEC 104 rate counts use one event per APDU. The `ids` /
+`anomaly` event of a finding
+from an IEC 104 event also copies that event's identity attributes, such as
+`session_id`, `apdu_id`, `type_id`, `ca` and `ioa`.
+
+`GET /api/v1/anomalies` lists stored findings, newest first. `limit` defaults
+to 200; values outside 1–5000 use the default. Each entry has `type`,
+`protocol`, `severity`, `message`, `source_ip`, `dest_ip`, `attributes` and
+`timestamp`. The detector keeps the 4,096 newest findings. Admins clear the
+findings and the detector's tracking state with `DELETE /api/v1/anomalies`.
+An engine restart, or a committed change to the `dataplane` settings, also
+clears them. The [IEC 104 APCI anomalies](#live-iec-104-apci-anomalies) appear
+only as events, not in this list.
+
+## Signatures
+
+The signature engine compares every decoded event with the loaded signatures.
+It loads **20 built-in signatures**: 13 for Modbus, DNP3, CIP and ICS write
+storms, and 7 for IEC 104. A match is recorded as an `ids` /
+`signature_match` event with `signature_id`, `name`, `severity` and
+`description`, plus the identity attributes of a matched IEC 104 event.
+Matches are observations only and never block traffic.
+
+| Request | Purpose |
+| --- | --- |
+| `GET /api/v1/signatures` | List the loaded signatures, built-in and custom |
+| `POST /api/v1/signatures` | Add a custom signature (admin) |
+| `DELETE /api/v1/signatures/{id}` | Remove a loaded signature, built-in or custom (admin) |
+| `GET /api/v1/signatures/matches` | List recent matches, newest first; `limit` defaults to 100 |
+
+A custom signature has a unique `id` and at least one condition. `name`,
+`description`, `severity`, `protocol` and `references` are optional. An empty
+`protocol` matches every protocol; otherwise it must equal the event's `proto`,
+in any letter case. All conditions must match. Each condition names a `field`
+(`proto`, `kind`, `flow_id` or an attribute name from
+[Decoded event fields](#decoded-event-fields)), an `op` and a `value`:
+
+| `op` | Matches when the field |
+| --- | --- |
+| `equals` (`eq`) | equals the value; numbers compare by value |
+| `in` | equals one member of the value array |
+| `gt`, `gte`, `lt`, `lte` | compares as stated; both sides must be numbers |
+| `contains` | contains the value as text |
+| `has_token` | is a comma-separated list or a string list that contains the value as a whole token |
+| `regex` | matches the regular expression (Go RE2 syntax) |
+
+Validation does not check `op`; a condition with another `op` never matches.
+An optional `threshold` of `count` (at least 2) and `windowSeconds` (at least 1)
+alerts once per flow ID when that many events match in one window. The window
+starts at the first matching event. The signature does not alert again for that
+flow ID until the window has passed.
+
+```json
+{
+  "id": "SITE-MODBUS-WRITE-BURST",
+  "name": "Modbus register write burst to unit 1",
+  "severity": "high",
+  "protocol": "modbus",
+  "conditions": [
+    {"field": "function_code", "op": "in", "value": [6, 16]},
+    {"field": "unit_id", "op": "equals", "value": 1}
+  ],
+  "threshold": {"count": 10, "windowSeconds": 60}
+}
+```
+
+`POST` returns `200` with the signature, `400` for an invalid one and `409`
+when a loaded signature already has that ID. `DELETE` returns `204`, or `404`
+for an unknown ID. Additions and removals are audited as `signatures.add` and
+`signatures.delete`.
+
+**Signature changes are live and temporary.** They are not part of the
+candidate or running configuration, and export does not include them. An
+engine restart, or a committed change to the `dataplane` settings, rebuilds
+the signature engine with the 23 built-in signatures. This removes custom
+signatures, restores deleted built-in signatures and clears the match list.
+The engine keeps the 4,096 newest matches. Each match has `signature`,
+`timestamp` and the matched `event`, whose keys are `FlowID`, `Proto`, `Kind`,
+`Attributes` and `Timestamp`.
+
 ## PCAP Offline Analysis
 
 The public management endpoints `POST /api/v1/pcap/analyze` (multipart `file`) and
@@ -316,14 +535,18 @@ endpoints are not the public policy-generation interface. See
 ## Events and templates
 
 Live telemetry includes inventory, anomalies, signatures, and protocol statistics.
-The passive IEC 104 inventory is separate from the learner. Native IDS rules and the built-in signature engine
-are separate consumers. See [Logging and Evidence](logging-evidence.md) for
-bounded retention, queries, and syslog forwarding.
+The passive IEC 104 inventory is separate from the learner. Native IDS rules and
+the [signature engine](#signatures) are separate consumers; see also
+[Protocol anomaly detection](#protocol-anomaly-detection) and
+[Decoded event fields](#decoded-event-fields). See
+[Logging and Evidence](logging-evidence.md) for bounded retention, queries, and
+syslog forwarding.
 
-Seven ICS API templates provide two Modbus variants and DNP3, S7comm, CIP,
-BACnet, and OPC UA examples. Purdue and maintenance-window templates belong to
-the general registry, not this seven-template set. Applying templates stages
-candidate changes; see [Policy Model](policy-model.md#templates-and-preview).
+Four ICS API templates provide two Modbus variants, one DNP3 example, and one
+CIP example. There is no IEC 104 template. Purdue and maintenance-window
+templates belong to the general registry, not this four-template set. Applying
+templates stages candidate changes; see
+[Policy Model](policy-model.md#templates-and-preview).
 
 ## IEC 104 Holdback Diagnostics
 

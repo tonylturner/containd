@@ -25,11 +25,10 @@ outside its control.
 
 ## Protocol coverage
 
-`DefaultDecoders()` supplies **16 protocol decoders: 8 ICS + 8 IT**, shared with
+`DefaultDecoders()` supplies **12 protocol decoders: 4 ICS + 8 IT**, shared with
 PCAP analysis:
 
-- ICS: Modbus, DNP3, IEC 60870-5-104, CIP/EtherNet/IP, S7comm, IEC 61850 MMS,
-  BACnet, and OPC UA.
+- ICS: Modbus/TCP, DNP3, IEC 60870-5-104, and CIP/EtherNet/IP.
 - IT: DNS, TLS, HTTP, SSH, SMB, NTP, SNMP, and RDP.
 - ICS marker and port detector are additional utility registrations, not protocols.
 

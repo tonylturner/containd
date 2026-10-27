@@ -37,10 +37,11 @@ type Options struct {
 }
 
 type mgmtStores struct {
-	store      config.Store
-	auditStore audit.Store
-	userStore  users.Store
-	bootEvent  *dpevents.Event
+	store       config.Store
+	auditStore  audit.Store
+	userStore   users.Store
+	bootEvent   *dpevents.Event
+	scopeEvents []dpevents.Event
 }
 
 type mgmtListenerConfig struct {
@@ -134,7 +135,13 @@ func Run(ctx context.Context, opts Options) error {
 		serviceManager.event = bound.event
 	}
 	runtimeCfg, listenerCfg = bound.cfg, bound.listener
-	publishBoundManagement(listenerCfg, bound.binds)
+	record := &runtimeRecordPublisher{path: RuntimeRecordPath(), served: publishBoundManagement(listenerCfg, bound.binds)}
+	publishRuntimeRecord(logger, record)
+	defer func() {
+		if err := record.remove(); err != nil {
+			logger.Warnf("failed to remove management runtime record: %v", err)
+		}
+	}()
 	// Best-effort initial service render on startup.
 	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
@@ -152,6 +159,14 @@ func Run(ctx context.Context, opts Options) error {
 			}
 		}
 		out = append(out, serviceManager.ListTelemetryEvents(limit)...)
+		migrationCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		migrations, err := publishScopeMigrations(migrationCtx, stores)
+		if err != nil {
+			logger.Errorw("deliver industrial scope migration telemetry", "error", err)
+		} else {
+			out = append(out, migrations...)
+		}
 		return out
 	})
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
@@ -161,6 +176,9 @@ func Run(ctx context.Context, opts Options) error {
 
 	// Start SSH server (admin-only) for interactive CLI.
 	sshAddr, sshEnabled := startSSH(ctx, logger, runtimeCfg, stores.store, stores.userStore, stores.auditStore, ipIndex, optionalFault, sshServer.Store)
+	if sshEnabled {
+		publishRuntimeRecord(logger, record)
+	}
 	printStartupHints(logger, listenerCfg.httpAddr, listenerCfg.httpLoopbackAddr, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, listenerCfg.enableHTTP, listenerCfg.enableHTTPS, sshAddr, sshEnabled)
 	return serveMgmtServers(ctx, bound.binds.servers, bound.binds.listeners)
 }
@@ -247,6 +265,12 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		stores.userStore.Close()
 		return fail(err)
 	}
+	stores.scopeEvents, err = publishScopeMigrations(context.Background(), stores)
+	if err != nil {
+		stores.auditStore.Close()
+		stores.userStore.Close()
+		return fail(err)
+	}
 	stores.bootEvent = event
 	return stores, cfg, nil
 }
@@ -325,10 +349,21 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 // bound management: every compile in this process admits them until the
 // next start, and the console and SSH CLI sessions call them on loopback
 // (see httpapi.LoopbackManagementAPI). SSH is not bound yet: startSSH adds
-// it once its socket binds (publishBoundSSH).
-func publishBoundManagement(lc mgmtListenerConfig, b mgmtBinds) {
-	httpapi.SetServedManagement(lc.servedManagement(b))
+// it once its socket binds (publishBoundSSH). It returns what the listeners
+// serve, for the runtime record.
+func publishBoundManagement(lc mgmtListenerConfig, b mgmtBinds) httpapi.ServedManagement {
+	served := lc.servedManagement(b)
+	httpapi.SetServedManagement(served)
 	config.SetBoundManagementListeners(b.record())
+	return served
+}
+
+// publishRuntimeRecord writes the bound management for local CLIs outside
+// this process (see LocalManagementAPI).
+func publishRuntimeRecord(logger *zap.SugaredLogger, record *runtimeRecordPublisher) {
+	if err := record.publish(); err != nil {
+		logger.Warnf("failed to write management runtime record %s: %v; containd cli outside SSH reports management as not running", record.path, err)
+	}
 }
 
 // publishBoundSSH adds the SSH socket bound at addr to the bound management
