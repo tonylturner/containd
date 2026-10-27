@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 // DiscoveredAsset represents an ICS device discovered from observed traffic.
@@ -44,7 +45,8 @@ func New() *Inventory {
 }
 
 // RecordEvent extracts ICS metadata from a DPI event and updates the
-// inventory for both source and destination IPs.
+// inventory for both wire IPs. Roles use the connection direction retained in
+// FlowID, never the event kind (which may be exception, restart or session).
 func (inv *Inventory) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
 	proto := strings.ToLower(ev.Proto)
 	switch proto {
@@ -77,18 +79,17 @@ func (inv *Inventory) recordModbus(srcIP, dstIP string, ev dpi.Event) {
 	inv.mu.Lock()
 	defer inv.mu.Unlock()
 
-	// Source is the master (sends requests).
+	srcRole, dstRole := eventRoles(srcIP, dstIP, ev, "master", "slave")
 	src := inv.getOrCreate(srcIP, "modbus", now)
-	src.Role = "master"
+	setRole(src, srcRole)
 	src.LastSeen = now
 	src.PacketCount++
 	src.FunctionCodes = addUint8Unique(src.FunctionCodes, fc)
 	src.UnitIDs = addUint8Unique(src.UnitIDs, unitID)
 	src.Peers = inv.addPeer(src.Peers, dstIP)
 
-	// Destination is the slave (receives requests).
 	dst := inv.getOrCreate(dstIP, "modbus", now)
-	dst.Role = "slave"
+	setRole(dst, dstRole)
 	dst.LastSeen = now
 	dst.PacketCount++
 	dst.FunctionCodes = addUint8Unique(dst.FunctionCodes, fc)
@@ -117,8 +118,9 @@ func (inv *Inventory) recordDNP3(srcIP, dstIP string, ev dpi.Event) {
 	inv.mu.Lock()
 	defer inv.mu.Unlock()
 
+	srcRole, dstRole := eventRoles(srcIP, dstIP, ev, "master", "slave")
 	src := inv.getOrCreate(srcIP, "dnp3", now)
-	src.Role = "master"
+	setRole(src, srcRole)
 	src.LastSeen = now
 	src.PacketCount++
 	src.FunctionCodes = addUint8Unique(src.FunctionCodes, fc)
@@ -126,7 +128,7 @@ func (inv *Inventory) recordDNP3(srcIP, dstIP string, ev dpi.Event) {
 	src.Peers = inv.addPeer(src.Peers, dstIP)
 
 	dst := inv.getOrCreate(dstIP, "dnp3", now)
-	dst.Role = "slave"
+	setRole(dst, dstRole)
 	dst.LastSeen = now
 	dst.PacketCount++
 	dst.FunctionCodes = addUint8Unique(dst.FunctionCodes, fc)
@@ -148,19 +150,37 @@ func (inv *Inventory) recordCIP(srcIP, dstIP string, ev dpi.Event) {
 	inv.mu.Lock()
 	defer inv.mu.Unlock()
 
+	srcRole, dstRole := eventRoles(srcIP, dstIP, ev, "client", "server")
 	src := inv.getOrCreate(srcIP, "cip", now)
-	src.Role = "client"
+	setRole(src, srcRole)
 	src.LastSeen = now
 	src.PacketCount++
 	src.FunctionCodes = addUint8Unique(src.FunctionCodes, sc)
 	src.Peers = inv.addPeer(src.Peers, dstIP)
 
 	dst := inv.getOrCreate(dstIP, "cip", now)
-	dst.Role = "server"
+	setRole(dst, dstRole)
 	dst.LastSeen = now
 	dst.PacketCount++
 	dst.FunctionCodes = addUint8Unique(dst.FunctionCodes, sc)
 	dst.Peers = inv.addPeer(dst.Peers, srcIP)
+}
+
+func eventRoles(srcIP, dstIP string, ev dpi.Event, initiator, responder string) (string, string) {
+	key, ok := flow.ParseKey(ev.FlowID)
+	if !ok || key.SrcIP.String() != srcIP || key.DstIP.String() != dstIP {
+		return "", "" // No connection evidence: do not invent or erase roles.
+	}
+	if key.Dir == flow.DirReverse {
+		return responder, initiator
+	}
+	return initiator, responder
+}
+
+func setRole(asset *DiscoveredAsset, role string) {
+	if role != "" {
+		asset.Role = role
+	}
 }
 
 // getOrCreate returns the existing asset or creates a new one. Must be called with inv.mu held.

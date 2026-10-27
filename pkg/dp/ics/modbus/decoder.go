@@ -101,9 +101,7 @@ func aduEvent(state *flow.State, frame *TCPFrame, adu []byte) dpi.Event {
 		eventfields.KeyFunctionCode: fc,
 	}
 	kind := "request"
-	// The service port also identifies replies in offline captures that have
-	// no handshake-derived flow direction.
-	if state != nil && (state.Key.Dir == flow.DirReverse || state.Key.SrcPort == 502) {
+	if state != nil && state.Key.Dir == flow.DirReverse {
 		kind = "response"
 	}
 

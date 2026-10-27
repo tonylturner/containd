@@ -4,15 +4,18 @@
 package inventory
 
 import (
+	"net"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 func TestRecordModbusCreatesAssets(t *testing.T) {
 	inv := New()
 	ev := dpi.Event{
+		FlowID:    inventoryKey("10.0.0.1", "10.0.0.2", 502).Hash(),
 		Proto:     "modbus",
 		Kind:      "request",
 		Timestamp: time.Now().UTC(),
@@ -52,6 +55,7 @@ func TestRecordModbusCreatesAssets(t *testing.T) {
 func TestRecordModbusRoleClassification(t *testing.T) {
 	inv := New()
 	ev := dpi.Event{
+		FlowID:    inventoryKey("192.168.1.10", "192.168.1.20", 502).Hash(),
 		Proto:     "modbus",
 		Kind:      "request",
 		Timestamp: time.Now().UTC(),
@@ -172,6 +176,7 @@ func TestRecordDNP3(t *testing.T) {
 func TestRecordCIP(t *testing.T) {
 	inv := New()
 	ev := dpi.Event{
+		FlowID:    inventoryKey("10.0.0.1", "10.0.0.2", 44818).Hash(),
 		Proto:     "cip",
 		Kind:      "request",
 		Timestamp: time.Now().UTC(),
@@ -257,5 +262,65 @@ func TestNonICSEventIgnored(t *testing.T) {
 	inv.RecordEvent("10.0.0.1", "10.0.0.2", ev)
 	if len(inv.List()) != 0 {
 		t.Fatal("non-ICS events should be ignored")
+	}
+}
+
+func inventoryKey(src, dst string, port uint16) flow.Key {
+	return flow.Key{SrcIP: net.ParseIP(src), DstIP: net.ParseIP(dst), SrcPort: 502, DstPort: port, Proto: 6}
+}
+
+func TestRolesFollowConnection(t *testing.T) {
+	for _, tc := range []struct {
+		proto          string
+		port           uint16
+		client, server string
+	}{
+		{"modbus", 502, "master", "slave"}, {"dnp3", 20000, "master", "slave"}, {"cip", 44818, "client", "server"},
+	} {
+		for _, replyFirst := range []bool{false, true} {
+			inv := New()
+			key := inventoryKey("10.0.0.1", "10.0.0.2", tc.port)
+			keys := []flow.Key{key, key.Reversed(), key.Reversed()}
+			if replyFirst {
+				keys = []flow.Key{key.Reversed(), key, key.Reversed()}
+			}
+			for i, k := range keys {
+				// Kind deliberately disagrees: direction is connection evidence, not
+				// exception/restart/session classification or the DNP3 link DIR bit.
+				ev := dpi.Event{FlowID: k.Hash(), Proto: tc.proto, Kind: []string{"response", "restart", "exception"}[i], Attributes: map[string]any{
+					"source_address": uint16(10), "destination_address": uint16(20), "direction": "master",
+				}}
+				inv.RecordEvent(k.SrcIP.String(), k.DstIP.String(), ev)
+				client, _ := inv.Get("10.0.0.1")
+				server, _ := inv.Get("10.0.0.2")
+				if client.Role != tc.client || server.Role != tc.server {
+					t.Fatalf("%s replyFirst=%v: client=%+v server=%+v", tc.proto, replyFirst, client, server)
+				}
+			}
+			if tc.proto == "dnp3" {
+				client, _ := inv.Get("10.0.0.1")
+				if len(client.StationAddresses) != 2 {
+					t.Fatalf("lost wire station addresses: %+v", client)
+				}
+			}
+		}
+	}
+}
+
+func TestRolesWithoutConnectionEvidence(t *testing.T) {
+	inv := New()
+	key := inventoryKey("10.0.0.1", "10.0.0.2", 502)
+	for _, id := range []string{"", "unrelated|1", key.Reversed().Hash()} {
+		inv.RecordEvent("10.0.0.1", "10.0.0.2", dpi.Event{Proto: "modbus", Kind: "response", FlowID: id})
+		client, _ := inv.Get("10.0.0.1")
+		if client.Role != "" {
+			t.Fatalf("invented role: %+v", client)
+		}
+	}
+	inv.RecordEvent("10.0.0.1", "10.0.0.2", dpi.Event{Proto: "modbus", FlowID: key.Hash()})
+	inv.RecordEvent("10.0.0.1", "10.0.0.2", dpi.Event{Proto: "modbus", Kind: "exception"})
+	client, _ := inv.Get("10.0.0.1")
+	if client.Role != "master" {
+		t.Fatalf("erased known role: %+v", client)
 	}
 }

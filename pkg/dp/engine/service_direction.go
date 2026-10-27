@@ -11,24 +11,5 @@ import (
 // icsServiceDirection is a midstream hint only: observed handshakes and
 // existing connection state take precedence, including on unusual ports.
 func icsServiceDirection(pkt capture.Packet) (flow.Direction, bool) {
-	known := func(port uint16) bool {
-		switch pkt.Proto {
-		case 6:
-			switch port {
-			case 502, 20000, 44818, iec104Port:
-				return true
-			}
-		case 17:
-			return port == 2222
-		}
-		return false
-	}
-	src, dst := known(pkt.SrcPort), known(pkt.DstPort)
-	if src == dst {
-		return flow.DirForward, false
-	}
-	if src {
-		return flow.DirReverse, true
-	}
-	return flow.DirForward, true
+	return flow.ICSServiceDirection(pkt.Proto, pkt.SrcPort, pkt.DstPort)
 }
