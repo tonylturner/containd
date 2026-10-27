@@ -9,7 +9,7 @@ behaviour. The plant's own state is the evidence, never a client timeout.
 |---|---|---|
 | `compose.yml` | lib60870 RTU and control centre on two disposable networks, the locally built containd firewall routing between them, management published to 127.0.0.1 only, no host networking | Apache-2.0 |
 | `endpoint/` | `iec104ep` (RTU, control centre, one-shot command client) on lib60870-C v2.4.1, built only into the harness image | **GPLv3** |
-| `malformer/` | pure-Go client for split, coalesced, malformed, unsupported and same-5-tuple cases; never links lib60870 | Apache-2.0 |
+| `malformer/` | pure-Go client for split, coalesced, malformed, unsupported, reserved-bit, role-violation and same-5-tuple cases; never links lib60870 | Apache-2.0 |
 | `capture/` | regenerates the reference pcaps in `testdata/` | Apache-2.0 |
 | `testdata/` | lib60870 wire captures, Wireshark expected-decode tables, provenance | Apache-2.0 test data |
 | `preflight/` | NFQUEUE and raw-RST kernel harness (`scripts/preflight-iec104.sh`) | Apache-2.0 |
@@ -72,6 +72,22 @@ The run also checks live observability:
 
 Inventory snapshots, diagnostics, metrics, anomaly events and alerts are
 saved beside `results.json`.
+
+The parsing gates (`scripts/smoke-iec104-lib-parsing.sh`) run the malformer
+scenarios under strict parsing (`dataplane.dpiIcsParsing.iec104 = "strict"`),
+under strict parsing with a learn policy, and under the tolerant default.
+Strict resets every APDU with a conformance finding before the RTU, with
+decision reason `nonconformant` when an ALLOW would otherwise have matched
+(the `reserved-bits` command) and reason `rule` when the DENY rule matches.
+Tolerant evaluates the decoded fields: the `reserved-bits` command reaches
+the RTU twice on one connection with two allow decisions and exactly one
+`passed` conformance alert, while `malformed-dcs` (its IOA is unreadable, so
+the ALLOW cannot match), `unsupported-type` and `role-violation` fall to the
+DENY rule and reset. `bad-length` (a lost frame boundary) resets in both
+modes without a conformance alert. Each gate's events, selected by the
+client port the malformer prints (`client_port=`), are saved as
+`parsing-<gate>.json`; `-repeat N` sends N consecutive I-frames of one
+scenario on one connection.
 
 Two assertions use extra tooling. The stale-retransmit case (`malformer
 -scenario stale-retransmit`) opens a raw-socket TCP session (ports 40405 and

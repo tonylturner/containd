@@ -8,11 +8,12 @@
 //
 // It opens one TCP connection, optionally completes the APCI handshake
 // (STARTDT act, wait for con), then writes a named scenario's bytes — whole,
-// split into small segments, or several APDUs coalesced into one segment — and
-// reports what it observed. Exit 0 means the scenario ran and its send
-// expectation held; non-zero means a connection or expectation failure. The
-// harness judges prevention from the firewall and the RTU state, not from
-// this tool's exit code alone.
+// split into small segments, several APDUs coalesced into one segment, or
+// -repeat consecutive I-frames of the same ASDU — and reports what it
+// observed, including the connection's client port. Exit 0 means the
+// scenario ran and its send expectation held; non-zero means a connection or
+// expectation failure. The harness judges prevention from the firewall and
+// the RTU state, not from this tool's exit code alone.
 //
 // Scenarios (see test/iec104/README.md for the wire layout of each):
 //
@@ -31,6 +32,11 @@
 //	malformed-dcs      a type 46 command with the illegal DCS value 3
 //	unsupported-type   an I-frame with Type ID 104 (not used in IEC 104),
 //	                   sent without STARTDT
+//	reserved-bits      a valid type 46 double-command EXECUTE whose I-frame
+//	                   sets the reserved bit of control octet 3: readable
+//	                   content inside a well-framed APDU
+//	role-violation     a monitor-direction single point (Type ID 1, COT 3,
+//	                   IOA 1002) sent by the client, which may not send it
 //	stale-retransmit   (Linux only) a raw-socket TCP session that sends a
 //	                   forbidden command, then, after a second handshake from
 //	                   another port, injects a later segment of the first
@@ -108,6 +114,31 @@ func interrogation(ca uint16) []byte {
 	return append(asdu, 20) // QOI = station
 }
 
+// singlePoint builds an M_SP_NA_1 (type 1) spontaneous (COT 3) single-point
+// ASDU with SIQ 0 (off, good quality): monitor-direction content that only a
+// server may send.
+func singlePoint(ca uint16, ioa uint32) []byte {
+	asdu := asduHeader(1, 3 /* spontaneous */, ca)
+	asdu = append(asdu, ioa3(ioa)...)
+	return append(asdu, 0x00)
+}
+
+// iFrames builds repeat consecutive I-frames of asdu with N(S) counting up
+// from 0 and N(R) 0, so a conforming peer accepts each one; repeat below 1
+// means one frame. reserved sets the reserved bit of control octet 3 on
+// every frame: the sequence numbers stay readable, the APDU stays framed.
+func iFrames(repeat int, asdu []byte, reserved bool) []byte {
+	var out []byte
+	for i := 0; i < max(repeat, 1); i++ {
+		frame := iFrame(uint16(i), 0, asdu)
+		if reserved {
+			frame[4] |= 0x01
+		}
+		out = append(out, frame...)
+	}
+	return out
+}
+
 // checksum16 is the one's-complement Internet checksum of b.
 func checksum16(b []byte) uint16 {
 	var sum uint32
@@ -177,6 +208,7 @@ type result struct {
 	sent   int
 	note   string
 	socket string
+	port   int
 	fatal  error
 }
 
@@ -191,6 +223,7 @@ type options struct {
 	gapMS    int
 	lport    int
 	hold     time.Duration
+	repeat   int
 }
 
 // dial connects to addr, from local port lport when it is non-zero. The
@@ -298,6 +331,9 @@ func run(o options) result {
 		return r
 	}
 	defer conn.Close()
+	if tcp, ok := conn.LocalAddr().(*net.TCPAddr); ok {
+		r.port = tcp.Port
+	}
 
 	gap := time.Duration(o.gapMS) * time.Millisecond
 
@@ -363,7 +399,21 @@ func run(o options) result {
 			return r
 		}
 		r.note = "DCS=3 (illegal double command)"
-		r.sent, r.fatal = writeAll(conn, iFrame(0, 0, doubleCommand(ca, ioa, 3, false)))
+		r.sent, r.fatal = writeAll(conn, iFrames(o.repeat, doubleCommand(ca, ioa, 3, false), false))
+	case "reserved-bits":
+		if err := handshake(conn); err != nil {
+			r.fatal = err
+			return r
+		}
+		r.note = fmt.Sprintf("dc-execute x%d with I-frame reserved bit set", max(o.repeat, 1))
+		r.sent, r.fatal = writeAll(conn, iFrames(o.repeat, doubleCommand(ca, ioa, byte(dcs), false), true))
+	case "role-violation":
+		if err := handshake(conn); err != nil {
+			r.fatal = err
+			return r
+		}
+		r.note = "Type ID 1 (monitor direction) from the client"
+		r.sent, r.fatal = writeAll(conn, iFrames(o.repeat, singlePoint(ca, ioa), false))
 	case "unsupported-type":
 		// Type ID 104 (C_RD_NA_1 / IEC-101 test) is not used in 104; B
 		// reports it unsupported. Sent without a handshake on purpose.
@@ -403,21 +453,23 @@ func main() {
 	gapMS := flag.Int("gap-ms", 20, "gap between segments for split sends")
 	lport := flag.Int("lport", 0, "local TCP port to bind (0 = ephemeral)")
 	hold := flag.Duration("hold", 0, "after sending, wait up to this long for the peer to close or reset")
+	repeat := flag.Int("repeat", 1, "consecutive I-frames of the ASDU on one connection (malformed-dcs, reserved-bits, role-violation)")
 	flag.Parse()
 
 	if *addr == "" || *scenario == "" {
-		fmt.Fprintln(os.Stderr, "usage: malformer -addr host:port -scenario NAME [-ca N -ioa N -dcs N -chunk N -gap-ms N -lport N -hold DURATION]")
+		fmt.Fprintln(os.Stderr, "usage: malformer -addr host:port -scenario NAME [-ca N -ioa N -dcs N -chunk N -gap-ms N -lport N -hold DURATION -repeat N]")
 		os.Exit(2)
 	}
 
 	r := run(options{
 		addr: *addr, scenario: *scenario, ca: uint16(*ca), ioa: uint32(*ioa),
-		dcs: *dcs, chunk: *chunk, gapMS: *gapMS, lport: *lport, hold: *hold,
+		dcs: *dcs, chunk: *chunk, gapMS: *gapMS, lport: *lport, hold: *hold, repeat: *repeat,
 	})
 	if r.fatal != nil {
 		fmt.Fprintf(os.Stderr, "%s: FAILED: %v\n", r.name, r.fatal)
 		os.Exit(1)
 	}
-	// The last field is machine-read by scripts/smoke-iec104.sh.
-	fmt.Printf("%s: sent %d bytes %s client_socket=%s\n", r.name, r.sent, r.note, r.socket)
+	// The client_port and client_socket fields are machine-read by
+	// scripts/smoke-iec104.sh and its parsing helpers.
+	fmt.Printf("%s: sent %d bytes %s client_port=%d client_socket=%s\n", r.name, r.sent, r.note, r.port, r.socket)
 }

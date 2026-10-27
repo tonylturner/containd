@@ -11,10 +11,21 @@ modes:
                   segments 300 ms apart
   read-coalesced  two reads (transactions 1 and 2) in one TCP segment
   diag            FC 8 diagnostics (sub-function 0, return query data)
+  pid-nonzero     two FC 3 reads (transactions 1 and 2) on one connection
+                  whose MBAP protocol identifier is 1 instead of 0: content
+                  the firewall cannot vouch for inside a valid frame
+  bad-length      one MBAP header whose length field is 1, below the valid
+                  2..254, so the frame boundary is lost; nothing follows it,
+                  so a server that gives up on it closes without unread data
+
+pid-nonzero prints PID_NONZERO_PORT and bad-length prints BAD_LENGTH_PORT
+(the client's TCP port) before any reply, so the harness can find the
+connection's events.
 
 Exit codes: 0 success; 1 failure (connect, read, or any other error); 2 usage
 error; 3 the connection was established (and, for readwrite, the read
-succeeded) but the write or diagnostics request got no response.
+succeeded) but the write, diagnostics, nonzero-PID or bad-length request got
+no response; stderr then names the cause (a reset, a close or a timeout).
 """
 import socket
 import struct
@@ -22,9 +33,21 @@ import sys
 import time
 
 TIMEOUT_SECONDS = 4.0
-MODES = ("persistent", "read", "write", "readwrite", "read-split", "read-coalesced", "diag")
+MODES = (
+    "persistent",
+    "read",
+    "write",
+    "readwrite",
+    "read-split",
+    "read-coalesced",
+    "diag",
+    "pid-nonzero",
+    "bad-length",
+)
 WRITE_ADDRESS = 1
 DEFAULT_WRITE_VALUE = 0x1234
+NONZERO_PROTOCOL_ID = 1
+BAD_MBAP_LENGTH = 1
 
 
 class WriteStageError(Exception):
@@ -41,7 +64,7 @@ def recv_exact(conn: socket.socket, count: int) -> bytes:
     return bytes(data)
 
 
-def build_request(mode: str, transaction_id: int, value: int) -> bytes:
+def build_request(mode: str, transaction_id: int, value: int, protocol_id: int = 0) -> bytes:
     unit_id = 1
     if mode == "read":
         pdu = struct.pack(">BHH", 3, 0, 2)
@@ -51,7 +74,7 @@ def build_request(mode: str, transaction_id: int, value: int) -> bytes:
         pdu = struct.pack(">BHH", 8, 0, 0x1234)
     else:
         raise ValueError(f"unsupported mode: {mode}")
-    header = struct.pack(">HHHB", transaction_id, 0, len(pdu) + 1, unit_id)
+    header = struct.pack(">HHHB", transaction_id, protocol_id, len(pdu) + 1, unit_id)
     return header + pdu
 
 
@@ -115,6 +138,23 @@ def run(mode: str, host: str, port: int, source: str, value: int) -> int:
             conn.sendall(build_request("read", 1, value) + build_request("read", 2, value))
             print(read_response(conn, "read", 1), flush=True)
             print(read_response(conn, "read", 2), flush=True)
+            return 0
+        if mode == "pid-nonzero":
+            print(f"PID_NONZERO_PORT {conn.getsockname()[1]}", flush=True)
+            for transaction_id in (1, 2):
+                try:
+                    conn.sendall(build_request("read", transaction_id, value, NONZERO_PROTOCOL_ID))
+                    print(read_response(conn, "read", transaction_id), flush=True)
+                except Exception as exc:  # noqa: BLE001
+                    raise WriteStageError(str(exc)) from exc
+            return 0
+        if mode == "bad-length":
+            print(f"BAD_LENGTH_PORT {conn.getsockname()[1]}", flush=True)
+            try:
+                conn.sendall(struct.pack(">HHHB", 1, 0, BAD_MBAP_LENGTH, 1))
+                print(read_response(conn, "read", 1), flush=True)
+            except Exception as exc:  # noqa: BLE001
+                raise WriteStageError(str(exc)) from exc
             return 0
         transaction_id = 1
         if mode == "readwrite":

@@ -82,15 +82,27 @@ line).
 
 ## ICS fixtures and the NFQUEUE variant
 
-`modbus/server.py` appends every decoded request to
-`/tmp/modbus-requests.jsonl` and rewrites its register image to
-`/tmp/modbus-state.json` (`{"writes": N, "registers": [...]}`) inside the
-`modbus_server` container. `modbus/client.py` modes: `read`, `write`,
-`readwrite` (a read, then a write on one connection), `read-split` (one read
-whose MBAP header and PDU go out as two TCP segments), `read-coalesced` (two
-reads in one segment) and `diag` (FC 8), with `--source IP` and `--value N`.
-Exit 3 means the connection was established but the write or diagnostics
-request got no response.
+`modbus/server.py` appends every decoded request (with its MBAP
+`protocol_id`) to `/tmp/modbus-requests.jsonl` and rewrites its register
+image to `/tmp/modbus-state.json` (`{"writes": N, "registers": [...]}`)
+inside the `modbus_server` container. It answers a request whose protocol
+identifier is not 0 like any other, so a test can prove whether the firewall
+delivered it. `modbus/client.py` modes: `read`, `write`, `readwrite` (a read,
+then a write on one connection), `read-split` (one read whose MBAP header and
+PDU go out as two TCP segments), `read-coalesced` (two reads in one segment),
+`diag` (FC 8), `pid-nonzero` (two reads with protocol identifier 1 on one
+connection) and `bad-length` (one MBAP header whose length field is 1,
+outside 2..254), with `--source IP` and `--value N`. Exit 3 means the connection was
+established but the write, diagnostics, nonzero-PID or bad-length request got
+no response; stderr names the cause.
+
+Both capture variants end with the ICS parsing checks
+(`scripts/smoke-dpi-lib-parsing.sh`): tolerant parsing, the default, delivers
+the `pid-nonzero` reads with one `ics-conformance` alert per connection;
+`dataplane.dpiIcsParsing.modbus = "strict"`, pushed through the API, drops
+the read and resets the session when inline (`would_drop` in learn mode); a
+`bad-length` read resets in both modes when inline. The checks read the
+connection's events by client port, which both modes print first.
 
 `dnp3/dnp3.py` is a minimal DNP3-over-TCP outstation (`server`, port 20000)
 and master (`read`, `operate` = FC 5, `operate-nr` = FC 6). The outstation
