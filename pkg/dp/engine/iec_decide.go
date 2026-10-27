@@ -107,7 +107,7 @@ func (t *iecTable) iecContext(ev dpi.Event) *rules.ICSContext {
 
 func iecContextFromDPIEvent(ev dpi.Event, safeRead func(map[string]any) bool) *rules.ICSContext {
 	a := ev.Attributes
-	c := &rules.IEC104Context{Malformed: ev.Kind == iecKindMalformed, Unsupported: ev.Kind == iecKindUnsupported}
+	c := &rules.IEC104Context{}
 	c.APCIType, _ = eventfields.String(a, eventfields.KeyAPCIType)
 	c.Class, _ = eventfields.String(a, eventfields.KeyClass)
 	if v, ok := eventfields.Uint8(a, eventfields.KeyTypeID); ok {

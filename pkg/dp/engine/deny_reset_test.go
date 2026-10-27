@@ -346,9 +346,9 @@ func TestDenyResetUnavailable(t *testing.T) {
 }
 
 func TestDenyUDPDatagramOnly(t *testing.T) {
-	f := newResetFlow(t, 2222)
+	f := newResetFlow(t, 44818)
 	f.e.LoadRules(rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{{
-		ID: "cip-deny", Protocols: []rules.Protocol{{Name: "udp", Port: "2222"}},
+		ID: "cip-deny", Protocols: []rules.Protocol{{Name: "udp", Port: "44818"}},
 		ICS: rules.ICSPredicate{Protocol: "cip", FunctionCode: []uint8{0x10}}, Action: rules.ActionDeny,
 	}}})
 	pkt := f.segment(false, 0, 0, 0, cipCommand(0x10))

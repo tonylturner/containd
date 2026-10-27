@@ -17,19 +17,14 @@ const iec104BroadcastCA = 65535
 // S/U/error APDU) for rule evaluation. Direction stays in
 // ICSContext.Direction. Fields the decoder could not read are nil or empty
 // and satisfy no predicate on them; nonconformant content is not SafeRead.
-// Malformed and Unsupported name the event kind for callers that build a
-// context from a stored event; evaluation does not consult them, because the
-// parsing mode, not the rules, decides whether such content is judged.
 type IEC104Context struct {
-	APCIType    string // "I" | "S" | "U"
-	TypeID      *uint8
-	CA          *uint16
-	IOA         *uint32
-	Class       string
-	SafeRead    bool // iec104.SafeRead
-	Broadcast   bool // I-frame with CA 65535
-	Malformed   bool
-	Unsupported bool
+	APCIType  string // "I" | "S" | "U"
+	TypeID    *uint8
+	CA        *uint16
+	IOA       *uint32
+	Class     string
+	SafeRead  bool // iec104.SafeRead
+	Broadcast bool // I-frame with CA 65535
 }
 
 // EffectiveMode resolves an ICS rule's mode: rule mode > global DPI mode >
