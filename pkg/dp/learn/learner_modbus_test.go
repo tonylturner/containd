@@ -42,6 +42,7 @@ func modbusContext(t *testing.T, ev dpi.Event, source, dest string) rules.EvalCo
 	ics := &rules.ICSContext{Protocol: "modbus", SpansUnknown: !okSpans}
 	if okFC {
 		ics.FunctionCode = fc
+		ics.HasFunctionCode = true
 	}
 	if okUnit {
 		ics.UnitID = &unit
@@ -141,13 +142,14 @@ func TestLearnedModbusRulesCoverOnlyObservedTuples(t *testing.T) {
 				SrcIP: net.ParseIP(learnerSource),
 				DstIP: net.ParseIP(learnerDest),
 				ICS: &rules.ICSContext{
-					Protocol:     "modbus",
-					FunctionCode: tc.fc,
-					UnitID:       &tc.unit,
-					Direction:    tc.direction,
-					ReadOnly:     tc.readOnly,
-					WriteOnly:    tc.writeOnly,
-					Spans:        []rules.AddressSpan{tc.span},
+					Protocol:        "modbus",
+					HasFunctionCode: true,
+					FunctionCode:    tc.fc,
+					UnitID:          &tc.unit,
+					Direction:       tc.direction,
+					ReadOnly:        tc.readOnly,
+					WriteOnly:       tc.writeOnly,
+					Spans:           []rules.AddressSpan{tc.span},
 				},
 			}
 			if got := evaluator.Evaluate(ctx); got != rules.ActionDeny {

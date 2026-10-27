@@ -114,8 +114,8 @@ func TestEvalContextOtherProtocolAddress(t *testing.T) {
 
 // Inline enforcement of decoded pymodbus ADUs: an ALLOW of 10-11 admits the
 // in-range read and not the range-crossing read or write; a DENY of 12-19
-// under an ALLOW default drops whatever reaches into it and anything it
-// cannot bound.
+// under an ALLOW default drops decoded spans reaching into it. Missing
+// addresses do not satisfy that DENY and fall to the configured default.
 func TestEnforceModbusRequestSpans(t *testing.T) {
 	unit := uint8(1)
 	allow := &rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{
@@ -138,14 +138,14 @@ func TestEnforceModbusRequestSpans(t *testing.T) {
 		{deny, aduReadInRange, false},
 		{deny, aduReadCrossing, true},
 		{deny, aduWriteCrossing, true},
-		{deny, aduUnknownFC, true},
-		{deny, aduShortPDU, true},
+		{deny, aduUnknownFC, false},
+		{deny, aduShortPDU, false},
 	}
 	for _, tc := range cases {
 		e := &Engine{eventStore: events.NewStore(10), dpiMode: "enforce"}
 		e.ruleSnap.Store(tc.snap)
 		state, pkt, ev := decodeModbus(t, modbusKey(40000, flow.DirForward), tc.adu)
-		v, _, enforced := e.enforceDPIEvents(state, pkt, []dpi.Event{ev})
+		v, _, enforced := e.enforceDPIEvents(state, pkt, []dpi.Event{ev}, false)
 		if dropped := enforced && v.Denies(); dropped != tc.dropped {
 			t.Errorf("%s under %s: dropped=%v (%+v), want %v", tc.adu, tc.snap.Firewall[0].ID, dropped, v, tc.dropped)
 		}

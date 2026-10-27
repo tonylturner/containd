@@ -101,7 +101,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 	// Events come before the error: a stream error's malformed event is
 	// already among them. Outside an enforce scope the packet itself passes.
 	e.RecordDPIEvents(state, &parsed, res.Events)
-	v, evalCtx, enforced := e.enforceDPIEvents(state, &parsed, res.Events)
+	v, evalCtx, enforced := e.enforceDPIEvents(state, &parsed, res.Events, scope != nil && (deniedStream(res.Err) || isStreamFailure(res)))
 	if enforced {
 		if pkt.Proto != 17 {
 			e.verdictCache.Put(flowHash, v)
@@ -109,8 +109,12 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 		if scope != nil {
 			e.dpiMgr.FailStream(state, &parsed, dpi.StreamDenied)
 		}
-		e.closeDeniedTCP(pkt, state, evalCtx.ICS.Protocol, reasonDPIDeny)
-		return capture.Decision{Action: capture.Drop, Reason: reasonDPIDeny}
+		reason := reasonDPIDeny
+		if v.Reason == reasonNonconformant {
+			reason = reasonNonconformant
+		}
+		e.closeDeniedTCP(pkt, state, evalCtx.ICS.Protocol, reason)
+		return capture.Decision{Action: capture.Drop, Reason: reason}
 	}
 	if scope != nil && deniedStream(res.Err) {
 		return e.stillDenied(pkt, state)
@@ -149,6 +153,9 @@ func (e *Engine) endStreamsOnClose(state *flow.State, pkt *dpi.ParsedPacket, acc
 	}
 	ended, evs, _ := e.dpiMgr.CloseStream(state, pkt)
 	e.recordFlowEndEvents(state, pkt, evs)
+	if ended {
+		e.conformance.end(state, pkt.TCPRst)
+	}
 	if !ended || !pkt.TCPRst {
 		return
 	}
@@ -167,6 +174,10 @@ func (e *Engine) endStreamsOnClose(state *flow.State, pkt *dpi.ParsedPacket, acc
 func (e *Engine) endFlowStream(state *flow.State, pkt *dpi.ParsedPacket) {
 	evs, _ := e.dpiMgr.OnFlowEnd(state)
 	e.recordFlowEndEvents(state, pkt, evs)
+	e.flowMu.Lock()
+	reverse := e.flows[state.Key.Reversed().Hash()]
+	e.flowMu.Unlock()
+	e.conformance.end(state, reverse == nil)
 }
 
 func (e *Engine) recordFlowEndEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) {

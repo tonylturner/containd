@@ -28,13 +28,15 @@ type EvalContext struct {
 
 // ICSContext represents decoded ICS metadata for rule evaluation.
 type ICSContext struct {
-	Protocol     string
-	FunctionCode uint8
-	UnitID       *uint8
-	ObjectClass  uint16
-	ReadOnly     bool
-	WriteOnly    bool
-	Direction    string // "request" or "response"
+	Protocol        string
+	FunctionCode    uint8
+	HasFunctionCode bool // true only when decoded, including FC 0
+	UnitID          *uint8
+	ObjectClass     uint16
+	HasObjectClass  bool // true only when decoded, including class 0
+	ReadOnly        bool
+	WriteOnly       bool
+	Direction       string // "request" or "response"
 	// Spans are the address ranges the message reads or writes, for
 	// address predicates; empty when it touches none. SpansUnknown marks a
 	// message that may touch addresses its decoder cannot bound, such as a
@@ -254,6 +256,9 @@ func matchICSFunctionCode(pred ICSPredicate, ctx EvalContext) bool {
 	if len(pred.FunctionCode) == 0 {
 		return true
 	}
+	if !ctx.ICS.HasFunctionCode {
+		return false
+	}
 	for _, fc := range pred.FunctionCode {
 		if fc == ctx.ICS.FunctionCode {
 			return true
@@ -271,9 +276,8 @@ func matchICSUnitID(pred ICSPredicate, ctx EvalContext) bool {
 
 // matchICSAddresses applies an address predicate to the spans the message
 // touches. A DENY or RESET matches when any span meets the predicate's
-// ranges, or when the spans are unknown, so a message whose addresses
-// cannot be bounded never slips past a deny. Every other action matches
-// only a message with at least one span, all of them inside the ranges:
+// ranges. Unknown or absent addresses never prove a predicate. Every other
+// action matches only a message with at least one span, all inside the ranges:
 // an ALLOW never admits addresses beyond what it names, nor a message
 // whose addresses are unknown.
 func matchICSAddresses(ce *compiledEntry, ctx EvalContext) bool {
@@ -281,7 +285,7 @@ func matchICSAddresses(ce *compiledEntry, ctx EvalContext) bool {
 		return true
 	}
 	if ce.Action == ActionDeny || ce.Action == ActionReset {
-		return ctx.ICS.SpansUnknown || ce.addresses.meetsAny(ctx.ICS.Spans)
+		return ce.addresses.meetsAny(ctx.ICS.Spans)
 	}
 	return !ctx.ICS.SpansUnknown && ce.addresses.holdsAll(ctx.ICS.Spans)
 }
@@ -289,6 +293,9 @@ func matchICSAddresses(ce *compiledEntry, ctx EvalContext) bool {
 func matchICSObjectClass(pred ICSPredicate, ctx EvalContext) bool {
 	if len(pred.ObjectClasses) == 0 {
 		return true
+	}
+	if !ctx.ICS.HasObjectClass {
+		return false
 	}
 	for _, oc := range pred.ObjectClasses {
 		if oc == ctx.ICS.ObjectClass {
