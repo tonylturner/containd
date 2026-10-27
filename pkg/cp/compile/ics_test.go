@@ -133,8 +133,8 @@ func TestCompileSnapshotEnforcesDirectionAndObjectClasses(t *testing.T) {
 	}{
 		{"modbus request denied", rules.ICSContext{Protocol: "modbus", Direction: "request"}, rules.ActionDeny},
 		{"modbus response passes", rules.ICSContext{Protocol: "modbus", Direction: "response"}, rules.ActionAllow},
-		{"cip identity class denied", rules.ICSContext{Protocol: "cip", ObjectClass: 0x01}, rules.ActionDeny},
-		{"cip other class passes", rules.ICSContext{Protocol: "cip", ObjectClass: 0x02}, rules.ActionAllow},
+		{"cip identity class denied", rules.ICSContext{Protocol: "cip", ObjectClass: 0x01, HasObjectClass: true}, rules.ActionDeny},
+		{"cip other class passes", rules.ICSContext{Protocol: "cip", ObjectClass: 0x02, HasObjectClass: true}, rules.ActionAllow},
 	}
 	for _, tc := range cases {
 		ics := tc.ics

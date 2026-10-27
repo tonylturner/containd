@@ -71,6 +71,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dataplane.dpiIcsParsing.iec104` to `strict` to retain that reset behavior.
   Lost frame boundaries and integrity faults still fail closed in enforce
   scope in both parsing modes.
+- ICS rule predicates no longer treat a function code or CIP object class that
+  was not decoded as zero, so such a message matches no function-code or
+  object-class predicate. Modbus, DNP3 and CIP decoders now report conformance
+  findings, and EtherNet/IP UDP 2222 is decoded as implicit I/O while
+  encapsulated UDP is decoded on 44818.
 
 - `MODBUS-WRITE-COIL-ALL` now matches only FC 15 requests, not quantity echoes
   in replies. `ICS-WRITE-STORM` now alerts on 20 initiator write commands per

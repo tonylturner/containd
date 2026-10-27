@@ -83,7 +83,10 @@ the endpoint replaces, rather than patches, that document):
 Parsing governs nonconformant content **inside a frame whose length is known**,
 such as a nonzero Modbus protocol ID, bad DNP3 data-block CRC, reserved bits,
 truncated PDU or unknown CIP command. Decoded fields remain available to policy;
-unreadable fields stay absent.
+unreadable fields stay absent. A rule never matches a function code or object
+class that was not decoded. When the addresses a message touches cannot be
+bounded, an `ALLOW` with an address range does not match it, but a `DENY` or
+`RESET` with an address range does.
 
 | Effective rule mode | Tolerant parsing | Strict parsing |
 | --- | --- | --- |
