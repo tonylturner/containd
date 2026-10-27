@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/cli"
 )
 
 // shellAPI lets CLI processes in one Linux shell call management as the SSH
@@ -49,6 +51,18 @@ func (a *shellAPI) close() {
 func (s *Server) shellAPIHandler(conn *sshConnection) http.Handler {
 	client := s.connectionClient(conn)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == cli.SSHResetAcknowledgePath && r.Method == http.MethodPost {
+			if !conn.reset.Load() {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			conn.close()
+			return
+		}
 		if !shellAPIPath(r.URL.Path) {
 			http.NotFound(w, r)
 			return
@@ -80,6 +94,9 @@ func (s *Server) shellAPIHandler(conn *sshConnection) http.Handler {
 				continue
 			}
 			w.Header()[name] = values
+		}
+		if conn.reset.Load() {
+			w.Header().Set(cli.SSHResetResponseHeader, "true")
 		}
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)

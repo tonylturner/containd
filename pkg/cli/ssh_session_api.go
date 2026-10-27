@@ -11,10 +11,17 @@ import (
 	"net/http"
 )
 
-// EnvSSHAPISocket names the Unix socket through which CLI processes in a
-// Linux shell opened over SSH call management as that SSH login. The SSH
-// server sets it in the shell and removes the socket when the shell exits.
-const EnvSSHAPISocket = "CONTAIND_SSH_API_SOCKET"
+const (
+	// EnvSSHAPISocket names the Unix socket through which CLI processes in a
+	// Linux shell opened over SSH call management as that SSH login. The SSH
+	// server sets it in the shell and removes the socket when the shell exits.
+	EnvSSHAPISocket = "CONTAIND_SSH_API_SOCKET"
+
+	// SSHResetResponseHeader and SSHResetAcknowledgePath coordinate delivery
+	// of a factory-reset response to the CLI before its SSH shell is closed.
+	SSHResetResponseHeader  = "X-Containd-SSH-Reset"
+	SSHResetAcknowledgePath = "/_containd/ssh-reset-complete"
+)
 
 // sshSessionBaseURL addresses requests sent over the SSH login's socket.
 const sshSessionBaseURL = "http://ssh-session"

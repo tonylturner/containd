@@ -199,9 +199,9 @@ func TestFactoryResetDisconnectsLinuxShellCLI(t *testing.T) {
 	select {
 	case <-exited:
 	case <-time.After(2 * time.Second):
-		tty.send(t, "echo shell-survived-reset\n")
-		tty.waitFor(t, "shell-survived-reset", 1)
-		t.Fatal("factory reset response reached containd cli, but its SSH Linux shell remained usable")
+		tty.send(t, "echo shell-survived-$((6*7))\n")
+		tty.waitFor(t, "shell-survived-42", 1)
+		t.Fatalf("factory reset response reached containd cli, but its SSH Linux shell remained usable: %q", tty.output())
 	}
 }
 

@@ -89,6 +89,9 @@ func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Wri
 	if out != nil {
 		writeMutationResult(out, resp.Header.Get("X-Containd-Config"))
 	}
+	if resp.Header.Get(SSHResetResponseHeader) == "true" {
+		return a.acknowledgeSSHReset(ctx)
+	}
 	return nil
 }
 
@@ -193,6 +196,22 @@ func (a *API) delete(ctx context.Context, path string, out io.Writer) error {
 	}
 	if out != nil {
 		writeMutationResult(out, resp.Header.Get("X-Containd-Config"))
+	}
+	return nil
+}
+
+func (a *API) acknowledgeSSHReset(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.BaseURL+SSHResetAcknowledgePath, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := a.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected SSH reset acknowledgement status %d", resp.StatusCode)
 	}
 	return nil
 }
