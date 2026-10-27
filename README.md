@@ -12,88 +12,166 @@
 [![OT Segmentation](https://img.shields.io/badge/topic-OT%20Segmentation-orange)](https://github.com/topics/ot-segmentation)
 [![Secure by Design](https://img.shields.io/badge/Secure%20by%20Design-CISA-blue)](https://www.cisa.gov/securebydesign)
 
-containd is a single-container appliance for ICS/OT lab segmentation.
-It combines zone-based firewalling, protocol inspection, network services,
-and web, SSH and API management around one configuration model.
+**Segment your ICS network in minutes, not months.**
 
-It serves lab operators, instructors and integrators routing traffic between
-Docker networks. Docker Compose owns network attachment and IP layout;
-containd applies policy to traffic routed through the appliance.
-It is not a native macOS or Windows host firewall.
+An open-source next-generation firewall purpose-built for ICS/OT network segmentation. containd is a single-container appliance that combines zone-based firewalling, ICS protocol deep packet inspection, embedded network services, and a full management UI. Designed for industrial control system operators who need OT-aware security without assembling dozens of point tools.
 
-## Quickstart
-
-Use Docker with modern Docker Compose on Linux or Docker Desktop.
-On Windows, use Docker Desktop's WSL2 backend. Run in a dedicated lab directory:
+## Quick Start
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/quickstart.sh
 sh quickstart.sh
 ```
 
-The script delegates to `scripts/bootstrap-starter.sh`: it downloads the starter
-Compose file, writes `.env`, generates a non-empty `CONTAIND_JWT_SECRET`, adjusts
-conflicting starter subnets and starts the combined appliance (`containd all`).
-Secret generation requires OpenSSL or Python 3.
+`quickstart.sh` downloads the starter compose, creates `.env` from `.env.example`, generates a real `CONTAIND_JWT_SECRET`, auto-adjusts the starter subnets if they would overlap with existing Docker networks, and starts the combined appliance (`containd all`) for you.
 
-To edit ports or networks before starting, use the
-[customize-before-start flow](docs/mkdocs/docker-compose.md#quickstart)
-with `bootstrap-starter.sh --no-start`.
+The published starter compose wires the management plane to the local engine automatically, enables enforcement by default, and gives containd a stable Docker-managed lab topology: `wan`, `dmz`, and `lan1` through `lan6`, matched to interfaces by subnet.
 
-**Published management ports are not a private network boundary.** Restrict
-host/network access before starting; do not expose bootstrap credentials to
-untrusted networks. See [deployment guidance](docs/mkdocs/docker-compose.md).
+Docker/Compose owns the available interfaces and their Docker-level IP wiring. Use containd to bind zones, tighten policy, and configure services inside that topology. If you want different lab subnets or interface addresses, edit `.env` before you start the stack.
 
-## Connect and configure
+containd is designed for container-to-container segmentation inside Docker-based labs. Linux Docker hosts are supported, and Docker Desktop is also a valid lab target because the traffic being segmented lives inside Docker's Linux VM. On Windows, use Docker Desktop with the WSL2 backend. containd is not a native host firewall for macOS or Windows networking.
 
-| Service | Default endpoint |
-| --- | --- |
+For a customizable starter directory instead of the zero-touch path above:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/bootstrap-starter.sh
+sh bootstrap-starter.sh --dir containd-lab --no-start
+```
+
+That writes `docker-compose.yml`, `.env.example`, and `.env`, auto-adjusts conflicting default starter subnets on fresh setup, lets you customize `.env`, and then you can start with `docker compose up -d`.
+
+| Service | URL |
+|---------|-----|
 | Web UI / API | `http://localhost:8080` |
 | HTTPS | `https://localhost:8443` |
-| SSH console | Port `2222`, user `containd` |
+| SSH console | `ssh -p 2222 containd@localhost` |
 
-The bootstrap login is **`containd` / `containd`**. Outside lab mode, the first
-web or SSH login must change it; leave lab mode disabled for normal use. SSH
-password login asks for a TOTP code on MFA accounts, and its PTY can reach the
-appliance's Linux shell. Read the [authentication limits](SECURITY.md#authentication-limits).
+Default credentials: `containd` / `containd` -- change on first login.
 
-HTTPS uses a generated self-signed certificate unless you supply a replacement.
-See [hardening guidance](docs/mkdocs/secure-by-design.md#deployment-hardening) before remote access.
+### SSH Shell Mode
 
-After login, create zones, bind interfaces, and define firewall policy.
-Review the candidate diff and commit it to apply runtime changes. The
-[configuration lifecycle](docs/mkdocs/config-format.md) describes staging,
-commit-confirmed and rollback.
+The SSH server supports two shell modes, controlled by `CONTAIND_SSH_SHELL_MODE` or `set system ssh shell-mode`:
 
-## Capabilities
+- **`appliance`** (default) -- Drops into the containd CLI. Type `shell` or `bash` to access the underlying Linux shell, `exit` to return.
+- **`linux`** -- Drops into a full bash shell with standard Linux tools (tcpdump, nft, etc.). Type `configure` or `containd cli` to enter the containd CLI, `exit` to return to bash.
 
-- Zone-based nftables firewalling and SNAT/DNAT: [policy model](docs/mkdocs/policy-model.md).
-  containd changes only its own tables (`inet containd`, `inet containd_policy`,
-  `inet containd_dhcp`) and leaves other rules, such as Docker's DNS, alone.
-- ICS protocol inspection, including IEC 60870-5-104: [ICS DPI](docs/mkdocs/ics-dpi.md).
-- DNS- and TLS SNI-based [DPI domain exclusions](docs/mkdocs/ics-dpi.md#dpi-exclusions).
-- Candidate/running configuration with commit-confirmed and rollback: [config format](docs/mkdocs/config-format.md).
-- Web, SSH and REST management with embedded network services: [services](docs/mkdocs/services.md).
-- Live kernel connections with timed kill, and ClamAV or ICAP scanning of inspected HTTP content: [services](docs/mkdocs/services.md).
+Both modes support bidirectional switching. The `linux` mode is useful for lab environments where students need access to industry tools like `tcpdump` alongside the containd CLI.
 
-See [architecture](docs/mkdocs/architecture.md) for the management, control and data planes.
+### First 5 Minutes
+
+1. Log in and change the default password.
+2. Create your first zones (`WAN`, `DMZ`, `LAN`/`OT`).
+3. Bind interfaces to those zones.
+4. Use the Policy Wizard or Firewall Rules page to create initial access policy.
+5. Review the candidate config diff and commit it so the runtime actually changes.
+
+<p align="center">
+  <img src="docs/mkdocs/assets/images/containd_dashboard.png" alt="containd dashboard showing network topology, service health, traffic statistics, and zone status" width="800" />
+  <br />
+  <em>Dashboard with live network topology, service health, traffic pulse, and zone status</em>
+</p>
+
+## Why containd?
+
+Traditional IT firewalls don't understand ICS protocols. They can't distinguish a legitimate Modbus register read from a malicious write, or detect anomalous DNP3 function codes. OT environments need protocol-aware segmentation, but deploying and integrating separate tools for firewalling, DPI, IDS, asset inventory, and network services is complex and fragile. containd puts all of this in a single container with one config model and one UI.
+
+## What It Does
+
+**Firewall** -- Zone-based with nftables enforcement, NAT (SNAT + DNAT), and default-deny posture.
+
+**ICS/OT Deep Packet Inspection** -- Native Go decoders for Modbus, DNP3, CIP/EtherNet/IP, S7comm, IEC 60870-5-104, IEC 61850 MMS, BACnet, OPC UA, plus DNS, TLS (SNI, partial JA3), HTTP, SSH, RDP, SMB, SNMP, NTP. Per-protocol enable/disable, learn-then-enforce workflow, function code and register-level visibility. IEC 104 evidence identifies types outside containd's supported type set.
+
+**ICS Security** -- Asset auto-discovery from traffic, learn mode for auto-generating allowlist rules, protocol anomaly detection, built-in ICS threat signatures, Sigma-like IDS rules, PCAP offline analysis.
+
+**Embedded Services** -- DNS (Unbound), NTP (chrony), DHCP, forward proxy (Envoy), reverse proxy (Nginx), VPN (WireGuard + OpenVPN), antivirus (ClamAV or ICAP).
+
+**Management** -- Web UI with dashboard, topology, firewall rules, routing, NAT, services, monitoring, and diagnostics. SSH console with configurable shell mode (appliance CLI or full Linux shell with tcpdump). REST API, Prometheus metrics, syslog forwarding, event export (JSON/Syslog).
+
+**Config Lifecycle** -- Candidate/running configs with commit-confirmed and auto-rollback, deterministic JSON export/import, schedule and identity predicates on rules, ICS policy templates for rapid deployment.
+
+## Architecture
+
+Single Go binary, three logical planes:
+
+- **Data plane** -- nftables/conntrack, NFQUEUE selective DPI steering, TCP reassembly, per-flow verdict caching, IDS/IPS
+- **Control plane** -- SQLite persistence, policy compilation, service management, audit logging
+- **Management plane** -- REST API, web UI, SSH console, auth/RBAC
+
+Run modes: `containd all` (combined), `containd mgmt`, `containd engine`.
+
+## Lab Topology
+
+The published starter compose (`deploy/docker-compose.yml`) and the source-build dev compose (`deploy/docker-compose.dev.yml`) both create 8 isolated Docker networks:
+
+| Network | Subnet | containd IP |
+|---------|--------|-------------|
+| WAN | 192.168.240.0/24 | 192.168.240.2 |
+| DMZ | 192.168.241.0/24 | 192.168.241.2 |
+| LAN1 | 192.168.242.0/24 | 192.168.242.2 |
+| LAN2 | 192.168.243.0/24 | 192.168.243.2 |
+| LAN3 | 192.168.244.0/24 | 192.168.244.2 |
+| LAN4 | 192.168.245.0/24 | 192.168.245.2 |
+| LAN5 | 192.168.246.0/24 | 192.168.246.2 |
+| LAN6 | 192.168.247.0/24 | 192.168.247.2 |
+
+By default, the starter compose pins containd to `.2` on each subnet, keeps `WAN` as the default-gateway network, enables nftables enforcement, and runs the appliance as `root` inside the container so nftables, routing, and TUN operations work across Linux, Docker Desktop, and WSL-backed lab environments. Edit `.env` to change those subnets or addresses for your lab. For Docker-based deployments, treat Compose as the owner of network attachment and IP layout; use the containd UI/API to bind interfaces to zones and enforce segmentation inside that layout.
+
+## Standalone Container
+
+```bash
+docker run -d \
+  --name containd \
+  --user 0 \
+  --cap-add NET_ADMIN --cap-add NET_RAW \
+  --cap-add NET_BIND_SERVICE \
+  --device /dev/net/tun:/dev/net/tun \
+  -p 8080:8080 -p 8443:8443 -p 2222:2222 \
+  -v containd-data:/data \
+  -e CONTAIND_JWT_SECRET=$(openssl rand -hex 32) \
+  ghcr.io/tonylturner/containd:latest
+```
+
+Combined mode auto-connects the management plane to the local dataplane engine. Set `CONTAIND_ENGINE_URL` only when you intentionally split mgmt and engine.
+
+## From Source
+
+```bash
+go build -o containd ./cmd/containd
+cd ui && npm ci && npm run build && cd ..
+CONTAIND_JWT_SECRET=$(openssl rand -hex 32) CONTAIND_UI_DIR=ui/out ./containd all
+```
+
+## Security
+
+- Default-deny firewall posture
+- Wolfi-based container image (glibc, actively patched, minimal CVE surface); the published starter runs as `root` inside the container so nftables, routing, and TUN operations work reliably across Docker lab runtimes
+- JWT auth with session invalidation, admin/view-only roles, MustChangePassword on first login, and optional app-based TOTP MFA for local accounts
+- TLS 1.2+ with hardened cipher suites, HSTS enabled by default
+- CORS wildcard rejection, same-origin protection for cookie-authenticated browser writes, SameSite=Strict cookies, request body limits, path traversal protection
+- Rate limiting on auth endpoints, nftables injection prevention
+- Cosign-signed container images with CycloneDX SBOM attestation
+- Trivy vulnerability scanning in CI (zero HIGH/CRITICAL)
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and hardening guidance, [Secure by Design](docs/mkdocs/secure-by-design.md) for CISA alignment, and [Advisories and CSAF](docs/mkdocs/advisories.md) for the public advisory process.
 
 ## Documentation
 
-Documentation is available from the appliance's **Help** icon and in the
-[documentation home](docs/mkdocs/index.md).
+Full docs are embedded in the appliance (Help icon in UI) and built from `docs/mkdocs/`:
 
-- Deploy: [Docker Compose](docs/mkdocs/docker-compose.md), [custom labs](docs/mkdocs/lab-compose.md), [Windows / WSL](docs/mkdocs/windows-wsl.md).
-- Configure: [CLI](docs/mkdocs/cli.md), [configuration JSON](docs/mkdocs/config-format.md), [API reference](docs/mkdocs/api-reference.md), [OpenAPI contract](docs/openapi.yaml).
-- Inspect and enforce: [ICS DPI](docs/mkdocs/ics-dpi.md), [IDS rules](docs/mkdocs/ids-rules.md), [dataplane enforcement](docs/mkdocs/dataplane-enforcement.md).
-- Operate safely: [hardening](docs/mkdocs/secure-by-design.md#deployment-hardening), [threat model](docs/mkdocs/threat-model.md), [updates](docs/mkdocs/update-policy.md), [advisories](docs/mkdocs/advisories.md).
-- Verify artifacts: [SBOM and image signatures](docs/mkdocs/sbom.md). CI includes vulnerability scanning; results depend on the image and scan date.
+- [Architecture](docs/mkdocs/architecture.md) | [Dataplane](docs/mkdocs/dataplane.md) | [eBPF](docs/mkdocs/dataplane-enforcement.md#experimental-ebpf-code)
+- [Docker Compose Deployment](docs/mkdocs/docker-compose.md) | [Customizing Lab Compose](docs/mkdocs/lab-compose.md) | [Windows / WSL Notes](docs/mkdocs/windows-wsl.md)
+- [CLI Reference](docs/mkdocs/cli.md) | [Config Format](docs/mkdocs/config-format.md)
+- [ICS DPI](docs/mkdocs/ics-dpi.md) | [IDS Rules](docs/mkdocs/ids-rules.md) | [Policy Model](docs/mkdocs/policy-model.md)
+- [Services](docs/mkdocs/services.md) | [API Reference](docs/mkdocs/api-reference.md) | [Secure by Design](docs/mkdocs/secure-by-design.md) | [Advisories and CSAF](docs/mkdocs/advisories.md)
+- [Logging and Evidence](docs/mkdocs/logging-evidence.md) | [Update Policy](docs/mkdocs/update-policy.md)
+- [SBOM](docs/mkdocs/sbom.md) | [Third-Party Licenses](docs/mkdocs/SPDX.md)
 
-## Contributing and security reports
+[OpenAPI 3.0 specification](docs/openapi.yaml) for the REST API.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for source builds, tests and documentation
-changes, and the [Code of Conduct](CODE_OF_CONDUCT.md) for community expectations.
-Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md),
-not in public issues.
+## Contributing
 
-Licensed under [Apache License 2.0](LICENSE).
+Contributions welcome -- ICS protocol decoders, policy templates, documentation, and bug reports are all valuable. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Apache License 2.0 -- see [LICENSE](LICENSE).
