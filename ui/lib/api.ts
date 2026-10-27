@@ -533,6 +533,8 @@ export type TelemetryEvent = {
   srcPort?: number;
   dstPort?: number;
   transport?: string;
+  /** Content hash, set on AV events. */
+  hash?: string;
 };
 
 export type FlowSummary = {
