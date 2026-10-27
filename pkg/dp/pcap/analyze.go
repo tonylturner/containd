@@ -81,7 +81,15 @@ func analyzeCore(r io.Reader, onEvent eventCallback, decoders ...dpi.Decoder) (*
 		if !ok {
 			continue
 		}
-		hash, state := analysisFlowState(flows, pkt, ts)
+		hash, state, reoriented := analysisFlowState(flows, pkt, ts)
+		for i := range reoriented {
+			old := &reoriented[i]
+			events, _ := mgr.OnFlowEnd(old)
+			// Summaries use wire tuples independently of orientation.
+			key := old.Key
+			key.Dir = flow.DirForward
+			recordAnalysisEvents(result, flowEvents, key.Hash(), key.SrcIP.String(), key.DstIP.String(), events, onEvent)
+		}
 		events := analyzePacket(mgr, sessions, state, pkt, ts)
 		recordAnalysisEvents(result, flowEvents, hash, pkt.SrcIP.String(), pkt.DstIP.String(), events, onEvent)
 	}
@@ -112,7 +120,7 @@ func updateAnalysisPacketStats(result *AnalysisResult, ts time.Time, size int, f
 	}
 }
 
-func analysisFlowState(flows map[string]*flow.State, pkt capture.Packet, ts time.Time) (string, *flow.State) {
+func analysisFlowState(flows map[string]*flow.State, pkt capture.Packet, ts time.Time) (string, *flow.State, []flow.State) {
 	key := flow.Key{
 		SrcIP:   pkt.SrcIP,
 		DstIP:   pkt.DstIP,
@@ -123,12 +131,37 @@ func analysisFlowState(flows map[string]*flow.State, pkt capture.Packet, ts time
 	}
 	hash := key.Hash()
 	state, exists := flows[hash]
+	opposite := key.Reversed()
+	opposite.Dir = flow.DirForward
+	reverse := flows[opposite.Hash()]
+	var reoriented []flow.State
+	// Map keys identify wire tuples; state keys additionally carry orientation.
+	// A handshake always wins, including when it contradicts a midstream hint.
+	if pkt.Proto == 6 && pkt.TCP.Flags&capture.TCPFlagSYN != 0 {
+		if pkt.TCP.Flags&capture.TCPFlagACK != 0 {
+			key.Dir = flow.DirReverse
+		}
+		if state != nil && state.Key.Dir != key.Dir {
+			reoriented = append(reoriented, *state)
+			state.Key.Dir = key.Dir
+		}
+		if reverse != nil && reverse.Key.Dir == key.Dir {
+			reoriented = append(reoriented, *reverse)
+			reverse.Key.Dir = key.Reversed().Dir
+		}
+	} else if exists {
+		key.Dir = state.Key.Dir
+	} else if reverse != nil {
+		key.Dir = reverse.Key.Reversed().Dir
+	} else {
+		key.Dir, _ = flow.ICSServiceDirection(pkt.Proto, pkt.SrcPort, pkt.DstPort)
+	}
 	if !exists {
 		state = flow.NewState(key, ts)
 		flows[hash] = state
 	}
 	state.Touch(uint64(len(pkt.Payload)), ts)
-	return hash, state
+	return hash, state, reoriented
 }
 
 // analyzePacket runs one packet through DPI with its TCP sequence number,

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Modbus request/reply decoding and ICS policy direction follow the connection
+  opener, including clients bound to port 502. Offline PCAP analysis uses
+  SYN/SYN-ACK orientation, with service-port hints only for midstream captures.
+  Modbus, DNP3 and CIP inventory roles stay stable across replies and exceptions.
+
 ### Security
 
 - Modbus address rules now cover the whole request span. An `ALLOW` with

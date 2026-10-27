@@ -70,9 +70,7 @@ func TestEvalContextModbusSpans(t *testing.T) {
 		{"write reply", modbusKey(40000, flow.DirReverse), aduWriteReply, []rules.AddressSpan{{Low: 30, High: 31}}, false},
 		{"unknown function code", modbusKey(40000, flow.DirForward), aduUnknownFC, nil, true},
 		{"short PDU", modbusKey(40000, flow.DirForward), aduShortPDU, nil, true},
-		// A client bound to source port 502: the decoder's port heuristic
-		// labels its request a reply, which must not read as touching nothing.
-		{"request from source port 502", modbusKey(502, flow.DirForward), aduReadCrossing, nil, true},
+		{"request from source port 502", modbusKey(502, flow.DirForward), aduReadCrossing, []rules.AddressSpan{{Low: 11, High: 18}}, false},
 	}
 	for _, tc := range cases {
 		state, pkt, ev := decodeModbus(t, tc.key, tc.adu)

@@ -99,7 +99,7 @@ func evalContextFromDPIEvent(snap *rules.Snapshot, state *flow.State, pkt *dpi.P
 			Protocol:  strings.ToLower(ev.Proto),
 			ReadOnly:  hasWrite && !isWrite,
 			WriteOnly: hasWrite && isWrite,
-			Direction: messageDirection(state, ev.Kind),
+			Direction: messageDirection(state),
 		},
 	}
 	ctx.ICS.Spans, ctx.ICS.SpansUnknown = addressSpans(state, ev)
@@ -237,16 +237,11 @@ func isStreamErrorEvent(ev dpi.Event) bool {
 // both directions through EvaluateIEC104 and deny unmatched replies.
 func isReply(state *flow.State) bool { return state.Key.Dir == flow.DirReverse }
 
-func messageDirection(state *flow.State, kind string) string {
+func messageDirection(state *flow.State) string {
 	if isReply(state) {
 		return "response"
 	}
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "response", "exception":
-		return "response"
-	default:
-		return "request"
-	}
+	return "request"
 }
 
 func attrString(attrs map[string]any, key string) string {
