@@ -467,11 +467,12 @@ type DataPlaneConfig struct {
 	DPIMock           bool     `json:"dpiMock,omitempty"`           // lab-only DPI inspect-all toggle
 
 	// DPI controls
-	DPIEnabled      bool            `json:"dpiEnabled,omitempty"`      // master DPI on/off
-	DPIMode         string          `json:"dpiMode,omitempty"`         // "learn" or "enforce" (ICS DPI global mode)
-	DPIProtocols    map[string]bool `json:"dpiProtocols,omitempty"`    // per-IT-protocol enable: "dns","tls","http","ssh","smb","ntp","snmp","rdp"
-	DPIICSProtocols map[string]bool `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","iec104"; an absent key is enabled
-	DPIExclusions   []DPIExclusion  `json:"dpiExclusions,omitempty"`   // IPs/domains excluded from DPI
+	DPIEnabled      bool              `json:"dpiEnabled,omitempty"`      // master DPI on/off
+	DPIMode         string            `json:"dpiMode,omitempty"`         // "learn" or "enforce" (ICS DPI global mode)
+	DPIProtocols    map[string]bool   `json:"dpiProtocols,omitempty"`    // per-IT-protocol enable: "dns","tls","http","ssh","smb","ntp","snmp","rdp"
+	DPIICSProtocols map[string]bool   `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","iec104"; an absent key is enabled
+	DPIICSParsing   map[string]string `json:"dpiIcsParsing,omitempty"`   // per-ICS-protocol "tolerant" or "strict"; an absent key is tolerant (see ics.Parsing)
+	DPIExclusions   []DPIExclusion    `json:"dpiExclusions,omitempty"`   // IPs/domains excluded from DPI
 
 	// NFLogGroup, when non-zero, enables kernel-side logging for rules
 	// with Log:true and starts a userspace nflog consumer that emits a
