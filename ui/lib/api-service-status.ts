@@ -162,13 +162,44 @@ export type VPNStatus = ServiceMeter & {
   note: string;
 };
 
+/** One transparent listener of the scanning gate. */
+export type AVGateListenerStatus = {
+  address: string;
+  /** Connections accepted here are masqueraded upstream. */
+  masquerade: boolean;
+  up: boolean;
+  error?: string;
+  /** The listener cannot be opened on this host at all. */
+  unavailable?: boolean;
+};
+
+/**
+ * The scanning gate's part of the antivirus status. The state is off while
+ * the data plane does not enforce; refuse or pass while a listener or the
+ * routing is down, by fail policy; pending while the gate runs but the
+ * scanner is not ready; else open.
+ */
+export type AVGateStatus = {
+  state: "off" | "refuse" | "pass" | "pending" | "open";
+  /** A scan selection is active. */
+  enabled: boolean;
+  fail_policy: string;
+  /** The admission the kernel currently applies: open, pass or refuse. */
+  admit: string;
+  admit_error?: string;
+  listeners: AVGateListenerStatus[];
+  scanner: { ready: boolean; error?: string };
+  connections: number;
+  routing_error?: string;
+  warning?: string;
+};
+
 /** The engine scanner's live status, its scans as the meter. */
 export type AVRuntimeStatus = ServiceMeter & {
   available: true;
   enabled: boolean;
   mode: string;
   failPolicy: string;
-  failOpenICS: boolean;
   max_size: number;
   /** Scan timeout in seconds. */
   timeout: number;
@@ -202,6 +233,8 @@ export type AVRuntimeStatus = ServiceMeter & {
   ready: boolean;
   db_version: string;
   ready_error: string;
+  /** Absent only when the engine's status predates the scanning gate. */
+  gate?: AVGateStatus;
 };
 
 /** The engine did not answer its antivirus status request. */

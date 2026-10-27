@@ -337,11 +337,43 @@ export type ClamAVConfig = {
   freshclamEnabled?: boolean;
 };
 
+/**
+ * One include entry of the scan selection: connections from sourceZones to
+ * destZones on destPorts (ports or N-M ranges, at least one). An empty zone
+ * list matches any zone.
+ */
+export type ScanInclude = {
+  sourceZones?: string[];
+  destZones?: string[];
+  destPorts: string[];
+};
+
+/** One exclude entry; sources and destinations are CIDRs. At least one field must be set. */
+export type ScanExclude = {
+  sourceZones?: string[];
+  destZones?: string[];
+  sources?: string[];
+  destinations?: string[];
+  destPorts?: string[];
+};
+
+export type ScanDownloadMode = "hold" | "stream_tail";
+
+/** The traffic the scanning gate intercepts; excludes win over includes. */
+export type ScanSelection = {
+  include?: ScanInclude[];
+  exclude?: ScanExclude[];
+  downloadMode?: ScanDownloadMode;
+  /** Zones whose unscanned traffic passes under a closed fail policy. */
+  icsZones?: string[];
+  /** Asset IDs whose unscanned traffic passes under a closed fail policy. */
+  icsAssets?: string[];
+};
+
 export type AVConfig = {
   enabled: boolean;
   mode?: "icap" | "clamav";
   failPolicy?: "open" | "closed";
-  failOpenIcs?: boolean;
   maxSizeBytes?: number;
   timeoutSec?: number;
   /** Verdict cache lifetime in nanoseconds; 0 selects 10 minutes. */
@@ -350,6 +382,11 @@ export type AVConfig = {
     servers?: { address: string; useTls?: boolean; service?: string }[];
   };
   clamav?: ClamAVConfig;
+  /** Scan HTTP responses (downloads). */
+  httpDownload?: boolean;
+  /** Scan HTTP requests (uploads). */
+  httpUpload?: boolean;
+  scan?: ScanSelection;
 };
 
 export type UserRole = "admin" | "view";
