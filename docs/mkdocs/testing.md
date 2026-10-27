@@ -153,15 +153,28 @@ and IEC104 scenarios in
 
 `CONTAIND_NETNS_KERNEL_TEST=1` is the one gate of the dataplane kernel tests
 in `pkg/dp/engine`, `pkg/dp/enforce`, `pkg/dp/capture`, `pkg/dp/session`,
-`pkg/dp/conntrack`, `pkg/dp/dhcpd` and `pkg/dp/netcfg`. Most of them replace
-containd's nft tables, routes or links, or create network namespaces, so they
-run only with the variable set, in a disposable privileged Linux container.
-The `pkg/dp/capture` and `pkg/dp/session` tests also run whenever they run as
-root; with the variable set, a missing prerequisite fails them instead of
-skipping. Each test's comment gives its container command. The
-`pkg/dp/netcfg` management kernel test also needs a TUN device, OpenVPN and
-reverse-path filtering; `bash pkg/dp/netcfg/management-kernel.sh` builds that
-container and runs it.
+`pkg/dp/conntrack`, `pkg/dp/dhcpd`, `pkg/dp/netcfg` and `pkg/app/engine`.
+Most of them replace containd's nft tables, routes or links, or create
+network namespaces, so they run only with the variable set, in a disposable
+privileged Linux container. The `pkg/dp/capture` and `pkg/dp/session` tests
+also run whenever they run as root; with the variable set, a missing
+prerequisite fails them instead of skipping. Each test's comment gives its
+container command. The `pkg/dp/netcfg` management kernel test also needs a
+TUN device, OpenVPN and reverse-path filtering;
+`bash pkg/dp/netcfg/management-kernel.sh` builds that container and runs it.
+
+The scanning-gate kernel tests run together with
+`bash scripts/gate-kernel-tests.sh`: the nft steering (`TestGateKernel`) and
+the nft load of every golden ruleset (`TestKernelNFTLoadsGoldens`) in
+`pkg/dp/enforce`, the gate policy routing (`TestGateRoutingKernel`) in
+`pkg/dp/netcfg` and the gate manager (`TestGateManagerKernel`) in
+`pkg/app/engine`. The script builds a `golang` image with nftables,
+iproute2 and Python, runs it with `NET_ADMIN`, `NET_RAW` and `SYS_ADMIN`
+(network namespaces need the last one), keeps the build and module caches in
+named Docker volumes, and passes extra arguments to `go test`. It runs the
+packages one at a time (`go test -p 1`) because the netcfg and engine tests
+install the gate's policy routing in the namespace-global table 104010 and
+would remove each other's objects in parallel.
 
 ## Kernel NFQUEUE Oracle
 

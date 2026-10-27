@@ -706,19 +706,102 @@ components:
             interfaces, or whose addresses share no family, which explains its zero matches.
             Omitted when there are none.
     AVConfig:
+      description: >-
+        Antivirus settings. A stored failOpenIcs still loads and is ignored; scan.icsZones and
+        scan.icsAssets replace it. The scanning gate intercepts traffic only with enabled, at least
+        one scan.include entry and httpDownload or httpUpload set.
       properties:
         cacheTtl: {type: integer, format: int64, minimum: 0, description: Verdict cache lifetime in nanoseconds; 0 selects 10 minutes}
         clamav: {$ref: '#/components/schemas/ClamAVConfig'}
         enabled: {type: boolean}
-        failOpenIcs: {type: boolean}
-        failPolicy: {type: string}
-        httpDownload: {type: boolean}
-        httpUpload: {type: boolean}
+        failPolicy: {type: string, enum: ["", open, closed], description: "Treatment of every unscanned outcome: open passes it, closed refuses it; empty selects open"}
+        httpDownload: {type: boolean, description: Scan the response bodies of selected connections}
+        httpUpload: {type: boolean, description: Scan the request bodies of selected connections}
         icap: {$ref: '#/components/schemas/ICAPConfig'}
-        maxSizeBytes: {type: integer, minimum: 0, maximum: 104857600, description: Largest payload sent to the scanner; 0 means no limit}
+        maxSizeBytes: {type: integer, minimum: 0, maximum: 104857600, description: Largest payload sent to the scanner; 0 means no limit. A larger object is unscanned and follows failPolicy}
         mode: {type: string, enum: ["", clamav, icap], description: "Scanning backend; empty selects clamav"}
-        timeoutSec: {type: integer, minimum: 0, maximum: 300, description: Per-scan and per-probe deadline in seconds; 0 selects 5}
+        scan: {$ref: '#/components/schemas/ScanSelection'}
+        timeoutSec: {type: integer, minimum: 0, maximum: 300, description: Backend connect and probe deadline in seconds; 0 selects 5. The gate bounds each scan to ten times this value, at least one minute}
       type: object
+    ScanSelection:
+      description: >-
+        The traffic the scanning gate intercepts: new TCP connections the firewall routes between
+        zones, port forwards included, matched on the effective (post-DNAT) destination. Exclude
+        entries win over every include entry. Selecting traffic requires dataplane.enforcement, and
+        no include entry may cover an ICS decoder port (502, 2222, 2404, 20000, 44818). Unknown
+        keys are rejected.
+      properties:
+        include: {items: {$ref: '#/components/schemas/ScanInclude'}, type: array, description: Any matching entry selects the connection}
+        exclude: {items: {$ref: '#/components/schemas/ScanExclude'}, type: array, description: A matching entry keeps the connection out of the gate}
+        downloadMode: {type: string, enum: ["", hold, stream_tail], description: "hold delivers nothing before the verdict; stream_tail forwards a download except its last 64 KiB and resets both connections on a blocking verdict. Empty selects hold. Uploads are always held"}
+        icsZones: {items: {type: string}, type: array, description: Zones whose endpoints pass unscanned outcomes under a closed fail policy; detections are still blocked}
+        icsAssets: {items: {type: string}, type: array, description: Asset IDs whose addresses pass unscanned outcomes under a closed fail policy}
+      type: object
+    ScanInclude:
+      description: Selects connections from sourceZones to destZones on destPorts; every populated field must match and an empty zone list means any zone.
+      properties:
+        sourceZones: {items: {type: string}, type: array}
+        destZones: {items: {type: string}, type: array}
+        destPorts: {items: {type: string}, type: array, description: Decimal ports or N-M ranges, from 1; at least one}
+      required: [destPorts]
+      type: object
+    ScanExclude:
+      description: Keeps matching connections out of the gate; every populated field must match and at least one must be set.
+      properties:
+        sourceZones: {items: {type: string}, type: array}
+        destZones: {items: {type: string}, type: array}
+        sources: {items: {type: string}, type: array, description: Source CIDRs}
+        destinations: {items: {type: string}, type: array, description: Effective destination CIDRs}
+        destPorts: {items: {type: string}, type: array, description: Decimal ports or N-M ranges}
+      type: object
+    AVStatus:
+      description: The engine's live antivirus status; the keys beside gate are the applied settings, readiness, counters and the clamd and FreshClam state.
+      type: object
+      additionalProperties: true
+      properties:
+        available: {type: boolean, description: false when the engine cannot be reached; the entry then carries only error}
+        error: {type: string}
+        ready: {type: boolean}
+        db_version: {type: string}
+        reload_pending: {type: boolean, description: A clamd database activation is being confirmed in the background}
+        gate: {$ref: '#/components/schemas/AVGateStatus'}
+    AVGateStatus:
+      description: The scanning gate's part of the antivirus status.
+      type: object
+      required: [state, enabled, fail_policy, admit, listeners, scanner, connections]
+      properties:
+        state:
+          type: string
+          enum: [off, refuse, pass, pending, open]
+          description: >-
+            off while the data plane does not enforce; refuse or pass, by fail policy, while a
+            listener or the gate's policy routing is down; pending while the gate runs but the
+            scanner is not ready, so selected objects are refused under closed and passed under
+            open; open when everything is up.
+        enabled: {type: boolean, description: The selection intercepts something}
+        fail_policy: {type: string, enum: [open, closed]}
+        admit: {type: string, enum: [open, refuse, pass], description: The admission installed in nftables for selected connections}
+        admit_error: {type: string, description: Why the last admission switch failed; omitted when it succeeded}
+        listeners: {items: {$ref: '#/components/schemas/AVGateListenerStatus'}, type: array}
+        scanner: {$ref: '#/components/schemas/AVGateScannerStatus'}
+        connections: {type: integer, description: Gated connections currently served}
+        routing_error: {type: string, description: Why the gate's policy routing is not installed; omitted when it is}
+        warning: {type: string, description: A host condition the gate cannot correct, such as net.ipv4.tcp_fwmark_accept enabled; omitted when there is none}
+    AVGateListenerStatus:
+      type: object
+      required: [address, masquerade, up]
+      properties:
+        address: {type: string, description: Loopback address and port the listener binds}
+        masquerade: {type: boolean, description: Serves connections whose upstream leg is masqueraded}
+        up: {type: boolean}
+        error: {type: string, description: The last bind or accept error; omitted when none}
+        unavailable: {type: boolean, description: The host lacks this loopback family; the listener is not required for the open state}
+    AVGateScannerStatus:
+      type: object
+      required: [ready]
+      properties:
+        ready: {type: boolean}
+        error: {type: string, description: Why the scanner is not ready; omitted when it is}
     Anomaly:
       properties:
         attributes: {additionalProperties: {}, type: object}
@@ -2142,12 +2225,53 @@ components:
       properties:
         Default: {type: string}
         Firewall: {items: {$ref: '#/components/schemas/RulesEntry'}, type: array}
+        Gate: {$ref: '#/components/schemas/RulesGateSelection'}
         IDS: {$ref: '#/components/schemas/RulesIDSConfig'}
         IdentityBindings: {items: {$ref: '#/components/schemas/RulesIdentityBinding'}, type: array, description: Sorted by address.}
         LocalInput: {items: {$ref: '#/components/schemas/RulesLocalServiceRule'}, type: array}
         NAT: {$ref: '#/components/schemas/RulesNATConfig'}
         Version: {type: string}
         ZoneIfaces: {additionalProperties: {items: {type: string}, type: array}, type: object}
+      type: object
+    RulesGateSelection:
+      description: >-
+        The compiled scan selection. Enabled is false, with empty entries and zones, when the
+        gate intercepts nothing. Zone, asset and CIDR references are resolved to devices and
+        prefixes; the effective destination is matched.
+      properties:
+        Enabled: {type: boolean}
+        Include: {items: {$ref: '#/components/schemas/RulesGateEntry'}, type: array}
+        Exclude: {items: {$ref: '#/components/schemas/RulesGateEntry'}, type: array}
+        Zones: {items: {$ref: '#/components/schemas/RulesGateZone'}, type: array, description: Every egress zone an include entry references}
+        ICSDevices: {items: {type: string}, type: array, description: Devices of the ICS-marked zones}
+        ICSCIDRs: {items: {type: string}, type: array, description: Subnets of the ICS-marked zones' interfaces and addresses of the ICS-marked assets}
+        FailPolicy: {type: string, enum: [open, closed]}
+        DownloadMode: {type: string, enum: [hold, stream_tail]}
+      type: object
+    RulesGateEntry:
+      description: >-
+        One resolved include or exclude entry. An include entry names its egress zones in
+        DestZones; an exclude entry carries egress devices in DestDevices and may constrain
+        addresses, in which case Family is 4 or 6 and the prefixes are of that family alone.
+      properties:
+        SourceDevices: {items: {type: string}, type: array, description: Ingress devices; empty means any}
+        DestZones: {items: {type: string}, type: array, description: Include entries only; names in Zones}
+        DestDevices: {items: {type: string}, type: array, description: Exclude entries only; empty means any}
+        Family: {type: integer, enum: [0, 4, 6], description: 0 when the entry has no address constraint}
+        Sources: {items: {type: string}, type: array, description: CIDRs; exclude entries only}
+        Destinations: {items: {type: string}, type: array, description: CIDRs; exclude entries only}
+        Ports: {items: {$ref: '#/components/schemas/RulesGatePortRange'}, type: array, description: Empty means any port; exclude entries only}
+      type: object
+    RulesGateZone:
+      properties:
+        Name: {type: string}
+        Index: {type: integer, minimum: 1, maximum: 255, description: The egress zone index written into the connection mark}
+        Devices: {items: {type: string}, type: array}
+      type: object
+    RulesGatePortRange:
+      properties:
+        Lo: {type: integer}
+        Hi: {type: integer}
       type: object
     RulesYARAString:
       properties:
@@ -2212,6 +2336,11 @@ components:
         Repeated values describe best-effort auxiliary infrastructure warnings
         (interfaces, routing, engine services including DHCP redirect, IPv4
         forwarding and PCAP), not ruleset or dataplane configuration failures.
+        A services: warning also reports a scan selection that intercepts or
+        exempts less than it reads (a zone without an interface, an asset
+        without an address, a closed fail policy without ICS endpoints) and an
+        AV backend still starting when the apply ended, which leaves the
+        scanning gate pending until it is ready.
         Across multiple bound zones, disabled forwarding includes "ipv4 forwarding
         is disabled (net.ipv4.ip_forward=0); routed traffic will not pass".
       schema: {type: string}
@@ -4769,6 +4898,11 @@ paths:
                         type: boolean
                         description: Whether the engine owns the candidate queue at sampling time; used only if enforcement is enabled and the candidate has an IEC 104 envelope.
                       reason: {type: string, description: Explanation of disabled enforcement or the sampled envelope decision}
+                      gateAdmit:
+                        type: string
+                        enum: [refuse, open, pass]
+                        description: The scanning gate's admission state sampled at request time and compiled into the preview; omitted when enforcement is disabled.
+                      gateAdmitReason: {type: string, description: What the sampled admission means for the candidate's gated connections; omitted when enforcement is disabled}
                   warnings:
                     type: array
                     items: {$ref: '#/components/schemas/RuleWarning'}
@@ -5486,8 +5620,9 @@ paths:
       tags: [Services]
       description: >-
         Management service status keyed by service. The av entry is the
-        engine's live antivirus status (ready, db_version, counters); when the
-        engine cannot be reached it is {"available": false, "error": ...}.
+        engine's live antivirus status (ready, db_version, counters) with the
+        scanning gate under gate; when the engine cannot be reached it is
+        {"available": false, "error": ...}.
         syslog.audit reports audit-record forwarding: enabled, sent_total,
         failed_total, last_error, last_flush, backlog, and forwarders, a list
         of {forwarder, last_id, backlog, last_error, last_sent}.
@@ -5496,4 +5631,8 @@ paths:
           description: Success
           content:
             application/json:
-              schema: {type: object, additionalProperties: true}
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  av: {$ref: '#/components/schemas/AVStatus'}
