@@ -68,8 +68,8 @@ func TestCIPStreamMidStreamPickupDropped(t *testing.T) {
 			if got := ruleHits(f.e, "cip-read"); got != hits+1 {
 				t.Fatalf("read hits %d -> %d, want one decoded read", hits, got)
 			}
-			if got := len(failClosedEvents(f.e)); got != 2 {
-				t.Fatalf("fail-closed events = %d, want only the two pickups", got)
+			if got := len(failClosedEvents(f.e)); got != 1 {
+				t.Fatalf("fail-closed events = %d, want only the original pickup", got)
 			}
 			select {
 			case got := <-f.up.calls:
