@@ -39,7 +39,7 @@ func (tx *transaction) run() bool {
 	h := tx.req
 	if h.hasExpect && h.expect != "100-continue" {
 		res := gateResult(avscan.ReasonUnsupported, "Expect: "+h.expect)
-		tx.emit(avscan.Upload, res, avscan.Block, h.declaredLength(), nil, 0)
+		tx.emit(avscan.Upload, res, avscan.Block, h.declaredLength(), nil, false, 0)
 		tx.c.refuse(refusal(417, "Expectation Failed", "containd: unsupported Expect\n", tx.headOnly()), true)
 		return false
 	}
@@ -50,7 +50,7 @@ func (tx *transaction) run() bool {
 	res, ok := tx.admit(h.declaredLength())
 	if !ok {
 		if tx.set.decide(res, tx.ics) == avscan.Block {
-			tx.refuseUpload(res, h.declaredLength(), nil)
+			tx.refuseUpload(res, h.declaredLength(), nil, false)
 			return false
 		}
 		return tx.exchange(body, &res)
@@ -86,7 +86,7 @@ func (tx *transaction) holdUpload(body io.Reader) bool {
 	case fillComplete:
 		res := tx.scan(tx.object(avscan.Upload, sp, nil), tx.c.client)
 		action := tx.set.decide(res, tx.ics)
-		tx.emit(avscan.Upload, res, action, sp.size, sp, 0)
+		tx.emit(avscan.Upload, res, action, sp.size, sp, false, 0)
 		if action == avscan.Block {
 			tx.c.refuse(refusal(403, "Forbidden", blockBody(res), tx.headOnly()), true)
 			return false
@@ -95,20 +95,21 @@ func (tx *transaction) holdUpload(body io.Reader) bool {
 	case fillOversized, fillDisk:
 		res := partialResult(outcome, detail)
 		if tx.set.decide(res, tx.ics) == avscan.Block {
-			tx.refuseUpload(res, sp.size, sp)
+			tx.refuseUpload(res, max(sp.size, h.declaredLength()), sp, true)
 			return false
 		}
 		return tx.exchange(bodySource{kind: h.body, held: sp, excess: excess, rest: body, release: release}, &res)
 	default:
-		tx.emitIncomplete(avscan.Upload, incompleteResult(outcome, detail), sp, 0)
+		tx.emit(avscan.Upload, incompleteResult(outcome, detail), avscan.Block, sp.size, sp, true, 0)
 		tx.c.closeAll()
 		return false
 	}
 }
 
-// refuseUpload answers 403 before the origin has seen a byte.
-func (tx *transaction) refuseUpload(res avscan.Result, size int64, sp *spool) {
-	tx.emit(avscan.Upload, res, avscan.Block, size, sp, 0)
+// refuseUpload answers 403 before the origin has seen a byte. partial
+// says whether sp holds only a prefix of the object.
+func (tx *transaction) refuseUpload(res avscan.Result, size int64, sp *spool, partial bool) {
+	tx.emit(avscan.Upload, res, avscan.Block, size, sp, partial, 0)
 	tx.c.refuse(refusal(403, "Forbidden", blockBody(res), tx.headOnly()), true)
 }
 
@@ -214,21 +215,10 @@ func (tx *transaction) object(dir avscan.Direction, sp *spool, respHead []byte) 
 	}
 }
 
-// emit records one object decision.
-func (tx *transaction) emit(dir avscan.Direction, res avscan.Result, action avscan.Action, size int64, sp *spool, status int) {
-	tx.c.srv.emit(tx.event(dir, res, action, size, sp, status))
-}
-
-// emitIncomplete records a body that never completed: its hash covers
-// only what arrived.
-func (tx *transaction) emitIncomplete(dir avscan.Direction, res avscan.Result, sp *spool, status int) {
-	ev := tx.event(dir, res, avscan.Block, sp.size, sp, status)
-	ev.SHA256Partial = true
-	tx.c.srv.emit(ev)
-}
-
-// event builds one object event.
-func (tx *transaction) event(dir avscan.Direction, res avscan.Result, action avscan.Action, size int64, sp *spool, status int) Event {
+// emit records one object decision. sp holds the hashed bytes, nil when
+// nothing was held; partial says explicitly that those bytes are only a
+// prefix of the object (oversized, disk error, incomplete, streamed on).
+func (tx *transaction) emit(dir avscan.Direction, res avscan.Result, action avscan.Action, size int64, sp *spool, partial bool, status int) {
 	ev := Event{
 		ID: tx.id, Direction: dir, Client: tx.c.clientAddr, Server: tx.c.serverAddr, ICS: tx.ics,
 		Method: tx.req.method, Host: tx.req.host, Target: boundTarget(tx.req.target), Status: status,
@@ -236,11 +226,11 @@ func (tx *transaction) event(dir avscan.Direction, res avscan.Result, action avs
 		Backend: res.Backend, Detail: res.Detail, Action: action, Duration: time.Since(tx.start),
 	}
 	if sp != nil && sp.size > 0 {
-		ev.SHA256, ev.SHA256Partial = sp.sum(), sp.size < size
+		ev.SHA256, ev.SHA256Partial = sp.sum(), partial
 	} else {
-		ev.SHA256Partial = size > 0
+		ev.SHA256Partial = partial || size > 0
 	}
-	return ev
+	tx.c.srv.emit(ev)
 }
 
 func (tx *transaction) headOnly() bool { return tx.req.method == "HEAD" }

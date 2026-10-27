@@ -37,7 +37,9 @@ func (tx *transaction) readResponse(u *upstream, stop chan struct{}) respResult 
 			if interim > maxInterim {
 				return tx.unsupportedResponse(u, h, raw, "more than 16 interim responses", stop)
 			}
-			if h.status == 100 && tx.sent100 {
+			// The gate answered its own 100; an HTTP/1.0 client would take
+			// any 1xx for the final response.
+			if (h.status == 100 && tx.sent100) || tx.req.http10 {
 				continue
 			}
 			if _, err := c.client.Write(raw); err != nil {
@@ -70,7 +72,7 @@ func (tx *transaction) unsupportedResponse(u *upstream, h *head, raw []byte, det
 	if h != nil {
 		status = h.status
 	}
-	tx.emit(avscan.Download, res, action, 0, nil, status)
+	tx.emit(avscan.Download, res, action, 0, nil, false, status)
 	if action == avscan.Block {
 		if !tx.sendDone.Load() {
 			close(stop)
@@ -103,7 +105,7 @@ func (tx *transaction) deliverResponse(u *upstream, h *head) bool {
 	res, ok := tx.admit(h.declaredLength())
 	if !ok {
 		if tx.set.decide(res, tx.ics) == avscan.Block {
-			tx.refuseDownload(h, res, h.declaredLength(), nil)
+			tx.refuseDownload(h, res, h.declaredLength(), nil, false)
 			return false
 		}
 		return tx.writeResponse(h, body, &res) && persist
@@ -120,7 +122,7 @@ func (tx *transaction) deliverResponse(u *upstream, h *head) bool {
 		}
 		res := tx.scan(tx.object(avscan.Download, sp, h.raw), watch)
 		action := tx.set.decide(res, tx.ics)
-		tx.emit(avscan.Download, res, action, sp.size, sp, h.status)
+		tx.emit(avscan.Download, res, action, sp.size, sp, false, h.status)
 		if action == avscan.Block {
 			_, _ = c.client.Write(refusal(403, "Forbidden", blockBody(res), tx.headOnly()))
 			return false
@@ -129,19 +131,20 @@ func (tx *transaction) deliverResponse(u *upstream, h *head) bool {
 	case fillOversized, fillDisk:
 		res := partialResult(outcome, detail)
 		if tx.set.decide(res, tx.ics) == avscan.Block {
-			tx.refuseDownload(h, res, sp.size, sp)
+			tx.refuseDownload(h, res, max(sp.size, h.declaredLength()), sp, true)
 			return false
 		}
 		return tx.writeResponse(h, bodySource{kind: h.body, held: sp, excess: excess, rest: body.rest}, &res) && persist
 	default:
-		tx.emitIncomplete(avscan.Download, incompleteResult(outcome, detail), sp, h.status)
+		tx.emit(avscan.Download, incompleteResult(outcome, detail), avscan.Block, sp.size, sp, true, h.status)
 		return false
 	}
 }
 
-// refuseDownload sends the client a 403 in place of the response.
-func (tx *transaction) refuseDownload(h *head, res avscan.Result, size int64, sp *spool) {
-	tx.emit(avscan.Download, res, avscan.Block, size, sp, h.status)
+// refuseDownload sends the client a 403 in place of the response. partial
+// says whether sp holds only a prefix of the object.
+func (tx *transaction) refuseDownload(h *head, res avscan.Result, size int64, sp *spool, partial bool) {
+	tx.emit(avscan.Download, res, avscan.Block, size, sp, partial, h.status)
 	_, _ = tx.c.client.Write(refusal(403, "Forbidden", blockBody(res), tx.headOnly()))
 }
 
@@ -154,7 +157,7 @@ func (tx *transaction) writeResponse(h *head, src bodySource, pass *avscan.Resul
 	}
 	sent, err := writeBody(newBodyWriter(c.client, src.kind), src, nil)
 	if pass != nil {
-		tx.emit(avscan.Download, *pass, avscan.PassUnscanned, sent, src.held, h.status)
+		tx.emit(avscan.Download, *pass, avscan.PassUnscanned, sent, src.held, true, h.status)
 	}
 	return err == nil
 }

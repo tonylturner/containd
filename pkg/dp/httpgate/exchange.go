@@ -78,7 +78,7 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 
 		sent, sendErr := tx.send(u, body, stop)
 		if pass != nil {
-			tx.emit(avscan.Upload, *pass, avscan.PassUnscanned, sent, body.held, 0)
+			tx.emit(avscan.Upload, *pass, avscan.PassUnscanned, sent, body.held, true, 0)
 		}
 		if body.release != nil {
 			body.release()

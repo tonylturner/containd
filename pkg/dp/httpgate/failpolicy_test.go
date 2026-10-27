@@ -160,6 +160,15 @@ func TestOversizedUploadFollowsPolicy(t *testing.T) {
 					if o.rec.connections() != 0 {
 						t.Fatal("origin reached for a refused oversized upload")
 					}
+					// A declared length over the cap is refused unread; a chunked
+					// body is refused after its 1 MiB prefix was held and hashed.
+					wantHash, wantSize := "", int64(threeMiB)
+					if framing == "chunked" {
+						wantHash, wantSize = sha256hex(body[:1<<20]), 1<<20
+					}
+					if !ev.SHA256Partial || ev.SHA256 != wantHash || ev.Size != wantSize {
+						t.Fatalf("refused prefix digest not marked partial: %+v", ev)
+					}
 					return
 				}
 				got := log.list()
@@ -214,6 +223,13 @@ func TestOversizedDownloadFollowsPolicy(t *testing.T) {
 						t.Fatalf("status %d, leaked=%v", resp.StatusCode, bytes.Contains(c.rec.bytes(), body[:4096]))
 					}
 					c.expectEOF()
+					wantHash, wantSize := "", int64(threeMiB)
+					if framing == "chunked" {
+						wantHash, wantSize = sha256hex(body[:1<<20]), 1<<20
+					}
+					if !ev.SHA256Partial || ev.SHA256 != wantHash || ev.Size != wantSize {
+						t.Fatalf("refused prefix digest not marked partial: %+v", ev)
+					}
 					return
 				}
 				if resp.StatusCode != 200 || !bytes.Equal(rb, body) {
@@ -230,6 +246,32 @@ func TestOversizedDownloadFollowsPolicy(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// A spool that cannot open its file refuses as busy under closed policy;
+// the digest of the bytes held in memory is marked partial.
+func TestSpoolDiskErrorRefusalIsPartial(t *testing.T) {
+	log := &bodyLog{}
+	o := echoOrigin(t, log)
+	g := startGate(t, o, func(s *Settings) {
+		s.ScanDownloads = false
+		s.MemoryThreshold = 1024
+		s.SpoolDir = "/nonexistent/httpgate-spool"
+	})
+	body := pattern(5000, 53)
+	c := g.client()
+	c.write(requestCL("POST", "/disk", "", body))
+	expectRefusedOrDelivered(t, c, avscan.FailClosed, avscan.ReasonBusy)
+	ev := g.events.next(t)
+	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonBusy, avscan.Block)
+	// The first write already exceeds the threshold, so nothing was held:
+	// the object is still reported by its declared length as partial.
+	if ev.Backend != "gate" || ev.SHA256 != "" || !ev.SHA256Partial || ev.Size != int64(len(body)) {
+		t.Fatalf("event %+v", ev)
+	}
+	if o.rec.connections() != 0 {
+		t.Fatal("origin reached for a refused upload")
 	}
 }
 
