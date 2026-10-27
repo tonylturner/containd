@@ -30,6 +30,8 @@ const (
 // ClamAVClient speaks the clamd Unix-socket protocol in NUL-delimited mode:
 // every command is sent as "z<COMMAND>\0" and every reply ends with "\0".
 type ClamAVClient struct {
+	// Timeout bounds connecting to clamd. The exchange itself is bounded by
+	// the ctx deadline when there is one, otherwise by Timeout as well.
 	Timeout time.Duration
 	Socket  string
 }
@@ -56,9 +58,9 @@ func (c *ClamAVClient) dial(ctx context.Context) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(timeout)
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
+	deadline, bounded := ctx.Deadline()
+	if !bounded {
+		deadline = time.Now().Add(timeout)
 	}
 	if err := conn.SetDeadline(deadline); err != nil {
 		_ = conn.Close()

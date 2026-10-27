@@ -234,7 +234,6 @@ func TestAVManagerSupervisesOneClamdAndFreshclam(t *testing.T) {
 	}
 
 	// Unrelated settings neither restart clamd nor rerun FreshClam.
-	cfg.BlockTTL = 30
 	cfg.TimeoutSec = 2
 	if err := mgr.Apply(applyCtx(t), cfg); err != nil {
 		t.Fatalf("Apply unchanged backend: %v", err)

@@ -225,7 +225,8 @@ func (m *AVManager) execFreshclam(ctx context.Context) (bool, error) {
 }
 
 // afterDefinitionsUpdate reloads clamd after new databases arrived, or
-// starts it when it had exited for lack of a database.
+// starts it when it had exited for lack of a database. The activation
+// confirms itself in the background and retries on failure.
 func (m *AVManager) afterDefinitionsUpdate(ctx context.Context, changed bool) {
 	if err := m.lock(ctx); err != nil {
 		return
@@ -241,7 +242,8 @@ func (m *AVManager) afterDefinitionsUpdate(ctx context.Context, changed bool) {
 	if running && !changed {
 		return
 	}
-	if err := m.reloadClamd(ctx, cfg); err != nil {
-		m.emit("service.av.clamav_reload_failed", map[string]any{"error": err.Error()})
-	}
+	ctx, cancel := context.WithTimeout(ctx, m.reloadBounds().confirm)
+	defer cancel()
+	// A failure records itself and schedules a retry.
+	_ = m.reloadClamd(ctx, cfg)
 }
