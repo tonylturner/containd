@@ -230,17 +230,22 @@ func (c *chunkWriter) finish() error {
 var errStopped = errors.New("httpgate: forwarding stopped")
 
 // copyBody streams src into dst until EOF, an error, or stop closes.
+// The caller must bound a blocked source read when stopping the copy.
 func copyBody(dst io.Writer, src io.Reader, stop <-chan struct{}) (int64, error) {
 	buf := make([]byte, copyBufSize)
 	var total int64
 	for {
-		select {
-		case <-stop:
-			return total, errStopped
-		default:
-		}
 		n, rerr := src.Read(buf)
 		if n > 0 {
+			// Check stop only when there are bytes left to forward.
+			// The origin can answer after receiving the final Write
+			// but before it returns; the next Read's EOF still means
+			// the body completed, not that stop truncated it.
+			select {
+			case <-stop:
+				return total, errStopped
+			default:
+			}
 			if _, werr := dst.Write(buf[:n]); werr != nil {
 				return total, werr
 			}

@@ -33,6 +33,9 @@ func writeBody(w bodyWriter, src bodySource, stop <-chan struct{}) (int64, error
 		}
 	}
 	if len(src.excess) > 0 {
+		if closed(stop) {
+			return total, errStopped
+		}
 		if _, err := w.Write(src.excess); err != nil {
 			return total, err
 		}
@@ -44,6 +47,11 @@ func writeBody(w bodyWriter, src bodySource, stop <-chan struct{}) (int64, error
 		if err != nil {
 			return total, err
 		}
+	}
+	// EOF completes a length body, but a chunked body still needs its
+	// terminator on the wire. A stop before that write truncates it.
+	if src.kind == bodyChunked && closed(stop) {
+		return total, errStopped
 	}
 	return total, w.finish()
 }

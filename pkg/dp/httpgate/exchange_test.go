@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,32 +18,37 @@ import (
 	"github.com/tonylturner/containd/pkg/common/avscan"
 )
 
-// latchConn is an origin connection whose first Write hands its bytes to
-// the origin and then does not return until release is closed. It holds
+// latchConn is an origin connection whose Write that reaches the byte
+// threshold waits until release is closed after sending its bytes. It holds
 // the request sender inside its Write while the origin already answers,
 // the scheduling the response reader must not depend on.
 type latchConn struct {
 	net.Conn
 	once    sync.Once
 	release <-chan struct{}
+	remain  int
 }
 
 func (c *latchConn) Write(p []byte) (int, error) {
 	n, err := c.Conn.Write(p)
+	c.remain -= n
+	if c.remain > 0 {
+		return n, err
+	}
 	c.once.Do(func() { <-c.release })
 	return n, err
 }
 
-// latchedDial installs a Dial hook on o that latches the first write of
-// every upstream connection. Call release before the gate shuts down.
-func latchedDial(o *origin) (release func()) {
+// latchedDial latches the write that reaches size bytes on every upstream
+// connection (the first write when size is zero). Release before shutdown.
+func latchedDial(o *origin, size int) (release func()) {
 	ch := make(chan struct{})
 	o.dial = func(_ context.Context, _, server netip.AddrPort) (net.Conn, error) {
 		nc, err := net.Dial("tcp", server.String())
 		if err != nil {
 			return nil, err
 		}
-		return &latchConn{Conn: nc, release: ch}, nil
+		return &latchConn{Conn: nc, release: ch, remain: size}, nil
 	}
 	var once sync.Once
 	return func() { once.Do(func() { close(ch) }) }
@@ -53,7 +59,7 @@ func latchedDial(o *origin) (release func()) {
 func TestResponseBeforeSendReturnsKeepsConnection(t *testing.T) {
 	log := &bodyLog{}
 	o := pathOrigin(t, log)
-	release := latchedDial(o)
+	release := latchedDial(o, 0)
 	defer release()
 	g := startGate(t, o, nil)
 	c := g.client()
@@ -85,7 +91,7 @@ func TestResponseBeforeSendReturnsWatchesClient(t *testing.T) {
 		_, _ = fmt.Fprintf(c, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n", len(body))
 		_, _ = c.Write(body)
 	})
-	release := latchedDial(o)
+	release := latchedDial(o, 0)
 	defer release()
 	g := startGate(t, o, func(s *Settings) { s.FailPolicy = avscan.FailOpen; s.ScanTimeout = time.Minute })
 	releaseScan := g.scanner.holdScans()
@@ -105,6 +111,61 @@ func TestResponseBeforeSendReturnsWatchesClient(t *testing.T) {
 	c.expectClosed()
 	if n := len(c.rec.bytes()); n != 0 {
 		t.Fatalf("client received %d bytes after half-closing under fail-open", n)
+	}
+}
+
+// A response can arrive after the final upload bytes reach the origin
+// but before that Write returns. EOF, not sender scheduling, determines
+// whether the upload completed and the pipelined request can be served.
+func TestUploadResponseBeforeFinalWriteReturnsKeepsConnection(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		scan bool
+		disk bool
+	}{
+		{name: "held-memory", scan: true},
+		{name: "held-disk", scan: true, disk: true},
+		{name: "streamed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := &bodyLog{}
+			o := pathOrigin(t, log)
+			body := pattern(1000, 113)
+			req := requestCL("POST", "/first", "", body)
+			// Count bytes rather than writes: a streamed body may
+			// arrive in more than one socket read.
+			release := latchedDial(o, len(req))
+			defer release()
+			g := startGate(t, o, func(s *Settings) {
+				s.ScanUploads = tc.scan
+				s.ScanDownloads = false
+				if tc.disk {
+					s.MemoryThreshold = 1
+				}
+			})
+			c := g.client()
+			c.write(req)
+			c.write(getRequest("/second", "X-Pad: "+strings.Repeat("a", 20<<10)+"\r\n"))
+			resp, rb := c.response("POST")
+			if resp.StatusCode != 200 || string(rb) != "path=/first" {
+				t.Fatalf("first response: status %d body %q", resp.StatusCode, rb)
+			}
+			// Reading the full first response proves stopSend ran while
+			// the final upload Write is still latched.
+			release()
+			resp, rb = c.response("GET")
+			if resp.StatusCode != 200 || string(rb) != "path=/second" {
+				t.Fatalf("second response: status %d body %q", resp.StatusCode, rb)
+			}
+			entries := log.list()
+			if len(entries) != 2 || entries[0].err != nil || !bytes.Equal(entries[0].body, body) ||
+				entries[1].header.Get("X-Pad") != strings.Repeat("a", 20<<10) {
+				t.Fatalf("origin requests %+v", entries)
+			}
+			if o.rec.connections() != 1 {
+				t.Fatalf("origin connections %d, want the first one reused", o.rec.connections())
+			}
+		})
 	}
 }
 
