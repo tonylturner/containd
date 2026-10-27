@@ -95,7 +95,7 @@ To configure managed server mode:
 
 ## AV
 
-- Config model: `services.av` (ICAP or an engine-supervised ClamAV daemon).
+- Config model: `services.av` (an engine-supervised ClamAV daemon by default, or a remote ICAP server).
 - API:
   - `GET/POST /api/v1/services/av` (stages the candidate; commit to apply)
   - `POST /api/v1/services/av/update`
@@ -140,7 +140,7 @@ ClamAV mode:
 
 Applying AV fails, and the commit reports a `services:` warning, when the
 backend is missing, clamd exits or does not answer `PING` within three
-seconds, or the first ICAP server does not answer `OPTIONS`. A freshly started
+seconds, or the ICAP server does not answer `OPTIONS` with the needed methods. A freshly started
 clamd with the full official database can take longer to load; the status
 `ready` field turns true once it answers.
 
@@ -156,10 +156,16 @@ Scanning:
   verdict triggers a temporary flow block.
 - Cached verdicts are keyed by content hash, backend and definitions
   generation, so new definitions or another server never reuse old verdicts.
-- ICAP uses RFC 3507 `RESPMOD` with the payload as a chunked response body.
-  `204 No Content` is clean; an `X-ICAP-Status` header containing
-  `VirusFound` is malware; any other reply, including `200` with adapted
-  content, is a scan error. `useTls` connects with verified TLS 1.2 or
+- ICAP is a generic RFC 3507 backend with exactly one server and no
+  failover. Uploads go as `REQMOD` with the request head, downloads as
+  `RESPMOD` with the request and response heads. The body streams as
+  transferred (chunked framing removed, content coding kept), with
+  `X-Client-IP` and `X-Server-IP`. A reply is infected when it carries
+  `X-Infection-Found`, `X-Violations-Found`, `X-Virus-ID` or an
+  `X-ICAP-Status` containing `VirusFound`; `204 No Content` is clean; any
+  other reply, including `200` with adapted content, is a scan error.
+  `OPTIONS` must list `REQMOD` when uploads are scanned and `RESPMOD` when
+  downloads are. `useTls` connects with verified TLS 1.2 or
   newer, using the configured host as the server name and the system roots
   plus the [additional CA bundle](config-format.md#additional-ca-bundle);
   there is no plaintext fallback.

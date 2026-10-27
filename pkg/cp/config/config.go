@@ -869,11 +869,11 @@ type IOARange struct {
 
 type AVConfig struct {
 	Enabled      bool          `json:"enabled"`
-	Mode         string        `json:"mode,omitempty"`         // icap|clamav
+	Mode         string        `json:"mode,omitempty"`         // clamav (default) | icap
 	FailPolicy   string        `json:"failPolicy,omitempty"`   // open|closed
 	FailOpenICS  bool          `json:"failOpenIcs,omitempty"`  // force fail-open for ICS protocols
 	MaxSizeBytes int64         `json:"maxSizeBytes,omitempty"` // 0 = unlimited
-	TimeoutSec   int           `json:"timeoutSec,omitempty"`   // ICAP scan timeout
+	TimeoutSec   int           `json:"timeoutSec,omitempty"`   // backend connect/scan bound
 	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`     // verdict cache TTL
 	ICAP         ICAPConfig    `json:"icap,omitempty"`
 	ClamAV       ClamAVConfig  `json:"clamav,omitempty"`
@@ -882,8 +882,8 @@ type AVConfig struct {
 }
 
 type ICAPConfig struct {
+	// Servers holds exactly one server in icap mode; there is no failover.
 	Servers []ICAPServer `json:"servers,omitempty"`
-	// Future: service-specific toggles (REQMOD/RESPMOD).
 }
 
 type ICAPServer struct {

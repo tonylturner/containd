@@ -716,7 +716,7 @@ components:
         httpUpload: {type: boolean}
         icap: {$ref: '#/components/schemas/ICAPConfig'}
         maxSizeBytes: {type: integer, minimum: 0, maximum: 104857600, description: Largest payload sent to the scanner; 0 means no limit}
-        mode: {type: string}
+        mode: {type: string, enum: ["", clamav, icap], description: "Scanning backend; empty selects clamav"}
         timeoutSec: {type: integer, minimum: 0, maximum: 300, description: Per-scan and per-probe deadline in seconds; 0 selects 5}
       type: object
     Anomaly:
