@@ -92,6 +92,7 @@ shellcheck_targets=(
     scripts/smoke-mgmt-reservation.sh
     scripts/smoke-quickstart.sh
     scripts/smoketest
+    scripts/verify-published-images.sh
     test/iec104/capture/capture.sh
 )
 
