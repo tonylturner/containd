@@ -92,6 +92,8 @@ test("ICS rule preview shows the impact and predicate warnings of the edited rul
 
   const summary = page.getByLabel("Rule impact preview");
   await expect(summary).toContainText("1234 of 5000 recent events match this rule on its own.");
+  await summary.getByText("Show 1 sample event").click();
+  await expect(summary.getByRole("list", { name: "Sample matching events" })).toContainText("10.10.0.5:40100 → 10.20.0.7:502 (tcp)");
   await expect(summary.getByRole("status")).toContainText(`plc-read: ${warning.message}`);
 
   // The unauthenticated attempt is retried with the session token.

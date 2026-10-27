@@ -12,7 +12,7 @@ import {
 } from "./api-normalize";
 import { normalizeICSCoverageRule, type ICSCoverageRule } from "./api-ics-coverage";
 
-import type { ApiResult } from "./api";
+import type { ApiResult, TelemetryEvent } from "./api";
 
 export type Protocol = {
   name: string;
@@ -127,7 +127,9 @@ export type RuleWarning = {
 /** Rule impact preview: the rule matched in isolation against recent events. */
 export type RulePreview = {
   match_count: number;
-  sample_matches: unknown[];
+  /** The newest matching events, at most 50, in their original wire orientation. */
+  sample_matches: TelemetryEvent[];
+  /** Oldest and newest timestamps of the events searched; null when there were none. */
   time_range: { start: string; end: string } | null;
   total_events: number;
   warnings?: RuleWarning[];
