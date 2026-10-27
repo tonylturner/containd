@@ -6,9 +6,11 @@ package engineapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,7 +65,9 @@ type blockFlowRequest struct {
 	TTLSeconds int    `json:"ttlSeconds,omitempty"`
 }
 
-func blockHostHandler(dp *engine.Engine) http.HandlerFunc {
+// blockHostHandler installs a temporary host block and resets the gated
+// connections it covers.
+func blockHostHandler(dp *engine.Engine, gate *gateManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -92,11 +96,14 @@ func blockHostHandler(dp *engine.Engine) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
+		gate.CloseMatching(engine.GateCloseRequest{Host: netip.MustParseAddr(ip.String())})
 		writeJSON(w, map[string]string{"status": "ok"})
 	}
 }
 
-func blockFlowHandler(dp *engine.Engine) http.HandlerFunc {
+// blockFlowHandler installs a temporary flow block and resets the gated
+// connections it covers.
+func blockFlowHandler(dp *engine.Engine, gate *gateManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -126,9 +133,14 @@ func blockFlowHandler(dp *engine.Engine) http.HandlerFunc {
 			return
 		}
 		ttl := time.Duration(req.TTLSeconds) * time.Second
-		if err := dp.Updater().BlockFlowTemp(r.Context(), srcIP, dstIP, strings.ToLower(strings.TrimSpace(req.Proto)), strings.TrimSpace(req.DstPort), ttl); err != nil {
+		proto, dport := strings.ToLower(strings.TrimSpace(req.Proto)), strings.TrimSpace(req.DstPort)
+		if err := dp.Updater().BlockFlowTemp(r.Context(), srcIP, dstIP, proto, dport, ttl); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
+		}
+		if proto == "tcp" {
+			port, _ := strconv.ParseUint(dport, 10, 16)
+			gate.CloseMatching(engine.GateCloseRequest{Src: netip.MustParseAddr(srcIP.String()), Dst: netip.MustParseAddr(dstIP.String()), DstPort: uint16(port)})
 		}
 		writeJSON(w, map[string]string{"status": "ok"})
 	}
@@ -154,14 +166,23 @@ func clearBlocksHandler(dp *engine.Engine) http.HandlerFunc {
 }
 
 // avApplyTimeout bounds how long a services apply waits for the scanner
-// backend to become ready; it stays within management's request timeout.
+// backend to become ready; it stays within management's request timeout. A
+// backend still starting when it ends is pending, not failed: the AV
+// manager keeps bringing it up and the gate withholds or passes selected
+// objects by the fail policy until it is ready.
 const avApplyTimeout = 3 * time.Second
 
 type avConfigApplier interface {
 	Apply(ctx context.Context, cfg config.AVConfig) error
 }
 
-func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager, av avConfigApplier) http.HandlerFunc {
+// avApplyPending reports an apply that ran out of time while its backend
+// was starting, as opposed to one the backend refused.
+func avApplyPending(ctx context.Context, err error) bool {
+	return err != nil && (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded))
+}
+
+func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager, av avConfigApplier, gate *gateManager) http.HandlerFunc {
 	var current config.ServicesConfig
 	var currentMu sync.Mutex
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -197,11 +218,14 @@ func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownersh
 			// AV applies independently of the other services; a backend
 			// that is not ready is reported after they are applied.
 			var avErr error
+			var avPending bool
 			if av != nil {
 				avCtx, cancelAV := context.WithTimeout(r.Context(), avApplyTimeout)
 				avErr = av.Apply(avCtx, svc.AV)
+				avPending = avApplyPending(avCtx, avErr)
 				cancelAV()
 			}
+			gate.applyAV(svc.AV)
 			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 			defer cancel()
 			if err := netcfg.ApplyWireGuard(ctx, svc.VPN.WireGuard); err != nil {
@@ -257,11 +281,20 @@ func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownersh
 				}
 			}
 			current = svc
-			if avErr != nil {
+			if avErr != nil && !avPending {
 				http.Error(w, "AV service apply failed: "+avErr.Error(), http.StatusServiceUnavailable)
 				return
 			}
-			writeJSON(w, map[string]any{"status": "applied"})
+			resp := map[string]any{"status": "applied"}
+			if avPending {
+				warning := "AV backend is still starting: " + avErr.Error() + "; scanning is pending until it is ready"
+				logger.Warnf("services apply: %s", warning)
+				if dpEngine != nil && dpEngine.Events() != nil {
+					dpEngine.Events().Append(dpevents.Event{Proto: "av", Kind: gateEventPending, Timestamp: time.Now().UTC(), Attributes: map[string]any{"error": avErr.Error()}})
+				}
+				resp["warnings"] = []string{warning}
+			}
+			writeJSON(w, resp)
 			return
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -349,7 +382,8 @@ func healthHandler(dpEngine *engine.Engine, guard *netcfg.ManagementGuard) http.
 	}
 }
 
-func applyRulesHandler(dpEngine *engine.Engine) http.HandlerFunc {
+// applyRulesHandler applies a snapshot and hands its scan selection to the gate.
+func applyRulesHandler(dpEngine *engine.Engine, gate *gateManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -371,6 +405,7 @@ func applyRulesHandler(dpEngine *engine.Engine) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		gate.applySnapshot(snap.Gate)
 		writeJSON(w, map[string]any{"status": "applied"})
 	}
 }

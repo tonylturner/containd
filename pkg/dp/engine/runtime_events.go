@@ -353,9 +353,16 @@ func (e *Engine) effectiveMode(matched *rules.Entry) string {
 	return rules.EffectiveMode(ruleMode, globalMode)
 }
 
-// ApplyVerdict applies a verdict to dynamic enforcement primitives when enabled.
+// ApplyVerdict applies a verdict to dynamic enforcement primitives when
+// enabled. A temporary block also resets the gated connections it covers.
 func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules.EvalContext) error {
-	return applyVerdict(ctx, e.updater, v, flow)
+	if err := applyVerdict(ctx, e.updater, v, flow); err != nil || e.updater == nil {
+		return err
+	}
+	if req, ok := gateCloseForVerdict(v, flow); ok {
+		closeGated([]GateCloseRequest{req})
+	}
+	return nil
 }
 
 func applyVerdict(ctx context.Context, updater enforce.Updater, v verdict.Verdict, flow rules.EvalContext) error {
@@ -416,11 +423,16 @@ func (e *Engine) releaseRulesetStatus() {
 }
 
 // RevokeConnections installs operator revocations through the active enforcement
-// backend. Unsupported or disabled backends cannot report a successful kill.
+// backend and resets the gated connections they cover. Unsupported or
+// disabled backends cannot report a successful kill.
 func (e *Engine) RevokeConnections(ctx context.Context, entries []conntrack.Entry, scope string, ttl time.Duration) error {
 	revoker, ok := e.Updater().(enforce.ConnectionRevoker)
 	if !ok {
 		return fmt.Errorf("connection revocation unavailable: nftables enforcement is not active")
 	}
-	return revoker.RevokeConnections(ctx, entries, scope, ttl)
+	if err := revoker.RevokeConnections(ctx, entries, scope, ttl); err != nil {
+		return err
+	}
+	closeGated(gateCloseRequests(entries, scope))
+	return nil
 }
