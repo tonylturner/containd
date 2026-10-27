@@ -13,6 +13,9 @@ import (
 // ICSProtocolIEC104 is the ICS predicate protocol of IEC 60870-5-104 rules.
 const ICSProtocolIEC104 = "iec104"
 
+// This user-facing diagnostic is also shown by the rule editors.
+const unsupportedICSAddressesMessage = "Address filters are not supported for DNP3 or CIP. Remove this filter before saving; protocol-specific station, point and CIP path selectors are not available yet."
+
 func validateICSPredicate(p ICSPredicate, ruleID string) error {
 	if p.Mode != "" && p.Mode != "learn" && p.Mode != "enforce" {
 		return fmt.Errorf("rule %s ics mode invalid %q", ruleID, p.Mode)
@@ -41,10 +44,12 @@ func validateICSPredicate(p ICSPredicate, ruleID string) error {
 	return validateICSAddresses(p, ruleID)
 }
 
-// validateICSAddresses refuses an addresses entry the evaluator cannot
-// parse (rules.ParseICSAddressSpec) or that exceeds what the protocol
-// carries (rules.ICSAddressMax).
+// validateICSAddresses permits generic addresses only for Modbus, and refuses
+// entries the evaluator cannot parse or that exceed the protocol's limit.
 func validateICSAddresses(p ICSPredicate, ruleID string) error {
+	if len(p.Addresses) > 0 && (p.Protocol == "dnp3" || p.Protocol == "cip") {
+		return fmt.Errorf("rule %s: %s", ruleID, unsupportedICSAddressesMessage)
+	}
 	limit := rules.ICSAddressMax(p.Protocol)
 	for _, spec := range p.Addresses {
 		_, high, err := rules.ParseICSAddressSpec(spec)

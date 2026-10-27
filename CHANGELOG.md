@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- DNP3 and CIP rules reject nonempty `addresses`, which could never match
+  decoded traffic and silently defeated address-qualified denials. Both rule
+  editors keep unsupported stored filters visible for explicit removal, but
+  no longer offer new ones. Stored configurations with these filters start in
+  management recovery with the offending rule and cause until corrected.
+
 - Modbus address rules now cover the whole request span. An `ALLOW` with
   `addresses` matches only when every register or coil the request reads or
   writes lies inside the listed entries; previously only the starting address
