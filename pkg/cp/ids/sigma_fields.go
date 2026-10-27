@@ -69,6 +69,12 @@ func decoderAttribute(field string) bool {
 		"qualifier", "quality", "value", "value_invalid", "source_time",
 		"time_valid", "time_summer", "apdu_id", "raw_hex", "transient":
 		return true
+	// Modbus data-access keys emitted per function code and direction in
+	// pkg/dp/ics/modbus/pdu.go (address, quantity and value are listed with
+	// the other protocols' keys).
+	case "byte_count", "register_count", "and_mask", "or_mask", "read_address",
+		"read_quantity", "write_address", "write_quantity":
+		return true
 	// Other protocol-specific keys emitted in pkg/dp/ics/*/decoder.go
 	// (and iec61850/mms.go).
 	case "bvlc_function", "is_critical", "object_instance", "object_type",
