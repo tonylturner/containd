@@ -149,20 +149,31 @@ func (c *Compiler) writeDynamicTable(buf *bytes.Buffer, locals []rules.LocalServ
 	for _, rule := range revocationRules() {
 		buf.WriteString(fmt.Sprintf("add rule inet %s revocations %s\n", table, rule))
 	}
+	blocks := map[string][]string{"forward": blockRules()}
+	if c.SteersGate() {
+		blocks = gateBlockRules()
+		blocks["forward"] = blockRules()
+	}
 	for _, ch := range dynamicChains {
 		for _, rule := range exempt[ch.name] {
 			buf.WriteString(fmt.Sprintf("add rule inet %s %s %s\n", table, ch.name, rule))
 		}
 		buf.WriteString(fmt.Sprintf("add rule inet %s %s jump revocations\n", table, ch.name))
+		for _, rule := range blocks[ch.name] {
+			buf.WriteString(fmt.Sprintf("add rule inet %s %s %s\n", table, ch.name, rule))
+		}
 	}
-	for _, rule := range []string{
+	return nil
+}
+
+// blockRules returns the temporary block checks of the forward chain: the
+// block_hosts and block_flows sets the DPI updater fills (NftUpdater).
+func blockRules() []string {
+	return []string{
 		"ip saddr @block_hosts drop",
 		"ip daddr @block_hosts drop",
 		"meta l4proto { tcp, udp } ip saddr . ip daddr . meta l4proto . th dport @block_flows drop",
-	} {
-		buf.WriteString(fmt.Sprintf("add rule inet %s forward %s\n", table, rule))
 	}
-	return nil
 }
 
 // dynamicSet is one timeout set of the dynamic table.

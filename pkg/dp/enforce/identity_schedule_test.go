@@ -299,7 +299,7 @@ func TestRecheckVerdicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var b bytes.Buffer
-	if err := p.writeRecheckChains(&b); err != nil {
+	if err := p.writeRecheckChains(&b, targetForward); err != nil {
 		t.Fatal(err)
 	}
 	set := "@schedule_deny_41_0120_0360_416d65726963612f4e65775f596f726b"

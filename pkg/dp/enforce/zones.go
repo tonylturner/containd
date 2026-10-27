@@ -113,27 +113,96 @@ func zoneWarnings(snap *rules.Snapshot, idx zoneIndex) []RuleWarning {
 	return out
 }
 
+// chainTarget is the hook a firewall decision graph is lowered for. The
+// forward chain sees both directions of a connection on the wire. A gated
+// connection is terminated by the scanning gate: its original direction is
+// delivered to the input hook and its replies leave through the output
+// hook, and its egress zone, which routing decides, is recorded in the
+// connection mark at selection (GateZoneCtMask) instead of being read from
+// an output interface.
+type chainTarget int
+
+const (
+	// targetForward lowers for the forward chain: ingress and egress zones
+	// from the packet's interfaces, both directions.
+	targetForward chainTarget = iota
+	// targetGateInput lowers for the input-side gate chain: the original
+	// direction only, ingress from the input interface, egress from the
+	// connection mark.
+	targetGateInput
+	// targetGateReply lowers for the output-side gate chain: the reply
+	// direction only, ingress (the original egress) from the connection
+	// mark, egress from the output interface.
+	targetGateReply
+)
+
+// zoneLowering lowers the zone predicates of rules for one target.
+type zoneLowering struct {
+	idx    zoneIndex
+	target chainTarget
+	// gate maps each egress zone the gate selection references to its
+	// connection-mark index; gate targets match egress zones against it.
+	gate map[string]uint8
+}
+
+// original returns the ingress and egress matches of the original
+// direction of a connection in e's zones: "" matches any. matches is false
+// when the zones can match no connection of the target.
+func (z zoneLowering) original(e rules.Entry) (in, out string, matches bool) {
+	in, inOK := z.idx.clause("iifname", e.SourceZones)
+	out, outOK := z.egress(e.DestZones)
+	return in, out, inOK && outOK
+}
+
+// egress matches the egress zones of a connection's original direction:
+// the output interface for the forward chain, the connection-mark index
+// for the gate targets. A gated connection can only have an index of the
+// selection's egress zones, so a rule whose egress zones have none matches
+// no gated connection.
+func (z zoneLowering) egress(zones []string) (clause string, matches bool) {
+	if z.target == targetForward {
+		return z.idx.clause("oifname", zones)
+	}
+	if len(zones) == 0 {
+		return "", true
+	}
+	var indices []uint8
+	for _, name := range zones {
+		if i, ok := z.gate[name]; ok {
+			indices = append(indices, i)
+		}
+	}
+	if len(indices) == 0 {
+		return "", false
+	}
+	return gateZoneClause(indices), true
+}
+
 // ctDirection is the zone match of a connection's packets in one
 // direction.
 type ctDirection struct{ clause, in, out string }
 
-// ctDirections matches e's zones for the packets of both directions of a
-// connection: as written on the original direction, swapped on replies.
+// ctDirections matches e's zones for the packets of a connection the
+// target sees: as written on the original direction, swapped on replies.
 // Without zones, one match without a direction covers both. matches is
-// false when the zones match no interface.
-func (idx zoneIndex) ctDirections(e rules.Entry) (dirs []ctDirection, matches bool) {
-	in, inOK := idx.clause("iifname", e.SourceZones)
-	out, outOK := idx.clause("oifname", e.DestZones)
-	if !inOK || !outOK {
+// false when the zones match no connection of the target.
+func (z zoneLowering) ctDirections(e rules.Entry) (dirs []ctDirection, matches bool) {
+	in, out, ok := z.original(e)
+	if !ok {
 		return nil, false
 	}
 	if in == "" && out == "" {
 		return []ctDirection{{}}, true
 	}
-	replyIn, _ := idx.clause("iifname", e.DestZones)
-	replyOut, _ := idx.clause("oifname", e.SourceZones)
-	return []ctDirection{
-		{"ct direction original", in, out},
-		{"ct direction reply", replyIn, replyOut},
-	}, true
+	original := ctDirection{"ct direction original", in, out}
+	switch z.target {
+	case targetGateInput:
+		return []ctDirection{original}, true
+	case targetGateReply:
+		replyOut, _ := z.idx.clause("oifname", e.SourceZones)
+		return []ctDirection{{"ct direction reply", out, replyOut}}, true
+	}
+	replyIn, _ := z.idx.clause("iifname", e.DestZones)
+	replyOut, _ := z.idx.clause("oifname", e.SourceZones)
+	return []ctDirection{original, {"ct direction reply", replyIn, replyOut}}, true
 }

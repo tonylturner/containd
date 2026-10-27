@@ -104,8 +104,10 @@ const (
 // (predicates.ctLines); a packet without a usable conntrack entry matches
 // by its header, as a connection's first packet. Either way the meter keys
 // on the packet's own header, so each direction of a flow has its own
-// bucket. The excess is logged when logStmt is set.
-func meterLines(e rules.Entry, p rules.Protocol, scopes []addrScope, zones zoneIndex, logStmt string) ([]ruleLine, error) {
+// bucket. The excess is logged when logStmt is set. The gate targets see
+// only tracked packets of gated connections, so they take only the lines
+// of their direction.
+func meterLines(e rules.Entry, p rules.Protocol, scopes []addrScope, zones zoneLowering, logStmt string) ([]ruleLine, error) {
 	rl := e.RateLimit
 	if rl == nil || rl.PacketsPerSecond == 0 {
 		return nil, fmt.Errorf("entry %s: RATE_LIMIT needs a positive packetsPerSecond", e.ID)
@@ -131,8 +133,7 @@ func meterLines(e rules.Entry, p rules.Protocol, scopes []addrScope, zones zoneI
 	if !ok {
 		return nil, nil
 	}
-	in, _ := zones.clause("iifname", e.SourceZones)
-	out, _ := zones.clause("oifname", e.DestZones)
+	in, out, _ := zones.original(e)
 	var lines []ruleLine
 	for _, s := range scopes {
 		for _, k := range meterKeys(p, s.family) {
@@ -145,8 +146,10 @@ func meterLines(e rules.Entry, p rules.Protocol, scopes []addrScope, zones zoneI
 				}
 			}
 			stmts := fmt.Sprintf("%s update @%s { %s %s } %s drop", counterStmt(e.ID), k.set(e.ID), k.key(), limit, tail)
-			first := append([]string{match, untrackedState, in, out, header}, s.header(false)...)
-			lines = append(lines, ruleLine{family: k.family, text: joinClauses(append(first, stmts))})
+			if zones.target == targetForward {
+				first := append([]string{match, untrackedState, in, out, header}, s.header(false)...)
+				lines = append(lines, ruleLine{family: k.family, text: joinClauses(append(first, stmts))})
+			}
 			for _, d := range dirs {
 				both := append([]string{match, trackedState, d.clause, d.in, d.out, tracked}, s.conntrack()...)
 				lines = append(lines, ruleLine{family: k.family, ct: true, text: joinClauses(append(both, stmts))})

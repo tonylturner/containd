@@ -35,5 +35,6 @@ func NewCompilerWithSettings(s CompilerSettings, reservation *mgmtpath.Reservati
 	c.ManagementReservation = reservation
 	c.NFLogGroup = int(s.NFLogGroup)
 	c.QueueID = int(s.NFQueueGroup)
+	c.GatePlainPort, c.GateMasqPort = s.GatePlainPort, s.GateMasqPort
 	return c
 }
