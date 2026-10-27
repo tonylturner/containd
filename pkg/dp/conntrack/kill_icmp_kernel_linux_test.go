@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -26,13 +27,34 @@ import (
 // count of answered requests.
 type pingers map[string]*atomic.Int64
 
+// echoTypes returns the raw socket network, protocol number and echo
+// request and reply types of dst's family.
+func echoTypes(dst string) (string, int, icmp.Type, icmp.Type) {
+	if strings.Contains(dst, ":") {
+		return "ip6:ipv6-icmp", 58, ipv6.ICMPTypeEchoRequest, ipv6.ICMPTypeEchoReply
+	}
+	return "ip4:icmp", 1, ipv4.ICMPTypeEcho, ipv4.ICMPTypeEchoReply
+}
+
+// sendEchoes sends echo messages of type typ with identifier id from conn to
+// dst every 20 ms until the peer exits.
+func sendEchoes(conn *icmp.PacketConn, dst string, typ icmp.Type, id int) {
+	peer := &net.IPAddr{IP: net.ParseIP(dst)}
+	for seq := 0; ; seq++ {
+		// The kernel computes the ICMPv6 checksum of raw sockets.
+		msg, err := (&icmp.Message{Type: typ, Body: &icmp.Echo{ID: id, Seq: seq & 0xffff, Data: []byte("containd")}}).Marshal(nil)
+		if err != nil {
+			return
+		}
+		_, _ = conn.WriteTo(msg, peer)
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // start pings dst from src every 20 ms with identifier id until the peer
 // exits, counting the echo replies from dst that carry id.
 func (p pingers) start(name, src, dst string, id int) error {
-	network, proto, request, reply := "ip4:icmp", 1, icmp.Type(ipv4.ICMPTypeEcho), icmp.Type(ipv4.ICMPTypeEchoReply)
-	if strings.Contains(dst, ":") {
-		network, proto, request, reply = "ip6:ipv6-icmp", 58, ipv6.ICMPTypeEchoRequest, ipv6.ICMPTypeEchoReply
-	}
+	network, proto, request, reply := echoTypes(dst)
 	// A raw socket bound to src sees every ICMP message to src; the
 	// identifier separates the flows.
 	conn, err := icmp.ListenPacket(network, src)
@@ -57,18 +79,20 @@ func (p pingers) start(name, src, dst string, id int) error {
 			}
 		}
 	}()
-	go func() {
-		peer := &net.IPAddr{IP: net.ParseIP(dst)}
-		for seq := 0; ; seq++ {
-			// The kernel computes the ICMPv6 checksum of raw sockets.
-			msg, err := (&icmp.Message{Type: request, Body: &icmp.Echo{ID: id, Seq: seq & 0xffff, Data: []byte("containd")}}).Marshal(nil)
-			if err != nil {
-				return
-			}
-			_, _ = conn.WriteTo(msg, peer)
-			time.Sleep(20 * time.Millisecond)
-		}
-	}()
+	go sendEchoes(conn, dst, request, id)
+	return nil
+}
+
+// sendStrays sends unsolicited echo replies with identifier id from src to
+// dst every 20 ms until the peer exits, as a responder does that answers
+// after its connection's entry is gone.
+func sendStrays(src, dst string, id int) error {
+	network, _, _, reply := echoTypes(dst)
+	conn, err := icmp.ListenPacket(network, src)
+	if err != nil {
+		return err
+	}
+	go sendEchoes(conn, dst, reply, id)
 	return nil
 }
 
@@ -109,13 +133,24 @@ func udpProbe(src, dst, sport string) error {
 	return err
 }
 
+// notrackICMP exempts all ICMP and ICMPv6 of this namespace from conntrack,
+// as an operator's notrack rule would.
+const notrackICMP = `table inet ctnotrack {
+  chain prerouting { type filter hook prerouting priority raw; meta l4proto { icmp, ipv6-icmp } notrack; }
+  chain output { type filter hook output priority raw; meta l4proto { icmp, ipv6-icmp } notrack; }
+}
+`
+
 // TestKernelConntrackKillICMP kills continuous pings through the routed lab
 // (see TestKernelConntrackKill for the container to run it in). A killed ping
 // gets no replies and leaves no entry for the interval, while another
 // identifier to the same host keeps going under connection scope and stops
-// under client-service scope, and another client keeps going under both. An
-// ICMP error about a UDP flow whose ports equal the killed ping's identifier
-// and type still arrives.
+// under client-service scope, and another client keeps going under both.
+// Without NAT, the server also answers the killed ping after its entry is
+// gone; those stray replies, which have no conntrack state, are dropped too.
+// The outcome holds when a notrack rule then exempts all ICMP from
+// conntrack. An ICMP error about a UDP flow whose ports equal the killed
+// ping's identifier and type still arrives.
 func TestKernelConntrackKillICMP(t *testing.T) {
 	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" {
 		t.Skip("opt-in isolated kernel test")
@@ -124,10 +159,11 @@ func TestKernelConntrackKillICMP(t *testing.T) {
 	for _, tc := range []struct {
 		name, scope string
 		v6, nat     bool
-	}{{"NAT exact", "connection", false, true}, {"NAT service", "client-service", false, true}, {"IPv6 exact", "connection", true, false}, {"IPv6 service", "client-service", true, false}} {
+	}{{"NAT exact", "connection", false, true}, {"NAT service", "client-service", false, true}, {"IPv4 exact", "connection", false, false}, {"IPv6 exact", "connection", true, false}, {"IPv6 service", "client-service", true, false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			defer cancel()
+			const revokeSecs = 4
 			var nat func(*routedLab) string
 			if tc.nat {
 				// The reply tuple of each flow to the VIP is the server's
@@ -206,8 +242,11 @@ func TestKernelConntrackKillICMP(t *testing.T) {
 			if tc.nat && (e.ReplySrc != lab.server || e.ReplyDst != lab.routerServer) {
 				t.Fatalf("missing NAT tuple %+v", e)
 			}
+			if !tc.nat && (e.ReplySrc != dest || e.ReplyDst != lab.client || e.ReplyICMPID != e.ICMPID) {
+				t.Fatalf("unexpected NAT tuple %+v", e)
+			}
 
-			result, err := conntrack.Kill(ctx, conntrack.KillRequest{DeleteRequest: conntrack.DeleteRequest{Proto: proto, Src: lab.client, Dst: dest, ICMPID: selectedID, ICMPType: echo}, Scope: tc.scope, DurationSecs: 2}, enforce.NewNftUpdater("containd").RevokeConnections)
+			result, err := conntrack.Kill(ctx, conntrack.KillRequest{DeleteRequest: conntrack.DeleteRequest{Proto: proto, Src: lab.client, Dst: dest, ICMPID: selectedID, ICMPType: echo}, Scope: tc.scope, DurationSecs: revokeSecs}, enforce.NewNftUpdater("containd").RevokeConnections)
 			killed := time.Now()
 			matched := 1
 			if tc.scope == "client-service" {
@@ -215,6 +254,14 @@ func TestKernelConntrackKillICMP(t *testing.T) {
 			}
 			if err != nil || !result.ConntrackDeleted || !result.RevocationInstalled || result.Matched != matched || result.Closure != "matching packets dropped" {
 				t.Fatalf("kill %+v: %v", result, err)
+			}
+			if !tc.nat {
+				// Under NAT the reply tuple's destination is the router, which
+				// cannot forward a reply without its entry.
+				server := startPeer(t, ctx, lab.serverNS, "client", lab.server)
+				if got := server.command(t, fmt.Sprintf("stray %s %s %s", e.ReplySrc, e.ReplyDst, e.ReplyICMPID)); got != "ok" {
+					t.Fatal(got)
+				}
 			}
 			// Replies in flight at the kill land before the window starts.
 			time.Sleep(200 * time.Millisecond)
@@ -231,7 +278,21 @@ func TestKernelConntrackKillICMP(t *testing.T) {
 			if got := p.command(t, probe); !strings.Contains(got, "connection refused") {
 				t.Fatalf("ICMP error about a UDP flow was revoked: %s", got)
 			}
-			time.Sleep(time.Until(killed.Add(2300 * time.Millisecond)))
+			if err := enforce.NewNftApplier().Apply(ctx, notrackICMP); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = exec.Command("nft", "delete", "table", "inet", "ctnotrack").Run() })
+			got = flowing(600 * time.Millisecond)
+			if err := enforce.NewNftApplier().Apply(ctx, "delete table inet ctnotrack\n"); err != nil {
+				t.Fatal(err)
+			}
+			if got["selected"] || got["neighbor"] != (tc.scope == "connection") || !got["otherclient"] {
+				t.Fatalf("%s revocation of untracked ICMP: pings answered %v", tc.scope, got)
+			}
+			if time.Since(killed) > (revokeSecs-1)*time.Second {
+				t.Fatalf("revocation checks outlasted the interval: %s", time.Since(killed))
+			}
+			time.Sleep(time.Until(killed.Add(revokeSecs*time.Second + 300*time.Millisecond)))
 			if got := flowing(time.Second); !got["selected"] || !got["neighbor"] || !got["otherclient"] {
 				t.Fatalf("revocation did not expire: %v", got)
 			}

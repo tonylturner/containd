@@ -50,6 +50,9 @@ func TestKernelConntrackPeer(t *testing.T) {
 			err = pings.start(fields[1], fields[2], fields[3], id)
 		case "replies":
 			reply = pings.replies(fields[1])
+		case "stray":
+			id, _ := strconv.Atoi(fields[3])
+			err = sendStrays(fields[1], fields[2], id)
 		case "udpprobe":
 			err = udpProbe(fields[1], fields[2], fields[3])
 		case "dial":

@@ -135,18 +135,48 @@ func parseTableLayout(doc []byte) (TableLayout, error) {
 				if err := json.Unmarshal(raw, &obj); err != nil {
 					return TableLayout{}, fmt.Errorf("decode nft %s: %w", key, err)
 				}
-				typ, flags := stringList(obj.Type), stringList(obj.Flags)
+				flags := stringList(obj.Flags)
 				sort.Strings(flags)
-				layout.Objects = append(layout.Objects, LiveObject{Kind: kind, Name: obj.Name, Type: strings.Join(typ, " . "), Flags: flags})
+				layout.Objects = append(layout.Objects, LiveObject{Kind: kind, Name: obj.Name, Type: setType(obj.Type), Flags: flags})
 			}
 		}
 	}
 	return layout, nil
 }
 
+// setType renders the type of an nft JSON set or map as LiveObject.Type
+// describes. A typeof key of other expressions than payload fields is kept
+// as its raw text, which never matches the current layout.
+func setType(raw json.RawMessage) string {
+	var typeOf struct {
+		Typeof json.RawMessage `json:"typeof"`
+	}
+	if json.Unmarshal(raw, &typeOf) != nil || typeOf.Typeof == nil {
+		return strings.Join(stringList(raw), " . ")
+	}
+	var key struct {
+		Concat []json.RawMessage `json:"concat"`
+	}
+	fields := []json.RawMessage{typeOf.Typeof}
+	if json.Unmarshal(typeOf.Typeof, &key) == nil && key.Concat != nil {
+		fields = key.Concat
+	}
+	names := make([]string, len(fields))
+	for i, field := range fields {
+		var expr struct {
+			Payload *struct{ Protocol, Field string } `json:"payload"`
+		}
+		if json.Unmarshal(field, &expr) != nil || expr.Payload == nil || expr.Payload.Protocol == "" || expr.Payload.Field == "" {
+			return string(raw)
+		}
+		names[i] = expr.Payload.Protocol + " " + expr.Payload.Field
+	}
+	return "typeof " + strings.Join(names, " . ")
+}
+
 // stringList decodes an nft JSON value that is a string or a string array.
-// Any other value (such as a typeof expression) is kept as its raw text,
-// which never matches the current layout.
+// Any other value is kept as its raw text, which never matches the current
+// layout.
 func stringList(raw json.RawMessage) []string {
 	if len(raw) == 0 {
 		return nil

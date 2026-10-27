@@ -341,11 +341,11 @@ The response reports `revocationInstalled`, `blockedUntil`, `conntrackDeleted`
 and counts/errors independently. Revocation is installed atomically before
 state deletion. Matching TCP packets receive kernel-generated resets on each
 endpoint's next packet; this is not confirmed endpoint closure. Matching UDP,
-ICMP and ICMPv6 packets are dropped. ICMP revocations match packets by their
-connection's original tuple, so an operator `notrack` rule that exempts ICMP
-from connection tracking also exempts it from an exact ICMP revocation. A
-failed revocation does not delete kernel state. Inspect each step even on HTTP
-200. Other protocols are visible but cannot be killed.
+ICMP and ICMPv6 packets are dropped, including echo requests and replies
+without connection state: ICMP that an operator `notrack` rule exempts from
+connection tracking, and replies that arrive after the connection's state was
+deleted. A failed revocation does not delete kernel state. Inspect each step
+even on HTTP 200. Other protocols are visible but cannot be killed.
 
 Revocations are kernel runtime state in the nftables table
 `inet <enforceTable>`, not persisted configuration. They survive commits

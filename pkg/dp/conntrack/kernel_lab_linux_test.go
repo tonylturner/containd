@@ -28,7 +28,9 @@ type routedLab struct {
 
 // newRoutedLab builds the lab, with IPv6 or IPv4 addressing, and applies the
 // containd firewall (default allow) plus the extra rules nat returns for the
-// lab, if any. Stale entries of earlier labs are deleted first.
+// lab, if any, in place of containd's tables, so no revocation or NAT rule
+// of an earlier lab remains. Stale entries of earlier labs are deleted
+// first.
 func newRoutedLab(t *testing.T, ctx context.Context, v6 bool, nat func(*routedLab) string) *routedLab {
 	t.Helper()
 	// Conntrack outlives namespaces. Remove only this harness's stale
@@ -111,10 +113,12 @@ func newRoutedLab(t *testing.T, ctx context.Context, v6 bool, nat func(*routedLa
 			t.Fatalf("set %s=1 using docker --sysctl before running: %s %v", key, out, err)
 		}
 	}
-	text, err := enforce.NewCompiler().CompileFirewall(&rules.Snapshot{Default: rules.ActionAllow})
+	compiler := enforce.NewCompiler()
+	text, err := compiler.CompileFirewall(&rules.Snapshot{Default: rules.ActionAllow})
 	if err != nil {
 		t.Fatal(err)
 	}
+	text = compiler.DeleteTables() + text
 	if nat != nil {
 		text += "add chain inet containd test_dnat { type nat hook prerouting priority dstnat; }\n"
 		text += "add chain inet containd test_snat { type nat hook postrouting priority srcnat; }\n"
