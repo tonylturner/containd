@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The CLI guide documents SSH shell modes again: `appliance` and `linux`,
+  how `CONTAIND_SSH_SHELL_MODE` and `set system ssh shell-mode` select them,
+  switching between the CLI and the Linux shell, the PTY requirement, and the
+  root-shell and lab-mode caveats.
+- The ICS DPI guide documents protocol anomaly detection, the signature API
+  with its 23 built-in signatures and temporary custom signatures, the decoded
+  event fields of each ICS decoder, a Modbus function-code and address rule
+  example, and how the TLS `ja3` fingerprint differs from reference JA3.
+
 ## [0.1.35] - 2026-10-26
 
 ### Security

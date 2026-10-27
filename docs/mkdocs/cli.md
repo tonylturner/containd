@@ -76,6 +76,7 @@ require a restart; committing does not rebind management sockets.
   - `set system ssh listen <addr>` (candidate)
   - `set system ssh allow-password <true|false>` (candidate)
   - `set system ssh authorized-keys-dir <dir>` (candidate)
+  - `set system ssh shell-mode <appliance|linux>` (candidate; see [shell modes](#shell-modes))
   - `commit`
   - `commit confirmed [ttl_seconds]`
   - `confirm`
@@ -127,6 +128,62 @@ Notes:
 - The SSH console is implemented without allocating a PTY; basic line editing/echo is handled internally.
 - `diag capture` and `show ip route` require Linux (inside the container) and typically `CAP_NET_RAW`.
 - The `wizard` includes an optional step to run `set outbound quickstart` (equivalent to the UI "Quick start (LAN→WAN)").
+
+### Shell modes
+
+The SSH shell mode selects what an interactive SSH login opens:
+
+- `appliance` (default): the containd CLI. Type `shell` or `bash` to open a
+  Linux shell. Type `exit` in that shell to return to the CLI.
+- `linux`: a Linux `bash` login shell with the image's tools, such as
+  `tcpdump` and `nft`. Type `configure` or `containd cli` to open the containd
+  CLI. Type `exit`, `shell` or `bash` in that CLI to return to the shell.
+
+A command on the `ssh` command line, such as
+`ssh -p 2222 containd@localhost show version`, runs as one CLI command in both
+modes.
+
+containd reads the mode once, when management starts.
+`CONTAIND_SSH_SHELL_MODE` takes precedence over the saved
+`system.ssh.shellMode`. Only `linux`, in any letter case, selects the Linux
+shell. Every other value, including an empty one, selects `appliance`.
+`set system ssh shell-mode <appliance|linux>` stages `system.ssh.shellMode`.
+Commit it, then restart containd. `show system` displays the saved value, not
+the environment override. The starter Compose file (`deploy/docker-compose.yml`)
+always sets `CONTAIND_SSH_SHELL_MODE` (default `appliance`), so the saved value
+has no effect there. Set the variable in `.env` and run `docker compose up -d`.
+
+The Linux shell needs a PTY. Interactive `ssh` requests one by default;
+`ssh -T` does not. In `linux` mode, a login without a PTY opens the appliance
+CLI and prints a warning.
+
+`configure` and `containd cli` in the Linux shell do not reuse the SSH login.
+They log in to the management API on 127.0.0.1 as `CONTAIND_CLI_USER` with
+`CONTAIND_CLI_PASSWORD`; both default to `containd`. The Linux shell starts
+with a minimal environment and does not receive the container's `CONTAIND_*`
+variables. If the account has a different password, set the variables for the
+command, for example
+`CONTAIND_CLI_USER=admin CONTAIND_CLI_PASSWORD='<password>' configure`.
+Otherwise the CLI stops with `authentication failed`. In lab mode the pinned
+`containd` / `containd` credential satisfies the defaults. The `menu`, `wizard`
+and `diagnostics` commands exist only in the appliance SSH CLI. There,
+`configure` opens the setup wizard, the same as `wizard`.
+
+Access and lab caveats:
+
+- Only admin accounts can log in over SSH. Every admin can open the Linux
+  shell in both modes, in and outside lab mode.
+- Outside lab mode, the [account checks](#account-checks-at-ssh-login) finish
+  before the CLI or shell opens. Lab mode skips them.
+- The shell runs as the containd process user. The starter Compose file runs
+  containd as root with `NET_ADMIN` and `NET_RAW`. In the default `all` mode the
+  engine runs in the same container. The shell can therefore change nftables,
+  routes and files directly, without candidate validation or commit.
+- containd audits SSH logins and appliance CLI commands. It does not audit
+  commands typed in the Linux shell.
+
+Use `linux` mode only where every SSH admin can have root access to the
+appliance container.
 
 ### SSH authentication and host keys
 
