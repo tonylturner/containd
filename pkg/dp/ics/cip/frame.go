@@ -12,6 +12,26 @@ import (
 // EtherNet/IP encapsulation header size in bytes.
 const eipHeaderSize = 24
 
+// maxStreamFrameSize matches the DPI manager's 64 KiB per-direction
+// reassembly bound, including the encapsulation header.
+const maxStreamFrameSize = 64 * 1024
+
+// frameEncapsulation returns nil without an error for an incomplete header
+// or body. Command codes and inner payload validity do not affect framing.
+func frameEncapsulation(data []byte) (*EIPHeader, error) {
+	if len(data) < eipHeaderSize {
+		return nil, nil
+	}
+	size := eipHeaderSize + int(binary.LittleEndian.Uint16(data[2:4]))
+	if size > maxStreamFrameSize {
+		return nil, fmt.Errorf("EtherNet/IP frame length %d exceeds reassembly bound %d", size, maxStreamFrameSize)
+	}
+	if len(data) < size {
+		return nil, nil
+	}
+	return ParseEIPHeader(data[:size])
+}
+
 var (
 	ErrTooShort     = errors.New("EtherNet/IP frame too short")
 	ErrTruncated    = errors.New("EtherNet/IP frame truncated")

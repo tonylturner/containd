@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- TCP CIP now reassembles split EtherNet/IP encapsulations, inspects every coalesced encapsulation, and fails closed on mid-stream pickups in an enforce scope.
 - The Modbus decoder no longer invents fields. Replies no longer report their
   byte count and data as `address` and `quantity`, and FC 5/6 report `value`
   instead of `quantity`. Requests report fields per function code, including

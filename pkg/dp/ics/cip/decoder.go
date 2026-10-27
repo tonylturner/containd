@@ -14,7 +14,8 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
-// Decoder implements dpi.Decoder for CIP/EtherNet/IP visibility.
+// Decoder implements dpi.StreamDecoder for TCP CIP/EtherNet/IP visibility
+// and dpi.Decoder for UDP I/O traffic.
 type Decoder struct{}
 
 func NewDecoder() *Decoder { return &Decoder{} }
@@ -53,6 +54,11 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		return nil, nil
 	}
 
+	return encapsulationEvents(state, hdr), nil
+}
+
+// encapsulationEvents is shared by TCP stream framing and packet-only UDP.
+func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 	attrs := map[string]any{
 		"enip_command":        CommandName(hdr.Command),
 		"enip_command_code":   hdr.Command,
@@ -107,7 +113,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 
 				subs := ParseMSPServices(cipMsg.Data)
 				if len(subs) == 0 {
-					return []dpi.Event{parentEv}, nil
+					return []dpi.Event{parentEv}
 				}
 
 				results := make([]dpi.Event, 0, 1+len(subs))
@@ -149,7 +155,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 						Timestamp:  now,
 					})
 				}
-				return results, nil
+				return results
 			}
 
 			ev := dpi.Event{
@@ -159,7 +165,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 				Attributes: attrs,
 				Timestamp:  time.Now().UTC(),
 			}
-			return []dpi.Event{ev}, nil
+			return []dpi.Event{ev}
 		}
 	}
 
@@ -171,7 +177,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 		Attributes: attrs,
 		Timestamp:  time.Now().UTC(),
 	}
-	return []dpi.Event{ev}, nil
+	return []dpi.Event{ev}
 }
 
 func (d *Decoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {
