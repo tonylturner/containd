@@ -275,8 +275,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		})
 	}
 
-	api := &cli.API{BaseURL: s.opts.BaseURL, Client: s.connectionClient(conn)}
-	reg := cli.NewRegistry(nil, api)
+	client := s.connectionClient(conn)
 	cmdCtx := cli.WithRole(connCtx, string(cli.RoleAdmin))
 
 	for ch := range chans {
@@ -288,6 +287,9 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		if err != nil {
 			continue
 		}
+		// Each channel owns its CLI client state; channels of one
+		// connection share only the connection's management client.
+		reg := cli.NewRegistry(nil, &cli.API{BaseURL: s.opts.BaseURL, Client: client})
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()

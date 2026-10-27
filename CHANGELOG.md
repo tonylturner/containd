@@ -57,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   socket that exists only while the shell runs, so the shell holds no token
   or password. `containd cli` outside an SSH shell, such as through
   `docker exec`, still logs in with those variables.
+- Several sessions multiplexed on one SSH connection, such as with OpenSSH
+  `ControlMaster`, no longer share CLI client state. Concurrent commands
+  wrote the same API token field without synchronisation.
 
 ## [0.1.35] - 2026-10-26
 

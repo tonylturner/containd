@@ -100,7 +100,9 @@ type resetAwareClient struct {
 	token      func(context.Context) (string, error)
 }
 
-// connectionClient is the management client of one SSH connection.
+// connectionClient is the management client of one SSH connection. Its
+// channels and shell APIs use it concurrently: it holds no mutable state
+// beyond the connection's atomic reset fields.
 func (s *Server) connectionClient(conn *sshConnection) *resetAwareClient {
 	return &resetAwareClient{
 		client:     s.opts.APIClient,
