@@ -32,18 +32,19 @@ export function ICSAddressFields({
   }
   if (protocol !== "modbus") return null;
   const meta = protoMeta(protocol);
+  const label = meta.addrLabel ?? "Register / coil addresses";
   return (
     <label className="block text-xs text-(--text)">
-      {meta.addrLabel}
+      {label}
       <input
-        aria-label={meta.addrLabel}
+        aria-label={label}
         value={addresses}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className="mt-1 w-full input-industrial disabled:opacity-60"
-        placeholder={meta.addrPlaceholder}
+        placeholder={meta.addrPlaceholder ?? ""}
       />
-      <span className="mt-1 block text-(--text-muted)">{meta.addrHelp}</span>
+      {meta.addrHelp && <span className="mt-1 block text-(--text-muted)">{meta.addrHelp}</span>}
     </label>
   );
 }

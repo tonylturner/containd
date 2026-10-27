@@ -53,9 +53,9 @@ export type ProtocolMeta = {
   fcLabel: string;
   fcPlaceholder: string;
   fcHelp: string;
-  addrLabel: string;
-  addrPlaceholder: string;
-  addrHelp: string;
+  addrLabel?: string;
+  addrPlaceholder?: string;
+  addrHelp?: string;
 };
 
 export const PROTOCOLS: Record<string, ProtocolMeta> = {
@@ -78,9 +78,6 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     fcPlaceholder: "1, 2, 3",
     fcHelp:
       "DNP3 application function codes (1=Read, 2=Write, 3=Select, 4=Operate, 5=Direct Operate, 13=Cold Restart, 14=Warm Restart).",
-    addrLabel: "Address filters unavailable",
-    addrPlaceholder: "",
-    addrHelp: UNSUPPORTED_ADDRESSES,
   },
   iec104: {
     label: "IEC 60870-5-104",
@@ -101,9 +98,6 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     fcPlaceholder: "76, 77",
     fcHelp:
       "CIP service codes (0x0E=Get_Attribute, 0x10=Set_Attribute, 0x4C/76=Read_Tag, 0x4D/77=Write_Tag, 0x52=Unconnected_Send).",
-    addrLabel: "Address filters unavailable",
-    addrPlaceholder: "",
-    addrHelp: UNSUPPORTED_ADDRESSES,
   },
 };
 
@@ -118,9 +112,6 @@ export function protoMeta(name: string): ProtocolMeta {
         fcLabel: "Function codes",
         fcPlaceholder: "",
         fcHelp: "Protocol-specific function or service codes.",
-        addrLabel: "Addresses",
-        addrPlaceholder: "",
-        addrHelp: "Protocol-specific address filter.",
       };
 }
 

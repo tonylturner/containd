@@ -6,7 +6,7 @@ import { InfoTip } from "../../components/InfoTip";
 import type { FirewallRule, ICSPredicate } from "../../lib/api";
 import { buildIEC104RuleICS, type IEC104Draft } from "../ics/iec104";
 import { IEC104Fields } from "../ics/iec104-fields";
-import { addressFilterError, formatICSMode, protoMeta, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
+import { addressFilterError, formatICSMode, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
 import { ICSAddressFields } from "../ics/ics-address-fields";
 import { ICS_PROTOCOL_KEYS, ICS_PROTOCOLS, icsProtoMeta } from "./firewall-utils";
 
@@ -74,10 +74,12 @@ export function ICSPredicateFields({
               <div className="text-[10px] font-medium text-(--text)">{meta.fcLabel}</div>
               <div className="text-[10px] text-(--text-muted) mt-0.5 leading-relaxed">{meta.fcHelp}</div>
             </div>
-            <div>
-              <div className="text-[10px] font-medium text-(--text)">{protoMeta(protocol).addrLabel}</div>
-              <div className="text-[10px] text-(--text-muted) mt-0.5 leading-relaxed">{protoMeta(protocol).addrHelp}</div>
-            </div>
+            {meta.addrLabel && meta.addrHelp && (
+              <div>
+                <div className="text-[10px] font-medium text-(--text)">{meta.addrLabel}</div>
+                <div className="text-[10px] text-(--text-muted) mt-0.5 leading-relaxed">{meta.addrHelp}</div>
+              </div>
+            )}
           </div>
           {meta.notes && (
             <div className="text-[10px] text-(--text-dim) border-t border-white/4 pt-2 mt-2">{meta.notes}</div>
