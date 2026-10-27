@@ -176,7 +176,7 @@ func incompleteResult(outcome fillOutcome, detail string) avscan.Result {
 // scan classifies obj. The context ends with the scan timeout, Shutdown,
 // or the watched client going away. A scan the gate itself ended is not
 // a scanner outcome: aborted is then set and res is the gate's own
-// result (timeout for a client close or Shutdown, unsupported for a
+// result (aborted for a client close or Shutdown, unsupported for a
 // pipeline overflow), which must never reach the fail policy, since
 // under fail-open it would let a client opt out of scanning by closing
 // its sending side. Only a Scan that returns on its own, the scan
@@ -198,13 +198,13 @@ func (tx *transaction) scan(obj avscan.Object, watch *peer) (res avscan.Result, 
 	res = tx.c.srv.Scanner.Scan(ctx, obj)
 	var abort avscan.Result
 	if w != nil && w.stop() {
-		abort = gateResult(avscan.ReasonTimeout, "client closed before the verdict")
+		abort = gateResult(avscan.ReasonAborted, "client closed before the verdict")
 		if w.overflow {
 			abort = gateResult(avscan.ReasonUnsupported, fmt.Sprintf("more than %d KiB pipelined before the verdict", pipelineCap>>10))
 		}
 	}
 	if tx.c.srv.ctx.Err() != nil {
-		abort = gateResult(avscan.ReasonTimeout, "shutdown before the verdict")
+		abort = gateResult(avscan.ReasonAborted, "shutdown before the verdict")
 	}
 	if abort.Verdict != "" {
 		return abort, true

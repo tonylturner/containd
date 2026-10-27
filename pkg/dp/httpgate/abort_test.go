@@ -32,7 +32,7 @@ func TestClientHalfCloseDuringScanAbortsUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 	ev := g.events.next(t)
-	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonTimeout, avscan.Block)
+	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonAborted, avscan.Block)
 	if ev.Detail != "client closed before the verdict" || ev.Size != int64(len(body)) || ev.SHA256 != sha256hex(body) || ev.SHA256Partial {
 		t.Fatalf("event %+v", ev)
 	}
@@ -74,7 +74,7 @@ func TestClientHalfCloseDuringScanAbortsDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 	ev := g.events.next(t)
-	expectEvent(t, ev, avscan.Download, avscan.Unscanned, avscan.ReasonTimeout, avscan.Block)
+	expectEvent(t, ev, avscan.Download, avscan.Unscanned, avscan.ReasonAborted, avscan.Block)
 	if ev.Detail != "client closed before the verdict" || ev.Status != 200 || ev.SHA256 != sha256hex(body) || ev.SHA256Partial {
 		t.Fatalf("event %+v", ev)
 	}
@@ -106,7 +106,7 @@ func TestPipelinedCloseDuringScanIsObserved(t *testing.T) {
 	c.conn.Close()
 	start := time.Now()
 	ev := g.events.next(t)
-	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonTimeout, avscan.Block)
+	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonAborted, avscan.Block)
 	if ev.Detail != "client closed before the verdict" || time.Since(start) > 2*time.Second {
 		t.Fatalf("event %+v after %v", ev, time.Since(start))
 	}

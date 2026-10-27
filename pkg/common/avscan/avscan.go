@@ -71,6 +71,10 @@ const (
 	ReasonNotReady     Reason = "not_ready"
 	// ReasonBusy means the gate's spool or concurrency limit was reached.
 	ReasonBusy Reason = "busy"
+	// ReasonAborted means the gate ended the transaction itself before a
+	// verdict (client gone, Shutdown). It is recorded only; it never
+	// reaches Decide and the object is never delivered.
+	ReasonAborted Reason = "aborted"
 )
 
 // Result is a scanner backend's answer for one Object.

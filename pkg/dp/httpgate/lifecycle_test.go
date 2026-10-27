@@ -141,7 +141,7 @@ func TestShutdownCancelsScansAndIsFinite(t *testing.T) {
 		t.Fatalf("client received %d bytes for an aborted transaction", n)
 	}
 	ev := g.events.next(t)
-	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonTimeout, avscan.Block)
+	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonAborted, avscan.Block)
 	if ev.Detail != "shutdown before the verdict" || ev.SHA256 != sha256hex(body) || ev.SHA256Partial {
 		t.Fatalf("event %+v", ev)
 	}
@@ -306,7 +306,7 @@ func TestClientCloseDuringScanCancelsIt(t *testing.T) {
 	g.scanner.waitScanStarted(t)
 	c.conn.Close()
 	ev := g.events.next(t)
-	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonTimeout, avscan.Block)
+	expectEvent(t, ev, avscan.Upload, avscan.Unscanned, avscan.ReasonAborted, avscan.Block)
 	if ev.Detail != "client closed before the verdict" || ev.SHA256Partial {
 		t.Fatalf("event %+v", ev)
 	}
