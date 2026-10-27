@@ -359,7 +359,9 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 				if hasPTY {
 					shellPTY = &pr
 				}
-				s.repl(ctx, username, remote, reg, ch, shellPTY, windowCh)
+				input := newSessionInput(ch)
+				s.repl(ctx, username, remote, reg, &sessionIO{sessionInput: input, Writer: ch}, shellPTY, windowCh)
+				input.close()
 				sendExitStatus(ch, exitSuccess)
 			}
 			return
@@ -418,7 +420,7 @@ func (s *Server) isLinuxShellMode() bool {
 
 // repl runs the appliance CLI. pr is the client's PTY request, or nil when the
 // client requested none; the shell command needs it.
-func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Registry, rw io.ReadWriter, pr *ptyRequest, windowCh <-chan ptyRequest) {
+func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Registry, rw *sessionIO, pr *ptyRequest, windowCh <-chan ptyRequest) {
 	reader := bufio.NewReader(rw)
 	prompt := "containd# "
 	// Gentle bootstrap hint.
@@ -441,8 +443,8 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 		case "exit", "quit", "logout":
 			return
 		case "shell", "bash":
-			if ch, ok := rw.(ssh.Channel); ok && pr != nil {
-				s.startLinuxShellInline(ctx, username, ch, pr, windowCh)
+			if pr != nil {
+				s.startLinuxShellInline(ctx, username, rw, reader, pr, windowCh)
 				continue
 			}
 			writeTTY(rw, "The Linux shell needs a terminal: reconnect with an interactive ssh session (not ssh -T).\n")

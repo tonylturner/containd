@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer start a Linux shell that has no terminal and hangs the session.
   They print that the Linux shell needs an interactive session and the CLI
   keeps running.
+- After `exit` from a Linux shell opened with `shell` in the SSH appliance
+  CLI, the CLI no longer loses the next input: the shell's input copy kept
+  reading the SSH channel and discarded it. The shell also receives lines
+  typed ahead of it, and stops taking window-size changes when it exits.
 
 ## [0.1.35] - 2026-10-26
 

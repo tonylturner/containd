@@ -4,6 +4,7 @@
 package sshserver
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
 	"io"
@@ -123,9 +124,10 @@ func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Ch
 	s.sendShellExit(ch, cmd.Wait())
 }
 
-// startLinuxShellInline launches a bash shell from within the appliance REPL.
-// It blocks until bash exits, then returns control to the caller (REPL resumes).
-func (s *Server) startLinuxShellInline(ctx context.Context, username string, ch ssh.Channel, pr *ptyRequest, windowCh <-chan ptyRequest) {
+// startLinuxShellInline runs a Linux shell from the appliance CLI and returns
+// when it exits. The shell first receives what the CLI has buffered but not
+// read; input it has not taken when it exits stays for the CLI.
+func (s *Server) startLinuxShellInline(ctx context.Context, username string, term *sessionIO, buffered *bufio.Reader, pr *ptyRequest, windowCh <-chan ptyRequest) {
 	shell := "/bin/bash"
 	if _, err := os.Stat(shell); err != nil {
 		shell = "/bin/sh"
@@ -139,50 +141,45 @@ func (s *Server) startLinuxShellInline(ctx context.Context, username string, ch 
 	ptmx, err := pty.StartWithSize(cmd, winSize)
 	if err != nil {
 		s.logger.Errorf("failed to start inline linux shell: %v", err)
+		writeTTY(term, "failed to start shell\n")
 		return
 	}
-
-	var closeOnce sync.Once
-	cleanup := func() {
-		closeOnce.Do(func() {
-			ptmx.Close()
-		})
+	if n := buffered.Buffered(); n > 0 {
+		ahead, _ := buffered.Peek(n)
+		_, _ = ptmx.Write(ahead)
+		_, _ = buffered.Discard(n)
 	}
-	defer cleanup()
 
-	_, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// Copy SSH channel -> PTY (stdin).
+	exited := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(3)
 	go func() {
-		defer cancel()
-		_, _ = io.Copy(ptmx, ch)
+		defer wg.Done()
+		term.forward(ptmx, exited)
 	}()
-
-	// Copy PTY -> SSH channel (stdout).
 	go func() {
-		defer cancel()
-		_, _ = io.Copy(ch, ptmx)
+		defer wg.Done()
+		_, _ = io.Copy(term.Writer, ptmx)
 	}()
-
-	// Handle window-change events forwarded from the session handler.
-	if windowCh != nil {
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-exited:
+				return
+			case wc, ok := <-windowCh:
+				if !ok {
 					return
-				case wc, ok := <-windowCh:
-					if !ok {
-						return
-					}
-					_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(wc.Height), Cols: uint16(wc.Width)})
 				}
+				_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(wc.Height), Cols: uint16(wc.Width)})
 			}
-		}()
-	}
+		}
+	}()
 
 	_ = cmd.Wait()
+	close(exited)
+	_ = ptmx.Close()
+	wg.Wait()
 }
 
 func buildShellEnv(username string, pr *ptyRequest) []string {
