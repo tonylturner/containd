@@ -3,20 +3,42 @@ package sshserver
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/tonylturner/containd/pkg/cli"
 )
+
+const shellAPIResetHelperEnv = "CONTAIND_TEST_SSH_CLI_HELPER"
+
+// TestShellAPIResetCLIHelper runs as the containd cli child process in
+// TestFactoryResetDisconnectsLinuxShellCLI.
+func TestShellAPIResetCLIHelper(t *testing.T) {
+	if os.Getenv(shellAPIResetHelperEnv) != "1" {
+		return
+	}
+	api, err := cli.ConnectSSHSession(context.Background(), os.Getenv(cli.EnvSSHAPISocket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := cli.NewRegistry(nil, api)
+	ctx := cli.WithRole(context.Background(), string(cli.RoleAdmin))
+	if err := reg.ParseAndExecute(ctx, "factory reset NUCLEAR", os.Stdout); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // shellAPIUpstream records the requests the shell API forwards to
 // management, after reading their bodies.
@@ -132,6 +154,54 @@ func TestShellAPIActsAsTheSSHLogin(t *testing.T) {
 	}
 	if _, err := cli.ConnectSSHSession(ctx, api.socket); err == nil {
 		t.Fatal("closed shell API still answers")
+	}
+}
+
+func TestFactoryResetDisconnectsLinuxShellCLI(t *testing.T) {
+	if _, err := os.Stat("/bin/bash"); err != nil {
+		t.Skip("needs /bin/bash")
+	}
+	srv, store, _ := newAssuranceServer(t)
+	srv.opts.ShellMode = "linux"
+	srv.opts.LabMode = true
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/me":
+			_, _ = io.WriteString(w, `{"username":"shell-reset-admin"}`)
+		case "/api/v1/system/factory-reset":
+			srv.RevokeConnections(r.Header.Get("X-Containd-SSH-Connection"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"status":"reset","loggedOut":true,"warnings":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+	srv.opts.BaseURL = api.URL
+	addr := serveSSH(t, srv)
+	u, password := createAdmin(t, store, "shell-reset-admin")
+	client, err := dialSSH(addr, u.Username, nil, ssh.Password(password))
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	defer client.Close()
+	tty := openTTY(t, client)
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := fmt.Sprintf("%s=1 %q -test.run=^TestShellAPIResetCLIHelper$\n", shellAPIResetHelperEnv, testBinary)
+	tty.send(t, command)
+	tty.waitFor(t, "ok", 1)
+
+	exited := make(chan error, 1)
+	go func() { exited <- tty.session.Wait() }()
+	select {
+	case <-exited:
+	case <-time.After(2 * time.Second):
+		tty.send(t, "echo shell-survived-reset\n")
+		tty.waitFor(t, "shell-survived-reset", 1)
+		t.Fatal("factory reset response reached containd cli, but its SSH Linux shell remained usable")
 	}
 }
 
