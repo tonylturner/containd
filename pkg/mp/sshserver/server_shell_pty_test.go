@@ -3,6 +3,7 @@ package sshserver
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -135,4 +136,66 @@ func (tt *tty) waitFor(t *testing.T, s string, n int) {
 			t.Fatalf("no %q (x%d) in %q", s, n, tt.output())
 		}
 	}
+}
+
+// A Linux shell's session delivers what the shell wrote before its exit
+// status, and ends without waiting for a process the shell left running.
+func TestLinuxShellExitDeliversOutput(t *testing.T) {
+	if _, err := os.Stat("/bin/bash"); err != nil {
+		t.Skip("needs /bin/bash")
+	}
+	srv, store, _ := newAssuranceServer(t)
+	srv.opts.ShellMode = "linux"
+	addr := serveSSH(t, srv)
+	u, password := createAdmin(t, store, "shell-exit-admin")
+	client, err := dialSSH(addr, u.Username, nil, ssh.Password(password))
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	defer client.Close()
+	for _, tc := range []struct {
+		input, output string
+		status        int
+	}{
+		{"seq 1 20000; exit 3\n", "19999\r\n20000\r\n", 3},
+		{"sleep 30 & echo started-$((6*7)); exit 0\n", "started-42", 0},
+	} {
+		session, err := client.NewSession()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := session.RequestPty("xterm", 24, 80, ssh.TerminalModes{}); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		session.Stdout = &out
+		session.Stdin = strings.NewReader(tc.input)
+		begin := time.Now()
+		if err := session.Shell(); err != nil {
+			t.Fatal(err)
+		}
+		err = session.Wait()
+		elapsed := time.Since(begin)
+		_ = session.Close()
+		status := 0
+		var exit *ssh.ExitError
+		if errors.As(err, &exit) {
+			status = exit.ExitStatus()
+		} else if err != nil {
+			t.Fatalf("%q: %v", tc.input, err)
+		}
+		if status != tc.status || !strings.Contains(out.String(), tc.output) {
+			t.Fatalf("%q: status %d, output tail %q", tc.input, status, tail(out.String()))
+		}
+		if elapsed > 10*time.Second {
+			t.Fatalf("%q: session took %s", tc.input, elapsed)
+		}
+	}
+}
+
+func tail(s string) string {
+	if len(s) > 200 {
+		return s[len(s)-200:]
+	}
+	return s
 }

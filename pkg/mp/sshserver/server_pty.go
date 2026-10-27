@@ -7,14 +7,17 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/sys/unix"
 
 	"github.com/tonylturner/containd/pkg/cli"
 )
@@ -57,66 +60,115 @@ func parseWindowChange(data []byte) (uint32, uint32, bool) {
 	return w, h, true
 }
 
-// startLinuxShell launches /bin/bash with a real PTY and wires it to the SSH channel.
-// It consumes the remaining SSH request channel to handle window-change events.
+// startLinuxShell runs a Linux shell as the session's program and sends its
+// exit status once the shell has exited and its input and output copies have
+// stopped. It services the session's remaining requests, such as
+// window-change, until the channel closes.
 func (s *Server) startLinuxShell(ctx context.Context, username string, ch ssh.Channel, requests <-chan *ssh.Request, pr *ptyRequest) {
 	cmd, release := s.shellCommand(ctx, username, pr, ch)
 	defer release()
 
-	winSize := &pty.Winsize{Rows: uint16(pr.Height), Cols: uint16(pr.Width)}
-	ptmx, err := pty.StartWithSize(cmd, winSize)
+	ptmx, err := startPTY(cmd, pr)
 	if err != nil {
 		s.logger.Errorf("failed to start linux shell: %v", err)
 		writeTTY(ch, "failed to start shell\n")
 		sendExitStatus(ch, exitFailure)
 		return
 	}
+	go serveShellRequests(requests, ptmx)
 
-	var closeOnce sync.Once
-	cleanup := func() {
-		closeOnce.Do(func() {
-			ptmx.Close()
-		})
-	}
-	defer cleanup()
-
-	_, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// Copy SSH channel -> PTY (stdin).
+	input := newSessionInput(ch)
+	defer input.close()
+	exited := make(chan struct{})
+	inputDone := make(chan struct{})
 	go func() {
-		defer cancel()
-		_, _ = io.Copy(ptmx, ch)
+		defer close(inputDone)
+		input.forward(ptmx, exited)
 	}()
-
-	// Copy PTY -> SSH channel (stdout).
+	outputDone := make(chan struct{})
 	go func() {
-		defer cancel()
+		defer close(outputDone)
 		_, _ = io.Copy(ch, ptmx)
 	}()
 
-	// Handle SSH requests (window-change).
-	go func() {
-		for req := range requests {
-			switch req.Type {
-			case "window-change":
-				w, h, ok := parseWindowChange(req.Payload)
-				if ok {
-					_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(h), Cols: uint16(w)})
-				}
-				if req.WantReply {
-					_ = req.Reply(true, nil)
-				}
-			default:
-				if req.WantReply {
-					_ = req.Reply(false, nil)
-				}
+	waitErr := cmd.Wait()
+	close(exited)
+	closeShellPTY(ptmx, outputDone)
+	<-inputDone
+	s.sendShellExit(ch, waitErr)
+}
+
+// serveShellRequests answers a shell session's requests until its channel
+// closes, applying window-change to the PTY.
+func serveShellRequests(requests <-chan *ssh.Request, ptmx *os.File) {
+	for req := range requests {
+		switch req.Type {
+		case "window-change":
+			if w, h, ok := parseWindowChange(req.Payload); ok {
+				setPTYSize(ptmx, w, h)
+			}
+			if req.WantReply {
+				_ = req.Reply(true, nil)
+			}
+		default:
+			if req.WantReply {
+				_ = req.Reply(false, nil)
 			}
 		}
-	}()
+	}
+}
 
-	// Wait for bash to exit.
-	s.sendShellExit(ch, cmd.Wait())
+// startPTY starts cmd on a PTY whose reads Close interrupts. A process the
+// shell leaves running can hold the terminal open after the shell exits, and
+// a blocking read would then outlive the session.
+func startPTY(cmd *exec.Cmd, pr *ptyRequest) (*os.File, error) {
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(pr.Height), Cols: uint16(pr.Width)})
+	if err != nil {
+		return nil, err
+	}
+	// A PTY the runtime poller cannot watch (macOS) keeps blocking reads:
+	// non-blocking reads would fail there instead of waiting.
+	if errors.Is(ptmx.SetReadDeadline(time.Time{}), os.ErrNoDeadline) {
+		return ptmx, nil
+	}
+	// (*os.File).Fd leaves the descriptor blocking; reads wait in the
+	// poller again once it is non-blocking.
+	if err := syscall.SetNonblock(int(ptmx.Fd()), true); err != nil {
+		_ = ptmx.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, err
+	}
+	return ptmx, nil
+}
+
+// setPTYSize resizes the terminal. It avoids pty.Setsize, whose use of
+// (*os.File).Fd would make the PTY blocking again.
+func setPTYSize(ptmx *os.File, width, height uint32) {
+	conn, err := ptmx.SyscallConn()
+	if err != nil {
+		return
+	}
+	_ = conn.Control(func(fd uintptr) {
+		_ = unix.IoctlSetWinsize(int(fd), unix.TIOCSWINSZ, &unix.Winsize{Row: uint16(height), Col: uint16(width)})
+	})
+}
+
+// shellOutputGrace bounds the wait for output a shell wrote before it
+// exited. A process the shell left running can keep the terminal open, so
+// the output copy may not end on its own.
+const shellOutputGrace = time.Second
+
+// closeShellPTY closes the PTY of a shell that has exited and returns once
+// the output copy has stopped. Output already written is delivered first,
+// waiting at most shellOutputGrace.
+func closeShellPTY(ptmx *os.File, outputDone <-chan struct{}) {
+	select {
+	case <-outputDone:
+	case <-time.After(shellOutputGrace):
+	}
+	_ = ptmx.Close()
+	<-outputDone
 }
 
 // startLinuxShellInline runs a Linux shell from the appliance CLI and returns
@@ -126,8 +178,7 @@ func (s *Server) startLinuxShellInline(ctx context.Context, username string, ter
 	cmd, release := s.shellCommand(ctx, username, pr, term)
 	defer release()
 
-	winSize := &pty.Winsize{Rows: uint16(pr.Height), Cols: uint16(pr.Width)}
-	ptmx, err := pty.StartWithSize(cmd, winSize)
+	ptmx, err := startPTY(cmd, pr)
 	if err != nil {
 		s.logger.Errorf("failed to start inline linux shell: %v", err)
 		writeTTY(term, "failed to start shell\n")
@@ -141,13 +192,14 @@ func (s *Server) startLinuxShellInline(ctx context.Context, username string, ter
 
 	exited := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		term.forward(ptmx, exited)
 	}()
+	outputDone := make(chan struct{})
 	go func() {
-		defer wg.Done()
+		defer close(outputDone)
 		_, _ = io.Copy(term.Writer, ptmx)
 	}()
 	go func() {
@@ -160,14 +212,14 @@ func (s *Server) startLinuxShellInline(ctx context.Context, username string, ter
 				if !ok {
 					return
 				}
-				_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(wc.Height), Cols: uint16(wc.Width)})
+				setPTYSize(ptmx, wc.Width, wc.Height)
 			}
 		}
 	}()
 
 	_ = cmd.Wait()
 	close(exited)
-	_ = ptmx.Close()
+	closeShellPTY(ptmx, outputDone)
 	wg.Wait()
 }
 
