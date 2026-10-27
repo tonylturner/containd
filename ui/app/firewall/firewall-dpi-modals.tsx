@@ -265,17 +265,19 @@ export function ICSDPIConfigModal({
                           Configured in firewall rules per-entry
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-[10px] font-medium text-(--text-muted) mb-1">
-                          {opts.addrLabel}
-                        </label>
-                        <p className="text-[9px] text-(--text-dim) mb-1.5">
-                          {opts.addrHelp}
-                        </p>
-                        <div className="text-[10px] text-(--text-dim) italic">
-                          Configured in firewall rules per-entry
+                      {opts.addrLabel && opts.addrHelp && (
+                        <div>
+                          <label className="block text-[10px] font-medium text-(--text-muted) mb-1">
+                            {opts.addrLabel}
+                          </label>
+                          <p className="text-[9px] text-(--text-dim) mb-1.5">
+                            {opts.addrHelp}
+                          </p>
+                          <div className="text-[10px] text-(--text-dim) italic">
+                            Configured in firewall rules per-entry
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                     {opts.hasUnitId && (
                       <div className="text-[10px] text-(--text-dim)">

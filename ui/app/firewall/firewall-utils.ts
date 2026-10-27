@@ -4,12 +4,11 @@ export type ICSProtoMeta = {
   fcLabel: string;
   fcPlaceholder: string;
   fcHelp: string;
-  addrLabel: string;
-  addrPlaceholder: string;
-  addrHelp: string;
+  addrLabel?: string;
+  addrPlaceholder?: string;
+  addrHelp?: string;
   showUnitId?: boolean;
   showObjectClasses?: boolean;
-  showStationAddrs?: boolean;
   notes?: string;
 };
 
@@ -36,11 +35,6 @@ export const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
     fcPlaceholder: "1, 2, 129",
     fcHelp:
       "1=Read, 2=Write, 3=Select, 4=Operate, 5=Direct Operate, 6=Direct Operate No Ack, 13=Cold Restart, 14=Warm Restart, 129=Response, 130=Unsolicited Response",
-    addrLabel: "Point indices",
-    addrPlaceholder: "0-10",
-    addrHelp:
-      "DNP3 data point indices. Used to restrict which binary/analog points this rule matches.",
-    showStationAddrs: true,
     notes:
       "DNP3 uses source/destination station addresses (0-65534) to identify master and outstation. IIN (Internal Indications) flags are inspected for anomaly detection.",
   },
@@ -65,10 +59,6 @@ export const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
     fcPlaceholder: "0x4C, 0x4D, 0x52",
     fcHelp:
       "0x01=Get Attributes All, 0x02=Set Attributes All, 0x0E=Get Attribute Single, 0x10=Set Attribute Single, 0x4C=Read Tag, 0x4D=Write Tag, 0x4E=Read Modify Write, 0x52=Multiple Service Packet, 0x4F=Read Tag Fragmented, 0x53=Write Tag Fragmented",
-    addrLabel: "EPATH (class/instance)",
-    addrPlaceholder: "0x02/1, 0x04/1",
-    addrHelp:
-      "CIP path segments as class/instance pairs. The EPATH defines the target object in the CIP object model.",
     showObjectClasses: true,
     notes:
       "CIP uses an object model: Object Class identifies the type (0x01=Identity, 0x02=Message Router, 0x04=Assembly, 0x66=Connection Manager). Multiple Service Packet (0x52) requests are unpacked into individual services for inspection.",
@@ -86,9 +76,6 @@ export function icsProtoMeta(name: string): ICSProtoMeta {
         fcLabel: "Function codes",
         fcPlaceholder: "",
         fcHelp: "",
-        addrLabel: "Addresses",
-        addrPlaceholder: "",
-        addrHelp: "",
       };
 }
 
@@ -139,8 +126,8 @@ export const ICS_PROTOCOL_OPTIONS: Record<
   {
     fcLabel: string;
     fcHelp: string;
-    addrLabel: string;
-    addrHelp: string;
+    addrLabel?: string;
+    addrHelp?: string;
     hasUnitId?: boolean;
     hasObjectClasses?: boolean;
   }
@@ -157,8 +144,6 @@ export const ICS_PROTOCOL_OPTIONS: Record<
     fcLabel: "Function codes",
     fcHelp:
       "1=Read, 2=Write, 3=Select, 4=Operate, 13=Cold Restart, 14=Warm Restart",
-    addrLabel: "Station addresses",
-    addrHelp: "Source and destination addresses (0-65534)",
   },
   iec104: {
     fcLabel: "Type IDs and classes",
@@ -169,8 +154,6 @@ export const ICS_PROTOCOL_OPTIONS: Record<
   cip: {
     fcLabel: "Service codes",
     fcHelp: "0x4C=Read Tag, 0x4D=Write Tag, 0x52=Multiple Service",
-    addrLabel: "CIP path",
-    addrHelp: "Object class / instance path",
     hasObjectClasses: true,
   },
 };
