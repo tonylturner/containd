@@ -29,6 +29,35 @@ function normalize(cfg: DHCPConfig | null): DHCPConfig {
   };
 }
 
+/**
+ * The form next to the config last read from or accepted by the server.
+ * `superseded` marks a server copy that changed while edits were unsaved.
+ */
+type Editor = { cfg: DHCPConfig; server: DHCPConfig; superseded: boolean };
+
+function sameConfig(a: DHCPConfig, b: DHCPConfig): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function fresh(cfg: DHCPConfig): Editor {
+  return { cfg, server: cfg, superseded: false };
+}
+
+/**
+ * Takes a config just read from the server. Unsaved edits stay in place unless
+ * the user asked for the reload, so a refresh triggered elsewhere, such as the
+ * one that follows a staged save, cannot discard them.
+ */
+function adopt(editor: Editor, next: DHCPConfig, keepEdits: boolean): Editor {
+  if (!keepEdits || sameConfig(editor.cfg, editor.server)) return fresh(next);
+  return { cfg: editor.cfg, server: next, superseded: editor.superseded || !sameConfig(next, editor.server) };
+}
+
+/** Takes the server's echo of a save; edits made since the save was submitted stay in place. */
+function accept(editor: Editor, submitted: DHCPConfig, next: DHCPConfig): Editor {
+  return sameConfig(editor.cfg, submitted) ? fresh(next) : { cfg: editor.cfg, server: next, superseded: false };
+}
+
 function poolsToText(pools: DHCPPool[]): string {
   return pools.map((p) => `${p.iface},${p.start},${p.end}`).join("\n");
 }
@@ -64,7 +93,12 @@ function textToReservations(text: string): DHCPReservation[] {
 export default function DHCPPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const [cfg, setCfg] = useState<DHCPConfig>(() => normalize(null));
+  const [editor, setEditor] = useState<Editor>(() => fresh(normalize(null)));
+  const { cfg } = editor;
+  const dirty = !sameConfig(cfg, editor.server);
+  const setCfg = useCallback((update: (cfg: DHCPConfig) => DHCPConfig) => {
+    setEditor((e) => ({ ...e, cfg: update(e.cfg) }));
+  }, []);
   const [status, setStatus] = useState<DHCPStatus | null>(null);
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
@@ -75,14 +109,14 @@ export default function DHCPPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     setLoading(true);
     setError(null);
     try {
       const svc = await api.getServicesStatus();
       setStatus(svc?.dhcp ?? null);
-      const s = await api.getDHCP();
-      setCfg(normalize(s));
+      const next = normalize(await api.getDHCP());
+      setEditor((e) => adopt(e, next, keepEdits));
       toast("DHCP status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -139,13 +173,18 @@ export default function DHCPPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    const saved = await save.run("save", () => api.setDHCP(cfg), {
+    const submitted = cfg;
+    const saved = await save.run("save", () => api.setDHCP(submitted), {
       success: "DHCP staged — commit to apply.",
       failure: "Failed to save DHCP settings.",
     });
     if (!saved) return;
-    if (saved.ok) setCfg(normalize(saved.data));
-    else setError(saved.error);
+    if (!saved.ok) {
+      setError(saved.error);
+      return;
+    }
+    const next = normalize(saved.data);
+    setEditor((e) => accept(e, submitted, next));
   }
 
   return (
@@ -154,7 +193,7 @@ export default function DHCPPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={refresh}
+            onClick={() => void refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -404,6 +443,19 @@ export default function DHCPPage() {
         </div>
 
         <SaveStateLine state={save.state} saved="staged — commit to apply." />
+        {dirty && (
+          <p
+            role="status"
+            aria-label="Unsaved edits"
+            className={editor.superseded
+              ? "mt-3 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-amber"
+              : "mt-3 text-xs text-(--text-muted)"}
+          >
+            {editor.superseded
+              ? "Unsaved edits kept: the DHCP settings changed on the server while you were editing. Save replaces them with your edits; Refresh discards your edits."
+              : "Unsaved edits — Save stages them; Refresh discards them."}
+          </p>
+        )}
       </Card>
 
       <Card className="mt-6">
