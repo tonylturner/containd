@@ -36,13 +36,13 @@ import (
 // masquerade mark of the upstream socket. It runs only when
 // CONTAIND_NETNS_KERNEL_TEST=1 inside a disposable Linux container with
 // NET_ADMIN, NET_RAW and SYS_ADMIN, nft, iproute2 and Python; the container
-// of scripts/gate-spike/run.sh has them:
+// of scripts/gate-kernel-tests.sh has them:
 //
 //	docker run --rm --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN \
 //	  --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv6.conf.all.forwarding=1 \
 //	  --sysctl net.ipv4.conf.all.rp_filter=1 --sysctl net.ipv4.conf.default.rp_filter=1 \
 //	  -e CONTAIND_NETNS_KERNEL_TEST=1 -e GOFLAGS=-mod=mod -v "$PWD:/src" -w /src \
-//	  containd-gate-spike:<go version> go test -count=1 -run '^TestGateManagerKernel$' -v ./pkg/app/engine
+//	  containd-gate-kernel:<go version> go test -count=1 -run '^TestGateManagerKernel$' -v ./pkg/app/engine
 func TestGateManagerKernel(t *testing.T) {
 	lab := newGateLab(t)
 	store := events.NewStore(256)
