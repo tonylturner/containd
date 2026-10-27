@@ -95,6 +95,12 @@ func UpgradeInPlace(cfg *Config) error {
 	default:
 		// For now, accept older patch versions of the same major/minor and bump.
 		if got.major == cur.major && got.minor == cur.minor {
+			if beforeIndustrialScope(cfg.SchemaVersion) {
+				ids := removeRetiredBuiltins(cfg)
+				if len(ids) > 0 {
+					cfg.scopeMigration = newScopeMigration(ids)
+				}
+			}
 			cfg.SchemaVersion = SchemaVersionCurrent
 			return nil
 		}

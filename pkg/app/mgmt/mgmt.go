@@ -107,7 +107,7 @@ func Run(ctx context.Context, opts Options) error {
 		engineClient = engineapi.NewHTTPClient(engineURL)
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
-	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent, migrations: stores.scopeEvents}
+	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
 	auditLog, ok := stores.auditStore.(audit.ForwardLog)
 	if !ok {
 		return fmt.Errorf("audit store %T cannot be forwarded to syslog", stores.auditStore)
