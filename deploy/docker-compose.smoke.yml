@@ -43,6 +43,7 @@ services:
       - NET_ADMIN
     volumes:
       - ../test/data-smoke/forward:/opt/forward:ro
+      - ../test/data-smoke/av:/opt/av:ro
     networks:
       lan_net:
         ipv4_address: 172.31.0.3
@@ -102,6 +103,38 @@ services:
     networks:
       wan_net:
         ipv4_address: 172.30.0.4
+    depends_on:
+      - engine
+
+  # Origins for the scanning-gate smoke (scripts/smoke-av-gate.sh): av_server
+  # on the WAN side serves the EICAR and clean objects on the selected port
+  # 8080 and the unselected port 8082; av_target is the LAN target of its
+  # inbound port forward. Both log the client address they observe.
+  av_server:
+    image: python:3-alpine
+    command: ["python", "/opt/av/server.py", "av_server", "8080", "8082"]
+    user: "0"
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ../test/data-smoke/av:/opt/av:ro
+    networks:
+      wan_net:
+        ipv4_address: 172.30.0.11
+    depends_on:
+      - engine
+
+  av_target:
+    image: python:3-alpine
+    command: ["python", "/opt/av/server.py", "av_target", "80"]
+    user: "0"
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ../test/data-smoke/av:/opt/av:ro
+    networks:
+      lan_net:
+        ipv4_address: 172.31.0.11
     depends_on:
       - engine
 

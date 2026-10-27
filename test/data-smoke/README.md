@@ -80,6 +80,34 @@ probe waits for a connection, default 3), `SMOKE_MUTATION` (`permissive` or
 `SMOKE_RESULT_FILE` (a file that receives the IDs of failed checks, one per
 line).
 
+## Scanning-gate fixtures
+
+`av/server.py NAME PORT...` is the HTTP origin of the scanning-gate smoke
+(`scripts/smoke-av-gate.sh`). It answers `GET /` with the same
+`server=NAME port=PORT client=IP` line as the forwarding echo listener,
+`GET /clean.txt` with that line followed by clean filler, `GET /eicar.txt`
+with the 68-byte EICAR test file and `POST /upload` with the line extended
+by `method=POST size=N md5=HEX`. It appends every request to
+`/tmp/av-requests.jsonl` in its container (client address, method, path,
+port, body size and MD5), which the smoke reads to see which address
+reached the origin and whether a refused upload ever arrived. `av/eicar.py`
+assembles the EICAR string at runtime from pieces, so no file in the
+repository carries it. `av/client.py get IP PORT PATH TIMEOUT` and
+`av/client.py post IP PORT PATH TIMEOUT eicar|clean` make one HTTP/1.1
+request and print one outcome line: `status=CODE bytes=N complete=yes|no
+eicar=yes|no line=<first body line>` (the line of an EICAR body is printed
+as `(eicar)`), or `timeout`, `refused`, `reset`, `closed` or `unreachable`.
+Exit 2 means the client could not run, which the smoke treats as a harness
+error. The compose file runs `av_server` (WAN side, ports 8080 and 8082)
+and `av_target` (LAN side, port 80) from this directory and mounts it at
+`/opt/av` in `lan_client` as well.
+
+`scripts/smoke-av-gate.sh` reads the isolation variables above,
+`SMOKE_PROBE_TIMEOUT` (default 10), `SMOKE_AV_READY_TIMEOUT` (seconds to
+wait for the gate to reach the state a policy implies, default 180),
+`SMOKE_MUTATION=no-gate` (commits every policy with an empty scan selection,
+which must fail the refusal checks) and `SMOKE_RESULT_FILE`.
+
 ## ICS fixtures and the NFQUEUE variant
 
 `modbus/server.py` appends every decoded request to
