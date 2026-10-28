@@ -4,6 +4,7 @@
 package dpi
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -192,15 +193,16 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 // streamMu held.
 func (m *Manager) flowEnd(state *flow.State) ([]Event, error) {
 	var out []Event
+	var errs []error
 	for _, d := range m.candidates(state) {
 		if d == nil || !d.Supports(state) {
 			continue
 		}
 		events, err := d.OnFlowEnd(state)
 		if err != nil {
-			return out, err
+			errs = append(errs, err)
 		}
 		out = append(out, events...)
 	}
-	return out, nil
+	return out, errors.Join(errs...)
 }
