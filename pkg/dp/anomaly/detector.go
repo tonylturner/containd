@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
@@ -290,15 +291,19 @@ func (d *Detector) checkModbus(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 				d.pendingTxns[fk] = make(map[uint16]bool)
 			}
 			d.pendingTxns[fk][txnID] = true
-		} else if ev.Kind == "response" {
+		} else if ev.Kind == "response" || (ev.Kind == "exception" && isModbusExceptionReply(ev, srcIP, dstIP)) {
 			// A response should match a prior request on the reverse flow.
 			pending := d.pendingTxns[reverseFk]
 			if pending == nil || !pending[txnID] {
+				replyKind := "response"
+				if ev.Kind == "exception" {
+					replyKind = "exception"
+				}
 				out = append(out, Anomaly{
 					Type:     "protocol_violation",
 					Protocol: "modbus",
 					Severity: "medium",
-					Message:  fmt.Sprintf("Modbus response (txn %d) without prior request", txnID),
+					Message:  fmt.Sprintf("Modbus %s (txn %d) without prior request", replyKind, txnID),
 					SourceIP: srcIP,
 					DestIP:   dstIP,
 					Attributes: map[string]any{
@@ -313,6 +318,14 @@ func (d *Detector) checkModbus(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	}
 
 	return out
+}
+
+func isModbusExceptionReply(ev dpi.Event, srcIP, dstIP string) bool {
+	key, ok := flow.ParseKey(ev.FlowID)
+	return ok &&
+		key.Dir == flow.DirReverse &&
+		key.SrcIP.String() == srcIP &&
+		key.DstIP.String() == dstIP
 }
 
 // recordAnomaly adds an anomaly to the ring buffer (must be called under lock).
