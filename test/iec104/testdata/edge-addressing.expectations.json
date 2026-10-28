@@ -1,0 +1,9 @@
+{
+  "class": "captured lib60870-C endpoint traffic",
+  "coverage": [
+    "general interrogation at common addresses 1 and 2",
+    "information-object addresses at 65535, 65536, and 16777215",
+    "unknown information-object command rejection"
+  ],
+  "labels": []
+}

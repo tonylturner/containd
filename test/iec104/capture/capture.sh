@@ -11,25 +11,27 @@ set -euo pipefail
 # (no firewall) so the fixtures are clean lib60870 wire traffic.
 #
 # For each pcap it also writes NAME.expected.tsv: Wireshark's independent
-# decode of every APDU (one row per APDU), so the containd decoder can be
-# checked against a second parser. tshark runs only here, at regeneration
-# time; Go tests never need it.
+# decode of each TCP payload record (one row per record, multi-valued APDU and
+# object fields comma-separated), so the containd decoder can be checked
+# against a second parser. tshark runs only here, at regeneration time; Go
+# tests never need it.
 #
 # Requirements: docker, Go (to build the malformer), tshark (TSHARK). Nothing
-# is published to a host port; everything runs on a throwaway network torn
-# down on exit.
+# is published to a host port; containers and the throwaway network are removed
+# on exit. Build/capture scratch is retained under build/ for inspection.
 #
 # Usage: test/iec104/capture/capture.sh [OUT_DIR]   (default test/iec104/testdata)
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 HERE="$ROOT/test/iec104/capture"
 OUT=${1:-$ROOT/test/iec104/testdata}
-WORK=$(mktemp -d)
+mkdir -p "$ROOT/build"
+WORK=$(mktemp -d "$ROOT/build/iec104-capture.XXXXXX")
 
-ENDPOINT_IMAGE=${IEC104_ENDPOINT_IMAGE:-containd-iec104-endpoint:capture}
-CAPTURE_IMAGE=${IEC104_CAPTURE_IMAGE:-containd-iec104-capture:capture}
+ENDPOINT_IMAGE=${IEC104_ENDPOINT_IMAGE:-containd-corpus-iec104-endpoint:lib60870-2.4.1}
+CAPTURE_IMAGE=${IEC104_CAPTURE_IMAGE:-containd-corpus-iec104-capture:alpine321}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
-NET="iec104-capture-${STAMP}-$$"
+NET="containd-corpus-iec104-net-${STAMP}-$$"
 SUBNET=${IEC104_CAPTURE_SUBNET:-10.235.0}
 RTU_IP=${SUBNET}.10
 CLIENT_IP=${SUBNET}.20
@@ -38,6 +40,7 @@ RTU=""
 CC=""
 CAP=""
 NET_ID=""
+CLIENT_COUNT=0
 
 ALLOWED_CA=1
 AUX_CA=2
@@ -49,14 +52,33 @@ DCS_CLOSE=2
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
 cleanup() {
-  set +e
-  [[ -n "$CAP" ]] && docker rm -f "$CAP" >/dev/null 2>&1
-  [[ -n "$CC" ]] && docker rm -f "$CC" >/dev/null 2>&1
-  [[ -n "$RTU" ]] && docker rm -f "$RTU" >/dev/null 2>&1
-  [[ -n "$NET_ID" ]] && docker network rm "$NET" >/dev/null 2>&1
-  rm -rf "$WORK"
+  local status=$? cleanup_status=0
+  trap - EXIT
+  if [[ -n "$CAP" ]]; then docker rm -f "$CAP" >/dev/null || cleanup_status=$?; fi
+  if [[ -n "$CC" ]]; then docker rm -f "$CC" >/dev/null || cleanup_status=$?; fi
+  if [[ -n "$RTU" ]]; then docker rm -f "$RTU" >/dev/null || cleanup_status=$?; fi
+  if [[ -n "$NET_ID" ]]; then docker network rm "$NET" >/dev/null || cleanup_status=$?; fi
+  if (( status != 0 )); then return "$status"; fi
+  return "$cleanup_status"
 }
 trap cleanup EXIT
+
+container_running() {
+  [[ $(docker inspect --format '{{.State.Running}}' "$1") == true ]]
+}
+
+container_exit_successfully() {
+  local code
+  code=$(docker inspect --format '{{.State.ExitCode}}' "$1")
+  [[ "$code" == 0 ]]
+}
+
+stop_container() {
+  local name=$1 timeout=$2
+  docker stop -t "$timeout" "$name" >/dev/null
+  container_exit_successfully "$name"
+  docker rm "$name" >/dev/null
+}
 
 command -v docker >/dev/null 2>&1 || { echo "docker not found" >&2; exit 2; }
 command -v go >/dev/null 2>&1 || { echo "go not found" >&2; exit 2; }
@@ -66,21 +88,27 @@ command -v "$TSHARK" >/dev/null 2>&1 || { echo "tshark not found (set TSHARK)" >
 log "Building images and the Go malformer..."
 docker build -q -t "$ENDPOINT_IMAGE" "$ROOT/test/iec104/endpoint" >/dev/null
 docker build -q -t "$CAPTURE_IMAGE" -f "$HERE/capture.Dockerfile" "$HERE" >/dev/null
-GOFLAGS=-mod=mod GOOS=linux GOARCH="$(docker info --format '{{.Architecture}}' | sed 's/aarch64/arm64/;s/x86_64/amd64/')" \
-  go build -o "$WORK/malformer" "$ROOT/test/iec104/malformer"
+( cd "$ROOT" && GOFLAGS=-mod=mod GOOS=linux GOARCH="$(docker info --format '{{.Architecture}}' | sed 's/aarch64/arm64/;s/x86_64/amd64/')" \
+  go build -o "$WORK/malformer" ./test/iec104/malformer )
 
 NET_ID=$(docker network create --subnet "${SUBNET}.0/24" "$NET")
 BRIDGE="br-${NET_ID:0:12}"
 
 # start_rtu [PERIODIC_MS]: RTU with the cyclic measurement period (0 = off).
 start_rtu() {
-  RTU=$(docker run -d --rm --name "iec104-cap-rtu-$$" --network "$NET" --ip "$RTU_IP" \
-    -e PERIODIC_MS="${1:-2000}" --cap-add NET_ADMIN "$ENDPOINT_IMAGE" rtu)
+  RTU="containd-corpus-iec104-rtu-${STAMP}-$$"
+  docker run -d --name "$RTU" --network "$NET" --ip "$RTU_IP" \
+    -e PERIODIC_MS="${1:-2000}" --cap-add NET_ADMIN "$ENDPOINT_IMAGE" rtu >/dev/null
   sleep 1
+  if ! container_running "$RTU"; then
+    echo "RTU container $RTU exited before capture" >&2
+    return 1
+  fi
 }
 
 stop_rtu() {
-  [[ -n "$RTU" ]] && docker rm -f "$RTU" >/dev/null 2>&1
+  [[ -n "$RTU" ]] || return 0
+  stop_container "$RTU" 5
   RTU=""
 }
 
@@ -89,36 +117,70 @@ run_capture() {
   local name=$1
   shift
   log "capture $name"
-  CAP=$(docker run -d --rm --name "iec104-cap-cap-$$" --net host --cap-add NET_ADMIN --cap-add NET_RAW \
-    -v "$WORK:/out" "$CAPTURE_IMAGE" -i "$BRIDGE" -U -w "/out/$name.pcap" 'tcp port 2404')
+  CAP="containd-corpus-iec104-capture-${name}-${STAMP}-$$"
+  docker run -d --name "$CAP" --net host --cap-add NET_ADMIN --cap-add NET_RAW \
+    -v "$WORK:/out" "$CAPTURE_IMAGE" -i "$BRIDGE" -U -w "/out/$name.pcap" 'tcp port 2404' >/dev/null
   sleep 1
+  if ! container_running "$CAP"; then
+    echo "capture container $CAP exited before client traffic" >&2
+    return 1
+  fi
   "$@"
   sleep 1
+  if ! container_running "$CAP"; then
+    echo "capture container $CAP exited during client traffic" >&2
+    return 1
+  fi
   # SIGTERM lets tcpdump flush and close the file (a SIGKILL can lose the tail).
-  docker stop -t 10 "$CAP" >/dev/null 2>&1
+  stop_container "$CAP" 10
   CAP=""
 }
 
-ep_cmd() {
-  docker run --rm --network "$NET" --ip "$CLIENT_IP" "$ENDPOINT_IMAGE" cmd "$RTU_IP" 2404 "$@" || true
+ep_cmd_status() {
+  local expected=$1 status=0
+  shift
+  CLIENT_COUNT=$((CLIENT_COUNT + 1))
+  if docker run --rm --name "containd-corpus-iec104-client-${STAMP}-$$-$CLIENT_COUNT" \
+    --network "$NET" --ip "$CLIENT_IP" "$ENDPOINT_IMAGE" cmd "$RTU_IP" 2404 "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  if (( status != expected )); then
+    echo "IEC104 client exited $status, expected $expected: $*" >&2
+    return 1
+  fi
+  if (( status != 0 )); then
+    log "client returned the expected negative-response status $status: $*"
+  fi
 }
 
+ep_cmd() { ep_cmd_status 0 "$@"; }
+ep_cmd_negative() { ep_cmd_status 1 "$@"; }
+
 malform() {
-  docker run --rm --network "$NET" --ip "$CLIENT_IP" -v "$WORK/malformer:/malformer:ro" \
-    --entrypoint /malformer "$ENDPOINT_IMAGE" -addr "$RTU_IP:2404" "$@" || true
+  CLIENT_COUNT=$((CLIENT_COUNT + 1))
+  docker run --rm --name "containd-corpus-iec104-client-${STAMP}-$$-$CLIENT_COUNT" \
+    --network "$NET" --ip "$CLIENT_IP" -v "$WORK/malformer:/malformer:ro" \
+    --entrypoint /malformer "$ENDPOINT_IMAGE" -addr "$RTU_IP:2404" "$@"
 }
 
 # --- startup-gi-monitor: a long-lived control-centre session (handshake,
 # STARTDT, station GI on CA 1, periodic COT 1 data, spontaneous type 31 after a
 # breaker change, S-frames on t2, TESTFR on t3 = 20 s, then FIN on close).
 scenario_startup() {
-  CC=$(docker run -d --rm --network "$NET" --ip "$CC_IP" "$ENDPOINT_IMAGE" cc "$RTU_IP" 2404)
+  CC="containd-corpus-iec104-cc-${STAMP}-$$"
+  docker run -d --name "$CC" --network "$NET" --ip "$CC_IP" "$ENDPOINT_IMAGE" cc "$RTU_IP" 2404 >/dev/null
   sleep 4
+  if ! container_running "$CC"; then
+    echo "control-centre container $CC exited before client traffic" >&2
+    return 1
+  fi
   ep_cmd sbo "$ALLOWED_CA" "$IOA_BREAKER" "$DCS_OPEN"
   sleep 2
   ep_cmd sbo "$ALLOWED_CA" "$IOA_BREAKER" "$DCS_CLOSE"
   sleep 22
-  docker stop -t 5 "$CC" >/dev/null 2>&1
+  stop_container "$CC" 5
   CC=""
 }
 
@@ -126,11 +188,16 @@ scenario_startup() {
 # t3 = 3 s exchanges TESTFR act/con; a second session runs STOPDT then STARTDT;
 # both sessions close with FIN.
 scenario_session() {
-  CC=$(docker run -d --rm --network "$NET" --ip "$CC_IP" -e IEC104_T3=3 "$ENDPOINT_IMAGE" cc "$RTU_IP" 2404)
+  CC="containd-corpus-iec104-cc-${STAMP}-$$"
+  docker run -d --name "$CC" --network "$NET" --ip "$CC_IP" -e IEC104_T3=3 "$ENDPOINT_IMAGE" cc "$RTU_IP" 2404 >/dev/null
   sleep 9
+  if ! container_running "$CC"; then
+    echo "control-centre container $CC exited before client traffic" >&2
+    return 1
+  fi
   ep_cmd stopstart
   sleep 1
-  docker stop -t 5 "$CC" >/dev/null 2>&1
+  stop_container "$CC" 5
   CC=""
 }
 
@@ -138,7 +205,7 @@ scenario_session() {
 scenario_sbo() {
   ep_cmd sbo "$ALLOWED_CA" "$IOA_BREAKER" "$DCS_OPEN"
   ep_cmd sbo "$ALLOWED_CA" "$IOA_BREAKER" "$DCS_CLOSE"
-  ep_cmd direct "$ALLOWED_CA" "$IOA_BREAKER" "$DCS_OPEN"
+  ep_cmd_negative direct "$ALLOWED_CA" "$IOA_BREAKER" "$DCS_OPEN"
   ep_cmd sbo "$ALLOWED_CA" "$IOA_ISOLATOR" "$DCS_OPEN"
 }
 
@@ -146,7 +213,7 @@ scenario_sbo() {
 scenario_edge() {
   ep_cmd gi "$ALLOWED_CA"
   ep_cmd gi "$AUX_CA"
-  ep_cmd direct "$ALLOWED_CA" 65535 "$DCS_OPEN"
+  ep_cmd_negative direct "$ALLOWED_CA" 65535 "$DCS_OPEN"
 }
 
 # --- malformed: layout and profile violations, split and coalesced APDUs
@@ -181,15 +248,16 @@ for f in startup-gi-monitor sbo-command edge-addressing malformed session-manage
   cp "$WORK/$f.pcap" "$OUT/$f.pcap"
 done
 
-# expected_decode NAME: one TSV row per APDU from Wireshark's IEC 104 dissector.
+# expected_decode NAME: one TSV row per TCP record from Wireshark's IEC 104 dissector.
 # Multi-valued fields (several APDUs in one segment, several objects in one
 # ASDU) are comma-separated in segment order.
 expected_decode() {
   local name=$1
   {
-    printf '# %s decode of %s.pcap; one row per TCP segment carrying APDUs.\n' "$("$TSHARK" -v | head -n 1)" "$name"
-    printf '# apci_type: 0x0=I 0x1=S 0x3=U. utype: 0x01 STARTDT act, 0x02 con, 0x04 STOPDT act, 0x08 con, 0x10 TESTFR act, 0x20 con.\n'
-    "$TSHARK" -r "$OUT/$name.pcap" -Y iec60870_104 -T fields -E header=y -E separator=/t -E occurrence=a -E aggregator=, \
+    "$TSHARK" -r "$OUT/$name.pcap" -Y iec60870_104 \
+      -o tcp.desegment_tcp_streams:TRUE -o tcp.reassemble_out_of_order:FALSE \
+      -o tcp.analyze_sequence_numbers:TRUE \
+      -T fields -E header=y -E separator=/t -E occurrence=a -E aggregator=, \
       -e frame.number -e ip.src -e tcp.srcport -e tcp.seq -e tcp.len \
       -e iec60870_104.apdulen -e iec60870_104.type -e iec60870_104.utype -e iec60870_104.tx -e iec60870_104.rx \
       -e iec60870_asdu.typeid -e iec60870_asdu.sq -e iec60870_asdu.numix -e iec60870_asdu.causetx \
@@ -204,6 +272,16 @@ for f in startup-gi-monitor sbo-command edge-addressing malformed session-manage
 done
 
 ARCH=$(docker image inspect "$ENDPOINT_IMAGE" --format '{{.Architecture}}')
-( cd "$OUT" && shasum -a 256 -- *.pcap > SHA256SUMS )
+SUM_FILES=(
+  edge-addressing.pcap edge-addressing.expected.tsv edge-addressing.expectations.json
+  malformed.pcap malformed.expected.tsv malformed.expectations.json
+  sbo-command.pcap sbo-command.expected.tsv sbo-command.expectations.json
+  session-management.pcap session-management.expected.tsv session-management.expectations.json
+  startup-gi-monitor.pcap startup-gi-monitor.expected.tsv startup-gi-monitor.expectations.json
+)
+for f in "${SUM_FILES[@]}"; do
+  [[ -s "$OUT/$f" ]] || { echo "missing generated corpus artifact $OUT/$f" >&2; exit 1; }
+done
+( cd "$OUT" && shasum -a 256 -- "${SUM_FILES[@]}" > SHA256SUMS )
 log "Captures written to $OUT (lib60870 2.4.1, alpine arch $ARCH)"
 cat "$OUT/SHA256SUMS"

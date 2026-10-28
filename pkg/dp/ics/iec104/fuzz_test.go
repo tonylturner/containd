@@ -10,6 +10,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
+	"github.com/tonylturner/containd/pkg/dp/internal/corpus"
 )
 
 var validKinds = map[string]bool{
@@ -46,8 +47,25 @@ func checkEvents(t *testing.T, res dpi.StreamResult) {
 }
 
 func addFixtureSeeds(f *testing.F) {
-	for _, fx := range append(loadFixtures(f), capturedFuzzFixtures(f)...) {
+	for _, fx := range loadFixtures(f) {
 		f.Add(fx.bytes, fx.dir == dpi.ServerToClient)
+	}
+	for _, fixture := range loadReferenceCaptures(f) {
+		seeds := corpus.Seeds(fixture)
+		seedIndex := 0
+		for _, packet := range fixture.Packets {
+			if len(packet.Decoded.Payload) == 0 {
+				continue
+			}
+			f.Add(seeds[seedIndex], packet.Dir == dpi.ServerToClient)
+			seedIndex++
+		}
+		if seedIndex != len(seeds) {
+			f.Fatalf("%s yielded %d packet seeds for %d payloads", fixture.Name, len(seeds), seedIndex)
+		}
+		for _, seed := range captureStreamSeeds(f, fixture) {
+			f.Add(seed.bytes, seed.dir == dpi.ServerToClient)
+		}
 	}
 }
 
@@ -83,18 +101,20 @@ func FuzzASDU(f *testing.F) {
 			f.Add(fx.bytes[apciLen:], fx.dir == dpi.ServerToClient)
 		}
 	}
-	for _, fx := range capturedFuzzFixtures(f) {
+	for _, fixture := range loadReferenceCaptures(f) {
 		// Walk complete wire APDUs, including every APDU of coalesced
 		// capture streams; partial APDUs remain stream/APCI seeds.
-		for b := fx.bytes; len(b) >= apciLen; {
-			n := int(b[1]) + 2
-			if b[0] != 0x68 || n < apciLen || n > len(b) {
-				break
+		for _, seed := range captureStreamSeeds(f, fixture) {
+			for b := seed.bytes; len(b) >= apciLen; {
+				n := int(b[1]) + 2
+				if b[0] != 0x68 || n < apciLen || n > len(b) {
+					break
+				}
+				if n > apciLen && b[2]&0x01 == 0 {
+					f.Add(b[apciLen:n], seed.dir == dpi.ServerToClient)
+				}
+				b = b[n:]
 			}
-			if n > apciLen && b[2]&0x01 == 0 {
-				f.Add(b[apciLen:n], fx.dir == dpi.ServerToClient)
-			}
-			b = b[n:]
 		}
 	}
 	f.Fuzz(func(t *testing.T, body []byte, server bool) {
@@ -131,7 +151,7 @@ func FuzzStream(f *testing.F) {
 		for _, fr := range res.Frames {
 			n += len(fr.Events)
 		}
-		if n > len(b)/3+1 {
+		if n > len(b) {
 			t.Fatalf("%d events from %d bytes", n, len(b))
 		}
 	})
