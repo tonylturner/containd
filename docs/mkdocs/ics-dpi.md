@@ -492,8 +492,8 @@ nonconformance before ALLOW matching. Broadcast objects cannot match an
 
 The generic learner records supported **request** events for Modbus, DNP3 and
 CIP. DNP3 restart/control messages are request messages even though their event
-kinds identify the command. Replies, exceptions, events with conformance findings,
-and IEC 104 do not produce learned rules. IEC 104 is excluded from both
+kinds identify the command. Replies, exceptions, events with conformance or
+undecoded findings, and IEC 104 do not produce learned rules. IEC 104 is excluded from both
 automatic learning and asset discovery. Review learned rules before use:
 observation is not authorization.
 

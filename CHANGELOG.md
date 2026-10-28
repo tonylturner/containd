@@ -125,7 +125,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve CIP response metadata and MSP child identities; report uninspected content and malformed UDP encapsulations instead of silently omitting them.
 - DNP3 inspection now reconstructs transport segments and tracks fragmented application responses, exposing point indices and CROB values with explicit incomplete/unsupported coverage. Application fragments are still decoded independently, without atomic whole-response prevention.
 - Classify Modbus diagnostics (function 8) sub-functions by the specification; sub-functions 3, 10 and 20 are writes and unknown sub-functions are reported as undecoded.
-
 - ICAP verdicts are never cached: each scan reaches the server with its direction, HTTP headers and endpoints; native ClamAV caching is unchanged.
 - `services.av.failOpenIcs` is retired in favour of `scan.icsZones` and
   `scan.icsAssets`; a stored value still loads and is ignored, and the
