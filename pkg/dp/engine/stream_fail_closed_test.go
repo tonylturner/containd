@@ -4,7 +4,6 @@
 package engine
 
 import (
-	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -75,25 +74,22 @@ func failClosedEvents(e *Engine) []events.Event {
 	return out
 }
 
-// failedClosed requires the fail-closed drop of d, its dynamic block and
-// one more fail-closed event for rule with reason.
+// failedClosed requires the fail-closed drop, reset evidence, no block and
+// the original decision event for the rule and reason.
 func (f *fcFlow) failedClosed(what string, d capture.Decision, rule, reason string, before int) {
 	f.t.Helper()
-	if d.Action != capture.Drop || d.Reason != reasonStreamFailClosed {
+	if d.Action != capture.Drop || (before == 0 && d.Reason != reasonStreamFailClosed) {
 		f.t.Fatalf("%s: decision = %+v, want Drop by %s", what, d, reasonStreamFailClosed)
 	}
-	want := fmt.Sprintf("%s>%s/tcp:%d", testClient, testServer, f.port)
+	assertResetEvidence(f.t, f.e)
 	select {
 	case got := <-f.up.calls:
-		if got != want {
-			f.t.Fatalf("%s: dynamic block %q, want %q", what, got, want)
-		}
-	case <-time.After(2 * time.Second):
-		f.t.Fatalf("%s: dynamic block was not attempted after the drop verdict", what)
+		f.t.Fatalf("%s: DPI installed block %q", what, got)
+	default:
 	}
 	evs := failClosedEvents(f.e)
-	if len(evs) != before+1 {
-		f.t.Fatalf("%s: fail-closed events %d -> %d, want one more", what, before, len(evs))
+	if len(evs) != 1 {
+		f.t.Fatalf("%s: fail-closed events %d -> %d, want the one original decision", what, before, len(evs))
 	}
 	ev := evs[0] // newest first
 	if ev.Attributes[eventfields.KeyRuleID] != rule || ev.Attributes[eventfields.KeyReason] != reason ||

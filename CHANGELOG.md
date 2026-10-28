@@ -43,6 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- DPI denials now drop the packet and best-effort reset only that TCP session,
+  without installing a host or service block. Fresh connections, including
+  same-source-port reconnects, can start immediately and other sessions are
+  untouched. UDP denies drop only the datagram; IPv6 and unavailable injectors
+  report reset unavailability. Per-peer `ics.session` events report resets sent
+  or failed, not confirmed closure. IEC 104 keeps its existing abort path.
+  DPI block elements installed before upgrading have no owner marker and are
+  not cleared automatically; they expire within their existing 10-minute TTL.
+
 - Restored the full README overview and dashboard screenshot.
 - A Modbus `ALLOW` whose `addresses` covered only the start of the requests it
   admitted now denies them: `10-11` no longer admits a read of 8 registers from
@@ -60,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Generic DPI denial tombstones now expire after 10 seconds and are capped at
+  16,384 entries, evicting the oldest first. Expiry and eviction release the
+  exact tuple's cached denial and failed streams so reconnects remain immediate;
+  late payload still drops through mid-stream protection. Capacity evictions
+  are counted in `containd_dp_denied_tcp_evictions_total`.
+- TCP CIP now reassembles split EtherNet/IP encapsulations, inspects every coalesced encapsulation, and fails closed on mid-stream pickups in an enforce scope.
 - The Modbus decoder no longer invents fields. Replies no longer report their
   byte count and data as `address` and `quantity`, and FC 5/6 report `value`
   instead of `quantity`. Requests report fields per function code, including

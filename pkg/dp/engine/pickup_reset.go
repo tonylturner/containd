@@ -4,78 +4,95 @@
 package engine
 
 import (
-	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/capture"
-	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
-// closePickedUp closes the connection of an inline flow whose stream has
-// just failed as picked up mid-connection, as midstreamLocked closes an
-// IEC104 session: the resets observedResets gives for the dropped packet
-// are sent once its drop verdict is submitted, and kept for
-// iecResetWindow to answer challenge ACKs (answerPickupChallenge). The
-// opposite direction's stream fails as picked up too, so that nothing of
-// the old connection passes and both directions start again at the next
-// handshake. Without a ready injector, and for IPv6, which the injector
-// cannot reset, the connection's packets only drop.
-func (e *Engine) closePickedUp(pkt capture.Packet, state *flow.State) {
+// resetDeniedTCP generalizes pickup resets: the denied packet seeds best-effort
+// resets for both peers, followed by exact conntrack deletion after its drop.
+// IPv6 and an unavailable injector still produce per-peer outcome evidence.
+func (e *Engine) resetDeniedTCP(pkt capture.Packet, state *flow.State, proto, reason string, d *deniedTCP) {
 	t := e.iec
 	src, okSrc := addrPort(pkt.SrcIP, pkt.SrcPort)
 	dst, okDst := addrPort(pkt.DstIP, pkt.DstPort)
-	if !okSrc || !okDst || !pkt.TCP.Valid || !t.health.injectorReady() {
-		return
-	}
-	e.flowMu.Lock()
-	rev := e.flows[state.Key.Reversed().Hash()]
-	e.flowMu.Unlock()
-	if rev != nil {
-		e.dpiMgr.FailStream(rev, &dpi.ParsedPacket{Proto: "tcp", FailClosed: true}, dpi.StreamMidStream)
-	}
+	available := okSrc && okDst && pkt.TCP.Valid && t.health.injectorReady()
 	key := iecKey{client: src, server: dst}
 	if state.Key.Dir == flow.DirReverse {
 		key = iecKey{client: dst, server: src}
 	}
 	var resets connReset
 	toReceiver, toSender, hasSender := observedResets(src, dst, pkt.TCP)
-	resets.targets[key.target(toReceiver)] = resetTarget{valid: true, r: toReceiver}
+	receiver, sender := iecDirSrv, iecDirClient
+	if state.Key.Dir == flow.DirReverse {
+		receiver, sender = sender, receiver
+	}
+	resets.targets[receiver] = resetTarget{valid: true, r: toReceiver}
 	if hasSender {
-		resets.targets[key.target(toSender)] = resetTarget{valid: true, r: toSender}
+		resets.targets[sender] = resetTarget{valid: true, r: toSender}
 	}
 	e.afterDrop(pkt.Token, func() {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		if d.retired {
+			for _, target := range []int{iecDirSrv, iecDirClient} {
+				e.genericResetEvent(state, proto, reason, target, "unavailable", nil)
+			}
+			return
+		}
 		for _, target := range []int{iecDirSrv, iecDirClient} { // as resetJob
-			if tr := &resets.targets[target]; tr.valid {
-				t.sendPickupReset(key, tr.r)
+			tr := &resets.targets[target]
+			outcome := "unavailable"
+			var err error
+			if available && tr.valid {
+				err = t.sendRST(tr.r)
+				outcome = resetOutcome(err)
 				tr.sent = time.Now()
 			}
+			e.genericResetEvent(state, proto, reason, target, outcome, err)
 		}
-		t.pickups.record(key, resets, time.Now())
-		t.deleteConntrack(key.client, key.server, key.what())
+		if available {
+			t.pickups.record(key, resets, d, func(target int, err error) {
+				e.genericResetEvent(state, proto, reason, target, resetOutcome(err), err)
+			}, time.Now())
+			t.deleteConntrack(key.client, key.server, key.what())
+		}
 	})
 }
 
-// target is the index of the endpoint r resets.
-func (k iecKey) target(r session.Reset) int {
-	if r.Dst == k.client {
-		return iecDirClient
+func (e *Engine) genericResetEvent(state *flow.State, proto, reason string, target int, outcome string, err error) {
+	attrs := map[string]any{eventfields.KeyOutcome: outcome, eventfields.KeyTarget: targetNames[target], eventfields.KeyReason: reason}
+	if err != nil {
+		attrs[eventfields.KeyError] = err.Error()
+		if e.iec.onError != nil {
+			e.iec.onError(err)
+		}
 	}
-	return iecDirSrv
+	k := state.Key
+	if k.Dir == flow.DirReverse {
+		k = k.Reversed()
+	}
+	e.eventStore.Append(events.Event{FlowID: state.Key.Hash(), Proto: proto, Kind: eventfields.KindSession,
+		Timestamp: time.Now().UTC(), SrcIP: k.SrcIP.String(), DstIP: k.DstIP.String(), SrcPort: k.SrcPort, DstPort: k.DstPort,
+		Transport: "tcp", Attributes: attrs})
 }
 
 func (k iecKey) what() string {
-	return "picked-up connection " + k.client.String() + " > " + k.server.String()
+	return "denied connection " + k.client.String() + " > " + k.server.String()
 }
 
-func (t *iecTable) sendPickupReset(key iecKey, r session.Reset) {
-	if err := t.sendRST(r); err != nil && t.onError != nil {
-		t.onError(errors.New(key.what() + ": " + err.Error()))
+func resetOutcome(err error) string {
+	if err != nil {
+		return outcomeResetFailed
 	}
+	return outcomeResetSent
 }
 
 // answerPickupChallenge answers a challenge ACK (RFC 5961) from an endpoint
@@ -100,15 +117,21 @@ func (t *iecTable) answerPickupChallenge(pkt capture.Packet) {
 	}
 	now := time.Now()
 	key, from := iecKey{client: src, server: dst}, iecDirClient
-	r, ok := t.pickups.challenge(key, from, pkt.TCP, now)
+	r, entry, ok := t.pickups.challenge(key, from, pkt.TCP, now)
 	if !ok {
 		key, from = iecKey{client: dst, server: src}, iecDirSrv
-		if r, ok = t.pickups.challenge(key, from, pkt.TCP, now); !ok {
+		if r, entry, ok = t.pickups.challenge(key, from, pkt.TCP, now); !ok {
 			return
 		}
 	}
 	if !t.jobs.submit(func() {
-		t.sendPickupReset(key, r)
+		entry.guard.mu.Lock()
+		defer entry.guard.mu.Unlock()
+		if entry.guard.retired {
+			return
+		}
+		err := t.sendRST(r)
+		entry.report(from, err)
 		t.pickups.resent(key, from, time.Now())
 	}) {
 		pressureTotals.worker.Add(1)
@@ -123,35 +146,48 @@ func (t *iecTable) answerPickupChallenge(pkt capture.Packet) {
 // when it holds none.
 type pickupResets struct {
 	mu    sync.Mutex
-	conns map[iecKey]*connReset
+	conns map[iecKey]*pickupReset
 	swept time.Time
 	live  atomic.Int32
 }
 
+// pickupReset associates challenge retries with the same denial generation.
+// Reconnect retirement cancels queued retries before they can hit a new session.
+type pickupReset struct {
+	connReset
+	guard  *deniedTCP
+	report func(int, error)
+}
+
 func newPickupResets() *pickupResets {
-	return &pickupResets{conns: make(map[iecKey]*connReset)}
+	return &pickupResets{conns: make(map[iecKey]*pickupReset)}
 }
 
 // record keeps the resets sent to close a connection.
-func (p *pickupResets) record(key iecKey, resets connReset, now time.Time) {
+func (p *pickupResets) record(key iecKey, resets connReset, guard *deniedTCP, report func(int, error), now time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.expireLocked(now)
 	if _, ok := p.conns[key]; !ok && len(p.conns) >= iecMaxSessions {
 		return
 	}
-	p.conns[key] = &resets
+	p.conns[key] = &pickupReset{connReset: resets, guard: guard, report: report}
 	p.live.Store(int32(len(p.conns)))
 }
 
 // challenge returns the reset to send again for a packet of from on key.
-func (p *pickupResets) challenge(key iecKey, from int, tcp capture.TCPMeta, now time.Time) (session.Reset, bool) {
+func (p *pickupResets) challenge(key iecKey, from int, tcp capture.TCPMeta, now time.Time) (session.Reset, *pickupReset, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if now.Sub(p.swept) > iecResetWindow {
 		p.expireLocked(now)
 	}
-	return p.conns[key].challenge(from, tcp, now)
+	entry := p.conns[key]
+	if entry == nil {
+		return session.Reset{}, nil, false
+	}
+	r, ok := entry.challenge(from, tcp, now)
+	return r, entry, ok
 }
 
 // forget drops the resets of the keys.

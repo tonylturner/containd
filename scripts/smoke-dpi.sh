@@ -19,14 +19,13 @@ set -euo pipefail
 #
 # SMOKE_DPI_CAPTURE=nfqueue steers ICS traffic through NFQUEUE
 # (nfqueueGroup SMOKE_NFQUEUE_GROUP, default 101) in enforce mode. The rules
-# report enforcing; later writes of a denied flow are blocked and the
-# 10-minute dynamic block appears in nft block_flows. It also asserts
+# report enforcing; a deny resets only that TCP session and installs no
+# dynamic block. It also asserts
 # first-actuation prevention, from server state: the
 # first Modbus FC 6 write on a fresh connection and after a read on a
 # persistent connection, the first Modbus FC 8, and the first complete DNP3
 # FC 5 and FC 6 never reach the server. Each probe uses its own client
-# address so the dynamic block of an earlier deny cannot stand in for the
-# inline drop.
+# address to keep receiver-side evidence independent.
 # Fixture and isolation setup: test/data-smoke/README.md.
 
 COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker-compose.smoke.yml}
@@ -50,7 +49,7 @@ TESTS_EXPECTED=22
 FAILURES=()
 case "$SMOKE_DPI_CAPTURE" in
   afpacket) ;;
-  nfqueue) TESTS_EXPECTED=26 ;;
+  nfqueue) TESTS_EXPECTED=28 ;;
   *)
     echo "SMOKE_DPI_CAPTURE must be afpacket or nfqueue, got: $SMOKE_DPI_CAPTURE" >&2
     exit 2
@@ -309,26 +308,101 @@ assert_ics_coverage() {
   fi
 }
 
-# assert_no_dynamic_block SRC PORT: learn mode never installs a block.
+# assert_no_dynamic_block SRC PORT: DPI never installs a block.
 assert_no_dynamic_block() {
   local src=$1 port=$2 set
   set=$(compose exec -T engine nft list set inet containd block_flows 2>&1 | tr -d '\r')
   if grep -Fq "$src . $MODBUS_DST . tcp . $port" <<<"$set"; then
-    check_fail "Learn mode installed a dynamic block for $src -> $MODBUS_DST:$port"
+    check_fail "DPI installed a dynamic block for $src -> $MODBUS_DST:$port"
   else
-    pass "Learn mode installed no dynamic block for $src -> $MODBUS_DST:$port"
+    pass "DPI installed no dynamic block for $src -> $MODBUS_DST:$port"
   fi
 }
 
-# assert_dynamic_block SRC PORT: the US DENY path still installs its
-# 10-minute dynamic block (src . dst . proto . dport) in nft block_flows.
-assert_dynamic_block() {
-  local src=$1 port=$2 set
-  set=$(compose exec -T engine nft list set inet containd block_flows 2>&1 | tr -d '\r')
-  if grep -Fq "$src . $MODBUS_DST . tcp . $port timeout 10m" <<<"$set"; then
-    pass "US 10-minute dynamic block present for $src -> $MODBUS_DST:$port"
+# Keep one allowed connection open while another connection from the same
+# address is denied. Capture the server-directed reset independently; the
+# client must receive ECONNRESET (a timeout is not success), then reconnect
+# from both its old port and a new port without waiting for a block TTL.
+probe_reset_isolation() {
+  local capture_pid status=0 denied_port
+  compose exec -T modbus_server python -u - >"$WORK_DIR/reset-server.out" 2>"$WORK_DIR/reset-server.err" <<'PY' &
+import socket
+import struct
+import time
+
+s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+s.settimeout(0.2)
+print("READY", flush=True)
+end = time.monotonic() + 8
+while time.monotonic() < end:
+    try:
+        b = s.recv(65535)
+    except socket.timeout:
+        continue
+    ihl = (b[0] & 15) * 4
+    if len(b) < ihl + 20 or not b[ihl + 13] & 4:
+        continue
+    sport, dport = struct.unpack_from("!HH", b, ihl)
+    if dport == 502:
+        print("RST", sport, flush=True)
+PY
+  capture_pid=$!
+  for _ in $(seq 1 30); do
+    if grep -q '^READY$' "$WORK_DIR/reset-server.out"; then
+      break
+    fi
+    sleep 0.1
+  done
+  if ! grep -q '^READY$' "$WORK_DIR/reset-server.out"; then
+    wait "$capture_pid" || true
+    check_fail "Server reset capture did not start"
+    return
+  fi
+  compose exec -T ot_client python - "$MODBUS_DST" "$MODBUS_SRC" \
+    >"$WORK_DIR/reset-isolation.out" 2>"$WORK_DIR/reset-isolation.err" <<'PY' || status=$?
+import errno
+import socket
+import sys
+
+sys.path.insert(0, "/opt/modbus")
+from client import exchange
+
+host, source = sys.argv[1:]
+
+def connect(port=0):
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.settimeout(3)
+    s.bind((source, port))
+    s.connect((host, 502))
+    return s
+
+with connect() as other:
+    assert exchange(other, "read", 1, 0).startswith("READ_OK")
+    with connect() as denied:
+        port = denied.getsockname()[1]
+        print("DENIED_PORT", port, flush=True)
+        try:
+            exchange(denied, "write", 2, 0x1234)
+        except OSError as exc:
+            assert exc.errno == errno.ECONNRESET, repr(exc)
+        else:
+            raise AssertionError("denied write was answered")
+    assert exchange(other, "read", 3, 0).startswith("READ_OK")
+with connect(port) as same_port:
+    assert exchange(same_port, "read", 4, 0).startswith("READ_OK")
+with connect() as fresh:
+    assert exchange(fresh, "read", 5, 0).startswith("READ_OK")
+PY
+  if ! wait "$capture_pid"; then
+    status=1
+  fi
+  denied_port=$(awk '$1 == "DENIED_PORT" {print $2}' "$WORK_DIR/reset-isolation.out")
+  if [[ "$status" -eq 0 && -n "$denied_port" ]] &&
+    grep -qx "RST $denied_port" "$WORK_DIR/reset-server.out"; then
+    pass "Both peers reset; immediate same/new-port reconnect and concurrent session survive"
   else
-    check_fail "US 10-minute dynamic block missing for $src -> $MODBUS_DST:$port: $(tr '\n' ' ' <<<"$set" | head -c 300)"
+    check_fail "Reset isolation failed: $(cat "$WORK_DIR/reset-isolation.err" "$WORK_DIR/reset-server.err")"
   fi
 }
 
@@ -644,8 +718,14 @@ if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
     exit 1
   fi
   pass "Follow-up Modbus write blocked after enforcement"
-  assert_dynamic_block "$MODBUS_SRC" 502
-  assert_dynamic_block "${LAN_NET}.8" 20000
+  assert_no_dynamic_block "$MODBUS_SRC" 502
+  assert_no_dynamic_block "${LAN_NET}.8" 20000
+  probe_reset_isolation
+  if compose exec -T ot_client python /tmp/dnp3.py read "$MODBUS_DST" --source "${LAN_NET}.8" >"$WORK_DIR/dnp3-reconnect.out" 2>"$WORK_DIR/dnp3-reconnect.err"; then
+    pass "DNP3 allowed reconnect succeeds immediately after deny"
+  else
+    check_fail "DNP3 reconnect failed: $(cat "$WORK_DIR/dnp3-reconnect.err")"
+  fi
 else
   log "Testing follow-up Modbus write is not blocked in learn mode..."
   if [[ $FOLLOW_UP_STATUS -eq 0 ]]; then
@@ -673,9 +753,6 @@ pass "Inventory discovered Modbus endpoints"
 # Persistent connection: read -> write -> read on ONE TCP connection. The
 # write must be decoded and denied even though it is not the first PDU,
 # and the server's replies must not be mistaken for new flows and blocked.
-log "Clearing dynamic flow blocks before the persistent-connection case..."
-compose exec -T engine nft flush set inet containd block_flows
-sleep 1
 PERSIST_TS=$(timestamp)
 export PERSIST_TS
 

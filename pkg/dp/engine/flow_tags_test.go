@@ -136,7 +136,7 @@ func TestIECSessionEventsCarryTags(t *testing.T) {
 }
 
 // A RESET rule decides an inspected message like DENY: the engine cannot
-// reject a queued packet, so it drops it and blocks the flow.
+// reject a queued packet, so it drops it without installing a block.
 func TestResetRuleDropsInspectedMessage(t *testing.T) {
 	read := clientToServer("modbus-read", "502", rules.ActionAllow, rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}})
 	reset := rules.Entry{ID: "reset-502", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, Action: rules.ActionReset}
@@ -148,8 +148,8 @@ func TestResetRuleDropsInspectedMessage(t *testing.T) {
 	if d := e.handlePacket(connSegment(false, 41000, 502, 112, ackPsh, modbusADU(2, 6, 1, 3))); d.Action != capture.Drop {
 		t.Fatalf("write decision = %+v, want drop", d)
 	}
-	if got, want := up.blockedAfter(e), []string{testClient + ">" + testServer + "/tcp:502"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("blocks = %v, want %v", got, want)
+	if got := up.blockedAfter(e); len(got) != 0 {
+		t.Fatalf("DPI blocks = %v, want none", got)
 	}
 }
 

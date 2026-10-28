@@ -15,9 +15,12 @@ outside its control.
    decoders. Generic DPI uses a per-flow verdict cache. IEC 104 uses a separate
    stateful inspection envelope and session gate rather than relying on that
    generic cache.
-4. Firewall rules evaluate to `ALLOW` or `DENY`. Generic enforced DPI denials can
-   install temporary flow blocks. IEC 104 can drop the held packet and abort/reset
-   a session. A native IDS alert alone is not a packet drop.
+4. Firewall rules evaluate to `ALLOW` or `DENY`. Enforced DPI denials drop the
+   packet and best-effort reset only that TCP session, without installing a host
+   or service block. Generic TCP denial tombstones last 10 seconds and are
+   capped at 16,384; later payload still fails closed as a mid-stream pickup.
+   UDP denials drop only the datagram. IEC 104 retains its stateful abort/reset
+   path. A native IDS alert alone is not a packet drop.
 5. Decoded events feed bounded telemetry, anomaly and signature checks, and
    protocol statistics. Asset discovery and automatic rule learning consume
    non-IEC-104 ICS events only.

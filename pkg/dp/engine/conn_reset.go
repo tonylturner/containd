@@ -16,7 +16,7 @@ import (
 
 // The engine closes a connection it drops but cannot follow, an IEC104
 // session not observed from its SYN (midstreamLocked) or an inline flow
-// stream picked up mid-connection (closePickedUp), so that both endpoints
+// denied or uninspectable stream (closeDeniedTCP), so that both endpoints
 // learn of it at once instead of retransmitting into the drop until their
 // own timeouts. It sends one payload-free RST to each endpoint through the
 // IEC104 reset injector and then deletes the connection's conntrack entry,

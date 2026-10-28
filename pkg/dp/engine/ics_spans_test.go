@@ -15,7 +15,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 	"github.com/tonylturner/containd/pkg/dp/rules"
-	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
 // ADUs captured between a pymodbus client and server.
@@ -149,7 +148,7 @@ func TestEnforceModbusRequestSpans(t *testing.T) {
 		e.ruleSnap.Store(tc.snap)
 		state, pkt, ev := decodeModbus(t, modbusKey(40000, flow.DirForward), tc.adu)
 		v, _, enforced := e.enforceDPIEvents(state, pkt, []dpi.Event{ev})
-		if dropped := enforced && v.Action == verdict.BlockFlowTemp; dropped != tc.dropped {
+		if dropped := enforced && v.Denies(); dropped != tc.dropped {
 			t.Errorf("%s under %s: dropped=%v (%+v), want %v", tc.adu, tc.snap.Firewall[0].ID, dropped, v, tc.dropped)
 		}
 	}

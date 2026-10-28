@@ -35,8 +35,8 @@ var transientFaults = []string{faultQueue, faultVerdict, faultReset, faultWorker
 // iecHealth tracks IEC104 enforcement health. Faults are recorded whether
 // or not an enforce envelope is loaded; they make the object unhealthy only
 // while one is (active describes the loaded runtime envelope). The reset
-// injector also closes inline ICS connections picked up mid-stream
-// (closePickedUp), so while an enforce rule of another ICS protocol is
+// injector also closes denied or uninspectable inline ICS connections
+// (closeDeniedTCP), so while an enforce rule of another ICS protocol is
 // loaded (ics) a reset fault makes the object unhealthy too, with active
 // still false.
 type iecHealth struct {

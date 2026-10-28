@@ -142,7 +142,7 @@ type iecTable struct {
 	inventory       iecInventoryInput
 	inventoryTokens map[capture.Token]*iecSession
 
-	// pickups are the resets of picked-up inline flows (closePickedUp),
+	// pickups are generic inline flow resets (closeDeniedTCP),
 	// which share this table's injector, worker and health.
 	pickups *pickupResets
 

@@ -198,6 +198,10 @@ CIP events report each EtherNet/IP layer as attributes. The protocol name `cip` 
 and one protocol match. The name `enip` is rejected at rule, signature, Sigma
 and toggle boundaries with: `EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`.
 
+TCP CIP on port 44818 is reassembled and framed per EtherNet/IP encapsulation,
+including split headers and bodies and multiple encapsulations in one segment.
+UDP 2222 remains packet-only, without stream reassembly.
+
 | CIP event layer | Attributes |
 | --- | --- |
 | Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle` |

@@ -4,6 +4,7 @@
 package engine
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"runtime"
@@ -28,8 +29,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 	"github.com/tonylturner/containd/pkg/dp/stats"
 )
-
-const dpiEnforceBlockTTL = 10 * time.Minute
 
 var startNFLog = capture.StartNFLog
 
@@ -72,6 +71,11 @@ type Engine struct {
 	lifecycleMu           sync.Mutex // serializes Start, Reconfigure and ApplyRules
 	flowMu                sync.Mutex
 	flows                 map[string]*flow.State
+	deniedTCP             map[string]*deniedTCP
+	deniedTCPOrder        list.List // oldest first; protected by flowMu
+	deniedTCPNow          func() time.Time
+	tcpISNs               map[string]uint32
+	tcpDecisions          [256]sync.Mutex
 	lastSweep             time.Time
 	verdictCache          *VerdictCache
 	inventory             *inventory.Inventory
@@ -199,6 +203,7 @@ func New(cfg Config) (*Engine, error) {
 		nflogGroup:            cfg.NFLogGroup,
 		nfqueueGroup:          cfg.NFQueueGroup,
 		flows:                 make(map[string]*flow.State),
+		deniedTCPNow:          time.Now,
 		verdictCache:          NewVerdictCache(30*time.Second, 65536),
 		hooks:                 hooks,
 	}
@@ -322,6 +327,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.nfqueueGroup = fresh.nfqueueGroup
 	e.onError = fresh.onError
 	e.flows = fresh.flows
+	e.tcpISNs = fresh.tcpISNs
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
@@ -599,6 +605,8 @@ func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	defer e.lockGenericTCP(pkt)()
+	e.reopenDeniedTCP(pkt)
 	state := e.trackFlow(pkt, now)
 	if state == nil {
 		return acceptDecision
@@ -696,6 +704,12 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow
 	state.IdleTimeout = 5 * time.Minute
 	state.Tags = e.flowTags(key)
 	e.flows[key.Hash()] = state
+	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 && handshakeMarked(pkt) {
+		if e.tcpISNs == nil {
+			e.tcpISNs = make(map[string]uint32)
+		}
+		e.tcpISNs[key.Hash()] = pkt.TCP.Seq
+	}
 	metrics.FlowsActive.Inc()
 	return state, forgotten
 }
@@ -713,9 +727,9 @@ func handshakeDirection(pkt capture.Packet) (flow.Direction, bool) {
 }
 
 // dropFlowLocked forgets the state of key and returns it, nil when there
-// is none. Every state the engine forgets has its streams ended exactly
-// once by endFlowStream: here by the caller, outside e.flowMu, and by
-// sweepFlows for expired ones. Must be called with e.flowMu held.
+// is none. The caller ends its stream: normally outside flowMu, but denial
+// retirement tears down streams atomically under that lock before exposing an
+// unguarded tuple. sweepFlows ends idle streams too. Requires e.flowMu held.
 func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 	hash := key.Hash()
 	st, ok := e.flows[hash]
@@ -723,16 +737,19 @@ func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 		return nil
 	}
 	delete(e.flows, hash)
+	delete(e.tcpISNs, hash)
 	metrics.FlowsActive.Dec()
 	return st
 }
 
 func (e *Engine) sweepFlows(now time.Time) {
+	e.expireDeniedTCP(now)
 	var expired []*flow.State
 	e.flowMu.Lock()
 	for k, st := range e.flows {
 		if st == nil || st.Expired(now) {
 			delete(e.flows, k)
+			delete(e.tcpISNs, k)
 			metrics.FlowsActive.Dec()
 			if st != nil {
 				expired = append(expired, st)
