@@ -75,7 +75,8 @@ def main(directory):
         "diagnostics_profile": "MODBUS Application Protocol V1.1b3 section 6.8.1 pp22-24; https://www.modbus.org/file/secure/modbusprotocolspecification.pdf sha256:f80d0d7132fd035104c3f21b01026470e3310ca3d8d493d9a9737d0d32ad2eb1",
         "log_normalization": "server.log strips trailing whitespace only; raw original retained by capture.sh output directory",
     }
-    for name in ("endpoint.py", "generator.Dockerfile", "capture.sh", "export-oracle.sh", "mutate.py", "finalize.py"):
+    for name in ("endpoint.py", "generator.Dockerfile", "capture.sh", "export-oracle.sh",
+                 "mutate.py", "finalize.py", "source-lock.py", "requirements.lock", "verify-wheel.py"):
         provenance[name + "_sha256"] = sha(capture / name)
     (directory / "manifest.json").write_text(json.dumps({
         "version": 1, "protocol": "modbus", "provenance": provenance, "scenarios": scenarios,

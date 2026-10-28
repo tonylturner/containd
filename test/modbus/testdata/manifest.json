@@ -2,7 +2,7 @@
   "version": 1,
   "protocol": "modbus",
   "provenance": {
-    "source": "pymodbus 3.11.4, BSD-3-Clause; installed source hashes in capture/source-lock.json sha256:b7ad79e5cbb656c0fa2b246d282e0c0bcbfe71cbf7d60fb001bf4a8e2b025a1d",
+    "source": "pymodbus 3.11.4, BSD-3-Clause; installed source hashes in capture/source-lock.json sha256:3c90902f0ab5139b20cbbbf69d0bd9c5c52876bee5ea31146169886d220cc4a6",
     "generator": "modbusspan-tools@sha256:2bbeea56d58c5192ebda1d8314637c3c9995341df21e733110405040bae77fbc; actual built image in images.json",
     "oracle": "TShark (Wireshark) 4.6.7 (b439fb7b47a9); -2 -o tcp.desegment_tcp_streams:TRUE -o tcp.reassemble_out_of_order:TRUE -o mbtcp.desegment:TRUE -o modbus.mbus_register_format:UINT16; tcp.len > 0; occurrence=a aggregator=, quote=d; re-serialize identical cells with Python csv.QUOTE_ALL",
     "license": "Apache-2.0 wire fixtures; BSD-3-Clause pymodbus runs only as generator, notice in capture/LICENSES/pymodbus.txt",
@@ -15,7 +15,10 @@
     "capture.sh_sha256": "1ef76ac95b7ff065401ba2fd1c4ed850b0d063250d9efe452cd3ab4c03136f2f",
     "export-oracle.sh_sha256": "85c87d99ce529a492a08031b04f1c745edf1da5dce2a8efa78e52bb7a42c7ca2",
     "mutate.py_sha256": "9dd57c24c2cc3cd92e77df3216017261cae7589f6403d7280173666a753ff4a7",
-    "finalize.py_sha256": "4dd7535194dcdb9997ee5e62cba7722c0bbbcd315e4ac111bcb25ef11772d132"
+    "finalize.py_sha256": "f55ee89ad0c89f851e1d491ff8540c70b1e6cc4ed58c5c982e1df2d2a48ad41d",
+    "source-lock.py_sha256": "2a6f8faea724af1995ee69973c37fff921493ce01fb8dc1f15fb021fee28ee85",
+    "requirements.lock_sha256": "9b76af0061c78bee0a5ed6095ebb6c71da753c95009a54b9a4e3e69d9d8869a0",
+    "verify-wheel.py_sha256": "3917d709d2fda43876de15444f65bc175f53fd177fe67867bcce9e106df32c1b"
   },
   "scenarios": [
     {

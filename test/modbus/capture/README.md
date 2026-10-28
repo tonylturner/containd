@@ -12,6 +12,13 @@ tcpdump 4.99.3-1 and iproute2 6.1.0-3 on Debian 12/arm64.
 `source-lock.json` inventories the installed Python source and distribution
 metadata by SHA256; pymodbus has no runtime Python dependencies. The original
 BSD notice is in `LICENSES/pymodbus.txt`.
+The upstream release tag resolves to commit
+`bf0e1b67233b4f65bde531c51fea97e461927ef3`. All 58 inventoried source/metadata
+files also match the official wheel, SHA256
+`89865929f53bd5e32b4076dde00ee86d9b8afb1686832ed74e69d55df22729c3`,
+locked in `requirements.lock`. To repeat that independent check, download the
+wheel URL in `source-lock.json` and run
+`python3 test/modbus/capture/verify-wheel.py <wheel-path>`.
 
 The bootstrap digest is **local**, not a published Docker Hub dependency.
 On a new host, transfer it with `docker save`/`docker load` before building.
