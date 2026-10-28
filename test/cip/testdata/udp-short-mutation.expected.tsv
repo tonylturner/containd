@@ -1,0 +1,2 @@
+"frame.number"	"pdu"	"object"	"tcp.payload"	"udp.payload"	"enip.command"	"enip.status"	"enip.session"	"cip.sc"	"cip.rr"	"cip.genstat"	"cip.class"	"cip.instance"	"cip.attribute"	"cip.msp.num_services"
+"1"	"0"	"0"	""	"6f:00:18:00:01:00:00:00:00:00:00:00:a6:09:ea:5b:05:c6:93:45:00:00:00:00:00:00:00:00:00:00:02:00:00:00:00:00:b2:00:08:00:0e:03:20:04:24:65:30"	"0x006f"	"0x00000000"	"0x00000001"	"0x0e"	"0x00"	""	""	""	""	""

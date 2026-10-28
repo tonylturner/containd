@@ -1,0 +1,6 @@
+[CLIENT] Connected and registered session 0x00000001
+service=0e status=00 ext= payload=0000000000000000
+service=10 status=00 ext= payload=
+service=7e status=01 ext= payload=
+service=0a status=00 ext= payload=03000800140018000e0000000000000000000000100000007e000100
+io=0102030405060708

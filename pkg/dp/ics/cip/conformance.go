@@ -10,10 +10,18 @@ import (
 )
 
 func addFinding(attrs map[string]any, code string) {
-	codes, _ := eventfields.Strings(attrs, eventfields.KeyConformance)
+	addCode(attrs, eventfields.KeyConformance, code)
+}
+
+func addUndecoded(attrs map[string]any, code string) {
+	addCode(attrs, eventfields.KeyUndecoded, code)
+}
+
+func addCode(attrs map[string]any, key, code string) {
+	codes, _ := eventfields.Strings(attrs, key)
 	codes = append(slices.Clone(codes), code)
 	slices.Sort(codes)
-	attrs[eventfields.KeyConformance] = slices.Compact(codes)
+	attrs[key] = slices.Compact(codes)
 }
 
 // Keep only complete, recognized logical segments. In particular, missing
@@ -33,7 +41,9 @@ func addPathFields(path []byte, attrs map[string]any) {
 			key = "instance_id"
 		case 0x28, 0x29:
 			key = "member_id"
-		case 0x2c, 0x2d, 0x30, 0x31:
+		case 0x2c, 0x2d:
+			key = "connection_point"
+		case 0x30, 0x31:
 			key = "attribute_id"
 		case 0x91: // ANSI extended symbolic segment, padded to a word
 			if pos+2 > len(path) {
@@ -49,6 +59,7 @@ func addPathFields(path []byte, attrs map[string]any) {
 			continue
 		default:
 			// No guessed offsets through unsupported segment formats.
+			addUndecoded(attrs, "cip.epath_unsupported")
 			return
 		}
 		size := 2

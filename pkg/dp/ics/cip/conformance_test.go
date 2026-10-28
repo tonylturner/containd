@@ -11,7 +11,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
 )
 
-func cpfMessage(b ...byte) []byte { return buildCPFItems(cpfTestItem{0xb2, b}) }
+func cpfMessage(b ...byte) []byte {
+	return buildCPFItems(cpfTestItem{0, nil}, cpfTestItem{0xb2, b})
+}
 
 func assertCodes(t *testing.T, ev dpi.Event, want []string) {
 	t.Helper()

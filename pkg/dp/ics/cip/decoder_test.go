@@ -92,9 +92,10 @@ func TestParseCIPMessageFromSendRRData(t *testing.T) {
 	path := []byte{0x20, 0x02}
 	payload := buildSendRRDataPayload(0x4C, 1, path)
 
-	cipMsg, err := ParseCIPMessage(payload)
-	if err != nil {
-		t.Fatalf("parse CIP: %v", err)
+	result := ParseCIPMessage(payload)
+	cipMsg := result.Message
+	if result.CPF.Err != nil || result.MessageError != nil {
+		t.Fatalf("parse CIP: %+v", result)
 	}
 	if cipMsg.ServiceCode != 0x4C {
 		t.Fatalf("expected service 0x4C, got 0x%02X", cipMsg.ServiceCode)
@@ -112,11 +113,12 @@ func TestParseCIPMessageFromSendRRData(t *testing.T) {
 
 func TestParseCIPMessageResponse(t *testing.T) {
 	// Response has bit 0x80 set: 0x4C | 0x80 = 0xCC
-	payload := buildCPFItems(cpfTestItem{0x00b2, []byte{0xcc, 0, 0, 0}})
+	payload := cpfMessage(0xcc, 0, 0, 0)
 
-	cipMsg, err := ParseCIPMessage(payload)
-	if err != nil {
-		t.Fatalf("parse CIP: %v", err)
+	result := ParseCIPMessage(payload)
+	cipMsg := result.Message
+	if result.CPF.Err != nil || result.MessageError != nil {
+		t.Fatalf("parse CIP: %+v", result)
 	}
 	if cipMsg.ServiceCode != 0x4C {
 		t.Fatalf("expected base service 0x4C, got 0x%02X", cipMsg.ServiceCode)
@@ -281,7 +283,7 @@ func TestDecoderOnPacketResponse(t *testing.T) {
 	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 44818, 12345, 6), time.Now())
 
 	// Build a SendRRData response with Write_Tag response (0x4D | 0x80 = 0xCD)
-	cipPayload := buildSendRRDataPayload(0xCD, 0, nil)
+	cipPayload := cpfMessage(0xcd, 0, 0, 0)
 	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
@@ -393,7 +395,7 @@ func TestParseMSPServices(t *testing.T) {
 			{code: 0x4C, pathSize: 1, path: []byte{0x20, 0x04}}, // Read_Tag
 			{code: 0x4D, pathSize: 1, path: []byte{0x20, 0x04}}, // Write_Tag
 		})
-		subs := ParseMSPServices(mspData)
+		subs := ParseMSPServices(mspData).Children
 		if len(subs) != 2 {
 			t.Fatalf("expected 2 sub-services, got %d", len(subs))
 		}
@@ -403,30 +405,30 @@ func TestParseMSPServices(t *testing.T) {
 		if subs[0].ServiceName != "Read_Tag" {
 			t.Fatalf("expected Read_Tag, got %s", subs[0].ServiceName)
 		}
-		if subs[0].IsWrite {
+		if IsWriteService(subs[0].ServiceCode) {
 			t.Fatal("Read_Tag should not be IsWrite")
 		}
 		if subs[1].ServiceCode != 0x4D {
 			t.Fatalf("expected 0x4D, got 0x%02X", subs[1].ServiceCode)
 		}
-		if !subs[1].IsWrite {
+		if !IsWriteService(subs[1].ServiceCode) {
 			t.Fatal("Write_Tag should be IsWrite")
 		}
 	})
 
 	t.Run("empty data", func(t *testing.T) {
-		subs := ParseMSPServices(nil)
+		subs := ParseMSPServices(nil).Children
 		if subs != nil {
 			t.Fatalf("expected nil, got %v", subs)
 		}
-		subs = ParseMSPServices([]byte{0x00})
+		subs = ParseMSPServices([]byte{0x00}).Children
 		if subs != nil {
 			t.Fatalf("expected nil for 1-byte data, got %v", subs)
 		}
 	})
 
 	t.Run("zero count", func(t *testing.T) {
-		subs := ParseMSPServices([]byte{0x00, 0x00})
+		subs := ParseMSPServices([]byte{0x00, 0x00}).Children
 		if subs != nil {
 			t.Fatalf("expected nil for zero count, got %v", subs)
 		}
@@ -435,7 +437,7 @@ func TestParseMSPServices(t *testing.T) {
 	t.Run("truncated offsets", func(t *testing.T) {
 		// Count says 5, but only 2 bytes total (no room for offset table).
 		data := []byte{0x05, 0x00}
-		subs := ParseMSPServices(data)
+		subs := ParseMSPServices(data).Children
 		if subs != nil {
 			t.Fatalf("expected nil for truncated offsets, got %v", subs)
 		}
@@ -456,7 +458,7 @@ func TestParseMSPServices(t *testing.T) {
 			}{code: 0x4C, pathSize: 0, path: nil}
 		}
 		mspData := buildMSPData(svcs)
-		subs := ParseMSPServices(mspData)
+		subs := ParseMSPServices(mspData).Children
 		if len(subs) > 32 {
 			t.Fatalf("expected at most 32, got %d", len(subs))
 		}
@@ -508,7 +510,7 @@ func TestDecoderMSPTwoSubServices(t *testing.T) {
 	if sub1.Attributes["service_code"] != uint8(0x4C) {
 		t.Fatalf("expected sub1 service_code 0x4C, got %v", sub1.Attributes["service_code"])
 	}
-	if sub1.Attributes["msp"] != "true" {
+	if sub1.Attributes["msp"] != true {
 		t.Fatal("sub1 should have msp=true")
 	}
 	if sub1.Attributes["is_write"] != false {
@@ -523,7 +525,7 @@ func TestDecoderMSPTwoSubServices(t *testing.T) {
 	if sub2.Attributes["is_write"] != true {
 		t.Fatal("Write_Tag sub should be is_write")
 	}
-	if sub2.Attributes["msp"] != "true" {
+	if sub2.Attributes["msp"] != true {
 		t.Fatal("sub2 should have msp=true")
 	}
 }
@@ -653,15 +655,15 @@ func TestCIPEPathParsing(t *testing.T) {
 		}
 	})
 
-	t.Run("16-bit attribute 0x2D", func(t *testing.T) {
-		// class=0x01, attribute=0x0100 (16-bit)
+	t.Run("16-bit connection point 0x2D", func(t *testing.T) {
+		// class=0x01, connection point=0x0100 (16-bit)
 		path := []byte{0x20, 0x01, 0x2D, 0x00, 0x00, 0x01}
 		r := ParseEPath(path)
 		if r.ClassID != 0x01 {
 			t.Fatalf("expected ClassID 0x01, got 0x%04X", r.ClassID)
 		}
-		if r.AttributeID != 0x0100 {
-			t.Fatalf("expected AttributeID 0x0100, got 0x%04X", r.AttributeID)
+		if r.ConnectionPoint != 0x0100 || r.AttributeID != 0 {
+			t.Fatalf("expected connection point 0x0100 and no attribute, got %+v", r)
 		}
 	})
 
