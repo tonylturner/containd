@@ -119,6 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `GET /api/v1/inventory/{ip}` returns an array with every protocol and role
+  observed for the address, and 404 when there is none.
+
 - ICAP verdicts are never cached: each scan reaches the server with its direction, HTTP headers and endpoints; native ClamAV caching is unchanged.
 - `services.av.failOpenIcs` is retired in favour of `scan.icsZones` and
   `scan.icsAssets`; a stored value still loads and is ignored, and the
@@ -206,6 +209,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   details show the encapsulation command and CPF items.
 
 ### Fixed
+
+- Modbus exception replies now complete their request's transaction, so an
+  exception no longer leaves the transaction pending, and an exception with
+  no prior request is reported like an unmatched response.
+- `set dataplane enforcement` in the CLI keeps the other dataplane settings
+  instead of resetting them, and rejects values other than `on`, `off`,
+  `true`, `false`, `1` and `0`.
+- The Alerts page lists protocol anomalies and signature matches beside rule
+  alerts, with their anomaly type or signature ID, and search covers those
+  identifiers and the protocol.
+- Discovered ICS assets keep a separate observation per protocol and role,
+  so a host that speaks two protocols, or is both client and server, no
+  longer has one observation overwrite another.
 
 - The scanning gate tracks connections by both TCP endpoints, so connections
   sharing a client IP and port keep their own masquerading, events and resets.
