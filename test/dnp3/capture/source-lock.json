@@ -1,0 +1,23 @@
+{
+  "opendnp3": {
+    "version": "3.1.2",
+    "commit": "26b4c01e4839bbbda8866655e086471c4917ee53",
+    "url": "https://codeload.github.com/dnp3/opendnp3/tar.gz/26b4c01e4839bbbda8866655e086471c4917ee53",
+    "sha256": "92a378907dde3856f1c8cd33ed391398df2865282a261448f0e710b87363e2f1"
+  },
+  "asio": {
+    "version": "1.16.0",
+    "url": "https://codeload.github.com/chriskohlhoff/asio/zip/refs/tags/asio-1-16-0",
+    "sha256": "18883c350558eadf91218ae5ce9a8f8f85099c2f036c1c8579fb639092e928c5"
+  },
+  "exe4cpp": {
+    "commit": "fb878a4de598ba9d6e4338afebf83f96e03af1b8",
+    "url": "https://codeload.github.com/automatak/exe4cpp/zip/fb878a4de598ba9d6e4338afebf83f96e03af1b8",
+    "sha256": "2a8a2c7d9982f54858b92c03cff91ef433907472039f8e61ff7c9f9b3d48db6c"
+  },
+  "ser4cpp": {
+    "commit": "3c449734dc530a8f465eb0982de29165cc4e23d5",
+    "url": "https://codeload.github.com/automatak/ser4cpp/zip/3c449734dc530a8f465eb0982de29165cc4e23d5",
+    "sha256": "5a78f83de2d70bdf4be2ab607bc4416c6866ce64a257a8f19948cf5746762f6e"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "parent": "class-range.pcap",
+  "parent_sha256": "91b6cad31c1bed8dbddb9cfc86c0952536c06caf061e5131aadf3ce0540a53e1",
+  "frame": 15,
+  "pcap_byte_offset": 1396,
+  "tcp_checksum_byte_offset": 1365,
+  "mode": "qualifier",
+  "old_value": 6,
+  "new_value": 12,
+  "dnp_crc_byte_offsets": [
+    1406
+  ],
+  "recipe": "set first read qualifier 0x06 to reserved 0x0c; repair data CRCs and TCP checksum"
+}

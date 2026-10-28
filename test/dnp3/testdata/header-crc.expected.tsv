@@ -1,0 +1,10 @@
+frame.number	tcp.payload	pdu	object	dnp3.src	dnp3.dst	dnp3.tr.fir	dnp3.tr.fin	dnp3.tr.seq	dnp3.al.func	dnp3.al.fir	dnp3.al.fin	dnp3.al.con	dnp3.al.uns	dnp3.al.seq	dnp3.al.iin	group	variation	qualifier	start	stop	quantity	points.json
+4	056411c40a0001000615c0c0153c02063c03063c04061a55	0	0	1	10	True	True	0	21	True	True	False	False	0		60	2	6				[]
+4	056411c40a0001000615c0c0153c02063c03063c04061a55	0	1	1	10	True	True	0	21	True	True	False	False	0		60	3	6				[]
+4	056411c40a0001000615c0c0153c02063c03063c04061a55	0	2	1	10	True	True	0	21	True	True	False	False	0		60	4	6				[]
+6	05640a4401000a006e25c0f082900043a2	0	0	10	1	True	True	0	130	True	True	True	True	0	0x9000							[]
+8	05640a4401000a006e25c1c08190009d0f	0	0	10	1	True	True	1	129	True	True	False	False	0	0x9000							[]
+10	056408c40a000100fc42c1d000a350	0	0	1	10	True	True	1	0	True	True	False	True	0								[]
+12	05640ec40a0001002529c2c102500100070700c5af	0	0	1	10	True	True	2	2	True	True	False	False	1		80	1	0	7	7		"[{""index"":7}]"
+14	05640a4401000a006e25c2c181100050b3	0	0	10	1	True	True	2	129	True	True	False	False	1	0x1000							[]
+15	056414c40a0001008eedc3c2013c02063c03063c04063c0106429e	0	0																			[]

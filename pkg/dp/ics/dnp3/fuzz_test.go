@@ -11,6 +11,9 @@ import (
 )
 
 func FuzzParseFrame(f *testing.F) {
+	for _, seed := range captureSegments(f) {
+		f.Add(seed)
+	}
 	f.Add([]byte{})
 	f.Add([]byte{0x05, 0x64})
 	f.Add(buildTestFrame(0x0A, 0xC0, 0x0001, 0x0002, []byte{0xC0, 0xC0, 0x01, 0x1E, 0x02}))
@@ -22,6 +25,7 @@ func FuzzParseFrame(f *testing.F) {
 }
 
 func FuzzParseObjectHeaders(f *testing.F) {
+	seedCapturedObjects(f)
 	f.Add([]byte{1}, uint8(FuncRead))
 	f.Add([]byte{1, 2}, uint8(FuncRead))
 	f.Add([]byte{0x01, 0x02, 0x06, 0x1E, 0x02, 0x00, 0x00, 0x04}, uint8(FuncRead))
@@ -46,6 +50,9 @@ func FuzzParseObjectHeaders(f *testing.F) {
 }
 
 func FuzzParseStream(f *testing.F) {
+	for _, seed := range captureStreams(f) {
+		f.Add(seed, uint16(0))
+	}
 	f.Add(concat(readFrame, linkStatus), uint16(0))
 	f.Add(concat(operateFrame, continuation, readFrame[:11]), uint16(3))
 	f.Add([]byte{0x05, 0x64, 0x05, 0xC0, 1, 0, 2, 0, 0xFF, 0xFF}, uint16(1))

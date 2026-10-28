@@ -14,8 +14,9 @@
 // Inspection bounds (not IEEE limits) are 64 KiB application bytes, 1024 link
 // segments per fragment, 1024 application fragments per response, 4096 station
 // contexts and 16 MiB retained storage including payload, duplicate bytes,
-// provenance and conservative context metadata charges. A decoded object header
-// has at most 8192 point records; header-only ranges remain compact. Overflow
+// provenance and conservative context metadata charges. An application fragment
+// has at most 1024 object headers and 8192 point records in total; header-only
+// ranges remain compact. Overflow
 // releases the affected assembly, never another live station. No joining resumes
 // until FIR. Physical frames keep their own ranges; link_ranges on the finishing
 // frame identifies the constituent link frames. raw_hex is that physical frame,
@@ -54,7 +55,7 @@
 //   - dnp3.application_incomplete: short header or incomplete response sequence.
 //   - dnp3.assembly_limit: fragment byte/segment or response-fragment bound.
 //   - dnp3.assembly_budget: station-count or aggregate retained-storage budget.
-//   - dnp3.object_limit: point-record inspection bound.
+//   - dnp3.object_limit: object-header or total point-record inspection bound.
 //   - dnp3.object_qualifier: object tail after an illegal qualifier/range.
 //   - dnp3.object_truncated: incomplete object header/index/value.
 //   - dnp3.object_unsupported: unknown object value layout. Never scan unknown

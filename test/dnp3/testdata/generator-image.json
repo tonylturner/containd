@@ -1,0 +1,52 @@
+[
+    {
+        "Id": "sha256:420f3c17f5c65f9a1c9a4cdf089724678d270cbcc9c59ef8cc2dc870900e3443",
+        "RepoTags": [
+            "containd-corpus-dnp3-1793221277-61031:3.1.2"
+        ],
+        "RepoDigests": [
+            "containd-corpus-dnp3-1793221277-61031@sha256:420f3c17f5c65f9a1c9a4cdf089724678d270cbcc9c59ef8cc2dc870900e3443"
+        ],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-28T20:56:52.931367305Z",
+        "Config": {
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "DEBIAN_FRONTEND=noninteractive"
+            ],
+            "Cmd": [
+                "bash"
+            ]
+        },
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 722192520,
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:3b7c7ecdb9b2a2a7651551c07dc748fee9e27902c8b88c25cb3af3fbbc0a4b87",
+                "sha256:672fda1b16bf346ae16e32d97062793370615f9adb3dc6ad8487abfda6a6ed7d",
+                "sha256:b96dac973db3221f415a76dc87804bb037099a12bb8b1fcbea543c45a2cb5105",
+                "sha256:0404ae2e997db3bcb33b2c49b41eb60ee8582dad61fd0f146f125d61f59b254e",
+                "sha256:aa8aa3aa154b5d7c38d9252fde07221351f3fbe4af11471d92c87950c7a4bf79",
+                "sha256:0c549162a9ec2790e23ffa453a7f3cc1bf07c5cc48f421a8c17088c0576a7d76"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-10-28T21:01:18.267338261Z"
+        },
+        "Descriptor": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "digest": "sha256:420f3c17f5c65f9a1c9a4cdf089724678d270cbcc9c59ef8cc2dc870900e3443",
+            "size": 856
+        },
+        "Identity": {
+            "Build": [
+                {
+                    "Ref": "r9ch8mqh1fgu398itwf24uys0",
+                    "CreatedAt": "2026-10-28T21:01:18.272088303Z"
+                }
+            ]
+        }
+    }
+]

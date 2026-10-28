@@ -26,7 +26,10 @@ type ObjectHeader struct {
 	Covered      int     `json:"covered"` // inspected header/value bytes from Offset
 }
 
-const maxDecodedPoints = 8192
+const (
+	maxDecodedPoints = 8192
+	maxObjectHeaders = 1024
+)
 
 // String renders owned evidence deterministically, including optional indices.
 func (h ObjectHeader) String() string {
@@ -90,7 +93,11 @@ func parseObjectHeaders(data []byte, offset int, fc uint8) ([]ObjectHeader, obje
 	}
 	headers := make([]ObjectHeader, 0, 4)
 	pos := offset
+	pointCount := 0
 	for pos < len(data) {
+		if len(headers) >= maxObjectHeaders {
+			return headers, walkLimited
+		}
 		oh := ObjectHeader{Group: data[pos], Offset: pos, Covered: min(3, len(data)-pos)}
 		if len(data)-pos >= 2 {
 			oh.Variation = data[pos+1]
@@ -134,7 +141,7 @@ func parseObjectHeaders(data []byte, offset int, fc uint8) ([]ObjectHeader, obje
 		}
 		pos += oh.Size
 		headers[len(headers)-1].Covered = oh.Size
-		if oh.Count > maxDecodedPoints && !(headerOnlyFunction(fc) && oh.Qualifier>>4 == 0) {
+		if oh.Count > uint64(maxDecodedPoints-pointCount) && !(headerOnlyFunction(fc) && oh.Qualifier>>4 == 0) {
 			return headers, walkLimited
 		}
 		n, stop := objectsLen(data[pos:], oh, fc)
@@ -145,6 +152,7 @@ func parseObjectHeaders(data []byte, offset int, fc uint8) ([]ObjectHeader, obje
 			return headers, stop
 		}
 		attachPoints(&headers[len(headers)-1], data[pos:pos+n], fc)
+		pointCount += len(headers[len(headers)-1].Points)
 		headers[len(headers)-1].Covered += n
 		pos += n
 	}
