@@ -323,6 +323,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The "Multiple ICS protocols on same flow" anomaly. It grouped traffic by
+  host pair rather than by connection, so it raised a high-severity anomaly
+  for every host that legitimately speaks two ICS protocols to one peer.
 - Asynchronous antivirus scanning of HTTP packet previews and the AV block TTL
   setting (`services.av.blockTtlSeconds`). Antivirus backends scan complete
   HTTP objects instead; no dynamic block follows a detection, so the setting

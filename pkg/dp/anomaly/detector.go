@@ -10,7 +10,6 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
-	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
@@ -61,14 +60,6 @@ func WithCIPProgramChangeDetection(enable bool) Option {
 	}
 }
 
-// WithCrossProtocolDetection controls whether multiple ICS protocols on the
-// same flow are flagged. Default: true.
-func WithCrossProtocolDetection(enable bool) Option {
-	return func(d *Detector) {
-		d.crossProtocolDetection = enable
-	}
-}
-
 const (
 	defaultWriteRateThreshold = 100
 	defaultTotalRateThreshold = 1000
@@ -84,15 +75,10 @@ type Detector struct {
 	// Feature toggles (all default to true).
 	dnp3RestartFromNonMaster  bool
 	cipProgramChangeDetection bool
-	crossProtocolDetection    bool
 
 	// Per-flow tracking of last transaction IDs (for Modbus request/response pairing).
 	// Key: "srcIP->dstIP"
 	pendingTxns map[string]map[uint16]bool // flow -> set of pending transaction IDs
-
-	// Per-flow ICS protocol tracking for cross-protocol detection.
-	// Key: "srcIP->dstIP", value: set of observed ICS protocol names.
-	flowProtos map[string]map[string]bool
 
 	writeRate *rateTracker
 	totalRate *rateTracker
@@ -114,9 +100,7 @@ func New(opts ...Option) *Detector {
 		totalRateThreshold:        defaultTotalRateThreshold,
 		dnp3RestartFromNonMaster:  true,
 		cipProgramChangeDetection: true,
-		crossProtocolDetection:    true,
 		pendingTxns:               make(map[string]map[uint16]bool),
-		flowProtos:                make(map[string]map[string]bool),
 		writeRate:                 newRateTracker(),
 		totalRate:                 newRateTracker(),
 		apduSeen:                  make(map[string]struct{}),
@@ -167,9 +151,6 @@ func (d *Detector) Check(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	case "iec104":
 		out = append(out, d.checkIEC104(srcIP, dstIP, ev)...)
 	}
-
-	// 2b. Cross-protocol violations.
-	out = append(out, d.checkCrossProtocol(srcIP, dstIP, ev)...)
 
 	// 3. Rate anomalies, counted once per APDU.
 	if !d.countsForRate(ev) {
@@ -356,7 +337,6 @@ func (d *Detector) Clear() {
 	defer d.mu.Unlock()
 
 	d.pendingTxns = make(map[string]map[uint16]bool)
-	d.flowProtos = make(map[string]map[string]bool)
 	d.writeRate = newRateTracker()
 	d.totalRate = newRateTracker()
 	d.apduSeen = make(map[string]struct{})
@@ -492,51 +472,6 @@ func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 
 	return out
 }
-
-// checkCrossProtocol detects multiple ICS protocols between the same hosts.
-func (d *Detector) checkCrossProtocol(srcIP, dstIP string, ev dpi.Event) []Anomaly {
-	var out []Anomaly
-	proto := ev.Proto
-
-	// Only track known ICS protocols.
-	if !isKnownICS(proto) {
-		return nil
-	}
-
-	fk := flowKey(srcIP, dstIP)
-
-	// Cross-protocol: multiple different ICS protocols on same flow.
-	if d.crossProtocolDetection {
-		if d.flowProtos[fk] == nil {
-			d.flowProtos[fk] = make(map[string]bool)
-		}
-		d.flowProtos[fk][proto] = true
-
-		if len(d.flowProtos[fk]) > 1 {
-			// Build list of protocols seen.
-			var protos []string
-			for p := range d.flowProtos[fk] {
-				protos = append(protos, p)
-			}
-			out = append(out, Anomaly{
-				Type:     "protocol_violation",
-				Protocol: proto,
-				Severity: "high",
-				Message:  fmt.Sprintf("Multiple ICS protocols on same flow: %v", protos),
-				SourceIP: srcIP,
-				DestIP:   dstIP,
-				Attributes: map[string]any{
-					"protocols": protos,
-				},
-				Timestamp: ev.Timestamp,
-			})
-		}
-	}
-
-	return out
-}
-
-func isKnownICS(proto string) bool { return ics.Supported(proto) }
 
 // rateTracker tracks events per minute per key using minute-granularity buckets.
 type rateTracker struct {
