@@ -4,6 +4,7 @@
 package engine
 
 import (
+	"net"
 	"net/netip"
 	"strings"
 	"testing"
@@ -12,6 +13,27 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
+
+func TestIECTableNonIPv4UsesRegistryPort(t *testing.T) {
+	tab := newIECTable("enforce", &zoneCache{})
+	tab.setPolicy(&rules.Snapshot{Firewall: []rules.Entry{{
+		ID: "iec", Sources: []string{"2001:db8::10/128"}, Destinations: []string{"2001:db8::20/128"},
+		Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}},
+		ICS:       rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"},
+	}}})
+	pkt := capture.Packet{SrcIP: net.ParseIP("2001:db8::10"), DstIP: net.ParseIP("2001:db8::20"),
+		SrcPort: 40000, DstPort: 2404}
+	for _, reverse := range []bool{false, true} {
+		if reverse {
+			pkt.SrcIP, pkt.DstIP = pkt.DstIP, pkt.SrcIP
+			pkt.SrcPort, pkt.DstPort = pkt.DstPort, pkt.SrcPort
+		}
+		result, matched := tab.nonIPv4Locked(pkt)
+		if !matched || result.decision.Action != capture.Drop || result.decision.Reason != reasonIECInvalid {
+			t.Fatalf("reverse=%v matched=%v result=%+v", reverse, matched, result)
+		}
+	}
+}
 
 // TestIECEnvelopeAgreesWithNftSteering: for the same snapshot, the engine
 // treats a session as inside an IEC104 envelope exactly when the nft
