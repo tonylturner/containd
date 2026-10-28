@@ -47,7 +47,9 @@ func ioEvent(state *flow.State, data []byte) dpi.Event {
 				}
 			default:
 				valid = false
-				addUndecoded(attrs, "cip.cpf_item_unsupported")
+				if !knownCPFItem(item.TypeID) {
+					addUndecoded(attrs, "cip.cpf_item_unsupported")
+				}
 			}
 		})
 		attrs["cpf_item_types"] = strings.Join(types, ",")

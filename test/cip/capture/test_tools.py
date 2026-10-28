@@ -104,8 +104,34 @@ class CoverageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='containd-corpus-cip-') as scratch:
             out = Path(scratch) / 'data'
             shutil.copytree(DATA, out)
-            (out / 'msp-scanner.exit').write_text('0\n')
+            (out / 'msp-error-scanner.exit').write_text('0\n')
             with self.assertRaisesRegex(RuntimeError, 'preserve its failed exit'):
+                finalize(out, HERE)
+
+    def test_failed_positive_cannot_be_certified(self):
+        with tempfile.TemporaryDirectory(prefix='containd-corpus-cip-') as scratch:
+            out = Path(scratch) / 'data'
+            shutil.copytree(DATA, out)
+            (out / 'msp32-scanner.exit').write_text('1\n')
+            with self.assertRaisesRegex(RuntimeError, 'preserve its successful exit'):
+                finalize(out, HERE)
+
+    def test_boundary_requires_all_observed_children(self):
+        with tempfile.TemporaryDirectory(prefix='containd-corpus-cip-') as scratch:
+            out = Path(scratch) / 'data'
+            shutil.copytree(DATA, out)
+            path = out / 'msp32.expected.tsv'
+            with path.open() as source:
+                reader = csv.DictReader(source, delimiter='\t')
+                fields, rows = reader.fieldnames, list(reader)
+            # Leave wrapper count 32 intact; remove one actual child reply.
+            victim = next(row for row in rows if row['object'] == '32' and row['cip.rr'] == '0x01')
+            rows.remove(victim)
+            with path.open('w') as target:
+                writer = csv.DictWriter(target, fieldnames=fields, delimiter='\t')
+                writer.writeheader()
+                writer.writerows(rows)
+            with self.assertRaisesRegex(RuntimeError, 'dissected mixed children'):
                 finalize(out, HERE)
 
 

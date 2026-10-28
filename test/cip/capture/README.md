@@ -1,15 +1,20 @@
 # EtherNet/IP reference capture tooling
 
-The unmodified OpENer POSIX sample is the adapter; EIPScanner is the scanner.
-`source-lock.json` pins both source commits and archive SHA256 values. The image
+The unmodified OpENer POSIX sample is the explicit/I/O adapter; cpppo 4.4.3
+is the MSP adapter. EIPScanner is the scanner for both. `source-lock.json`
+pins all three source commits and archive SHA256 values; `requirements.lock`
+pins cpppo's greenery dependency and source archive hash. The image
 pins its Debian base digest and a dated package snapshot. `LICENSES/` retains
 upstream licenses; `NOTICE` describes the tools and independent oracle.
 
 `scanner.cpp` uses EIPScanner's service API for UCMM and its encapsulation/CPF
 serializers for class 3 SendUnitData. Class 1 I/O uses its ConnectionManager.
-The **request** MSP offset table is assembled locally and passed through the
-generic service API. Every response comes from the real adapter; both reference
-stacks serialize their own I/O datagrams. There is no reply rewriting and no
+`msp-scanner.cpp` assembles the **request** MSP offset table locally and passes
+it through the generic service API. `cpppo-adapter.py` configures one INT array
+and uses cpppo's supported shutdown control API; it does not change protocol
+handling. Its unused UDP listener is disabled to allow orderly shutdown. Every
+response comes from the real adapter; OpENer and EIPScanner serialize their own
+I/O datagrams. There is no reply rewriting and no
 containd in the path.
 
 ## Generate
@@ -21,22 +26,28 @@ Run from the checkout root, choosing new absolute output directories:
 bash test/cip/capture/capture.sh "$PWD/build/cip-runs/explicit" explicit
 bash test/cip/capture/capture.sh "$PWD/build/cip-runs/connected" connected
 bash test/cip/capture/capture.sh "$PWD/build/cip-runs/io" io
-```
-
-The following are **failed coverage probes**, not successful generation. Run
-and inspect them separately: each currently exits **1**, preserving its pcap,
-scanner exit status, and endpoint/capture logs. Do not ignore the exit codes.
-
-```bash
 bash test/cip/capture/capture.sh "$PWD/build/cip-runs/msp" msp
 bash test/cip/capture/capture.sh "$PWD/build/cip-runs/msp32" msp32
 ```
 
-OpENer replies with general status `0x08` (service not supported) to both MSP
-requests. Its pinned Message Router registers GetAttributeSingle but not MSP.
-These captures prove mixed MSP **requests** and the 32-child request boundary,
-not child execution, MSP replies or status `0x1e`. Changing the scanner cannot
-add a service missing in the adapter. No alternative reply is synthesized.
+Before relying on cpppo, the scanner verifies every returned child header and
+count: the mixed Get/Set Attribute request executes three successful children;
+the boundary case returns all 32 successful children. The adapter's real MSP
+implementation is also in `server/enip/device.py`, `Message_Router.request`.
+
+The following **failed coverage probe** exits **1**, preserving its pcap, scanner
+exit status and endpoint/capture logs. Do not ignore that exit code:
+
+```bash
+bash test/cip/capture/capture.sh "$PWD/build/cip-runs/msp-error" msp-error
+```
+
+The nonexistent attribute 99 fails for real (`0x08`), but cpppo returns MSP
+wrapper status **0**, not the required **0x1e**. Its Message Router sets wrapper
+status 0 unconditionally after processing children. This is labelled stack
+deviation evidence, not positive 0x1e coverage. No response is synthesized or
+repaired. OpENer remains the adapter for all non-MSP scenarios; its unsupported
+MSP probes are not retained.
 
 To assemble the successful exchanges and explicitly labelled failure evidence:
 
@@ -45,9 +56,9 @@ python3 test/cip/capture/assemble.py build/cip-runs "$PWD/build/cip-new-testdata
 (cd build/cip-new-testdata && shasum -a 256 -c SHA256SUMS)
 ```
 
-Assembly rejects a failed positive, an unexpectedly successful blocked probe,
+Assembly rejects a failed positive, an unexpectedly successful 0x1e probe,
 missing observed layouts, empty captures, TCP loss/retransmission or malformed
-pristine traffic. It does not convert the failed probes into positive coverage.
+pristine traffic. It does not convert the failed probe into positive coverage.
 Review new evidence before replacing the committed fixtures. Copy the consumer
 README and LICENSE separately when replacing the directory.
 
@@ -70,9 +81,10 @@ the original frame mapping. It then removes the final payload byte of native
 record 1, preserving the declared B1 length but repairing UDP/IP lengths and
 checksums. The mutation metadata names the parent digest and exact byte offset.
 
-`finalize.py` records the current decoder's opaque-body coverage limitations
-separately from the independent oracle. It never labels those as adapter wire
-violations. There is no complete CIP conformance claim.
+`finalize.py` expects no conformance or undecoded codes on reference traffic.
+Attribute values, service parameters, known command bodies and CPF metadata
+are data, not unwalked protocol structure. The short-UDP mutation alone expects
+`cip.cpf_layout`. There is no complete CIP conformance claim.
 
 Tool checks:
 

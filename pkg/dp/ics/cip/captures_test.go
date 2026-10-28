@@ -135,6 +135,9 @@ func checkCaptureOracle(t testing.TB, fixture corpus.Fixture, steps []corpus.Ste
 			}
 			for key, codes := range map[string][]string{eventfields.KeyConformance: object.Conformance, eventfields.KeyUndecoded: object.Undecoded} {
 				gotCodes, _ := eventfields.Strings(event.Attributes, key)
+				if fixture.Name != "udp-short-mutation" && len(gotCodes) != 0 {
+					t.Fatalf("reference traffic has %s=%v", key, gotCodes)
+				}
 				if !reflect.DeepEqual(gotCodes, codes) && !(len(gotCodes) == 0 && len(codes) == 0) {
 					t.Fatalf("frame %d object %d: %s=%v want=%v", want.Frame, i, key, gotCodes, codes)
 				}

@@ -4,10 +4,10 @@
 # its pcap and logs survive for independent diagnosis, not positive claims.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-out="${1:?usage: capture.sh NEW_ABSOLUTE_DIRECTORY explicit|connected|io|msp|msp32}"
+out="${1:?usage: capture.sh NEW_ABSOLUTE_DIRECTORY explicit|connected|io|msp|msp32|msp-error}"
 scenario="${2:?missing scenario}"
 [[ "$out" = /* && ! -e "$out" ]] || { echo 'output must be a new absolute directory' >&2; exit 2; }
-case "$scenario" in explicit|connected|io|msp|msp32) ;; *) exit 2 ;; esac
+case "$scenario" in explicit|connected|io|msp|msp32|msp-error) ;; *) exit 2 ;; esac
 mkdir -p "$out/logs"
 run="containd-corpus-cip-$(date +%s)-$$"
 image="${CIP_IMAGE:-containd-corpus-cip-reference}"
@@ -36,21 +36,33 @@ network_created=1
 server="$run-server"
 capture="$run-capture"
 client="$run-client"
-docker run -d --name "$server" --network "$network" "$image" /src/opener-build/src/ports/POSIX/OpENer eth0 > /dev/null
+driver=/scanner
+adapter=(/src/opener-build/src/ports/POSIX/OpENer eth0)
+expected_server_exit=202
+if [[ "$scenario" = msp* ]]; then
+    driver=/msp-scanner
+    adapter=(python3 /drivers/cpppo-adapter.py)
+    expected_server_exit=0
+fi
 containers+=("$server")
+docker run -d --name "$server" --network "$network" "$image" "${adapter[@]}" > /dev/null
 # Readiness without opening an extra protocol session in the capture.
 ready=0
 for ((i = 0; i < 100; i++)); do
-    [[ "$(docker inspect -f '{{.State.Running}}' "$server")" = true ]]
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$server")" != true ]]; then
+        docker logs "$server" > "$out/logs/adapter.log" 2>&1
+        cat "$out/logs/adapter.log" >&2
+        exit 1
+    fi
     if docker exec "$server" sh -c 'ss -lnt | grep -q :44818'; then ready=1; break; fi
     sleep 0.1
 done
-[[ "$ready" = 1 ]]
+[[ "$ready" = 1 ]] || { echo 'endpoint readiness timed out' >&2; exit 1; }
 server_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$server")"
+containers+=("$capture")
 docker run -d --name "$capture" --network "container:$server" --cap-add NET_RAW \
     -v "$out:/evidence" "$image" tcpdump -i eth0 --immediate-mode -U -s 0 -w "/evidence/$scenario.pcap" \
     'tcp port 44818 or udp port 2222' > /dev/null
-containers+=("$capture")
 ready=0
 for ((i = 0; i < 100; i++)); do
     log="$(docker logs "$capture" 2>&1)"
@@ -58,10 +70,10 @@ for ((i = 0; i < 100; i++)); do
     [[ "$(docker inspect -f '{{.State.Running}}' "$capture")" = true ]]
     sleep 0.1
 done
-[[ "$ready" = 1 ]]
+[[ "$ready" = 1 ]] || { echo 'endpoint readiness timed out' >&2; exit 1; }
 containers+=("$client")
 result=0
-docker run --name "$client" --network "$network" "$image" /scanner "$server_ip" "$scenario" > "$out/logs/scanner.log" 2>&1 || result=$?
+docker run --name "$client" --network "$network" "$image" "$driver" "$server_ip" "$scenario" > "$out/logs/scanner.log" 2>&1 || result=$?
 printf '%s\n' "$result" > "$out/logs/scanner.exit"
 docker kill --signal INT "$capture" > /dev/null
 [[ "$(docker wait "$capture")" = 0 ]]
@@ -69,7 +81,7 @@ docker kill --signal INT "$capture" > /dev/null
 docker logs "$capture" > "$out/logs/tcpdump.log" 2>&1
 # OpENer's POSIX main returns RET_SHOW_SIGNAL (200) plus the caught signal.
 docker kill --signal INT "$server" > /dev/null
-[[ "$(docker wait "$server")" = 202 ]]
+[[ "$(docker wait "$server")" = "$expected_server_exit" ]]
 docker logs "$server" > "$out/logs/adapter.log" 2>&1
 cat "$out/logs/scanner.log"
 exit "$result"

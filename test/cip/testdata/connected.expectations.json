@@ -6,9 +6,7 @@
         {
           "kind": "session",
           "conformance": [],
-          "undecoded": [
-            "cip.encapsulation_payload_unsupported"
-          ]
+          "undecoded": []
         }
       ]
     },
@@ -18,9 +16,7 @@
         {
           "kind": "session",
           "conformance": [],
-          "undecoded": [
-            "cip.encapsulation_payload_unsupported"
-          ]
+          "undecoded": []
         }
       ]
     },
@@ -30,9 +26,7 @@
         {
           "kind": "request",
           "conformance": [],
-          "undecoded": [
-            "cip.service_payload_unsupported"
-          ]
+          "undecoded": []
         }
       ]
     },
@@ -42,9 +36,7 @@
         {
           "kind": "response",
           "conformance": [],
-          "undecoded": [
-            "cip.service_payload_unsupported"
-          ]
+          "undecoded": []
         }
       ]
     },
@@ -64,9 +56,7 @@
         {
           "kind": "response",
           "conformance": [],
-          "undecoded": [
-            "cip.service_payload_unsupported"
-          ]
+          "undecoded": []
         }
       ]
     },
@@ -96,9 +86,7 @@
         {
           "kind": "request",
           "conformance": [],
-          "undecoded": [
-            "cip.service_payload_unsupported"
-          ]
+          "undecoded": []
         }
       ]
     },
@@ -108,9 +96,7 @@
         {
           "kind": "response",
           "conformance": [],
-          "undecoded": [
-            "cip.service_payload_unsupported"
-          ]
+          "undecoded": []
         }
       ]
     },

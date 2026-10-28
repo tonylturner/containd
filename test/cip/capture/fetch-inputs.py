@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Download and authenticate the two unmodified reference stack archives."""
+"""Download and authenticate the unmodified reference stack archives."""
 import hashlib
 import json
 from pathlib import Path

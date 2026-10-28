@@ -6,9 +6,7 @@
         {
           "kind": "session",
           "conformance": [],
-          "undecoded": [
-            "cip.encapsulation_payload_unsupported"
-          ]
+          "undecoded": []
         }
       ]
     },
@@ -18,9 +16,7 @@
         {
           "kind": "session",
           "conformance": [],
-          "undecoded": [
-            "cip.encapsulation_payload_unsupported"
-          ]
+          "undecoded": []
         }
       ]
     },
@@ -30,9 +26,7 @@
         {
           "kind": "request",
           "conformance": [],
-          "undecoded": [
-            "cip.service_payload_unsupported"
-          ]
+          "undecoded": []
         },
         {
           "kind": "request",
@@ -42,9 +36,7 @@
         {
           "kind": "request",
           "conformance": [],
-          "undecoded": [
-            "cip.service_payload_unsupported"
-          ]
+          "undecoded": []
         },
         {
           "kind": "request",
@@ -56,6 +48,21 @@
     {
       "frame": 9,
       "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
         {
           "kind": "response",
           "conformance": [],
@@ -73,6 +80,5 @@
         }
       ]
     }
-  ],
-  "coverage_blocker": "adapter returns service-not-supported (0x08); no MSP child replies or 0x1e; scanner exits 1"
+  ]
 }

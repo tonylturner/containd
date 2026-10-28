@@ -8,13 +8,19 @@
 // cip.response_reserved (nonzero response reserved byte), and
 // cip.msp_response_mismatch (child response bit differs from its wrapper).
 //
-// Undecoded codes describe framed content not inspected: cip.msp_limit (shared
+// Undecoded codes describe unwalked protocol structure: cip.msp_limit (shared
 // 32-child budget), cip.msp_nesting (eight envelope levels),
 // cip.epath_unsupported (unknown segment format), cip.extra_data_item (only the
 // first explicit data item is selected), cip.cpf_item_unsupported (unknown item
-// body), cip.service_payload_unsupported (service-specific body has no parser),
-// and cip.encapsulation_payload_unsupported (non-explicit command body).
+// type ID), and cip.encapsulation_payload_unsupported (body of an unknown
+// encapsulation command, whose message layout cannot be established).
 // Codes are sorted and unique on events. They are not wire violations.
+//
+// Service-specific values and parameters are data after a decoded service and
+// path, not unwalked protocol identity. Known non-explicit encapsulation bodies,
+// encapsulation error bodies and known CPF metadata items are also data.
+// They do not cause undecoded findings; MSP children and paths still must be
+// walked, and a second explicit data item still reports uninspected content.
 //
 // UDP I/O assembly bytes are opaque application data, not undecoded protocol.
 // Their preview is bounded to 512 bytes; data_length always retains the full

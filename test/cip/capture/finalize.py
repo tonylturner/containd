@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 
 from mutate import records
 
-NAMES = ['explicit', 'connected', 'io', 'msp', 'msp32', 'native-io', 'udp-short-mutation']
+NAMES = ['explicit', 'connected', 'io', 'msp', 'msp32', 'msp-error', 'native-io', 'udp-short-mutation']
 
 
 def digest(path):
@@ -40,28 +40,14 @@ def expected_objects(rows, name):
     objects = []
     for row in rows:
         raw = bytes.fromhex(row['cip.message_hex'])
-        codes = []
         conformance = []
         kind = 'session'
         if raw:
             response = bool(raw[0] & 0x80)
             kind = 'response' if response else 'request'
-            # Header and body boundary, independent of containd output. Opaque
-            # service bodies are deliberately reported by the current decoder.
-            start = 4 + 2 * raw[3] if response else 2 + 2 * raw[1]
-            msp_body = raw[0] & 0x7f == 0x0a and (not response or raw[2] in [0, 0x1e])
-            if len(raw) > start and not msp_body:
-                codes.append('cip.service_payload_unsupported')
-        elif row['enip.command'] == '0x0065':
-            codes.append('cip.encapsulation_payload_unsupported')
-        if any(x not in [0, 0xa1, 0xb1, 0xb2, 0x8002] for x in json.loads(row['cpf_types.json'])):
-            codes.append('cip.cpf_item_unsupported')
         if name == 'udp-short-mutation':
             conformance.append('cip.cpf_layout')
-        objects.append({'kind': kind, 'conformance': conformance, 'undecoded': sorted(codes)})
-    if len(objects) > 1:
-        # MSP parent aggregates descendants; envelope limitations are inherited.
-        objects[0]['undecoded'] = sorted({c for obj in objects for c in obj['undecoded']})
+        objects.append({'kind': kind, 'conformance': conformance, 'undecoded': []})
     return objects
 
 
@@ -93,9 +79,19 @@ def finalize(out, inputs):
         raise RuntimeError('missing independently dissected class 1 negotiation')
     for name, count in [('msp', '3'), ('msp32', '32')]:
         require(name, lambda r: r['cip.msp.num_services'] == count and r['cip.rr'] == '0x00', 'MSP request count ' + count)
-        require(name, lambda r: r['cip.sc'] == '0x0a' and r['cip.genstat'] == '0x08', 'documented unsupported-service blocker')
-        if (out / f'{name}-scanner.exit').read_text().strip() != '1':
-            raise RuntimeError('MSP coverage probe must preserve its failed exit')
+        require(name, lambda r: r['cip.msp.num_services'] == count and r['cip.genstat'] == '0x00', 'successful MSP reply count ' + count)
+        for wrapper in [r for r in rows[name] if r['cip.msp.num_services']]:
+            children = [r for r in rows[name] if r['frame.number'] == wrapper['frame.number'] and r != wrapper]
+            if len(children) != int(count) or {r['cip.sc'] for r in children} != {'0x0e', '0x10'}:
+                raise RuntimeError(f'{name}: missing independently dissected mixed children')
+        if (out / f'{name}-scanner.exit').read_text().strip() != '0':
+            raise RuntimeError('MSP positive capture must preserve its successful exit')
+        if any(r['cip.genstat'] not in ['', '0x00'] for r in rows[name]):
+            raise RuntimeError('MSP positive capture contains a failing child')
+    require('msp-error', lambda r: r['cip.genstat'] == '0x08', 'real failed attribute child')
+    require('msp-error', lambda r: r['cip.msp.num_services'] == '3' and r['cip.genstat'] == '0x00', 'documented cpppo wrapper-status deviation')
+    if (out / 'msp-error-scanner.exit').read_text().strip() != '1':
+        raise RuntimeError('MSP 0x1e probe must preserve its failed exit')
     if not all(json.loads(r['cpf_types.json']) == [0x8002, 0xb1] for r in rows['native-io']):
         raise RuntimeError('native I/O CPF layout missing')
     negotiated = set()
@@ -107,7 +103,7 @@ def finalize(out, inputs):
     observed = {int(row['enip.cpf.sai.connid'], 0) for row in rows['native-io']}
     if len(negotiated) != 2 or observed != negotiated:
         raise RuntimeError('native I/O connection IDs do not match ForwardOpen reply')
-    for name in NAMES[:5]:
+    for name in NAMES[:6]:
         if '0 packets dropped by kernel' not in (out / f'{name}-tcpdump.log').read_text():
             raise RuntimeError(f'{name}: capture drops or missing tcpdump summary')
     for name in ['native-io.lineage', 'udp-short-mutation.mutation']:
@@ -122,13 +118,13 @@ def finalize(out, inputs):
         for row in rows[name]:
             grouped.setdefault(int(row['frame.number']), []).append(row)
         expected = {'events': [{'frame': frame, 'objects': expected_objects(group, name)} for frame, group in grouped.items()]}
-        if name in ['msp', 'msp32']:
-            expected['coverage_blocker'] = 'adapter returns service-not-supported (0x08); no MSP child replies or 0x1e; scanner exits 1'
+        if name == 'msp-error':
+            expected['stack_deviation'] = 'cpppo returns wrapper status 0 despite a failing child; required 0x1e is not produced; scanner exits 1'
         if name == 'udp-short-mutation':
             expected['mutation'] = json.loads((out / 'udp-short-mutation.mutation.json').read_text())
         (out / f'{name}.expectations.json').write_text(json.dumps(expected, indent=2) + '\n')
         assets = [f'{name}.pdml.gz']
-        if name in NAMES[:5]:
+        if name in NAMES[:6]:
             assets += [f'{name}-{suffix}' for suffix in ['scanner.log', 'adapter.log', 'tcpdump.log', 'scanner.exit']]
         if name == 'native-io':
             assets.append('native-io.lineage.json')
@@ -144,18 +140,18 @@ def finalize(out, inputs):
         scenarios.append(scenario)
         inventory += [scenario[k] for k in ['pcap', 'oracle', 'expectations']] + assets
     shutil.copyfile(inputs / 'source-lock.json', out / 'source-lock.json')
-    for asset in ['generator-image.json', 'generator-packages.txt', 'source-lock.json']:
+    for asset in ['generator-image.json', 'generator-packages.txt', 'msp-generator-image.json', 'msp-generator-packages.txt', 'source-lock.json']:
         scenarios[0]['assets'].append(asset)
         inventory.append(asset)
     recipes = {str(p.relative_to(inputs)): digest(p) for p in sorted(inputs.rglob('*')) if p.is_file() and '__pycache__' not in p.parts}
     manifest = {'version': 1, 'protocol': 'cip', 'provenance': {
         'source': (inputs / 'source-lock.json').read_text().strip(),
-        'generator': 'generator.Dockerfile; Debian bookworm base pinned by digest and packages from snapshot 20261001T000000Z; generator-image.json and generator-packages.txt; unmodified OpENer POSIX sample and EIPScanner; Release CMake',
+        'generator': 'generator.Dockerfile; Debian bookworm base pinned by digest and packages from snapshot 20261001T000000Z; generator-image.json and generator-packages.txt; unmodified OpENer POSIX sample, cpppo 4.4.3 and EIPScanner; Release CMake; pinned greenery dependency',
         'oracle': 'tshark 4.6.7 b439fb7b47a9; -n -o tcp.desegment_tcp_streams:TRUE -o enip.desegment:TRUE -o enip.o2t_run_idle:TRUE -o enip.t2o_run_idle:FALSE -T pdml; gzip mtime=0; size-zero inferred paths excluded from TSV',
-        'license': 'Apache-2.0 fixtures and local driver; BSD-style OpENer and MIT EIPScanner notices retained in capture/LICENSES; no bundled captures',
-        'topology': 'independent EIPScanner originator and OpENer adapter on invocation-owned private Docker bridges, no containd or host ports',
+        'license': 'Apache-2.0 fixtures and local driver; BSD-style OpENer, GPL-3.0-or-later cpppo and MIT EIPScanner notices retained in capture/LICENSES; no bundled captures',
+        'topology': 'independent EIPScanner originator; OpENer adapter for explicit/I/O and cpppo for MSP on invocation-owned private Docker bridges, no containd or host ports',
         'capture_side': 'tcpdump --immediate-mode -U -i eth0 in adapter network namespace; classic Ethernet pcap',
-        'limitations': 'MSP probes fail with service-not-supported 0x08, not 0x1e; only request children and count32 have captured coverage. Current decoder deliberately reports opaque service/registration bodies and socket-address CPF items as undecoded; these are decoder limitations, not stack deviations.',
+        'limitations': 'Mixed MSP success and 32-child request/reply coverage are captured. cpppo fails to return wrapper 0x1e when a child fails: msp-error is labelled stack-deviation evidence, not conformant positive 0x1e coverage.',
         'inputs_sha256': json.dumps(recipes, separators=(',', ':')),
     }, 'scenarios': scenarios}
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')

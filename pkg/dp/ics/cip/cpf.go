@@ -14,6 +14,15 @@ type CPFItem struct {
 	Complete bool
 }
 
+func knownCPFItem(id uint16) bool {
+	switch id {
+	case 0, 0xc, 0xa1, 0xb1, 0xb2, 0x100, 0x8000, 0x8001, 0x8002:
+		return true
+	default:
+		return false
+	}
+}
+
 // walkCPFItems shares length validation between encapsulated explicit messages
 // and native I/O datagrams. A partial final item retains its available bytes;
 // callers decide which complete fields can be read without guessing offsets.
@@ -80,6 +89,16 @@ func parseCPF(data []byte) CPFResult {
 			if item.Length != 4 {
 				itemErr = ErrInvalidCPF
 			}
+		case 0x8000, 0x8001:
+			if item.Length != 16 {
+				itemErr = ErrInvalidCPF
+			}
+		case 0x8002:
+			if item.Length != 8 {
+				itemErr = ErrInvalidCPF
+			}
+		case 0xc, 0x100:
+			// ListIdentity/ListServices metadata, not a CIP message.
 		case 0xb1, 0xb2:
 			if r.Selected >= 0 {
 				r.Undecoded = append(r.Undecoded, "cip.extra_data_item")

@@ -2,14 +2,14 @@
   "version": 1,
   "protocol": "cip",
   "provenance": {
-    "source": "{\n  \"opener\": {\n    \"commit\": \"0e1ab7ee5c272950c0dc8daf7793008d7a518912\",\n    \"url\": \"https://codeload.github.com/EIPStackGroup/OpENer/tar.gz/0e1ab7ee5c272950c0dc8daf7793008d7a518912\",\n    \"sha256\": \"5b01333bdc300c1410cf9e02d33a564320b7a6094786a047065a7ec14b21d945\"\n  },\n  \"eipscanner\": {\n    \"commit\": \"12c89a57ec2e7449efb1348be52af10be9ef9701\",\n    \"url\": \"https://codeload.github.com/nimbuscontrols/EIPScanner/tar.gz/12c89a57ec2e7449efb1348be52af10be9ef9701\",\n    \"sha256\": \"3efbb95bff91501328b5899dd635cfee61ec11f59f3ad7609812fb65211ddc63\"\n  }\n}",
-    "generator": "generator.Dockerfile; Debian bookworm base pinned by digest and packages from snapshot 20261001T000000Z; generator-image.json and generator-packages.txt; unmodified OpENer POSIX sample and EIPScanner; Release CMake",
+    "source": "{\n  \"opener\": {\n    \"commit\": \"0e1ab7ee5c272950c0dc8daf7793008d7a518912\",\n    \"url\": \"https://codeload.github.com/EIPStackGroup/OpENer/tar.gz/0e1ab7ee5c272950c0dc8daf7793008d7a518912\",\n    \"sha256\": \"5b01333bdc300c1410cf9e02d33a564320b7a6094786a047065a7ec14b21d945\"\n  },\n  \"eipscanner\": {\n    \"commit\": \"12c89a57ec2e7449efb1348be52af10be9ef9701\",\n    \"url\": \"https://codeload.github.com/nimbuscontrols/EIPScanner/tar.gz/12c89a57ec2e7449efb1348be52af10be9ef9701\",\n    \"sha256\": \"3efbb95bff91501328b5899dd635cfee61ec11f59f3ad7609812fb65211ddc63\"\n  },\n  \"cpppo\": {\n    \"version\": \"4.4.3\",\n    \"commit\": \"00e38df798ed45b35c15454ef376cde7fca76cd2\",\n    \"url\": \"https://codeload.github.com/pjkundert/cpppo/tar.gz/00e38df798ed45b35c15454ef376cde7fca76cd2\",\n    \"sha256\": \"de0aaaf0b1e340733a3b48a4501a08d4cd1c18c7b0be9ada2603a16cf5e34f5d\"\n  }\n}",
+    "generator": "generator.Dockerfile; Debian bookworm base pinned by digest and packages from snapshot 20261001T000000Z; generator-image.json and generator-packages.txt; unmodified OpENer POSIX sample, cpppo 4.4.3 and EIPScanner; Release CMake; pinned greenery dependency",
     "oracle": "tshark 4.6.7 b439fb7b47a9; -n -o tcp.desegment_tcp_streams:TRUE -o enip.desegment:TRUE -o enip.o2t_run_idle:TRUE -o enip.t2o_run_idle:FALSE -T pdml; gzip mtime=0; size-zero inferred paths excluded from TSV",
-    "license": "Apache-2.0 fixtures and local driver; BSD-style OpENer and MIT EIPScanner notices retained in capture/LICENSES; no bundled captures",
-    "topology": "independent EIPScanner originator and OpENer adapter on invocation-owned private Docker bridges, no containd or host ports",
+    "license": "Apache-2.0 fixtures and local driver; BSD-style OpENer, GPL-3.0-or-later cpppo and MIT EIPScanner notices retained in capture/LICENSES; no bundled captures",
+    "topology": "independent EIPScanner originator; OpENer adapter for explicit/I/O and cpppo for MSP on invocation-owned private Docker bridges, no containd or host ports",
     "capture_side": "tcpdump --immediate-mode -U -i eth0 in adapter network namespace; classic Ethernet pcap",
-    "limitations": "MSP probes fail with service-not-supported 0x08, not 0x1e; only request children and count32 have captured coverage. Current decoder deliberately reports opaque service/registration bodies and socket-address CPF items as undecoded; these are decoder limitations, not stack deviations.",
-    "inputs_sha256": "{\"LICENSES/EIPScanner.txt\":\"f0597e7fdc9454df887d3d06ab03b291fa3e170356d0fa64e92834cbe7d95c9c\",\"LICENSES/OpENer.txt\":\"61033e98e59344712d37d30b284fc7e600fd29153b8c58f51ba6056cc6347870\",\"NOTICE\":\"df0fc2aa5954afdbe91a3bf8446e902645bfb8e3ce877d027674cfd951b5d0e8\",\"README.md\":\"0241de5ace85b7e03d118aa2a8f5dd7c5400f80fef4389123cd017b41ca3173b\",\"assemble.py\":\"bd5dcedff477a346865869fb146fecfde6182559f5877e615a97cac1d04e7a73\",\"capture.sh\":\"d44c4708ae1bf8a781eab5ffa6ea84378019d24f6c246c50dc53ccacf1d338c2\",\"export-oracle.sh\":\"6faa2906921504a8418e25b39ae99568c6865dc67c6e63dfe71df9b8fdd0f7dc\",\"export.py\":\"cc49ca70f4867e4d72adedbdf812a7241bc70c5e4f7d4c8b0586801ac5daad52\",\"fetch-inputs.py\":\"94f8b1c3b1b6c9b24ef752ca42bce3ff8983cf09084bdc5f2ed85807428545cf\",\"finalize.py\":\"9b834d5cdd7f32df5e8cac0b2b0f2be421394c8e5f56218adb2ba35638c0c453\",\"generator.Dockerfile\":\"4a3149309aedc245ba368a4c4b0c8e468eee534ea1a53e380703c41cff963012\",\"mutate.py\":\"a9cab80fe3c392a2fb042351d410cf8751db4bd8fc3aef1684cc1ba9a7a69619\",\"scanner.cpp\":\"841463df3ce9565554f32c3f4198f4151a9b35ae7b0a01858848e3c8230ce16f\",\"source-lock.json\":\"a46ebcc4afff558eba5ad34cef19a798403e77779ee8956bd48ddde1435d1861\",\"test_tools.py\":\"f4cdb6074b981dd71ee86bb3717a6647f54f42f5b3bee3397ef99b45b6722d6a\"}"
+    "limitations": "Mixed MSP success and 32-child request/reply coverage are captured. cpppo fails to return wrapper 0x1e when a child fails: msp-error is labelled stack-deviation evidence, not conformant positive 0x1e coverage.",
+    "inputs_sha256": "{\"LICENSES/EIPScanner.txt\":\"f0597e7fdc9454df887d3d06ab03b291fa3e170356d0fa64e92834cbe7d95c9c\",\"LICENSES/OpENer.txt\":\"61033e98e59344712d37d30b284fc7e600fd29153b8c58f51ba6056cc6347870\",\"LICENSES/cpppo-COPYING.txt\":\"8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903\",\"LICENSES/cpppo.txt\":\"d2539ab97dbad7985316f15a254caa3306e34a6002486410f648c9f79e039fa3\",\"LICENSES/greenery.txt\":\"6628c37b3a259c4c3496a680d29625652fb7b73c65a9b27f72541588cd8ef85b\",\"NOTICE\":\"1877b6b97c174a1caf2dc267ab154964dc2fb52fc8d18690c6fc1a09326c6d2c\",\"README.md\":\"ebd341561d2a87413d17699c574fb1c6fbf6fd96f300e446bf02dc86e1df307f\",\"assemble.py\":\"b0911cccbf3d2b680c76abff80c2fef1762616c8053803968f915e3c26b27c66\",\"capture.sh\":\"e160dcbac073c62282c51a551481978d702c6749430bd34bcc936ac46640572b\",\"cpppo-adapter.py\":\"30e0fc2e59310a17318e2f7baf6b7856fb6c7001e684d150ae770d758f401f64\",\"export-oracle.sh\":\"ceabeb9c3184f86538ed19c96468b33bf6501a752d836ac8ceb568c905a3b6be\",\"export.py\":\"cc49ca70f4867e4d72adedbdf812a7241bc70c5e4f7d4c8b0586801ac5daad52\",\"fetch-inputs.py\":\"ebbc0468af3d86e19ff0f331afc0820701c0f4671791cca02be8dbc335ba1886\",\"finalize.py\":\"8144beca52cc5fc66426d90f2df2b22ea45caf15d6e8be4da3fde7b69c61d003\",\"generator.Dockerfile\":\"098b4ad2ff8dd2bc35beb7bf5de84b4b783393c5712b30a4c139b2064c7f2dae\",\"msp-scanner.cpp\":\"46e95c169e71984347664845bd5f5405ecc6853b8b5de94ec23fb4c57b0bdab7\",\"mutate.py\":\"a9cab80fe3c392a2fb042351d410cf8751db4bd8fc3aef1684cc1ba9a7a69619\",\"requirements.lock\":\"6127465768929dfb74558226c7e9a27fb989dfc84f41a56641ac0a97cb82658d\",\"scanner.cpp\":\"960dc6f804df4043df49853b099fa4eb12b2c8c49925d9cefba8a659f7b813e3\",\"source-lock.json\":\"88f2943b826e6bee12b3f9d6b35cd38c8073cafa8a9ca7c73077a1765d7b4980\",\"test_tools.py\":\"4d2cc164341fc2d24ede7ede5ec04ed26657ab0731aa96dd96a31fcbd9d3d8bf\"}"
   },
   "scenarios": [
     {
@@ -45,6 +45,8 @@
         "explicit-scanner.exit",
         "generator-image.json",
         "generator-packages.txt",
+        "msp-generator-image.json",
+        "msp-generator-packages.txt",
         "source-lock.json"
       ]
     },
@@ -146,6 +148,29 @@
         "msp32-adapter.log",
         "msp32-tcpdump.log",
         "msp32-scanner.exit"
+      ]
+    },
+    {
+      "name": "msp-error",
+      "pcap": "msp-error.pcap",
+      "oracle": "msp-error.expected.tsv",
+      "expectations": "msp-error.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "Docker bridge TX partial checksums retained; not a checksum-validity oracle",
+      "contiguous": true,
+      "oracle_frames": [
+        4,
+        6,
+        8,
+        9,
+        10
+      ],
+      "assets": [
+        "msp-error.pdml.gz",
+        "msp-error-scanner.log",
+        "msp-error-adapter.log",
+        "msp-error-tcpdump.log",
+        "msp-error-scanner.exit"
       ]
     },
     {

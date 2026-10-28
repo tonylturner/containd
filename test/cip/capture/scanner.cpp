@@ -128,36 +128,15 @@ static void connectedMessages(const SessionInfo::SPtr& si) {
     close.setOriginatorSerialNumber(p.originatorSerialNumber);
     status(router.sendRequest(si, 0x4e, EPath(6, 1), close.pack()), 0);
 }
-static void multipleServices(const SessionInfo::SPtr& si, unsigned count) {
-    std::vector<std::vector<uint8_t>> children;
-    for (unsigned i = 0; i < count; ++i) {
-        children.push_back(MessageRouterRequest(i == 1 ? 0x10 : 0x0e,
-            EPath(i == 1 ? 4 : 1, i == 1 ? 154 : 1, i == count - 1 ? 99 : 3),
-            i == 1 ? std::vector<uint8_t>(32, 0x5a) : std::vector<uint8_t>{}, true).pack());
-    }
-    Buffer body;
-    body << CipUint(count);
-    CipUint offset = 2 + 2 * count;
-    for (const auto& child : children) {
-        body << offset;
-        offset += child.size();
-    }
-    for (const auto& child : children) body << child;
-    auto response = MessageRouter(true).sendRequest(si, 0x0a, EPath(2, 1), body.data());
-    status(response, 0x1e);
-    require(!response.getData().empty(), "missing MSP child replies");
-}
 int main(int argc, char** argv) {
     try {
-        require(argc == 3, "usage: scanner ADAPTER explicit|connected|io|msp|msp32");
+        require(argc == 3, "usage: scanner ADAPTER explicit|connected|io");
         utils::Logger::setLogLevel(utils::LogLevel::INFO);
         auto si = std::make_shared<SessionInfo>(argv[1], 44818);
         std::string scenario = argv[2];
         if (scenario == "explicit") explicitMessages(si);
         else if (scenario == "connected") connectedMessages(si);
         else if (scenario == "io") implicitMessages(si);
-        else if (scenario == "msp") multipleServices(si, 3);
-        else if (scenario == "msp32") multipleServices(si, 32);
         else throw std::runtime_error("unknown scenario");
         return 0;
     } catch (const std::exception& e) {
