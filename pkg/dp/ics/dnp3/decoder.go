@@ -19,11 +19,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
-// Decoder implements dpi.StreamDecoder for DNP3 visibility.
-type Decoder struct{}
-
-func NewDecoder() *Decoder { return &Decoder{} }
-
 func (d *Decoder) Supports(state *flow.State) bool {
 	if state == nil {
 		return false
@@ -43,16 +38,14 @@ func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
 // Protocol implements dpi.StreamDecoder.
 func (d *Decoder) Protocol() string { return eventfields.ProtoDNP3 }
 
-// ParseStream frames the DNP3-over-TCP stream into data link frames. Each
-// complete frame is one dpi.DecodedFrame. A frame whose user data starts an
-// application fragment (transport FIR) yields one event describing that
-// fragment's application header and the objects in this frame; continuation
-// segments and link-only frames yield none unless a content finding needs
-// visibility (then a session event carries the readable link fields). Fragments that span
-// several link frames are not reassembled. An incomplete tail is NeedMore;
-// bytes that cannot start a frame (start octets, header CRC, length) end the
-// parse with a *dpi.FrameError carrying its malformed event.
+// ParseStream consumes each physical link frame immediately. Completed
+// application fragments ride on their finishing frame; incomplete transport
+// assemblies are owned by the decoder, not retained in the TCP byte view.
 func (d *Decoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.StreamResult, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	now := d.now()
+	d.prune(now)
 	var res dpi.StreamResult
 	pos := 0
 	for pos < len(v.Bytes) {
@@ -73,7 +66,7 @@ func (d *Decoder) ParseStream(state *flow.State, v dpi.StreamView) (dpi.StreamRe
 		res.Frames = append(res.Frames, dpi.DecodedFrame{
 			Start:  v.Base + int64(pos),
 			End:    v.Base + int64(pos+n),
-			Events: frameEvents(state, decodeLinkFrame(raw), raw),
+			Events: d.assemble(state, v, decodeLinkFrame(raw), raw, LinkRange{v.Base + int64(pos), v.Base + int64(pos+n)}, now),
 		})
 		pos += n
 	}
@@ -103,21 +96,8 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 
 func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 	var codes []string
-	final := len(frame.Data) > 0 && frame.Data[0]&TransportFIN != 0
 	if frame.badDataCRC {
 		codes = append(codes, "dnp3.data_crc")
-	}
-	if !frame.HasApplicationHeader() {
-		if len(frame.Data) > 0 && frame.Data[0]&TransportFIR != 0 && final {
-			codes = append(codes, "dnp3.application_header")
-		}
-		if len(codes) == 0 {
-			return nil
-		}
-		return []dpi.Event{{FlowID: flowID(state), Proto: eventfields.ProtoDNP3, Kind: "session",
-			Attributes: map[string]any{"source_address": frame.Source, "destination_address": frame.Destination,
-				eventfields.KeyDirection: linkDirection(frame.Control), "raw_hex": rawHex(raw), eventfields.KeyConformance: sortedFindings(codes)},
-			Timestamp: time.Now().UTC()}}
 	}
 	fc := frame.FunctionCode
 	isWrite := IsWriteFunctionCode(fc)
@@ -146,6 +126,7 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 
 	// Extract IIN flags from response messages.
 	if iin1, iin2, ok := frame.IIN(); ok {
+		attrs["iin1"], attrs["iin2"] = iin1, iin2
 		flags := FormatIINFlags(iin1, iin2)
 		if flags != "" {
 			attrs["iin_flags"] = flags
@@ -159,17 +140,27 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 	}
 	var objHeaders []ObjectHeader
 	if objOffset > len(frame.Data) {
-		if final {
-			codes = append(codes, "dnp3.application_header")
-		}
+		codes = append(codes, "dnp3.application_header")
+		attrs[eventfields.KeyUndecoded] = []string{"dnp3.application_incomplete"}
 	} else {
 		var stopped objectWalkStop
 		objHeaders, stopped = parseObjectHeaders(frame.Data, objOffset, fc)
-		if stopped == walkInvalid || stopped == walkTruncated && final {
+		if stopped == walkInvalid || stopped == walkTruncated {
 			codes = append(codes, "dnp3.object_walk")
+		}
+		switch stopped {
+		case walkInvalid:
+			attrs[eventfields.KeyUndecoded] = []string{"dnp3.object_qualifier"}
+		case walkTruncated:
+			attrs[eventfields.KeyUndecoded] = []string{"dnp3.object_truncated"}
+		case walkUnsupported:
+			attrs[eventfields.KeyUndecoded] = []string{"dnp3.object_unsupported"}
+		case walkLimited:
+			attrs[eventfields.KeyUndecoded] = []string{"dnp3.object_limit"}
 		}
 	}
 	if len(objHeaders) > 0 {
+		attrs["objects"] = objHeaders
 		// Emit comma-separated object groups.
 		var b strings.Builder
 		for i, oh := range objHeaders {
@@ -181,14 +172,21 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 		attrs[eventfields.KeyObjectGroups] = b.String()
 
 		// Emit first header's qualifier and count for primary inspection.
-		if objHeaders[0].hasQualifier {
+		if objHeaders[0].HasQualifier {
 			attrs["qualifier"] = objHeaders[0].Qualifier
 		}
-		if count := objHeaders[0].Count; objHeaders[0].hasCount && count <= math.MaxUint16 {
+		if count := objHeaders[0].Count; objHeaders[0].HasCount && count <= math.MaxUint16 {
 			attrs["object_count"] = uint16(count)
 		}
 	}
 
+	for _, h := range objHeaders {
+		for _, p := range h.Points {
+			if v := p.CROB; v != nil && !v.validEncoding() {
+				codes = append(codes, "dnp3.crob_value")
+			}
+		}
+	}
 	if len(codes) > 0 {
 		attrs[eventfields.KeyConformance] = sortedFindings(codes)
 	}
@@ -246,6 +244,7 @@ func flowID(state *flow.State) string {
 }
 
 func (d *Decoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {
+	d.StreamEnded(flowID(state), dpi.DirUnknown)
 	return nil, nil
 }
 

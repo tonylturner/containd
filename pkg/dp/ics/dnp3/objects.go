@@ -3,16 +3,38 @@
 
 package dnp3
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"encoding/json"
+)
 
 // ObjectHeader represents a parsed DNP3 object group header.
 type ObjectHeader struct {
-	hasQualifier, hasCount bool
-	Group                  uint8
-	Variation              uint8
-	Qualifier              uint8
-	Count                  uint32 // objects named by the range field; 0 when it names none or is invalid
-	Size                   int    // bytes of the header itself (group, variation, qualifier, range)
+	HasQualifier bool    `json:"has_qualifier"`
+	HasVariation bool    `json:"has_variation"`
+	HasCount     bool    `json:"has_count"`
+	Start        *uint32 `json:"start,omitempty"`
+	Stop         *uint32 `json:"stop,omitempty"`
+	Addressing   string  `json:"addressing,omitempty"`
+	Points       []Point `json:"points,omitempty"`
+	Group        uint8   `json:"group"`
+	Variation    uint8   `json:"variation"`
+	Qualifier    uint8   `json:"qualifier"`
+	Count        uint64  `json:"count"`
+	Size         int     `json:"size"`
+	Offset       int     `json:"offset"`
+	Covered      int     `json:"covered"` // inspected header/value bytes from Offset
+}
+
+const maxDecodedPoints = 8192
+
+// String renders owned evidence deterministically, including optional indices.
+func (h ObjectHeader) String() string {
+	b, err := json.Marshal(h)
+	if err != nil {
+		panic(err)
+	} // This fixed, scalar-only schema is always encodable.
+	return string(b)
 }
 
 // Qualifier fields (IEEE 1815-2012 application layer object header): bits
@@ -55,6 +77,8 @@ const (
 	walkComplete objectWalkStop = iota
 	walkTruncated
 	walkInvalid
+	walkUnsupported
+	walkLimited
 )
 
 func parseObjectHeaders(data []byte, offset int, fc uint8) ([]ObjectHeader, objectWalkStop) {
@@ -67,16 +91,36 @@ func parseObjectHeaders(data []byte, offset int, fc uint8) ([]ObjectHeader, obje
 	headers := make([]ObjectHeader, 0, 4)
 	pos := offset
 	for pos < len(data) {
-		oh := ObjectHeader{Group: data[pos]}
+		oh := ObjectHeader{Group: data[pos], Offset: pos, Covered: min(3, len(data)-pos)}
+		if len(data)-pos >= 2 {
+			oh.Variation = data[pos+1]
+			oh.HasVariation = true
+		}
 		if len(data)-pos < 3 {
 			return append(headers, oh), walkTruncated
 		}
-		oh.Variation, oh.Qualifier, oh.hasQualifier = data[pos+1], data[pos+2], true
+		oh.Variation, oh.Qualifier, oh.HasQualifier = data[pos+1], data[pos+2], true
 		rangeLen, count, valid, ok := readRange(data[pos+3:], oh.Qualifier&0x0F)
 		oh.Size = 3 + rangeLen
-		oh.hasCount = ok && valid
-		if oh.hasCount {
+		oh.HasCount = ok && valid
+		if oh.HasCount {
 			oh.Count = count
+			rc := oh.Qualifier & 15
+			switch {
+			case rc <= rangeVirtual4:
+				width := 1 << int(rc%3)
+				start, stop := readUint(data[pos+3:pos+3+width]), readUint(data[pos+3+width:pos+3+2*width])
+				oh.Start = &start
+				oh.Stop = &stop
+				oh.Addressing = "range"
+				if rc >= rangeVirtual1 {
+					oh.Addressing = "virtual"
+				}
+			case rc == rangeNone:
+				oh.Addressing = "all"
+			default:
+				oh.Addressing = "count"
+			}
 		}
 		headers = append(headers, oh)
 		if oh.Qualifier&0x80 != 0 || (oh.Qualifier>>4)&7 == 7 {
@@ -89,10 +133,19 @@ func parseObjectHeaders(data []byte, offset int, fc uint8) ([]ObjectHeader, obje
 			return headers, walkInvalid
 		}
 		pos += oh.Size
+		headers[len(headers)-1].Covered = oh.Size
+		if oh.Count > maxDecodedPoints && !(headerOnlyFunction(fc) && oh.Qualifier>>4 == 0) {
+			return headers, walkLimited
+		}
 		n, stop := objectsLen(data[pos:], oh, fc)
 		if stop != walkComplete {
+			if stop == walkTruncated {
+				attachPartialPoints(&headers[len(headers)-1], data[pos:], fc)
+			}
 			return headers, stop
 		}
+		attachPoints(&headers[len(headers)-1], data[pos:pos+n], fc)
+		headers[len(headers)-1].Covered += n
 		pos += n
 	}
 	return headers, walkComplete
@@ -101,8 +154,8 @@ func parseObjectHeaders(data []byte, offset int, fc uint8) ([]ObjectHeader, obje
 // readRange decodes the range field for range code rc. It returns the field
 // length, the object count, whether the range is meaningful, and false only
 // when the field itself is truncated.
-func readRange(b []byte, rc uint8) (n int, count uint32, valid, ok bool) {
-	startStop := func(width int) (int, uint32, bool, bool) {
+func readRange(b []byte, rc uint8) (n int, count uint64, valid, ok bool) {
+	startStop := func(width int) (int, uint64, bool, bool) {
 		if len(b) < 2*width {
 			return 0, 0, false, false
 		}
@@ -110,13 +163,13 @@ func readRange(b []byte, rc uint8) (n int, count uint32, valid, ok bool) {
 		if stop < start {
 			return 2 * width, 0, false, true
 		}
-		return 2 * width, stop - start + 1, true, true
+		return 2 * width, uint64(stop) - uint64(start) + 1, true, true
 	}
-	countOf := func(width int) (int, uint32, bool, bool) {
+	countOf := func(width int) (int, uint64, bool, bool) {
 		if len(b) < width {
 			return 0, 0, false, false
 		}
-		return width, readUint(b[:width]), true, true
+		return width, uint64(readUint(b[:width])), true, true
 	}
 	switch rc {
 	case rangeStartStop1, rangeVirtual1:
@@ -157,7 +210,11 @@ func objectsLen(b []byte, oh ObjectHeader, fc uint8) (int, objectWalkStop) {
 	prefix := int(oh.Qualifier>>4) & 0x07
 	switch {
 	case prefix >= prefixSize1 && prefix <= prefixSize1+2:
-		return sizePrefixedLen(b, oh.Count, 1<<(prefix-prefixSize1))
+		n, stop := sizePrefixedLen(b, oh.Count, 1<<(prefix-prefixSize1))
+		if stop != walkComplete {
+			return n, stop
+		}
+		return n, walkUnsupported // size is readable, but the value schema is not inspected
 	case prefix > prefixSize1+2:
 		return 0, walkInvalid // reserved prefix code
 	}
@@ -178,16 +235,16 @@ func objectsLen(b []byte, oh ObjectHeader, fc uint8) (int, objectWalkStop) {
 	}
 	size, ok := fixedObjectSize[key]
 	if !ok {
-		return 0, walkInvalid
+		return 0, walkUnsupported
 	}
 	return fit(b, count*uint64(indexLen+size))
 }
 
 // sizePrefixedLen walks count objects that each start with a width-octet
 // object size (free-format objects such as group 70).
-func sizePrefixedLen(b []byte, count uint32, width int) (int, objectWalkStop) {
+func sizePrefixedLen(b []byte, count uint64, width int) (int, objectWalkStop) {
 	pos := 0
-	for i := uint32(0); i < count; i++ {
+	for i := uint64(0); i < count; i++ {
 		if len(b)-pos < width {
 			return 0, walkTruncated
 		}
@@ -231,7 +288,6 @@ var fixedObjectSize = map[uint16]int{
 	0x0203: 3,  // g2v3 binary input event with relative time
 	0x0A02: 1,  // g10v2 binary output status with flags
 	0x0C01: 11, // g12v1 control relay output block
-	0x0C02: 11, // g12v2 pattern control block
 	0x1401: 5,  // g20v1 32-bit counter with flag
 	0x1402: 3,  // g20v2 16-bit counter with flag
 	0x1405: 4,  // g20v5 32-bit counter
