@@ -20,6 +20,19 @@ import (
 
 const reasonNonconformant = "nonconformant"
 
+// inspectionFindingKeys share policy arbitration, but retain separate alert
+// identities and evidence: undecoded content is not a conformance violation.
+var inspectionFindingKeys = []string{eventfields.KeyConformance, eventfields.KeyUndecoded}
+
+func hasInspectionFindings(ev dpi.Event) bool {
+	for _, key := range inspectionFindingKeys {
+		if codes, _ := eventfields.Strings(ev.Attributes, key); len(codes) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // SetICSParsing atomically changes subsequent decisions without retiring
 // sessions. The caller's map is never retained.
 func (e *Engine) SetICSParsing(modes map[string]string) {
@@ -65,13 +78,16 @@ func (e *Engine) conformanceScope(state *flow.State, pkt *dpi.ParsedPacket, prot
 // recordConformanceDecision is shared with the APDU verdict path. Call only
 // after decoded-deny precedence is resolved; it records evidence, not delivery.
 func (e *Engine) recordConformanceDecision(state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, scope *rules.Entry, mode, decision, reason string) {
-	codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyConformance)
 	attrs := withDerivedIdentity(ev, map[string]any{
-		eventfields.KeyConformance: codes,
-		eventfields.KeyMode:        mode,
-		eventfields.KeyDecision:    decision,
-		eventfields.KeyReason:      reason,
+		eventfields.KeyMode:     mode,
+		eventfields.KeyDecision: decision,
+		eventfields.KeyReason:   reason,
 	})
+	for _, key := range inspectionFindingKeys {
+		if codes, _ := eventfields.Strings(ev.Attributes, key); len(codes) > 0 {
+			attrs[key] = codes
+		}
+	}
 	if scope != nil {
 		attrs[eventfields.KeyRuleID] = scope.ID
 	}
@@ -87,8 +103,13 @@ const (
 )
 
 type conformanceConnection struct {
-	codes map[string]uint64
+	codes map[inspectionFinding]uint64
 	fin   [2]bool
+}
+
+type inspectionFinding struct {
+	field string
+	code  string
 }
 
 // Saturation suppresses new alert identities rather than evicting live ones
@@ -107,7 +128,7 @@ func conformanceKey(state *flow.State) string {
 	return key.Hash()
 }
 
-func (a *conformanceAlerts) fresh(state *flow.State, codes []string) []string {
+func (a *conformanceAlerts) fresh(state *flow.State, field string, codes []string) []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	key := conformanceKey(state)
@@ -120,15 +141,16 @@ func (a *conformanceAlerts) fresh(state *flow.State, codes []string) []string {
 		if a.conns == nil {
 			a.conns = make(map[string]*conformanceConnection)
 		}
-		conn = &conformanceConnection{codes: make(map[string]uint64)}
+		conn = &conformanceConnection{codes: make(map[inspectionFinding]uint64)}
 		a.conns[key] = conn
 	}
 	var fresh []string
 	for _, code := range codes {
-		if _, seen := conn.codes[code]; seen {
-			conn.codes[code]++
+		id := inspectionFinding{field: field, code: code}
+		if _, seen := conn.codes[id]; seen {
+			conn.codes[id]++
 		} else if len(conn.codes) < conformanceMaxCodes {
-			conn.codes[code] = 1
+			conn.codes[id] = 1
 			fresh = append(fresh, code)
 		} else {
 			a.suppressed++
@@ -164,23 +186,28 @@ func (a *conformanceAlerts) clear() {
 // IEC callers can reuse this after their delivery decision, with session/APDU
 // identity on ev. Repeated codes count but do not emit another alert.
 func (e *Engine) recordConformanceAlert(state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, action string) {
-	codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyConformance)
-	if len(codes) == 0 || state == nil || e.eventStore == nil {
+	if state == nil || e.eventStore == nil {
 		return
 	}
-	fresh := e.conformance.fresh(state, codes)
-	if len(fresh) == 0 {
-		return
+	for _, key := range inspectionFindingKeys {
+		codes, _ := eventfields.Strings(ev.Attributes, key)
+		if len(codes) == 0 {
+			continue
+		}
+		fresh := e.conformance.fresh(state, key, codes)
+		if len(fresh) == 0 {
+			continue
+		}
+		attrs := withDerivedIdentity(ev, map[string]any{
+			"rule_id": "ics-" + key, "severity": "medium",
+			"message":  fmt.Sprintf("%s %s %s: %s", ev.Proto, key, strings.Join(fresh, ", "), action),
+			"protocol": ev.Proto, "action": action, key: fresh,
+		})
+		metrics.IDSAlertsTotal.Inc()
+		e.eventStore.Record(state, pkt, []dpi.Event{{
+			FlowID: conformanceFlowID(state, ev), Proto: "ids", Kind: "alert", Timestamp: time.Now().UTC(), Attributes: attrs,
+		}})
 	}
-	attrs := withDerivedIdentity(ev, map[string]any{
-		"rule_id": "ics-conformance", "severity": "medium",
-		"message":  fmt.Sprintf("%s conformance %s: %s", ev.Proto, strings.Join(fresh, ", "), action),
-		"protocol": ev.Proto, "action": action, eventfields.KeyConformance: fresh,
-	})
-	metrics.IDSAlertsTotal.Inc()
-	e.eventStore.Record(state, pkt, []dpi.Event{{
-		FlowID: conformanceFlowID(state, ev), Proto: "ids", Kind: "alert", Timestamp: time.Now().UTC(), Attributes: attrs,
-	}})
 }
 
 func conformanceFlowID(state *flow.State, ev dpi.Event) string {

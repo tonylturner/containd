@@ -1,0 +1,107 @@
+[
+    {
+        "Id": "sha256:2bbeea56d58c5192ebda1d8314637c3c9995341df21e733110405040bae77fbc",
+        "RepoTags": [
+            "modbusspan-tools:latest"
+        ],
+        "RepoDigests": [
+            "modbusspan-tools@sha256:2bbeea56d58c5192ebda1d8314637c3c9995341df21e733110405040bae77fbc"
+        ],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-27T01:49:22.899063384Z",
+        "Config": {
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "DEBIAN_FRONTEND=noninteractive"
+            ],
+            "Cmd": [
+                "sleep",
+                "infinity"
+            ],
+            "ArgsEscaped": true
+        },
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 261712755,
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:3b7c7ecdb9b2a2a7651551c07dc748fee9e27902c8b88c25cb3af3fbbc0a4b87",
+                "sha256:9ca356b48effa64ff06f7f2efc446624c886e231b9c93feeb31b39d78ee1a50d",
+                "sha256:ea22f914190eb4e7f38f68dba867fd9c16946761f65f409d53782ccb6bffe4a2"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-10-27T01:49:24.21334626Z"
+        },
+        "Descriptor": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "digest": "sha256:2bbeea56d58c5192ebda1d8314637c3c9995341df21e733110405040bae77fbc",
+            "size": 855
+        },
+        "Identity": {
+            "Pull": [
+                {
+                    "Repository": "docker.io/library/modbusspan-tools"
+                }
+            ],
+            "Build": [
+                {
+                    "Ref": "2mu3xbz27klmixxwa83jf5rla",
+                    "CreatedAt": "2026-10-27T01:49:24.677807135Z"
+                }
+            ]
+        }
+    },
+    {
+        "Id": "sha256:dcd7e22625c988af35343a4dde03eeb7f5a3f46c9020f032da01eeee567fc44c",
+        "RepoTags": [
+            "containd-corpus-modbus-generator:latest"
+        ],
+        "RepoDigests": [
+            "containd-corpus-modbus-generator@sha256:dcd7e22625c988af35343a4dde03eeb7f5a3f46c9020f032da01eeee567fc44c"
+        ],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-28T20:39:20.651209387Z",
+        "Config": {
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "DEBIAN_FRONTEND=noninteractive"
+            ],
+            "Entrypoint": [
+                "/venv/bin/python",
+                "/generator/endpoint.py"
+            ],
+            "ArgsEscaped": true
+        },
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 261736047,
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:3b7c7ecdb9b2a2a7651551c07dc748fee9e27902c8b88c25cb3af3fbbc0a4b87",
+                "sha256:9ca356b48effa64ff06f7f2efc446624c886e231b9c93feeb31b39d78ee1a50d",
+                "sha256:ea22f914190eb4e7f38f68dba867fd9c16946761f65f409d53782ccb6bffe4a2",
+                "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+                "sha256:429221cc7702ebe860d12988295bc452b64eabe2ac8deca520b16d2d3cb90398"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-10-28T20:39:20.698524804Z"
+        },
+        "Descriptor": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "digest": "sha256:dcd7e22625c988af35343a4dde03eeb7f5a3f46c9020f032da01eeee567fc44c",
+            "size": 856
+        },
+        "Identity": {
+            "Build": [
+                {
+                    "Ref": "tkqkl9mbenrg11z7tgj473us4",
+                    "CreatedAt": "2026-10-28T20:39:20.708671512Z"
+                }
+            ]
+        }
+    }
+]

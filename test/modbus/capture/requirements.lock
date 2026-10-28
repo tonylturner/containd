@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+# No runtime Python dependencies; optional serial/GUI extras are not installed.
+pymodbus==3.11.4 \
+    --hash=sha256:89865929f53bd5e32b4076dde00ee86d9b8afb1686832ed74e69d55df22729c3

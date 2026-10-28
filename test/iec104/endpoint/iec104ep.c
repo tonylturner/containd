@@ -455,7 +455,6 @@ static void
 connectionEventHandler(void* parameter, IMasterConnection con, CS104_PeerConnectionEvent event)
 {
     (void)parameter;
-    (void)con;
     if (event == CS104_CON_EVENT_CONNECTION_OPENED || event == CS104_CON_EVENT_CONNECTION_CLOSED)
     {
         Semaphore_wait(rtuLock);
@@ -468,12 +467,20 @@ connectionEventHandler(void* parameter, IMasterConnection con, CS104_PeerConnect
     }
     if (event == CS104_CON_EVENT_CONNECTION_CLOSED || event == CS104_CON_EVENT_DEACTIVATED)
     {
+        /* Only the closing connection's interrogation and selection end:
+         * another client's close must not cancel them. */
         Semaphore_wait(rtuLock);
-        giState = 0;
-        giConn = NULL;
-        giProgress = 0;
-        selActive = false;
-        selConn = NULL;
+        if (giConn == con)
+        {
+            giState = 0;
+            giConn = NULL;
+            giProgress = 0;
+        }
+        if (selConn == con)
+        {
+            selActive = false;
+            selConn = NULL;
+        }
         Semaphore_post(rtuLock);
     }
 }

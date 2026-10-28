@@ -12,9 +12,3 @@ import "github.com/tonylturner/containd/pkg/dp/ics"
 func ICSDecoderPortIn(lo, hi uint16) (ics.DecoderPort, bool) {
 	return ics.DecoderPortIn(lo, hi)
 }
-
-// IsICSDecoderPort reports whether port is the fixed server port of the
-// named decoder (modbus, dnp3, cip or iec104) on any transport.
-func IsICSDecoderPort(protocol string, port uint16) bool {
-	return ics.IsDecoderPort(protocol, port)
-}

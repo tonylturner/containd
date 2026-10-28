@@ -30,7 +30,7 @@ func streamFixtures() []struct {
 		{"session", buildEIPHeader(0x65, 1, []byte{1, 0, 0, 0}), 1},
 		{"read", buildEIPHeader(0x6f, 2, buildSendRRDataPayload(0x4c, 3, []byte{0x20, 4, 0x24, 1, 0x30, 3})), 1},
 		{"write", buildEIPHeader(0x6f, 3, buildSendRRDataPayload(0x4d, 1, []byte{0x20, 4})), 1},
-		{"response", buildEIPHeader(0x6f, 4, buildSendRRDataPayload(0xcc, 0, nil)), 1},
+		{"response", buildEIPHeader(0x6f, 4, cpfMessage(0xcc, 0, 0, 0)), 1},
 		{"connected", buildEIPHeader(0x70, 5, buildCPFItems(
 			cpfTestItem{0x00a1, []byte{1, 0, 0, 0}},
 			cpfTestItem{0x00b1, []byte{1, 0, 0x4c, 0}},

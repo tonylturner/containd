@@ -64,6 +64,15 @@ type StreamDecoder interface {
 	ParseStream(state *flow.State, v StreamView) (StreamResult, error)
 }
 
+// StreamEnder is an optional StreamDecoder extension for decoders that keep
+// state per stream across ParseStream calls. The manager calls StreamEnded
+// once each time it discards the state of one stream (end, close, reset,
+// failure, replacement or idle expiry), serialized with ParseStream. The
+// decoder drops its state for that stream and must not call the manager.
+type StreamEnder interface {
+	StreamEnded(session string, dir StreamDir)
+}
+
 // StreamErrKind classifies manager-side stream failures.
 type StreamErrKind uint8
 

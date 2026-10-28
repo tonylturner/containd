@@ -153,10 +153,10 @@ func TestDecoderHelpers(t *testing.T) {
 	if got := exceptionName(99); got != "unknown" {
 		t.Fatalf("exceptionName(99) = %q", got)
 	}
-	if got := diagSubFunctionName(4); got != "force_listen_only" {
-		t.Fatalf("diagSubFunctionName(4) = %q", got)
+	if got := diagnosticSubfunctions[4].name; got != "force_listen_only" {
+		t.Fatalf("diagnosticSubfunctions[4].name = %q", got)
 	}
-	if got := diagSubFunctionName(999); got != "unknown" {
-		t.Fatalf("diagSubFunctionName(999) = %q", got)
+	if _, ok := diagnosticSubfunctions[999]; ok {
+		t.Fatal("unexpected descriptor for unknown subfunction")
 	}
 }

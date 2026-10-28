@@ -121,10 +121,11 @@ func (s *iecSession) sessionEvent(outcome string, extra map[string]any, now time
 }
 
 // decisionKeys are the decoded attributes an ics.decision event repeats,
-// including the conformance findings the decision was made with.
+// including the conformance and undecoded findings the decision was made with.
 var decisionKeys = []string{
 	eventfields.KeyAPDUID, eventfields.KeyTypeID, eventfields.KeyCA, eventfields.KeyIOA,
 	eventfields.KeySelect, eventfields.KeyDirection, eventfields.KeyConformance,
+	eventfields.KeyUndecoded,
 }
 
 func (s *iecSession) decisionEvent(ev dpi.Event, d iecDecision, now time.Time) events.Event {

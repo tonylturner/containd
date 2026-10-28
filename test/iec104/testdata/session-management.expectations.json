@@ -1,0 +1,9 @@
+{
+  "class": "captured lib60870-C endpoint traffic",
+  "coverage": [
+    "STARTDT and STOPDT transitions",
+    "TESTFR activity and acknowledgements",
+    "independent concurrent TCP sessions"
+  ],
+  "labels": []
+}

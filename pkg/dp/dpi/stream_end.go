@@ -32,6 +32,7 @@ func (m *Manager) CloseStream(state *flow.State, pkt *ParsedPacket) (bool, []Eve
 	if !m.reassembler.end(key, pos, len(pkt.Payload), pkt.TCPRst, pkt.FailClosed) {
 		return false, nil, nil
 	}
+	m.endStream(key)
 	evs, err := m.flowEnd(state)
 	return true, evs, err
 }
@@ -49,6 +50,7 @@ func (m *Manager) ResetStream(peer *flow.State, pkt *ParsedPacket) ([]Event, err
 	if !m.reassembler.endPeer(peer.Key.Hash(), pkt.FailClosed) {
 		return nil, nil
 	}
+	m.endStream(peer.Key.Hash())
 	return m.flowEnd(peer)
 }
 
@@ -72,6 +74,7 @@ func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket, kind StreamEr
 	}
 	key, _, _ := streamKey(state, pkt)
 	m.reassembler.fail(key, &StreamError{Kind: kind, Offset: m.reassembler.watermark(key), Proto: framer.Protocol()})
+	m.endStream(key)
 }
 
 // end handles a FIN or RST that the stream key's own direction sent at pos,

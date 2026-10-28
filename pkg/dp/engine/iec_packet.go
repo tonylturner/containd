@@ -6,6 +6,7 @@ package engine
 import (
 	"errors"
 	"net/netip"
+	"strconv"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
@@ -168,7 +169,7 @@ func orient(src, dst netip.AddrPort) (client, server netip.AddrPort) {
 
 // nonIPv4Locked drops IPv6 traffic inside an enforce envelope.
 func (t *iecTable) nonIPv4Locked(pkt capture.Packet) (iecResult, bool) {
-	ctx := rules.EvalContext{SrcIP: pkt.SrcIP, DstIP: pkt.DstIP, Proto: "tcp", Port: "2404"}
+	ctx := rules.EvalContext{SrcIP: pkt.SrcIP, DstIP: pkt.DstIP, Proto: "tcp", Port: strconv.Itoa(ics.IEC104Port)}
 	if pkt.DstPort != iec104Port {
 		ctx.SrcIP, ctx.DstIP = pkt.DstIP, pkt.SrcIP
 	}

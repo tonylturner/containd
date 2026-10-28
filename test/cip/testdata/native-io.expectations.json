@@ -1,0 +1,64 @@
+{
+  "events": [
+    {
+      "frame": 1,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 2,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 3,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 4,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 5,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    }
+  ]
+}

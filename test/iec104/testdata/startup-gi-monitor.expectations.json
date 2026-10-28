@@ -1,0 +1,10 @@
+{
+  "class": "captured lib60870-C endpoint traffic",
+  "coverage": [
+    "control-centre startup and station general interrogation",
+    "monitoring measurements and spontaneous breaker updates",
+    "select-before-execute command exchanges",
+    "CP56Time2a wall-clock fields"
+  ],
+  "labels": []
+}

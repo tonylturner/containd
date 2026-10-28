@@ -106,7 +106,7 @@ func TestDecoderMalformedCPF(t *testing.T) {
 		// A valid first CIP item must not hide malformed later items.
 		trailing[:len(trailing)-1],
 	} {
-		if _, _, err := parseCPF(data); err == nil {
+		if result := parseCPF(data); result.Err == nil {
 			t.Fatal("malformed CPF accepted")
 		}
 		state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
@@ -120,8 +120,9 @@ func TestDecoderMalformedCPF(t *testing.T) {
 			}
 		}
 		if len(data) == len(trailing)-1 {
-			msg, err := ParseCIPMessage(data)
-			if err != nil || msg.ServiceCode != 0x4c || events[0].Attributes["service_code"] != uint8(0x4c) {
+			result := ParseCIPMessage(data)
+			msg := result.Message
+			if result.CPF.Err == nil || result.MessageError != nil || msg.ServiceCode != 0x4c || events[0].Attributes["service_code"] != uint8(0x4c) {
 				t.Fatal("malformed later item changed first CIP payload decoding")
 			}
 		}

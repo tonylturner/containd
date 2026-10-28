@@ -119,6 +119,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Apply ICS parsing policy to framed but undecoded content and exclude it from learned allowances.
+- Restrict default CIP port 2222 inspection to UDP; TCP/2222 remains containd's SSH service.
+- Infer IEC 104 for numeric port 2404 rules imported from Suricata or Snort.
+- Preserve CIP response metadata and MSP child identities; report unwalked protocol structure and malformed UDP encapsulations instead of silently omitting them.
+- Correct the EtherNet/IP command codes for ListServices (0x0004), ListIdentity (0x0063) and ListInterfaces (0x0064), and name IndicateStatus and Cancel.
+- DNP3 inspection now reconstructs transport segments and tracks fragmented application responses, exposing point indices and CROB values with explicit incomplete/unsupported coverage. Application fragments are still decoded independently, without atomic whole-response prevention.
+- Classify Modbus diagnostics (function 8) sub-functions by the specification; sub-functions 3, 10 and 20 are writes and unknown sub-functions are reported as undecoded.
 - ICAP verdicts are never cached: each scan reaches the server with its direction, HTTP headers and endpoints; native ClamAV caching is unchanged.
 - `services.av.failOpenIcs` is retired in favour of `scan.icsZones` and
   `scan.icsAssets`; a stored value still loads and is ignored, and the

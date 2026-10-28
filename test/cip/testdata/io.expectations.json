@@ -1,0 +1,74 @@
+{
+  "events": [
+    {
+      "frame": 4,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 17,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 18,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 20,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    }
+  ]
+}

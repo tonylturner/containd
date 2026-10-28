@@ -80,6 +80,10 @@ not a supported import format. These converters implement subsets, not complete
 compatibility with the source engines. Inspect conversion notes and evaluability
 before enabling imported rules.
 
+Suricata and Snort imports infer `iec104` for rules with numeric port 2404,
+including rules using `tcp`, `ip`, or port 2404 on either endpoint. Other ports
+continue to use the general transport or their known-protocol mapping.
+
 The supported Sigma subset includes metadata (`title`, `id`, `description`,
 `level`, `tags`, `logsource`), detection selections with `|contains`, `|regex`/`|re`,
 `|startswith`, `|endswith`, `|gt`, `|lt`, and conditions using `and`, `or`, `not`,

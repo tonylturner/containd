@@ -14,7 +14,7 @@ import (
 
 var _ dpi.StreamDecoder = (*Decoder)(nil)
 
-func (d *Decoder) Protocol() string { return "cip" }
+func (d *Decoder) Protocol() string { return eventfields.ProtoCIP }
 
 // ParseStream emits one frame per EtherNet/IP encapsulation. Unknown commands
 // still frame by length and retain their session events; only a length beyond
@@ -54,7 +54,7 @@ func malformedEvent(state *flow.State, data []byte, err error) dpi.Event {
 	}
 	return dpi.Event{
 		FlowID: id,
-		Proto:  "cip",
+		Proto:  eventfields.ProtoCIP,
 		Kind:   eventfields.KindMalformed,
 		Attributes: map[string]any{
 			eventfields.KeyError: err.Error(),

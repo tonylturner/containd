@@ -1,0 +1,52 @@
+[
+    {
+        "Id": "sha256:fcb85812896c6cff857b193d1e45edd406f71bdf14c447f5af381f1858cb142d",
+        "RepoTags": [
+            "containd-corpus-cip-reference:latest"
+        ],
+        "RepoDigests": [
+            "containd-corpus-cip-reference@sha256:fcb85812896c6cff857b193d1e45edd406f71bdf14c447f5af381f1858cb142d"
+        ],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-28T21:27:47.609530719Z",
+        "Config": {
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "DEBIAN_FRONTEND=noninteractive"
+            ],
+            "Cmd": [
+                "bash"
+            ]
+        },
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 693280713,
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:3b7c7ecdb9b2a2a7651551c07dc748fee9e27902c8b88c25cb3af3fbbc0a4b87",
+                "sha256:43f6f045b19ad5b5959c48194d590180ffbdae3e5b800e0cb4ee2265ffdda080",
+                "sha256:8e5143b0e5ed08138ae55fad839c48b6226fee047eaae6adf5b76a2d5420b145",
+                "sha256:930cce24a96bf702cccf9d2121e90ebaf9aa9442dee94a4b53f8088f495e4b50",
+                "sha256:01719d9410eca229f568791395cb88e2287a5a451b92c01b015a0f0511958236",
+                "sha256:99fa467435fd29fd2c5728da4efa0f86233e3e8348e65a968a844faba4441884"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-10-28T21:29:28.022019335Z"
+        },
+        "Descriptor": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "digest": "sha256:fcb85812896c6cff857b193d1e45edd406f71bdf14c447f5af381f1858cb142d",
+            "size": 856
+        },
+        "Identity": {
+            "Build": [
+                {
+                    "Ref": "87dww1zvd4pbgdlvbcm3w6lig",
+                    "CreatedAt": "2026-10-28T21:29:28.028101835Z"
+                }
+            ]
+        }
+    }
+]

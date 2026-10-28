@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func TestParseSuricataBasicAlertTCP(t *testing.T) {
@@ -185,6 +187,10 @@ func TestParseSuricataPortMapping(t *testing.T) {
 		{"44818", "cip"},
 		{"2222", "cip"},
 		{"20000", "dnp3"},
+		{"2404", "iec104"},
+		{"80", "http"},
+		{"443", "tls"},
+		{"53", "dns"},
 		{"4840", "tcp"},
 		{"102", "tcp"},
 		{"47808", "tcp"},
@@ -197,6 +203,27 @@ func TestParseSuricataPortMapping(t *testing.T) {
 		}
 		if r.Proto != tt.proto {
 			t.Fatalf("port %s: expected proto %s, got %s", tt.port, tt.proto, r.Proto)
+		}
+	}
+}
+
+func TestImportedIEC104Protocol(t *testing.T) {
+	for _, parser := range []struct {
+		name  string
+		parse func(string) (config.IDSRule, error)
+	}{{"suricata", ParseSuricataLine}, {"snort", ParseSnortLine}} {
+		for _, header := range []string{
+			"tcp any any -> any 2404",
+			"tcp any 2404 -> any any",
+			"ip any any -> any 2404",
+			"iec104 any any -> any any",
+		} {
+			t.Run(parser.name+"/"+header, func(t *testing.T) {
+				r, err := parser.parse(`alert ` + header + ` (msg:"IEC test"; sid:7001;)`)
+				if err != nil || r.Proto != "iec104" {
+					t.Fatalf("rule=%+v error=%v, want iec104", r, err)
+				}
+			})
 		}
 	}
 }

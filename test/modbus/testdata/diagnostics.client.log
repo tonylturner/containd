@@ -1,0 +1,48 @@
+<pymodbus.pdu.diag_message.ReturnQueryDataResponse object at 0xffff86fe0550>
+{"subfunction": 0, "response": "<pymodbus.pdu.diag_message.ReturnQueryDataResponse object at 0xffff86fe0550>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff86fe0690>
+<pymodbus.pdu.diag_message.RestartCommunicationsOptionResponse object at 0xffff86fe0590>
+{"subfunction": 1, "response": "<pymodbus.pdu.diag_message.RestartCommunicationsOptionResponse object at 0xffff86fe0590>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff86fe0510>
+<pymodbus.pdu.diag_message.ReturnDiagnosticRegisterResponse object at 0xffff86fe0510>
+{"subfunction": 2, "response": "<pymodbus.pdu.diag_message.ReturnDiagnosticRegisterResponse object at 0xffff86fe0510>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff86fe0550>
+<pymodbus.pdu.diag_message.ChangeAsciiInputDelimiterResponse object at 0xffff86fe0590>
+{"subfunction": 3, "response": "<pymodbus.pdu.diag_message.ChangeAsciiInputDelimiterResponse object at 0xffff86fe0590>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff86fe0690>
+<pymodbus.pdu.diag_message.ClearCountersResponse object at 0xffff86fe0650>
+{"subfunction": 10, "response": "<pymodbus.pdu.diag_message.ClearCountersResponse object at 0xffff86fe0650>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff86fe0690>
+<pymodbus.pdu.diag_message.ReturnBusMessageCountResponse object at 0xffff86fe0690>
+{"subfunction": 11, "response": "<pymodbus.pdu.diag_message.ReturnBusMessageCountResponse object at 0xffff86fe0690>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff86fe0590>
+<pymodbus.pdu.diag_message.ReturnBusCommunicationErrorCountResponse object at 0xffff86fe0590>
+{"subfunction": 12, "response": "<pymodbus.pdu.diag_message.ReturnBusCommunicationErrorCountResponse object at 0xffff86fe0590>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff86fe0650>
+<pymodbus.pdu.diag_message.ReturnBusExceptionErrorCountResponse object at 0xffff86fe0650>
+{"subfunction": 13, "response": "<pymodbus.pdu.diag_message.ReturnBusExceptionErrorCountResponse object at 0xffff86fe0650>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff86fe0690>
+<pymodbus.pdu.diag_message.ReturnDeviceMessageCountResponse object at 0xffff86fe0690>
+{"subfunction": 14, "response": "<pymodbus.pdu.diag_message.ReturnDeviceMessageCountResponse object at 0xffff86fe0690>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff87945290>
+<pymodbus.pdu.diag_message.ReturnDeviceNoResponseCountResponse object at 0xffff87967690>
+{"subfunction": 15, "response": "<pymodbus.pdu.diag_message.ReturnDeviceNoResponseCountResponse object at 0xffff87967690>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff87ede8d0>
+<pymodbus.pdu.diag_message.ReturnDeviceNAKCountResponse object at 0xffff87ede8d0>
+{"subfunction": 16, "response": "<pymodbus.pdu.diag_message.ReturnDeviceNAKCountResponse object at 0xffff87ede8d0>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff87ede910>
+<pymodbus.pdu.diag_message.ReturnDeviceBusyCountResponse object at 0xffff87945290>
+{"subfunction": 17, "response": "<pymodbus.pdu.diag_message.ReturnDeviceBusyCountResponse object at 0xffff87945290>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff87967690>
+<pymodbus.pdu.diag_message.ReturnDeviceBusCharacterOverrunCountResponse object at 0xffff87ede8d0>
+{"subfunction": 18, "response": "<pymodbus.pdu.diag_message.ReturnDeviceBusCharacterOverrunCountResponse object at 0xffff87ede8d0>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff872c9690>
+<pymodbus.pdu.diag_message.ReturnIopOverrunCountResponse object at 0xffff87945290>
+{"subfunction": 19, "response": "<pymodbus.pdu.diag_message.ReturnIopOverrunCountResponse object at 0xffff87945290>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff87d56e50>
+<pymodbus.pdu.diag_message.ClearOverrunCountResponse object at 0xffff87967690>
+{"subfunction": 20, "response": "<pymodbus.pdu.diag_message.ClearOverrunCountResponse object at 0xffff87967690>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff872c9690>
+<pymodbus.pdu.diag_message.ForceListenOnlyModeResponse object at 0xffff87945290>
+{"subfunction": 4, "response": "<pymodbus.pdu.diag_message.ForceListenOnlyModeResponse object at 0xffff87945290>"}
+<pymodbus.pdu.exceptionresponse.ExceptionResponse object at 0xffff879a15d0>
