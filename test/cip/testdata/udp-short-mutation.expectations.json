@@ -1,0 +1,10 @@
+{
+  "events": [
+    {
+      "frame": 1,
+      "kinds": [
+        "malformed"
+      ]
+    }
+  ]
+}

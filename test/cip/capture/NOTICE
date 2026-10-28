@@ -1,0 +1,9 @@
+CIPDIP, https://github.com/tonylturner/cipdip
+Source commit: 12c7397cf8d1a4d608c82ba3f15c788308636c57
+Copyright CIPDIP contributors. Licensed under Apache License 2.0.
+The generated traffic uses CIPDIP's original serializers and server handlers.
+No bundled CIPDIP captures are copied or replayed.
+
+Oracle: Wireshark / tshark 4.6.7 (GPL-2.0-or-later).
+PDML and TSV files are observations of the generated packets, not copied
+Wireshark source. Oracle generation requires a separately installed tshark.

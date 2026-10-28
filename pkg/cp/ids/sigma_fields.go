@@ -78,6 +78,9 @@ func decoderAttribute(field string) bool {
 	// Other keys emitted by the retained industrial decoders.
 	case "service_code", "address", "attribute_id",
 		"cip_path", "enip_command", "enip_command_code", "cpf_item_types", "instance_id", "is_control", "msp",
+		"enip_status", "enip_sender_context", "enip_options", "connection_id", "connected_sequence",
+		"response_reserved", "general_status", "additional_status_count", "cpf_item_count", "cpf_item_index", "cpf_data_item_type",
+		"multi_service_decoded_count", "msp_index", "connection_point", "io_context_known", "io_data_hex", "io_data_truncated", "sequence", "data_length",
 		"multi_service_count", "object_class", "object_class_name", "service_name",
 		"enip_session_handle", "destination_address", "function_name", "iin_flags",
 		"source_address",

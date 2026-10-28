@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "protocol": "cip",
+  "provenance": {
+    "source": "CIPDIP 12c7397cf8d1a4d608c82ba3f15c788308636c57; git archive SHA256 a65ed0b98598db257a7a4afc733650e9395bdd10537e271d178379cdd0f64c93",
+    "generator": "test/cip/capture/Dockerfile; golang:1.26.10@sha256:24a707af49702fa44f02785475d02fb752f6982d3e9c0afb7696e1f0204e7ce9; libpcap 1.10.5-2; tcpdump 4.99.5-2; source/dependency and recipe hashes in capture/",
+    "oracle": "tshark 4.6.7 b439fb7b47a9; -n -o tcp.desegment_tcp_streams:TRUE -o enip.desegment:TRUE -o enip.o2t_run_idle:TRUE -o enip.t2o_run_idle:FALSE -T pdml; export.py preserves object hierarchy",
+    "license": "Apache-2.0; original generated packets, no bundled captures; capture/NOTICE",
+    "topology": "CIPDIP API client 172.30.93.3 -> CIPDIP adapter server 172.30.93.2; private bridge containd-corpus-cip-net; no containd in path",
+    "capture_side": "tcpdump eth0 in server network namespace, Ethernet classic pcap",
+    "limitations": "Diagnostic capture, not successful conformance certification: response bits absent, no native UDP I/O, no connected explicit API, no emitted additional status or MSP 0x1e. Generation exits 1 on the logged intentional unknown-service server error.",
+    "mutation": "udp-short-mutation.pcap derives from explicit-io.pcap record 8: drop transport payload byte 47; TCP replaced with UDP 49152->44818; IPv4/UDP lengths and checksums updated. udp-enip-io.pcap filters original records 18/19 without changing bytes."
+  },
+  "scenarios": [
+    {
+      "name": "explicit-io",
+      "pcap": "explicit-io.pcap",
+      "oracle": "explicit-io.expected.tsv",
+      "expectations": "explicit-io.expectations.json",
+      "transport": "tcp",
+      "contiguous": true,
+      "oracle_frames": [
+        4,
+        6,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        20,
+        21,
+        22,
+        24
+      ],
+      "checksum_offload": "Docker bridge partial pseudo-header checksums retained; tshark identifies checksum offload",
+      "assets": [
+        "explicit-io.pdml",
+        "client.log",
+        "server.log",
+        "capture.log"
+      ]
+    },
+    {
+      "name": "udp-enip-io",
+      "pcap": "udp-enip-io.pcap",
+      "oracle": "udp-enip-io.expected.tsv",
+      "expectations": "udp-enip-io.expectations.json",
+      "transport": "udp",
+      "contiguous": false,
+      "oracle_frames": [
+        1,
+        2
+      ],
+      "checksum_offload": "Docker bridge partial pseudo-header checksums retained; tshark identifies checksum offload",
+      "assets": [
+        "udp-enip-io.pdml"
+      ],
+      "roles": [
+        {
+          "transport": "udp",
+          "client": "172.30.93.3:55157",
+          "server": "172.30.93.2:2222"
+        }
+      ]
+    },
+    {
+      "name": "udp-short-mutation",
+      "pcap": "udp-short-mutation.pcap",
+      "oracle": "udp-short-mutation.expected.tsv",
+      "expectations": "udp-short-mutation.expectations.json",
+      "transport": "udp",
+      "contiguous": false,
+      "oracle_frames": [
+        1
+      ],
+      "checksum_offload": "none; IPv4 and UDP checksums recomputed by derive.py",
+      "assets": [
+        "udp-short-mutation.pdml"
+      ],
+      "roles": [
+        {
+          "transport": "udp",
+          "client": "172.30.93.3:49152",
+          "server": "172.30.93.2:44818"
+        }
+      ]
+    }
+  ]
+}

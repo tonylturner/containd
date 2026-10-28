@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<?xml-stylesheet type="text/xsl" href="pdml2html.xsl"?>
+<!-- You can find pdml2html.xsl in /opt/homebrew/share/doc/wireshark or at https://gitlab.com/wireshark/wireshark/-/tree/master/resources/share/doc/wireshark/pdml2html.xsl. -->
+<pdml version="0" creator="wireshark/4.6.7" time="Wed Oct 28 16:49:46 2026" capture_file="test/cip/testdata/udp-short-mutation.pcap">
+<packet>
+  <proto name="geninfo" pos="0" showname="General information" size="89">
+    <field name="num" pos="0" show="1" showname="Number" value="1" size="89"/>
+    <field name="len" pos="0" show="89" showname="Frame Length" value="59" size="89"/>
+    <field name="caplen" pos="0" show="89" showname="Captured Length" value="59" size="89"/>
+    <field name="timestamp" pos="0" show="Oct 28, 2026 16:40:12.414729000 EDT" showname="Captured Time" value="1793220012.414729000" size="89"/>
+  </proto>
+  <proto name="frame" showname="Frame 1: Packet, 89 bytes on wire (712 bits), 89 bytes captured (712 bits)" size="89" pos="0">
+    <field name="frame.encap_type" showname="Encapsulation type: Ethernet (1)" size="0" pos="0" show="1"/>
+    <field name="frame.time" showname="Arrival Time: Oct 28, 2026 16:40:12.414729000 EDT" size="0" pos="0" show="2026-10-28T16:40:12.414729000-0400"/>
+    <field name="frame.time_utc" showname="UTC Arrival Time: Oct 28, 2026 20:40:12.414729000 UTC" size="0" pos="0" show="2026-10-28T20:40:12.414729000Z"/>
+    <field name="frame.time_epoch" showname="Epoch Arrival Time: 1793220012.414729000" size="0" pos="0" show="1793220012.414729000"/>
+    <field name="frame.offset_shift" showname="Time shift for this packet: 0.000000000 seconds" size="0" pos="0" show="0.000000000"/>
+    <field name="frame.time_relative" showname="Time since reference or first frame: 0.000000000 seconds" size="0" pos="0" show="0.000000000"/>
+    <field name="frame.number" showname="Frame Number: 1" size="0" pos="0" show="1"/>
+    <field name="frame.len" showname="Frame Length: 89 bytes (712 bits)" size="0" pos="0" show="89"/>
+    <field name="frame.cap_len" showname="Capture Length: 89 bytes (712 bits)" size="0" pos="0" show="89"/>
+    <field name="frame.marked" showname="Frame is marked: False" size="0" pos="0" show="False"/>
+    <field name="frame.ignored" showname="Frame is ignored: False" size="0" pos="0" show="False"/>
+    <field name="frame.protocols" showname="Protocols in frame: eth:ethertype:ip:udp:enip:cip" size="0" pos="0" show="eth:ethertype:ip:udp:enip:cip"/>
+    <field name="frame.encoding" showname="Character encoding: ASCII (0)" size="0" pos="0" show="0"/>
+  </proto>
+  <proto name="eth" showname="Ethernet II, Src: 5e:ee:1a:98:58:66, Dst: ce:54:a6:f5:07:28" size="14" pos="0">
+    <field name="eth.dst" showname="Destination: ce:54:a6:f5:07:28" size="6" pos="0" show="ce:54:a6:f5:07:28" value="ce54a6f50728">
+      <field name="eth.dst_resolved" showname="Destination (resolved): ce:54:a6:f5:07:28" hide="yes" size="6" pos="0" show="ce:54:a6:f5:07:28" value="ce54a6f50728"/>
+      <field name="eth.dst.oui" showname="Destination OUI: ce:54:a6" hide="yes" size="3" pos="0" show="13522086" value="ce54a6"/>
+      <field name="eth.dst.lg" showname=".... ..1. .... .... .... .... = LG bit: Locally administered address (this is NOT the factory default)" size="3" pos="0" show="True" value="1" unmaskedvalue="ce54a6"/>
+      <field name="eth.dst.ig" showname=".... ...0 .... .... .... .... = IG bit: Individual address (unicast)" size="3" pos="0" show="False" value="0" unmaskedvalue="ce54a6"/>
+      <field name="eth.addr" showname="Address: ce:54:a6:f5:07:28" hide="yes" size="6" pos="0" show="ce:54:a6:f5:07:28" value="ce54a6f50728"/>
+      <field name="eth.addr_resolved" showname="Address (resolved): ce:54:a6:f5:07:28" hide="yes" size="6" pos="0" show="ce:54:a6:f5:07:28" value="ce54a6f50728"/>
+      <field name="eth.addr.oui" showname="Address OUI: ce:54:a6" hide="yes" size="3" pos="0" show="13522086" value="ce54a6"/>
+      <field name="eth.lg" showname=".... ..1. .... .... .... .... = LG bit: Locally administered address (this is NOT the factory default)" hide="yes" size="3" pos="0" show="True" value="1" unmaskedvalue="ce54a6"/>
+      <field name="eth.ig" showname=".... ...0 .... .... .... .... = IG bit: Individual address (unicast)" hide="yes" size="3" pos="0" show="False" value="0" unmaskedvalue="ce54a6"/>
+    </field>
+    <field name="eth.src" showname="Source: 5e:ee:1a:98:58:66" size="6" pos="6" show="5e:ee:1a:98:58:66" value="5eee1a985866">
+      <field name="eth.src_resolved" showname="Source (resolved): 5e:ee:1a:98:58:66" hide="yes" size="6" pos="6" show="5e:ee:1a:98:58:66" value="5eee1a985866"/>
+      <field name="eth.src.oui" showname="Source OUI: 5e:ee:1a" hide="yes" size="3" pos="6" show="6221338" value="5eee1a"/>
+      <field name="eth.src.lg" showname=".... ..1. .... .... .... .... = LG bit: Locally administered address (this is NOT the factory default)" size="3" pos="6" show="True" value="1" unmaskedvalue="5eee1a"/>
+      <field name="eth.src.ig" showname=".... ...0 .... .... .... .... = IG bit: Individual address (unicast)" size="3" pos="6" show="False" value="0" unmaskedvalue="5eee1a"/>
+      <field name="eth.addr" showname="Address: 5e:ee:1a:98:58:66" hide="yes" size="6" pos="6" show="5e:ee:1a:98:58:66" value="5eee1a985866"/>
+      <field name="eth.addr_resolved" showname="Address (resolved): 5e:ee:1a:98:58:66" hide="yes" size="6" pos="6" show="5e:ee:1a:98:58:66" value="5eee1a985866"/>
+      <field name="eth.addr.oui" showname="Address OUI: 5e:ee:1a" hide="yes" size="3" pos="6" show="6221338" value="5eee1a"/>
+      <field name="eth.lg" showname=".... ..1. .... .... .... .... = LG bit: Locally administered address (this is NOT the factory default)" hide="yes" size="3" pos="6" show="True" value="1" unmaskedvalue="5eee1a"/>
+      <field name="eth.ig" showname=".... ...0 .... .... .... .... = IG bit: Individual address (unicast)" hide="yes" size="3" pos="6" show="False" value="0" unmaskedvalue="5eee1a"/>
+    </field>
+    <field name="eth.type" showname="Type: IPv4 (0x0800)" size="2" pos="12" show="0x0800" value="0800"/>
+    <field name="eth.stream" showname="Stream index: 0" size="0" pos="0" show="0"/>
+  </proto>
+  <proto name="ip" showname="Internet Protocol Version 4, Src: 172.30.93.3, Dst: 172.30.93.2" size="20" pos="14">
+    <field name="ip.version" showname="0100 .... = Version: 4" size="1" pos="14" show="4" value="45"/>
+    <field name="ip.hdr_len" showname=".... 0101 = Header Length: 20 bytes (5)" size="1" pos="14" show="20" value="45"/>
+    <field name="ip.dsfield" showname="Differentiated Services Field: 0x00 (DSCP: CS0, ECN: Not-ECT)" size="1" pos="15" show="0x00" value="00">
+      <field name="ip.dsfield.dscp" showname="0000 00.. = Differentiated Services Codepoint: Default (0)" size="1" pos="15" show="0" value="0" unmaskedvalue="00"/>
+      <field name="ip.dsfield.ecn" showname=".... ..00 = Explicit Congestion Notification: Not ECN-Capable Transport (0)" size="1" pos="15" show="0" value="0" unmaskedvalue="00"/>
+    </field>
+    <field name="ip.len" showname="Total Length: 75" size="2" pos="16" show="75" value="004b"/>
+    <field name="ip.id" showname="Identification: 0xbf33 (48947)" size="2" pos="18" show="0xbf33" value="bf33"/>
+    <field name="ip.flags" showname="010. .... = Flags: 0x2, Don&#x27;t fragment" size="1" pos="20" show="0x02" value="2" unmaskedvalue="40">
+      <field name="ip.flags.rb" showname="0... .... = Reserved bit: Not set" size="1" pos="20" show="False" value="0" unmaskedvalue="40"/>
+      <field name="ip.flags.df" showname=".1.. .... = Don&#x27;t fragment: Set" size="1" pos="20" show="True" value="1" unmaskedvalue="40"/>
+      <field name="ip.flags.mf" showname="..0. .... = More fragments: Not set" size="1" pos="20" show="False" value="0" unmaskedvalue="40"/>
+    </field>
+    <field name="ip.frag_offset" showname="...0 0000 0000 0000 = Fragment Offset: 0" size="2" pos="20" show="0" value="0" unmaskedvalue="4000"/>
+    <field name="ip.ttl" showname="Time to Live: 64" size="1" pos="22" show="64" value="40"/>
+    <field name="ip.proto" showname="Protocol: UDP (17)" size="1" pos="23" show="17" value="11"/>
+    <field name="ip.checksum" showname="Header Checksum: 0x692c [validation disabled]" size="2" pos="24" show="0x692c" value="692c"/>
+    <field name="ip.checksum.status" showname="Header checksum status: Unverified" size="0" pos="24" show="2"/>
+    <field name="ip.src" showname="Source Address: 172.30.93.3" size="4" pos="26" show="172.30.93.3" value="ac1e5d03"/>
+    <field name="ip.addr" showname="Source or Destination Address: 172.30.93.3" hide="yes" size="4" pos="26" show="172.30.93.3" value="ac1e5d03"/>
+    <field name="ip.src_host" showname="Source Host: 172.30.93.3" hide="yes" size="4" pos="26" show="172.30.93.3" value="ac1e5d03"/>
+    <field name="ip.host" showname="Source or Destination Host: 172.30.93.3" hide="yes" size="4" pos="26" show="172.30.93.3" value="ac1e5d03"/>
+    <field name="ip.dst" showname="Destination Address: 172.30.93.2" size="4" pos="30" show="172.30.93.2" value="ac1e5d02"/>
+    <field name="ip.addr" showname="Source or Destination Address: 172.30.93.2" hide="yes" size="4" pos="30" show="172.30.93.2" value="ac1e5d02"/>
+    <field name="ip.dst_host" showname="Destination Host: 172.30.93.2" hide="yes" size="4" pos="30" show="172.30.93.2" value="ac1e5d02"/>
+    <field name="ip.host" showname="Source or Destination Host: 172.30.93.2" hide="yes" size="4" pos="30" show="172.30.93.2" value="ac1e5d02"/>
+    <field name="ip.stream" showname="Stream index: 0" size="0" pos="34" show="0"/>
+  </proto>
+  <proto name="udp" showname="User Datagram Protocol, Src Port: 49152, Dst Port: 44818" size="8" pos="34">
+    <field name="udp.srcport" showname="Source Port: 49152" size="2" pos="34" show="49152" value="c000"/>
+    <field name="udp.dstport" showname="Destination Port: 44818" size="2" pos="36" show="44818" value="af12"/>
+    <field name="udp.port" showname="Source or Destination Port: 49152" hide="yes" size="2" pos="34" show="49152" value="c000"/>
+    <field name="udp.port" showname="Source or Destination Port: 44818" hide="yes" size="2" pos="36" show="44818" value="af12"/>
+    <field name="udp.length" showname="Length: 55" size="2" pos="38" show="55" value="0037"/>
+    <field name="udp.checksum" showname="Checksum: 0x8e4b [unverified]" size="2" pos="40" show="0x8e4b" value="8e4b"/>
+    <field name="udp.checksum.status" showname="Checksum Status: Unverified" size="0" pos="40" show="2"/>
+    <field name="udp.stream" showname="Stream index: 0" size="0" pos="42" show="0"/>
+    <field name="udp.stream.pnum" showname="Stream Packet Number: 1" size="0" pos="34" show="1"/>
+    <field name="" show="Timestamps" size="0" pos="34">
+      <field name="udp.time_relative" showname="Time since first frame: 0.000000000 seconds" size="0" pos="34" show="0.000000000"/>
+      <field name="udp.time_delta" showname="Time since previous frame: 0.000000000 seconds" size="0" pos="34" show="0.000000000"/>
+    </field>
+    <field name="udp.payload" showname="UDP payload (47 bytes)" size="47" pos="42" show="6f:00:18:00:01:00:00:00:00:00:00:00:a6:09:ea:5b:05:c6:93:45:00:00:00:00:00:00:00:00:00:00:02:00:00:00:00:00:b2:00:08:00:0e:03:20:04:24:65:30" value="6f0018000100000000000000a609ea5b05c6934500000000000000000000020000000000b20008000e032004246530"/>
+  </proto>
+  <proto name="enip" showname="EtherNet/IP (Industrial Protocol), Session: 0x00000001, Send RR Data" size="47" pos="42">
+    <field name="" show="Encapsulation Header" size="24" pos="42" value="6f0018000100000000000000a609ea5b05c6934500000000">
+      <field name="enip.command" showname="Command: Send RR Data (0x006f)" size="2" pos="42" show="0x006f" value="6f00"/>
+      <field name="enip.length" showname="Length: 24" size="2" pos="44" show="24" value="1800"/>
+      <field name="enip.session" showname="Session Handle: 0x00000001" size="4" pos="46" show="0x00000001" value="01000000"/>
+      <field name="enip.status" showname="Status: Success (0x00000000)" size="4" pos="50" show="0x00000000" value="00000000"/>
+      <field name="enip.context" showname="Sender Context: a609ea5b05c69345" size="8" pos="54" show="a6:09:ea:5b:05:c6:93:45" value="a609ea5b05c69345"/>
+      <field name="enip.options" showname="Options: 0x00000000" size="4" pos="62" show="0x00000000" value="00000000"/>
+    </field>
+    <field name="" show="Command Specific Data" size="23" pos="66" value="000000000000020000000000b20008000e032004246530">
+      <field name="enip.srrd.iface" showname="Interface Handle: CIP (0x00000000)" size="4" pos="66" show="0x00000000" value="00000000"/>
+      <field name="enip.timeout" showname="Timeout: 0" size="2" pos="70" show="0" value="0000"/>
+      <field name="enip.cpf.itemcount" showname="Item Count: 2" size="2" pos="72" show="2" value="0200">
+        <field name="enip.cpf.typeid" showname="Type ID: Null Address Item (0x0000)" size="2" pos="74" show="0x0000" value="0000">
+          <field name="enip.cpf.length" showname="Length: 0" size="2" pos="76" show="0" value="0000"/>
+        </field>
+        <field name="enip.cpf.typeid" showname="Type ID: Unconnected Data Item (0x00b2)" size="2" pos="78" show="0x00b2" value="b200">
+          <field name="enip.cpf.length" showname="Length: 8" size="2" pos="80" show="8" value="0800"/>
+          <field name="_ws.expert" showname="Expert Info (Error/Malformed): CPF Item Length Mismatch: Item Length 8, Remaining Data Length: 7" size="0" pos="78">
+            <field name="enip.malformed.cpf_item_length_mismatch" showname="CPF Item Length Mismatch: Item Length 8, Remaining Data Length: 7" size="0" pos="0" show="" value=""/>
+            <field name="_ws.expert.message" showname="Message: CPF Item Length Mismatch: Item Length 8, Remaining Data Length: 7" hide="yes" size="0" pos="0" show="CPF Item Length Mismatch: Item Length 8, Remaining Data Length: 7"/>
+            <field name="_ws.expert.severity" showname="Severity level: Error" size="0" pos="0" show="8388608"/>
+            <field name="_ws.expert.group" showname="Group: Malformed" size="0" pos="0" show="117440512"/>
+          </field>
+          <proto name="_ws.malformed" showname="Malformed Packet" hide="yes" size="0" pos="78"/>
+        </field>
+      </field>
+      <field name="_ws.expert" showname="Expert Info (Note/Protocol): CIP request without a response" size="0" pos="66">
+        <field name="cip.analysis.request_no_response" showname="CIP request without a response" size="0" pos="0" show="" value=""/>
+        <field name="_ws.expert.message" showname="Message: CIP request without a response" hide="yes" size="0" pos="0" show="CIP request without a response"/>
+        <field name="_ws.expert.severity" showname="Severity level: Note" size="0" pos="0" show="4194304"/>
+        <field name="_ws.expert.group" showname="Group: Protocol" size="0" pos="0" show="150994944"/>
+      </field>
+    </field>
+  </proto>
+  <proto name="cip" showname="Common Industrial Protocol" size="7" pos="82">
+    <field name="cip.service" showname="Service: Get Attribute Single (Request)" size="1" pos="82" show="0x0e" value="0e">
+      <field name="cip.rr" showname="0... .... = Request/Response: Request (0x0)" size="1" pos="82" show="0x00" value="0" unmaskedvalue="0e"/>
+      <field name="cip.sc" showname=".000 1110 = Service: Get Attribute Single (0x0e)" size="1" pos="82" show="0x0e" value="E" unmaskedvalue="0e"/>
+    </field>
+    <field name="cip.request_path_size" showname="Request Path Size: 3 words" size="1" pos="83" show="3" value="03"/>
+    <field name="" show="Request Path: " size="5" pos="84" value="2004246530"/>
+  </proto>
+  <proto name="_ws.malformed" showname="[Malformed Packet: CIP: length of contained item exceeds length of containing item]" size="0" pos="14">
+    <field name="_ws.expert" showname="Expert Info (Error/Malformed): Malformed Packet (Exception occurred)" size="0" pos="14">
+      <field name="_ws.malformed.expert" showname="Malformed Packet (Exception occurred)" size="0" pos="0" show="" value=""/>
+      <field name="_ws.expert.message" showname="Message: Malformed Packet (Exception occurred)" hide="yes" size="0" pos="0" show="Malformed Packet (Exception occurred)"/>
+      <field name="_ws.expert.severity" showname="Severity level: Error" size="0" pos="0" show="8388608"/>
+      <field name="_ws.expert.group" showname="Group: Malformed" size="0" pos="0" show="117440512"/>
+    </field>
+    <proto name="_ws.malformed" showname="Malformed Packet" hide="yes" size="0" pos="14"/>
+  </proto>
+</packet>
+
+
+</pdml>

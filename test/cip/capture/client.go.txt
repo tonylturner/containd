@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: Apache-2.0
+// Compiled inside the pinned CIPDIP module; serialization is CIPDIP's, not containd's.
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/tonylturner/cipdip/internal/cip/client"
+	"github.com/tonylturner/cipdip/internal/cip/protocol"
+)
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c := client.NewClient()
+	if err := c.Connect(ctx, os.Args[1], 44818); err != nil {
+		return err
+	}
+	read := protocol.CIPRequest{Service: 0x0e, Path: protocol.CIPPath{Class: 4, Instance: 101, Attribute: 3}}
+	write := protocol.CIPRequest{Service: 0x10, Path: protocol.CIPPath{Class: 4, Instance: 103, Attribute: 3}, Payload: []byte{1, 2, 3, 4, 5, 6, 7, 8}}
+	bad := protocol.CIPRequest{Service: 0x7e, Path: read.Path}
+	msp, err := client.BuildMultipleServiceRequest([]protocol.CIPRequest{read, write, bad})
+	if err != nil {
+		return err
+	}
+	for _, req := range []protocol.CIPRequest{read, write, bad, msp} {
+		resp, err := c.InvokeService(ctx, req)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("service=%02x status=%02x ext=%x payload=%x\n", resp.Service, resp.Status, resp.ExtStatus, resp.Payload)
+	}
+	conn, err := c.ForwardOpen(ctx, client.ConnectionParams{
+		Name: "corpus", Transport: "udp", OToTRPIMs: 100, TToORPIMs: 100,
+		OToTSizeBytes: 8, TToOSizeBytes: 8, Priority: "scheduled",
+		TransportClassTrigger: 1, Class: 4, Instance: 101,
+	})
+	if err != nil {
+		return err
+	}
+	if err := c.SendIOData(ctx, conn, []byte{1, 2, 3, 4, 5, 6, 7, 8}); err != nil {
+		return err
+	}
+	data, err := c.ReceiveIOData(ctx, conn)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("io=%x\n", data)
+	if err := c.ForwardClose(ctx, conn); err != nil {
+		return err
+	}
+	return c.Disconnect(ctx)
+}

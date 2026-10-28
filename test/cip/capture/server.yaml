@@ -1,0 +1,22 @@
+server:
+  name: corpus
+  personality: adapter
+  listen_ip: 0.0.0.0
+  tcp_port: 44818
+  udp_io_port: 2222
+  enable_udp_io: true
+adapter_assemblies:
+  - name: input
+    class: 4
+    instance: 101
+    attribute: 3
+    size_bytes: 8
+    update_pattern: static
+    writable: false
+  - name: output
+    class: 4
+    instance: 103
+    attribute: 3
+    size_bytes: 8
+    update_pattern: static
+    writable: true
