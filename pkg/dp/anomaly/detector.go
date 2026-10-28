@@ -69,14 +69,6 @@ func WithCrossProtocolDetection(enable bool) Option {
 	}
 }
 
-// WithNonStandardPortDetection controls whether ICS traffic on non-standard
-// ports is flagged. Default: true.
-func WithNonStandardPortDetection(enable bool) Option {
-	return func(d *Detector) {
-		d.nonStandardPortDetection = enable
-	}
-}
-
 const (
 	defaultWriteRateThreshold = 100
 	defaultTotalRateThreshold = 1000
@@ -93,7 +85,6 @@ type Detector struct {
 	dnp3RestartFromNonMaster  bool
 	cipProgramChangeDetection bool
 	crossProtocolDetection    bool
-	nonStandardPortDetection  bool
 
 	// Per-flow tracking of last transaction IDs (for Modbus request/response pairing).
 	// Key: "srcIP->dstIP"
@@ -124,7 +115,6 @@ func New(opts ...Option) *Detector {
 		dnp3RestartFromNonMaster:  true,
 		cipProgramChangeDetection: true,
 		crossProtocolDetection:    true,
-		nonStandardPortDetection:  true,
 		pendingTxns:               make(map[string]map[uint16]bool),
 		flowProtos:                make(map[string]map[string]bool),
 		writeRate:                 newRateTracker(),
@@ -503,8 +493,7 @@ func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	return out
 }
 
-// checkCrossProtocol detects multiple ICS protocols on the same flow and
-// ICS traffic on non-standard ports.
+// checkCrossProtocol detects multiple ICS protocols between the same hosts.
 func (d *Detector) checkCrossProtocol(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	var out []Anomaly
 	proto := ev.Proto
@@ -544,40 +533,10 @@ func (d *Detector) checkCrossProtocol(srcIP, dstIP string, ev dpi.Event) []Anoma
 		}
 	}
 
-	// Non-standard port detection.
-	if d.nonStandardPortDetection {
-		srcPort, _ := ev.Attributes["src_port"].(uint16)
-		dstPort, _ := ev.Attributes["dst_port"].(uint16)
-		if srcPort > 0 || dstPort > 0 {
-			if !isStandardPort(proto, srcPort) && !isStandardPort(proto, dstPort) {
-				out = append(out, Anomaly{
-					Type:     "protocol_violation",
-					Protocol: proto,
-					Severity: "low",
-					Message:  fmt.Sprintf("ICS protocol %s on non-standard ports (%d -> %d), possible tunneling", proto, srcPort, dstPort),
-					SourceIP: srcIP,
-					DestIP:   dstIP,
-					Attributes: map[string]any{
-						"src_port": srcPort,
-						"dst_port": dstPort,
-					},
-					Timestamp: ev.Timestamp,
-				})
-			}
-		}
-	}
-
 	return out
 }
 
 func isKnownICS(proto string) bool { return ics.Supported(proto) }
-
-func isStandardPort(proto string, port uint16) bool {
-	if port == 0 || !ics.Supported(proto) {
-		return true // unknown port or protocol, don't flag
-	}
-	return ics.IsDecoderPort(proto, port)
-}
 
 // rateTracker tracks events per minute per key using minute-granularity buckets.
 type rateTracker struct {
