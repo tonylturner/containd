@@ -9,25 +9,12 @@ import { SkeletonList } from "../../components/Skeleton";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState } from "../../components/EmptyState";
 import { Pagination, SearchBar } from "../../components/TableControls";
-import { describeICSEvidence, iec104AttributeRows } from "../events/iec104-evidence";
+import { iec104AttributeRows } from "../events/iec104-evidence";
 import { DetailRow, DetailSection, severityVariant } from "./alert-detail-parts";
 import { IEC104EvidencePanel } from "./iec104-alert-panel";
+import { alertView } from "./alert-view";
 
 const PAGE_SIZES = [10, 25, 50, 100];
-
-/** Alerts are IDS alerts plus IEC 104 enforcement evidence other than allows. */
-function alertView(ev: TelemetryEvent): { severity: string; message: string; ruleId: string } | null {
-  if (ev.proto === "ids" && ev.kind === "alert") {
-    return {
-      severity: String(ev.attributes?.["severity"] ?? "low"),
-      message: String(ev.attributes?.["message"] ?? ev.attributes?.["rule_id"] ?? "IDS alert"),
-      ruleId: String(ev.attributes?.["rule_id"] ?? ""),
-    };
-  }
-  const evidence = describeICSEvidence(ev);
-  if (!evidence?.alert) return null;
-  return { severity: evidence.severity, message: evidence.message, ruleId: "" };
-}
 
 export default function AlertsPage() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
@@ -81,10 +68,10 @@ export default function AlertsPage() {
       return view ? [{ ev, ...view }] : [];
     });
     if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(({ ev, message, ruleId, severity }) =>
-        message.toLowerCase().includes(q) || ruleId.toLowerCase().includes(q) ||
-          severity.toLowerCase().includes(q) || (ev.srcIp ?? "").includes(q) || (ev.dstIp ?? "").includes(q));
+      const q = search.trim().toLowerCase();
+      list = list.filter(({ ev, message, identifier, severity, protocol, description }) =>
+        [message, identifier?.value, severity, protocol, description, ev.srcIp, ev.dstIp]
+          .some((value) => value?.toLowerCase().includes(q)));
     }
     if (sevFilter) {
       list = list.filter((a) => a.severity === sevFilter);
@@ -155,7 +142,7 @@ export default function AlertsPage() {
 
       {/* Search */}
       <div className="mb-3 max-w-lg">
-        <SearchBar value={search} onChange={setSearch} placeholder="Search alerts by message, rule ID, IP..." className="w-full" />
+        <SearchBar value={search} onChange={setSearch} placeholder="Search alerts by message, ID, anomaly type, IP..." className="w-full" />
       </div>
 
       {alerts.length === 0 ? (
@@ -249,15 +236,11 @@ function formatHexDump(hexStr: string): { offset: string; hex: string; ascii: st
 }
 
 function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: () => void }) {
-  const evidence = describeICSEvidence(event);
-  if (evidence) return <IEC104EvidencePanel event={event} evidence={evidence} onClose={onClose} />;
+  const view = alertView(event);
+  if (!view) return null;
+  if (view.evidence) return <IEC104EvidencePanel event={event} evidence={view.evidence} onClose={onClose} />;
   const attrs = event.attributes ?? {};
-  const sev = String(attrs["severity"] ?? "low");
-  const msg = String(attrs["message"] ?? "IDS alert");
-  const ruleId = String(attrs["rule_id"] ?? "");
-  const desc = attrs["description"] as string | undefined;
-  const eventProto = String(attrs["event_proto"] ?? "");
-  const eventKind = String(attrs["event_kind"] ?? "");
+  const { severity: sev, message: msg, protocol: eventProto } = view;
   const sourceFormat = attrs["source_format"] as string | undefined;
   const refs = (attrs["references"] as string[] | undefined) ?? [];
   const cves = (attrs["cve"] as string[] | undefined) ?? [];
@@ -292,11 +275,11 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* Rule info */}
-        <DetailSection label="Rule">
-          <DetailRow label="Rule ID" value={ruleId} mono />
-          {desc && <DetailRow label="Description" value={desc} />}
-          <DetailRow label="Triggered by" value={`${eventProto} / ${eventKind}`} />
+        {/* Detection info */}
+        <DetailSection label={view.section}>
+          {view.identifier && <DetailRow label={view.identifier.label} value={view.identifier.value} mono />}
+          {view.description && <DetailRow label="Description" value={view.description} />}
+          {view.triggeredBy && <DetailRow label="Triggered by" value={view.triggeredBy} />}
           <DetailRow label="Time" value={new Date(event.timestamp).toLocaleString()} />
         </DetailSection>
 
