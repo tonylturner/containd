@@ -1,0 +1,38 @@
+{
+  "class": "captured malformer-to-lib60870-C endpoint traffic",
+  "coverage": [
+    "truncated APDU remains incomplete at EOF",
+    "APCI length below four produces a FrameError",
+    "invalid DCS values are malformed profile input",
+    "Type ID 104 is unsupported",
+    "APDUs split across TCP segments and coalesced in one segment"
+  ],
+  "labels": [
+    {
+      "frame": 4,
+      "kind": "incomplete",
+      "label": "truncated-apdu"
+    },
+    {
+      "frame": 16,
+      "kind": "frame_error",
+      "label": "apci-length-below-four",
+      "offset": 6
+    },
+    {
+      "frame": 28,
+      "kind": "malformed",
+      "label": "invalid-dcs-client-request"
+    },
+    {
+      "frame": 29,
+      "kind": "malformed",
+      "label": "invalid-dcs-server-response"
+    },
+    {
+      "frame": 37,
+      "kind": "unsupported",
+      "label": "unsupported-type-id-104"
+    }
+  ]
+}

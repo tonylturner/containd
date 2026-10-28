@@ -1,0 +1,9 @@
+{
+  "class": "captured lib60870-C endpoint traffic",
+  "coverage": [
+    "select-before-execute open and close commands",
+    "execute without a prior select",
+    "commands to an otherwise valid but policy-forbidden IOA"
+  ],
+  "labels": []
+}

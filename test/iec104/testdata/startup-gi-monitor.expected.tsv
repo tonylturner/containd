@@ -1,5 +1,3 @@
-# TShark (Wireshark) 4.6.7 (Git commit b439fb7b47a9): decode of startup-gi-monitor.pcap; one row per TCP segment carrying APDUs.
-# apci_type: 0x0=I 0x1=S 0x3=U. utype: 0x01 STARTDT act, 0x02 con, 0x04 STOPDT act, 0x08 con, 0x10 TESTFR act, 0x20 con.
 frame.number	ip.src	tcp.srcport	tcp.seq	tcp.len	iec60870_104.apdulen	iec60870_104.type	iec60870_104.utype	iec60870_104.tx	iec60870_104.rx	iec60870_asdu.typeid	iec60870_asdu.sq	iec60870_asdu.numix	iec60870_asdu.causetx	iec60870_asdu.nega	iec60870_asdu.test	iec60870_asdu.oa	iec60870_asdu.addr	iec60870_asdu.ioa	iec60870_asdu.diq	iec60870_asdu.qds	iec60870_asdu.float	iec60870_asdu.dco	iec60870_asdu.dco.se	iec60870_asdu.qoi	iec60870_asdu.cp56time	tcp.payload
 4	10.235.0.21	50240	1	6	4	0x00000003	0x00000001																			680407000000
 6	10.235.0.10	2404	1	6	4	0x00000003	0x00000002																			68040b000000

@@ -5,7 +5,7 @@ pcaps hold protocol bytes only; they contain no lib60870 code. They are
 Apache-2.0 test data under the repository licence. The programs that produced
 them (`test/iec104/endpoint/`) are GPLv3 and are not part of containd.
 
-Every byte here is **captured**, never hand-edited. The `malformed.pcap`
+Every pcap record here is **captured**, never hand-edited. The `malformed.pcap`
 scenarios come from the pure-Go `test/iec104/malformer` client (marked
 "malformer" below); all other traffic is lib60870-C on both ends.
 
@@ -32,8 +32,9 @@ test/iec104/capture/capture.sh            # writes into test/iec104/testdata/
 - `NAME.expected.tsv` is Wireshark's independent decode of each pcap
   (TShark 4.6.7), one row per TCP segment that carries APDUs; several APDUs
   or objects in one segment are comma-separated. It is a second-parser
-  cross-check for the containd decoder. Go tests read the pcaps directly,
-  without tshark or a separately extracted copy of their bytes (see below).
+  cross-check for the containd decoder. Its header and selected capture frames
+  are declared in `manifest.json`; hashes cover the pcaps, oracle tables and
+  expectation files.
 - Timestamps, ports, ISNs and the SHA256 sums change on every regeneration;
   the APDU bytes do not, apart from CP56Time2a values and the drifting feeder
   current.
@@ -147,38 +148,33 @@ those. The `abort-reconnect` evidence comes from
 
 ## Go decoder regression corpus
 
-`pkg/dp/ics/iec104/captures_test.go` reads all five pcaps listed in
-`SHA256SUMS`, verifies each SHA256, decodes Ethernet/IPv4/TCP, and groups
-payloads by directional connection tuple. Capture name, packet number,
-tuple and port-derived direction remain attached to each input. This is
-deterministic extraction at test time, with no generated fixture to drift.
-The reader intentionally rejects different pcap formats, truncated records,
-tuple reuse, TCP gaps or retransmissions rather than silently changing the
-corpus. Regeneration that introduces those features needs an explicit
-reader update; this helper is not a general TCP reassembler.
+`pkg/dp/ics/iec104/captures_test.go` loads `manifest.json` through the shared
+`corpus` package, which authenticates every referenced file and preserves
+capture record order, TCP sequence metadata, connection identity, and payload
+source spans. The captured SYN handshake determines client/server roles; the
+test does not infer them from port numbers.
 
-`TestReferenceCapturePackets` delivers the original segments, retaining
-incomplete bytes until an APDU completes, and compares the decoder with
-every Wireshark row: framing, sequences, U-functions, ASDU headers, object
-counts, addresses, values, command select bits, qualifiers, quality and
-timestamps. Float comparisons allow the TSV's float32 rounding. CP56Time2a
-has no wire timezone, so timestamp comparison uses wall-clock fields,
-not Wireshark's attached host offset.
+`TestReferenceCaptureManagerReplay` delivers every original capture through a
+fresh `dpi.Manager` in sequence and session-offset modes. It compares decoded
+APDU fields and per-object values with the TShark rows, including CP56Time2a
+wall-clock fields. Float comparisons allow the TSV's float32 rounding. It also
+replays split, coalesced, reordered and retransmitted derivatives through a
+fresh Manager and checks ordered per-connection, per-direction event
+semantics. Derivatives retain source spans and are not claimed as additional
+captured traffic.
 
-The explicit strictness exceptions are `malformed.pcap` frames 28 and 29
-(invalid DCS: malformed), 37 (Type 104: unsupported), and 16 (bad APCI
-length: framing error). Wireshark reports object fields for the first
-three, but containd deliberately emits no decoded object for these invalid
-APDUs; their headers and event kinds are checked instead. The truncated
-stream starting at frame 4 stays incomplete and emits no event.
+The malformed expectations file labels frame 4 as an incomplete EOF tail,
+frame 16 as an APCI `FrameError`, frames 28 and 29 as malformed invalid-DCS
+APDUs, and frame 37 as unsupported Type ID 104. Wireshark reports ordinary
+fields for invalid DCS and Type ID 104, but containd deliberately emits no
+decoded objects for those invalid APDUs; their headers and event kinds are
+checked instead. The malformed pcap is captured malformer-to-lib60870 traffic,
+not pristine lib60870 client traffic or a synthetic mutation.
 
-`TestReferenceCaptureStreamTransforms` coalesces each connection direction,
-splits it at every byte, and tests complete prefixes with partial-next-APDU
-tails. These are labelled transforms of captured bytes, including the
-capture's malformed and incomplete streams, not additional captured traffic.
-`FuzzAPCI` and `FuzzStream` use both original segments and coalesced streams;
-`FuzzASDU` uses every complete captured I-format APDU's ASDU. Synthetic
-fixtures remain separate and retain their existing coverage.
+`FuzzAPCI` and `FuzzStream` seed from `corpus.Seeds` and
+`corpus.StreamSeeds`; `FuzzASDU` extracts complete captured I-format ASDU
+payloads from stream seeds. Synthetic fixtures remain separate and retain
+their existing coverage.
 
 ```sh
 go test ./pkg/dp/ics/iec104/ -run '^TestReferenceCapture'
