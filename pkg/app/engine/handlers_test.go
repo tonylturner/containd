@@ -172,6 +172,13 @@ func TestEngineHTTPHelpersAndHandlers(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("get status = %d", rec.Code)
 		}
+		var observations []map[string]any
+		if err := json.NewDecoder(rec.Body).Decode(&observations); err != nil {
+			t.Fatalf("decode inventory observations: %v", err)
+		}
+		if len(observations) != 1 || observations[0]["ip"] != "192.0.2.10" {
+			t.Fatalf("unexpected inventory observations: %#v", observations)
+		}
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodDelete, "/internal/inventory", nil)
