@@ -4,9 +4,11 @@
 package templates
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 func TestListReturnsAllTemplates(t *testing.T) {
@@ -22,6 +24,44 @@ func TestListReturnsAllTemplates(t *testing.T) {
 		if !names[want] {
 			t.Errorf("expected template %q in List() output", want)
 		}
+	}
+}
+
+func TestICSTemplateProtocolPorts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		port      int
+		wirePort  string
+		ruleCount int
+	}{
+		{"modbus-read-only", ics.ModbusPort, "502", 2},
+		{"dnp3-secure-operations", ics.DNP3Port, "20000", 2},
+		{"cip-monitor-only", ics.CIPPort, "44818", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpl, err := Get(tc.name)
+			if err != nil {
+				t.Fatalf("Get(%q): %v", tc.name, err)
+			}
+			if len(tmpl.Rules) != tc.ruleCount {
+				t.Fatalf("rule count=%d, want %d", len(tmpl.Rules), tc.ruleCount)
+			}
+			for _, rule := range tmpl.Rules {
+				if len(rule.Protocols) != 1 {
+					t.Fatalf("rule %q protocol list=%v, want one protocol", rule.ID, rule.Protocols)
+				}
+				protocol := rule.Protocols[0]
+				if protocol.Name != "tcp" {
+					t.Errorf("rule %q protocol=%q, want tcp", rule.ID, protocol.Name)
+				}
+				if protocol.Port != tc.wirePort {
+					t.Errorf("rule %q wire port=%q, want %q", rule.ID, protocol.Port, tc.wirePort)
+				}
+				if protocol.Port != strconv.Itoa(tc.port) {
+					t.Errorf("rule %q port=%q, want registry port %d", rule.ID, protocol.Port, tc.port)
+				}
+			}
+		})
 	}
 }
 

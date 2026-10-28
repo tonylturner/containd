@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"syscall"
 )
 
 // Reset describes one payload-free IPv4 RST. It is sent with source Src to
@@ -49,7 +50,7 @@ func buildRST(r Reset) ([]byte, error) {
 	ip[0] = 0x45 // IPv4, 20-byte header
 	binary.BigEndian.PutUint16(ip[2:4], rstLen)
 	ip[8] = 64 // TTL
-	ip[9] = protoTCP
+	ip[9] = syscall.IPPROTO_TCP
 	s4, d4 := src.As4(), dst.As4()
 	copy(ip[12:16], s4[:])
 	copy(ip[16:20], d4[:])
@@ -66,8 +67,7 @@ func buildRST(r Reset) ([]byte, error) {
 }
 
 const (
-	protoTCP = 6
-	flagRST  = 0x04
+	flagRST = 0x04
 )
 
 // pseudoHeaderSum is the unfolded one's-complement sum of the IPv4 TCP
@@ -76,7 +76,7 @@ func pseudoHeaderSum(src, dst [4]byte, tcpLen int) uint32 {
 	var sum uint32
 	sum += uint32(binary.BigEndian.Uint16(src[0:2])) + uint32(binary.BigEndian.Uint16(src[2:4]))
 	sum += uint32(binary.BigEndian.Uint16(dst[0:2])) + uint32(binary.BigEndian.Uint16(dst[2:4]))
-	sum += protoTCP + uint32(tcpLen)
+	sum += uint32(syscall.IPPROTO_TCP) + uint32(tcpLen)
 	return sum
 }
 

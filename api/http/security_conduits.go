@@ -11,21 +11,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 // Well-known port-to-protocol name mappings.
 var portNameMap = map[int]string{
-	443:   "HTTPS",
-	80:    "HTTP",
-	22:    "SSH",
-	3389:  "RDP",
-	53:    "DNS",
-	161:   "SNMP",
-	502:   "Modbus",
-	20000: "DNP3",
-	44818: "EtherNet/IP",
-	2404:  "IEC 104",
-	2222:  "EtherNet/IP",
+	443:                 "HTTPS",
+	80:                  "HTTP",
+	22:                  "SSH",
+	3389:                "RDP",
+	53:                  "DNS",
+	161:                 "SNMP",
+	ics.ModbusPort:      "Modbus",
+	ics.DNP3Port:        "DNP3",
+	ics.CIPPort:         "EtherNet/IP",
+	ics.IEC104Port:      "IEC 104",
+	ics.CIPImplicitPort: "EtherNet/IP",
 }
 
 // Ports considered encrypted for TLS enforcement check.
@@ -39,9 +40,13 @@ var plaintextPorts = map[int]bool{
 }
 
 // ICS protocol ports.
-var icsPorts = map[int]bool{
-	502: true, 20000: true, 44818: true, 2404: true, 2222: true,
-}
+var icsPorts = func() map[int]bool {
+	ports := make(map[int]bool)
+	for _, decoderPort := range ics.DecoderPorts() {
+		ports[int(decoderPort.Port)] = true
+	}
+	return ports
+}()
 
 // Admin protocol names for MITRE mapping.
 var adminProtos = map[string]bool{
