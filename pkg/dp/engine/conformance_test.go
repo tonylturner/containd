@@ -163,7 +163,7 @@ func TestConformanceAlertDedupAndFlowEnd(t *testing.T) {
 	if !reflect.DeepEqual(codes, []string{"cip.c"}) {
 		t.Fatalf("new alert codes = %v", codes)
 	}
-	if e.conformance.conns[conformanceKey(st)].codes["cip.b"] != 3 {
+	if e.conformance.conns[conformanceKey(st)].codes[inspectionFinding{field: eventfields.KeyConformance, code: "cip.b"}] != 3 {
 		t.Fatal("repeats did not count")
 	}
 	other := flow.NewState(st.Key, time.Now())
@@ -194,7 +194,7 @@ func TestConformanceBoundedState(t *testing.T) {
 	for i := range codes {
 		codes[i] = strings.Repeat("a", i+1)
 	}
-	if len(a.fresh(st, codes)) != conformanceMaxCodes || a.suppressed != 1 {
+	if len(a.fresh(st, eventfields.KeyConformance, codes)) != conformanceMaxCodes || a.suppressed != 1 {
 		t.Fatal("per-connection code bound not applied")
 	}
 	for i := 0; i < conformanceMaxConnections-1; i++ {
@@ -202,7 +202,7 @@ func TestConformanceBoundedState(t *testing.T) {
 	}
 	other := flow.NewState(st.Key, time.Now())
 	other.Key.SrcPort++
-	if len(a.fresh(other, []string{"cip.a"})) != 0 {
+	if len(a.fresh(other, eventfields.KeyConformance, []string{"cip.a"})) != 0 {
 		t.Fatal("connection bound not applied")
 	}
 }

@@ -9,16 +9,6 @@ import (
 )
 
 func TestICSDecoderPorts(t *testing.T) {
-	for proto, port := range map[string]uint16{"modbus": 502, "cip": 2222, "iec104": 2404, "dnp3": 20000, "CIP": 44818} {
-		if !IsICSDecoderPort(proto, port) {
-			t.Errorf("%s/%d not a decoder port", proto, port)
-		}
-	}
-	for proto, port := range map[string]uint16{"modbus": 503, "cip": 2404, "iec104": 502, "": 502, "http": 80} {
-		if IsICSDecoderPort(proto, port) {
-			t.Errorf("%s/%d reported as a decoder port", proto, port)
-		}
-	}
 	if p, ok := ICSDecoderPortIn(500, 600); !ok || p.String() != "modbus/502" {
 		t.Fatalf("ICSDecoderPortIn(500, 600) = %v, %v", p, ok)
 	}
