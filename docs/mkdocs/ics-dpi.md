@@ -315,12 +315,17 @@ UDP port 44818 carries encapsulation commands such as ListIdentity, decoded like
 | CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; responses retain `response_reserved`, `general_status`, `additional_status_count` and `additional_status` when present; MSP parents carry `multi_service_count` and `multi_service_decoded_count`; each child carries `msp: true`, `msp_index` and `msp_index_path` |
 
 MSP sub-events retain encapsulation and CPF/response metadata; inspection is
-bounded to 32 children total and nesting depth 8. `cip.response_reserved`,
-`cip.msp_response_mismatch` and `cip.encapsulation_length` are conformance
-codes. Undecoded codes are `cip.msp_limit`, `cip.msp_nesting`,
-`cip.epath_unsupported`, `cip.extra_data_item`, `cip.cpf_item_unsupported`,
-`cip.service_payload_unsupported` and
-`cip.encapsulation_payload_unsupported`. Non-CPF commands such as
+bounded to 32 children total and nesting depth 8. CIP wire violations carry
+`conformance` codes: `cip.unknown_command`, `cip.encapsulation_length`,
+`cip.cpf_layout`, `cip.item_truncated`, `cip.message_short`,
+`cip.epath_truncated`, `cip.msp_layout`, `cip.response_reserved` and
+`cip.msp_response_mismatch`. Protocol structure the decoder did not walk
+carries `undecoded` codes: `cip.msp_limit`, `cip.msp_nesting`,
+`cip.epath_unsupported`, `cip.extra_data_item`, `cip.cpf_item_unsupported`
+(unknown CPF item types only) and `cip.encapsulation_payload_unsupported`
+(bodies of unknown encapsulation commands). Attribute values, service
+parameters and reply data, known command bodies and known CPF metadata items
+are data of a decoded operation and carry no undecoded code. Non-CPF commands such as
 RegisterSession have no `cpf_item_types`. The encapsulation fields replace
 `command`, `command_code` and `session_handle`; CIP events do not emit aliases.
 
