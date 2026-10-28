@@ -71,8 +71,10 @@ func New() *Learner {
 
 // RecordEvent updates the learned profile for a communication pair based on a DPI event.
 func (l *Learner) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
-	if codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyConformance); len(codes) > 0 {
-		return
+	for _, key := range []string{eventfields.KeyConformance, eventfields.KeyUndecoded} {
+		if codes, _ := eventfields.Strings(ev.Attributes, key); len(codes) > 0 {
+			return
+		}
 	}
 	proto := strings.ToLower(ev.Proto)
 	if !ics.Learnable(proto) || !isRequestEvent(proto, ev) {

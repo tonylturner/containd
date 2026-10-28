@@ -18,7 +18,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
-	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/itdpi"
@@ -80,7 +79,7 @@ func (e *Engine) recordLearnEvents(srcIP, dstIP string, evs []dpi.Event) {
 		return
 	}
 	for _, ev := range evs {
-		if codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyConformance); learnableICSEvent(ev) && len(codes) == 0 {
+		if learnableICSEvent(ev) && !hasInspectionFindings(ev) {
 			e.learner.RecordEvent(srcIP, dstIP, ev)
 		}
 	}

@@ -92,7 +92,7 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 		if !denied.Denies() {
 			v, matched = e.evaluateVerdictMatch(ctx, applyDefault)
 		}
-		if codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyConformance); len(codes) > 0 {
+		if hasInspectionFindings(ev) {
 			scope := e.conformanceScope(state, pkt, ev.Proto)
 			strict := scope != nil && ics.EffectiveParsing(modes, strings.ToLower(ev.Proto)) == ics.Strict
 			// A default is not a decoded rule denial. Strict decides this

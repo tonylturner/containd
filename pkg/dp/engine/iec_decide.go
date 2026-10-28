@@ -34,7 +34,7 @@ func (d iecDecision) enforced() bool { return d.decision == decisionDeny }
 // and unframeable bytes are denied without a rule; everything else is
 // matched against the IEC104 rules only, with whatever fields the decoder
 // read, and no match is DENY in the envelope mode. Under strict parsing an
-// event with conformance findings is denied before any ALLOW and instead of
+// event with conformance or undecoded findings is denied before any ALLOW and instead of
 // the default, with reason nonconformant; a matched DENY keeps its own
 // reason. In a learn envelope, or under a learn-mode rule, a deny is
 // would_drop.
@@ -77,7 +77,7 @@ func (t *iecTable) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
 // evidence of a lost frame boundary or a stream fault rather than content.
 func iecEventDenialReason(ev dpi.Event) string {
 	switch {
-	case ev.Kind == iecKindMalformed && len(iecFindings(ev)) == 0:
+	case ev.Kind == iecKindMalformed && !hasInspectionFindings(ev):
 		return reasonMalformed
 	case iecBroadcast(ev.Attributes):
 		return reasonBroadcast
@@ -86,18 +86,12 @@ func iecEventDenialReason(ev dpi.Event) string {
 	}
 }
 
-// iecFindings returns the conformance codes of an event.
-func iecFindings(ev dpi.Event) []string {
-	codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyConformance)
-	return codes
-}
-
 // iecStrictPreempts reports content that strict parsing denies before any
-// ALLOW: an event with conformance findings. Shared with preview, where a
-// candidate ALLOW can therefore never match it, while a candidate DENY
+// ALLOW: an event with conformance or undecoded findings. Shared with preview,
+// where a candidate ALLOW can therefore never match it, while a candidate DENY
 // still does.
 func iecStrictPreempts(ev dpi.Event, parsing ics.Parsing) bool {
-	return parsing == ics.Strict && len(iecFindings(ev)) > 0
+	return parsing == ics.Strict && hasInspectionFindings(ev)
 }
 
 // iecContext builds the rule context of one IEC104 event.
@@ -166,7 +160,7 @@ func (t *iecTable) judgeLocked(s *iecSession, evs []dpi.Event, now time.Time) ie
 		if d.decision != decisionAllow || d.log {
 			j.events = append(j.events, s.decisionEvent(ev, d, now))
 		}
-		if len(iecFindings(ev)) > 0 {
+		if hasInspectionFindings(ev) {
 			j.findings = append(j.findings, iecFinding{ev: ev, decision: d.decision})
 		}
 		if t.reconnectLocked(s, ev) {

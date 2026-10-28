@@ -69,11 +69,23 @@ func DecoderPortIn(lo, hi uint16) (DecoderPort, bool) {
 }
 
 // IsDecoderPort reports whether port is a fixed server port of the named
-// decoder on any transport. The name is matched case-insensitively.
+// decoder on any transport. Port-only anomaly observations use this when
+// transport evidence is unavailable.
 func IsDecoderPort(protocol string, port uint16) bool {
 	protocol = strings.ToLower(protocol)
 	for _, p := range decoderPorts {
 		if p.Protocol == protocol && p.Port == port {
+			return true
+		}
+	}
+	return false
+}
+
+// IsProtocolPortOn reports whether port is a fixed server port of the named
+// decoder on transport (an IP protocol number). Names are case-insensitive.
+func IsProtocolPortOn(protocol string, transport uint8, port uint16) bool {
+	for _, p := range decoderPorts {
+		if strings.EqualFold(p.Protocol, protocol) && p.Transport == transport && p.Port == port {
 			return true
 		}
 	}
