@@ -63,7 +63,6 @@ type CIPMessage struct {
 	Data        []byte
 	Response    *ResponseHeader
 	Conformance []string
-	Undecoded   []string
 }
 
 // ResponseHeader retains every complete wire field, including a partial
@@ -78,13 +77,15 @@ type ResponseHeader struct {
 // commandNames maps EtherNet/IP encapsulation command codes to names.
 var commandNames = map[uint16]string{
 	0x0000: "NOP",
-	0x0001: "ListServices",
-	0x0004: "ListIdentity",
-	0x0063: "ListInterfaces",
+	0x0004: "ListServices",
+	0x0063: "ListIdentity",
+	0x0064: "ListInterfaces",
 	0x0065: "RegisterSession",
 	0x0066: "UnregisterSession",
 	0x006F: "SendRRData",
 	0x0070: "SendUnitData",
+	0x0072: "IndicateStatus",
+	0x0073: "Cancel",
 }
 
 // serviceNames maps CIP service codes to names.
@@ -295,13 +296,6 @@ func ParseCIPMessage(data []byte) ExplicitResult {
 	return result
 }
 
-func setMessagePayload(msg *CIPMessage, data []byte) {
-	msg.Data = data
-	if len(data) > 0 && !hasMSPBody(msg) {
-		msg.Undecoded = []string{"cip.service_payload_unsupported"}
-	}
-}
-
 // parseCIPFromItem parses the CIP service header from an item's data.
 func parseCIPFromItem(data []byte) (*CIPMessage, error) {
 	if len(data) == 0 {
@@ -333,7 +327,7 @@ func parseCIPFromItem(data []byte) (*CIPMessage, error) {
 		if offset > len(data) {
 			return msg, ErrCIPTooShort
 		}
-		setMessagePayload(msg, data[offset:])
+		msg.Data = data[offset:]
 		return msg, nil
 	}
 	if len(data) < 2 {
@@ -345,6 +339,6 @@ func parseCIPFromItem(data []byte) (*CIPMessage, error) {
 		return msg, ErrPathTruncated
 	}
 	msg.Path = data[2 : 2+pathBytes]
-	setMessagePayload(msg, data[2+pathBytes:])
+	msg.Data = data[2+pathBytes:]
 	return msg, nil
 }

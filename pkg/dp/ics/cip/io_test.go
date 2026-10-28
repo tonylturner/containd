@@ -154,7 +154,7 @@ func TestNativeIOPartialFields(t *testing.T) {
 }
 
 func TestUDPEncapsulatedDiscovery(t *testing.T) {
-	for _, command := range []uint16{0x0001, 0x0004, 0x0063} {
+	for _, command := range []uint16{0x0004, 0x0063, 0x0064} {
 		for _, reverse := range []bool{false, true} {
 			st := cipState()
 			st.Key.Proto, st.Key.DstPort = 17, 44818
@@ -173,7 +173,7 @@ func TestUDPEncapsulatedDiscovery(t *testing.T) {
 
 func FuzzNativeIO(f *testing.F) {
 	for _, fixture := range captureFixtures(f) {
-		if fixture.Name != "udp-enip-io" {
+		if fixture.Spec.Transport != "udp" {
 			continue
 		}
 		for _, seed := range corpus.Seeds(fixture) {

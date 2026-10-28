@@ -1,0 +1,14 @@
+[INFO] Registered session 1
+[INFO] Send request: service=0xe epath=[classId=1 objectId=1 attributeId=1]
+status=0x0 additional=
+[INFO] Send request: service=0x10 epath=[classId=4 objectId=154 attributeId=3]
+status=0x0 additional=
+[INFO] Send request: service=0xe epath=[classId=4 objectId=154 attributeId=3]
+status=0x0 additional=
+[INFO] Send request: service=0xe epath=[classId=1 objectId=1 attributeId=99]
+status=0x14 additional=
+[INFO] Send request: service=0x10 epath=[classId=4 objectId=154 attributeId=3]
+status=0x13 additional=
+[INFO] Send request: service=0x54 epath=[classId=6 objectId=1]
+status=0x1 additional=0x12f,
+[INFO] Unregistered session 1

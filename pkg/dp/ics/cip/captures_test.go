@@ -2,6 +2,7 @@
 package cip
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -96,8 +97,12 @@ func TestIndependentCaptures(t *testing.T) {
 }
 
 type captureExpectation struct {
-	Frame       int      `json:"frame"`
-	Kinds       []string `json:"kinds"`
+	Frame   int                        `json:"frame"`
+	Objects []captureObjectExpectation `json:"objects"`
+}
+
+type captureObjectExpectation struct {
+	Kind        string   `json:"kind"`
 	Conformance []string `json:"conformance"`
 	Undecoded   []string `json:"undecoded"`
 }
@@ -119,19 +124,23 @@ func checkCaptureOracle(t testing.TB, fixture corpus.Fixture, steps []corpus.Ste
 	total := 0
 	for _, want := range expected {
 		got := events[want.Frame]
-		if len(got) != len(want.Kinds) {
-			t.Fatalf("frame %d: events=%v want kinds=%v", want.Frame, got, want.Kinds)
+		if len(got) != len(want.Objects) {
+			t.Fatalf("frame %d: events=%v want objects=%v", want.Frame, got, want.Objects)
 		}
 		total += len(got)
 		for i, event := range got {
-			if event.Kind != want.Kinds[i] {
+			object := want.Objects[i]
+			if event.Kind != object.Kind {
 				t.Fatalf("frame %d object %d: kind=%s", want.Frame, i, event.Kind)
 			}
-		}
-		for key, codes := range map[string][]string{eventfields.KeyConformance: want.Conformance, eventfields.KeyUndecoded: want.Undecoded} {
-			gotCodes, _ := eventfields.Strings(got[0].Attributes, key)
-			if !reflect.DeepEqual(gotCodes, codes) {
-				t.Fatalf("frame %d: %s=%v want=%v", want.Frame, key, gotCodes, codes)
+			for key, codes := range map[string][]string{eventfields.KeyConformance: object.Conformance, eventfields.KeyUndecoded: object.Undecoded} {
+				gotCodes, _ := eventfields.Strings(event.Attributes, key)
+				if fixture.Name != "udp-short-mutation" && len(gotCodes) != 0 {
+					t.Fatalf("reference traffic has %s=%v", key, gotCodes)
+				}
+				if !reflect.DeepEqual(gotCodes, codes) && !(len(gotCodes) == 0 && len(codes) == 0) {
+					t.Fatalf("frame %d object %d: %s=%v want=%v", want.Frame, i, key, gotCodes, codes)
+				}
 			}
 		}
 	}
@@ -160,6 +169,9 @@ func checkCaptureOracle(t testing.TB, fixture corpus.Fixture, steps []corpus.Ste
 			"enip.command": "enip_command_code", "enip.status": "enip_status", "enip.session": "enip_session_handle",
 			"cip.sc": "service_code", "cip.genstat": "general_status", "cip.class": "object_class",
 			"cip.instance": "instance_id", "cip.attribute": "attribute_id", "cip.msp.num_services": "multi_service_count",
+			"cip.addstat_size": "additional_status_count", "enip.cpf.itemcount": "cpf_item_count",
+			"enip.cpf.cai.connid": "connection_id", "enip.cpf.sai.connid": "connection_id",
+			"enip.cpf.sai.seq": "sequence",
 		} {
 			value := row.Fields[oracleKey]
 			if value == "" {
@@ -181,6 +193,67 @@ func checkCaptureOracle(t testing.TB, fixture corpus.Fixture, steps []corpus.Ste
 			}
 			if event.Kind != kind {
 				t.Fatalf("frame %d: wire bit kind=%s got=%s", row.Frame, kind, event.Kind)
+			}
+		}
+		checkCaptureStructuredOracle(t, fixture, row, event)
+	}
+}
+
+func checkCaptureStructuredOracle(t testing.TB, fixture corpus.Fixture, row corpus.OracleRow, event dpi.Event) {
+	t.Helper()
+	if row.Fields["cip.sc"] != "" && row.Fields["cip.rr"] == "0x01" {
+		var want []uint16
+		if err := json.Unmarshal([]byte(row.Fields["additional_status.json"]), &want); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := event.Attributes["additional_status"].([]uint16)
+		if !ok || !reflect.DeepEqual(got, want) {
+			t.Fatalf("frame %d object %d: additional_status=%v oracle=%v", row.Frame, row.Object, got, want)
+		}
+		// tshark's size-zero request path annotations are not wire evidence.
+		for _, key := range []string{"object_class", "instance_id", "attribute_id", "address"} {
+			if _, present := event.Attributes[key]; present {
+				t.Fatalf("response invented %s", key)
+			}
+		}
+	}
+	var types, lengths []uint16
+	for key, target := range map[string]*[]uint16{"cpf_types.json": &types, "cpf_lengths.json": &lengths} {
+		if err := json.Unmarshal([]byte(row.Fields[key]), target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(types) != 0 {
+		names := make([]string, len(types))
+		for i, item := range types {
+			names[i] = fmt.Sprintf("0x%04x", item)
+		}
+		if event.Attributes["cpf_item_types"] != strings.Join(names, ",") {
+			t.Fatalf("frame %d: CPF types=%v oracle=%v", row.Frame, event.Attributes["cpf_item_types"], types)
+		}
+	}
+	if fixture.Spec.Transport == "tcp" && row.Fields["cip.seq"] != "" {
+		want, err := strconv.ParseUint(row.Fields["cip.seq"], 0, 16)
+		got, ok := eventfields.Uint16(event.Attributes, "connected_sequence")
+		if err != nil || !ok || uint64(got) != want {
+			t.Fatalf("frame %d: connected sequence=%v oracle=%v", row.Frame, got, want)
+		}
+	}
+	if fixture.Name == "native-io" {
+		got, ok := eventfields.Uint16(event.Attributes, "data_length")
+		if !ok || len(lengths) != 2 || got != lengths[1] {
+			t.Fatalf("frame %d: I/O length=%v oracle=%v", row.Frame, got, lengths)
+		}
+		payload, err := hex.DecodeString(strings.ReplaceAll(row.Fields["udp.payload"], ":", ""))
+		if err != nil || len(payload) < 18 || event.Attributes["io_data_hex"] != hex.EncodeToString(payload[18:]) {
+			t.Fatalf("frame %d: opaque I/O bytes differ from capture", row.Frame)
+		}
+		if event.Attributes["io_context_known"] != false {
+			t.Fatal("inferred I/O context without connection tracking")
+		}
+		for _, key := range []string{"service_code", "function_code", "is_write", "transport_class", "cip_sequence"} {
+			if _, present := event.Attributes[key]; present {
+				t.Fatalf("opaque I/O invented %s", key)
 			}
 		}
 	}

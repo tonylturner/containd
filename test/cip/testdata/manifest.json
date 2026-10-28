@@ -2,22 +2,23 @@
   "version": 1,
   "protocol": "cip",
   "provenance": {
-    "source": "CIPDIP 12c7397cf8d1a4d608c82ba3f15c788308636c57; git archive SHA256 a65ed0b98598db257a7a4afc733650e9395bdd10537e271d178379cdd0f64c93",
-    "generator": "test/cip/capture/Dockerfile; golang:1.26.10@sha256:24a707af49702fa44f02785475d02fb752f6982d3e9c0afb7696e1f0204e7ce9; libpcap 1.10.5-2; tcpdump 4.99.5-2; source/dependency and recipe hashes in capture/",
-    "oracle": "tshark 4.6.7 b439fb7b47a9; -n -o tcp.desegment_tcp_streams:TRUE -o enip.desegment:TRUE -o enip.o2t_run_idle:TRUE -o enip.t2o_run_idle:FALSE -T pdml; export.py preserves object hierarchy",
-    "license": "Apache-2.0; original generated packets, no bundled captures; capture/NOTICE",
-    "topology": "CIPDIP API client 172.30.93.3 -> CIPDIP adapter server 172.30.93.2; private bridge containd-corpus-cip-net; no containd in path",
-    "capture_side": "tcpdump eth0 in server network namespace, Ethernet classic pcap",
-    "limitations": "Diagnostic capture, not successful conformance certification: response bits absent, no native UDP I/O, no connected explicit API, no emitted additional status or MSP 0x1e. Generation exits 1 on the logged intentional unknown-service server error.",
-    "mutation": "udp-short-mutation.pcap derives from explicit-io.pcap record 8: drop transport payload byte 47; TCP replaced with UDP 49152->44818; IPv4/UDP lengths and checksums updated. udp-enip-io.pcap filters original records 18/19 without changing bytes."
+    "source": "{\n  \"opener\": {\n    \"commit\": \"0e1ab7ee5c272950c0dc8daf7793008d7a518912\",\n    \"url\": \"https://codeload.github.com/EIPStackGroup/OpENer/tar.gz/0e1ab7ee5c272950c0dc8daf7793008d7a518912\",\n    \"sha256\": \"5b01333bdc300c1410cf9e02d33a564320b7a6094786a047065a7ec14b21d945\"\n  },\n  \"eipscanner\": {\n    \"commit\": \"12c89a57ec2e7449efb1348be52af10be9ef9701\",\n    \"url\": \"https://codeload.github.com/nimbuscontrols/EIPScanner/tar.gz/12c89a57ec2e7449efb1348be52af10be9ef9701\",\n    \"sha256\": \"3efbb95bff91501328b5899dd635cfee61ec11f59f3ad7609812fb65211ddc63\"\n  },\n  \"cpppo\": {\n    \"version\": \"4.4.3\",\n    \"commit\": \"00e38df798ed45b35c15454ef376cde7fca76cd2\",\n    \"url\": \"https://codeload.github.com/pjkundert/cpppo/tar.gz/00e38df798ed45b35c15454ef376cde7fca76cd2\",\n    \"sha256\": \"de0aaaf0b1e340733a3b48a4501a08d4cd1c18c7b0be9ada2603a16cf5e34f5d\"\n  }\n}",
+    "generator": "generator.Dockerfile; Debian bookworm base pinned by digest and packages from snapshot 20261001T000000Z; generator-image.json and generator-packages.txt; unmodified OpENer POSIX sample, cpppo 4.4.3 and EIPScanner; Release CMake; pinned greenery dependency",
+    "oracle": "tshark 4.6.7 b439fb7b47a9; -n -o tcp.desegment_tcp_streams:TRUE -o enip.desegment:TRUE -o enip.o2t_run_idle:TRUE -o enip.t2o_run_idle:FALSE -T pdml; gzip mtime=0; size-zero inferred paths excluded from TSV",
+    "license": "Apache-2.0 fixtures and local driver; BSD-style OpENer, GPL-3.0-or-later cpppo and MIT EIPScanner notices retained in capture/LICENSES; no bundled captures",
+    "topology": "independent EIPScanner originator; OpENer adapter for explicit/I/O and cpppo for MSP on invocation-owned private Docker bridges, no containd or host ports",
+    "capture_side": "tcpdump --immediate-mode -U -i eth0 in adapter network namespace; classic Ethernet pcap",
+    "limitations": "Mixed MSP success and 32-child request/reply coverage are captured. cpppo fails to return wrapper 0x1e when a child fails: msp-error is labelled stack-deviation evidence, not conformant positive 0x1e coverage.",
+    "inputs_sha256": "{\"LICENSES/EIPScanner.txt\":\"f0597e7fdc9454df887d3d06ab03b291fa3e170356d0fa64e92834cbe7d95c9c\",\"LICENSES/OpENer.txt\":\"61033e98e59344712d37d30b284fc7e600fd29153b8c58f51ba6056cc6347870\",\"LICENSES/cpppo-COPYING.txt\":\"8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903\",\"LICENSES/cpppo.txt\":\"d2539ab97dbad7985316f15a254caa3306e34a6002486410f648c9f79e039fa3\",\"LICENSES/greenery.txt\":\"6628c37b3a259c4c3496a680d29625652fb7b73c65a9b27f72541588cd8ef85b\",\"NOTICE\":\"1877b6b97c174a1caf2dc267ab154964dc2fb52fc8d18690c6fc1a09326c6d2c\",\"README.md\":\"ebd341561d2a87413d17699c574fb1c6fbf6fd96f300e446bf02dc86e1df307f\",\"assemble.py\":\"b0911cccbf3d2b680c76abff80c2fef1762616c8053803968f915e3c26b27c66\",\"capture.sh\":\"e160dcbac073c62282c51a551481978d702c6749430bd34bcc936ac46640572b\",\"cpppo-adapter.py\":\"30e0fc2e59310a17318e2f7baf6b7856fb6c7001e684d150ae770d758f401f64\",\"export-oracle.sh\":\"ceabeb9c3184f86538ed19c96468b33bf6501a752d836ac8ceb568c905a3b6be\",\"export.py\":\"cc49ca70f4867e4d72adedbdf812a7241bc70c5e4f7d4c8b0586801ac5daad52\",\"fetch-inputs.py\":\"ebbc0468af3d86e19ff0f331afc0820701c0f4671791cca02be8dbc335ba1886\",\"finalize.py\":\"8144beca52cc5fc66426d90f2df2b22ea45caf15d6e8be4da3fde7b69c61d003\",\"generator.Dockerfile\":\"098b4ad2ff8dd2bc35beb7bf5de84b4b783393c5712b30a4c139b2064c7f2dae\",\"msp-scanner.cpp\":\"46e95c169e71984347664845bd5f5405ecc6853b8b5de94ec23fb4c57b0bdab7\",\"mutate.py\":\"a9cab80fe3c392a2fb042351d410cf8751db4bd8fc3aef1684cc1ba9a7a69619\",\"requirements.lock\":\"6127465768929dfb74558226c7e9a27fb989dfc84f41a56641ac0a97cb82658d\",\"scanner.cpp\":\"960dc6f804df4043df49853b099fa4eb12b2c8c49925d9cefba8a659f7b813e3\",\"source-lock.json\":\"88f2943b826e6bee12b3f9d6b35cd38c8073cafa8a9ca7c73077a1765d7b4980\",\"test_tools.py\":\"4d2cc164341fc2d24ede7ede5ec04ed26657ab0731aa96dd96a31fcbd9d3d8bf\"}"
   },
   "scenarios": [
     {
-      "name": "explicit-io",
-      "pcap": "explicit-io.pcap",
-      "oracle": "explicit-io.expected.tsv",
-      "expectations": "explicit-io.expectations.json",
+      "name": "explicit",
+      "pcap": "explicit.pcap",
+      "oracle": "explicit.expected.tsv",
+      "expectations": "explicit.expectations.json",
       "transport": "tcp",
+      "checksum_offload": "Docker bridge TX partial checksums retained; not a checksum-validity oracle",
       "contiguous": true,
       "oracle_frames": [
         4,
@@ -32,39 +33,176 @@
         15,
         16,
         17,
-        20,
-        21,
-        22,
-        24
+        18,
+        19,
+        20
       ],
-      "checksum_offload": "Docker bridge partial pseudo-header checksums retained; tshark identifies checksum offload",
       "assets": [
-        "explicit-io.pdml",
-        "client.log",
-        "server.log",
-        "capture.log"
+        "explicit.pdml.gz",
+        "explicit-scanner.log",
+        "explicit-adapter.log",
+        "explicit-tcpdump.log",
+        "explicit-scanner.exit",
+        "generator-image.json",
+        "generator-packages.txt",
+        "msp-generator-image.json",
+        "msp-generator-packages.txt",
+        "source-lock.json"
       ]
     },
     {
-      "name": "udp-enip-io",
-      "pcap": "udp-enip-io.pcap",
-      "oracle": "udp-enip-io.expected.tsv",
-      "expectations": "udp-enip-io.expectations.json",
+      "name": "connected",
+      "pcap": "connected.pcap",
+      "oracle": "connected.expected.tsv",
+      "expectations": "connected.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "Docker bridge TX partial checksums retained; not a checksum-validity oracle",
+      "contiguous": true,
+      "oracle_frames": [
+        4,
+        6,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "assets": [
+        "connected.pdml.gz",
+        "connected-scanner.log",
+        "connected-adapter.log",
+        "connected-tcpdump.log",
+        "connected-scanner.exit"
+      ]
+    },
+    {
+      "name": "io",
+      "pcap": "io.pcap",
+      "oracle": "io.expected.tsv",
+      "expectations": "io.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "Docker bridge TX partial checksums retained; not a checksum-validity oracle",
+      "contiguous": true,
+      "oracle_frames": [
+        4,
+        6,
+        8,
+        9,
+        17,
+        18,
+        20
+      ],
+      "assets": [
+        "io.pdml.gz",
+        "io-scanner.log",
+        "io-adapter.log",
+        "io-tcpdump.log",
+        "io-scanner.exit"
+      ]
+    },
+    {
+      "name": "msp",
+      "pcap": "msp.pcap",
+      "oracle": "msp.expected.tsv",
+      "expectations": "msp.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "Docker bridge TX partial checksums retained; not a checksum-validity oracle",
+      "contiguous": true,
+      "oracle_frames": [
+        4,
+        6,
+        8,
+        9,
+        10
+      ],
+      "assets": [
+        "msp.pdml.gz",
+        "msp-scanner.log",
+        "msp-adapter.log",
+        "msp-tcpdump.log",
+        "msp-scanner.exit"
+      ]
+    },
+    {
+      "name": "msp32",
+      "pcap": "msp32.pcap",
+      "oracle": "msp32.expected.tsv",
+      "expectations": "msp32.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "Docker bridge TX partial checksums retained; not a checksum-validity oracle",
+      "contiguous": true,
+      "oracle_frames": [
+        4,
+        6,
+        8,
+        9,
+        10
+      ],
+      "assets": [
+        "msp32.pdml.gz",
+        "msp32-scanner.log",
+        "msp32-adapter.log",
+        "msp32-tcpdump.log",
+        "msp32-scanner.exit"
+      ]
+    },
+    {
+      "name": "msp-error",
+      "pcap": "msp-error.pcap",
+      "oracle": "msp-error.expected.tsv",
+      "expectations": "msp-error.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "Docker bridge TX partial checksums retained; not a checksum-validity oracle",
+      "contiguous": true,
+      "oracle_frames": [
+        4,
+        6,
+        8,
+        9,
+        10
+      ],
+      "assets": [
+        "msp-error.pdml.gz",
+        "msp-error-scanner.log",
+        "msp-error-adapter.log",
+        "msp-error-tcpdump.log",
+        "msp-error-scanner.exit"
+      ]
+    },
+    {
+      "name": "native-io",
+      "pcap": "native-io.pcap",
+      "oracle": "native-io.expected.tsv",
+      "expectations": "native-io.expectations.json",
       "transport": "udp",
+      "checksum_offload": "Docker bridge TX partial checksums retained; not a checksum-validity oracle",
       "contiguous": false,
       "oracle_frames": [
         1,
-        2
+        2,
+        3,
+        4,
+        5,
+        6
       ],
-      "checksum_offload": "Docker bridge partial pseudo-header checksums retained; tshark identifies checksum offload",
       "assets": [
-        "udp-enip-io.pdml"
+        "native-io.pdml.gz",
+        "native-io.lineage.json"
       ],
       "roles": [
         {
           "transport": "udp",
-          "client": "172.30.93.3:55157",
-          "server": "172.30.93.2:2222"
+          "client": "172.19.0.3:2222",
+          "server": "172.19.0.2:2222"
+        },
+        {
+          "transport": "udp",
+          "client": "172.19.0.3:39813",
+          "server": "172.19.0.2:2222"
         }
       ]
     },
@@ -74,19 +212,20 @@
       "oracle": "udp-short-mutation.expected.tsv",
       "expectations": "udp-short-mutation.expectations.json",
       "transport": "udp",
+      "checksum_offload": "none; IPv4/UDP checksums recomputed",
       "contiguous": false,
       "oracle_frames": [
         1
       ],
-      "checksum_offload": "none; IPv4 and UDP checksums recomputed by derive.py",
       "assets": [
-        "udp-short-mutation.pdml"
+        "udp-short-mutation.pdml.gz",
+        "udp-short-mutation.mutation.json"
       ],
       "roles": [
         {
           "transport": "udp",
-          "client": "172.30.93.3:49152",
-          "server": "172.30.93.2:44818"
+          "client": "172.19.0.3:2222",
+          "server": "172.19.0.2:2222"
         }
       ]
     }

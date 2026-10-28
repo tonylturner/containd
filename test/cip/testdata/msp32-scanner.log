@@ -1,0 +1,36 @@
+[INFO] Registered session 853621384
+[INFO] Send request: service=0xa epath=[classId=2 objectId=1]
+child[0] status=0x0
+child[1] status=0x0
+child[2] status=0x0
+child[3] status=0x0
+child[4] status=0x0
+child[5] status=0x0
+child[6] status=0x0
+child[7] status=0x0
+child[8] status=0x0
+child[9] status=0x0
+child[10] status=0x0
+child[11] status=0x0
+child[12] status=0x0
+child[13] status=0x0
+child[14] status=0x0
+child[15] status=0x0
+child[16] status=0x0
+child[17] status=0x0
+child[18] status=0x0
+child[19] status=0x0
+child[20] status=0x0
+child[21] status=0x0
+child[22] status=0x0
+child[23] status=0x0
+child[24] status=0x0
+child[25] status=0x0
+child[26] status=0x0
+child[27] status=0x0
+child[28] status=0x0
+child[29] status=0x0
+child[30] status=0x0
+child[31] status=0x0
+wrapper status=0x0 children=32 failed=0
+[INFO] Unregistered session 853621384

@@ -1,0 +1,8 @@
+[INFO] Registered session 1
+[INFO] Send request: service=0x54 epath=[classId=6 objectId=1]
+status=0x0 additional=
+status=0x0 additional=
+status=0x14 additional=
+[INFO] Send request: service=0x4e epath=[classId=6 objectId=1]
+status=0x0 additional=
+[INFO] Unregistered session 1

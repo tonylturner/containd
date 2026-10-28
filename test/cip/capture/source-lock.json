@@ -1,0 +1,18 @@
+{
+  "opener": {
+    "commit": "0e1ab7ee5c272950c0dc8daf7793008d7a518912",
+    "url": "https://codeload.github.com/EIPStackGroup/OpENer/tar.gz/0e1ab7ee5c272950c0dc8daf7793008d7a518912",
+    "sha256": "5b01333bdc300c1410cf9e02d33a564320b7a6094786a047065a7ec14b21d945"
+  },
+  "eipscanner": {
+    "commit": "12c89a57ec2e7449efb1348be52af10be9ef9701",
+    "url": "https://codeload.github.com/nimbuscontrols/EIPScanner/tar.gz/12c89a57ec2e7449efb1348be52af10be9ef9701",
+    "sha256": "3efbb95bff91501328b5899dd635cfee61ec11f59f3ad7609812fb65211ddc63"
+  },
+  "cpppo": {
+    "version": "4.4.3",
+    "commit": "00e38df798ed45b35c15454ef376cde7fca76cd2",
+    "url": "https://codeload.github.com/pjkundert/cpppo/tar.gz/00e38df798ed45b35c15454ef376cde7fca76cd2",
+    "sha256": "de0aaaf0b1e340733a3b48a4501a08d4cd1c18c7b0be9ada2603a16cf5e34f5d"
+  }
+}

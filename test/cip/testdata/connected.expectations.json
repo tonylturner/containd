@@ -1,0 +1,114 @@
+{
+  "events": [
+    {
+      "frame": 4,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 10,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 11,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 12,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 13,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 14,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 15,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 16,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    }
+  ]
+}

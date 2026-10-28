@@ -28,7 +28,8 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 		"enip_session_handle": hdr.SessionHandle, "enip_status": hdr.Status,
 		"enip_sender_context": hex.EncodeToString(hdr.SenderContext[:]), "enip_options": hdr.Options,
 	}
-	if _, known := commandNames[hdr.Command]; !known {
+	_, knownCommand := commandNames[hdr.Command]
+	if !knownCommand {
 		addFinding(attrs, "cip.unknown_command")
 	}
 	if cipCommands[hdr.Command] && hdr.Status == 0 {
@@ -75,8 +76,10 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 				return projectMessage(state, attrs, msg, msp, nil)
 			}
 		}
-	} else if len(hdr.Data) != 0 {
-		// Non-explicit command bodies have no parser here.
+	} else if !knownCommand && len(hdr.Data) != 0 {
+		// An unknown command might carry another message envelope. Known
+		// non-explicit commands and encapsulation error bodies carry data,
+		// not an unwalked service/path or nested CIP operation.
 		addUndecoded(attrs, "cip.encapsulation_payload_unsupported")
 	}
 	return []dpi.Event{newEvent(state, "session", attrs)}
@@ -102,9 +105,6 @@ func projectMessage(state *flow.State, envelope map[string]any, msg *CIPMessage,
 	}
 	for _, code := range msg.Conformance {
 		addFinding(attrs, code)
-	}
-	for _, code := range msg.Undecoded {
-		addUndecoded(attrs, code)
 	}
 	kind := "request"
 	if msg.IsResponse {

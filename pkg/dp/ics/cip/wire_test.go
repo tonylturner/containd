@@ -142,7 +142,6 @@ func TestCoverageIsNotConformance(t *testing.T) {
 		code string
 	}{
 		{[]byte{0x4c, 1, 0xff, 0}, "cip.epath_unsupported"},
-		{[]byte{0x7e, 0, 1, 2}, "cip.service_payload_unsupported"},
 	} {
 		ev := wireEvents(t, tc.wire)[0]
 		assertCodes(t, ev, nil)
@@ -155,6 +154,92 @@ func TestCoverageIsNotConformance(t *testing.T) {
 	r := parseCPF(data)
 	if len(r.Items) != 3 || r.Selected != 1 || r.Err != nil || !slices.Equal(r.Undecoded, []string{"cip.extra_data_item"}) {
 		t.Fatal(r)
+	}
+}
+
+func assertNoUndecoded(t *testing.T, ev dpi.Event) {
+	t.Helper()
+	if codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyUndecoded); len(codes) != 0 {
+		t.Fatalf("application data reported as unwalked protocol: %v", ev)
+	}
+}
+
+func TestDecodedOperationDataIsNotUndecoded(t *testing.T) {
+	for _, wire := range [][]byte{
+		{0x10, 3, 0x20, 4, 0x24, 154, 0x30, 3, 1, 2, 3}, // Set Attribute value
+		{0x8e, 0, 0, 0, 1, 2, 3},                        // Get Attribute reply value
+		{0x54, 2, 0x20, 6, 0x24, 1, 1, 2, 3},            // ForwardOpen parameters
+		{0x7e, 0, 1, 2},                                 // Unknown service, known header
+	} {
+		ev := wireEvents(t, wire)[0]
+		assertCodes(t, ev, nil)
+		assertNoUndecoded(t, ev)
+	}
+}
+
+func TestKnownEncapsulationBodiesAreData(t *testing.T) {
+	for command, name := range commandNames {
+		if cipCommands[command] {
+			continue
+		}
+		for _, body := range [][]byte{nil, {1, 0, 0, 0}, {0x0a, 0, 0x10, 0}} {
+			evs := encapsulationEvents(cipState(), &EIPHeader{Command: command, Data: body})
+			if len(evs) != 1 || evs[0].Kind != "session" || evs[0].Attributes["enip_command"] != name {
+				t.Fatal(evs)
+			}
+			assertCodes(t, evs[0], nil)
+			assertNoUndecoded(t, evs[0])
+		}
+	}
+	for command, name := range map[uint16]string{4: "ListServices", 0x63: "ListIdentity", 0x64: "ListInterfaces"} {
+		if CommandName(command) != name {
+			t.Fatalf("command 0x%x: %s", command, CommandName(command))
+		}
+	}
+	ev := encapsulationEvents(cipState(), &EIPHeader{Command: 0x6f, Status: 1, Data: []byte{1, 2}})[0]
+	assertNoUndecoded(t, ev)
+	for _, body := range [][]byte{nil, {0x0a, 0, 0x10, 0}} {
+		ev = encapsulationEvents(cipState(), &EIPHeader{Command: 0xffff, Data: body})[0]
+		assertCodes(t, ev, []string{"cip.unknown_command"})
+		codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyUndecoded)
+		if len(body) != 0 && !slices.Equal(codes, []string{"cip.encapsulation_payload_unsupported"}) || len(body) == 0 && len(codes) != 0 {
+			t.Fatal(ev)
+		}
+	}
+}
+
+func TestKnownCPFMetadataIsNotUndecoded(t *testing.T) {
+	for id, size := range map[uint16]int{0xc: 2, 0x100: 2, 0x8000: 16, 0x8001: 16, 0x8002: 8, 0x1234: 2} {
+		payload := buildCPFItems(cpfTestItem{0, nil}, cpfTestItem{0xb2, []byte{0x0e, 0}},
+			cpfTestItem{id, make([]byte, size)})
+		ev := encapsulationEvents(cipState(), &EIPHeader{Command: 0x6f, Data: payload})[0]
+		assertCodes(t, ev, nil)
+		if id == 0x1234 {
+			codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyUndecoded)
+			if !slices.Equal(codes, []string{"cip.cpf_item_unsupported"}) {
+				t.Fatal(ev)
+			}
+		} else {
+			assertNoUndecoded(t, ev)
+			if id == 0xc || id == 0x100 {
+				continue // Variable-length discovery metadata.
+			}
+			bad := parseCPF(buildCPFItems(cpfTestItem{0, nil}, cpfTestItem{0xb2, []byte{0x0e, 0}},
+				cpfTestItem{id, make([]byte, size-1)}))
+			if !slices.Equal(bad.Conformance, []string{"cip.cpf_layout"}) || len(bad.Undecoded) != 0 {
+				t.Fatal(bad)
+			}
+		}
+	}
+	// A recognized item in the wrong native-I/O position remains a layout
+	// violation, not an unknown item. Unknown IDs still report coverage.
+	for _, id := range []uint16{0x8000, 0x1234} {
+		ev := ioEvent(cipState(), ioCPF(cpfTestItem{id, make([]byte, 16)}))
+		assertCodes(t, ev, []string{"cip.cpf_layout"})
+		codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyUndecoded)
+		if id == 0x8000 && len(codes) != 0 || id == 0x1234 && !slices.Equal(codes, []string{"cip.cpf_item_unsupported"}) {
+			t.Fatal(ev)
+		}
 	}
 }
 

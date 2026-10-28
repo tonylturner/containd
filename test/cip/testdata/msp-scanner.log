@@ -1,0 +1,7 @@
+[INFO] Registered session 875682370
+[INFO] Send request: service=0xa epath=[classId=2 objectId=1]
+child[0] status=0x0
+child[1] status=0x0
+child[2] status=0x0
+wrapper status=0x0 children=3 failed=0
+[INFO] Unregistered session 875682370
