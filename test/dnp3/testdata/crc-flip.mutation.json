@@ -1,0 +1,10 @@
+{
+  "parent": "class-range.pcap",
+  "parent_sha256": "91b6cad31c1bed8dbddb9cfc86c0952536c06caf061e5131aadf3ce0540a53e1",
+  "frame": 15,
+  "pcap_byte_offset": 1407,
+  "tcp_checksum_byte_offset": 1365,
+  "mode": "data-crc",
+  "xor": 1,
+  "recipe": "xor data CRC byte by 1, recompute changed packet TCP checksum"
+}

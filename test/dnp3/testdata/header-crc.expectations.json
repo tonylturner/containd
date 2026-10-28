@@ -1,0 +1,17 @@
+{
+  "conformance": [],
+  "undecoded": [],
+  "eof_partial": false,
+  "mutation": {
+    "parent": "class-range.pcap",
+    "parent_sha256": "91b6cad31c1bed8dbddb9cfc86c0952536c06caf061e5131aadf3ce0540a53e1",
+    "frame": 15,
+    "pcap_byte_offset": 1389,
+    "tcp_checksum_byte_offset": 1365,
+    "mode": "header-crc",
+    "xor": 1,
+    "recipe": "retain records through target packet; xor header CRC byte by 1; repair TCP checksum",
+    "unframed_payload_bytes": 27
+  },
+  "frame_error": "dnp3 header CRC mismatch"
+}

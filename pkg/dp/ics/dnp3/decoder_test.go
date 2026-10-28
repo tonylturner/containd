@@ -52,7 +52,7 @@ func TestParseFrameReadRequest(t *testing.T) {
 	// Transport(0xC0=FIR+FIN) + AppControl(0xC0) + FuncCode(0x01=Read) + ObjGroup(30) + Var(2)
 	userData := []byte{0xC0, 0xC0, 0x01, 0x1E, 0x02}
 	// length = 5 (ctrl+dest+src) + len(userData) = 10
-	raw := buildTestFrame(0x0A, 0xC0, 0x0001, 0x0002, userData)
+	raw := buildTestFrame(0x0A, 0xC4, 0x0001, 0x0002, userData)
 
 	frame, err := ParseFrame(raw)
 	if err != nil {
@@ -196,7 +196,7 @@ func TestDecoderOnPacketReadRequest(t *testing.T) {
 
 	// Build a read request frame.
 	userData := []byte{0xC0, 0xC0, 0x01, 0x1E, 0x02}
-	raw := buildTestFrame(0x0A, 0xC0, 0x0001, 0x0002, userData)
+	raw := buildTestFrame(0x0A, 0xC4, 0x0001, 0x0002, userData)
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
 	if err != nil {
@@ -257,7 +257,7 @@ func TestDecoderOnPacketWriteControl(t *testing.T) {
 
 	// Operate (0x04) with CROB group (12), variation 1, qualifier 0x07 (1-byte count), count=1.
 	userData := []byte{0xC0, 0xC0, 0x04, 0x0C, 0x01, 0x07, 0x01}
-	raw := buildTestFrame(uint8(5+len(userData)), 0xC0, 0x0001, 0x0002, userData)
+	raw := buildTestFrame(uint8(5+len(userData)), 0xC4, 0x0001, 0x0002, userData)
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
 	if err != nil {
@@ -299,7 +299,7 @@ func TestDecoderOnPacketDirectOperateVariants(t *testing.T) {
 
 			// CROB group (12), variation 1, qualifier 0x07 (1-byte count), count=1.
 			userData := []byte{0xC0, 0xC0, tc.fc, 0x0C, 0x01, 0x07, 0x01}
-			raw := buildTestFrame(uint8(5+len(userData)), 0xC0, 0x0001, 0x0002, userData)
+			raw := buildTestFrame(uint8(5+len(userData)), 0xC4, 0x0001, 0x0002, userData)
 
 			events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
 			if err != nil {
@@ -345,7 +345,7 @@ func TestDecoderOnPacketColdRestart(t *testing.T) {
 
 	// Cold Restart (0x0D), no objects.
 	userData := []byte{0xC0, 0xC0, 0x0D}
-	raw := buildTestFrame(0x08, 0xC0, 0x0001, 0x0002, userData)
+	raw := buildTestFrame(0x08, 0xC4, 0x0001, 0x0002, userData)
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
 	if err != nil {
@@ -369,7 +369,7 @@ func TestDecoderOnPacketWarmRestart(t *testing.T) {
 
 	// Warm Restart (0x0E), no objects.
 	userData := []byte{0xC0, 0xC0, 0x0E}
-	raw := buildTestFrame(0x08, 0xC0, 0x0001, 0x0002, userData)
+	raw := buildTestFrame(0x08, 0xC4, 0x0001, 0x0002, userData)
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
 	if err != nil {
@@ -386,7 +386,7 @@ func TestDecoderOnPacketStopApplication(t *testing.T) {
 
 	// Stop Application (0x12).
 	userData := []byte{0xC0, 0xC0, 0x12}
-	raw := buildTestFrame(0x08, 0xC0, 0x0001, 0x0002, userData)
+	raw := buildTestFrame(0x08, 0xC4, 0x0001, 0x0002, userData)
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
 	if err != nil {
@@ -403,7 +403,7 @@ func TestDecoderOnPacketSaveConfig(t *testing.T) {
 
 	// Save Configuration (0x13).
 	userData := []byte{0xC0, 0xC0, 0x13}
-	raw := buildTestFrame(0x08, 0xC0, 0x0001, 0x0002, userData)
+	raw := buildTestFrame(0x08, 0xC4, 0x0001, 0x0002, userData)
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
 	if err != nil {
@@ -452,7 +452,7 @@ func TestDecoderOnPacketMultipleObjectGroups(t *testing.T) {
 		0x01, 0x02, 0x06, // Group 1, Var 2, Qualifier 0x06
 		0x1E, 0x02, 0x00, 0x00, 0x09, // Group 30, Var 2, Qualifier 0x00, range 0-9
 	}
-	raw := buildTestFrame(uint8(5+len(userData)), 0xC0, 0x0001, 0x0002, userData)
+	raw := buildTestFrame(uint8(5+len(userData)), 0xC4, 0x0001, 0x0002, userData)
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
 	if err != nil {

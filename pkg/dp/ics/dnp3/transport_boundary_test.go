@@ -68,7 +68,7 @@ func TestTransportBoundaryTruncation(t *testing.T) {
 	}
 }
 
-func TestNonFinalSegmentsRetainInvalidContentFindings(t *testing.T) {
+func TestCompletedSegmentsInspectInvalidContent(t *testing.T) {
 	for _, objects := range [][]byte{
 		{99, 9, 7, 1},      // unknown value size, even without value bytes
 		{1, 2, 0x0c},       // reserved range
@@ -84,10 +84,23 @@ func TestNonFinalSegmentsRetainInvalidContentFindings(t *testing.T) {
 			}
 			raw := linkFrame(0x44, data)
 			events, err := NewDecoder().OnPacket(dnp3State(), &dpi.ParsedPacket{Payload: raw})
+			if !final {
+				if err != nil || len(events) != 0 {
+					t.Fatalf("pending fragment events=%v err=%v", events, err)
+				}
+				continue
+			}
 			if err != nil || len(events) != 1 {
 				t.Fatalf("events=%v err=%v", events, err)
 			}
 			codes, _ := eventfields.Strings(events[0].Attributes, eventfields.KeyConformance)
+			if objects[0] == 99 {
+				codes, _ = eventfields.Strings(events[0].Attributes, eventfields.KeyUndecoded)
+				if !slices.Equal(codes, []string{"dnp3.object_unsupported"}) {
+					t.Fatal(codes)
+				}
+				continue
+			}
 			if !slices.Equal(codes, []string{"dnp3.object_walk"}) {
 				t.Fatalf("objects=%x final=%v codes=%v", objects, final, codes)
 			}
