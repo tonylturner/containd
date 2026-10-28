@@ -10,12 +10,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
-
-// iec104Port is the only supported IEC104 server port.
-const iec104Port = 2404
 
 // IEC104EnvelopeChain is the regular chain every IEC104 envelope steering
 // rule jumps to. While the engine owns its queue it queues every packet
@@ -122,7 +120,7 @@ func compileIEC104Steering(e rules.Entry, zones zoneIndex) ([]string, error) {
 	replyIn, _ := zones.clause("iifname", e.DestZones)
 	replyOut, _ := zones.clause("oifname", e.SourceZones)
 	verdict := counterStmt(e.ID) + " jump " + IEC104EnvelopeChain
-	port := strconv.Itoa(iec104Port)
+	port := strconv.Itoa(ics.IEC104Port)
 	var lines []string
 	for _, s := range scopes {
 		lines = append(lines,
@@ -146,7 +144,7 @@ func admitsIEC104Port(protos []rules.Protocol) bool {
 		if p.Port == "" {
 			return true
 		}
-		if lo, hi, ok := parsePortRange(p.Port); ok && lo <= iec104Port && iec104Port <= hi {
+		if lo, hi, ok := parsePortRange(p.Port); ok && lo <= ics.IEC104Port && ics.IEC104Port <= hi {
 			return true
 		}
 	}

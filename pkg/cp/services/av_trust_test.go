@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/avscan"
 	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
@@ -59,18 +60,19 @@ func TestAVTrustReachesICAPWithoutRestart(t *testing.T) {
 	if err := mgr.Apply(ctx, cfg); err != nil {
 		t.Fatalf("Apply after trust: %v", err)
 	}
-	if res := mgr.Scan(ctx, ScanTask{Preview: []byte("data")}); res.Verdict != "clean" {
+	if res := mgr.Scan(ctx, scanObject([]byte("data"))); res.Verdict != "clean" {
 		t.Fatalf("Scan over TLS = %+v", res)
 	}
 	if status := mgr.Status(ctx); status["ready"] != true || status["trust_revision"] != trust.Revision(string(privateCA.PEM)) {
 		t.Fatalf("status = %+v", status)
 	}
 
-	// Replacing the bundle takes effect on the next connection.
+	// Replacing the bundle takes effect on the next connection; fresh
+	// content keeps the cached verdict out of the way.
 	if err := mgr.SetTrust(ctx, mustBundle(t, otherCA.PEM)); err != nil {
 		t.Fatalf("SetTrust(other): %v", err)
 	}
-	if res := mgr.Scan(ctx, ScanTask{Preview: []byte("data")}); res.Verdict != "error" || res.Error == nil || !strings.Contains(res.Error.Error(), "certificate") {
+	if res := mgr.Scan(ctx, scanObject([]byte("other data"))); res.Reason != avscan.ReasonScannerError || !strings.Contains(res.Detail, "certificate") {
 		t.Fatalf("Scan after replacing trust = %+v", res)
 	}
 	if err := mgr.SetTrust(ctx, trust.Bundle{Revision: trust.NoRevision}); err != nil {

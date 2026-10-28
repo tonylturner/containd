@@ -64,21 +64,37 @@ func (c *Compiler) writePreroutingChain(buf *bytes.Buffer, snap *rules.Snapshot)
 	return nil
 }
 
+// natMasqueradeZones returns the zones the postrouting chain masquerades
+// between: the egress zone (default wan) and the source zones (default lan
+// and dmz), trimmed.
+func natMasqueradeZones(snap *rules.Snapshot) (egress string, srcZones []string) {
+	egress = strings.TrimSpace(snap.NAT.EgressZone)
+	if egress == "" {
+		egress = "wan"
+	}
+	for _, z := range snap.NAT.SourceZones {
+		srcZones = append(srcZones, strings.TrimSpace(z))
+	}
+	if len(srcZones) == 0 {
+		srcZones = []string{"lan", "dmz"}
+	}
+	return egress, srcZones
+}
+
 func (c *Compiler) writePostroutingChain(buf *bytes.Buffer, snap *rules.Snapshot) error {
 	if !snap.NAT.Enabled || len(snap.ZoneIfaces) == 0 {
 		return nil
 	}
-	egress := strings.TrimSpace(snap.NAT.EgressZone)
-	if egress == "" {
-		egress = "wan"
-	}
-	srcZones := snap.NAT.SourceZones
-	if len(srcZones) == 0 {
-		srcZones = []string{"lan", "dmz"}
-	}
+	egress, srcZones := natMasqueradeZones(snap)
 	buf.WriteString("  chain postrouting {\n")
 	buf.WriteString("    type nat hook postrouting priority srcnat;\n")
 	buf.WriteString("    policy accept;\n")
+	if c.SteersGate() {
+		// The gate's upstream legs are locally generated: no ingress
+		// interface, so the lines below never match them. Their socket
+		// mark says whether their selection was masqueraded.
+		buf.WriteString("    " + gateUpstreamMasquerade() + ";\n")
+	}
 	// The destination's egress interface is selected by routing, not by a
 	// conventional zone name. Restrict return-path SNAT to each DNAT target.
 	pfs := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
@@ -97,7 +113,6 @@ func (c *Compiler) writePostroutingChain(buf *bytes.Buffer, snap *rules.Snapshot
 		fmt.Fprintf(buf, "    %s ip daddr %s masquerade;\n", match, strings.TrimSpace(pf.DestIP))
 	}
 	for _, z := range srcZones {
-		z = strings.TrimSpace(z)
 		if len(snap.ZoneIfaces[z]) == 0 || len(snap.ZoneIfaces[egress]) == 0 {
 			continue
 		}

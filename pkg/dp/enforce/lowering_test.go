@@ -94,6 +94,7 @@ var loweringGoldens = []struct {
 	{"testdata/empty_zone_policy.nft", emptyZoneSnapshot, goldenCompiler},
 	{"testdata/address_family_policy.nft", familySnapshot, goldenCompiler},
 	{"testdata/zone_names_policy.nft", zoneNamesSnapshot, goldenCompiler},
+	{"testdata/gate_policy.nft", gateSnapshot, gateCompiler},
 }
 
 // policyTable cuts the policy table out of a compiled script.

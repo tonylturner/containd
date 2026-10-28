@@ -4,7 +4,7 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type AVConfig, type AVStatus } from "../../../../lib/api";
+import { api, isAdmin, type Asset, type AVConfig, type AVStatus, type Zone } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { SaveStateLine } from "../../../../components/SaveStateLine";
@@ -12,29 +12,31 @@ import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { Card } from "../../../../components/Card";
-import { ConfirmDialog, useConfirm } from "../../../../components/ConfirmDialog";
+import { CustomDefinitions } from "./custom-defs";
+import { GateStatus } from "./gate-status";
+import { normalizeScan } from "./scan-model";
+import { ScanSelectionEditor } from "./scan-selection";
 
 const emptyICAPServer = { address: "", useTls: false, service: "" };
 
 export default function AVPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const confirm = useConfirm();
   const [cfg, setCfg] = useState<AVConfig>({
     enabled: false,
-    mode: "icap",
+    mode: "clamav",
     failPolicy: "open",
-    failOpenIcs: true,
     icap: { servers: [] },
     clamav: { freshclamEnabled: true },
   });
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [assets, setAssets] = useState<Asset[]>([]);
   const [status, setStatus] = useState<AVStatus | null>(null);
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const [defs, setDefs] = useState<string[]>([]);
-  const [uploading, setUploading] = useState(false);
   const [defsPath, setDefsPath] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -49,6 +51,9 @@ export default function AVPage() {
       setStatus(svc?.av ?? null);
       const s = await api.getAV();
       if (s) setCfg(s);
+      const [zoneList, assetList] = await Promise.all([api.listZones(), api.listAssets()]);
+      setZones(zoneList ?? []);
+      setAssets(assetList ?? []);
       const defsResp = await api.listAVDefs();
       setDefs(defsResp?.files ?? []);
       setDefsPath(defsResp?.path ?? "");
@@ -89,6 +94,7 @@ export default function AVPage() {
         ...(cfg.clamav ?? {}),
         freshclamEnabled: cfg.clamav?.freshclamEnabled ?? true,
       },
+      scan: normalizeScan(cfg.scan),
     };
     const result = await save.run("save", () => api.setAV(payload), {
       success: "AV settings staged — commit to apply.",
@@ -178,7 +184,6 @@ export default function AVPage() {
         </div>
       }
     >
-      <ConfirmDialog {...confirm.props} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -229,7 +234,7 @@ export default function AVPage() {
             <div>Definitions: <span className="text-(--text)">{status?.db_version || "n/a"}</span></div>
             <div>Detections: <span className="text-(--text)">{status?.detections ?? 0}</span></div>
             <div>Additional CA: <span className="text-(--text)">{status?.trust_revision && status.trust_revision !== "none" ? status.trust_revision.slice(0, 19) : "none"}</span></div>
-            <div>Mode: <span className="text-(--text)">{status?.mode ?? cfg.mode ?? "icap"}</span></div>
+            <div>Mode: <span className="text-(--text)">{status?.mode ?? cfg.mode ?? "clamav"}</span></div>
             <div>Fail policy: <span className="text-(--text)">{status?.failPolicy ?? cfg.failPolicy ?? "open"}</span></div>
             <div>
               Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
@@ -237,17 +242,14 @@ export default function AVPage() {
             <div>
               Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
             </div>
-            <div>ICS fail-open: <span className="text-(--text)">{status?.failOpenICS ?? cfg.failOpenIcs ? "yes" : "no"}</span></div>
             <div>ICAP servers: <span className="text-(--text)">{status?.icap_servers ?? 0}</span></div>
             <div>Cache: <span className="text-(--text)">{status?.cache_size ?? 0}</span></div>
-            <div>Queue depth: <span className="text-(--text)">{status?.queue_depth ?? 0}</span></div>
             <div>ClamAV running: <span className="text-(--text)">{status?.clamav_running ? `yes (pid ${status?.clamav_pid ?? ""})` : "no"}</span></div>
             <div>ClamAV socket: <span className="text-(--text)">{status?.clamav_socket || "n/a"}</span></div>
             <div>ClamAV last start: <span className="text-(--text)">{status?.clamav_last_start || "never"}</span></div>
             <div>Freshclam: <span className="text-(--text)">{status?.freshclam_enabled ? (status?.freshclam_running ? "running" : "enabled") : "disabled"}</span></div>
             <div>Freshclam last: <span className="text-(--text)">{status?.freshclam_last || "never"}</span></div>
             <div>Freshclam interval: <span className="text-(--text)">{status?.freshclam_interval || "6h"}</span></div>
-            <div>Block TTL: <span className="text-(--text)">{status.block_ttl || 600}s</span></div>
             <div>Custom defs path (engine): <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
             {status.sparkline.length ? (
               <div className="md:col-span-3">
@@ -261,6 +263,9 @@ export default function AVPage() {
             ) : null}
             <div className="md:col-span-3 text-xs">{status?.last_error}</div>
             <div className="md:col-span-3 text-xs">{status?.freshclam_error}</div>
+            <div className="md:col-span-3">
+              <GateStatus gate={status.gate} />
+            </div>
           </div>
         )}
       </Card>
@@ -281,7 +286,7 @@ export default function AVPage() {
           <div>
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">Mode</label>
             <select
-              value={cfg.mode ?? "icap"}
+              value={cfg.mode ?? "clamav"}
               disabled={!canEdit}
               onChange={(e) => {
                 const mode = e.target.value as AVConfig["mode"];
@@ -300,8 +305,8 @@ export default function AVPage() {
               }}
               className="mt-1 w-full input-industrial"
             >
-              <option value="icap">ICAP (external)</option>
-              <option value="clamav">ClamAV (embedded)</option>
+              <option value="clamav">ClamAV (native)</option>
+              <option value="icap">ICAP (remote server)</option>
             </select>
           </div>
           <div>
@@ -316,16 +321,6 @@ export default function AVPage() {
               <option value="closed">Fail closed</option>
             </select>
           </div>
-          <label className="flex items-center gap-2 text-sm text-(--text)">
-            <input
-              type="checkbox"
-              checked={cfg.failOpenIcs ?? true}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, failOpenIcs: e.target.checked }))}
-              className="h-4 w-4"
-            />
-            Always fail open for ICS traffic
-          </label>
           <div>
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">Max size (bytes)</label>
             <input
@@ -333,16 +328,6 @@ export default function AVPage() {
               value={cfg.maxSizeBytes ?? 0}
               disabled={!canEdit}
               onChange={(e) => setCfg((c) => ({ ...c, maxSizeBytes: Number(e.target.value) }))}
-              className="mt-1 w-full input-industrial"
-            />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-(--text-muted)">Block TTL (seconds)</label>
-            <input
-              type="number"
-              value={cfg.blockTtlSeconds ?? 600}
-              disabled={!canEdit}
-              onChange={(e) => setCfg((c) => ({ ...c, blockTtlSeconds: Number(e.target.value) }))}
               className="mt-1 w-full input-industrial"
             />
           </div>
@@ -359,7 +344,7 @@ export default function AVPage() {
         </div>
         <div className="mt-6">
           <h3 className="text-sm font-semibold text-(--text)">ICAP servers</h3>
-          <p className="text-xs text-(--text-muted)">Use when mode is ICAP; leave empty to disable.</p>
+          <p className="text-xs text-(--text-muted)">Used when mode is ICAP: one RFC 3507 server (REQMOD for uploads, RESPMOD for downloads).</p>
           <div className="mt-3 space-y-2">
             {icapServers.map((srv, idx) => (
               <div key={idx} className="grid gap-2 rounded-lg border bg-(--surface) p-3 md:grid-cols-4">
@@ -397,7 +382,7 @@ export default function AVPage() {
                 )}
               </div>
             ))}
-            {canEdit && (
+            {canEdit && icapServers.length === 0 && (
               <button
                 onClick={addICAPServer}
                 className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui"
@@ -410,7 +395,7 @@ export default function AVPage() {
 
         <div className="mt-6">
           <h3 className="text-sm font-semibold text-(--text)">ClamAV</h3>
-          <p className="text-xs text-(--text-muted)">Used when mode is ClamAV (embedded).</p>
+          <p className="text-xs text-(--text-muted)">Used when mode is ClamAV (native, the default).</p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div>
               <label className="text-xs uppercase tracking-wide text-(--text-muted)">Socket path</label>
@@ -463,68 +448,22 @@ export default function AVPage() {
           </div>
         </div>
 
-        <div className="mt-6">
-          <h3 className="text-sm font-semibold text-(--text)">Custom definitions</h3>
-          <p className="text-xs text-(--text-muted)">Upload .ndb/.ldb/.yara files into the custom defs path.</p>
-          <div className="mt-3 flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <label className="text-xs uppercase tracking-wide text-(--text-muted)">
-                Upload file
-                <input
-                  type="file"
-                  className="mt-1 text-sm text-(--text)"
-                  disabled={!canEdit || uploading}
-                  onChange={async (e) => {
-                    if (!e.target.files?.length) return;
-                    setUploading(true);
-                    const f = e.target.files[0];
-                    const result = await api.uploadAVDef(f);
-                    const msg = result.ok ? `Uploaded ${f.name}` : (result.error || `Upload failed for ${f.name}`);
-                    setUpdateMsg(msg);
-                    toast(msg, result.ok ? "success" : "error");
-                    setUploading(false);
-                    refresh();
-                  }}
-                />
-              </label>
-            </div>
-            <div className="rounded-lg border bg-(--surface) p-3 text-xs text-(--text)">
-              <div className="mb-2 font-semibold text-(--text)">Existing defs</div>
-              {defsPath && <div className="mb-2 text-[10px] text-(--text-muted)">Path: {defsPath}</div>}
-              {defs.length === 0 && <div className="text-(--text-muted)">None uploaded.</div>}
-              {defs.length > 0 && (
-                <ul className="space-y-1">
-                  {defs.map((d) => (
-                    <li key={d} className="flex items-center justify-between rounded-sm border bg-(--surface) px-2 py-1">
-                      <span>{d}</span>
-                      {canEdit && (
-                        <button
-                          className="text-xs text-red-400 transition-ui hover:bg-red-500/10"
-                          onClick={() => {
-                            confirm.open({
-                              title: "Delete definition",
-                              message: `Delete ${d}?`,
-                              variant: "danger",
-                              confirmLabel: "Delete",
-                              onConfirm: async () => {
-                                const result = await api.deleteAVDef(d);
-                                const msg = result.ok ? `Deleted ${d}` : (result.error || `Failed to delete ${d}`);
-                                setUpdateMsg(msg);
-                                toast(msg, result.ok ? "success" : "error");
-                                refresh();
-                              },
-                            });
-                          }}
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
+        <CustomDefinitions
+          defs={defs}
+          defsPath={defsPath}
+          canEdit={canEdit}
+          notify={(msg, ok) => {
+            setUpdateMsg(msg);
+            toast(msg, ok ? "success" : "error");
+          }}
+          refresh={refresh}
+        />
+      </Card>
+
+      <Card className="mt-4">
+        <h2 className="text-lg font-semibold text-(--text)">Scanned traffic</h2>
+        <div className="mt-3">
+          <ScanSelectionEditor cfg={cfg} update={setCfg} zones={zones} assets={assets} canEdit={canEdit} />
         </div>
       </Card>
 

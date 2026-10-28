@@ -7,11 +7,19 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// RulesetPreviewRuntime describes the envelope decision sampled for a preview
-// or why enforcement would apply nothing, not the last installed kernel state.
+// RulesetPreviewRuntime describes the runtime state sampled for a preview:
+// the envelope decision and the scanning gate's admission the candidate would
+// be compiled with, or why enforcement would apply nothing. It is not the
+// last installed kernel state.
 type RulesetPreviewRuntime struct {
 	IEC104EnvelopeOpen bool   `json:"iec104EnvelopeOpen"`
 	Reason             string `json:"reason"`
+	// GateAdmit is the admission state of the scanning gate held by the
+	// engine (named by enforce.GateAdmitState.String) and GateAdmitReason
+	// what it means for the candidate; both are empty when nothing would
+	// be applied.
+	GateAdmit       string `json:"gateAdmit,omitempty"`
+	GateAdmitReason string `json:"gateAdmitReason,omitempty"`
 }
 
 type RulesetPreview struct {
@@ -23,9 +31,10 @@ type RulesetPreview struct {
 	Warnings []enforce.RuleWarning `json:"warnings,omitempty"`
 }
 
-// PreviewRuleset compiles an isolated candidate with the queue ownership sampled
-// now and schedule time sets planned from now. A subsequent bind or
-// reconfiguration, or a later apply time, can change the eventual apply.
+// PreviewRuleset compiles an isolated candidate with the queue ownership and
+// the gate admission sampled now and schedule time sets planned from now. A
+// subsequent bind, reconfiguration or admission switch, or a later apply
+// time, can change the eventual apply.
 func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSettings) (RulesetPreview, error) {
 	if err := enforce.ValidateManagementSnapshot(&snap, e.managementReservation); err != nil {
 		return RulesetPreview{}, err
@@ -33,8 +42,9 @@ func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSe
 	comp := enforce.NewCompilerWithSettings(settings, e.managementReservation)
 	comp.EngineAPI = e.engineAPI
 	comp.IEC104EnvelopeOpen = e.gate.sampleOpen(comp.QueueID)
+	comp.GateAdmit = e.GateAdmit()
 	comp.ScheduleFrom = e.gate.now()
-	runtime := RulesetPreviewRuntime{IEC104EnvelopeOpen: comp.IEC104EnvelopeOpen}
+	runtime := RulesetPreviewRuntime{IEC104EnvelopeOpen: comp.IEC104EnvelopeOpen, GateAdmit: comp.GateAdmit.String()}
 	switch {
 	case !comp.SteersIEC104(&snap):
 		runtime.Reason = "IEC 104 envelope not used by this candidate"
@@ -42,6 +52,16 @@ func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSe
 		runtime.Reason = "IEC 104 envelope open: candidate queue is owned by this engine"
 	default:
 		runtime.Reason = "IEC 104 envelope closed: candidate queue is not owned by this engine"
+	}
+	switch {
+	case !comp.SteersGate():
+		runtime.GateAdmitReason = "scanning gate not used by this candidate"
+	case comp.GateAdmit == enforce.GateAdmitOpen:
+		runtime.GateAdmitReason = "scanning gate open: new gated connections are delivered to the scanner"
+	case comp.GateAdmit == enforce.GateAdmitPass:
+		runtime.GateAdmitReason = "scanning gate passing: new gated connections pass unscanned while a listener or the gate routing is down (open fail policy)"
+	default:
+		runtime.GateAdmitReason = "scanning gate refusing: new gated connections are reset until the listeners and the gate routing are up; ICS endpoints pass ungated"
 	}
 	ruleset, err := comp.CompileFirewall(&snap)
 	if err != nil {

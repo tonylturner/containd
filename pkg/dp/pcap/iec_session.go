@@ -12,10 +12,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
-
-const iec104Port = 2404
 
 // offlineSessions tracks IEC104 sessions from their SYN in one offline
 // analysis run, as the live engine does, so IEC104 is parsed only with
@@ -50,12 +49,12 @@ func endpoint(ip net.IP, port uint16) string {
 // annotate fills the session fields of an IEC104 packet. iec reports a
 // TCP packet to or from port 2404; parse reports whether it may be parsed.
 func (o *offlineSessions) annotate(mgr *dpi.Manager, pkt capture.Packet, parsed *dpi.ParsedPacket) (iec, parse bool) {
-	if pkt.Proto != 6 || (pkt.SrcPort != iec104Port && pkt.DstPort != iec104Port) || !pkt.TCP.Valid {
+	if pkt.Proto != 6 || (pkt.SrcPort != ics.IEC104Port && pkt.DstPort != ics.IEC104Port) || !pkt.TCP.Valid {
 		return false, false
 	}
 	src, dst := endpoint(pkt.SrcIP, pkt.SrcPort), endpoint(pkt.DstIP, pkt.DstPort)
 	f := pkt.TCP.Flags
-	if f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK == 0 && pkt.DstPort == iec104Port {
+	if f&capture.TCPFlagSYN != 0 && f&capture.TCPFlagACK == 0 && pkt.DstPort == ics.IEC104Port {
 		o.seq++
 		c2s := flow.NewSeqSpace(pkt.TCP.Seq)
 		o.byKey[offlineKey{client: src, server: dst}] = &offlineSession{

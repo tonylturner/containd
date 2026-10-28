@@ -91,7 +91,7 @@ func addDefaultRoute(ifIndex int, gateway string) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	rtm := unix.RtMsg{
 		Family:   unix.AF_INET,
 		Dst_len:  0,
@@ -103,10 +103,10 @@ func addDefaultRoute(ifIndex int, gateway string) error {
 		Type:     unix.RTN_UNICAST,
 		Flags:    0,
 	}
-	_ = binary.Write(&req, binary.LittleEndian, rtm)
+	_ = binary.Write(&req, binary.NativeEndian, rtm)
 
 	oif := make([]byte, 4)
-	binary.LittleEndian.PutUint32(oif, uint32(ifIndex))
+	binary.NativeEndian.PutUint32(oif, uint32(ifIndex))
 	addRtAttr(&req, unix.RTA_OIF, oif)
 	addRtAttr(&req, unix.RTA_GATEWAY, ip4)
 
@@ -135,7 +135,7 @@ func addDefaultRoute(ifIndex int, gateway string) error {
 		if len(m.Data) < 4 {
 			return errors.New("netlink error")
 		}
-		code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+		code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
 		if code == 0 {
 			return nil
 		}

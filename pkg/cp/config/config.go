@@ -868,24 +868,26 @@ type IOARange struct {
 	End   uint32 `json:"end"`
 }
 
+// AVConfig decodes leniently: a retired member such as failOpenIcs or
+// blockTtlSeconds still loads and is ignored. Scan alone is strict
+// (config_scan.go).
 type AVConfig struct {
 	Enabled      bool          `json:"enabled"`
-	Mode         string        `json:"mode,omitempty"`            // icap|clamav
-	FailPolicy   string        `json:"failPolicy,omitempty"`      // open|closed
-	FailOpenICS  bool          `json:"failOpenIcs,omitempty"`     // force fail-open for ICS protocols
-	BlockTTL     int           `json:"blockTtlSeconds,omitempty"` // seconds to keep dynamic blocks on malware
-	MaxSizeBytes int64         `json:"maxSizeBytes,omitempty"`    // 0 = unlimited
-	TimeoutSec   int           `json:"timeoutSec,omitempty"`      // ICAP scan timeout
-	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`        // verdict cache TTL
+	Mode         string        `json:"mode,omitempty"`         // clamav (default) | icap
+	FailPolicy   string        `json:"failPolicy,omitempty"`   // open|closed
+	MaxSizeBytes int64         `json:"maxSizeBytes,omitempty"` // 0 = unlimited
+	TimeoutSec   int           `json:"timeoutSec,omitempty"`   // backend connect/scan bound
+	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`     // native ClamAV verdict cache TTL; ICAP is never cached
 	ICAP         ICAPConfig    `json:"icap,omitempty"`
 	ClamAV       ClamAVConfig  `json:"clamav,omitempty"`
 	HTTPDownload bool          `json:"httpDownload,omitempty"` // scan HTTP responses
 	HTTPUpload   bool          `json:"httpUpload,omitempty"`   // scan HTTP requests/uploads
+	Scan         ScanSelection `json:"scan,omitempty"`         // traffic the scanning gate intercepts
 }
 
 type ICAPConfig struct {
+	// Servers holds exactly one server in icap mode; there is no failover.
 	Servers []ICAPServer `json:"servers,omitempty"`
-	// Future: service-specific toggles (REQMOD/RESPMOD).
 }
 
 type ICAPServer struct {

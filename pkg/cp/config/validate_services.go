@@ -91,28 +91,19 @@ func validateAV(cfg AVConfig) error {
 	}
 	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
 	if mode == "" {
-		mode = "icap"
+		mode = "clamav"
 	}
 	switch mode {
 	case "icap", "clamav":
 	default:
 		return fmt.Errorf("services.av.mode must be icap or clamav")
 	}
-	fail := strings.ToLower(strings.TrimSpace(cfg.FailPolicy))
-	if fail == "" {
-		fail = "open"
-	}
-	if fail != "open" && fail != "closed" {
+	if fail := cfg.EffectiveFailPolicy(); fail != "open" && fail != "closed" {
 		return fmt.Errorf("services.av.failPolicy must be open or closed")
 	}
 	if mode == "icap" {
-		if len(cfg.ICAP.Servers) == 0 {
-			return fmt.Errorf("services.av.icap.servers must not be empty when mode=icap")
-		}
-		for i, s := range cfg.ICAP.Servers {
-			if strings.TrimSpace(s.Address) == "" {
-				return fmt.Errorf("services.av.icap.servers[%d].address required", i)
-			}
+		if err := validateICAPServers(cfg.ICAP.Servers); err != nil {
+			return err
 		}
 	}
 	if cfg.TimeoutSec < 0 || cfg.TimeoutSec > maxAVTimeoutSec {
@@ -121,9 +112,6 @@ func validateAV(cfg AVConfig) error {
 	if cfg.MaxSizeBytes < 0 || cfg.MaxSizeBytes > maxAVScanBytes {
 		return fmt.Errorf("services.av.maxSizeBytes must be between 0 (no limit) and %d", maxAVScanBytes)
 	}
-	if cfg.BlockTTL < 0 {
-		return errors.New("services.av.blockTtlSeconds must not be negative; 0 selects 600")
-	}
 	if cfg.CacheTTL < 0 {
 		return errors.New("services.av.cacheTtl must not be negative; 0 selects 10m")
 	}
@@ -131,6 +119,26 @@ func validateAV(cfg AVConfig) error {
 		if _, err := cfg.ClamAV.UpdateInterval(); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateICAPServers requires exactly one server, since scans go to one
+// server without failover, with a host:port address.
+func validateICAPServers(servers []ICAPServer) error {
+	switch len(servers) {
+	case 0:
+		return errors.New("services.av.icap.servers must not be empty when mode=icap")
+	case 1:
+	default:
+		return fmt.Errorf("services.av.icap.servers must hold exactly one server when mode=icap (got %d); failover is not supported", len(servers))
+	}
+	addr := strings.TrimSpace(servers[0].Address)
+	if addr == "" {
+		return errors.New("services.av.icap.servers[0].address required")
+	}
+	if host, port, err := net.SplitHostPort(addr); err != nil || host == "" || port == "" {
+		return fmt.Errorf("services.av.icap.servers[0].address %q must be host:port", addr)
 	}
 	return nil
 }

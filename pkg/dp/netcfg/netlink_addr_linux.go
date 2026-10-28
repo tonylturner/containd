@@ -58,7 +58,7 @@ func addAddr(ifIndex int, ipnet *net.IPNet) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 
 	ifa := unix.IfAddrmsg{
 		Family:    uint8(family),
@@ -67,7 +67,7 @@ func addAddr(ifIndex int, ipnet *net.IPNet) error {
 		Scope:     0,
 		Index:     uint32(ifIndex),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, ifa)
+	_ = binary.Write(&req, binary.NativeEndian, ifa)
 
 	addRtAttr(&req, unix.IFA_LOCAL, ip)
 	addRtAttr(&req, unix.IFA_ADDRESS, ip)
@@ -97,7 +97,7 @@ func addAddr(ifIndex int, ipnet *net.IPNet) error {
 			if len(m.Data) < 4 {
 				return errors.New("netlink error")
 			}
-			code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+			code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
 			if code == 0 {
 				return nil
 			}
@@ -150,7 +150,7 @@ func delAddr(ifIndex int, ipnet *net.IPNet) error {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	ifa := unix.IfAddrmsg{
 		Family:    uint8(family),
 		Prefixlen: uint8(prefixLen),
@@ -158,7 +158,7 @@ func delAddr(ifIndex int, ipnet *net.IPNet) error {
 		Scope:     0,
 		Index:     uint32(ifIndex),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, ifa)
+	_ = binary.Write(&req, binary.NativeEndian, ifa)
 	addRtAttr(&req, unix.IFA_LOCAL, ip)
 	addRtAttr(&req, unix.IFA_ADDRESS, ip)
 
@@ -186,7 +186,7 @@ func delAddr(ifIndex int, ipnet *net.IPNet) error {
 		if len(m.Data) < 4 {
 			return errors.New("netlink error")
 		}
-		code := int32(binary.LittleEndian.Uint32(m.Data[:4]))
+		code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
 		if code == 0 {
 			return nil
 		}
@@ -244,8 +244,8 @@ func buildGetAddrRequest(seq uint32, family int) []byte {
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	}
-	_ = binary.Write(&req, binary.LittleEndian, hdr)
-	_ = binary.Write(&req, binary.LittleEndian, unix.IfAddrmsg{Family: uint8(family)})
+	_ = binary.Write(&req, binary.NativeEndian, hdr)
+	_ = binary.Write(&req, binary.NativeEndian, unix.IfAddrmsg{Family: uint8(family)})
 	b := req.Bytes()
 	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
 	return b
@@ -290,7 +290,7 @@ func netlinkMessageError(data []byte) error {
 	if len(data) < 4 {
 		return errors.New("netlink error")
 	}
-	code := int32(binary.LittleEndian.Uint32(data[:4]))
+	code := int32(binary.NativeEndian.Uint32(data[:4]))
 	if code == 0 {
 		return nil
 	}
@@ -351,8 +351,8 @@ type netlinkAttr struct {
 func parseNetlinkAttrs(b []byte) []netlinkAttr {
 	attrs := []netlinkAttr{}
 	for len(b) >= 4 {
-		l := int(binary.LittleEndian.Uint16(b[0:2]))
-		t := binary.LittleEndian.Uint16(b[2:4])
+		l := int(binary.NativeEndian.Uint16(b[0:2]))
+		t := binary.NativeEndian.Uint16(b[2:4])
 		if l < 4 || l > len(b) {
 			break
 		}
@@ -372,7 +372,7 @@ func addRtAttr(b *bytes.Buffer, attrType uint16, data []byte) {
 	l := hdrLen + len(data)
 	aligned := (l + 3) & ^3
 	h := unix.RtAttr{Len: uint16(l), Type: attrType}
-	_ = binary.Write(b, binary.LittleEndian, h)
+	_ = binary.Write(b, binary.NativeEndian, h)
 	_, _ = b.Write(data)
 	for i := l; i < aligned; i++ {
 		_ = b.WriteByte(0)

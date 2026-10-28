@@ -131,6 +131,31 @@ for LAN traffic disabled. It passes only when each run fails exactly the
 checks that its change breaks. Both scripts accept the isolation variables
 described in the smoke fixture README linked below.
 
+## Scanning Gate Smoke
+
+`bash scripts/smoke-av-gate.sh` brings up the same harness, enables the
+native clamd with FreshClam off and the EICAR test file's MD5 as its only
+custom definition, and commits a scan selection for LAN-to-WAN tcp/8080 and
+the port forward's WAN-to-LAN tcp/80. It checks, with the EICAR and clean
+objects served by `test/data-smoke/av/`, that:
+
+- under fail-open and fail-closed with the scanner ready, the EICAR
+  download and upload are refused with `403` and no EICAR byte reaches the
+  client or the origin, clean objects pass whole, the origin sees the
+  engine's WAN address, a detection event names the client, the inbound
+  port forward is gated the same way with the target seeing the engine's
+  LAN address, and an unselected port passes EICAR without a gate event;
+- with the backend switched to an ICAP server that refuses connections,
+  fail-open passes everything unscanned, fail-closed refuses downloads and
+  uploads while management stays reachable, and a client marked as an ICS
+  asset passes under fail-closed;
+- an exclude entry wins over the include entry: EICAR passes and the gate
+  records no event for it.
+
+Exit codes follow the forwarding smoke. `SMOKE_MUTATION=no-gate` commits an
+empty scan selection and must fail the refusal checks. The script accepts
+the isolation variables described in the smoke fixture README.
+
 ## Selecting Tests
 
 | Change | Checks |
@@ -139,6 +164,7 @@ described in the smoke fixture README linked below.
 | Protocol parsing or stream reassembly | Adjacent malformed-input tests, fuzz targets and benchmarks |
 | UI routes or forms | Playwright specs and UI lint; mocked API tests do not validate the live backend |
 | Forwarding, NAT or live DPI | `bash scripts/smoketest`; set `SMOKE_INCLUDE_DPI=0` for forwarding only |
+| Scanning gate, AV fail policy or scan selection | `bash scripts/smoke-av-gate.sh` |
 | Linux networking or runtime behavior | Tests on Linux with the capabilities required by the package or harness |
 
 Keep regression tests beside the code they exercise, following
@@ -153,15 +179,28 @@ and IEC104 scenarios in
 
 `CONTAIND_NETNS_KERNEL_TEST=1` is the one gate of the dataplane kernel tests
 in `pkg/dp/engine`, `pkg/dp/enforce`, `pkg/dp/capture`, `pkg/dp/session`,
-`pkg/dp/conntrack`, `pkg/dp/dhcpd` and `pkg/dp/netcfg`. Most of them replace
-containd's nft tables, routes or links, or create network namespaces, so they
-run only with the variable set, in a disposable privileged Linux container.
-The `pkg/dp/capture` and `pkg/dp/session` tests also run whenever they run as
-root; with the variable set, a missing prerequisite fails them instead of
-skipping. Each test's comment gives its container command. The
-`pkg/dp/netcfg` management kernel test also needs a TUN device, OpenVPN and
-reverse-path filtering; `bash pkg/dp/netcfg/management-kernel.sh` builds that
-container and runs it.
+`pkg/dp/conntrack`, `pkg/dp/dhcpd`, `pkg/dp/netcfg` and `pkg/app/engine`.
+Most of them replace containd's nft tables, routes or links, or create
+network namespaces, so they run only with the variable set, in a disposable
+privileged Linux container. The `pkg/dp/capture` and `pkg/dp/session` tests
+also run whenever they run as root; with the variable set, a missing
+prerequisite fails them instead of skipping. Each test's comment gives its
+container command. The `pkg/dp/netcfg` management kernel test also needs a
+TUN device, OpenVPN and reverse-path filtering;
+`bash pkg/dp/netcfg/management-kernel.sh` builds that container and runs it.
+
+The scanning-gate kernel tests run together with
+`bash scripts/gate-kernel-tests.sh`: the nft steering (`TestGateKernel`) and
+the nft load of every golden ruleset (`TestKernelNFTLoadsGoldens`) in
+`pkg/dp/enforce`, the gate policy routing (`TestGateRoutingKernel`) in
+`pkg/dp/netcfg` and the gate manager (`TestGateManagerKernel`) in
+`pkg/app/engine`. The script builds a `golang` image with nftables,
+iproute2 and Python, runs it with `NET_ADMIN`, `NET_RAW` and `SYS_ADMIN`
+(network namespaces need the last one), keeps the build and module caches in
+named Docker volumes, and passes extra arguments to `go test`. It runs the
+packages one at a time (`go test -p 1`) because the netcfg and engine tests
+install the gate's policy routing in the namespace-global table 104010 and
+would remove each other's objects in parallel.
 
 ## Kernel NFQUEUE Oracle
 

@@ -45,11 +45,12 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
 // Port is the IEC 104 TCP port (IEC 60870-5-104 clause 5).
-const Port = 2404
+const Port = ics.IEC104Port
 
 // maxRawHex bounds raw_hex to one maximal APDU.
 const maxRawHex = 2 + maxAPDULength

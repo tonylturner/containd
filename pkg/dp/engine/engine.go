@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,7 +56,6 @@ type Engine struct {
 	dpiMgr                *dpi.Manager
 	eventStore            *events.Store
 	rulesetStatus         atomic.Pointer[RulesetStatus]
-	avSink                AVSink
 	inspectAll            bool
 	dpiEnabled            bool // master DPI on/off
 	icsParsing            atomic.Pointer[map[string]string]
@@ -88,7 +86,11 @@ type Engine struct {
 	hooks                 *inlineHooks
 	iec                   *iecTable
 	gate                  *envelopeGate // outlives Reconfigure, as the kernel ruleset does
-	domains               *domainExclusions
+	// gateAdmit is the admission state of the scanning gate (scan_admit.go):
+	// written by SetGateAdmit and into every applied ruleset, under
+	// lifecycleMu. It outlives Reconfigure, as the kernel ruleset does.
+	gateAdmit enforce.GateAdmitState
+	domains   *domainExclusions
 }
 
 // RulesetStatus describes the installed ruleset: its compiled text,
@@ -118,8 +120,13 @@ type EnforceConfig struct {
 	EngineAPI *enforce.EngineAPIPath
 	Enabled   bool
 	TableName string
-	Applier   enforce.Applier
-	Updater   enforce.Updater
+	// GatePlainPort and GateMasqPort are the scanning gate's loopback
+	// listener ports (enforce.CompilerSettings); both zero compiles no
+	// gate. The application passes the same values to preview.
+	GatePlainPort uint16
+	GateMasqPort  uint16
+	Applier       enforce.Applier
+	Updater       enforce.Updater
 }
 
 type Config struct {
@@ -228,6 +235,7 @@ func New(cfg Config) (*Engine, error) {
 	if cfg.Enforce.Enabled {
 		comp := enforce.NewCompilerWithSettings(enforce.CompilerSettings{
 			TableName: cfg.Enforce.TableName, NFLogGroup: cfg.NFLogGroup, NFQueueGroup: cfg.NFQueueGroup,
+			GatePlainPort: cfg.Enforce.GatePlainPort, GateMasqPort: cfg.Enforce.GateMasqPort,
 		}, e.managementReservation)
 		comp.EngineAPI = e.engineAPI
 		e.compiler = comp
@@ -319,7 +327,6 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.anomalyDetector = fresh.anomalyDetector
 	e.sigEngine = fresh.sigEngine
 	e.stats = fresh.stats
-	e.avSink = fresh.avSink
 	e.inspectAll = fresh.inspectAll
 	e.dpiEnabled = fresh.dpiEnabled
 	e.dpiMode = fresh.dpiMode
@@ -478,6 +485,9 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	if err := snap.ValidateIndustrialProtocols(); err != nil {
 		return err
 	}
+	if err := snap.Gate.Validate(); err != nil {
+		return err
+	}
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
 	if err := enforce.ValidateManagementSnapshot(&snap, e.managementReservation); err != nil {
@@ -489,6 +499,7 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 	if e.compiler != nil {
 		start := time.Now()
 		var err error
+		e.compiler.GateAdmit = e.gateAdmit
 		if compiled, err = e.gate.apply(ctx, e.compiler, e.applier, &snap); err != nil {
 			e.recordApplyFailure(snap.Version, err)
 			return err
@@ -569,7 +580,7 @@ func shouldInspectFirewallEntry(entry rules.Entry, state *flow.State, pkt *dpi.P
 	if len(entry.Protocols) > 0 {
 		return entryMatchesProtocolPorts(entry, state, pkt)
 	}
-	return matchesICSDefaultPort(entry.ICS.Protocol, servicePort(state, pkt))
+	return rules.IsICSDecoderPort(entry.ICS.Protocol, servicePort(state, pkt))
 }
 
 func entryMatchesProtocolPorts(entry rules.Entry, state *flow.State, pkt *dpi.ParsedPacket) bool {
@@ -579,21 +590,6 @@ func entryMatchesProtocolPorts(entry rules.Entry, state *flow.State, pkt *dpi.Pa
 		}
 	}
 	return false
-}
-
-func matchesICSDefaultPort(proto string, port uint16) bool {
-	switch strings.ToLower(proto) {
-	case "modbus":
-		return port == 502
-	case "dnp3":
-		return port == 20000
-	case "cip":
-		return port == 44818 || port == 2222
-	case "iec104":
-		return port == iec104Port
-	default:
-		return false
-	}
 }
 
 // handlePacket runs flow tracking, DPI and enforcement for one captured

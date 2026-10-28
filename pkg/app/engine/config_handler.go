@@ -147,7 +147,9 @@ func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *e
 		OnError: func(err error) {
 			logger.Errorf("data plane capture error: %v", err)
 		},
-		Enforce:         engine.EnforceConfig{ManagementReservation: reservation, Enabled: dp.Enforcement, TableName: table, Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(table)},
+		Enforce: engine.EnforceConfig{ManagementReservation: reservation, Enabled: dp.Enforcement, TableName: table,
+			GatePlainPort: settings.GatePlainPort, GateMasqPort: settings.GateMasqPort,
+			Applier: enforce.NewNftApplier(), Updater: enforce.NewNftUpdater(table)},
 		InspectAll:      dp.DPIMock,
 		DPIEnabled:      dp.DPIEnabled,
 		DPIMode:         dp.DPIMode,
@@ -160,10 +162,16 @@ func newEngineFor(logger *zap.SugaredLogger, dp config.DataPlaneConfig, store *e
 	})
 }
 
-// compilerSettings is the single candidate-config mapping for apply and preview.
+// compilerSettings is the single candidate-config mapping for apply and
+// preview. The scanning gate's listener ports are the defaults whenever
+// enforcement is on.
 func compilerSettings(dp config.DataPlaneConfig) enforce.CompilerSettings {
-	return enforce.CompilerSettings{
+	s := enforce.CompilerSettings{
 		TableName:  firstNonEmpty(dp.EnforceTable, "containd"),
 		NFLogGroup: dp.NFLogGroup, NFQueueGroup: dp.NFQueueGroup,
 	}
+	if dp.Enforcement {
+		s.GatePlainPort, s.GateMasqPort = enforce.DefaultGatePlainPort, enforce.DefaultGateMasqPort
+	}
+	return s
 }

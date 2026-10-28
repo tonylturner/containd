@@ -12,6 +12,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
@@ -28,10 +29,10 @@ func (d *Decoder) Supports(state *flow.State) bool {
 	}
 	switch state.Key.Proto {
 	case 6: // TCP — explicit messaging on port 44818
-		return state.Key.SrcPort == 44818 || state.Key.DstPort == 44818
+		return state.Key.SrcPort == ics.CIPPort || state.Key.DstPort == ics.CIPPort
 	case 17: // UDP — implicit I/O on 2222, packet-only encapsulation on 44818
-		return state.Key.SrcPort == 2222 || state.Key.DstPort == 2222 ||
-			state.Key.SrcPort == 44818 || state.Key.DstPort == 44818
+		return state.Key.SrcPort == ics.CIPImplicitPort || state.Key.DstPort == ics.CIPImplicitPort ||
+			state.Key.SrcPort == ics.CIPPort || state.Key.DstPort == ics.CIPPort
 	default:
 		return false
 	}
@@ -39,7 +40,7 @@ func (d *Decoder) Supports(state *flow.State) bool {
 
 // Ports implements dpi.PortHinter for port-based dispatch.
 func (d *Decoder) Ports() (tcpPorts, udpPorts []uint16) {
-	return []uint16{44818}, []uint16{2222, 44818}
+	return []uint16{ics.CIPPort}, []uint16{ics.CIPImplicitPort, ics.CIPPort}
 }
 
 // cipCommands are EIP commands that carry CIP messages.
@@ -54,7 +55,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	}
 	// Every datagram on the I/O port is one bounded frame, so an empty or
 	// malformed one is still reported rather than silently skipped.
-	if state != nil && state.Key.Proto == 17 && (state.Key.SrcPort == 2222 || state.Key.DstPort == 2222) {
+	if state != nil && state.Key.Proto == 17 && (state.Key.SrcPort == ics.CIPImplicitPort || state.Key.DstPort == ics.CIPImplicitPort) {
 		return []dpi.Event{ioEvent(state, pkt.Payload)}, nil
 	}
 	if len(pkt.Payload) == 0 {

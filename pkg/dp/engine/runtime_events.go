@@ -46,7 +46,6 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	e.recordLearnEvents(srcIP, dstIP, evs)
 	e.recordAnomalyAlerts(state, pkt, srcIP, dstIP, evs)
 	e.recordSignatureAlerts(state, pkt, evs)
-	e.enqueueAVTasks(state, evs)
 	e.eventStore.Record(state, pkt, evs)
 	e.recordEvaluatedIDSAlerts(state, pkt, evs)
 }
@@ -144,41 +143,6 @@ func signatureAlertFromMatch(ev dpi.Event, m signatures.Match) dpi.Event {
 	}
 }
 
-func (e *Engine) enqueueAVTasks(state *flow.State, evs []dpi.Event) {
-	if e == nil || e.avSink == nil {
-		return
-	}
-	src, dst := srcDestStrings(state)
-	for _, ev := range evs {
-		if !isAVScanCandidate(ev) {
-			continue
-		}
-		preview, _ := ev.Attributes["preview"].([]byte)
-		hash, _ := ev.Attributes["hash"].(string)
-		if len(preview) == 0 {
-			continue
-		}
-		e.avSink.EnqueueAVScan(context.Background(), AVScanTask{
-			Hash:      hash,
-			Direction: ev.Kind,
-			Proto:     "http",
-			Source:    src,
-			Dest:      dst,
-			FlowID:    ev.FlowID,
-			Preview:   preview,
-			ICS:       isICSEvent(ev.Proto, ev.Kind),
-		})
-		delete(ev.Attributes, "preview")
-	}
-}
-
-func isAVScanCandidate(ev dpi.Event) bool {
-	if ev.Proto != "http" {
-		return false
-	}
-	return ev.Kind == "request" || ev.Kind == "response"
-}
-
 func (e *Engine) recordProtoStats(evs []dpi.Event) {
 	if e == nil || e.stats == nil {
 		return
@@ -248,14 +212,6 @@ func (e *Engine) AnomalyDetector() *anomaly.Detector {
 		return nil
 	}
 	return e.anomalyDetector
-}
-
-// AVSink returns the currently configured AV sink, if any.
-func (e *Engine) AVSink() AVSink {
-	if e == nil {
-		return nil
-	}
-	return e.avSink
 }
 
 // Updater returns the dynamic nftables updater when enforcement is enabled.
@@ -398,9 +354,16 @@ func (e *Engine) effectiveMode(matched *rules.Entry) string {
 	return rules.EffectiveMode(ruleMode, globalMode)
 }
 
-// ApplyVerdict applies a verdict to dynamic enforcement primitives when enabled.
+// ApplyVerdict applies a verdict to dynamic enforcement primitives when
+// enabled. A temporary block also resets the gated connections it covers.
 func (e *Engine) ApplyVerdict(ctx context.Context, v verdict.Verdict, flow rules.EvalContext) error {
-	return applyVerdict(ctx, e.updater, v, flow)
+	if err := applyVerdict(ctx, e.updater, v, flow); err != nil || e.updater == nil {
+		return err
+	}
+	if req, ok := gateCloseForVerdict(v, flow); ok {
+		closeGated([]GateCloseRequest{req})
+	}
+	return nil
 }
 
 func applyVerdict(ctx context.Context, updater enforce.Updater, v verdict.Verdict, flow rules.EvalContext) error {
@@ -461,11 +424,16 @@ func (e *Engine) releaseRulesetStatus() {
 }
 
 // RevokeConnections installs operator revocations through the active enforcement
-// backend. Unsupported or disabled backends cannot report a successful kill.
+// backend and resets the gated connections they cover. Unsupported or
+// disabled backends cannot report a successful kill.
 func (e *Engine) RevokeConnections(ctx context.Context, entries []conntrack.Entry, scope string, ttl time.Duration) error {
 	revoker, ok := e.Updater().(enforce.ConnectionRevoker)
 	if !ok {
 		return fmt.Errorf("connection revocation unavailable: nftables enforcement is not active")
 	}
-	return revoker.RevokeConnections(ctx, entries, scope, ttl)
+	if err := revoker.RevokeConnections(ctx, entries, scope, ttl); err != nil {
+		return err
+	}
+	closeGated(gateCloseRequests(entries, scope))
+	return nil
 }

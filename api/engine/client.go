@@ -123,31 +123,46 @@ func (c *HTTPClient) Configure(ctx context.Context, cfg config.DataPlaneConfig) 
 	return nil
 }
 
-func (c *HTTPClient) ConfigureServices(ctx context.Context, services config.ServicesConfig) error {
+// ConfigureServices applies the services configuration and returns the
+// warnings the engine applied it with: conditions such as an AV backend that
+// is still starting, which the engine resolves on its own without a further
+// apply.
+func (c *HTTPClient) ConfigureServices(ctx context.Context, services config.ServicesConfig) ([]string, error) {
 	if c.BaseURL == "" {
-		return fmt.Errorf("engine BaseURL is empty")
+		return nil, fmt.Errorf("engine BaseURL is empty")
 	}
 	body, err := json.Marshal(services)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/services", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.Client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		detail := strings.TrimSpace(string(b))
-		if detail != "" {
-			return fmt.Errorf("engine services status %d: %s", resp.StatusCode, detail)
-		}
-		return fmt.Errorf("engine services status %d", resp.StatusCode)
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("engine services response: %w", err)
 	}
-	return nil
+	if resp.StatusCode >= 300 {
+		if detail := strings.TrimSpace(string(b)); detail != "" {
+			return nil, fmt.Errorf("engine services status %d: %s", resp.StatusCode, detail)
+		}
+		return nil, fmt.Errorf("engine services status %d", resp.StatusCode)
+	}
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil, nil
+	}
+	var applied struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(b, &applied); err != nil {
+		return nil, fmt.Errorf("engine services response: %w", err)
+	}
+	return applied.Warnings, nil
 }

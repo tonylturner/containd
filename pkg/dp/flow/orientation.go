@@ -7,25 +7,15 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 // ICSServiceDirection is a midstream hint, used only without handshake or
 // connection evidence. Equal-status ports are ambiguous: callers retain
 // first-seen orientation, not a proved client/server assignment.
 func ICSServiceDirection(proto uint8, srcPort, dstPort uint16) (Direction, bool) {
-	known := func(port uint16) bool {
-		switch proto {
-		case 6:
-			switch port {
-			case 502, 20000, 44818, 2404:
-				return true
-			}
-		case 17:
-			return port == 2222
-		}
-		return false
-	}
-	src, dst := known(srcPort), known(dstPort)
+	src, dst := ics.IsDecoderPortOn(proto, srcPort), ics.IsDecoderPortOn(proto, dstPort)
 	if src == dst {
 		return DirForward, false
 	}

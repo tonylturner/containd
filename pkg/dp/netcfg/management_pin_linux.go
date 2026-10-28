@@ -36,7 +36,7 @@ func (g *ManagementGuard) Reconcile(ctx context.Context) (err error) {
 	if err = g.removeSourceAddresses(ctx); err != nil {
 		return err
 	}
-	routes, err := managementDump(ctx, unix.RTM_GETROUTE)
+	routes, err := netlinkDump(ctx, unix.RTM_GETROUTE)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func (g *ManagementGuard) Reconcile(ctx context.Context) (err error) {
 		if !ok || !g.reservation.IsSource(a.Unmap()) {
 			continue
 		}
-		_, err := managementRequest(ctx, unix.RTM_DELROUTE, unix.NLM_F_ACK, route.payload)
+		_, err := netlinkRequest(ctx, unix.RTM_DELROUTE, unix.NLM_F_ACK, route.payload)
 		if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.ENOENT) {
 			continue
 		}
@@ -71,7 +71,7 @@ func managementAddressFault(index uint32, address, reason string) ManagementFaul
 	return f
 }
 func (g *ManagementGuard) removeSourceAddresses(ctx context.Context) error {
-	msgs, err := managementDump(ctx, unix.RTM_GETADDR)
+	msgs, err := netlinkDump(ctx, unix.RTM_GETADDR)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (g *ManagementGuard) removeSourceAddresses(ctx context.Context) error {
 		if !ok || !g.reservation.IsSource(a.Unmap()) {
 			continue
 		}
-		_, err := managementRequest(ctx, unix.RTM_DELADDR, unix.NLM_F_ACK, m.Data)
+		_, err := netlinkRequest(ctx, unix.RTM_DELADDR, unix.NLM_F_ACK, m.Data)
 		if errors.Is(err, unix.EADDRNOTAVAIL) {
 			continue
 		}
@@ -105,7 +105,7 @@ func (g *ManagementGuard) ensurePin(ctx context.Context, routes []syscall.Netlin
 	if err != nil {
 		return err
 	}
-	rules, err := managementDump(ctx, unix.RTM_GETRULE)
+	rules, err := netlinkDump(ctx, unix.RTM_GETRULE)
 	if err != nil {
 		return err
 	}
@@ -119,23 +119,23 @@ func (g *ManagementGuard) ensurePin(ctx context.Context, routes []syscall.Netlin
 		}
 		if !found {
 			var b bytes.Buffer
-			b.Write(managementPayload(unix.RtMsg{Family: unix.AF_INET, Dst_len: 32, Protocol: ManagementRouteProtocol, Scope: unix.RT_SCOPE_LINK, Type: unix.RTN_UNICAST}))
+			b.Write(netlinkPayload(unix.RtMsg{Family: unix.AF_INET, Dst_len: 32, Protocol: ManagementRouteProtocol, Scope: unix.RT_SCOPE_LINK, Type: unix.RTN_UNICAST}))
 			addRtAttr(&b, unix.RTA_DST, source.AsSlice())
 			addRtAttr(&b, unix.RTA_PREFSRC, r.Local.Addr().AsSlice())
-			managementAttrU32(&b, unix.RTA_OIF, uint32(nic.Index))
-			managementAttrU32(&b, unix.RTA_TABLE, ManagementTable)
-			if _, err := managementRequest(ctx, unix.RTM_NEWROUTE, unix.NLM_F_ACK|unix.NLM_F_CREATE|unix.NLM_F_REPLACE, b.Bytes()); err != nil {
+			netlinkAttrU32(&b, unix.RTA_OIF, uint32(nic.Index))
+			netlinkAttrU32(&b, unix.RTA_TABLE, ManagementTable)
+			if _, err := netlinkRequest(ctx, unix.RTM_NEWROUTE, unix.NLM_F_ACK|unix.NLM_F_CREATE|unix.NLM_F_REPLACE, b.Bytes()); err != nil {
 				return err
 			}
 		}
 		if !managementPinRuleExists(rules, r, source) {
 			var b bytes.Buffer
-			b.Write(managementPayload(fibRuleHdr{Family: unix.AF_INET, SrcLen: 32, DstLen: 32, Action: frActToTbl}))
+			b.Write(netlinkPayload(fibRuleHdr{Family: unix.AF_INET, SrcLen: 32, DstLen: 32, Action: frActToTbl}))
 			addRtAttr(&b, fraSrc, r.Local.Addr().AsSlice())
 			addRtAttr(&b, fraDst, source.AsSlice())
-			managementAttrU32(&b, fraTable, ManagementTable)
-			managementAttrU32(&b, fraPriority, mgmtpath.PinPriority)
-			if _, err := managementRequest(ctx, unix.RTM_NEWRULE, unix.NLM_F_ACK|unix.NLM_F_CREATE|unix.NLM_F_EXCL, b.Bytes()); err != nil {
+			netlinkAttrU32(&b, fraTable, ManagementTable)
+			netlinkAttrU32(&b, fraPriority, mgmtpath.PinPriority)
+			if _, err := netlinkRequest(ctx, unix.RTM_NEWRULE, unix.NLM_F_ACK|unix.NLM_F_CREATE|unix.NLM_F_EXCL, b.Bytes()); err != nil {
 				return err
 			}
 		}

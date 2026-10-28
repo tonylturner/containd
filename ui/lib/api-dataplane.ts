@@ -15,6 +15,10 @@ export type RulesetPreview = {
   runtime: {
     iec104EnvelopeOpen: boolean;
     reason: string;
+    /** The scanning gate admission compiled into the preview; absent when enforcement is disabled. */
+    gateAdmit?: "refuse" | "open" | "pass";
+    /** What that admission means for the candidate's gated connections. */
+    gateAdmitReason?: string;
   };
   warnings?: RuleWarning[];
   /** Static coverage of the candidate's ICS rules; GET /dataplane/ics-coverage is the UI's source. */

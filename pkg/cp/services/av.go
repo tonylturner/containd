@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/avscan"
 	commonlog "github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -26,8 +27,11 @@ const (
 	DefaultClamdSocket = "/run/clamav/clamd.sock"
 	// DefaultCustomDefsPath stores uploaded custom signature databases.
 	DefaultCustomDefsPath = "/data/clamav/custom"
-	defaultAVTimeout      = 5 * time.Second
-	defaultAVCacheTTL     = 10 * time.Minute
+	// DefaultAVTimeout bounds a scanner connection, probe and scan when the
+	// AV configuration sets no timeout; the scanning gate derives its scan
+	// deadline from the same value.
+	DefaultAVTimeout  = 5 * time.Second
+	defaultAVCacheTTL = 10 * time.Minute
 	// avStatusProbeTimeout bounds the live readiness check in Status.
 	avStatusProbeTimeout = 2 * time.Second
 )
@@ -72,7 +76,7 @@ func DefaultAVOptions() AVOptions {
 
 // AVManager is the engine's single antivirus owner: it applies AV settings,
 // supervises clamd and the FreshClam schedule, manages custom definitions
-// and scans queued tasks. Its children live until Stop.
+// and scans complete objects. Its children live until Stop.
 type AVManager struct {
 	opts   AVOptions
 	ctx    context.Context
@@ -82,8 +86,7 @@ type AVManager struct {
 	// a channel so goroutines being stopped can abandon the wait.
 	op chan struct{}
 
-	OnEvent   func(kind string, attrs map[string]any)
-	OnVerdict func(task ScanTask, res ScanResult)
+	OnEvent func(kind string, attrs map[string]any)
 
 	mu         sync.Mutex
 	lastCfg    config.AVConfig
@@ -100,18 +103,29 @@ type AVManager struct {
 	cache      map[string]cachedVerdict
 	maxCache   int
 
-	queue *ScanQueue
-	log   *zap.SugaredLogger
+	slots        chan struct{}
+	backendReady bool
+	// reload is the database activation awaiting clamd's proof, if any;
+	// reloadError records the last activation failure until a retry
+	// succeeds; reloadAttempt grows the retry backoff; retrySeq lets a newer
+	// retry supersede an older one; bounds holds the timing.
+	reload        *pendingReload
+	reloadError   string
+	reloadAttempt int
+	retrySeq      uint64
+	bounds        reloadBounds
+	defsPath      string
+	log           *zap.SugaredLogger
 	// validateDef checks a candidate signature database before activation.
 	validateDef func(ctx context.Context, path string) error
 }
 
 type cachedVerdict struct {
-	verdict string
+	result  avscan.Result
 	expires time.Time
 }
 
-// NewAVManager returns a manager whose daemons and workers are bound to ctx
+// NewAVManager returns a manager whose daemons and scans are bound to ctx
 // and stopped by Stop.
 func NewAVManager(ctx context.Context, opts AVOptions) *AVManager {
 	ctx, cancel := context.WithCancel(ctx)
@@ -122,7 +136,8 @@ func NewAVManager(ctx context.Context, opts AVOptions) *AVManager {
 		op:       make(chan struct{}, 1),
 		cache:    make(map[string]cachedVerdict),
 		maxCache: 1024,
-		queue:    NewScanQueue(2048),
+		slots:    make(chan struct{}, 8),
+		bounds:   defaultReloadBounds(),
 		log:      newAVLogger(),
 	}
 	m.validateDef = m.clamscanValidate
@@ -159,14 +174,19 @@ func (m *AVManager) lock(ctx context.Context) error {
 
 func (m *AVManager) unlock() { <-m.op }
 
-// Stop ends the FreshClam schedule, stops clamd and the scan worker, and
-// waits for every goroutine and child process the manager started.
+// Stop ends the FreshClam schedule, stops clamd, and waits for every
+// goroutine and child process the manager started. It cancels the manager
+// before taking the operation lock so an activation retry holding it,
+// possibly for minutes, releases it at once.
 func (m *AVManager) Stop() error {
+	m.cancel()
 	m.op <- struct{}{}
 	defer m.unlock()
 	m.stopFreshclam()
 	err := m.stopClamd()
-	m.cancel()
+	m.mu.Lock()
+	m.backendReady = false
+	m.mu.Unlock()
 	m.wg.Wait()
 	metrics.ServicesRunning.WithLabelValues("av").Set(0)
 	return err
@@ -175,21 +195,37 @@ func (m *AVManager) Stop() error {
 // Apply makes cfg the running AV configuration. Settings that do not affect
 // clamd or FreshClam leave them running. It returns an error when the
 // configured backend is missing, cannot start or does not answer in time.
+// A database activation that clamd accepted is confirmed in the background:
+// Apply waits for the proof only until ctx ends, and Status reports the
+// activation as pending until then.
 func (m *AVManager) Apply(ctx context.Context, cfg config.AVConfig) error {
+	if err := m.applyLocked(ctx, cfg); err != nil {
+		return err
+	}
+	return m.awaitReload(ctx)
+}
+
+func (m *AVManager) applyLocked(ctx context.Context, cfg config.AVConfig) error {
 	if err := m.lock(ctx); err != nil {
 		return err
 	}
 	defer m.unlock()
 	m.mu.Lock()
 	m.lastCfg = cfg
+	if !cfg.Enabled || avMode(cfg) != "clamav" {
+		m.reloadError = ""
+		m.reloadAttempt = 0
+	}
 	m.lastRender = time.Now().UTC()
 	m.mu.Unlock()
 	err := m.applyBackend(ctx, cfg)
 	m.mu.Lock()
 	if err != nil {
 		m.lastError = err.Error()
+		m.backendReady = false
 	} else {
 		m.lastError = ""
+		m.backendReady = cfg.Enabled
 	}
 	m.mu.Unlock()
 	ready := 0.0
@@ -227,7 +263,7 @@ func (m *AVManager) applyBackend(ctx context.Context, cfg config.AVConfig) error
 
 func (m *AVManager) probeICAP(ctx context.Context, cfg config.AVConfig) error {
 	srv := firstICAPServer(cfg)
-	err := m.icapClient(cfg).Probe(ctx, srv)
+	err := m.icapClient(cfg).Probe(ctx, srv, icapMethods(cfg)...)
 	m.mu.Lock()
 	m.lastTest = time.Now().UTC()
 	m.mu.Unlock()
@@ -257,17 +293,15 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	out := meterStatus(&m.scans, &m.scanErrs)
 	out["enabled"] = cfg.Enabled
 	out["mode"] = avMode(cfg)
-	out["failPolicy"] = firstNonEmpty(strings.ToLower(cfg.FailPolicy), "open")
-	out["failOpenICS"] = cfg.FailOpenICS
-	out["block_ttl"] = cfg.BlockTTL
+	out["failPolicy"] = cfg.EffectiveFailPolicy()
 	out["max_size"] = cfg.MaxSizeBytes
 	out["timeout"] = int(avTimeout(cfg) / time.Second)
 	out["cache_ttl"] = avCacheTTL(cfg).String()
 	out["cache_size"] = len(m.cache)
-	out["queue_depth"] = m.queue.Len()
 	out["icap_servers"] = len(cfg.ICAP.Servers)
 	out["detections"] = m.detections
 	out["definitions_generation"] = m.defsGen
+	out["reload_pending"] = m.reload != nil
 	out["clamav_socket"] = clamdSocket(cfg)
 	out["clamav_path"] = m.opts.ClamdPath
 	out["clamav_running"] = m.clamd.running()
@@ -293,6 +327,11 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	m.mu.Unlock()
 
 	ready, version, readyErr := m.readiness(ctx, cfg)
+	m.mu.Lock()
+	if m.reloadError != "" {
+		ready, readyErr = false, m.reloadError
+	}
+	m.mu.Unlock()
 	out["ready"] = ready
 	out["db_version"] = version
 	out["ready_error"] = readyErr
@@ -300,7 +339,7 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 }
 
 // readiness checks the backend live: clamd must answer PING and VERSION, an
-// ICAP server must answer OPTIONS.
+// ICAP server must answer OPTIONS for the scanned directions.
 func (m *AVManager) readiness(ctx context.Context, cfg config.AVConfig) (bool, string, string) {
 	if !cfg.Enabled {
 		return false, "", "disabled"
@@ -319,7 +358,7 @@ func (m *AVManager) readiness(ctx context.Context, cfg config.AVConfig) (bool, s
 		}
 		return true, version, ""
 	case "icap":
-		if err := m.icapClient(cfg).Probe(ctx, firstICAPServer(cfg)); err != nil {
+		if err := m.icapClient(cfg).Probe(ctx, firstICAPServer(cfg), icapMethods(cfg)...); err != nil {
 			return false, "", err.Error()
 		}
 		return true, "", ""

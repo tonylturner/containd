@@ -175,13 +175,15 @@ type mockEngine struct {
 	snap    rules.Snapshot
 	err     error
 	svcErr  error
-	lastDP  config.DataPlaneConfig
-	lastIf  []config.Interface
-	lastRT  config.RoutingConfig
-	lastRTR config.RoutingConfig
-	lastSvc config.ServicesConfig
-	state   []config.InterfaceState
-	ruleset dpengine.RulesetStatus
+	// svcWarnings are the warnings the engine applied the services with.
+	svcWarnings []string
+	lastDP      config.DataPlaneConfig
+	lastIf      []config.Interface
+	lastRT      config.RoutingConfig
+	lastRTR     config.RoutingConfig
+	lastSvc     config.ServicesConfig
+	state       []config.InterfaceState
+	ruleset     dpengine.RulesetStatus
 
 	avErr        error
 	avUpdates    int
@@ -219,9 +221,9 @@ func (m *mockEngine) ConfigureRoutingReplace(ctx context.Context, routing config
 	return nil
 }
 
-func (m *mockEngine) ConfigureServices(ctx context.Context, services config.ServicesConfig) error {
+func (m *mockEngine) ConfigureServices(ctx context.Context, services config.ServicesConfig) ([]string, error) {
 	m.lastSvc = services
-	return m.svcErr
+	return m.svcWarnings, m.svcErr
 }
 
 func (m *mockEngine) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {

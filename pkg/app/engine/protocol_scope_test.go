@@ -43,7 +43,7 @@ func TestRemovedProtocolInternalHandlers(t *testing.T) {
 				t.Fatal(err)
 			}
 			rec := httptest.NewRecorder()
-			applyRulesHandler(dp.Engine).ServeHTTP(rec, httptest.NewRequest("POST", "/internal/apply_rules", bytes.NewReader(body)))
+			applyRulesHandler(dp.Engine, nil).ServeHTTP(rec, httptest.NewRequest("POST", "/internal/apply_rules", bytes.NewReader(body)))
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("snapshot: %d %s", rec.Code, rec.Body)
 			}

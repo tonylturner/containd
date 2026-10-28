@@ -26,7 +26,7 @@ import (
 
 // IEC104 session bounds.
 const (
-	iec104Port              = 2404
+	iec104Port              = ics.IEC104Port
 	iecMaxHeldPerSession    = 32
 	iecMaxHeldBytes         = 64 << 10
 	iecMaxHeldGlobal        = 256

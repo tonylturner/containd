@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Modbus request/reply decoding and ICS policy direction follow the connection
-  opener, including clients bound to port 502. Offline PCAP analysis uses
-  SYN/SYN-ACK orientation, with service-port hints only for midstream captures.
-  Modbus, DNP3 and CIP inventory roles stay stable across replies and exceptions.
-
 ### Security
 
 - Learned ICS rules now come only from supported requests and are split by
@@ -34,14 +27,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matches any Modbus request whose span cannot be bounded (unknown function
   code, malformed PDU, quantity outside protocol limits, byte count that
   disagrees with the quantity).
+- HTTP DPI events no longer carry the first 4 KiB of the raw request or
+  response (`preview`) or its SHA-256 (`hash`). Those bytes could include
+  `Authorization` and `Set-Cookie` headers and form bodies, and reached the
+  event store, the events API and exports once packet-preview scanning no
+  longer removed them. Events keep the parsed metadata (method, path, host,
+  status, user agent, ports). Sigma rules can no longer select `preview` or
+  `hash`.
 
 ### Added
 
+- `services.av.scan` selects the traffic the scanning gate intercepts:
+  include and exclude entries of directional zone pairs, destination ports
+  and CIDRs, a download mode (`hold` or `stream_tail`) and the ICS-marked
+  zones and assets that pass unscanned content under a closed fail policy.
+  Exclusions win, and a selection may not include an ICS decoder port.
+- The engine intercepts the HTTP/1.x connections that `services.av.scan`
+  selects and scans each object before delivering it. While enforcement is
+  on, nftables steers every new TCP connection between the selected zones on
+  the selected ports, forwarded connections and inbound IPv4 port forwards
+  alike, to the engine's loopback listeners, matched on the destination after
+  DNAT. The gate holds each selected message body, scans it with the ClamAV
+  or ICAP backend and delivers or refuses the whole message; it dials the
+  server from the client's address, so the server sees the client IP unless
+  the existing source NAT masquerades the connection. The firewall policy
+  decides gated connections in both directions, revocations and temporary
+  blocks reset the gated connections they match, management is never
+  intercepted, and a connection opened before the selection covered it stays
+  unscanned until it closes. Content the gate cannot frame (HTTPS, HTTP/2,
+  `CONNECT`, `Upgrade`), partial objects (`206` or `Content-Range`) and
+  bodies larger than `maxSizeBytes` are reported as not scanned and follow
+  `failPolicy`; an endpoint in `scan.icsZones` or `scan.icsAssets` passes
+  unscanned outcomes under `closed`, and a detection is refused with `403`
+  under either policy. A relayed body that fails part way resets both
+  connections, so a truncated object never looks complete.
+- `scan.downloadMode: stream_tail` forwards a download as it arrives except
+  its last 64 KiB, which the gate holds until the verdict; a blocking verdict
+  resets both connections. Uploads are held in every mode. In both download
+  modes the gate remembers a URL whose download it refused as infected for
+  10 minutes (at most 4096 entries) and refuses a later request for it before
+  contacting the origin under either fail policy, so a withheld tail cannot
+  be fetched with a `Range` request.
+- The `av` entry of `GET /services/status` reports the scanning gate under
+  `gate`: its state (`off`, `refuse`, `pass`, `pending` or `open`), the
+  admission installed in nftables, the loopback listeners, scanner readiness,
+  gated connections, and routing or host warnings. The Antivirus page shows
+  the same state, edits the scan selection (include and exclude entries by
+  zone and port, download mode, ICS zones and assets) and the HTTP download
+  and upload switches, and flags an ICS decoder port before saving.
+- The ruleset preview (`GET /dataplane/ruleset`) samples the scanning gate's
+  admission state and reports it as `runtime.gateAdmit` with
+  `runtime.gateAdmitReason`, so the previewed ruleset carries the gate chain
+  an apply would install now.
+- Gate events under protocol `av`: `service.av.scanned` for every scanned or
+  unscanned object, `service.av.gate_connection` for a connection the gate
+  could not complete, `service.av.gate_state` for each admission change and
+  `service.av.pending` for a commit whose backend was still starting.
+  Detections keep `service.av.detected`. Object events carry the client, the
+  effective destination and, for a port forward, the original destination,
+  with direction, verdict, action, backend, reason (including `aborted` for
+  an object the client abandoned before the verdict) and size.
+- `scripts/smoke-av-gate.sh` smokes the scanning gate on a live engine with
+  the EICAR test file: fail-open and fail-closed with the scanner ready, an
+  unavailable backend, ICS assets, an exclusion, an inbound port forward and
+  an unselected port. Fixtures are under `test/data-smoke/av/`;
+  `SMOKE_MUTATION=no-gate` must fail its refusal checks.
 - Per-protocol `dataplane.dpiIcsParsing` settings (`tolerant` or `strict`) for
   Modbus, DNP3, CIP and IEC 104, with Parsing controls in Firewall DPI settings.
   Tolerant evaluates decoded fields and alerts on nonconformant content; strict
   drops nonconformant frames and resets the session when enforcing.
-
 - Scheduled workflows check the published `:latest` management and engine
   images daily and after each release: Cosign signatures, signed CycloneDX SBOM
   attestations, and a Trivy HIGH/CRITICAL scan of every platform image.
@@ -65,6 +119,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- ICAP verdicts are never cached: each scan reaches the server with its direction, HTTP headers and endpoints; native ClamAV caching is unchanged.
+- `services.av.failOpenIcs` is retired in favour of `scan.icsZones` and
+  `scan.icsAssets`; a stored value still loads and is ignored, and the
+  Antivirus page no longer offers the ICS fail-open setting.
+- A services apply whose clamd is still starting when its three-second
+  budget ends is pending, not failed: the commit succeeds with the warning
+  `services: AV backend is still starting …; scanning is pending until it is
+  ready`, the AV status shows the gate `pending`, and the engine keeps
+  bringing the backend up. Selected objects are refused under `closed` and
+  passed under `open` until it is ready.
+- `timeoutSec` bounds connecting to the scanner backend and its probes; each
+  scan is bounded by the gate's own deadline, ten times `timeoutSec` and at
+  least one minute, so a large clean object is no longer cut short by the
+  backend timeout.
+- Every clamd database activation is confirmed in the background: the engine
+  installs a probe signature and scans for it until clamd detects it, within
+  five minutes, retrying a failed activation with a bounded backoff. The AV
+  status reports `reload_pending` meanwhile, and
+  `service.av.clamav_reload_confirmed` records each confirmed activation.
+- An empty `services.av.mode` now selects the native ClamAV backend; ICAP is
+  an optional remote backend that accepts exactly one server.
+- ICAP scanning follows RFC 3507: uploads are sent as `REQMOD` and downloads
+  as `RESPMOD` with the original HTTP heads, streaming the body with
+  `X-Client-IP`/`X-Server-IP`. A reply is infected on `X-Infection-Found`,
+  `X-Violations-Found`, `X-Virus-ID` or a `VirusFound` ICAP status, clean only
+  on `204`, and a scan error otherwise. The `OPTIONS` probe requires `REQMOD`
+  when uploads are scanned and `RESPMOD` when downloads are scanned. The
+  encapsulated request head is the client's, `Cookie` and `Authorization`
+  included, as ICAP specifies.
 - Upgraded configurations default to tolerant ICS parsing without migration.
   IEC 104 malformed or profile-violating APDUs with a known length now reach
   the rules with a conformance alert instead of resetting the session. Set
@@ -80,7 +163,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unsupported`: decoded content carries `conformance` codes instead, and a
   strict rejection uses reason `nonconformant`. `malformed` now means only
   unframeable bytes or a stream fault.
-
 - `MODBUS-WRITE-COIL-ALL` now matches only FC 15 requests, not quantity echoes
   in replies. `ICS-WRITE-STORM` now alerts on 20 initiator write commands per
   connection within 10 seconds; replies and exceptions do not count, and an
@@ -93,7 +175,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or failed, not confirmed closure. IEC 104 keeps its existing abort path.
   DPI block elements installed before upgrading have no owner marker and are
   not cleared automatically; they expire within their existing 10-minute TTL.
-
 - Restored the full README overview and dashboard screenshot.
 - A Modbus `ALLOW` whose `addresses` covered only the start of the requests it
   admitted now denies them: `10-11` no longer admits a read of 8 registers from
@@ -108,9 +189,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with its 23 built-in signatures and temporary custom signatures, the decoded
   event fields of each ICS decoder, a Modbus function-code and address rule
   example, and how the TLS `ja3` fingerprint differs from reference JA3.
+- On upgrade, unchanged built-in IDS rules for removed industrial protocols
+  are removed automatically and recorded in an audit record. Any other saved
+  reference to a removed protocol starts the appliance in management recovery;
+  the saved configuration remains exportable until a valid configuration is
+  committed.
+- IDS rules, custom signatures, Sigma rules, firewall rules and decoder toggles
+  reject `enip` with `EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`.
+  The protocol name `cip` covers the whole EtherNet/IP stack. Suricata and Snort
+  rule files that use `enip` still import as `cip`.
+- CIP events (including MSP sub-events) replace `command`, `command_code` and
+  `session_handle` with `enip_command`, `enip_command_code` and
+  `enip_session_handle`, without aliases. `cpf_item_types` reports all CPF item
+  types in packet order as one comma-joined string without spaces for valid
+  SendRRData/SendUnitData item lists, usable with IDS scalar operators; alert
+  details show the encapsulation command and CPF items.
 
 ### Fixed
 
+- The scanning gate tracks connections by both TCP endpoints, so connections
+  sharing a client IP and port keep their own masquerading, events and resets.
+- The scanning gate keeps a client connection open after a completed upload
+  when the origin answers before the gate's last write returns; it no longer
+  treats the upload as truncated and drops the next pipelined response.
+- The DHCP page keeps unsaved edits when its configuration is reloaded after a
+  staged save, a commit or an auto refresh, and says when the server copy
+  changed underneath them. Only the Refresh button discards them.
+- Modbus request/reply decoding and ICS policy direction follow the connection
+  opener, including clients bound to port 502. Offline PCAP analysis uses
+  SYN/SYN-ACK orientation, with service-port hints only for midstream captures.
+  Modbus, DNP3 and CIP inventory roles stay stable across replies and exceptions.
 - Generic DPI denial tombstones now expire after 10 seconds and are capped at
   16,384 entries, evicting the oldest first. Expiry and eviction release the
   exact tuple's cached denial and failed streams so reconnects remain immediate;
@@ -183,27 +291,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Several sessions multiplexed on one SSH connection, such as with OpenSSH
   `ControlMaster`, no longer share CLI client state. Concurrent commands
   wrote the same API token field without synchronisation.
-
-### Changed
-
-- On upgrade, unchanged built-in IDS rules for removed industrial protocols
-  are removed automatically and recorded in an audit record. Any other saved
-  reference to a removed protocol starts the appliance in management recovery;
-  the saved configuration remains exportable until a valid configuration is
-  committed.
-- IDS rules, custom signatures, Sigma rules, firewall rules and decoder toggles
-  reject `enip` with `EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`.
-  The protocol name `cip` covers the whole EtherNet/IP stack. Suricata and Snort
-  rule files that use `enip` still import as `cip`.
-- CIP events (including MSP sub-events) replace `command`, `command_code` and
-  `session_handle` with `enip_command`, `enip_command_code` and
-  `enip_session_handle`, without aliases. `cpf_item_types` reports all CPF item
-  types in packet order as one comma-joined string without spaces for valid
-  SendRRData/SendUnitData item lists, usable with IDS scalar operators; alert
-  details show the encapsulation command and CPF items.
-
-### Fixed
-
 - The built-in CIP IDS rules never matched: they named protocol `enip`, but
   the CIP decoder reports `cip`. They now name `cip`. On upgrade, unchanged
   built-in CIP rules are updated to `cip` and recorded in the same audit
@@ -212,6 +299,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Asynchronous antivirus scanning of HTTP packet previews and the AV block TTL
+  setting (`services.av.blockTtlSeconds`). Antivirus backends scan complete
+  HTTP objects instead; no dynamic block follows a detection, so the setting
+  had no effect. A stored or exported configuration that still contains it
+  loads and the value is ignored. The AV page and the AV status no longer
+  show a queue depth or block TTL.
 - Removed S7comm, BACnet/IP, OPC UA and IEC 61850 MMS inspection, templates and
   protocol-specific detections. Industrial inspection supports Modbus/TCP,
   DNP3, IEC 60870-5-104 and optional CIP/EtherNet/IP.

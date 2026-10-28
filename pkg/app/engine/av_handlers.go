@@ -22,8 +22,8 @@ type avOperator interface {
 	DeleteDefinition(ctx context.Context, name string) error
 }
 
-func registerAVHandlers(mux *http.ServeMux, av avOperator) {
-	mux.HandleFunc("/internal/av/status", avStatusHandler(av))
+func registerAVHandlers(mux *http.ServeMux, av avOperator, gate *gateManager) {
+	mux.HandleFunc("/internal/av/status", avStatusHandler(av, gate))
 	mux.HandleFunc("/internal/av/update", avUpdateHandler(av))
 	mux.HandleFunc("/internal/av/defs", avDefsHandler(av))
 }
@@ -41,13 +41,19 @@ func avError(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), code)
 }
 
-func avStatusHandler(av avOperator) http.HandlerFunc {
+// avStatusHandler reports the scanner's status with the gate's under "gate".
+func avStatusHandler(av avOperator, gate *gateManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, av.Status(r.Context()))
+		status := av.Status(r.Context())
+		if status == nil {
+			status = map[string]any{}
+		}
+		status["gate"] = gate.status()
+		writeJSON(w, status)
 	}
 }
 

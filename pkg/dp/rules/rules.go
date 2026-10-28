@@ -18,6 +18,8 @@ type Snapshot struct {
 	Default    Action
 	// IdentityBindings tag opener IPs with identity labels, sorted by IP.
 	IdentityBindings []IdentityBinding
+	// Gate is the scan selection the engine steers through the scanning gate.
+	Gate GateSelection
 }
 
 // IdentityBinding tags one address with identity labels.

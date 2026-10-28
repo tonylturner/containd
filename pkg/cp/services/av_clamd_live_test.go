@@ -74,11 +74,11 @@ func TestLiveClamdEngine(t *testing.T) {
 	}
 	t.Logf("clamd ready: %s (pid %v)", status["db_version"], status["clamav_pid"])
 
-	if res := mgr.Scan(ctx, ScanTask{Preview: []byte(eicar)}); res.Verdict != "malware" || !strings.HasPrefix(res.Signature, "Live.EICAR.Test") {
+	if res := mgr.Scan(ctx, scanObject([]byte(eicar))); res.Verdict != "infected" || !strings.HasPrefix(res.Signature, "Live.EICAR.Test") {
 		t.Fatalf("EICAR scan = %+v", res)
 	}
 	marker := []byte("containd live custom definition marker")
-	if res := mgr.Scan(ctx, ScanTask{Preview: marker}); res.Verdict != "clean" {
+	if res := mgr.Scan(ctx, scanObject(marker)); res.Verdict != "clean" {
 		t.Fatalf("clean scan = %+v", res)
 	}
 
@@ -92,26 +92,14 @@ func TestLiveClamdEngine(t *testing.T) {
 	if err != nil || !def.Active {
 		t.Fatalf("UploadDefinition = %+v, %v", def, err)
 	}
-	waitScan(t, mgr, marker, "malware")
+	if res := mgr.Scan(ctx, scanObject(marker)); res.Verdict != "infected" || !strings.HasPrefix(res.Signature, "Live.Custom.Marker") {
+		t.Fatalf("cached marker after confirmed activation = %+v", res)
+	}
 	if err := mgr.DeleteDefinition(ctx, "live.ndb"); err != nil {
 		t.Fatalf("DeleteDefinition: %v", err)
 	}
-	waitScan(t, mgr, marker, "clean")
-}
-
-// waitScan polls because clamd reloads databases in the background.
-func waitScan(t *testing.T, mgr *AVManager, payload []byte, want string) {
-	t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		res := mgr.Scan(context.Background(), ScanTask{Preview: payload})
-		if res.Verdict == want {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("scan after reload = %+v, want %s", res, want)
-		}
-		time.Sleep(250 * time.Millisecond)
+	if res := mgr.Scan(ctx, scanObject(marker)); res.Verdict != "clean" {
+		t.Fatalf("cached marker after confirmed deletion = %+v", res)
 	}
 }
 

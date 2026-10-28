@@ -52,7 +52,7 @@ func (f *fakeAVOperator) DeleteDefinition(_ context.Context, name string) error 
 
 func serveAV(av avOperator, method, target string, body io.Reader) *httptest.ResponseRecorder {
 	mux := http.NewServeMux()
-	registerAVHandlers(mux, av)
+	registerAVHandlers(mux, av, nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(method, target, body))
 	return rec

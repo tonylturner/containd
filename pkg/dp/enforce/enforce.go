@@ -36,6 +36,17 @@ type Compiler struct {
 	// (the zero value) drops it. Only the engine that owns the queue sets
 	// it, and only while that queue is bound.
 	IEC104EnvelopeOpen bool
+	// GatePlainPort and GateMasqPort are the scanning gate's loopback
+	// listener ports for plain connections and for connections whose
+	// upstream leg is masqueraded (gate.go). Both set, CompileFirewall
+	// emits the gate delivery machinery; both zero, no gate.
+	GatePlainPort uint16
+	GateMasqPort  uint16
+	// GateAdmit is the admission state CompileFirewall writes into
+	// GateAdmitChain: what happens to a newly selected connection. The
+	// zero value refuses; only the engine, which knows whether the gate's
+	// listeners are up, opens or passes.
+	GateAdmit GateAdmitState
 	// NFLogGroup, when non-zero, causes rules with Log:true to emit a
 	// "log prefix ... group <NFLogGroup>" statement before their verdict.
 	// The userspace nflog consumer subscribes to this group, parses the
@@ -73,6 +84,9 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		return "", err
 	}
 
+	if err := c.validateGate(); err != nil {
+		return "", err
+	}
 	preds, err := newPredicates(snap, c.QueueID)
 	if err != nil {
 		return "", err
@@ -88,15 +102,27 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if err := preds.writeSets(&buf, c); err != nil {
 		return "", err
 	}
-	if err := preds.writeRecheckChains(&buf); err != nil {
+	// Regular chains are declared before the chains that jump to them.
+	if err := preds.writeRecheckChains(&buf, targetForward); err != nil {
 		return "", err
 	}
-	// Declared before the forward chain that jumps to them.
+	if c.SteersGate() {
+		for _, target := range []chainTarget{targetGateInput, targetGateReply} {
+			if err := preds.writeRecheckChains(&buf, target); err != nil {
+				return "", err
+			}
+		}
+	}
 	if c.SteersIEC104(snap) {
 		c.writeIEC104EnvelopeChain(&buf)
 	}
 	if c.queuesICS(snap) {
 		c.writeICSQueueChain(&buf)
+	}
+	if c.SteersGate() {
+		if err := c.writeGateChains(&buf, snap, preds); err != nil {
+			return "", err
+		}
 	}
 	if err := c.writeInputChain(&buf, preds.zones, locals); err != nil {
 		return "", err
@@ -124,6 +150,9 @@ func (c *Compiler) writeInputChain(buf *bytes.Buffer, zones zoneIndex, locals []
 	buf.WriteString("    type filter hook input priority 0;\n")
 	buf.WriteString("    policy drop;\n")
 	buf.WriteString("    iifname \"lo\" accept;\n")
+	if c.SteersGate() {
+		buf.WriteString("    " + gateInputJump + ";\n")
+	}
 	buf.WriteString("    ct state { established, related } accept;\n")
 	buf.WriteString("    ct state invalid drop;\n")
 	if err := c.writeManagementInput(buf); err != nil {
@@ -154,11 +183,28 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot, pr
 	buf.WriteString(fmt.Sprintf("    policy %s;\n", defaultPolicy(snap.Default)))
 	// Revocations and temporary blocks act in the dynamic table's earlier
 	// forward chain, before anything below (see writeDynamicTable).
+	if c.SteersGate() {
+		// A gated connection is decided in GateInputChain; one that is not
+		// delivered to the gate (its listener gone) never forwards.
+		buf.WriteString("    " + gateForwardGuard + ";\n")
+	}
+	if err := c.writeDecisions(buf, snap, preds, targetForward); err != nil {
+		return err
+	}
+	buf.WriteString("  }\n")
+	return nil
+}
 
+// writeDecisions emits the decision graph of snap's firewall rules for
+// target, the body of the forward chain. The gate's input chain takes the
+// same graph with its zone predicates lowered for the gate (zoneLowering),
+// so a gated connection is decided by the same rules, counters, logs and
+// queues as a forwarded one.
+func (c *Compiler) writeDecisions(buf *bytes.Buffer, snap *rules.Snapshot, preds *predicates, target chainTarget) error {
 	// RATE_LIMIT meters come first, so that they meter every packet of a
 	// flow, before IEC104 steering, NFQUEUE and the established accept.
 	meters, tags, decide := forwardSections(snap.Firewall)
-	if err := c.writeEntries(buf, preds, meters); err != nil {
+	if err := c.writeEntries(buf, preds, target, meters); err != nil {
 		return err
 	}
 
@@ -171,10 +217,14 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot, pr
 	// parse. With QueueID=0 this is a no-op (compileEntry emits plain
 	// accept/drop for everything, ct established below stays optimal).
 	// IEC104 rules come first and steer both directions of their session
-	// scope, marked; they replace the rule's own line.
+	// scope, marked; they replace the rule's own line. The gate never
+	// selects the IEC104 port (an ICS decoder port), so the gate chains
+	// carry no steering.
 	if c.QueueID > 0 {
-		if err := c.writeIEC104Steering(func(line string) { buf.WriteString("    " + line + ";\n") }, snap, preds.zones); err != nil {
-			return err
+		if target == targetForward {
+			if err := c.writeIEC104Steering(func(line string) { buf.WriteString("    " + line + ";\n") }, snap, preds.zones); err != nil {
+				return err
+			}
 		}
 		var queued []rules.Entry
 		for _, e := range decide {
@@ -182,12 +232,12 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot, pr
 				queued = append(queued, e)
 			}
 		}
-		if err := c.writeEntries(buf, preds, queued); err != nil {
+		if err := c.writeEntries(buf, preds, target, queued); err != nil {
 			return err
 		}
 	}
 
-	preds.writeRecheckJump(buf)
+	preds.writeRecheckJump(buf, target)
 	buf.WriteString("    ct state { established, related } accept;\n")
 	if err := c.writeDNATAccepts(buf, snap); err != nil {
 		return err
@@ -204,18 +254,15 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot, pr
 			rest = append(rest, e)
 		}
 	}
-	if err := c.writeEntries(buf, preds, rest); err != nil {
-		return err
-	}
-	buf.WriteString("  }\n")
-	return nil
+	return c.writeEntries(buf, preds, target, rest)
 }
 
-// writeEntries emits the lines of entries in order, with their identity
-// and schedule predicates.
-func (c *Compiler) writeEntries(buf *bytes.Buffer, preds *predicates, entries []rules.Entry) error {
+// writeEntries emits the lines of entries in order, lowered for target,
+// with their identity and schedule predicates.
+func (c *Compiler) writeEntries(buf *bytes.Buffer, preds *predicates, target chainTarget, entries []rules.Entry) error {
+	zones := preds.lowering(target)
 	for _, e := range entries {
-		lines, err := compileEntry(e, preds.zones, c.QueueID, c.NFLogGroup)
+		lines, err := compileEntry(e, zones, c.QueueID, c.NFLogGroup)
 		if err != nil {
 			return err
 		}
@@ -259,14 +306,13 @@ type ruleLine struct {
 // chain adds them (predicates.guard).
 //
 // Each line counts into the rule's counter.
-func compileEntry(e rules.Entry, zones zoneIndex, queueID int, nflogGroup int) ([]ruleLine, error) {
+func compileEntry(e rules.Entry, zones zoneLowering, queueID int, nflogGroup int) ([]ruleLine, error) {
 	scopes, err := addrScopes(e)
 	if err != nil {
 		return nil, err
 	}
-	in, inOK := zones.clause("iifname", e.SourceZones)
-	out, outOK := zones.clause("oifname", e.DestZones)
-	if !inOK || !outOK || len(scopes) == 0 {
+	in, out, ok := zones.original(e)
+	if !ok || len(scopes) == 0 {
 		return nil, nil
 	}
 	queued := queuedToEngine(e, queueID)
