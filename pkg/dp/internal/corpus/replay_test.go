@@ -227,7 +227,7 @@ func TestReplayLifecycleErrorsAndReset(t *testing.T) {
 		if s.Kind == "inspect" {
 			continue
 		}
-		if s.Result.Err == nil || len(s.Result.Events) != 1 || s.Result.Events[0].Kind != "end" {
+		if s.Result.Err == nil || len(s.Result.Events) != 2 || s.Result.Events[0].Kind != "end" || s.Result.Events[1].Kind != "end-error" {
 			t.Fatalf("lost lifecycle error/events: %+v", s)
 		}
 		switch s.Kind {
