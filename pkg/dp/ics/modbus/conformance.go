@@ -89,7 +89,7 @@ func validLayout(fc uint8, p []byte, response bool) bool {
 	}
 	switch fc {
 	case 8:
-		return len(p) >= 4 && len(p)%2 == 0
+		return validDiagnosticLayout(p, response)
 	case 43:
 		if len(p) < 1 {
 			return false

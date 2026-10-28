@@ -124,10 +124,13 @@ func aduEvent(state *flow.State, frame *TCPFrame, adu []byte) dpi.Event {
 			if len(frame.PDU) >= 2 {
 				sub := binary.BigEndian.Uint16(frame.PDU[0:2])
 				attrs["sub_function"] = sub
-				attrs["sub_function_name"] = diagSubFunctionName(sub)
-				// Sub-functions 1 (restart comm) and 4 (force listen only) are writes.
-				if sub == 1 || sub == 4 {
-					attrs[eventfields.KeyIsWrite] = true
+				if desc, ok := diagnosticSubfunctions[sub]; ok {
+					attrs["sub_function_name"] = desc.name
+					attrs[eventfields.KeyIsWrite] = desc.write
+				} else {
+					attrs["sub_function_name"] = "unknown"
+					// Framed diagnostics outside the supported serial-line profile.
+					attrs[eventfields.KeyUndecoded] = []string{"modbus.diagnostics_subfunction"}
 				}
 			}
 		case 43: // MEI (Encapsulated Interface Transport).
@@ -217,24 +220,6 @@ func exceptionName(code uint8) string {
 		return "gateway_path_unavailable"
 	case 11:
 		return "gateway_target_failed"
-	default:
-		return "unknown"
-	}
-}
-
-// diagSubFunctionName returns the name of a Diagnostics (FC 8) sub-function.
-func diagSubFunctionName(sub uint16) string {
-	switch sub {
-	case 0:
-		return "return_query_data"
-	case 1:
-		return "restart_comm"
-	case 4:
-		return "force_listen_only"
-	case 10:
-		return "clear_counters"
-	case 20:
-		return "clear_overrun"
 	default:
 		return "unknown"
 	}
