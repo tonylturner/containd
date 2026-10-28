@@ -88,6 +88,17 @@ class that was not decoded. When the addresses a message touches cannot be
 bounded, an `ALLOW` with an address range does not match it, but a `DENY` or
 `RESET` with an address range does.
 
+Some framed content is not inspected at all and is reported separately in the
+event's `undecoded` codes (`<proto>.<reason>`), not as a conformance violation.
+Policy handles these findings like conformance findings: tolerant parsing
+leaves delivery to normal rule and default-action evaluation; the finding itself
+does not cause a drop. Strict parsing in an enforce scope drops and resets the
+message, while strict learn scope records a would-drop decision without
+affecting delivery. Either finding type raises a medium-severity IDS alert
+(`ics-conformance` or `ics-undecoded`), deduplicated per connection and code. If
+an event has both keys, it can produce both alerts, while policy still decides
+delivery once. Events with either finding are excluded from learned profiles.
+
 | Effective rule mode | Tolerant parsing | Strict parsing |
 | --- | --- | --- |
 | Enforce scope | Evaluate decoded fields as usual; pass unless policy denies | Drop the packet and reset the session; decision reason `nonconformant` |
@@ -233,13 +244,37 @@ the value in brackets is the event's `proto`.
 
 | Protocol | `kind` values | Attributes |
 | --- | --- | --- |
-| Modbus/TCP (`modbus`) | `request`, `response`, `exception`, `malformed` | `transaction_id`, `unit_id`, `function_code`, `is_write`, `raw_hex`; data-access fields per function code (see [ICS Firewall Rule Predicates](#ics-firewall-rule-predicates)): requests `address` with `quantity` (1–4, 15, 16; plus `byte_count` for 15, 16), `value` (5, 6), `and_mask`, `or_mask` (22), or `read_address`, `read_quantity`, `write_address`, `write_quantity`, `byte_count` (23); read responses `byte_count` and, for registers, `register_count`; write responses the fields they echo; `sub_function`, `sub_function_name` (code 8); `mei_type` (code 43), `mei_type_name` (MEI type 14); `exception_code`, `exception_description` (exceptions, with `function_code` set to the base code); `error` (malformed) |
-| DNP3 (`dnp3`) | `request`, `response`, `restart` (codes 13, 14), `control` (codes 18, 19), `malformed` | `function_code`, `function_name`, `is_write`, `is_control`, `source_address`, `destination_address`, `direction` (`master` or `outstation`, from the link DIR bit), `iin_flags`, `object_groups` (comma-separated), `qualifier`, `object_count` (first object header), `raw_hex`; `error` (malformed) |
+| Modbus/TCP (`modbus`) | `request`, `response`, `exception`, `malformed` | `transaction_id`, `unit_id`, `function_code`, `is_write`, `raw_hex`; data-access fields per function code (see [ICS Firewall Rule Predicates](#ics-firewall-rule-predicates)): requests `address` with `quantity` (1–4, 15, 16; plus `byte_count` for 15, 16), `value` (5, 6), `and_mask`, `or_mask` (22), or `read_address`, `read_quantity`, `write_address`, `write_quantity`, `byte_count` (23); read responses `byte_count` and, for registers, `register_count`; write responses the fields they echo; `sub_function`, `sub_function_name` (code 8; sub-functions 1, 3, 4, 10 and 20 are writes; supported names cover 0–4, 10–18 and 20); invalid per-sub-function layout is `modbus.pdu_layout`; unknown sub-functions are reported as undecoded `modbus.diagnostics_subfunction`; `mei_type` (code 43), `mei_type_name` (MEI type 14); `exception_code`, `exception_description` (exceptions, with `function_code` set to the base code); `error` (malformed) |
+| DNP3 (`dnp3`) | `request`, `response`, `restart` (codes 13, 14), `control` (codes 18, 19), `malformed` | `function_code`, `function_name`, `is_write`, `is_control`, `source_address`, `destination_address`, `direction` (`master` or `outstation`, from the link DIR bit), `iin_flags`, `object_groups`, `qualifier`, `object_count`, `objects` with point records that may include an `index` and decoded `crob`, `link_ranges`, `transport_segments`, `application_fragment`, `application_complete`, `raw_hex`; `error` (malformed), `conformance` and `undecoded` codes (listed below) |
 | IEC 104 (`iec104`) | `apci`, `request`, `response`, `malformed`, `unsupported` | See below |
 | CIP/EtherNet/IP (`cip`) | `request`, `response`, `session` (EtherNet/IP commands without a CIP message) | See below |
 
-The DNP3 decoder emits one event per link frame that starts an application
-fragment. It does not reassemble fragments that span several link frames.
+The DNP3 decoder reassembles transport segments and tracks multi-fragment
+application responses. Events for a completed transport fragment ride on its
+finishing link frame; `link_ranges` identifies the constituent physical link
+frames, while `raw_hex` remains the finishing physical frame rather than a
+synthesized application payload. Application fragments are decoded
+independently: earlier TCP packets are not held back and whole-response
+prevention is not atomic. Point records preserve indices only when present
+(absence is not index zero); group 12 variation 1 CROBs expose their encoded
+control, operation, trip/close, queue/clear, count, on/off times and status.
+
+DNP3 conformance codes are `dnp3.data_crc`, `dnp3.application_header`,
+`dnp3.object_walk`, `dnp3.crob_value`, `dnp3.link_duplicate`,
+`dnp3.link_retry_conflict`, `dnp3.transport_duplicate`,
+`dnp3.transport_conflict`, `dnp3.transport_orphan`, `dnp3.transport_sequence`,
+`dnp3.transport_restart`, `dnp3.application_control`,
+`dnp3.application_duplicate`, `dnp3.application_sequence` and
+`dnp3.application_restart`. Header CRC failures instead fail frame parsing.
+Undecoded codes are `dnp3.link_payload`, `dnp3.transport_incomplete`,
+`dnp3.application_incomplete`, `dnp3.assembly_limit`, `dnp3.assembly_budget`,
+`dnp3.object_limit`, `dnp3.object_qualifier`, `dnp3.object_truncated` and
+`dnp3.object_unsupported`. Inspection bounds are 64 KiB application bytes,
+1024 link segments per fragment, 1024 application fragments per response,
+4096 station contexts, 16 MiB retained storage (including payload, duplicate
+bytes, provenance and context charges), 1024 object headers per fragment and
+8192 point records total. Incomplete transport/application assemblies expire
+after 30 seconds idle or 60 seconds absolute.
 
 IEC 104 events carry `direction` (`request` from the client, `response` from
 the server), `session_id`, `apdu_id`, `apci_type` (`I`, `S` or `U`) and
@@ -263,21 +298,29 @@ and toggle boundaries with: `EtherNet/IP is decoded as "cip"; match encapsulatio
 
 TCP CIP on port 44818 is reassembled and framed per EtherNet/IP encapsulation,
 including split headers and bodies and multiple encapsulations in one segment.
-UDP is packet-only, without stream reassembly. Port 2222 carries implicit I/O
+UDP is packet-only, without stream reassembly. CIP inspection on port 2222 is
+UDP-only; TCP/2222 is containd's default SSH service port, not CIP. UDP port
+2222 carries implicit I/O
 datagrams: a bare Common Packet Format with a sequenced address item and a
 connected data item, decoded as one `session` event with `connection_id`,
 `sequence`, `data_length` and `cpf_item_types`, never a service code. A
 datagram whose item list cannot be read carries the `cip.cpf_layout` finding.
-Port 44818 carries encapsulation commands such as ListIdentity, decoded like TCP.
+UDP port 44818 carries encapsulation commands such as ListIdentity, decoded like TCP.
 
 | CIP event layer | Attributes |
 | --- | --- |
-| Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle` |
+| Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle`, `enip_status`, `enip_sender_context`, `enip_options` |
 | Implicit I/O (UDP 2222) | `connection_id`, `sequence`, `data_length` (whole connected data item), `cpf_item_types` |
-| Common Packet Format (CPF) | `cpf_item_types`: all item types in packet order as one comma-joined lowercase hex string with no spaces, such as `"0x0000,0x00b2"`, on SendRRData/SendUnitData with a valid item list |
-| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; MSP parents also carry `multi_service_count`, sub-events carry `msp` |
+| Common Packet Format (CPF) | `cpf_item_types`: item types in packet order as one comma-joined lowercase hex string with no spaces; plus selected item `cpf_item_index`, `cpf_data_item_type`, and, when available, `connection_id`, `connected_sequence` |
+| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; responses retain `response_reserved`, `general_status`, `additional_status_count` and `additional_status` when present; MSP parents carry `multi_service_count` and `multi_service_decoded_count`; each child carries `msp: true`, `msp_index` and `msp_index_path` |
 
-MSP sub-events retain the encapsulation and CPF fields. Non-CPF commands such as
+MSP sub-events retain encapsulation and CPF/response metadata; inspection is
+bounded to 32 children total and nesting depth 8. `cip.response_reserved`,
+`cip.msp_response_mismatch` and `cip.encapsulation_length` are conformance
+codes. Undecoded codes are `cip.msp_limit`, `cip.msp_nesting`,
+`cip.epath_unsupported`, `cip.extra_data_item`, `cip.cpf_item_unsupported`,
+`cip.service_payload_unsupported` and
+`cip.encapsulation_payload_unsupported`. Non-CPF commands such as
 RegisterSession have no `cpf_item_types`. The encapsulation fields replace
 `command`, `command_code` and `session_handle`; CIP events do not emit aliases.
 
