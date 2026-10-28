@@ -1,0 +1,68 @@
+{
+  "pid-nonzero": {
+    "parent": "operations.pcap",
+    "parent_sha256": "19962420f0db93b42ff2802a42d6da2e7f150ad71329708bb96286edf42d50a5",
+    "frame": 4,
+    "tcp_payload_offsets": [
+      2,
+      3
+    ],
+    "parent_file_offsets": [
+      370,
+      371
+    ],
+    "before_payload": "000100000006010100000009",
+    "after_payload": "000100010006010100000009",
+    "recipe": "retain opening handshake and first request only; edit payload; recompute IPv4/TCP lengths/checksums"
+  },
+  "bad-length": {
+    "parent": "operations.pcap",
+    "parent_sha256": "19962420f0db93b42ff2802a42d6da2e7f150ad71329708bb96286edf42d50a5",
+    "frame": 4,
+    "tcp_payload_offsets": [
+      4,
+      5
+    ],
+    "parent_file_offsets": [
+      372,
+      373
+    ],
+    "before_payload": "000100000006010100000009",
+    "after_payload": "000100000001010100000009",
+    "recipe": "retain opening handshake and first request only; edit payload; recompute IPv4/TCP lengths/checksums"
+  },
+  "truncation": {
+    "parent": "operations.pcap",
+    "parent_sha256": "19962420f0db93b42ff2802a42d6da2e7f150ad71329708bb96286edf42d50a5",
+    "frame": 4,
+    "tcp_payload_offsets": [
+      10,
+      11
+    ],
+    "parent_file_offsets": [
+      378,
+      379
+    ],
+    "before_payload": "000100000006010100000009",
+    "after_payload": "00010000000601010000",
+    "recipe": "retain opening handshake and first request only; edit payload; recompute IPv4/TCP lengths/checksums"
+  },
+  "bad-layout": {
+    "parent": "operations.pcap",
+    "parent_sha256": "19962420f0db93b42ff2802a42d6da2e7f150ad71329708bb96286edf42d50a5",
+    "frame": 4,
+    "tcp_payload_offsets": [
+      4,
+      5,
+      11
+    ],
+    "parent_file_offsets": [
+      372,
+      373,
+      379
+    ],
+    "before_payload": "000100000006010100000009",
+    "after_payload": "0001000000050101000000",
+    "recipe": "retain opening handshake and first request only; edit payload; recompute IPv4/TCP lengths/checksums"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "origin": "mutation",
+  "events": 1,
+  "conformance": {
+    "4": [
+      "modbus.pid_nonzero"
+    ]
+  },
+  "undecoded": {},
+  "frame_error": false,
+  "eof_partial": false,
+  "supplemental": {}
+}

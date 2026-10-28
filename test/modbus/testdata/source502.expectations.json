@@ -1,0 +1,18 @@
+{
+  "origin": "captured-stack",
+  "events": 2,
+  "conformance": {},
+  "undecoded": {},
+  "frame_error": false,
+  "eof_partial": false,
+  "supplemental": {
+    "4": {
+      "address": 65534,
+      "quantity": 2
+    },
+    "6": {
+      "byte_count": 4,
+      "register_count": 2
+    }
+  }
+}

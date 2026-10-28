@@ -8,9 +8,15 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
+	"github.com/tonylturner/containd/pkg/dp/internal/corpus"
 )
 
 func FuzzParseTCPFrame(f *testing.F) {
+	for _, fixture := range modbusCaptures(f) {
+		for _, seed := range corpus.Seeds(fixture) {
+			f.Add(seed)
+		}
+	}
 	f.Add([]byte{})
 	f.Add([]byte{0x00})
 	f.Add([]byte{
@@ -38,6 +44,15 @@ func FuzzParseTCPFrame(f *testing.F) {
 }
 
 func FuzzParseStream(f *testing.F) {
+	for _, fixture := range modbusCaptures(f) {
+		seeds, err := corpus.StreamSeeds(fixture)
+		if err != nil {
+			f.Fatal(err)
+		}
+		for _, seed := range seeds {
+			f.Add(seed, uint16(0))
+		}
+	}
 	f.Add([]byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x01, 0x03, 0x00, 0x00, 0x00, 0x02}, uint16(0))
 	f.Add([]byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x03, 0x01, 0x83, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x01}, uint16(7))
 	f.Add([]byte{0x00, 0x01, 0x00, 0x00, 0xFF, 0xFF, 0x01}, uint16(1))

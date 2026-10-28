@@ -1,0 +1,23 @@
+{
+  "origin": "captured-stack",
+  "events": 64,
+  "conformance": {
+    "67": [
+      "modbus.pdu_layout"
+    ]
+  },
+  "undecoded": {
+    "58": [
+      "modbus.diagnostics_subfunction"
+    ],
+    "59": [
+      "modbus.diagnostics_subfunction"
+    ],
+    "60": [
+      "modbus.diagnostics_subfunction"
+    ]
+  },
+  "frame_error": false,
+  "eof_partial": false,
+  "supplemental": {}
+}
