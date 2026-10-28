@@ -17,6 +17,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/itdpi"
@@ -294,13 +295,9 @@ func (e *Engine) hasLearnMode() bool {
 	return false
 }
 
-func isICSEvent(proto, kind string) bool {
-	switch strings.ToLower(proto) {
-	case "modbus", "dnp3", "iec104", "s7", "s7comm", "cip", "bacnet", "opcua", "mms", "ics":
-		return true
-	}
-	_ = kind
-	return false
+func isICSEvent(proto, _ string) bool {
+	proto = strings.ToLower(proto)
+	return proto == "ics" || ics.Supported(proto)
 }
 
 // Evaluate applies the current rule snapshot to a simple context.

@@ -7,14 +7,10 @@ import (
 	"fmt"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
-	"github.com/tonylturner/containd/pkg/dp/ics/bacnet"
 	"github.com/tonylturner/containd/pkg/dp/ics/cip"
 	"github.com/tonylturner/containd/pkg/dp/ics/dnp3"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
-	"github.com/tonylturner/containd/pkg/dp/ics/iec61850"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
-	"github.com/tonylturner/containd/pkg/dp/ics/opcua"
-	"github.com/tonylturner/containd/pkg/dp/ics/s7comm"
 	"github.com/tonylturner/containd/pkg/dp/itdpi"
 )
 
@@ -26,10 +22,6 @@ func DefaultDecoders() []dpi.Decoder {
 		dnp3.NewDecoder(),
 		iec104.NewDecoder(),
 		cip.NewDecoder(),
-		iec61850.NewMMSDecoder(),
-		s7comm.NewDecoder(),
-		bacnet.NewDecoder(),
-		opcua.NewDecoder(),
 		itdpi.NewDNSDecoder(),
 		itdpi.NewTLSDecoder(),
 		itdpi.NewHTTPDecoder(),
@@ -55,14 +47,10 @@ var itDecoderProto = map[string]string{
 }
 
 var icsDecoderProto = map[string]string{
-	"*modbus.Decoder":      "modbus",
-	"*dnp3.Decoder":        "dnp3",
-	"*cip.Decoder":         "cip",
-	"*s7comm.Decoder":      "s7comm",
-	"*iec61850.MMSDecoder": "mms",
-	"*bacnet.Decoder":      "bacnet",
-	"*opcua.Decoder":       "opcua",
-	"*iec104.Decoder":      "iec104",
+	"*modbus.Decoder": "modbus",
+	"*dnp3.Decoder":   "dnp3",
+	"*cip.Decoder":    "cip",
+	"*iec104.Decoder": "iec104",
 }
 
 // FilterDecoders returns decoders filtered by the per-protocol toggle maps.

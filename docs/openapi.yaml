@@ -538,7 +538,8 @@ components:
       properties:
         protocol:
           type: string
-          enum: [modbus, dnp3, cip, s7comm, mms, bacnet, opcua, iec104]
+          enum: [modbus, dnp3, iec104, cip]
+          description: 'Unsupported names return 400: rule <id> ics protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
         functionCode:
           description: >
             Function/service codes (not iec104). Accepted forms: integer
@@ -893,7 +894,15 @@ components:
         captureInterfaces: {items: {type: string}, type: array}
         dpiEnabled: {type: boolean}
         dpiExclusions: {items: {$ref: '#/components/schemas/DPIExclusion'}, type: array}
-        dpiIcsProtocols: {additionalProperties: {type: boolean}, type: object}
+        dpiIcsProtocols:
+          type: object
+          additionalProperties: false
+          properties:
+            modbus: {type: boolean}
+            dnp3: {type: boolean}
+            iec104: {type: boolean}
+            cip: {type: boolean}
+          description: 'Unknown keys (true or false) return 400: dataplane.dpiIcsProtocols: protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
         dpiMock: {type: boolean}
         dpiMode: {type: string, enum: ['', learn, enforce], description: Empty inherits learn mode. Other values are rejected.}
         dpiProtocols: {additionalProperties: {type: boolean}, type: object}
@@ -1001,7 +1010,9 @@ components:
         labels: {additionalProperties: {type: string}, type: object}
         message: {type: string}
         mitreAttackIDs: {items: {type: string}, type: array}
-        proto: {type: string}
+        proto:
+          type: string
+          description: 'Generic and IT names remain valid. Obsolete industrial labels return 400: ids rule <id> proto "<name>" is not supported; supported: modbus, dnp3, iec104, cip. For enip: ids rule <id> proto "enip": EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command'
         rawSource: {type: string}
         references: {items: {type: string}, type: array}
         severity: {type: string}
@@ -2602,7 +2613,7 @@ paths:
         "200": {description: Candidate saved, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}, headers: {
             X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
         "400":
-          description: Invalid JSON or configuration
+          description: Invalid JSON or configuration; unsupported industrial references are rejected atomically with the rule or decoder key named
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -2708,7 +2719,7 @@ paths:
           headers:
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400":
-          description: Invalid JSON or configuration
+          description: Invalid JSON or configuration; unsupported industrial references are rejected atomically with the rule or decoder key named
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -2980,7 +2991,7 @@ paths:
       responses:
         "200": {description: Rule created, content: {application/json: {schema: {$ref: '#/components/schemas/FirewallRule'}}}, headers: {
               X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
-        "400": {description: Invalid rule or resulting configuration, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid rule or resulting configuration; unsupported ICS protocol names are rejected without staging or applying changes, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Stages the shared candidate; commit to apply.
 
   /firewall/rules/{id}:
@@ -3536,7 +3547,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "200": {description: Signature added, content: {application/json: {schema: {$ref: '#/components/schemas/SignaturesSignature'}}}}
-        "400": {description: Invalid signature, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: 'Invalid signature. Unsupported industrial names return signature <id> protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "409": {description: A signature with this ID is already loaded, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /signatures/{id}:
@@ -4922,6 +4933,11 @@ paths:
       tags: [Ids]
       description: Imports and deduplicates by rule ID in the candidate bank. Format is detected from file when omitted. Commit to apply.
       responses:
+        '400':
+          description: 'Invalid import or removed industrial protocol. Rejected imports leave candidate and running banks unchanged; ids rule <id> proto "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         '200':
           description: Success
           content:

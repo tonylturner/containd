@@ -89,9 +89,9 @@ Rule:
 Protocol parsers are small, safety-sensitive modules. Keep parse entry points, malformed-packet regression tests, and fuzz targets colocated with the protocol package instead of hiding them in broad integration files.
 
 Current parser layout examples:
-- `pkg/dp/ics/bacnet/frame.go`
+- `pkg/dp/ics/dnp3/frame.go`
 - `pkg/dp/ics/cip/frame.go`
-- `pkg/dp/ics/s7comm/frame.go`
+- `pkg/dp/ics/iec104/asdu.go`
 - `pkg/dp/itdpi/dns.go`
 - `pkg/dp/itdpi/http.go`
 - `pkg/dp/itdpi/tls.go`
@@ -106,7 +106,8 @@ Placement rules:
 Examples:
 - `pkg/dp/ics/modbus/fuzz_test.go`
 - `pkg/dp/ics/dnp3/fuzz_test.go`
-- `pkg/dp/ics/opcua/fuzz_test.go`
+- `pkg/dp/ics/cip/fuzz_test.go`
+- `pkg/dp/ics/iec104/fuzz_test.go`
 - `pkg/dp/itdpi/fuzz_test.go`
 
 Rule:

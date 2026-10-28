@@ -18,9 +18,8 @@ function codeAttr(attributes: Record<string, unknown>, key: string): number | un
 }
 
 /**
- * The ICS operation an event decoded: a function code (Modbus, DNP3, S7comm,
- * CIP), a service (BACnet, CIP, OPC UA, MMS) or an IEC 104 Type ID; null
- * for an event without one.
+ * The ICS operation an event decoded: a function code (Modbus, DNP3), a CIP
+ * service or an IEC 104 Type ID; null for an event without one.
  */
 function icsOperation(ev: TelemetryEvent): string | null {
   const a = ev.attributes;
@@ -28,7 +27,7 @@ function icsOperation(ev: TelemetryEvent): string | null {
   const fc = codeAttr(a, "function_code");
   const fcName = textAttr(a, "function_name");
   if (fc !== undefined) return fcName ? `function ${fc} ${fcName}` : `function ${fc}`;
-  const service = textAttr(a, "service_name") ?? textAttr(a, "service");
+  const service = textAttr(a, "service_name");
   const serviceCode = codeAttr(a, "service_code");
   if (service || serviceCode !== undefined) {
     return ["service", serviceCode, service].filter((part) => part !== undefined).join(" ");

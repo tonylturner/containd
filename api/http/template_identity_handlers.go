@@ -207,10 +207,7 @@ func listICSTemplatesHandler() gin.HandlerFunc {
 			}},
 		},
 		{Name: "dnp3_secure_operations", Description: "Allow normal DNP3 reads, deny dangerous function codes (restart, stop)", Protocol: "dnp3"},
-		{Name: "s7comm_read_only", Description: "Allow S7comm read variable, deny write and PLC control", Protocol: "s7comm"},
 		{Name: "cip_monitor_only", Description: "Allow CIP read services, deny writes and control commands", Protocol: "cip"},
-		{Name: "bacnet_read_only", Description: "Allow BACnet read properties, deny writes and device control", Protocol: "bacnet"},
-		{Name: "opcua_monitor_only", Description: "Allow OPC UA browse/read/subscribe, deny writes and node management", Protocol: "opcua"},
 	}
 	return func(c *gin.Context) {
 		c.JSON(http.StatusOK, infos)
@@ -288,6 +285,7 @@ func buildICSTemplateRules(template string, ranges []string) ([]config.Rule, err
 	// copy-pasting from the list endpoint into apply gets a 400. Both
 	// forms are unambiguous because template names contain at most one
 	// separator and that separator is the only divergence point.
+	requested := template
 	template = strings.ReplaceAll(template, "-", "_")
 	switch template {
 	case "modbus_read_only":
@@ -299,16 +297,10 @@ func buildICSTemplateRules(template string, ranges []string) ([]config.Rule, err
 		return templates.ModbusRegisterGuard(ranges), nil
 	case "dnp3_secure_operations":
 		return templates.DNP3SecureOperations(), nil
-	case "s7comm_read_only":
-		return templates.S7commReadOnly(), nil
 	case "cip_monitor_only":
 		return templates.CIPMonitorOnly(), nil
-	case "bacnet_read_only":
-		return templates.BACnetReadOnly(), nil
-	case "opcua_monitor_only":
-		return templates.OPCUAMonitorOnly(), nil
 	default:
-		return nil, fmt.Errorf("unknown ICS template %q", template)
+		return nil, fmt.Errorf("unknown ICS template %q", requested)
 	}
 }
 

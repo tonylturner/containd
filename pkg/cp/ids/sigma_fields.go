@@ -75,18 +75,14 @@ func decoderAttribute(field string) bool {
 	case "byte_count", "register_count", "and_mask", "or_mask", "read_address",
 		"read_quantity", "write_address", "write_quantity":
 		return true
-	// Other protocol-specific keys emitted in pkg/dp/ics/*/decoder.go
-	// (and iec61850/mms.go).
-	case "bvlc_function", "is_critical", "object_instance", "object_type",
-		"property_id", "service", "service_code", "address", "attribute_id",
-		"cip_path", "command_code", "instance_id", "is_control", "msp",
+	// Other keys emitted by the retained industrial decoders.
+	case "service_code", "address", "attribute_id",
+		"cip_path", "enip_command", "enip_command_code", "cpf_item_types", "instance_id", "is_control", "msp",
 		"multi_service_count", "object_class", "object_class_name", "service_name",
-		"session_handle", "destination_address", "function_name", "iin_flags",
-		"source_address", "pdu_tag", "service_tag", "variable_name",
+		"enip_session_handle", "destination_address", "function_name", "iin_flags",
+		"source_address",
 		"transaction_id", "exception_code", "exception_description", "mei_type",
-		"mei_type_name", "quantity", "sub_function", "sub_function_name",
-		"chunk_type", "message_type", "area", "cotp_pdu_type", "db_number",
-		"error_class", "error_code", "item_count", "pdu_reference", "safety_critical":
+		"mei_type_name", "quantity", "sub_function", "sub_function_name":
 		return true
 	default:
 		return false

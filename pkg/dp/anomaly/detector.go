@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
@@ -51,14 +52,6 @@ func WithDNP3RestartFromNonMaster(enable bool) Option {
 	}
 }
 
-// WithS7StopDetection controls whether PLC stop commands are flagged.
-// Default: true.
-func WithS7StopDetection(enable bool) Option {
-	return func(d *Detector) {
-		d.s7StopDetection = enable
-	}
-}
-
 // WithCIPProgramChangeDetection controls whether CIP program mode changes
 // are flagged. Default: true.
 func WithCIPProgramChangeDetection(enable bool) Option {
@@ -97,7 +90,6 @@ type Detector struct {
 
 	// Feature toggles (all default to true).
 	dnp3RestartFromNonMaster  bool
-	s7StopDetection           bool
 	cipProgramChangeDetection bool
 	crossProtocolDetection    bool
 	nonStandardPortDetection  bool
@@ -129,7 +121,6 @@ func New(opts ...Option) *Detector {
 		writeRateThreshold:        defaultWriteRateThreshold,
 		totalRateThreshold:        defaultTotalRateThreshold,
 		dnp3RestartFromNonMaster:  true,
-		s7StopDetection:           true,
 		cipProgramChangeDetection: true,
 		crossProtocolDetection:    true,
 		nonStandardPortDetection:  true,
@@ -180,8 +171,6 @@ func (d *Detector) Check(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 		out = append(out, d.checkModbus(srcIP, dstIP, ev)...)
 	case "dnp3":
 		out = append(out, d.checkDNP3(srcIP, dstIP, ev)...)
-	case "s7", "s7comm":
-		out = append(out, d.checkS7comm(srcIP, dstIP, ev)...)
 	case "cip":
 		out = append(out, d.checkCIP(srcIP, dstIP, ev)...)
 	case "iec104":
@@ -443,67 +432,6 @@ func (d *Detector) checkDNP3(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	return out
 }
 
-func (d *Detector) checkS7comm(srcIP, dstIP string, ev dpi.Event) []Anomaly {
-	var out []Anomaly
-
-	if !d.s7StopDetection {
-		return nil
-	}
-
-	fc, hasFC := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode)
-	if !hasFC {
-		return nil
-	}
-
-	// PLC Stop command (FC 0x29 = 41).
-	if fc == 0x29 {
-		out = append(out, Anomaly{
-			Type:     "protocol_violation",
-			Protocol: "s7comm",
-			Severity: "critical",
-			Message:  "S7comm PLC Stop command detected (FC 0x29)",
-			SourceIP: srcIP,
-			DestIP:   dstIP,
-			Attributes: map[string]any{
-				"function_code": fc,
-			},
-			Timestamp: ev.Timestamp,
-		})
-	}
-
-	// Control operations: CPU start (0x28), memory write (0x05), download (0x1A, 0x1B).
-	switch fc {
-	case 0x28: // PLC Start/Run
-		out = append(out, Anomaly{
-			Type:     "protocol_violation",
-			Protocol: "s7comm",
-			Severity: "high",
-			Message:  "S7comm PLC control operation detected (CPU Start, FC 0x28)",
-			SourceIP: srcIP,
-			DestIP:   dstIP,
-			Attributes: map[string]any{
-				"function_code": fc,
-			},
-			Timestamp: ev.Timestamp,
-		})
-	case 0x1A, 0x1B: // Download block
-		out = append(out, Anomaly{
-			Type:     "protocol_violation",
-			Protocol: "s7comm",
-			Severity: "high",
-			Message:  fmt.Sprintf("S7comm download operation detected (FC 0x%02X)", fc),
-			SourceIP: srcIP,
-			DestIP:   dstIP,
-			Attributes: map[string]any{
-				"function_code": fc,
-			},
-			Timestamp: ev.Timestamp,
-		})
-	}
-
-	return out
-}
-
 func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	var out []Anomaly
 
@@ -511,11 +439,11 @@ func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 		return nil
 	}
 
-	service, _ := ev.Attributes["service"].(int)
+	service, hasService := eventfields.Uint8(ev.Attributes, "service_code")
 
 	// Program mode change: Stop (0x07), Start/Run (0x06).
-	switch service {
-	case 0x07: // Stop
+	switch {
+	case hasService && service == 0x07: // Stop
 		out = append(out, Anomaly{
 			Type:     "protocol_violation",
 			Protocol: "cip",
@@ -524,11 +452,11 @@ func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 			SourceIP: srcIP,
 			DestIP:   dstIP,
 			Attributes: map[string]any{
-				"service": service,
+				"service_code": service,
 			},
 			Timestamp: ev.Timestamp,
 		})
-	case 0x06: // Start/Run
+	case hasService && service == 0x06: // Start/Run
 		out = append(out, Anomaly{
 			Type:     "protocol_violation",
 			Protocol: "cip",
@@ -537,7 +465,7 @@ func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 			SourceIP: srcIP,
 			DestIP:   dstIP,
 			Attributes: map[string]any{
-				"service": service,
+				"service_code": service,
 			},
 			Timestamp: ev.Timestamp,
 		})
@@ -629,13 +557,7 @@ func (d *Detector) checkCrossProtocol(srcIP, dstIP string, ev dpi.Event) []Anoma
 	return out
 }
 
-func isKnownICS(proto string) bool {
-	switch proto {
-	case "modbus", "dnp3", "cip", "s7", "s7comm", "bacnet", "opcua", "mms", "iec104":
-		return true
-	}
-	return false
-}
+func isKnownICS(proto string) bool { return ics.Supported(proto) }
 
 func isStandardPort(proto string, port uint16) bool {
 	if port == 0 {
@@ -648,12 +570,6 @@ func isStandardPort(proto string, port uint16) bool {
 		return port == 20000
 	case "cip":
 		return port == 44818 || port == 2222
-	case "s7", "s7comm", "mms":
-		return port == 102
-	case "bacnet":
-		return port == 47808
-	case "opcua":
-		return port == 4840
 	case "iec104":
 		return port == 2404
 	}

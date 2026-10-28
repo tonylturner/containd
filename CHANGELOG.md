@@ -127,6 +127,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ControlMaster`, no longer share CLI client state. Concurrent commands
   wrote the same API token field without synchronisation.
 
+### Changed
+
+- On upgrade, unchanged built-in IDS rules for removed industrial protocols
+  are removed automatically and recorded in an audit record. Any other saved
+  reference to a removed protocol starts the appliance in management recovery;
+  the saved configuration remains exportable until a valid configuration is
+  committed.
+- IDS rules, custom signatures, Sigma rules, firewall rules and decoder toggles
+  reject `enip` with `EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`.
+  The protocol name `cip` covers the whole EtherNet/IP stack. Suricata and Snort
+  rule files that use `enip` still import as `cip`.
+- CIP events (including MSP sub-events) replace `command`, `command_code` and
+  `session_handle` with `enip_command`, `enip_command_code` and
+  `enip_session_handle`, without aliases. `cpf_item_types` reports all CPF item
+  types in packet order as one comma-joined string without spaces for valid
+  SendRRData/SendUnitData item lists, usable with IDS scalar operators; alert
+  details show the encapsulation command and CPF items.
+
+### Fixed
+
+- The built-in CIP IDS rules never matched: they named protocol `enip`, but
+  the CIP decoder reports `cip`. They now name `cip`. On upgrade, unchanged
+  built-in CIP rules are updated to `cip` and recorded in the same audit
+  record; an edited copy that names `enip` starts the appliance in management
+  recovery until it is corrected.
+
+### Removed
+
+- Removed S7comm, BACnet/IP, OPC UA and IEC 61850 MMS inspection, templates and
+  protocol-specific detections. Industrial inspection supports Modbus/TCP,
+  DNP3, IEC 60870-5-104 and optional CIP/EtherNet/IP.
+
 ## [0.1.35] - 2026-10-26
 
 ### Security

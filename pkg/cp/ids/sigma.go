@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"gopkg.in/yaml.v3"
 )
 
@@ -79,6 +80,15 @@ func ConvertSigmaRule(sr SigmaRule) (config.IDSRule, error) {
 		return config.IDSRule{}, err
 	}
 
+	for _, tag := range sr.Tags {
+		for _, prefix := range []string{"containd.proto.", "proto."} {
+			if strings.HasPrefix(tag, prefix) {
+				if err := ics.ValidateIDS(firstNonEmpty(sr.ID, slugify(sr.Title)), strings.TrimPrefix(tag, prefix)); err != nil {
+					return config.IDSRule{}, err
+				}
+			}
+		}
+	}
 	proto, kind := inferProtoKindFromTags(sr.Tags)
 	rule := config.IDSRule{
 		ID:           firstNonEmpty(sr.ID, slugify(sr.Title)),

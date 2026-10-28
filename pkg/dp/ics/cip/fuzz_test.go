@@ -27,6 +27,8 @@ func FuzzParseCIPMessage(f *testing.F) {
 	f.Add(readTag)
 	f.Add(response)
 	f.Add(msp)
+	f.Add(buildCPFItems(cpfTestItem{0x00a1, []byte{1, 0, 0, 0}}, cpfTestItem{0x00b1, []byte{1, 0, 0x4c, 0}}))
+	f.Add(buildCPFItems(cpfTestItem{0x00b2, []byte{0x4c, 0}}, cpfTestItem{0x1234, []byte{1}}))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = ParseCIPMessage(data)

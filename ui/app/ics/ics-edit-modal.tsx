@@ -287,14 +287,6 @@ export function EditICSModal({
               "Common: 1=Read, 2=Write, 3=Select, 4=Operate, 13=Cold Restart, 14=Warm Restart, 18=Stop Application."}
             {protocol === "cip" &&
               "Common: 0x4C(76)=Read Tag, 0x4D(77)=Write Tag, 0x0E(14)=Get Attribute, 0x10(16)=Set Attribute."}
-            {protocol === "s7comm" &&
-              "Common: 4=Read Var, 5=Write Var, 0x28(40)=PLC Control, 0x29(41)=PLC Stop."}
-            {protocol === "mms" &&
-              "IEC 61850 Manufacturing Message Specification over ISO/ACSE."}
-            {protocol === "bacnet" &&
-              "Common: 12=ReadProperty, 14=ReadPropertyMultiple, 15=WriteProperty, 8=WhoIs, 0=IAm."}
-            {protocol === "opcua" &&
-              "OPC Unified Architecture binary protocol."}
             {isIEC104 &&
               "First course types: 1, 3, 13, 30, 31 (monitor), 46 (double command), 100 (general interrogation). Unmatched IEC 104 traffic inside an enforce envelope is denied and the session is reset."}
           </div>

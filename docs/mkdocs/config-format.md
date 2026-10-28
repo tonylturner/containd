@@ -15,7 +15,7 @@ snapshot and cannot certify nft enforcement.
 
 ## Schema
 
-This complete example uses schema `0.1.7`. It defines two routed networks and a
+This complete example uses schema `0.1.8`. It defines two routed networks and a
 single TCP/80 allow rule. With enforcement enabled, other new forwarded
 connections are denied. Enforcement is off until you enable it deliberately. Replace the illustrative kernel devices and
 addresses with your deployment's values before applying it. This is not the
@@ -23,7 +23,7 @@ Docker starter topology.
 
 ```json
 {
-  "schema_version": "0.1.7",
+  "schema_version": "0.1.8",
   "description": "Two-zone routed lab; adapt device names and addressing before committing",
   "system": {
     "hostname": "containd",
@@ -269,6 +269,33 @@ path, unsafe changes and rollback targets are refused; see
 Exports are redacted by default. Only admins can request an unredacted export;
 store full backups securely. Keep the persistent data volume as well as exported
 JSON if you need users, audit history, or service files during recovery.
+
+## Unsupported protocols during upgrade
+
+When a saved configuration with schema below `0.1.8` is loaded, exact matches
+to shipped built-in IDS rules for removed industrial protocols are removed
+automatically; only the `enabled` setting may differ. Containd records the
+removed rule IDs in an audit record when it persists the migrated configuration.
+Edited copies and other references are not removed. A remaining reference to a
+removed protocol starts the appliance in **management recovery**; the saved
+configuration remains exportable, and committing a valid configuration repairs
+the appliance.
+
+The management API returns HTTP 400 with the applicable message below when a
+new configuration contains an unsupported industrial protocol. Rejected
+stage, import, commit, or rollback requests are all-or-nothing and do not
+partially apply changes:
+
+```text
+rule <id> ics protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip
+dataplane.dpiIcsProtocols: protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip
+ids rule <id> proto "<name>" is not supported; supported: modbus, dnp3, iec104, cip
+signature <id> protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip
+```
+
+The saved configuration is not silently rewritten beyond the unchanged
+built-in IDS rules above. Correct other unsupported references and commit the
+valid configuration to leave management recovery.
 
 ## Additional CA bundle
 

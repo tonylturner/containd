@@ -316,7 +316,7 @@ func TestTrackFlowICSServiceReplyFirst(t *testing.T) {
 	for _, tc := range []struct {
 		proto uint8
 		port  uint16
-	}{{6, 502}, {6, 20000}, {6, 44818}, {6, 102}, {6, 4840}, {6, 2404}, {17, 2222}, {17, 47808}} {
+	}{{6, 502}, {6, 20000}, {6, 44818}, {6, 2404}, {17, 2222}} {
 		e := newOrientationEngine(t)
 		reply := connSegment(true, 41000, tc.port, 500, ackPsh, nil)
 		reply.Proto = tc.proto

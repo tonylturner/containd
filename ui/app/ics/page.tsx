@@ -24,6 +24,7 @@ import {
   formatICSMode,
   PROTOCOL_KEYS,
   PROTOCOLS,
+  isSupportedICSProtocol,
   protoMeta,
 } from "./ics-shared";
 import { summarizeIEC104 } from "./iec104";
@@ -197,7 +198,12 @@ export default function ICSPolicyPage() {
                   key={p}
                   className="flex items-center justify-between text-sm text-(--text)"
                 >
-                  <span>{protoMeta(p).label}</span>
+                  <span className="flex items-center gap-2">
+                    {protoMeta(p).label}
+                    {!isSupportedICSProtocol(p) && (
+                      <StatusBadge variant="warning">unsupported</StatusBadge>
+                    )}
+                  </span>
                   <StatusBadge variant="neutral">{n}</StatusBadge>
                 </div>
               ))}
@@ -284,6 +290,11 @@ export default function ICSPolicyPage() {
                   <StatusBadge variant="neutral">
                     {protoMeta(r.ics?.protocol ?? "").label}
                   </StatusBadge>
+                  {!isSupportedICSProtocol(r.ics?.protocol ?? "") && (
+                    <span className="ml-2">
+                      <StatusBadge variant="warning">unsupported</StatusBadge>
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-(--text)">
                   {r.ics?.protocol === "iec104"
@@ -312,12 +323,22 @@ export default function ICSPolicyPage() {
                 </td>
                 <td className="px-4 py-3 text-right">
                   {canEdit && (
-                    <button
-                      onClick={() => setEditing(r)}
-                      className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
-                    >
-                      Edit
-                    </button>
+                    isSupportedICSProtocol(r.ics?.protocol ?? "") ? (
+                      <button
+                        onClick={() => setEditing(r)}
+                        className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
+                      >
+                        Edit
+                      </button>
+                    ) : (
+                      <Link
+                        href="/firewall/"
+                        className="text-xs font-medium text-(--amber) hover:underline"
+                        title="Unsupported ICS rules are read-only; delete the rule from Firewall Rules."
+                      >
+                        Delete in Firewall Rules
+                      </Link>
+                    )
                   )}
                 </td>
               </tr>

@@ -168,8 +168,8 @@ review, candidate staging, and commit.
 
 ## Templates and preview
 
-The seven templates at `GET /api/v1/templates/ics` comprise two Modbus variants
-and DNP3, S7comm, CIP, BACnet, and OPC UA examples, not one per supported protocol.
+The four templates at `GET /api/v1/templates/ics` comprise two Modbus variants,
+one DNP3 example, and one CIP example. There is no IEC 104 template.
 `POST /api/v1/templates/ics/apply` stages their rules. Purdue and maintenance
 window templates belong to the general `/api/v1/templates` registry and its
 `/apply` endpoint. The maintenance window template stages scheduled L4 `ALLOW`

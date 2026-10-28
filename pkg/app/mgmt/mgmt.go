@@ -37,10 +37,11 @@ type Options struct {
 }
 
 type mgmtStores struct {
-	store      config.Store
-	auditStore audit.Store
-	userStore  users.Store
-	bootEvent  *dpevents.Event
+	store       config.Store
+	auditStore  audit.Store
+	userStore   users.Store
+	bootEvent   *dpevents.Event
+	scopeEvents []dpevents.Event
 }
 
 type mgmtListenerConfig struct {
@@ -158,6 +159,14 @@ func Run(ctx context.Context, opts Options) error {
 			}
 		}
 		out = append(out, serviceManager.ListTelemetryEvents(limit)...)
+		migrationCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		migrations, err := publishScopeMigrations(migrationCtx, stores)
+		if err != nil {
+			logger.Errorw("deliver industrial scope migration telemetry", "error", err)
+		} else {
+			out = append(out, migrations...)
+		}
 		return out
 	})
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
@@ -251,6 +260,12 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		return fail(err)
 	}
 	event, err := recordBootDecision(logger, stores, cfg, r)
+	if err != nil {
+		stores.auditStore.Close()
+		stores.userStore.Close()
+		return fail(err)
+	}
+	stores.scopeEvents, err = publishScopeMigrations(context.Background(), stores)
 	if err != nil {
 		stores.auditStore.Close()
 		stores.userStore.Close()

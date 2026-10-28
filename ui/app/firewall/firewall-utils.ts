@@ -10,9 +10,6 @@ export type ICSProtoMeta = {
   showUnitId?: boolean;
   showObjectClasses?: boolean;
   showStationAddrs?: boolean;
-  showDbNumber?: boolean;
-  showObjectType?: boolean;
-  showPropertyId?: boolean;
   notes?: string;
 };
 
@@ -47,6 +44,20 @@ export const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
     notes:
       "DNP3 uses source/destination station addresses (0-65534) to identify master and outstation. IIN (Internal Indications) flags are inspected for anomaly detection.",
   },
+  iec104: {
+    label: "IEC 60870-5-104",
+    port: "2404",
+    fcLabel: "Type IDs and classes",
+    fcPlaceholder: "46, 100",
+    fcHelp:
+      "Decoded Type IDs: 1, 3, 13, 30, 31 (monitor); 45-51 and 58-64 (commands and setpoints); 70, 100-103, 105, 107 (system: end of init, general interrogation, counter interrogation, read, clock sync, reset process, test). Classes group them as monitor, control, system or unknown.",
+    addrLabel: "CA and IOA",
+    addrPlaceholder: "",
+    addrHelp:
+      "Common address (CA) identifies the station, 0-65534; 65535 is broadcast and never matches an allow rule. Information object addresses (IOA) are closed ranges, 0-16777215.",
+    notes:
+      "Rules match the session tuple (client to port 2404) in both directions. Inside an enforce envelope, a denied, malformed or unsupported APDU drops the packet and resets the session; unmatched traffic is denied.",
+  },
   cip: {
     label: "CIP / EtherNet/IP",
     port: "44818",
@@ -62,96 +73,23 @@ export const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
     notes:
       "CIP uses an object model: Object Class identifies the type (0x01=Identity, 0x02=Message Router, 0x04=Assembly, 0x66=Connection Manager). Multiple Service Packet (0x52) requests are unpacked into individual services for inspection.",
   },
-  s7comm: {
-    label: "S7comm (Siemens)",
-    port: "102",
-    fcLabel: "Function codes",
-    fcPlaceholder: "4, 5",
-    fcHelp:
-      "0x04=Read Variable, 0x05=Write Variable, 0x1D=Request Download, 0x1E=Download Block, 0x1F=Download Ended, 0x28=PI Service (PLC Control), 0x29=PLC Stop",
-    addrLabel: "Variable addresses",
-    addrPlaceholder: "DB1.DBX0.0, MW100",
-    addrHelp:
-      "S7 addressing: DBx.DBXy.z (data blocks), Mx (merkers), Ix (inputs), Qx (outputs). DB number identifies the data block.",
-    showDbNumber: true,
-    notes:
-      "S7comm shares TCP port 102 with IEC 61850 MMS (differentiated by COTP protocol ID). Memory areas: 0x81=Inputs, 0x82=Outputs, 0x83=Merkers, 0x84=Data Blocks, 0x1C=Counters, 0x1D=Timers.",
-  },
-  mms: {
-    label: "IEC 61850 MMS",
-    port: "102",
-    fcLabel: "MMS service types",
-    fcPlaceholder: "",
-    fcHelp:
-      "MMS services: Read (confirmed), Write (confirmed), GetNameList, GetVariableAccessAttributes, DefineNamedVariableList, DeleteNamedVariableList, ObtainFile, Report, GOOSE-control. Service codes are ASN.1 context tags.",
-    addrLabel: "Named variables",
-    addrPlaceholder: "LLN0$BR$brcb01",
-    addrHelp:
-      "IEC 61850 variable names follow domain/item naming: LogicalDevice/LogicalNode$FC$DataObject (e.g., XCBR1$ST$Pos). FC = Functional Constraint (ST=Status, MX=Measured, CO=Control).",
-    notes:
-      "MMS is the application layer for IEC 61850 substation automation. Uses ISO/ACSE transport over TPKT/COTP on port 102. Shares port with S7comm (differentiated by COTP protocol ID byte).",
-  },
-  bacnet: {
-    label: "BACnet/IP",
-    port: "47808",
-    fcLabel: "Service choices",
-    fcPlaceholder: "12, 14, 15",
-    fcHelp:
-      "Confirmed: 12=ReadProperty, 14=WriteProperty, 15=WritePropertyMultiple, 5=SubscribeCOV, 26=ReadPropertyMultiple. Unconfirmed: 0=I-Am, 1=I-Have, 8=Who-Is, 7=Who-Has, 2=COV-Notification",
-    addrLabel: "Object type / instance",
-    addrPlaceholder: "analog-input:1, binary-output:5",
-    addrHelp:
-      "BACnet objects are type:instance pairs. Common types: analog-input (0), analog-output (1), analog-value (2), binary-input (3), binary-output (4), binary-value (5), device (8).",
-    showObjectType: true,
-    showPropertyId: true,
-    notes:
-      "BACnet/IP uses UDP port 47808 (0xBAC0). BVLC (BACnet Virtual Link Control) encapsulates NPDU and APDU layers. Property IDs: 85=Present Value, 28=Description, 77=Object Name.",
-  },
-  opcua: {
-    label: "OPC UA",
-    port: "4840",
-    fcLabel: "Service types",
-    fcPlaceholder: "",
-    fcHelp:
-      "Services: OpenSecureChannel, CloseSecureChannel, CreateSession, ActivateSession, Read, Write, Browse, BrowseNext, Call, CreateSubscription, Publish, CreateMonitoredItems",
-    addrLabel: "Node IDs",
-    addrPlaceholder: "ns=2;s=MyVariable",
-    addrHelp:
-      "OPC UA node IDs: ns=<namespace>;i=<numeric> or ns=<namespace>;s=<string>. Namespace 0 is the OPC UA standard namespace. Application-specific nodes typically use ns=1 or ns=2.",
-    notes:
-      "OPC UA uses a binary protocol over TCP. The decoder identifies message types (HEL, ACK, OPN, CLO, MSG) and extracts service IDs from MSG chunks. Security is negotiated at the secure channel level.",
-  },
-  iec104: {
-    label: "IEC 60870-5-104",
-    port: "2404",
-    fcLabel: "Type IDs and classes",
-    fcPlaceholder: "46, 100",
-    fcHelp:
-      "Decoded Type IDs: 1, 3, 13, 30, 31 (monitor); 45-51 and 58-64 (commands and setpoints); 70, 100-103, 105, 107 (system: end of init, general interrogation, counter interrogation, read, clock sync, reset process, test). Classes group them as monitor, control, system or unknown.",
-    addrLabel: "CA and IOA",
-    addrPlaceholder: "",
-    addrHelp:
-      "Common address (CA) identifies the station, 0-65534; 65535 is broadcast and never matches an allow rule. Information object addresses (IOA) are closed ranges, 0-16777215.",
-    notes:
-      "Rules match the session tuple (client to port 2404) in both directions. Inside an enforce envelope, a denied, malformed or unsupported APDU drops the packet and resets the session; unmatched traffic is denied.",
-  },
 };
 
 export const ICS_PROTOCOL_KEYS = Object.keys(ICS_PROTOCOLS);
 
 export function icsProtoMeta(name: string): ICSProtoMeta {
-  return (
-    ICS_PROTOCOLS[name] ?? {
-      label: name,
-      port: "",
-      fcLabel: "Function codes",
-      fcPlaceholder: "",
-      fcHelp: "",
-      addrLabel: "Addresses",
-      addrPlaceholder: "",
-      addrHelp: "",
-    }
-  );
+  return Object.prototype.hasOwnProperty.call(ICS_PROTOCOLS, name)
+    ? ICS_PROTOCOLS[name]
+    : {
+        label: name,
+        port: "",
+        fcLabel: "Function codes",
+        fcPlaceholder: "",
+        fcHelp: "",
+        addrLabel: "Addresses",
+        addrPlaceholder: "",
+        addrHelp: "",
+      };
 }
 
 export const IT_PROTOCOLS: {
@@ -178,18 +116,15 @@ export const ICS_DPI_PROTOCOLS: {
 }[] = [
   { key: "modbus", label: "Modbus/TCP", port: "502", desc: "Function codes, register addresses, unit IDs" },
   { key: "dnp3", label: "DNP3", port: "20000", desc: "Function codes, station addresses, IIN flags" },
-  { key: "cip", label: "CIP / EtherNet/IP", port: "44818", desc: "Service codes, object classes, CIP paths" },
-  { key: "s7comm", label: "S7comm", port: "102", desc: "Memory areas, DB numbers, read/write ops" },
-  { key: "mms", label: "IEC 61850 MMS", port: "102", desc: "MMS service requests, named variables" },
-  { key: "bacnet", label: "BACnet/IP", port: "47808", desc: "Service types, object types, property IDs" },
-  { key: "opcua", label: "OPC UA", port: "4840", desc: "Service types, node IDs, browse/read/write" },
   { key: "iec104", label: "IEC 60870-5-104", port: "2404", desc: "APCI frames, Type IDs, common addresses, IOAs" },
+  { key: "cip", label: "CIP / EtherNet/IP", port: "44818", desc: "Service codes, object classes, CIP paths" },
 ];
 
 /**
  * Effective decoder state per ICS protocol. The engine enables a decoder
  * that is not configured; only an explicit `false` disables it
- * (pkg/dp/engine/decoders.go). Unknown keys are kept as configured.
+ * (pkg/dp/engine/decoders.go). Unknown keys are retained so the API can
+ * report invalid saved configuration and the operator can explicitly remove it.
  */
 export function effectiveICSDecoders(
   configured: Record<string, boolean> | undefined,
@@ -225,41 +160,17 @@ export const ICS_PROTOCOL_OPTIONS: Record<
     addrLabel: "Station addresses",
     addrHelp: "Source and destination addresses (0-65534)",
   },
+  iec104: {
+    fcLabel: "Type IDs and classes",
+    fcHelp: "3/13/31 monitor, 45-51/58-64 control, 100 interrogation, 102 read",
+    addrLabel: "CA and IOA",
+    addrHelp: "Common address 0-65534, IOA ranges 0-16777215",
+  },
   cip: {
     fcLabel: "Service codes",
     fcHelp: "0x4C=Read Tag, 0x4D=Write Tag, 0x52=Multiple Service",
     addrLabel: "CIP path",
     addrHelp: "Object class / instance path",
     hasObjectClasses: true,
-  },
-  s7comm: {
-    fcLabel: "Function codes",
-    fcHelp: "0x04=Read, 0x05=Write, 0x28=Setup Comm, 0x29=PLC Stop",
-    addrLabel: "Memory area / DB",
-    addrHelp: "DB numbers, memory area types",
-  },
-  mms: {
-    fcLabel: "Service types",
-    fcHelp: "Read, Write, GetNameList, Define, Report",
-    addrLabel: "Named variables",
-    addrHelp: "Domain/variable name patterns",
-  },
-  bacnet: {
-    fcLabel: "Service types",
-    fcHelp: "ReadProperty, WriteProperty, SubscribeCOV, WhoIs",
-    addrLabel: "Object type / instance",
-    addrHelp: "e.g. analog-input:1, binary-output:5",
-  },
-  opcua: {
-    fcLabel: "Service types",
-    fcHelp: "Read, Write, Browse, Call, CreateSubscription",
-    addrLabel: "Node IDs",
-    addrHelp: "Namespace and identifier patterns",
-  },
-  iec104: {
-    fcLabel: "Type IDs and classes",
-    fcHelp: "3/13/31 monitor, 45-51/58-64 control, 100 interrogation, 102 read",
-    addrLabel: "CA and IOA",
-    addrHelp: "Common address 0-65534, IOA ranges 0-16777215",
   },
 };

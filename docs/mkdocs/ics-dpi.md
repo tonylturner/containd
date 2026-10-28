@@ -1,6 +1,6 @@
 # ICS/OT Deep Packet Inspection
 
-containd has **16 native Go protocol decoders: 8 ICS + 8 IT**. Live capture and
+containd has **12 native Go protocol decoders: 4 ICS + 8 IT**. Live capture and
 PCAP analysis share `DefaultDecoders()`. ICS marker and port detector are two
 additional utility registrations, not protocol decoders. Decoding a field does
 not make it an enforceable firewall predicate.
@@ -50,17 +50,17 @@ replacement request:
     "modbus": true,
     "dnp3": true,
     "iec104": true,
-    "cip": false,
-    "s7comm": false,
-    "mms": true,
-    "bacnet": false,
-    "opcua": false
+    "cip": false
   }
 }
 ```
 
-An omitted protocol toggle leaves its decoder enabled. `dpiProtocols` controls
-the IT decoders separately. Enabling a decoder does not create a policy rule.
+The four supported industrial decoders are Modbus/TCP, DNP3, IEC 60870-5-104
+and CIP/EtherNet/IP. CIP is optional and can be disabled. An omitted protocol
+toggle leaves its decoder enabled. `dpiProtocols` controls the IT decoders
+separately. Enabling a decoder does not create a policy rule. For saved
+configurations affected by removed protocol support, see
+[upgrade recovery](config-format.md#unsupported-protocols-during-upgrade).
 
 ## DPI exclusions
 
@@ -127,11 +127,7 @@ and selection reason.
 | Modbus/TCP | TCP 502 | `pkg/dp/ics/modbus` |
 | DNP3 | TCP 20000 | `pkg/dp/ics/dnp3` |
 | IEC 60870-5-104 | TCP 2404 | `pkg/dp/ics/iec104` |
-| CIP/EtherNet/IP | TCP 44818 | `pkg/dp/ics/cip` |
-| S7comm | TCP 102 | `pkg/dp/ics/s7comm` |
-| IEC 61850 MMS | TCP 102 | `pkg/dp/ics/iec61850` |
-| BACnet | UDP 47808 | `pkg/dp/ics/bacnet` |
-| OPC UA | TCP 4840 | `pkg/dp/ics/opcua` |
+| CIP/EtherNet/IP | TCP 44818, UDP 2222 | `pkg/dp/ics/cip` |
 
 The eight IT decoders live in `pkg/dp/itdpi`: DNS, TLS, HTTP, SSH, SMB, NTP, SNMP,
 and RDP. Protocol events carry `proto`, `kind`, `flowId`, timestamp, and a decoder-
@@ -178,11 +174,7 @@ the value in brackets is the event's `proto`.
 | Modbus/TCP (`modbus`) | `request`, `response`, `exception`, `malformed` | `transaction_id`, `unit_id`, `function_code`, `is_write`, `raw_hex`; data-access fields per function code (see [ICS Firewall Rule Predicates](#ics-firewall-rule-predicates)): requests `address` with `quantity` (1–4, 15, 16; plus `byte_count` for 15, 16), `value` (5, 6), `and_mask`, `or_mask` (22), or `read_address`, `read_quantity`, `write_address`, `write_quantity`, `byte_count` (23); read responses `byte_count` and, for registers, `register_count`; write responses the fields they echo; `sub_function`, `sub_function_name` (code 8); `mei_type` (code 43), `mei_type_name` (MEI type 14); `exception_code`, `exception_description` (exceptions, with `function_code` set to the base code); `error` (malformed) |
 | DNP3 (`dnp3`) | `request`, `response`, `restart` (codes 13, 14), `control` (codes 18, 19), `malformed` | `function_code`, `function_name`, `is_write`, `is_control`, `source_address`, `destination_address`, `direction` (`master` or `outstation`, from the link DIR bit), `iin_flags`, `object_groups` (comma-separated), `qualifier`, `object_count` (first object header), `raw_hex`; `error` (malformed) |
 | IEC 104 (`iec104`) | `apci`, `request`, `response`, `malformed`, `unsupported` | See below |
-| CIP/EtherNet/IP (`cip`) | `request`, `response`, `session` (EtherNet/IP commands without a CIP message) | `command`, `command_code`, `session_handle`; `service_code`, `service_name`, `function_code` (the service code), `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; `multi_service_count` on a Multiple Service Packet, which also emits one event per sub-service with `msp: "true"` |
-| S7comm (`s7comm`) | `connection` (COTP CR/CC), `request`, `response` | `cotp_pdu_type` (connection); `message_type`, `pdu_reference`, `raw_hex`, `function_code`, `function_name`, `is_write`, `is_control`; `item_count`, `area`, `address`, `db_number`, `safety_critical` (Read/Write Var); `error_class`, `error_code` (Ack-Data) |
-| IEC 61850 MMS (`mms`) | `connection_request`, `connection_confirm`, `request`, `response`, `unconfirmed`, `initiate_request`, `initiate_response`, `unknown` | `service` (`connection` on COTP CR/CC events, which carry no other attribute), `pdu_tag`, `service_tag`, `is_write`, `is_control`, `variable_name` (Read/Write), `raw_hex` |
-| BACnet (`bacnet`) | `request`, `response`, `discovery` | `bvlc_function`, `pdu_type`, `service_code`, `service` (`bvlc` without an APDU), `is_write`, `is_critical`, `object_type`, `object_instance`, `property_id`, `raw_hex` |
-| OPC UA (`opcua`) | `request`, `response` (also ERR), `session` (HEL, ACK, OPN, CLO) | `message_type`, `chunk_type`, `service`, `is_write`, `raw_hex` |
+| CIP/EtherNet/IP (`cip`) | `request`, `response`, `session` (EtherNet/IP commands without a CIP message) | See below |
 
 The DNP3 decoder emits one event per link frame that starts an application
 fragment. It does not reassemble fragments that span several link frames.
@@ -202,6 +194,27 @@ the server), `session_id`, `apdu_id`, `apci_type` (`I`, `S` or `U`) and
 An I-format APDU emits one event per information object. Types outside the
 supported set emit `unsupported`.
 
+CIP events report each EtherNet/IP layer as attributes. The protocol name `cip` covers the whole EtherNet/IP stack: one decoder toggle
+and one protocol match. The name `enip` is rejected at rule, signature, Sigma
+and toggle boundaries with: `EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`.
+
+| CIP event layer | Attributes |
+| --- | --- |
+| Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle` |
+| Common Packet Format (CPF) | `cpf_item_types`: all item types in packet order as one comma-joined lowercase hex string with no spaces, such as `"0x0000,0x00b2"`, on SendRRData/SendUnitData with a valid item list |
+| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; MSP parents also carry `multi_service_count`, sub-events carry `msp` |
+
+MSP sub-events retain the encapsulation and CPF fields. Non-CPF commands such as
+RegisterSession have no `cpf_item_types`. The encapsulation fields replace
+`command`, `command_code` and `session_handle`; CIP events do not emit aliases.
+
+For a `cip` IDS rule, this condition matches a connected-data CPF item using
+`contains "0x00b1"`:
+
+```json
+{"field": "attr.cpf_item_types", "op": "contains", "value": "0x00b1"}
+```
+
 The TLS decoder emits a `client_hello` event with `sni`, `alpn`,
 `tls_version`, `cipher_suites`, `extensions`, `ja3`, `ja3_hash`, `src_port`,
 `dst_port` and `transport`. `ja3` follows the JA3 layout but is **not
@@ -218,7 +231,7 @@ than IEC 104 are:
 
 | JSON field | Meaning and limits |
 | --- | --- |
-| `protocol` | `modbus`, `dnp3`, `cip`, `s7comm`, `mms`, `bacnet`, or `opcua` |
+| `protocol` | `modbus`, `dnp3`, or `cip` |
 | `functionCode` | Array of numeric function/service codes, 0–255; evaluated from `function_code` |
 | `unitId` | Optional Modbus unit ID, 0–255; evaluated from `unit_id` |
 | `addresses` | Array of address entries, each one value or an inclusive `low-high` range (see below); evaluated against the addresses the message touches |
@@ -290,9 +303,8 @@ With `mode: "enforce"` the rule needs a nonzero `dataplane.nfqueueGroup` (see
 
 Only metadata actually emitted by the decoder can satisfy these conditions.
 There are no firewall selectors for DNP3 station addresses/object headers, CIP
-instance/attribute/EPATH/MSP, S7 DB numbers, MMS named variables/domains, BACnet
-objects/properties, or OPC UA message/service/Node ID patterns. Decoder telemetry
-and IDS attributes are not additional firewall selector fields.
+instance/attribute/EPATH/MSP. Decoder telemetry and IDS attributes are not
+additional firewall selector fields.
 
 ICS messages follow the firewall's precedence (see
 [Actions and precedence](policy-model.md#actions-and-precedence)): any matching
@@ -413,8 +425,8 @@ Detectors have no tuning controls.
 | `protocol_violation` | critical | DNP3 cold or warm restart (function code 13 or 14) from an outstation |
 | `protocol_violation` | high | Every DNP3 unsolicited response (function code 130) |
 | `protocol_violation` | high | DNP3 request with an undefined function code (34–127) |
-| `protocol_violation` | critical | S7comm PLC stop (function code 0x29) |
-| `protocol_violation` | high | S7comm PLC control (0x28) or block download (0x1A, 0x1B) |
+| `protocol_violation` | critical | CIP message with service code 0x07 (Stop), request or reply |
+| `protocol_violation` | high | CIP message with service code 0x06 (Start), request or reply |
 | `protocol_violation` | high | IEC 104 role violation: a monitor type (1–44) from the client, or a control or system activation/deactivation from the server |
 | `protocol_violation` | high | More than one ICS protocol from one source to one destination address |
 | `rate_anomaly` | high | More than 1,000 ICS events from one source to one destination address in the current and previous clock minute |
@@ -423,10 +435,8 @@ Detectors have no tuning controls.
 These checks use the source and destination IP addresses, not ports. While a
 pair is above a rate limit, each further event raises another finding. After a
 pair shows a second protocol, each further ICS event of that pair raises that
-finding again. IEC 104 rate counts use one event per APDU. On TCP 102 the S7comm
-and MMS decoders both report a COTP connection, so a TCP 102 connection raises
-the multiple-protocol finding for its address pair. CIP, BACnet, OPC UA and MMS
-events get no protocol-specific checks. The `ids` / `anomaly` event of a finding
+finding again. IEC 104 rate counts use one event per APDU. The `ids` /
+`anomaly` event of a finding
 from an IEC 104 event also copies that event's identity attributes, such as
 `session_id`, `apdu_id`, `type_id`, `ca` and `ioa`.
 
@@ -442,8 +452,8 @@ only as events, not in this list.
 ## Signatures
 
 The signature engine compares every decoded event with the loaded signatures.
-It loads **23 built-in signatures**: 16 for Modbus, DNP3, CIP, S7comm and ICS
-write storms, and 7 for IEC 104. A match is recorded as an `ids` /
+It loads **20 built-in signatures**: 13 for Modbus, DNP3, CIP and ICS write
+storms, and 7 for IEC 104. A match is recorded as an `ids` /
 `signature_match` event with `signature_id`, `name`, `severity` and
 `description`, plus the identity attributes of a matched IEC 104 event.
 Matches are observations only and never block traffic.
@@ -528,10 +538,11 @@ the [signature engine](#signatures) are separate consumers; see also
 [Logging and Evidence](logging-evidence.md) for bounded retention, queries, and
 syslog forwarding.
 
-Seven ICS API templates provide two Modbus variants and DNP3, S7comm, CIP,
-BACnet, and OPC UA examples. Purdue and maintenance-window templates belong to
-the general registry, not this seven-template set. Applying templates stages
-candidate changes; see [Policy Model](policy-model.md#templates-and-preview).
+Four ICS API templates provide two Modbus variants, one DNP3 example, and one
+CIP example. There is no IEC 104 template. Purdue and maintenance-window
+templates belong to the general registry, not this four-template set. Applying
+templates stages candidate changes; see
+[Policy Model](policy-model.md#templates-and-preview).
 
 ## IEC 104 Holdback Diagnostics
 

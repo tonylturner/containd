@@ -150,7 +150,7 @@ export function ICSDPIConfigModal({
   }
 
   function enableAll() {
-    const next: Record<string, boolean> = {};
+    const next: Record<string, boolean> = { ...draft };
     ICS_DPI_PROTOCOLS.forEach((p) => {
       next[p.key] = true;
     });
@@ -158,7 +158,7 @@ export function ICSDPIConfigModal({
   }
 
   function disableAll() {
-    const next: Record<string, boolean> = {};
+    const next: Record<string, boolean> = { ...draft };
     ICS_DPI_PROTOCOLS.forEach((p) => {
       next[p.key] = false;
     });
@@ -312,6 +312,35 @@ export function ICSDPIConfigModal({
             );
           })}
         </div>
+
+        {Object.entries(draft)
+          .filter(([key]) => !ICS_DPI_PROTOCOLS.some((protocol) => protocol.key === key))
+          .map(([key, enabled]) => (
+            <div
+              key={key}
+              className="mt-3 flex items-center justify-between rounded-xs border border-amber-500/20 bg-amber-500/5 px-3 py-2.5"
+            >
+              <div className="text-sm text-(--text)">
+                <span className="font-mono">{key}</span>{" "}
+                <span className="text-amber-300">unsupported</span>
+                <div className="mt-0.5 text-[10px] text-(--text-muted)">
+                  Stored value: {String(enabled)}. Remove this key to repair the decoder map.
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label={`Remove unsupported protocol ${key}`}
+                onClick={() => {
+                  const next = { ...draft };
+                  delete next[key];
+                  setDraft(next);
+                }}
+                className="rounded-xs border border-red-500/20 bg-red-500/10 px-2 py-1 text-xs text-red-300"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
 
         <div className="mt-4 text-[10px] text-(--text-dim)">
           Protocol-specific DPI parameters (function codes, register addresses,

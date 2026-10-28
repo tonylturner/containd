@@ -44,6 +44,9 @@ export function DPIConfigSection({
   const protos = cfg.dpiProtocols ?? {};
   const icsProtos = cfg.dpiIcsProtocols ?? {};
   const exclusions = cfg.dpiExclusions ?? [];
+  const unsupportedICSKeys = Object.keys(icsProtos).filter(
+    (key) => !ICS_DPI_PROTOCOLS.some((protocol) => protocol.key === key),
+  );
 
   const enabledProtoCount = IT_PROTOCOLS.filter(
     (p) => protos[p.key] !== false,
@@ -220,6 +223,14 @@ export function DPIConfigSection({
                     </span>
                   );
                 })}
+                {unsupportedICSKeys.map((key) => (
+                  <span
+                    key={key}
+                    className="rounded-xs border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-300"
+                  >
+                    {key} — unsupported
+                  </span>
+                ))}
               </div>
               <div className="mt-2">
                 <IEC104HealthIndicator health={health?.iec104Enforcement} />
