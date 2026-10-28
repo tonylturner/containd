@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 func TestProtocolScopeConduits(t *testing.T) {
@@ -36,5 +37,32 @@ func TestProtocolScopeConduits(t *testing.T) {
 				t.Fatalf("industrial classification=%t want=%t (%v)", got, tc.industrial, mitre)
 			}
 		})
+	}
+}
+
+func TestConduitICSRegistryMembership(t *testing.T) {
+	want := map[int]bool{
+		ics.ModbusPort:      true,
+		ics.CIPImplicitPort: true,
+		ics.IEC104Port:      true,
+		ics.DNP3Port:        true,
+		ics.CIPPort:         true,
+	}
+	got := make(map[int]bool)
+	for _, port := range ics.DecoderPorts() {
+		got[int(port.Port)] = true
+	}
+	if len(got) != len(want) {
+		t.Fatalf("distinct decoder ports=%v, want %v", got, want)
+	}
+	for port := range want {
+		if !icsPorts[port] {
+			t.Errorf("registry port %d missing from conduit ICS membership", port)
+		}
+	}
+	for port := range icsPorts {
+		if !want[port] {
+			t.Errorf("non-registry port %d included in conduit ICS membership", port)
+		}
 	}
 }

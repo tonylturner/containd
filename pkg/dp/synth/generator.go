@@ -21,6 +21,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 )
 
@@ -172,11 +173,11 @@ type scenario struct {
 var scenarios = []scenario{
 	// ── ICS protocols ─────────────────────────────────────────────
 	// Modbus/TCP — attribute keys match pkg/dp/ics/modbus/decoder.go
-	{proto: "modbus", kind: "request", transport: "tcp", dstPort: 502, weight: 25, attrFn: synthModbusRequest},
-	{proto: "modbus", kind: "exception", transport: "tcp", dstPort: 502, weight: 3, attrFn: synthModbusException},
+	{proto: "modbus", kind: "request", transport: "tcp", dstPort: ics.ModbusPort, weight: 25, attrFn: synthModbusRequest},
+	{proto: "modbus", kind: "exception", transport: "tcp", dstPort: ics.ModbusPort, weight: 3, attrFn: synthModbusException},
 
 	// DNP3 — attribute keys match pkg/dp/ics/dnp3/decoder.go
-	{proto: "dnp3", kind: "request", transport: "tcp", dstPort: 20000, weight: 15, attrFn: func(rng *rand.Rand) map[string]any {
+	{proto: "dnp3", kind: "request", transport: "tcp", dstPort: ics.DNP3Port, weight: 15, attrFn: func(rng *rand.Rand) map[string]any {
 		fcs := []int{1, 2, 3, 4, 5, 13, 14}
 		fcNames := map[int]string{1: "READ", 2: "WRITE", 3: "SELECT", 4: "OPERATE", 5: "DIRECT_OPERATE", 13: "COLD_RESTART", 14: "WARM_RESTART"}
 		fc := fcs[rng.Intn(len(fcs))]
@@ -195,7 +196,7 @@ var scenarios = []scenario{
 	}},
 
 	// CIP/EtherNet/IP — attribute keys match pkg/dp/ics/cip/decoder.go
-	{proto: "cip", kind: "request", transport: "tcp", dstPort: 44818, weight: 12, attrFn: func(rng *rand.Rand) map[string]any {
+	{proto: "cip", kind: "request", transport: "tcp", dstPort: ics.CIPPort, weight: 12, attrFn: func(rng *rand.Rand) map[string]any {
 		type cipSvc struct {
 			code uint8
 			name string
@@ -400,9 +401,9 @@ func synthModbusException(rng *rand.Rand) map[string]any {
 // events carry exactly the attributes a captured ADU with the same bytes
 // does. reply orients the ADU from the server's port 502.
 func decodeModbus(adu []byte, reply bool) map[string]any {
-	key := flow.Key{SrcIP: net.IPv4(192, 0, 2, 1), DstIP: net.IPv4(192, 0, 2, 2), SrcPort: 49152, DstPort: 502, Proto: 6}
+	key := flow.Key{SrcIP: net.IPv4(192, 0, 2, 1), DstIP: net.IPv4(192, 0, 2, 2), SrcPort: 49152, DstPort: ics.ModbusPort, Proto: ics.TCP}
 	if reply {
-		key = flow.Key{SrcIP: key.DstIP, DstIP: key.SrcIP, SrcPort: 502, DstPort: 49152, Proto: 6, Dir: flow.DirReverse}
+		key = flow.Key{SrcIP: key.DstIP, DstIP: key.SrcIP, SrcPort: ics.ModbusPort, DstPort: 49152, Proto: ics.TCP, Dir: flow.DirReverse}
 	}
 	events, err := modbus.NewDecoder().OnPacket(&flow.State{Key: key}, &dpi.ParsedPacket{
 		Proto: "tcp", SrcPort: key.SrcPort, DstPort: key.DstPort, Payload: adu,
