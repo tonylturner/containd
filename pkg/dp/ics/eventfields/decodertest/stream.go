@@ -13,6 +13,8 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
+// CheckStream is for stateless decoders. Stateful callers must use
+// CheckStreamFactory, which isolates the prefix replay.
 // CheckStream runs sd.ParseStream on an owned copy of v and fails t unless
 // the result keeps the dpi.StreamDecoder contract:
 //   - frames are contiguous from v.Base, in order, non-empty, inside the view;
@@ -26,6 +28,20 @@ import (
 //     nothing else.
 func CheckStream(t testing.TB, sd dpi.StreamDecoder, state *flow.State, v dpi.StreamView) (dpi.StreamResult, error) {
 	t.Helper()
+	return checkStream(t, sd, state, v, func() dpi.StreamDecoder { return sd })
+}
+
+// CheckStreamFactory checks one parse and its prefix replay with separate fresh
+// decoders. makeDecoder must construct new state, not return a shared instance.
+func CheckStreamFactory(t testing.TB, makeDecoder func() dpi.StreamDecoder, state *flow.State, v dpi.StreamView) (dpi.StreamResult, error) {
+	t.Helper()
+	ownedState := cloneState(state)
+	return checkStream(t, makeDecoder(), ownedState, v, makeDecoder)
+}
+
+func checkStream(t testing.TB, sd dpi.StreamDecoder, state *flow.State, v dpi.StreamView, reparse func() dpi.StreamDecoder) (dpi.StreamResult, error) {
+	t.Helper()
+	prefixState := cloneState(state)
 	view := v
 	view.Bytes = append([]byte(nil), v.Bytes...)
 	res, err := sd.ParseStream(state, view)
@@ -57,10 +73,10 @@ func CheckStream(t testing.TB, sd dpi.StreamDecoder, state *flow.State, v dpi.St
 	if after := describe(res, err, true); after != before {
 		t.Fatalf("result changed when the view was overwritten:\n%s\n%s", before, after)
 	}
-	if res.Consumed > 0 {
+	if res.Consumed > 0 && reparse != nil {
 		prefix := v
 		prefix.Bytes = append([]byte(nil), v.Bytes[:res.Consumed]...)
-		again, againErr := sd.ParseStream(state, prefix)
+		again, againErr := reparse().ParseStream(prefixState, prefix)
 		if againErr != nil || again.NeedMore || Describe(again, nil) != Describe(dpi.StreamResult{Frames: res.Frames, Consumed: res.Consumed}, nil) {
 			t.Fatalf("reparsing the consumed prefix: err %v needMore %v\n%s\nwant\n%s", againErr, again.NeedMore, Describe(again, nil), Describe(res, nil))
 		}
@@ -68,6 +84,7 @@ func CheckStream(t testing.TB, sd dpi.StreamDecoder, state *flow.State, v dpi.St
 	return res, err
 }
 
+// CheckSplits is for stateless decoders; stateful callers use CheckSplitsFactory.
 // CheckSplits delivers v in two parts at every cut point, the way the DPI
 // manager does: the second view starts where the first parse's consumed
 // prefix ends. Every split must give the frames, events and error of the
@@ -75,12 +92,37 @@ func CheckStream(t testing.TB, sd dpi.StreamDecoder, state *flow.State, v dpi.St
 // beyond the cut.
 func CheckSplits(t testing.TB, sd dpi.StreamDecoder, state *flow.State, v dpi.StreamView) {
 	t.Helper()
-	whole, wholeErr := CheckStream(t, sd, state, v)
+	checkSplits(t, func() dpi.StreamDecoder { return sd }, state, v, false)
+}
+
+// CheckSplitsFactory uses a fresh decoder for the whole parse, prefix reparse,
+// and each split schedule. The head and tail of a schedule share one decoder:
+// they are successive views of one stream, not independent replays.
+func CheckSplitsFactory(t testing.TB, makeDecoder func() dpi.StreamDecoder, state *flow.State, v dpi.StreamView) {
+	t.Helper()
+	checkSplits(t, makeDecoder, state, v, true)
+}
+
+func checkSplits(t testing.TB, makeDecoder func() dpi.StreamDecoder, state *flow.State, v dpi.StreamView, fresh bool) {
+	t.Helper()
+	wholeState := state
+	if fresh {
+		wholeState = cloneState(state)
+	}
+	whole, wholeErr := checkStream(t, makeDecoder(), wholeState, v, makeDecoder)
 	want := Describe(whole, wholeErr)
 	for cut := 1; cut < len(v.Bytes); cut++ {
+		sd := makeDecoder()
+		splitState := state
+		var reparse func() dpi.StreamDecoder
+		if fresh {
+			splitState = cloneState(state)
+		} else {
+			reparse = makeDecoder
+		}
 		head := v
 		head.Bytes = v.Bytes[:cut]
-		first, err := CheckStream(t, sd, state, head)
+		first, err := checkStream(t, sd, splitState, head, reparse)
 		if err != nil {
 			if got := Describe(first, err); got != want {
 				t.Fatalf("cut %d: early error\n%s\nwant\n%s", cut, got, want)
@@ -90,16 +132,23 @@ func CheckSplits(t testing.TB, sd dpi.StreamDecoder, state *flow.State, v dpi.St
 		tail := v
 		tail.Base = v.Base + int64(first.Consumed)
 		tail.Bytes = v.Bytes[first.Consumed:]
-		second, err := CheckStream(t, sd, state, tail)
-		joined := dpi.StreamResult{
-			Frames:   append(append([]dpi.DecodedFrame(nil), first.Frames...), second.Frames...),
-			Consumed: first.Consumed + second.Consumed,
-			NeedMore: second.NeedMore,
-		}
+		second, err := checkStream(t, sd, splitState, tail, reparse)
+		joined := dpi.StreamResult{Frames: append(append([]dpi.DecodedFrame(nil), first.Frames...), second.Frames...), Consumed: first.Consumed + second.Consumed, NeedMore: second.NeedMore}
 		if got := Describe(joined, err); got != want {
 			t.Fatalf("cut %d:\n%s\nwant\n%s", cut, got, want)
 		}
 	}
+}
+
+func cloneState(state *flow.State) *flow.State {
+	if state == nil {
+		return nil
+	}
+	owned := *state
+	owned.Key.SrcIP = append([]byte(nil), state.Key.SrcIP...)
+	owned.Key.DstIP = append([]byte(nil), state.Key.DstIP...)
+	owned.Tags = append([]string(nil), state.Tags...)
+	return &owned
 }
 
 // Describe renders a parse result without timestamps, for comparisons. A
