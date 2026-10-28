@@ -62,6 +62,68 @@ separately. Enabling a decoder does not create a policy rule. For saved
 configurations affected by removed protocol support, see
 [upgrade recovery](config-format.md#unsupported-protocols-during-upgrade).
 
+## Parsing modes
+
+`dataplane.dpiIcsParsing` sets parsing independently for `modbus`, `dnp3`,
+`cip` and `iec104`. Each value is `tolerant` (the default) or `strict`.
+An omitted map, omitted key or empty value means tolerant. Unknown protocol
+names and other values are rejected. Existing configurations become tolerant
+without migration. Stage settings in **Firewall → Deep Packet Inspection →
+ICS Protocol Decoders → Configure**, or POST the full candidate dataplane
+document to `/api/v1/dataplane`, then commit to apply.
+
+For example, this fragment selects strict IEC 104 parsing and leaves the other
+protocols tolerant (merge it into the full dataplane document before posting;
+the endpoint replaces, rather than patches, that document):
+
+```json
+{"dpiIcsParsing": {"iec104": "strict"}}
+```
+
+Parsing governs nonconformant content **inside a frame whose length is known**,
+such as a nonzero Modbus protocol ID, bad DNP3 data-block CRC, reserved bits,
+truncated PDU or unknown CIP command. Decoded fields remain available to policy;
+unreadable fields stay absent. A rule never matches a function code or object
+class that was not decoded. When the addresses a message touches cannot be
+bounded, an `ALLOW` with an address range does not match it, but a `DENY` or
+`RESET` with an address range does.
+
+| Effective rule mode | Tolerant parsing | Strict parsing |
+| --- | --- | --- |
+| Enforce scope | Evaluate decoded fields as usual; pass unless policy denies | Drop the packet and reset the session; decision reason `nonconformant` |
+| Learn (monitor) scope | Rules observe; no on-wire effect | Report `would_drop`; no on-wire effect |
+
+A decoded policy denial takes precedence and retains its own reason. Strict
+nonconformance is decided before ALLOW rules. Tolerant is not a policy bypass:
+under an allowlist, an unreadable field cannot satisfy an ALLOW that names that
+field, so the message falls to the default action. A broader ALLOW using only
+readable fields can still match.
+TCP resets are best effort and connection-scoped; UDP denials drop only the
+datagram, without a session reset.
+
+Every event with findings carries sorted, unique `conformance` codes such as
+`iec104.unsupported_type`. Both modes raise an `ids` / `alert` with rule ID
+`ics-conformance`, severity `medium`, flow identity, codes and the action taken
+(`passed`, `dropped and reset` or `would drop`). Alerts are bounded to one per
+connection per code; repeats only count. Events with findings never feed the
+learner, but inventory and telemetry still record them.
+
+**Both modes fail closed in enforce scope** when a frame boundary is lost:
+Modbus length outside 2–254, bad DNP3 start or header CRC, invalid IEC 104 start
+or length, or oversized CIP encapsulation. They also fail closed on integrity
+faults: midstream pickup, retransmission with different bytes, decoder panic,
+queue unavailability, buffer or out-of-order overflow, a missing decoder, and
+IEC 104 hold timeout. These faults reset the session, not a host/service block;
+tolerant does not scan for a new frame boundary or recover that session.
+
+IEC 104 malformed/profile-violating content with a known APDU length reaches
+the rules with decoded fields and an alert in tolerant mode; strict drops and
+resets it. Reserved APCI control bits with a readable length are conformance
+findings. An unsupported Type ID is still a decoded type byte: tolerant rules
+decide it, with an `iec104.unsupported_type` finding. Changing parsing applies
+to new decisions after the config push, not by resetting existing sessions
+solely because their parsing mode changed.
+
 ## DPI exclusions
 
 `dataplane.dpiExclusions` accepts `ip`, `cidr`, and `domain` entries. Each
@@ -127,7 +189,7 @@ and selection reason.
 | Modbus/TCP | TCP 502 | `pkg/dp/ics/modbus` |
 | DNP3 | TCP 20000 | `pkg/dp/ics/dnp3` |
 | IEC 60870-5-104 | TCP 2404 | `pkg/dp/ics/iec104` |
-| CIP/EtherNet/IP | TCP 44818, UDP 2222 | `pkg/dp/ics/cip` |
+| CIP/EtherNet/IP | TCP 44818, UDP 2222 and 44818 | `pkg/dp/ics/cip` |
 
 The eight IT decoders live in `pkg/dp/itdpi`: DNS, TLS, HTTP, SSH, SMB, NTP, SNMP,
 and RDP. Protocol events carry `proto`, `kind`, `flowId`, timestamp, and a decoder-
@@ -189,10 +251,11 @@ the server), `session_id`, `apdu_id`, `apci_type` (`I`, `S` or `U`) and
 | U-format | `class: system`, `is_write: false`, `u_function` (`startdt_act`, `startdt_con`, `stopdt_act`, `stopdt_con`, `testfr_act`, `testfr_con`) |
 | I-format | `send_sequence`, `receive_sequence`, `type_id`, `class`, `vsq`, `object_count`, `sq`, `cause`, `cot_negative`, `cot_test`, `originator`, `ca`, `is_write` |
 | Information object | `ioa`, `object_index`, and by type `value`, `quality`, `qualifier`, `select`, `transient`, `value_invalid`, `source_time`, `time_valid`, `time_summer` |
-| Malformed or unsupported | `error`, with the identity attributes the decoder could read |
+| Malformed or unsupported | `error` and `conformance`, with the identity attributes the decoder could read |
 
 An I-format APDU emits one event per information object. Types outside the
-supported set emit `unsupported`.
+supported set emit `unsupported` with a conformance finding; parsing mode and
+rules determine the verdict, not the event kind alone.
 
 CIP events report each EtherNet/IP layer as attributes. The protocol name `cip` covers the whole EtherNet/IP stack: one decoder toggle
 and one protocol match. The name `enip` is rejected at rule, signature, Sigma
@@ -200,11 +263,17 @@ and toggle boundaries with: `EtherNet/IP is decoded as "cip"; match encapsulatio
 
 TCP CIP on port 44818 is reassembled and framed per EtherNet/IP encapsulation,
 including split headers and bodies and multiple encapsulations in one segment.
-UDP 2222 remains packet-only, without stream reassembly.
+UDP is packet-only, without stream reassembly. Port 2222 carries implicit I/O
+datagrams: a bare Common Packet Format with a sequenced address item and a
+connected data item, decoded as one `session` event with `connection_id`,
+`sequence`, `data_length` and `cpf_item_types`, never a service code. A
+datagram whose item list cannot be read carries the `cip.cpf_layout` finding.
+Port 44818 carries encapsulation commands such as ListIdentity, decoded like TCP.
 
 | CIP event layer | Attributes |
 | --- | --- |
 | Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle` |
+| Implicit I/O (UDP 2222) | `connection_id`, `sequence`, `data_length` (whole connected data item), `cpf_item_types` |
 | Common Packet Format (CPF) | `cpf_item_types`: all item types in packet order as one comma-joined lowercase hex string with no spaces, such as `"0x0000,0x00b2"`, on SendRRData/SendUnitData with a valid item list |
 | CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; MSP parents also carry `multi_service_count`, sub-events carry `msp` |
 
@@ -238,7 +307,7 @@ than IEC 104 are:
 | `protocol` | `modbus`, `dnp3`, or `cip` |
 | `functionCode` | Array of numeric function/service codes, 0–255; evaluated from `function_code` |
 | `unitId` | Optional Modbus unit ID, 0–255; evaluated from `unit_id` |
-| `addresses` | Array of address entries, each one value or an inclusive `low-high` range (see below); evaluated against the addresses the message touches |
+| `addresses` | Modbus-only array of address entries, each one value or an inclusive `low-high` range (see below); evaluated against the addresses the message touches |
 | `objectClasses` | CIP object-class IDs, 0–65535; evaluated from `object_class`; CIP only |
 | `readOnly`, `writeOnly` | Read/write class from an explicitly present `is_write`; not both true |
 | `direction` | `request` or `response`; omit for both |
@@ -247,11 +316,18 @@ than IEC 104 are:
 Each `addresses` entry is one value (`256`, `0x0100`) or an inclusive range
 `low-high` (`100-511`, `0x0100-0x01FF`). Values are unsigned decimal or hex with
 a `0x` prefix, may mix within a range, and may have spaces around them. A range
-needs low <= high. Modbus addresses are 0–65535 (`0xFFFF`); the other protocols
-accept 0–4294967295 (`0xFFFFFFFF`). Validation refuses any other entry, such as
+needs low <= high. Modbus addresses are 0–65535 (`0xFFFF`).
+Validation refuses any other entry, such as
 `0x01G0`, `-5` or `0x200-0x100`, and names the rule and the entry. A stored
 configuration with such an entry starts in management recovery until a valid
 configuration is committed.
+
+The `addresses` predicate is supported only for Modbus. DNP3 and CIP rules
+with nonempty `addresses` are rejected in every mode because their decoded
+station, object and path fields are not numeric address predicates. An existing
+stored rule keeps its filter and starts in management recovery with the cause;
+remove the unsupported filter explicitly and commit a valid configuration to
+resume normal policy. IEC 104 uses `ca` and `ioa` instead.
 
 A message touches a set of address spans. A Modbus request touches the span
 from its starting address for its quantity: function codes 1–4, 15 and 16 name
@@ -308,14 +384,17 @@ With `mode: "enforce"` the rule needs a nonzero `dataplane.nfqueueGroup` (see
 Only metadata actually emitted by the decoder can satisfy these conditions.
 There are no firewall selectors for DNP3 station addresses/object headers, CIP
 instance/attribute/EPATH/MSP. Decoder telemetry and IDS attributes are not
-additional firewall selector fields.
+additional firewall selector fields. Protocol-specific station, point and CIP
+path selectors are not available yet.
 
 ICS messages follow the firewall's precedence (see
 [Actions and precedence](policy-model.md#actions-and-precedence)): any matching
 `ALLOW` admits the message, whatever its position; otherwise the first matching
 `DENY` or `RESET` by rule ID denies it. An ICS `DENY` that overlaps any `ALLOW`,
 including a plain L3/L4 `ALLOW` on the same port, is therefore shadowed and
-never denies anything there; the ruleset warnings name such rules. `RESET`,
+never denies anything there; the ruleset warnings name such rules. Strict
+nonconformance is rejected before ALLOW matching as described in
+[Parsing modes](#parsing-modes). `RESET`,
 `RATE_LIMIT` and `TAG` rules take no ICS protocol.
 
 ### IEC 104 fields and matching
@@ -339,7 +418,17 @@ even with a zero/false value. IEC-only list fields are rejected on other protoco
 
 Supported descriptor Type IDs are 1, 3, 5, 7, 9, 11, 13, 15, 21; 30–37;
 45–51; 58–64; 70, 100, 101, 102, 103, 105, and 107. Other types decode as
-unsupported, not as implicitly allowed commands.
+unsupported with a conformance finding: tolerant evaluates the decoded fields,
+including the Type ID, against the rules; strict drops and resets in enforce
+scope. Unsupported does not mean implicitly allowed.
+
+IEC 104 conformance codes: `iec104.apci_length`, `iec104.body_length`,
+`iec104.element`, `iec104.ioa_range`, `iec104.profile_sq`,
+`iec104.reserved_bits`, `iec104.role`, `iec104.short_asdu`, `iec104.time`,
+`iec104.u_function`, `iec104.unsupported_type`, `iec104.zero_objects`.
+Nonconformant content is never safe-read, so a `readOnly` ALLOW does not admit
+it. A malformed event without a code is a lost frame boundary or stream fault
+and is denied in both modes.
 
 Safe-read includes S/U frames, response-direction monitoring, general
 interrogation (100), request-direction read (102), and end of initialization (70).
@@ -350,25 +439,41 @@ IEC 104 rules define an L3/L4 inspection envelope. Any matching enforce-mode rul
 makes the envelope enforce-mode. Object evaluation uses only IEC 104 rules: any
 matching IEC 104 `ALLOW` admits the object, otherwise the first matching IEC 104
 `DENY` by rule ID denies it, and no match is denied. A broad TCP/2404 allow rule
-or a generic allow default cannot bypass it. `ALLOW` cannot match malformed or
-broadcast objects. ASDU predicates, identity, and schedules do not narrow the envelope itself.
+or a generic allow default cannot bypass it. In tolerant mode, malformed or
+profile-violating content with a known length can match an `ALLOW` on fields
+that were decoded; absent fields never satisfy a predicate. Strict rejects
+nonconformance before ALLOW matching. Broadcast objects cannot match an
+`ALLOW`. ASDU predicates, identity, and schedules do not narrow the envelope itself.
 
 ## Learn Mode
 
-The generic learner records non-IEC-104 ICS profiles; IEC 104 is excluded from
-both automatic learning and asset discovery. Review learned rules before use:
+The generic learner records supported **request** events for Modbus, DNP3 and
+CIP. DNP3 restart/control messages are request messages even though their event
+kinds identify the command. Replies, exceptions, events with conformance findings,
+and IEC 104 do not produce learned rules. IEC 104 is excluded from both
+automatic learning and asset discovery. Review learned rules before use:
 observation is not authorization.
 
 1. Commit an explicit learn-mode firewall entry and configure capture/DPI.
-2. Inspect `GET /api/v1/learn/profiles`. A Modbus profile lists each observed
-   address span (`10-11`, `100`), so its learned rule admits the whole spans it
-   saw.
+2. Inspect `GET /api/v1/learn/profiles`. Profiles summarize observed IP pairs;
+   Modbus addresses are the full observed spans (`10-11`, `100`).
 3. Use `POST /api/v1/learn/generate` to return proposed rules for review.
+   Generation separates each `(source, destination, protocol, unit, function
+   code)` tuple. Modbus rules carry only that tuple's unit, function code and
+   observed address spans, and every learned rule matches request direction
+   only. DNP3 rules carry their function code; CIP rules carry their service
+   code and observed object classes, including a class-less request where
+   applicable. Neither protocol gets an `addresses` filter; station, point and
+   CIP path selectors are not available.
 4. `POST /api/v1/learn/apply` stages generated rules in candidate configuration
    (`status: staged`); it does not activate them. Generated rules leave
    `ics.mode` empty, so they inherit the global `dpiMode`: they enforce only
    when the global mode is `enforce`, and staging them is then refused while
    `dataplane.nfqueueGroup` is 0. Set a per-rule mode in candidate to override.
+   Rules generated by older versions may have merged units, function codes and
+   addresses into one wider rule. Generation does not remove or replace those
+   existing rules; review and remove any legacy learned rules before relying
+   on the narrower proposals.
 5. Review scope and per-rule modes in candidate, then commit with
    `POST /api/v1/config/commit`. Rule order does not matter: a learned `ALLOW`
    admits its traffic even past a `DENY` listed before it, and any `DENY` it
@@ -462,6 +567,10 @@ storms, and 7 for IEC 104. A match is recorded as an `ids` /
 `description`, plus the identity attributes of a matched IEC 104 event.
 Matches are observations only and never block traffic.
 
+The built-in `ICS-WRITE-STORM` signature alerts after 20 initiator write
+commands on one connection within 10 seconds. Replies and exceptions do not
+count, and an IEC 104 APDU with multiple object events counts once.
+
 | Request | Purpose |
 | --- | --- |
 | `GET /api/v1/signatures` | List the loaded signatures, built-in and custom |
@@ -490,6 +599,16 @@ An optional `threshold` of `count` (at least 2) and `windowSeconds` (at least 1)
 alerts once per flow ID when that many events match in one window. The window
 starts at the first matching event. The signature does not alert again for that
 flow ID until the window has passed.
+
+Two optional threshold fields change what counts:
+
+- `scope`: `flow` (the default) counts each direction of a connection
+  separately. `connection` counts both directions of one connection together.
+  Events whose flow ID is not a connection tuple keep their own counter.
+- `dedupAttr`: an event attribute. Matching events with the same nonempty value
+  count once in a window. The built-in write storm uses `apdu_id`. A window
+  retains at most 256 values; past that, new values still count but are not
+  remembered.
 
 ```json
 {

@@ -70,9 +70,8 @@ func TestAddressSpansLimits(t *testing.T) {
 	}
 }
 
-// A request PDU whose length does not fit its function code's layout emits
-// no data-access fields, so AddressSpans does not bound it.
-func TestRequestFieldsRequireExactLayout(t *testing.T) {
+// Partial layouts retain scalars, but do not establish a complete access span.
+func TestRequestFieldsRetainPartialLayout(t *testing.T) {
 	cases := []struct {
 		name string
 		fc   uint8
@@ -91,8 +90,9 @@ func TestRequestFieldsRequireExactLayout(t *testing.T) {
 	for _, tc := range cases {
 		attrs := map[string]any{"function_code": tc.fc}
 		addRequestFields(tc.fc, tc.pdu, attrs)
-		if len(attrs) != 1 {
-			t.Errorf("%s: emitted %v", tc.name, attrs)
+		addConformance(nil, &TCPFrame{FunctionCode: tc.fc, PDU: tc.pdu}, "request", attrs)
+		if len(attrs) <= 2 {
+			t.Errorf("%s: did not retain readable fields: %v", tc.name, attrs)
 		}
 		if spans, ok := AddressSpans(attrs); ok || spans != nil {
 			t.Errorf("%s: AddressSpans = %v, %v", tc.name, spans, ok)

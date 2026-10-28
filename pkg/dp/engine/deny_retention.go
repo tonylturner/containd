@@ -118,6 +118,7 @@ func (e *Engine) retireDeniedTCP(d *deniedTCP, eviction bool) {
 			// still needs teardown, even without a tracked flow entry.
 			st = &flow.State{Key: k}
 		}
+		e.conformance.end(st, true)
 		evs, _ := e.dpiMgr.OnFlowEnd(st)
 		if len(evs) > 0 {
 			ended = append(ended, endedFlow{st, evs})

@@ -33,10 +33,12 @@ func frameEncapsulation(data []byte) (*EIPHeader, error) {
 }
 
 var (
-	ErrTooShort     = errors.New("EtherNet/IP frame too short")
-	ErrTruncated    = errors.New("EtherNet/IP frame truncated")
-	ErrNoCIPPayload = errors.New("no CIP payload in encapsulation")
-	ErrCIPTooShort  = errors.New("CIP message too short")
+	ErrTooShort      = errors.New("EtherNet/IP frame too short")
+	ErrTruncated     = errors.New("EtherNet/IP frame truncated")
+	ErrNoCIPPayload  = errors.New("no CIP payload in encapsulation")
+	ErrInvalidCPF    = errors.New("invalid CPF layout")
+	ErrPathTruncated = errors.New("CIP path truncated")
+	ErrCIPTooShort   = errors.New("CIP message too short")
 )
 
 // EIPHeader represents a parsed EtherNet/IP encapsulation header.
@@ -52,6 +54,8 @@ type EIPHeader struct {
 
 // CIPMessage represents a parsed CIP message extracted from SendRRData/SendUnitData.
 type CIPMessage struct {
+	status      uint8
+	hasStatus   bool
 	ServiceCode uint8
 	ServiceName string
 	IsResponse  bool
@@ -61,6 +65,7 @@ type CIPMessage struct {
 
 // commandNames maps EtherNet/IP encapsulation command codes to names.
 var commandNames = map[uint16]string{
+	0x0000: "NOP",
 	0x0001: "ListServices",
 	0x0004: "ListIdentity",
 	0x0063: "ListInterfaces",
@@ -186,63 +191,16 @@ type EPathResult struct {
 	Raw         []byte
 }
 
-// ParseEPath walks EPATH segments and extracts class, instance, attribute,
-// and member IDs from all recognised segment types.
+// ParseEPath extracts complete recognized EPATH segments, stopping at the first
+// unsupported or truncated segment rather than guessing subsequent offsets.
 func ParseEPath(data []byte) EPathResult {
+	attrs := make(map[string]any)
+	addPathFields(data, attrs)
 	r := EPathResult{Raw: data}
-	i := 0
-	for i < len(data) {
-		seg := data[i]
-		switch seg {
-		case 0x20: // 8-bit class
-			if i+1 < len(data) {
-				r.ClassID = uint16(data[i+1])
-			}
-			i += 2
-		case 0x21: // 16-bit class (padded)
-			if i+3 < len(data) {
-				r.ClassID = binary.LittleEndian.Uint16(data[i+2 : i+4])
-			}
-			i += 4
-		case 0x24: // 8-bit instance
-			if i+1 < len(data) {
-				r.InstanceID = uint16(data[i+1])
-			}
-			i += 2
-		case 0x25: // 16-bit instance (padded)
-			if i+3 < len(data) {
-				r.InstanceID = binary.LittleEndian.Uint16(data[i+2 : i+4])
-			}
-			i += 4
-		case 0x28: // 8-bit member (sometimes used as attribute in older CIP)
-			if i+1 < len(data) {
-				r.MemberID = uint16(data[i+1])
-			}
-			i += 2
-		case 0x29: // 16-bit member (padded)
-			if i+3 < len(data) {
-				r.MemberID = binary.LittleEndian.Uint16(data[i+2 : i+4])
-			}
-			i += 4
-		case 0x2C, 0x30: // 8-bit attribute (standard and alternate encoding)
-			if i+1 < len(data) {
-				r.AttributeID = uint16(data[i+1])
-			}
-			i += 2
-		case 0x2D, 0x31: // 16-bit attribute (standard and alternate encoding, padded)
-			if i+3 < len(data) {
-				r.AttributeID = binary.LittleEndian.Uint16(data[i+2 : i+4])
-			}
-			i += 4
-		default:
-			// Unknown segment; 8-bit variants use 2 bytes, 16-bit (odd) use 4.
-			if seg&0x01 != 0 {
-				i += 4
-			} else {
-				i += 2
-			}
-		}
-	}
+	r.ClassID, _ = attrs["object_class"].(uint16)
+	r.InstanceID, _ = attrs["instance_id"].(uint16)
+	r.AttributeID, _ = attrs["attribute_id"].(uint16)
+	r.MemberID, _ = attrs["member_id"].(uint16)
 	return r
 }
 
@@ -269,6 +227,9 @@ const maxMSPServices = 32
 
 // SubService represents a single CIP service extracted from a Multiple_Service_Packet.
 type SubService struct {
+	status      uint8
+	hasStatus   bool
+	findings    []string
 	ServiceCode uint8
 	ServiceName string
 	IsWrite     bool
@@ -285,75 +246,55 @@ type SubService struct {
 //
 // Returns nil if the data is malformed or too short.
 func ParseMSPServices(data []byte) []SubService {
+	subs, _ := parseMSPServices(data)
+	return subs
+}
+
+func parseMSPServices(data []byte) ([]SubService, bool) {
 	if len(data) < 2 {
-		return nil
+		return nil, true
 	}
-	count := int(binary.LittleEndian.Uint16(data[0:2]))
-	if count == 0 {
-		return nil
+	total := int(binary.LittleEndian.Uint16(data[:2]))
+	tableEnd := 2 + total*2
+	if total == 0 || tableEnd > len(data) {
+		return nil, true
 	}
-	if count > maxMSPServices {
-		count = maxMSPServices
-	}
-
-	// Validate that the offset table fits.
-	offsetTableEnd := 2 + count*2
-	if offsetTableEnd > len(data) {
-		return nil
-	}
-
-	// Read offsets.
-	offsets := make([]uint16, count)
-	for i := 0; i < count; i++ {
-		offsets[i] = binary.LittleEndian.Uint16(data[2+i*2 : 2+i*2+2])
-	}
-
+	count := min(total, maxMSPServices)
+	stopped := total > count
 	subs := make([]SubService, 0, count)
 	for i := 0; i < count; i++ {
-		off := int(offsets[i])
-		if off >= len(data) || off+2 > len(data) {
-			continue // skip malformed entry
+		off := int(binary.LittleEndian.Uint16(data[2+2*i : 4+2*i]))
+		end := len(data)
+		if i+1 < total {
+			end = int(binary.LittleEndian.Uint16(data[4+2*i : 6+2*i]))
 		}
-
-		// Determine the end of this sub-service payload.
-		var end int
-		if i+1 < count {
-			end = int(offsets[i+1])
-		} else {
-			end = len(data)
-		}
-		if end > len(data) || end <= off {
-			end = len(data)
-		}
-
-		subData := data[off:end]
-		if len(subData) < 2 {
+		if off < tableEnd || end <= off || end > len(data) {
+			stopped = true
 			continue
 		}
-
-		serviceCode := subData[0] & 0x7F
-		pathSize := subData[1]
-		pathBytes := int(pathSize) * 2
-
+		msg, err := parseCIPFromItem(data[off:end])
+		if msg == nil {
+			stopped = true
+			continue
+		}
 		sub := SubService{
-			ServiceCode: serviceCode,
-			ServiceName: ServiceName(serviceCode),
-			IsWrite:     IsWriteService(serviceCode),
-			IsControl:   IsControlService(serviceCode),
+			ServiceCode: msg.ServiceCode, ServiceName: msg.ServiceName,
+			IsWrite: IsWriteService(msg.ServiceCode), IsControl: IsControlService(msg.ServiceCode),
+			Path: msg.Path, status: msg.status, hasStatus: msg.hasStatus,
 		}
-
-		cursor := 2
-		if pathBytes > 0 && cursor+pathBytes <= len(subData) {
-			sub.Path = subData[cursor : cursor+pathBytes]
+		if err != nil {
+			code := "cip.message_short"
+			if errors.Is(err, ErrPathTruncated) {
+				code = "cip.epath_truncated"
+			}
+			sub.findings = []string{code}
 		}
-
 		subs = append(subs, sub)
 	}
-
 	if len(subs) == 0 {
-		return nil
+		return nil, stopped
 	}
-	return subs
+	return subs, stopped
 }
 
 // ParseEIPHeader parses an EtherNet/IP encapsulation header from raw bytes.
@@ -409,62 +350,77 @@ func ParseCIPMessage(data []byte) (*CIPMessage, error) {
 
 // parseCPF walks the complete item list, retaining the first CIP data item.
 // Item payload parsing is deliberately separate from CPF framing validation.
-// A malformed later item invalidates the type list, not an earlier CIP payload.
+// A malformed later item retains both earlier types and the first CIP payload.
 func parseCPF(data []byte) ([]string, []byte, error) {
 	var cipItem []byte
+	types := make([]string, 0)
 	// Minimum: interface(4) + timeout(2) + count(2) = 8
 	if len(data) < 8 {
-		return nil, cipItem, ErrCIPTooShort
+		return types, cipItem, ErrCIPTooShort
 	}
-	itemCount := binary.LittleEndian.Uint16(data[6:8])
+	types, cipItem, err := parseItems(data, 8, int(binary.LittleEndian.Uint16(data[6:8])))
+	if err == nil && binary.LittleEndian.Uint32(data[:4]) != 0 {
+		err = ErrInvalidCPF
+	}
+	return types, cipItem, err
+}
+
+func parseItems(data []byte, offset, count int) ([]string, []byte, error) {
+	var cipItem []byte
 	types := make([]string, 0)
-	offset := 8
-	for i := 0; i < int(itemCount); i++ {
-		if offset+4 > len(data) {
-			return nil, cipItem, ErrCIPTooShort
+	var itemErr error
+	err := walkCPFItems(data, offset, count, func(item cpfItem) {
+		types = append(types, fmt.Sprintf("0x%04x", item.typeID))
+		if !item.complete {
+			return
 		}
-		typeID := binary.LittleEndian.Uint16(data[offset : offset+2])
-		itemLen := binary.LittleEndian.Uint16(data[offset+2 : offset+4])
-		offset += 4
-		if offset+int(itemLen) > len(data) {
-			return nil, cipItem, ErrTruncated
+		if cipItem == nil && (item.typeID == 0x00B2 || item.typeID == 0x00B1) {
+			cipItem = item.data
+			if item.typeID == 0x00b1 {
+				if len(cipItem) < 2 {
+					cipItem, itemErr = []byte{}, ErrCIPTooShort
+					return
+				}
+				cipItem = cipItem[2:] // connected explicit message sequence count
+			}
 		}
-		types = append(types, fmt.Sprintf("0x%04x", typeID))
-		if cipItem == nil && (typeID == 0x00B2 || typeID == 0x00B1) {
-			cipItem = data[offset : offset+int(itemLen)]
-		}
-		offset += int(itemLen)
+	})
+	if itemErr != nil {
+		err = itemErr
 	}
-	return types, cipItem, nil
+	return types, cipItem, err
 }
 
 // parseCIPFromItem parses the CIP service header from an item's data.
 func parseCIPFromItem(data []byte) (*CIPMessage, error) {
-	if len(data) < 2 {
+	if len(data) == 0 {
 		return nil, ErrCIPTooShort
 	}
-	serviceCode := data[0]
-	isResponse := (serviceCode & 0x80) != 0
-	baseCode := serviceCode & 0x7F
-
-	pathSize := data[1] // path size in 16-bit words
-	pathBytes := int(pathSize) * 2
-
-	msg := &CIPMessage{
-		ServiceCode: baseCode,
-		ServiceName: ServiceName(baseCode),
-		IsResponse:  isResponse,
-	}
-
-	offset := 2
-	if pathBytes > 0 && offset+pathBytes <= len(data) {
-		msg.Path = data[offset : offset+pathBytes]
-		offset += pathBytes
-	}
-
-	if offset < len(data) {
+	code := data[0] & 0x7f
+	msg := &CIPMessage{ServiceCode: code, ServiceName: ServiceName(code), IsResponse: data[0]&0x80 != 0}
+	if msg.IsResponse {
+		if len(data) >= 3 {
+			msg.status, msg.hasStatus = data[2], true
+		}
+		if len(data) < 4 {
+			return msg, ErrCIPTooShort
+		}
+		offset := 4 + 2*int(data[3]) // reserved, general status, additional status words
+		if offset > len(data) {
+			return msg, ErrCIPTooShort
+		}
 		msg.Data = data[offset:]
+		return msg, nil
 	}
-
+	if len(data) < 2 {
+		return msg, ErrCIPTooShort
+	}
+	pathBytes := int(data[1]) * 2
+	if 2+pathBytes > len(data) {
+		msg.Path = data[2:]
+		return msg, ErrPathTruncated
+	}
+	msg.Path = data[2 : 2+pathBytes]
+	msg.Data = data[2+pathBytes:]
 	return msg, nil
 }

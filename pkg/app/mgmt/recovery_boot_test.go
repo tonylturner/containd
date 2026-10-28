@@ -293,3 +293,116 @@ func TestBootWithoutReservationClearsHistoricalFault(t *testing.T) {
 		t.Fatalf("valid config without reservation stayed in recovery: %v event=%v", err, stores.bootEvent)
 	}
 }
+
+func TestUnsupportedICSAddressesBootIntoRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		protocol string
+		port     string
+	}{
+		{protocol: "dnp3", port: "20000"},
+		{protocol: "cip", port: "44818"},
+	} {
+		t.Run(tc.protocol, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.db")
+			t.Setenv("CONTAIND_CONFIG_DB", path)
+			t.Setenv("CONTAIND_AUDIT_DB", filepath.Join(dir, "audit.db"))
+			t.Setenv("CONTAIND_USERS_DB", filepath.Join(dir, "users.db"))
+
+			store, err := config.NewSQLiteStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			f := false
+			cfg := config.DefaultConfig()
+			cfg.Interfaces = []config.Interface{
+				{Name: "mgmt0", Device: "mgmtnic", Zone: "mgmt"},
+				{Name: "wan0", Device: "wannic", Zone: "wan", Access: config.InterfaceAccess{Mgmt: &f}},
+			}
+			cfg.DataPlane.Enforcement = true
+			cfg.DataPlane.DPIEnabled = true
+			cfg.DataPlane.NFQueueGroup = 100
+			if err := store.Save(ctx, cfg); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			const ruleID = "unsupported-address"
+			addresses := []string{"10-20"}
+			setStoredRules(t, path, []config.Rule{{
+				ID: ruleID, Action: config.ActionAllow,
+				Protocols: []config.Protocol{{Name: "tcp", Port: tc.port}},
+				ICS:       config.ICSPredicate{Protocol: tc.protocol, Addresses: addresses},
+			}})
+
+			stores, running, err := initMgmtStores(zap.NewNop().Sugar(), nil)
+			if err != nil {
+				t.Fatalf("invalid stored config stopped management: %v", err)
+			}
+			defer stores.store.Close()
+			defer stores.auditStore.Close()
+			defer stores.userStore.Close()
+
+			const reason = "Address filters are not supported for DNP3 or CIP. Remove this filter before saving; protocol-specific station, point and CIP path selectors are not available yet."
+			wantFault := "rule " + ruleID + ": " + reason
+			fault, err := config.ManagementBootFaultForStore(ctx, stores.store)
+			if err != nil || !strings.Contains(fault, wantFault) {
+				t.Fatalf("boot fault = %q, want %q (err=%v)", fault, wantFault, err)
+			}
+			var eventFault string
+			if stores.bootEvent != nil {
+				eventFault, _ = stores.bootEvent.Attributes["error"].(string)
+			}
+			if stores.bootEvent == nil || stores.bootEvent.Kind != "management.recovery.boot_fault" ||
+				!strings.Contains(eventFault, wantFault) {
+				t.Fatalf("boot event = %+v, want recovery fault %q", stores.bootEvent, wantFault)
+			}
+			rows, err := stores.auditStore.List(ctx, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			audited := 0
+			for _, row := range rows {
+				if row.Action == "management.recovery.boot_fault" {
+					audited++
+				}
+			}
+			if audited != 1 {
+				t.Fatalf("boot audited %d recovery faults, want 1", audited)
+			}
+			if len(running.Firewall.Rules) != 1 ||
+				running.Firewall.Rules[0].ID != ruleID ||
+				running.Firewall.Rules[0].ICS.Protocol != tc.protocol ||
+				!reflect.DeepEqual(running.Firewall.Rules[0].ICS.Addresses, addresses) {
+				t.Fatalf("boot dropped or rewrote the stored rule: %+v", running.Firewall.Rules)
+			}
+
+			srv, calls := recordingEngine(t)
+			stop := startEngineSync(ctx, zap.NewNop().Sugar(), stores.store, engineapi.NewHTTPClient(srv.URL), nil)
+			defer stop()
+			recovery, before := nextRuleset(t, calls)
+			var paths []string
+			var dp *config.DataPlaneConfig
+			for _, call := range before {
+				paths = append(paths, call.path)
+				if call.path == "/internal/config" {
+					dp = &call.dp
+				}
+			}
+			if !reflect.DeepEqual(paths, []string{"/health", "/internal/config"}) {
+				t.Fatalf("recovery replayed stored runtime state: %v", paths)
+			}
+			if dp == nil || !dp.Enforcement || len(dp.CaptureInterfaces) != 0 || dp.DPIEnabled || dp.NFQueueGroup != 0 {
+				t.Fatalf("recovery dataplane = %+v", dp)
+			}
+			snap := recovery.snapshot
+			if snap.Version != config.ManagementRecoveryVersion || snap.Default != rules.ActionDeny ||
+				len(snap.Firewall) != 0 || snap.NAT.Enabled || len(snap.ZoneIfaces) != 0 {
+				t.Fatalf("recovery ruleset admits stored transit: %+v", snap)
+			}
+		})
+	}
+}

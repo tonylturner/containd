@@ -16,6 +16,9 @@ func validateDataPlane(dp DataPlaneConfig) error {
 	if err := ics.ValidateToggles(dp.DPIICSProtocols); err != nil {
 		return err
 	}
+	if err := ics.ValidateParsing(dp.DPIICSParsing); err != nil {
+		return err
+	}
 	if err := validateDomainExclusions(dp.DPIExclusions); err != nil {
 		return err
 	}

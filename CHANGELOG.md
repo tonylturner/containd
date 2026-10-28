@@ -7,8 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Modbus request/reply decoding and ICS policy direction follow the connection
+  opener, including clients bound to port 502. Offline PCAP analysis uses
+  SYN/SYN-ACK orientation, with service-port hints only for midstream captures.
+  Modbus, DNP3 and CIP inventory roles stay stable across replies and exceptions.
+
 ### Security
 
+- Learned ICS rules now come only from supported requests and are split by
+  source, destination, protocol, unit and function/service code. Modbus rules
+  retain only that tuple's bounded address spans; DNP3 and CIP suggestions no
+  longer misrepresent station, object-group or path values as addresses.
+  Previously generated wider rules are not removed automatically.
+- DNP3 and CIP rules reject nonempty `addresses`, which could never match
+  decoded traffic and silently defeated address-qualified denials. Both rule
+  editors keep unsupported stored filters visible for explicit removal, but
+  no longer offer new ones. Stored configurations with these filters start in
+  management recovery with the offending rule and cause until corrected.
 - Modbus address rules now cover the whole request span. An `ALLOW` with
   `addresses` matches only when every register or coil the request reads or
   writes lies inside the listed entries; previously only the starting address
@@ -19,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disagrees with the quantity).
 
 ### Added
+
+- Per-protocol `dataplane.dpiIcsParsing` settings (`tolerant` or `strict`) for
+  Modbus, DNP3, CIP and IEC 104, with Parsing controls in Firewall DPI settings.
+  Tolerant evaluates decoded fields and alerts on nonconformant content; strict
+  drops nonconformant frames and resets the session when enforcing.
 
 - Scheduled workflows check the published `:latest` management and engine
   images daily and after each release: Cosign signatures, signed CycloneDX SBOM
@@ -43,6 +65,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Upgraded configurations default to tolerant ICS parsing without migration.
+  IEC 104 malformed or profile-violating APDUs with a known length now reach
+  the rules with a conformance alert instead of resetting the session. Set
+  `dataplane.dpiIcsParsing.iec104` to `strict` to retain that reset behavior.
+  Lost frame boundaries and integrity faults still fail closed in enforce
+  scope in both parsing modes.
+- ICS rule predicates no longer treat a function code or CIP object class that
+  was not decoded as zero, so such a message matches no function-code or
+  object-class predicate. Modbus, DNP3 and CIP decoders now report conformance
+  findings, and EtherNet/IP UDP 2222 is decoded as implicit I/O while
+  encapsulated UDP is decoded on 44818.
+- IEC 104 `ics.decision` events no longer use the reasons `role` and
+  `unsupported`: decoded content carries `conformance` codes instead, and a
+  strict rejection uses reason `nonconformant`. `malformed` now means only
+  unframeable bytes or a stream fault.
+
+- `MODBUS-WRITE-COIL-ALL` now matches only FC 15 requests, not quantity echoes
+  in replies. `ICS-WRITE-STORM` now alerts on 20 initiator write commands per
+  connection within 10 seconds; replies and exceptions do not count, and an
+  IEC 104 APDU with multiple object events counts once.
 - DPI denials now drop the packet and best-effort reset only that TCP session,
   without installing a host or service block. Fresh connections, including
   same-source-port reconnects, can start immediately and other sessions are

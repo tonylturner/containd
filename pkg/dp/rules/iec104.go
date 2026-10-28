@@ -15,17 +15,16 @@ const iec104BroadcastCA = 65535
 
 // IEC104Context is the decoded IEC 60870-5-104 metadata of one object (or
 // S/U/error APDU) for rule evaluation. Direction stays in
-// ICSContext.Direction.
+// ICSContext.Direction. Fields the decoder could not read are nil or empty
+// and satisfy no predicate on them; nonconformant content is not SafeRead.
 type IEC104Context struct {
-	APCIType    string // "I" | "S" | "U"
-	TypeID      *uint8
-	CA          *uint16
-	IOA         *uint32
-	Class       string
-	SafeRead    bool // iec104.SafeRead
-	Broadcast   bool // I-frame with CA 65535
-	Malformed   bool
-	Unsupported bool
+	APCIType  string // "I" | "S" | "U"
+	TypeID    *uint8
+	CA        *uint16
+	IOA       *uint32
+	Class     string
+	SafeRead  bool // iec104.SafeRead
+	Broadcast bool // I-frame with CA 65535
 }
 
 // EffectiveMode resolves an ICS rule's mode: rule mode > global DPI mode >
@@ -115,13 +114,14 @@ func compileIEC104(p ICSPredicate) *compiledIEC104 {
 
 // matchIEC104 matches the IEC104 predicate of an entry. Generic
 // function-code, unit and address matching never runs on IEC104 events.
+// A broadcast object never matches an ALLOW.
 func matchIEC104(ce *compiledEntry, ctx EvalContext) bool {
 	c, ics := ce.iec, ctx.ICS
 	if c.invalid || ics == nil || ics.Protocol != ProtocolIEC104 || ics.IEC104 == nil {
 		return false
 	}
 	obj := ics.IEC104
-	if ce.Action == ActionAllow && (obj.Malformed || isIEC104Broadcast(obj)) {
+	if ce.Action == ActionAllow && isIEC104Broadcast(obj) {
 		return false
 	}
 	if ce.ICS.Direction != "" && ce.ICS.Direction != ics.Direction {

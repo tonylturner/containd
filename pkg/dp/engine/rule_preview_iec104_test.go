@@ -93,6 +93,7 @@ func TestPreviewFirewallRuleIEC104ReadOnlyUsesDecoderClassification(t *testing.T
 		iecEvent(4, "unsupported", true, map[string]any{
 			"apci_type": "I", "direction": "request", "class": "unknown",
 			"type_id": float64(2), "ca": float64(1), "error": "type 2 is not in the supported IEC 104 type set",
+			"conformance": []any{"iec104.unsupported_type"},
 		}),
 		iecEvent(5, "request", true, map[string]any{
 			"apci_type": "I", "direction": "request", "class": "system",

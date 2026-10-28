@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -70,9 +71,7 @@ func TestEvalContextModbusSpans(t *testing.T) {
 		{"write reply", modbusKey(40000, flow.DirReverse), aduWriteReply, []rules.AddressSpan{{Low: 30, High: 31}}, false},
 		{"unknown function code", modbusKey(40000, flow.DirForward), aduUnknownFC, nil, true},
 		{"short PDU", modbusKey(40000, flow.DirForward), aduShortPDU, nil, true},
-		// A client bound to source port 502: the decoder's port heuristic
-		// labels its request a reply, which must not read as touching nothing.
-		{"request from source port 502", modbusKey(502, flow.DirForward), aduReadCrossing, nil, true},
+		{"request from source port 502", modbusKey(502, flow.DirForward), aduReadCrossing, []rules.AddressSpan{{Low: 11, High: 18}}, false},
 	}
 	for _, tc := range cases {
 		state, pkt, ev := decodeModbus(t, tc.key, tc.adu)
@@ -147,10 +146,53 @@ func TestEnforceModbusRequestSpans(t *testing.T) {
 		e := &Engine{eventStore: events.NewStore(10), dpiMode: "enforce"}
 		e.ruleSnap.Store(tc.snap)
 		state, pkt, ev := decodeModbus(t, modbusKey(40000, flow.DirForward), tc.adu)
-		v, _, enforced := e.enforceDPIEvents(state, pkt, []dpi.Event{ev})
+		v, _, enforced := e.enforceDPIEvents(state, pkt, []dpi.Event{ev}, false)
 		if dropped := enforced && v.Denies(); dropped != tc.dropped {
 			t.Errorf("%s under %s: dropped=%v (%+v), want %v", tc.adu, tc.snap.Firewall[0].ID, dropped, v, tc.dropped)
 		}
+	}
+}
+
+func TestConformanceUnknownSpansCannotMatchAllow(t *testing.T) {
+	assertConformanceUnknownSpanMatch(t, rules.ActionAllow, false)
+}
+
+func TestConformanceUnknownSpansMatchDenyReset(t *testing.T) {
+	for _, action := range []rules.Action{rules.ActionDeny, rules.ActionReset} {
+		t.Run(string(action), func(t *testing.T) {
+			assertConformanceUnknownSpanMatch(t, action, true)
+		})
+	}
+}
+
+func assertConformanceUnknownSpanMatch(t *testing.T, action rules.Action, wantMatch bool) {
+	t.Helper()
+	state, pkt, ev := decodeModbus(t, modbusKey(40000, flow.DirForward), aduShortPDU)
+	ev.Attributes[eventfields.KeyConformance] = []string{"modbus.truncated_pdu"}
+	ctx, ok := evalContextFromDPIEvent(nil, state, pkt, ev, "", "")
+	if !ok || !ctx.ICS.HasFunctionCode || ctx.ICS.FunctionCode != 3 || !ctx.ICS.SpansUnknown {
+		t.Fatalf("expected decoded FC 3 with unknown address coverage: %+v", ctx.ICS)
+	}
+	entry := rules.Entry{ID: "address-rule", Action: action,
+		ICS: rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}, Addresses: []string{"12-19"}}}
+	if got := rules.PreviewMatch(entry, ctx); got != wantMatch {
+		t.Fatalf("%s matched=%v, want %v", action, got, wantMatch)
+	}
+	// Tolerant findings must preserve the address predicate's asymmetry:
+	// an unprovable ALLOW falls to default DENY; DENY/RESET overrides ALLOW default.
+	defaultAction, wantReason := rules.ActionAllow, reasonRule
+	if action == rules.ActionAllow {
+		defaultAction, wantReason = rules.ActionDeny, reasonDefault
+	}
+	e := &Engine{eventStore: events.NewStore(10), dpiMode: "enforce"}
+	e.ruleSnap.Store(&rules.Snapshot{Default: defaultAction, Firewall: []rules.Entry{entry}})
+	v, _, enforced := e.enforceDPIEvents(state, pkt, []dpi.Event{ev}, false)
+	if !enforced || !v.Denies() {
+		t.Fatalf("unknown address coverage passed: %+v", v)
+	}
+	decisions := findingEvents(e, eventfields.KindDecision)
+	if len(decisions) != 1 || decisions[0].Attributes[eventfields.KeyReason] != wantReason {
+		t.Fatalf("decision=%+v, want reason %s", decisions, wantReason)
 	}
 }
 

@@ -26,6 +26,13 @@ set -euo pipefail
 # persistent connection, the first Modbus FC 8, and the first complete DNP3
 # FC 5 and FC 6 never reach the server. Each probe uses its own client
 # address to keep receiver-side evidence independent.
+#
+# Both modes then prove ICS parsing (scripts/smoke-dpi-lib-parsing.sh): with
+# tolerant parsing, the default, a Modbus read whose protocol identifier is
+# not 0 reaches the server with one ics-conformance alert per connection;
+# with dataplane.dpiIcsParsing.modbus = "strict", pushed through the API, it
+# is dropped and the session reset (would_drop in learn mode); a lost MBAP
+# frame boundary resets in both modes.
 # Fixture and isolation setup: test/data-smoke/README.md.
 
 COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker-compose.smoke.yml}
@@ -45,11 +52,11 @@ SMOKE_BUILD=${SMOKE_BUILD:-1}
 SMOKE_DPI_CAPTURE=${SMOKE_DPI_CAPTURE:-afpacket}
 NFQUEUE_GROUP=${SMOKE_NFQUEUE_GROUP:-101}
 TESTS_PASSED=0
-TESTS_EXPECTED=22
+TESTS_EXPECTED=37
 FAILURES=()
 case "$SMOKE_DPI_CAPTURE" in
   afpacket) ;;
-  nfqueue) TESTS_EXPECTED=28 ;;
+  nfqueue) TESTS_EXPECTED=45 ;;
   *)
     echo "SMOKE_DPI_CAPTURE must be afpacket or nfqueue, got: $SMOKE_DPI_CAPTURE" >&2
     exit 2
@@ -75,6 +82,8 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 # shellcheck source=scripts/smoke-engine-api.sh
 source "$(dirname "${BASH_SOURCE[0]}")/smoke-engine-api.sh"
+# shellcheck source=scripts/smoke-dpi-lib-parsing.sh
+source "$(dirname "${BASH_SOURCE[0]}")/smoke-dpi-lib-parsing.sh"
 
 # COMPOSE_FILE is a colon-separated list, as in docker compose itself, so an
 # override file can follow the base harness file.
@@ -809,6 +818,8 @@ if echo "$BLOCK_FLOWS" | grep -q "${MODBUS_DST} . ${MODBUS_SRC}"; then
   exit 1
 fi
 pass "Server replies were not dynamically blocked"
+
+run_parsing_probes
 
 if [[ ${#FAILURES[@]} -gt 0 ]]; then
   log "Failed assertions (${SMOKE_DPI_CAPTURE}):"

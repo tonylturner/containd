@@ -85,8 +85,15 @@ export function DPIConfigSection({
     save({ ...cfg, dpiProtocols: newProtos });
   }
 
-  function saveICSProtos(newICSProtos: Record<string, boolean>) {
-    save({ ...cfg, dpiIcsProtocols: newICSProtos });
+  function saveICSProtos(
+    newICSProtos: Record<string, boolean>,
+    parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>,
+  ) {
+    save({
+      ...cfg,
+      dpiIcsProtocols: newICSProtos,
+      ...(Object.keys(parsing).length > 0 ? { dpiIcsParsing: parsing } : {}),
+    });
   }
 
   function saveExclusions(newExcl: DPIExclusion[]) {
@@ -182,7 +189,7 @@ export function DPIConfigSection({
               <p className="mt-1 text-[10px] text-(--text-dim)">
                 {dpiMode === "learn"
                   ? "Candidate learning mode — commit to apply. Observes traffic without blocking."
-                  : "Candidate enforcement mode — commit to apply. Non-conforming traffic may then be blocked."}
+                  : "Candidate enforcement mode — commit to apply. Decoded policy denials are blocked; parsing mode controls nonconformant frames."}
               </p>
             </div>
 
@@ -355,8 +362,9 @@ export function DPIConfigSection({
       {showICSConfigModal && (
         <ICSDPIConfigModal
           icsProtocols={icsProtos}
-          onSave={(p) => {
-            saveICSProtos(p);
+          parsing={cfg.dpiIcsParsing ?? {}}
+          onSave={(p, parsing) => {
+            saveICSProtos(p, parsing);
             setShowICSConfigModal(false);
           }}
           onClose={() => setShowICSConfigModal(false)}

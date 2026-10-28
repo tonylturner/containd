@@ -40,6 +40,11 @@ const (
 	KeyObjectGroups = "object_groups"
 	KeyMessage      = "message"
 	KeyAnomalyType  = "anomaly_type"
+	// KeyConformance lists stable finding codes ("<proto>.<finding>", for
+	// example "modbus.pid_nonzero") on an event whose frame boundary is
+	// known but whose content does not conform. Absent means conformant.
+	// The value is []string, sorted and without duplicates.
+	KeyConformance = "conformance"
 )
 
 // IEC104 event attribute keys.

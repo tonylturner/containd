@@ -238,10 +238,7 @@ func TestIEC104MonitorClassAndGIKeepPolicySessionAllowed(t *testing.T) {
 		for _, frame := range res.Frames {
 			for _, ev := range frame.Events {
 				attrs := ev.Attributes
-				ctx := rules.IEC104Context{
-					Malformed:   ev.Kind == eventfields.KindMalformed,
-					Unsupported: ev.Kind == eventfields.KindUnsupported,
-				}
+				var ctx rules.IEC104Context
 				ctx.APCIType, _ = eventfields.String(attrs, eventfields.KeyAPCIType)
 				ctx.Class, _ = eventfields.String(attrs, eventfields.KeyClass)
 				ctx.SafeRead = iec104.SafeRead(attrs)

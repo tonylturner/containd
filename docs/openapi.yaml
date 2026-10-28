@@ -552,7 +552,7 @@ components:
           - {type: object, additionalProperties: true}
           nullable: true
         unitId: {type: integer, minimum: 0, maximum: 255, description: Modbus unit id}
-        addresses: {type: array, items: {type: string}, description: "Address entries (not iec104), each one value or an inclusive low-high range, decimal or 0x hex, low <= high; Modbus 0-65535, other protocols 0-4294967295"}
+        addresses: {type: array, items: {type: string}, description: "Modbus-only address entries, each one value or an inclusive low-high range, decimal or 0x hex, low <= high, 0-65535. Nonempty addresses are rejected for DNP3 and CIP in every mode; protocol-specific station, point and CIP path selectors are not available yet. IEC104 uses ca and ioa."}
         objectClasses: {type: array, items: {type: integer}, description: CIP object classes (cip only)}
         readOnly:
           type: boolean
@@ -894,6 +894,21 @@ components:
         captureInterfaces: {items: {type: string}, type: array}
         dpiEnabled: {type: boolean}
         dpiExclusions: {items: {$ref: '#/components/schemas/DPIExclusion'}, type: array}
+        dpiIcsParsing:
+          type: object
+          additionalProperties: false
+          properties:
+            modbus: {type: string, enum: [tolerant, strict], default: tolerant}
+            dnp3: {type: string, enum: [tolerant, strict], default: tolerant}
+            iec104: {type: string, enum: [tolerant, strict], default: tolerant}
+            cip: {type: string, enum: [tolerant, strict], default: tolerant}
+          description: >-
+            Per-protocol parsing. Omitted map or keys mean tolerant; the API also accepts an empty
+            string as the default. Unknown protocols or other values return 400.
+            Tolerant evaluates decoded fields and alerts on nonconformance inside known-length frames.
+            Strict drops nonconformant frames and resets the session in enforce scope; learn scope
+            reports would_drop without blocking. Lost frame boundaries and integrity faults fail
+            closed in enforce scope in both parsing modes.
         dpiIcsProtocols:
           type: object
           additionalProperties: false
@@ -1405,6 +1420,8 @@ components:
       properties:
         count: {type: integer}
         windowSeconds: {type: integer}
+        scope: {type: string, enum: [flow, connection]}
+        dedupAttr: {type: string}
       type: object
     StaticRoute:
       properties:

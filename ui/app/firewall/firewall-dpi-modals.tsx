@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { DPIExclusion } from "../../lib/api";
+import type { DataPlaneConfig, DPIExclusion } from "../../lib/api";
 import {
   ICS_DPI_PROTOCOLS,
   ICS_PROTOCOL_OPTIONS,
@@ -133,17 +133,23 @@ export function DPIProtocolModal({
 
 export function ICSDPIConfigModal({
   icsProtocols,
+  parsing,
   onSave,
   onClose,
 }: {
   icsProtocols: Record<string, boolean>;
-  onSave: (p: Record<string, boolean>) => void;
+  parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>;
+  onSave: (
+    p: Record<string, boolean>,
+    parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>,
+  ) => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState<Record<string, boolean>>({
     ...icsProtocols,
   });
   const [activeProto, setActiveProto] = useState<string | null>(null);
+  const [draftParsing, setDraftParsing] = useState({ ...parsing });
 
   function toggle(key: string) {
     setDraft((d) => ({ ...d, [key]: d[key] === false ? true : false }));
@@ -174,8 +180,7 @@ export function ICSDPIConfigModal({
               ICS Protocol DPI Configuration
             </h2>
             <p className="mt-1 text-xs text-(--text-muted)">
-              Enable or disable individual ICS protocol decoders and view
-              protocol-specific options.
+              Stage protocol decoders and parsing modes. Commit to apply.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -202,7 +207,7 @@ export function ICSDPIConfigModal({
             return (
               <div key={p.key}>
                 <div
-                  className={`flex items-center justify-between rounded-xs border px-3 py-2.5 transition-ui ${
+                  className={`flex flex-wrap items-center justify-between gap-3 rounded-xs border px-3 py-2.5 transition-ui ${
                     on
                       ? "border-emerald-500/20 bg-emerald-500/4"
                       : "border-white/4 bg-white/1"
@@ -241,14 +246,33 @@ export function ICSDPIConfigModal({
                       </div>
                     </div>
                   </div>
-                  <div
+                  <label className="flex items-center gap-2 text-xs text-(--text-muted)">
+                    Parsing
+                    <select
+                      aria-label={`${p.label} parsing`}
+                      value={draftParsing[p.key] === "strict" ? "strict" : "tolerant"}
+                      onChange={(e) => setDraftParsing((current) => ({
+                        ...current,
+                        [p.key]: e.target.value as "tolerant" | "strict",
+                      }))}
+                      className="rounded-xs border bg-(--surface2) px-2 py-1.5 text-xs text-(--text) outline-hidden focus-visible:ring-2 focus-visible:ring-(--amber)"
+                    >
+                      <option value="tolerant">Tolerant</option>
+                      <option value="strict">Strict</option>
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-label={`${p.label} decoder`}
+                    aria-checked={on}
                     onClick={() => toggle(p.key)}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer shrink-0 ${on ? "bg-emerald-500" : "bg-white/10"}`}
                   >
                     <span
                       className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${on ? "translate-x-4" : "translate-x-0.5"}`}
                     />
-                  </div>
+                  </button>
                 </div>
 
                 {expanded && opts && (
@@ -265,17 +289,19 @@ export function ICSDPIConfigModal({
                           Configured in firewall rules per-entry
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-[10px] font-medium text-(--text-muted) mb-1">
-                          {opts.addrLabel}
-                        </label>
-                        <p className="text-[9px] text-(--text-dim) mb-1.5">
-                          {opts.addrHelp}
-                        </p>
-                        <div className="text-[10px] text-(--text-dim) italic">
-                          Configured in firewall rules per-entry
+                      {opts.addrLabel && opts.addrHelp && (
+                        <div>
+                          <label className="block text-[10px] font-medium text-(--text-muted) mb-1">
+                            {opts.addrLabel}
+                          </label>
+                          <p className="text-[9px] text-(--text-dim) mb-1.5">
+                            {opts.addrHelp}
+                          </p>
+                          <div className="text-[10px] text-(--text-dim) italic">
+                            Configured in firewall rules per-entry
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                     {opts.hasUnitId && (
                       <div className="text-[10px] text-(--text-dim)">
@@ -343,6 +369,13 @@ export function ICSDPIConfigModal({
           ))}
 
         <div className="mt-4 text-[10px] text-(--text-dim)">
+          Tolerant enforces what is decoded and alerts on the rest. Strict drops
+          nonconformant frames and resets the session in enforce mode; learning
+          reports would-drop without blocking. A lost frame boundary and integrity
+          faults reset the session in both parsing modes when enforcing.
+        </div>
+
+        <div className="mt-3 text-[10px] text-(--text-dim)">
           Protocol-specific DPI parameters (function codes, register addresses,
           unit IDs) are configured per-rule in firewall entries with ICS
           predicates. This panel controls which ICS decoders will be enabled after commit at the
@@ -357,7 +390,7 @@ export function ICSDPIConfigModal({
             Cancel
           </button>
           <button
-            onClick={() => onSave(draft)}
+            onClick={() => onSave(draft, draftParsing)}
             className="rounded-xs bg-(--amber) px-3 py-1.5 text-xs font-medium text-white transition-ui hover:brightness-110"
           >
             Save

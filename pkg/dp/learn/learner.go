@@ -13,6 +13,8 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/ics/cip"
+	"github.com/tonylturner/containd/pkg/dp/ics/dnp3"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 )
@@ -36,21 +38,49 @@ type LearnedProfile struct {
 
 // Learner passively records ICS traffic and generates allowlist rules.
 type Learner struct {
-	mu       sync.RWMutex
-	profiles map[string]*LearnedProfile // keyed by "srcIP:dstIP:protocol"
+	mu           sync.RWMutex
+	profiles     map[string]*LearnedProfile // keyed by "srcIP:dstIP:protocol"
+	observations map[learnedTuple]*learnedObservation
+}
+
+// learnedTuple is the complete predicate tuple represented by one generated
+// rule. Unit IDs apply only to Modbus; the other protocols use hasUnit=false.
+type learnedTuple struct {
+	protocol string
+	source   string
+	dest     string
+	unitID   uint8
+	hasUnit  bool
+	fc       uint8
+}
+
+type learnedObservation struct {
+	addresses     map[string]bool
+	objectClasses map[uint16]bool
+	readSeen      bool
+	writeSeen     bool
 }
 
 // New creates a new Learner.
 func New() *Learner {
 	return &Learner{
-		profiles: make(map[string]*LearnedProfile),
+		profiles:     make(map[string]*LearnedProfile),
+		observations: make(map[learnedTuple]*learnedObservation),
 	}
 }
 
 // RecordEvent updates the learned profile for a communication pair based on a DPI event.
 func (l *Learner) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
+	if codes, _ := eventfields.Strings(ev.Attributes, eventfields.KeyConformance); len(codes) > 0 {
+		return
+	}
 	proto := strings.ToLower(ev.Proto)
-	if !ics.Learnable(proto) {
+	if !ics.Learnable(proto) || !isRequestEvent(proto, ev) {
+		return
+	}
+
+	tuple, addresses, learnable := learnableTupleForEvent(proto, srcIP, dstIP, ev)
+	if !learnable {
 		return
 	}
 
@@ -72,6 +102,53 @@ func (l *Learner) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
 	updateProfileMetadata(p, now)
 	recordProtocolAttributes(proto, p, ev)
 	recordReadWriteState(p, ev)
+
+	observation, ok := l.observations[tuple]
+	if !ok {
+		observation = &learnedObservation{
+			addresses:     make(map[string]bool),
+			objectClasses: make(map[uint16]bool),
+		}
+		l.observations[tuple] = observation
+	}
+	for _, address := range addresses {
+		observation.addresses[address] = true
+	}
+	if proto == "cip" {
+		objectClass, ok := eventfields.Uint16(ev.Attributes, "object_class")
+		if !ok {
+			objectClass = 0
+		}
+		observation.objectClasses[objectClass] = true
+	}
+	if isWrite, ok := eventfields.Bool(ev.Attributes, eventfields.KeyIsWrite); ok {
+		if isWrite {
+			observation.writeSeen = true
+		} else {
+			observation.readSeen = true
+		}
+	}
+}
+
+func isRequestEvent(proto string, ev dpi.Event) bool {
+	if ev.Kind == eventfields.KindRequest {
+		return true
+	}
+	if proto != eventfields.ProtoDNP3 {
+		return false
+	}
+	fc, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode)
+	if !ok {
+		return false
+	}
+	switch ev.Kind {
+	case "restart":
+		return fc == dnp3.FuncColdRestart || fc == dnp3.FuncWarmRestart
+	case "control":
+		return fc == dnp3.FuncStopApplication || fc == dnp3.FuncSaveConfiguration
+	default:
+		return false
+	}
 }
 
 func newLearnedProfile(proto, srcIP, dstIP string, now time.Time) *LearnedProfile {
@@ -101,32 +178,28 @@ func recordProtocolAttributes(proto string, p *LearnedProfile, ev dpi.Event) {
 		recordDNP3Attributes(p, ev)
 	case eventfields.ProtoModbus:
 		recordModbusAttributes(p, ev)
-	default:
-		recordDefaultAttributes(p, ev)
 	}
 }
 
 func recordCIPAttributes(p *LearnedProfile, ev dpi.Event) {
 	if v, ok := eventfields.Uint8(ev.Attributes, "service_code"); ok {
 		p.FunctionCodes[v] = true
+		p.ServiceCodes[uint16(v)] = true
 	}
 	if v, ok := eventfields.Uint16(ev.Attributes, "object_class"); ok {
 		p.ObjectClasses[v] = true
 	}
-	recordStringAddress(p, ev.Attributes["cip_path"])
 }
 
 func recordDNP3Attributes(p *LearnedProfile, ev dpi.Event) {
 	if v, ok := eventfields.Uint8(ev.Attributes, "function_code"); ok {
 		p.FunctionCodes[v] = true
 	}
-	recordStringAddress(p, ev.Attributes["object_groups"])
 }
 
-// recordModbusAttributes records each address span the message touches as
-// an address entry, so a rule generated from the profile covers the whole
-// spans observed: an ALLOW's address predicate holds a message only when
-// every span it touches lies inside the predicate.
+// recordModbusAttributes adds each decoded span to the aggregate profile
+// summary. Rule generation keeps these spans separately by unit and function
+// code so an ALLOW cannot combine unrelated observations.
 func recordModbusAttributes(p *LearnedProfile, ev dpi.Event) {
 	if v, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode); ok {
 		p.FunctionCodes[v] = true
@@ -140,39 +213,6 @@ func recordModbusAttributes(p *LearnedProfile, ev dpi.Event) {
 			p.Addresses[fmt.Sprintf("%d", sp.First)] = true
 		} else {
 			p.Addresses[fmt.Sprintf("%d-%d", sp.First, sp.Last)] = true
-		}
-	}
-}
-
-func recordDefaultAttributes(p *LearnedProfile, ev dpi.Event) {
-	if v, ok := eventfields.Uint8(ev.Attributes, "function_code"); ok {
-		p.FunctionCodes[v] = true
-	}
-	if v, ok := eventfields.Uint8(ev.Attributes, "unit_id"); ok {
-		p.UnitIDs[v] = true
-	}
-	if addr, ok := ev.Attributes["address"]; ok {
-		recordAddressValue(p, addr)
-	}
-}
-
-func recordStringAddress(p *LearnedProfile, v any) {
-	s, ok := v.(string)
-	if ok && s != "" {
-		p.Addresses[s] = true
-	}
-}
-
-func recordAddressValue(p *LearnedProfile, v any) {
-	switch a := v.(type) {
-	case string:
-		if a != "" {
-			p.Addresses[a] = true
-		}
-	default:
-		s := fmt.Sprintf("%v", a)
-		if s != "" {
-			p.Addresses[s] = true
 		}
 	}
 }
@@ -220,59 +260,127 @@ func (l *Learner) Profiles() []LearnedProfile {
 	return out
 }
 
+func learnableTupleForEvent(proto, srcIP, dstIP string, ev dpi.Event) (learnedTuple, []string, bool) {
+	tuple := learnedTuple{protocol: proto, source: srcIP, dest: dstIP}
+	switch proto {
+	case eventfields.ProtoModbus:
+		fc, okFC := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode)
+		unitID, okUnit := eventfields.Uint8(ev.Attributes, eventfields.KeyUnitID)
+		if !okFC || !okUnit {
+			return learnedTuple{}, nil, false
+		}
+		spans, okSpans := modbus.AddressSpans(ev.Attributes)
+		if !okSpans {
+			return learnedTuple{}, nil, false
+		}
+		tuple.fc = fc
+		tuple.unitID = unitID
+		tuple.hasUnit = true
+		addresses := make([]string, 0, len(spans))
+		for _, span := range spans {
+			if span.First == span.Last {
+				addresses = append(addresses, fmt.Sprintf("%d", span.First))
+			} else {
+				addresses = append(addresses, fmt.Sprintf("%d-%d", span.First, span.Last))
+			}
+		}
+		return tuple, addresses, true
+	case eventfields.ProtoDNP3:
+		fc, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode)
+		if !ok {
+			return learnedTuple{}, nil, false
+		}
+		if strings.HasPrefix(dnp3.FunctionCodeName(fc), "unknown_") {
+			return learnedTuple{}, nil, false
+		}
+		tuple.fc = fc
+		return tuple, nil, true
+	case "cip":
+		serviceCode, ok := eventfields.Uint8(ev.Attributes, "service_code")
+		if !ok {
+			return learnedTuple{}, nil, false
+		}
+		if strings.HasPrefix(cip.ServiceName(serviceCode), "Unknown(") {
+			return learnedTuple{}, nil, false
+		}
+		if _, present := ev.Attributes["object_class"]; present {
+			if _, ok := eventfields.Uint16(ev.Attributes, "object_class"); !ok {
+				return learnedTuple{}, nil, false
+			}
+		}
+		tuple.fc = serviceCode
+		return tuple, nil, true
+	default:
+		return learnedTuple{}, nil, false
+	}
+}
+
 // GenerateRules converts learned profiles into firewall rules.
 func (l *Learner) GenerateRules() []config.Rule {
-	profiles := l.Profiles()
-	rules := make([]config.Rule, 0, len(profiles))
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 
-	for _, p := range profiles {
-		ruleID := fmt.Sprintf("learned-%s-%s-%s", p.Protocol, sanitizeIP(p.SourceIP), sanitizeIP(p.DestIP))
+	tuples := make([]learnedTuple, 0, len(l.observations))
+	for tuple := range l.observations {
+		tuples = append(tuples, tuple)
+	}
+	sort.Slice(tuples, func(i, j int) bool {
+		a, b := tuples[i], tuples[j]
+		if a.source != b.source {
+			return a.source < b.source
+		}
+		if a.dest != b.dest {
+			return a.dest < b.dest
+		}
+		if a.protocol != b.protocol {
+			return a.protocol < b.protocol
+		}
+		if a.hasUnit != b.hasUnit {
+			return !a.hasUnit
+		}
+		if a.unitID != b.unitID {
+			return a.unitID < b.unitID
+		}
+		return a.fc < b.fc
+	})
+	generated := make([]config.Rule, 0, len(tuples))
 
-		// Merge service codes that fit in uint8 into FunctionCodes for rule generation.
-		mergedFCs := copyBoolMap8(p.FunctionCodes)
-		for sc := range p.ServiceCodes {
-			if sc <= 255 {
-				mergedFCs[uint8(sc)] = true
-			}
+	for _, tuple := range tuples {
+		observation := l.observations[tuple]
+		unitID := "none"
+		icsPredicate := config.ICSPredicate{
+			Protocol:     tuple.protocol,
+			FunctionCode: []uint8{tuple.fc},
+			Direction:    eventfields.KindRequest,
+		}
+		if tuple.hasUnit {
+			unitID = fmt.Sprintf("%d", tuple.unitID)
+			unit := tuple.unitID
+			icsPredicate.UnitID = &unit
+			icsPredicate.Addresses = sortedStringKeys(observation.addresses)
+		} else if tuple.protocol == "cip" {
+			icsPredicate.ObjectClasses = sortedUint16Keys(observation.objectClasses)
 		}
 
-		fcs := sortedUint8Keys(mergedFCs)
-		addrs := sortedStringKeys(p.Addresses)
-
-		// Mode stays empty: a learned rule inherits the global DPI mode, so
-		// it enforces only where enforce is configured and has an inline path.
-		ics := config.ICSPredicate{
-			Protocol:     p.Protocol,
-			FunctionCode: fcs,
-			Addresses:    addrs,
+		if observation.readSeen && !observation.writeSeen {
+			icsPredicate.ReadOnly = true
+		} else if observation.writeSeen && !observation.readSeen {
+			icsPredicate.WriteOnly = true
 		}
 
-		// Set read/write classification.
-		if p.ReadSeen && !p.WriteSeen {
-			ics.ReadOnly = true
-		} else if p.WriteSeen && !p.ReadSeen {
-			ics.WriteOnly = true
-		}
-
-		// If exactly one unit ID was observed, set it (Modbus-specific).
-		if len(p.UnitIDs) == 1 {
-			for uid := range p.UnitIDs {
-				v := uid
-				ics.UnitID = &v
-			}
-		}
-
+		ruleID := fmt.Sprintf("learned-%s-%s-%s-u%s-fc%02x", tuple.protocol,
+			sanitizeIP(tuple.source), sanitizeIP(tuple.dest), unitID, tuple.fc)
 		r := config.Rule{
 			ID:           ruleID,
-			Description:  fmt.Sprintf("Auto-learned %s rule (%s -> %s)", p.Protocol, p.SourceIP, p.DestIP),
-			Sources:      []string{p.SourceIP + "/32"},
-			Destinations: []string{p.DestIP + "/32"},
-			ICS:          ics,
+			Description:  fmt.Sprintf("Auto-learned %s unit %s function/service 0x%02x (%s -> %s)", tuple.protocol, unitID, tuple.fc, tuple.source, tuple.dest),
+			Sources:      []string{tuple.source + "/32"},
+			Destinations: []string{tuple.dest + "/32"},
+			ICS:          icsPredicate,
 			Action:       config.ActionAllow,
 		}
-		rules = append(rules, r)
+		generated = append(generated, r)
 	}
-	return rules
+	return generated
 }
 
 // Clear resets all learned data.
@@ -280,22 +388,11 @@ func (l *Learner) Clear() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.profiles = make(map[string]*LearnedProfile)
+	l.observations = make(map[learnedTuple]*learnedObservation)
 }
 
 func sanitizeIP(ip string) string {
 	return strings.ReplaceAll(ip, ":", "-")
-}
-
-func sortedUint8Keys(m map[uint8]bool) []uint8 {
-	if len(m) == 0 {
-		return nil
-	}
-	out := make([]uint8, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
 }
 
 func sortedStringKeys(m map[string]bool) []string {
@@ -307,6 +404,18 @@ func sortedStringKeys(m map[string]bool) []string {
 		out = append(out, k)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func sortedUint16Keys(m map[uint16]bool) []uint16 {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]uint16, 0, len(m))
+	for key := range m {
+		out = append(out, key)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
 

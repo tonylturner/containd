@@ -146,6 +146,7 @@ export type DataPlaneConfig = {
   dpiMode?: "learn" | "enforce";
   dpiProtocols?: Record<string, boolean>;
   dpiIcsProtocols?: Record<string, boolean>;
+  dpiIcsParsing?: Record<string, "tolerant" | "strict">;
   dpiExclusions?: DPIExclusion[];
   nflogGroup?: number;
   nfqueueGroup?: number;
@@ -566,7 +567,14 @@ export type ICSDecisionAttributes = {
   ruleId: string;
   action?: string;
   mode?: string;
-  reason: "rule" | "default" | "broadcast" | "malformed" | "unsupported" | "role";
+  /**
+   * Engine reasons: rule, default, broadcast, malformed (unframeable bytes
+   * or a stream fault) and nonconformant (strict parsing rejected decoded
+   * content). A reason outside that set is kept raw rather than hidden.
+   */
+  reason: string;
+  /** Sorted conformance finding codes, e.g. iec104.reserved_bits. */
+  conformance: string[];
   apdu_id?: string;
   type_id?: number;
   ca?: number;

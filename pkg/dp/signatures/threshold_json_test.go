@@ -45,6 +45,29 @@ func TestThresholdJSONShapeAndBuiltinRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(back, storm) || back.Threshold.Window() != time.Minute {
 		t.Fatalf("round trip = %+v, want %+v", back, storm)
 	}
+	writeStorm := builtin(t, "ICS-WRITE-STORM")
+	raw, err = json.Marshal(writeStorm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var writeStormWire map[string]any
+	if err := json.Unmarshal(raw, &writeStormWire); err != nil {
+		t.Fatal(err)
+	}
+	wantWriteStorm := map[string]any{
+		"count": float64(icsWriteStormCount), "windowSeconds": float64(icsWriteStormWindowSeconds),
+		"scope": thresholdScopeConnection, "dedupAttr": "apdu_id",
+	}
+	if got := writeStormWire["threshold"]; !reflect.DeepEqual(got, wantWriteStorm) {
+		t.Fatalf("write-storm threshold JSON = %v, want %v", got, wantWriteStorm)
+	}
+	var writeStormBack Signature
+	if err := json.Unmarshal(raw, &writeStormBack); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(writeStormBack, writeStorm) {
+		t.Fatalf("write-storm round trip = %+v, want %+v", writeStormBack, writeStorm)
+	}
 	// Signatures without a threshold do not emit the key.
 	raw, err = json.Marshal(builtin(t, "MODBUS-SCAN-001"))
 	if err != nil {
@@ -58,20 +81,23 @@ func TestThresholdJSONShapeAndBuiltinRoundTrip(t *testing.T) {
 func TestCustomThresholdSignatureFromJSON(t *testing.T) {
 	const custom = `[{"id":"CUSTOM-WRITE-BURST","name":"Write burst","protocol":"modbus","severity":"high",
 		"conditions":[{"field":"is_write","op":"equals","value":true}],
-		"threshold":{"count":3,"windowSeconds":5}}]`
+		"threshold":{"count":3,"windowSeconds":5,"scope":"connection","dedupAttr":"command_id"}}]`
 	e := New()
 	if err := e.LoadFromJSON(strings.NewReader(custom)); err != nil {
 		t.Fatal(err)
 	}
 	sigs := e.List()
-	if len(sigs) != 1 || sigs[0].Threshold == nil || *sigs[0].Threshold != (Threshold{Count: 3, WindowSeconds: 5}) {
+	wantThreshold := Threshold{
+		Count: 3, WindowSeconds: 5, Scope: thresholdScopeConnection, DedupAttr: "command_id",
+	}
+	if len(sigs) != 1 || sigs[0].Threshold == nil || *sigs[0].Threshold != wantThreshold {
 		t.Fatalf("loaded = %+v", sigs)
 	}
 	raw, err := json.Marshal(sigs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"threshold":{"count":3,"windowSeconds":5}`) {
+	if !strings.Contains(string(raw), `"threshold":{"count":3,"windowSeconds":5,"scope":"connection","dedupAttr":"command_id"}`) {
 		t.Fatalf("re-marshalled = %s", raw)
 	}
 	t0 := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
@@ -88,7 +114,10 @@ func TestCustomThresholdSignatureFromJSON(t *testing.T) {
 }
 
 func TestInvalidThresholdIsRejected(t *testing.T) {
-	for _, th := range []string{`{"count":1,"windowSeconds":60}`, `{"count":10,"windowSeconds":0}`, `{"count":10}`, `{}`} {
+	for _, th := range []string{
+		`{"count":1,"windowSeconds":60}`, `{"count":10,"windowSeconds":0}`,
+		`{"count":10}`, `{}`, `{"count":2,"windowSeconds":1,"scope":"global"}`,
+	} {
 		in := `[{"id":"OK","conditions":[{"field":"kind","op":"equals","value":"x"}]},
 			{"id":"BAD","conditions":[{"field":"kind","op":"equals","value":"x"}],"threshold":` + th + `}]`
 		e := New()

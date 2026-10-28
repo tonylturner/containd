@@ -82,7 +82,7 @@ func TestGenericICSDenyShadowedByAllow(t *testing.T) {
 		ICS: ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{6}}}
 	ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{write, tcpEntry("z-allow-502", ActionAllow, "502")}})
 	ctx := l4Ctx("10.0.0.1", "10.0.0.2", "tcp", "502")
-	ctx.ICS = &ICSContext{Protocol: "modbus", FunctionCode: 6}
+	ctx.ICS = &ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: 6}
 	if action, entry := ev.EvaluateMatch(ctx); action != ActionAllow || ruleID(entry) != "z-allow-502" {
 		t.Fatalf("FC6 = %s by %q, want ALLOW by z-allow-502", action, ruleID(entry))
 	}

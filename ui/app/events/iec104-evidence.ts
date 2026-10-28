@@ -52,9 +52,13 @@ const REASON_TEXT: Record<string, string> = {
   default: "no rule matched",
   broadcast: "broadcast CA",
   malformed: "malformed APDU",
-  unsupported: "unsupported Type ID",
-  role: "role violation",
+  nonconformant: "nonconformant under strict parsing",
 };
+
+/** A reason without a label is shown as the engine sent it. */
+function reasonText(reason: string): string {
+  return Object.hasOwn(REASON_TEXT, reason) ? REASON_TEXT[reason] : reason;
+}
 
 const SESSION_VIEW = {
   aborted: { badge: "aborted", variant: "error", severity: "high", headline: "IEC 104 session aborted" },
@@ -101,14 +105,17 @@ export function describeICSEvidence(ev: TelemetryEvent): EvidenceView | null {
     const v = DECISION_VIEW[a.decision];
     const rule = a.ruleId || "envelope default";
     const what = objectText(a) || "APDU";
+    const reason = reasonText(a.reason);
+    const findings = a.conformance.join(", ");
     return {
       ...v,
-      message: `${v.badge}: ${what} (${REASON_TEXT[a.reason]}, ${rule})`,
+      message: `${v.badge}: ${what} (${reason}, ${rule}${findings ? `; ${findings}` : ""})`,
       sessionId: a.session_id,
       alert: a.decision !== "allow",
       rows: present([
         ["Decision", a.decision],
-        ["Reason", REASON_TEXT[a.reason]],
+        ["Reason", reason],
+        ["Conformance", findings],
         ["Rule", rule],
         ["Rule action", a.action],
         ["Mode", a.mode],
