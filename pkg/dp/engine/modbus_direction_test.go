@@ -57,12 +57,12 @@ func TestModbusSource502ThroughConsumers(t *testing.T) {
 				t.Fatalf("preview %s=%+v", tc.rule.ID, got)
 			}
 		}
-		master, ok := e.Inventory().Get(testClient)
-		if !ok || master.Role != "master" || master.PacketCount != 3 {
+		master := e.Inventory().GetAssets(testClient)
+		if len(master) != 1 || master[0].Role != "master" || master[0].PacketCount != 3 {
 			t.Fatalf("master=%+v", master)
 		}
-		slave, ok := e.Inventory().Get(testServer)
-		if !ok || slave.Role != "slave" || slave.PacketCount != 3 {
+		slave := e.Inventory().GetAssets(testServer)
+		if len(slave) != 1 || slave[0].Role != "slave" || slave[0].PacketCount != 3 {
 			t.Fatalf("slave=%+v", slave)
 		}
 	}

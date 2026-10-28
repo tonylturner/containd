@@ -436,8 +436,8 @@ All inventory reads require an authenticated management session:
 
 | Method | Path | Result |
 |---|---|---|
-| GET | `/api/v1/inventory` | Retained legacy Modbus/DNP3/CIP assets, sorted by IP |
-| GET | `/api/v1/inventory/{ip}` | One legacy asset; 404 if absent |
+| GET | `/api/v1/inventory` | Retained Modbus/DNP3/CIP observations, one per IP, protocol and role, sorted by IP |
+| GET | `/api/v1/inventory/{ip}` | All observations for an IP, sorted by protocol and role; 404 if none |
 | GET | `/api/v1/inventory/iec104` | IEC 104 endpoint pairs, CAs, points, command counts, fixed limits and overflow totals |
 | DELETE | `/api/v1/inventory` | Admin-only clear of both inventories and overflow counters |
 
