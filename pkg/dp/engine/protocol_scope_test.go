@@ -8,9 +8,49 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
+
+func TestDefaultInspectionTransportScope(t *testing.T) {
+	for _, tc := range []struct {
+		protocol  string
+		transport uint8
+		port      uint16
+		want      bool
+	}{
+		{"cip", ics.TCP, 2222, false},
+		{"cip", ics.UDP, 2222, true},
+		{"cip", ics.UDP, 44818, true},
+		{"CIP", ics.TCP, 44818, true},
+		{"modbus", ics.TCP, 502, true},
+		{"modbus", ics.UDP, 502, false},
+		{"dnp3", ics.TCP, 20000, true},
+		{"dnp3", ics.UDP, 20000, false},
+		{"iec104", ics.TCP, 2404, true},
+		{"iec104", ics.UDP, 2404, false},
+	} {
+		t.Run(fmt.Sprintf("%s/%d/%d", tc.protocol, tc.transport, tc.port), func(t *testing.T) {
+			entry := rules.Entry{ICS: rules.ICSPredicate{Protocol: tc.protocol}}
+			state := conformanceState()
+			state.Key.Proto, state.Key.DstPort = tc.transport, tc.port
+			transport := "tcp"
+			if tc.transport == ics.UDP {
+				transport = "udp"
+			}
+			pkt := &dpi.ParsedPacket{Proto: transport, SrcPort: state.Key.SrcPort, DstPort: tc.port}
+			if got := shouldInspectFirewallEntry(entry, state, pkt); got != tc.want {
+				t.Fatalf("forward inspect = %v, want %v", got, tc.want)
+			}
+			state.Key = state.Key.Reversed()
+			pkt.SrcPort, pkt.DstPort = pkt.DstPort, pkt.SrcPort
+			if got := shouldInspectFirewallEntry(entry, state, pkt); got != tc.want {
+				t.Fatalf("reverse inspect = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestProtocolScopeDecoders(t *testing.T) {
 	want := map[string]bool{"modbus": true, "dnp3": true, "iec104": true, "cip": true}
@@ -65,7 +105,7 @@ func TestRemovedProtocolSnapshotAtomic(t *testing.T) {
 				t.Fatal("rejected snapshot changed runtime state")
 			}
 		}
-		if isICSEvent(name, "request") || isRuleEvaluableICSEvent(name) || rules.IsICSDecoderPort(name, 102) || ics.Supported(name) {
+		if isICSEvent(name, "request") || isRuleEvaluableICSEvent(name) || ics.IsProtocolPortOn(name, ics.TCP, 102) || ics.Supported(name) {
 			t.Fatalf("retired protocol classified as industrial: %s", name)
 		}
 	}

@@ -1,0 +1,24 @@
+{
+  "events": [
+    {
+      "frame": 1,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [
+            "cip.cpf_layout"
+          ],
+          "undecoded": []
+        }
+      ]
+    }
+  ],
+  "mutation": {
+    "parent": "native-io.pcap",
+    "parent_sha256": "fe44004acd2f04ea0fda62f1a5d3190decc0d77a1d4957094a68575905c8062b",
+    "parent_frame": 1,
+    "transport_payload_offset": 51,
+    "removed_hex": "00",
+    "operation": "remove final UDP payload byte; retain CPF declared item length; recompute IPv4/UDP lengths and checksums"
+  }
+}

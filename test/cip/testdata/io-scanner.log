@@ -1,0 +1,8 @@
+[INFO] Registered session 1
+[INFO] Send request: service=0x54 epath=[classId=6 objectId=1]
+[INFO] Open IO connection O2T_ID=3738959891 T2O_ID=1722155009 SerialNumber 1
+[INFO] Open UDP socket to send data to 172.19.0.2:2222
+[INFO] Close connection connection T2O_ID=1722155009
+[INFO] Send request: service=0x4e epath=[classId=6 objectId=1]
+native class1 received=4
+[INFO] Unregistered session 1

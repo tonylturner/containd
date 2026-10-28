@@ -1,0 +1,374 @@
+{
+  "events": [
+    {
+      "frame": 4,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        },
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 10,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    }
+  ]
+}

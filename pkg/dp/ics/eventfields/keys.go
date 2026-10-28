@@ -11,6 +11,7 @@ const (
 	ProtoIEC104 = "iec104"
 	ProtoModbus = "modbus"
 	ProtoDNP3   = "dnp3"
+	ProtoCIP    = "cip"
 )
 
 // Decoder event kinds. IEC104 uses all five; Modbus and DNP3 emit
@@ -45,6 +46,12 @@ const (
 	// known but whose content does not conform. Absent means conformant.
 	// The value is []string, sorted and without duplicates.
 	KeyConformance = "conformance"
+	// KeyUndecoded lists stable codes ("<proto>.<reason>", for example
+	// "cip.msp_nested") for framed content the decoder did not inspect.
+	// Policy treats it like KeyConformance, with its own alert. Absent
+	// means every framed byte was decoded. The value is []string, sorted
+	// and without duplicates.
+	KeyUndecoded = "undecoded"
 )
 
 // IEC104 event attribute keys.

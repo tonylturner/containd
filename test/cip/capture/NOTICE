@@ -1,0 +1,20 @@
+Reference endpoints (unmodified sources, pinned in source-lock.json):
+- OpENer, https://github.com/EIPStackGroup/OpENer
+  Copyright Rockwell Automation and contributors; BSD-style license in LICENSES/OpENer.txt.
+  License text is transcoded from Windows-1252 to UTF-8, with trailing whitespace removed.
+- EIPScanner, https://github.com/nimbuscontrols/EIPScanner
+  Copyright Aleksey Timin and contributors; MIT license in LICENSES/EIPScanner.txt.
+- cpppo 4.4.3, https://github.com/pjkundert/cpppo
+  Copyright Hard Consulting Corporation and contributors; GPLv3 and external
+  protocol exception in LICENSES/cpppo.txt; GPLv3 text in LICENSES/cpppo-COPYING.txt.
+  License files retain wording, with trailing whitespace removed.
+- greenery 2.1, https://github.com/qntm/greenery
+  Sam Hughes; MIT (as declared in the pinned PyPI source distribution setup.py).
+  That old distribution has no license file. LICENSES/greenery.txt retains the
+  upstream MIT text from the current repository LICENSE.txt (copyright 2021 qntm),
+  not a claim that this file accompanied the 2.1 distribution.
+No bundled third-party captures are copied or replayed. The local endpoint
+request driver and capture/export/mutation tools are Apache-2.0.
+
+Oracle: Wireshark / tshark 4.6.7 (GPL-2.0-or-later), installed separately.
+TSV and PDML are independent observations, not copied Wireshark source.

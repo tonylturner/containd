@@ -14,7 +14,7 @@ import (
 
 type headerWant struct {
 	group, variation, qualifier uint8
-	count                       uint32
+	count                       uint64
 }
 
 func headerSummary(hs []ObjectHeader) []headerWant {
@@ -92,13 +92,13 @@ func TestParseObjectHeaders(t *testing.T) {
 			want: []headerWant{{12, 1, 0x17, 1}, {12, 1, 0x28, 1}},
 		},
 		{
-			name: "free format: size-prefixed objects are self-describing",
+			name: "free format: sized but uninspected values stop the walk",
 			fc:   0x19, // open file
 			data: []byte{
 				0x46, 0x03, 0x5B, 0x01, 0x03, 0x00, 0xAA, 0xBB, 0xCC, // g70v3, one 3-octet object
 				0x32, 0x01, 0x07, 0x01, 1, 2, 3, 4, 5, 6, // g50v1 count 1
 			},
-			want: []headerWant{{70, 3, 0x5B, 1}, {50, 1, 0x07, 1}},
+			want: []headerWant{{70, 3, 0x5B, 1}},
 		},
 		{
 			name: "unknown variation stops the walk",

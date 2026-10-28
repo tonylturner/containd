@@ -21,6 +21,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -580,7 +581,7 @@ func shouldInspectFirewallEntry(entry rules.Entry, state *flow.State, pkt *dpi.P
 	if len(entry.Protocols) > 0 {
 		return entryMatchesProtocolPorts(entry, state, pkt)
 	}
-	return rules.IsICSDecoderPort(entry.ICS.Protocol, servicePort(state, pkt))
+	return ics.IsProtocolPortOn(entry.ICS.Protocol, state.Key.Proto, servicePort(state, pkt))
 }
 
 func entryMatchesProtocolPorts(entry rules.Entry, state *flow.State, pkt *dpi.ParsedPacket) bool {

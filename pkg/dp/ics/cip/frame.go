@@ -7,6 +7,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
 // EtherNet/IP encapsulation header size in bytes.
@@ -54,25 +56,36 @@ type EIPHeader struct {
 
 // CIPMessage represents a parsed CIP message extracted from SendRRData/SendUnitData.
 type CIPMessage struct {
-	status      uint8
-	hasStatus   bool
 	ServiceCode uint8
 	ServiceName string
 	IsResponse  bool
 	Path        []byte
 	Data        []byte
+	Response    *ResponseHeader
+	Conformance []string
+}
+
+// ResponseHeader retains every complete wire field, including a partial
+// additional-status tail. Nil pointers mean the field was not available.
+type ResponseHeader struct {
+	Reserved         *uint8
+	GeneralStatus    *uint8
+	AdditionalCount  *uint8
+	AdditionalStatus []uint16
 }
 
 // commandNames maps EtherNet/IP encapsulation command codes to names.
 var commandNames = map[uint16]string{
 	0x0000: "NOP",
-	0x0001: "ListServices",
-	0x0004: "ListIdentity",
-	0x0063: "ListInterfaces",
+	0x0004: "ListServices",
+	0x0063: "ListIdentity",
+	0x0064: "ListInterfaces",
 	0x0065: "RegisterSession",
 	0x0066: "UnregisterSession",
 	0x006F: "SendRRData",
 	0x0070: "SendUnitData",
+	0x0072: "IndicateStatus",
+	0x0073: "Cancel",
 }
 
 // serviceNames maps CIP service codes to names.
@@ -184,11 +197,14 @@ func IsControlService(code uint8) bool {
 
 // EPathResult holds the fully parsed contents of a CIP EPATH.
 type EPathResult struct {
-	ClassID     uint16
-	InstanceID  uint16
-	AttributeID uint16
-	MemberID    uint16
-	Raw         []byte
+	ClassID         uint16
+	InstanceID      uint16
+	AttributeID     uint16
+	MemberID        uint16
+	ConnectionPoint uint16
+	Conformance     []string
+	Undecoded       []string
+	Raw             []byte
 }
 
 // ParseEPath extracts complete recognized EPATH segments, stopping at the first
@@ -201,6 +217,9 @@ func ParseEPath(data []byte) EPathResult {
 	r.InstanceID, _ = attrs["instance_id"].(uint16)
 	r.AttributeID, _ = attrs["attribute_id"].(uint16)
 	r.MemberID, _ = attrs["member_id"].(uint16)
+	r.ConnectionPoint, _ = attrs["connection_point"].(uint16)
+	r.Conformance, _ = eventfields.Strings(attrs, eventfields.KeyConformance)
+	r.Undecoded, _ = eventfields.Strings(attrs, eventfields.KeyUndecoded)
 	return r
 }
 
@@ -219,82 +238,6 @@ func ExtractClassFromPath(path []byte) (uint16, bool) {
 // so that the learner always sees a consistent three-part address.
 func FormatAddress(r EPathResult) string {
 	return fmt.Sprintf("0x%02X/%d/%d", r.ClassID, r.InstanceID, r.AttributeID)
-}
-
-// maxMSPServices caps the number of sub-services parsed from a Multiple_Service_Packet
-// to bound CPU in the NFQUEUE hot path.
-const maxMSPServices = 32
-
-// SubService represents a single CIP service extracted from a Multiple_Service_Packet.
-type SubService struct {
-	status      uint8
-	hasStatus   bool
-	findings    []string
-	ServiceCode uint8
-	ServiceName string
-	IsWrite     bool
-	IsControl   bool
-	Path        []byte
-}
-
-// ParseMSPServices parses individual sub-services from MSP data (the Data
-// field of a CIP message with service code 0x0A). The data layout is:
-//
-//	uint16  service_count
-//	uint16  offset[service_count]   (each relative to start of data)
-//	...     service payloads
-//
-// Returns nil if the data is malformed or too short.
-func ParseMSPServices(data []byte) []SubService {
-	subs, _ := parseMSPServices(data)
-	return subs
-}
-
-func parseMSPServices(data []byte) ([]SubService, bool) {
-	if len(data) < 2 {
-		return nil, true
-	}
-	total := int(binary.LittleEndian.Uint16(data[:2]))
-	tableEnd := 2 + total*2
-	if total == 0 || tableEnd > len(data) {
-		return nil, true
-	}
-	count := min(total, maxMSPServices)
-	stopped := total > count
-	subs := make([]SubService, 0, count)
-	for i := 0; i < count; i++ {
-		off := int(binary.LittleEndian.Uint16(data[2+2*i : 4+2*i]))
-		end := len(data)
-		if i+1 < total {
-			end = int(binary.LittleEndian.Uint16(data[4+2*i : 6+2*i]))
-		}
-		if off < tableEnd || end <= off || end > len(data) {
-			stopped = true
-			continue
-		}
-		msg, err := parseCIPFromItem(data[off:end])
-		if msg == nil {
-			stopped = true
-			continue
-		}
-		sub := SubService{
-			ServiceCode: msg.ServiceCode, ServiceName: msg.ServiceName,
-			IsWrite: IsWriteService(msg.ServiceCode), IsControl: IsControlService(msg.ServiceCode),
-			Path: msg.Path, status: msg.status, hasStatus: msg.hasStatus,
-		}
-		if err != nil {
-			code := "cip.message_short"
-			if errors.Is(err, ErrPathTruncated) {
-				code = "cip.epath_truncated"
-			}
-			sub.findings = []string{code}
-		}
-		subs = append(subs, sub)
-	}
-	if len(subs) == 0 {
-		return nil, stopped
-	}
-	return subs, stopped
 }
 
 // ParseEIPHeader parses an EtherNet/IP encapsulation header from raw bytes.
@@ -330,6 +273,14 @@ func ParseEIPHeader(data []byte) (*EIPHeader, error) {
 	return hdr, nil
 }
 
+// ExplicitResult retains both CPF provenance and message-header parsing errors.
+// A readable selected message never hides a later malformed CPF item.
+type ExplicitResult struct {
+	CPF          CPFResult
+	Message      *CIPMessage
+	MessageError error
+}
+
 // ParseCIPMessage extracts a CIP message from the data portion of a
 // SendRRData or SendUnitData encapsulation. The data layout is:
 //
@@ -337,58 +288,12 @@ func ParseEIPHeader(data []byte) (*EIPHeader, error) {
 //
 // Each item: Type ID (2) + Length (2) + Data (Length bytes)
 // We look for Unconnected Data Item (0x00B2) or Connected Data Item (0x00B1).
-func ParseCIPMessage(data []byte) (*CIPMessage, error) {
-	_, item, err := parseCPF(data)
-	if item != nil {
-		return parseCIPFromItem(item)
+func ParseCIPMessage(data []byte) ExplicitResult {
+	result := ExplicitResult{CPF: parseCPF(data)}
+	if result.CPF.Selected >= 0 {
+		result.Message, result.MessageError = parseCIPFromItem(result.CPF.Payload)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return nil, ErrNoCIPPayload
-}
-
-// parseCPF walks the complete item list, retaining the first CIP data item.
-// Item payload parsing is deliberately separate from CPF framing validation.
-// A malformed later item retains both earlier types and the first CIP payload.
-func parseCPF(data []byte) ([]string, []byte, error) {
-	var cipItem []byte
-	types := make([]string, 0)
-	// Minimum: interface(4) + timeout(2) + count(2) = 8
-	if len(data) < 8 {
-		return types, cipItem, ErrCIPTooShort
-	}
-	types, cipItem, err := parseItems(data, 8, int(binary.LittleEndian.Uint16(data[6:8])))
-	if err == nil && binary.LittleEndian.Uint32(data[:4]) != 0 {
-		err = ErrInvalidCPF
-	}
-	return types, cipItem, err
-}
-
-func parseItems(data []byte, offset, count int) ([]string, []byte, error) {
-	var cipItem []byte
-	types := make([]string, 0)
-	var itemErr error
-	err := walkCPFItems(data, offset, count, func(item cpfItem) {
-		types = append(types, fmt.Sprintf("0x%04x", item.typeID))
-		if !item.complete {
-			return
-		}
-		if cipItem == nil && (item.typeID == 0x00B2 || item.typeID == 0x00B1) {
-			cipItem = item.data
-			if item.typeID == 0x00b1 {
-				if len(cipItem) < 2 {
-					cipItem, itemErr = []byte{}, ErrCIPTooShort
-					return
-				}
-				cipItem = cipItem[2:] // connected explicit message sequence count
-			}
-		}
-	})
-	if itemErr != nil {
-		err = itemErr
-	}
-	return types, cipItem, err
+	return result
 }
 
 // parseCIPFromItem parses the CIP service header from an item's data.
@@ -399,13 +304,26 @@ func parseCIPFromItem(data []byte) (*CIPMessage, error) {
 	code := data[0] & 0x7f
 	msg := &CIPMessage{ServiceCode: code, ServiceName: ServiceName(code), IsResponse: data[0]&0x80 != 0}
 	if msg.IsResponse {
+		r := &ResponseHeader{}
+		msg.Response = r
+		if len(data) >= 2 {
+			r.Reserved = &data[1]
+			if data[1] != 0 {
+				msg.Conformance = append(msg.Conformance, "cip.response_reserved")
+			}
+		}
 		if len(data) >= 3 {
-			msg.status, msg.hasStatus = data[2], true
+			r.GeneralStatus = &data[2]
 		}
 		if len(data) < 4 {
 			return msg, ErrCIPTooShort
 		}
-		offset := 4 + 2*int(data[3]) // reserved, general status, additional status words
+		r.AdditionalCount = &data[3]
+		offset := 4 + 2*int(data[3])
+		r.AdditionalStatus = make([]uint16, 0, data[3])
+		for i := 4; i+2 <= min(offset, len(data)); i += 2 {
+			r.AdditionalStatus = append(r.AdditionalStatus, binary.LittleEndian.Uint16(data[i:i+2]))
+		}
 		if offset > len(data) {
 			return msg, ErrCIPTooShort
 		}

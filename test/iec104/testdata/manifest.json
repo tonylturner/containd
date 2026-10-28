@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "protocol": "iec104",
+  "provenance": {
+    "source": "lib60870-C v2.4.1 archive SHA256 d5708b9885c2c068ac9d9bae4696a624bd1d1d6645a1b1a9261c00274bc36c3a; endpoint adapter SHA256 9abe89de87764d5b316ffc2e84c2aa9a67e27a94645ed3d986ea76189cfd2bf5; malformer source SHA256 0d47a3ec2e1b7f591651ca365834663b7f7bf7d25a1e1880b98bb61eda812a8c",
+    "generator": "Endpoint Dockerfile SHA256 a401ee56d96638e3b33edd9fec1dd25ccb6e0aab094a457a434bcc07aa8b35a9 uses Alpine 3.21 sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507; capture Dockerfile SHA256 7b1eda244f16340b4717df09b658c4be46ad224cd196fff55e518db78b9459ca uses the same pinned Alpine digest but leaves its tcpdump package unversioned; capture script SHA256 bdf7ad7902cca3eaff352e2b7016fef090f5347e0410ce3e7815414baedaa893",
+    "oracle": "Wireshark TShark 4.6.7 (Git commit b439fb7b47a9); tcp.desegment_tcp_streams=TRUE, tcp.reassemble_out_of_order=FALSE, tcp.analyze_sequence_numbers=TRUE; -Y iec60870_104 -T fields -E header=y -E separator=/t -E occurrence=a -E aggregator=,",
+    "license": "Apache-2.0 fixture data; endpoint harness and lib60870 are GPLv3 and are not linked into containd",
+    "topology": "RTU 10.235.0.10:2404 and clients 10.235.0.20/21 on a disposable Docker bridge; endpoint-to-endpoint without a firewall",
+    "capture_side": "tcpdump on the Docker bridge",
+    "traffic_origin": "Four scenarios use lib60870-C client and server endpoints; malformed.pcap records the pure-Go malformer client talking to the lib60870-C server",
+    "checksum_offload": "none reported by the bridge capture",
+    "oracle_export": "Frame rows preserve the complete captured TCP payload; each TSV is the independent TShark fields export"
+  },
+  "scenarios": [
+    {
+      "name": "edge-addressing",
+      "pcap": "edge-addressing.pcap",
+      "oracle": "edge-addressing.expected.tsv",
+      "expectations": "edge-addressing.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "none reported by bridge capture",
+      "contiguous": true,
+      "oracle_frames": [4, 6, 8, 9, 11, 13, 15, 17, 19, 28, 30, 32, 33, 35, 37, 39, 41, 48, 50, 52, 53, 55],
+      "unobserved_frames": []
+    },
+    {
+      "name": "malformed",
+      "pcap": "malformed.pcap",
+      "oracle": "malformed.expected.tsv",
+      "expectations": "malformed.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "none reported by bridge capture",
+      "contiguous": true,
+      "oracle_frames": [12, 14, 24, 26, 28, 29, 37, 45, 47, 53, 55, 63, 65, 67, 68, 69, 71, 72, 74],
+      "unobserved_frames": [4, 16, 49, 50, 52]
+    },
+    {
+      "name": "sbo-command",
+      "pcap": "sbo-command.pcap",
+      "oracle": "sbo-command.expected.tsv",
+      "expectations": "sbo-command.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "none reported by bridge capture",
+      "contiguous": true,
+      "oracle_frames": [4, 6, 8, 9, 11, 12, 14, 16, 18, 27, 29, 31, 32, 34, 35, 37, 39, 41, 46, 48, 50, 51, 53, 62, 64, 66, 67, 69, 70, 72, 74],
+      "unobserved_frames": []
+    },
+    {
+      "name": "session-management",
+      "pcap": "session-management.pcap",
+      "oracle": "session-management.expected.tsv",
+      "expectations": "session-management.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "none reported by bridge capture",
+      "contiguous": true,
+      "oracle_frames": [4, 6, 8, 9, 11, 13, 15, 17, 18, 20, 21, 26, 28, 30, 31, 33, 34, 36, 38, 39, 44, 46],
+      "unobserved_frames": []
+    },
+    {
+      "name": "startup-gi-monitor",
+      "pcap": "startup-gi-monitor.pcap",
+      "oracle": "startup-gi-monitor.expected.tsv",
+      "expectations": "startup-gi-monitor.expectations.json",
+      "transport": "tcp",
+      "checksum_offload": "none reported by bridge capture",
+      "contiguous": true,
+      "oracle_frames": [4, 6, 8, 9, 11, 13, 15, 17, 19, 24, 26, 28, 29, 31, 32, 34, 36, 38, 40, 46, 48, 50, 55, 57, 59, 60, 62, 63, 65, 67, 68, 70, 71, 72, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96, 98, 100, 102, 104, 106],
+      "unobserved_frames": []
+    }
+  ]
+}

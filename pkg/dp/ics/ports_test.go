@@ -3,7 +3,10 @@
 
 package ics
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDecoderPorts(t *testing.T) {
 	ports := DecoderPorts()
@@ -24,14 +27,25 @@ func TestDecoderPorts(t *testing.T) {
 			t.Errorf("%s has transport %d", p, p.Transport)
 		}
 	}
-	for proto, port := range map[string]uint16{"modbus": 502, "cip": 2222, "iec104": 2404, "dnp3": 20000, "CIP": 44818} {
-		if !IsDecoderPort(proto, port) {
-			t.Errorf("%s/%d not a decoder port", proto, port)
+}
+
+func TestProtocolPortOn(t *testing.T) {
+	for _, p := range DecoderPorts() {
+		if !IsProtocolPortOn(strings.ToUpper(p.Protocol), p.Transport, p.Port) {
+			t.Errorf("%s not on transport %d", p, p.Transport)
 		}
 	}
-	for proto, port := range map[string]uint16{"modbus": 503, "cip": 2404, "iec104": 502, "": 502, "http": 80} {
-		if IsDecoderPort(proto, port) {
-			t.Errorf("%s/%d reported as a decoder port", proto, port)
+	for _, c := range []struct {
+		protocol  string
+		transport uint8
+		port      uint16
+	}{
+		{"cip", TCP, 2222}, {"modbus", UDP, 502}, {"dnp3", UDP, 20000},
+		{"iec104", UDP, 2404}, {"modbus", TCP, 503}, {"cip", TCP, 2404},
+		{"iec104", TCP, 502}, {"", TCP, 502}, {"http", TCP, 80}, {"cip", 1, 44818},
+	} {
+		if IsProtocolPortOn(c.protocol, c.transport, c.port) {
+			t.Errorf("%s/%d reported on transport %d", c.protocol, c.port, c.transport)
 		}
 	}
 }

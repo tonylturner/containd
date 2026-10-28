@@ -20,7 +20,7 @@ func TestConformanceTwins(t *testing.T) {
 		{"short IIN", "dnp3.application_header", []byte{0xc0, 0xc0, FuncResponse, 0}, []byte{0xc0, 0xc0, FuncResponse, 0, 0}},
 		{"short object", "dnp3.object_walk", []byte{0xc0, 0xc0, FuncRead, 1}, []byte{0xc0, 0xc0, FuncRead, 1, 2, 6}},
 		{"short range", "dnp3.object_walk", []byte{0xc0, 0xc0, FuncRead, 1, 2, 1, 0}, []byte{0xc0, 0xc0, FuncRead, 1, 2, 1, 0, 0, 0, 0}},
-		{"unknown value size", "dnp3.object_walk", []byte{0xc0, 0xc0, FuncResponse, 0, 0, 99, 9, 7, 1, 0}, []byte{0xc0, 0xc0, FuncResponse, 0, 0, 1, 2, 7, 1, 0}},
+		{"unknown value size", "dnp3.object_unsupported", []byte{0xc0, 0xc0, FuncResponse, 0, 0, 99, 9, 7, 1, 0}, []byte{0xc0, 0xc0, FuncResponse, 0, 0, 1, 2, 7, 1, 0}},
 		{"reserved range", "dnp3.object_walk", []byte{0xc0, 0xc0, FuncRead, 1, 2, 0x0c}, []byte{0xc0, 0xc0, FuncRead, 1, 2, 6}},
 		{"reserved prefix", "dnp3.object_walk", []byte{0xc0, 0xc0, FuncRead, 1, 2, 0x76}, []byte{0xc0, 0xc0, FuncRead, 1, 2, 6}},
 		{"reserved bit", "dnp3.object_walk", []byte{0xc0, 0xc0, FuncRead, 1, 2, 0x86}, []byte{0xc0, 0xc0, FuncRead, 1, 2, 6}},
@@ -38,7 +38,11 @@ func TestConformanceTwins(t *testing.T) {
 					t.Fatalf("frames=%+v err=%v", res, err)
 				}
 				for form, attrs := range decodertest.Forms(t, res.Frames[0].Events[0].Attributes) {
-					got, _ := eventfields.Strings(attrs, eventfields.KeyConformance)
+					key := eventfields.KeyConformance
+					if tc.code == "dnp3.object_unsupported" {
+						key = eventfields.KeyUndecoded
+					}
+					got, _ := eventfields.Strings(attrs, key)
 					var want []string
 					if bad {
 						want = []string{tc.code}
@@ -71,12 +75,7 @@ func TestDataCRCFindingsOnApplicationAndContinuation(t *testing.T) {
 					t.Fatalf("%+v %v", res, err)
 				}
 				events := res.Frames[0].Events
-				if !bad && data[0]&TransportFIR == 0 {
-					if len(events) != 0 {
-						t.Fatal(events)
-					}
-					continue
-				}
+
 				if len(events) != 1 {
 					t.Fatal(events)
 				}

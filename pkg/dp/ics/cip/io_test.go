@@ -3,6 +3,7 @@ package cip
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"slices"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields/decodertest"
+	"github.com/tonylturner/containd/pkg/dp/internal/corpus"
 )
 
 func ioCPF(items ...cpfTestItem) []byte {
@@ -43,7 +45,7 @@ func TestUDPPortsAndDispatch(t *testing.T) {
 }
 
 func TestNativeIOFields(t *testing.T) {
-	for _, payload := range [][]byte{nil, {0x10}, {0x4c, 3, 0x20, 4, 0x24, 1, 0x30, 3}, make([]byte, 512)} {
+	for _, payload := range [][]byte{nil, {0x10}, {0x4c, 3, 0x20, 4, 0x24, 1, 0x30, 3}, make([]byte, 512), make([]byte, 513)} {
 		for _, reverse := range []bool{false, true} {
 			st := cipState()
 			st.Key.Proto, st.Key.DstPort = 17, 2222
@@ -58,6 +60,7 @@ func TestNativeIOFields(t *testing.T) {
 			want := decodertest.Forms(t, map[string]any{
 				"connection_id": uint32(0x12345678), "sequence": uint32(0x90abcdef),
 				"data_length": uint16(len(payload)), "cpf_item_types": "0x8002,0x00b1",
+				"cpf_item_count": uint16(2), "io_context_known": false, "io_data_hex": hex.EncodeToString(payload[:min(len(payload), 512)]), "io_data_truncated": len(payload) > 512,
 			})
 			for form, attrs := range decodertest.Forms(t, events[0].Attributes) {
 				if !reflect.DeepEqual(attrs, want[form]) {
@@ -151,7 +154,7 @@ func TestNativeIOPartialFields(t *testing.T) {
 }
 
 func TestUDPEncapsulatedDiscovery(t *testing.T) {
-	for _, command := range []uint16{0x0001, 0x0004, 0x0063} {
+	for _, command := range []uint16{0x0004, 0x0063, 0x0064} {
 		for _, reverse := range []bool{false, true} {
 			st := cipState()
 			st.Key.Proto, st.Key.DstPort = 17, 44818
@@ -169,6 +172,14 @@ func TestUDPEncapsulatedDiscovery(t *testing.T) {
 }
 
 func FuzzNativeIO(f *testing.F) {
+	for _, fixture := range captureFixtures(f) {
+		if fixture.Spec.Transport != "udp" {
+			continue
+		}
+		for _, seed := range corpus.Seeds(fixture) {
+			f.Add(seed)
+		}
+	}
 	f.Add([]byte{})
 	f.Add(testIOPacket([]byte{0x10, 0, 1, 2}))
 	f.Add(testIOPacket(nil))

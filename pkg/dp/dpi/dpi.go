@@ -4,6 +4,7 @@
 package dpi
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -78,6 +79,13 @@ type Manager struct {
 	udpByPort   map[uint16][]Decoder // UDP port -> matching decoders
 	anyDecoders []Decoder            // decoders with no port-specific hint
 	reassembler *reassembler
+	streamEnds  map[string]streamEnd
+}
+
+type streamEnd struct {
+	decoder StreamEnder
+	session string
+	dir     StreamDir
 }
 
 func NewManager(decoders ...Decoder) *Manager {
@@ -85,6 +93,7 @@ func NewManager(decoders ...Decoder) *Manager {
 		tcpByPort:   make(map[uint16][]Decoder),
 		udpByPort:   make(map[uint16][]Decoder),
 		reassembler: newReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
+		streamEnds:  make(map[string]streamEnd),
 	}
 	for _, d := range decoders {
 		m.Add(d)
@@ -173,7 +182,9 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 
 	// Clean up reassembly buffer for this flow.
 	if m.reassembler != nil {
-		m.reassembler.complete(state.Key.Hash())
+		key := state.Key.Hash()
+		m.reassembler.complete(key)
+		m.endStream(key)
 	}
 	return m.flowEnd(state)
 }
@@ -182,15 +193,16 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 // streamMu held.
 func (m *Manager) flowEnd(state *flow.State) ([]Event, error) {
 	var out []Event
+	var errs []error
 	for _, d := range m.candidates(state) {
 		if d == nil || !d.Supports(state) {
 			continue
 		}
 		events, err := d.OnFlowEnd(state)
 		if err != nil {
-			return out, err
+			errs = append(errs, err)
 		}
 		out = append(out, events...)
 	}
-	return out, nil
+	return out, errors.Join(errs...)
 }

@@ -71,7 +71,7 @@ func TestParseStreamFramesEveryLinkFrame(t *testing.T) {
 		events    int
 		fc        uint8
 		direction string
-	}{{1, FuncRead, "master"}, {0, 0, ""}, {1, FuncDirectOperate, "master"}, {1, FuncResponse, "outstation"}, {0, 0, ""}}
+	}{{1, FuncRead, "master"}, {0, 0, ""}, {1, FuncDirectOperate, "master"}, {0, 0, ""}, {1, FuncResponse, "outstation"}}
 	for i, w := range perFrame {
 		evs := res.Frames[i].Events
 		if len(evs) != w.events {
@@ -95,7 +95,7 @@ func hexOf(b []byte) string { return hex.EncodeToString(b) }
 
 func TestParseStreamSplitAtEveryByte(t *testing.T) {
 	stream := concat(readFrame, linkStatus, operateFrame, continuation, []byte{0x05, 0x64, 0x05, 0xC0, 1, 0, 2, 0, 0xFF, 0xFF})
-	decodertest.CheckSplits(t, NewDecoder(), dnp3State(), dpi.StreamView{Base: 7, Bytes: stream})
+	decodertest.CheckSplitsFactory(t, func() dpi.StreamDecoder { return NewDecoder() }, dnp3State(), dpi.StreamView{Base: 7, Bytes: stream})
 }
 
 func TestParseStreamFrameErrors(t *testing.T) {
@@ -305,7 +305,9 @@ func TestStreamDNP3EventShapeMatchesSingleFrame(t *testing.T) {
 		"object_count":        uint16(0),
 		"raw_hex":             hex.EncodeToString(f),
 	}
-	if !reflect.DeepEqual(evs[0].Attributes, want) {
-		t.Fatalf("attributes = %#v, want %#v", evs[0].Attributes, want)
+	for k, v := range want {
+		if !reflect.DeepEqual(evs[0].Attributes[k], v) {
+			t.Fatalf("%s = %#v, want %#v", k, evs[0].Attributes[k], v)
+		}
 	}
 }

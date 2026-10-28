@@ -14,21 +14,23 @@ import (
 )
 
 // Well-known port-to-protocol mappings for ICS/OT enrichment.
-var portProtoMap = map[string]string{
-	"502":   "modbus",
-	"44818": "cip",
-	"2222":  "cip",
-	"20000": "dnp3",
-	"161":   "snmp",
-	"162":   "snmp",
-	"53":    "dns",
-	"443":   "tls",
-	"80":    "http",
-	"22":    "ssh",
-	"3389":  "rdp",
-	"445":   "smb",
-	"123":   "ntp",
-}
+var portProtoMap = func() map[string]string {
+	ports := map[string]string{
+		"161":  "snmp",
+		"162":  "snmp",
+		"53":   "dns",
+		"443":  "tls",
+		"80":   "http",
+		"22":   "ssh",
+		"3389": "rdp",
+		"445":  "smb",
+		"123":  "ntp",
+	}
+	for _, p := range ics.DecoderPorts() {
+		ports[strconv.Itoa(int(p.Port))] = p.Protocol
+	}
+	return ports
+}()
 
 // suricataPriorityMap maps Suricata/Snort numeric priority to containd severity.
 var suricataPriorityMap = map[int]string{

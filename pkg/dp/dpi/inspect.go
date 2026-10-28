@@ -56,7 +56,10 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 	key, session, pos := streamKey(state, pkt)
 	var errEvent *Event
 	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
-		anchored := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake)
+		anchored, discarded := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake)
+		if discarded {
+			m.endStream(key)
+		}
 		if pkt.FailClosed && len(pkt.Payload) > 0 && !anchored {
 			errEvent = streamError(state, pkt, &res, &StreamError{Kind: StreamResync, Offset: m.reassembler.watermark(key)})
 		}
@@ -73,7 +76,9 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
 
 	if framer != nil && res.Err == nil && len(pkt.Payload) > 0 && !(pkt.FailClosed && pkt.TCPRst) {
 		now := time.Now()
-		m.reassembler.sweep(now)
+		for _, expired := range m.reassembler.sweep(now) {
+			m.endStream(expired)
+		}
 		fed := m.reassembler.feed(key, pos, pkt.Payload, now, true, pkt.HasOffset, pkt.FailClosed)
 		res.Gap = fed.gap
 		switch {
@@ -146,6 +151,9 @@ func firstFramer(candidates []Decoder, state *flow.State) StreamDecoder {
 // returns an error that is not a *FrameError, yields a FrameError at the
 // view's base and none of its frames.
 func (m *Manager) parseFramed(state *flow.State, pkt *ParsedPacket, sd StreamDecoder, res *InspectResult, key string, v StreamView) *Event {
+	if ender, ok := sd.(StreamEnder); ok {
+		m.streamEnds[key] = streamEnd{decoder: ender, session: v.Session, dir: v.Dir}
+	}
 	sr, err := sd.ParseStream(state, v)
 	var fe *FrameError
 	switch {
@@ -200,9 +208,21 @@ func frameContractViolation(v StreamView, sr StreamResult, continues bool) strin
 func (m *Manager) discard(key string, keepFailed bool, err error) {
 	if keepFailed {
 		m.reassembler.fail(key, err)
+	} else {
+		m.reassembler.complete(key)
+	}
+	m.endStream(key)
+}
+
+// endStream drops the recorded decoder state for key. Callers hold streamMu,
+// which serializes this notification with ParseStream.
+func (m *Manager) endStream(key string) {
+	ended, ok := m.streamEnds[key]
+	if !ok {
 		return
 	}
-	m.reassembler.complete(key)
+	delete(m.streamEnds, key)
+	ended.decoder.StreamEnded(ended.session, ended.dir)
 }
 
 // malformedEvent is the single event the manager reports for a framed
@@ -230,7 +250,9 @@ func (m *Manager) EndStream(session string) {
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
 	for _, dir := range []StreamDir{ClientToServer, ServerToClient} {
-		m.reassembler.complete(sessionStreamKey(session, dir))
+		key := sessionStreamKey(session, dir)
+		m.reassembler.complete(key)
+		m.endStream(key)
 	}
 }
 

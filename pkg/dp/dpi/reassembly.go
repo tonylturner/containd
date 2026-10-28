@@ -165,32 +165,33 @@ func seqDiff(a, b uint32) int32 {
 // follow: the stream drops its bytes and is lost, so its next bytes are a
 // mid-stream pickup.
 //
-// open reports whether the stream is anchored at this SYN: it started a
-// stream, or repeats the SYN its live stream started at.
-func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, handshake bool) bool {
+// open reports whether the stream is anchored at this SYN and whether it
+// discarded the prior stream's accumulated state.
+func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, handshake bool) (anchored, discarded bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.streams[key]
 	switch {
 	case !ok:
 		if failClosed && !handshake {
-			return false
+			return false, false
 		}
 	case failClosed && s.failed != nil:
 		if !midStream(s.failed) || !handshake {
-			return false
+			return false, false
 		}
 	case s.synSeen && s.synSeq == seq && !s.closed:
 		s.lastUpdate = now
-		return true
+		return true, false
 	case failClosed && !s.closed:
 		if handshake {
 			r.loseLocked(s)
+			discarded = true
 		}
 		s.lastUpdate = now
-		return false
+		return false, discarded
 	case failClosed && !handshake:
-		return false
+		return false, false
 	}
 	if ok {
 		r.bytesBuffered -= s.held()
@@ -198,7 +199,7 @@ func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, ha
 		r.activeStreams++
 	}
 	r.streams[key] = &stream{strict: true, mode: posSeq, seq0: seq, synSeen: true, synSeq: seq, verify: failClosed, lastUpdate: now}
-	return true
+	return true, ok
 }
 
 // loseLocked drops the bytes of a live fail-closed stream, which keeps its
@@ -530,19 +531,21 @@ func (r *reassembler) completeLocked(key string) {
 	}
 }
 
-// sweep removes streams idle longer than idleTimeout, except session
-// streams, whose lifetime the caller owns (EndStream), failed streams,
-// which hold no bytes and stay failed until their flow ends, and live
-// fail-closed streams, which keep their position until their flow ends:
-// one holding a partial frame drops it and is lost, another drops only its
-// consumed history. It runs at most once per idleTimeout.
-func (r *reassembler) sweep(now time.Time) {
+// sweep expires decoder state for streams idle longer than idleTimeout,
+// except session streams, whose lifetime the caller owns (EndStream), and
+// failed streams, which stay failed until their flow ends. Live fail-closed
+// streams keep their position: one holding a partial frame drops it and is
+// lost, while another drops only its consumed history. It returns keys
+// whose decoder state was discarded; a fail-closed stream may remain to
+// preserve its transport position. It runs at most once per idleTimeout.
+func (r *reassembler) sweep(now time.Time) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if now.Sub(r.lastSweep) < r.idleTimeout {
-		return
+		return nil
 	}
 	r.lastSweep = now
+	var expired []string
 	for key, s := range r.streams {
 		if s.keep || s.failed != nil || now.Sub(s.lastUpdate) <= r.idleTimeout {
 			continue
@@ -552,13 +555,17 @@ func (r *reassembler) sweep(now time.Time) {
 			r.bytesBuffered -= s.held()
 			delete(r.streams, key)
 			r.activeStreams--
+			expired = append(expired, key)
 		case s.stored() > 0:
 			r.loseLocked(s)
+			expired = append(expired, key)
 		default:
 			r.bytesBuffered -= len(s.hist)
 			s.hist = nil
+			expired = append(expired, key)
 		}
 	}
+	return expired
 }
 
 // retransmissions returns the duplicate-segment count of a stream.
