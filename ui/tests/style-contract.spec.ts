@@ -57,7 +57,7 @@ for (const [path, placeholder] of [
   ["/identities", "Search addresses or identities..."],
   ["/zones", "Search zones..."],
   ["/audit", "Search audit log..."],
-  ["/alerts", "Search alerts by message, rule ID, IP..."],
+  ["/alerts", "Search alerts by message, ID, anomaly type, IP..."],
   ["/ids", "Search rules..."],
 ] as const) {
   test(`${path} search text starts clear of its icon`, async ({ page }) => {
