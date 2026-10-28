@@ -1,0 +1,5 @@
+[INFO] Registered session 1
+[INFO] Send request: service=0xa epath=[classId=2 objectId=1]
+status=0x8 additional=
+[INFO] Unregistered session 1
+FAIL: unexpected adapter status

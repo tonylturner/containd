@@ -1,0 +1,128 @@
+{
+  "events": [
+    {
+      "frame": 4,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": [
+            "cip.encapsulation_payload_unsupported"
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": [
+            "cip.encapsulation_payload_unsupported"
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": [
+            "cip.service_payload_unsupported"
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": [
+            "cip.service_payload_unsupported"
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 10,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 11,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": [
+            "cip.service_payload_unsupported"
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 12,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 13,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    },
+    {
+      "frame": 14,
+      "objects": [
+        {
+          "kind": "request",
+          "conformance": [],
+          "undecoded": [
+            "cip.service_payload_unsupported"
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 15,
+      "objects": [
+        {
+          "kind": "response",
+          "conformance": [],
+          "undecoded": [
+            "cip.service_payload_unsupported"
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 16,
+      "objects": [
+        {
+          "kind": "session",
+          "conformance": [],
+          "undecoded": []
+        }
+      ]
+    }
+  ]
+}

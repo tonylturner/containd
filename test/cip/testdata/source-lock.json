@@ -1,0 +1,12 @@
+{
+  "opener": {
+    "commit": "0e1ab7ee5c272950c0dc8daf7793008d7a518912",
+    "url": "https://codeload.github.com/EIPStackGroup/OpENer/tar.gz/0e1ab7ee5c272950c0dc8daf7793008d7a518912",
+    "sha256": "5b01333bdc300c1410cf9e02d33a564320b7a6094786a047065a7ec14b21d945"
+  },
+  "eipscanner": {
+    "commit": "12c89a57ec2e7449efb1348be52af10be9ef9701",
+    "url": "https://codeload.github.com/nimbuscontrols/EIPScanner/tar.gz/12c89a57ec2e7449efb1348be52af10be9ef9701",
+    "sha256": "3efbb95bff91501328b5899dd635cfee61ec11f59f3ad7609812fb65211ddc63"
+  }
+}

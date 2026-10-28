@@ -173,7 +173,7 @@ func TestUDPEncapsulatedDiscovery(t *testing.T) {
 
 func FuzzNativeIO(f *testing.F) {
 	for _, fixture := range captureFixtures(f) {
-		if fixture.Name != "udp-enip-io" {
+		if fixture.Spec.Transport != "udp" {
 			continue
 		}
 		for _, seed := range corpus.Seeds(fixture) {
