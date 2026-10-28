@@ -32,10 +32,11 @@ func TestRecordModbusCreatesAssets(t *testing.T) {
 		t.Fatalf("expected 2 assets, got %d", len(assets))
 	}
 
-	src, ok := inv.Get("10.0.0.1")
-	if !ok {
+	srcAssets := inv.GetAssets("10.0.0.1")
+	if len(srcAssets) != 1 {
 		t.Fatal("expected source asset")
 	}
+	src := srcAssets[0]
 	if src.Role != "master" {
 		t.Errorf("expected master role, got %s", src.Role)
 	}
@@ -43,10 +44,11 @@ func TestRecordModbusCreatesAssets(t *testing.T) {
 		t.Errorf("expected modbus protocol, got %s", src.Protocol)
 	}
 
-	dst, ok := inv.Get("10.0.0.2")
-	if !ok {
+	dstAssets := inv.GetAssets("10.0.0.2")
+	if len(dstAssets) != 1 {
 		t.Fatal("expected destination asset")
 	}
+	dst := dstAssets[0]
 	if dst.Role != "slave" {
 		t.Errorf("expected slave role, got %s", dst.Role)
 	}
@@ -67,11 +69,11 @@ func TestRecordModbusRoleClassification(t *testing.T) {
 	}
 	inv.RecordEvent("192.168.1.10", "192.168.1.20", ev)
 
-	master, _ := inv.Get("192.168.1.10")
+	master := inv.GetAssets("192.168.1.10")[0]
 	if master.Role != "master" {
 		t.Errorf("source should be master, got %s", master.Role)
 	}
-	slave, _ := inv.Get("192.168.1.20")
+	slave := inv.GetAssets("192.168.1.20")[0]
 	if slave.Role != "slave" {
 		t.Errorf("destination should be slave, got %s", slave.Role)
 	}
@@ -116,7 +118,7 @@ func TestDeduplicationOfFunctionCodesAndUnitIDs(t *testing.T) {
 	inv.RecordEvent("10.0.0.1", "10.0.0.2", ev)
 	inv.RecordEvent("10.0.0.1", "10.0.0.2", ev)
 
-	src, _ := inv.Get("10.0.0.1")
+	src := inv.GetAssets("10.0.0.1")[0]
 	if len(src.UnitIDs) != 1 {
 		t.Errorf("expected 1 unique unit ID, got %d", len(src.UnitIDs))
 	}
@@ -138,7 +140,7 @@ func TestDeduplicationOfFunctionCodesAndUnitIDs(t *testing.T) {
 	}
 	inv.RecordEvent("10.0.0.1", "10.0.0.2", ev2)
 
-	src, _ = inv.Get("10.0.0.1")
+	src = inv.GetAssets("10.0.0.1")[0]
 	if len(src.FunctionCodes) != 2 {
 		t.Errorf("expected 2 unique function codes, got %d", len(src.FunctionCodes))
 	}
@@ -161,10 +163,11 @@ func TestRecordDNP3(t *testing.T) {
 	}
 	inv.RecordEvent("10.0.0.1", "10.0.0.2", ev)
 
-	src, ok := inv.Get("10.0.0.1")
-	if !ok {
+	srcAssets := inv.GetAssets("10.0.0.1")
+	if len(srcAssets) != 1 {
 		t.Fatal("expected source asset")
 	}
+	src := srcAssets[0]
 	if src.Protocol != "dnp3" {
 		t.Errorf("expected dnp3, got %s", src.Protocol)
 	}
@@ -186,17 +189,19 @@ func TestRecordCIP(t *testing.T) {
 	}
 	inv.RecordEvent("10.0.0.1", "10.0.0.2", ev)
 
-	src, ok := inv.Get("10.0.0.1")
-	if !ok {
+	srcAssets := inv.GetAssets("10.0.0.1")
+	if len(srcAssets) != 1 {
 		t.Fatal("expected source asset")
 	}
+	src := srcAssets[0]
 	if src.Role != "client" {
 		t.Errorf("expected client role, got %s", src.Role)
 	}
-	dst, ok := inv.Get("10.0.0.2")
-	if !ok {
+	dstAssets := inv.GetAssets("10.0.0.2")
+	if len(dstAssets) != 1 {
 		t.Fatal("expected destination asset")
 	}
+	dst := dstAssets[0]
 	if dst.Role != "server" {
 		t.Errorf("expected server role, got %s", dst.Role)
 	}
@@ -236,14 +241,14 @@ func TestPeers(t *testing.T) {
 	inv.RecordEvent("10.0.0.1", "10.0.0.2", ev)
 	inv.RecordEvent("10.0.0.1", "10.0.0.3", ev)
 
-	src, _ := inv.Get("10.0.0.1")
+	src := inv.GetAssets("10.0.0.1")[0]
 	if len(src.Peers) != 2 {
 		t.Errorf("expected 2 peers, got %d", len(src.Peers))
 	}
 
 	// Duplicate peer should not be added.
 	inv.RecordEvent("10.0.0.1", "10.0.0.2", ev)
-	src, _ = inv.Get("10.0.0.1")
+	src = inv.GetAssets("10.0.0.1")[0]
 	if len(src.Peers) != 2 {
 		t.Errorf("expected 2 peers after dup, got %d", len(src.Peers))
 	}
@@ -291,14 +296,14 @@ func TestRolesFollowConnection(t *testing.T) {
 					"source_address": uint16(10), "destination_address": uint16(20), "direction": "master",
 				}}
 				inv.RecordEvent(k.SrcIP.String(), k.DstIP.String(), ev)
-				client, _ := inv.Get("10.0.0.1")
-				server, _ := inv.Get("10.0.0.2")
+				client := inv.GetAssets("10.0.0.1")[0]
+				server := inv.GetAssets("10.0.0.2")[0]
 				if client.Role != tc.client || server.Role != tc.server {
 					t.Fatalf("%s replyFirst=%v: client=%+v server=%+v", tc.proto, replyFirst, client, server)
 				}
 			}
 			if tc.proto == "dnp3" {
-				client, _ := inv.Get("10.0.0.1")
+				client := inv.GetAssets("10.0.0.1")[0]
 				if len(client.StationAddresses) != 2 {
 					t.Fatalf("lost wire station addresses: %+v", client)
 				}
@@ -312,15 +317,16 @@ func TestRolesWithoutConnectionEvidence(t *testing.T) {
 	key := inventoryKey("10.0.0.1", "10.0.0.2", 502)
 	for _, id := range []string{"", "unrelated|1", key.Reversed().Hash()} {
 		inv.RecordEvent("10.0.0.1", "10.0.0.2", dpi.Event{Proto: "modbus", Kind: "response", FlowID: id})
-		client, _ := inv.Get("10.0.0.1")
+		client := inv.GetAssets("10.0.0.1")[0]
 		if client.Role != "" {
 			t.Fatalf("invented role: %+v", client)
 		}
 	}
 	inv.RecordEvent("10.0.0.1", "10.0.0.2", dpi.Event{Proto: "modbus", FlowID: key.Hash()})
 	inv.RecordEvent("10.0.0.1", "10.0.0.2", dpi.Event{Proto: "modbus", Kind: "exception"})
-	client, _ := inv.Get("10.0.0.1")
-	if client.Role != "master" {
-		t.Fatalf("erased known role: %+v", client)
+	client := inv.GetAssets("10.0.0.1")
+	if len(client) != 2 || client[0].Role != "" || client[0].PacketCount != 4 ||
+		client[1].Role != "master" || client[1].PacketCount != 1 {
+		t.Fatalf("mixed unknown and known observations: %+v", client)
 	}
 }

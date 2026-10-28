@@ -51,6 +51,65 @@ func TestEngineStatusError(t *testing.T) {
 	}
 }
 
+func TestInventoryAssetsClient(t *testing.T) {
+	want := []inventory.DiscoveredAsset{
+		{IP: "192.0.2.50", Protocol: "cip", Role: "client"},
+		{IP: "192.0.2.50", Protocol: "modbus", Role: ""},
+		{IP: "192.0.2.50", Protocol: "modbus", Role: "master"},
+		{IP: "192.0.2.50", Protocol: "modbus", Role: "slave"},
+	}
+	body, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		wantErr    bool
+	}{
+		{"observations", string(body), 200, false},
+		{"missing", "", 404, false},
+		{"unavailable", `{"error":"inventory unavailable"}`, 503, true},
+		{"singular rejected", `{"ip":"192.0.2.50","protocol":"modbus"}`, 200, true},
+		{"null rejected", "null", 200, true},
+		{"malformed rejected", "[", 200, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if _, err := io.Copy(io.Discard, r.Body); err != nil {
+					t.Error(err)
+					return
+				}
+				if r.Method != http.MethodGet || (r.URL.Path != "/internal/inventory/192.0.2.50" && r.URL.Path != "/internal/inventory") {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			client := NewHTTPClient(srv.URL)
+			got, err := client.GetInventoryAssets(context.Background(), " 192.0.2.50 ")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("GetInventoryAssets error: %v", err)
+			}
+			if tc.name == "observations" {
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("got %+v; want %+v", got, want)
+				}
+				list, err := client.ListInventory(context.Background())
+				if err != nil || !reflect.DeepEqual(list, got) {
+					t.Fatalf("list and lookup disagree: %+v / %v", list, err)
+				}
+			}
+			if tc.status == 404 && got != nil {
+				t.Fatalf("missing IP returned observations: %+v", got)
+			}
+		})
+	}
+}
+
 func TestHTTPClientRepresentativeEndpoints(t *testing.T) {
 	t.Parallel()
 
@@ -178,9 +237,9 @@ func TestHTTPClientRepresentativeEndpoints(t *testing.T) {
 	if len(statsOut) != 0 {
 		t.Fatalf("ListProtoStats = %#v, want empty slice", statsOut)
 	}
-	asset, err := c.GetInventoryAsset(ctx, "192.0.2.50")
+	asset, err := c.GetInventoryAssets(ctx, "192.0.2.50")
 	if err != nil || asset != nil {
-		t.Fatalf("GetInventoryAsset = %#v, %v; want nil, nil", asset, err)
+		t.Fatalf("GetInventoryAssets = %#v, %v; want nil, nil", asset, err)
 	}
 	if _, err := c.ListDHCPLeases(ctx); err == nil || !strings.Contains(err.Error(), "dhcp unavailable") {
 		t.Fatalf("ListDHCPLeases error = %v", err)

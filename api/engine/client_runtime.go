@@ -154,8 +154,8 @@ func (c *HTTPClient) ListInventory(ctx context.Context) ([]inventory.DiscoveredA
 	return out, nil
 }
 
-// GetInventoryAsset fetches a discovered ICS asset by IP.
-func (c *HTTPClient) GetInventoryAsset(ctx context.Context, ip string) (*inventory.DiscoveredAsset, error) {
+// GetInventoryAssets fetches all discovered ICS observations for an IP.
+func (c *HTTPClient) GetInventoryAssets(ctx context.Context, ip string) ([]inventory.DiscoveredAsset, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/internal/inventory/"+url.PathEscape(strings.TrimSpace(ip)), nil)
 	if err != nil {
 		return nil, err
@@ -171,11 +171,14 @@ func (c *HTTPClient) GetInventoryAsset(ctx context.Context, ip string) (*invento
 	if resp.StatusCode != http.StatusOK {
 		return nil, engineStatusError(resp, "engine inventory asset status")
 	}
-	var out inventory.DiscoveredAsset
+	var out []inventory.DiscoveredAsset
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	if out == nil {
+		return nil, fmt.Errorf("invalid engine inventory observations")
+	}
+	return out, nil
 }
 
 // ClearInventory clears the engine-side discovered asset inventory.

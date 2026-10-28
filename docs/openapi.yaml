@@ -4751,14 +4751,14 @@ paths:
           description: Engine does not support connection revocation
   /inventory/{ip}:
     get:
-      summary: Get discovered asset
+      summary: List discovered observations for an IP
       tags: [Inventory]
       responses:
         '200':
           description: Success
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/InventoryDiscoveredAsset'}
+              schema: {type: array, items: {$ref: '#/components/schemas/InventoryDiscoveredAsset'}}
         '404':
           description: Asset not found in the available engine inventory
           content:

@@ -104,7 +104,7 @@ func TestInventoryIdleExpiry(t *testing.T) {
 	}
 	inv.RecordEvent("a", "b", dpi.Event{Proto: "modbus"})
 	for _, e := range inv.assets.items {
-		e.Value.(*entry[string, *DiscoveredAsset]).touched = old
+		e.Value.(*entry[assetKey, *DiscoveredAsset]).touched = old
 	}
 	if len(inv.List()) != 0 {
 		t.Fatal("legacy did not expire")
@@ -121,7 +121,7 @@ func TestLegacyInventoryBoundsAndCopies(t *testing.T) {
 	if len(inv.List()) != MaxAssets {
 		t.Fatal("unbounded assets")
 	}
-	a, _ := inv.Get("client")
+	a := inv.GetAssets("client")[0]
 	if len(a.Peers) != MaxPeers || len(a.StationAddresses) != MaxStationAddresses {
 		t.Fatal("unbounded metadata")
 	}
@@ -129,13 +129,13 @@ func TestLegacyInventoryBoundsAndCopies(t *testing.T) {
 	if overflow.Assets != 2 || overflow.Peers == 0 || overflow.StationAddresses == 0 {
 		t.Fatal(overflow)
 	}
-	if _, ok := inv.Get("peer-0000"); ok {
+	if len(inv.GetAssets("peer-0000")) != 0 {
 		t.Fatal("oldest peer retained")
 	}
 	a.Peers[0] = "mutated"
-	b, _ := inv.Get("client")
+	b := inv.GetAssets("client")[0]
 	if b.Peers[0] == "mutated" {
-		t.Fatal("Get aliases store")
+		t.Fatal("GetAssets aliases store")
 	}
 	list := inv.List()
 	for i := range list {
@@ -143,7 +143,7 @@ func TestLegacyInventoryBoundsAndCopies(t *testing.T) {
 			list[i].Peers[0] = "mutated"
 		}
 	}
-	b, _ = inv.Get("client")
+	b = inv.GetAssets("client")[0]
 	if b.Peers[0] == "mutated" {
 		t.Fatal("List aliases store")
 	}

@@ -114,12 +114,12 @@ func inventoryItemHandler(dpEngine *engine.Engine) http.HandlerFunc {
 			writeJSON(w, map[string]string{"error": "inventory unavailable"})
 			return
 		}
-		asset, ok := inv.Get(ip)
-		if !ok {
+		assets := inv.GetAssets(ip)
+		if len(assets) == 0 {
 			http.Error(w, "asset not found", http.StatusNotFound)
 			return
 		}
-		writeJSON(w, asset)
+		writeJSON(w, assets)
 	}
 }
 
