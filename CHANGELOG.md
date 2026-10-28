@@ -228,6 +228,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Discovered ICS assets keep a separate observation per protocol and role,
   so a host that speaks two protocols, or is both client and server, no
   longer has one observation overwrite another.
+- Security conduit analysis names and classifies ICS protocols by transport
+  and port, so a TCP rule on port 2222 is no longer shown as EtherNet/IP.
 
 - The scanning gate tracks connections by both TCP endpoints, so connections
   sharing a client IP and port keep their own masquerading, events and resets.
