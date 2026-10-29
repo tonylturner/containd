@@ -88,9 +88,9 @@ func TestParseEIPHeaderTooShort(t *testing.T) {
 }
 
 func TestParseCIPMessageFromSendRRData(t *testing.T) {
-	// Build a SendRRData payload with Read_Tag (0x4C), path = [0x20, 0x02]
-	path := []byte{0x20, 0x02}
-	payload := buildSendRRDataPayload(0x4C, 1, path)
+	// Read_Tag requires a supported Logix target.
+	path := []byte{0x91, 0x02, 0x54, 0x47}
+	payload := buildSendRRDataPayloadWithData(0x4C, 2, path, []byte{1, 0})
 
 	result := ParseCIPMessage(payload)
 	cipMsg := result.Message
@@ -106,8 +106,8 @@ func TestParseCIPMessageFromSendRRData(t *testing.T) {
 	if cipMsg.IsResponse {
 		t.Fatal("expected request, got response")
 	}
-	if len(cipMsg.Path) != 2 {
-		t.Fatalf("expected 2 path bytes, got %d", len(cipMsg.Path))
+	if len(cipMsg.Path) != 4 {
+		t.Fatalf("expected 4 path bytes, got %d", len(cipMsg.Path))
 	}
 }
 
@@ -128,38 +128,6 @@ func TestParseCIPMessageResponse(t *testing.T) {
 	}
 }
 
-func TestServiceCodeClassification(t *testing.T) {
-	// Read services
-	for _, code := range []uint8{0x01, 0x03, 0x0D, 0x0E, 0x4C, 0x4E, 0x5B} {
-		if !IsReadService(code) {
-			t.Fatalf("expected 0x%02X to be read", code)
-		}
-	}
-
-	// Write services
-	for _, code := range []uint8{0x02, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B,
-		0x10, 0x16, 0x1A, 0x4B, 0x4D, 0x4F, 0x52, 0x54} {
-		if !IsWriteService(code) {
-			t.Fatalf("expected 0x%02X to be write", code)
-		}
-	}
-
-	// Control services
-	for _, code := range []uint8{0x05, 0x06, 0x07, 0x08, 0x09, 0x54} {
-		if !IsControlService(code) {
-			t.Fatalf("expected 0x%02X to be control", code)
-		}
-	}
-	if IsControlService(0x4C) {
-		t.Fatal("0x4C should not be control")
-	}
-
-	// Response bit should be masked off
-	if !IsReadService(0x4C | 0x80) {
-		t.Fatal("response 0xCC should still classify as read")
-	}
-}
-
 func TestCommandName(t *testing.T) {
 	if CommandName(0x0065) != "RegisterSession" {
 		t.Fatalf("expected RegisterSession, got %s", CommandName(0x0065))
@@ -170,16 +138,6 @@ func TestCommandName(t *testing.T) {
 	name := CommandName(0xFFFF)
 	if name == "" {
 		t.Fatal("expected non-empty name for unknown command")
-	}
-}
-
-func TestServiceName(t *testing.T) {
-	if ServiceName(0x4C) != "Read_Tag" {
-		t.Fatalf("expected Read_Tag, got %s", ServiceName(0x4C))
-	}
-	// Response bit masked
-	if ServiceName(0xCC) != "Read_Tag" {
-		t.Fatalf("expected Read_Tag for response, got %s", ServiceName(0xCC))
 	}
 }
 
@@ -219,8 +177,8 @@ func TestDecoderOnPacketSendRRData(t *testing.T) {
 	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
 
 	// Build a full SendRRData packet with Read_Tag
-	path := []byte{0x20, 0x02}
-	cipPayload := buildSendRRDataPayload(0x4C, 1, path)
+	path := []byte{0x91, 0x02, 0x54, 0x47}
+	cipPayload := buildSendRRDataPayloadWithData(0x4C, 2, path, []byte{1, 0})
 	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
 
 	events, err := dec.OnPacket(state, &dpi.ParsedPacket{Payload: raw})
@@ -246,8 +204,8 @@ func TestDecoderOnPacketSendRRData(t *testing.T) {
 	if ev.Attributes["is_write"] != false {
 		t.Fatal("Read_Tag should not be is_write")
 	}
-	if ev.Attributes["cip_path"] != "2002" {
-		t.Fatalf("expected cip_path 2002, got %v", ev.Attributes["cip_path"])
+	if ev.Attributes["cip_path"] != "91025447" {
+		t.Fatalf("expected cip_path 91025447, got %v", ev.Attributes["cip_path"])
 	}
 }
 
@@ -297,8 +255,8 @@ func TestDecoderOnPacketResponse(t *testing.T) {
 	if ev.Kind != "response" {
 		t.Fatalf("expected kind response, got %s", ev.Kind)
 	}
-	if ev.Attributes["is_write"] != true {
-		t.Fatal("Write_Tag response should be is_write")
+	if _, present := ev.Attributes["is_write"]; present {
+		t.Fatal("uncorrelated response must not carry access semantics")
 	}
 }
 
@@ -387,14 +345,9 @@ func buildSendRRDataPayloadWithData(serviceCode uint8, pathSize uint8, path []by
 
 func TestParseMSPServices(t *testing.T) {
 	t.Run("two sub-services Read_Tag+Write_Tag", func(t *testing.T) {
-		mspData := buildMSPData([]struct {
-			code     uint8
-			pathSize uint8
-			path     []byte
-		}{
-			{code: 0x4C, pathSize: 1, path: []byte{0x20, 0x04}}, // Read_Tag
-			{code: 0x4D, pathSize: 1, path: []byte{0x20, 0x04}}, // Write_Tag
-		})
+		mspData := mspWire(0x0a,
+			[]byte{0x4c, 2, 0x91, 2, 'T', 'G', 1, 0},
+			[]byte{0x4d, 2, 0x91, 2, 'T', 'G'})[2:]
 		subs := ParseMSPServices(mspData).Children
 		if len(subs) != 2 {
 			t.Fatalf("expected 2 sub-services, got %d", len(subs))
@@ -405,13 +358,13 @@ func TestParseMSPServices(t *testing.T) {
 		if subs[0].ServiceName != "Read_Tag" {
 			t.Fatalf("expected Read_Tag, got %s", subs[0].ServiceName)
 		}
-		if IsWriteService(subs[0].ServiceCode) {
-			t.Fatal("Read_Tag should not be IsWrite")
+		if Classify(subs[0].CIPMessage) != AccessRead {
+			t.Fatal("Read_Tag should be read")
 		}
 		if subs[1].ServiceCode != 0x4D {
 			t.Fatalf("expected 0x4D, got 0x%02X", subs[1].ServiceCode)
 		}
-		if !IsWriteService(subs[1].ServiceCode) {
+		if Classify(subs[1].CIPMessage) != AccessWrite {
 			t.Fatal("Write_Tag should be IsWrite")
 		}
 	})
@@ -469,14 +422,9 @@ func TestDecoderMSPTwoSubServices(t *testing.T) {
 	dec := NewDecoder()
 	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
 
-	mspData := buildMSPData([]struct {
-		code     uint8
-		pathSize uint8
-		path     []byte
-	}{
-		{code: 0x4C, pathSize: 1, path: []byte{0x20, 0x04}}, // Read_Tag
-		{code: 0x4D, pathSize: 1, path: []byte{0x20, 0x04}}, // Write_Tag
-	})
+	mspData := mspWire(0x0a,
+		[]byte{0x4c, 2, 0x91, 2, 'T', 'G', 1, 0},
+		[]byte{0x4d, 2, 0x91, 2, 'T', 'G'})[2:]
 
 	cipPayload := buildSendRRDataPayloadWithData(0x0A, 0, nil, mspData)
 	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)
@@ -534,14 +482,9 @@ func TestDecoderMSPReadOnly(t *testing.T) {
 	dec := NewDecoder()
 	state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", 12345, 44818, 6), time.Now())
 
-	mspData := buildMSPData([]struct {
-		code     uint8
-		pathSize uint8
-		path     []byte
-	}{
-		{code: 0x4C, pathSize: 0, path: nil}, // Read_Tag
-		{code: 0x4E, pathSize: 0, path: nil}, // Read_Tag_Fragmented
-	})
+	mspData := mspWire(0x0a,
+		[]byte{0x4c, 2, 0x91, 2, 'T', 'G', 1, 0},
+		[]byte{0x52, 2, 0x91, 2, 'T', 'G', 1, 0, 0, 0, 0, 0})[2:]
 
 	cipPayload := buildSendRRDataPayloadWithData(0x0A, 0, nil, mspData)
 	raw := buildEIPHeader(0x006F, 0x00000001, cipPayload)

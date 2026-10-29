@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
 // ProtoStats holds per-protocol counters.
@@ -73,16 +74,18 @@ func (t *Tracker) RecordEvent(ev dpi.Event) {
 		ps.LastSeen = ev.Timestamp
 	}
 
+	isWrite, classified := eventfields.Bool(ev.Attributes, eventfields.KeyIsWrite)
 	kind := strings.ToLower(ev.Kind)
 	switch {
 	case strings.Contains(kind, "alert"):
 		ps.AlertCount++
-	case attrBool(ev.Attributes, "is_write"):
+	case classified && isWrite:
 		ps.WriteCount++
-	case strings.Contains(kind, "write"):
-		ps.WriteCount++
-	default:
+	case classified && !isWrite:
 		ps.ReadCount++
+	case !classified && !strings.EqualFold(ev.Proto, eventfields.ProtoCIP) && strings.Contains(kind, "write"):
+		// SMB emits command kinds without access attributes.
+		ps.WriteCount++
 	}
 }
 
@@ -166,22 +169,4 @@ func (t *Tracker) TopTalkers(n int) []FlowStats {
 		out = out[:n]
 	}
 	return out
-}
-
-func attrBool(attrs map[string]any, key string) bool {
-	if attrs == nil {
-		return false
-	}
-	v, ok := attrs[key]
-	if !ok {
-		return false
-	}
-	switch b := v.(type) {
-	case bool:
-		return b
-	case string:
-		return strings.EqualFold(strings.TrimSpace(b), "true")
-	default:
-		return false
-	}
 }

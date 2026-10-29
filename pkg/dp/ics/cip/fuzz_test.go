@@ -93,9 +93,18 @@ func FuzzParseCIPMessage(f *testing.F) {
 	f.Add(msp)
 	f.Add(buildCPFItems(cpfTestItem{0x00a1, []byte{1, 0, 0, 0}}, cpfTestItem{0x00b1, []byte{1, 0, 0x4c, 0}}))
 	f.Add(buildCPFItems(cpfTestItem{0x00b2, []byte{0x4c, 0}}, cpfTestItem{0x1234, []byte{1}}))
+	f.Add(cpfMessage(0x4c, 2, 0x91, 2, 'T', 'G', 1, 0))
+	f.Add(cpfMessage(0x52, 2, 0x91, 2, 'T', 'G', 1, 0, 0, 0, 0, 0))
+	f.Add(cpfMessage(0x4c, 2, 0x20, 0x37, 0x24, 1))
+	f.Add(cpfMessage(0x55, 2, 0x20, 0x6b, 0x24, 0, 1, 0, 1, 0))
+	f.Add(cpfMessage(0x4c, 2, 0x20, 0x6c, 0x24, 1, 0, 0, 0, 0, 8, 0))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_ = ParseCIPMessage(data)
+		result := ParseCIPMessage(data)
+		category := Classify(result.Message)
+		if result.Message != nil && result.Message.IsResponse && category != AccessUnknown {
+			t.Fatalf("response classified as %v", category)
+		}
 		_ = ParseMSPServices(data)
 		_ = ParseEPath(data)
 	})
