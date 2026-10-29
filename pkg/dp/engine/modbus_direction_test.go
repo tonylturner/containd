@@ -76,8 +76,8 @@ func TestPolicyDirectionIgnoresKind(t *testing.T) {
 			want = "response"
 		}
 		for _, kind := range []string{"request", "response", "exception", "restart", "session"} {
-			ctx, ok := evalContextFromDPIEvent(nil, state, &dpi.ParsedPacket{Proto: "tcp"}, dpi.Event{Proto: "modbus", Kind: kind}, "", "")
-			if !ok || ctx.ICS.Direction != want {
+			ctx := singleEvalContext(t, nil, state, &dpi.ParsedPacket{Proto: "tcp"}, dpi.Event{Proto: "modbus", Kind: kind}, "", "")
+			if ctx.ICS.Direction != want {
 				t.Fatalf("dir=%v kind=%s ctx=%+v", dir, kind, ctx)
 			}
 		}

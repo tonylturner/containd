@@ -75,39 +75,38 @@ func TestEvalContextModbusSpans(t *testing.T) {
 	}
 	for _, tc := range cases {
 		state, pkt, ev := decodeModbus(t, tc.key, tc.adu)
-		ctx, ok := evalContextFromDPIEvent(nil, state, pkt, ev, "", "")
-		if !ok {
-			t.Fatalf("%s: no context", tc.name)
-		}
+		ctx := singleEvalContext(t, nil, state, pkt, ev, "", "")
 		if !reflect.DeepEqual(ctx.ICS.Spans, tc.spans) || ctx.ICS.SpansUnknown != tc.unknown {
 			t.Errorf("%s: spans %v unknown %v, want %v %v", tc.name, ctx.ICS.Spans, ctx.ICS.SpansUnknown, tc.spans, tc.unknown)
 		}
 	}
 }
 
-// Protocols other than Modbus touch the one numeric address their decoder
-// emits; a non-numeric address touches none and is not unknown.
-func TestEvalContextOtherProtocolAddress(t *testing.T) {
+// CIP display addresses are never policy spans, numeric or otherwise.
+func TestEvalContextCIPHasNoScalarAddressSpans(t *testing.T) {
 	state := &flow.State{Key: flow.Key{SrcIP: net.ParseIP("10.0.0.1"), DstIP: net.ParseIP("10.0.0.2"), SrcPort: 40000, DstPort: 44818, Proto: 6}}
 	pkt := &dpi.ParsedPacket{Proto: "tcp", SrcPort: 40000, DstPort: 44818}
 	cases := []struct {
 		addr  any
 		spans []rules.AddressSpan
 	}{
-		{uint16(256), []rules.AddressSpan{{Low: 256, High: 256}}},
-		{"0x0100", []rules.AddressSpan{{Low: 256, High: 256}}},
-		{float64(7), []rules.AddressSpan{{Low: 7, High: 7}}},
+		{uint16(256), nil},
+		{"0x0100", nil},
+		{float64(7), nil},
 		{"0x02/1/1", nil},
 		{"1-2", nil},
 		{nil, nil},
 	}
 	for _, tc := range cases {
-		attrs := map[string]any{"service_code": uint8(0x0e)}
+		attrs := map[string]any{
+			eventfields.KeyFunctionCode: uint8(0x0e),
+			eventfields.KeyCIPTarget:    "logical",
+		}
 		if tc.addr != nil {
 			attrs["address"] = tc.addr
 		}
-		ctx, ok := evalContextFromDPIEvent(nil, state, pkt, dpi.Event{Proto: "cip", Kind: "request", Attributes: attrs}, "", "")
-		if !ok || !reflect.DeepEqual(ctx.ICS.Spans, tc.spans) || ctx.ICS.SpansUnknown {
+		ctx := singleEvalContext(t, nil, state, pkt, dpi.Event{Proto: "cip", Kind: "request", Attributes: attrs}, "", "")
+		if !reflect.DeepEqual(ctx.ICS.Spans, tc.spans) || ctx.ICS.SpansUnknown {
 			t.Errorf("address %#v: spans %v unknown %v, want %v", tc.addr, ctx.ICS.Spans, ctx.ICS.SpansUnknown, tc.spans)
 		}
 	}
@@ -169,8 +168,8 @@ func assertConformanceUnknownSpanMatch(t *testing.T, action rules.Action, wantMa
 	t.Helper()
 	state, pkt, ev := decodeModbus(t, modbusKey(40000, flow.DirForward), aduShortPDU)
 	ev.Attributes[eventfields.KeyConformance] = []string{"modbus.truncated_pdu"}
-	ctx, ok := evalContextFromDPIEvent(nil, state, pkt, ev, "", "")
-	if !ok || !ctx.ICS.HasFunctionCode || ctx.ICS.FunctionCode != 3 || !ctx.ICS.SpansUnknown {
+	ctx := singleEvalContext(t, nil, state, pkt, ev, "", "")
+	if !ctx.ICS.HasFunctionCode || ctx.ICS.FunctionCode != 3 || !ctx.ICS.SpansUnknown {
 		t.Fatalf("expected decoded FC 3 with unknown address coverage: %+v", ctx.ICS)
 	}
 	entry := rules.Entry{ID: "address-rule", Action: action,

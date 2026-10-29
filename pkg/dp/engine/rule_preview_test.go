@@ -145,15 +145,15 @@ func TestPreviewRuleUSUsesRuntimeContext(t *testing.T) {
 				Attributes: map[string]any{"function_code": uint8(3), "is_write": false, "unit_id": uint8(1)}}
 			entry := rules.Entry{Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "modbus", ReadOnly: true}}
 			snap := &rules.Snapshot{ZoneIfaces: map[string][]string{"control": {"cc0"}, "plant": {"rtu0"}}}
-			got, ok := previewEventContext(snap, entry, ev, previewZoneResolver, ics.Tolerant)
-			want, runtimeOK := evalContextFromDPIEvent(snap, &flow.State{Key: key},
+			got := previewEventContexts(snap, entry, ev, previewZoneResolver, ics.Tolerant)
+			want := evalContextsFromDPIEvent(snap, &flow.State{Key: key},
 				&dpi.ParsedPacket{Proto: "tcp", SrcPort: key.SrcPort, DstPort: key.DstPort},
 				dpi.Event{Proto: ev.Proto, Kind: ev.Kind, Attributes: ev.Attributes}, "control", "plant")
-			want.Now = ev.Timestamp
-			if !ok || !runtimeOK || !reflect.DeepEqual(got, want) {
+			want[0].Now = ev.Timestamp
+			if len(got) != 1 || !reflect.DeepEqual(got, want) {
 				t.Fatalf("preview context %+v != runtime %+v", got, want)
 			}
-			if !rules.PreviewMatch(entry, got) {
+			if !rules.PreviewMatch(entry, got[0]) {
 				t.Fatal("read-only Modbus rule did not match")
 			}
 		})
