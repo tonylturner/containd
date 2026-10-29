@@ -119,21 +119,40 @@ func lookupService(code uint8, t serviceTarget) serviceDefinition {
 	if !t.valid {
 		return serviceDefinition{}
 	}
-	if t.symbolic || t.class == 0x6b {
-		if t.symbolic && code == 0x55 || !t.symbolic && (!t.hasInstance || t.attribute) {
+	if t.symbolic {
+		// Symbolic segments accept tag services, not class-based attribute enumeration.
+		if code == 0x55 {
 			return serviceDefinition{}
-		}
-		if !t.symbolic && (code != 0x55 && t.instance == 0 || code == 0x55 && !t.instanceTarget()) {
-			return serviceDefinition{}
-		}
-		if !t.symbolic && code == 0x4e {
-			return serviceDefinition{} // unverified Symbol-instance RMW form
 		}
 		return logixServices[code]
 	}
-	if t.class == 0x06 && (!t.instanceTarget() || t.instance != 1) ||
-		t.class == 0x6c && (!t.instanceTarget() || t.instance == 0) {
-		return serviceDefinition{}
+	switch t.class {
+	case 0x6b:
+		if code == 0x55 {
+			// Get_Instance_Attribute_List accepts a bare Symbol instance, including zero.
+			if !t.instanceTarget() {
+				return serviceDefinition{}
+			}
+			return logixServices[code]
+		}
+		// Symbol class tag services accept nonzero instances and members, not attributes.
+		if !t.hasInstance || t.instance == 0 || t.attribute {
+			return serviceDefinition{}
+		}
+		if code == 0x4e {
+			return serviceDefinition{} // unverified Symbol-instance RMW form
+		}
+		return logixServices[code]
+	case 0x06:
+		// Connection Manager services accept only bare instance 1.
+		if !t.instanceTarget() || t.instance != 1 {
+			return serviceDefinition{}
+		}
+	case 0x6c:
+		// Template services accept only bare nonzero instances.
+		if !t.instanceTarget() || t.instance == 0 {
+			return serviceDefinition{}
+		}
 	}
 	return objectServices[t.class][code]
 }
