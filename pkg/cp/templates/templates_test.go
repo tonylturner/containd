@@ -65,6 +65,24 @@ func TestICSTemplateProtocolPorts(t *testing.T) {
 	}
 }
 
+func TestCIPMonitorOnlyUsesAccessClassifier(t *testing.T) {
+	rules := CIPMonitorOnly()
+	if len(rules) != 2 {
+		t.Fatalf("rules=%+v", rules)
+	}
+	for i, rule := range rules {
+		if rule.ICS.Protocol != "cip" || len(rule.ICS.FunctionCode) != 0 || len(rule.ICS.ObjectClasses) != 0 {
+			t.Fatalf("rule %d bypasses classifier: %+v", i, rule)
+		}
+	}
+	if rules[0].Action != config.ActionAllow || !rules[0].ICS.ReadOnly || rules[0].ICS.WriteOnly {
+		t.Fatalf("read rule=%+v", rules[0])
+	}
+	if rules[1].Action != config.ActionDeny || !rules[1].ICS.WriteOnly || rules[1].ICS.ReadOnly {
+		t.Fatalf("write/control rule=%+v", rules[1])
+	}
+}
+
 func TestListIsSorted(t *testing.T) {
 	all := List()
 	for i := 1; i < len(all); i++ {

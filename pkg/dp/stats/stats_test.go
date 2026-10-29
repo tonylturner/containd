@@ -18,7 +18,7 @@ func TestTrackerIndependentPacketAndEventCounters(t *testing.T) {
 	tracker.RecordPacket(netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.2"), "modbus", 100, now)
 	for _, kind := range []string{"read_register", "write_coil", "alert_overflow"} {
 		tracker.RecordEvent(dpi.Event{Proto: "modbus", Kind: kind, Timestamp: now.Add(-time.Second),
-			Attributes: map[string]any{"src": "event-source", "dst": "event-destination"}})
+			Attributes: map[string]any{"src": "event-source", "dst": "event-destination", "is_write": kind == "write_coil"}})
 	}
 	got := tracker.Stats()
 	if len(got) != 1 {
@@ -41,11 +41,69 @@ func TestTrackerEventsWithoutPackets(t *testing.T) {
 		tracker.RecordEvent(dpi.Event{Kind: "object", Timestamp: now, Attributes: attrs})
 	}
 	got := tracker.Stats()[0]
-	if got.Protocol != "unknown" || got.PacketCount != 0 || got.ByteCount != 0 || got.EventCount != 4 || got.ReadCount != 2 || got.WriteCount != 2 || !got.LastSeen.Equal(now) {
+	if got.Protocol != "unknown" || got.PacketCount != 0 || got.ByteCount != 0 || got.EventCount != 4 || got.ReadCount != 0 || got.WriteCount != 1 || !got.LastSeen.Equal(now) {
 		t.Fatalf("event-only stats = %+v", got)
 	}
 	if top := tracker.TopTalkers(1); len(top) != 0 {
 		t.Fatalf("event-only flows = %+v", top)
+	}
+}
+
+func TestTrackerRequiresExplicitAccessCategory(t *testing.T) {
+	tracker := New()
+	for _, ev := range []dpi.Event{
+		{Proto: "cip", Kind: "request", Attributes: map[string]any{"is_write": false}},
+		{Proto: "cip", Kind: "request", Attributes: map[string]any{"is_write": true}},
+		{Proto: "cip", Kind: "response"},
+		{Proto: "cip", Kind: "session"},
+		{Proto: "cip", Kind: "request", Attributes: map[string]any{"service_code": uint8(0x0a)}},
+		{Proto: "cip", Kind: "write"},
+		{Proto: "cip", Kind: "alert"},
+		{Proto: "cip", Kind: "request", Attributes: map[string]any{"is_write": "false"}},
+	} {
+		tracker.RecordEvent(ev)
+	}
+	got := tracker.Stats()[0]
+	if got.EventCount != 8 || got.ReadCount != 1 || got.WriteCount != 1 || got.AlertCount != 1 {
+		t.Fatalf("unclassified events became reads/writes: %+v", got)
+	}
+}
+
+func TestTrackerCommandKindFallback(t *testing.T) {
+	for _, version := range []string{"SMB1", "SMB2"} {
+		for _, tc := range []struct {
+			kind          string
+			reads, writes int64
+		}{
+			{"read", 1, 0},
+			{"write", 0, 1},
+			{"negotiate", 0, 0},
+		} {
+			t.Run(version+"/"+tc.kind, func(t *testing.T) {
+				tracker := New()
+				tracker.RecordEvent(dpi.Event{Proto: "smb", Kind: tc.kind, Attributes: map[string]any{
+					"version": version, "command": tc.kind, "src_port": uint16(50000),
+					"dst_port": uint16(445), "transport": uint8(6),
+				}})
+				got := tracker.Stats()[0]
+				if got.EventCount != 1 || got.ReadCount != tc.reads || got.WriteCount != tc.writes || got.AlertCount != 0 {
+					t.Fatalf("SMB command-kind counters = %+v", got)
+				}
+			})
+		}
+	}
+	for _, protocol := range []string{"cip", "CIP"} {
+		for _, kind := range []string{"read", "write", "request"} {
+			t.Run(protocol+"/"+kind, func(t *testing.T) {
+				tracker := New()
+				tracker.RecordEvent(dpi.Event{Proto: protocol, Kind: kind,
+					Attributes: map[string]any{"service_code": uint8(0x7f)}})
+				got := tracker.Stats()[0]
+				if got.EventCount != 1 || got.ReadCount != 0 || got.WriteCount != 0 || got.AlertCount != 0 {
+					t.Fatalf("unclassified CIP event gained an access category: %+v", got)
+				}
+			})
+		}
 	}
 }
 
