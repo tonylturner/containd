@@ -75,9 +75,9 @@ func DefaultBudgets() Budgets {
 	return Budgets{1024, 8, 16, 5 * time.Second, 4, 4096, 16 << 20}
 }
 
-// Key is an opaque caller-assigned connection identity plus an incarnation.
+// Key is an opaque caller-assigned connection incarnation identity.
 // The caller must Release on close, tuple reuse and reconfiguration.
-type Key struct{ Connection, Incarnation uint64 }
+type Key string
 
 // Meta ports are endpoint ports in the same order as Arrival.Direction. They
 // inform Expected only; they never decide content identity or sender role.

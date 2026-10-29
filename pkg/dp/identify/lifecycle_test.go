@@ -110,7 +110,7 @@ func TestSweepDeadlines(t *testing.T) {
 	b := DefaultBudgets()
 	b.Entries = 3
 	table, now := newTestTable(t, b, ics.TCP, 502)
-	pending, confirmed := Key{2, 1}, Key{3, 1}
+	pending, confirmed := Key("2/1"), Key("3/1")
 	for _, key := range []Key{pending, confirmed} {
 		if !table.Open(key, Meta{Transport: ics.TCP}) {
 			t.Fatal("open")
@@ -134,7 +134,7 @@ func TestSweepDeadlines(t *testing.T) {
 	}
 	// Explicit Release preserves the terminal-cache contract and frees admission.
 	table.Release(expired[0])
-	if !table.Open(Key{4, 1}, Meta{Transport: ics.TCP}) {
+	if !table.Open(Key("4/1"), Meta{Transport: ics.TCP}) {
 		t.Fatal("expired slot could not be reused")
 	}
 	*now = now.Add(4 * time.Second)

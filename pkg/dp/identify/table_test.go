@@ -11,7 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
-var testKey = Key{1, 1}
+var testKey = Key("1/1")
 
 func newTestTable(t *testing.T, b Budgets, transport uint8, port uint16) (*Table, *time.Time) {
 	t.Helper()
@@ -243,7 +243,7 @@ func TestMemoryAndEntryCaps(t *testing.T) {
 	if n, charge := table.Usage(); n != 1 || charge != EntryCharge {
 		t.Fatal("SYN allocated payload", n, charge)
 	}
-	if table.Open(Key{2, 1}, Meta{Transport: ics.TCP}) || table.Counters().Overflow != 1 {
+	if table.Open(Key("2/1"), Meta{Transport: ics.TCP}) || table.Counters().Overflow != 1 {
 		t.Fatal("entry cap")
 	}
 	observe(t, table, Arrival{Sequence: 100, Payload: []byte{0}})
@@ -295,19 +295,19 @@ func TestInvalidInputs(t *testing.T) {
 		t.Fatal("nil clock accepted")
 	}
 	table, _ := newTestTable(t, b, ics.TCP, 502)
-	if table.Open(Key{2, 1}, Meta{Transport: 99}) {
+	if table.Open(Key("2/1"), Meta{Transport: 99}) {
 		t.Fatal("invalid transport admitted")
 	}
 	if _, ok := table.Observe(testKey, Arrival{Direction: 2}); ok {
 		t.Fatal("invalid direction")
 	}
-	if _, ok := table.Observe(Key{99, 99}, Arrival{}); ok {
+	if _, ok := table.Observe(Key("99/99"), Arrival{}); ok {
 		t.Fatal("unknown key")
 	}
-	if _, ok := table.Poll(Key{99, 99}); ok {
+	if _, ok := table.Poll(Key("99/99")); ok {
 		t.Fatal("unknown poll")
 	}
-	if _, _, ok := table.Take(Key{99, 99}); ok {
+	if _, _, ok := table.Take(Key("99/99")); ok {
 		t.Fatal("unknown take")
 	}
 }

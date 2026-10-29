@@ -27,7 +27,7 @@ type entry struct {
 // EntryCharge includes the inline entry, key and a conservative 128-byte map
 // slot/allocator allowance. ChargedBytes is deterministic admission accounting,
 // not a claim about total process RSS or Go map bucket allocations.
-const EntryCharge = int(unsafe.Sizeof(entry{})) + int(unsafe.Sizeof(Key{})) + 128
+const EntryCharge = int(unsafe.Sizeof(entry{})) + int(unsafe.Sizeof(Key(""))) + 128
 
 type Table struct {
 	budgets Budgets
