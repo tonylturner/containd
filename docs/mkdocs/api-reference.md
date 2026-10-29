@@ -314,7 +314,8 @@ with `proto: "identify"` and `kind: "identification"`, one per captured
 connection incarnation. `attributes` contains:
 
 - `protocol`, `identification_state` (`confirmed`, `reject`, or
-  `identification_incomplete`), `reason`, `identification_coverage` and
+  `identification_incomplete`), `reason`, optional `identification_coverage`
+  (present only when identification ended on a coverage limit) and
   `identification_candidates`;
 - `expected` (two endpoint protocol expectations, empty string for none),
   `service_transport`, `service_port`, `mismatch`;
@@ -334,8 +335,10 @@ other events of the flow remain retained; they do not resurrect expired flows.
 
 `POST /api/v1/pcap/analyze` (multipart `file`) and
 `POST /api/v1/pcap/analyze/{name}` return policy analysis. `stats.identifications`
-is an array of `{key, flowId, attributes}`: `key` is a run-qualified offline
-incarnation, and `attributes` uses the same spellings above. `stats.events`
+is an array of `{key, flowId, srcIp, dstIp, srcPort, dstPort, attributes}`:
+`key` is a run-qualified offline incarnation. The endpoints follow captured SYN
+client-to-server roles when available, otherwise the flow's orientation hint.
+`attributes` uses the same spellings above. `stats.events`
 includes identification and passive decoder events. Suggestions exclude
 observation-bound connections. The engine's internal PCAP analysis endpoints
 return the analysis directly, with `identifications` at the top level and

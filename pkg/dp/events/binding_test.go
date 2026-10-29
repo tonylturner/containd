@@ -76,3 +76,12 @@ func TestUtilityEvidenceDoesNotSetApplication(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestFlowEventCountIncludesIdentification(t *testing.T) {
+	s := NewStore(4)
+	s.Append(Event{FlowID: "flow", Proto: "identify", Kind: "identification"})
+	s.Append(Event{FlowID: "flow", Proto: "modbus", Kind: "request"})
+	if got := s.Flows(0)[0].EventCount; got != 2 {
+		t.Fatalf("flow event count = %d, want 2 including identification", got)
+	}
+}

@@ -34,6 +34,10 @@ type AnalysisOptions struct {
 type Identification struct {
 	Key        string         `json:"key"`
 	FlowID     string         `json:"flowId"`
+	SrcIP      string         `json:"srcIp"`
+	DstIP      string         `json:"dstIp"`
+	SrcPort    uint16         `json:"srcPort"`
+	DstPort    uint16         `json:"dstPort"`
 	Attributes map[string]any `json:"attributes"`
 }
 
@@ -207,15 +211,24 @@ func (o *offlineObserver) record(out observe.Output, result *AnalysisResult, flo
 	for _, id := range out.Identifications {
 		ev := id.Event
 		ev.Connection = &flow.Connection{Key: string(id.Key), Status: "wire"}
-		result.Identifications = append(result.Identifications, Identification{Key: string(id.Key), FlowID: ev.FlowID, Attributes: ev.Attributes})
+		identification := Identification{Key: string(id.Key), FlowID: ev.FlowID, Attributes: ev.Attributes}
 		if id.Binding == observe.Observation {
 			result.observed[string(id.Key)] = true
 		}
 		hash := ev.FlowID
 		if k, ok := flow.ParseKey(hash); ok {
+			// The directional state carries SYN roles when captured. Present
+			// the opener first, even when the capture started at the SYN-ACK.
+			presented := k
+			if presented.Dir == flow.DirReverse {
+				presented = presented.Reversed()
+			}
+			identification.SrcIP, identification.DstIP = presented.SrcIP.String(), presented.DstIP.String()
+			identification.SrcPort, identification.DstPort = presented.SrcPort, presented.DstPort
 			k.Dir = flow.DirForward
 			hash = k.Hash()
 		}
+		result.Identifications = append(result.Identifications, identification)
 		recordAnalysisEvents(result, flowEvents, hash, "", "", []dpi.Event{ev}, onEvent)
 	}
 	for _, batch := range out.Batches {

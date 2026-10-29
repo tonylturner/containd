@@ -563,7 +563,7 @@ export type IdentificationAttributes = {
   protocol: string;
   identification_state: "confirmed" | "reject" | "identification_incomplete";
   reason: string;
-  identification_coverage: string;
+  identification_coverage?: string;
   identification_candidates: string[] | null;
   expected: [string, string];
   service_transport: "tcp" | "udp";
@@ -584,6 +584,11 @@ export type ObservationAttributes = {
 export type PcapIdentification = {
   key: string;
   flowId: string;
+  /** Client to server from captured SYN roles; otherwise the flow's orientation hint. */
+  srcIp: string;
+  dstIp: string;
+  srcPort: number;
+  dstPort: number;
   attributes: IdentificationAttributes;
 };
 

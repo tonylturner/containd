@@ -15,6 +15,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 )
 
@@ -38,7 +39,7 @@ type FlowSummary struct {
 	Protocol  string    `json:"protocol"`
 	Packets   int       `json:"packets"`
 	Bytes     int       `json:"bytes"`
-	Events    int       `json:"events"`
+	Events    int       `json:"events"` // All retained events, including identification, as in live rollups.
 	FirstSeen time.Time `json:"firstSeen"`
 	LastSeen  time.Time `json:"lastSeen"`
 }
@@ -230,7 +231,9 @@ func recordAnalysisEvents(result *AnalysisResult, flowEvents map[string]int, has
 		if onEvent != nil {
 			onEvent(srcStr, dstStr, ev)
 		}
-		result.Protocols[ev.Proto]++
+		if ev.Proto != eventfields.ProtoIdentify {
+			result.Protocols[ev.Proto]++
+		}
 	}
 	result.Events = append(result.Events, events...)
 	flowEvents[hash] += len(events)
@@ -308,6 +311,9 @@ func AnalyzeForPolicy(r io.Reader, decoders ...dpi.Decoder) (*PolicyAnalysis, er
 	}
 	var candidates []candidate
 	onEvent := func(srcIP, dstIP string, ev dpi.Event) {
+		if ev.Proto == eventfields.ProtoIdentify {
+			return
+		}
 		eventSummary[ev.Proto]++
 		// IT/utility traffic remains visible in analysis, not ICS policy.
 		// IEC104 is also summarised but never auto-learned.

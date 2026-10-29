@@ -54,6 +54,21 @@ func TestIdentificationFixtures(t *testing.T) {
 			if len(result.Identifications) != 1 {
 				t.Fatalf("identifications: %+v", result.Identifications)
 			}
+			if _, ok := result.Protocols["identify"]; ok {
+				t.Fatalf("identification counted as a protocol: %+v", result.Protocols)
+			}
+			identificationEvents, flowEvents := 0, 0
+			for _, ev := range result.Events {
+				if ev.Proto == "identify" {
+					identificationEvents++
+				}
+			}
+			for _, f := range result.Flows {
+				flowEvents += f.Events
+			}
+			if identificationEvents != 1 || flowEvents != len(result.Events) {
+				t.Fatalf("lost flow events: identifications=%d flows=%d events=%d", identificationEvents, flowEvents, len(result.Events))
+			}
 			a := result.Identifications[0].Attributes
 			if a["protocol"] != tc.protocol || a["binding"] != tc.binding || a["identification_state"] != tc.state || a["mismatch"] != tc.mismatch || a["outside_rule_port_scope"] != "unknown" {
 				t.Fatalf("attributes: %+v", a)
@@ -77,11 +92,45 @@ func TestIdentificationFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if _, ok := policy.EventSummary["identify"]; ok {
+				t.Fatalf("identification counted in protocol summary: %+v", policy.EventSummary)
+			}
 			if tc.binding == "observation" && (len(policy.Rules) != 0 || len(policy.Profiles) != 0) {
 				t.Fatalf("passive rules: %+v", policy)
 			}
 			if tc.binding == "legacy" && len(policy.Rules) != 1 {
 				t.Fatalf("legacy rules: %+v", policy.Rules)
+			}
+		})
+	}
+}
+
+func TestIdentificationEndpoints(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		reverse                  bool
+		clientPort, serverPort   uint16
+		flags                    byte
+		wantSrc, wantDst         string
+		wantSrcPort, wantDstPort uint16
+	}{
+		{"SYN", false, 49152, 1502, 0x02, "10.0.0.1", "10.0.0.2", 49152, 1502},
+		{"SYN overrides registry port", false, 502, 1502, 0x02, "10.0.0.1", "10.0.0.2", 502, 1502},
+		{"SYN-ACK first", true, 49152, 1502, 0x12, "10.0.0.1", "10.0.0.2", 49152, 1502},
+		{"unknown midstream keeps capture order", true, 49152, 1502, 0x10, "10.0.0.2", "10.0.0.1", 1502, 49152},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := orientedModbusFrame(tc.reverse, tc.clientPort, tc.serverPort, 99, tc.flags, nil)
+			result, err := Analyze(bytes.NewReader(buildPCAP([][]byte{frame})), modbus.NewDecoder())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Identifications) != 1 {
+				t.Fatalf("identifications: %+v", result.Identifications)
+			}
+			id := result.Identifications[0]
+			if id.SrcIP != tc.wantSrc || id.DstIP != tc.wantDst || id.SrcPort != tc.wantSrcPort || id.DstPort != tc.wantDstPort {
+				t.Fatalf("endpoints: %+v", id)
 			}
 		})
 	}

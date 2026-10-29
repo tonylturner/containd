@@ -1427,12 +1427,12 @@ components:
       type: object
     IdentificationAttributes:
       type: object
-      required: [protocol, identification_state, reason, identification_coverage, expected, service_transport, service_port, mismatch, binding, outside_rule_port_scope, profile_version, syn_coverage]
+      required: [protocol, identification_state, reason, expected, service_transport, service_port, mismatch, binding, outside_rule_port_scope, profile_version, syn_coverage]
       properties:
         protocol: {type: string, description: Empty when no unique protocol is identified.}
         identification_state: {type: string, enum: [confirmed, reject, identification_incomplete]}
         reason: {type: string, description: Probe reason; distinct from coverage.}
-        identification_coverage: {type: string, enum: ['', budget, timeout, conflict, midstream/no-SYN, truncated, closed]}
+        identification_coverage: {type: string, enum: [budget, timeout, conflict, midstream/no-SYN, truncated, closed]}
         identification_candidates:
           type: array
           nullable: true
@@ -1460,10 +1460,14 @@ components:
           items: {type: boolean}
     PcapIdentification:
       type: object
-      required: [key, flowId, attributes]
+      required: [key, flowId, srcIp, dstIp, srcPort, dstPort, attributes]
       properties:
         key: {type: string, description: Run-qualified offline connection incarnation.}
         flowId: {type: string}
+        srcIp: {type: string, description: Client address from captured SYN roles; otherwise the flow orientation hint.}
+        dstIp: {type: string, description: Server address from captured SYN roles; otherwise the flow orientation hint.}
+        srcPort: {type: integer, minimum: 0, maximum: 65535}
+        dstPort: {type: integer, minimum: 0, maximum: 65535}
         attributes: {$ref: '#/components/schemas/IdentificationAttributes'}
     PcapAnalysisResult:
       properties:

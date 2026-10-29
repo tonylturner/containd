@@ -50,14 +50,17 @@ func IdentificationEvent(d identify.Decision, meta identify.Meta, syn [2]bool, b
 	if _, ok := scope.(bool); !ok {
 		scope = "unknown"
 	}
-	return dpi.Event{Proto: eventfields.ProtoIdentify, Kind: eventfields.KindIdentification, Timestamp: at,
-		Attributes: map[string]any{
-			eventfields.KeyProtocol: string(d.Protocol), eventfields.KeyIdentificationState: string(d.State),
-			eventfields.KeyReason: reason, eventfields.KeyIdentificationCoverage: string(d.Coverage),
-			eventfields.KeyExpected:         [2]string{string(d.Expected[0]), string(d.Expected[1])},
-			eventfields.KeyServiceTransport: transport, eventfields.KeyServicePort: meta.Ports[service],
-			eventfields.KeyMismatch: mismatch, eventfields.KeyBinding: string(binding),
-			eventfields.KeyOutsideRulePortScope: scope, eventfields.KeyProfileVersion: identify.ProfileVersion,
-			eventfields.KeySYNCoverage: syn, eventfields.KeyIdentificationCandidates: candidates,
-		}}
+	attributes := map[string]any{
+		eventfields.KeyProtocol: string(d.Protocol), eventfields.KeyIdentificationState: string(d.State),
+		eventfields.KeyReason:           reason,
+		eventfields.KeyExpected:         [2]string{string(d.Expected[0]), string(d.Expected[1])},
+		eventfields.KeyServiceTransport: transport, eventfields.KeyServicePort: meta.Ports[service],
+		eventfields.KeyMismatch: mismatch, eventfields.KeyBinding: string(binding),
+		eventfields.KeyOutsideRulePortScope: scope, eventfields.KeyProfileVersion: identify.ProfileVersion,
+		eventfields.KeySYNCoverage: syn, eventfields.KeyIdentificationCandidates: candidates,
+	}
+	if d.Coverage != "" {
+		attributes[eventfields.KeyIdentificationCoverage] = string(d.Coverage)
+	}
+	return dpi.Event{Proto: eventfields.ProtoIdentify, Kind: eventfields.KindIdentification, Timestamp: at, Attributes: attributes}
 }
