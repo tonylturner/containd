@@ -148,13 +148,12 @@ test("single-point monitor Type IDs are decoded and may be allowed", () => {
   expect(res).toMatchObject({ ok: true, ics: { typeIds: [1, 30] } });
 });
 
-test("an update that would clear a stored IEC field is refused", () => {
+test("an update clears stored IEC fields with null", () => {
   const existing = { protocol: "iec104", typeIds: [46], ca: [1], mode: "enforce" as const };
   const draft = iec104DraftFrom(existing);
   expect(draft.ca).toBe("1");
   const res = buildIEC104RuleICS({ ...draft, ca: "" }, "enforce", "ALLOW", existing);
-  expect(res.ok).toBe(false);
-  if (!res.ok) expect(res.error).toMatch(/cannot clear ca/);
+  expect(res).toMatchObject({ ok: true, ics: { ca: null } });
   expect(buildIEC104RuleICS({ ...draft, ca: "2" }, "enforce", "ALLOW", existing).ok).toBe(true);
   // A protocol change replaces the predicate, so nothing is guarded.
   expect(

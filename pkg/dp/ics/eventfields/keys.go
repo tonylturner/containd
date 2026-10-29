@@ -97,3 +97,18 @@ const (
 	KeyAPDUIDs       = "apdu_ids"
 	KeyTriggerAPDUID = "trigger_apdu_id"
 )
+
+// D.7 coverage and CIP target keys, shared by decoders (emitters) and the
+// engine (context builder).
+const (
+	// KeyCoverageIncomplete (bool true) marks an event whose message was
+	// not fully inspected; the engine adds an ObjectUnknown context.
+	KeyCoverageIncomplete = "coverage_incomplete"
+	// KeyCIPTarget is "logical", "symbolic" or "unknown".
+	KeyCIPTarget = "cip_target"
+	// KeyCIPSymbol is the []string of ANSI extended symbol segments.
+	KeyCIPSymbol   = "cip_symbol"
+	KeyObjectClass = "object_class"
+	KeyInstanceID  = "instance_id"
+	KeyAttributeID = "attribute_id"
+)

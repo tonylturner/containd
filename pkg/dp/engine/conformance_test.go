@@ -277,9 +277,9 @@ func TestEvalContextAbsentFieldsDoNotMatchZero(t *testing.T) {
 			{Protocol: "cip", ReadOnly: true},
 			{Protocol: "cip", WriteOnly: true},
 		} {
-			ctx, ok := evalContextFromDPIEvent(nil, st, pkt, dpi.Event{Proto: "cip", Kind: "session"}, "", "")
+			ctx := singleEvalContext(t, nil, st, pkt, dpi.Event{Proto: "cip", Kind: "session"}, "", "")
 			entry := rules.Entry{Action: action, ICS: predicate}
-			if !ok || rules.PreviewMatch(entry, ctx) {
+			if rules.PreviewMatch(entry, ctx) {
 				t.Fatalf("absent field satisfied %+v", entry)
 			}
 		}
@@ -287,7 +287,7 @@ func TestEvalContextAbsentFieldsDoNotMatchZero(t *testing.T) {
 	ev := dpi.Event{Proto: "cip", Kind: "request", Attributes: map[string]any{
 		"function_code": uint8(0), "object_class": uint16(0),
 	}}
-	ctx, _ := evalContextFromDPIEvent(nil, st, pkt, ev, "", "")
+	ctx := singleEvalContext(t, nil, st, pkt, ev, "", "")
 	entry := rules.Entry{Action: rules.ActionAllow, ICS: rules.ICSPredicate{
 		Protocol: "cip", FunctionCode: []uint8{0}, ObjectClasses: []uint16{0},
 	}}

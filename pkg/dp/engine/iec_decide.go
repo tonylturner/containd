@@ -100,6 +100,11 @@ func (t *iecTable) iecContext(ev dpi.Event) *rules.ICSContext {
 }
 
 func iecContextFromDPIEvent(ev dpi.Event, safeRead func(map[string]any) bool) *rules.ICSContext {
+	contexts := icsContextsFromDPIEvent(nil, ev, safeRead)
+	return &contexts[0]
+}
+
+func iecObjectFromDPIEvent(ev dpi.Event, safeRead func(map[string]any) bool) *rules.ICSContext {
 	a := ev.Attributes
 	c := &rules.IEC104Context{}
 	c.APCIType, _ = eventfields.String(a, eventfields.KeyAPCIType)
@@ -112,6 +117,25 @@ func iecContextFromDPIEvent(ev dpi.Event, safeRead func(map[string]any) bool) *r
 	}
 	if v, ok := eventfields.Uint32(a, eventfields.KeyIOA); ok {
 		c.IOA = &v
+	}
+	if c.APCIType == "I" {
+		if v, ok := eventfields.Uint8(a, eventfields.KeyCause); ok {
+			c.COT = &v
+		}
+		if v, ok := eventfields.Uint8(a, eventfields.KeyOriginator); ok {
+			c.Originator = &v
+		}
+		if v, ok := eventfields.Bool(a, eventfields.KeyCOTNegative); ok {
+			c.Negative = &v
+		}
+		if v, ok := eventfields.Bool(a, eventfields.KeyCOTTest); ok {
+			c.Test = &v
+		}
+		if c.TypeID != nil && ((*c.TypeID >= 45 && *c.TypeID <= 50) || (*c.TypeID >= 58 && *c.TypeID <= 63)) {
+			if v, ok := eventfields.Bool(a, eventfields.KeySelect); ok {
+				c.Select = &v
+			}
+		}
 	}
 	c.Broadcast = iecBroadcast(a)
 	c.SafeRead = safeRead(a)

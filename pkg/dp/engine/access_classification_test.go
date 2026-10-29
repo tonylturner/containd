@@ -56,19 +56,21 @@ func TestModbusDNP3ReadOnlyFromWire(t *testing.T) {
 			ev := res.Frames[0].Events[0]
 			for form, attrs := range decodertest.Forms(t, ev.Attributes) {
 				ev.Attributes = attrs
-				ctx, ok := evalContextFromDPIEvent(&snapshot, state, &dpi.ParsedPacket{
+				contexts := evalContextsFromDPIEvent(&snapshot, state, &dpi.ParsedPacket{
 					Proto: "tcp", SrcPort: 40000, DstPort: tc.port,
 				}, ev, "", "")
-				if !ok {
+				if len(contexts) == 0 {
 					t.Fatal("missing evaluation context")
 				}
-				action, matched := rules.NewEvaluator(&snapshot).EvaluateMatch(ctx)
-				if (action == rules.ActionAllow) != tc.read || (matched != nil) != tc.read ||
-					ctx.ICS.ReadOnly != tc.read || ctx.ICS.WriteOnly != tc.write {
-					t.Fatalf("%s action=%s matched=%v ctx=%+v", form, action, matched, ctx.ICS)
-				}
-				if rules.PreviewMatch(snapshot.Firewall[0], ctx) != tc.read {
-					t.Fatalf("%s preview differs from production", form)
+				for _, ctx := range contexts {
+					action, matched := rules.NewEvaluator(&snapshot).EvaluateMatch(ctx)
+					if (action == rules.ActionAllow) != tc.read || (matched != nil) != tc.read ||
+						ctx.ICS.ReadOnly != tc.read || ctx.ICS.WriteOnly != tc.write {
+						t.Fatalf("%s action=%s matched=%v ctx=%+v", form, action, matched, ctx.ICS)
+					}
+					if rules.PreviewMatch(snapshot.Firewall[0], ctx) != tc.read {
+						t.Fatalf("%s preview differs from production", form)
+					}
 				}
 			}
 		})

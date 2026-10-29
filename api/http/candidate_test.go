@@ -165,7 +165,7 @@ func editableValue(cfg *config.Config, path string) any {
 	case "/firewall/ics-rules":
 		var result []config.Rule
 		for _, r := range cfg.Firewall.Rules {
-			if hasICSPredicate(r) {
+			if !r.ICS.Empty() {
 				result = append(result, r)
 			}
 		}

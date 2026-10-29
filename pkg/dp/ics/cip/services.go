@@ -116,7 +116,7 @@ func lookupService(code uint8, t serviceTarget) serviceDefinition {
 	if d, ok := commonServices[code]; ok {
 		return d
 	}
-	if !t.valid {
+	if !t.valid || t.connectionPoint {
 		return serviceDefinition{}
 	}
 	if t.symbolic {
@@ -174,7 +174,7 @@ func Classify(msg *CIPMessage) AccessCategory {
 		return AccessUnknown
 	}
 	t := decodeTarget(msg.Path)
-	if !t.valid {
+	if !t.valid || t.connectionPoint {
 		return AccessUnknown
 	}
 	d := lookupService(msg.ServiceCode, t)
