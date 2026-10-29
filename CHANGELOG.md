@@ -235,6 +235,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Live and offline DPI events retain packet capture timestamps, including
+  malformed events; ICS tagging no longer replaces them with wall time.
+
 - TCP/2404 flows outside IEC 104 table ownership now use generic TCP
   decision serialization, denial reconnects and incarnation retirement.
 

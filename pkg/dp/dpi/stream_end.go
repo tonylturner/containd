@@ -33,7 +33,7 @@ func (m *Manager) CloseStream(state *flow.State, pkt *ParsedPacket) (bool, []Eve
 		return false, nil, nil
 	}
 	m.endStream(key)
-	evs, err := m.flowEnd(state)
+	evs, err := m.flowEnd(state, eventTime(state, pkt))
 	return true, evs, err
 }
 
@@ -51,7 +51,7 @@ func (m *Manager) ResetStream(peer *flow.State, pkt *ParsedPacket) ([]Event, err
 		return nil, nil
 	}
 	m.endStream(peer.Key.Hash())
-	return m.flowEnd(peer)
+	return m.flowEnd(peer, eventTime(peer, pkt))
 }
 
 // FailStream fails the framed stream of a packet with a StreamError of

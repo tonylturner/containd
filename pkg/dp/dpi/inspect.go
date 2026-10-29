@@ -35,13 +35,15 @@ import (
 // picked up mid-connection, a StreamMidStream error without a malformed
 // event (see feed). The payload of a fail-closed RST is not fed, as no
 // receiver delivers it.
-func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) InspectResult {
-	var res InspectResult
+func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResult) {
 	if m == nil || len(m.decoders) == 0 {
 		return res
 	}
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
+	at := eventTime(state, pkt)
+	m.eventTimes[state.Key.Hash()] = at
+	defer func() { stampResult(&res, at) }()
 	candidates := m.candidates(state)
 	tcp := pkt.Proto == "tcp"
 	stream := m.reassembles(pkt)
@@ -237,7 +239,6 @@ func malformedEvent(state *flow.State, pkt *ParsedPacket, proto string, err erro
 		Proto:      proto,
 		Kind:       "malformed",
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 }
 

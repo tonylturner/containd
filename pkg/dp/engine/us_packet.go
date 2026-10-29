@@ -48,6 +48,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
 	}
 	parsed := dpi.ParsedPacket{
+		Timestamp:    pkt.Timestamp,
 		Payload:      pkt.Payload,
 		Proto:        pkt.Transport,
 		SrcPort:      pkt.SrcPort,

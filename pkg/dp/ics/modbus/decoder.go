@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"net"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -157,7 +156,6 @@ func aduEvent(state *flow.State, frame *TCPFrame, adu []byte) dpi.Event {
 		Proto:      eventfields.ProtoModbus,
 		Kind:       kind,
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 }
 
@@ -179,7 +177,6 @@ func malformedEvent(state *flow.State, b []byte, err error) dpi.Event {
 			eventfields.KeyError: err.Error(),
 			"raw_hex":            rawHex(b),
 		},
-		Timestamp: time.Now().UTC(),
 	}
 }
 

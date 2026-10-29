@@ -4,8 +4,6 @@
 package itdpi
 
 import (
-	"time"
-
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
@@ -37,7 +35,6 @@ func MarkICS(ev dpi.Event) dpi.Event {
 		}
 		attrs["ics"] = true
 		ev.Attributes = attrs
-		ev.Timestamp = time.Now().UTC()
 	}
 	return ev
 }

@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -57,7 +56,6 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 				"src_port":  pkt.SrcPort,
 				"dst_port":  pkt.DstPort,
 			},
-			Timestamp: time.Now().UTC(),
 		}
 		return []dpi.Event{ev}, nil
 	}
@@ -65,7 +63,6 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 	if line == "" {
 		return nil, nil
 	}
-	now := time.Now().UTC()
 	if strings.HasPrefix(line, "HTTP/") {
 		parts := strings.SplitN(line, " ", 3)
 		status := ""
@@ -78,7 +75,7 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 			"src_port":  pkt.SrcPort,
 			"dst_port":  pkt.DstPort,
 		}
-		ev := dpi.Event{FlowID: state.Key.Hash(), Proto: "http", Kind: "response", Attributes: attrs, Timestamp: now}
+		ev := dpi.Event{FlowID: state.Key.Hash(), Proto: "http", Kind: "response", Attributes: attrs}
 		return []dpi.Event{ev}, nil
 	}
 	parts := strings.SplitN(line, " ", 3)
@@ -117,7 +114,7 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 		"src_port":   pkt.SrcPort,
 		"dst_port":   pkt.DstPort,
 	}
-	ev := dpi.Event{FlowID: state.Key.Hash(), Proto: "http", Kind: "request", Attributes: attrs, Timestamp: now}
+	ev := dpi.Event{FlowID: state.Key.Hash(), Proto: "http", Kind: "request", Attributes: attrs}
 	return []dpi.Event{ev}, nil
 }
 

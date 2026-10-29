@@ -19,9 +19,12 @@ func TestObservationDispatchValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := flow.NewState(flow.Key{Proto: 6, SrcIP: net.IPv4(10, 0, 0, 1), DstIP: net.IPv4(10, 0, 0, 2), SrcPort: 50000, DstPort: 1502}, time.Now())
-	p := &dpi.ParsedPacket{Proto: "tcp", HasOffset: true, Session: "s", Dir: dpi.ClientToServer, Payload: []byte{0, 1, 0, 0, 0, 6, 1, 3, 0, 0, 0, 1}}
+	at := time.Unix(1234567890, 123)
+	p := &dpi.ParsedPacket{Timestamp: at, Proto: "tcp", HasOffset: true, Session: "s", Dir: dpi.ClientToServer, Payload: []byte{0, 1, 0, 0, 0, 6, 1, 3, 0, 0, 0, 1}}
 	if got := m.InspectProtocol("modbus", s, p); got.Err != nil || len(got.Events) != 1 {
 		t.Fatal(got)
+	} else if !got.Events[0].Timestamp.Equal(at) {
+		t.Fatal("observation lost capture timestamp", got)
 	}
 	if got := m.Inspect(s, p); got.Err != nil || len(got.Events) != 0 {
 		t.Fatal("observation registered a legacy decoder", got)

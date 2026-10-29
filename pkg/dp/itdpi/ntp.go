@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -111,7 +110,6 @@ func (d *NTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 		Proto:      "ntp",
 		Kind:       kind,
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return []dpi.Event{ev}, nil
 }

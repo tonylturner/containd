@@ -41,7 +41,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"maps"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -285,7 +284,6 @@ func (dc dirContext) event(kind string, attrs map[string]any) dpi.Event {
 		Proto:      eventfields.ProtoIEC104,
 		Kind:       kind,
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 }
 
@@ -300,7 +298,6 @@ func unattributedEvent(state *flow.State, b []byte, err error) dpi.Event {
 			eventfields.KeyError:  err.Error(),
 			eventfields.KeyRawHex: rawHex(b),
 		},
-		Timestamp: time.Now().UTC(),
 	}
 }
 

@@ -5,7 +5,6 @@ package cip
 
 import (
 	"encoding/hex"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -60,6 +59,5 @@ func malformedEvent(state *flow.State, data []byte, err error) dpi.Event {
 			eventfields.KeyError: err.Error(),
 			"raw_hex":            hex.EncodeToString(data[:min(len(data), maxRawHex)]),
 		},
-		Timestamp: time.Now().UTC(),
 	}
 }

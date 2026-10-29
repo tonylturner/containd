@@ -196,6 +196,7 @@ func analysisFlowState(flows map[string]*flow.State, pkt capture.Packet, ts time
 // malformed event is among them and the analysis continues.
 func analyzePacket(mgr *dpi.Manager, sessions *offlineSessions, state *flow.State, pkt capture.Packet, ts time.Time) []dpi.Event {
 	parsed := &dpi.ParsedPacket{
+		Timestamp:   ts,
 		Payload:     pkt.Payload,
 		Proto:       pkt.Transport,
 		SrcPort:     pkt.SrcPort,
@@ -214,16 +215,7 @@ func analyzePacket(mgr *dpi.Manager, sessions *offlineSessions, state *flow.Stat
 	for i := range events {
 		events[i].Connection = state.Connection.Load()
 	}
-	stampEvents(events, ts)
 	return events
-}
-
-func stampEvents(events []dpi.Event, ts time.Time) {
-	for i := range events {
-		if events[i].Timestamp.IsZero() {
-			events[i].Timestamp = ts
-		}
-	}
 }
 
 func recordAnalysisEvents(result *AnalysisResult, flowEvents map[string]int, hash, srcStr, dstStr string, events []dpi.Event, onEvent eventCallback) {

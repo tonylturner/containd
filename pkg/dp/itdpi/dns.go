@@ -6,7 +6,6 @@ package itdpi
 import (
 	"encoding/binary"
 	"net/netip"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -100,7 +99,6 @@ func (d *DNSDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 		Proto:      "dns",
 		Kind:       kind,
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return []dpi.Event{ev}, nil
 }

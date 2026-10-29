@@ -278,7 +278,7 @@ func linkEvent(st *flow.State, f *DNP3Frame, raw []byte, codes, undecoded []stri
 	attrs := map[string]any{"source_address": f.Source, "destination_address": f.Destination, eventfields.KeyDirection: linkDirection(f.Control), "raw_hex": rawHex(raw)}
 	mergeCodes(attrs, eventfields.KeyConformance, codes)
 	mergeCodes(attrs, eventfields.KeyUndecoded, undecoded)
-	return dpi.Event{FlowID: flowID(st), Proto: eventfields.ProtoDNP3, Kind: "session", Attributes: attrs, Timestamp: time.Now().UTC()}
+	return dpi.Event{FlowID: flowID(st), Proto: eventfields.ProtoDNP3, Kind: "session", Attributes: attrs}
 }
 
 func copyBytes(b []byte) []byte {

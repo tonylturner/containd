@@ -55,11 +55,7 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 
 func normalizeDPIEvents(evs []dpi.Event) []dpi.Event {
 	for i := range evs {
-		at := evs[i].Timestamp
 		evs[i] = itdpi.MarkICS(evs[i])
-		if passive, _ := evs[i].Attributes[eventfields.KeyObservationOnly].(bool); passive {
-			evs[i].Timestamp = at
-		}
 	}
 	return evs
 }

@@ -59,8 +59,8 @@ func (m *Manager) InspectProtocol(protocol string, state *flow.State, pkt *Parse
 }
 
 // InspectProtocolAt uses an injected ingestion clock for stream expiry.
-func (m *Manager) InspectProtocolAt(protocol string, state *flow.State, pkt *ParsedPacket, now time.Time) InspectResult {
-	res := InspectResult{Proto: protocol}
+func (m *Manager) InspectProtocolAt(protocol string, state *flow.State, pkt *ParsedPacket, now time.Time) (res InspectResult) {
+	res.Proto = protocol
 	if !m.HasProtocol(protocol) {
 		res.Err = fmt.Errorf("unknown or disabled observation protocol %q", protocol)
 		return res
@@ -71,6 +71,7 @@ func (m *Manager) InspectProtocolAt(protocol string, state *flow.State, pkt *Par
 	}
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
+	defer func() { stampResult(&res, eventTime(state, pkt)) }()
 	d := m.observation[protocol]
 	if pkt.Proto == "udp" {
 		if protocol != eventfields.ProtoCIP {

@@ -6,7 +6,6 @@ package itdpi
 import (
 	"bytes"
 	"encoding/binary"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -153,7 +152,6 @@ func (d *RDPDecoder) parseConnectionRequest(state *flow.State, pkt *dpi.ParsedPa
 		Proto:      "rdp",
 		Kind:       "connection_request",
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return []dpi.Event{ev}, nil
 }
@@ -190,7 +188,6 @@ func (d *RDPDecoder) parseConnectionConfirm(state *flow.State, pkt *dpi.ParsedPa
 					Proto:      "rdp",
 					Kind:       "negotiation",
 					Attributes: attrs,
-					Timestamp:  time.Now().UTC(),
 				}
 				return []dpi.Event{ev}, nil
 			}
@@ -202,7 +199,6 @@ func (d *RDPDecoder) parseConnectionConfirm(state *flow.State, pkt *dpi.ParsedPa
 		Proto:      "rdp",
 		Kind:       "connection_confirm",
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return []dpi.Event{ev}, nil
 }
@@ -220,7 +216,6 @@ func (d *RDPDecoder) parseMCSConnectInitial(state *flow.State, pkt *dpi.ParsedPa
 		Proto:      "rdp",
 		Kind:       "mcs_connect",
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return []dpi.Event{ev}, nil
 }

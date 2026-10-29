@@ -7,7 +7,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -87,7 +86,7 @@ func newEvent(state *flow.State, kind string, attrs map[string]any) dpi.Event {
 		id = state.Key.Hash()
 	}
 	return dpi.Event{FlowID: id, Proto: eventfields.ProtoCIP, Kind: kind,
-		Attributes: attrs, Timestamp: time.Now().UTC()}
+		Attributes: attrs}
 }
 
 func projectMessage(state *flow.State, envelope map[string]any, msg *CIPMessage, msp *MSPResult, path []uint16) []dpi.Event {

@@ -6,7 +6,6 @@ package itdpi
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -211,7 +210,6 @@ func newSNMPEvent(state *flow.State, kind string, attrs map[string]any) dpi.Even
 		Proto:      "snmp",
 		Kind:       kind,
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 }
 
