@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -243,15 +242,6 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 	}
 }
 
-func hasICSPredicate(r config.Rule) bool {
-	return strings.TrimSpace(r.ICS.Protocol) != "" ||
-		len(r.ICS.FunctionCode) > 0 ||
-		r.ICS.UnitID != nil ||
-		len(r.ICS.Addresses) > 0 ||
-		r.ICS.ReadOnly ||
-		r.ICS.WriteOnly
-}
-
 func listICSRulesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := store.LoadCandidate(c.Request.Context())
@@ -261,7 +251,7 @@ func listICSRulesHandler(store config.Store) gin.HandlerFunc {
 		}
 		var icsRules []config.Rule
 		for _, r := range cfg.Firewall.Rules {
-			if hasICSPredicate(r) {
+			if !r.ICS.Empty() {
 				icsRules = append(icsRules, r)
 			}
 		}
@@ -283,7 +273,7 @@ func createICSRuleHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
-		if !hasICSPredicate(r) {
+		if r.ICS.Empty() {
 			apiError(c, http.StatusBadRequest, "rule must include an ICS predicate")
 			return
 		}
@@ -317,7 +307,7 @@ func updateICSRuleHandler(store config.Store) gin.HandlerFunc {
 			updated := false
 			for i, existing := range cfg.Firewall.Rules {
 				if existing.ID == id {
-					if !hasICSPredicate(existing) {
+					if existing.ICS.Empty() {
 						apiError(c, http.StatusBadRequest, "rule is not an ICS rule")
 						return false
 					}

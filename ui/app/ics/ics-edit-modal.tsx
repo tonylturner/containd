@@ -14,6 +14,7 @@ import { RuleImpactSummary } from "../firewall/firewall-rule-warnings";
 import {
   buildICSRuleUpdate,
   addressFilterError,
+  selectorFieldError,
   icsAddressDraftFrom,
   type ICSMode,
   type ICSModeSelection,
@@ -61,6 +62,7 @@ export function EditICSModal({
   const [previewing, setPreviewing] = useState(false);
 
   const meta = protoMeta(protocol);
+  const selectorError = enabled ? selectorFieldError(protocol, functionCodes, unitId, objectClasses) : null;
   const isIEC104 = protocol === "iec104";
 
   // The predicate Save would stage; preview checks the same one.
@@ -70,22 +72,19 @@ export function EditICSModal({
     if (!enabled) return { ok: true, ics: undefined };
     const addressError = addressFilterError(protocol, addresses);
     if (addressError) return { ok: false, error: addressError };
-    if (isIEC104) {
-      return buildIEC104RuleICS(iec, mode, rule.action, rule.ics, globalMode);
-    }
+    if (selectorError) return { ok: false, error: selectorError };
+    const built = isIEC104
+      ? buildIEC104RuleICS(iec, mode, rule.action, rule.ics, globalMode)
+      : {
+          ok: true as const,
+          ics: buildICSRuleUpdate(protocol, functionCodes, addresses, unitId,
+            objectClasses, readOnly, writeOnly, mode, rule.ics),
+        };
+    if (!built.ok) return built;
+    // Preview and PATCH both inherit using the same explicit empty mode.
     return {
       ok: true,
-      ics: buildICSRuleUpdate(
-        protocol,
-        functionCodes,
-        addresses,
-        unitId,
-        objectClasses,
-        readOnly,
-        writeOnly,
-        mode,
-        rule.ics,
-      ),
+      ics: mode === "" && rule.ics?.mode ? { ...built.ics, mode: "" } : built.ics,
     };
   }
 
@@ -96,8 +95,7 @@ export function EditICSModal({
       setError(built.error);
       return;
     }
-    // Rule updates merge, so inheriting clears a stored mode with an empty one.
-    onSave(built.ics && mode === "" && rule.ics?.mode ? { ...built.ics, mode: "" } : built.ics);
+    onSave(built.ics);
   }
 
   // Previews the whole rule with the edited predicate, so the zones, sources,
@@ -187,6 +185,7 @@ export function EditICSModal({
             </div>
           </div>
 
+          {selectorError && <p role="alert" className="text-sm text-red-400">{selectorError}</p>}
           {isIEC104 ? (
             <IEC104Fields draft={iec} onChange={setIec} disabled={!enabled} />
           ) : (

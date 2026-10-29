@@ -6,7 +6,7 @@ import { InfoTip } from "../../components/InfoTip";
 import type { FirewallRule, ICSPredicate } from "../../lib/api";
 import { buildIEC104RuleICS, type IEC104Draft } from "../ics/iec104";
 import { IEC104Fields } from "../ics/iec104-fields";
-import { addressFilterError, formatICSMode, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
+import { addressFilterError, buildICSRuleUpdate, selectorFieldError, formatICSMode, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
 import { ICSAddressFields } from "../ics/ics-address-fields";
 import { ICS_PROTOCOL_KEYS, ICS_PROTOCOLS, icsProtoMeta } from "./firewall-utils";
 
@@ -37,6 +37,7 @@ export function ICSPredicateFields({
   iec: IEC104Draft; onIecChange: (v: IEC104Draft) => void;
 }) {
   const meta = icsProtoMeta(protocol);
+  const selectorError = selectorFieldError(protocol, functionCodes, unitId, objectClasses);
   const [showHelp, setShowHelp] = useState(false);
 
   return (
@@ -87,6 +88,7 @@ export function ICSPredicateFields({
         </div>
       )}
 
+      {selectorError && <p role="alert" className="text-sm text-red-400">{selectorError}</p>}
       {protocol === "iec104" ? (
         <IEC104Fields draft={iec} onChange={onIecChange} />
       ) : (
@@ -157,48 +159,8 @@ export function buildRuleICS(
   if (input.protocol === "iec104") {
     return buildIEC104RuleICS(input.iec, input.mode, input.action, input.existing, input.globalMode);
   }
-  return { ok: true, ics: buildICSPredicate(input) };
-}
-
-function buildICSPredicate({
-  protocol,
-  functionCodes,
-  addresses,
-  unitId,
-  objectClasses,
-  readOnly,
-  writeOnly,
-  mode,
-  existing,
-}: RuleICSInput): ICSPredicate {
-  const icsMeta = icsProtoMeta(protocol);
-  const ics: ICSPredicate = {
-    protocol,
-    functionCode: functionCodes
-      .split(",")
-      .map((v) => Number(v.trim()))
-      .filter((n) => Number.isFinite(n))
-      .map((n) => Math.max(0, Math.min(255, n))),
-    addresses: addresses.split(",").map((s) => s.trim()).filter(Boolean),
-    readOnly,
-    writeOnly,
-    ...(mode ? { mode } : {}),
-  };
-  if (icsMeta.showUnitId && unitId.trim()) {
-    const uid = Number(unitId.trim());
-    if (Number.isFinite(uid) && uid >= 0 && uid <= 255) ics.unitId = uid;
-  }
-  if (icsMeta.showObjectClasses && objectClasses.trim()) {
-    ics.objectClasses = objectClasses
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((s) => parseInt(s, s.startsWith("0x") ? 16 : 10))
-      .filter((n) => Number.isFinite(n) && n >= 0);
-  }
-  if ((ics.functionCode?.length ?? 0) === 0) delete ics.functionCode;
-  // An omitted PATCH field would retain the unsupported stored filter.
-  if ((ics.addresses?.length ?? 0) === 0 && !existing?.addresses?.length) delete ics.addresses;
-  if ((ics.objectClasses?.length ?? 0) === 0) delete ics.objectClasses;
-  return ics;
+  const error = selectorFieldError(input.protocol, input.functionCodes, input.unitId, input.objectClasses);
+  if (error) return { ok: false, error };
+  return { ok: true, ics: buildICSRuleUpdate(input.protocol, input.functionCodes, input.addresses,
+    input.unitId, input.objectClasses, input.readOnly, input.writeOnly, input.mode, input.existing) };
 }

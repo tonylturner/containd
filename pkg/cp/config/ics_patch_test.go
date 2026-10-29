@@ -27,6 +27,12 @@ func TestPatchICSPredicate(t *testing.T) {
 			ICSPredicate{Protocol: "iec104", TypeIDs: []int{45, 46}, CA: []uint16{1}, Mode: "enforce"}},
 		{"functionCode null clears on modbus", modbus, `{"functionCode":null}`,
 			ICSPredicate{Protocol: "modbus", WriteOnly: true, Mode: "enforce"}},
+		{"generic null clears all optional selectors", ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}, UnitID: new(uint8(1)), Addresses: []string{"0-10"}, ReadOnly: true, Direction: "request"},
+			`{"functionCode":null,"unitId":null,"addresses":null,"readOnly":null,"direction":null}`,
+			ICSPredicate{Protocol: "modbus"}},
+		{"CIP classes null clears", ICSPredicate{Protocol: "cip", ObjectClasses: []uint16{4}, WriteOnly: true},
+			`{"objectClasses":null,"writeOnly":null}`, ICSPredicate{Protocol: "cip"}},
+		{"generic omitted selectors stay", modbus, `{}`, modbus},
 		{"empty patch keeps", iec, `{}`, iec},
 		{"null clears", iec, `null`, ICSPredicate{}},
 	}

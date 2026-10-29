@@ -199,11 +199,13 @@ func TestShowFirewallICSRulesIncludesIEC104Fields(t *testing.T) {
 		Action: config.ActionAllow,
 		ICS:    config.ICSPredicate{Protocol: "iec104", ReadOnly: true},
 	}
+	cip := config.Rule{ID: "cip", Action: config.ActionAllow,
+		ICS: config.ICSPredicate{Protocol: "cip", ObjectClasses: []uint16{4, 102}}}
 	client := &dispatchHTTPClient{
 		t: t,
 		handlers: map[string]func(*http.Request) (*http.Response, error){
 			"GET /api/v1/firewall/ics-rules": func(*http.Request) (*http.Response, error) {
-				return jsonHTTPResponse(http.StatusOK, []config.Rule{rule, inherited}, nil), nil
+				return jsonHTTPResponse(http.StatusOK, []config.Rule{rule, inherited, cip}, nil), nil
 			},
 			"GET /api/v1/dataplane": func(*http.Request) (*http.Response, error) {
 				return jsonHTTPResponse(http.StatusOK, config.DataPlaneConfig{DPIMode: "enforce"}, nil), nil
@@ -215,9 +217,29 @@ func TestShowFirewallICSRulesIncludesIEC104Fields(t *testing.T) {
 	if err := showFirewallICSRulesAPI(api)(context.Background(), &out, nil); err != nil {
 		t.Fatalf("show IEC104 rules: %v", err)
 	}
-	for _, want := range []string{"TYPE_IDS", "CLASSES", "CA", "IOA", "DIRECTION", "45,46", "monitor", "65536-65567", "response", "enforce (effective: enforce)", "inherit (enforce)"} {
+	for _, want := range []string{"OBJECT_CLASSES", "4,102", "TYPE_IDS", "CLASSES", "CA", "IOA", "DIRECTION", "45,46", "monitor", "65536-65567", "response", "enforce (effective: enforce)", "inherit (enforce)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output = %q, want %q", out.String(), want)
 		}
+	}
+}
+
+func TestCIPObjectClassesArgs(t *testing.T) {
+	for _, input := range []string{"0,4,65535", "0x00,0x04,0xFFFF"} {
+		rule, err := parseFirewallICSRuleArgs([]string{"cip", "ALLOW", "cip", "--object-classes", input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(rule.ICS.ObjectClasses, []uint16{0, 4, 65535}) {
+			t.Fatalf("classes = %v", rule.ICS.ObjectClasses)
+		}
+	}
+	for _, input := range []string{"", "-1", "65536", "4.5", "4x", "4,"} {
+		if _, err := parseFirewallICSRuleArgs([]string{"cip", "ALLOW", "cip", "--object-classes", input}); err == nil {
+			t.Errorf("accepted %q", input)
+		}
+	}
+	if _, err := parseFirewallICSRuleArgs([]string{"cip", "ALLOW", "cip", "--object-classes"}); err == nil {
+		t.Fatal("missing value accepted")
 	}
 }

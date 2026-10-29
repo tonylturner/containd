@@ -19,16 +19,18 @@ export type Protocol = {
   port?: string;
 };
 
+/** Generic optional selectors accept null to explicitly clear a PATCH restriction. */
 export type ICSPredicate = {
   protocol?: string;
-  functionCode?: number[];
-  unitId?: number;
-  addresses?: string[];
-  objectClasses?: number[];
-  readOnly?: boolean;
-  writeOnly?: boolean;
-  direction?: "request" | "response";
-  mode?: "enforce" | "learn";
+  functionCode?: number[] | null;
+  unitId?: number | null;
+  addresses?: string[] | null;
+  objectClasses?: number[] | null;
+  readOnly?: boolean | null;
+  writeOnly?: boolean | null;
+  direction?: "request" | "response" | null;
+  /** Empty inherits the global mode, including in preview and PATCH bodies. */
+  mode?: "enforce" | "learn" | "";
   // IEC 60870-5-104 fields (protocol "iec104"). A missing field is a
   // wildcard; an empty list is a validation error, so never send [].
   typeIds?: number[];

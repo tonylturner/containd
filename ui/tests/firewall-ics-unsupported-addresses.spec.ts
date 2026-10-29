@@ -88,7 +88,7 @@ for (const protocol of ["dnp3", "cip"]) {
 
     await form.getByRole("button", { name: "Save changes" }).click();
     await expect.poll(() => patches.length).toBe(1);
-    expect(patches[0]).toMatchObject({ ics: { protocol, addresses: [] } });
+    expect(patches[0]).toMatchObject({ ics: { protocol, addresses: null } });
   });
 
   test(`${protocol} firewall create does not carry an address prefill to a changed protocol`, async ({ page }) => {

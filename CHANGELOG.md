@@ -216,6 +216,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Empty ICS function/service code fields now mean any code in both rule editors,
+  without injecting zero from whitespace or separators. Invalid selector values
+  block saving and preview, and clearing generic restrictions removes them.
+- Template previews display the generated rule's nested ICS protocol and codes.
+  ICS rule listing and dashboard counts recognize all predicate fields, and the
+  CLI accepts and displays CIP object classes.
+
 - Modbus exception replies now complete their request's transaction, so an
   exception no longer leaves the transaction pending, and an exception with
   no prior request is reported like an unmatched response.

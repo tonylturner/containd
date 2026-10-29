@@ -14,7 +14,7 @@ import (
 	dprules "github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// setFirewallICSRuleAPI creates or updates an ICS-specific firewall rule.
+// setFirewallICSRuleAPI creates an ICS-specific firewall rule.
 //
 // Usage:
 //
@@ -25,6 +25,7 @@ import (
 //	--src-zone <zone>
 //	--dst-zone <zone>
 //	--function-code <codes>   (comma-separated uint8 values)
+//	--object-classes <classes> (CIP, comma-separated decimal or 0x-prefixed uint16 values)
 //	--unit-id <id>
 //	--addresses <ranges>      (comma-separated, e.g. "0x0100-0x01FF,0x0200")
 //	--read-only
@@ -47,7 +48,7 @@ func setFirewallICSRuleAPI(api *API) Command {
 
 func parseFirewallICSRuleArgs(args []string) (config.Rule, error) {
 	if len(args) < 3 {
-		return config.Rule{}, fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--mode <learn|enforce>]")
+		return config.Rule{}, fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--object-classes <classes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--mode <learn|enforce>]")
 	}
 
 	rule := config.Rule{
@@ -94,6 +95,17 @@ func applyFirewallICSRuleArg(rule *config.Rule, args []string, index int) (int, 
 			return index, fmt.Errorf("invalid --function-code: %w", err)
 		}
 		rule.ICS.FunctionCode = codes
+		return next, nil
+	case "--object-classes":
+		value, next, err := firewallICSRuleValue(args, index, "--object-classes")
+		if err != nil {
+			return index, err
+		}
+		classes, err := parseCIPObjectClasses(value)
+		if err != nil {
+			return index, err
+		}
+		rule.ICS.ObjectClasses = classes
 		return next, nil
 	case "--unit-id":
 		value, next, err := firewallICSRuleValue(args, index, "--unit-id")
@@ -186,6 +198,24 @@ func applyFirewallICSRuleArg(rule *config.Rule, args []string, index int) (int, 
 	default:
 		return index, fmt.Errorf("unknown option: %s", args[index])
 	}
+}
+
+func parseCIPObjectClasses(value string) ([]uint16, error) {
+	classes := make([]uint16, 0)
+	for _, token := range strings.Split(value, ",") {
+		token = strings.TrimSpace(token)
+		base := 10
+		if strings.HasPrefix(strings.ToLower(token), "0x") {
+			base = 16
+			token = token[2:]
+		}
+		class, err := strconv.ParseUint(token, base, 16)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --object-classes: %w", err)
+		}
+		classes = append(classes, uint16(class))
+	}
+	return classes, nil
 }
 
 func parseIEC104TypeIDs(value string) ([]int, error) {
@@ -322,11 +352,15 @@ func showFirewallICSRulesAPI(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/dataplane", &dataPlane); err != nil {
 			return err
 		}
-		t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "PROTOCOL", "FUNC_CODES", "UNIT_ID", "ADDRESSES", "TYPE_IDS", "CLASSES", "CA", "IOA", "R/W", "DIRECTION", "MODE")
+		t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "PROTOCOL", "FUNC_CODES", "UNIT_ID", "ADDRESSES", "OBJECT_CLASSES", "TYPE_IDS", "CLASSES", "CA", "IOA", "R/W", "DIRECTION", "MODE")
 		for _, r := range rules {
 			fcs := make([]string, 0, len(r.ICS.FunctionCode))
 			for _, fc := range r.ICS.FunctionCode {
 				fcs = append(fcs, strconv.Itoa(int(fc)))
+			}
+			objectClasses := make([]string, 0, len(r.ICS.ObjectClasses))
+			for _, class := range r.ICS.ObjectClasses {
+				objectClasses = append(objectClasses, strconv.Itoa(int(class)))
 			}
 			typeIDs := make([]string, 0, len(r.ICS.TypeIDs))
 			for _, typeID := range r.ICS.TypeIDs {
@@ -368,6 +402,7 @@ func showFirewallICSRulesAPI(api *API) Command {
 				joinCSV(fcs),
 				unitID,
 				joinCSV(r.ICS.Addresses),
+				joinCSV(objectClasses),
 				joinCSV(typeIDs),
 				joinCSV(r.ICS.Classes),
 				joinCSV(cas),

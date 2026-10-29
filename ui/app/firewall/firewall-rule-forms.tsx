@@ -194,7 +194,7 @@ export function EditRuleModal({
         rateLimit: fields.rateLimit,
         tag: fields.tag,
         schedule: fields.schedule,
-        ics: parts.value.ics,
+        ics: icsPatch ?? undefined,
       },
     };
   }

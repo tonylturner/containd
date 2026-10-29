@@ -119,6 +119,35 @@ export function isSupportedICSProtocol(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(PROTOCOLS, name);
 }
 
+/** Empty CSV tokens are separators, never numeric zero. Hex is explicit. */
+export function parseSelectorCSV(text: string, label: string, max: number): number[] {
+  return text.split(",").map((v) => v.trim()).filter(Boolean).map((token) => {
+    const value = Number(token);
+    if (!/^(?:[0-9]+|0x[0-9a-f]+)$/i.test(token) || !Number.isInteger(value) || value > max) {
+      throw new Error(`${label}: "${token}" must be an integer from 0 to ${max}.`);
+    }
+    return value;
+  });
+}
+
+function parseUnitID(text: string): number | undefined {
+  if (!text.trim()) return undefined;
+  if (text.includes(",")) throw new Error("Unit ID: enter one integer from 0 to 255.");
+  return parseSelectorCSV(text, "Unit ID", 255)[0];
+}
+
+export function selectorFieldError(protocol: string, codes: string, unit: string, classes: string): string | null {
+  if (protocol === "iec104") return null;
+  try {
+    parseSelectorCSV(codes, "Function / service codes", 255);
+    if (protocol === "modbus") parseUnitID(unit);
+    if (protocol === "cip") parseSelectorCSV(classes, "Object classes", 65535);
+    return null;
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
 export function buildICSRuleUpdate(
   protocol: string,
   functionCodes: string,
@@ -130,40 +159,33 @@ export function buildICSRuleUpdate(
   mode: ICSModeSelection,
   existing?: ICSPredicate,
 ): ICSPredicate {
+  const codes = parseSelectorCSV(functionCodes, "Function / service codes", 255);
+  const classes = protocol === "cip" ? parseSelectorCSV(objectClasses, "Object classes", 65535) : [];
+  const sameProtocol = existing?.protocol === protocol ? existing : undefined;
+  const addressList = addresses.split(",").map((s) => s.trim()).filter(Boolean);
   const ics: ICSPredicate = {
     protocol,
-    functionCode: functionCodes
-      .split(",")
-      .map((v) => Number(v.trim()))
-      .filter((n) => Number.isFinite(n) && n >= 0)
-      .map((n) => Math.min(255, n)),
-    addresses: addresses
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
     readOnly,
     writeOnly,
+    ...(sameProtocol?.direction ? { direction: sameProtocol.direction } : {}),
     ...(mode ? { mode } : {}),
   };
-
-  if (protocol === "modbus" && unitId.trim()) {
-    const uid = Number(unitId.trim());
-    if (Number.isFinite(uid) && uid >= 0 && uid <= 255) ics.unitId = uid;
+  // Omission retains a stored restriction on PATCH. Null clears it, and is
+  // also accepted by create/preview, keeping those payloads identical.
+  if (codes.length) ics.functionCode = codes;
+  else if (sameProtocol?.functionCode?.length) ics.functionCode = null;
+  if (addressList.length) ics.addresses = addressList;
+  else if (sameProtocol?.addresses?.length) ics.addresses = null;
+  if (protocol === "modbus") {
+    const uid = parseUnitID(unitId);
+    if (uid != null) ics.unitId = uid;
+    else if (sameProtocol?.unitId != null) ics.unitId = null;
+  } else if (sameProtocol?.unitId != null) {
+    // The server accepts legacy unit selectors on other generic protocols;
+    // a form without a unit input must not silently widen those predicates.
+    ics.unitId = sameProtocol.unitId;
   }
-
-  if (protocol === "cip" && objectClasses.trim()) {
-    ics.objectClasses = objectClasses
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((s) => parseInt(s, s.startsWith("0x") ? 16 : 10))
-      .filter((n) => Number.isFinite(n) && n >= 0);
-  }
-
-  if (ics.functionCode?.length === 0) delete ics.functionCode;
-  // PATCH merges omitted fields. Explicitly empty a removed stored filter.
-  if (ics.addresses?.length === 0 && !existing?.addresses?.length) delete ics.addresses;
-  if ((ics.objectClasses?.length ?? 0) === 0) delete ics.objectClasses;
-
+  if (classes.length) ics.objectClasses = classes;
+  else if (sameProtocol?.objectClasses?.length) ics.objectClasses = null;
   return ics;
 }

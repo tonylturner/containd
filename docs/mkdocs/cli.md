@@ -278,8 +278,12 @@ deletion leaves SSH connections open.
 
 `set firewall ics-rule <id> <action> <protocol> [options...]` accepts the
 existing zone and Modbus/CIP-style flags (`--src-zone`, `--dst-zone`,
-`--function-code`, `--unit-id`, `--addresses`, `--read-only`, `--write-only`,
-and `--mode`). For IEC 104 (`protocol` is `iec104`), use:
+`--function-code`, `--object-classes`, `--unit-id`, `--addresses`, `--read-only`,
+`--write-only`, and `--mode`). The command creates a new rule; it does not update an existing ID.
+For CIP, `--object-classes <classes>` accepts comma-separated class IDs from
+0 through 65535 in decimal or `0x`-prefixed hex (for example `4,0x66`).
+`show firewall ics-rules` includes these values in `OBJECT_CLASSES`.
+For IEC 104 (`protocol` is `iec104`), use:
 
 - `--type-ids <ids>` — comma-separated decimal TypeIDs from 1 through 255.
 - `--classes <classes>` — comma-separated `monitor`, `control`, `system`, or `unknown`.

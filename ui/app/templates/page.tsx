@@ -7,7 +7,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useEffect, useState } from "react";
 
-import { api, apiURL, isAdmin, type Zone } from "../../lib/api";
+import { api, apiURL, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 import { SkeletonList } from "../../components/Skeleton";
@@ -30,17 +30,6 @@ type TemplateParameter = {
   help?: string;
 };
 
-type TemplateGeneratedRule = {
-  id: string;
-  description: string;
-  protocol: string;
-  functionCodes?: number[];
-  addresses?: string[];
-  action: string;
-  sourceZones?: string[];
-  destZones?: string[];
-};
-
 type TemplateApplyRequest = {
   template: string;
   sourceZones?: string[];
@@ -49,7 +38,7 @@ type TemplateApplyRequest = {
 };
 
 type TemplateApplyResponse = {
-  rules: TemplateGeneratedRule[];
+  rules: FirewallRule[];
   created?: number;
   updated?: number;
 };
@@ -253,7 +242,7 @@ function TemplateModal({
   const [sourceZones, setSourceZones] = useState<string[]>([]);
   const [destZones, setDestZones] = useState<string[]>([]);
   const [params, setParams] = useState<Record<string, string>>({});
-  const [preview, setPreview] = useState<TemplateGeneratedRule[] | null>(null);
+  const [preview, setPreview] = useState<FirewallRule[] | null>(null);
   const [loading, setLoading] = useState(false);
 
   function buildRequest(): TemplateApplyRequest {
@@ -457,13 +446,13 @@ function TemplateModal({
                           </td>
                           <td className="px-4 py-2">
                             <span
-                              className={`rounded-full px-2 py-0.5 text-xs ${protoBadgeClass(r.protocol)}`}
+                              className={`rounded-full px-2 py-0.5 text-xs ${protoBadgeClass(r.ics?.protocol ?? "")}`}
                             >
-                              {r.protocol}
+                              {r.ics?.protocol || "-"}
                             </span>
                           </td>
                           <td className="px-4 py-2 font-mono text-xs text-(--text)">
-                            {(r.functionCodes ?? []).join(", ") || "*"}
+                            {(r.ics?.functionCode ?? []).join(", ") || "*"}
                           </td>
                           <td className="px-4 py-2">
                             <span

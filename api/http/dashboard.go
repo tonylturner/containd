@@ -98,7 +98,7 @@ func loadDashboardCounts(ctx context.Context, store config.Store) dashboardCount
 func countICSRules(rules []config.Rule) int {
 	count := 0
 	for _, r := range rules {
-		if hasICSPredicate(r) {
+		if !r.ICS.Empty() {
 			count++
 		}
 	}

@@ -65,7 +65,7 @@ for (const protocol of ["dnp3", "cip"]) {
 
     await form.getByRole("button", { name: "Save filter" }).click();
     await expect.poll(() => patches.length).toBe(1);
-    expect(patches[0]).toMatchObject({ ics: { protocol, addresses: [] } });
+    expect(patches[0]).toMatchObject({ ics: { protocol, addresses: null } });
     await expect(page.getByText("ICS filter staged — commit to apply.")).toBeVisible();
   });
 

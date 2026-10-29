@@ -3,7 +3,10 @@
 
 package config
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Config represents the management-plane persistent configuration.
 // It intentionally stays narrow until broader models are added.
@@ -859,6 +862,15 @@ type ICSPredicate struct {
 	Classes []string   `json:"classes,omitempty"` // monitor|control|system|unknown
 	CA      []uint16   `json:"ca,omitempty"`      // 0..65534
 	IOA     []IOARange `json:"ioa,omitempty"`
+}
+
+// Empty reports whether the predicate has no packet-matching fields.
+// Mode is an enforcement setting, not a packet predicate.
+func (p ICSPredicate) Empty() bool {
+	return strings.TrimSpace(p.Protocol) == "" && len(p.FunctionCode) == 0 &&
+		p.UnitID == nil && len(p.Addresses) == 0 && len(p.ObjectClasses) == 0 &&
+		!p.ReadOnly && !p.WriteOnly && strings.TrimSpace(p.Direction) == "" &&
+		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0
 }
 
 // IOARange is a closed IEC104 information object address range,
