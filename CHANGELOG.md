@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- ICS decoder events expose CIP logical/symbolic/unknown targets and mark
+  incomplete CIP MSP/CPF and DNP3 object coverage for per-object policy checks.
+  Role-violating IEC 104 ASDUs retain every decoded object and its role finding.
 - Learned ICS rules now come only from supported requests and are split by
   source, destination, protocol, unit and function/service code. Modbus rules
   retain only that tuple's bounded address spans; DNP3 and CIP suggestions no

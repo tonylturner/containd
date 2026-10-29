@@ -223,14 +223,15 @@ func (dc dirContext) iFrameEvents(base map[string]any, asdu []byte) []dpi.Event 
 	if err != nil {
 		return dc.single(eventfields.KindMalformed, base, err)
 	}
-	if roleErr != nil {
-		// The layout decoded: keep the first object as evidence.
-		maps.Copy(base, objects[0])
-		return dc.single(eventfields.KindMalformed, base, roleErr)
-	}
 	kind := eventfields.KindResponse
 	if dc.direction == DirectionRequest {
 		kind = eventfields.KindRequest
+	}
+	if roleErr != nil {
+		// The layout decoded within the APDU/object budgets. Preserve every
+		// object, with the same role violation on each event.
+		kind = eventfields.KindMalformed
+		addError(base, roleErr)
 	}
 	events := make([]dpi.Event, 0, len(objects))
 	for _, obj := range objects {
@@ -256,6 +257,11 @@ func (dc dirContext) baseAttrs(start int64, raw []byte) map[string]any {
 // err is a conformanceError: its text is the error attribute and its code
 // a conformance finding.
 func (dc dirContext) single(kind string, attrs map[string]any, err error) []dpi.Event {
+	addError(attrs, err)
+	return []dpi.Event{dc.event(kind, attrs)}
+}
+
+func addError(attrs map[string]any, err error) {
 	if err != nil {
 		attrs[eventfields.KeyError] = err.Error()
 		var ce *conformanceError
@@ -263,7 +269,6 @@ func (dc dirContext) single(kind string, attrs map[string]any, err error) []dpi.
 			addFinding(attrs, ce.code)
 		}
 	}
-	return []dpi.Event{dc.event(kind, attrs)}
 }
 
 // unframeableEvent is the FrameError event for bytes that cannot start an

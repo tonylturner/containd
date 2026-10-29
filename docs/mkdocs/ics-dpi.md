@@ -241,6 +241,11 @@ the first 512 payload bytes (IEC 104: the APDU). An attribute is present only
 when the decoder found its value. The tables list what each ICS decoder emits;
 the value in brackets is the event's `proto`.
 
+`coverage_incomplete: true` marks a DNP3 fragment or CIP operation whose
+contained objects or operations were not fully inspected. The attribute is
+omitted on fully covered messages; it is separate from `conformance` and
+`undecoded` findings. See [Incomplete inspection](#incomplete-inspection).
+
 | Protocol | `kind` values | Attributes |
 | --- | --- | --- |
 | Modbus/TCP (`modbus`) | `request`, `response`, `exception`, `malformed` | `transaction_id`, `unit_id`, `function_code`, `is_write`, `raw_hex`; data-access fields per function code (see [ICS Firewall Rule Predicates](#ics-firewall-rule-predicates)): requests `address` with `quantity` (1–4, 15, 16; plus `byte_count` for 15, 16), `value` (5, 6), `and_mask`, `or_mask` (22), or `read_address`, `read_quantity`, `write_address`, `write_quantity`, `byte_count` (23); read responses `byte_count` and, for registers, `register_count`; write responses the fields they echo; `sub_function`, `sub_function_name` (code 8; sub-functions 1, 3, 4, 10 and 20 are writes; supported names cover 0–4, 10–18 and 20); invalid per-sub-function layout is `modbus.pdu_layout`; unknown sub-functions are reported as undecoded `modbus.diagnostics_subfunction`; `mei_type` (code 43), `mei_type_name` (MEI type 14); `exception_code`, `exception_description` (exceptions, with `function_code` set to the base code); `error` (malformed) |
@@ -257,6 +262,11 @@ independently: earlier TCP packets are not held back and whole-response
 prevention is not atomic. Point records preserve indices only when present
 (absence is not index zero); group 12 variation 1 CROBs expose their encoded
 control, operation, trip/close, queue/clear, count, on/off times and status.
+The fragment event carries `coverage_incomplete: true` when the object walk
+stops at an unknown, unsupported, size-prefixed, free-format or truncated
+layout, a reserved range code or an inspection budget. Readable headers and
+partial point lists remain in `objects`, including each header's `covered`
+byte count; a partial point list also marks coverage incomplete.
 
 DNP3 conformance codes are `dnp3.data_crc`, `dnp3.application_header`,
 `dnp3.object_walk`, `dnp3.crob_value`, `dnp3.link_duplicate`,
@@ -290,6 +300,9 @@ the server), `session_id`, `apdu_id`, `apci_type` (`I`, `S` or `U`) and
 An I-format APDU emits one event per information object. Types outside the
 supported set emit `unsupported` with a conformance finding; parsing mode and
 rules determine the verdict, not the event kind alone.
+When a role-violating ASDU's layout decodes, it still emits every object,
+each as `malformed` with the role finding and its own IOA and object index.
+The existing APDU-length and object-count limits bound this emission.
 
 CIP events report each EtherNet/IP layer as attributes. The protocol name `cip` covers the whole EtherNet/IP stack: one decoder toggle
 and one protocol match. The name `enip` is rejected at rule, signature, Sigma
@@ -311,7 +324,17 @@ UDP port 44818 carries encapsulation commands such as ListIdentity, decoded like
 | Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle`, `enip_status`, `enip_sender_context`, `enip_options` |
 | Implicit I/O (UDP 2222) | `connection_id`, `sequence`, `data_length` (whole connected data item), `cpf_item_types` |
 | Common Packet Format (CPF) | `cpf_item_types`: item types in packet order as one comma-joined lowercase hex string with no spaces; plus selected item `cpf_item_index`, `cpf_data_item_type`, and, when available, `connection_id`, `connected_sequence` |
-| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; responses retain `response_reserved`, `general_status`, `additional_status_count` and `additional_status` when present; MSP parents carry `multi_service_count` and `multi_service_decoded_count`; each child carries `msp: true`, `msp_index` and `msp_index_path` |
+| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `cip_target` (`logical`, `symbolic` or `unknown`), `cip_symbol` (symbolic targets only, an array of symbol-name segments), `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; responses retain `response_reserved`, `general_status`, `additional_status_count` and `additional_status` when present; MSP parents carry `multi_service_count` and `multi_service_decoded_count`; each child carries `msp: true`, `msp_index` and `msp_index_path`; incomplete wrappers and roots with uninspected extra CPF data items carry `coverage_incomplete: true` |
+
+Every CIP operation, including MSP children and uncorrelated responses, carries
+`cip_target`. Supported logical paths name a class, optionally an instance,
+then at most one attribute, member or connection point, using 8/16-bit segments.
+Symbolic paths contain one or more ANSI `0x91` symbols with optional 8/16-bit
+element segments; `cip_symbol` preserves the symbol segments in order, without
+element indexes. Repeated logical segments, mixed logical/symbolic paths,
+32-bit segments and other unsupported paths are `unknown`, never truncated to
+a supported target. Partial logical fields can remain as telemetry but do not
+make an unknown target known. Responses have no wire target and are `unknown`.
 
 CIP access classification uses the request's own complete, supported EPATH,
 not the service number alone. `is_write: false` identifies a supported read;
@@ -535,15 +558,22 @@ access; prefer tag ALLOW lists with default deny.
 ### Incomplete inspection
 
 A message not fully inspected adds an **unknown-object context**, with only
-message-wide facts (L3/L4, protocol, direction, DNP3 stations), no function code
-and no access category. This includes incomplete/unsupported DNP3 object walks,
-partial point lists and reserved qualifiers, incomplete CIP nested MSP decoding
-or uninspected CPF items. Decoder events mark `coverage_incomplete: true`.
+message-wide facts (L3/L4, protocol, direction, DNP3 stations). DNP3 retains its
+fragment-wide function code and access category; CIP MSP coverage contexts have
+neither, because inner services are unknown. This includes incomplete/unsupported
+DNP3 object walks, partial point lists and reserved qualifiers, incomplete CIP
+nested MSP decoding or uninspected CPF data items. Decoder events mark
+`coverage_incomplete: true`, omitted otherwise. Each incomplete MSP wrapper
+carries the marker, including ancestors of an incomplete nested wrapper:
+declared/decoded count mismatches, service/depth budget exhaustion and
+`cip.msp_layout` all mark incomplete coverage. Uninspected extra CPF data items
+mark the root operation, not its already inspected children.
 An ALLOW with any object selector fails this context; a DENY with any object
 selector matches it. Function, access, station, direction and L3/L4 constraints
-still apply: this is not an unconditional denial. Only an ALLOW without object,
-function or access constraints can admit the extra context. Unknown-object
-handling overrides only the object-selector conjunction, not other fields.
+still apply: this is not an unconditional denial. An ALLOW must omit object
+selectors; for CIP MSP coverage it must also omit function and access constraints.
+Unknown-object handling overrides only the object-selector conjunction, not
+other fields.
 IEC 104 retains each decoded object, including role-violating ASDUs.
 
 Create/replace rejects explicit `null` or `[]` for the new selector fields;
