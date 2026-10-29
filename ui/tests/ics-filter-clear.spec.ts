@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // Rule updates keep every omitted key, so the ICS editor clears explicitly:
-// a disabled filter is `ics: null`, an inherited mode is `ics.mode: ""`.
+// a disabled filter is `ics: null`, an inherited mode is `ics.mode: null`.
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 const base = {
@@ -88,7 +88,7 @@ test("choosing inherit clears a stored safety mode", async ({ page }) => {
   await expect(mode.locator("option:checked")).toHaveText("Inherit global (learning)");
   await page.getByRole("button", { name: "Save filter" }).click();
   await expect.poll(() => patches.length).toBe(1);
-  expect(patches[0]).toMatchObject({ ics: { protocol: "modbus", functionCode: [3], readOnly: true, mode: "" } });
+  expect(patches[0]).toMatchObject({ ics: { protocol: "modbus", functionCode: [3], readOnly: true, mode: null } });
 });
 
 test("an inherited safety mode stays unset", async ({ page }) => {

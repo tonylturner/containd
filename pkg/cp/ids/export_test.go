@@ -19,10 +19,9 @@ detection:
     function_code: 5
   condition: selection
 `
-	rule := config.IDSRule{
-		ID:           "test-1",
-		SourceFormat: "sigma",
-		RawSource:    raw,
+	rule, err := ConvertSigmaYAML([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
 	}
 	out, err := ExportSigmaRule(rule)
 	if err != nil {
@@ -50,41 +49,39 @@ func TestExportSigmaFromFields(t *testing.T) {
 	}
 	out, err := ExportSigmaRule(rule)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
-	s := string(out)
-	if !strings.Contains(s, "title: Test Detection") {
-		t.Errorf("missing title in output: %s", s)
-	}
-	if !strings.Contains(s, "level: high") {
-		t.Errorf("missing level in output: %s", s)
-	}
-	if !strings.Contains(s, "containd.proto.modbus") {
-		t.Errorf("missing proto tag in output: %s", s)
+	restored, err := ConvertSigmaYAML(out)
+	if err != nil || restored.Proto != rule.Proto || restored.Kind != rule.Kind || restored.When.Op != "in" || strings.Contains(string(out), "|in:") {
+		t.Fatalf("native inverse = %s, %+v, %v", out, restored, err)
 	}
 }
 
 func TestExportSigmaMultipleRules(t *testing.T) {
-	rules := []config.IDSRule{
-		{ID: "r1", Title: "Rule One", Labels: map[string]string{}},
-		{ID: "r2", Title: "Rule Two", Labels: map[string]string{}},
+	var rules []config.IDSRule
+	for _, title := range []string{"One", "Two"} {
+		rule, err := ConvertSigmaYAML([]byte("title: " + title + "\ndetection: {selection: {function_code: 5}, condition: selection}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rules = append(rules, rule)
 	}
 	out, err := ExportSigmaRules(rules)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(string(out), "---") {
+	if !strings.Contains(string(out.Text), "---") {
 		t.Error("expected document separator in multi-rule output")
 	}
 }
 
 func TestExportSuricataRoundTrip(t *testing.T) {
 	raw := `alert tcp any any -> any 502 (msg:"Modbus Write"; content:"|00 05|"; sid:1000001; rev:1;)`
-	rule := config.IDSRule{
-		ID:           "suricata-1000001",
-		SourceFormat: "suricata",
-		RawSource:    raw,
+	rules, err := ImportRules([]byte(raw), FormatSuricata)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("import=%+v,%v", rules, err)
 	}
+	rule := rules[0]
 	out, err := ExportSuricataRule(rule)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -154,7 +151,7 @@ func TestExportSuricataMultipleRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	lines := strings.Split(strings.TrimSpace(string(out.Text)), "\n")
 	if len(lines) != 2 {
 		t.Errorf("expected 2 lines, got %d", len(lines))
 	}
@@ -162,11 +159,11 @@ func TestExportSuricataMultipleRules(t *testing.T) {
 
 func TestExportSnortRoundTrip(t *testing.T) {
 	raw := `alert tcp any any -> any 80 (msg:"HTTP Test"; sid:100; rev:1;)`
-	rule := config.IDSRule{
-		ID:           "snort-100",
-		SourceFormat: "snort",
-		RawSource:    raw,
+	rules, err := ImportRules([]byte(raw), FormatSnort)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("import=%+v,%v", rules, err)
 	}
+	rule := rules[0]
 	out, err := ExportSnortRule(rule)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -194,10 +191,10 @@ func TestExportSnortFromFields(t *testing.T) {
 	if !strings.Contains(out, `msg:"Snort Test"`) {
 		t.Errorf("missing msg: %s", out)
 	}
-	if !strings.Contains(out, "depth:100") {
+	if !strings.Contains(out, "depth 100") {
 		t.Errorf("missing depth: %s", out)
 	}
-	if !strings.Contains(out, "offset:10") {
+	if !strings.Contains(out, "offset 10") {
 		t.Errorf("missing offset: %s", out)
 	}
 	if !strings.Contains(out, "priority:1") {
@@ -217,7 +214,7 @@ func TestExportSnortMultipleRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	lines := strings.Split(strings.TrimSpace(string(out.Text)), "\n")
 	if len(lines) != 2 {
 		t.Errorf("expected 2 lines, got %d", len(lines))
 	}
@@ -232,11 +229,11 @@ func TestExportYARARoundTrip(t *testing.T) {
     condition:
         $a
 }`
-	rule := config.IDSRule{
-		ID:           "yara-testmalware",
-		SourceFormat: "yara",
-		RawSource:    raw,
+	rules, err := ImportRules([]byte(raw), FormatYARA)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("import=%+v,%v", rules, err)
 	}
+	rule := rules[0]
 	out, err := ExportYARARule(rule)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -294,17 +291,19 @@ func TestExportYARAFromFields(t *testing.T) {
 func TestExportYARAMultipleRules(t *testing.T) {
 	rules := []config.IDSRule{
 		{
-			ID:    "r1",
-			Title: "RuleOne",
+			ID:          "r1",
+			Title:       "RuleOne",
+			YARAStrings: []config.YARAString{{Name: "$a", Pattern: "one", Type: "text"}},
 			Labels: map[string]string{
-				"yara.condition": "true",
+				"yara.condition": "$a",
 			},
 		},
 		{
-			ID:    "r2",
-			Title: "RuleTwo",
+			ID:          "r2",
+			Title:       "RuleTwo",
+			YARAStrings: []config.YARAString{{Name: "$a", Pattern: "two", Type: "text"}},
 			Labels: map[string]string{
-				"yara.condition": "true",
+				"yara.condition": "$a",
 			},
 		},
 	}
@@ -312,7 +311,7 @@ func TestExportYARAMultipleRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	s := string(out)
+	s := string(out.Text)
 	if strings.Count(s, "rule ") != 2 {
 		t.Errorf("expected 2 rules in output, got: %s", s)
 	}

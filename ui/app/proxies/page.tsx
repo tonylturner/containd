@@ -1,8 +1,11 @@
 "use client";
 
+import { useConfigForm } from "../../lib/use-config-form";
+import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 
 import {
@@ -29,7 +32,7 @@ export default function ProxiesPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const [status, setStatus] = useState<ServicesStatus | null>(null);
-  const [forward, setForward] = useState<ForwardProxyConfig>({
+  const forwardDraft = useConfigEditor<ForwardProxyConfig>({
     enabled: false,
     listenPort: 3128,
     listenZones: ["mgmt"],
@@ -38,31 +41,37 @@ export default function ProxiesPage() {
     upstream: "",
     logRequests: false,
   });
-  const [reverse, setReverse] = useState<ReverseProxyConfig>({
+  const reverseDraft = useConfigEditor<ReverseProxyConfig>({
     enabled: false,
     sites: [],
   });
-  const [newSite, setNewSite] = useState<ReverseProxySite>({
+  const siteDraft = useConfigForm({ site: {
     name: "",
     listenPort: 8081,
     hostnames: [],
     backends: [],
     tlsEnabled: false,
-  });
+  } as ReverseProxySite, backends: "", hostnames: "" });
+  const { cfg: forward, setCfg: setForward, adoptConfig: adoptForward } = forwardDraft;
+  const { cfg: reverse, setCfg: setReverse, adoptConfig: adoptReverse } = reverseDraft;
+  const [newSite, setNewSite] = siteDraft.field("site");
+  const [backendsCSV, setBackendsCSV] = siteDraft.field("backends");
+  const [hostnamesCSV, setHostnamesCSV] = siteDraft.field("hostnames");
+  const { refreshForm: refreshSite } = siteDraft;
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     setLoading(true);
     setError(null);
     try {
       setStatus(await api.getServicesStatus());
       const fp = await api.getForwardProxy();
       if (fp) {
-        setForward({
+        adoptForward({
           enabled: fp.enabled ?? false,
           listenPort: fp.listenPort ?? 3128,
           listenZones: fp.listenZones ?? [],
@@ -70,15 +79,16 @@ export default function ProxiesPage() {
           allowedClients: fp.allowedClients ?? [],
           upstream: fp.upstream ?? "",
           logRequests: fp.logRequests ?? false,
-        });
+        }, keepEdits);
       }
       const rp = await api.getReverseProxy();
       if (rp) {
-        setReverse({
+        adoptReverse({
           enabled: rp.enabled ?? false,
           sites: rp.sites ?? [],
-        });
+        }, keepEdits);
       }
+      refreshSite(rp, keepEdits);
       toast("Proxy status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -87,7 +97,7 @@ export default function ProxiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, adoptForward, adoptReverse, refreshSite]);
 
   useConfigRefresh(refresh);
 
@@ -103,14 +113,8 @@ export default function ProxiesPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
-  const listenZonesCSV = useMemo(
-    () => (forward.listenZones ?? []).join(", "),
-    [forward.listenZones],
-  );
-  const allowedDomainsCSV = useMemo(
-    () => (forward.allowedDomains ?? []).join(", "),
-    [forward.allowedDomains],
-  );
+  const listenZonesCSV = forwardDraft.text("listenZones", (forward.listenZones ?? []).join(", "));
+  const allowedDomainsCSV = forwardDraft.text("allowedDomains", (forward.allowedDomains ?? []).join(", "));
   // Envoy and nginx report their own access-log meters next to the proxy
   // service entry.
   const proxy = status?.proxy;
@@ -121,14 +125,18 @@ export default function ProxiesPage() {
     if (!canEdit) return;
     setError(null);
     setSaveState("saving");
-    const saved = await api.setForwardProxy(forward);
+    const submitted = forwardDraft.editor;
+    const saved = await api.setForwardProxy({ ...forward,
+      listenZones: listenZonesCSV.split(",").map((s) => s.trim()).filter(Boolean),
+      allowedDomains: allowedDomainsCSV.split(",").map((s) => s.trim()).filter(Boolean),
+    });
     setSaveState(saved.ok ? "saved" : "error");
     if (!saved.ok) {
       const msg = saved.error || "Failed to save forward proxy settings.";
       setError(msg);
       toast(msg, "error");
     } else {
-      setForward(saved.data);
+      forwardDraft.acceptConfig(submitted, saved.data);
       toast(saved.warning ? `Forward proxy staged — commit to apply. Warning: ${saved.warning}` : "Forward proxy staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
@@ -138,6 +146,7 @@ export default function ProxiesPage() {
     if (!canEdit) return;
     setError(null);
     setSaveState("saving");
+    const submitted = reverseDraft.editor;
     const saved = await api.setReverseProxy(reverse);
     setSaveState(saved.ok ? "saved" : "error");
     if (!saved.ok) {
@@ -145,7 +154,7 @@ export default function ProxiesPage() {
       setError(msg);
       toast(msg, "error");
     } else {
-      setReverse(saved.data);
+      reverseDraft.acceptConfig(submitted, saved.data);
       toast(saved.warning ? `Reverse proxy staged — commit to apply. Warning: ${saved.warning}` : "Reverse proxy staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
@@ -162,21 +171,17 @@ export default function ProxiesPage() {
       setError("Listen port must be valid.");
       return;
     }
-    if (!newSite.backends || newSite.backends.length === 0) {
+    const backends = backendsCSV.split(",").map((s) => s.trim()).filter(Boolean);
+    const hostnames = hostnamesCSV.split(",").map((s) => s.trim()).filter(Boolean);
+    if (backends.length === 0) {
       setError("At least one backend is required.");
       return;
     }
     setReverse((r) => ({
       ...r,
-      sites: [...(r.sites ?? []), { ...newSite, name: newSite.name.trim() }],
+      sites: [...(r.sites ?? []), { ...newSite, name: newSite.name.trim(), backends, hostnames }],
     }));
-    setNewSite({
-      name: "",
-      listenPort: 8081,
-      hostnames: [],
-      backends: [],
-      tlsEnabled: false,
-    });
+    siteDraft.acceptFields(siteDraft.editor, ["site", "backends", "hostnames"]);
   }
 
   function deleteSite(name: string) {
@@ -201,7 +206,7 @@ export default function ProxiesPage() {
       actions={
         <div className="flex items-center gap-3">
           <button
-            onClick={() => refresh()}
+            onClick={() => refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -219,6 +224,7 @@ export default function ProxiesPage() {
       }
     >
       <ConfirmDialog {...confirm.props} />
+      <ConfigEditNotice superseded={forwardDraft.editor.superseded || reverseDraft.editor.superseded || siteDraft.editor.superseded} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -382,15 +388,7 @@ export default function ProxiesPage() {
                     type="text"
                     value={listenZonesCSV}
                     disabled={!canEdit}
-                    onChange={(e) =>
-                      setForward((f) => ({
-                        ...f,
-                        listenZones: e.target.value
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter(Boolean),
-                      }))
-                    }
+                    onChange={(e) => forwardDraft.setText("listenZones", e.target.value)}
                     placeholder="mgmt, lan"
                     className="mt-2 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                   />
@@ -405,15 +403,7 @@ export default function ProxiesPage() {
                     type="text"
                     value={allowedDomainsCSV}
                     disabled={!canEdit}
-                    onChange={(e) =>
-                      setForward((f) => ({
-                        ...f,
-                        allowedDomains: e.target.value
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter(Boolean),
-                      }))
-                    }
+                    onChange={(e) => forwardDraft.setText("allowedDomains", e.target.value)}
                     placeholder="*.example.com"
                     className="mt-2 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                   />
@@ -523,33 +513,17 @@ export default function ProxiesPage() {
                 />
                 <input
                   type="text"
-                  value={(newSite.backends ?? []).join(", ")}
+                  value={backendsCSV}
                   disabled={!canEdit}
-                  onChange={(e) =>
-                    setNewSite((s) => ({
-                      ...s,
-                      backends: e.target.value
-                        .split(",")
-                        .map((v) => v.trim())
-                        .filter(Boolean),
-                    }))
-                  }
+                  onChange={(e) => setBackendsCSV(e.target.value)}
                   placeholder="backends host:port, host:port"
                   className="md:col-span-2 input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
                 <input
                   type="text"
-                  value={(newSite.hostnames ?? []).join(", ")}
+                  value={hostnamesCSV}
                   disabled={!canEdit}
-                  onChange={(e) =>
-                    setNewSite((s) => ({
-                      ...s,
-                      hostnames: e.target.value
-                        .split(",")
-                        .map((v) => v.trim())
-                        .filter(Boolean),
-                    }))
-                  }
+                  onChange={(e) => setHostnamesCSV(e.target.value)}
                   placeholder="hostnames (optional)"
                   className="md:col-span-2 input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />

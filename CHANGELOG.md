@@ -9,16 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- ICS decoder events expose CIP request targets (logical, symbolic or unknown;
+  responses carry none) and mark
+  incomplete CIP MSP/CPF and DNP3 object coverage for per-object policy checks.
+  Role-violating IEC 104 ASDUs retain every decoded object and its role finding.
 - Learned ICS rules now come only from supported requests and are split by
   source, destination, protocol, unit and function/service code. Modbus rules
   retain only that tuple's bounded address spans; DNP3 and CIP suggestions no
   longer misrepresent station, object-group or path values as addresses.
   Previously generated wider rules are not removed automatically.
-- DNP3 and CIP rules reject nonempty `addresses`, which could never match
-  decoded traffic and silently defeated address-qualified denials. Both rule
-  editors keep unsupported stored filters visible for explicit removal, but
-  no longer offer new ones. Stored configurations with these filters start in
-  management recovery with the offending rule and cause until corrected.
+- CIP rules reject `addresses`; DNP3 now interprets them as point indexes and
+  requires object groups. DNP3/CIP reject the ineffective Modbus `unitId` filter.
+  Both editors expose unsupported stored filters for explicit removal; invalid
+  stored predicates enter management recovery until corrected.
 - Modbus address rules now cover the whole request span. An `ALLOW` with
   `addresses` matches only when every register or coil the request reads or
   writes lies inside the listed entries; previously only the starting address
@@ -37,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Both ICS editors, CLI and API schemas expose DNP3 station/group/variation/point
+  selectors, CIP instance/attribute/tag selectors, and IEC 104 cause, originator,
+  P/N, T and select/execute selectors. Clearing a selector sends a merge-PATCH
+  null; previews send the complete effective predicate without removal markers.
+- DNP3 secure-operations templates explicitly allow Confirm and startup functions,
+  restrict Write to time/IIN groups 50/80, and deny Save Configuration alongside
+  restart and stop operations.
+
+- DPI events and directional flow summaries include a verified
+  `transportConnectionId` for locally tracked AF_PACKET TCP/UDP connections,
+  with correlation status and conntrack-zone authority health.
 - `services.av.scan` selects the traffic the scanning gate intercepts:
   include and exclude entries of directional zone pairs, destination ports
   and CIDRs, a download mode (`hold` or `stream_tail`) and the ICS-marked
@@ -216,6 +230,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Empty ICS function/service code fields now mean any code in both rule editors,
+  without injecting zero from whitespace or separators. Invalid selector values
+  block saving and preview, and clearing generic restrictions removes them.
+- Template previews display the generated rule's nested ICS protocol and codes.
+  ICS rule listing and dashboard counts recognize all predicate fields, and the
+  CLI accepts and displays CIP object classes.
+- Modbus transaction pairing separates connection incarnations, directions,
+  transaction IDs and unit IDs, including locally masqueraded AF_PACKET
+  traffic. Missing connection evidence reports correlation unavailable instead
+  of an unmatched-reply violation; inventory and learning use verified logical
+  client/backend roles without changing wire telemetry or policy addresses.
+  Unmatched-reply detection requires capture from the connection's opening SYN,
+  pauses for two quiet minutes after packet loss or an inspection bypass, and
+  resumes on its own; resolver admission is limited to industrial traffic and
+  bounded. NFQUEUE and PCAP evidence reports `correlationStatus: wire`.
+- Successful IDS imports and zone, interface and identity collection changes
+  appear immediately without discarding unrelated edits. Saving IDS rules keeps
+  imported additions; import and creation forms do not block configuration refreshes.
+  VPN profile uploads likewise update their configuration path while retaining edits.
+- DHCP, DNS, NTP, syslog, AV, proxy, VPN, IDS, NAT, routing, zone, interface,
+  wizard and identity editors keep unsaved edits during staged-save, commit
+  and automatic refreshes, and warn when settings change on the server.
+  Explicit Refresh discards edits. List fields retain unfinished text while typing.
 - On narrow screens, the sidebar collapses behind a Menu button so the main
   content has the full viewport width. Navigation closes after choosing a
   link or pressing Escape; the desktop sidebar stays visible.
@@ -233,8 +270,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other than 14, Modbus Write File Record (FC 21), and DNP3 freeze,
   initialize, start, unsolicited, assign-class, time, file, configuration and
   authentication functions no longer count as reads. Unknown operations omit
-  `is_write`. The Modbus read-only template also denies FC 21, and the DNP3
-  example template describes its Write and Enable Unsolicited allowances.
+  `is_write`. The Modbus read-only template also denies FC 21.
 - Modbus exception replies now complete their request's transaction, so an
   exception no longer leaves the transaction pending, and an exception with
   no prior request is reported like an unmatched response.
@@ -339,6 +375,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built-in CIP rules are updated to `cip` and recorded in the same audit
   record; an edited copy that names `enip` starts the appliance in management
   recovery until it is corrected.
+- All four IDS exporters validate `rawSource` as a cache against the rule's
+  current predicates before reusing it. Edited or corrupt cached source falls
+  through to exact native export or a refusal naming the unsupported predicate;
+  conversion-loss safeguards remain in place.
+- Sigma and YARA IDS exports now report refusals instead of dropping native
+  predicates. Sigma round-trips containd's decoder fields, supported operators,
+  Boolean conditions, protocol/kind tags and severity; imports preserve each
+  UTF-8 document's source bytes.
+  YARA accepts only byte-content rules without native event or network
+  predicates. Refusal comments, API counts and UI feedback
+  cover every export format.
+- Snort 3 and Suricata IDS exports refuse unsupported application predicates
+  instead of widening them to generic traffic. Downloads list every refusal in
+  comments and report a refused count in the API header and Export panel.
+  Valid same-format cached source remains lossless; native content uses the
+  target engine's option syntax.
+- Snort imports keep Snort 3 content modifiers, negation, hex content and
+  escaped punctuation, so containd's own Snort exports re-import unchanged.
+  Quoted option values no longer split on `;` or `,`.
 
 ### Removed
 

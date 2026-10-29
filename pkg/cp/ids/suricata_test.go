@@ -365,3 +365,24 @@ func TestParseSuricataNoSIDFallback(t *testing.T) {
 		t.Fatalf("expected fallback ID suricata-no-sid-rule, got %s", r.ID)
 	}
 }
+
+func TestParseSuricataSnortQuotedContent(t *testing.T) {
+	for _, parser := range []struct {
+		name  string
+		parse func(string) (config.IDSRule, error)
+	}{{"suricata", ParseSuricataLine}, {"snort", ParseSnortLine}} {
+		t.Run(parser.name, func(t *testing.T) {
+			// Include literal and escaped semicolons, quote, comma, unknown
+			// escape, and an escaped backslash immediately before the quote.
+			line := `alert tcp any any -> any any (content:"a;b\;c\"d,e\,f\q\\"; nocase; depth:30; sid:903;)`
+			rule, err := parser.parse(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := config.ContentMatch{Pattern: `a;b;c"d,e\,f\q\`, Nocase: true, Depth: 30}
+			if len(rule.ContentMatches) != 1 || rule.ContentMatches[0] != want {
+				t.Fatalf("got %#v, want %#v", rule.ContentMatches, want)
+			}
+		})
+	}
+}

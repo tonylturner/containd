@@ -1,5 +1,7 @@
 "use client";
 
+import type { useConfigForm } from "../../lib/use-config-form";
+
 import { useMemo, useRef, useState } from "react";
 
 import { Card } from "../../components/Card";
@@ -13,19 +15,24 @@ import {
   groupFilterMatch,
 } from "./ids-shared";
 
+export type IDSPanelFields = { name: string; filter: string; format: string; sigmaText: string };
+type PanelForm = Pick<ReturnType<typeof useConfigForm<IDSPanelFields>>, "field">;
+
 export function GroupsPanel({
+  form,
   groups,
   rules,
   canEdit,
   onUpdate,
 }: {
+  form: PanelForm;
   groups: RuleGroup[];
   rules: IDSRule[];
   canEdit: boolean;
   onUpdate: (g: RuleGroup[]) => void;
 }) {
-  const [name, setName] = useState("");
-  const [filter, setFilter] = useState("");
+  const [name, setName] = form.field("name");
+  const [filter, setFilter] = form.field("filter");
 
   const groupStats = useMemo(() => {
     const stats: Record<string, number> = {};
@@ -173,16 +180,20 @@ export function GroupsPanel({
 }
 
 export function ImportPanel({
-  onImported,
+  form,
+  onImport,
+  onConverted,
   onError,
 }: {
-  onImported: (msg: string) => void;
+  form: PanelForm;
+  onImport: (file: File, format: string) => Promise<boolean>;
+  onConverted: (rule: IDSRule) => void;
   onError: (msg: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [format, setFormat] = useState("");
+  const [format, setFormat] = form.field("format");
   const [importing, setImporting] = useState(false);
-  const [sigmaText, setSigmaText] = useState("");
+  const [sigmaText, setSigmaText] = form.field("sigmaText");
   const [sigmaConverting, setSigmaConverting] = useState(false);
 
   async function onFileImport() {
@@ -191,16 +202,9 @@ export function ImportPanel({
       return;
     }
     setImporting(true);
-    onError("");
-    const result = await api.importIDSRules(file, format || undefined);
+    const ok = await onImport(file, format);
     setImporting(false);
-    if (!result.ok) {
-      onError(result.error || "Import failed. Check the file format and try again.");
-      return;
-    }
-    onImported(
-      `IDS rules staged — commit to apply. Imported ${result.data.imported} rule${result.data.imported !== 1 ? "s" : ""} (${result.data.skipped} skipped). Format: ${result.data.format}. Total: ${result.data.total}.`,
-    );
+    if (!ok) return;
     if (fileRef.current) {
       fileRef.current.value = "";
     }
@@ -212,14 +216,15 @@ export function ImportPanel({
     }
     setSigmaConverting(true);
     onError("");
-    const rule = await api.convertSigma(sigmaText);
+    const submitted = sigmaText;
+    const rule = await api.convertSigma(submitted);
     setSigmaConverting(false);
     if (!rule) {
       onError("Sigma conversion failed. Check YAML syntax.");
       return;
     }
-    onImported(`Converted Sigma rule: ${rule.id}. Click Save to persist.`);
-    setSigmaText("");
+    onConverted(rule);
+    setSigmaText((current) => current === submitted ? "" : current);
   }
 
   return (
@@ -291,48 +296,60 @@ export function ImportPanel({
 export function ExportPanel({ ruleCount }: { ruleCount: number }) {
   const [exporting, setExporting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refusedCount, setRefusedCount] = useState<number | null>(null);
 
   async function doExport(format: string) {
     setExporting(format);
     setError(null);
-    const ok = await api.exportIDSRules(format);
+    setRefusedCount(null);
+    const result = await api.exportIDSRules(format);
     setExporting(null);
-    if (!ok) {
-      setError(`Export failed for ${format}.`);
+    if (!result.ok) {
+      setError(result.error || `Export failed for ${format}.`);
+    } else {
+      setRefusedCount(result.data.refusedCount);
     }
   }
 
   return (
     <Card title="Export rules">
       <p className="mb-4 text-xs text-(--text-muted)">
-        Export all {ruleCount} rule{ruleCount !== 1 ? "s" : ""} in your chosen
-        format.
+        Download running rules in your chosen format. All formats refuse
+        rules they cannot preserve; the file lists each refusal. Unsaved and
+        staged changes are not included.
       </p>
+      {refusedCount !== null && (
+        <p role="status" aria-label="Export result" className="mb-3 text-sm text-(--text)">
+          Downloaded. {refusedCount} rule{refusedCount !== 1 ? "s" : ""} refused.
+          {refusedCount > 0 && " Review the refusal comments in the downloaded file."}
+        </p>
+      )}
       {error && (
         <div className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
           {error}
         </div>
       )}
-      {ruleCount === 0 ? (
-        <p className="text-sm text-(--text-muted)">No rules to export.</p>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {EXPORT_FORMATS.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => doExport(f.value)}
-              disabled={exporting !== null}
-              className="flex flex-col items-center gap-2 rounded-xs border bg-(--surface2) p-4 text-center transition-ui disabled:opacity-50"
-            >
-              <FormatBadge format={f.value} />
-              <span className="text-sm text-(--text)">{f.label}</span>
-              <span className="text-[10px] text-(--text-muted)">
-                {exporting === f.value ? "Downloading..." : "Download"}
-              </span>
-            </button>
-          ))}
-        </div>
+      {ruleCount === 0 && (
+        <p className="mb-3 text-sm text-(--text-muted)">
+          No candidate rules. Running rules can still be exported.
+        </p>
       )}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {EXPORT_FORMATS.map((f) => (
+          <button
+            key={f.value}
+            onClick={() => doExport(f.value)}
+            disabled={exporting !== null}
+            className="flex flex-col items-center gap-2 rounded-xs border bg-(--surface2) p-4 text-center transition-ui disabled:opacity-50"
+          >
+            <FormatBadge format={f.value} />
+            <span className="text-sm text-(--text)">{f.label}</span>
+            <span className="text-[10px] text-(--text-muted)">
+              {exporting === f.value ? "Downloading..." : "Download"}
+            </span>
+          </button>
+        ))}
+      </div>
     </Card>
   );
 }
@@ -400,14 +417,17 @@ export function SourcesCatalog({ sources }: { sources: IDSRuleSource[] }) {
 
 export function EditRuleModal({
   rule,
+  text,
+  setText,
   onClose,
   onSave,
 }: {
   rule: IDSRule;
+  text: string;
+  setText: (text: string) => void;
   onClose: () => void;
   onSave: (r: IDSRule) => void;
 }) {
-  const [text, setText] = useState(JSON.stringify(rule, null, 2));
   const [err, setErr] = useState<string | null>(null);
 
   function save() {

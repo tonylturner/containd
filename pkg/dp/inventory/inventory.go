@@ -51,9 +51,14 @@ func New() *Inventory {
 }
 
 // RecordEvent extracts ICS metadata from a DPI event and updates the
-// inventory for both wire IPs. Roles use the connection direction retained in
-// FlowID, never the event kind (which may be exception, restart or session).
+// inventory using verified logical client/backend evidence when available.
+// Without CT, roles use the wire FlowID, never the event kind.
 func (inv *Inventory) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
+	if key, ok := flow.ParseKey(ev.FlowID); ok {
+		if src, dst, verified := ev.Connection.LogicalIPs(key); verified {
+			srcIP, dstIP = src, dst
+		}
+	}
 	proto := strings.ToLower(ev.Proto)
 	switch proto {
 	case "modbus":
@@ -168,6 +173,14 @@ func (inv *Inventory) recordCIP(srcIP, dstIP string, ev dpi.Event) {
 
 func eventRoles(srcIP, dstIP string, ev dpi.Event, initiator, responder string) (string, string) {
 	key, ok := flow.ParseKey(ev.FlowID)
+	if ok {
+		if src, dst, verified := ev.Connection.LogicalIPs(key); verified && src == srcIP && dst == dstIP {
+			if ev.Connection.Direction(key) == flow.DirReverse {
+				return responder, initiator
+			}
+			return initiator, responder
+		}
+	}
 	if !ok || key.SrcIP.String() != srcIP || key.DstIP.String() != dstIP {
 		return "", "" // No connection evidence: do not invent or erase roles.
 	}

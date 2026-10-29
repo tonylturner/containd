@@ -82,7 +82,9 @@ func (e *Engine) passThreshold(sig Signature, ev dpi.Event, now time.Time) bool 
 	}
 	flowID := ev.FlowID
 	if t.Scope == thresholdScopeConnection {
-		if key, ok := flow.ParseKey(flowID); ok {
+		if ev.Connection != nil {
+			flowID = ev.Connection.Key
+		} else if key, ok := flow.ParseKey(flowID); ok {
 			if key.Dir == flow.DirReverse {
 				key = key.Reversed()
 			}

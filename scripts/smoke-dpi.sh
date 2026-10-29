@@ -15,7 +15,8 @@ set -euo pipefail
 # interfaces, which cannot stop a command. It asserts that management
 # refuses the ICS rules in enforce mode without an inline path, then runs
 # the traffic with the rules in learn mode: they report monitoring, denied
-# writes reach the server, and nothing is blocked.
+# writes reach the server, and nothing is blocked. The exact conformant read
+# has request and reply DPI events sharing one transportConnectionId.
 #
 # SMOKE_DPI_CAPTURE=nfqueue steers ICS traffic through NFQUEUE
 # (nfqueueGroup SMOKE_NFQUEUE_GROUP, default 101) in enforce mode. The rules
@@ -52,15 +53,15 @@ SMOKE_BUILD=${SMOKE_BUILD:-1}
 SMOKE_DPI_CAPTURE=${SMOKE_DPI_CAPTURE:-afpacket}
 NFQUEUE_GROUP=${SMOKE_NFQUEUE_GROUP:-101}
 TESTS_PASSED=0
-TESTS_EXPECTED=37
+TESTS_EXPECTED=38
 FAILURES=()
 case "$SMOKE_DPI_CAPTURE" in
-  afpacket) ;;
-  nfqueue) TESTS_EXPECTED=45 ;;
-  *)
-    echo "SMOKE_DPI_CAPTURE must be afpacket or nfqueue, got: $SMOKE_DPI_CAPTURE" >&2
-    exit 2
-    ;;
+afpacket) ;;
+nfqueue) TESTS_EXPECTED=46 ;;
+*)
+  echo "SMOKE_DPI_CAPTURE must be afpacket or nfqueue, got: $SMOKE_DPI_CAPTURE" >&2
+  exit 2
+  ;;
 esac
 
 GREEN="\033[32m"
@@ -586,7 +587,7 @@ export MODBUS_DST="${WAN_NET}.4"
 
 modbus_event_filter=$(
   cat <<'EOF'
-any(.[]; .proto == "modbus" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
+any(.[]; .proto == "modbus" and .kind == "request" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and .srcPort == (env.MODBUS_READ_PORT | tonumber) and .attributes.transaction_id == 1 and .attributes.unit_id == 1 and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
 EOF
 )
 
@@ -638,6 +639,12 @@ if [[ $READ_STATUS -ne 0 ]]; then
   exit 1
 fi
 pass "Modbus read allowed ($(tr -d '\r' <"$WORK_DIR/modbus-read.out"))"
+MODBUS_READ_PORT=$(awk '$1 == "READ_PORT" {print $2}' "$WORK_DIR/modbus-read.out" | tr -d '\r')
+export MODBUS_READ_PORT
+[[ "$MODBUS_READ_PORT" =~ ^[0-9]+$ ]] || {
+  log "read did not report its exact TCP source port"
+  exit 1
+}
 
 if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_event_filter"; then
   log "expected modbus event not found"
@@ -645,6 +652,44 @@ if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_event_filter"; then
   exit 1
 fi
 pass "Modbus event recorded in telemetry"
+
+READ_EVENTS=$($CURL -H "$AUTH_HEADER" "${BASE}/events?limit=500")
+READ_REQUEST=$(echo "$READ_EVENTS" | jq -ce --argjson port "$MODBUS_READ_PORT" \
+  '[.[] | select(.proto == "modbus" and .kind == "request" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and .srcPort == $port and .attributes.transaction_id == 1 and .attributes.unit_id == 1 and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))] | sort_by(.id) | last')
+if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
+  MODBUS_CONNECTION_ID=$(echo "$READ_REQUEST" | jq -r '.transportConnectionId // empty')
+  MODBUS_REQUEST_FLOW=$(echo "$READ_REQUEST" | jq -r '.flowId')
+  export MODBUS_CONNECTION_ID MODBUS_REQUEST_FLOW
+  [[ -n "$MODBUS_CONNECTION_ID" ]] || {
+    log "NAT read request has no verified transport identity"
+    exit 1
+  }
+  modbus_response_filter=$(
+    cat <<'EOF'
+any(.[]; .proto == "modbus" and .kind == "response" and .srcIp == env.MODBUS_DST and .transportConnectionId == env.MODBUS_CONNECTION_ID and .flowId != env.MODBUS_REQUEST_FLOW and .attributes.transaction_id == 1 and .attributes.unit_id == 1)
+EOF
+  )
+  if ! wait_for_jq "${BASE}/events?limit=500" "$modbus_response_filter"; then
+    log "NAT read lacks a decoded response sharing the request's transportConnectionId"
+    exit 1
+  fi
+  if ! $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=500" | jq -e \
+    'all(.[]; .transportConnectionId != env.MODBUS_CONNECTION_ID or (.attributes.message // "" | contains("without prior request") | not))' >/dev/null; then
+    log "conformant NAT read raised a matching unmatched-reply anomaly"
+    exit 1
+  fi
+  pass "Exact NAT read has request + response, distinct directional flowIds and one transportConnectionId"
+else
+  # The client received its reply, but generic Modbus steering queues only
+  # the request direction. Verify that limitation instead of calling the
+  # absence of unmatched-reply anomalies bidirectional success.
+  if ! echo "$READ_EVENTS" | jq -e --argjson port "$MODBUS_READ_PORT" \
+    'all(.[]; (.proto != "modbus" or .kind != "response" or .srcIp != env.MODBUS_DST or .dstIp != env.MODBUS_SRC or .dstPort != $port))' >/dev/null; then
+    log "NFQUEUE reply coverage changed; update the explicit steering expectation"
+    exit 1
+  fi
+  pass "NFQUEUE read returned a reply to the client; configured request-only steering produced no reply DPI event"
+fi
 
 log "Testing a Modbus read split across two TCP segments..."
 if compose exec -T ot_client python /opt/modbus/client.py read-split "$MODBUS_DST" 502 >"$WORK_DIR/split.out" 2>"$WORK_DIR/split.err" &&

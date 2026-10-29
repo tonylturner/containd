@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Response } from "@playwright/test";
 import type { DHCPConfig } from "../lib/api";
-import { CONFIG_COMMITTED } from "../lib/config-events";
+import { CONFIG_COMMITTED, CONFIG_STAGED } from "../lib/config-events";
 
 // The event meter every management service status entry carries.
 const idleMeter = {
@@ -133,4 +133,30 @@ test("a clean editor adopts a server change", async ({ page }) => {
   await announceConfigChange(page);
   await expect(authority(page)).toBeChecked();
   await expect(notice(page)).toHaveCount(0);
+});
+
+test("DHCP keeps unfinished pool, reservation and CSV text across config refreshes", async ({ page }) => {
+  await mockAPI(page, { enabled: false, authoritative: false });
+  await open(page);
+  await page.getByText("Advanced options", { exact: true }).click();
+  const pools = page.getByPlaceholder("lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200");
+  const reservations = page.getByPlaceholder("lan2,aa:bb:cc:dd:ee:ff,192.168.10.50");
+  const ifaces = page.getByPlaceholder("lan2, lan3");
+  await pools.pressSequentially("lan2,192.");
+  await reservations.pressSequentially("lan2,aa:");
+  await ifaces.fill("lan2, ");
+  for (const event of [CONFIG_COMMITTED, CONFIG_STAGED]) {
+    await Promise.all([
+      page.waitForResponse(configRead),
+      page.evaluate((name) => window.dispatchEvent(new CustomEvent(name)), event),
+    ]);
+    await settled(page);
+    await expect(pools).toHaveValue("lan2,192.");
+    await expect(reservations).toHaveValue("lan2,aa:");
+    await expect(ifaces).toHaveValue("lan2, ");
+  }
+  await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
+  await expect(pools).toHaveValue("");
+  await expect(reservations).toHaveValue("");
+  await expect(ifaces).toHaveValue("lan2");
 });

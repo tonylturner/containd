@@ -46,11 +46,14 @@ type ParsedPacket struct {
 
 // Event is emitted by decoders and fed to rules/IDS/telemetry.
 type Event struct {
-	FlowID     string
-	Proto      string
-	Kind       string
-	Attributes map[string]any
-	Timestamp  time.Time
+	FlowID                string
+	Connection            *flow.Connection           `json:"-"`
+	TransportConnectionID flow.TransportConnectionID `json:"transportConnectionId,omitempty"`
+	CorrelationStatus     string                     `json:"correlationStatus,omitempty"`
+	Proto                 string
+	Kind                  string
+	Attributes            map[string]any
+	Timestamp             time.Time
 }
 
 // Decoder inspects packets for a given flow and emits protocol events.

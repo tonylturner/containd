@@ -1,8 +1,11 @@
 "use client";
 
+import { useConfigForm } from "../../lib/use-config-form";
+import { ConfigEditNotice } from "../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   api,
@@ -38,22 +41,28 @@ export default function RoutingPage() {
 
   const confirm = useConfirm();
 
-  const [gwName, setGwName] = useState("");
-  const [gwAlias, setGwAlias] = useState("");
-  const [gwAddr, setGwAddr] = useState("");
-  const [gwIface, setGwIface] = useState("");
-  const [gwDesc, setGwDesc] = useState("");
+  const form = useConfigForm({
+    gwName: "", gwAlias: "", gwAddr: "", gwIface: "", gwDesc: "",
+    routeDst: "", routeGw: "", routeIface: "", routeTable: "0", routeMetric: "",
+    ruleSrc: "", ruleDst: "", ruleTable: "", rulePrio: "",
+  });
+  const { refreshForm } = form;
+  const [gwName, setGwName] = form.field("gwName");
+  const [gwAlias, setGwAlias] = form.field("gwAlias");
+  const [gwAddr, setGwAddr] = form.field("gwAddr");
+  const [gwIface, setGwIface] = form.field("gwIface");
+  const [gwDesc, setGwDesc] = form.field("gwDesc");
 
-  const [routeDst, setRouteDst] = useState("");
-  const [routeGw, setRouteGw] = useState("");
-  const [routeIface, setRouteIface] = useState("");
-  const [routeTable, setRouteTable] = useState("0");
-  const [routeMetric, setRouteMetric] = useState("");
+  const [routeDst, setRouteDst] = form.field("routeDst");
+  const [routeGw, setRouteGw] = form.field("routeGw");
+  const [routeIface, setRouteIface] = form.field("routeIface");
+  const [routeTable, setRouteTable] = form.field("routeTable");
+  const [routeMetric, setRouteMetric] = form.field("routeMetric");
 
-  const [ruleSrc, setRuleSrc] = useState("");
-  const [ruleDst, setRuleDst] = useState("");
-  const [ruleTable, setRuleTable] = useState("");
-  const [rulePrio, setRulePrio] = useState("");
+  const [ruleSrc, setRuleSrc] = form.field("ruleSrc");
+  const [ruleDst, setRuleDst] = form.field("ruleDst");
+  const [ruleTable, setRuleTable] = form.field("ruleTable");
+  const [rulePrio, setRulePrio] = form.field("rulePrio");
 
   const gatewayLabel = (value?: string): string => {
     if (!value) return "\u2014";
@@ -62,17 +71,18 @@ export default function RoutingPage() {
     return match.alias ? `${match.alias} (${match.name})` : match.name;
   };
 
-  async function refresh() {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [r, osr] = await Promise.all([api.getRouting(), api.getOSRouting()]);
     setCfg({ gateways: r?.gateways ?? [], routes: r?.routes ?? [], rules: r?.rules ?? [] });
     setOSRouting(osr);
-  }
+    refreshForm(r, keepEdits);
+  }, [refreshForm]);
 
   useConfigRefresh(refresh);
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
 
   async function save(next: RoutingConfig): Promise<{ ok: boolean; warning?: string }> {
     setError(null);
@@ -116,13 +126,11 @@ export default function RoutingPage() {
       routes: cfg.routes ?? [],
       rules: cfg.rules ?? [],
     };
+    const submitted = form.editor;
     const result = await save(next);
     if (!result.ok) return;
-    setGwName("");
-    setGwAlias("");
-    setGwAddr("");
-    setGwIface("");
-    setGwDesc("");
+
+    form.acceptFields(submitted, ["gwName", "gwAlias", "gwAddr", "gwIface", "gwDesc"]);
   }
 
   async function deleteGateway(idx: number) {
@@ -180,13 +188,11 @@ export default function RoutingPage() {
       routes: [...(cfg.routes ?? []), nextRoute],
       rules: cfg.rules ?? [],
     };
+    const submitted = form.editor;
     const result = await save(next);
     if (!result.ok) return;
-    setRouteDst("");
-    setRouteGw("");
-    setRouteIface("");
-    setRouteTable("0");
-    setRouteMetric("");
+
+    form.acceptFields(submitted, ["routeDst", "routeGw", "routeIface", "routeTable", "routeMetric"]);
   }
 
   async function deleteRoute(idx: number) {
@@ -219,12 +225,11 @@ export default function RoutingPage() {
       routes: cfg.routes ?? [],
       rules: [...(cfg.rules ?? []), nextRule],
     };
+    const submitted = form.editor;
     const result = await save(next);
     if (!result.ok) return;
-    setRuleSrc("");
-    setRuleDst("");
-    setRuleTable("");
-    setRulePrio("");
+
+    form.acceptFields(submitted, ["ruleSrc", "ruleDst", "ruleTable", "rulePrio"]);
   }
 
   async function deleteRule(idx: number) {
@@ -349,7 +354,7 @@ export default function RoutingPage() {
             </button>
           )}
           <button
-            onClick={refresh}
+            onClick={() => refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -357,6 +362,7 @@ export default function RoutingPage() {
         </div>
       }
     >
+      <ConfigEditNotice superseded={form.editor.superseded} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.

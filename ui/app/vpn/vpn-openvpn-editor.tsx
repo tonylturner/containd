@@ -27,6 +27,8 @@ type Props = {
   canEdit: boolean;
   cfg: NormalizedVPNConfig;
   setCfg: Dispatch<SetStateAction<NormalizedVPNConfig>>;
+  text: (key: string, derived: string) => string;
+  setText: (key: string, value: string) => void;
   zones: Zone[];
   interfaceOptions: InterfaceOption[];
   openvpnIssues: FieldIssue[];
@@ -44,6 +46,8 @@ export function OpenVPNEditorCard({
   canEdit,
   cfg,
   setCfg,
+  text,
+  setText,
   zones,
   interfaceOptions,
   openvpnIssues,
@@ -524,23 +528,9 @@ export function OpenVPNEditorCard({
                     <InfoTip label="DNS servers sent to clients when they connect." />
                   </label>
                   <input
-                    value={(cfg.openvpn.server?.pushDNS ?? []).join(", ")}
+                    value={text("pushDNS", (cfg.openvpn.server?.pushDNS ?? []).join(", "))}
                     disabled={!canEdit}
-                    onChange={(e) =>
-                      setCfg((c) => ({
-                        ...c,
-                        openvpn: {
-                          ...c.openvpn,
-                          server: {
-                            ...(c.openvpn.server ?? defaultOpenVPNServer),
-                            pushDNS: e.target.value
-                              .split(",")
-                              .map((s) => s.trim())
-                              .filter(Boolean),
-                          },
-                        },
-                      }))
-                    }
+                    onChange={(e) => setText("pushDNS", e.target.value)}
                     className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     placeholder="1.1.1.1, 8.8.8.8"
                   />
@@ -551,23 +541,9 @@ export function OpenVPNEditorCard({
                     <InfoTip label="Networks advertised to VPN clients for reachability." />
                   </label>
                   <input
-                    value={(cfg.openvpn.server?.pushRoutes ?? []).join(", ")}
+                    value={text("pushRoutes", (cfg.openvpn.server?.pushRoutes ?? []).join(", "))}
                     disabled={!canEdit}
-                    onChange={(e) =>
-                      setCfg((c) => ({
-                        ...c,
-                        openvpn: {
-                          ...c.openvpn,
-                          server: {
-                            ...(c.openvpn.server ?? defaultOpenVPNServer),
-                            pushRoutes: e.target.value
-                              .split(",")
-                              .map((s) => s.trim())
-                              .filter(Boolean),
-                          },
-                        },
-                      }))
-                    }
+                    onChange={(e) => setText("pushRoutes", e.target.value)}
                     className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                     placeholder="192.168.0.0/24, 10.0.0.0/8"
                   />

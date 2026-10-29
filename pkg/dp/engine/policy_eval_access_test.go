@@ -10,6 +10,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 func TestEvalContextReadWriteNeedsPresentIsWrite(t *testing.T) {
@@ -28,10 +29,7 @@ func TestEvalContextReadWriteNeedsPresentIsWrite(t *testing.T) {
 		{map[string]any{"is_write": "false", "function_code": 2.5}, false, false, 0, nil, "wrong kinds and fraction"},
 	}
 	for _, c := range cases {
-		ctx, ok := evalContextFromDPIEvent(nil, state, pkt, dpi.Event{Proto: "modbus", Kind: "request", Attributes: c.attrs}, "", "")
-		if !ok {
-			t.Fatalf("%s: no context", c.describeCase)
-		}
+		ctx := singleEvalContext(t, nil, state, pkt, dpi.Event{Proto: "modbus", Kind: "request", Attributes: c.attrs}, "", "")
 		ics := ctx.ICS
 		if ics.ReadOnly != c.read || ics.WriteOnly != c.write || ics.FunctionCode != c.fc {
 			t.Fatalf("%s: read=%v write=%v fc=%d", c.describeCase, ics.ReadOnly, ics.WriteOnly, ics.FunctionCode)
@@ -43,3 +41,13 @@ func TestEvalContextReadWriteNeedsPresentIsWrite(t *testing.T) {
 }
 
 func ptr8(v uint8) *uint8 { return &v }
+
+// singleEvalContext asserts that fixtures naming one operation stay singular.
+func singleEvalContext(t *testing.T, snap *rules.Snapshot, state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, srcZone, dstZone string) rules.EvalContext {
+	t.Helper()
+	contexts := evalContextsFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
+	if len(contexts) != 1 {
+		t.Fatalf("got %d contexts, want one", len(contexts))
+	}
+	return contexts[0]
+}

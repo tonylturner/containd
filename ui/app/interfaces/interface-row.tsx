@@ -1,5 +1,7 @@
 "use client";
 
+import type { ConfigFields } from "../../lib/use-config-editor";
+
 import Image from "next/image";
 import { useMemo, useState } from "react";
 
@@ -9,6 +11,7 @@ import { staticAssetURL } from "../../lib/api-core";
 import { zoneLabel, zoneName } from "../../lib/zones";
 
 export function InterfaceRow({
+  draft,
   iface,
   runtime,
   zones,
@@ -18,6 +21,7 @@ export function InterfaceRow({
   onUpdate,
   canEdit,
 }: {
+  draft: ConfigFields;
   iface: Interface;
   runtime: InterfaceState | null;
   zones: Zone[];
@@ -28,22 +32,20 @@ export function InterfaceRow({
   canEdit: boolean;
 }) {
   const [editing, setEditing] = useState(false);
-  const [itype, setIType] = useState((iface.type ?? "physical").toLowerCase());
-  const [members, setMembers] = useState((iface.members ?? []).join(", "));
-  const [parent, setParent] = useState(iface.parent ?? "");
-  const [vlanId, setVlanId] = useState(
-    typeof iface.vlanId === "number" ? String(iface.vlanId) : "",
-  );
-  const [device, setDevice] = useState(iface.device ?? "");
-  const [alias, setAlias] = useState(iface.alias ?? "");
-  const [zone, setZone] = useState(iface.zone ?? "");
-  const [mode, setMode] = useState(iface.addressMode ?? "");
-  const [addresses, setAddresses] = useState((iface.addresses ?? []).join(", "));
-  const [gateway, setGateway] = useState(iface.gateway ?? "");
-  const [mgmt, setMgmt] = useState(iface.access?.mgmt ?? true);
-  const [http, setHTTP] = useState(iface.access?.http ?? true);
-  const [https, setHTTPS] = useState(iface.access?.https ?? true);
-  const [ssh, setSSH] = useState(iface.access?.ssh ?? true);
+  const [itype, setIType] = draft.field(`${JSON.stringify(iface.name)}.itype`, (iface.type ?? "physical").toLowerCase());
+  const [members, setMembers] = draft.field(`${JSON.stringify(iface.name)}.members`, (iface.members ?? []).join(", "));
+  const [parent, setParent] = draft.field(`${JSON.stringify(iface.name)}.parent`, iface.parent ?? "");
+  const [vlanId, setVlanId] = draft.field(`${JSON.stringify(iface.name)}.vlanId`, typeof iface.vlanId === "number" ? String(iface.vlanId) : "");
+  const [device, setDevice] = draft.field(`${JSON.stringify(iface.name)}.device`, iface.device ?? "");
+  const [alias, setAlias] = draft.field(`${JSON.stringify(iface.name)}.alias`, iface.alias ?? "");
+  const [zone, setZone] = draft.field(`${JSON.stringify(iface.name)}.zone`, iface.zone ?? "");
+  const [mode, setMode] = draft.field(`${JSON.stringify(iface.name)}.mode`, iface.addressMode ?? "");
+  const [addresses, setAddresses] = draft.field(`${JSON.stringify(iface.name)}.addresses`, (iface.addresses ?? []).join(", "));
+  const [gateway, setGateway] = draft.field(`${JSON.stringify(iface.name)}.gateway`, iface.gateway ?? "");
+  const [mgmt, setMgmt] = draft.field(`${JSON.stringify(iface.name)}.mgmt`, iface.access?.mgmt ?? true);
+  const [http, setHTTP] = draft.field(`${JSON.stringify(iface.name)}.http`, iface.access?.http ?? true);
+  const [https, setHTTPS] = draft.field(`${JSON.stringify(iface.name)}.https`, iface.access?.https ?? true);
+  const [ssh, setSSH] = draft.field(`${JSON.stringify(iface.name)}.ssh`, iface.access?.ssh ?? true);
 
   const detectedCIDR = firstIPv4CIDR(runtime?.addrs);
   const suggestedGateway = suggestGatewayFromCIDR(detectedCIDR);

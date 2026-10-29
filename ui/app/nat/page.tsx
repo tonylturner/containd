@@ -1,8 +1,11 @@
 "use client";
 
+import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
+import { useConfigForm } from "../../lib/use-config-form";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type SetStateAction } from "react";
 import Link from "next/link";
 
 import {
@@ -30,6 +33,8 @@ export default function NATPage() {
   const [nat, setNat] = useState<NATConfig>({ enabled: false });
   // Until the first answer the settings are unknown, not disabled or empty.
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -63,14 +68,16 @@ export default function NATPage() {
     },
   ];
 
-  async function refresh() {
+  async function refresh({ keepEdits = true }: { keepEdits?: boolean } = {}) {
     const [z, n] = await Promise.all([api.listZones(), api.getNAT()]);
-    // Saving from stand-in settings would overwrite the real ones, so an
-    // unavailable answer hides the cards until the next success.
+    // Never save stand-in settings. After the first success, keep drafts
+    // mounted but disabled while the current server copy is unavailable.
     if (z && n) {
       setLoadError(null);
       setZones(z);
       setNat(n);
+      setLoaded(true);
+      if (!keepEdits) setReloadKey((n) => n + 1);
     } else {
       setLoadError(UNAVAILABLE);
     }
@@ -88,7 +95,7 @@ export default function NATPage() {
       title="NAT"
       actions={
         <button
-          onClick={refresh}
+          onClick={() => refresh({ keepEdits: false })}
           className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
         >
           Refresh
@@ -116,8 +123,10 @@ export default function NATPage() {
         <div role="alert" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {loadError}
         </div>
-      ) : loading ? <SkeletonList rows={4} /> : <>
+      ) : null}
+      {loading ? <SkeletonList rows={4} /> : loaded ? <fieldset disabled={!!loadError} className="min-w-0">
       <NATCard
+        key={`snat-${reloadKey}`}
         zones={zones}
         nat={nat}
         onSave={async (cfg) => {
@@ -126,7 +135,7 @@ export default function NATPage() {
           const saved = await api.setNAT(cfg);
           if (!saved.ok) {
             setError(saved.error || "Failed to update NAT (check zones).");
-            return;
+            return null;
           }
           setNat(saved.data);
           setNotice(
@@ -135,10 +144,12 @@ export default function NATPage() {
               : "NAT configuration staged — commit to apply.",
           );
           refresh();
+          return saved.data;
         }}
       />
 
       <PortForwardsCard
+        key={`dnat-${reloadKey}`}
         zones={zones}
         nat={nat}
         onSave={async (cfg) => {
@@ -147,7 +158,7 @@ export default function NATPage() {
           const saved = await api.setNAT(cfg);
           if (!saved.ok) {
             setError(saved.error || "Failed to update port forwards (check zones/ports).");
-            return;
+            return null;
           }
           setNat(saved.data);
           setNotice(
@@ -156,11 +167,16 @@ export default function NATPage() {
               : "Port forwarding configuration staged — commit to apply.",
           );
           refresh();
+          return saved.data;
         }}
       />
-      </>}
+      </fieldset> : null}
     </Shell>
   );
+}
+
+function snat(nat: NATConfig): NATConfig {
+  return { enabled: !!nat.enabled, egressZone: nat.egressZone ?? "", sourceZones: nat.sourceZones ?? [] };
 }
 
 /* ── SNAT card ────────────────────────────────────────────────── */
@@ -172,33 +188,25 @@ function NATCard({
 }: {
   zones: Zone[];
   nat: NATConfig;
-  onSave: (cfg: NATConfig) => void;
+  onSave: (cfg: NATConfig) => Promise<NATConfig | null>;
 }) {
-  const [enabled, setEnabled] = useState(!!nat.enabled);
-  const [egressZone, setEgressZone] = useState(nat.egressZone ?? "");
-  const [sourceZones, setSourceZones] = useState<string[]>(
-    nat.sourceZones ?? [],
-  );
-
-  useEffect(() => {
-    setEnabled(!!nat.enabled);
-    setEgressZone(nat.egressZone ?? "");
-    setSourceZones(nat.sourceZones ?? []);
-  }, [nat.enabled, nat.egressZone, nat.sourceZones]);
+  const { editor, cfg, setCfg, adoptConfig, acceptConfig, dirty } = useConfigEditor(() => snat(nat));
+  const enabled = !!cfg.enabled;
+  const egressZone = cfg.egressZone ?? "";
+  const sourceZones = cfg.sourceZones ?? [];
+  const setEnabled = (value: SetStateAction<boolean>) => setCfg((c) => ({ ...c, enabled: typeof value === "function" ? value(!!c.enabled) : value }));
+  const setEgressZone = (egressZone: string) => setCfg((c) => ({ ...c, egressZone }));
+  const setSourceZones = (value: SetStateAction<string[]>) => setCfg((c) => ({ ...c, sourceZones: typeof value === "function" ? value(c.sourceZones ?? []) : value }));
+  useEffect(() => { adoptConfig(snat(nat)); }, [nat, adoptConfig]);
 
   const zoneOptions = (zones ?? [])
     .map((z) => ({ value: z.name, label: zoneLabel(z) }))
     .filter((z) => z.value);
   zoneOptions.sort((a, b) => a.label.localeCompare(b.label));
 
-  const dirty =
-    enabled !== !!nat.enabled ||
-    egressZone !== (nat.egressZone ?? "") ||
-    JSON.stringify((sourceZones ?? []).slice().sort()) !==
-      JSON.stringify(((nat.sourceZones ?? []) as string[]).slice().sort());
-
   return (
     <div className="mb-6 overflow-hidden rounded-xs border bg-(--surface) shadow-card backdrop-blur-sm">
+      <ConfigEditNotice superseded={editor.superseded} />
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-(--text)">Source NAT (SNAT)</div>
@@ -305,15 +313,14 @@ function NATCard({
         <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
           <button
             disabled={!dirty}
-            onClick={() =>
-              onSave({
-                enabled,
+            onClick={async () => {
+              const submitted = editor;
+              const saved = await onSave({ ...nat, ...cfg,
                 egressZone: egressZone.trim() || undefined,
-                sourceZones:
-                  (sourceZones ?? []).map((z) => z.trim()).filter(Boolean) ||
-                  undefined,
-              })
-            }
+                sourceZones: sourceZones.map((z) => z.trim()).filter(Boolean),
+              });
+              if (saved) acceptConfig(submitted, snat(saved));
+            }}
             className={
               "rounded-xs px-3 py-1.5 text-sm font-medium transition-ui " +
               (dirty
@@ -338,40 +345,48 @@ function PortForwardsCard({
 }: {
   zones: Zone[];
   nat: NATConfig;
-  onSave: (cfg: NATConfig) => void;
+  onSave: (cfg: NATConfig) => Promise<NATConfig | null>;
 }) {
-  const [items, setItems] = useState<PortForward[]>(nat.portForwards ?? []);
-  const [ingressChoice, setIngressChoice] = useState("");
-  const [newProto, setNewProto] = useState<"tcp" | "udp">("tcp");
-  const [newListen, setNewListen] = useState("");
-  const [newDestIp, setNewDestIp] = useState("");
-  const [newDestPort, setNewDestPort] = useState("");
-  const [newSources, setNewSources] = useState("");
-  const [newDesc, setNewDesc] = useState("");
+  const { editor, cfg: items, setCfg: setItems, adoptConfig, acceptConfig, dirty } = useConfigEditor<PortForward[]>(nat.portForwards ?? []);
+  const form = useConfigForm({
+    ingressChoice: "", newProto: "tcp" as "tcp" | "udp",
+    newListen: "", newDestIp: "", newDestPort: "", newSources: "", newDesc: "",
+  }, nat);
+  const { refreshForm } = form;
+  useEffect(() => { refreshForm(nat); }, [nat, refreshForm]);
+  const [ingressChoice, setIngressChoice] = form.field("ingressChoice");
+  const [newProto, setNewProto] = form.field("newProto");
+  const [newListen, setNewListen] = form.field("newListen");
+  const [newDestIp, setNewDestIp] = form.field("newDestIp");
+  const [newDestPort, setNewDestPort] = form.field("newDestPort");
+  const [newSources, setNewSources] = form.field("newSources");
+  const [newDesc, setNewDesc] = form.field("newDesc");
   const [error, setError] = useState<string | null>(null);
   const confirm = useConfirm();
 
   useEffect(() => {
-    setItems(nat.portForwards ?? []);
-  }, [nat.portForwards]);
+    adoptConfig(nat.portForwards ?? []);
+  }, [nat.portForwards, adoptConfig]);
 
   const zoneOptions = (zones ?? [])
     .map((z) => ({ value: z.name, label: zoneLabel(z) }))
     .filter((z) => z.value);
   zoneOptions.sort((a, b) => a.label.localeCompare(b.label));
 
-  // The chosen ingress zone while it exists; otherwise the zone named "wan"
-  // if there is one, else none, and Add asks for a choice.
+  // Keep an explicit choice even if a refresh removes its zone. Never
+  // silently stage a different ingress on the user's behalf.
   const hasZone = (name: string) => zoneOptions.some((z) => z.value === name);
-  const newIngress = hasZone(ingressChoice) ? ingressChoice : hasZone("wan") ? "wan" : "";
-
-  const dirty = JSON.stringify(items) !== JSON.stringify(nat.portForwards ?? []);
+  const newIngress = ingressChoice || (hasZone("wan") ? "wan" : "");
 
   // One banner serves the whole row, so each message names its field.
   async function add() {
     setError(null);
     if (!newIngress) {
       setError("Ingress zone is required.");
+      return;
+    }
+    if (!hasZone(newIngress)) {
+      setError("Ingress zone is no longer available. Choose a configured zone.");
       return;
     }
     if (!newListen.trim()) {
@@ -424,7 +439,9 @@ function PortForwardsCard({
 
   async function save() {
     setError(null);
-    onSave({ ...nat, portForwards: items });
+    const submitted = editor;
+    const saved = await onSave({ ...nat, portForwards: items });
+    if (saved) acceptConfig(submitted, saved.portForwards ?? []);
   }
 
   function toggle(id: string, enabled: boolean) {
@@ -447,6 +464,7 @@ function PortForwardsCard({
 
   return (
     <div className="mb-6 overflow-hidden rounded-xs border bg-(--surface) shadow-card backdrop-blur-sm">
+      <ConfigEditNotice superseded={editor.superseded || form.editor.superseded} />
       <ConfirmDialog {...confirm.props} />
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div>
@@ -493,6 +511,9 @@ function PortForwardsCard({
                 <option value="" disabled>
                   ingress: choose a zone
                 </option>
+              )}
+              {ingressChoice && !hasZone(ingressChoice) && (
+                <option value={ingressChoice}>ingress:{ingressChoice} (no longer on server)</option>
               )}
               {zoneOptions.map((z) => (
                 <option key={z.value} value={z.value}>

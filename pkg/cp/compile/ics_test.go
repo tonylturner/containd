@@ -20,12 +20,25 @@ func TestICSPredicateCopiesFields(t *testing.T) {
 		Addresses:     []string{"0-10"},
 		ObjectClasses: []uint16{2},
 		ReadOnly:      true,
+		WriteOnly:     true,
 		Direction:     "request",
 		Mode:          "enforce",
 		TypeIDs:       []int{45, 46},
 		Classes:       []string{"control"},
 		CA:            []uint16{1},
 		IOA:           []config.IOARange{{Start: 65536, End: 65567}},
+		COT:           []int{6},
+		Originators:   []int{0},
+		Negative:      compileBoolPtr(false),
+		Test:          compileBoolPtr(false),
+		SelectExecute: "execute",
+		Masters:       []uint16{0},
+		Outstations:   []uint16{65519},
+		Groups:        []int{0},
+		Variations:    []int{0},
+		Instances:     []uint16{0},
+		Attributes:    []uint16{65535},
+		Tags:          []string{"Program:Main.Pump"},
 	}
 	wantUnitID := uint8(7)
 	want := rules.ICSPredicate{
@@ -35,12 +48,37 @@ func TestICSPredicateCopiesFields(t *testing.T) {
 		Addresses:     []string{"0-10"},
 		ObjectClasses: []uint16{2},
 		ReadOnly:      true,
+		WriteOnly:     true,
 		Direction:     "request",
 		Mode:          "enforce",
 		TypeIDs:       []int{45, 46},
 		Classes:       []string{"control"},
 		CA:            []uint16{1},
 		IOA:           []rules.IOARange{{Start: 65536, End: 65567}},
+		COT:           []int{6},
+		Originators:   []int{0},
+		Negative:      compileBoolPtr(false),
+		Test:          compileBoolPtr(false),
+		SelectExecute: "execute",
+		Masters:       []uint16{0},
+		Outstations:   []uint16{65519},
+		Groups:        []int{0},
+		Variations:    []int{0},
+		Instances:     []uint16{0},
+		Attributes:    []uint16{65535},
+		Tags:          []string{"Program:Main.Pump"},
+	}
+	// Keep the complete explicit fixture above in lockstep with both types.
+	// No zero fields: even pointer-false and list-zero values must survive.
+	for _, typ := range []reflect.Type{reflect.TypeOf(in), reflect.TypeOf(want)} {
+		if typ.NumField() != 25 {
+			t.Fatalf("%s has %d fields; enumerate every predicate field in the copy fixture", typ, typ.NumField())
+		}
+	}
+	for i := range reflect.TypeOf(in).NumField() {
+		if reflect.ValueOf(in).Field(i).IsZero() {
+			t.Fatalf("copy fixture omits %s", reflect.TypeOf(in).Field(i).Name)
+		}
 	}
 	got := ICSPredicate(in)
 	if !reflect.DeepEqual(got, want) {
@@ -51,6 +89,10 @@ func TestICSPredicateCopiesFields(t *testing.T) {
 	in.TypeIDs[0], in.Classes[0], in.CA[0], in.IOA[0].Start, in.FunctionCode[0] = 1, "monitor", 2, 3, 4
 	in.Addresses[0], in.ObjectClasses[0] = "99", 5
 	*in.UnitID = 9
+	in.COT[0], in.Originators[0] = 7, 1
+	*in.Negative, *in.Test = true, true
+	in.Masters[0], in.Outstations[0], in.Groups[0], in.Variations[0] = 1, 2, 3, 4
+	in.Instances[0], in.Attributes[0], in.Tags[0] = 5, 6, "Changed"
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ICSPredicate shares memory with its input: %+v", got)
 	}
@@ -59,6 +101,8 @@ func TestICSPredicateCopiesFields(t *testing.T) {
 		t.Fatalf("empty predicate = %+v, want zero", zero)
 	}
 }
+
+func compileBoolPtr(v bool) *bool { return &v }
 
 func TestCompileSnapshotUsesICSPredicate(t *testing.T) {
 	cfg := &config.Config{
