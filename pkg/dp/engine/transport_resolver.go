@@ -124,9 +124,6 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 		pkt.Timestamp = time.Now().UTC()
 	}
 	history := r.admitHistoryLocked(pkt)
-	if history == nil && e.observation != nil {
-		metrics.IdentificationRefusals.Inc()
-	}
 	if r.count.Add(1) > transportQueueLimit {
 		r.count.Add(-1)
 		r.unavailable(e, pkt, "queue_overflow")
@@ -143,6 +140,10 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 	case r.queue <- transportPacket{packet: pkt, at: time.Now(), history: history}:
 		if history != nil {
 			history.queued++
+		} else if e.observation != nil {
+			// The worker still observes this packet. Missing loss-index
+			// coverage is not an observer admission refusal.
+			metrics.IdentificationTransportLosses.WithLabelValues("index_capacity").Inc()
 		}
 	default:
 		r.bytes.Add(-n)
@@ -155,7 +156,10 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 func (r *transportResolver) unavailable(e *Engine, pkt capture.Packet, status string) {
 	r.authority.count(status)
 	if e.observation != nil {
-		metrics.IdentificationRefusals.Inc()
+		// Packet loss is intentionally per arrival: the incarnation may
+		// already be admitted, or be admitted by a later packet. Only
+		// Observer.Open can refuse an entire identification incarnation.
+		metrics.IdentificationTransportLosses.WithLabelValues("queue_capacity").Inc()
 	}
 	now := time.Now()
 	if entry := r.indexed[packetKey(pkt).Tuple()]; entry != nil {

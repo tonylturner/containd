@@ -162,11 +162,25 @@ func TestObservationRefusalAndDirectionExpiry(t *testing.T) {
 	key := identify.Key(e.tupleStateLocked(packetKey(trace[0]).Tuple()).Connection.Load().Key)
 	other := trace[0]
 	other.SrcPort++
+	before := testutil.ToFloat64(metrics.IdentificationRefusals)
 	for range 5 {
 		e.HandlePacket(other)
 	}
+	if delta := testutil.ToFloat64(metrics.IdentificationRefusals) - before; delta != 1 {
+		t.Fatalf("refused incarnation metric=%v, want 1 despite repeated packets", delta)
+	}
 	if got := e.observation.observer.Counters().Refusals; got != 1 {
 		t.Fatalf("refused incarnation retried: %d", got)
+	}
+	other.TCP.Seq++
+	for range 5 {
+		e.HandlePacket(other)
+	}
+	if got := e.observation.observer.Counters().Refusals; got != 2 {
+		t.Fatalf("fresh ISN must count exactly one new refusal, got %d", got)
+	}
+	if delta := testutil.ToFloat64(metrics.IdentificationRefusals) - before; delta != 2 {
+		t.Fatalf("two refused incarnations metric=%v", delta)
 	}
 	// Expire only the request direction. Its peer must retain the Observed
 	// marker for learner exclusion, but no live decoder stream.
