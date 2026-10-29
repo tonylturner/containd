@@ -25,6 +25,14 @@ type IEC104Context struct {
 	Class     string
 	SafeRead  bool // iec104.SafeRead
 	Broadcast bool // I-frame with CA 65535
+	// Cause of transmission, originator, P/N and T bits of the ASDU, and
+	// Select (S/E=1) for command types that carry the qualifier; nil
+	// when the APDU does not carry the field.
+	COT        *uint8
+	Originator *uint8
+	Negative   *bool
+	Test       *bool
+	Select     *bool
 }
 
 // EffectiveMode resolves an ICS rule's mode: rule mode > global DPI mode >

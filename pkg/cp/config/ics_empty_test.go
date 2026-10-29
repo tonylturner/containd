@@ -7,13 +7,17 @@ import (
 )
 
 func TestICSPredicateEmpty(t *testing.T) {
-	zero := uint8(0)
+	zero, no := uint8(0), false
 	fields := []ICSPredicate{
 		{Protocol: "modbus"}, {FunctionCode: []uint8{0}}, {UnitID: &zero},
 		{Addresses: []string{"0"}}, {ObjectClasses: []uint16{0}},
 		{ReadOnly: true}, {WriteOnly: true}, {Direction: "request"},
 		{TypeIDs: []int{1}}, {Classes: []string{"monitor"}},
 		{CA: []uint16{0}}, {IOA: []IOARange{{Start: 0, End: 0}}},
+		{COT: []int{6}}, {Originators: []int{0}}, {Negative: &no}, {Test: &no},
+		{SelectExecute: "select"}, {Masters: []uint16{0}}, {Outstations: []uint16{0}},
+		{Groups: []int{0}}, {Variations: []int{0}}, {Instances: []uint32{0}},
+		{Attributes: []uint16{0}}, {Tags: []string{"T"}},
 	}
 	// Guard additions to the model: each packet field needs a fixture here.
 	if len(fields) != reflect.TypeFor[ICSPredicate]().NumField()-1 {

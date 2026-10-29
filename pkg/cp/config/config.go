@@ -862,6 +862,24 @@ type ICSPredicate struct {
 	Classes []string   `json:"classes,omitempty"` // monitor|control|system|unknown
 	CA      []uint16   `json:"ca,omitempty"`      // 0..65534
 	IOA     []IOARange `json:"ioa,omitempty"`
+	// IEC 104 cause of transmission 1..63, originator address 0..255,
+	// P/N and T bits, and the S/E qualifier of commands.
+	COT           []int  `json:"cot,omitempty"`
+	Originators   []int  `json:"originators,omitempty"`
+	Negative      *bool  `json:"negative,omitempty"`
+	Test          *bool  `json:"test,omitempty"`
+	SelectExecute string `json:"selectExecute,omitempty"` // "select" | "execute"
+
+	// DNP3 predicates (protocol "dnp3"); Addresses are point indexes there.
+	Masters     []uint16 `json:"masters,omitempty"`     // master station addresses
+	Outstations []uint16 `json:"outstations,omitempty"` // outstation addresses
+	Groups      []int    `json:"groups,omitempty"`      // object groups 0..255
+	Variations  []int    `json:"variations,omitempty"`  // object variations 0..255
+
+	// CIP target predicates (protocol "cip"), beside ObjectClasses.
+	Instances  []uint32 `json:"instances,omitempty"`
+	Attributes []uint16 `json:"attributes,omitempty"`
+	Tags       []string `json:"tags,omitempty"` // Logix symbolic tag paths
 }
 
 // Empty reports whether the predicate has no packet-matching fields.
@@ -870,7 +888,11 @@ func (p ICSPredicate) Empty() bool {
 	return strings.TrimSpace(p.Protocol) == "" && len(p.FunctionCode) == 0 &&
 		p.UnitID == nil && len(p.Addresses) == 0 && len(p.ObjectClasses) == 0 &&
 		!p.ReadOnly && !p.WriteOnly && strings.TrimSpace(p.Direction) == "" &&
-		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0
+		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0 &&
+		len(p.COT) == 0 && len(p.Originators) == 0 && p.Negative == nil && p.Test == nil &&
+		strings.TrimSpace(p.SelectExecute) == "" &&
+		len(p.Masters) == 0 && len(p.Outstations) == 0 && len(p.Groups) == 0 && len(p.Variations) == 0 &&
+		len(p.Instances) == 0 && len(p.Attributes) == 0 && len(p.Tags) == 0
 }
 
 // IOARange is a closed IEC104 information object address range,
