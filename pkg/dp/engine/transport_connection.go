@@ -195,6 +195,10 @@ func adoptTransport(previous, incoming *flow.Connection) *flow.Connection {
 	if evidence == nil {
 		evidence = previous.Evidence
 	}
+	if previous.ID == id && previous.Status == incoming.Status && previous.Evidence == evidence {
+		previous.MergeHistory(incoming)
+		return previous
+	}
 	fresh := &flow.Connection{ID: id, Key: previous.Key, Status: incoming.Status, Evidence: evidence}
 	fresh.InheritLifecycle(previous)
 	fresh.MergeHistory(incoming)
@@ -215,6 +219,9 @@ func (e *Engine) closeCorrelation(state *flow.State, reset, expired bool) {
 	}
 	if reset || expired || c.FIN().Load() == 3 {
 		c.Closed().Store(true)
+		if e.transport != nil {
+			e.transport.retireAdmission(state)
+		}
 		if e.anomalyDetector != nil {
 			e.anomalyDetector.ForgetConnection(c.Key)
 		}

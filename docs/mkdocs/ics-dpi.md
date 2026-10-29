@@ -224,7 +224,9 @@ expiry. Each miss sends one direction-agnostic exact GET with a 100 ms native
 deadline, within a 200 ms resolver budget; confirmation waits for a later
 packet, never a worker retry sleep. No table dump or per-packet lookup occurs
 on cache hits. A separate bounded 16,384-tuple loss index survives lookup TTL
-expiry. If it is full, affected connections remain incomplete until tracking
+expiry and reclaims a connection's aliases directly on close or expiry, without
+scanning the index on capture admission. If it is full, affected connections
+remain incomplete until tracking
 resumes and a full pairing timeout passes; `coverage_capacity` counts these
 unindexed observations.
 

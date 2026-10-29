@@ -106,7 +106,7 @@ func TestTransportNegativeAliasesExpireBeforeCapacityCheck(t *testing.T) {
 }
 
 func TestTransportLossIndexCapacityDoesNotClaimCoverage(t *testing.T) {
-	_, r, _ := newTransportTest(t, &transportCTFake{})
+	e, r, _ := newTransportTest(t, &transportCTFake{})
 	tuple := natEvidence().Original
 	for i := range transportAliasLimit {
 		key := tuple
@@ -123,8 +123,10 @@ func TestTransportLossIndexCapacityDoesNotClaimCoverage(t *testing.T) {
 		t.Fatal("loss-index capacity claimed complete coverage")
 	}
 	// Reclaim a closed incarnation, then wait a full quiet pairing timeout.
-	for _, old := range r.indexed {
-		old.connection.Closed().Store(true)
+	for tuple, old := range r.indexed {
+		retired := flow.NewState(flow.TupleKey(tuple, flow.DirForward), time.Now())
+		retired.Connection.Store(old.connection)
+		e.closeCorrelation(retired, true, false)
 		break
 	}
 	r.trackConnection(state, time.Now(), nil)

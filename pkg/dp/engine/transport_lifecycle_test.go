@@ -246,9 +246,9 @@ func TestTransportEngineWiresApplierAndStatus(t *testing.T) {
 		t.Fatal("status exposed mutable counters")
 	}
 	for _, cfg := range []Config{{NFQueueGroup: 5}, {Capture: capture.Config{Mode: "nfqueue", Interfaces: []string{"lo"}}}, {}} {
-		offline := &Engine{}
-		if err := offline.initTransport(cfg); err != nil || offline.transport != nil {
-			t.Fatal("inline/offline capture acquired CT authority")
+		wireOnly := &Engine{}
+		if err := wireOnly.initTransport(cfg); err != nil || wireOnly.transport != nil {
+			t.Fatal("wire-only capture acquired CT authority")
 		}
 	}
 }
@@ -264,15 +264,15 @@ func TestTransportWireIncarnations(t *testing.T) {
 	e.flowMu.Unlock()
 	c := st.Connection.Load()
 	if c.PublicID() != "" || c.Status != "wire" {
-		t.Fatal("offline path acquired CT identity")
+		t.Fatal("wire-only path acquired CT identity")
 	}
 	events := []dpi.Event{{FlowID: st.Key.Hash(), Kind: "request", Proto: "modbus"}}
 	bindEventConnections(st, events)
 	if events[0].Connection != c || events[0].CorrelationStatus != "wire" {
-		t.Fatal("offline event lost wire incarnation")
+		t.Fatal("wire-only event lost wire incarnation")
 	}
 	if c.Direction(flow.TupleKey(ev.Original, flow.DirForward)) != flow.DirForward {
-		t.Fatal("offline direction changed")
+		t.Fatal("wire-only direction changed")
 	}
 }
 

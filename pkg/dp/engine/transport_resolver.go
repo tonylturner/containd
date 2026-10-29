@@ -177,14 +177,24 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 	tick := time.NewTicker(5 * time.Millisecond)
 	defer tick.Stop()
 	var pending []transportPacket
+	sorted := true
 	drain := func() {
 		for len(pending) < transportQueueLimit {
 			select {
 			case p := <-r.queue:
 				pending = append(pending, p)
+				sorted = false
 			default:
 				return
 			}
+		}
+	}
+	sortPending := func() {
+		if !sorted {
+			sort.SliceStable(pending, func(i, j int) bool {
+				return pending[i].packet.Timestamp.Before(pending[j].packet.Timestamp)
+			})
+			sorted = true
 		}
 	}
 	defer func() {
@@ -206,6 +216,7 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			return
 		case p := <-r.queue:
 			pending = append(pending, p)
+			sorted = false
 		case <-tick.C:
 		}
 		for {
@@ -215,9 +226,7 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			default:
 			}
 			drain()
-			sort.SliceStable(pending, func(i, j int) bool {
-				return pending[i].packet.Timestamp.Before(pending[j].packet.Timestamp)
-			})
+			sortPending()
 			if len(pending) == 0 || time.Since(pending[0].at) < transportOrderDelay {
 				break
 			}
@@ -226,9 +235,7 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			p := pending[0]
 			c := r.resolve(ctx, p.packet, time.Since(p.at) > transportMaxWait)
 			drain()
-			sort.SliceStable(pending, func(i, j int) bool {
-				return pending[i].packet.Timestamp.Before(pending[j].packet.Timestamp)
-			})
+			sortPending()
 			if pending[0].at != p.at {
 				continue
 			}

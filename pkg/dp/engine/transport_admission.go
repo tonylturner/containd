@@ -63,15 +63,11 @@ func transportOverflowIdentity(pkt capture.Packet, c *flow.Connection) (flow.Key
 // needs a tuple-scoped loss marker. Placeholders retain loss while its opener
 // is queued. Closed incarnations are reclaimed, never live ones.
 func (r *transportResolver) admissionHistoryLocked(tuple conntrack.Tuple) *transportAdmission {
-	if entry := r.indexed[tuple]; entry != nil && !entry.connection.Closed().Load() {
-		return entry
-	}
-	if len(r.indexed) >= transportAliasLimit {
-		for key, entry := range r.indexed {
-			if entry.connection.Closed().Load() {
-				delete(r.indexed, key)
-			}
+	if entry := r.indexed[tuple]; entry != nil {
+		if !entry.connection.Closed().Load() {
+			return entry
 		}
+		delete(r.indexed, tuple)
 	}
 	if len(r.indexed) >= transportAliasLimit {
 		return nil
@@ -79,6 +75,23 @@ func (r *transportResolver) admissionHistoryLocked(tuple conntrack.Tuple) *trans
 	entry := &transportAdmission{connection: &flow.Connection{}}
 	r.indexed[tuple] = entry
 	return entry
+}
+
+// Connection close/expiry knows its aliases, so reclamation is indexed rather
+// than a full-table scan on capture admission. Never retire a newer SYN's slot.
+func (r *transportResolver) retireAdmission(state *flow.State) {
+	c := state.Connection.Load()
+	tuples := []conntrack.Tuple{state.Key.Tuple(), state.Key.Reversed().Tuple()}
+	if c.Evidence != nil {
+		tuples = append(tuples, c.Evidence.Original, c.Evidence.Reply)
+	}
+	r.admissionMu.Lock()
+	defer r.admissionMu.Unlock()
+	for _, tuple := range tuples {
+		if entry := r.indexed[tuple]; entry != nil && entry.connection.Key == c.Key {
+			delete(r.indexed, tuple)
+		}
+	}
 }
 
 func (r *transportResolver) admitHistoryLocked(pkt capture.Packet) *transportAdmission {
@@ -115,6 +128,11 @@ func (r *transportResolver) trackConnection(state *flow.State, at time.Time, his
 		if entry != nil && !entry.connection.Closed().Load() {
 			if entry != history && entry.hasSYN && entry.connection.Key == "" {
 				continue // An opener queued on the other tuple owns its placeholder.
+			}
+			if entry.connection.Key == "" && c.Coverage().Load() {
+				// Admission has just regained a slot for an already-started
+				// history. Its preceding unindexed interval may contain loss.
+				c.LoseCorrelation(at, anomaly.ModbusPairingTimeout)
 			}
 			if entry.connection.Key == "" || entry.connection.Key == c.Key {
 				c.MergeHistory(entry.connection)
