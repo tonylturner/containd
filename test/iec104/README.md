@@ -20,8 +20,9 @@ lib60870-C is GPLv3-or-commercial, so `endpoint/iec104ep.c` is a GPLv3
 combined work. It is compiled only inside `endpoint/Dockerfile`, whose image
 ships the pinned lib60870 tarball and `iec104ep.c` under `/usr/share/src` and
 the GPLv3 text under `/usr/share/licenses/iec104`. containd's Go code never
-imports, links or copies it; the endpoints talk to containd over TCP/2404
-only. Do not publish that image as a containd artefact.
+imports, links or copies it; the endpoints talk to containd only over TCP (port
+2404 by default). `IEC104_PORT` sets the RTU listener port; clients accept a port
+argument. Do not publish that image as a containd artefact.
 
 ## Run
 
@@ -162,3 +163,17 @@ refuses overlaps with existing Docker networks. Results, packet captures and
 diagnostics remain in `build/iec104-preflight/`. The exit trap removes the
 run's containers, networks, volumes and image. Run one preflight at a time:
 its result directory and subnet pair are fixed.
+
+## Passive identification smoke
+
+`bash scripts/smoke-dpi.sh` in AF_PACKET mode also uses the endpoint image on
+TCP/12404 and a Modbus server on TCP/1502. The services share the existing smoke
+endpoint network namespaces; no additional published ports or subnets are needed.
+The script rebuilds the GPL endpoint image from current sources and checks content
+confirmation, directional passive decoding, rule-port scope, received monitoring
+objects, reset capture and dynamic block sets. NFQUEUE instead asserts that no
+identification events were produced. The existing TCP/502 checks run unchanged.
+
+Use `SMOKE_DPI_CAPTURE=afpacket` (or `nfqueue`), `COMPOSE_FILE`, `SMOKE_PROJECT`,
+`SMOKE_WAN_NET`, `SMOKE_LAN_NET`, `BASE` and `IEC104_ENDPOINT_IMAGE` for an isolated
+stack, as for the regular DPI smoke. The caller owns stack teardown.

@@ -3,7 +3,7 @@
 # This image carries one program, iec104ep, which links lib60870-C
 # (MZ Automation, GPLv3-or-commercial). It is a harness-only image: it is
 # never linked into containd (Apache-2.0, own Go parser). The
-# endpoints talk to containd only over TCP/2404. The corresponding source
+# endpoints talk to containd only over TCP (port 2404 by default). The corresponding source
 # for every GPLv3 binary — the pinned lib60870 tarball and iec104ep.c —
 # ships under /usr/share/src, with the GPLv3 licence under
 # /usr/share/licenses/iec104.

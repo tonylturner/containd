@@ -34,6 +34,9 @@ set -euo pipefail
 # with dataplane.dpiIcsParsing.modbus = "strict", pushed through the API, it
 # is dropped and the session reset (would_drop in learn mode); a lost MBAP
 # frame boundary resets in both modes.
+# AF_PACKET additionally checks content-confirmed passive Modbus/1502 and
+# IEC104/12404 decoding, exact directional events and no reset/block attempts.
+# NFQUEUE asserts no identification events.
 # Fixture and isolation setup: test/data-smoke/README.md.
 
 COMPOSE_FILE=${COMPOSE_FILE:-deploy/docker-compose.smoke.yml}
@@ -53,11 +56,11 @@ SMOKE_BUILD=${SMOKE_BUILD:-1}
 SMOKE_DPI_CAPTURE=${SMOKE_DPI_CAPTURE:-afpacket}
 NFQUEUE_GROUP=${SMOKE_NFQUEUE_GROUP:-101}
 TESTS_PASSED=0
-TESTS_EXPECTED=38
+TESTS_EXPECTED=47
 FAILURES=()
 case "$SMOKE_DPI_CAPTURE" in
   afpacket) ;;
-  nfqueue) TESTS_EXPECTED=46 ;;
+  nfqueue) TESTS_EXPECTED=47 ;;
   *)
     echo "SMOKE_DPI_CAPTURE must be afpacket or nfqueue, got: $SMOKE_DPI_CAPTURE" >&2
     exit 2
@@ -85,6 +88,8 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 source "$(dirname "${BASH_SOURCE[0]}")/smoke-engine-api.sh"
 # shellcheck source=scripts/smoke-dpi-lib-parsing.sh
 source "$(dirname "${BASH_SOURCE[0]}")/smoke-dpi-lib-parsing.sh"
+# shellcheck source=test/data-smoke/identify/smoke.sh
+source test/data-smoke/identify/smoke.sh
 
 # COMPOSE_FILE is a colon-separated list, as in docker compose itself, so an
 # override file can follow the base harness file.
@@ -858,6 +863,7 @@ fi
 pass "Server replies were not dynamically blocked"
 
 run_parsing_probes
+run_identification_probes
 
 if [[ ${#FAILURES[@]} -gt 0 ]]; then
   log "Failed assertions (${SMOKE_DPI_CAPTURE}):"
