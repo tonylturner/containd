@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
@@ -45,8 +46,18 @@ func exportRulesFile(rules []config.IDSRule, single func(config.IDSRule) (string
 }
 
 func exportRuleSet(rules []config.IDSRule, single func(config.IDSRule) (string, error), comment, separator string) (ExportResult, error) {
+	return exportJoinedRuleSet(rules, single, comment, func(body *strings.Builder, text string) {
+		if body.Len() > 0 {
+			body.WriteString(separator)
+		}
+		body.WriteString(text)
+		body.WriteByte('\n')
+	})
+}
+
+func exportJoinedRuleSet(rules []config.IDSRule, single func(config.IDSRule) (string, error), comment string, join func(*strings.Builder, string)) (ExportResult, error) {
 	var result ExportResult
-	var body bytes.Buffer
+	var body strings.Builder
 	for _, rule := range rules {
 		text, err := single(rule)
 		if err != nil {
@@ -57,11 +68,7 @@ func exportRuleSet(rules []config.IDSRule, single func(config.IDSRule) (string, 
 			result.Refusals = append(result.Refusals, ExportRefusal{RuleID: refusal.RuleID, Reason: refusal.Error()})
 			continue
 		}
-		if body.Len() > 0 {
-			body.WriteString(separator)
-		}
-		body.WriteString(text)
-		body.WriteByte('\n')
+		join(&body, text)
 	}
 	var out bytes.Buffer
 	if len(result.Refusals) > 0 {
@@ -76,7 +83,7 @@ func exportRuleSet(rules []config.IDSRule, single func(config.IDSRule) (string, 
 			fmt.Fprintf(&out, "%s refused: %s\n", comment, data)
 		}
 	}
-	out.Write(body.Bytes())
+	out.WriteString(body.String())
 	result.Text = out.Bytes()
 	return result, nil
 }

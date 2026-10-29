@@ -50,7 +50,7 @@ for (const [format, ext, prefix] of [["Sigma", ".yml", "#"], ["YARA", ".yar", "/
     await page.route("**/api/v1/ids/export?**", (route) => route.fulfill({
       contentType: format === "Sigma" ? "text/yaml" : "text/plain",
       headers: { "X-Containd-IDS-Refused": "1" },
-      body: `${prefix} refused: {"rule_id":"rule-1","reason":"cannot preserve proto=modbus"}\n`,
+      body: `${prefix} refused: {"rule_id":"rule-1","reason":"cannot preserve ${format === "Sigma" ? "srcAddr=10.0.0.0/8" : "proto=modbus"}"}\n`,
     }));
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: new RegExp(format) }).click();

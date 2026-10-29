@@ -4,7 +4,6 @@
 package ids
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -20,10 +19,9 @@ detection:
     function_code: 5
   condition: selection
 `
-	rule := config.IDSRule{
-		ID:           "test-1",
-		SourceFormat: "sigma",
-		RawSource:    raw,
+	rule, err := ConvertSigmaYAML([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
 	}
 	out, err := ExportSigmaRule(rule)
 	if err != nil {
@@ -50,16 +48,23 @@ func TestExportSigmaFromFields(t *testing.T) {
 		Labels: map[string]string{},
 	}
 	out, err := ExportSigmaRule(rule)
-	var refusal *RuleExportError
-	if len(out) != 0 || !errors.As(err, &refusal) || refusal.RuleID != rule.ID || !strings.Contains(refusal.Predicate, "proto") {
-		t.Fatalf("native filters lost: %q %v", out, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := ConvertSigmaYAML(out)
+	if err != nil || restored.Proto != rule.Proto || restored.Kind != rule.Kind || restored.When.Op != "in" || strings.Contains(string(out), "|in:") {
+		t.Fatalf("native inverse = %s, %+v, %v", out, restored, err)
 	}
 }
 
 func TestExportSigmaMultipleRules(t *testing.T) {
-	rules := []config.IDSRule{
-		{ID: "r1", SourceFormat: FormatSigma, RawSource: "title: One\ndetection: {selection: {field: value}, condition: selection}\n"},
-		{ID: "r2", SourceFormat: FormatSigma, RawSource: "title: Two\ndetection: {selection: {field: value}, condition: selection}\n"},
+	var rules []config.IDSRule
+	for _, title := range []string{"One", "Two"} {
+		rule, err := ConvertSigmaYAML([]byte("title: " + title + "\ndetection: {selection: {function_code: 5}, condition: selection}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rules = append(rules, rule)
 	}
 	out, err := ExportSigmaRules(rules)
 	if err != nil {

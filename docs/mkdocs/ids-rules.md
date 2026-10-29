@@ -86,7 +86,7 @@ continue to use the general transport or their known-protocol mapping.
 
 The supported Sigma subset includes metadata (`title`, `id`, `description`,
 `level`, `tags`, `logsource`), detection selections with `|contains`, `|regex`/`|re`,
-`|startswith`, `|endswith`, `|gt`, `|lt`, and conditions using `and`, `or`, `not`,
+`|in`, `|gt`, `|lt`, equality lists (membership), and conditions using `and`, `or`, `not`,
 parentheses, and `selection*` wildcards. Tags `containd.proto.<proto>` and
 `containd.kind.<kind>` set fast filters.
 
@@ -128,15 +128,34 @@ after download; inspect the comments before installing the file in another engin
 
 Sigma and YARA use the same preserve-or-refuse policy:
 
-- **Sigma:** only original Sigma detection source is exported. There is no
-  established target-backend mapping for native decoder fields; `attr.` is not
-  stripped and native conditions are not approximated as Sigma modifiers.
-  Protocol and kind quick filters are refused, even alongside original source:
-  Sigma metadata tags cannot enforce them. Network scope and byte-buffer
-  predicates are also refused. Native rules without original Sigma source are
-  refused rather than emitted without a detection.
-  Current Sigma imports do not retain per-rule original source, so they are
-  refused too; the JSON backup remains available without lossy conversion.
+- **Sigma:** native rules export to **containd's own Sigma dialect**, not a
+  third-party backend schema. Decoder-backed `attr.<key>` fields map to `<key>`;
+  core `proto`, `kind` and `flowid` fields retain their names. Equality has no
+  modifier; `contains`, `regex`, `gt`, `lt` and scalar `in` retain their modifiers.
+  List `in` values become YAML lists without a modifier. Boolean `all`, `any`
+  and `not` become parenthesized `and`, `or` and `not` expressions with unique
+  selections. The default equality operator and singleton groups retain their
+  matching meaning even though their serialized shape changes.
+  Protocol and kind quick filters use `containd.proto.<proto>` and
+  `containd.kind.<kind>` tags, which containd's importer enforces. These tags
+  **do not enforce filters in arbitrary third-party Sigma consumers**.
+  Severity, `logsource` and preserved `sigma.*` metadata are retained; current
+  quick filters replace stale protocol/kind metadata tags.
+  Byte matches, network address/port quick filters, fields outside the decoder
+  vocabulary, unmapped operations, and value shapes that would import
+  differently are refused. A native empty `when` is also refused: the importer
+  treats empty detections as non-evaluable, not match-all.
+  UTF-8 imports retain each document's original bytes, including comments,
+  directives and line endings. Multi-rule downloads remove per-document UTF-8
+  BOM markers when joining documents; single-source exports remain unchanged.
+  UTF-16 imports are re-encoded to independent UTF-8 documents: later source
+  slices lack the stream's encoding BOM, and non-UTF-8 bytes cannot survive
+  native rules' JSON storage.
+  A single retained UTF-16 source can be exported alone, but is refused in a
+  multi-rule export that would mix encodings.
+  Original source is returned unchanged while its matching predicates and
+  severity agree with the normalized rule; stale source is refused with the
+  conflicting predicate named. Edit and reimport the source to resolve it.
 - **YARA:** pure `yaraStrings` content definitions and their `yara.condition`
   expression are exported (default: `any of them`). Original YARA source remains
   unchanged. Any protocol, kind, `when`, network scope or network
@@ -148,5 +167,6 @@ Sigma and YARA use the same preserve-or-refuse policy:
 
 Disabled rules are refused in every format. Same-format `rawSource` remains
 authoritative for its original source predicates: edit and reimport the source
-rather than expecting normalized edits to rewrite it. The additional Sigma and
-YARA constraints listed above are never silently discarded.
+rather than expecting normalized edits to rewrite it. Sigma additionally checks
+that source and normalized predicates still agree. The constraints listed above
+are never silently discarded.

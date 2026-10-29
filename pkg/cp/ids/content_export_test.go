@@ -16,17 +16,6 @@ import (
 const sigmaExportSource = "title: Test\nlogsource: {product: test}\ndetection:\n  selection:\n    function_code: 5\n  condition: selection\n"
 const yaraExportSource = `rule Content { strings: $a = "test" condition: $a }`
 
-func TestSigmaExportRefusesImportWithoutSource(t *testing.T) {
-	rules, err := ConvertSigmaFile([]byte(sigmaExportSource))
-	if err != nil || len(rules) != 1 {
-		t.Fatalf("import = %+v, %v", rules, err)
-	}
-	out, err := ExportSigmaRules(rules)
-	if err != nil || len(out.Refusals) != 1 || !strings.HasPrefix(string(out.Text), "# containd:") {
-		t.Fatalf("import without source widened: %+v, %v", out, err)
-	}
-}
-
 func TestYARAExportLiteralNewline(t *testing.T) {
 	text, err := ExportYARARule(config.IDSRule{
 		ID: "literal", YARAStrings: []config.YARAString{{Name: "$a", Pattern: "a\nb"}},
@@ -36,78 +25,67 @@ func TestYARAExportLiteralNewline(t *testing.T) {
 	}
 }
 
-func TestContentExportPredicates(t *testing.T) {
+func TestYARAExportPredicates(t *testing.T) {
 	leaf := config.IDSCondition{Field: "attr.function_code", Op: "equals", Value: 5}
 	pure := config.IDSRule{ID: "pure", YARAStrings: []config.YARAString{{Name: "$a", Pattern: "test", Type: "text"}}}
-	for _, format := range []string{FormatSigma, FormatYARA} {
-		single := func(rule config.IDSRule) (string, error) {
-			if format == FormatYARA {
-				return ExportYARARule(rule)
-			}
-			b, err := ExportSigmaRule(rule)
-			return string(b), err
-		}
-		for _, tc := range []struct {
-			name, predicate string
-			rule            config.IDSRule
-		}{
-			{"protocol", "proto", config.IDSRule{Proto: "modbus"}},
-			{"kind", "kind", config.IDSRule{Kind: "request"}},
-			{"leaf", "attr.function_code", config.IDSRule{When: leaf}},
-			{"all", "when.all", config.IDSRule{When: config.IDSCondition{All: []config.IDSCondition{leaf}}}},
-			{"any", "when.any", config.IDSRule{When: config.IDSCondition{Any: []config.IDSCondition{leaf}}}},
-			{"not", "when.not", config.IDSRule{When: config.IDSCondition{Not: &leaf}}},
-			{"empty-not", "when.not", config.IDSRule{When: config.IDSCondition{Not: &config.IDSCondition{}}}},
-			{"op-only", "when", config.IDSRule{When: config.IDSCondition{Op: "equals"}}},
-			{"disabled", "enabled", config.IDSRule{Enabled: new(false)}},
-			{"metadata-only", "", config.IDSRule{Title: "Not a detection"}},
-			{"content-buffer", "", config.IDSRule{ContentMatches: []config.ContentMatch{{Pattern: "test"}}}},
-		} {
-			t.Run(format+"/"+tc.name, func(t *testing.T) {
-				tc.rule.ID = "refused"
-				text, err := single(tc.rule)
-				var refusal *RuleExportError
-				if text != "" || !errors.As(err, &refusal) || refusal.RuleID != tc.rule.ID ||
-					refusal.Format != format || !strings.Contains(refusal.Predicate, tc.predicate) {
-					t.Fatalf("export = %q, %v", text, err)
-				}
-			})
-		}
-		t.Run(format+"/pure-content", func(t *testing.T) {
-			text, err := single(pure)
-			if format == FormatYARA {
-				if err != nil || !strings.Contains(text, `$a = "test"`) || !strings.Contains(text, "any of them") {
-					t.Fatalf("pure content = %q, %v", text, err)
-				}
-			} else if text != "" || err == nil {
-				t.Fatalf("Sigma discarded content = %q, %v", text, err)
+	const format = FormatYARA
+	single := ExportYARARule
+	for _, tc := range []struct {
+		name, predicate string
+		rule            config.IDSRule
+	}{
+		{"protocol", "proto", config.IDSRule{Proto: "modbus"}},
+		{"kind", "kind", config.IDSRule{Kind: "request"}},
+		{"leaf", "attr.function_code", config.IDSRule{When: leaf}},
+		{"all", "when.all", config.IDSRule{When: config.IDSCondition{All: []config.IDSCondition{leaf}}}},
+		{"any", "when.any", config.IDSRule{When: config.IDSCondition{Any: []config.IDSCondition{leaf}}}},
+		{"not", "when.not", config.IDSRule{When: config.IDSCondition{Not: &leaf}}},
+		{"empty-not", "when.not", config.IDSRule{When: config.IDSCondition{Not: &config.IDSCondition{}}}},
+		{"op-only", "when", config.IDSRule{When: config.IDSCondition{Op: "equals"}}},
+		{"disabled", "enabled", config.IDSRule{Enabled: new(false)}},
+		{"metadata-only", "", config.IDSRule{Title: "Not a detection"}},
+		{"content-buffer", "", config.IDSRule{ContentMatches: []config.ContentMatch{{Pattern: "test"}}}},
+	} {
+		t.Run(format+"/"+tc.name, func(t *testing.T) {
+			tc.rule.ID = "refused"
+			text, err := single(tc.rule)
+			var refusal *RuleExportError
+			if text != "" || !errors.As(err, &refusal) || refusal.RuleID != tc.rule.ID ||
+				refusal.Format != format || !strings.Contains(refusal.Predicate, tc.predicate) {
+				t.Fatalf("export = %q, %v", text, err)
 			}
 		})
-		raw := map[string]string{FormatSigma: sigmaExportSource, FormatYARA: yaraExportSource}[format]
-		for _, filter := range []string{"", "proto", "kind", "enabled"} {
-			t.Run(format+"/raw/"+filter, func(t *testing.T) {
-				rule := config.IDSRule{ID: "raw", SourceFormat: format, RawSource: raw}
-				switch filter {
-				case "proto":
-					rule.Proto = "modbus"
-				case "kind":
-					rule.Kind = "request"
-				case "enabled":
-					rule.Enabled = new(false)
-				}
-				text, err := single(rule)
-				if filter == "" {
-					if err != nil || text != raw {
-						t.Fatalf("round trip = %q, %v", text, err)
-					}
-				} else {
-					var refusal *RuleExportError
-					if text != "" || !errors.As(err, &refusal) || !strings.Contains(refusal.Predicate, filter) {
-						t.Fatalf("raw source lost filter: %q, %v", text, err)
-					}
-				}
-			})
+	}
+	t.Run(format+"/pure-content", func(t *testing.T) {
+		text, err := single(pure)
+		if err != nil || !strings.Contains(text, `$a = "test"`) || !strings.Contains(text, "any of them") {
+			t.Fatalf("pure content = %q, %v", text, err)
 		}
+	})
+	raw := yaraExportSource
+	for _, filter := range []string{"", "proto", "kind", "enabled"} {
+		t.Run(format+"/raw/"+filter, func(t *testing.T) {
+			rule := config.IDSRule{ID: "raw", SourceFormat: format, RawSource: raw}
+			switch filter {
+			case "proto":
+				rule.Proto = "modbus"
+			case "kind":
+				rule.Kind = "request"
+			case "enabled":
+				rule.Enabled = new(false)
+			}
+			text, err := single(rule)
+			if filter == "" {
+				if err != nil || text != raw {
+					t.Fatalf("round trip = %q, %v", text, err)
+				}
+			} else {
+				var refusal *RuleExportError
+				if text != "" || !errors.As(err, &refusal) || !strings.Contains(refusal.Predicate, filter) {
+					t.Fatalf("raw source lost filter: %q, %v", text, err)
+				}
+			}
+		})
 	}
 	for name, rule := range map[string]config.IDSRule{
 		"raw-when": {SourceFormat: FormatYARA, RawSource: yaraExportSource, When: leaf},
@@ -139,13 +117,21 @@ func TestContentExportRefusalReports(t *testing.T) {
 				if format == FormatYARA {
 					prefix, raw = "//", yaraExportSource
 				}
-				rules := []config.IDSRule{{ID: "refused\nrule injected {}", Proto: "modbus"}}
+				rules := []config.IDSRule{{ID: "refused\nrule injected {}", SrcAddr: "10.0.0.0/8"}}
 				for i := range accepted {
 					source := raw
 					if format == FormatYARA {
 						source = strings.Replace(raw, "rule Content ", "rule Content"+strconv.Itoa(i)+" ", 1)
 					}
-					rules = append(rules, config.IDSRule{ID: "accepted-" + strconv.Itoa(i), SourceFormat: format, RawSource: source})
+					rule := config.IDSRule{ID: "accepted-" + strconv.Itoa(i), SourceFormat: format, RawSource: source}
+					if format == FormatSigma {
+						var err error
+						rule, err = ConvertSigmaYAML([]byte(source))
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					rules = append(rules, rule)
 				}
 				out, err := ExportRules(rules, format)
 				if err != nil || len(out.Refusals) != 1 {

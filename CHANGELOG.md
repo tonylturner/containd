@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Sigma and YARA IDS exports now report refusals instead of dropping native
-  predicates. Sigma requires original detection source and refuses native
-  protocol/kind filters; YARA accepts only byte-content rules without native
-  event or network predicates. Refusal comments, API counts and UI feedback
+  predicates. Sigma round-trips containd's decoder fields, supported operators,
+  Boolean conditions, protocol/kind tags and severity; imports preserve each
+  UTF-8 document's source bytes and refuse stale source after predicate edits.
+  YARA accepts only byte-content rules without native event or network
+  predicates. Refusal comments, API counts and UI feedback
   cover every export format.
 - Snort 3 and Suricata IDS exports refuse unsupported application predicates
   instead of widening them to generic traffic. Downloads list every refusal in

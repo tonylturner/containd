@@ -10,9 +10,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	cpids "github.com/tonylturner/containd/pkg/cp/ids"
 )
 
 func TestIDSExportDownload(t *testing.T) {
+	sigmaRules, err := cpids.ConvertSigmaFile([]byte("title: Sigma\nid: sigma-1\nlevel: high\ntags: [containd.proto.modbus, containd.kind.request]\ndetection: {selection: {function_code: 5}, condition: selection}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name, query, count, contentType string
 		rules                           []config.IDSRule
@@ -26,14 +31,11 @@ func TestIDSExportDownload(t *testing.T) {
 		{"empty", "snort", "0", "text/plain", nil, 200},
 		{"case", "SNORT", "0", "text/plain", []config.IDSRule{{ID: "1", Proto: "tcp"}}, 200},
 		{"default", "", "0", "text/plain", []config.IDSRule{{ID: "1", Proto: "tcp"}}, 200},
-		{"sigma", "sigma", "0", "text/yaml", []config.IDSRule{{ID: "1", SourceFormat: "sigma", RawSource: "title: Sigma\ndetection: {selection: {field: value}, condition: selection}\n"}}, 200},
+		{"sigma", "sigma", "0", "text/yaml", sigmaRules, 200},
 		{"yara", "yara", "0", "text/plain", []config.IDSRule{{ID: "1", Title: "YARA", YARAStrings: []config.YARAString{{Name: "$a", Pattern: "test"}}}}, 200},
-		{"sigma refused", "sigma", "1", "text/yaml", []config.IDSRule{{ID: "2", Proto: "modbus"}}, 200},
+		{"sigma refused", "sigma", "1", "text/yaml", []config.IDSRule{{ID: "2", SrcAddr: "10.0.0.0/8"}}, 200},
 		{"yara refused", "yara", "1", "text/plain", []config.IDSRule{{ID: "2", Proto: "modbus"}}, 200},
-		{"sigma partial", "sigma", "1", "text/yaml", []config.IDSRule{
-			{ID: "2", Proto: "modbus"},
-			{ID: "1", SourceFormat: "sigma", RawSource: "title: Sigma\ndetection: {selection: {field: value}, condition: selection}\n"},
-		}, 200},
+		{"sigma partial", "sigma", "1", "text/yaml", append([]config.IDSRule{{ID: "2", SrcAddr: "10.0.0.0/8"}}, sigmaRules...), 200},
 		{"yara partial", "yara", "1", "text/plain", []config.IDSRule{
 			{ID: "2", Proto: "modbus"},
 			{ID: "1", Title: "YARA", YARAStrings: []config.YARAString{{Name: "$a", Pattern: "test"}}},
@@ -64,9 +66,16 @@ func TestIDSExportDownload(t *testing.T) {
 			if tc.query == "yara" {
 				prefix = "//"
 			}
+			predicate := "proto="
+			if tc.query == "sigma" {
+				predicate = "srcAddr="
+			}
 			if tc.count == "1" && (!strings.Contains(rec.Body.String(), prefix+` refused: {"rule_id":"2"`) ||
-				!strings.Contains(rec.Body.String(), "proto=") || strings.Contains(rec.Body.String(), "alert ip ")) {
+				!strings.Contains(rec.Body.String(), predicate) || strings.Contains(rec.Body.String(), "alert ip ")) {
 				t.Fatalf("missing refusal or widened rule: %s", rec.Body)
+			}
+			if tc.name == "sigma" && rec.Body.String() != sigmaRules[0].RawSource {
+				t.Fatalf("Sigma source changed: %s", rec.Body)
 			}
 			if strings.Contains(tc.name, "partial") {
 				acceptedText := "alert tcp "
