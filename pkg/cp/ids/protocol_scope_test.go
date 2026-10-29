@@ -87,12 +87,17 @@ func TestProtocolScopeCIPPortEnrichment(t *testing.T) {
 func TestProtocolScopeCIPSuricataExport(t *testing.T) {
 	rule := config.IDSRule{ID: "CIP", Proto: "cip", Title: "CIP"}
 	out, err := ExportSuricataRule(rule)
-	if err != nil || !strings.HasPrefix(out, "alert enip ") {
-		t.Fatalf("CIP exported as generic IP: %q %v", out, err)
+	if out != "" || !errors.Is(err, ErrUnexportableProto) {
+		t.Fatalf("native CIP was not refused: %q %v", out, err)
 	}
-	got, err := ParseSuricataLine(out)
+	raw := `alert enip any any -> any any (msg:"CIP"; sid:1;)`
+	got, err := ParseSuricataLine(raw)
 	if err != nil || got.Proto != "cip" {
-		t.Fatalf("CIP roundtrip: %+v %v", got, err)
+		t.Fatalf("CIP import: %+v %v", got, err)
+	}
+	out, err = ExportSuricataRule(got)
+	if err != nil || out != raw {
+		t.Fatalf("CIP raw roundtrip: %q %v", out, err)
 	}
 }
 

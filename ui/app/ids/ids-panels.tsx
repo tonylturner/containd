@@ -291,48 +291,60 @@ export function ImportPanel({
 export function ExportPanel({ ruleCount }: { ruleCount: number }) {
   const [exporting, setExporting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refusedCount, setRefusedCount] = useState<number | null>(null);
 
   async function doExport(format: string) {
     setExporting(format);
     setError(null);
-    const ok = await api.exportIDSRules(format);
+    setRefusedCount(null);
+    const result = await api.exportIDSRules(format);
     setExporting(null);
-    if (!ok) {
-      setError(`Export failed for ${format}.`);
+    if (!result.ok) {
+      setError(result.error || `Export failed for ${format}.`);
+    } else {
+      setRefusedCount(result.data.refusedCount);
     }
   }
 
   return (
     <Card title="Export rules">
       <p className="mb-4 text-xs text-(--text-muted)">
-        Export all {ruleCount} rule{ruleCount !== 1 ? "s" : ""} in your chosen
-        format.
+        Download running rules in your chosen format. All formats refuse
+        rules they cannot preserve; the file lists each refusal. Unsaved and
+        staged changes are not included.
       </p>
+      {refusedCount !== null && (
+        <p role="status" aria-label="Export result" className="mb-3 text-sm text-(--text)">
+          Downloaded. {refusedCount} rule{refusedCount !== 1 ? "s" : ""} refused.
+          {refusedCount > 0 && " Review the refusal comments in the downloaded file."}
+        </p>
+      )}
       {error && (
         <div className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
           {error}
         </div>
       )}
-      {ruleCount === 0 ? (
-        <p className="text-sm text-(--text-muted)">No rules to export.</p>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {EXPORT_FORMATS.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => doExport(f.value)}
-              disabled={exporting !== null}
-              className="flex flex-col items-center gap-2 rounded-xs border bg-(--surface2) p-4 text-center transition-ui disabled:opacity-50"
-            >
-              <FormatBadge format={f.value} />
-              <span className="text-sm text-(--text)">{f.label}</span>
-              <span className="text-[10px] text-(--text-muted)">
-                {exporting === f.value ? "Downloading..." : "Download"}
-              </span>
-            </button>
-          ))}
-        </div>
+      {ruleCount === 0 && (
+        <p className="mb-3 text-sm text-(--text-muted)">
+          No candidate rules. Running rules can still be exported.
+        </p>
       )}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {EXPORT_FORMATS.map((f) => (
+          <button
+            key={f.value}
+            onClick={() => doExport(f.value)}
+            disabled={exporting !== null}
+            className="flex flex-col items-center gap-2 rounded-xs border bg-(--surface2) p-4 text-center transition-ui disabled:opacity-50"
+          >
+            <FormatBadge format={f.value} />
+            <span className="text-sm text-(--text)">{f.label}</span>
+            <span className="text-[10px] text-(--text-muted)">
+              {exporting === f.value ? "Downloading..." : "Download"}
+            </span>
+          </button>
+        ))}
+      </div>
     </Card>
   );
 }

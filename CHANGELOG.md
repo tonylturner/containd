@@ -352,6 +352,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built-in CIP rules are updated to `cip` and recorded in the same audit
   record; an edited copy that names `enip` starts the appliance in management
   recovery until it is corrected.
+- All four IDS exporters validate `rawSource` as a cache against the rule's
+  current predicates before reusing it. Edited or corrupt cached source falls
+  through to exact native export or a refusal naming the unsupported predicate;
+  conversion-loss safeguards remain in place.
+- Sigma and YARA IDS exports now report refusals instead of dropping native
+  predicates. Sigma round-trips containd's decoder fields, supported operators,
+  Boolean conditions, protocol/kind tags and severity; imports preserve each
+  UTF-8 document's source bytes.
+  YARA accepts only byte-content rules without native event or network
+  predicates. Refusal comments, API counts and UI feedback
+  cover every export format.
+- Snort 3 and Suricata IDS exports refuse unsupported application predicates
+  instead of widening them to generic traffic. Downloads list every refusal in
+  comments and report a refused count in the API header and Export panel.
+  Valid same-format cached source remains lossless; native content uses the
+  target engine's option syntax.
+- Snort imports keep Snort 3 content modifiers, negation, hex content and
+  escaped punctuation, so containd's own Snort exports re-import unchanged.
+  Quoted option values no longer split on `;` or `,`.
 
 ### Removed
 

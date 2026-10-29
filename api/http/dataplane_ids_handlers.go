@@ -280,7 +280,7 @@ func idsImportHandler(store config.Store) gin.HandlerFunc {
 
 func idsExportHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		format := c.Query("format")
+		format := strings.ToLower(c.Query("format"))
 		if format == "" {
 			format = "suricata"
 		}
@@ -290,7 +290,7 @@ func idsExportHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		data, err := cpids.ExportRules(rules, format)
+		result, err := cpids.ExportRules(rules, format)
 		if err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
@@ -309,7 +309,8 @@ func idsExportHandler(store config.Store) gin.HandlerFunc {
 		dateStr := fmt.Sprintf("%02d%02d%02d", now.Year()%100, now.Month(), now.Day())
 		filename := fmt.Sprintf("%s-%s%s", format, dateStr, ext[format])
 		c.Header("Content-Disposition", "attachment; filename="+filename)
-		c.Data(http.StatusOK, contentType, data)
+		c.Header("X-Containd-IDS-Refused", fmt.Sprint(len(result.Refusals)))
+		c.Data(http.StatusOK, contentType, result.Text)
 	}
 }
 
