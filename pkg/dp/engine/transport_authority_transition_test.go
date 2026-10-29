@@ -96,5 +96,8 @@ func TestTransportAuthorityReadDoesNotStallPacketWorker(t *testing.T) {
 	}
 	r.admit(e, transportWire(natEvidence().Original, time.Now(), modbusADU(1, 3, 10, 2)))
 	waitTransport(t, func() bool { return len(transportModbusEvents(e)) == 1 })
+	if ev := transportModbusEvents(e)[0]; ev.CorrelationStatus != "resolved" {
+		t.Fatalf("periodic read downgraded packet: %+v", ev)
+	}
 	close(z.release)
 }

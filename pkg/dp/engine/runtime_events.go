@@ -41,11 +41,6 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	metrics.DPIEventsTotal.Add(float64(len(evs)))
 	evs = normalizeDPIEvents(evs)
 	bindEventConnections(state, evs)
-	for _, ev := range evs {
-		if c := ev.Connection; c != nil && c.Evidence != nil && !c.Verified() {
-			c.LoseCorrelation(ev.Timestamp, anomaly.ModbusPairingTimeout)
-		}
-	}
 	srcIP, dstIP := stateIPs(state)
 	e.recordInventoryEvents(srcIP, dstIP, evs)
 	e.recordLearnEvents(srcIP, dstIP, evs)

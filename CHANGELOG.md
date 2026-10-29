@@ -219,6 +219,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Successful background conntrack-zone checks preserve verified evidence;
+  temporary authority changes no longer impose a false packet-loss recovery
+  window on continuously captured Modbus connections.
 - Transport correlation retains published IDs and pending Modbus requests across
   conntrack authority refreshes and failures. Start-of-connection coverage and
   bounded, tuple-scoped loss recovery prevent false unmatched replies without

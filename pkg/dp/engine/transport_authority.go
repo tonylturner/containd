@@ -20,7 +20,8 @@ type zoneSetterReader interface {
 }
 
 // An odd generation is unverified; a successful whole-namespace read makes it
-// even. Every refresh invalidates previously cached CT evidence first.
+// even. Successful observations preserve the generation; actual changes and
+// failed or setter-bearing reads invalidate previously cached CT evidence.
 type transportAuthority struct {
 	checkMu  sync.Mutex
 	version  atomic.Uint64
@@ -92,7 +93,7 @@ func (a *transportAuthority) check(ctx context.Context) {
 }
 
 func (a *transportAuthority) checkLocked(ctx context.Context) {
-	version := a.invalidate()
+	version := a.version.Load()
 	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 	var setters []enforce.ZoneSetter
@@ -110,13 +111,18 @@ func (a *transportAuthority) checkLocked(ctx context.Context) {
 	a.status.ZoneStatus = "zone_unverified"
 	a.status.Counters["zone_checks"]++
 	if err != nil {
+		a.invalidate()
 		a.status.ZoneError = err.Error()
 		a.status.Counters["zone_read_errors"]++
 	} else if len(setters) != 0 {
+		a.invalidate()
 		a.status.ZoneStatus = "unsupported_zone"
 		a.status.Counters["zone_setter_checks"]++
-	} else if a.applying.Load() == 0 && a.version.CompareAndSwap(version, version+1) {
-		a.status.ZoneStatus = "verified"
+	} else if a.applying.Load() == 0 {
+		if version%2 == 0 && a.version.Load() == version ||
+			version%2 != 0 && a.version.CompareAndSwap(version, version+1) {
+			a.status.ZoneStatus = "verified"
+		}
 	}
 }
 

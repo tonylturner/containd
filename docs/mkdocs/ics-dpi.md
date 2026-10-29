@@ -174,7 +174,7 @@ Missing identity or capture coverage instead raises an
 transactions per connection, expires transactions after two minutes, and is
 cleared on connection close or reuse. Correlation-unavailable anomalies are
 emitted at most once per incarnation, while unavailable observations continue
-to be counted. After a loss or unverified-evidence observation, unmatched
+to be counted. After an actual observation loss, unmatched
 claims re-arm only after a full two-minute quiet pairing timeout since the
 latest gap, and only if the opening SYN was captured. Thus transactions that
 could predate a gap cannot cause unmatched claims; detection is not disabled
@@ -188,7 +188,11 @@ target prevents zone-zero authority; read errors leave it unverified. Each
 read has a 500 ms deadline and runs in a separate goroutine, never blocking
 packet processing. Ruleset apply invalidates authority immediately and requests
 an asynchronous recheck after completion; each packet uses an immutable
-evidence snapshot. This is periodic namespace observation, not
+evidence snapshot. Routine successful reads preserve authority and cached
+identities while in flight. Errors or detected zone setters revoke authority.
+An evidence downgrade gates unmatched claims until evidence is verified again,
+but does not itself count as packet loss or start a recovery timeout.
+This is periodic namespace observation, not
 synchronization with external ruleset writers; an external change can take
 until the next check to be detected. Conntrack zones are not firewall
 interface policy zones.
