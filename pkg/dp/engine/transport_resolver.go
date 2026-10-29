@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
@@ -31,8 +32,9 @@ const (
 )
 
 type transportPacket struct {
-	packet capture.Packet
-	at     time.Time
+	packet  capture.Packet
+	at      time.Time
+	history *flow.Connection
 }
 
 type transportAlias struct {
@@ -44,16 +46,18 @@ type transportAlias struct {
 }
 
 type transportResolver struct {
-	admissionMu sync.Mutex
-	closed      bool
-	authority   *transportAuthority
-	reader      conntrack.IdentityReader
-	queue       chan transportPacket
-	count       atomic.Int64
-	bytes       atomic.Int64
-	aliases     map[conntrack.Tuple]*transportAlias // worker-owned, O/R only
-	epoch       string
-	serial      uint64
+	admissionMu  sync.Mutex
+	closed       bool
+	indexed      map[conntrack.Tuple]*flow.Connection // under admissionMu, bounded independently of lookup TTL
+	overflowNext time.Time
+	authority    *transportAuthority
+	reader       conntrack.IdentityReader
+	queue        chan transportPacket
+	count        atomic.Int64
+	bytes        atomic.Int64
+	aliases      map[conntrack.Tuple]*transportAlias // worker-owned, O/R only
+	epoch        string
+	serial       uint64
 }
 
 func (e *Engine) initTransport(cfg Config) error {
@@ -83,7 +87,7 @@ func newTransportResolver(zones zoneSetterReader, reader conntrack.IdentityReade
 		return nil, fmt.Errorf("transport identity epoch: %w", err)
 	}
 	return &transportResolver{authority: newTransportAuthority(zones), reader: reader,
-		queue: make(chan transportPacket, transportQueueLimit), aliases: make(map[conntrack.Tuple]*transportAlias),
+		queue: make(chan transportPacket, transportQueueLimit), indexed: make(map[conntrack.Tuple]*flow.Connection), aliases: make(map[conntrack.Tuple]*transportAlias),
 		epoch: hex.EncodeToString(epoch[:])}, nil
 }
 
@@ -95,14 +99,14 @@ func (r *transportResolver) nextKey() string {
 // Admission is nonblocking and never does network I/O. AF_PACKET has no inline
 // verdict: pressure loses an observation, not a forwarding decision.
 func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decision {
+	if !e.transportEligible(pkt) {
+		return e.HandlePacket(pkt)
+	}
 	r.admissionMu.Lock()
 	defer r.admissionMu.Unlock()
 	if r.closed {
 		r.authority.count("canceled")
 		return acceptDecision
-	}
-	if pkt.Invalid != "" || pkt.Proto != 6 && pkt.Proto != 17 {
-		return e.HandlePacket(pkt)
 	}
 	n := int64(len(pkt.Payload))
 	if pkt.Timestamp.IsZero() {
@@ -121,7 +125,7 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 	}
 	pkt.Payload, pkt.SrcIP, pkt.DstIP = bytes.Clone(pkt.Payload), bytes.Clone(pkt.SrcIP), bytes.Clone(pkt.DstIP)
 	select {
-	case r.queue <- transportPacket{packet: pkt, at: time.Now()}:
+	case r.queue <- transportPacket{packet: pkt, at: time.Now(), history: r.admissionHistoryLocked(packetKey(pkt).Tuple())}:
 	default:
 		r.bytes.Add(-n)
 		r.count.Add(-1)
@@ -132,6 +136,14 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 
 func (r *transportResolver) unavailable(e *Engine, pkt capture.Packet, status string) {
 	r.authority.count(status)
+	now := time.Now()
+	if c := r.indexed[packetKey(pkt).Tuple()]; c != nil {
+		c.LoseCorrelation(now, anomaly.ModbusPairingTimeout)
+	}
+	if now.Before(r.overflowNext) {
+		return
+	}
+	r.overflowNext = now.Add(time.Second)
 	e.eventStore.Append(events.Event{Kind: "dpi.correlation.unavailable", Timestamp: time.Now().UTC(),
 		CorrelationStatus: status,
 		SrcIP:             pkt.SrcIP.String(), DstIP: pkt.DstIP.String(), SrcPort: pkt.SrcPort, DstPort: pkt.DstPort,
@@ -171,6 +183,7 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			r.authority.count("canceled")
 		}
 		r.aliases = make(map[conntrack.Tuple]*transportAlias)
+		clear(r.indexed)
 	}()
 	for {
 		select {
@@ -207,6 +220,9 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			pending[0] = transportPacket{}
 			pending = pending[1:]
 			if ctx.Err() == nil {
+				if p.history != nil && p.history.Key == "" {
+					c.MergeHistory(p.history)
+				}
 				e.handleTransportPacket(p.packet, c)
 			}
 			r.bytes.Add(-int64(len(p.packet.Payload)))
@@ -245,7 +261,7 @@ func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, ove
 		return old.connection
 	}
 	for t, alias := range r.aliases {
-		if now.Sub(alias.expires) > 30*time.Second {
+		if now.Sub(alias.expires) > 30*time.Second || alias.connection.Evidence == nil && !now.Before(alias.expires) {
 			delete(r.aliases, t)
 		}
 	}
@@ -254,23 +270,8 @@ func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, ove
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
-	var evidence conntrack.Evidence
-	var err error
-	for attempt := 0; attempt < 2; attempt++ {
-		r.authority.count("lookups")
-		evidence, err = r.reader.Lookup(lookupCtx, tuple)
-		if !errors.Is(err, conntrack.ErrNotFound) || attempt == 1 {
-			break
-		}
-		r.authority.count("retries")
-		select {
-		case <-lookupCtx.Done():
-			err = lookupCtx.Err()
-		case <-time.After(10 * time.Millisecond):
-			continue
-		}
-		break
-	}
+	r.authority.count("lookups")
+	evidence, err := r.reader.Lookup(lookupCtx, tuple)
 	if version != r.authority.version.Load() {
 		return r.unresolved("zone_unverified")
 	}

@@ -55,11 +55,15 @@ func BenchmarkTransportCopyAdmission(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	e, err := New(Config{InspectAll: true, DPIEnabled: true})
+	if err != nil {
+		b.Fatal(err)
+	}
 	pkt := transportWire(natEvidence().Original, time.Now(), make([]byte, 512))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		r.admit(nil, pkt)
+		r.admit(e, pkt)
 		p := <-r.queue
 		r.bytes.Add(-int64(len(p.packet.Payload)))
 		r.count.Add(-1)

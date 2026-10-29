@@ -46,7 +46,7 @@ func (c *identityReader) open() error {
 	return nil
 }
 
-// Lookup sends at most two exact selectors, never a dump. Failed exchanges
+// Lookup sends one direction-agnostic exact GET, never a dump. Failed exchanges
 // retire the socket: late replies cannot become another lookup's evidence.
 func (c *identityReader) Lookup(ctx context.Context, t Tuple) (Evidence, error) {
 	if err := t.Validate(); err != nil {
@@ -60,36 +60,31 @@ func (c *identityReader) Lookup(ctx context.Context, t Tuple) (Evidence, error) 
 	if err := c.open(); err != nil {
 		return Evidence{}, err
 	}
-	for _, selector := range []uint16{1, 2} {
-		payload, err := encodeIdentityLookup(t, selector)
-		if err != nil {
-			return Evidence{}, err
-		}
-		var evidence Evidence
-		found := false
-		err = c.socket.exchange(ctx, 0x101, payload, false, func(record []byte) (bool, error) {
-			var err error
-			evidence, err = decodeIdentity(record)
-			found = err == nil
-			return true, err
-		})
-		if err == nil && found {
-			return evidence, evidence.Validate(t)
-		}
-		if err != nil && !errors.Is(err, unix.ENOENT) {
-			_ = c.Close()
-			return Evidence{}, err
-		}
+	payload, err := encodeIdentityLookup(t)
+	if err != nil {
+		return Evidence{}, err
 	}
-	return Evidence{}, ErrNotFound
+	var evidence Evidence
+	found := false
+	err = c.socket.exchange(ctx, 0x101, payload, false, func(record []byte) (bool, error) {
+		var err error
+		evidence, err = decodeIdentity(record)
+		found = err == nil
+		return true, err
+	})
+	if err == nil && found {
+		return evidence, evidence.Validate(t)
+	}
+	if errors.Is(err, unix.ENOENT) || err == nil {
+		return Evidence{}, ErrNotFound
+	}
+	_ = c.Close()
+	return Evidence{}, err
 }
 
-func encodeIdentityLookup(t Tuple, selector uint16) ([]byte, error) {
+func encodeIdentityLookup(t Tuple) ([]byte, error) {
 	if err := t.Validate(); err != nil {
 		return nil, err
-	}
-	if selector != 1 && selector != 2 {
-		return nil, fmt.Errorf("invalid conntrack selector")
 	}
 	proto := "tcp"
 	if t.Protocol == 17 {
@@ -101,7 +96,7 @@ func encodeIdentityLookup(t Tuple, selector uint16) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := append([]byte{family, 0, 0, 0}, nlAttr(selector|0x8000, tuple)...)
+	out := append([]byte{family, 0, 0, 0}, nlAttr(1|0x8000, tuple)...)
 	return append(out, nlAttrU16(18, 0)...), nil
 }
 

@@ -205,7 +205,7 @@ func TestTransportResolverOrdersNATReplyAfterQueuedRequest(t *testing.T) {
 	}
 }
 
-func TestTransportResolverAuthorityAndRetry(t *testing.T) {
+func TestTransportResolverAuthorityAndLaterConfirmation(t *testing.T) {
 	evidence := natEvidence()
 	f := &transportCTFake{evidence: evidence, miss: 1}
 	_, r, z := newTransportTest(t, f)
@@ -216,8 +216,17 @@ func TestTransportResolverAuthorityAndRetry(t *testing.T) {
 	}
 	r.authority.check(ctx)
 	c := r.resolve(ctx, pkt, false)
-	if !c.Verified() || f.calls != 2 || r.authority.snapshot().Counters["retries"] != 1 {
-		t.Fatalf("confirmation retry = %+v, calls=%d", c, f.calls)
+	if c.Status != "not_found" || f.calls != 1 {
+		t.Fatalf("miss retried in worker: %+v, calls=%d", c, f.calls)
+	}
+	r.resolve(ctx, pkt, false)
+	if f.calls != 1 {
+		t.Fatal("negative cache did not bound GETs")
+	}
+	r.aliases[packetKey(pkt).Tuple()].expires = time.Now().Add(-time.Millisecond)
+	c = r.resolve(ctx, pkt, false)
+	if !c.Verified() || f.calls != 2 {
+		t.Fatalf("later confirmation: %+v, calls=%d", c, f.calls)
 	}
 	z.set([]enforce.ZoneSetter{{Family: "ip", Table: "foreign", Chain: "raw", Handle: 1}}, nil)
 	r.authority.check(ctx)

@@ -38,16 +38,16 @@ func TestIdentityCodec(t *testing.T) {
 		if err != nil || e.Reply.Destination.Port() != 52000 || e.Start != 12345678 {
 			t.Fatalf("decode = %+v, %v", e, err)
 		}
-		for i, observed := range []Tuple{e.Original, e.Reply} {
+		for _, observed := range []Tuple{e.Original, e.Reply} {
 			if err := e.Validate(observed); err != nil {
 				t.Fatal(err)
 			}
-			encoded, err := encodeIdentityLookup(observed, uint16(i+1))
+			encoded, err := encodeIdentityLookup(observed)
 			if err != nil {
 				t.Fatal(err)
 			}
 			a, err := attributes(encoded[4:])
-			if err != nil || len(a[uint16(i+1)]) == 0 || binary.BigEndian.Uint16(a[18]) != 0 || encoded[0] != family {
+			if err != nil || len(a[1]) == 0 || binary.BigEndian.Uint16(a[18]) != 0 || encoded[0] != family {
 				t.Fatalf("bad exact selector: %x, %v", encoded, err)
 			}
 		}

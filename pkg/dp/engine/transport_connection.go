@@ -172,6 +172,7 @@ func adoptTransport(previous, incoming *flow.Connection) *flow.Connection {
 	}
 	fresh := &flow.Connection{ID: id, Key: previous.Key, Status: incoming.Status, Evidence: evidence}
 	fresh.InheritLifecycle(previous)
+	fresh.MergeHistory(incoming)
 	return fresh
 }
 
