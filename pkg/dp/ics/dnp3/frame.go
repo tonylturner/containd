@@ -59,66 +59,82 @@ var (
 	ErrBadLength    = errors.New("dnp3 link length below 5")
 )
 
+type accessCategory uint8
+
+const (
+	accessUnknown accessCategory = iota
+	accessRead
+	accessWrite
+	accessControl
+)
+
+type functionDefinition struct {
+	name   string
+	access accessCategory
+}
+
+// IEEE 1815 application functions. The read allowlist includes confirmation
+// and delay measurement, not just data reads. Known
+// responses retain their historical non-write classification; this table does
+// not infer their access from a correlated request.
+var applicationFunctions = map[uint8]functionDefinition{
+	0:   {"confirm", accessRead},
+	1:   {"read", accessRead},
+	2:   {"write", accessWrite},
+	3:   {"select", accessControl},
+	4:   {"operate", accessControl},
+	5:   {"direct_operate", accessControl},
+	6:   {"direct_operate_no_ack", accessControl},
+	7:   {"immediate_freeze", accessControl},
+	8:   {"immediate_freeze_no_ack", accessControl},
+	9:   {"freeze_clear", accessControl},
+	10:  {"freeze_clear_no_ack", accessControl},
+	11:  {"freeze_at_time", accessControl},
+	12:  {"freeze_at_time_no_ack", accessControl},
+	13:  {"cold_restart", accessControl},
+	14:  {"warm_restart", accessControl},
+	15:  {"initialize_data", accessControl},
+	16:  {"initialize_application", accessControl},
+	17:  {"start_application", accessControl},
+	18:  {"stop_application", accessControl},
+	19:  {"save_configuration", accessControl},
+	20:  {"enable_unsolicited", accessControl},
+	21:  {"disable_unsolicited", accessControl},
+	22:  {"assign_class", accessControl},
+	23:  {"delay_measure", accessRead},
+	24:  {"record_current_time", accessControl},
+	25:  {"open_file", accessControl},
+	26:  {"close_file", accessControl},
+	27:  {"delete_file", accessControl},
+	28:  {"get_file_info", accessControl},
+	29:  {"authenticate_file", accessControl},
+	30:  {"abort_file", accessControl},
+	31:  {"activate_configuration", accessControl},
+	32:  {"authenticate_request", accessControl},
+	33:  {"authenticate_request_no_ack", accessControl},
+	129: {"response", accessRead},
+	130: {"unsolicited_response", accessRead},
+	131: {"authenticate_response", accessRead},
+}
+
 // FunctionCodeName returns a human-readable name for a DNP3 function code.
 func FunctionCodeName(fc uint8) string {
-	switch fc {
-	case FuncConfirm:
-		return "confirm"
-	case FuncRead:
-		return "read"
-	case FuncWrite:
-		return "write"
-	case FuncSelect:
-		return "select"
-	case FuncOperate:
-		return "operate"
-	case FuncDirectOperate:
-		return "direct_operate"
-	case FuncDirectOperateNoAck:
-		return "direct_operate_no_ack"
-	case FuncColdRestart:
-		return "cold_restart"
-	case FuncWarmRestart:
-		return "warm_restart"
-	case FuncStopApplication:
-		return "stop_application"
-	case FuncSaveConfiguration:
-		return "save_configuration"
-	case FuncEnableUnsolicited:
-		return "enable_unsolicited"
-	case FuncDisableUnsolicited:
-		return "disable_unsolicited"
-	case FuncAssignClass:
-		return "assign_class"
-	case FuncResponse:
-		return "response"
-	case FuncUnsolicitedResponse:
-		return "unsolicited_response"
-	default:
-		return fmt.Sprintf("unknown_0x%02x", fc)
+	if def, ok := applicationFunctions[fc]; ok {
+		return def.name
 	}
+	return fmt.Sprintf("unknown_0x%02x", fc)
 }
 
-// IsWriteFunctionCode returns true for function codes that mutate outstation state.
+// IsWriteFunctionCode reports write/control operations. False is not proof of
+// a read: an unlisted function has unknown access semantics.
 func IsWriteFunctionCode(fc uint8) bool {
-	switch fc {
-	case FuncWrite, FuncSelect, FuncOperate, FuncDirectOperate, FuncDirectOperateNoAck,
-		FuncColdRestart, FuncWarmRestart, FuncStopApplication, FuncSaveConfiguration:
-		return true
-	default:
-		return false
-	}
+	access := applicationFunctions[fc].access
+	return access == accessWrite || access == accessControl
 }
 
-// IsControlFunctionCode returns true for function codes that perform control operations.
+// IsControlFunctionCode reports state-changing control operations.
 func IsControlFunctionCode(fc uint8) bool {
-	switch fc {
-	case FuncSelect, FuncOperate, FuncDirectOperate, FuncDirectOperateNoAck,
-		FuncColdRestart, FuncWarmRestart, FuncStopApplication:
-		return true
-	default:
-		return false
-	}
+	return applicationFunctions[fc].access == accessControl
 }
 
 // IsRestartFunctionCode returns true for restart function codes.

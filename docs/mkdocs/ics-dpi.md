@@ -399,6 +399,26 @@ than IEC 104 are:
 | `direction` | `request` or `response`; omit for both |
 | `mode` | `learn` or `enforce`; omit to inherit global mode |
 
+Modbus and DNP3 access classification uses explicit known operations. Unknown
+operations omit `is_write` and `is_control`, so they match neither `readOnly`
+nor `writeOnly`. These attributes describe function semantics, not successful
+execution or whole-message conformance.
+
+| Protocol | Read (`is_write: false`) | Write/control (`is_write: true`) |
+| --- | --- | --- |
+| Modbus | FC 1–4, 7, 11, 12, 17, 20, 24; FC 8 sub-functions 0, 2, 11–18; FC 43 MEI type 14 (Read Device Identification) | FC 5, 6, 15, 16, 21, 22, 23; FC 8 sub-functions 1, 3, 4, 10, 20 |
+| DNP3 | FC 0 (Confirm), 1 (Read), 23 (Delay Measure); known responses 129–131 retain their non-write classification | FC 2 (Write); FC 3–22 and 24–33 are controls, also carrying `is_control: true` |
+
+Other function codes, private/vendor extensions such as Modbus FC 90, unknown
+FC 8 sub-functions, and FC 43 MEI types other than 14 are unknown, not reads.
+MEI 13 (CANopen General Reference) is not inherently read-only. Modbus replies
+use their own function/subtype; exceptions use the base function but have no
+diagnostic or MEI subtype, so FC 8/43 exceptions remain unknown. DNP3 response
+codes outside 129–131 remain unknown even though their high bit identifies a
+response-form header. Response access is not inferred from request correlation.
+DNP3 `restart` events identify FC 13/14; kind `control` identifies only FC 18/19.
+Other control operations retain kind `request` while carrying `is_control: true`.
+
 Each `addresses` entry is one value (`256`, `0x0100`) or an inclusive range
 `low-high` (`100-511`, `0x0100-0x01FF`). Values are unsigned decimal or hex with
 a `0x` prefix, may mix within a range, and may have spaces around them. A range
@@ -759,6 +779,13 @@ rules before reapplying there. The ICS template API stages replacements for
 matching IDs. Review the saved rules, default action and reply policy before
 enforcing. See
 [Policy Model](policy-model.md#templates-and-preview).
+
+The Modbus read-only template allows FC 1–4 and denies listed write functions,
+including FC 21 (Write File Record); use default deny to exclude all other
+functions. The `dnp3-secure-operations` example is **not read-only**: it allows
+FC 1 (Read), FC 2 (Write), and FC 20 (Enable Unsolicited), while denying
+FC 13/14 (Restart) and FC 18 (Stop Application). Review these allowances before
+applying it.
 
 ## IEC 104 Holdback Diagnostics
 

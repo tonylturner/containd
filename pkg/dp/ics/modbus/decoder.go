@@ -110,14 +110,14 @@ func aduEvent(state *flow.State, frame *TCPFrame, adu []byte) dpi.Event {
 		kind = "exception"
 		baseFc := fc - 128
 		attrs[eventfields.KeyFunctionCode] = baseFc
-		attrs[eventfields.KeyIsWrite] = IsWriteFunctionCode(baseFc)
+		addAccess(attrs, classifyAccess(baseFc, nil))
 		if len(frame.PDU) >= 1 {
 			ec := frame.PDU[0]
 			attrs["exception_code"] = ec
 			attrs["exception_description"] = exceptionName(ec)
 		}
 	} else {
-		attrs[eventfields.KeyIsWrite] = IsWriteFunctionCode(fc)
+		addAccess(attrs, classifyAccess(fc, frame.PDU))
 
 		switch fc {
 		case 8: // Diagnostics — sub-function is first 2 bytes of PDU.
@@ -126,7 +126,6 @@ func aduEvent(state *flow.State, frame *TCPFrame, adu []byte) dpi.Event {
 				attrs["sub_function"] = sub
 				if desc, ok := diagnosticSubfunctions[sub]; ok {
 					attrs["sub_function_name"] = desc.name
-					attrs[eventfields.KeyIsWrite] = desc.write
 				} else {
 					attrs["sub_function_name"] = "unknown"
 					// Framed diagnostics outside the supported serial-line profile.
@@ -159,6 +158,12 @@ func aduEvent(state *flow.State, frame *TCPFrame, adu []byte) dpi.Event {
 		Kind:       kind,
 		Attributes: attrs,
 		Timestamp:  time.Now().UTC(),
+	}
+}
+
+func addAccess(attrs map[string]any, category accessCategory) {
+	if category != accessUnknown {
+		attrs[eventfields.KeyIsWrite] = category == accessWrite
 	}
 }
 
