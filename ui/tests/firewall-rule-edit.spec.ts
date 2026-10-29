@@ -140,7 +140,8 @@ test("choosing inherit clears a stored ICS mode", async ({ page }) => {
   await form.getByLabel("Rule Mode").selectOption("");
   await form.getByRole("button", { name: "Save changes" }).click();
   await expect.poll(() => seen.patches.length).toBe(1);
-  expect(seen.patches[0]).toMatchObject({ ics: { protocol: "modbus", mode: "" } });
+  // Merge-PATCH null deletes the stored mode (config.PatchICSPredicate).
+  expect(seen.patches[0]).toMatchObject({ ics: { protocol: "modbus", mode: null } });
 });
 
 test("RATE_LIMIT stages its limit and refuses an ICS protocol", async ({ page }) => {

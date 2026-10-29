@@ -29,8 +29,9 @@ func PatchICSPredicate(cur ICSPredicate, patch json.RawMessage) (ICSPredicate, e
 			return ICSPredicate{}, fmt.Errorf("ics protocol: %w", err)
 		}
 		if protocol != cur.Protocol {
-			err := json.Unmarshal(patch, &out)
-			return out, err
+			// Replacement still honors merge-PATCH null deletion, including
+			// keys from the old protocol that are not legal on the new one.
+			cur = ICSPredicate{}
 		}
 	}
 	base, err := json.Marshal(cur)
@@ -42,7 +43,11 @@ func PatchICSPredicate(cur ICSPredicate, patch json.RawMessage) (ICSPredicate, e
 		return ICSPredicate{}, err
 	}
 	for key, raw := range fields {
-		merged[key] = raw
+		if isJSONNull(raw) {
+			delete(merged, key)
+		} else {
+			merged[key] = raw
+		}
 	}
 	body, err := json.Marshal(merged)
 	if err != nil {

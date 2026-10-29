@@ -4,8 +4,9 @@ package cip
 import "encoding/binary"
 
 type pathSegment struct {
-	code  byte
-	value uint16
+	code   byte
+	value  uint16
+	symbol string
 }
 
 type decodedPath struct {
@@ -50,20 +51,26 @@ func decodePath(path []byte) decodedPath {
 			r.validPadding = r.validPadding && path[pos+1] == 0
 			value = binary.LittleEndian.Uint16(path[pos+2 : pos+4])
 		}
-		r.segments = append(r.segments, pathSegment{code, value})
+		s := pathSegment{code: code, value: value}
+		if code == 0x91 {
+			s.symbol = string(path[pos+2 : pos+2+int(value)])
+		}
+		r.segments = append(r.segments, s)
 		pos += size
 	}
 	return r
 }
 
 type serviceTarget struct {
-	class       uint16
-	instance    uint16
-	hasInstance bool
-	symbolic    bool
-	members     bool
-	attribute   bool
-	valid       bool
+	class           uint16
+	instance        uint16
+	hasInstance     bool
+	symbolic        bool
+	symbol          []string
+	members         bool
+	attribute       bool
+	connectionPoint bool
+	valid           bool
 }
 
 func decodeTarget(path []byte) serviceTarget {
@@ -74,7 +81,12 @@ func decodeTarget(path []byte) serviceTarget {
 	t := serviceTarget{valid: true, symbolic: p.segments[0].code == 0x91}
 	if t.symbolic {
 		for _, s := range p.segments {
-			if s.code != 0x91 && s.code != 0x28 && s.code != 0x29 {
+			switch s.code {
+			case 0x91:
+				t.symbol = append(t.symbol, s.symbol)
+			case 0x28, 0x29:
+				// Element indexes do not change the symbol subtree.
+			default:
 				return serviceTarget{}
 			}
 		}
@@ -84,25 +96,27 @@ func decodeTarget(path []byte) serviceTarget {
 		return serviceTarget{}
 	}
 	t.class = p.segments[0].value
-	// A single class followed by instance, attribute and/or members is
-	// supported. Repeated classes and hierarchical mixed paths are ambiguous.
+	// A class may be followed by one instance and at most one attribute,
+	// member or connection point. Mixed or repeated targets are ambiguous.
 	for _, s := range p.segments[1:] {
+		terminal := t.attribute || t.members || t.connectionPoint
 		switch s.code {
 		case 0x24, 0x25:
-			if t.hasInstance || t.attribute || t.members {
+			if t.hasInstance || terminal {
 				return serviceTarget{}
 			}
 			t.instance, t.hasInstance = s.value, true
 		case 0x30, 0x31:
-			if !t.hasInstance || t.attribute || t.members {
+			if !t.hasInstance || terminal {
 				return serviceTarget{}
 			}
 			t.attribute = true
-		case 0x28, 0x29:
-			if !t.hasInstance {
+		case 0x28, 0x29, 0x2c, 0x2d:
+			if !t.hasInstance || terminal {
 				return serviceTarget{}
 			}
-			t.members = true
+			t.members = s.code == 0x28 || s.code == 0x29
+			t.connectionPoint = !t.members
 		default:
 			return serviceTarget{}
 		}
@@ -111,5 +125,5 @@ func decodeTarget(path []byte) serviceTarget {
 }
 
 func (t serviceTarget) instanceTarget() bool {
-	return t.hasInstance && !t.attribute && !t.members
+	return t.hasInstance && !t.attribute && !t.members && !t.connectionPoint
 }

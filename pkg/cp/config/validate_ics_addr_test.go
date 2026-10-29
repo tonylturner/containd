@@ -54,7 +54,10 @@ func TestValidateRefusesICSAddressForms(t *testing.T) {
 }
 
 func TestValidateRefusesUnsupportedICSAddresses(t *testing.T) {
-	const message = "rule ics-1: Address filters are not supported for DNP3 or CIP. Remove this filter before saving; protocol-specific station, point and CIP path selectors are not available yet."
+	messages := map[string]string{
+		"dnp3": "rule ics-1 ics addresses requires non-empty groups for protocol dnp3",
+		"cip":  "rule ics-1 ics addresses is not supported for protocol cip; use target selectors",
+	}
 	for _, proto := range []string{"dnp3", "cip"} {
 		for _, action := range []Action{ActionAllow, ActionDeny} {
 			for _, mode := range []string{"", "learn", "enforce"} {
@@ -63,8 +66,8 @@ func TestValidateRefusesUnsupportedICSAddresses(t *testing.T) {
 						cfg := genericICSConfig(proto, mode, "enforce", 100)
 						cfg.Firewall.Rules[0].Action = action
 						cfg.Firewall.Rules[0].ICS.Addresses = addresses
-						if err := cfg.Validate(); err == nil || err.Error() != message {
-							t.Fatalf("addresses %q: got %v, want %q", addresses, err, message)
+						if err := cfg.Validate(); err == nil || err.Error() != messages[proto] {
+							t.Fatalf("addresses %q: got %v, want %q", addresses, err, messages[proto])
 						}
 					}
 					for _, addresses := range [][]string{nil, {}} {

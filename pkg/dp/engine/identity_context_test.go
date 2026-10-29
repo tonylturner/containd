@@ -28,8 +28,8 @@ func TestEvalContextsCarryOpenerIdentities(t *testing.T) {
 			key = flow.Key{SrcIP: net.ParseIP(testServer), DstIP: net.ParseIP(testClient), SrcPort: 502, DstPort: 40000, Proto: 6, Dir: dir}
 		}
 		pkt := &dpi.ParsedPacket{Proto: "tcp", SrcPort: key.SrcPort, DstPort: key.DstPort}
-		ctx, ok := evalContextFromDPIEvent(snap, &flow.State{Key: key}, pkt, dpi.Event{Proto: "modbus", Kind: "request"}, "", "")
-		if !ok || !slices.Equal(ctx.Identities, want) {
+		ctx := singleEvalContext(t, snap, &flow.State{Key: key}, pkt, dpi.Event{Proto: "modbus", Kind: "request"}, "", "")
+		if !slices.Equal(ctx.Identities, want) {
 			t.Fatalf("direction %v: identities %v, want %v", dir, ctx.Identities, want)
 		}
 	}

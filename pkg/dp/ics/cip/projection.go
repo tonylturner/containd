@@ -65,7 +65,11 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 					result := parseMSP(msg.Data, &msg.IsResponse, &budget, 0)
 					msp = &result
 				}
-				return projectMessage(state, attrs, msg, msp, nil)
+				events := projectMessage(state, attrs, msg, msp, nil)
+				if slices.Contains(cpf.Undecoded, "cip.extra_data_item") {
+					events[0].Attributes[eventfields.KeyCoverageIncomplete] = true
+				}
+				return events
 			}
 		}
 	} else if !knownCommand && len(hdr.Data) != 0 {
@@ -112,6 +116,19 @@ func projectMessage(state *flow.State, envelope map[string]any, msg *CIPMessage,
 		}
 	}
 	addPathFields(msg.Path, attrs)
+	// A response has no wire target, so it carries no cip_target. Policy
+	// object selectors apply to requests; a response is not "unknown".
+	if !msg.IsResponse {
+		attrs[eventfields.KeyCIPTarget] = "unknown"
+		if target := decodeTarget(msg.Path); target.valid && !slices.Contains(msg.Conformance, "cip.epath_truncated") {
+			if target.symbolic {
+				attrs[eventfields.KeyCIPTarget] = "symbolic"
+				attrs[eventfields.KeyCIPSymbol] = target.symbol
+			} else {
+				attrs[eventfields.KeyCIPTarget] = "logical"
+			}
+		}
+	}
 	category := Classify(msg)
 	for _, key := range []string{eventfields.KeyConformance, eventfields.KeyUndecoded} {
 		if codes, _ := eventfields.Strings(attrs, key); len(codes) != 0 {
@@ -126,8 +143,13 @@ func projectMessage(state *flow.State, envelope map[string]any, msg *CIPMessage,
 	}
 	events := []dpi.Event{newEvent(state, kind, attrs)}
 	if msp == nil {
-
+		if hasMSPBody(msg) {
+			attrs[eventfields.KeyCoverageIncomplete] = true
+		}
 		return events
+	}
+	if int(msp.Declared) != len(msp.Children) || len(msp.Undecoded) != 0 || slices.Contains(msp.Conformance, "cip.msp_layout") {
+		attrs[eventfields.KeyCoverageIncomplete] = true
 	}
 	attrs["multi_service_count"] = msp.Declared
 	attrs["multi_service_decoded_count"] = uint16(len(msp.Children))
@@ -148,6 +170,9 @@ func projectMessage(state *flow.State, envelope map[string]any, msg *CIPMessage,
 		children := projectMessage(state, inherited, child.CIPMessage, child.Nested, childPath)
 		// The wrapper also reports uninspected or malformed descendants.
 		for _, ev := range children {
+			if incomplete, _ := eventfields.Bool(ev.Attributes, eventfields.KeyCoverageIncomplete); incomplete {
+				attrs[eventfields.KeyCoverageIncomplete] = true
+			}
 			for _, key := range []string{eventfields.KeyConformance, eventfields.KeyUndecoded} {
 				codes, _ := eventfields.Strings(ev.Attributes, key)
 				for _, code := range codes {

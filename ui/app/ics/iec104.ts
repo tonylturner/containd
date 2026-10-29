@@ -1,10 +1,11 @@
 import type {
   FirewallRule,
   ICSPredicate,
+  ICSPredicatePatch,
   IEC104Class,
   IOARange,
 } from "../../lib/api";
-import type { ICSMode, ICSModeSelection } from "./ics-shared";
+import { parseSelectorCSV, predicatePatch, type ICSMode, type ICSModeSelection } from "./ics-shared";
 
 // IEC 60870-5-104 rule model for the editors.
 // The client-side checks mirror the server validation ranges so operators see
@@ -35,9 +36,21 @@ export type IEC104TypeInfo = {
 export const IEC104_TYPES: Record<number, IEC104TypeInfo> = {
   1: { name: "M_SP_NA_1 single point", cls: "monitor", descriptor: true },
   3: { name: "M_DP_NA_1 double point", cls: "monitor", descriptor: true },
+  5: { name: "M_ST_NA_1 step position", cls: "monitor", descriptor: true },
+  7: { name: "M_BO_NA_1 bitstring", cls: "monitor", descriptor: true },
+  9: { name: "M_ME_NA_1 normalized measurement", cls: "monitor", descriptor: true },
+  11: { name: "M_ME_NB_1 scaled measurement", cls: "monitor", descriptor: true },
   13: { name: "M_ME_NC_1 short float", cls: "monitor", descriptor: true },
+  15: { name: "M_IT_NA_1 integrated totals", cls: "monitor", descriptor: true },
+  21: { name: "M_ME_ND_1 normalized, no quality", cls: "monitor", descriptor: true },
   30: { name: "M_SP_TB_1 single point, time", cls: "monitor", descriptor: true },
   31: { name: "M_DP_TB_1 double point, time", cls: "monitor", descriptor: true },
+  32: { name: "M_ST_TB_1 step position, time", cls: "monitor", descriptor: true },
+  33: { name: "M_BO_TB_1 bitstring, time", cls: "monitor", descriptor: true },
+  34: { name: "M_ME_TD_1 normalized, time", cls: "monitor", descriptor: true },
+  35: { name: "M_ME_TE_1 scaled, time", cls: "monitor", descriptor: true },
+  36: { name: "M_ME_TF_1 float, time", cls: "monitor", descriptor: true },
+  37: { name: "M_IT_TB_1 integrated totals, time", cls: "monitor", descriptor: true },
   45: { name: "C_SC_NA_1 single command", cls: "control", descriptor: true },
   46: { name: "C_DC_NA_1 double command", cls: "control", descriptor: true },
   47: { name: "C_RC_NA_1 regulating step", cls: "control", descriptor: true },
@@ -81,6 +94,11 @@ export type IEC104Draft = {
   ioa: string;
   direction: "" | "request" | "response";
   readOnly: boolean;
+  cot: string;
+  originators: string;
+  negative: "" | "true" | "false";
+  test: "" | "true" | "false";
+  selectExecute: "" | "select" | "execute";
 };
 
 export function formatIOARanges(ranges: IOARange[] | undefined): string {
@@ -98,6 +116,11 @@ export function iec104DraftFrom(ics: ICSPredicate | undefined): IEC104Draft {
     ioa: formatIOARanges(own?.ioa),
     direction: own?.direction ?? "",
     readOnly: own?.readOnly ?? false,
+    cot: (own?.cot ?? []).join(", "),
+    originators: (own?.originators ?? []).join(", "),
+    negative: own?.negative == null ? "" : String(own.negative) as "true" | "false",
+    test: own?.test == null ? "" : String(own.test) as "true" | "false",
+    selectExecute: own?.selectExecute ?? "",
   };
 }
 
@@ -188,7 +211,7 @@ export function parseIOARanges(text: string): Parsed<IOARange[]> {
 }
 
 export type IEC104BuildResult =
-  | { ok: true; ics: ICSPredicate }
+  | { ok: true; ics: ICSPredicatePatch }
   | { ok: false; error: string };
 
 /**
@@ -201,7 +224,7 @@ function buildIEC104Predicate(
   mode: ICSModeSelection,
   action: FirewallRule["action"],
   globalMode?: ICSMode,
-): IEC104BuildResult {
+): { ok: true; ics: ICSPredicate } | { ok: false; error: string } {
   const typeIds = parseTypeIds(draft.typeIds);
   if (!typeIds.ok) return typeIds;
   const ca = parseCAs(draft.ca);
@@ -209,8 +232,20 @@ function buildIEC104Predicate(
   const ioa = parseIOARanges(draft.ioa);
   if (!ioa.ok) return ioa;
 
+  let cot: number[], originators: number[];
+  try {
+    cot = parseSelectorCSV(draft.cot, "COT", 63);
+    if (cot.includes(0)) throw new Error("COT must be in 1-63.");
+    originators = parseSelectorCSV(draft.originators, "Originators", 255);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  if (draft.selectExecute && typeIds.value.some((v) => !(v >= 45 && v <= 50 || v >= 58 && v <= 63))) {
+    return { ok: false, error: "selectExecute requires omitted Type IDs or only 45-50 and 58-63 (not bitstring 51/64)." };
+  }
   const effectiveMode = mode || globalMode || "learn";
   if (action === "ALLOW" && effectiveMode !== "learn") {
+    if (draft.classes.includes("unknown")) return { ok: false, error: "Enforce ALLOW cannot include the unknown class." };
     const undecoded = typeIds.value.filter((t) => !iec104TypeInfo(t).descriptor);
     if (undecoded.length > 0) {
       return {
@@ -228,22 +263,17 @@ function buildIEC104Predicate(
   if (draft.direction) ics.direction = draft.direction;
   if (ca.value.length > 0) ics.ca = ca.value;
   if (ioa.value.length > 0) ics.ioa = ioa.value;
+  if (cot.length) ics.cot = cot;
+  if (originators.length) ics.originators = originators;
+  if (draft.negative !== "") ics.negative = draft.negative === "true";
+  if (draft.test !== "") ics.test = draft.test === "true";
+  if (draft.selectExecute) ics.selectExecute = draft.selectExecute;
   ics.readOnly = draft.readOnly;
   if (mode) ics.mode = mode;
   return { ok: true, ics };
 }
 
-const CLEARABLE_FIELDS = ["typeIds", "classes", "direction", "ca", "ioa"] as const;
-
-/**
- * Builds the predicate for a rule save. `existing` is the stored predicate
- * when the save is an update. Rule updates are deep JSON merges
- * (api/http/firewall_rule_handlers.go mergeJSONObject), so a field left out
- * of the patch keeps its stored value. Strict server validation rejects null
- * on the IEC fields:
- * an update that would remove a stored IEC field is refused instead of
- * silently keeping the old filter.
- */
+/** Build once; a merge PATCH adds null only for cleared stored selectors. */
 export function buildIEC104RuleICS(
   draft: IEC104Draft,
   mode: ICSModeSelection,
@@ -252,15 +282,8 @@ export function buildIEC104RuleICS(
   globalMode?: ICSMode,
 ): IEC104BuildResult {
   const built = buildIEC104Predicate(draft, mode, action, globalMode);
-  if (!built.ok || existing?.protocol !== "iec104") return built;
-  const stuck = CLEARABLE_FIELDS.filter(
-    (field) => existing[field] !== undefined && built.ics[field] === undefined,
-  );
-  if (stuck.length === 0) return built;
-  return {
-    ok: false,
-    error: `Saving cannot clear ${stuck.join(", ")} on an existing rule because rule updates merge fields. Delete and recreate the rule to remove them.`,
-  };
+  if (!built.ok) return built;
+  return { ok: true, ics: predicatePatch(built.ics, existing) };
 }
 
 /** Short summaries for rule tables. */
@@ -272,6 +295,11 @@ export function summarizeIEC104(ics: ICSPredicate): {
     (ics.typeIds ?? []).length > 0 ? `type ${(ics.typeIds ?? []).join(",")}` : "",
     (ics.classes ?? []).length > 0 ? (ics.classes ?? []).join("|") : "",
     ics.direction ?? "",
+    ics.cot?.length ? `COT ${ics.cot.join(",")}` : "",
+    ics.originators?.length ? `OA ${ics.originators.join(",")}` : "",
+    ics.negative != null ? `P/N=${ics.negative ? 1 : 0}` : "",
+    ics.test != null ? `T=${ics.test ? 1 : 0}` : "",
+    ics.selectExecute ?? "",
   ]
     .filter(Boolean)
     .join(" ");

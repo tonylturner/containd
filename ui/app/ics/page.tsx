@@ -22,6 +22,7 @@ import { EditICSModal } from "./ics-edit-modal";
 import { RulePrecedenceNote } from "../firewall/firewall-rule-table";
 import {
   formatICSMode,
+  summarizeGenericICS,
   PROTOCOL_KEYS,
   PROTOCOLS,
   isSupportedICSProtocol,
@@ -299,7 +300,7 @@ export default function ICSPolicyPage() {
                 <td className="px-4 py-3 font-mono text-xs text-(--text)">
                   {r.ics?.protocol === "iec104"
                     ? summarizeIEC104(r.ics).types
-                    : (r.ics?.functionCode ?? []).join(", ") || "*"}
+                    : r.ics ? summarizeGenericICS(r.ics) : "*"}
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-(--text)">
                   {r.ics?.protocol === "iec104"

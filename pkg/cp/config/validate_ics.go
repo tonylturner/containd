@@ -13,10 +13,10 @@ import (
 // ICSProtocolIEC104 is the ICS predicate protocol of IEC 60870-5-104 rules.
 const ICSProtocolIEC104 = "iec104"
 
-// This user-facing diagnostic is also shown by the rule editors.
-const unsupportedICSAddressesMessage = "Address filters are not supported for DNP3 or CIP. Remove this filter before saving; protocol-specific station, point and CIP path selectors are not available yet."
-
-func validateICSPredicate(p ICSPredicate, ruleID string) error {
+// ValidateICSPredicate validates one rule's ICS selectors, including predicates
+// constructed in Go. Preview can use it without a whole candidate configuration.
+// Whole-policy activation and enforce-ALLOW descriptor checks still need Validate.
+func ValidateICSPredicate(p ICSPredicate, ruleID string) error {
 	if p.Mode != "" && p.Mode != "learn" && p.Mode != "enforce" {
 		return fmt.Errorf("rule %s ics mode invalid %q", ruleID, p.Mode)
 	}
@@ -32,6 +32,12 @@ func validateICSPredicate(p ICSPredicate, ruleID string) error {
 	if p.Direction != "" && p.Direction != "request" && p.Direction != "response" {
 		return fmt.Errorf("rule %s ics direction invalid %q", ruleID, p.Direction)
 	}
+	if err := validateProtocolSelectors(p, ruleID); err != nil {
+		return err
+	}
+	if p.UnitID != nil && (p.Protocol == "dnp3" || p.Protocol == "cip") {
+		return fmt.Errorf("rule %s ics unitId is not supported for protocol %s; remove this filter", ruleID, p.Protocol)
+	}
 	if p.Protocol == ICSProtocolIEC104 {
 		return validateIEC104Predicate(p, ruleID)
 	}
@@ -44,11 +50,16 @@ func validateICSPredicate(p ICSPredicate, ruleID string) error {
 	return validateICSAddresses(p, ruleID)
 }
 
-// validateICSAddresses permits generic addresses only for Modbus, and refuses
+// validateICSAddresses permits Modbus addresses and grouped DNP3 point indexes, and refuses
 // entries the evaluator cannot parse or that exceed the protocol's limit.
 func validateICSAddresses(p ICSPredicate, ruleID string) error {
-	if len(p.Addresses) > 0 && (p.Protocol == "dnp3" || p.Protocol == "cip") {
-		return fmt.Errorf("rule %s: %s", ruleID, unsupportedICSAddressesMessage)
+	if len(p.Addresses) > 0 {
+		if p.Protocol == "cip" {
+			return fmt.Errorf("rule %s ics addresses is not supported for protocol cip; use target selectors", ruleID)
+		}
+		if p.Protocol == "dnp3" && len(p.Groups) == 0 {
+			return fmt.Errorf("rule %s ics addresses requires non-empty groups for protocol dnp3", ruleID)
+		}
 	}
 	limit := rules.ICSAddressMax(p.Protocol)
 	for _, spec := range p.Addresses {
@@ -89,7 +100,7 @@ func validateICSWithoutProtocol(p ICSPredicate, ruleID string) error {
 	case p.Direction != "":
 		field = "direction"
 	default:
-		field = iec104FieldSet(p)
+		field = protocolSelectorField(p)
 	}
 	if field != "" {
 		return fmt.Errorf("rule %s ics %s needs an ics protocol", ruleID, field)
@@ -97,8 +108,7 @@ func validateICSWithoutProtocol(p ICSPredicate, ruleID string) error {
 	return nil
 }
 
-// iec104FieldSet names the first IEC104 list field that is set (non-nil),
-// or "".
+// iec104FieldSet names the first IEC104 field that is set, or "".
 func iec104FieldSet(p ICSPredicate) string {
 	switch {
 	case p.TypeIDs != nil:
@@ -109,6 +119,16 @@ func iec104FieldSet(p ICSPredicate) string {
 		return "ca"
 	case p.IOA != nil:
 		return "ioa"
+	case p.COT != nil:
+		return "cot"
+	case p.Originators != nil:
+		return "originators"
+	case p.Negative != nil:
+		return "negative"
+	case p.Test != nil:
+		return "test"
+	case p.SelectExecute != "":
+		return "selectExecute"
 	default:
 		return ""
 	}

@@ -447,7 +447,7 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 				return fmt.Errorf("rule %s has empty identity", r.ID)
 			}
 		}
-		if err := validateICSPredicate(r.ICS, r.ID); err != nil {
+		if err := ValidateICSPredicate(r.ICS, r.ID); err != nil {
 			return err
 		}
 		if err := validateSchedule(r.Schedule, r.ID); err != nil {

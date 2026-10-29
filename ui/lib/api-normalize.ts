@@ -140,6 +140,16 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
   if (normalized.unitId == null) delete normalized.unitId;
   if (!normalized.protocol) delete normalized.protocol;
 
+  for (const key of ["cot", "originators", "masters", "outstations", "groups", "variations", "instances", "attributes"] as const) {
+    if (record[key] !== undefined) normalized[key] = toIntegerList(record[key]);
+  }
+  if (record.tags !== undefined) normalized.tags = toStringList(record.tags);
+  for (const key of ["negative", "test"] as const) {
+    const value = record[key];
+    if (typeof value === "boolean") normalized[key] = value;
+  }
+  if (record.selectExecute === "select" || record.selectExecute === "execute") normalized.selectExecute = record.selectExecute;
+
   // `ics: {}` is a valid L3/L4-only predicate; keep it an object.
   return normalized;
 }
