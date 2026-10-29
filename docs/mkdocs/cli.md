@@ -293,6 +293,24 @@ For IEC 104 (`protocol` is `iec104`), use:
 - `--direction <request|response>` — select the session half.
 - `--mode <learn|enforce>` — choose the rule's ICS mode.
 
+Additional IEC 104 selectors:
+
+- `--cot <values>` — causes 1–63; `--originators <values>` — addresses 0–255.
+- `--negative <true|false>` and `--test <true|false>` — exact P/N and T flags, including explicit false.
+- `--select-execute <select|execute>` — only omitted Type IDs or 45–50, 58–63.
+
+DNP3 selectors are `--masters` and `--outstations` (0–65519), `--groups` and
+`--variations` (0–255), and `--addresses` (closed point-index ranges,
+0–4294967295; requires groups). Stations apply to application messages only.
+CIP selectors are `--instances` and `--attributes` (0–65535), or `--tags`
+(comma-separated symbolic paths, for example `Motor.Speed,Program:Main.Pump`).
+Tags cannot combine with `--object-classes`, `--instances` or `--attributes`.
+New numeric lists accept decimal or `0x` hex. Omit a flag for ANY; `0` remains
+an explicit value. `--unit-id` is Modbus-only; CIP does not accept `--addresses`.
+The show table includes every selector, distinguishing absent booleans from false.
+See [predicate semantics](ics-dpi.md#object-station-and-target-matching) for
+variation 0, unknown targets, tag limitations and whole-message matching.
+
 Example: allow supported monitoring types 1 (single-point) and 30 (timestamped
 single-point) in server responses for common address 1 and the selected IOAs:
 

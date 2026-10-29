@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { api, apiURL, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
+import { summarizeGenericICS } from "../ics/ics-shared";
 import { SkeletonList } from "../../components/Skeleton";
 
 /* ── Types ─────────────────────────────────────────────────────── */
@@ -453,6 +454,7 @@ function TemplateModal({
                           </td>
                           <td className="px-4 py-2 font-mono text-xs text-(--text)">
                             {(r.ics?.functionCode ?? []).join(", ") || "*"}
+                            {r.ics && <div className="mt-1 text-(--text-muted)">{summarizeGenericICS(r.ics, false)}</div>}
                           </td>
                           <td className="px-4 py-2">
                             <span

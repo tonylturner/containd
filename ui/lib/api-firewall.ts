@@ -19,16 +19,16 @@ export type Protocol = {
   port?: string;
 };
 
-/** Generic optional selectors accept null to explicitly clear a PATCH restriction. */
+/** Effective predicate: omit a selector to match any value. */
 export type ICSPredicate = {
   protocol?: string;
-  functionCode?: number[] | null;
-  unitId?: number | null;
-  addresses?: string[] | null;
-  objectClasses?: number[] | null;
-  readOnly?: boolean | null;
-  writeOnly?: boolean | null;
-  direction?: "request" | "response" | null;
+  functionCode?: number[];
+  unitId?: number;
+  addresses?: string[];
+  objectClasses?: number[];
+  readOnly?: boolean;
+  writeOnly?: boolean;
+  direction?: "request" | "response";
   /** Empty inherits the global mode, including in preview and PATCH bodies. */
   mode?: "enforce" | "learn" | "";
   // IEC 60870-5-104 fields (protocol "iec104"). A missing field is a
@@ -37,6 +37,18 @@ export type ICSPredicate = {
   classes?: IEC104Class[];
   ca?: number[];
   ioa?: IOARange[];
+  cot?: number[];
+  originators?: number[];
+  negative?: boolean;
+  test?: boolean;
+  selectExecute?: "select" | "execute";
+  masters?: number[];
+  outstations?: number[];
+  groups?: number[];
+  variations?: number[];
+  instances?: number[];
+  attributes?: number[];
+  tags?: string[];
 };
 
 export type IEC104Class = "monitor" | "control" | "system" | "unknown";
@@ -86,9 +98,9 @@ export type RuleSchedule = {
   timezone?: string;
 };
 
-/** An ICS predicate patch; `mode: ""` clears a stored mode so it inherits. */
-export type ICSPredicatePatch = Omit<ICSPredicate, "mode"> & {
-  mode?: ICSPredicate["mode"] | "";
+/** Merge-PATCH selectors: null clears a restriction; omission retains it. */
+export type ICSPredicatePatch = {
+  [K in keyof ICSPredicate]?: ICSPredicate[K] | null;
 };
 
 /**

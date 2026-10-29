@@ -1,3 +1,5 @@
+import { IEC104_TYPES } from "../ics/iec104";
+
 export type ICSProtoMeta = {
   label: string;
   port: string;
@@ -36,7 +38,7 @@ export const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
     fcHelp:
       "1=Read, 2=Write, 3=Select, 4=Operate, 5=Direct Operate, 6=Direct Operate No Ack, 13=Cold Restart, 14=Warm Restart, 129=Response, 130=Unsolicited Response",
     notes:
-      "DNP3 uses source/destination station addresses (0-65534) to identify master and outstation. IIN (Internal Indications) flags are inspected for anomaly detection.",
+      "DNP3 uses source/destination station addresses (0-65519) to identify master and outstation. IIN (Internal Indications) flags are inspected for anomaly detection.",
   },
   iec104: {
     label: "IEC 60870-5-104",
@@ -44,7 +46,7 @@ export const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
     fcLabel: "Type IDs and classes",
     fcPlaceholder: "46, 100",
     fcHelp:
-      "Decoded Type IDs: 1, 3, 13, 30, 31 (monitor); 45-51 and 58-64 (commands and setpoints); 70, 100-103, 105, 107 (system: end of init, general interrogation, counter interrogation, read, clock sync, reset process, test). Classes group them as monitor, control, system or unknown.",
+      `Decoded Type IDs: ${Object.entries(IEC104_TYPES).filter(([, info]) => info.descriptor).map(([id]) => id).join(", ")}. Classes: monitor, control, system or unknown.`,
     addrLabel: "CA and IOA",
     addrPlaceholder: "",
     addrHelp:
@@ -58,10 +60,10 @@ export const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
     fcLabel: "CIP service codes",
     fcPlaceholder: "0x4C, 0x4D, 0x52",
     fcHelp:
-      "0x01=Get Attributes All, 0x02=Set Attributes All, 0x0E=Get Attribute Single, 0x10=Set Attribute Single, 0x4C=Read Tag, 0x4D=Write Tag, 0x4E=Read Modify Write, 0x52=Multiple Service Packet, 0x4F=Read Tag Fragmented, 0x53=Write Tag Fragmented",
+      "0x01=Get Attributes All, 0x02=Set Attributes All, 0x0E=Get Attribute Single, 0x10=Set Attribute Single, 0x4C=Read Tag, 0x4D=Write Tag, 0x4E=Read Modify Write, 0x0A=Multiple Service Packet, 0x52=Read Tag Fragmented / Unconnected Send, 0x53=Write Tag Fragmented",
     showObjectClasses: true,
     notes:
-      "CIP uses an object model: Object Class identifies the type (0x01=Identity, 0x02=Message Router, 0x04=Assembly, 0x66=Connection Manager). Multiple Service Packet (0x52) requests are unpacked into individual services for inspection.",
+      "CIP uses an object model: Object Class identifies the type (0x01=Identity, 0x02=Message Router, 0x04=Assembly, 0x06=Connection Manager). Multiple Service Packet (0x0A) requests are unpacked into individual services for inspection.",
   },
 };
 
@@ -144,6 +146,8 @@ export const ICS_PROTOCOL_OPTIONS: Record<
     fcLabel: "Function codes",
     fcHelp:
       "1=Read, 2=Write, 3=Select, 4=Operate, 13=Cold Restart, 14=Warm Restart",
+    addrLabel: "Point indexes (requires groups)",
+    addrHelp: "Closed ranges 0-4294967295; stations 0-65519, groups and variations 0-255",
   },
   iec104: {
     fcLabel: "Type IDs and classes",
@@ -153,7 +157,7 @@ export const ICS_PROTOCOL_OPTIONS: Record<
   },
   cip: {
     fcLabel: "Service codes",
-    fcHelp: "0x4C=Read Tag, 0x4D=Write Tag, 0x52=Multiple Service",
+    fcHelp: "0x4C=Read Tag, 0x4D=Write Tag, 0x0A=Multiple Service Packet",
     hasObjectClasses: true,
   },
 };

@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 const unsupportedAddresses =
-  "Address filters are not supported for DNP3 or CIP. Remove this filter before saving; protocol-specific station, point and CIP path selectors are not available yet.";
+  "Address filters are not supported for CIP. Remove this filter before saving; use object classes, instances, attributes or tags.";
 
 function rule(protocol: string, addresses?: string[]) {
   return {
@@ -49,7 +49,7 @@ function editor(page: Page) {
   return page.locator("div.fixed").filter({ has: page.getByRole("heading", { name: "ICS filter — rule ics-address-rule" }) });
 }
 
-for (const protocol of ["dnp3", "cip"]) {
+for (const protocol of ["cip"]) {
   test(`${protocol} ICS editor displays and clears a stored address filter`, async ({ page }) => {
     const patches = await openICS(page, rule(protocol, ["10-20", "30"]));
     await page.getByRole("button", { name: "Edit", exact: true }).click();

@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 const unsupportedAddresses =
-  "Address filters are not supported for DNP3 or CIP. Remove this filter before saving; protocol-specific station, point and CIP path selectors are not available yet.";
+  "Address filters are not supported for CIP. Remove this filter before saving; use object classes, instances, attributes or tags.";
 
 function rule(protocol: string, addresses?: string[]) {
   return {
@@ -72,7 +72,7 @@ function icsProtocolSelect(form: ReturnType<typeof createForm>) {
   return form.getByText("ICS Protocol", { exact: true }).locator("xpath=..").locator("select");
 }
 
-for (const protocol of ["dnp3", "cip"]) {
+for (const protocol of ["cip"]) {
   test(`${protocol} firewall editor displays and clears a stored address filter`, async ({ page }) => {
     const { patches } = await openFirewall(page, [rule(protocol, ["10-20", "30"])]);
     await page.getByRole("button", { name: "Edit", exact: true }).click();
@@ -119,7 +119,7 @@ test("firewall Modbus address input and IEC 104 CA/IOA remain available", async 
   await expect(form.getByPlaceholder("2001, 65536-65567")).toBeVisible();
 });
 
-test("DPI decoder settings no longer advertise DNP3 or CIP address selectors", async ({ page }) => {
+test("DPI decoder reference distinguishes DNP3 points from CIP targets", async ({ page }) => {
   await openFirewall(page, [], { dpiEnabled: true });
   await page.getByText("ICS Protocol Decoders", { exact: true })
     .locator("xpath=../..")
@@ -128,7 +128,7 @@ test("DPI decoder settings no longer advertise DNP3 or CIP address selectors", a
   const modal = page.locator("div.fixed").filter({ has: page.getByRole("heading", { name: "ICS Protocol DPI Configuration" }) });
 
   await modal.getByText("DNP3", { exact: true }).click();
-  await expect(modal.getByText("Point indices", { exact: true })).toHaveCount(0);
+  await expect(modal.getByText("Point indexes (requires groups)", { exact: true })).toBeVisible();
   await expect(modal.getByText("Station addresses", { exact: true })).toHaveCount(0);
   await modal.getByText("CIP / EtherNet/IP", { exact: true }).click();
   await expect(modal.getByText("CIP path", { exact: true })).toHaveCount(0);

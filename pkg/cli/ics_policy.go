@@ -36,6 +36,13 @@ import (
 //	--ioa <ranges>            (IEC104, comma-separated decimal addresses/ranges)
 //	--direction <request|response>
 //	--mode <learn|enforce>
+//	--masters / --outstations <stations> (DNP3, 0..65519)
+//	--groups / --variations <values>     (DNP3, 0..255)
+//	--instances / --attributes <values> (CIP, 0..65535)
+//	--tags <paths>                      (CIP, comma-separated tag paths)
+//	--cot <values> / --originators <values> (IEC104, 1..63 / 0..255)
+//	--negative <true|false> / --test <true|false> (IEC104)
+//	--select-execute <select|execute>    (IEC104)
 func setFirewallICSRuleAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		rule, err := parseFirewallICSRuleArgs(args)
@@ -48,7 +55,7 @@ func setFirewallICSRuleAPI(api *API) Command {
 
 func parseFirewallICSRuleArgs(args []string) (config.Rule, error) {
 	if len(args) < 3 {
-		return config.Rule{}, fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--object-classes <classes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--mode <learn|enforce>]")
+		return config.Rule{}, fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--object-classes <classes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--mode <learn|enforce>] [--masters <stations>] [--outstations <stations>] [--groups <groups>] [--variations <variations>] [--instances <instances>] [--attributes <attributes>] [--tags <paths>] [--cot <causes>] [--originators <addresses>] [--negative <true|false>] [--test <true|false>] [--select-execute <select|execute>]")
 	}
 
 	rule := config.Rule{
@@ -71,6 +78,12 @@ func parseFirewallICSRuleArgs(args []string) (config.Rule, error) {
 
 func applyFirewallICSRuleArg(rule *config.Rule, args []string, index int) (int, error) {
 	switch args[index] {
+	case "--masters", "--outstations", "--groups", "--variations", "--instances", "--attributes", "--tags", "--cot", "--originators", "--negative", "--test", "--select-execute":
+		value, next, err := firewallICSRuleValue(args, index, args[index])
+		if err != nil {
+			return index, err
+		}
+		return next, applyICSSelector(&rule.ICS, args[index], value)
 	case "--src-zone":
 		value, next, err := firewallICSRuleValue(args, index, "--src-zone")
 		if err != nil {
@@ -201,21 +214,7 @@ func applyFirewallICSRuleArg(rule *config.Rule, args []string, index int) (int, 
 }
 
 func parseCIPObjectClasses(value string) ([]uint16, error) {
-	classes := make([]uint16, 0)
-	for _, token := range strings.Split(value, ",") {
-		token = strings.TrimSpace(token)
-		base := 10
-		if strings.HasPrefix(strings.ToLower(token), "0x") {
-			base = 16
-			token = token[2:]
-		}
-		class, err := strconv.ParseUint(token, base, 16)
-		if err != nil {
-			return nil, fmt.Errorf("invalid --object-classes: %w", err)
-		}
-		classes = append(classes, uint16(class))
-	}
-	return classes, nil
+	return parseICSSelectorNumbers(value, "--object-classes", 65535)
 }
 
 func parseIEC104TypeIDs(value string) ([]int, error) {
@@ -352,69 +351,78 @@ func showFirewallICSRulesAPI(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/dataplane", &dataPlane); err != nil {
 			return err
 		}
-		t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "PROTOCOL", "FUNC_CODES", "UNIT_ID", "ADDRESSES", "OBJECT_CLASSES", "TYPE_IDS", "CLASSES", "CA", "IOA", "R/W", "DIRECTION", "MODE")
-		for _, r := range rules {
-			fcs := make([]string, 0, len(r.ICS.FunctionCode))
-			for _, fc := range r.ICS.FunctionCode {
-				fcs = append(fcs, strconv.Itoa(int(fc)))
-			}
-			objectClasses := make([]string, 0, len(r.ICS.ObjectClasses))
-			for _, class := range r.ICS.ObjectClasses {
-				objectClasses = append(objectClasses, strconv.Itoa(int(class)))
-			}
-			typeIDs := make([]string, 0, len(r.ICS.TypeIDs))
-			for _, typeID := range r.ICS.TypeIDs {
-				typeIDs = append(typeIDs, strconv.Itoa(typeID))
-			}
-			cas := make([]string, 0, len(r.ICS.CA))
-			for _, ca := range r.ICS.CA {
-				cas = append(cas, strconv.Itoa(int(ca)))
-			}
-			ioa := make([]string, 0, len(r.ICS.IOA))
-			for _, addressRange := range r.ICS.IOA {
-				if addressRange.Start == addressRange.End {
-					ioa = append(ioa, strconv.FormatUint(uint64(addressRange.Start), 10))
-				} else {
-					ioa = append(ioa, fmt.Sprintf("%d-%d", addressRange.Start, addressRange.End))
-				}
-			}
-			unitID := "—"
-			if r.ICS.UnitID != nil {
-				unitID = strconv.Itoa(int(*r.ICS.UnitID))
-			}
-			rw := "—"
-			if r.ICS.ReadOnly {
-				rw = "read-only"
-			} else if r.ICS.WriteOnly {
-				rw = "write-only"
-			}
-			effectiveMode := dprules.EffectiveMode(r.ICS.Mode, dataPlane.DPIMode)
-			mode := fmt.Sprintf("%s (effective: %s)", strings.TrimSpace(r.ICS.Mode), effectiveMode)
-			if strings.TrimSpace(r.ICS.Mode) == "" {
-				mode = "inherit (" + effectiveMode + ")"
-			}
-			t.addRow(
-				r.ID,
-				string(r.Action),
-				joinCSV(r.SourceZones),
-				joinCSV(r.DestZones),
-				r.ICS.Protocol,
-				joinCSV(fcs),
-				unitID,
-				joinCSV(r.ICS.Addresses),
-				joinCSV(objectClasses),
-				joinCSV(typeIDs),
-				joinCSV(r.ICS.Classes),
-				joinCSV(cas),
-				joinCSV(ioa),
-				rw,
-				firstNonEmpty(r.ICS.Direction, "—"),
-				mode,
-			)
-		}
-		t.render(out)
+		renderFirewallICSRules(out, rules, dataPlane.DPIMode)
 		return nil
 	}
+}
+
+func renderFirewallICSRules(out io.Writer, rules []config.Rule, globalMode string) {
+	t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "PROTOCOL", "FUNC_CODES", "UNIT_ID", "ADDRESSES", "OBJECT_CLASSES", "TYPE_IDS", "CLASSES", "CA", "IOA", "R/W", "DIRECTION", "MODE", "MASTERS", "OUTSTATIONS", "GROUPS", "VARIATIONS", "INSTANCES", "ATTRIBUTES", "TAGS", "COT", "ORIGINATORS", "NEGATIVE", "TEST", "SELECT_EXECUTE")
+	for _, r := range rules {
+		fcs := make([]string, 0, len(r.ICS.FunctionCode))
+		for _, fc := range r.ICS.FunctionCode {
+			fcs = append(fcs, strconv.Itoa(int(fc)))
+		}
+		objectClasses := make([]string, 0, len(r.ICS.ObjectClasses))
+		for _, class := range r.ICS.ObjectClasses {
+			objectClasses = append(objectClasses, strconv.Itoa(int(class)))
+		}
+		typeIDs := make([]string, 0, len(r.ICS.TypeIDs))
+		for _, typeID := range r.ICS.TypeIDs {
+			typeIDs = append(typeIDs, strconv.Itoa(typeID))
+		}
+		cas := make([]string, 0, len(r.ICS.CA))
+		for _, ca := range r.ICS.CA {
+			cas = append(cas, strconv.Itoa(int(ca)))
+		}
+		ioa := make([]string, 0, len(r.ICS.IOA))
+		for _, addressRange := range r.ICS.IOA {
+			if addressRange.Start == addressRange.End {
+				ioa = append(ioa, strconv.FormatUint(uint64(addressRange.Start), 10))
+			} else {
+				ioa = append(ioa, fmt.Sprintf("%d-%d", addressRange.Start, addressRange.End))
+			}
+		}
+		unitID := "—"
+		if r.ICS.UnitID != nil {
+			unitID = strconv.Itoa(int(*r.ICS.UnitID))
+		}
+		rw := "—"
+		if r.ICS.ReadOnly {
+			rw = "read-only"
+		} else if r.ICS.WriteOnly {
+			rw = "write-only"
+		}
+		effectiveMode := dprules.EffectiveMode(r.ICS.Mode, globalMode)
+		mode := fmt.Sprintf("%s (effective: %s)", strings.TrimSpace(r.ICS.Mode), effectiveMode)
+		if strings.TrimSpace(r.ICS.Mode) == "" {
+			mode = "inherit (" + effectiveMode + ")"
+		}
+		t.addRow(
+			r.ID,
+			string(r.Action),
+			joinCSV(r.SourceZones),
+			joinCSV(r.DestZones),
+			r.ICS.Protocol,
+			joinCSV(fcs),
+			unitID,
+			joinCSV(r.ICS.Addresses),
+			joinCSV(objectClasses),
+			joinCSV(typeIDs),
+			joinCSV(r.ICS.Classes),
+			joinCSV(cas),
+			joinCSV(ioa),
+			rw,
+			firstNonEmpty(r.ICS.Direction, "—"),
+			mode,
+			selectorCSV(r.ICS.Masters), selectorCSV(r.ICS.Outstations),
+			selectorCSV(r.ICS.Groups), selectorCSV(r.ICS.Variations),
+			selectorCSV(r.ICS.Instances), selectorCSV(r.ICS.Attributes), joinCSV(r.ICS.Tags),
+			selectorCSV(r.ICS.COT), selectorCSV(r.ICS.Originators),
+			optionalBool(r.ICS.Negative), optionalBool(r.ICS.Test), firstNonEmpty(r.ICS.SelectExecute, "—"),
+		)
+	}
+	t.render(out)
 }
 
 // parseUint8CSV parses a comma-separated list of uint8 values.

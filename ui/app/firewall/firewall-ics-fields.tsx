@@ -3,10 +3,11 @@
 import { useState } from "react";
 
 import { InfoTip } from "../../components/InfoTip";
-import type { FirewallRule, ICSPredicate } from "../../lib/api";
+import type { FirewallRule, ICSPredicate, ICSPredicatePatch } from "../../lib/api";
 import { buildIEC104RuleICS, type IEC104Draft } from "../ics/iec104";
 import { IEC104Fields } from "../ics/iec104-fields";
-import { addressFilterError, buildICSRuleUpdate, selectorFieldError, formatICSMode, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
+import { type GenericSelectorDraft, addressFilterError, buildICSRuleUpdate, selectorFieldError, formatICSMode, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
+import { ICSSelectorFields } from "../ics/ics-selector-fields";
 import { ICSAddressFields } from "../ics/ics-address-fields";
 import { ICS_PROTOCOL_KEYS, ICS_PROTOCOLS, icsProtoMeta } from "./firewall-utils";
 
@@ -23,6 +24,7 @@ export function ICSPredicateFields({
   readOnly, onReadOnlyChange,
   writeOnly, onWriteOnlyChange,
   iec, onIecChange,
+  selectors, onSelectorsChange,
 }: {
   protocol: string; onProtocolChange: (v: string) => void;
   mode: ICSModeSelection; onModeChange: (v: ICSModeSelection) => void;
@@ -34,6 +36,7 @@ export function ICSPredicateFields({
   objectClasses: string; onObjectClassesChange: (v: string) => void;
   readOnly: boolean; onReadOnlyChange: (v: boolean) => void;
   writeOnly: boolean; onWriteOnlyChange: (v: boolean) => void;
+  selectors: GenericSelectorDraft; onSelectorsChange: (v: GenericSelectorDraft) => void;
   iec: IEC104Draft; onIecChange: (v: IEC104Draft) => void;
 }) {
   const meta = icsProtoMeta(protocol);
@@ -116,6 +119,7 @@ export function ICSPredicateFields({
             )}
           </div>
 
+          <ICSSelectorFields protocol={protocol} draft={selectors} onChange={onSelectorsChange} unitId={unitId} onUnitIdChange={onUnitIdChange} />
           <div className="flex items-center gap-4 text-sm text-(--text)">
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={readOnly} onChange={(e) => onReadOnlyChange(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
@@ -146,13 +150,14 @@ type RuleICSInput = {
   mode: ICSModeSelection;
   globalMode?: ICSMode;
   iec: IEC104Draft;
+  selectors?: GenericSelectorDraft;
   action: FirewallRule["action"];
   existing?: ICSPredicate;
 };
 
 export function buildRuleICS(
   input: RuleICSInput,
-): { ok: true; ics: ICSPredicate | undefined } | { ok: false; error: string } {
+): { ok: true; ics: ICSPredicatePatch | undefined } | { ok: false; error: string } {
   if (!input.enabled) return { ok: true, ics: undefined };
   const addressError = addressFilterError(input.protocol, input.addresses);
   if (addressError) return { ok: false, error: addressError };
@@ -161,6 +166,10 @@ export function buildRuleICS(
   }
   const error = selectorFieldError(input.protocol, input.functionCodes, input.unitId, input.objectClasses);
   if (error) return { ok: false, error };
-  return { ok: true, ics: buildICSRuleUpdate(input.protocol, input.functionCodes, input.addresses,
-    input.unitId, input.objectClasses, input.readOnly, input.writeOnly, input.mode, input.existing) };
+  try {
+    return { ok: true, ics: buildICSRuleUpdate(input.protocol, input.functionCodes, input.addresses,
+      input.unitId, input.objectClasses, input.readOnly, input.writeOnly, input.mode, input.existing, input.selectors) };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
 }

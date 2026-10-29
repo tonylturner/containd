@@ -17,7 +17,7 @@ import {
 } from "../../lib/api";
 import { validateIPOrCIDRList } from "../../lib/validate";
 import { iec104DraftFrom, type IEC104Draft } from "../ics/iec104";
-import { icsAddressDraftFrom, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
+import { genericSelectorDraftFrom, effectivePredicate, type GenericSelectorDraft, icsAddressDraftFrom, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
 import { zoneLabel } from "../../lib/zones";
 import { ICSPredicateFields, buildRuleICS } from "./firewall-ics-fields";
 import {
@@ -44,6 +44,7 @@ type ICSDraft = {
   writeOnly: boolean;
   mode: ICSModeSelection;
   iec: IEC104Draft;
+  selectors: GenericSelectorDraft;
 };
 
 // A new filter starts from example values; an existing one keeps its own,
@@ -61,6 +62,7 @@ export function icsDraftFrom(ics: ICSPredicate | undefined, mode: ICSModeSelecti
     writeOnly: ics?.writeOnly ?? false,
     mode,
     iec: iec104DraftFrom(ics),
+    selectors: genericSelectorDraftFrom(ics),
   };
 }
 
@@ -73,7 +75,7 @@ function buildRuleParts(
   tagsInUse: string[],
   globalMode: ICSMode | undefined,
   existing?: ICSPredicate,
-): Built<{ fields: PolicyFields; ics: ICSPredicate | undefined }> {
+): Built<{ fields: PolicyFields; ics: ICSPredicatePatch | undefined }> {
   const fields = buildPolicy(policy, tagsInUse);
   if (!fields.ok) return fields;
   if (ics.enabled && !actionTakesICS(fields.value.action)) {
@@ -111,6 +113,7 @@ function ICSDraftFields({ draft, onChange, globalMode }: { draft: ICSDraft; onCh
       objectClasses={draft.objectClasses} onObjectClassesChange={(objectClasses) => set({ objectClasses })}
       readOnly={draft.readOnly} onReadOnlyChange={(readOnly) => set({ readOnly })}
       writeOnly={draft.writeOnly} onWriteOnlyChange={(writeOnly) => set({ writeOnly })}
+      selectors={draft.selectors} onSelectorsChange={(selectors) => set({ selectors })}
       iec={draft.iec} onIecChange={(iec) => set({ iec })}
     />
   );
@@ -164,9 +167,8 @@ export function EditRuleModal({
       return null;
     }
     const { fields } = parts.value;
-    // Rule updates merge, so a stored mode is cleared with an empty one.
-    let icsPatch: ICSPredicatePatch | null = parts.value.ics ?? null;
-    if (icsPatch && ics.mode === "" && rule.ics?.mode) icsPatch = { ...icsPatch, mode: "" };
+    // Merge PATCH removals are null; preview omits the cleared keys.
+    const icsPatch: ICSPredicatePatch | null = parts.value.ics ?? null;
     const base = {
       description: description.trim(),
       action: fields.action,
@@ -194,7 +196,7 @@ export function EditRuleModal({
         rateLimit: fields.rateLimit,
         tag: fields.tag,
         schedule: fields.schedule,
-        ics: icsPatch ?? undefined,
+        ics: effectivePredicate(icsPatch),
       },
     };
   }
@@ -329,7 +331,7 @@ export function CreateRuleForm({
       protocols: buildProtocols(proto, port),
       identities: fields.identities.length > 0 ? fields.identities : undefined,
       schedule: fields.schedule,
-      ics: parts.value.ics,
+      ics: effectivePredicate(parts.value.ics),
       action: fields.action,
       rateLimit: fields.rateLimit,
       tag: fields.tag,
