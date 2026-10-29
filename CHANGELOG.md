@@ -219,31 +219,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Dropped-only transport loss histories expire after recovery, freeing admission
-  capacity so a stopped SYN burst cannot permanently disable unmatched-reply
-  detection for later connections. Queued and live histories remain protected;
-  `coverage_index_reclaimed` counts expired unbound histories removed by a sweep.
-- Port-reusing SYNs reserve their own correlation-loss history before queueing,
-  so overflow during reordering cannot leave a new incarnation falsely covered.
-- Excluded opening SYNs no longer grant complete correlation coverage;
-  deliberately bypassed requests keep translated replies from becoming false
-  unmatched-reply violations.
-- Successful background conntrack-zone checks preserve verified evidence;
-  temporary authority changes no longer impose a false packet-loss recovery
-  window on continuously captured Modbus connections.
-- Transport correlation retains published IDs and pending Modbus requests across
-  conntrack authority refreshes and failures. Start-of-connection coverage and
-  bounded, tuple-scoped loss recovery prevent false unmatched replies without
-  permanently disabling detection. Industrial-only admission, single exact
-  lookups, prompt negative-cache expiry and rate-limited overflow telemetry bound
-  resolver pressure. Wire-only NFQUEUE/PCAP evidence is reported as `wire`;
-  reconfiguration preserves learned profiles and raw capture SYNs do not alter
-  inline deny-handshake tracking.
 - Modbus transaction pairing separates connection incarnations, directions,
   transaction IDs and unit IDs, including locally masqueraded AF_PACKET
   traffic. Missing connection evidence reports correlation unavailable instead
   of an unmatched-reply violation; inventory and learning use verified logical
   client/backend roles without changing wire telemetry or policy addresses.
+  Unmatched-reply detection requires capture from the connection's opening SYN,
+  pauses for two quiet minutes after packet loss or an inspection bypass, and
+  resumes on its own; resolver admission is limited to industrial traffic and
+  bounded. NFQUEUE and PCAP evidence reports `correlationStatus: wire`.
 - CIP read-only rules no longer classify Apply Attributes, Set Member,
   connection controls or class-specific mutations as reads. Classification
   uses the request target and validates supported read bodies; unknown
