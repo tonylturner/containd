@@ -563,7 +563,7 @@ export type IdentificationAttributes = {
   protocol: string;
   identification_state: "confirmed" | "reject" | "identification_incomplete";
   reason: string;
-  identification_coverage: string;
+  identification_coverage?: string;
   identification_candidates: string[] | null;
   expected: [string, string];
   service_transport: "tcp" | "udp";

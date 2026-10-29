@@ -248,13 +248,20 @@ func TestIdentificationJSONContract(t *testing.T) {
 	if err = json.Unmarshal(data, &attrs); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"protocol", "identification_state", "reason", "expected", "service_transport", "service_port", "mismatch", "binding", "outside_rule_port_scope", "profile_version", "syn_coverage", "identification_candidates", "identification_coverage"} {
+	for _, k := range []string{"protocol", "identification_state", "reason", "expected", "service_transport", "service_port", "mismatch", "binding", "outside_rule_port_scope", "profile_version", "syn_coverage", "identification_candidates"} {
 		if _, ok := attrs[k]; !ok {
 			t.Fatal("missing frozen key", k)
 		}
 	}
+	if _, ok := attrs["identification_coverage"]; ok {
+		t.Fatal("confirmed identification must omit empty coverage", attrs)
+	}
 	if attrs["outside_rule_port_scope"] != true || attrs["binding"] != "observation" || attrs["protocol"] != "modbus" || attrs["service_port"] != float64(1502) {
 		t.Fatal(attrs)
+	}
+	limited := IdentificationEvent(identify.Decision{Coverage: identify.Budget}, identify.Meta{}, [2]bool{}, None, "unknown", instant)
+	if limited.Attributes["identification_coverage"] != string(identify.Budget) {
+		t.Fatal("non-empty coverage missing", limited.Attributes)
 	}
 }
 

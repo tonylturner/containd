@@ -4,7 +4,7 @@ import type { IdentificationAttributes } from "../lib/api";
 
 const identification: IdentificationAttributes = {
   protocol: "modbus", identification_state: "confirmed", reason: "paired frames",
-  identification_coverage: "", identification_candidates: ["modbus"],
+  identification_candidates: ["modbus"],
   expected: ["", "dnp3"], service_transport: "tcp", service_port: 20000,
   mismatch: true, binding: "observation", outside_rule_port_scope: true,
   profile_version: 2, syn_coverage: [true, true],

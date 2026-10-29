@@ -314,7 +314,8 @@ with `proto: "identify"` and `kind: "identification"`, one per captured
 connection incarnation. `attributes` contains:
 
 - `protocol`, `identification_state` (`confirmed`, `reject`, or
-  `identification_incomplete`), `reason`, `identification_coverage` and
+  `identification_incomplete`), `reason`, optional `identification_coverage`
+  (present only when identification ended on a coverage limit) and
   `identification_candidates`;
 - `expected` (two endpoint protocol expectations, empty string for none),
   `service_transport`, `service_port`, `mismatch`;
