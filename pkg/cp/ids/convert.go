@@ -51,8 +51,7 @@ func Export(format string, rules []config.IDSRule) (ExportResult, error) {
 func ExportRules(rules []config.IDSRule, format string) (ExportResult, error) {
 	switch strings.ToLower(format) {
 	case FormatSuricata:
-		text, err := ExportSuricataRules(rules)
-		return ExportResult{Text: text}, err
+		return ExportSuricataRules(rules)
 	case FormatSnort:
 		return ExportSnortRules(rules)
 	case FormatYARA:

@@ -19,6 +19,9 @@ func TestIDSExportDownload(t *testing.T) {
 		status                          int
 	}{
 		{"partial", "snort", "1", "text/plain", []config.IDSRule{{ID: "1", Proto: "tcp"}, {ID: "2", Proto: "modbus"}}, 200},
+		{"suricata partial", "suricata", "1", "text/plain", []config.IDSRule{{ID: "1", Proto: "tcp"}, {ID: "2", Proto: "cip"}}, 200},
+		{"suricata all refused", "suricata", "1", "text/plain", []config.IDSRule{{ID: "2", Proto: "modbus"}}, 200},
+		{"default refused", "", "1", "text/plain", []config.IDSRule{{ID: "2", Proto: "iec104"}}, 200},
 		{"all refused", "snort", "1", "text/plain", []config.IDSRule{{ID: "2", Proto: "modbus"}}, 200},
 		{"empty", "snort", "0", "text/plain", nil, 200},
 		{"case", "SNORT", "0", "text/plain", []config.IDSRule{{ID: "1", Proto: "tcp"}}, 200},
@@ -51,7 +54,7 @@ func TestIDSExportDownload(t *testing.T) {
 				!strings.Contains(rec.Body.String(), "proto=") || strings.Contains(rec.Body.String(), "alert ip ")) {
 				t.Fatalf("missing refusal or widened rule: %s", rec.Body)
 			}
-			if tc.name == "partial" && !strings.Contains(rec.Body.String(), "alert tcp ") {
+			if strings.Contains(tc.name, "partial") && !strings.Contains(rec.Body.String(), "alert tcp ") {
 				t.Fatalf("lost accepted rule: %s", rec.Body)
 			}
 		})

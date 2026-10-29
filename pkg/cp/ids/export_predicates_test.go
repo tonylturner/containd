@@ -14,6 +14,10 @@ func TestSnortExportProtocolAllowlist(t *testing.T) {
 	testRulesFileProtocolAllowlist(t, FormatSnort, ExportSnortRule)
 }
 
+func TestSuricataExportProtocolAllowlist(t *testing.T) {
+	testRulesFileProtocolAllowlist(t, FormatSuricata, ExportSuricataRule)
+}
+
 func testRulesFileProtocolAllowlist(t *testing.T, format string, export func(config.IDSRule) (string, error)) {
 	t.Helper()
 	for _, proto := range []string{"", "ip", "tcp", "UDP", "icmp", "modbus", "dnp3", "cip", "enip",
@@ -48,6 +52,10 @@ func testRulesFileProtocolAllowlist(t *testing.T, format string, export func(con
 
 func TestSnortExportRefusesConditions(t *testing.T) {
 	testRulesFileConditions(t, ExportSnortRule)
+}
+
+func TestSuricataExportRefusesConditions(t *testing.T) {
+	testRulesFileConditions(t, ExportSuricataRule)
 }
 
 func testRulesFileConditions(t *testing.T, export func(config.IDSRule) (string, error)) {
@@ -106,6 +114,10 @@ func TestSnortExportRefusalReport(t *testing.T) {
 	testRulesFileRefusalReport(t, ExportSnortRules)
 }
 
+func TestSuricataExportRefusalReport(t *testing.T) {
+	testRulesFileRefusalReport(t, ExportSuricataRules)
+}
+
 func testRulesFileRefusalReport(t *testing.T, export func([]config.IDSRule) (ExportResult, error)) {
 	t.Helper()
 	for _, accepted := range []bool{false, true} {
@@ -157,6 +169,21 @@ func TestSnort3ContentSyntax(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{`content:"|DE AD|", nocase, depth 20, offset 1;`, `content:!"x", distance -2, within 10;`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in %s", want, out)
+		}
+	}
+}
+
+func TestSuricataContentSyntax(t *testing.T) {
+	out, err := ExportSuricataRule(config.IDSRule{ID: "1", Proto: "tcp", ContentMatches: []config.ContentMatch{
+		{Pattern: "DE AD", IsHex: true, Nocase: true},
+		{Pattern: "x", Negate: true, Distance: -2, Within: 10},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`content:"|DE AD|"; nocase;`, `content:!"x"; distance:-2; within:10;`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in %s", want, out)
 		}

@@ -23,10 +23,7 @@ func TestExportRefusesIEC104Rules(t *testing.T) {
 		single func(config.IDSRule) (string, error)
 		multi  func([]config.IDSRule) (ExportResult, error)
 	}{
-		{"suricata", ExportSuricataRule, func(rules []config.IDSRule) (ExportResult, error) {
-			text, err := ExportSuricataRules(rules)
-			return ExportResult{Text: text}, err
-		}},
+		{"suricata", ExportSuricataRule, ExportSuricataRules},
 		{"snort", ExportSnortRule, ExportSnortRules},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,9 +41,9 @@ func TestExportRefusesIEC104Rules(t *testing.T) {
 				}
 			}
 			if len(lines) != 1 || !strings.Contains(lines[0], "TCP rule") {
-				t.Fatalf("export = %q, want only the modbus rule", out)
+				t.Fatalf("export = %q, want only the TCP rule", out)
 			}
-			if tc.name == "snort" && len(out.Refusals) != 2 {
+			if len(out.Refusals) != 2 {
 				t.Fatalf("refusals = %+v", out.Refusals)
 			}
 		})

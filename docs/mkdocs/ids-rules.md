@@ -96,7 +96,7 @@ parentheses, and `selection*` wildcards. Tags `containd.proto.<proto>` and
 candidate. Supported formats are `snort`, `suricata` (the default), `sigma`,
 and `yara`. For a native JSON backup, use `GET /api/v1/ids/backup`.
 
-Snort 3 rules-file exports refuse a rule rather than drop a
+Snort 3 and Suricata rules-file exports refuse a rule rather than drop a
 predicate. The current conservative mapping is:
 
 | Native input | Rules-file export |
@@ -107,6 +107,8 @@ predicate. The current conservative mapping is:
 | Removed or unknown protocols (including native `enip`) | Refused |
 | `kind`, any `when` predicate or Boolean condition tree | Refused, including service, Modbus function/unit/data, DNP3 function/object/indications and CIP service/class/instance/attribute tests |
 | Cross-format imported rules or YARA predicates | Refused; their unrepresented source predicates cannot safely be discarded |
+| Imported rules without original source, conversion notes recording lost predicates | Refused |
+| Empty/multiline content, non-byte-pair hex, literal pipes in text content, negative depth/offset/within | Refused; use explicit hex bytes for literal pipes |
 | Disabled rules | Refused rather than activated in the exported file |
 | Same-format import with `rawSource` | Original source returned unchanged (unless disabled); normalized fields are not merged into it |
 

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Snort 3 IDS exports refuse unsupported application predicates
+- Snort 3 and Suricata IDS exports refuse unsupported application predicates
   instead of widening them to generic traffic. Downloads list every refusal in
   comments and report a refused count in the API header and Export panel.
   Same-format imported source remains lossless; native content uses the target

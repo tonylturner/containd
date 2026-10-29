@@ -5119,7 +5119,7 @@ paths:
       responses:
         '200':
           description: >-
-            Exported rule text (possibly no accepted rules). Snort
+            Exported rule text (possibly no accepted rules). Snort and Suricata
             files include JSON comments of the form '# refused: {"rule_id":"...",
             "reason":"..."}' for every refused rule. Refused rules are not emitted
             as active rules.
