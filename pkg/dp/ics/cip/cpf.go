@@ -77,6 +77,10 @@ func parseCPF(data []byte) CPFResult {
 	var itemErr error
 	r.Err = walkCPFItems(data, 8, int(r.Count), func(item CPFItem) {
 		r.Items = append(r.Items, item)
+		if (item.TypeID == 0xb1 || item.TypeID == 0xb2) && r.Selected >= 0 {
+			r.Undecoded = append(r.Undecoded, "cip.extra_data_item")
+			return
+		}
 		if !item.Complete {
 			return
 		}
@@ -100,10 +104,6 @@ func parseCPF(data []byte) CPFResult {
 		case 0xc, 0x100:
 			// ListIdentity/ListServices metadata, not a CIP message.
 		case 0xb1, 0xb2:
-			if r.Selected >= 0 {
-				r.Undecoded = append(r.Undecoded, "cip.extra_data_item")
-				return
-			}
 			r.Selected = len(r.Items) - 1
 			r.Payload = item.Data
 			var address *CPFItem

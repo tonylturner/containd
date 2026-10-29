@@ -142,11 +142,15 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 	}
 	var objHeaders []ObjectHeader
 	if objOffset > len(frame.Data) {
+		attrs[eventfields.KeyCoverageIncomplete] = true
 		codes = append(codes, "dnp3.application_header")
 		attrs[eventfields.KeyUndecoded] = []string{"dnp3.application_incomplete"}
 	} else {
 		var stopped objectWalkStop
 		objHeaders, stopped = parseObjectHeaders(frame.Data, objOffset, fc)
+		if stopped != walkComplete {
+			attrs[eventfields.KeyCoverageIncomplete] = true
+		}
 		if stopped == walkInvalid || stopped == walkTruncated {
 			codes = append(codes, "dnp3.object_walk")
 		}
