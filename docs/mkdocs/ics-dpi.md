@@ -225,10 +225,21 @@ deadline, within a 200 ms resolver budget; confirmation waits for a later
 packet, never a worker retry sleep. No table dump or per-packet lookup occurs
 on cache hits. A separate bounded 16,384-tuple loss index survives lookup TTL
 expiry and reclaims a connection's aliases directly on close or expiry, without
-scanning the index on capture admission. If it is full, affected connections
-remain incomplete until tracking
-resumes and a full pairing timeout passes; `coverage_capacity` counts these
-unindexed observations.
+scanning the index on capture admission. Dropped-only, unbound histories become
+evictable once two minutes have passed since their latest loss. The existing
+activity-driven flow sweep, triggered by packet processing when 30 seconds have
+elapsed since its last run, removes them. It never removes a queued/in-flight
+token or a live connection's history.
+`coverage_index_reclaimed` counts those expired unbound entries removed.
+
+While the index is full, affected connections cannot claim complete coverage;
+`coverage_capacity` counts unindexed observations. After capacity is reclaimed,
+an already-started connection must regain indexing and wait a full two-minute
+pairing timeout, with no further loss or inspection bypass, before unmatched
+replies can alert again. This still requires an inspected, admitted opening SYN;
+midstream-only captures do not acquire complete coverage by waiting. A new
+connection with a fully inspected opening SYN after capacity returns can claim
+coverage immediately. No worker restart is needed after a stopped flood.
 
 The engine ruleset status includes `transportIdentity` for live AF_PACKET
 capture. `zoneStatus` is `verified`, `zone_unverified` or `unsupported_zone`;
@@ -240,7 +251,8 @@ Sparse cumulative `counters` include:
   `lookup_error`, `lookup_timeout`, `ambiguous`, `unsupported_zone`,
   `unsupported_tuple`, `zone_unverified`.
 - Admission and correlation: `queue_overflow`, `admission_timeout`,
-  `cache_capacity`, `coverage_capacity`, `canceled`, `correlation_unavailable`.
+  `cache_capacity`, `coverage_capacity`, `coverage_index_reclaimed`, `canceled`,
+  `correlation_unavailable`.
 
 The `modbus` object reports `matched`, `unmatched`, `unavailable`, `capacity`
 and `expired` totals plus current `pendingConnections` and
