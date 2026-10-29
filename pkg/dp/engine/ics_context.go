@@ -85,6 +85,12 @@ func icsContextsFromDPIEvent(state *flow.State, ev dpi.Event, safeRead func(map[
 			objects = append(objects, obj)
 		}
 	case eventfields.ProtoCIP:
+		// Responses have no wire target and are not correlated with their
+		// requests. Even retained target/coverage attributes cannot turn
+		// that absence into an unknown operation that object DENYs match.
+		if ev.Kind == eventfields.KindResponse {
+			return []rules.ICSContext{base}
+		}
 		// Service 0x0a is a container, not an operation. Its children carry
 		// their own targets; an incomplete wrapper contributes coverage only.
 		if !base.HasFunctionCode || base.FunctionCode != 0x0a {
