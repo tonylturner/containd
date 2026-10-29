@@ -253,6 +253,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wizard and identity editors keep unsaved edits during staged-save, commit
   and automatic refreshes, and warn when settings change on the server.
   Explicit Refresh discards edits. List fields retain unfinished text while typing.
+- On narrow screens, the sidebar collapses behind a Menu button so the main
+  content has the full viewport width. Navigation closes after choosing a
+  link or pressing Escape; the desktop sidebar stays visible.
 - CIP read-only rules no longer classify Apply Attributes, Set Member,
   connection controls or class-specific mutations as reads. Classification
   uses the request target and validates supported read bodies; unknown

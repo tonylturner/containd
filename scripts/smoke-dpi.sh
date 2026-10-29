@@ -56,12 +56,12 @@ TESTS_PASSED=0
 TESTS_EXPECTED=38
 FAILURES=()
 case "$SMOKE_DPI_CAPTURE" in
-  afpacket) ;;
-  nfqueue) TESTS_EXPECTED=46 ;;
-  *)
-    echo "SMOKE_DPI_CAPTURE must be afpacket or nfqueue, got: $SMOKE_DPI_CAPTURE" >&2
-    exit 2
-    ;;
+afpacket) ;;
+nfqueue) TESTS_EXPECTED=46 ;;
+*)
+  echo "SMOKE_DPI_CAPTURE must be afpacket or nfqueue, got: $SMOKE_DPI_CAPTURE" >&2
+  exit 2
+  ;;
 esac
 
 GREEN="\033[32m"
@@ -73,29 +73,26 @@ timestamp() {
 }
 
 log() { echo "[$(timestamp)] $*"; }
-pass() { TESTS_PASSED=$((TESTS_PASSED + 1)); log "PASS: $*"; }
+pass() {
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+  log "PASS: $*"
+}
 # check_fail records a failed assertion and lets the run continue, so one
 # run reports every assertion.
-check_fail() { FAILURES+=("$*"); log "FAIL: $*"; }
+check_fail() {
+  FAILURES+=("$*")
+  log "FAIL: $*"
+}
 
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
+# shellcheck source=scripts/smoke-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/smoke-lib.sh"
 # shellcheck source=scripts/smoke-engine-api.sh
 source "$(dirname "${BASH_SOURCE[0]}")/smoke-engine-api.sh"
 # shellcheck source=scripts/smoke-dpi-lib-parsing.sh
 source "$(dirname "${BASH_SOURCE[0]}")/smoke-dpi-lib-parsing.sh"
-
-# COMPOSE_FILE is a colon-separated list, as in docker compose itself, so an
-# override file can follow the base harness file.
-compose() {
-  local files=() args=() file
-  IFS=: read -r -a files <<<"$COMPOSE_FILE"
-  for file in "${files[@]}"; do
-    args+=(-f "$file")
-  done
-  docker compose --project-name "$SMOKE_PROJECT" "${args[@]}" "$@"
-}
 
 ensure_tools() {
   for bin in docker jq curl; do
@@ -588,17 +585,20 @@ export START_TS
 export MODBUS_SRC="${LAN_NET}.5"
 export MODBUS_DST="${WAN_NET}.4"
 
-modbus_event_filter=$(cat <<'EOF'
+modbus_event_filter=$(
+  cat <<'EOF'
 any(.[]; .proto == "modbus" and .kind == "request" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and .srcPort == (env.MODBUS_READ_PORT | tonumber) and .attributes.transaction_id == 1 and .attributes.unit_id == 1 and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
 EOF
 )
 
-modbus_deny_filter=$(cat <<'EOF'
+modbus_deny_filter=$(
+  cat <<'EOF'
 any(.[]; .kind == "firewall.rule.hit" and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
 EOF
 )
 
-modbus_inventory_filter=$(cat <<'EOF'
+modbus_inventory_filter=$(
+  cat <<'EOF'
 any(.[]; .protocol == "modbus" and ((.lastSeen | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)) and (.ip == env.MODBUS_SRC or .ip == env.MODBUS_DST))
 EOF
 )
@@ -624,7 +624,10 @@ log "Programming OT client and Modbus server routes through engine..."
 sed 's/^/  /' "$WORK_DIR/route-setup-dpi.log"
 
 OT_ROUTE=$(compose exec -T ot_client ip route get "${WAN_NET}.4" | tr -d '\r')
-echo "$OT_ROUTE" | grep -q "via ${LAN_NET}.2" || { log "ot_client route not via engine: $OT_ROUTE"; exit 1; }
+echo "$OT_ROUTE" | grep -q "via ${LAN_NET}.2" || {
+  log "ot_client route not via engine: $OT_ROUTE"
+  exit 1
+}
 pass "OT client route uses engine for Modbus traffic"
 
 log "Testing Modbus read allow..."
@@ -638,7 +641,10 @@ fi
 pass "Modbus read allowed ($(tr -d '\r' <"$WORK_DIR/modbus-read.out"))"
 MODBUS_READ_PORT=$(awk '$1 == "READ_PORT" {print $2}' "$WORK_DIR/modbus-read.out" | tr -d '\r')
 export MODBUS_READ_PORT
-[[ "$MODBUS_READ_PORT" =~ ^[0-9]+$ ]] || { log "read did not report its exact TCP source port"; exit 1; }
+[[ "$MODBUS_READ_PORT" =~ ^[0-9]+$ ]] || {
+  log "read did not report its exact TCP source port"
+  exit 1
+}
 
 if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_event_filter"; then
   log "expected modbus event not found"
@@ -654,11 +660,15 @@ if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
   MODBUS_CONNECTION_ID=$(echo "$READ_REQUEST" | jq -r '.transportConnectionId // empty')
   MODBUS_REQUEST_FLOW=$(echo "$READ_REQUEST" | jq -r '.flowId')
   export MODBUS_CONNECTION_ID MODBUS_REQUEST_FLOW
-  [[ -n "$MODBUS_CONNECTION_ID" ]] || { log "NAT read request has no verified transport identity"; exit 1; }
-  modbus_response_filter=$(cat <<'EOF'
+  [[ -n "$MODBUS_CONNECTION_ID" ]] || {
+    log "NAT read request has no verified transport identity"
+    exit 1
+  }
+  modbus_response_filter=$(
+    cat <<'EOF'
 any(.[]; .proto == "modbus" and .kind == "response" and .srcIp == env.MODBUS_DST and .transportConnectionId == env.MODBUS_CONNECTION_ID and .flowId != env.MODBUS_REQUEST_FLOW and .attributes.transaction_id == 1 and .attributes.unit_id == 1)
 EOF
-)
+  )
   if ! wait_for_jq "${BASE}/events?limit=500" "$modbus_response_filter"; then
     log "NAT read lacks a decoded response sharing the request's transportConnectionId"
     exit 1
@@ -826,11 +836,13 @@ if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
   fi
 fi
 
-persistent_write_filter=$(cat <<'EOF'
+persistent_write_filter=$(
+  cat <<'EOF'
 any(.[]; .proto == "modbus" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and .srcPort == (env.PERSIST_PORT | tonumber) and .attributes.function_code == 6 and .attributes.is_write == true and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))
 EOF
 )
-persistent_deny_filter=$(cat <<'EOF'
+persistent_deny_filter=$(
+  cat <<'EOF'
 any(.[]; .kind == "firewall.rule.hit" and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))
 EOF
 )

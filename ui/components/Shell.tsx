@@ -59,6 +59,8 @@ export function Shell({
   const [authError, setAuthError] = React.useState<string | null>(null);
   const [me, setMe] = React.useState<User | null>(() => verifiedSession);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [navigationOpen, setNavigationOpen] = React.useState(false);
+  const navigationToggleRef = React.useRef<HTMLButtonElement>(null);
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [profileTab, setProfileTab] = React.useState<
     "profile" | "password" | "mfa"
@@ -71,6 +73,15 @@ export function Shell({
   const pendingMFA = !!me?.mfaRequired && !me?.mfaEnabled;
   const forceMFA = pendingMFA && isMFAGraceExpired(me?.mfaGraceUntil);
   const mfaGraceDisplay = formatOptionalDate(me?.mfaGraceUntil);
+
+  React.useEffect(() => {
+    setNavigationOpen(false);
+  }, [pathname]);
+
+  function closeNavigation() {
+    setNavigationOpen(false);
+    navigationToggleRef.current?.focus();
+  }
 
   // Auto-expand nav group containing the active page
   React.useEffect(() => {
@@ -259,7 +270,15 @@ export function Shell({
   }
 
   return (
-    <div className="relative min-h-screen bg-[#080a0f] text-slate-100">
+    <div
+      className="relative min-h-screen bg-[#080a0f] text-slate-100"
+      onKeyDown={(event) => {
+        if (navigationOpen && event.key === "Escape") {
+          event.preventDefault();
+          closeNavigation();
+        }
+      }}
+    >
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-black focus:px-4 focus:py-2 focus:text-white"
@@ -267,16 +286,54 @@ export function Shell({
         Skip to main content
       </a>
 
-      <div className="relative flex min-h-screen">
+      <div className="flex h-14 items-center justify-between border-b bg-[#0a0d0a]/90 px-4 md:hidden">
+        <Link href="/" className="text-sm font-bold tracking-[2px] uppercase">
+          containd
+        </Link>
+        <button
+          ref={navigationToggleRef}
+          type="button"
+          aria-label="Navigation"
+          aria-controls="shell-sidebar"
+          aria-expanded={navigationOpen}
+          onClick={() => setNavigationOpen((open) => !open)}
+          className="inline-flex items-center gap-2 rounded-lg border border-white/8 bg-white/4 px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/8 focus-visible:shadow-focus-ring"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            {navigationOpen ? (
+              <path d="m6 6 12 12M6 18 18 6" />
+            ) : (
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            )}
+          </svg>
+          {navigationOpen ? "Close" : "Menu"}
+        </button>
+      </div>
+
+      <div className="relative flex min-h-[calc(100dvh-3.5rem)] flex-col md:min-h-screen md:flex-row">
         {/* ── Sidebar ─────────────────────────────────────────── */}
         <aside
+          id="shell-sidebar"
           aria-label="Sidebar"
-          className="flex h-screen w-60 shrink-0 flex-col border-r bg-[#0a0d0a]/90 backdrop-blur-xs"
+          onClick={(event) => {
+            if (navigationOpen && (event.target as Element).closest("a")) {
+              closeNavigation();
+            }
+          }}
+          className={`${navigationOpen ? "flex" : "hidden"} h-[calc(100dvh-3.5rem)] w-full shrink-0 flex-col border-b bg-[#0a0d0a]/90 backdrop-blur-xs md:flex md:h-screen md:w-60 md:border-b-0 md:border-r`}
         >
           {/* Brand */}
           <Link
             href="/"
-            className="flex items-center gap-3 px-4 py-4 border-b transition-ui"
+            className="hidden items-center gap-3 px-4 py-4 border-b transition-ui md:flex"
           >
             <div
               className="flex h-8 w-8 items-center justify-center rounded-full border-2"
@@ -305,7 +362,7 @@ export function Shell({
           {/* Navigation */}
           <nav
             aria-label="Main navigation"
-            className="flex-1 overflow-y-auto px-2 py-3 pb-4 text-[13px]"
+            className="min-h-0 flex-1 overflow-y-auto px-2 py-3 pb-4 text-[13px]"
           >
             {/* Dashboard link */}
             <div className="mb-1 px-1">
@@ -474,7 +531,7 @@ export function Shell({
         <main
           id="main-content"
           aria-label={title}
-          className="flex-1 overflow-y-auto bg-[#080a0f] px-6 py-6"
+          className="min-w-0 flex-1 overflow-auto bg-[#080a0f] px-4 py-6 md:px-6"
         >
           <div className="mx-auto max-w-6xl">
             {!authChecked && (
@@ -561,13 +618,13 @@ export function Shell({
                 )}
                 <ShellRecoveryBanner />
                 <ConfigStatusBar />
-                <div className="mb-5 flex items-center justify-between gap-4">
+                <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <h1 className="text-lg font-semibold tracking-wide text-white">
                       {title}
                     </h1>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {actions}
                     <a
                       href={docsHref}
