@@ -25,7 +25,7 @@ func TestOperationTargetEmission(t *testing.T) {
 		{"symbol elements", "4c069103544147002801290002000100", "symbolic", []string{"TAG"}},
 		{"symbol subtree", "4c05910254472801910241420100", "symbolic", []string{"TG", "AB"}},
 		{"program symbol", "4c0a910c50726f6772616d3a4d61696e91044d6f746f0100", "symbolic", []string{"Program:Main", "Moto"}},
-		{"response", "8e000000", "unknown", nil},
+		{"response has no target", "8e000000", "", nil},
 		{"no path", "0e00", "unknown", nil},
 		{"32-bit class", "0e042200000001002401", "unknown", nil},
 		{"32-bit instance", "0e042001260000000100", "unknown", nil},
@@ -51,7 +51,7 @@ func TestOperationTargetEmission(t *testing.T) {
 				for form, attrs := range decodertest.Forms(t, ev.Attributes) {
 					target, ok := eventfields.String(attrs, eventfields.KeyCIPTarget)
 					symbol, hasSymbol := eventfields.Strings(attrs, eventfields.KeyCIPSymbol)
-					if !ok || target != tc.target || hasSymbol != (tc.symbol != nil) || !slices.Equal(symbol, tc.symbol) {
+					if ok != (tc.target != "") || target != tc.target || hasSymbol != (tc.symbol != nil) || !slices.Equal(symbol, tc.symbol) {
 						t.Fatalf("%s target=%v symbol=%v attrs=%v", form, target, symbol, attrs)
 					}
 					if _, present := attrs[eventfields.KeyCoverageIncomplete]; present {

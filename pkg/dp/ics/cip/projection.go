@@ -116,13 +116,17 @@ func projectMessage(state *flow.State, envelope map[string]any, msg *CIPMessage,
 		}
 	}
 	addPathFields(msg.Path, attrs)
-	attrs[eventfields.KeyCIPTarget] = "unknown"
-	if target := decodeTarget(msg.Path); target.valid && !slices.Contains(msg.Conformance, "cip.epath_truncated") {
-		if target.symbolic {
-			attrs[eventfields.KeyCIPTarget] = "symbolic"
-			attrs[eventfields.KeyCIPSymbol] = target.symbol
-		} else {
-			attrs[eventfields.KeyCIPTarget] = "logical"
+	// A response has no wire target, so it carries no cip_target. Policy
+	// object selectors apply to requests; a response is not "unknown".
+	if !msg.IsResponse {
+		attrs[eventfields.KeyCIPTarget] = "unknown"
+		if target := decodeTarget(msg.Path); target.valid && !slices.Contains(msg.Conformance, "cip.epath_truncated") {
+			if target.symbolic {
+				attrs[eventfields.KeyCIPTarget] = "symbolic"
+				attrs[eventfields.KeyCIPSymbol] = target.symbol
+			} else {
+				attrs[eventfields.KeyCIPTarget] = "logical"
+			}
 		}
 	}
 	category := Classify(msg)

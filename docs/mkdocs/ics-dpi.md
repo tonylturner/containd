@@ -324,17 +324,17 @@ UDP port 44818 carries encapsulation commands such as ListIdentity, decoded like
 | Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle`, `enip_status`, `enip_sender_context`, `enip_options` |
 | Implicit I/O (UDP 2222) | `connection_id`, `sequence`, `data_length` (whole connected data item), `cpf_item_types` |
 | Common Packet Format (CPF) | `cpf_item_types`: item types in packet order as one comma-joined lowercase hex string with no spaces; plus selected item `cpf_item_index`, `cpf_data_item_type`, and, when available, `connection_id`, `connected_sequence` |
-| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `cip_target` (`logical`, `symbolic` or `unknown`), `cip_symbol` (symbolic targets only, an array of symbol-name segments), `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; responses retain `response_reserved`, `general_status`, `additional_status_count` and `additional_status` when present; MSP parents carry `multi_service_count` and `multi_service_decoded_count`; each child carries `msp: true`, `msp_index` and `msp_index_path`; incomplete wrappers and roots with uninspected extra CPF data items carry `coverage_incomplete: true` |
+| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `cip_target` (requests: `logical`, `symbolic` or `unknown`), `cip_symbol` (symbolic targets only, an array of symbol-name segments), `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; responses retain `response_reserved`, `general_status`, `additional_status_count` and `additional_status` when present; MSP parents carry `multi_service_count` and `multi_service_decoded_count`; each child carries `msp: true`, `msp_index` and `msp_index_path`; incomplete wrappers and roots with uninspected extra CPF data items carry `coverage_incomplete: true` |
 
-Every CIP operation, including MSP children and uncorrelated responses, carries
-`cip_target`. Supported logical paths name a class, optionally an instance,
+Every CIP request operation, including MSP children, carries `cip_target`. Supported logical paths name a class, optionally an instance,
 then at most one attribute, member or connection point, using 8/16-bit segments.
 Symbolic paths contain one or more ANSI `0x91` symbols with optional 8/16-bit
 element segments; `cip_symbol` preserves the symbol segments in order, without
 element indexes. Repeated logical segments, mixed logical/symbolic paths,
 32-bit segments and other unsupported paths are `unknown`, never truncated to
 a supported target. Partial logical fields can remain as telemetry but do not
-make an unknown target known. Responses have no wire target and are `unknown`.
+make an unknown target known. Responses have no wire target and carry no `cip_target`, so object
+selectors (class, instance, attribute, tag) never match a response.
 
 CIP access classification uses the request's own complete, supported EPATH,
 not the service number alone. `is_write: false` identifies a supported read;
