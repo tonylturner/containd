@@ -245,7 +245,7 @@ the value in brackets is the event's `proto`.
 | Protocol | `kind` values | Attributes |
 | --- | --- | --- |
 | Modbus/TCP (`modbus`) | `request`, `response`, `exception`, `malformed` | `transaction_id`, `unit_id`, `function_code`, `is_write`, `raw_hex`; data-access fields per function code (see [ICS Firewall Rule Predicates](#ics-firewall-rule-predicates)): requests `address` with `quantity` (1–4, 15, 16; plus `byte_count` for 15, 16), `value` (5, 6), `and_mask`, `or_mask` (22), or `read_address`, `read_quantity`, `write_address`, `write_quantity`, `byte_count` (23); read responses `byte_count` and, for registers, `register_count`; write responses the fields they echo; `sub_function`, `sub_function_name` (code 8; sub-functions 1, 3, 4, 10 and 20 are writes; supported names cover 0–4, 10–18 and 20); invalid per-sub-function layout is `modbus.pdu_layout`; unknown sub-functions are reported as undecoded `modbus.diagnostics_subfunction`; `mei_type` (code 43), `mei_type_name` (MEI type 14); `exception_code`, `exception_description` (exceptions, with `function_code` set to the base code); `error` (malformed) |
-| DNP3 (`dnp3`) | `request`, `response`, `restart` (codes 13, 14), `control` (codes 3–12, 15–22, 24–33), `malformed` | `function_code`, `function_name`, `is_write`, `is_control`, `source_address`, `destination_address`, `direction` (`master` or `outstation`, from the link DIR bit), `iin_flags`, `object_groups`, `qualifier`, `object_count`, `objects` with point records that may include an `index` and decoded `crob`, `link_ranges`, `transport_segments`, `application_fragment`, `application_complete`, `raw_hex`; `error` (malformed), `conformance` and `undecoded` codes (listed below) |
+| DNP3 (`dnp3`) | `request`, `response`, `restart` (codes 13, 14), `control` (codes 18, 19), `malformed` | `function_code`, `function_name`, `is_write`, `is_control`, `source_address`, `destination_address`, `direction` (`master` or `outstation`, from the link DIR bit), `iin_flags`, `object_groups`, `qualifier`, `object_count`, `objects` with point records that may include an `index` and decoded `crob`, `link_ranges`, `transport_segments`, `application_fragment`, `application_complete`, `raw_hex`; `error` (malformed), `conformance` and `undecoded` codes (listed below) |
 | IEC 104 (`iec104`) | `apci`, `request`, `response`, `malformed`, `unsupported` | See below |
 | CIP/EtherNet/IP (`cip`) | `request`, `response`, `session` (EtherNet/IP commands without a CIP message) | See below |
 
@@ -378,8 +378,8 @@ use their own function/subtype; exceptions use the base function but have no
 diagnostic or MEI subtype, so FC 8/43 exceptions remain unknown. DNP3 response
 codes outside 129–131 remain unknown even though their high bit identifies a
 response-form header. Response access is not inferred from request correlation.
-DNP3 `restart` events identify FC 13/14; the other control functions above use
-kind `control`.
+DNP3 `restart` events identify FC 13/14; kind `control` identifies only FC 18/19.
+Other control operations retain kind `request` while carrying `is_control: true`.
 
 Each `addresses` entry is one value (`256`, `0x0100`) or an inclusive range
 `low-high` (`100-511`, `0x0100-0x01FF`). Values are unsigned decimal or hex with

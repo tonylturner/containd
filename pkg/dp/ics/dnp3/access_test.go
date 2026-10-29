@@ -34,7 +34,7 @@ func TestAccessEveryFunctionCode(t *testing.T) {
 				kind = "response"
 			case code == 13 || code == 14:
 				kind = "restart"
-			case control:
+			case code == 18 || code == 19:
 				kind = "control"
 			}
 			if ev.Kind != kind {
@@ -55,6 +55,32 @@ func TestAccessEveryFunctionCode(t *testing.T) {
 			}
 			if IsWriteFunctionCode(fc) != write || IsControlFunctionCode(fc) != control {
 				t.Fatal("public helpers disagree with decoded classification")
+			}
+		})
+	}
+}
+
+func TestControlAccessPreservesRequestKind(t *testing.T) {
+	for _, fc := range []uint8{3, 4, 5} {
+		t.Run(fmt.Sprint(fc), func(t *testing.T) {
+			// One CROB at index 0: latch on once, 100 ms on, zero off.
+			user := []byte{0xc0, 0xc0, fc, 12, 1, 0x17, 1, 0,
+				3, 1, 100, 0, 0, 0, 0, 0, 0, 0, 0}
+			wire := buildTestFrame(byte(5+len(user)), 0xc4, 10, 1, user)
+			res, err := NewDecoder().ParseStream(nil, dpi.StreamView{Bytes: wire})
+			if err != nil || len(res.Frames) != 1 || len(res.Frames[0].Events) != 1 {
+				t.Fatalf("decode=%+v err=%v", res, err)
+			}
+			ev := res.Frames[0].Events[0]
+			if ev.Kind != eventfields.KindRequest {
+				t.Fatalf("kind=%s want=request", ev.Kind)
+			}
+			for form, attrs := range decodertest.Forms(t, ev.Attributes) {
+				write, hasWrite := eventfields.Bool(attrs, eventfields.KeyIsWrite)
+				control, hasControl := eventfields.Bool(attrs, "is_control")
+				if !hasWrite || !write || !hasControl || !control {
+					t.Fatalf("%s lost write/control access: %+v", form, attrs)
+				}
 			}
 		})
 	}

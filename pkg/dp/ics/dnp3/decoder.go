@@ -106,10 +106,10 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 	if IsResponse(fc) {
 		kind = "response"
 	}
-	// Classify dangerous function codes.
+	// Preserve public event kinds independently of access classification.
 	if IsRestartFunctionCode(fc) {
 		kind = "restart"
-	} else if access == accessControl {
+	} else if fc == FuncStopApplication || fc == FuncSaveConfiguration {
 		kind = "control"
 	}
 

@@ -222,7 +222,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read-only allows. Unknown diagnostic sub-functions and MEI types omit access
   classification. The Modbus template includes Write File Record in its
   write denials; the DNP3 example correctly describes its write and enable
-  unsolicited allowances.
+  unsolicited allowances. DNP3 event kinds remain unchanged, preserving
+  request learning and existing event filters for select/operate and other
+  control operations.
 - Modbus exception replies now complete their request's transaction, so an
   exception no longer leaves the transaction pending, and an exception with
   no prior request is reported like an unmatched response.
