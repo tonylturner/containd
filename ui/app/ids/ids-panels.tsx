@@ -1,6 +1,6 @@
 "use client";
 
-import type { ConfigFields } from "../../lib/use-config-editor";
+import type { useConfigForm } from "../../lib/use-config-form";
 
 import { useMemo, useRef, useState } from "react";
 
@@ -15,21 +15,24 @@ import {
   groupFilterMatch,
 } from "./ids-shared";
 
+export type IDSPanelFields = { name: string; filter: string; format: string; sigmaText: string };
+type PanelForm = Pick<ReturnType<typeof useConfigForm<IDSPanelFields>>, "field">;
+
 export function GroupsPanel({
-  draft,
+  form,
   groups,
   rules,
   canEdit,
   onUpdate,
 }: {
-  draft: ConfigFields;
+  form: PanelForm;
   groups: RuleGroup[];
   rules: IDSRule[];
   canEdit: boolean;
   onUpdate: (g: RuleGroup[]) => void;
 }) {
-  const [name, setName] = draft.field("group.name", "");
-  const [filter, setFilter] = draft.field("group.filter", "");
+  const [name, setName] = form.field("name");
+  const [filter, setFilter] = form.field("filter");
 
   const groupStats = useMemo(() => {
     const stats: Record<string, number> = {};
@@ -177,18 +180,20 @@ export function GroupsPanel({
 }
 
 export function ImportPanel({
-  draft,
-  onImported,
+  form,
+  onImport,
+  onConverted,
   onError,
 }: {
-  draft: ConfigFields;
-  onImported: (msg: string) => void;
+  form: PanelForm;
+  onImport: (file: File, format: string) => Promise<boolean>;
+  onConverted: (rule: IDSRule) => void;
   onError: (msg: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [format, setFormat] = draft.field("import.format", "");
+  const [format, setFormat] = form.field("format");
   const [importing, setImporting] = useState(false);
-  const [sigmaText, setSigmaText] = draft.field("import.sigma", "");
+  const [sigmaText, setSigmaText] = form.field("sigmaText");
   const [sigmaConverting, setSigmaConverting] = useState(false);
 
   async function onFileImport() {
@@ -197,16 +202,9 @@ export function ImportPanel({
       return;
     }
     setImporting(true);
-    onError("");
-    const result = await api.importIDSRules(file, format || undefined);
+    const ok = await onImport(file, format);
     setImporting(false);
-    if (!result.ok) {
-      onError(result.error || "Import failed. Check the file format and try again.");
-      return;
-    }
-    onImported(
-      `IDS rules staged — commit to apply. Imported ${result.data.imported} rule${result.data.imported !== 1 ? "s" : ""} (${result.data.skipped} skipped). Format: ${result.data.format}. Total: ${result.data.total}.`,
-    );
+    if (!ok) return;
     if (fileRef.current) {
       fileRef.current.value = "";
     }
@@ -225,7 +223,7 @@ export function ImportPanel({
       onError("Sigma conversion failed. Check YAML syntax.");
       return;
     }
-    onImported(`Converted Sigma rule: ${rule.id}. Click Save to persist.`);
+    onConverted(rule);
     setSigmaText((current) => current === submitted ? "" : current);
   }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState, type SetStateAction } from "react";
-import { accept, adopt, fresh, isDirty, sameConfig, type ConfigEditor } from "./config-editor";
+import { accept, acceptCollection as acknowledge, adopt, fresh, isDirty, sameConfig, type ConfigEditor } from "./config-editor";
 
 export function useConfigEditor<T>(initial: T | (() => T)) {
   const [editor, setEditor] = useState(() => fresh(
@@ -22,16 +22,13 @@ export function useConfigEditor<T>(initial: T | (() => T)) {
   const clearText = useCallback((prefix: string) => {
     setEditor((e) => ({ ...e, raw: Object.fromEntries(Object.entries(e.raw).filter(([key]) => !key.startsWith(prefix))) }));
   }, []);
+  const acceptCollection = useCallback((update: (cfg: T) => T, prefixes: string[] = []) => {
+    setEditor((e) => acknowledge(e, update, prefixes));
+  }, []);
   // Row saves acknowledge only that row. Other drafts, and typing after the
   // request started, are not part of the acknowledgement.
   const acceptRow = useCallback((submitted: ConfigEditor<T>, update: (rows: T) => T, prefix: string) => {
-    setEditor((e) => {
-      const raw = Object.fromEntries(Object.entries(e.raw).filter(([key, value]) =>
-        !key.startsWith(prefix) || value !== submitted.raw[key]));
-      const server = update(e.server);
-      const pending = Object.keys(raw).length > 0;
-      return { cfg: pending ? update(e.cfg) : server, server, raw, superseded: pending && e.superseded };
-    });
+    setEditor((e) => acknowledge(e, update, [prefix], submitted));
   }, []);
   function field<V>(key: string, derived: V): [V, (value: SetStateAction<V>) => void] {
     const value = key in editor.raw ? JSON.parse(editor.raw[key]) as V : derived;
@@ -48,7 +45,7 @@ export function useConfigEditor<T>(initial: T | (() => T)) {
   }
   return {
     editor, cfg: editor.cfg, setCfg, adoptConfig, acceptConfig,
-    dirty: isDirty(editor), setText, field, clearText, acceptRow,
+    dirty: isDirty(editor), setText, field, clearText, acceptRow, acceptCollection,
     text: (key: string, derived: string) => editor.raw[key] ?? derived,
   };
 }

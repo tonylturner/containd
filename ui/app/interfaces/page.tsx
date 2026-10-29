@@ -1,6 +1,6 @@
 "use client";
 
-import { upsertRow } from "../../lib/config-editor";
+import { reconcileRows, upsertRow } from "../../lib/config-editor";
 
 import { useConfigForm } from "../../lib/use-config-form";
 import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
@@ -122,12 +122,14 @@ export default function InterfacesPage() {
   async function onAutoAssign() {
     setError(null);
     setAssigning(true);
+    const before = rowsDraft.editor.server;
     const res = await api.assignInterfaces("auto");
     setAssigning(false);
     if (!res.ok) {
       setError(res.error || "Failed to auto-assign interfaces.");
       return;
     }
+    rowsDraft.acceptCollection((rows) => reconcileRows(rows, before, res.data.interfaces, (row) => row.name));
     await refresh();
     setNotice(res.warning ? `Interface assignments staged — commit to apply. Warning: ${res.warning}` : "Interface assignments staged — commit to apply.");
   }
@@ -206,6 +208,7 @@ export default function InterfacesPage() {
       setError(created.error || "Failed to create interface.");
       return;
     }
+    rowsDraft.acceptCollection((rows) => upsertRow(rows, created.data, (row) => row.name));
     await refresh();
     setNotice(created.warning ? `Interface staged — commit to apply. Warning: ${created.warning}` : "Interface staged — commit to apply.");
     form.acceptFields(submitted, ["name", "alias", "zone", "ifaceType", "members", "parent", "vlanId", "addresses"]);
@@ -219,6 +222,7 @@ export default function InterfacesPage() {
       setError(result.error || "Failed to delete interface.");
       return;
     }
+    rowsDraft.acceptCollection((rows) => rows.filter((row) => row.name !== ifaceName), [`${JSON.stringify(ifaceName)}.`]);
     await refresh();
     setNotice(result.warning ? `Interface staged — commit to apply. Warning: ${result.warning}` : "Interface staged — commit to apply.");
   }

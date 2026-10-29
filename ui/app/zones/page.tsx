@@ -76,6 +76,7 @@ export default function ZonesPage() {
       setError(result.error);
       return;
     }
+    rowsDraft.acceptCollection((rows) => upsertRow(rows, result.data, (row) => row.name));
     toast("Zone staged — commit to apply.", "success");
     refresh();
     form.acceptFields(submitted, ["name", "alias", "description", "slTarget"]);
@@ -94,6 +95,7 @@ export default function ZonesPage() {
           setError(result.error);
           return;
         }
+        rowsDraft.acceptCollection((rows) => rows.filter((row) => row.name !== zoneName), [`${JSON.stringify(zoneName)}.`]);
         toast("Zone staged — commit to apply.", "success");
         refresh();
       },

@@ -118,6 +118,7 @@ export default function IdentitiesPage() {
           setError(res.error);
           return;
         }
+        rowsDraft.acceptCollection((rows) => rows.filter((row) => row.ip !== address), [`${JSON.stringify(address)}.`]);
         toast("Binding removal staged — commit to apply.", "success");
         refresh();
       },

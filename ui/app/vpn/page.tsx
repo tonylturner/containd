@@ -43,7 +43,7 @@ export default function VPNPage() {
   const canEdit = isAdmin();
   const toast = useToast();
   const confirm = useConfirm();
-  const { editor, cfg, setCfg, adoptConfig, acceptConfig, text, setText } = useConfigEditor(() => normalize(null));
+  const { editor, cfg, setCfg, adoptConfig, acceptConfig, acceptCollection, text, setText } = useConfigEditor(() => normalize(null));
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -269,8 +269,10 @@ export default function VPNPage() {
       setUploadState("uploaded");
       toast(res.warning ? `Profile staged — commit to apply. Warning: ${res.warning}` : "Profile staged — commit to apply.", "success");
       // Uploading a profile switches OpenVPN to "configPath" mode (advanced) and clears managed config.
-      const next = normalize(res.data.vpn);
-      adoptConfig({ ...next, openvpn: { ...next.openvpn, managed: undefined } });
+      acceptCollection((current) => ({
+        ...current,
+        openvpn: { ...current.openvpn, configPath: res.data.configPath, managed: undefined },
+      }));
       setTimeout(() => setUploadState("idle"), 1500);
       // Refresh runtime badges (installed/running/last error) after upload.
       refresh({ silent: true });

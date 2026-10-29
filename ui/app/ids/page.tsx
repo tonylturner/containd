@@ -1,10 +1,12 @@
 "use client";
 
 import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
+import { upsertRow } from "../../lib/config-editor";
+import { useConfigForm } from "../../lib/use-config-form";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Shell } from "../../components/Shell";
 import {
@@ -25,6 +27,7 @@ import {
   GroupsPanel,
   ImportPanel,
   SourcesCatalog,
+  type IDSPanelFields,
 } from "./ids-panels";
 import { isRuleEnabled } from "./ids-shared";
 
@@ -34,6 +37,12 @@ export default function IDSPage() {
   const canEdit = isAdmin();
   const draft = useConfigEditor<IDSConfig>({ enabled: false, rules: [] });
   const { editor, cfg: ids, setCfg: setIds, adoptConfig, acceptConfig, text, setText, clearText } = draft;
+  const { acceptCollection } = draft;
+  const panelForm = useConfigForm<IDSPanelFields>({ name: "", filter: "", format: "", sigmaText: "" });
+  const { refreshForm } = panelForm;
+  const importedFrom = useRef<IDSRule[] | null>(null);
+  const refreshId = useRef(0);
+  const [importPending, setImportPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [editing, setEditing] = useState<IDSRule | null>(null);
@@ -42,18 +51,40 @@ export default function IDSPage() {
   const confirm = useConfirm();
 
   const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
+    const id = ++refreshId.current;
     const [cfg, src] = await Promise.all([api.getIDS(), api.getIDSSources()]);
-    adoptConfig(cfg ?? { enabled: false, rules: [] }, keepEdits);
+    // A read started before an import cannot acknowledge or undo that import.
+    if (id !== refreshId.current) return;
+    if (!cfg) {
+      setError(importedFrom.current
+        ? "Rules were imported, but could not be loaded. Refresh to reconcile them before saving."
+        : "Failed to load IDS rules.");
+      return;
+    }
+    setError(null);
+    adoptConfig(cfg, keepEdits);
+    if (importedFrom.current) {
+      // File import only appends new IDs. Other changes in this read are
+      // background changes, not acknowledgement of the user's local edits.
+      const before = new Set(importedFrom.current.map((rule) => rule.id));
+      const added = (cfg.rules ?? []).filter((rule) => !before.has(rule.id));
+      acceptCollection((current) => ({
+        ...current, rules: added.reduce((rules, rule) => upsertRow(rules, rule, (r) => r.id), current.rules ?? []),
+      }));
+      importedFrom.current = null;
+      setImportPending(false);
+    }
+    refreshForm(cfg, keepEdits);
     setSources(src ?? []);
     if (!keepEdits) setEditing(null);
-  }, [adoptConfig]);
+  }, [adoptConfig, acceptCollection, refreshForm]);
 
   useConfigRefresh(refresh);
 
   useEffect(() => { refresh(); }, [refresh]);
 
   async function onSave() {
-    if (!canEdit) return;
+    if (!canEdit || importPending) return;
     setError(null);
     // The modal is not submitted by the page Save button.
     const submitted = { ...editor, raw: {} };
@@ -61,6 +92,27 @@ export default function IDSPage() {
     if (!saved.ok) { setError(saved.error || "Failed to save IDS rules."); return; }
     acceptConfig(submitted, saved.data);
     flashSuccess("IDS rules staged — commit to apply.");
+  }
+
+  async function onImport(file: File, format: string) {
+    if (importPending) return false;
+    const before = editor.server.rules ?? [];
+    setImportPending(true);
+    setError(null);
+    const result = await api.importIDSRules(file, format || undefined);
+    if (!result.ok) {
+      setImportPending(false);
+      setError(result.error || "Import failed. Check the file format and try again.");
+      return false;
+    }
+    // The import response contains counts, not rules. Keep Save blocked until
+    // a successful read has acknowledged the additions, even if that read fails.
+    importedFrom.current = before;
+    await refresh();
+    const { imported, skipped, format: detected, total } = result.data;
+    flashSuccess(`IDS rules staged — commit to apply. Imported ${imported} rule${imported !== 1 ? "s" : ""} (${skipped} skipped). Format: ${detected}. Total: ${total}.`);
+    setActiveTab("rules");
+    return true;
   }
 
   function onDelete(id: string) {
@@ -133,7 +185,7 @@ export default function IDSPage() {
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110">
+            <button onClick={onSave} disabled={importPending} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
               Save
             </button>
           )}
@@ -181,11 +233,16 @@ export default function IDSPage() {
           onBulkDelete={onBulkDelete} onBulkToggle={onBulkToggle} onToggleRule={onToggleRule} />
       )}
       {activeTab === "groups" && (
-        <GroupsPanel draft={draft} groups={groups} rules={rules} canEdit={canEdit}
+        <GroupsPanel form={panelForm} groups={groups} rules={rules} canEdit={canEdit}
           onUpdate={(g) => setIds((prev) => ({ ...prev, ruleGroups: g }))} />
       )}
       {activeTab === "import" && canEdit && (
-        <ImportPanel draft={draft} onImported={(msg) => { flashSuccess(msg); refresh(); setActiveTab("rules"); }} onError={setError} />
+        <ImportPanel form={panelForm} onImport={onImport} onConverted={(rule) => {
+          // Conversion returns a rule but does not stage it on the server.
+          setIds((current) => ({ ...current, rules: upsertRow(current.rules ?? [], rule, (r) => r.id) }));
+          flashSuccess(`Converted Sigma rule: ${rule.id}. Click Save to persist.`);
+          setActiveTab("rules");
+        }} onError={setError} />
       )}
       {activeTab === "import" && !canEdit && (
         <div className="py-8 text-center text-sm text-(--text-muted)">Import is disabled in view-only mode.</div>
