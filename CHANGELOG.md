@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- DPI events and directional flow summaries include a verified
+  `transportConnectionId` for locally tracked AF_PACKET TCP/UDP connections,
+  with correlation status and conntrack-zone authority health.
 - `services.av.scan` selects the traffic the scanning gate intercepts:
   include and exclude entries of directional zone pairs, destination ports
   and CIDRs, a download mode (`hold` or `stream_tail`) and the ICS-marked
@@ -216,6 +219,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Modbus transaction pairing separates connection incarnations, directions,
+  transaction IDs and unit IDs, including locally masqueraded AF_PACKET
+  traffic. Missing connection evidence reports correlation unavailable instead
+  of an unmatched-reply violation; inventory and learning use verified logical
+  client/backend roles without changing wire telemetry or policy addresses.
 - Modbus exception replies now complete their request's transaction, so an
   exception no longer leaves the transaction pending, and an exception with
   no prior request is reported like an unmatched response.
