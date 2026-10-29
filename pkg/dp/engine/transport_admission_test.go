@@ -70,14 +70,13 @@ func TestTransportOverflowScopesLossIncludingQueuedOpener(t *testing.T) {
 	other.Coverage().Store(true)
 	tuple := natEvidence().Original
 	tuple.Source = netip.MustParseAddrPort("10.10.0.6:42000")
-	r.indexed[tuple] = other
+	r.indexed[tuple] = &transportAdmission{connection: other}
 	r.admissionMu.Lock()
 	r.unavailable(e, pkt, "queue_overflow")
 	r.admissionMu.Unlock()
 	r.authority.check(context.Background())
 	c := r.resolve(context.Background(), queued.packet, false)
-	c.MergeHistory(queued.history)
-	e.handleTransportPacket(pkt, c)
+	e.handleTransportPacket(pkt, c, queued.history)
 	e.flowMu.Lock()
 	started := e.tupleStateLocked(packetKey(pkt).Tuple()).Connection.Load()
 	e.flowMu.Unlock()
@@ -112,23 +111,23 @@ func TestTransportLossIndexCapacityDoesNotClaimCoverage(t *testing.T) {
 	for i := range transportAliasLimit {
 		key := tuple
 		key.Source = netip.AddrPortFrom(key.Source.Addr(), uint16(i))
-		r.indexed[key] = &flow.Connection{Key: "occupied"}
+		r.indexed[key] = &transportAdmission{connection: &flow.Connection{Key: "occupied"}}
 	}
 	state := flow.NewState(flow.TupleKey(natEvidence().Reply, flow.DirReverse), time.Now())
 	c := &flow.Connection{Key: "uncertain"}
 	c.Coverage().Store(true)
 	state.Connection.Store(c)
-	r.trackConnection(state, time.Now())
+	r.trackConnection(state, time.Now(), nil)
 	if c.CorrelationAvailable(time.Now()) || len(r.indexed) != transportAliasLimit ||
 		r.authority.snapshot().Counters["coverage_capacity"] != 1 {
 		t.Fatal("loss-index capacity claimed complete coverage")
 	}
 	// Reclaim a closed incarnation, then wait a full quiet pairing timeout.
 	for _, old := range r.indexed {
-		old.Closed().Store(true)
+		old.connection.Closed().Store(true)
 		break
 	}
-	r.trackConnection(state, time.Now())
+	r.trackConnection(state, time.Now(), nil)
 	if !c.CorrelationAvailable(time.Now().Add(3 * time.Minute)) {
 		t.Fatal("coverage did not recover after capacity became available")
 	}

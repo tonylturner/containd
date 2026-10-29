@@ -219,6 +219,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Port-reusing SYNs reserve their own correlation-loss history before queueing,
+  so overflow during reordering cannot leave a new incarnation falsely covered.
 - Excluded opening SYNs no longer grant complete correlation coverage;
   deliberately bypassed requests keep translated replies from becoming false
   unmatched-reply violations.

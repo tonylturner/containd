@@ -29,13 +29,13 @@ func noteCorrelationInspection(state *flow.State, pkt capture.Packet, inspected 
 	}
 }
 
-func (e *Engine) handleTransportPacket(pkt capture.Packet, c *flow.Connection) {
+func (e *Engine) handleTransportPacket(pkt capture.Packet, c *flow.Connection, history *transportAdmission) {
 	defer func() {
 		if r := recover(); r != nil {
 			e.reportPacketPanic(packetPanic(r))
 		}
 	}()
-	e.handlePacketConnection(pkt, c)
+	e.handlePacketConnection(pkt, c, history)
 }
 
 // Caller holds flowMu. Both possible wire orientations are searched; CT peer

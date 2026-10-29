@@ -55,7 +55,7 @@ func TestTransportOverflowCarriesKnownWireIdentity(t *testing.T) {
 	r.authority.check(context.Background())
 	pkt := transportWire(natEvidence().Reply, time.Now(), nil)
 	c := r.resolve(context.Background(), pkt, false)
-	r.indexed[packetKey(pkt).Tuple()] = c
+	r.indexed[packetKey(pkt).Tuple()] = &transportAdmission{connection: c}
 	r.admissionMu.Lock()
 	r.unavailable(e, pkt, "queue_overflow")
 	r.admissionMu.Unlock()

@@ -32,7 +32,7 @@ func TestTransportEventsDuringApplyKeepIdentity(t *testing.T) {
 	ctx := context.Background()
 	r.authority.check(ctx)
 	request := transportWire(evidence.Original, time.Now(), modbusADU(1, 3, 10, 2))
-	e.handleTransportPacket(request, r.resolve(ctx, request, false))
+	e.handleTransportPacket(request, r.resolve(ctx, request, false), nil)
 	first := transportModbusEvents(e)[0]
 	base := &transportBlockingApply{started: make(chan struct{}), release: make(chan struct{})}
 	applier := &transportApplier{Applier: base, authority: r.authority}
@@ -45,7 +45,7 @@ func TestTransportEventsDuringApplyKeepIdentity(t *testing.T) {
 		t.Fatal("scan authorized an unfinished apply")
 	}
 	reply := transportWire(evidence.Reply, time.Now(), []byte{0, 1, 0, 0, 0, 7, 1, 3, 4, 0, 10, 0, 11})
-	e.handleTransportPacket(reply, r.resolve(ctx, reply, false))
+	e.handleTransportPacket(reply, r.resolve(ctx, reply, false), nil)
 	close(base.release)
 	if err := <-done; err != nil {
 		t.Fatal(err)

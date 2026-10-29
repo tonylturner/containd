@@ -49,11 +49,11 @@ func TestTransportAuthorityWindowDoesNotDisableDetection(t *testing.T) {
 	now := time.Now()
 	syn := transportWire(ev.Original, now, nil)
 	syn.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 100}
-	e.handleTransportPacket(syn, r.resolve(ctx, syn, false))
+	e.handleTransportPacket(syn, r.resolve(ctx, syn, false), nil)
 	req := transportWire(ev.Original, now.Add(time.Millisecond), modbusADU(1, 3, 10, 2))
-	e.handleTransportPacket(req, r.resolve(ctx, req, false))
+	e.handleTransportPacket(req, r.resolve(ctx, req, false), nil)
 	rep := transportWire(ev.Reply, now.Add(2*time.Millisecond), modbusReadReply(1))
-	e.handleTransportPacket(rep, r.resolve(ctx, rep, false))
+	e.handleTransportPacket(rep, r.resolve(ctx, rep, false), nil)
 	if s := e.AnomalyDetector().PairingStats(); s.Matched != 1 {
 		t.Fatalf("fixture did not pair: %+v", s)
 	}
@@ -64,17 +64,17 @@ func TestTransportAuthorityWindowDoesNotDisableDetection(t *testing.T) {
 	if c.Status != "zone_unverified" || c.PublicID() == "" {
 		t.Fatalf("cache hit during periodic check: status=%s id=%q", c.Status, c.PublicID())
 	}
-	e.handleTransportPacket(req2, c)
+	e.handleTransportPacket(req2, c, nil)
 	// The read finishes with no zone setters: verified again.
 	r.authority.check(ctx)
 	if r.authority.snapshot().ZoneStatus != "verified" {
 		t.Fatal("fixture did not re-verify")
 	}
 	rep2 := transportWire(ev.Reply, now.Add(4*time.Millisecond), modbusReadReply(2))
-	e.handleTransportPacket(rep2, r.resolve(ctx, rep2, false))
+	e.handleTransportPacket(rep2, r.resolve(ctx, rep2, false), nil)
 	// A genuinely unmatched reply ten seconds later, long after the check.
 	bogus := transportWire(ev.Reply, now.Add(10*time.Second), modbusReadReply(99))
-	e.handleTransportPacket(bogus, r.resolve(ctx, bogus, false))
+	e.handleTransportPacket(bogus, r.resolve(ctx, bogus, false), nil)
 	stats := e.AnomalyDetector().PairingStats()
 	var statuses []string
 	for _, m := range transportModbusEvents(e) {

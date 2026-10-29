@@ -34,7 +34,15 @@ const (
 type transportPacket struct {
 	packet  capture.Packet
 	at      time.Time
-	history *flow.Connection
+	history *transportAdmission
+}
+
+// An admission slot outlives its placeholder-to-root handoff. Queued packets
+// retain this token even if a newer SYN replaces the tuple's current slot.
+type transportAdmission struct {
+	connection *flow.Connection
+	synSeq     uint32
+	hasSYN     bool
 }
 
 type transportAlias struct {
@@ -48,7 +56,7 @@ type transportAlias struct {
 type transportResolver struct {
 	admissionMu  sync.Mutex
 	closed       bool
-	indexed      map[conntrack.Tuple]*flow.Connection // under admissionMu, bounded independently of lookup TTL
+	indexed      map[conntrack.Tuple]*transportAdmission // under admissionMu, independent of lookup TTL
 	overflowNext time.Time
 	authority    *transportAuthority
 	reader       conntrack.IdentityReader
@@ -87,7 +95,7 @@ func newTransportResolver(zones zoneSetterReader, reader conntrack.IdentityReade
 		return nil, fmt.Errorf("transport identity epoch: %w", err)
 	}
 	return &transportResolver{authority: newTransportAuthority(zones), reader: reader,
-		queue: make(chan transportPacket, transportQueueLimit), indexed: make(map[conntrack.Tuple]*flow.Connection), aliases: make(map[conntrack.Tuple]*transportAlias),
+		queue: make(chan transportPacket, transportQueueLimit), indexed: make(map[conntrack.Tuple]*transportAdmission), aliases: make(map[conntrack.Tuple]*transportAlias),
 		epoch: hex.EncodeToString(epoch[:])}, nil
 }
 
@@ -112,6 +120,7 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 	if pkt.Timestamp.IsZero() {
 		pkt.Timestamp = time.Now().UTC()
 	}
+	history := r.admitHistoryLocked(pkt)
 	if r.count.Add(1) > transportQueueLimit {
 		r.count.Add(-1)
 		r.unavailable(e, pkt, "queue_overflow")
@@ -125,7 +134,7 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 	}
 	pkt.Payload, pkt.SrcIP, pkt.DstIP = bytes.Clone(pkt.Payload), bytes.Clone(pkt.SrcIP), bytes.Clone(pkt.DstIP)
 	select {
-	case r.queue <- transportPacket{packet: pkt, at: time.Now(), history: r.admissionHistoryLocked(packetKey(pkt).Tuple())}:
+	case r.queue <- transportPacket{packet: pkt, at: time.Now(), history: history}:
 	default:
 		r.bytes.Add(-n)
 		r.count.Add(-1)
@@ -137,14 +146,17 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 func (r *transportResolver) unavailable(e *Engine, pkt capture.Packet, status string) {
 	r.authority.count(status)
 	now := time.Now()
-	if c := r.indexed[packetKey(pkt).Tuple()]; c != nil {
-		c.LoseCorrelation(now, anomaly.ModbusPairingTimeout)
+	if entry := r.indexed[packetKey(pkt).Tuple()]; entry != nil {
+		entry.connection.LoseCorrelation(now, anomaly.ModbusPairingTimeout)
 	}
 	if now.Before(r.overflowNext) {
 		return
 	}
 	r.overflowNext = now.Add(time.Second)
-	c := r.indexed[packetKey(pkt).Tuple()]
+	var c *flow.Connection
+	if entry := r.indexed[packetKey(pkt).Tuple()]; entry != nil {
+		c = entry.connection
+	}
 	key, proto := transportOverflowIdentity(pkt, c)
 	e.eventStore.Append(events.Event{Kind: "dpi.correlation.unavailable", Timestamp: now.UTC(),
 		FlowID: key.Hash(), Proto: proto, Transport: pkt.Transport, TransportConnectionID: c.PublicID(),
@@ -223,10 +235,7 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			pending[0] = transportPacket{}
 			pending = pending[1:]
 			if ctx.Err() == nil {
-				if p.history != nil && p.history.Key == "" {
-					c.MergeHistory(p.history)
-				}
-				e.handleTransportPacket(p.packet, c)
+				e.handleTransportPacket(p.packet, c, p.history)
 			}
 			r.bytes.Add(-int64(len(p.packet.Payload)))
 			r.count.Add(-1)

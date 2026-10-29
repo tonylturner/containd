@@ -62,13 +62,13 @@ func transportOverflowIdentity(pkt capture.Packet, c *flow.Connection) (flow.Key
 // The loss index is independent of lookup TTLs: a quiet live connection still
 // needs a tuple-scoped loss marker. Placeholders retain loss while its opener
 // is queued. Closed incarnations are reclaimed, never live ones.
-func (r *transportResolver) admissionHistoryLocked(tuple conntrack.Tuple) *flow.Connection {
-	if c := r.indexed[tuple]; c != nil && !c.Closed().Load() {
-		return c
+func (r *transportResolver) admissionHistoryLocked(tuple conntrack.Tuple) *transportAdmission {
+	if entry := r.indexed[tuple]; entry != nil && !entry.connection.Closed().Load() {
+		return entry
 	}
 	if len(r.indexed) >= transportAliasLimit {
-		for key, c := range r.indexed {
-			if c.Closed().Load() {
+		for key, entry := range r.indexed {
+			if entry.connection.Closed().Load() {
 				delete(r.indexed, key)
 			}
 		}
@@ -76,26 +76,50 @@ func (r *transportResolver) admissionHistoryLocked(tuple conntrack.Tuple) *flow.
 	if len(r.indexed) >= transportAliasLimit {
 		return nil
 	}
-	c := &flow.Connection{}
-	r.indexed[tuple] = c
-	return c
+	entry := &transportAdmission{connection: &flow.Connection{}}
+	r.indexed[tuple] = entry
+	return entry
 }
 
-func (r *transportResolver) trackConnection(state *flow.State, at time.Time) {
+func (r *transportResolver) admitHistoryLocked(pkt capture.Packet) *transportAdmission {
+	tuple := packetKey(pkt).Tuple()
+	entry := r.admissionHistoryLocked(tuple)
+	if entry == nil {
+		return nil
+	}
+	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 {
+		if !entry.hasSYN || entry.synSeq != pkt.TCP.Seq {
+			entry = &transportAdmission{connection: &flow.Connection{}, synSeq: pkt.TCP.Seq, hasSYN: true}
+			r.indexed[tuple] = entry
+		}
+	}
+	return entry
+}
+
+func (r *transportResolver) trackConnection(state *flow.State, at time.Time, history *transportAdmission) {
 	c := state.Connection.Load()
 	r.admissionMu.Lock()
 	defer r.admissionMu.Unlock()
-	tuples := []conntrack.Tuple{state.Key.Tuple()}
+	observed := state.Key.Tuple()
+	if history != nil && r.indexed[observed] != history {
+		// A later admitted SYN already owns this tuple. Older queued packets
+		// must neither steal its slot nor copy its losses into the predecessor.
+		return
+	}
+	tuples := []conntrack.Tuple{observed}
 	if c.Evidence != nil {
 		tuples = append(tuples, c.Evidence.Original, c.Evidence.Reply)
 	}
 	for _, tuple := range tuples {
-		previous := r.indexed[tuple]
-		if previous != nil && !previous.Closed().Load() {
-			if previous.Key == "" || previous.Key == c.Key {
-				c.MergeHistory(previous)
+		entry := r.indexed[tuple]
+		if entry != nil && !entry.connection.Closed().Load() {
+			if entry != history && entry.hasSYN && entry.connection.Key == "" {
+				continue // An opener queued on the other tuple owns its placeholder.
 			}
-			r.indexed[tuple] = c
+			if entry.connection.Key == "" || entry.connection.Key == c.Key {
+				c.MergeHistory(entry.connection)
+			}
+			entry.connection = c
 			continue
 		}
 		if c.Coverage().Load() {
@@ -103,11 +127,12 @@ func (r *transportResolver) trackConnection(state *flow.State, at time.Time) {
 			// that an unrecorded drop there was harmless.
 			c.LoseCorrelation(at, anomaly.ModbusPairingTimeout)
 		}
-		if r.admissionHistoryLocked(tuple) == nil {
+		entry = r.admissionHistoryLocked(tuple)
+		if entry == nil {
 			c.LoseCorrelation(at, anomaly.ModbusPairingTimeout)
 			r.authority.count("coverage_capacity")
 			continue
 		}
-		r.indexed[tuple] = c
+		entry.connection = c
 	}
 }

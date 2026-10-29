@@ -622,10 +622,10 @@ func entryMatchesProtocolPorts(entry rules.Entry, state *flow.State, pkt *dpi.Pa
 // handlePacket runs flow tracking, DPI and enforcement for one captured
 // packet and decides it.
 func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
-	return e.handlePacketConnection(pkt, nil)
+	return e.handlePacketConnection(pkt, nil, nil)
 }
 
-func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Connection) capture.Decision {
+func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Connection, history *transportAdmission) capture.Decision {
 	if e == nil {
 		return acceptDecision
 	}
@@ -647,7 +647,7 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	}
 	e.bindTransport(state, connection)
 	if connection != nil && e.transport != nil {
-		e.transport.trackConnection(state, now)
+		e.transport.trackConnection(state, now, history)
 	}
 	if d, ok := e.handleIECPacket(pkt, state); ok {
 		return d

@@ -262,7 +262,7 @@ func TestTransportResolverFailuresAndBounds(t *testing.T) {
 			r.authority.check(context.Background())
 			pkt := transportWire(natEvidence().Reply, time.Now(), []byte{0, 1, 0, 0, 0, 3, 1, 0x83, 2})
 			c := r.resolve(context.Background(), pkt, false)
-			e.handleTransportPacket(pkt, c)
+			e.handleTransportPacket(pkt, c, nil)
 			got := e.AnomalyDetector().Anomalies(0)
 			if c.Status != tc.status || c.PublicID() != "" || len(got) != 1 || got[0].Type != "correlation_unavailable" {
 				t.Fatalf("failure = %+v, %+v", c, got)

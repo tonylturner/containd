@@ -24,10 +24,7 @@ func TestTransportNATExcludedRequestsDoNotBecomeUnmatched(t *testing.T) {
 		select {
 		case q := <-r.queue:
 			c := r.resolve(context.Background(), q.packet, false)
-			if q.history != nil && q.history.Key == "" {
-				c.MergeHistory(q.history)
-			}
-			e.handleTransportPacket(q.packet, c)
+			e.handleTransportPacket(q.packet, c, q.history)
 			r.count.Add(-1)
 			r.bytes.Add(-int64(len(q.packet.Payload)))
 		default:
@@ -77,7 +74,7 @@ func TestTransportInspectionBypassExtendsRecovery(t *testing.T) {
 	at := time.Now()
 	syn := transportWire(evidence.Original, at, nil)
 	syn.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 1000}
-	e.handleTransportPacket(syn, r.resolve(ctx, syn, false))
+	e.handleTransportPacket(syn, r.resolve(ctx, syn, false), nil)
 	e.flowMu.Lock()
 	state := e.tupleStateLocked(evidence.Original)
 	e.flowMu.Unlock()
@@ -101,7 +98,7 @@ func TestTransportInspectionBypassExtendsRecovery(t *testing.T) {
 	// unmatched reply still alerts on this already-started incarnation.
 	e.dpiExclusions = nil
 	reply := transportWire(evidence.Reply, at, nil)
-	e.handleTransportPacket(reply, r.resolve(ctx, reply, false))
+	e.handleTransportPacket(reply, r.resolve(ctx, reply, false), nil)
 	e.flowMu.Lock()
 	reverse := e.tupleStateLocked(evidence.Reply)
 	e.flowMu.Unlock()

@@ -213,8 +213,10 @@ but emits at most one `dpi.correlation.unavailable` event per second. This
 kind carries `correlationStatus: queue_overflow`, the matching
 `correlation_status` attribute, wire endpoints, directional `flowId` and
 protocol/transport hints when known, and an already-known transport ID.
-It does not claim payload decoding. Loss is scoped to the affected tuple,
-not unrelated connections. Backlogged
+It does not claim payload decoding. Loss is scoped to the affected tuple and
+incarnation, not unrelated connections. A new-ISN SYN reserves its own loss
+history immediately at admission, including while it waits in the reorder
+window; retransmissions retain that history. Backlogged
 packets older than 500 ms degrade to unavailable evidence. The alias cache
 holds at most 16,384 aliases, revalidates positive entries after one second
 (or the shorter kernel timeout), and prunes negative entries at their 100 ms

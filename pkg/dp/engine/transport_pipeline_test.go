@@ -21,7 +21,7 @@ func TestTransportLookupDowngradeKeepsReplyIdentity(t *testing.T) {
 			e, r, _ := newTransportTest(t, f)
 			r.authority.check(context.Background())
 			request := transportWire(natEvidence().Original, time.Now(), modbusADU(1, 3, 10, 2))
-			e.handleTransportPacket(request, r.resolve(context.Background(), request, false))
+			e.handleTransportPacket(request, r.resolve(context.Background(), request, false), nil)
 			first := transportModbusEvents(e)[0]
 			f.err = errors.New("permission denied")
 			if status == "not_found" {
@@ -33,7 +33,7 @@ func TestTransportLookupDowngradeKeepsReplyIdentity(t *testing.T) {
 				r.authority.invalidate()
 			}
 			c := r.resolve(context.Background(), reply, status == "admission_timeout")
-			e.handleTransportPacket(reply, c)
+			e.handleTransportPacket(reply, c, nil)
 			last := transportModbusEvents(e)[0]
 			if last.TransportConnectionID != first.TransportConnectionID || c.Status != status ||
 				e.AnomalyDetector().PairingStats().Matched != 1 {
@@ -48,13 +48,13 @@ func TestTransportNewSYNDuringAuthorityFailureStartsNewIncarnation(t *testing.T)
 	r.authority.check(context.Background())
 	pkt := transportWire(natEvidence().Original, time.Now(), nil)
 	pkt.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 100}
-	e.handleTransportPacket(pkt, r.resolve(context.Background(), pkt, false))
+	e.handleTransportPacket(pkt, r.resolve(context.Background(), pkt, false), nil)
 	e.flowMu.Lock()
 	old := e.tupleStateLocked(packetKey(pkt).Tuple()).Connection.Load()
 	e.flowMu.Unlock()
 	r.authority.invalidate()
 	pkt.TCP.Seq++
-	e.handleTransportPacket(pkt, r.resolve(context.Background(), pkt, false))
+	e.handleTransportPacket(pkt, r.resolve(context.Background(), pkt, false), nil)
 	e.flowMu.Lock()
 	fresh := e.tupleStateLocked(packetKey(pkt).Tuple()).Connection.Load()
 	e.flowMu.Unlock()
@@ -70,10 +70,10 @@ func TestTransportMidstreamOutstandingReply(t *testing.T) {
 	// Capture starts after request 1 was sent, but before pipelined request 2.
 	request := transportWire(ev.Original, time.Now(), modbusADU(2, 3, 10, 2))
 	request.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 1000}
-	e.handleTransportPacket(request, r.resolve(context.Background(), request, false))
+	e.handleTransportPacket(request, r.resolve(context.Background(), request, false), nil)
 	reply := transportWire(ev.Reply, time.Now(), []byte{0, 1, 0, 0, 0, 7, 1, 3, 4, 0, 10, 0, 11})
 	reply.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 2000}
-	e.handleTransportPacket(reply, r.resolve(context.Background(), reply, false))
+	e.handleTransportPacket(reply, r.resolve(context.Background(), reply, false), nil)
 	if got := len(transportModbusEvents(e)); got != 2 {
 		t.Fatalf("decoded %d events, want request and reply", got)
 	}
