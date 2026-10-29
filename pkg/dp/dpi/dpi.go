@@ -76,7 +76,8 @@ type PortHinter interface {
 
 // Manager dispatches packets to registered decoders.
 type Manager struct {
-	streamMu    sync.Mutex // one feed/parse/trim transaction across capture workers
+	observation map[string]StreamDecoder // immutable explicit observation registry
+	streamMu    sync.Mutex               // one feed/parse/trim transaction across capture workers
 	decoders    []Decoder
 	tcpByPort   map[uint16][]Decoder // TCP port -> matching decoders
 	udpByPort   map[uint16][]Decoder // UDP port -> matching decoders

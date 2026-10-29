@@ -59,9 +59,12 @@ const (
 	Conflict  Coverage = "conflict"
 	Midstream Coverage = "midstream/no-SYN"
 	Truncated Coverage = "truncated"
+	Closed    Coverage = "closed"
 )
 
 type Budgets struct {
+	// Protocols limits probing; nil enables all profiles, an empty slice enables none.
+	Protocols         []Protocol
 	BytesPerDirection int
 	PendingRanges     int
 	Arrivals          int
@@ -72,7 +75,7 @@ type Budgets struct {
 }
 
 func DefaultBudgets() Budgets {
-	return Budgets{1024, 8, 16, 5 * time.Second, 4, 4096, 16 << 20}
+	return Budgets{BytesPerDirection: 1024, PendingRanges: 8, Arrivals: 16, Duration: 5 * time.Second, UDPDatagrams: 4, Entries: 4096, ChargedBytes: 16 << 20}
 }
 
 // Key is an opaque caller-assigned connection incarnation identity.
@@ -106,11 +109,12 @@ type Decision struct {
 // except Overflow, which counts refused admissions or byte-growth attempts.
 type Counters struct {
 	Candidates, Confirms, Rejects, Ambiguity, Overflow uint64
-	Incomplete                                         [5]uint64 // Budget, Timeout, Conflict, Midstream, Truncated
+	Incomplete                                         [6]uint64 // Budget, Timeout, Conflict, Midstream, Truncated, Closed
 }
 
 // Datagram refers to a whole UDP message in Replay.Bytes[Direction].
 type Datagram struct {
+	order     uint64 // table-wide ingestion order, preserved through adoption
 	Direction uint8
 	Range     Range
 	Length    int // original datagram length; may exceed Range length for an incomplete clipped replay
@@ -128,8 +132,11 @@ type Segment struct {
 // all already-observed out-of-order bytes. UDP boundaries must be honored. The
 // table no longer charges these arrays after Take.
 type Replay struct {
-	Bytes     [2][]byte
-	Sequence  [2]uint32
-	Pending   [2][]Segment
-	Datagrams []Datagram
+	// TriggerRetained reports that the entire last Observe payload was admitted.
+	// False means no caller may treat its missing bytes as replayed.
+	TriggerRetained bool
+	Bytes           [2][]byte
+	Sequence        [2]uint32
+	Pending         [2][]Segment
+	Datagrams       []Datagram
 }

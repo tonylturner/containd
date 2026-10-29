@@ -53,6 +53,15 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	if state != nil && state.Key.Proto == 17 && (state.Key.SrcPort == ics.CIPImplicitPort || state.Key.DstPort == ics.CIPImplicitPort) {
 		return []dpi.Event{ioEvent(state, pkt.Payload)}, nil
 	}
+	return d.OnProtocolPacket(state, pkt)
+}
+
+// OnProtocolPacket decodes ENIP encapsulation regardless of endpoint ports.
+// Observation bindings must never select the UDP/2222 implicit I/O layer.
+func (d *Decoder) OnProtocolPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Event, error) {
+	if pkt == nil {
+		return nil, nil
+	}
 	if len(pkt.Payload) == 0 && (state == nil || state.Key.Proto != 17) {
 		return nil, nil
 	}

@@ -9,7 +9,8 @@
 // entire datagram. Poll or Sweep applies deadlines when traffic is idle: from
 // Open for SYN-only entries, and from first payload thereafter. Sweep returns
 // newly expired keys; callers Release them after consuming timeout decisions.
-// Close, tuple reuse and reconfiguration also require Release.
+// Close/EOF uses Finish before Release; tuple reuse and reconfiguration also
+// require Release.
 //
 // A unique confirmed Decision can bind a decoder, but never authorizes traffic.
 // Expected records registry port expectations independently of content identity.
@@ -22,8 +23,12 @@
 // functions do not establish client/server roles; callers use TCP SYN metadata.
 //
 // Take transfers retained storage once, and leaves terminal metadata cached
-// until Release. Do not submit the triggering arrival a second time: it is
-// already in Replay. Replay.Bytes are contiguous directional TCP prefixes;
+// until Release. For a confirmation the entire triggering payload is already
+// in Replay; never submit it twice. Replay.TriggerRetained makes failed admission explicit:
+// deadline, truncation, missing SYN, conflict and allocation refusal can end an
+// entry without retaining the triggering payload; clipping retains only its
+// admitted prefix. None of those outcomes can bind a decoder. Replay.Bytes
+// are contiguous directional TCP prefixes;
 // Replay.Sequence and Replay.Pending preserve origins and out-of-order bytes for
 // the caller's bound stream reassembler. For UDP, replay each Datagram boundary
 // independently. Oversized arrivals retain only their budgeted prefix for a

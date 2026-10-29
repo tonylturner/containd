@@ -11,17 +11,19 @@ import (
 )
 
 type entry struct {
-	meta      Meta
-	prefixes  [2]prefix
-	datagrams []Datagram
-	opened    time.Time
-	first     time.Time
-	started   bool
-	arrivals  int
-	decision  Decision
-	taken     bool
-	candidate bool
-	ambiguous bool
+	meta            Meta
+	prefixes        [2]prefix
+	datagrams       []Datagram
+	opened          time.Time
+	first           time.Time
+	started         bool
+	arrivals        int
+	decision        Decision
+	taken           bool
+	candidate       bool
+	ambiguous       bool
+	triggerRetained bool
+	terminalOrder   uint64
 }
 
 // EntryCharge includes the inline entry, key and a conservative 128-byte map
@@ -35,6 +37,7 @@ type Table struct {
 	entries map[Key]*entry
 	charged int
 	counts  Counters
+	serial  uint64
 }
 
 // NewTable requires positive budgets and an injected monotonic ingestion clock.
@@ -43,6 +46,20 @@ func NewTable(b Budgets, now func() time.Time) (*Table, error) {
 	if now == nil || b.BytesPerDirection <= 0 || b.PendingRanges < 0 || b.Arrivals <= 0 ||
 		b.Duration <= 0 || b.UDPDatagrams <= 0 || b.Entries <= 0 || b.ChargedBytes < EntryCharge {
 		return nil, fmt.Errorf("invalid identification budgets or clock")
+	}
+	if b.Protocols != nil {
+		enabled := make(map[Protocol]bool)
+		for _, p := range b.Protocols {
+			valid := false
+			for _, known := range protocols {
+				valid = valid || p == known
+			}
+			if !valid || enabled[p] {
+				return nil, fmt.Errorf("invalid enabled protocol %q", p)
+			}
+			enabled[p] = true
+		}
+		b.Protocols = append([]Protocol{}, b.Protocols...)
 	}
 	// Ensure capacity arithmetic cannot overflow and one allocation can fit.
 	if b.BytesPerDirection > b.ChargedBytes ||
@@ -93,6 +110,7 @@ func (t *Table) Observe(key Key, a Arrival) (Decision, bool) {
 	if terminal(e.decision.State) {
 		return e.decision, true
 	}
+	e.triggerRetained = false
 	if t.expire(e, t.now()) {
 		return e.decision, true
 	}
@@ -153,10 +171,12 @@ func (t *Table) Observe(key Key, a Arrival) (Decision, bool) {
 	if e.meta.Transport == ics.UDP {
 		start := p.length
 		p.length += copy(p.data[start:], payload)
-		e.datagrams = append(e.datagrams, Datagram{a.Direction, Range{start, p.length}, len(a.Payload)})
+		t.serial++
+		e.datagrams = append(e.datagrams, Datagram{order: t.serial, Direction: a.Direction, Range: Range{start, p.length}, Length: len(a.Payload)})
 	} else if len(payload) > 0 {
 		changed, coverage = p.add(sequence, payload, t.budgets.PendingRanges)
 	}
+	e.triggerRetained = coverage == "" && !clipped
 	if coverage != "" {
 		t.finish(e, coverage)
 	} else if clipped {
@@ -216,6 +236,9 @@ func (t *Table) allocate(e *entry, p *prefix) bool {
 func (t *Table) decide(e *entry, complete bool) {
 	active, confirmed, waiting := 0, 0, false
 	for i, p := range protocols {
+		if !t.enabled(p) {
+			continue
+		}
 		var r Result
 		if e.meta.Transport == ics.UDP {
 			r = udpResult(e, p)
@@ -251,12 +274,14 @@ func (t *Table) decide(e *entry, complete bool) {
 		if confirmed == 1 && complete {
 			e.decision.State = Confirmed
 			t.counts.Confirms++
+			t.markTerminal(e)
 		}
 	case waiting:
 		e.decision.State, e.decision.Protocol = NeedMore, ""
 	default:
 		e.decision.State, e.decision.Protocol = Reject, ""
 		t.counts.Rejects++
+		t.markTerminal(e)
 	}
 }
 
@@ -326,7 +351,8 @@ func datagramBytes(e *entry, d Datagram) []byte {
 
 func (t *Table) finish(e *entry, reason Coverage) {
 	e.decision.State, e.decision.Coverage = Incomplete, reason
-	for i, r := range [...]Coverage{Budget, Timeout, Conflict, Midstream, Truncated} {
+	t.markTerminal(e)
+	for i, r := range [...]Coverage{Budget, Timeout, Conflict, Midstream, Truncated, Closed} {
 		if r == reason {
 			t.counts.Incomplete[i]++
 		}
@@ -375,7 +401,7 @@ func (t *Table) Take(key Key) (Decision, Replay, bool) {
 	if !ok || e.taken || !terminal(e.decision.State) {
 		return Decision{}, Replay{}, false
 	}
-	replay := Replay{Datagrams: e.datagrams}
+	replay := Replay{Datagrams: e.datagrams, TriggerRetained: e.triggerRetained}
 	t.charged -= retainedCharge(e)
 	e.datagrams = nil
 	for i := range e.prefixes {
@@ -413,3 +439,53 @@ func (t *Table) Release(key Key) {
 
 func (t *Table) Counters() Counters          { return t.counts }
 func (t *Table) Usage() (entries, bytes int) { return len(t.entries), t.charged }
+
+func (t *Table) enabled(p Protocol) bool {
+	if t.budgets.Protocols == nil {
+		return true
+	}
+	for _, enabled := range t.budgets.Protocols {
+		if p == enabled {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *Table) markTerminal(e *entry) {
+	if e.terminalOrder == 0 {
+		t.serial++
+		e.terminalOrder = t.serial
+	}
+}
+
+// Finish finalizes pending evidence at close/EOF. Candidates and directional
+// results are retained; a provisional ambiguity never becomes a binding.
+func (t *Table) Finish(key Key) (Decision, bool) {
+	e, ok := t.entries[key]
+	if !ok {
+		return Decision{}, false
+	}
+	if !terminal(e.decision.State) {
+		t.finish(e, Closed)
+	}
+	return e.decision, true
+}
+
+// Abort finalizes pending evidence on a caller-detected coverage failure.
+// Terminal evidence is immutable. Invalid reasons are refused.
+func (t *Table) Abort(key Key, reason Coverage) (Decision, bool) {
+	switch reason {
+	case Budget, Timeout, Conflict, Midstream, Truncated, Closed:
+	default:
+		return Decision{}, false
+	}
+	e, ok := t.entries[key]
+	if !ok {
+		return Decision{}, false
+	}
+	if !terminal(e.decision.State) {
+		t.finish(e, reason)
+	}
+	return e.decision, true
+}
