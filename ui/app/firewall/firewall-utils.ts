@@ -58,10 +58,10 @@ export const ICS_PROTOCOLS: Record<string, ICSProtoMeta> = {
     fcLabel: "CIP service codes",
     fcPlaceholder: "0x4C, 0x4D, 0x52",
     fcHelp:
-      "0x01=Get Attributes All, 0x02=Set Attributes All, 0x0E=Get Attribute Single, 0x10=Set Attribute Single, 0x4C=Read Tag, 0x4D=Write Tag, 0x4E=Read Modify Write, 0x52=Multiple Service Packet, 0x4F=Read Tag Fragmented, 0x53=Write Tag Fragmented",
+      "Common codes: 0x01=Get Attributes All, 0x02=Set Attributes All, 0x0A=Multiple Service Packet, 0x0D=Apply Attributes, 0x0E=Get Attribute Single, 0x10=Set Attribute Single, 0x18=Get Member, 0x19=Set Member. Object-specific codes depend on class; for Logix tags, 0x4C=Read Tag, 0x4D=Write Tag, 0x4E=Read Modify Write, 0x52=Read Tag Fragmented, 0x53=Write Tag Fragmented.",
     showObjectClasses: true,
     notes:
-      "CIP uses an object model: Object Class identifies the type (0x01=Identity, 0x02=Message Router, 0x04=Assembly, 0x66=Connection Manager). Multiple Service Packet (0x52) requests are unpacked into individual services for inspection.",
+      "CIP uses an object model: Object Class identifies the type (0x01=Identity, 0x02=Message Router, 0x04=Assembly, 0x06=Connection Manager). Multiple Service Packet (0x0A) children are inspected individually; class 0x06 Unconnected Send (0x52) bodies are not decoded.",
   },
 };
 

@@ -224,6 +224,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traffic. Missing connection evidence reports correlation unavailable instead
   of an unmatched-reply violation; inventory and learning use verified logical
   client/backend roles without changing wire telemetry or policy addresses.
+- CIP read-only rules no longer classify Apply Attributes, Set Member,
+  connection controls or class-specific mutations as reads. Classification
+  uses the request target and validates supported read bodies; unknown
+  operations and uncorrelated replies have no read/write category. The CIP
+  monitor template uses read-only/write-only predicates instead of unsafe
+  service-code lists. Previously saved template rules require replacement.
+- Protocol read counters require explicit read evidence instead of treating
+  every non-write event as a read. CIP learning uses decoded target-aware
+  service names and excludes requests without a known access category.
+- Modbus and DNP3 read-only rules match only known reads. Unknown and
+  vendor function codes, unknown Modbus diagnostic sub-functions, MEI types
+  other than 14, Modbus Write File Record (FC 21), and DNP3 freeze,
+  initialize, start, unsolicited, assign-class, time, file, configuration and
+  authentication functions no longer count as reads. Unknown operations omit
+  `is_write`. The Modbus read-only template also denies FC 21, and the DNP3
+  example template describes its Write and Enable Unsolicited allowances.
 - Modbus exception replies now complete their request's transaction, so an
   exception no longer leaves the transaction pending, and an exception with
   no prior request is reported like an unmatched response.

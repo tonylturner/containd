@@ -229,12 +229,15 @@ func checkCaptureOracle(t *testing.T, f corpus.Fixture, steps []corpus.Step, wan
 			}
 		}
 		fc := expected["function_code"]
-		write := slices.Contains([]uint16{5, 6, 15, 16, 22, 23}, fc)
+		write := slices.Contains([]uint16{5, 6, 15, 16, 21, 22, 23}, fc)
+		known := write || slices.Contains([]uint16{1, 2, 3, 4, 7, 11, 12, 17, 20, 24}, fc)
 		if fc == 8 && kind != "exception" {
 			write = slices.Contains([]uint16{1, 3, 4, 10, 20}, expected["sub_function"])
+			known = write || slices.Contains([]uint16{0, 2, 11, 12, 13, 14, 15, 16, 17, 18}, expected["sub_function"])
 		}
-		if ev.Attributes["is_write"] != write {
-			t.Fatalf("frame %d: write=%v want=%v", row.Frame, ev.Attributes["is_write"], write)
+		gotWrite, hasWrite := eventfields.Bool(ev.Attributes, eventfields.KeyIsWrite)
+		if hasWrite != known || known && gotWrite != write {
+			t.Fatalf("frame %d: write=%v/%v want=%v/%v", row.Frame, gotWrite, hasWrite, write, known)
 		}
 		checkOracleSpans(t, ev, expected, wants.Conformance[frame])
 		if ev.Attributes["raw_hex"] != row.Fields["tcp.payload"] {

@@ -14,23 +14,24 @@ import (
 func init() {
 	register(Template{
 		Name:        "modbus-read-only",
-		Description: "Modbus read-only – allow read function codes (FC 1-4), deny all write operations",
+		Description: "Modbus read-only – allow read function codes (FC 1-4), deny listed write function codes",
 		Rules:       ModbusReadOnly(),
 	})
 	register(Template{
 		Name:        "dnp3-secure-operations",
-		Description: "DNP3 secure operations – allow normal reads, deny dangerous function codes (restart, stop)",
+		Description: "DNP3 example – allow read, write and enable unsolicited; deny restart and stop",
 		Rules:       DNP3SecureOperations(),
 	})
 	register(Template{
 		Name:        "cip-monitor-only",
-		Description: "CIP/EtherNet-IP monitor-only – allow read services, deny writes and control commands",
+		Description: "CIP/EtherNet-IP monitor-only – allow classified reads, deny classified writes and control commands",
 		Rules:       CIPMonitorOnly(),
 	})
 }
 
 // ModbusReadOnly returns rules that allow Modbus read function codes (1-4) and
-// deny write function codes (5, 6, 15, 16, 22, 23).
+// deny write function codes (5, 6, 15, 16, 21, 22, 23). Other functions,
+// including diagnostics and private extensions, require a default-deny policy.
 //
 // Log:true is set on every rule so the operator has visibility into both
 // what the deny rule would block AND what the allow rule actually passes —
@@ -54,11 +55,11 @@ func ModbusReadOnly() []config.Rule {
 		},
 		{
 			ID:          "tpl-modbus-deny-writes",
-			Description: "Deny Modbus write operations (FC 5: Write Single Coil, FC 6: Write Single Register, FC 15: Write Multiple Coils, FC 16: Write Multiple Registers, FC 22: Mask Write Register, FC 23: Read/Write Multiple Registers)",
+			Description: "Deny Modbus write operations (FC 5: Write Single Coil, FC 6: Write Single Register, FC 15: Write Multiple Coils, FC 16: Write Multiple Registers, FC 21: Write File Record, FC 22: Mask Write Register, FC 23: Read/Write Multiple Registers)",
 			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.ModbusPort)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "modbus",
-				FunctionCode: []uint8{5, 6, 15, 16, 22, 23},
+				FunctionCode: []uint8{5, 6, 15, 16, 21, 22, 23},
 			},
 			Log:    true,
 			Action: config.ActionDeny,
@@ -86,13 +87,13 @@ func ModbusRegisterGuard(allowedRanges []string) []config.Rule {
 	return rules
 }
 
-// DNP3SecureOperations returns rules that allow safe DNP3 function codes and
-// deny dangerous ones (restart, stop application).
+// DNP3SecureOperations returns an example allowing read, write and enable
+// unsolicited, while denying restart and stop application. It is not read-only.
 func DNP3SecureOperations() []config.Rule {
 	return []config.Rule{
 		{
 			ID:          "tpl-dnp3-allow-reads",
-			Description: "Allow DNP3 safe operations (FC 1: Read, FC 2: Write for responses, FC 20: File Transport)",
+			Description: "Allow DNP3 operations (FC 1: Read, FC 2: Write, FC 20: Enable Unsolicited); not read-only",
 			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.DNP3Port)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "dnp3",
@@ -121,22 +122,22 @@ func CIPMonitorOnly() []config.Rule {
 	return []config.Rule{
 		{
 			ID:          "tpl-cip-allow-reads",
-			Description: "Allow CIP read services (0x01: Get_Attributes_All, 0x03: Get_Attribute_List, 0x0D: Get_Attribute_Single, 0x0E: Get_Member, 0x4C: Read_Tag, 0x4E: Read_Tag_Fragmented)",
+			Description: "Allow CIP requests classified as reads for their decoded target",
 			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.CIPPort)}},
 			ICS: config.ICSPredicate{
-				Protocol:     "cip",
-				FunctionCode: []uint8{0x01, 0x03, 0x0D, 0x0E, 0x4C, 0x4E},
+				Protocol: "cip",
+				ReadOnly: true,
 			},
 			Log:    true,
 			Action: config.ActionAllow,
 		},
 		{
 			ID:          "tpl-cip-deny-write-control",
-			Description: "Deny CIP write and control services (0x05: Reset, 0x06: Start, 0x07: Stop, 0x4D: Write_Tag, 0x4F: Write_Tag_Fragmented)",
+			Description: "Deny CIP requests classified as writes or control operations",
 			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.CIPPort)}},
 			ICS: config.ICSPredicate{
-				Protocol:     "cip",
-				FunctionCode: []uint8{0x05, 0x06, 0x07, 0x4D, 0x4F},
+				Protocol:  "cip",
+				WriteOnly: true,
 			},
 			Log:    true,
 			Action: config.ActionDeny,

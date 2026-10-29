@@ -12,16 +12,16 @@ import (
 )
 
 // cipStreamRead is a SendRRData Read_Tag with a null address item and an
-// unconnected data item, addressed to object class 4.
+// unconnected data item, addressed to a Logix symbolic tag with one element.
 func cipStreamRead() []byte {
-	raw := make([]byte, 44)
+	raw := make([]byte, 48)
 	binary.LittleEndian.PutUint16(raw[0:2], 0x6f)
-	binary.LittleEndian.PutUint16(raw[2:4], 20)
+	binary.LittleEndian.PutUint16(raw[2:4], 24)
 	binary.LittleEndian.PutUint32(raw[4:8], 1)
 	binary.LittleEndian.PutUint16(raw[30:32], 2)
 	binary.LittleEndian.PutUint16(raw[36:38], 0xb2)
-	binary.LittleEndian.PutUint16(raw[38:40], 4)
-	copy(raw[40:], []byte{0x4c, 1, 0x20, 4})
+	binary.LittleEndian.PutUint16(raw[38:40], 8)
+	copy(raw[40:], []byte{0x4c, 2, 0x91, 2, 'T', 'G', 1, 0})
 	return raw
 }
 

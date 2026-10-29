@@ -97,7 +97,7 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     fcLabel: "Service codes",
     fcPlaceholder: "76, 77",
     fcHelp:
-      "CIP service codes (0x0E=Get_Attribute, 0x10=Set_Attribute, 0x4C/76=Read_Tag, 0x4D/77=Write_Tag, 0x52=Unconnected_Send).",
+      "Common CIP codes: 0x0A=Multiple_Service_Packet, 0x0D=Apply_Attributes, 0x0E=Get_Attribute_Single, 0x10=Set_Attribute_Single, 0x18=Get_Member, 0x19=Set_Member. Object-specific codes depend on class: 0x4C/76 is Read_Tag for Logix tags; 0x52 is Logix Read_Tag_Fragmented or class 0x06 Unconnected_Send.",
   },
 };
 

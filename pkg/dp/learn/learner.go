@@ -14,7 +14,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
-	"github.com/tonylturner/containd/pkg/dp/ics/cip"
 	"github.com/tonylturner/containd/pkg/dp/ics/dnp3"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
@@ -313,7 +312,10 @@ func learnableTupleForEvent(proto, srcIP, dstIP string, ev dpi.Event) (learnedTu
 		if !ok {
 			return learnedTuple{}, nil, false
 		}
-		if strings.HasPrefix(cip.ServiceName(serviceCode), "Unknown(") {
+		// Projection is the authority for target-specific service identity.
+		name, named := eventfields.String(ev.Attributes, "service_name")
+		_, classified := eventfields.Bool(ev.Attributes, eventfields.KeyIsWrite)
+		if !named || name == "" || strings.HasPrefix(name, "Unknown(") || !classified {
 			return learnedTuple{}, nil, false
 		}
 		if _, present := ev.Attributes["object_class"]; present {

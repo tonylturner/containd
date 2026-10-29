@@ -3,7 +3,6 @@ package cip
 
 import (
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -14,13 +13,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
-
-func messageErrorCode(err error) string {
-	if errors.Is(err, ErrPathTruncated) {
-		return "cip.epath_truncated"
-	}
-	return "cip.message_short"
-}
 
 func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 	attrs := map[string]any{
@@ -63,7 +55,7 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 				attrs["connected_sequence"] = *cpf.ConnectedSequence
 			}
 			msg, err := explicit.Message, explicit.MessageError
-			if err != nil {
+			if err != nil && msg == nil {
 				addFinding(attrs, messageErrorCode(err))
 			}
 			if msg != nil {
@@ -97,9 +89,6 @@ func newEvent(state *flow.State, kind string, attrs map[string]any) dpi.Event {
 func projectMessage(state *flow.State, envelope map[string]any, msg *CIPMessage, msp *MSPResult, path []uint16) []dpi.Event {
 	attrs := maps.Clone(envelope)
 	attrs["service_code"], attrs["function_code"], attrs["service_name"] = msg.ServiceCode, msg.ServiceCode, msg.ServiceName
-	if IsReadService(msg.ServiceCode) || IsWriteService(msg.ServiceCode) || IsControlService(msg.ServiceCode) {
-		attrs["is_write"], attrs["is_control"] = IsWriteService(msg.ServiceCode), IsControlService(msg.ServiceCode)
-	}
 	if len(path) != 0 {
 		attrs["msp"], attrs["msp_index"], attrs["msp_index_path"] = true, path[len(path)-1], slices.Clone(path)
 	}
@@ -123,6 +112,18 @@ func projectMessage(state *flow.State, envelope map[string]any, msg *CIPMessage,
 		}
 	}
 	addPathFields(msg.Path, attrs)
+	category := Classify(msg)
+	for _, key := range []string{eventfields.KeyConformance, eventfields.KeyUndecoded} {
+		if codes, _ := eventfields.Strings(attrs, key); len(codes) != 0 {
+			category = AccessUnknown
+		}
+	}
+	switch category {
+	case AccessRead:
+		attrs["is_write"], attrs["is_control"] = false, false
+	case AccessWrite, AccessControl:
+		attrs["is_write"], attrs["is_control"] = true, category == AccessControl
+	}
 	events := []dpi.Event{newEvent(state, kind, attrs)}
 	if msp == nil {
 

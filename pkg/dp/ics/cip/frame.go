@@ -88,50 +88,23 @@ var commandNames = map[uint16]string{
 	0x0073: "Cancel",
 }
 
-// serviceNames maps CIP service codes to names.
-var serviceNames = map[uint8]string{
-	0x01: "Get_Attributes_All",
-	0x02: "Set_Attributes_All",
-	0x03: "Get_Attribute_List",
-	0x04: "Set_Attribute_List",
-	0x05: "Reset",
-	0x06: "Start",
-	0x07: "Stop",
-	0x08: "Create",
-	0x09: "Delete",
-	0x0A: "Multiple_Service_Packet",
-	0x0B: "Apply_Attributes",
-	0x0D: "Get_Attribute_Single",
-	0x0E: "Get_Attribute_Single", // alias kept for backward compat
-	0x10: "Set_Attribute_Single",
-	0x14: "Find_Next_Object",
-	0x15: "Error_Response",
-	0x16: "Save",
-	0x17: "Restore",
-	0x18: "No_Operation",
-	0x19: "Get_Member",
-	0x1A: "Set_Member",
-	0x4B: "Execute_PCCC",
-	0x4C: "Read_Tag",
-	0x4D: "Write_Tag",
-	0x4E: "Read_Tag_Fragmented",
-	0x4F: "Write_Tag_Fragmented",
-	0x52: "Read_Modify_Write_Tag",
-	0x53: "Forward_Close",
-	0x54: "Forward_Open",
-	0x5B: "Get_Instance_Attribute_List",
-}
-
 // objectClassNames maps CIP object class IDs to names.
 var objectClassNames = map[uint16]string{
 	0x01: "Identity",
 	0x02: "Message_Router",
 	0x04: "Assembly",
 	0x06: "Connection_Manager",
-	0x66: "EtherNet_Link",
-	0x67: "QoS",
-	0x68: "TCP_IP_Interface",
-	0xAC: "Program",
+	0x37: "File",
+	0x44: "Modbus",
+	0x47: "Device_Level_Ring",
+	0x48: "QoS",
+	0x67: "PCCC",
+	0x6B: "Symbol",
+	0x6C: "Template",
+	0xAC: "Logix_Controller_Metadata",
+	0xF3: "Connection_Configuration",
+	0xF5: "TCP_IP_Interface",
+	0xF6: "EtherNet_Link",
 }
 
 // ObjectClassName returns a human-readable name for a CIP object class ID.
@@ -148,51 +121,6 @@ func CommandName(cmd uint16) string {
 		return name
 	}
 	return fmt.Sprintf("Unknown(0x%04X)", cmd)
-}
-
-// ServiceName returns the human-readable name for a CIP service code.
-// The response bit (0x80) is masked off before lookup.
-func ServiceName(code uint8) string {
-	base := code & 0x7F
-	if name, ok := serviceNames[base]; ok {
-		return name
-	}
-	return fmt.Sprintf("Unknown(0x%02X)", base)
-}
-
-// IsReadService returns true for CIP service codes classified as read operations.
-func IsReadService(code uint8) bool {
-	base := code & 0x7F
-	switch base {
-	case 0x01, 0x03, 0x0D, 0x0E, 0x14, 0x19, 0x4C, 0x4E, 0x5B:
-		return true
-	default:
-		return false
-	}
-}
-
-// IsWriteService returns true for CIP service codes classified as write/control operations.
-func IsWriteService(code uint8) bool {
-	base := code & 0x7F
-	switch base {
-	case 0x02, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B,
-		0x10, 0x16, 0x1A,
-		0x4B, 0x4D, 0x4F, 0x52, 0x54:
-		return true
-	default:
-		return false
-	}
-}
-
-// IsControlService returns true for CIP connection management and critical service codes.
-func IsControlService(code uint8) bool {
-	base := code & 0x7F
-	switch base {
-	case 0x05, 0x06, 0x07, 0x08, 0x09, 0x54:
-		return true
-	default:
-		return false
-	}
 }
 
 // EPathResult holds the fully parsed contents of a CIP EPATH.
@@ -297,12 +225,17 @@ func ParseCIPMessage(data []byte) ExplicitResult {
 }
 
 // parseCIPFromItem parses the CIP service header from an item's data.
-func parseCIPFromItem(data []byte) (*CIPMessage, error) {
+func parseCIPFromItem(data []byte) (msg *CIPMessage, err error) {
+	defer func() {
+		if msg != nil && err != nil {
+			msg.Conformance = append(msg.Conformance, messageErrorCode(err))
+		}
+	}()
 	if len(data) == 0 {
 		return nil, ErrCIPTooShort
 	}
 	code := data[0] & 0x7f
-	msg := &CIPMessage{ServiceCode: code, ServiceName: ServiceName(code), IsResponse: data[0]&0x80 != 0}
+	msg = &CIPMessage{ServiceCode: code, ServiceName: ServiceName(code, nil), IsResponse: data[0]&0x80 != 0}
 	if msg.IsResponse {
 		r := &ResponseHeader{}
 		msg.Response = r
@@ -340,5 +273,13 @@ func parseCIPFromItem(data []byte) (*CIPMessage, error) {
 	}
 	msg.Path = data[2 : 2+pathBytes]
 	msg.Data = data[2+pathBytes:]
+	msg.ServiceName = ServiceName(code, msg.Path)
 	return msg, nil
+}
+
+func messageErrorCode(err error) string {
+	if errors.Is(err, ErrPathTruncated) {
+		return "cip.epath_truncated"
+	}
+	return "cip.message_short"
 }
