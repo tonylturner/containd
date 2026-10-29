@@ -1,8 +1,15 @@
 "use client";
 
+import { upsertRow } from "../../lib/config-editor";
+
+import type { ConfigFields } from "../../lib/use-config-editor";
+
+import { useConfigForm } from "../../lib/use-config-form";
+import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { api, isAdmin, type Zone, type ConduitMap } from "../../lib/api";
@@ -19,31 +26,35 @@ import { EmptyState } from "../../components/EmptyState";
 
 export default function ZonesPage() {
   const toast = useToast();
-  const [zones, setZones] = useState<Zone[]>([]);
+  const rowsDraft = useConfigEditor<Zone[]>([]);
+  const { cfg: zones, adoptConfig: adoptRows } = rowsDraft;
   const [conduits, setConduits] = useState<ConduitMap>({});
-  const [name, setName] = useState("");
-  const [alias, setAlias] = useState("");
-  const [description, setDescription] = useState("");
-  const [slTarget, setSlTarget] = useState(0);
+  const form = useConfigForm({ name: "", alias: "", description: "", slTarget: 0 });
+  const { refreshForm } = form;
+  const [name, setName] = form.field("name");
+  const [alias, setAlias] = form.field("alias");
+  const [description, setDescription] = form.field("description");
+  const [slTarget, setSlTarget] = form.field("slTarget");
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const confirm = useConfirm();
 
-  async function refresh() {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [list, conds] = await Promise.all([
       api.listZones(),
       api.getSecurityConduits(),
     ]);
-    setZones(list ?? []);
+    adoptRows(list ?? [], keepEdits);
     setConduits((conds as ConduitMap) ?? {});
-  }
+    refreshForm(list, keepEdits);
+  }, [refreshForm, adoptRows]);
 
   useConfigRefresh(refresh);
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
 
   async function onCreate() {
     setError(null);
@@ -53,6 +64,7 @@ export default function ZonesPage() {
     setNameError(nameErr);
     if (nameErr) return;
     setSaving(true);
+    const submitted = form.editor;
     const result = await api.createZone({
       name,
       alias: alias.trim() || undefined,
@@ -65,11 +77,8 @@ export default function ZonesPage() {
       return;
     }
     toast("Zone staged — commit to apply.", "success");
-    setName("");
-    setAlias("");
-    setDescription("");
-    setSlTarget(0);
     refresh();
+    form.acceptFields(submitted, ["name", "alias", "description", "slTarget"]);
   }
 
   async function onDelete(zoneName: string) {
@@ -93,11 +102,13 @@ export default function ZonesPage() {
 
   async function onUpdate(zoneName: string, patch: Partial<Zone>) {
     setError(null);
+    const submitted = rowsDraft.editor;
     const result = await api.updateZone(zoneName, patch);
     if (!result.ok) {
       setError(result.error);
       return;
     }
+    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, result.data, (row) => row.name), `${JSON.stringify(zoneName)}.`);
     toast("Zone staged — commit to apply.", "success");
     refresh();
   }
@@ -135,13 +146,14 @@ export default function ZonesPage() {
       title="Zones"
       actions={
         <button
-          onClick={refresh}
+          onClick={() => refresh({ keepEdits: false })}
           className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui hover:text-(--text)"
         >
           Refresh
         </button>
       }
     >
+      <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
       {!isAdmin() && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -250,6 +262,7 @@ export default function ZonesPage() {
                 )}
                 {table.data.map((z) => (
                   <ZoneRow
+                    draft={rowsDraft}
                     key={z.name}
                     zone={z}
                     conduits={conduits}
@@ -282,21 +295,23 @@ function SLBadge({ value, color }: { value: number; color: string }) {
 }
 
 function ZoneRow({
+  draft,
   zone,
   conduits,
   onDelete,
   onUpdate,
   canEdit,
 }: {
+  draft: ConfigFields;
   zone: Zone;
   conduits: ConduitMap;
   onDelete: (name: string) => void;
   onUpdate: (name: string, patch: Partial<Zone>) => void;
   canEdit: boolean;
 }) {
-  const [desc, setDesc] = useState(zone.description ?? "");
-  const [alias, setAlias] = useState(zone.alias ?? "");
-  const [editSlt, setEditSlt] = useState(zone.slTarget ?? 0);
+  const [desc, setDesc] = draft.field(`${JSON.stringify(zone.name)}.desc`, zone.description ?? "");
+  const [alias, setAlias] = draft.field(`${JSON.stringify(zone.name)}.alias`, zone.alias ?? "");
+  const [editSlt, setEditSlt] = draft.field(`${JSON.stringify(zone.name)}.editSlt`, zone.slTarget ?? 0);
   const [editing, setEditing] = useState(false);
 
   // Compute SL-A from conduit data

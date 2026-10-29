@@ -1,8 +1,10 @@
 "use client";
 
+import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Shell } from "../../components/Shell";
 import {
@@ -30,7 +32,8 @@ import { isRuleEnabled } from "./ids-shared";
 
 export default function IDSPage() {
   const canEdit = isAdmin();
-  const [ids, setIds] = useState<IDSConfig>({ enabled: false, rules: [] });
+  const draft = useConfigEditor<IDSConfig>({ enabled: false, rules: [] });
+  const { editor, cfg: ids, setCfg: setIds, adoptConfig, acceptConfig, text, setText, clearText } = draft;
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [editing, setEditing] = useState<IDSRule | null>(null);
@@ -38,22 +41,25 @@ export default function IDSPage() {
   const [activeTab, setActiveTab] = useState<"rules" | "import" | "export" | "sources" | "groups">("rules");
   const confirm = useConfirm();
 
-  async function refresh() {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [cfg, src] = await Promise.all([api.getIDS(), api.getIDSSources()]);
-    setIds(cfg ?? { enabled: false, rules: [] });
+    adoptConfig(cfg ?? { enabled: false, rules: [] }, keepEdits);
     setSources(src ?? []);
-  }
+    if (!keepEdits) setEditing(null);
+  }, [adoptConfig]);
 
   useConfigRefresh(refresh);
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh(); }, [refresh]);
 
   async function onSave() {
     if (!canEdit) return;
     setError(null);
+    // The modal is not submitted by the page Save button.
+    const submitted = { ...editor, raw: {} };
     const saved = await api.setIDS(ids);
     if (!saved.ok) { setError(saved.error || "Failed to save IDS rules."); return; }
-    setIds(saved.data);
+    acceptConfig(submitted, saved.data);
     flashSuccess("IDS rules staged — commit to apply.");
   }
 
@@ -123,7 +129,7 @@ export default function IDSPage() {
       title="IDS Rules"
       actions={
         <div className="flex items-center gap-2">
-          <button onClick={refresh} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui">
+          <button onClick={() => refresh({ keepEdits: false })} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui">
             Refresh
           </button>
           {canEdit && (
@@ -139,6 +145,7 @@ export default function IDSPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      <ConfigEditNotice superseded={editor.superseded} />
       {error && <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>}
       {success && <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{success}</div>}
 
@@ -174,11 +181,11 @@ export default function IDSPage() {
           onBulkDelete={onBulkDelete} onBulkToggle={onBulkToggle} onToggleRule={onToggleRule} />
       )}
       {activeTab === "groups" && (
-        <GroupsPanel groups={groups} rules={rules} canEdit={canEdit}
+        <GroupsPanel draft={draft} groups={groups} rules={rules} canEdit={canEdit}
           onUpdate={(g) => setIds((prev) => ({ ...prev, ruleGroups: g }))} />
       )}
       {activeTab === "import" && canEdit && (
-        <ImportPanel onImported={(msg) => { flashSuccess(msg); refresh(); setActiveTab("rules"); }} onError={setError} />
+        <ImportPanel draft={draft} onImported={(msg) => { flashSuccess(msg); refresh(); setActiveTab("rules"); }} onError={setError} />
       )}
       {activeTab === "import" && !canEdit && (
         <div className="py-8 text-center text-sm text-(--text-muted)">Import is disabled in view-only mode.</div>
@@ -187,8 +194,12 @@ export default function IDSPage() {
       {activeTab === "sources" && <SourcesCatalog sources={sources} />}
 
       {editing && canEdit && (
-        <EditRuleModal rule={editing} onClose={() => setEditing(null)} onSave={(newRule) => {
+        <EditRuleModal rule={editing}
+          text={text(`rule.${editing.id}`, JSON.stringify(editing, null, 2))}
+          setText={(value) => setText(`rule.${editing.id}`, value)}
+          onClose={() => { clearText(`rule.${editing.id}`); setEditing(null); }} onSave={(newRule) => {
           setIds((prev) => ({ ...prev, rules: (prev.rules ?? []).map((r) => r.id === editing.id ? newRule : r) }));
+          clearText(`rule.${editing.id}`);
           setEditing(null);
         }} />
       )}

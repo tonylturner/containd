@@ -1,8 +1,13 @@
 "use client";
 
+import { upsertRow } from "../../lib/config-editor";
+
+import { useConfigForm } from "../../lib/use-config-form";
+import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { api, isAdmin, type Interface, type InterfaceState, type Zone } from "../../lib/api";
@@ -20,18 +25,24 @@ import { zoneLabel } from "../../lib/zones";
 
 export default function InterfacesPage() {
   const [reservation, setReservation] = useState<ManagementReservation | null>(null);
-  const [ifaces, setIfaces] = useState<Interface[]>([]);
+  const rowsDraft = useConfigEditor<Interface[]>([]);
+  const { cfg: ifaces, adoptConfig: adoptRows } = rowsDraft;
   const [runtimeStatus, setRuntimeStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [state, setState] = useState<InterfaceState[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
-  const [name, setName] = useState("");
-  const [alias, setAlias] = useState("");
-  const [zone, setZone] = useState("");
-  const [ifaceType, setIfaceType] = useState<"physical" | "bridge" | "vlan">("physical");
-  const [members, setMembers] = useState("");
-  const [parent, setParent] = useState("");
-  const [vlanId, setVlanId] = useState("10");
-  const [addresses, setAddresses] = useState("");
+  const form = useConfigForm({
+    name: "", alias: "", zone: "", ifaceType: "physical" as "physical" | "bridge" | "vlan",
+    members: "", parent: "", vlanId: "10", addresses: "",
+  });
+  const { refreshForm } = form;
+  const [name, setName] = form.field("name");
+  const [alias, setAlias] = form.field("alias");
+  const [zone, setZone] = form.field("zone");
+  const [ifaceType, setIfaceType] = form.field("ifaceType");
+  const [members, setMembers] = form.field("members");
+  const [parent, setParent] = form.field("parent");
+  const [vlanId, setVlanId] = form.field("vlanId");
+  const [addresses, setAddresses] = form.field("addresses");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -69,19 +80,20 @@ export default function InterfacesPage() {
     },
   ];
 
-  async function refresh() {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [i, z, s, r] = await Promise.all([
       api.listInterfaces(),
       api.listZones(),
       api.listInterfaceState(),
       api.getManagementReservation(),
     ]);
+    refreshForm(i, keepEdits);
     setReservation(r);
-    setIfaces(i ?? []);
+    adoptRows(i ?? [], keepEdits);
     setZones(z ?? []);
     setState(s ?? []);
     setRuntimeStatus(s === null ? "unavailable" : "ready");
-  }
+  }, [refreshForm, adoptRows]);
 
   const unboundConfigured = useMemo(() => {
     const byDev = new Set(
@@ -105,7 +117,7 @@ export default function InterfacesPage() {
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
 
   async function onAutoAssign() {
     setError(null);
@@ -187,22 +199,16 @@ export default function InterfacesPage() {
               type: "physical",
               addresses: addrs,
             };
+    const submitted = form.editor;
     const created = await api.createInterface(payload);
     setSaving(false);
     if (!created.ok) {
       setError(created.error || "Failed to create interface.");
       return;
     }
-    setName("");
-    setAlias("");
-    setZone("");
-    setIfaceType("physical");
-    setMembers("");
-    setParent("");
-    setVlanId("10");
-    setAddresses("");
     await refresh();
     setNotice(created.warning ? `Interface staged — commit to apply. Warning: ${created.warning}` : "Interface staged — commit to apply.");
+    form.acceptFields(submitted, ["name", "alias", "zone", "ifaceType", "members", "parent", "vlanId", "addresses"]);
   }
 
   async function onDelete(ifaceName: string) {
@@ -228,13 +234,14 @@ export default function InterfacesPage() {
       const gwErr = validateIP(patch.gateway);
       if (gwErr) { setError(gwErr); return; }
     }
+    const submitted = rowsDraft.editor;
     const updated = await api.updateInterface(ifaceName, patch);
     if (!updated.ok) {
       setError(updated.error || "Failed to update interface.");
       return;
     }
     // Reflect candidate state; the separate OS state remains live until commit.
-    setIfaces((prev) => prev.map((i) => (i.name === ifaceName ? { ...i, ...updated.data } : i)));
+    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, updated.data, (row) => row.name), `${JSON.stringify(ifaceName)}.`);
     await refresh();
     setNotice(updated.warning ? `Interface staged — commit to apply. Warning: ${updated.warning}` : "Interface staged — commit to apply.");
   }
@@ -265,7 +272,7 @@ export default function InterfacesPage() {
             </>
           )}
           <button
-            onClick={refresh}
+            onClick={() => refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -307,6 +314,7 @@ export default function InterfacesPage() {
           <BootFaultStatus bootFault={reservation.bootFault} recovery={reservation.recovery} reserved={false} />
         </aside>
       )}
+      <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
       {!isAdmin() && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -321,7 +329,7 @@ export default function InterfacesPage() {
       {runtimeStatus === "unavailable" && (
         <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           <p>Interface runtime state unavailable — the engine could not be reached. Link and address state is unknown.</p>
-          <button onClick={refresh} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
+          <button onClick={() => refresh()} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
         </div>
       )}
       {runtimeStatus === "ready" && state.length === 0 && <p role="status" className="mb-4 text-sm text-(--text)">No OS interfaces reported.</p>}
@@ -481,6 +489,7 @@ export default function InterfacesPage() {
             )}
             {ifaces.map((i) => (
               <InterfaceRow
+                draft={rowsDraft}
                 key={i.name}
                 iface={i}
                 runtime={runtimeFor(i, state)}

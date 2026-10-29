@@ -1,5 +1,7 @@
 "use client";
 
+import type { ConfigFields } from "../../lib/use-config-editor";
+
 import { useMemo, useRef, useState } from "react";
 
 import { Card } from "../../components/Card";
@@ -14,18 +16,20 @@ import {
 } from "./ids-shared";
 
 export function GroupsPanel({
+  draft,
   groups,
   rules,
   canEdit,
   onUpdate,
 }: {
+  draft: ConfigFields;
   groups: RuleGroup[];
   rules: IDSRule[];
   canEdit: boolean;
   onUpdate: (g: RuleGroup[]) => void;
 }) {
-  const [name, setName] = useState("");
-  const [filter, setFilter] = useState("");
+  const [name, setName] = draft.field("group.name", "");
+  const [filter, setFilter] = draft.field("group.filter", "");
 
   const groupStats = useMemo(() => {
     const stats: Record<string, number> = {};
@@ -173,16 +177,18 @@ export function GroupsPanel({
 }
 
 export function ImportPanel({
+  draft,
   onImported,
   onError,
 }: {
+  draft: ConfigFields;
   onImported: (msg: string) => void;
   onError: (msg: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [format, setFormat] = useState("");
+  const [format, setFormat] = draft.field("import.format", "");
   const [importing, setImporting] = useState(false);
-  const [sigmaText, setSigmaText] = useState("");
+  const [sigmaText, setSigmaText] = draft.field("import.sigma", "");
   const [sigmaConverting, setSigmaConverting] = useState(false);
 
   async function onFileImport() {
@@ -212,14 +218,15 @@ export function ImportPanel({
     }
     setSigmaConverting(true);
     onError("");
-    const rule = await api.convertSigma(sigmaText);
+    const submitted = sigmaText;
+    const rule = await api.convertSigma(submitted);
     setSigmaConverting(false);
     if (!rule) {
       onError("Sigma conversion failed. Check YAML syntax.");
       return;
     }
     onImported(`Converted Sigma rule: ${rule.id}. Click Save to persist.`);
-    setSigmaText("");
+    setSigmaText((current) => current === submitted ? "" : current);
   }
 
   return (
@@ -400,14 +407,17 @@ export function SourcesCatalog({ sources }: { sources: IDSRuleSource[] }) {
 
 export function EditRuleModal({
   rule,
+  text,
+  setText,
   onClose,
   onSave,
 }: {
   rule: IDSRule;
+  text: string;
+  setText: (text: string) => void;
   onClose: () => void;
   onSave: (r: IDSRule) => void;
 }) {
-  const [text, setText] = useState(JSON.stringify(rule, null, 2));
   const [err, setErr] = useState<string | null>(null);
 
   function save() {

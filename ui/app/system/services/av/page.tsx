@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,7 +24,7 @@ const emptyICAPServer = { address: "", useTls: false, service: "" };
 export default function AVPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const [cfg, setCfg] = useState<AVConfig>({
+  const { editor, cfg, setCfg, adoptConfig, acceptConfig } = useConfigEditor<AVConfig>({
     enabled: false,
     mode: "clamav",
     failPolicy: "open",
@@ -43,14 +45,14 @@ export default function AVPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     setLoading(true);
     setRefreshError(null);
     try {
       const svc = await api.getServicesStatus();
       setStatus(svc?.av ?? null);
       const s = await api.getAV();
-      if (s) setCfg(s);
+      if (s) adoptConfig(s, keepEdits);
       const [zoneList, assetList] = await Promise.all([api.listZones(), api.listAssets()]);
       setZones(zoneList ?? []);
       setAssets(assetList ?? []);
@@ -66,7 +68,7 @@ export default function AVPage() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, adoptConfig]);
 
   useConfigRefresh(refresh);
 
@@ -87,6 +89,7 @@ export default function AVPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
+    const submitted = editor;
     // Ensure optional booleans are explicit so Go doesn't default omitted values to false.
     const payload: AVConfig = {
       ...cfg,
@@ -101,7 +104,7 @@ export default function AVPage() {
       failure: "Failed to save AV settings.",
     });
     if (!result) return;
-    if (result.ok) setCfg(result.data);
+    if (result.ok) acceptConfig(submitted, result.data);
     else setError(result.error);
   }
 
@@ -149,7 +152,7 @@ export default function AVPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={() => refresh()}
+            onClick={() => refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -184,6 +187,7 @@ export default function AVPage() {
         </div>
       }
     >
+      <ConfigEditNotice superseded={editor.superseded} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.

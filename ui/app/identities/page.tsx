@@ -1,5 +1,12 @@
 "use client";
 
+import { upsertRow } from "../../lib/config-editor";
+
+import type { ConfigFields } from "../../lib/use-config-editor";
+
+import { useConfigForm } from "../../lib/use-config-form";
+import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
+
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -43,15 +50,18 @@ export default function IdentitiesPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const canEdit = isAdmin();
-  const [bindings, setBindings] = useState<IdentityBinding[]>([]);
+  const rowsDraft = useConfigEditor<IdentityBinding[]>([]);
+  const { cfg: bindings, adoptConfig: adoptRows } = rowsDraft;
   const [rules, setRules] = useState<FirewallRule[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [ip, setIp] = useState("");
-  const [labels, setLabels] = useState("");
+  const form = useConfigForm({ ip: "", labels: "" });
+  const { refreshForm } = form;
+  const [ip, setIp] = form.field("ip");
+  const [labels, setLabels] = form.field("labels");
   const [saving, setSaving] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [res, ruleList] = await Promise.all([api.listIdentityBindings(), api.listFirewallRules()]);
     setRules(ruleList ?? []);
     if (!res.ok) {
@@ -59,8 +69,9 @@ export default function IdentitiesPage() {
       return;
     }
     setLoadError(null);
-    setBindings(res.data);
-  }, []);
+    adoptRows(res.data, keepEdits);
+    refreshForm(res.data, keepEdits);
+  }, [refreshForm, adoptRows]);
 
   useConfigRefresh(refresh);
   useEffect(() => {
@@ -69,11 +80,13 @@ export default function IdentitiesPage() {
 
   async function stage(binding: IdentityBinding): Promise<boolean> {
     setError(null);
+    const submitted = rowsDraft.editor;
     const res = await api.setIdentityBinding(binding);
     if (!res.ok) {
       setError(res.error);
       return false;
     }
+    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, res.data, (row) => row.ip), `${JSON.stringify(binding.ip)}.`);
     toast(res.warning ? `Binding staged — commit to apply. Warning: ${res.warning}` : "Binding staged — commit to apply.", "success");
     await refresh();
     return true;
@@ -86,12 +99,10 @@ export default function IdentitiesPage() {
       return;
     }
     setSaving(true);
+    const submitted = form.editor;
     const ok = await stage(checked.binding);
     setSaving(false);
-    if (ok) {
-      setIp("");
-      setLabels("");
-    }
+    if (ok) form.acceptFields(submitted, ["ip", "labels"]);
   }
 
   function onDelete(address: string) {
@@ -122,11 +133,12 @@ export default function IdentitiesPage() {
     <Shell
       title="Identity Bindings"
       actions={
-        <button onClick={refresh} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui">
+        <button onClick={() => refresh({ keepEdits: false })} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui">
           Refresh
         </button>
       }
     >
+      <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -192,7 +204,7 @@ export default function IdentitiesPage() {
                   </tr>
                 )}
                 {table.data.map((b) => (
-                  <BindingRow key={b.ip} binding={b} canEdit={canEdit} onStage={stage} onDelete={onDelete} onInvalid={setError} />
+                  <BindingRow draft={rowsDraft} key={b.ip} binding={b} canEdit={canEdit} onStage={stage} onDelete={onDelete} onInvalid={setError} />
                 ))}
               </tbody>
             </table>
@@ -206,12 +218,14 @@ export default function IdentitiesPage() {
 }
 
 function BindingRow({
+  draft,
   binding,
   canEdit,
   onStage,
   onDelete,
   onInvalid,
 }: {
+  draft: ConfigFields;
   binding: IdentityBinding;
   canEdit: boolean;
   onStage: (b: IdentityBinding) => Promise<boolean>;
@@ -219,7 +233,7 @@ function BindingRow({
   onInvalid: (error: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [labels, setLabels] = useState(binding.identities.join(", "));
+  const [labels, setLabels] = draft.field(`${JSON.stringify(binding.ip)}.labels`, binding.identities.join(", "));
 
   async function save() {
     const checked = bindingError(binding.ip, labels);

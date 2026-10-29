@@ -1,5 +1,8 @@
 "use client";
 
+import { useConfigForm } from "../../lib/use-config-form";
+import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import Image from "next/image";
@@ -40,7 +43,7 @@ export default function VPNPage() {
   const canEdit = isAdmin();
   const toast = useToast();
   const confirm = useConfirm();
-  const [cfg, setCfg] = useState(() => normalize(null));
+  const { editor, cfg, setCfg, adoptConfig, acceptConfig, text, setText } = useConfigEditor(() => normalize(null));
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +54,9 @@ export default function VPNPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [interfaces, setInterfaces] = useState<Interface[]>([]);
   const [ovpnClients, setOvpnClients] = useState<string[]>([]);
-  const [newClientName, setNewClientName] = useState<string>("");
+  const clientForm = useConfigForm({ name: "" });
+  const [newClientName, setNewClientName] = clientForm.field("name");
+  const { refreshForm: refreshClient } = clientForm;
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -109,12 +114,13 @@ export default function VPNPage() {
   }, [cfg.openvpn]);
 
   const refresh = useCallback(
-    async ({ silent = false }: { silent?: boolean } = {}) => {
+    async ({ silent = false, keepEdits = true }: { silent?: boolean; keepEdits?: boolean } = {}) => {
       setLoading(true);
       setError(null);
       try {
         const current = await api.getVPN();
-        setCfg(normalize(current));
+        adoptConfig(normalize(current), keepEdits);
+        refreshClient(current?.openvpn, keepEdits);
         const [states, zonesResp, ifacesResp] = await Promise.all([
           api.listInterfaceState(),
           api.listZones(),
@@ -158,7 +164,7 @@ export default function VPNPage() {
         setLastUpdated(new Date());
       }
     },
-    [toast],
+    [toast, adoptConfig, refreshClient],
   );
 
   useConfigRefresh(refresh);
@@ -175,7 +181,7 @@ export default function VPNPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
-  const peersText = useMemo(() => JSON.stringify(cfg.wireguard.peers ?? [], null, 2), [cfg.wireguard.peers]);
+  const peersText = text("peers", JSON.stringify(cfg.wireguard.peers ?? [], null, 2));
   const peerNameByKey = useMemo(() => {
     const out = new Map<string, string>();
     for (const p of cfg.wireguard.peers ?? []) {
@@ -200,6 +206,15 @@ export default function VPNPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
+    let peers;
+    try {
+      peers = JSON.parse(peersText);
+      if (!Array.isArray(peers)) throw new Error("Peers must be a JSON array.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Invalid peers JSON.");
+      return;
+    }
+    const submitted = editor;
     setSaveState("saving");
 
     // If using managed OpenVPN, ensure configPath is cleared so the backend prefers managed.
@@ -215,8 +230,14 @@ export default function VPNPage() {
       openvpn.server = openvpn.server ?? { ...defaultOpenVPNServer };
     }
 
+    if (openvpn.server) {
+      openvpn.server = { ...openvpn.server,
+        pushDNS: text("pushDNS", (openvpn.server.pushDNS ?? []).join(", ")).split(",").map((s) => s.trim()).filter(Boolean),
+        pushRoutes: text("pushRoutes", (openvpn.server.pushRoutes ?? []).join(", ")).split(",").map((s) => s.trim()).filter(Boolean),
+      };
+    }
     const saved = await api.setVPN({
-      wireguard: cfg.wireguard,
+      wireguard: { ...cfg.wireguard, peers },
       openvpn,
     });
     setSaveState(saved.ok ? "saved" : "error");
@@ -225,7 +246,7 @@ export default function VPNPage() {
       setError(msg);
       toast(msg, "error");
     } else {
-      setCfg(normalize(saved.data));
+      acceptConfig(submitted, normalize(saved.data));
       toast(saved.warning ? `VPN staged — commit to apply. Warning: ${saved.warning}` : "VPN staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
@@ -249,10 +270,7 @@ export default function VPNPage() {
       toast(res.warning ? `Profile staged — commit to apply. Warning: ${res.warning}` : "Profile staged — commit to apply.", "success");
       // Uploading a profile switches OpenVPN to "configPath" mode (advanced) and clears managed config.
       const next = normalize(res.data.vpn);
-      setCfg({
-        ...next,
-        openvpn: { ...next.openvpn, managed: undefined },
-      });
+      adoptConfig({ ...next, openvpn: { ...next.openvpn, managed: undefined } });
       setTimeout(() => setUploadState("idle"), 1500);
       // Refresh runtime badges (installed/running/last error) after upload.
       refresh({ silent: true });
@@ -266,7 +284,8 @@ export default function VPNPage() {
 
   async function createClient() {
     if (!canEdit) return;
-    const name = newClientName.trim();
+    const submitted = newClientName;
+    const name = submitted.trim();
     if (!name) return;
     setError(null);
     const created = await api.createOpenVPNClient(name);
@@ -276,7 +295,7 @@ export default function VPNPage() {
       toast(msg, "error");
       return;
     }
-    setNewClientName("");
+    setNewClientName((current) => current === submitted ? "" : current);
     const res = await api.listOpenVPNClients();
     setOvpnClients(res?.clients ?? []);
     toast(created.warning ? `Client created with warning: ${created.warning}` : "Client created", "success");
@@ -310,7 +329,7 @@ export default function VPNPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={() => refresh()}
+            onClick={() => refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -335,6 +354,7 @@ export default function VPNPage() {
         </div>
       }
     >
+      <ConfigEditNotice superseded={editor.superseded || clientForm.editor.superseded} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text) shadow-card">
           View-only mode: configuration changes are disabled.
@@ -528,14 +548,7 @@ export default function VPNPage() {
                 rows={8}
                 value={peersText}
                 disabled={!canEdit}
-                onChange={(e) => {
-                  try {
-                    const parsed = JSON.parse(e.target.value);
-                    setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, peers: Array.isArray(parsed) ? parsed : [] } }));
-                  } catch {
-                    // Keep text editing until valid JSON is entered.
-                  }
-                }}
+                onChange={(e) => setText("peers", e.target.value)}
                 className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
               />
             </div>
@@ -556,6 +569,8 @@ export default function VPNPage() {
           canEdit={canEdit}
           cfg={cfg}
           setCfg={setCfg}
+          text={text}
+          setText={setText}
           zones={zones}
           interfaceOptions={interfaceOptions}
           openvpnIssues={openvpnIssues}
