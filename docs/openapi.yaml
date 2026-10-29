@@ -377,8 +377,18 @@ components:
       properties:
         id: {type: integer, format: uint64}
         flowId: {type: string}
+        transportConnectionId:
+          type: string
+          description: Local transport connection incarnation established from verified O/R evidence; retained across later evidence failures. Directional flowId and wire endpoints are unchanged.
+        correlationStatus: {$ref: '#/components/schemas/TransportCorrelationStatus'}
         proto: {type: string}
-        kind: {type: string}
+        kind:
+          type: string
+          description: >-
+            Event kind. dpi.correlation.unavailable reports a dropped correlation observation
+            (queue_overflow), rate-limited to one event per second; carries wire endpoints,
+            flowId, protocol/transport hints and an existing transportConnectionId when known,
+            not decoded payload evidence. The queue_overflow counter counts every drop.
         attributes:
           type: object
           additionalProperties: true
@@ -416,6 +426,10 @@ components:
       type: object
       properties:
         flowId: {type: string}
+        transportConnectionId:
+          type: string
+          description: Shared transport identity without bidirectional regrouping; omitted only when retained events have differing nonempty IDs, not merely differing evidence status.
+        correlationStatus: {$ref: '#/components/schemas/TransportCorrelationStatus'}
         session_id:
           type: string
           description: >
@@ -1098,6 +1112,8 @@ components:
       properties:
         Attributes: {additionalProperties: {}, type: object}
         FlowID: {type: string}
+        transportConnectionId: {type: string, description: Local transport connection incarnation established from verified evidence and retained across later evidence failures; independent of FlowID and protocol session handles.}
+        correlationStatus: {$ref: '#/components/schemas/TransportCorrelationStatus'}
         Kind: {type: string}
         Proto: {type: string}
         Timestamp: {format: date-time, type: string}
@@ -2019,6 +2035,50 @@ components:
           description: >-
             Merged into the stored schedule; unspecified fields are kept. Null
             clears the schedule (required before changing a rule to TAG).
+    TransportCorrelationStatus:
+      type: string
+      enum: [resolved, wire, zone_unverified, unsupported_zone, unsupported_tuple, not_found, lookup_error, lookup_timeout, ambiguous, admission_timeout, cache_capacity, queue_overflow, mixed]
+      description: >-
+        Identity evidence, not proof of complete capture or delivery. wire means wire-only
+        correlation (including live NFQUEUE and PCAP), without live conntrack evidence.
+        mixed applies to flow rollups containing differing evidence. An issued ID remains
+        present when authority or lookup failure downgrades status.
+    TransportIdentityStatus:
+      type: object
+      properties:
+        zoneStatus: {type: string, enum: [verified, zone_unverified, unsupported_zone]}
+        zoneCheckedAt: {type: string, format: date-time}
+        zoneError: {type: string}
+        zoneSetters:
+          type: array
+          items:
+            type: object
+            properties:
+              family: {type: string}
+              table: {type: string}
+              chain: {type: string}
+              handle: {type: integer, format: uint64}
+        counters:
+          type: object
+          additionalProperties: {type: integer, format: uint64}
+          description: >-
+            Sparse cumulative counters; absent keys mean zero. Authority counters are zone_checks,
+            zone_read_errors, zone_setter_checks. Resolution counters are lookups, cache_hits,
+            resolved, not_found, lookup_error, lookup_timeout, ambiguous, unsupported_zone,
+            unsupported_tuple, zone_unverified. Admission/correlation counters are queue_overflow
+            (every drop), admission_timeout, cache_capacity, coverage_capacity (unindexed tuple
+            observations), coverage_index_reclaimed (expired unbound tuple histories evicted by
+            the flow sweep), canceled, correlation_unavailable (emitted anomalies). No worker retries.
+        modbus:
+          type: object
+          properties:
+            matched: {type: integer, format: uint64}
+            unmatched: {type: integer, format: uint64}
+            unavailable: {type: integer, format: uint64}
+            capacity: {type: integer, format: uint64}
+            expired: {type: integer, format: uint64}
+            pendingConnections: {type: integer}
+            pendingTransactions: {type: integer}
     EngineRulesetStatus:
       description: >-
         The installed ruleset. A failed apply leaves it installed and in force, so ruleset, snapshotVersion,
@@ -2032,6 +2092,7 @@ components:
         ruleset: {type: string, description: Compiled text of the installed ruleset; empty when none is installed, as with enforcement disabled.}
         snapshotVersion: {type: string, description: Version of the installed snapshot.}
         schedulePlanner: {$ref: '#/components/schemas/SchedulePlannerStatus'}
+        transportIdentity: {$ref: '#/components/schemas/TransportIdentityStatus'}
         icsCoverage:
           type: array
           items: {$ref: '#/components/schemas/ICSCoverageRule'}

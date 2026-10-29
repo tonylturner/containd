@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -31,6 +30,9 @@ func (w *worker) run(ctx context.Context) error {
 		return err
 	}
 	defer unix.Close(fd)
+	if err := unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_TIMESTAMPNS, 1); err != nil {
+		return fmt.Errorf("enable AF_PACKET receive timestamps: %w", err)
+	}
 	if err := unix.SetNonblock(fd, true); err != nil {
 		return err
 	}
@@ -47,11 +49,12 @@ func (w *worker) run(ctx context.Context) error {
 		})
 	}
 	buf := make([]byte, w.cfg.Snaplen)
+	oob := make([]byte, unix.CmsgSpace(afPacketTimespecSize))
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
-		// Poll, rather than a blocking Recvfrom, bounds cancellation latency
+		// Poll, rather than a blocking Recvmsg, bounds cancellation latency
 		// on a quiet interface to the 250ms poll timeout without a socket
 		// closer goroutine racing this worker's descriptor lifetime.
 		timeout := 250
@@ -66,7 +69,7 @@ func (w *worker) run(ctx context.Context) error {
 		if n == 0 || pollfds[0].Revents&unix.POLLIN == 0 {
 			continue
 		}
-		rn, from, err := unix.Recvfrom(fd, buf, 0)
+		rn, oobn, flags, from, err := unix.Recvmsg(fd, buf, oob, 0)
 		if err != nil {
 			if err == unix.EAGAIN || err == unix.EWOULDBLOCK || err == unix.EINTR {
 				continue
@@ -80,6 +83,7 @@ func (w *worker) run(ctx context.Context) error {
 		if !ok {
 			continue
 		}
+		pkt.Timestamp = afPacketReceiveTime(oob[:oobn], flags)
 		// AF_PACKET is observational: the decision is not applied.
 		_ = w.handler(pkt)
 	}
@@ -116,7 +120,6 @@ func decodePacket(iface string, data []byte) (Packet, bool) {
 	if !ok {
 		return Packet{}, false
 	}
-	pkt.Timestamp = time.Now().UTC()
 	pkt.Interface = iface
 	return pkt, true
 }

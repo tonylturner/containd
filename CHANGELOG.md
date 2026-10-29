@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restrict Write to time/IIN groups 50/80, and deny Save Configuration alongside
   restart and stop operations.
 
+- DPI events and directional flow summaries include a verified
+  `transportConnectionId` for locally tracked AF_PACKET TCP/UDP connections,
+  with correlation status and conntrack-zone authority health.
 - `services.av.scan` selects the traffic the scanning gate intercepts:
   include and exclude entries of directional zone pairs, destination ports
   and CIDRs, a download mode (`hold` or `stream_tail`) and the ICS-marked
@@ -233,6 +236,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Template previews display the generated rule's nested ICS protocol and codes.
   ICS rule listing and dashboard counts recognize all predicate fields, and the
   CLI accepts and displays CIP object classes.
+- Modbus transaction pairing separates connection incarnations, directions,
+  transaction IDs and unit IDs, including locally masqueraded AF_PACKET
+  traffic. Missing connection evidence reports correlation unavailable instead
+  of an unmatched-reply violation; inventory and learning use verified logical
+  client/backend roles without changing wire telemetry or policy addresses.
+  Unmatched-reply detection requires capture from the connection's opening SYN,
+  pauses for two quiet minutes after packet loss or an inspection bypass, and
+  resumes on its own; resolver admission is limited to industrial traffic and
+  bounded. NFQUEUE and PCAP evidence reports `correlationStatus: wire`.
 - CIP read-only rules no longer classify Apply Attributes, Set Member,
   connection controls or class-specific mutations as reads. Classification
   uses the request target and validates supported read bodies; unknown

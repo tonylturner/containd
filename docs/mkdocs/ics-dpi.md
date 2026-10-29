@@ -134,6 +134,133 @@ decide it, with an `iec104.unsupported_type` finding. Changing parsing applies
 to new decisions after the config push, not by resetting existing sessions
 solely because their parsing mode changed.
 
+## Transport identity and NAT
+
+Live AF_PACKET DPI events and their derived alerts carry an optional
+`transportConnectionId`. It identifies a locally tracked TCP/UDP connection
+incarnation across the original and reply conntrack tuples, including source
+port remapping. It is separate from the directional `flowId`, IEC 104
+`session_id` and CIP's numeric `connection_id`. Published IDs are never renamed.
+Events retain their observed wire addresses and ports; `/flows` remains
+directional and includes the shared transport ID rather than regrouping it.
+Existing IEC 104 `session_id` grouping is unchanged.
+If one directional rollup contains differing evidence or incarnations,
+`correlationStatus` is `mixed`, and differing transport IDs are omitted.
+
+`correlationStatus` describes identity evidence: `resolved`, `wire`,
+`zone_unverified`, `unsupported_zone`, `unsupported_tuple`, `not_found`,
+`lookup_error`, `lookup_timeout`, `ambiguous`, `admission_timeout`,
+`cache_capacity` or `queue_overflow`. Authority or lookup failures downgrade
+status without removing an issued ID or changing the incarnation's pairing
+key. A history without a public ID can adopt verified identity, including its
+pending requests; previously published events are not rewritten. PCAP and
+NFQUEUE report `wire`: they retain wire-connection pairing without claiming
+live conntrack evidence or querying it.
+Policy evaluation, protocol dispatch, wire resets and kernel deletion
+coordinates keep their existing address semantics. Arbitrary public-port
+DNAT does not enable decoding on that port.
+
+Modbus pending requests are keyed by connection incarnation, request
+direction, transaction ID and unit ID. Coverage requires observing the
+incarnation's opening SYN being admitted to inspection and correlation, not
+merely tracked as a wire packet or seen as a request. Excluded openers do not
+grant coverage. Deliberately bypassed packets extend the recovery timeout on an
+already-correlated incarnation, without broadening inspection or changing
+wire-based exclusions. An unknown reply with verified
+identity and complete coverage raises a protocol violation. Known pairs still
+match when capture began midstream or evidence is unavailable.
+Missing identity or capture coverage instead raises an
+`ids` anomaly with `anomaly_type: correlation_unavailable` and a
+`correlation_status` reason. These reasons also include `capture_incomplete`,
+`pending_capacity`, `pending_incomplete`, `wire_identity_missing` and
+`tuple_mismatch`. Pending state is capped at 4,096 connections and 256
+transactions per connection, expires transactions after two minutes, and is
+cleared on connection close or reuse. Correlation-unavailable anomalies are
+emitted at most once per incarnation, while unavailable observations continue
+to be counted. After an actual observation loss, unmatched
+claims re-arm only after a full two-minute quiet pairing timeout since the
+latest gap, and only if the opening SYN was captured. Thus transactions that
+could predate a gap cannot cause unmatched claims; detection is not disabled
+permanently.
+
+Only default conntrack zone zero is supported. The resolver reads
+`nft -j list ruleset` at startup, after containd's ruleset applications and
+reconciliations, and every five seconds. It includes all tables and families,
+including other applications' rules. Any `ct zone` assignment or xt `CT`
+target prevents zone-zero authority; read errors leave it unverified. Each
+read has a 500 ms deadline and runs in a separate goroutine, never blocking
+packet processing. Ruleset apply invalidates authority immediately and requests
+an asynchronous recheck after completion; each packet uses an immutable
+evidence snapshot. Routine successful reads preserve authority and cached
+identities while in flight. Errors or detected zone setters revoke authority.
+An evidence downgrade gates unmatched claims until evidence is verified again,
+but does not itself count as packet loss or start a recovery timeout.
+This is periodic namespace observation, not
+synchronization with external ruleset writers; an external change can take
+until the next check to be detected. Conntrack zones are not firewall
+interface policy zones.
+
+Only traffic selected for industrial DPI enters correlation admission; other
+traffic follows normal packet processing without a CT lookup.
+Capture admission never performs network I/O or waits for a lookup. One
+worker owns exact GETs, O/R aliases and correlation processing. Its 25 ms
+timestamp reorder window lets an earlier request from another capture
+interface precede a reply, including requests queued during a lookup.
+Admission holds at most 512 packets and 4 MiB of payload. Overflow loses an
+observation, not a forwarded packet. Every drop increments `queue_overflow`,
+but emits at most one `dpi.correlation.unavailable` event per second. This
+kind carries `correlationStatus: queue_overflow`, the matching
+`correlation_status` attribute, wire endpoints, directional `flowId` and
+protocol/transport hints when known, and an already-known transport ID.
+It does not claim payload decoding. Loss is scoped to the affected tuple and
+incarnation, not unrelated connections. A new-ISN SYN reserves its own loss
+history immediately at admission, including while it waits in the reorder
+window; retransmissions retain that history. Backlogged
+packets older than 500 ms degrade to unavailable evidence. The alias cache
+holds at most 16,384 aliases, revalidates positive entries after one second
+(or the shorter kernel timeout), and prunes negative entries at their 100 ms
+expiry. Each miss sends one direction-agnostic exact GET with a 100 ms native
+deadline, within a 200 ms resolver budget; confirmation waits for a later
+packet, never a worker retry sleep. No table dump or per-packet lookup occurs
+on cache hits. A separate bounded 16,384-tuple loss index survives lookup TTL
+expiry and reclaims a connection's aliases directly on close or expiry, without
+scanning the index on capture admission. Dropped-only, unbound histories become
+evictable once two minutes have passed since their latest loss. The existing
+activity-driven flow sweep, triggered by packet processing when 30 seconds have
+elapsed since its last run, removes them. It never removes a queued/in-flight
+token or a live connection's history.
+`coverage_index_reclaimed` counts those expired unbound entries removed.
+
+While the index is full, affected connections cannot claim complete coverage;
+`coverage_capacity` counts unindexed observations. After capacity is reclaimed,
+an already-started connection must regain indexing and wait a full two-minute
+pairing timeout, with no further loss or inspection bypass, before unmatched
+replies can alert again. This still requires an inspected, admitted opening SYN;
+midstream-only captures do not acquire complete coverage by waiting. A new
+connection with a fully inspected opening SYN after capacity returns can claim
+coverage immediately. No worker restart is needed after a stopped flood.
+
+The engine ruleset status includes `transportIdentity` for live AF_PACKET
+capture. `zoneStatus` is `verified`, `zone_unverified` or `unsupported_zone`;
+`zoneCheckedAt`, `zoneError` and `zoneSetters` describe the last read.
+Sparse cumulative `counters` include:
+
+- Authority: `zone_checks`, `zone_read_errors`, `zone_setter_checks`.
+- Resolution: `lookups`, `cache_hits`, `resolved`, `not_found`,
+  `lookup_error`, `lookup_timeout`, `ambiguous`, `unsupported_zone`,
+  `unsupported_tuple`, `zone_unverified`.
+- Admission and correlation: `queue_overflow`, `admission_timeout`,
+  `cache_capacity`, `coverage_capacity`, `coverage_index_reclaimed`, `canceled`,
+  `correlation_unavailable`.
+
+The `modbus` object reports `matched`, `unmatched`, `unavailable`, `capacity`
+and `expired` totals plus current `pendingConnections` and
+`pendingTransactions`. `unavailable` counts observations, while
+`correlation_unavailable` counts emitted anomalies; `queue_overflow` counts
+every dropped observation regardless of event rate limiting.
+Missing sparse counters mean zero. These are
+observation-health signals, not inline enforcement readiness.
+
 ## DPI exclusions
 
 `dataplane.dpiExclusions` accepts `ip`, `cidr`, and `domain` entries. Each

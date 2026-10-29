@@ -121,7 +121,7 @@ func TestDecodedModbusExceptionCompletesRequest(t *testing.T) {
 			if got := d.Check(serverIP, clientIP, exception); len(got) != 0 {
 				t.Fatalf("decoded exception should complete its request: %+v", got)
 			}
-			if d.pendingTxns[flowKey(clientIP, serverIP)][1] {
+			if d.PairingStats().PendingTransactions != 0 {
 				t.Fatal("decoded exception did not remove its pending transaction")
 			}
 		})

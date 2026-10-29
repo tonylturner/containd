@@ -40,6 +40,7 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	}
 	metrics.DPIEventsTotal.Add(float64(len(evs)))
 	evs = normalizeDPIEvents(evs)
+	bindEventConnections(state, evs)
 	srcIP, dstIP := stateIPs(state)
 	e.recordInventoryEvents(srcIP, dstIP, evs)
 	e.recordLearnEvents(srcIP, dstIP, evs)
@@ -94,25 +95,33 @@ func (e *Engine) recordAnomalyAlerts(state *flow.State, pkt *dpi.ParsedPacket, s
 			continue
 		}
 		for _, a := range e.anomalyDetector.Check(srcIP, dstIP, ev) {
+			if a.Type == "correlation_unavailable" && e.transport != nil {
+				e.transport.authority.count("correlation_unavailable")
+			}
 			e.eventStore.Record(state, pkt, []dpi.Event{anomalyAlertFromEvent(ev, a)})
 		}
 	}
 }
 
 func anomalyAlertFromEvent(ev dpi.Event, a anomaly.Anomaly) dpi.Event {
+	attrs := map[string]any{
+		"anomaly_type": a.Type,
+		"protocol":     a.Protocol,
+		"severity":     a.Severity,
+		"message":      a.Message,
+		"source_ip":    a.SourceIP,
+		"dest_ip":      a.DestIP,
+	}
+	if status, ok := a.Attributes["correlation_status"].(string); ok && status != "" {
+		attrs["correlation_status"] = status
+	}
 	return dpi.Event{
-		FlowID: ev.FlowID,
-		Proto:  "ids",
-		Kind:   "anomaly",
-		Attributes: withDerivedIdentity(ev, map[string]any{
-			"anomaly_type": a.Type,
-			"protocol":     a.Protocol,
-			"severity":     a.Severity,
-			"message":      a.Message,
-			"source_ip":    a.SourceIP,
-			"dest_ip":      a.DestIP,
-		}),
-		Timestamp: a.Timestamp,
+		FlowID:     ev.FlowID,
+		Connection: ev.Connection,
+		Proto:      "ids",
+		Kind:       "anomaly",
+		Attributes: withDerivedIdentity(ev, attrs),
+		Timestamp:  a.Timestamp,
 	}
 }
 
@@ -129,9 +138,10 @@ func (e *Engine) recordSignatureAlerts(state *flow.State, pkt *dpi.ParsedPacket,
 
 func signatureAlertFromMatch(ev dpi.Event, m signatures.Match) dpi.Event {
 	return dpi.Event{
-		FlowID: ev.FlowID,
-		Proto:  "ids",
-		Kind:   "signature_match",
+		FlowID:     ev.FlowID,
+		Connection: ev.Connection,
+		Proto:      "ids",
+		Kind:       "signature_match",
 		Attributes: withDerivedIdentity(ev, map[string]any{
 			"signature_id": m.Signature.ID,
 			"name":         m.Signature.Name,
@@ -395,6 +405,15 @@ func (e *Engine) RulesetStatus() RulesetStatus {
 	}
 	st.ICSCoverage = e.ICSCoverage()
 	st.SchedulePlanner = e.gate.schedulePlanAt(e.gate.now())
+	e.lifecycleMu.Lock()
+	transport := e.transport
+	detector := e.anomalyDetector
+	e.lifecycleMu.Unlock()
+	if transport != nil {
+		status := transport.authority.snapshot()
+		status.Modbus = detector.PairingStats()
+		st.TransportIdentity = &status
+	}
 	return st
 }
 

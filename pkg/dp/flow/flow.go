@@ -87,6 +87,7 @@ func (k Key) Hash() string {
 // State holds runtime flow state and timestamps.
 type State struct {
 	Key         Key
+	Connection  ConnectionSlot `json:"-"`
 	FirstSeen   time.Time
 	LastSeen    time.Time
 	Bytes       uint64
@@ -103,9 +104,10 @@ type State struct {
 
 func NewState(key Key, now time.Time) *State {
 	return &State{
-		Key:       key,
-		FirstSeen: now,
-		LastSeen:  now,
+		Key:        key,
+		Connection: newConnectionSlot(),
+		FirstSeen:  now,
+		LastSeen:   now,
 	}
 }
 
