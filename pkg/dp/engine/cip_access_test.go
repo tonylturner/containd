@@ -68,12 +68,9 @@ func TestCIPReadOnlyFromWireThroughPolicyAndConsumers(t *testing.T) {
 			for form, attrs := range decodertest.Forms(t, event.Attributes) {
 				ev := event
 				ev.Attributes = attrs
-				ctx, ok := evalContextFromDPIEvent(&snapshot, state, &dpi.ParsedPacket{
+				ctx := singleEvalContext(t, &snapshot, state, &dpi.ParsedPacket{
 					Proto: "tcp", SrcPort: 40000, DstPort: 44818,
 				}, ev, "", "")
-				if !ok {
-					t.Fatal("missing evaluation context")
-				}
 				action, matched := evaluator.EvaluateMatch(ctx)
 				if (action == rules.ActionAllow) != tc.read || (matched != nil) != tc.read ||
 					ctx.ICS.ReadOnly != tc.read || ctx.ICS.WriteOnly != tc.write {

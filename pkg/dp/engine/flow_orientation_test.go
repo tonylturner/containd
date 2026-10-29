@@ -189,10 +189,7 @@ func TestReplyEvaluatedWithConnectionOrientation(t *testing.T) {
 		t.Fatalf("servicePort(reply) = %d, want 502", got)
 	}
 	ev := dpi.Event{Proto: "modbus", Kind: "request", Attributes: map[string]any{"function_code": uint8(3)}}
-	ctx, ok := evalContextFromDPIEvent(nil, state, pkt, ev, "lan", "wan")
-	if !ok {
-		t.Fatal("reply event not evaluable")
-	}
+	ctx := singleEvalContext(t, nil, state, pkt, ev, "lan", "wan")
 	if ctx.SrcIP.String() != testClient || ctx.DstIP.String() != testServer || ctx.Port != "502" || ctx.SrcZone != "lan" || ctx.DstZone != "wan" {
 		t.Fatalf("reply context = %+v, want %s -> %s:502 lan->wan", ctx, testClient, testServer)
 	}
