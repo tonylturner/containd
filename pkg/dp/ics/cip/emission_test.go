@@ -141,6 +141,46 @@ func TestExtraCPFDataCoverageEmission(t *testing.T) {
 	}
 }
 
+func TestNonOperationAndUnreadableCoverageEmission(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		event      dpi.Event
+		incomplete bool
+	}{
+		{
+			name: "truncated selected CIP message",
+			event: encapsulationEvents(cipState(), &EIPHeader{Command: 0x6f,
+				Data: buildCPFItems(cpfTestItem{0, nil}, cpfTestItem{0xb2, nil})})[0],
+			incomplete: true,
+		},
+		{
+			name:       "unknown command with payload",
+			event:      encapsulationEvents(cipState(), &EIPHeader{Command: 0xffff, Data: []byte{1}})[0],
+			incomplete: true,
+		},
+		{
+			name:  "RegisterSession",
+			event: encapsulationEvents(cipState(), &EIPHeader{Command: 0x65, Data: []byte{1, 0}})[0],
+		},
+		{
+			name:  "ListIdentity",
+			event: encapsulationEvents(cipState(), &EIPHeader{Command: 0x63, Data: []byte{1, 2}})[0],
+		},
+		{
+			name:  "SendRRData without data item",
+			event: encapsulationEvents(cipState(), &EIPHeader{Command: 0x6f, Data: buildCPFItems(cpfTestItem{0, nil})})[0],
+		},
+		{
+			name:  "implicit I/O",
+			event: ioEvent(cipState(), testIOPacket([]byte{1, 2, 3})),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertEmissionCoverage(t, tc.event, tc.incomplete)
+		})
+	}
+}
+
 func TestMSPCoverageDoesNotLeakIntoSiblingWrappers(t *testing.T) {
 	leaf := requestBytes(t, "0e03200124013001")
 	evs := wireEvents(t, mspWire(0x0a, []byte{0x0a, 0, 1, 0}, mspWire(0x0a, leaf)))

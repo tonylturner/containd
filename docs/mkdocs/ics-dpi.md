@@ -542,8 +542,15 @@ CIP logical targets support 8- and 16-bit class/instance/attribute segments;
 Instance-enumerating services (0x11 and class 0x6B service 0x55) have unknown
 instances. Attributes are known only for single-attribute services 0x0E/0x10 and
 member services 0x18/0x19. Unknown instance/attribute selectors fail ALLOW and
-match DENY. Read-only requires positive read evidence; controls are writes,
-never reads, and structural/unknown services satisfy neither access constraint.
+match DENY. Object facts and unknown-object flags apply only to CIP service
+operations. Non-operation encapsulation events and implicit I/O retain message
+facts but have no object facts or unknown flags, so a rule with an object
+selector matches neither ALLOW nor DENY. If a SendRRData/SendUnitData data item
+exists but its CIP operation cannot be decoded, or an unknown encapsulation
+command carries a payload, coverage is unknown: object-selector DENYs match
+and ALLOWs do not. Read-only requires positive read evidence; controls are
+writes, never reads, and structural/unknown services satisfy neither access
+constraint.
 
 Tag paths are dot-separated names (`Motor.Speed`, `Program:Main.Motor`): each
 name matches `[A-Za-z_][A-Za-z0-9_]*`, at most 40 characters; only the first
