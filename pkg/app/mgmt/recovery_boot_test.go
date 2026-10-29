@@ -346,8 +346,11 @@ func TestUnsupportedICSAddressesBootIntoRecovery(t *testing.T) {
 			defer stores.auditStore.Close()
 			defer stores.userStore.Close()
 
-			const reason = "Address filters are not supported for DNP3 or CIP. Remove this filter before saving; protocol-specific station, point and CIP path selectors are not available yet."
-			wantFault := "rule " + ruleID + ": " + reason
+			reason := "addresses is not supported for protocol cip; use target selectors"
+			if tc.protocol == "dnp3" {
+				reason = "addresses requires non-empty groups for protocol dnp3"
+			}
+			wantFault := "rule " + ruleID + " ics " + reason
 			fault, err := config.ManagementBootFaultForStore(ctx, stores.store)
 			if err != nil || !strings.Contains(fault, wantFault) {
 				t.Fatalf("boot fault = %q, want %q (err=%v)", fault, wantFault, err)
