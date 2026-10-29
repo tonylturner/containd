@@ -52,7 +52,24 @@ func exchange(ctx context.Context, typ uint16, payload []byte, dump bool, record
 	if err = unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return fmt.Errorf("ctnetlink bind: %w", err)
 	}
-	seq := uint32(time.Now().UnixNano())
+	s := querySocket{fd: fd, seq: uint32(time.Now().UnixNano()), buf: make([]byte, 1<<20)}
+	return s.exchange(ctx, typ, payload, dump, record)
+}
+
+// querySocket has one owner. Exact lookups reuse its socket and bounded buffer;
+// operator dumps retain their separate per-operation socket.
+type querySocket struct {
+	fd  int
+	seq uint32
+	buf []byte
+}
+
+func (s *querySocket) exchange(ctx context.Context, typ uint16, payload []byte, dump bool, record func([]byte) (bool, error)) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.seq++
+	seq, fd := s.seq, s.fd
 	msg := make([]byte, 16+len(payload))
 	binary.NativeEndian.PutUint32(msg, uint32(len(msg)))
 	binary.NativeEndian.PutUint16(msg[4:], typ)
@@ -66,13 +83,19 @@ func exchange(ctx context.Context, typ uint16, payload []byte, dump bool, record
 	if err = unix.Sendto(fd, msg, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return fmt.Errorf("ctnetlink send: %w", err)
 	}
-	buf := make([]byte, 1<<20)
+	buf := s.buf
 	for {
 		if err = ctx.Err(); err != nil {
 			return fmt.Errorf("ctnetlink receive: %w", err)
 		}
 		ready := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-		if _, err = unix.Poll(ready, 50); err == unix.EINTR {
+		wait := 50
+		if deadline, ok := ctx.Deadline(); ok {
+			if remaining := int(time.Until(deadline).Milliseconds()); remaining < wait {
+				wait = max(1, remaining)
+			}
+		}
+		if _, err = unix.Poll(ready, wait); err == unix.EINTR {
 			continue
 		} else if err != nil {
 			return err
