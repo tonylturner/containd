@@ -4,10 +4,12 @@
 package anomaly
 
 import (
+	"net"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 func TestWriteRateAnomalyDetection(t *testing.T) {
@@ -144,6 +146,143 @@ func TestModbusResponseMatchesRequest(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestModbusExceptionWithoutRequest(t *testing.T) {
+	d := New()
+	ev := dpi.Event{
+		FlowID: modbusFlowID("10.0.0.2", "10.0.0.1", 502, 40000, flow.DirReverse),
+		Proto:  "modbus",
+		Kind:   "exception",
+		Attributes: map[string]any{
+			"transaction_id": uint16(42),
+			"function_code":  uint8(3),
+		},
+	}
+
+	anomalies := d.Check("10.0.0.2", "10.0.0.1", ev)
+	if len(anomalies) != 1 || anomalies[0].Message != "Modbus exception (txn 42) without prior request" {
+		t.Fatalf("exception without request should be flagged, got %+v", anomalies)
+	}
+}
+
+func TestModbusExceptionCompletesRequest(t *testing.T) {
+	d := New()
+	client, server := "10.0.0.1", "10.0.0.2"
+	d.Check(client, server, dpi.Event{
+		Proto: "modbus",
+		Kind:  "request",
+		Attributes: map[string]any{
+			"transaction_id": uint16(42),
+			"function_code":  uint8(3),
+		},
+	})
+
+	exception := dpi.Event{
+		FlowID: modbusFlowID(server, client, 502, 40000, flow.DirReverse),
+		Proto:  "modbus",
+		Kind:   "exception",
+		Attributes: map[string]any{
+			"transaction_id": uint16(42),
+			"function_code":  uint8(3),
+		},
+	}
+	if got := d.Check(server, client, exception); len(got) != 0 {
+		t.Fatalf("matching exception should complete request without anomaly: %+v", got)
+	}
+	if d.pendingTxns[flowKey(client, server)][42] {
+		t.Fatal("matching exception did not remove the pending transaction")
+	}
+
+	// A repeated exception cannot complete the already-consumed transaction.
+	if got := d.Check(server, client, exception); len(got) != 1 ||
+		got[0].Message != "Modbus exception (txn 42) without prior request" {
+		t.Fatalf("duplicate exception should be flagged, got %+v", got)
+	}
+
+	// Nor can a later ordinary response reuse the completed transaction.
+	response := exception
+	response.Kind = "response"
+	if got := d.Check(server, client, response); len(got) != 1 ||
+		got[0].Message != "Modbus response (txn 42) without prior request" {
+		t.Fatalf("response after exception should be unpaired, got %+v", got)
+	}
+}
+
+func TestModbusExceptionRequiresKnownServerDirection(t *testing.T) {
+	client, server := "10.0.0.1", "10.0.0.2"
+	tests := []struct {
+		name         string
+		flowID       string
+		source, dest string
+	}{
+		{
+			name:   "forward exception-shaped event",
+			flowID: modbusFlowID(client, server, 40000, 502, flow.DirForward),
+			source: client,
+			dest:   server,
+		},
+		{
+			name:   "missing direction",
+			source: server,
+			dest:   client,
+		},
+		{
+			name:   "contradictory flow tuple",
+			flowID: modbusFlowID(server, client, 502, 40000, flow.DirReverse),
+			source: client,
+			dest:   server,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := New()
+			d.Check(client, server, dpi.Event{
+				Proto: "modbus",
+				Kind:  "request",
+				Attributes: map[string]any{
+					"transaction_id": uint16(42),
+				},
+			})
+
+			exception := dpi.Event{
+				FlowID: tc.flowID,
+				Proto:  "modbus",
+				Kind:   "exception",
+				Attributes: map[string]any{
+					"transaction_id": uint16(42),
+					"function_code":  uint8(3),
+				},
+			}
+			if got := d.Check(tc.source, tc.dest, exception); len(got) != 0 {
+				t.Fatalf("unknown/non-server direction must not be treated as a reply: %+v", got)
+			}
+			if !d.pendingTxns[flowKey(client, server)][42] {
+				t.Fatal("unknown/non-server direction consumed the pending transaction")
+			}
+
+			// The actual reverse response still matches, proving the exception
+			// neither consumed nor otherwise changed the pending request.
+			response := dpi.Event{
+				Proto: "modbus",
+				Kind:  "response",
+				Attributes: map[string]any{
+					"transaction_id": uint16(42),
+				},
+			}
+			if got := d.Check(server, client, response); len(got) != 0 {
+				t.Fatalf("ordinary response should still match pending request: %+v", got)
+			}
+		})
+	}
+}
+
+func modbusFlowID(srcIP, dstIP string, srcPort, dstPort uint16, dir flow.Direction) string {
+	return flow.Key{
+		SrcIP: net.ParseIP(srcIP), DstIP: net.ParseIP(dstIP),
+		SrcPort: srcPort, DstPort: dstPort, Proto: 6, Dir: dir,
+	}.Hash()
 }
 
 func TestRateTrackerBucketRollover(t *testing.T) {

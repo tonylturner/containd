@@ -5,8 +5,10 @@ package templates
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
 func init() {
@@ -41,7 +43,7 @@ func ModbusReadOnly() []config.Rule {
 		{
 			ID:          "tpl-modbus-allow-reads",
 			Description: "Allow Modbus read operations (FC 1: Read Coils, FC 2: Read Discrete Inputs, FC 3: Read Holding Registers, FC 4: Read Input Registers)",
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "502"}},
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.ModbusPort)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "modbus",
 				FunctionCode: []uint8{1, 2, 3, 4},
@@ -53,7 +55,7 @@ func ModbusReadOnly() []config.Rule {
 		{
 			ID:          "tpl-modbus-deny-writes",
 			Description: "Deny Modbus write operations (FC 5: Write Single Coil, FC 6: Write Single Register, FC 15: Write Multiple Coils, FC 16: Write Multiple Registers, FC 22: Mask Write Register, FC 23: Read/Write Multiple Registers)",
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "502"}},
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.ModbusPort)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "modbus",
 				FunctionCode: []uint8{5, 6, 15, 16, 22, 23},
@@ -91,7 +93,7 @@ func DNP3SecureOperations() []config.Rule {
 		{
 			ID:          "tpl-dnp3-allow-reads",
 			Description: "Allow DNP3 safe operations (FC 1: Read, FC 2: Write for responses, FC 20: File Transport)",
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "20000"}},
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.DNP3Port)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "dnp3",
 				FunctionCode: []uint8{1, 2, 20},
@@ -102,7 +104,7 @@ func DNP3SecureOperations() []config.Rule {
 		{
 			ID:          "tpl-dnp3-deny-dangerous",
 			Description: "Deny DNP3 dangerous operations (FC 13: Cold Restart, FC 14: Warm Restart, FC 18: Stop Application)",
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "20000"}},
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.DNP3Port)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "dnp3",
 				FunctionCode: []uint8{13, 14, 18},
@@ -120,7 +122,7 @@ func CIPMonitorOnly() []config.Rule {
 		{
 			ID:          "tpl-cip-allow-reads",
 			Description: "Allow CIP read services (0x01: Get_Attributes_All, 0x03: Get_Attribute_List, 0x0D: Get_Attribute_Single, 0x0E: Get_Member, 0x4C: Read_Tag, 0x4E: Read_Tag_Fragmented)",
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "44818"}},
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.CIPPort)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "cip",
 				FunctionCode: []uint8{0x01, 0x03, 0x0D, 0x0E, 0x4C, 0x4E},
@@ -131,7 +133,7 @@ func CIPMonitorOnly() []config.Rule {
 		{
 			ID:          "tpl-cip-deny-write-control",
 			Description: "Deny CIP write and control services (0x05: Reset, 0x06: Start, 0x07: Stop, 0x4D: Write_Tag, 0x4F: Write_Tag_Fragmented)",
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "44818"}},
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.CIPPort)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "cip",
 				FunctionCode: []uint8{0x05, 0x06, 0x07, 0x4D, 0x4F},

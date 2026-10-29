@@ -119,6 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `GET /api/v1/inventory/{ip}` returns an array with every protocol and role
+  observed for the address, and 404 when there is none.
 - Apply ICS parsing policy to framed but undecoded content and exclude it from learned allowances.
 - Restrict default CIP port 2222 inspection to UDP; TCP/2222 remains containd's SSH service.
 - Infer IEC 104 for numeric port 2404 rules imported from Suricata or Snort.
@@ -214,6 +216,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Modbus exception replies now complete their request's transaction, so an
+  exception no longer leaves the transaction pending, and an exception with
+  no prior request is reported like an unmatched response.
+- `set dataplane enforcement` in the CLI keeps the other dataplane settings
+  instead of resetting them, and rejects values other than `on`, `off`,
+  `true`, `false`, `1` and `0`.
+- The Alerts page lists protocol anomalies and signature matches beside rule
+  alerts, with their anomaly type or signature ID, and search covers those
+  identifiers and the protocol.
+- Discovered ICS assets keep a separate observation per protocol and role,
+  so a host that speaks two protocols, or is both client and server, no
+  longer has one observation overwrite another.
+- Security conduit analysis names and classifies ICS protocols by transport
+  and port, so a TCP rule on port 2222 is no longer shown as EtherNet/IP.
+
 - The scanning gate tracks connections by both TCP endpoints, so connections
   sharing a client IP and port keep their own masquerading, events and resets.
 - The scanning gate keeps a client connection open after a completed upload
@@ -306,6 +323,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The "Multiple ICS protocols on same flow" anomaly. It grouped traffic by
+  host pair rather than by connection, so it raised a high-severity anomaly
+  for every host that legitimately speaks two ICS protocols to one peer.
 - Asynchronous antivirus scanning of HTTP packet previews and the AV block TTL
   setting (`services.av.blockTtlSeconds`). Antivirus backends scan complete
   HTTP objects instead; no dynamic block follows a detection, so the setting

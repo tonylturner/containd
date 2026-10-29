@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
-	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
@@ -60,22 +60,6 @@ func WithCIPProgramChangeDetection(enable bool) Option {
 	}
 }
 
-// WithCrossProtocolDetection controls whether multiple ICS protocols on the
-// same flow are flagged. Default: true.
-func WithCrossProtocolDetection(enable bool) Option {
-	return func(d *Detector) {
-		d.crossProtocolDetection = enable
-	}
-}
-
-// WithNonStandardPortDetection controls whether ICS traffic on non-standard
-// ports is flagged. Default: true.
-func WithNonStandardPortDetection(enable bool) Option {
-	return func(d *Detector) {
-		d.nonStandardPortDetection = enable
-	}
-}
-
 const (
 	defaultWriteRateThreshold = 100
 	defaultTotalRateThreshold = 1000
@@ -91,16 +75,10 @@ type Detector struct {
 	// Feature toggles (all default to true).
 	dnp3RestartFromNonMaster  bool
 	cipProgramChangeDetection bool
-	crossProtocolDetection    bool
-	nonStandardPortDetection  bool
 
 	// Per-flow tracking of last transaction IDs (for Modbus request/response pairing).
 	// Key: "srcIP->dstIP"
 	pendingTxns map[string]map[uint16]bool // flow -> set of pending transaction IDs
-
-	// Per-flow ICS protocol tracking for cross-protocol detection.
-	// Key: "srcIP->dstIP", value: set of observed ICS protocol names.
-	flowProtos map[string]map[string]bool
 
 	writeRate *rateTracker
 	totalRate *rateTracker
@@ -122,10 +100,7 @@ func New(opts ...Option) *Detector {
 		totalRateThreshold:        defaultTotalRateThreshold,
 		dnp3RestartFromNonMaster:  true,
 		cipProgramChangeDetection: true,
-		crossProtocolDetection:    true,
-		nonStandardPortDetection:  true,
 		pendingTxns:               make(map[string]map[uint16]bool),
-		flowProtos:                make(map[string]map[string]bool),
 		writeRate:                 newRateTracker(),
 		totalRate:                 newRateTracker(),
 		apduSeen:                  make(map[string]struct{}),
@@ -176,9 +151,6 @@ func (d *Detector) Check(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	case "iec104":
 		out = append(out, d.checkIEC104(srcIP, dstIP, ev)...)
 	}
-
-	// 2b. Cross-protocol violations.
-	out = append(out, d.checkCrossProtocol(srcIP, dstIP, ev)...)
 
 	// 3. Rate anomalies, counted once per APDU.
 	if !d.countsForRate(ev) {
@@ -290,15 +262,19 @@ func (d *Detector) checkModbus(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 				d.pendingTxns[fk] = make(map[uint16]bool)
 			}
 			d.pendingTxns[fk][txnID] = true
-		} else if ev.Kind == "response" {
+		} else if ev.Kind == "response" || (ev.Kind == "exception" && isModbusExceptionReply(ev, srcIP, dstIP)) {
 			// A response should match a prior request on the reverse flow.
 			pending := d.pendingTxns[reverseFk]
 			if pending == nil || !pending[txnID] {
+				replyKind := "response"
+				if ev.Kind == "exception" {
+					replyKind = "exception"
+				}
 				out = append(out, Anomaly{
 					Type:     "protocol_violation",
 					Protocol: "modbus",
 					Severity: "medium",
-					Message:  fmt.Sprintf("Modbus response (txn %d) without prior request", txnID),
+					Message:  fmt.Sprintf("Modbus %s (txn %d) without prior request", replyKind, txnID),
 					SourceIP: srcIP,
 					DestIP:   dstIP,
 					Attributes: map[string]any{
@@ -313,6 +289,14 @@ func (d *Detector) checkModbus(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	}
 
 	return out
+}
+
+func isModbusExceptionReply(ev dpi.Event, srcIP, dstIP string) bool {
+	key, ok := flow.ParseKey(ev.FlowID)
+	return ok &&
+		key.Dir == flow.DirReverse &&
+		key.SrcIP.String() == srcIP &&
+		key.DstIP.String() == dstIP
 }
 
 // recordAnomaly adds an anomaly to the ring buffer (must be called under lock).
@@ -353,7 +337,6 @@ func (d *Detector) Clear() {
 	defer d.mu.Unlock()
 
 	d.pendingTxns = make(map[string]map[uint16]bool)
-	d.flowProtos = make(map[string]map[string]bool)
 	d.writeRate = newRateTracker()
 	d.totalRate = newRateTracker()
 	d.apduSeen = make(map[string]struct{})
@@ -488,82 +471,6 @@ func (d *Detector) checkCIP(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 	}
 
 	return out
-}
-
-// checkCrossProtocol detects multiple ICS protocols on the same flow and
-// ICS traffic on non-standard ports.
-func (d *Detector) checkCrossProtocol(srcIP, dstIP string, ev dpi.Event) []Anomaly {
-	var out []Anomaly
-	proto := ev.Proto
-
-	// Only track known ICS protocols.
-	if !isKnownICS(proto) {
-		return nil
-	}
-
-	fk := flowKey(srcIP, dstIP)
-
-	// Cross-protocol: multiple different ICS protocols on same flow.
-	if d.crossProtocolDetection {
-		if d.flowProtos[fk] == nil {
-			d.flowProtos[fk] = make(map[string]bool)
-		}
-		d.flowProtos[fk][proto] = true
-
-		if len(d.flowProtos[fk]) > 1 {
-			// Build list of protocols seen.
-			var protos []string
-			for p := range d.flowProtos[fk] {
-				protos = append(protos, p)
-			}
-			out = append(out, Anomaly{
-				Type:     "protocol_violation",
-				Protocol: proto,
-				Severity: "high",
-				Message:  fmt.Sprintf("Multiple ICS protocols on same flow: %v", protos),
-				SourceIP: srcIP,
-				DestIP:   dstIP,
-				Attributes: map[string]any{
-					"protocols": protos,
-				},
-				Timestamp: ev.Timestamp,
-			})
-		}
-	}
-
-	// Non-standard port detection.
-	if d.nonStandardPortDetection {
-		srcPort, _ := ev.Attributes["src_port"].(uint16)
-		dstPort, _ := ev.Attributes["dst_port"].(uint16)
-		if srcPort > 0 || dstPort > 0 {
-			if !isStandardPort(proto, srcPort) && !isStandardPort(proto, dstPort) {
-				out = append(out, Anomaly{
-					Type:     "protocol_violation",
-					Protocol: proto,
-					Severity: "low",
-					Message:  fmt.Sprintf("ICS protocol %s on non-standard ports (%d -> %d), possible tunneling", proto, srcPort, dstPort),
-					SourceIP: srcIP,
-					DestIP:   dstIP,
-					Attributes: map[string]any{
-						"src_port": srcPort,
-						"dst_port": dstPort,
-					},
-					Timestamp: ev.Timestamp,
-				})
-			}
-		}
-	}
-
-	return out
-}
-
-func isKnownICS(proto string) bool { return ics.Supported(proto) }
-
-func isStandardPort(proto string, port uint16) bool {
-	if port == 0 || !ics.Supported(proto) {
-		return true // unknown port or protocol, don't flag
-	}
-	return ics.IsDecoderPort(proto, port)
 }
 
 // rateTracker tracks events per minute per key using minute-granularity buckets.

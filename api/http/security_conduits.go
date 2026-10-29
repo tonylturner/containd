@@ -11,21 +11,26 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
-// Well-known port-to-protocol name mappings.
+// Non-industrial port names remain independent of transport.
 var portNameMap = map[int]string{
-	443:   "HTTPS",
-	80:    "HTTP",
-	22:    "SSH",
-	3389:  "RDP",
-	53:    "DNS",
-	161:   "SNMP",
-	502:   "Modbus",
-	20000: "DNP3",
-	44818: "EtherNet/IP",
-	2404:  "IEC 104",
-	2222:  "EtherNet/IP",
+	443:  "HTTPS",
+	80:   "HTTP",
+	22:   "SSH",
+	3389: "RDP",
+	53:   "DNS",
+	161:  "SNMP",
+}
+
+// Industrial names apply only to registered decoder transports.
+var icsPortNames = map[int]string{
+	ics.ModbusPort:      "Modbus",
+	ics.DNP3Port:        "DNP3",
+	ics.CIPPort:         "EtherNet/IP",
+	ics.IEC104Port:      "IEC 104",
+	ics.CIPImplicitPort: "EtherNet/IP",
 }
 
 // Ports considered encrypted for TLS enforcement check.
@@ -38,11 +43,6 @@ var plaintextPorts = map[int]bool{
 	80: true, 23: true, 21: true, 161: true, 162: true,
 }
 
-// ICS protocol ports.
-var icsPorts = map[int]bool{
-	502: true, 20000: true, 44818: true, 2404: true, 2222: true,
-}
-
 // Admin protocol names for MITRE mapping.
 var adminProtos = map[string]bool{
 	"SSH": true, "RDP": true,
@@ -51,6 +51,8 @@ var adminProtos = map[string]bool{
 type protoEntry struct {
 	N string `json:"n"`
 	T string `json:"t"`
+
+	industrial bool
 }
 
 type conduitResult struct {
@@ -138,7 +140,7 @@ func buildConduitResult(cfg *config.Config, globals conduitGlobalState, from, to
 	protoWhitelist := hasProtoRestrictions
 	ruleDescs := conduitRuleDescriptions(matching, from, to)
 	gaps := computeGaps(state, defaultDeny, tlsEnforced, protoWhitelist, globals.auditLogged, globals.avEnabled, allPorts, hasICSPredicate)
-	mitre := computeMitre(state, protoWhitelist, from, protos, allPorts)
+	mitre := computeMitre(state, protoWhitelist, from, protos)
 	return &conduitResult{
 		State:          state,
 		IDS:            globals.idsMode,
@@ -197,17 +199,37 @@ func protocolEntriesForRule(r config.Rule, hasICSPredicate bool, allPorts map[in
 			continue
 		}
 		allPorts[port] = true
-		name := portNameMap[port]
-		if name == "" {
-			name = fmt.Sprintf("%s/%s", strings.ToUpper(p.Name), p.Port)
-		}
+		name, industrial := conduitProtocolInfo(p)
 		t := "allowed"
 		if hasICSPredicate || r.ICS.Protocol != "" {
 			t = "inspect"
 		}
-		protos = append(protos, protoEntry{N: name, T: t})
+		protos = append(protos, protoEntry{N: name, T: t, industrial: industrial})
 	}
 	return protos
+}
+
+func conduitProtocolInfo(p config.Protocol) (string, bool) {
+	port := parsePort(p.Port)
+	var transport uint8
+	switch strings.ToLower(p.Name) {
+	case "tcp":
+		transport = ics.TCP
+	case "udp":
+		transport = ics.UDP
+	}
+	industrial := port > 0 && port <= 65535 && ics.IsDecoderPortOn(transport, uint16(port))
+	name := portNameMap[port]
+	if industrial {
+		name = icsPortNames[port]
+	}
+	if name == "" {
+		name = strings.ToUpper(p.Name)
+		if p.Port != "" {
+			name += "/" + p.Port
+		}
+	}
+	return name, industrial
 }
 
 func conduitTLSEnforced(allPorts map[int]bool) bool {
@@ -300,14 +322,7 @@ func describeRule(r config.Rule, from, to string) string {
 	if len(r.Protocols) > 0 {
 		var names []string
 		for _, p := range r.Protocols {
-			name := portNameMap[parsePort(p.Port)]
-			if name == "" {
-				if p.Port != "" {
-					name = strings.ToUpper(p.Name) + "/" + p.Port
-				} else {
-					name = strings.ToUpper(p.Name)
-				}
-			}
+			name, _ := conduitProtocolInfo(p)
 			names = append(names, name)
 		}
 		protoStr = strings.Join(names, "/")
@@ -354,12 +369,12 @@ func computeGaps(state string, defaultDeny, tlsEnforced, protoWhitelist, auditLo
 	return gaps
 }
 
-func computeMitre(state string, protoWhitelist bool, fromZone string, protos []protoEntry, ports map[int]bool) []string {
+func computeMitre(state string, protoWhitelist bool, fromZone string, protos []protoEntry) []string {
 	var mitre []string
 
 	hasICSPort := false
-	for port := range ports {
-		if icsPorts[port] {
+	for _, p := range protos {
+		if p.industrial {
 			hasICSPort = true
 			break
 		}

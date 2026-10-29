@@ -30,7 +30,7 @@ test("alerts show loading, not the empty state, until the first list answers", a
   await requested;
   await expect(page.locator("main .animate-pulse").first()).toBeVisible();
   await expect(page.getByText("No IDS alerts", { exact: true })).toHaveCount(0);
-  await expect(page.getByPlaceholder("Search alerts by message, rule ID, IP...")).toHaveCount(0);
+  await expect(page.getByPlaceholder("Search alerts by message, ID, anomaly type, IP...")).toHaveCount(0);
 
   const answered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/events");
   release();

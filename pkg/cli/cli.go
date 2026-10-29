@@ -297,8 +297,21 @@ func setDataPlaneAPI(api *API) Command {
 		if args[0] != "enforcement" {
 			return fmt.Errorf("usage: set dataplane enforcement <on|off> [table] [iface...]")
 		}
-		on := args[1] == "on" || args[1] == "true" || args[1] == "1"
-		dp := config.DataPlaneConfig{Enforcement: on}
+		var on bool
+		switch args[1] {
+		case "on", "true", "1":
+			on = true
+		case "off", "false", "0":
+			on = false
+		default:
+			return fmt.Errorf("invalid enforcement value %q: use on, off, true, false, 1, or 0", args[1])
+		}
+
+		var dp config.DataPlaneConfig
+		if err := api.getJSON(ctx, "/api/v1/dataplane", &dp); err != nil {
+			return err
+		}
+		dp.Enforcement = on
 		if len(args) > 2 {
 			dp.EnforceTable = args[2]
 		}

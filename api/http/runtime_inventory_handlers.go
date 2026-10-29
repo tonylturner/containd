@@ -31,7 +31,7 @@ func listInventoryHandler(engine EngineClient) gin.HandlerFunc {
 	}
 }
 
-func getInventoryAssetHandler(engine EngineClient) gin.HandlerFunc {
+func getInventoryAssetsHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ic, ok := engine.(InventoryClient)
 		if !ok || ic == nil {
@@ -39,16 +39,16 @@ func getInventoryAssetHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 		ip := c.Param("ip")
-		asset, err := ic.GetInventoryAsset(c.Request.Context(), ip)
+		assets, err := ic.GetInventoryAssets(c.Request.Context(), ip)
 		if err != nil {
 			apiError(c, http.StatusServiceUnavailable, "engine inventory unavailable")
 			return
 		}
-		if asset == nil {
+		if len(assets) == 0 {
 			apiError(c, http.StatusNotFound, "asset not found")
 			return
 		}
-		c.JSON(http.StatusOK, asset)
+		c.JSON(http.StatusOK, assets)
 	}
 }
 

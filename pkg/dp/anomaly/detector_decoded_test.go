@@ -23,7 +23,14 @@ import (
 func decodeOne(t *testing.T, d dpi.Decoder, dstPort uint16, payload []byte) dpi.Event {
 	t.Helper()
 	key := flow.Key{SrcIP: net.ParseIP("10.0.0.1"), DstIP: net.ParseIP("10.0.0.2"), SrcPort: 40000, DstPort: dstPort, Proto: 6}
-	evs, err := d.OnPacket(flow.NewState(key, time.Now()), &dpi.ParsedPacket{Payload: payload, Proto: "tcp", SrcPort: 40000, DstPort: dstPort})
+	return decodeOneWithKey(t, d, key, payload)
+}
+
+func decodeOneWithKey(t *testing.T, d dpi.Decoder, key flow.Key, payload []byte) dpi.Event {
+	t.Helper()
+	evs, err := d.OnPacket(flow.NewState(key, time.Now()), &dpi.ParsedPacket{
+		Payload: payload, Proto: "tcp", SrcPort: key.SrcPort, DstPort: key.DstPort,
+	})
 	if err != nil || len(evs) != 1 {
 		t.Fatalf("decode: events=%d err=%v", len(evs), err)
 	}
@@ -49,6 +56,16 @@ func modbusWrite(unit uint8) []byte {
 	return []byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x06, unit, 0x06, 0x00, 0x01, 0x00, 0x03}
 }
 
+func modbusRead(unit uint8) []byte {
+	// MBAP: txn 1, proto 0, length 6, unit; PDU: FC 3 read register 1, count 1.
+	return []byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x06, unit, 0x03, 0x00, 0x01, 0x00, 0x01}
+}
+
+func modbusException(unit uint8) []byte {
+	// MBAP: txn 1, proto 0, length 3, unit; PDU: FC 3 exception, code 2.
+	return []byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x03, unit, 0x83, 0x02}
+}
+
 func hasMessage(as []Anomaly, msg string) bool {
 	for _, a := range as {
 		if a.Message == msg {
@@ -72,6 +89,42 @@ func TestDecodedModbusUnitIDDrift(t *testing.T) {
 		if got := New().Check("10.0.0.1", "10.0.0.2", bcast); !hasMessage(got, broadcast) {
 			t.Fatalf("roundtrip=%v: unit 0 write not flagged: %+v", rt, got)
 		}
+	}
+}
+
+func TestDecodedModbusExceptionCompletesRequest(t *testing.T) {
+	clientIP, serverIP := "10.0.0.1", "10.0.0.2"
+	requestKey := flow.Key{
+		SrcIP: net.ParseIP(clientIP), DstIP: net.ParseIP(serverIP),
+		SrcPort: 40000, DstPort: 502, Proto: 6, Dir: flow.DirForward,
+	}
+	exceptionKey := flow.Key{
+		SrcIP: net.ParseIP(serverIP), DstIP: net.ParseIP(clientIP),
+		SrcPort: 502, DstPort: 40000, Proto: 6, Dir: flow.DirReverse,
+	}
+
+	for _, roundTrip := range []bool{false, true} {
+		t.Run(map[bool]string{false: "decoded", true: "json_round_trip"}[roundTrip], func(t *testing.T) {
+			request := decodeOneWithKey(t, modbus.NewDecoder(), requestKey, modbusRead(1))
+			exception := decodeOneWithKey(t, modbus.NewDecoder(), exceptionKey, modbusException(1))
+			if exception.Kind != "exception" {
+				t.Fatalf("decoder event kind changed: got %q", exception.Kind)
+			}
+			if roundTrip {
+				request, exception = jsonRoundTrip(t, request), jsonRoundTrip(t, exception)
+			}
+
+			d := New()
+			if got := d.Check(clientIP, serverIP, request); len(got) != 0 {
+				t.Fatalf("decoded request produced unexpected anomalies: %+v", got)
+			}
+			if got := d.Check(serverIP, clientIP, exception); len(got) != 0 {
+				t.Fatalf("decoded exception should complete its request: %+v", got)
+			}
+			if d.pendingTxns[flowKey(clientIP, serverIP)][1] {
+				t.Fatal("decoded exception did not remove its pending transaction")
+			}
+		})
 	}
 }
 
