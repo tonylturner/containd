@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Content identification for Modbus, DNP3, IEC 104 and EtherNet/IP on AF_PACKET
+  and in PCAP analysis, with passive alternate-port decoding, content/port
+  badges, mismatch and outside-rule-port scope evidence. Identification never
+  changes verdicts; observation-bound connections do not generate ALLOW rules.
+
 - DPI events and directional flow summaries include a verified
   `transportConnectionId` for locally tracked AF_PACKET TCP/UDP connections,
   with correlation status and conntrack-zone authority health.

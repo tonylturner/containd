@@ -68,10 +68,10 @@ func TestAnalyzeModbusOrientation(t *testing.T) {
 			if tc.replyFirst {
 				kinds[0], kinds[1] = kinds[1], kinds[0]
 			}
-			if len(res.Events) != len(kinds) {
-				t.Fatalf("events=%+v", res.Events)
+			if len(decodedEvents(res.Events)) != len(kinds) {
+				t.Fatalf("events=%+v", decodedEvents(res.Events))
 			}
-			for i, ev := range res.Events {
+			for i, ev := range decodedEvents(res.Events) {
 				if ev.Kind != kinds[i] {
 					t.Fatalf("event %d=%+v want %s", i, ev, kinds[i])
 				}
@@ -114,10 +114,10 @@ func TestAnalyzeHandshakeOverridesMidstreamHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	kinds := []string{"response", "request", "request", "response"}
-	if len(res.Events) != len(kinds) {
-		t.Fatalf("events=%+v", res.Events)
+	if len(decodedEvents(res.Events)) != len(kinds) {
+		t.Fatalf("events=%+v", decodedEvents(res.Events))
 	}
-	for i, ev := range res.Events {
+	for i, ev := range decodedEvents(res.Events) {
 		if ev.Kind != kinds[i] {
 			t.Fatalf("event %d=%+v want %s", i, ev, kinds[i])
 		}

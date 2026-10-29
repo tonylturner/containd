@@ -146,11 +146,11 @@ func TestAnalyzeModbusPacket(t *testing.T) {
 	if result.ByteCount != len(frame) {
 		t.Errorf("ByteCount = %d, want %d", result.ByteCount, len(frame))
 	}
-	if len(result.Events) == 0 {
+	if len(decodedEvents(result.Events)) == 0 {
 		t.Fatal("expected at least one event from modbus decoder")
 	}
 
-	ev := result.Events[0]
+	ev := decodedEvents(result.Events)[0]
 	if ev.Proto != "modbus" {
 		t.Errorf("event Proto = %q, want %q", ev.Proto, "modbus")
 	}
@@ -181,8 +181,8 @@ func TestAnalyzeModbusPacket(t *testing.T) {
 		if f.Packets != 1 {
 			t.Errorf("flow Packets = %d, want 1", f.Packets)
 		}
-		if f.Events != 1 {
-			t.Errorf("flow Events = %d, want 1", f.Events)
+		if f.Events != 2 {
+			t.Errorf("flow Events = %d, want 2", f.Events)
 		}
 	}
 }
@@ -203,8 +203,8 @@ func TestAnalyzeEmptyPCAP(t *testing.T) {
 	if result.ByteCount != 0 {
 		t.Errorf("ByteCount = %d, want 0", result.ByteCount)
 	}
-	if len(result.Events) != 0 {
-		t.Errorf("len(Events) = %d, want 0", len(result.Events))
+	if len(decodedEvents(result.Events)) != 0 {
+		t.Errorf("len(Events) = %d, want 0", len(decodedEvents(result.Events)))
 	}
 	if len(result.Flows) != 0 {
 		t.Errorf("len(Flows) = %d, want 0", len(result.Flows))
@@ -237,8 +237,8 @@ func TestAnalyzePacketCounting(t *testing.T) {
 	// The two frames are byte-identical at the same TCP sequence number: the
 	// second is a retransmission, so its message is decoded once.
 	// TestAnalyzeCountsEveryMessage covers two distinct messages.
-	if len(result.Events) != 1 {
-		t.Errorf("len(Events) = %d, want 1", len(result.Events))
+	if len(decodedEvents(result.Events)) != 1 {
+		t.Errorf("len(Events) = %d, want 1", len(decodedEvents(result.Events)))
 	}
 	if result.Duration != 1*time.Second {
 		t.Errorf("Duration = %v, want 1s", result.Duration)
@@ -344,7 +344,7 @@ func TestAnalyzeCountsEveryMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze() error: %v", err)
 	}
-	if len(result.Events) != 2 {
-		t.Errorf("len(Events) = %d, want 2", len(result.Events))
+	if len(decodedEvents(result.Events)) != 2 {
+		t.Errorf("len(Events) = %d, want 2", len(decodedEvents(result.Events)))
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -48,6 +49,7 @@ type FlowSummary struct {
 	SrcPort               uint16                     `json:"srcPort,omitempty"`
 	DstPort               uint16                     `json:"dstPort,omitempty"`
 	Transport             string                     `json:"transport,omitempty"`
+	Identification        map[string]any             `json:"identification,omitempty"`
 	Application           string                     `json:"application,omitempty"`
 	EventCount            uint64                     `json:"eventCount"`
 	AvDetected            bool                       `json:"avDetected,omitempty"`
@@ -78,6 +80,7 @@ type Store struct {
 	denies           eventRing
 	incidents        incidentBank
 	historyTruncated bool
+	bindings         map[string]*bindingRecord
 	aborted          abortedSet // aborted IEC104 incarnations hidden from Flows
 
 	// Spill-to-disk support.
@@ -386,7 +389,6 @@ func (s *Store) Flows(limit int) []FlowSummary {
 				SrcPort:               ev.SrcPort,
 				DstPort:               ev.DstPort,
 				Transport:             ev.Transport,
-				Application:           ev.Proto,
 				SessionID:             sessionID,
 			}
 			if sessionID != "" {
@@ -425,9 +427,6 @@ func (s *Store) Flows(limit int) []FlowSummary {
 			}
 			tags[key].add(labels)
 		}
-		if f.Application == "" {
-			f.Application = ev.Proto
-		}
 		if strings.EqualFold(ev.Kind, "service.av.detected") {
 			f.AvDetected = true
 		}
@@ -439,6 +438,10 @@ func (s *Store) Flows(limit int) []FlowSummary {
 	out := make([]FlowSummary, 0, len(byFlow))
 	for _, k := range order {
 		f := *byFlow[k]
+		if r := s.bindings[k]; r != nil {
+			f.Application = r.application
+			f.Identification = maps.Clone(r.identification)
+		}
 		f.Tags = tags[k].sorted()
 		out = append(out, f)
 	}

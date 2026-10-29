@@ -307,6 +307,44 @@ to all protocols, including Modbus and DNP3, not only IEC104.
 wrapped. `/api/v1/flows` still rolls up only the general event ring; prolonged
 DENY retention does not resurrect old flow groups.
 
+## Content Identification Results
+
+`GET /api/v1/events?query=1&kind=identification` returns identification events
+with `proto: "identify"` and `kind: "identification"`, one per captured
+connection incarnation. `attributes` contains:
+
+- `protocol`, `identification_state` (`confirmed`, `reject`, or
+  `identification_incomplete`), `reason`, `identification_coverage` and
+  `identification_candidates`;
+- `expected` (two endpoint protocol expectations, empty string for none),
+  `service_transport`, `service_port`, `mismatch`;
+- `binding` (`observation`, `legacy`, or `none`),
+  `outside_rule_port_scope` (boolean, or `"unknown"` without a rule snapshot),
+  `profile_version` and `syn_coverage` (two endpoint booleans).
+
+Passive decoder events carry `observation_only: true` and
+`binding_source: "observation"`. They are evidence, not verdicts. The Events
+page marks them **Observation only**.
+
+`GET /api/v1/flows` includes an optional `identification` object with these
+attributes. `application` is the confirmed bound protocol when available,
+otherwise the legacy application's decoder protocol. Utility markers do not
+set it. Binding summaries survive eviction of their original event while
+other events of the flow remain retained; they do not resurrect expired flows.
+
+`POST /api/v1/pcap/analyze` (multipart `file`) and
+`POST /api/v1/pcap/analyze/{name}` return policy analysis. `stats.identifications`
+is an array of `{key, flowId, attributes}`: `key` is a run-qualified offline
+incarnation, and `attributes` uses the same spellings above. `stats.events`
+includes identification and passive decoder events. Suggestions exclude
+observation-bound connections. The engine's internal PCAP analysis endpoints
+return the analysis directly, with `identifications` at the top level and
+scope evaluated against their rule snapshot. Policy analysis without a
+snapshot reports `outside_rule_port_scope: "unknown"`.
+
+See [Content identification](ics-dpi.md#content-identification) for protocol,
+capture-mode, timing and coverage limits.
+
 ## Rule Counters and Flow Tags
 
 `GET /api/v1/firewall/counters` returns the kernel counters of the applied
