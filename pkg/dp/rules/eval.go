@@ -45,16 +45,18 @@ type ICSContext struct {
 	SpansUnknown bool
 	// ObjectUnknown marks a context whose object or target the decoder
 	// could not establish (an unwalkable DNP3 object header, an ambiguous
-	// or unsupported CIP path). Object selectors then never ALLOW and
-	// always DENY; see specs contract §Unknown.
+	// or unsupported CIP path), or a part of the message that was not
+	// inspected. A rule with any object selector never ALLOWs such a
+	// context and always DENYs it; other constraints still apply.
 	ObjectUnknown bool
 	// DNP3: station addresses by role, and the one object header this
 	// context judges (Spans carry its point indexes).
 	Master, Outstation *uint16
 	Group, Variation   *uint8
-	// CIP: the operation's own target. Symbol holds Logix symbolic
-	// segments and is nil for a logical (class-based) target.
-	Instance  *uint32
+	// CIP: the operation's own target from 8- or 16-bit logical segments.
+	// Symbol holds Logix symbolic segment names and is nil for a logical
+	// (class-based) target.
+	Instance  *uint16
 	Attribute *uint16
 	Symbol    []string
 	// IEC104 is set only for IEC 60870-5-104 events.

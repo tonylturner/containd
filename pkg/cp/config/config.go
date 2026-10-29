@@ -877,7 +877,7 @@ type ICSPredicate struct {
 	Variations  []int    `json:"variations,omitempty"`  // object variations 0..255
 
 	// CIP target predicates (protocol "cip"), beside ObjectClasses.
-	Instances  []uint32 `json:"instances,omitempty"`
+	Instances  []uint16 `json:"instances,omitempty"`
 	Attributes []uint16 `json:"attributes,omitempty"`
 	Tags       []string `json:"tags,omitempty"` // Logix symbolic tag paths
 }

@@ -156,7 +156,7 @@ type ICSPredicate struct {
 	Variations  []int    `json:"variations,omitempty"`
 
 	// CIP target predicates beside ObjectClasses.
-	Instances  []uint32 `json:"instances,omitempty"`
+	Instances  []uint16 `json:"instances,omitempty"`
 	Attributes []uint16 `json:"attributes,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
 }

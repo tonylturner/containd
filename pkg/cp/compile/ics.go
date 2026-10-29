@@ -32,7 +32,7 @@ func ICSPredicate(p config.ICSPredicate) dprules.ICSPredicate {
 		Outstations:   append([]uint16(nil), p.Outstations...),
 		Groups:        append([]int(nil), p.Groups...),
 		Variations:    append([]int(nil), p.Variations...),
-		Instances:     append([]uint32(nil), p.Instances...),
+		Instances:     append([]uint16(nil), p.Instances...),
 		Attributes:    append([]uint16(nil), p.Attributes...),
 		Tags:          append([]string(nil), p.Tags...),
 	}

@@ -16,7 +16,7 @@ func TestICSPredicateEmpty(t *testing.T) {
 		{CA: []uint16{0}}, {IOA: []IOARange{{Start: 0, End: 0}}},
 		{COT: []int{6}}, {Originators: []int{0}}, {Negative: &no}, {Test: &no},
 		{SelectExecute: "select"}, {Masters: []uint16{0}}, {Outstations: []uint16{0}},
-		{Groups: []int{0}}, {Variations: []int{0}}, {Instances: []uint32{0}},
+		{Groups: []int{0}}, {Variations: []int{0}}, {Instances: []uint16{0}},
 		{Attributes: []uint16{0}}, {Tags: []string{"T"}},
 	}
 	// Guard additions to the model: each packet field needs a fixture here.
