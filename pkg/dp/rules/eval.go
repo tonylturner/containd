@@ -59,6 +59,11 @@ type ICSContext struct {
 	Instance  *uint16
 	Attribute *uint16
 	Symbol    []string
+	// InstanceUnknown and AttributeUnknown mark an operation that may
+	// touch instances or attributes beyond its EPATH (enumeration, list
+	// and all-attribute services). Like SpansUnknown, the matching
+	// selector then never ALLOWs and always DENYs.
+	InstanceUnknown, AttributeUnknown bool
 	// IEC104 is set only for IEC 60870-5-104 events.
 	IEC104 *IEC104Context
 }
