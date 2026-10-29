@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comments and report a refused count in the API header and Export panel.
   Valid same-format cached source remains lossless; native content uses the
   target engine's option syntax.
+- Snort imports keep Snort 3 content modifiers, negation, hex content and
+  escaped punctuation, so containd's own Snort exports re-import unchanged.
+  Quoted option values no longer split on `;` or `,`.
 
 ### Security
 
