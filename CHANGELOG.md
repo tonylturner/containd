@@ -216,8 +216,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- SMB read and write events without explicit access attributes both contribute
-  to protocol read/write counters; unclassified CIP events remain excluded.
 - CIP read-only rules no longer classify Apply Attributes, Set Member,
   connection controls or class-specific mutations as reads. Classification
   uses the request target and validates supported read bodies; unknown
