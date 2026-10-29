@@ -75,12 +75,43 @@ func ParseTCPFrame(b []byte) (*TCPFrame, error) {
 	return decodeADU(b[:n]), nil
 }
 
-// IsWriteFunctionCode returns true for Modbus function codes that mutate state.
+// IsWriteFunctionCode reports unconditional write functions. False does not
+// establish a read: diagnostics and MEI need their subtype, and unknown
+// functions have no access classification.
 func IsWriteFunctionCode(fc uint8) bool {
+	return classifyAccess(fc, nil) == accessWrite
+}
+
+type accessCategory uint8
+
+const (
+	accessUnknown accessCategory = iota
+	accessRead
+	accessWrite
+)
+
+// classifyAccess follows MODBUS Application Protocol V1.1b3 section 6.
+// The PDU excludes the function byte. Exception responses have no subtype;
+// their base function may be classified, but FC 8/43 remain unknown.
+func classifyAccess(fc uint8, pdu []byte) accessCategory {
 	switch fc {
-	case 5, 6, 15, 16, 22, 23:
-		return true
-	default:
-		return false
+	case 1, 2, 3, 4, 7, 11, 12, 17, 20, 24:
+		return accessRead
+	case 5, 6, 15, 16, 21, 22, 23:
+		return accessWrite
+	case 8:
+		if len(pdu) >= 2 {
+			if desc, ok := diagnosticSubfunctions[binary.BigEndian.Uint16(pdu)]; ok {
+				if desc.write {
+					return accessWrite
+				}
+				return accessRead
+			}
+		}
+	case 43:
+		if len(pdu) >= 1 && pdu[0] == 14 {
+			return accessRead
+		}
 	}
+	return accessUnknown
 }

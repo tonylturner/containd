@@ -40,8 +40,11 @@ func TestDiagnosticSubfunctions(t *testing.T) {
 				// or copy its write category onto an uncorrelated exception.
 				ex := aduEvent(st, &TCPFrame{FunctionCode: 0x88, PDU: []byte{3}}, nil)
 				if ex.Kind != "exception" || ex.Attributes["function_code"] != byte(8) ||
-					ex.Attributes["is_write"] != false || ex.Attributes["exception_code"] != byte(3) {
+					ex.Attributes["exception_code"] != byte(3) {
 					t.Fatal(ex)
+				}
+				if _, ok := ex.Attributes["is_write"]; ok {
+					t.Fatal("exception invented an access category")
 				}
 				if _, ok := ex.Attributes["sub_function"]; ok {
 					t.Fatal("exception invented a subfunction")

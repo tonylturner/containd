@@ -238,6 +238,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Protocol read counters require explicit read evidence instead of treating
   every non-write event as a read. CIP learning uses decoded target-aware
   service names and excludes requests without a known access category.
+- Modbus and DNP3 read-only rules match only known reads. Unknown and
+  vendor function codes, unknown Modbus diagnostic sub-functions, MEI types
+  other than 14, Modbus Write File Record (FC 21), and DNP3 freeze,
+  initialize, start, unsolicited, assign-class, time, file, configuration and
+  authentication functions no longer count as reads. Unknown operations omit
+  `is_write`. The Modbus read-only template also denies FC 21.
 - Modbus exception replies now complete their request's transaction, so an
   exception no longer leaves the transaction pending, and an exception with
   no prior request is reported like an unmatched response.

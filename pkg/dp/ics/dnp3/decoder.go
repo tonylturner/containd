@@ -100,14 +100,13 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 		codes = append(codes, "dnp3.data_crc")
 	}
 	fc := frame.FunctionCode
-	isWrite := IsWriteFunctionCode(fc)
-	isControl := IsControlFunctionCode(fc)
+	access := applicationFunctions[fc].access
 
 	kind := "request"
 	if IsResponse(fc) {
 		kind = "response"
 	}
-	// Classify dangerous function codes.
+	// Preserve public event kinds independently of access classification.
 	if IsRestartFunctionCode(fc) {
 		kind = "restart"
 	} else if fc == FuncStopApplication || fc == FuncSaveConfiguration {
@@ -117,11 +116,14 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 	attrs := map[string]any{
 		eventfields.KeyFunctionCode: fc,
 		"function_name":             FunctionCodeName(fc),
-		eventfields.KeyIsWrite:      isWrite,
-		"is_control":                isControl,
 		"source_address":            frame.Source,
 		"destination_address":       frame.Destination,
 		eventfields.KeyDirection:    linkDirection(frame.Control),
+	}
+
+	if access != accessUnknown {
+		attrs[eventfields.KeyIsWrite] = access == accessWrite || access == accessControl
+		attrs["is_control"] = access == accessControl
 	}
 
 	// Extract IIN flags from response messages.

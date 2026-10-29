@@ -14,7 +14,7 @@ import (
 func init() {
 	register(Template{
 		Name:        "modbus-read-only",
-		Description: "Modbus read-only – allow read function codes (FC 1-4), deny all write operations",
+		Description: "Modbus read-only – allow read function codes (FC 1-4), deny listed write function codes",
 		Rules:       ModbusReadOnly(),
 	})
 	register(Template{
@@ -30,7 +30,8 @@ func init() {
 }
 
 // ModbusReadOnly returns rules that allow Modbus read function codes (1-4) and
-// deny write function codes (5, 6, 15, 16, 22, 23).
+// deny write function codes (5, 6, 15, 16, 21, 22, 23). Other functions,
+// including diagnostics and private extensions, require a default-deny policy.
 //
 // Log:true is set on every rule so the operator has visibility into both
 // what the deny rule would block AND what the allow rule actually passes —
@@ -54,11 +55,11 @@ func ModbusReadOnly() []config.Rule {
 		},
 		{
 			ID:          "tpl-modbus-deny-writes",
-			Description: "Deny Modbus write operations (FC 5: Write Single Coil, FC 6: Write Single Register, FC 15: Write Multiple Coils, FC 16: Write Multiple Registers, FC 22: Mask Write Register, FC 23: Read/Write Multiple Registers)",
+			Description: "Deny Modbus write operations (FC 5: Write Single Coil, FC 6: Write Single Register, FC 15: Write Multiple Coils, FC 16: Write Multiple Registers, FC 21: Write File Record, FC 22: Mask Write Register, FC 23: Read/Write Multiple Registers)",
 			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.ModbusPort)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "modbus",
-				FunctionCode: []uint8{5, 6, 15, 16, 22, 23},
+				FunctionCode: []uint8{5, 6, 15, 16, 21, 22, 23},
 			},
 			Log:    true,
 			Action: config.ActionDeny,
