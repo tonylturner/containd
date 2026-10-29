@@ -646,6 +646,9 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 		return acceptDecision
 	}
 	e.bindTransport(state, connection)
+	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 {
+		state.Connection.Load().Coverage().Store(true)
+	}
 	if d, ok := e.handleIECPacket(pkt, state); ok {
 		return d
 	}

@@ -51,3 +51,18 @@ func TestTransportMetadataAndDirectionalGrouping(t *testing.T) {
 		}
 	}
 }
+
+func TestTransportRollupKeepsIssuedIDAcrossStatusChanges(t *testing.T) {
+	store := NewStore(10)
+	for _, event := range []Event{
+		{FlowID: "direction", CorrelationStatus: "not_found"},
+		{FlowID: "direction", TransportConnectionID: "epoch/1", CorrelationStatus: "resolved"},
+		{FlowID: "direction", TransportConnectionID: "epoch/1", CorrelationStatus: "zone_unverified"},
+	} {
+		store.Append(event)
+	}
+	got := store.Flows(0)
+	if len(got) != 1 || got[0].TransportConnectionID != "epoch/1" || got[0].CorrelationStatus != "mixed" {
+		t.Fatalf("evidence changes erased issued ID: %+v", got)
+	}
+}

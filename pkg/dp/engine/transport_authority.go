@@ -22,12 +22,13 @@ type zoneSetterReader interface {
 // An odd generation is unverified; a successful whole-namespace read makes it
 // even. Every refresh invalidates previously cached CT evidence first.
 type transportAuthority struct {
-	checkMu sync.Mutex
-	version atomic.Uint64
-	loss    atomic.Uint64
-	reader  zoneSetterReader
-	mu      sync.Mutex
-	status  TransportStatus
+	checkMu  sync.Mutex
+	version  atomic.Uint64
+	applying atomic.Int64
+	recheck  chan struct{}
+	reader   zoneSetterReader
+	mu       sync.Mutex
+	status   TransportStatus
 }
 
 // TransportStatus is observation health, not an enforcement readiness gate.
@@ -41,19 +42,46 @@ type TransportStatus struct {
 }
 
 func newTransportAuthority(reader zoneSetterReader) *transportAuthority {
-	a := &transportAuthority{reader: reader, status: TransportStatus{
+	a := &transportAuthority{reader: reader, recheck: make(chan struct{}, 1), status: TransportStatus{
 		ZoneStatus: "zone_unverified", Counters: make(map[string]uint64),
 	}}
 	a.version.Store(1)
 	return a
 }
 
-func (a *transportAuthority) invalidate() {
-	v := a.version.Load()
-	if v%2 == 0 {
-		a.version.Add(1)
-	} else {
-		a.version.Add(2)
+func (a *transportAuthority) invalidate() uint64 {
+	for {
+		v := a.version.Load()
+		next := v + 1
+		if v%2 != 0 {
+			next++
+		}
+		if a.version.CompareAndSwap(v, next) {
+			return next
+		}
+	}
+}
+
+func (a *transportAuthority) requestCheck() {
+	select {
+	case a.recheck <- struct{}{}:
+	default:
+	}
+}
+
+func (a *transportAuthority) run(ctx context.Context) {
+	a.check(ctx)
+	tick := time.NewTicker(transportZoneInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			a.check(ctx)
+		case <-a.recheck:
+			a.check(ctx)
+		}
 	}
 }
 
@@ -64,7 +92,7 @@ func (a *transportAuthority) check(ctx context.Context) {
 }
 
 func (a *transportAuthority) checkLocked(ctx context.Context) {
-	a.invalidate()
+	version := a.invalidate()
 	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 	var setters []enforce.ZoneSetter
@@ -82,15 +110,12 @@ func (a *transportAuthority) checkLocked(ctx context.Context) {
 	a.status.ZoneStatus = "zone_unverified"
 	a.status.Counters["zone_checks"]++
 	if err != nil {
-		a.loss.Add(1)
 		a.status.ZoneError = err.Error()
 		a.status.Counters["zone_read_errors"]++
 	} else if len(setters) != 0 {
-		a.loss.Add(1)
 		a.status.ZoneStatus = "unsupported_zone"
 		a.status.Counters["zone_setter_checks"]++
-	} else {
-		a.version.Add(1)
+	} else if a.applying.Load() == 0 && a.version.CompareAndSwap(version, version+1) {
 		a.status.ZoneStatus = "verified"
 	}
 }
@@ -121,12 +146,13 @@ type transportApplier struct {
 }
 
 func (a *transportApplier) Apply(ctx context.Context, ruleset string) error {
-	a.authority.checkMu.Lock()
-	defer a.authority.checkMu.Unlock()
+	a.authority.applying.Add(1)
 	a.authority.invalidate()
-	err := a.Applier.Apply(ctx, ruleset)
-	a.authority.checkLocked(ctx)
-	return err
+	defer func() {
+		a.authority.applying.Add(-1)
+		a.authority.requestCheck()
+	}()
+	return a.Applier.Apply(ctx, ruleset)
 }
 
 func (a *transportApplier) ReadCounters(ctx context.Context, table string) (map[string]enforce.CounterValue, error) {

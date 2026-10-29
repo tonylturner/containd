@@ -113,3 +113,35 @@ func TestModbusExpiredBucketRetainsCoverageLossAcrossSnapshots(t *testing.T) {
 		t.Fatalf("idle retirement claimed a known unmatched reply: %+v", got)
 	}
 }
+
+func TestModbusPairingRearmsAfterLossTimeout(t *testing.T) {
+	d := New()
+	reply := pairingEvent(41000, 1, 1, true, "started")
+	at := reply.Timestamp
+	reply.Connection.LoseCorrelation(at, pendingTTL)
+	if got := d.Check("10.0.0.2", "10.0.0.1", reply); len(got) != 1 || got[0].Type != "correlation_unavailable" {
+		t.Fatalf("gap was treated as complete capture: %+v", got)
+	}
+	reply.Timestamp = at.Add(pendingTTL + time.Second)
+	if got := d.Check("10.0.0.2", "10.0.0.1", reply); len(got) != 1 || got[0].Type != "protocol_violation" {
+		t.Fatalf("unmatched detection did not re-arm: %+v", got)
+	}
+}
+
+func TestModbusUnresolvedReportsOncePerIncarnation(t *testing.T) {
+	d := New()
+	reply := pairingEvent(41000, 1, 1, true, "unresolved")
+	reply.Connection = &flow.Connection{Key: "unresolved", Status: "not_found"}
+	alerts := 0
+	for range 10 {
+		alerts += len(d.Check("10.0.0.2", "10.0.0.1", reply))
+	}
+	if alerts != 1 {
+		t.Fatalf("unresolved alerts = %d, want 1", alerts)
+	}
+	next := &flow.Connection{Key: "next", Status: "not_found"}
+	reply.Connection = next
+	if got := d.Check("10.0.0.2", "10.0.0.1", reply); len(got) != 1 {
+		t.Fatal("suppression leaked to another incarnation")
+	}
+}

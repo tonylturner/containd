@@ -11,15 +11,12 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
-func (e *Engine) handleTransportPacket(pkt capture.Packet, c *flow.Connection, loss uint64) {
+func (e *Engine) handleTransportPacket(pkt capture.Packet, c *flow.Connection) {
 	defer func() {
 		if r := recover(); r != nil {
 			e.reportPacketPanic(packetPanic(r))
 		}
 	}()
-	if c.LossEpoch != loss {
-		c.Coverage().Store(false)
-	}
 	e.handlePacketConnection(pkt, c)
 }
 
@@ -93,7 +90,6 @@ func (e *Engine) noteTransportSYNLocked(pkt capture.Packet, key flow.Key) {
 func (e *Engine) newWireConnectionLocked(status string) *flow.Connection {
 	e.wireSerial++
 	c := &flow.Connection{Key: fmt.Sprintf("wire/%p/%d", e, e.wireSerial), Status: status}
-	c.Coverage().Store(status == "offline")
 	return c
 }
 
@@ -114,70 +110,50 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 		state.Connection.Store(old)
 		return
 	}
-	if incoming.Verified() {
-		// Prefer the existing original-direction history. Never merge an
-		// already-published unresolved request into a new CT identity.
-		history := e.tupleStateLocked(incoming.Evidence.Original)
-		if history == nil || history.Connection.Load() == nil || !history.Connection.Load().Published().Load() {
-			history = e.tupleStateLocked(incoming.Evidence.Reply)
-		}
-		if history != nil {
-			if previous := history.Connection.Load(); previous != nil && previous.Published().Load() {
-				if previous.Evidence == nil {
-					if e.transport != nil {
-						e.transport.authority.count("identity_frozen")
+	// The existing original history owns the incarnation key. A history
+	// without a public ID may acquire evidence; an issued ID is never renamed.
+	if incoming.Evidence != nil {
+		selected := false
+		for _, issued := range []bool{true, false} {
+			for _, tuple := range []conntrack.Tuple{incoming.Evidence.Original, incoming.Evidence.Reply} {
+				if history := e.tupleStateLocked(tuple); history != nil {
+					previous := history.Connection.Load()
+					if previous != nil && !previous.Closed().Load() &&
+						(previous.ID != "") == issued &&
+						(previous.Evidence == nil || sameGeneration(previous.Evidence, incoming.Evidence)) {
+						incoming = adoptTransport(previous, incoming)
+						selected = true
+						break
 					}
-					if old == nil {
-						old = e.newWireConnectionLocked("identity_frozen")
-					}
-					state.Connection.Store(old)
-					return
-				}
-				if sameGeneration(previous.Evidence, incoming.Evidence) && !previous.Closed().Load() {
-					incoming = revalidateTransport(previous, incoming)
 				}
 			}
-		}
-		if old != nil && old.Published().Load() && old.Evidence == nil {
-			return
-		}
-		// A reply-only history also freezes its ID. A periodic authority
-		// refresh must not rename it just because O has not been observed.
-		if old != nil && old.Published().Load() && sameGeneration(old.Evidence, incoming.Evidence) && !old.Closed().Load() {
-			incoming = revalidateTransport(old, incoming)
+			if selected {
+				break
+			}
 		}
 	} else if old != nil {
-		// Keep the private incarnation while evidence is unavailable. CT
-		// IDs are exposed only when the authority generation is current.
-		if old.Evidence != nil {
-			status := incoming.ResolutionStatus()
-			old.Unavailable.Store(&status)
-			old.Gap().Store(true)
-			old.Coverage().Store(false)
-			return
+		incoming = adoptTransport(old, incoming)
+	} else if peer := e.tupleStateLocked(state.Key.Reversed().Tuple()); peer != nil {
+		if previous := peer.Connection.Load(); previous != nil && !previous.Closed().Load() {
+			incoming = adoptTransport(previous, incoming)
 		}
-		if old.Published().Load() {
-			fresh := &flow.Connection{Key: old.Key, Status: incoming.ResolutionStatus(), LossEpoch: old.LossEpoch}
-			fresh.InheritLifecycle(old)
-			state.Connection.Store(fresh)
-			return
-		}
-		incoming = &flow.Connection{Key: old.Key, Status: incoming.Status, LossEpoch: incoming.LossEpoch}
-		incoming.InheritLifecycle(old)
 	}
-	if !incoming.Verified() {
-		if peer := e.tupleStateLocked(state.Key.Reversed().Tuple()); peer != nil {
-			if p := peer.Connection.Load(); p != nil && p.Evidence == nil && !p.Closed().Load() {
-				incoming = &flow.Connection{Key: p.Key, Status: incoming.ResolutionStatus(), LossEpoch: incoming.LossEpoch}
-				incoming.InheritLifecycle(p)
-			}
+	if old != nil && old.ID != "" && incoming.ID != old.ID {
+		incoming = adoptTransport(old, &flow.Connection{Status: "ambiguous"})
+		if e.transport != nil {
+			e.transport.authority.count("ambiguous")
 		}
 	}
 	state.Connection.Store(incoming)
-	if incoming.Verified() {
+	if incoming.Evidence != nil {
 		for _, tuple := range []conntrack.Tuple{incoming.Evidence.Original, incoming.Evidence.Reply} {
 			if peer := e.tupleStateLocked(tuple); peer != nil {
-				if previous := peer.Connection.Load(); previous != nil && previous.Key == incoming.Key {
+				previous := peer.Connection.Load()
+				if previous != nil && previous.ID == "" && previous.Key != incoming.Key && e.anomalyDetector != nil {
+					incoming.MergeHistory(previous)
+					e.anomalyDetector.AdoptConnection(previous.Key, incoming.Key)
+				}
+				if previous == nil || previous.ID == "" || previous.ID == incoming.ID {
 					peer.Connection.Store(incoming)
 				}
 			}
@@ -185,15 +161,17 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 	}
 }
 
-func revalidateTransport(previous, incoming *flow.Connection) *flow.Connection {
-	if previous.Verified() {
-		return previous
+func adoptTransport(previous, incoming *flow.Connection) *flow.Connection {
+	id := previous.ID
+	if id == "" {
+		id = incoming.ID
 	}
-	fresh := &flow.Connection{ID: previous.ID, Key: previous.Key, Status: "resolved",
-		Evidence: incoming.Evidence, Authority: incoming.Authority, AuthorityVersion: incoming.AuthorityVersion,
-		LossEpoch: previous.LossEpoch, AuthorityLoss: previous.AuthorityLoss}
+	evidence := incoming.Evidence
+	if evidence == nil {
+		evidence = previous.Evidence
+	}
+	fresh := &flow.Connection{ID: id, Key: previous.Key, Status: incoming.Status, Evidence: evidence}
 	fresh.InheritLifecycle(previous)
-	fresh.Gap().Store(previous.Gap().Load() || previous.AuthorityLoss != incoming.AuthorityLoss)
 	return fresh
 }
 

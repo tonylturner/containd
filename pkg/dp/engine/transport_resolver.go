@@ -51,7 +51,6 @@ type transportResolver struct {
 	queue       chan transportPacket
 	count       atomic.Int64
 	bytes       atomic.Int64
-	loss        atomic.Uint64
 	aliases     map[conntrack.Tuple]*transportAlias // worker-owned, O/R only
 	epoch       string
 	serial      uint64
@@ -132,7 +131,6 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 }
 
 func (r *transportResolver) unavailable(e *Engine, pkt capture.Packet, status string) {
-	r.loss.Add(1)
 	r.authority.count(status)
 	e.eventStore.Append(events.Event{Kind: "dpi.correlation.unavailable", Timestamp: time.Now().UTC(),
 		CorrelationStatus: status,
@@ -145,11 +143,12 @@ func (r *transportResolver) unavailable(e *Engine, pkt capture.Packet, status st
 // overtake its reply, including requests queued during a blocking GET.
 func (r *transportResolver) run(ctx context.Context, e *Engine) {
 	defer r.reader.Close()
-	r.authority.check(ctx)
+	authorityCtx, stopAuthority := context.WithCancel(ctx)
+	authorityDone := make(chan struct{})
+	go func() { defer close(authorityDone); r.authority.run(authorityCtx) }()
+	defer func() { stopAuthority(); <-authorityDone }()
 	tick := time.NewTicker(5 * time.Millisecond)
 	defer tick.Stop()
-	zoneTick := time.NewTicker(transportZoneInterval)
-	defer zoneTick.Stop()
 	var pending []transportPacket
 	drain := func() {
 		for len(pending) < transportQueueLimit {
@@ -177,8 +176,6 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-zoneTick.C:
-			r.authority.check(ctx)
 		case p := <-r.queue:
 			pending = append(pending, p)
 		case <-tick.C:
@@ -187,8 +184,6 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-zoneTick.C:
-				r.authority.check(ctx)
 			default:
 			}
 			drain()
@@ -212,7 +207,7 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			pending[0] = transportPacket{}
 			pending = pending[1:]
 			if ctx.Err() == nil {
-				e.handleTransportPacket(p.packet, c, r.loss.Load())
+				e.handleTransportPacket(p.packet, c)
 			}
 			r.bytes.Add(-int64(len(p.packet.Payload)))
 			r.count.Add(-1)
@@ -227,9 +222,6 @@ func (r *transportResolver) unresolved(status string) *flow.Connection {
 
 func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, overdue bool) *flow.Connection {
 	version := r.authority.version.Load()
-	if version%2 != 0 {
-		return r.unresolved("zone_unverified")
-	}
 	tuple := packetKey(pkt).Tuple()
 	if err := tuple.Validate(); err != nil {
 		return r.unresolved("unsupported_tuple")
@@ -239,6 +231,12 @@ func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, ove
 	}
 	now := time.Now()
 	old := r.aliases[tuple]
+	if version%2 != 0 {
+		if old != nil && !old.connection.Closed().Load() {
+			return adoptTransport(old.connection, r.unresolved("zone_unverified"))
+		}
+		return r.unresolved("zone_unverified")
+	}
 	syn := pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0
 	newSYN := syn && old != nil && (!old.hasSYN || old.synSeq != pkt.TCP.Seq)
 	if !newSYN && old != nil && old.version == version && now.Before(old.expires) && !old.connection.Closed().Load() &&
@@ -247,7 +245,7 @@ func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, ove
 		return old.connection
 	}
 	for t, alias := range r.aliases {
-		if now.Sub(alias.expires) > 30*time.Second || alias.version != version {
+		if now.Sub(alias.expires) > 30*time.Second {
 			delete(r.aliases, t)
 		}
 	}
@@ -312,8 +310,7 @@ func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, ove
 	if c == nil || !c.Verified() {
 		key := r.nextKey()
 		c = &flow.Connection{ID: flow.TransportConnectionID(key), Key: key, Status: "resolved",
-			Evidence: &evidence, Authority: &r.authority.version, AuthorityVersion: version, LossEpoch: r.loss.Load(),
-			AuthorityLoss: r.authority.loss.Load()}
+			Evidence: &evidence}
 	}
 	ttl := time.Second
 	if timeout := time.Duration(evidence.TimeoutSeconds) * time.Second; timeout < ttl {

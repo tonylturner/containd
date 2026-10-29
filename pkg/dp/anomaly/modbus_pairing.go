@@ -4,7 +4,6 @@ package anomaly
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -14,7 +13,8 @@ import (
 const (
 	maxPendingConnections   = 4096
 	maxPendingPerConnection = 256
-	pendingTTL              = 2 * time.Minute
+	ModbusPairingTimeout    = 2 * time.Minute
+	pendingTTL              = ModbusPairingTimeout
 )
 
 type transactionKey struct {
@@ -25,10 +25,10 @@ type transactionKey struct {
 }
 
 type pendingConnection struct {
-	transactions map[transactionKey]time.Time
-	connection   *flow.Connection
-	last         time.Time
-	incomplete   bool
+	transactions    map[transactionKey]time.Time
+	connection      *flow.Connection
+	last            time.Time
+	incompleteUntil time.Time
 }
 
 type PairingStats struct {
@@ -56,10 +56,40 @@ func (d *Detector) ForgetConnection(id string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for key := range d.pendingTxns {
-		if key == id || strings.HasPrefix(key, id+"/wire/") {
+		if key == id {
 			delete(d.pendingTxns, key)
 		}
 	}
+}
+
+// AdoptConnection migrates a wire-only history once exact CT evidence proves
+// its membership. Public IDs are never merged; the engine selects the survivor.
+func (d *Detector) AdoptConnection(from, to string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	source := d.pendingTxns[from]
+	if source == nil || from == to {
+		return
+	}
+	target := d.pendingTxns[to]
+	if target == nil {
+		d.pendingTxns[to] = source
+	} else {
+		if source.incompleteUntil.After(target.incompleteUntil) {
+			target.incompleteUntil = source.incompleteUntil
+		}
+		if source.last.After(target.last) {
+			target.last = source.last
+		}
+		for key, at := range source.transactions {
+			if len(target.transactions) < maxPendingPerConnection {
+				target.transactions[key] = at
+			} else {
+				target.incompleteUntil = at.Add(pendingTTL)
+			}
+		}
+	}
+	delete(d.pendingTxns, from)
 }
 
 func pairingIdentity(ev dpi.Event) (id string, direction flow.Direction, available bool, status string) {
@@ -68,30 +98,24 @@ func pairingIdentity(ev dpi.Event) (id string, direction flow.Direction, availab
 		return "", 0, false, "wire_identity_missing"
 	}
 	direction = key.Dir
+	if c := ev.Connection; c != nil {
+		if c.Evidence != nil {
+			if key.Tuple() != c.Evidence.Original && key.Tuple() != c.Evidence.Reply {
+				return "", 0, false, "tuple_mismatch"
+			}
+			direction = c.Direction(key)
+		}
+		status = c.ResolutionStatus()
+		available = c.CorrelationAvailable(ev.Timestamp) && (c.Verified() || status == "offline" || status == "wire")
+		if !available && (c.Verified() || status == "offline" || status == "wire") {
+			status = "capture_incomplete"
+		}
+		return c.Key, direction, available, status
+	}
 	canonical := key
 	if canonical.Dir == flow.DirReverse {
 		canonical = canonical.Reversed()
 	}
-	if c := ev.Connection; c != nil {
-		if c.Verified() {
-			if key.Tuple() != c.Evidence.Original && key.Tuple() != c.Evidence.Reply {
-				return "", 0, false, "tuple_mismatch"
-			}
-			available := c.Coverage().Load() && !c.Gap().Load()
-			status = "capture_incomplete"
-			if available {
-				status = "resolved"
-			}
-			return c.Key, c.Direction(key), available, status
-		}
-		status = c.ResolutionStatus()
-		if status == "offline" && c.Gap().Load() {
-			status = "capture_incomplete"
-		}
-		return c.Key + "/wire/" + canonical.Hash(), direction, status == "offline", status
-	}
-	// Standalone decoder/PCAP consumers have no live CT authority. Their
-	// explicit full wire key is usable; an IP pair is never a fallback key.
 	return canonical.Hash(), direction, true, "offline"
 }
 
@@ -104,9 +128,9 @@ func (d *Detector) sweepPending(now time.Time) {
 		for key, at := range c.transactions {
 			if now.Sub(at) > pendingTTL {
 				delete(c.transactions, key)
-				c.incomplete = true
+				c.incompleteUntil = now.Add(pendingTTL)
 				if c.connection != nil {
-					c.connection.Gap().Store(true)
+					c.connection.LoseCorrelation(now, pendingTTL)
 				}
 				d.pairing.Expired++
 			}
@@ -132,6 +156,9 @@ func (d *Detector) pairModbus(srcIP, dstIP string, ev dpi.Event, tid uint16, uni
 	c := d.pendingTxns[id]
 	unavailable := func(reason string) []Anomaly {
 		d.pairing.Unavailable++
+		if ev.Connection != nil && !ev.Connection.ReportUnavailable() {
+			return nil
+		}
 		return []Anomaly{{Type: "correlation_unavailable", Protocol: "modbus", Severity: "low",
 			Message: "Modbus transaction correlation unavailable", SourceIP: srcIP, DestIP: dstIP,
 			Attributes: map[string]any{"correlation_status": reason, "transaction_id": tid, "unit_id": unit}, Timestamp: ev.Timestamp}}
@@ -143,7 +170,7 @@ func (d *Detector) pairModbus(srcIP, dstIP string, ev dpi.Event, tid uint16, uni
 		if c == nil {
 			if len(d.pendingTxns) >= maxPendingConnections {
 				if ev.Connection != nil {
-					ev.Connection.Gap().Store(true)
+					ev.Connection.LoseCorrelation(now, pendingTTL)
 				}
 				d.pairing.Capacity++
 				return unavailable("pending_capacity")
@@ -153,9 +180,9 @@ func (d *Detector) pairModbus(srcIP, dstIP string, ev dpi.Event, tid uint16, uni
 		}
 		c.last = now
 		if _, exists := c.transactions[key]; !exists && len(c.transactions) >= maxPendingPerConnection {
-			c.incomplete = true
+			c.incompleteUntil = now.Add(pendingTTL)
 			if c.connection != nil {
-				c.connection.Gap().Store(true)
+				c.connection.LoseCorrelation(now, pendingTTL)
 			}
 			d.pairing.Capacity++
 			return unavailable("pending_capacity")
@@ -175,7 +202,7 @@ func (d *Detector) pairModbus(srcIP, dstIP string, ev dpi.Event, tid uint16, uni
 			d.pairing.Matched++
 			return nil
 		}
-		if c.incomplete {
+		if now.Before(c.incompleteUntil) {
 			return unavailable("pending_incomplete")
 		}
 	}

@@ -29,7 +29,7 @@ func TestTransportPublishedIdentitySurvivesRefresh(t *testing.T) {
 			}
 			pkt := transportWire(tuple, time.Now(), nil)
 			c := r.resolve(ctx, pkt, false)
-			e.handleTransportPacket(pkt, c, 0)
+			e.handleTransportPacket(pkt, c)
 			e.flowMu.Lock()
 			state := e.tupleStateLocked(tuple)
 			e.flowMu.Unlock()
@@ -45,23 +45,21 @@ func TestTransportPublishedIdentitySurvivesRefresh(t *testing.T) {
 				c = r.resolve(ctx, pkt, false)
 				e.bindTransport(state, c)
 				if fail {
-					if state.Connection.Load().PublicID() != "" {
-						t.Fatal("published stale ID during authority failure")
+					if state.Connection.Load().PublicID() != id || state.Connection.Load().Verified() {
+						t.Fatal("published ID or downgraded evidence lost during authority failure")
 					}
 				} else if state.Connection.Load().PublicID() != id {
 					t.Fatal("renamed published identity")
 				}
 			}
-			if !state.Connection.Load().Gap().Load() {
-				t.Fatal("authority loss erased the coverage gap")
-			}
+
 			// A second direction must share the refreshed record, including FIN.
 			peer := ev.Reply
 			if replyOnly {
 				peer = ev.Original
 			}
 			peerPkt := transportWire(peer, time.Now(), nil)
-			e.handleTransportPacket(peerPkt, r.resolve(ctx, peerPkt, false), 0)
+			e.handleTransportPacket(peerPkt, r.resolve(ctx, peerPkt, false))
 			e.flowMu.Lock()
 			other := e.tupleStateLocked(peer)
 			e.flowMu.Unlock()
@@ -80,9 +78,9 @@ func TestTransportIncarnationAndPeerCleanup(t *testing.T) {
 	request := transportWire(ev.Original, time.Now(), modbusADU(1, 3, 10, 2))
 	request.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 100}
 	first := r.resolve(ctx, request, false)
-	e.handleTransportPacket(request, first, 0)
+	e.handleTransportPacket(request, first)
 	reply := transportWire(ev.Reply, time.Now(), nil)
-	e.handleTransportPacket(reply, r.resolve(ctx, reply, false), 0)
+	e.handleTransportPacket(reply, r.resolve(ctx, reply, false))
 	e.flowMu.Lock()
 	original, reverse := e.tupleStateLocked(ev.Original), e.tupleStateLocked(ev.Reply)
 	e.flowMu.Unlock()
@@ -96,7 +94,7 @@ func TestTransportIncarnationAndPeerCleanup(t *testing.T) {
 	}
 	request.TCP.Seq++
 	next := r.resolve(ctx, request, false)
-	e.handleTransportPacket(request, next, 0)
+	e.handleTransportPacket(request, next)
 	e.flowMu.Lock()
 	renewed, stalePeer := e.tupleStateLocked(ev.Original), e.tupleStateLocked(ev.Reply)
 	e.flowMu.Unlock()
@@ -109,21 +107,26 @@ func TestTransportIncarnationAndPeerCleanup(t *testing.T) {
 	}
 }
 
-func TestTransportFrozenHistoryAndCoverage(t *testing.T) {
+func TestTransportUnresolvedHistoryAdoptsIdentity(t *testing.T) {
 	ev := natEvidence()
 	e, r, _ := newTransportTest(t, &transportCTFake{evidence: ev})
 	request := transportWire(ev.Original, time.Now(), modbusADU(1, 3, 10, 2))
-	e.handleTransportPacket(request, r.unresolved("not_found"), 0)
+	e.handleTransportPacket(request, r.unresolved("not_found"))
+	e.flowMu.Lock()
+	key := e.tupleStateLocked(ev.Original).Connection.Load().Key
+	e.flowMu.Unlock()
 	r.authority.check(context.Background())
 	reply := transportWire(ev.Reply, time.Now(), []byte{0, 1, 0, 0, 0, 3, 1, 0x83, 2})
-	e.handleTransportPacket(reply, r.resolve(context.Background(), reply, false), 0)
-	for _, event := range e.Events().List(0) {
-		if event.TransportConnectionID != "" || event.Attributes["anomaly_type"] == "protocol_violation" {
-			t.Fatalf("merged already-published unresolved history: %+v", event)
-		}
+	e.handleTransportPacket(reply, r.resolve(context.Background(), reply, false))
+	got := transportModbusEvents(e)
+	if len(got) != 2 || got[0].TransportConnectionID == "" || e.AnomalyDetector().PairingStats().Matched != 1 {
+		t.Fatalf("unresolved history not adopted: %+v", got)
 	}
-	if r.authority.snapshot().Counters["identity_frozen"] == 0 {
-		t.Fatal("missing frozen history counter")
+	e.flowMu.Lock()
+	adopted := e.tupleStateLocked(ev.Original).Connection.Load()
+	e.flowMu.Unlock()
+	if adopted.Key != key {
+		t.Fatal("adoption renamed the incarnation pairing key")
 	}
 }
 
@@ -180,6 +183,7 @@ func TestTransportApplierRechecksWholeNamespace(t *testing.T) {
 	if err := wrapper.Apply(context.Background(), "rules"); err != nil {
 		t.Fatal(err)
 	}
+	a.check(context.Background())
 	if a.version.Load()%2 == 0 || a.snapshot().ZoneStatus != "unsupported_zone" || a.snapshot().Counters["zone_checks"] != 2 {
 		t.Fatal("apply did not invalidate and recheck authority")
 	}

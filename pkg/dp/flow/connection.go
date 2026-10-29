@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"sync/atomic"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 )
@@ -37,21 +38,17 @@ func (s *ConnectionSlot) Store(c *Connection) {
 // ID, Key, Status and Evidence are immutable after construction. Publication
 // freezes assignment; coverage may be lost without renaming public history.
 type Connection struct {
-	ID               TransportConnectionID
-	Key              string // private incarnation identity, including offline capture
-	Status           string
-	Evidence         *conntrack.Evidence
-	Authority        *atomic.Uint64
-	AuthorityVersion uint64
-	LossEpoch        uint64
-	AuthorityLoss    uint64
-	lifecycle        atomic.Pointer[connectionLifecycle]
-	Unavailable      atomic.Pointer[string]
+	ID        TransportConnectionID
+	Key       string // private incarnation identity, including offline capture
+	Status    string
+	Evidence  *conntrack.Evidence
+	lifecycle atomic.Pointer[connectionLifecycle]
 }
 
 type connectionLifecycle struct {
-	gap, published, coverage, closed atomic.Bool
-	fin                              atomic.Uint32
+	published, coverage, closed, unavailableReported atomic.Bool
+	recoveryUntil                                    atomic.Int64
+	fin                                              atomic.Uint32
 }
 
 func (c *Connection) mutable() *connectionLifecycle {
@@ -68,35 +65,66 @@ func (c *Connection) InheritLifecycle(previous *Connection) {
 	c.lifecycle.Store(previous.mutable())
 }
 
-func (c *Connection) Gap() *atomic.Bool       { return &c.mutable().gap }
 func (c *Connection) Published() *atomic.Bool { return &c.mutable().published }
 func (c *Connection) Coverage() *atomic.Bool  { return &c.mutable().coverage }
 func (c *Connection) Closed() *atomic.Bool    { return &c.mutable().closed }
 func (c *Connection) FIN() *atomic.Uint32     { return &c.mutable().fin }
 
-func (c *Connection) Verified() bool {
-	return c != nil && c.Evidence != nil && c.Unavailable.Load() == nil &&
-		(c.Authority == nil || c.Authority.Load() == c.AuthorityVersion)
-}
+// Verified is the immutable evidence snapshot selected at packet admission.
+// Authority refreshes cannot change a packet halfway through its event pipeline.
+func (c *Connection) Verified() bool { return c != nil && c.Evidence != nil && c.Status == "resolved" }
 
 func (c *Connection) PublicID() TransportConnectionID {
-	if c.Verified() {
-		return c.ID
+	if c == nil {
+		return ""
 	}
-	return ""
+	return c.ID
 }
-
 func (c *Connection) ResolutionStatus() string {
 	if c == nil {
 		return "offline"
 	}
-	if status := c.Unavailable.Load(); status != nil {
-		return *status
-	}
-	if c.Evidence != nil && !c.Verified() {
-		return "zone_unverified"
-	}
 	return c.Status
+}
+
+func (c *Connection) LoseCorrelation(at time.Time, timeout time.Duration) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	until := at.Add(timeout).UnixNano()
+	slot := &c.mutable().recoveryUntil
+	for old := slot.Load(); old < until; old = slot.Load() {
+		if slot.CompareAndSwap(old, until) {
+			break
+		}
+	}
+}
+func (c *Connection) CorrelationAvailable(at time.Time) bool {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	return c.Coverage().Load() && at.UnixNano() >= c.mutable().recoveryUntil.Load()
+}
+func (c *Connection) ReportUnavailable() bool {
+	return c.mutable().unavailableReported.CompareAndSwap(false, true)
+}
+
+// MergeHistory preserves loss and notification history when verified evidence
+// joins wire-only directions which had not issued their own public IDs.
+func (c *Connection) MergeHistory(previous *Connection) {
+	if previous.mutable().unavailableReported.Load() {
+		c.mutable().unavailableReported.Store(true)
+	}
+	if previous.Coverage().Load() {
+		c.Coverage().Store(true)
+	}
+	slot := &c.mutable().recoveryUntil
+	until := previous.mutable().recoveryUntil.Load()
+	for old := slot.Load(); old < until; old = slot.Load() {
+		if slot.CompareAndSwap(old, until) {
+			break
+		}
+	}
 }
 
 func (k Key) Tuple() conntrack.Tuple {
@@ -120,10 +148,10 @@ func TupleKey(t conntrack.Tuple, dir Direction) Key {
 }
 
 func (c *Connection) Direction(k Key) Direction {
-	if c.Verified() && k.Tuple() == c.Evidence.Reply {
+	if c != nil && c.Evidence != nil && k.Tuple() == c.Evidence.Reply {
 		return DirReverse
 	}
-	if c.Verified() && k.Tuple() == c.Evidence.Original {
+	if c != nil && c.Evidence != nil && k.Tuple() == c.Evidence.Original {
 		return DirForward
 	}
 	return k.Dir

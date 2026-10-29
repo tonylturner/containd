@@ -119,6 +119,7 @@ func runTransportTest(t *testing.T, e *Engine, r *transportResolver) (context.Ca
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); r.run(ctx, e) }()
+	waitTransport(t, func() bool { return r.authority.version.Load()%2 == 0 })
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -220,11 +221,9 @@ func TestTransportResolverAuthorityAndRetry(t *testing.T) {
 	}
 	z.set([]enforce.ZoneSetter{{Family: "ip", Table: "foreign", Chain: "raw", Handle: 1}}, nil)
 	r.authority.check(ctx)
-	if c.PublicID() != "" {
-		t.Fatal("stale zone-0 evidence remained trusted")
-	}
+	c.Published().Store(true)
 	c2 := r.resolve(ctx, pkt, false)
-	if c2.PublicID() != "" || c2.Status != "zone_unverified" || f.calls != 2 {
+	if c2.PublicID() != c.ID || c2.Verified() || c2.Status != "zone_unverified" || f.calls != 2 {
 		t.Fatal("queried or trusted ambiguous zone")
 	}
 	z.set(nil, errors.New("nft permission denied"))
@@ -254,7 +253,7 @@ func TestTransportResolverFailuresAndBounds(t *testing.T) {
 			r.authority.check(context.Background())
 			pkt := transportWire(natEvidence().Reply, time.Now(), []byte{0, 1, 0, 0, 0, 3, 1, 0x83, 2})
 			c := r.resolve(context.Background(), pkt, false)
-			e.handleTransportPacket(pkt, c, 0)
+			e.handleTransportPacket(pkt, c)
 			got := e.AnomalyDetector().Anomalies(0)
 			if c.Status != tc.status || c.PublicID() != "" || len(got) != 1 || got[0].Type != "correlation_unavailable" {
 				t.Fatalf("failure = %+v, %+v", c, got)

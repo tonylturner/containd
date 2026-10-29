@@ -42,14 +42,8 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	evs = normalizeDPIEvents(evs)
 	bindEventConnections(state, evs)
 	for _, ev := range evs {
-		if c := ev.Connection; c != nil && c.Verified() {
-			current := e.transport == nil || c.LossEpoch == e.transport.loss.Load() && c.AuthorityLoss == e.transport.authority.loss.Load()
-			if !current || c.Gap().Load() {
-				c.Gap().Store(true)
-				c.Coverage().Store(false)
-			} else if ev.Kind == "request" && state != nil && c.Direction(state.Key) == flow.DirForward {
-				c.Coverage().Store(true)
-			}
+		if c := ev.Connection; c != nil && c.Evidence != nil && !c.Verified() {
+			c.LoseCorrelation(ev.Timestamp, anomaly.ModbusPairingTimeout)
 		}
 	}
 	srcIP, dstIP := stateIPs(state)

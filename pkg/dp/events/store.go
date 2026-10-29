@@ -364,6 +364,7 @@ func (s *Store) Flows(limit int) []FlowSummary {
 		return nil
 	}
 	byFlow := map[string]*FlowSummary{}
+	mixedIDs := map[string]bool{}
 	tags := map[string]labelSet{}
 	var order []string
 	for i := range s.general.events {
@@ -394,12 +395,19 @@ func (s *Store) Flows(limit int) []FlowSummary {
 			byFlow[key] = f
 			order = append(order, key)
 		}
-		if f.TransportConnectionID != ev.TransportConnectionID || f.CorrelationStatus != ev.CorrelationStatus {
-			if f.TransportConnectionID != ev.TransportConnectionID {
-				f.TransportConnectionID = ""
-			}
+		if f.CorrelationStatus != ev.CorrelationStatus {
 			f.CorrelationStatus = "mixed"
 		}
+		if ev.TransportConnectionID != "" && !mixedIDs[key] {
+			if f.TransportConnectionID == "" {
+				f.TransportConnectionID = ev.TransportConnectionID
+			} else if f.TransportConnectionID != ev.TransportConnectionID {
+				f.TransportConnectionID = ""
+				f.CorrelationStatus = "mixed"
+				mixedIDs[key] = true
+			}
+		}
+
 		if sessionID != "" && isClientSide(ev) {
 			// Orient the group on the session tuple: client → server.
 			f.SrcIP, f.DstIP, f.SrcPort, f.DstPort = ev.SrcIP, ev.DstIP, ev.SrcPort, ev.DstPort
