@@ -733,14 +733,12 @@ Detectors have no tuning controls.
 | `protocol_violation` | critical | CIP message with service code 0x07 (Stop), request or reply |
 | `protocol_violation` | high | CIP message with service code 0x06 (Start), request or reply |
 | `protocol_violation` | high | IEC 104 role violation: a monitor type (1–44) from the client, or a control or system activation/deactivation from the server |
-| `protocol_violation` | high | More than one ICS protocol from one source to one destination address |
 | `rate_anomaly` | high | More than 1,000 ICS events from one source to one destination address in the current and previous clock minute |
 | `rate_anomaly` | critical | More than 100 write events (`is_write: true`) in the same window |
 
 These checks use the source and destination IP addresses, not ports. While a
-pair is above a rate limit, each further event raises another finding. After a
-pair shows a second protocol, each further ICS event of that pair raises that
-finding again. IEC 104 rate counts use one event per APDU. The `ids` /
+pair is above a rate limit, each further event raises another finding.
+IEC 104 rate counts use one event per APDU. The `ids` /
 `anomaly` event of a finding
 from an IEC 104 event also copies that event's identity attributes, such as
 `session_id`, `apdu_id`, `type_id`, `ca` and `ioa`.
@@ -828,7 +826,7 @@ for an unknown ID. Additions and removals are audited as `signatures.add` and
 **Signature changes are live and temporary.** They are not part of the
 candidate or running configuration, and export does not include them. An
 engine restart, or a committed change to the `dataplane` settings, rebuilds
-the signature engine with the 23 built-in signatures. This removes custom
+the signature engine with the built-in signatures. This removes custom
 signatures, restores deleted built-in signatures and clears the match list.
 The engine keeps the 4,096 newest matches. Each match has `signature`,
 `timestamp` and the matched `event`, whose keys are `FlowID`, `Proto`, `Kind`,
