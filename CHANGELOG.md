@@ -216,6 +216,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On narrow screens, the sidebar collapses behind a Menu button so the main
+  content has the full viewport width. Navigation closes after choosing a
+  link or pressing Escape; the desktop sidebar stays visible.
 - CIP read-only rules no longer classify Apply Attributes, Set Member,
   connection controls or class-specific mutations as reads. Classification
   uses the request target and validates supported read bodies; unknown
