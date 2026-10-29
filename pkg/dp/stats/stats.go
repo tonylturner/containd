@@ -83,9 +83,14 @@ func (t *Tracker) RecordEvent(ev dpi.Event) {
 		ps.WriteCount++
 	case classified && !isWrite:
 		ps.ReadCount++
-	case !classified && !strings.EqualFold(ev.Proto, eventfields.ProtoCIP) && strings.Contains(kind, "write"):
+	case !classified && !strings.EqualFold(ev.Proto, eventfields.ProtoCIP):
 		// SMB emits command kinds without access attributes.
-		ps.WriteCount++
+		switch {
+		case strings.Contains(kind, "write"):
+			ps.WriteCount++
+		case strings.Contains(kind, "read"):
+			ps.ReadCount++
+		}
 	}
 }
 

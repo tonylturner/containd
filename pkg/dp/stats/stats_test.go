@@ -67,10 +67,42 @@ func TestTrackerRequiresExplicitAccessCategory(t *testing.T) {
 	if got.EventCount != 8 || got.ReadCount != 1 || got.WriteCount != 1 || got.AlertCount != 1 {
 		t.Fatalf("unclassified events became reads/writes: %+v", got)
 	}
-	tracker.RecordEvent(dpi.Event{Proto: "smb", Kind: "write"})
-	for _, ps := range tracker.Stats() {
-		if ps.Protocol == "smb" && (ps.EventCount != 1 || ps.WriteCount != 1 || ps.ReadCount != 0) {
-			t.Fatalf("SMB command-kind write lost: %+v", ps)
+}
+
+func TestTrackerCommandKindFallback(t *testing.T) {
+	for _, version := range []string{"SMB1", "SMB2"} {
+		for _, tc := range []struct {
+			kind          string
+			reads, writes int64
+		}{
+			{"read", 1, 0},
+			{"write", 0, 1},
+			{"negotiate", 0, 0},
+		} {
+			t.Run(version+"/"+tc.kind, func(t *testing.T) {
+				tracker := New()
+				tracker.RecordEvent(dpi.Event{Proto: "smb", Kind: tc.kind, Attributes: map[string]any{
+					"version": version, "command": tc.kind, "src_port": uint16(50000),
+					"dst_port": uint16(445), "transport": uint8(6),
+				}})
+				got := tracker.Stats()[0]
+				if got.EventCount != 1 || got.ReadCount != tc.reads || got.WriteCount != tc.writes || got.AlertCount != 0 {
+					t.Fatalf("SMB command-kind counters = %+v", got)
+				}
+			})
+		}
+	}
+	for _, protocol := range []string{"cip", "CIP"} {
+		for _, kind := range []string{"read", "write", "request"} {
+			t.Run(protocol+"/"+kind, func(t *testing.T) {
+				tracker := New()
+				tracker.RecordEvent(dpi.Event{Proto: protocol, Kind: kind,
+					Attributes: map[string]any{"service_code": uint8(0x7f)}})
+				got := tracker.Stats()[0]
+				if got.EventCount != 1 || got.ReadCount != 0 || got.WriteCount != 0 || got.AlertCount != 0 {
+					t.Fatalf("unclassified CIP event gained an access category: %+v", got)
+				}
+			})
 		}
 	}
 }
