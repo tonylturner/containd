@@ -37,28 +37,29 @@ func encapsulate(command uint16, session uint32, body []byte) []byte {
 	return b
 }
 
-// Independent bitwise CRC fixture builder; production uses the DNP3 reader.
-func link(data []byte) []byte {
-	crc := func(b []byte) []byte {
-		var c uint16
-		for _, v := range b {
-			c ^= uint16(v)
-			for range 8 {
-				if c&1 != 0 {
-					c = c>>1 ^ 0xa6bc
-				} else {
-					c >>= 1
-				}
+func testCRC(b []byte) []byte {
+	var c uint16
+	for _, v := range b {
+		c ^= uint16(v)
+		for range 8 {
+			if c&1 != 0 {
+				c = c>>1 ^ 0xa6bc
+			} else {
+				c >>= 1
 			}
 		}
-		return []byte{byte(^c), byte(^c >> 8)}
 	}
+	return []byte{byte(^c), byte(^c >> 8)}
+}
+
+// Independent bitwise CRC fixture builder; production uses the DNP3 reader.
+func link(data []byte) []byte {
 	b := []byte{5, 0x64, byte(5 + len(data)), 0xc4, 1, 0, 2, 0}
-	b = append(b, crc(b)...)
+	b = append(b, testCRC(b)...)
 	for len(data) > 0 {
 		n := min(16, len(data))
 		b = append(b, data[:n]...)
-		b = append(b, crc(data[:n])...)
+		b = append(b, testCRC(data[:n])...)
 		data = data[n:]
 	}
 	return b
@@ -95,8 +96,8 @@ func TestProtocolTraps(t *testing.T) {
 		b    []byte
 		want State
 	}{
-		{"zero NOP", ENIP, make([]byte, 24), Reject},
-		{"nonempty NOP", ENIP, encapsulate(0, 0, []byte{1, 2}), Reject},
+		{"zero NOP", ENIP, make([]byte, 24), NeedMore},
+		{"nonempty NOP", ENIP, encapsulate(0, 0, []byte{1, 2}), NeedMore},
 		{"I prefix", IEC104, weakI[:6], NeedMore},
 		{"single I", IEC104, weakI, Candidate},
 		{"two I", IEC104, append(append([]byte(nil), weakI...), weakI...), Confirmed},
@@ -167,6 +168,12 @@ func TestENIPProfiles(t *testing.T) {
 	for _, transport := range []uint8{ics.TCP, ics.UDP} {
 		for _, cmd := range []uint16{0x6f, 0x70} {
 			a, b := explicit(cmd, false), explicit(cmd, true)
+			if transport == ics.UDP {
+				if r := Probe(ENIP, transport, a, b); r.State != Reject {
+					t.Fatal(r)
+				}
+				continue
+			}
 			if r := Probe(ENIP, transport, a, nil); r.State != Candidate {
 				t.Fatal(r)
 			}
@@ -189,7 +196,11 @@ func TestENIPProfiles(t *testing.T) {
 				body = []byte{0, 0}
 			}
 			raw := encapsulate(cmd, 0, body)
-			if r := Probe(ENIP, transport, raw, nil); r.State != Confirmed {
+			want := Confirmed
+			if cmd == 0x64 {
+				want = Candidate
+			}
+			if r := Probe(ENIP, transport, raw, nil); r.State != want {
 				t.Fatalf("cmd=%x: %+v", cmd, r)
 			}
 			raw = append(raw, 1)

@@ -25,7 +25,7 @@ const (
 )
 
 // ProfileVersion versions the supported evidence rules, not a decoder schema.
-const ProfileVersion = 1
+const ProfileVersion = 2
 
 type Role string
 
@@ -41,6 +41,7 @@ type Range struct{ Start, End int }
 type Result struct {
 	Protocol  Protocol
 	State     State
+	States    [2]State // directional evidence before cross-direction pairing; absent TCP bytes need_more
 	Examined  [2]Range
 	Reason    string
 	Transport uint8

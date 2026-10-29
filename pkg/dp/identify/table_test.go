@@ -331,7 +331,9 @@ func TestAmbiguityAndNegativeCache(t *testing.T) {
 }
 
 func TestUDPDatagrams(t *testing.T) {
-	f := fixtures()[3]
+	// Only discovery commands are encapsulated over UDP.
+	f := fixture{protocol: ENIP, request: encapsulate(4, 0, nil),
+		reply: encapsulate(4, 0, append([]byte{1, 0, 0, 1, 20, 0, 1, 0}, make([]byte, 18)...))}
 	table, _ := newTestTable(t, DefaultBudgets(), ics.UDP, 44818)
 	observe(t, table, Arrival{Payload: f.request})
 	d := observe(t, table, Arrival{Direction: 1, Payload: f.reply})
@@ -343,9 +345,9 @@ func TestUDPDatagrams(t *testing.T) {
 		t.Fatal(r)
 	}
 	table, _ = newTestTable(t, DefaultBudgets(), ics.UDP, 12345)
-	// Two partial datagrams must never be stitched into a RegisterSession.
-	d = observe(t, table, Arrival{Payload: f.request[:24]})
-	d = observe(t, table, Arrival{Payload: f.request[24:]})
+	// Two partial datagrams must never be stitched into a ListServices reply.
+	d = observe(t, table, Arrival{Payload: f.reply[:24]})
+	d = observe(t, table, Arrival{Payload: f.reply[24:]})
 	if d.State != Reject {
 		t.Fatal(d)
 	}

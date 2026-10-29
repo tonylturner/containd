@@ -7,33 +7,35 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/dnp3"
-	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
 )
 
 var protocols = [4]Protocol{Modbus, DNP3, IEC104, ENIP}
 
 type evidence struct {
-	state State
-	end   int
-	role  Role
-	why   string
-	// Correlation is applied only to complete, shape-checked frames.
-	pair func([]byte) bool
+	state      State
+	end        int
+	role       Role
+	why        string
+	neutral    bool // a complete NOP-only prefix, not a partial UDP frame
+	modbus     []modbusMessage
+	enip       []enipMessage
+	uAct, uCon uint8
 }
 
 // Probe is pure and non-emitting. TCP arguments start at stream origin; UDP
 // arguments are whole individual datagrams, never concatenated datagrams.
 // Callers must bound their input (Table enforces its configured byte budget).
 func Probe(p Protocol, transport uint8, forward, reverse []byte) Result {
-	r := Result{Protocol: p, State: Reject, Transport: transport, Role: Unknown, Version: ProfileVersion}
+	r := Result{Protocol: p, State: Reject, States: [2]State{Reject, Reject}, Transport: transport, Role: Unknown, Version: ProfileVersion}
 	if transport != ics.TCP && (transport != ics.UDP || p != ENIP) {
 		r.Reason = "unsupported transport"
 		return r
 	}
 	a, b := inspect(p, transport, forward), inspect(p, transport, reverse)
+	r.States = [2]State{a.state, b.state}
 	r.Examined = [2]Range{{End: a.end}, {End: b.end}}
 	best := a
-	if strength(b.state) > strength(a.state) {
+	if len(forward) == 0 || len(reverse) > 0 && strength(b.state) > strength(a.state) {
 		best = b
 	}
 	r.State, r.Reason = best.state, best.why
@@ -42,15 +44,43 @@ func Probe(p Protocol, transport uint8, forward, reverse []byte) Result {
 		r.State, r.Reason = NeedMore, "empty"
 		if transport == ics.UDP {
 			r.State, r.Reason = Reject, "empty datagram"
+			r.States[0] = Reject
 		}
 	}
 	// Correlation cannot rehabilitate a partner that failed its own profile
 	// checks (including datagram boundaries and encapsulation size limits).
 	if strength(a.state) >= 2 && strength(b.state) >= 2 &&
-		(a.pair != nil && a.pair(reverse) || b.pair != nil && b.pair(forward)) {
+		paired(p, a, b) {
 		r.State, r.Reason = Confirmed, "paired frames"
 	}
+	if r.State == Confirmed && (len(forward) > 0 && a.state == Reject || len(reverse) > 0 && b.state == Reject) {
+		r.State, r.Reason = Candidate, "contradictory directional evidence"
+	}
 	return r
+}
+
+func paired(p Protocol, a, b evidence) bool {
+	switch p {
+	case Modbus:
+		for _, x := range a.modbus {
+			for _, y := range b.modbus {
+				if x.tid == y.tid && x.unit == y.unit && x.fc == y.fc && (x.req && y.rsp || x.rsp && y.req) {
+					return true
+				}
+			}
+		}
+	case ENIP:
+		for _, x := range a.enip {
+			for _, y := range b.enip {
+				if enipPair(x, y) || enipPair(y, x) {
+					return true
+				}
+			}
+		}
+	case IEC104:
+		return a.uAct&b.uCon != 0 || a.uCon&b.uAct != 0
+	}
+	return false
 }
 
 func strength(s State) int {
@@ -68,7 +98,7 @@ func strength(s State) int {
 
 func inspect(p Protocol, transport uint8, b []byte) evidence {
 	if len(b) == 0 {
-		return evidence{state: Reject, role: Unknown, why: "empty direction"}
+		return evidence{state: NeedMore, role: Unknown, why: "empty direction"}
 	}
 	var e evidence
 	switch p {
@@ -80,7 +110,7 @@ func inspect(p Protocol, transport uint8, b []byte) evidence {
 		e = iecEvidence(b)
 	case ENIP:
 		e = enipEvidence(b, transport == ics.UDP)
-		if transport == ics.UDP && e.state == NeedMore {
+		if transport == ics.UDP && e.state == NeedMore && !e.neutral {
 			e = invalid(b)
 		}
 	default:
@@ -125,50 +155,11 @@ func legalLinkControl(c byte) bool {
 		switch fc {
 		case 0, 1, 2, 3, 4, 9:
 			sequenced := fc == 2 || fc == 3
-			return (c&dnp3.ControlFCV != 0) == sequenced &&
-				(sequenced || c&dnp3.ControlFCB == 0)
+			return (c&dnp3.ControlFCV != 0) == sequenced
 		}
 		return false
 	}
 	return c&dnp3.ControlFCB == 0 && (fc == 0 || fc == 1 || fc == 11 || fc == 15)
-}
-
-func iecEvidence(b []byte) evidence {
-	if b[0] != 0x68 {
-		return invalid(b[:1])
-	}
-	v, err := iec104.ValidateAPDU(b)
-	if err != nil {
-		return invalid(b)
-	}
-	if v.Size == 0 {
-		return pending(b)
-	}
-	e := evidence{state: Candidate, end: v.Size, why: "single APDU"}
-	if !v.Supported {
-		e.why = "unsupported ASDU profile"
-		return e
-	}
-	if v.UFunction != "" {
-		e.pair = func(other []byte) bool {
-			w, err := iec104.ValidateAPDU(other)
-			if err != nil || w.Size == 0 || w.UFunction == "" {
-				return false
-			}
-			switch v.UFunction + "/" + w.UFunction {
-			case "startdt_act/startdt_con", "startdt_con/startdt_act",
-				"stopdt_act/stopdt_con", "stopdt_con/stopdt_act",
-				"testfr_act/testfr_con", "testfr_con/testfr_act":
-				return true
-			}
-			return false
-		}
-	}
-	w, err := iec104.ValidateAPDU(b[v.Size:])
-	if err == nil && w.Size > 0 && w.Supported && (v.Format != "S" || w.Format != "S") {
-		e.state, e.end, e.why = Confirmed, v.Size+w.Size, "consecutive APDUs"
-	}
-	return e
 }
 
 func le16(b []byte) uint16 { return binary.LittleEndian.Uint16(b) }

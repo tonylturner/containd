@@ -13,6 +13,11 @@
 // Expected records registry port expectations independently of content identity.
 // Ambiguous and candidate decisions remain pending until stronger evidence or
 // budget exhaustion. Unknown protocol layouts are not confirmation evidence.
+// Result.States exposes directional evidence; a hard reject in either observed
+// direction prevents confirmation from the other alone. Modbus, IEC and ENIP
+// walk validated frame boundaries, including neutral ENIP NOPs, without offset
+// scanning. ENIP over UDP supports List commands and NOP only. IEC control
+// functions do not establish client/server roles; callers use TCP SYN metadata.
 //
 // Take transfers retained storage once, and leaves terminal metadata cached
 // until Release. Do not submit the triggering arrival a second time: it is

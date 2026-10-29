@@ -8,39 +8,48 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 )
 
+type modbusMessage struct {
+	tid      uint16
+	unit, fc uint8
+	req, rsp bool
+}
+
 func modbusEvidence(b []byte) evidence {
-	if len(b) >= 4 && be16(b[2:4]) != 0 {
-		return invalid(b[:4])
-	}
-	f, err := modbus.ParseTCPFrame(b)
-	if errors.Is(err, modbus.ErrTooShort) {
-		return pending(b)
-	}
-	if err != nil || f.ProtocolID != 0 || f.FunctionCode&0x7f == 0 {
-		return invalid(b)
-	}
-	req, rsp, supported := modbusShape(f)
-	e := evidence{state: Candidate, end: 6 + int(f.Length), why: "unsupported function shape"}
-	if !supported {
-		return e
-	}
-	if !req && !rsp {
-		return invalid(b[:e.end])
-	}
-	e.why = "complete FC shape"
-	if req && !rsp {
-		e.role = Client
-	} else if rsp && !req {
-		e.role = Server
-	}
-	e.pair = func(other []byte) bool {
-		g, err := modbus.ParseTCPFrame(other)
-		if err != nil || g.ProtocolID != 0 || g.TransactionID != f.TransactionID ||
-			g.UnitID != f.UnitID || g.FunctionCode&0x7f != f.FunctionCode&0x7f {
-			return false
+	e := pending(b)
+	for offset := 0; offset < len(b); {
+		rest := b[offset:]
+		if len(rest) >= 4 && be16(rest[2:4]) != 0 {
+			return invalid(b[:offset+4])
 		}
-		greq, grsp, ok := modbusShape(g)
-		return ok && (req && grsp || rsp && greq)
+		f, err := modbus.ParseTCPFrame(rest)
+		if errors.Is(err, modbus.ErrTooShort) {
+			break
+		}
+		if err != nil || f.ProtocolID != 0 || f.FunctionCode&0x7f == 0 {
+			return invalid(b)
+		}
+		req, rsp, supported := modbusShape(f)
+		if supported && !req && !rsp {
+			return invalid(b)
+		}
+		e.state, e.why = Candidate, "complete FC shape"
+		if !supported {
+			e.why = "unsupported function shape"
+		} else {
+			e.modbus = append(e.modbus, modbusMessage{f.TransactionID, f.UnitID, f.FunctionCode & 0x7f, req, rsp})
+		}
+		role := Unknown
+		if req && !rsp {
+			role = Client
+		} else if rsp && !req {
+			role = Server
+		}
+		if offset == 0 {
+			e.role = role
+		} else if e.role != role {
+			e.role = Unknown
+		}
+		offset += 6 + int(f.Length)
 	}
 	return e
 }
