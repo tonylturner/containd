@@ -53,7 +53,10 @@ func (e Evidence) Validate(observed Tuple) error {
 	if err := e.Reply.Validate(); err != nil {
 		return err
 	}
-	if e.TimeoutSeconds == 0 || e.Original.Family != e.Reply.Family ||
+	if e.TimeoutSeconds == 0 {
+		return fmt.Errorf("conntrack identity has expired (zero timeout)")
+	}
+	if e.Original.Family != e.Reply.Family ||
 		e.Original.Protocol != e.Reply.Protocol || e.Original == e.Reply ||
 		observed != e.Original && observed != e.Reply {
 		return fmt.Errorf("conntrack identity has ambiguous or mismatched tuples")

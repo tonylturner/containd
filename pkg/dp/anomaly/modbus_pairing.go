@@ -64,9 +64,10 @@ func (d *Detector) ForgetConnection(id string) {
 
 // AdoptConnection migrates a wire-only history once exact CT evidence proves
 // its membership. Public IDs are never merged; the engine selects the survivor.
-func (d *Detector) AdoptConnection(from, to string) {
+func (d *Detector) AdoptConnection(from string, survivor *flow.Connection) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	to := survivor.Key
 	source := d.pendingTxns[from]
 	if source == nil || from == to {
 		return
@@ -82,13 +83,14 @@ func (d *Detector) AdoptConnection(from, to string) {
 			target.last = source.last
 		}
 		for key, at := range source.transactions {
-			if len(target.transactions) < maxPendingPerConnection {
+			if _, exists := target.transactions[key]; exists || len(target.transactions) < maxPendingPerConnection {
 				target.transactions[key] = at
-			} else {
-				target.incompleteUntil = at.Add(pendingTTL)
+			} else if until := at.Add(pendingTTL); until.After(target.incompleteUntil) {
+				target.incompleteUntil = until
 			}
 		}
 	}
+	d.pendingTxns[to].connection = survivor
 	delete(d.pendingTxns, from)
 }
 
@@ -106,8 +108,8 @@ func pairingIdentity(ev dpi.Event) (id string, direction flow.Direction, availab
 			direction = c.Direction(key)
 		}
 		status = c.ResolutionStatus()
-		available = c.CorrelationAvailable(ev.Timestamp) && (c.Verified() || status == "offline" || status == "wire")
-		if !available && (c.Verified() || status == "offline" || status == "wire") {
+		available = c.CorrelationAvailable(ev.Timestamp) && (c.Verified() || status == "wire")
+		if !available && (c.Verified() || status == "wire") {
 			status = "capture_incomplete"
 		}
 		return c.Key, direction, available, status
@@ -116,7 +118,7 @@ func pairingIdentity(ev dpi.Event) (id string, direction flow.Direction, availab
 	if canonical.Dir == flow.DirReverse {
 		canonical = canonical.Reversed()
 	}
-	return canonical.Hash(), direction, true, "offline"
+	return canonical.Hash(), direction, true, "wire"
 }
 
 func (d *Detector) sweepPending(now time.Time) {

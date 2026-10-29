@@ -219,6 +219,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Transport correlation retains published IDs and pending Modbus requests across
+  conntrack authority refreshes and failures. Start-of-connection coverage and
+  bounded, tuple-scoped loss recovery prevent false unmatched replies without
+  permanently disabling detection. Industrial-only admission, single exact
+  lookups, prompt negative-cache expiry and rate-limited overflow telemetry bound
+  resolver pressure. Wire-only NFQUEUE/PCAP evidence is reported as `wire`;
+  reconfiguration preserves learned profiles and raw capture SYNs do not alter
+  inline deny-handshake tracking.
 - Modbus transaction pairing separates connection incarnations, directions,
   transaction IDs and unit IDs, including locally masqueraded AF_PACKET
   traffic. Missing connection evidence reports correlation unavailable instead

@@ -793,6 +793,7 @@ func (e *Engine) sweepFlows(now time.Time) {
 		if st == nil || st.Expired(now) {
 			delete(e.flows, k)
 			delete(e.tcpISNs, k)
+			delete(e.transportISNs, k)
 			metrics.FlowsActive.Dec()
 			if st != nil {
 				expired = append(expired, st)

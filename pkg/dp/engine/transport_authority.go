@@ -130,6 +130,9 @@ func (a *transportAuthority) snapshot() TransportStatus {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := a.status
+	if out.ZoneStatus == "verified" && a.version.Load()%2 != 0 {
+		out.ZoneStatus = "zone_unverified"
+	}
 	out.ZoneSetters = append([]enforce.ZoneSetter(nil), out.ZoneSetters...)
 	out.Counters = make(map[string]uint64, len(a.status.Counters))
 	for k, v := range a.status.Counters {

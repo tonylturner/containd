@@ -105,7 +105,7 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 			old = peer.Connection.Load()
 		}
 		if old == nil {
-			old = e.newWireConnectionLocked("offline")
+			old = e.newWireConnectionLocked("wire")
 		}
 		state.Connection.Store(old)
 		return
@@ -144,19 +144,26 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 			e.transport.authority.count("ambiguous")
 		}
 	}
+	e.adoptTransportPending(incoming, old)
 	state.Connection.Store(incoming)
 	if incoming.Evidence != nil {
 		for _, tuple := range []conntrack.Tuple{incoming.Evidence.Original, incoming.Evidence.Reply} {
 			if peer := e.tupleStateLocked(tuple); peer != nil {
 				previous := peer.Connection.Load()
-				if previous != nil && previous.ID == "" && previous.Key != incoming.Key && e.anomalyDetector != nil {
-					incoming.MergeHistory(previous)
-					e.anomalyDetector.AdoptConnection(previous.Key, incoming.Key)
-				}
+				e.adoptTransportPending(incoming, previous)
 				if previous == nil || previous.ID == "" || previous.ID == incoming.ID {
 					peer.Connection.Store(incoming)
 				}
 			}
+		}
+	}
+}
+
+func (e *Engine) adoptTransportPending(incoming, previous *flow.Connection) {
+	if incoming.Evidence != nil && previous != nil && previous.ID == "" && previous.Key != incoming.Key {
+		incoming.MergeHistory(previous)
+		if e.anomalyDetector != nil {
+			e.anomalyDetector.AdoptConnection(previous.Key, incoming)
 		}
 	}
 }

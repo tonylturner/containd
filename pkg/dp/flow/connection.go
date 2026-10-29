@@ -35,8 +35,8 @@ func (s *ConnectionSlot) Store(c *Connection) {
 }
 
 // Connection is shared correlation evidence, never policy/reset coordinates.
-// ID, Key, Status and Evidence are immutable after construction. Publication
-// freezes assignment; coverage may be lost without renaming public history.
+// ID, Key, Status and Evidence are immutable after construction. An issued ID
+// freezes assignment; an ID-less history may still acquire verified evidence.
 type Connection struct {
 	ID        TransportConnectionID
 	Key       string // private incarnation identity, including offline capture
@@ -82,7 +82,7 @@ func (c *Connection) PublicID() TransportConnectionID {
 }
 func (c *Connection) ResolutionStatus() string {
 	if c == nil {
-		return "offline"
+		return "wire"
 	}
 	return c.Status
 }

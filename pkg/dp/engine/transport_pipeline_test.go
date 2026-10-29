@@ -4,13 +4,64 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
+
+func TestTransportLookupDowngradeKeepsReplyIdentity(t *testing.T) {
+	for _, status := range []string{"lookup_error", "not_found", "admission_timeout", "zone_unverified"} {
+		t.Run(status, func(t *testing.T) {
+			f := &transportCTFake{evidence: natEvidence()}
+			e, r, _ := newTransportTest(t, f)
+			r.authority.check(context.Background())
+			request := transportWire(natEvidence().Original, time.Now(), modbusADU(1, 3, 10, 2))
+			e.handleTransportPacket(request, r.resolve(context.Background(), request, false))
+			first := transportModbusEvents(e)[0]
+			f.err = errors.New("permission denied")
+			if status == "not_found" {
+				f.err = conntrack.ErrNotFound
+			}
+			reply := transportWire(natEvidence().Reply, time.Now(), []byte{0, 1, 0, 0, 0, 7, 1, 3, 4, 0, 10, 0, 11})
+			r.aliases[natEvidence().Reply].expires = time.Now().Add(-time.Second)
+			if status == "zone_unverified" {
+				r.authority.invalidate()
+			}
+			c := r.resolve(context.Background(), reply, status == "admission_timeout")
+			e.handleTransportPacket(reply, c)
+			last := transportModbusEvents(e)[0]
+			if last.TransportConnectionID != first.TransportConnectionID || c.Status != status ||
+				e.AnomalyDetector().PairingStats().Matched != 1 {
+				t.Fatalf("downgrade split first reply: %+v, %+v", first, last)
+			}
+		})
+	}
+}
+
+func TestTransportNewSYNDuringAuthorityFailureStartsNewIncarnation(t *testing.T) {
+	e, r, _ := newTransportTest(t, &transportCTFake{evidence: natEvidence()})
+	r.authority.check(context.Background())
+	pkt := transportWire(natEvidence().Original, time.Now(), nil)
+	pkt.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 100}
+	e.handleTransportPacket(pkt, r.resolve(context.Background(), pkt, false))
+	e.flowMu.Lock()
+	old := e.tupleStateLocked(packetKey(pkt).Tuple()).Connection.Load()
+	e.flowMu.Unlock()
+	r.authority.invalidate()
+	pkt.TCP.Seq++
+	e.handleTransportPacket(pkt, r.resolve(context.Background(), pkt, false))
+	e.flowMu.Lock()
+	fresh := e.tupleStateLocked(packetKey(pkt).Tuple()).Connection.Load()
+	e.flowMu.Unlock()
+	if old.Key == fresh.Key || fresh.PublicID() != "" {
+		t.Fatal("new SYN inherited a previous incarnation while authority failed")
+	}
+}
 
 func TestTransportMidstreamOutstandingReply(t *testing.T) {
 	ev := natEvidence()
@@ -27,7 +78,7 @@ func TestTransportMidstreamOutstandingReply(t *testing.T) {
 		t.Fatalf("decoded %d events, want request and reply", got)
 	}
 	stats := e.AnomalyDetector().PairingStats()
-	if stats.Unmatched != 0 {
+	if stats.Unmatched != 0 || stats.Unavailable != 1 {
 		t.Fatalf("legitimate outstanding reply classified unmatched after midstream start: %+v", stats)
 	}
 }
@@ -42,7 +93,7 @@ func TestTransportSuccessfulRefreshDuringEventPipeline(t *testing.T) {
 	st := flow.NewState(flow.TupleKey(ev.Original, flow.DirForward), time.Now())
 	st.Connection.Store(c)
 	e.flows[st.Key.Hash()] = st
-	c.Coverage().Store(true) // Earlier request/reply established coverage.
+	c.Coverage().Store(true) // The opener SYN was captured earlier.
 	events := []dpi.Event{{FlowID: st.Key.Hash(), Proto: "modbus", Kind: "request", Timestamp: time.Now(), Attributes: map[string]any{"transaction_id": uint16(7), "unit_id": uint8(1), "function_code": uint8(3)}}}
 	bindEventConnections(st, events)
 	// A concurrent ruleset apply can refresh authority after binding, before
@@ -57,7 +108,7 @@ func TestTransportSuccessfulRefreshDuringEventPipeline(t *testing.T) {
 	reply.FlowID, reply.Kind, reply.Connection = replyState.Key.Hash(), "response", nil
 	e.RecordDPIEvents(replyState, &dpi.ParsedPacket{Proto: "tcp"}, []dpi.Event{reply})
 	stats := e.AnomalyDetector().PairingStats()
-	if stats.Unmatched != 0 {
+	if stats.Unmatched != 0 || stats.Matched != 1 {
 		t.Fatalf("observed request lost across successful authority refresh: %+v", stats)
 	}
 }

@@ -144,7 +144,10 @@ func (r *transportResolver) unavailable(e *Engine, pkt capture.Packet, status st
 		return
 	}
 	r.overflowNext = now.Add(time.Second)
-	e.eventStore.Append(events.Event{Kind: "dpi.correlation.unavailable", Timestamp: time.Now().UTC(),
+	c := r.indexed[packetKey(pkt).Tuple()]
+	key, proto := transportOverflowIdentity(pkt, c)
+	e.eventStore.Append(events.Event{Kind: "dpi.correlation.unavailable", Timestamp: now.UTC(),
+		FlowID: key.Hash(), Proto: proto, Transport: pkt.Transport, TransportConnectionID: c.PublicID(),
 		CorrelationStatus: status,
 		SrcIP:             pkt.SrcIP.String(), DstIP: pkt.DstIP.String(), SrcPort: pkt.SrcPort, DstPort: pkt.DstPort,
 		Attributes: map[string]any{"correlation_status": status}})
@@ -236,44 +239,52 @@ func (r *transportResolver) unresolved(status string) *flow.Connection {
 	return &flow.Connection{Key: r.nextKey(), Status: status}
 }
 
+func (r *transportResolver) unresolvedAlias(old *transportAlias, status string) *flow.Connection {
+	c := r.unresolved(status)
+	if old != nil && !old.connection.Closed().Load() {
+		return adoptTransport(old.connection, c)
+	}
+	return c
+}
+
 func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, overdue bool) *flow.Connection {
 	version := r.authority.version.Load()
 	tuple := packetKey(pkt).Tuple()
 	if err := tuple.Validate(); err != nil {
 		return r.unresolved("unsupported_tuple")
 	}
-	if overdue {
-		return r.unresolved("admission_timeout")
-	}
 	now := time.Now()
 	old := r.aliases[tuple]
-	if version%2 != 0 {
-		if old != nil && !old.connection.Closed().Load() {
-			return adoptTransport(old.connection, r.unresolved("zone_unverified"))
-		}
-		return r.unresolved("zone_unverified")
-	}
 	syn := pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0
 	newSYN := syn && old != nil && (!old.hasSYN || old.synSeq != pkt.TCP.Seq)
-	if !newSYN && old != nil && old.version == version && now.Before(old.expires) && !old.connection.Closed().Load() &&
-		(old.connection.Evidence == nil || old.connection.Verified()) {
+	history := old
+	if newSYN {
+		history = nil
+	}
+	if overdue {
+		return r.unresolvedAlias(history, "admission_timeout")
+	}
+	if version%2 != 0 {
+		return r.unresolvedAlias(history, "zone_unverified")
+	}
+	if !newSYN && old != nil && old.version == version && now.Before(old.expires) && !old.connection.Closed().Load() {
 		r.authority.count("cache_hits")
 		return old.connection
 	}
 	for t, alias := range r.aliases {
-		if now.Sub(alias.expires) > 30*time.Second || alias.connection.Evidence == nil && !now.Before(alias.expires) {
+		if now.Sub(alias.expires) > 30*time.Second || !alias.connection.Verified() && !now.Before(alias.expires) {
 			delete(r.aliases, t)
 		}
 	}
 	if len(r.aliases)+2 > transportAliasLimit {
-		return r.unresolved("cache_capacity")
+		return r.unresolvedAlias(history, "cache_capacity")
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
 	r.authority.count("lookups")
 	evidence, err := r.reader.Lookup(lookupCtx, tuple)
 	if version != r.authority.version.Load() {
-		return r.unresolved("zone_unverified")
+		return r.unresolvedAlias(history, "zone_unverified")
 	}
 	if err == nil {
 		err = evidence.Validate(tuple)
@@ -288,7 +299,7 @@ func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, ove
 		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 			status = "lookup_timeout"
 		}
-		c := r.unresolved(status)
+		c := r.unresolvedAlias(history, status)
 		r.aliases[tuple] = &transportAlias{connection: c, expires: now.Add(100 * time.Millisecond), version: version}
 		return c
 	}
@@ -296,7 +307,7 @@ func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, ove
 	for _, t := range []conntrack.Tuple{evidence.Original, evidence.Reply} {
 		if a := r.aliases[t]; a != nil && a != old && now.Before(a.expires) && a.connection.Evidence != nil &&
 			!a.connection.Closed().Load() && !sameGeneration(a.connection.Evidence, &evidence) {
-			return r.unresolved("ambiguous")
+			return r.unresolvedAlias(history, "ambiguous")
 		}
 	}
 	var c *flow.Connection

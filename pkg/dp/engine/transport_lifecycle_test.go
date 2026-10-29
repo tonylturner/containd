@@ -130,6 +130,42 @@ func TestTransportUnresolvedHistoryAdoptsIdentity(t *testing.T) {
 	}
 }
 
+func TestTransportAdoptsBothUnresolvedDirectionalHistories(t *testing.T) {
+	ev := natEvidence()
+	e, r, _ := newTransportTest(t, &transportCTFake{evidence: ev})
+	original := flow.NewState(flow.TupleKey(ev.Original, flow.DirForward), time.Now())
+	reply := flow.NewState(flow.TupleKey(ev.Reply, flow.DirReverse), time.Now())
+	for i, state := range []*flow.State{original, reply} {
+		c := r.unresolved("not_found")
+		state.Connection.Store(c)
+		e.flows[state.Key.Hash()] = state
+		e.RecordDPIEvents(state, nil, []dpi.Event{{Proto: "modbus", Kind: "request", FlowID: state.Key.Hash(),
+			Timestamp: time.Now(), Attributes: map[string]any{
+				"transaction_id": uint16(i + 1), "unit_id": uint8(1), "function_code": uint8(3)}}})
+	}
+	original.Connection.Load().Coverage().Store(true)
+	oldReply := reply.Connection.Load()
+	// Preserve the reply-side notification and loss history too.
+	oldReply.ReportUnavailable()
+	oldReply.LoseCorrelation(time.Now(), time.Minute)
+	r.authority.check(context.Background())
+	pkt := transportWire(ev.Reply, time.Now(), nil)
+	e.bindTransport(reply, r.resolve(context.Background(), pkt, false))
+	c := reply.Connection.Load()
+	if c.PublicID() == "" || c != original.Connection.Load() || c.ReportUnavailable() ||
+		c.CorrelationAvailable(time.Now()) || e.AnomalyDetector().PairingStats().PendingTransactions != 2 {
+		t.Fatal("adoption lost a directional pending/notification history")
+	}
+	for i, state := range []*flow.State{reply, original} {
+		e.RecordDPIEvents(state, nil, []dpi.Event{{Proto: "modbus", Kind: "response", FlowID: state.Key.Hash(),
+			Timestamp: time.Now(), Attributes: map[string]any{
+				"transaction_id": uint16(i + 1), "unit_id": uint8(1), "function_code": uint8(3)}}})
+	}
+	if stats := e.AnomalyDetector().PairingStats(); stats.Matched != 2 || stats.PendingTransactions != 0 {
+		t.Fatalf("adoption did not transfer both directions: %+v", stats)
+	}
+}
+
 func TestTransportResolverIPv6UDPAndAliasCapacity(t *testing.T) {
 	ev := conntrack.Evidence{ID: 42, TimeoutSeconds: 60,
 		Original: conntrack.Tuple{Family: 10, Protocol: 17,
@@ -217,7 +253,7 @@ func TestTransportEngineWiresApplierAndStatus(t *testing.T) {
 	}
 }
 
-func TestTransportOfflineWireIncarnations(t *testing.T) {
+func TestTransportWireIncarnations(t *testing.T) {
 	e, _, _ := newTransportTest(t, &transportCTFake{})
 	e.transport = nil
 	ev := natEvidence()
@@ -227,12 +263,12 @@ func TestTransportOfflineWireIncarnations(t *testing.T) {
 	st := e.tupleStateLocked(ev.Original)
 	e.flowMu.Unlock()
 	c := st.Connection.Load()
-	if c.PublicID() != "" || c.Status != "offline" {
+	if c.PublicID() != "" || c.Status != "wire" {
 		t.Fatal("offline path acquired CT identity")
 	}
 	events := []dpi.Event{{FlowID: st.Key.Hash(), Kind: "request", Proto: "modbus"}}
 	bindEventConnections(st, events)
-	if events[0].Connection != c || events[0].CorrelationStatus != "offline" {
+	if events[0].Connection != c || events[0].CorrelationStatus != "wire" {
 		t.Fatal("offline event lost wire incarnation")
 	}
 	if c.Direction(flow.TupleKey(ev.Original, flow.DirForward)) != flow.DirForward {

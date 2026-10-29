@@ -379,10 +379,16 @@ components:
         flowId: {type: string}
         transportConnectionId:
           type: string
-          description: Verified local transport connection incarnation shared across O/R tuples; directional flowId and wire endpoints are unchanged.
+          description: Local transport connection incarnation established from verified O/R evidence; retained across later evidence failures. Directional flowId and wire endpoints are unchanged.
         correlationStatus: {$ref: '#/components/schemas/TransportCorrelationStatus'}
         proto: {type: string}
-        kind: {type: string}
+        kind:
+          type: string
+          description: >-
+            Event kind. dpi.correlation.unavailable reports a dropped correlation observation
+            (queue_overflow), rate-limited to one event per second; carries wire endpoints,
+            flowId, protocol/transport hints and an existing transportConnectionId when known,
+            not decoded payload evidence. The queue_overflow counter counts every drop.
         attributes:
           type: object
           additionalProperties: true
@@ -422,7 +428,7 @@ components:
         flowId: {type: string}
         transportConnectionId:
           type: string
-          description: Shared transport identity without bidirectional regrouping; omitted when retained events have differing IDs.
+          description: Shared transport identity without bidirectional regrouping; omitted only when retained events have differing nonempty IDs, not merely differing evidence status.
         correlationStatus: {$ref: '#/components/schemas/TransportCorrelationStatus'}
         session_id:
           type: string
@@ -1038,7 +1044,7 @@ components:
       properties:
         Attributes: {additionalProperties: {}, type: object}
         FlowID: {type: string}
-        transportConnectionId: {type: string, description: Verified local transport connection incarnation; independent of FlowID and protocol session handles.}
+        transportConnectionId: {type: string, description: Local transport connection incarnation established from verified evidence and retained across later evidence failures; independent of FlowID and protocol session handles.}
         correlationStatus: {$ref: '#/components/schemas/TransportCorrelationStatus'}
         Kind: {type: string}
         Proto: {type: string}
@@ -1963,8 +1969,12 @@ components:
             clears the schedule (required before changing a rule to TAG).
     TransportCorrelationStatus:
       type: string
-      enum: [resolved, offline, zone_unverified, unsupported_zone, unsupported_tuple, not_found, lookup_error, lookup_timeout, ambiguous, admission_timeout, cache_capacity, identity_frozen, queue_overflow, mixed]
-      description: Identity evidence, not proof of complete capture or delivery. mixed applies to flow rollups containing differing evidence.
+      enum: [resolved, wire, zone_unverified, unsupported_zone, unsupported_tuple, not_found, lookup_error, lookup_timeout, ambiguous, admission_timeout, cache_capacity, queue_overflow, mixed]
+      description: >-
+        Identity evidence, not proof of complete capture or delivery. wire means wire-only
+        correlation (including live NFQUEUE and PCAP), without live conntrack evidence.
+        mixed applies to flow rollups containing differing evidence. An issued ID remains
+        present when authority or lookup failure downgrades status.
     TransportIdentityStatus:
       type: object
       properties:
@@ -1983,7 +1993,13 @@ components:
         counters:
           type: object
           additionalProperties: {type: integer, format: uint64}
-          description: Sparse cumulative authority, lookup, admission and correlation counters; absent keys mean zero.
+          description: >-
+            Sparse cumulative counters; absent keys mean zero. Authority counters are zone_checks,
+            zone_read_errors, zone_setter_checks. Resolution counters are lookups, cache_hits,
+            resolved, not_found, lookup_error, lookup_timeout, ambiguous, unsupported_zone,
+            unsupported_tuple, zone_unverified. Admission/correlation counters are queue_overflow
+            (every drop), admission_timeout, cache_capacity, coverage_capacity (unindexed tuple
+            observations), canceled, correlation_unavailable (emitted anomalies). No worker retries.
         modbus:
           type: object
           properties:

@@ -109,21 +109,24 @@ func (e *Engine) recordAnomalyAlerts(state *flow.State, pkt *dpi.ParsedPacket, s
 }
 
 func anomalyAlertFromEvent(ev dpi.Event, a anomaly.Anomaly) dpi.Event {
+	attrs := map[string]any{
+		"anomaly_type": a.Type,
+		"protocol":     a.Protocol,
+		"severity":     a.Severity,
+		"message":      a.Message,
+		"source_ip":    a.SourceIP,
+		"dest_ip":      a.DestIP,
+	}
+	if status, ok := a.Attributes["correlation_status"].(string); ok && status != "" {
+		attrs["correlation_status"] = status
+	}
 	return dpi.Event{
 		FlowID:     ev.FlowID,
 		Connection: ev.Connection,
 		Proto:      "ids",
 		Kind:       "anomaly",
-		Attributes: withDerivedIdentity(ev, map[string]any{
-			"anomaly_type":       a.Type,
-			"protocol":           a.Protocol,
-			"severity":           a.Severity,
-			"message":            a.Message,
-			"source_ip":          a.SourceIP,
-			"dest_ip":            a.DestIP,
-			"correlation_status": a.Attributes["correlation_status"],
-		}),
-		Timestamp: a.Timestamp,
+		Attributes: withDerivedIdentity(ev, attrs),
+		Timestamp:  a.Timestamp,
 	}
 }
 

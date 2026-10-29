@@ -18,7 +18,7 @@ func pairingEvent(port uint16, tid uint16, unit uint8, reply bool, incarnation s
 		key = modbusFlowID("10.0.0.2", "10.0.0.1", 502, port, flow.DirReverse)
 		kind = "response"
 	}
-	c := &flow.Connection{Key: incarnation, Status: "offline"}
+	c := &flow.Connection{Key: incarnation, Status: "wire"}
 	c.Coverage().Store(true)
 	return dpi.Event{FlowID: key, Connection: c, Proto: "modbus", Kind: kind, Timestamp: time.Now(),
 		Attributes: map[string]any{"transaction_id": tid, "unit_id": unit, "function_code": uint8(3)}}
@@ -60,7 +60,7 @@ func TestModbusPairingScopesPortUnitDirectionAndIncarnation(t *testing.T) {
 }
 
 func TestModbusUnresolvedDoesNotClaimUnmatchedReply(t *testing.T) {
-	for _, status := range []string{"zone_unverified", "not_found", "lookup_error", "unsupported_zone", "identity_frozen"} {
+	for _, status := range []string{"zone_unverified", "not_found", "lookup_error", "unsupported_zone", "admission_timeout"} {
 		d := New()
 		ev := pairingEvent(41000, 7, 1, true, "unresolved")
 		ev.Connection = &flow.Connection{Key: "unresolved", Status: status}
@@ -143,5 +143,23 @@ func TestModbusUnresolvedReportsOncePerIncarnation(t *testing.T) {
 	reply.Connection = next
 	if got := d.Check("10.0.0.2", "10.0.0.1", reply); len(got) != 1 {
 		t.Fatal("suppression leaked to another incarnation")
+	}
+}
+
+func TestModbusPairingAdoptedExpiryMarksSurvivingIncarnation(t *testing.T) {
+	d := New()
+	req := pairingEvent(41000, 1, 1, false, "unresolved")
+	d.Check("10.0.0.1", "10.0.0.2", req)
+	survivor := &flow.Connection{Key: "survivor", Status: "wire"}
+	survivor.Coverage().Store(true)
+	d.AdoptConnection(req.Connection.Key, survivor)
+	reply := pairingEvent(41000, 2, 1, true, "survivor")
+	reply.Connection = survivor
+	// Sweeping retires the idle pending bucket as well as its request.
+	reply.Timestamp = req.Timestamp.Add(2*pendingTTL + time.Second)
+	got := d.Check("10.0.0.2", "10.0.0.1", reply)
+	if len(got) != 1 || got[0].Type != "correlation_unavailable" || d.PairingStats().PendingConnections != 0 ||
+		survivor.CorrelationAvailable(reply.Timestamp) {
+		t.Fatalf("adopted request expiration lost the survivor's gap: %+v", got)
 	}
 }

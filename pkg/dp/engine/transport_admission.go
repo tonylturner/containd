@@ -38,6 +38,27 @@ func (e *Engine) transportEligible(pkt capture.Packet) bool {
 	return false
 }
 
+// Overflow telemetry has no decoded payload. Use only port/handshake hints
+// and already-admitted evidence, preserving the observed wire coordinates.
+func transportOverflowIdentity(pkt capture.Packet, c *flow.Connection) (flow.Key, string) {
+	key := packetKey(pkt)
+	if dir, known := icsServiceDirection(pkt); known {
+		key.Dir = dir
+	}
+	if dir, known := handshakeDirection(pkt); known {
+		key.Dir = dir
+	}
+	if c != nil {
+		key.Dir = c.Direction(key)
+	}
+	for _, port := range ics.DecoderPorts() {
+		if port.Transport == pkt.Proto && (port.Port == pkt.SrcPort || port.Port == pkt.DstPort) {
+			return key, port.Protocol
+		}
+	}
+	return key, pkt.Transport
+}
+
 // The loss index is independent of lookup TTLs: a quiet live connection still
 // needs a tuple-scoped loss marker. Placeholders retain loss while its opener
 // is queued. Closed incarnations are reclaimed, never live ones.

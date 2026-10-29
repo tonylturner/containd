@@ -48,3 +48,17 @@ func TestTransportRawSYNDoesNotChangeDenyISNs(t *testing.T) {
 		t.Fatal("raw capture SYN changed deny semantics or retired its retransmission")
 	}
 }
+
+func TestTransportRawSYNExpiryCleansISNs(t *testing.T) {
+	e, _, _ := newTransportTest(t, &transportCTFake{})
+	pkt := transportWire(natEvidence().Original, time.Now(), nil)
+	pkt.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 100}
+	e.HandlePacket(pkt)
+	if len(e.transportISNs) != 1 {
+		t.Fatal("missing transport hint")
+	}
+	e.sweepFlows(pkt.Timestamp.Add(10 * time.Minute))
+	if len(e.transportISNs) != 0 {
+		t.Fatal("expired connection leaked transport ISN")
+	}
+}
