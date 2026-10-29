@@ -29,7 +29,7 @@ async function mockAPI(page: Page) {
         ], historyTruncated: false }
       : path === "/api/v1/pcap/list" ? [{ name: "alternate.pcap", sizeBytes: 400, createdAt: flow.firstSeen }]
       : path === "/api/v1/pcap/analyze/alternate.pcap" ? {
-          rules: [], profiles: [], eventSummary: { modbus: 2, identify: 2 },
+          rules: [], profiles: [], eventSummary: { modbus: 2 },
           stats: { events: [], flows: [], protocols: { modbus: 2 }, duration: 100000000, packetCount: 5, byteCount: 400,
             identifications: [
               { key: "capture/1", flowId: flow.flowId, attributes: identification },
@@ -83,6 +83,7 @@ test("PCAP shows identity, coverage, binding, endpoints and unknown scope", asyn
   await expect(section.getByText("modbus · content", { exact: true })).toBeVisible();
   for (const text of ["observation", "none / dnp3", "tcp/20000", "midstream/no-SYN", "Unknown (no snapshot)"])
     await expect(section.getByText(text, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: "identify", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Stage .*Rule/ })).toHaveCount(0);
   await screenshot(page, "pcap");
 });

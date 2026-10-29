@@ -54,6 +54,21 @@ func TestIdentificationFixtures(t *testing.T) {
 			if len(result.Identifications) != 1 {
 				t.Fatalf("identifications: %+v", result.Identifications)
 			}
+			if _, ok := result.Protocols["identify"]; ok {
+				t.Fatalf("identification counted as a protocol: %+v", result.Protocols)
+			}
+			identificationEvents, flowEvents := 0, 0
+			for _, ev := range result.Events {
+				if ev.Proto == "identify" {
+					identificationEvents++
+				}
+			}
+			for _, f := range result.Flows {
+				flowEvents += f.Events
+			}
+			if identificationEvents != 1 || flowEvents != len(result.Events) {
+				t.Fatalf("lost flow events: identifications=%d flows=%d events=%d", identificationEvents, flowEvents, len(result.Events))
+			}
 			a := result.Identifications[0].Attributes
 			if a["protocol"] != tc.protocol || a["binding"] != tc.binding || a["identification_state"] != tc.state || a["mismatch"] != tc.mismatch || a["outside_rule_port_scope"] != "unknown" {
 				t.Fatalf("attributes: %+v", a)
@@ -76,6 +91,9 @@ func TestIdentificationFixtures(t *testing.T) {
 			policy, err := AnalyzeForPolicy(bytes.NewReader(data), modbus.NewDecoder(), dnp3.NewDecoder(), iec104.NewDecoder())
 			if err != nil {
 				t.Fatal(err)
+			}
+			if _, ok := policy.EventSummary["identify"]; ok {
+				t.Fatalf("identification counted in protocol summary: %+v", policy.EventSummary)
 			}
 			if tc.binding == "observation" && (len(policy.Rules) != 0 || len(policy.Profiles) != 0) {
 				t.Fatalf("passive rules: %+v", policy)
