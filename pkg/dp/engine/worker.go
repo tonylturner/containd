@@ -14,7 +14,8 @@ import (
 // packet path, one at a time, from a bounded queue. Jobs are submitted only
 // after the verdicts they depend on, so no job can delay a verdict.
 type worker struct {
-	jobs chan func()
+	jobs      chan func()
+	submitted func()
 }
 
 func newWorker(capacity int) *worker {
@@ -24,6 +25,9 @@ func newWorker(capacity int) *worker {
 // submit queues job without blocking. It reports false when the queue is
 // full; the caller treats that as a bounded-worker failure.
 func (w *worker) submit(job func()) bool {
+	if w.submitted != nil {
+		w.submitted()
+	}
 	select {
 	case w.jobs <- job:
 		return true
@@ -66,9 +70,10 @@ func (w *worker) run(ctx context.Context) {
 // has completed: capture reports every Drop through OnVerdict exactly once,
 // including (VerdictDrop, ErrQueueClosed) when the generation goes down.
 type afterVerdict struct {
-	mu      sync.Mutex
-	pending map[capture.Token]func()
-	limit   int
+	mu        sync.Mutex
+	pending   map[capture.Token]func()
+	limit     int
+	submitted func()
 }
 
 func newAfterVerdict(limit int) *afterVerdict {
@@ -80,6 +85,9 @@ func newAfterVerdict(limit int) *afterVerdict {
 func (a *afterVerdict) add(tok capture.Token, job func()) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.submitted != nil {
+		a.submitted()
+	}
 	if len(a.pending) >= a.limit {
 		return false
 	}

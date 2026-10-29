@@ -62,7 +62,7 @@ func (e *Engine) peerFlow(state *flow.State) *flow.State {
 // A fresh raw SYN or verified kernel generation retires both directional
 // streams before their tuple can be reused. Inline admission remains unchanged.
 func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.Connection) {
-	if pkt.Token.Inline() || isIECPort(pkt) {
+	if pkt.Token.Inline() || isIECPort(pkt) && e.observation == nil {
 		return
 	}
 	e.flowMu.Lock()
@@ -179,6 +179,7 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 
 func (e *Engine) adoptTransportPending(incoming, previous *flow.Connection) {
 	if incoming.Evidence != nil && previous != nil && previous.ID == "" && previous.Key != incoming.Key {
+		e.adoptObservationLocked(incoming, previous)
 		incoming.MergeHistory(previous)
 		if e.anomalyDetector != nil {
 			e.anomalyDetector.AdoptConnection(previous.Key, incoming)
@@ -218,6 +219,7 @@ func (e *Engine) closeCorrelation(state *flow.State, reset, expired bool) {
 		}
 	}
 	if reset || expired || c.FIN().Load() == 3 {
+		e.finishObservation(state)
 		c.Closed().Store(true)
 		if e.transport != nil {
 			e.transport.retireAdmission(state)

@@ -40,3 +40,7 @@ func withDerivedIdentity(ev dpi.Event, attrs map[string]any) map[string]any {
 	}
 	return attrs
 }
+
+func identificationEvent(ev dpi.Event) bool {
+	return ev.Proto == eventfields.ProtoIdentify && ev.Kind == eventfields.KindIdentification
+}

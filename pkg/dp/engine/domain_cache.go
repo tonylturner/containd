@@ -29,15 +29,16 @@ type domainAssociation struct {
 // flows. Association expiry never reverses a flow decision. State identity
 // keeps reused tuples independent; decisions disappear with their tracked flow.
 type domainExclusions struct {
-	mu           sync.Mutex
-	now          func() time.Time
-	capacity     int
-	associations map[domainAssociationKey]*list.Element
-	byIP         map[netip.Addr]map[domainAssociationKey]*list.Element
-	lru          *list.List
-	decisions    map[*flow.State]bool
-	lastPrune    time.Time
-	evictions    uint64
+	mu                 sync.Mutex
+	now                func() time.Time
+	capacity           int
+	associations       map[domainAssociationKey]*list.Element
+	byIP               map[netip.Addr]map[domainAssociationKey]*list.Element
+	lru                *list.List
+	decisions          map[*flow.State]bool
+	discoveryDecisions map[*flow.State]bool
+	lastPrune          time.Time
+	evictions          uint64
 }
 
 func newDomainExclusions(exclusions []DPIExclusion) *domainExclusions {
@@ -47,7 +48,7 @@ func newDomainExclusions(exclusions []DPIExclusion) *domainExclusions {
 				now: time.Now, capacity: domainAssociationCapacity,
 				associations: make(map[domainAssociationKey]*list.Element), lru: list.New(),
 				byIP:      make(map[netip.Addr]map[domainAssociationKey]*list.Element),
-				decisions: make(map[*flow.State]bool),
+				decisions: make(map[*flow.State]bool), discoveryDecisions: make(map[*flow.State]bool),
 			}
 		}
 	}

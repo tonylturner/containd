@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
@@ -43,7 +44,8 @@ type transportAdmission struct {
 	connection *flow.Connection
 	synSeq     uint32
 	hasSYN     bool
-	queued     int // includes the in-flight worker packet; under admissionMu
+	settled    bool // terminal discovery with no port-selected decoder
+	queued     int  // includes the in-flight worker packet; under admissionMu
 }
 
 type transportAlias struct {
@@ -122,6 +124,9 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 		pkt.Timestamp = time.Now().UTC()
 	}
 	history := r.admitHistoryLocked(pkt)
+	if history == nil && e.observation != nil {
+		metrics.IdentificationRefusals.Inc()
+	}
 	if r.count.Add(1) > transportQueueLimit {
 		r.count.Add(-1)
 		r.unavailable(e, pkt, "queue_overflow")
@@ -149,6 +154,9 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 
 func (r *transportResolver) unavailable(e *Engine, pkt capture.Packet, status string) {
 	r.authority.count(status)
+	if e.observation != nil {
+		metrics.IdentificationRefusals.Inc()
+	}
 	now := time.Now()
 	if entry := r.indexed[packetKey(pkt).Tuple()]; entry != nil {
 		entry.connection.LoseCorrelation(now, anomaly.ModbusPairingTimeout)
