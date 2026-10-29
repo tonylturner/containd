@@ -50,7 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DNP3 secure-operations templates explicitly allow Confirm and startup functions,
   restrict Write to time/IIN groups 50/80, and deny Save Configuration alongside
   restart and stop operations.
-
 - `services.av.scan` selects the traffic the scanning gate intercepts:
   include and exclude entries of directional zone pairs, destination ports
   and CIDRs, a download mode (`hold` or `stream_tail`) and the ICS-marked
