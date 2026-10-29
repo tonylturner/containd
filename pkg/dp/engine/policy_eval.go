@@ -11,8 +11,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
-	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
-	"github.com/tonylturner/containd/pkg/dp/ics/modbus"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
@@ -83,29 +81,39 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 	var denied verdict.Verdict
 	var deniedCtx rules.EvalContext
 	for _, ev := range evs {
-		ctx, ok := evalContextFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
-		if !ok {
+		contexts := evalContextsFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
+		if len(contexts) == 0 {
 			continue
 		}
-		var v verdict.Verdict
-		var matched *rules.Entry
-		if !denied.Denies() {
-			v, matched = e.evaluateVerdictMatch(ctx, applyDefault)
+		r := evaluated{ev: ev, ctx: contexts[0]}
+		findings := hasInspectionFindings(ev)
+		if findings {
+			r.scope = e.conformanceScope(state, pkt, ev.Proto)
+			r.strict = r.scope != nil && ics.EffectiveParsing(modes, strings.ToLower(ev.Proto)) == ics.Strict
 		}
-		if hasInspectionFindings(ev) {
-			scope := e.conformanceScope(state, pkt, ev.Proto)
-			strict := scope != nil && ics.EffectiveParsing(modes, strings.ToLower(ev.Proto)) == ics.Strict
-			// A default is not a decoded rule denial. Strict decides this
-			// event before ALLOW/default, in the effective scope's mode.
-			if strict && matched == nil {
+		for i, ctx := range contexts {
+			var v verdict.Verdict
+			var matched *rules.Entry
+			if !denied.Denies() {
+				v, matched = e.evaluateVerdictMatch(ctx, applyDefault)
+			}
+			// Strict replaces defaults, but never a decoded rule denial.
+			if r.strict && matched == nil {
 				v = verdict.Verdict{Action: verdict.AllowContinue}
 			}
-			results = append(results, evaluated{ev: ev, ctx: ctx, v: v, matched: matched, scope: scope, strict: strict})
+			if i == 0 || (!r.v.Denies() && v.Denies()) {
+				r.ctx, r.v, r.matched = ctx, v, matched
+			}
+			if v.Denies() && e.effectiveMode(matched) == "enforce" && !denied.Denies() {
+				denied, deniedCtx = v, ctx
+			}
 		}
-		if v.Denies() && e.effectiveMode(matched) == "enforce" && !denied.Denies() {
-			denied, deniedCtx = v, ctx
+		// Record findings once per event, not once per object header.
+		if findings {
+			results = append(results, r)
 		}
 	}
+
 	// Strict nonconformance overrides ALLOW, not a decoded denial. Learn
 	// scopes produce shadow decisions only, even when the global mode enforces.
 	for _, r := range results {
@@ -153,81 +161,6 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 		e.recordConformanceAlert(state, pkt, r.ev, action)
 	}
 	return denied, deniedCtx, denied.Denies()
-}
-
-func evalContextFromDPIEvent(snap *rules.Snapshot, state *flow.State, pkt *dpi.ParsedPacket, ev dpi.Event, srcZone, dstZone string) (rules.EvalContext, bool) {
-	if state == nil || pkt == nil || !isRuleEvaluableICSEvent(ev.Proto) || isStreamErrorEvent(ev) {
-		return rules.EvalContext{}, false
-	}
-	service := servicePort(state, pkt)
-	// Read/write class comes only from a present is_write: an event that
-	// does not say it is a write is not thereby read-only.
-	isWrite, hasWrite := eventfields.Bool(ev.Attributes, eventfields.KeyIsWrite)
-	ctx := rules.EvalContext{
-		SrcZone: srcZone,
-		DstZone: dstZone,
-		SrcIP:   state.Key.OpenerIP(),
-		DstIP:   state.Key.ServerIP(),
-		Proto:   strings.ToLower(pkt.Proto),
-		Port:    strconv.Itoa(int(service)),
-		// Identities are bound to the connection's opener.
-		Identities: snap.IdentitiesOf(state.Key.OpenerIP()),
-		ICS: &rules.ICSContext{
-			Protocol:  strings.ToLower(ev.Proto),
-			ReadOnly:  hasWrite && !isWrite,
-			WriteOnly: hasWrite && isWrite,
-			Direction: messageDirection(state),
-		},
-	}
-	ctx.ICS.Spans, ctx.ICS.SpansUnknown = addressSpans(state, ev)
-	if fc, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyFunctionCode); ok {
-		ctx.ICS.FunctionCode = fc
-		ctx.ICS.HasFunctionCode = true
-	}
-	if unitID, ok := eventfields.Uint8(ev.Attributes, eventfields.KeyUnitID); ok {
-		ctx.ICS.UnitID = &unitID
-	}
-	if objectClass, ok := eventfields.Uint16(ev.Attributes, "object_class"); ok {
-		ctx.ICS.ObjectClass = objectClass
-		ctx.ICS.HasObjectClass = true
-	}
-	return ctx, true
-}
-
-// addressSpans returns the address spans an event touches for address
-// predicates, and whether they are unknown. Modbus messages carry their
-// spans in function-code-specific fields (modbus.AddressSpans). Other
-// protocols touch the one numeric address their decoder emits, or none.
-func addressSpans(state *flow.State, ev dpi.Event) ([]rules.AddressSpan, bool) {
-	if strings.EqualFold(ev.Proto, eventfields.ProtoModbus) {
-		return modbusAddressSpans(state, ev)
-	}
-	if v, err := rules.ParseICSAddress(attrString(ev.Attributes, "address")); err == nil {
-		return []rules.AddressSpan{{Low: v, High: v}}, false
-	}
-	return nil, false
-}
-
-// modbusAddressSpans bounds a Modbus message's spans by the connection's
-// orientation, not the decoder's message kind. A message from the
-// connection's opener is a request: unless the decoder decoded it as a
-// request with bounded spans, its spans are unknown, so a request the
-// decoder labelled a reply (a client using source port 502) cannot pass as
-// touching nothing. A reply reads or writes nothing by itself: it touches
-// only the spans it echoes (FC 5, 6, 15, 16, 22).
-func modbusAddressSpans(state *flow.State, ev dpi.Event) ([]rules.AddressSpan, bool) {
-	spans, ok := modbus.AddressSpans(ev.Attributes)
-	if !isReply(state) && (ev.Kind != "request" || !ok) {
-		return nil, true
-	}
-	if len(spans) == 0 {
-		return nil, false
-	}
-	out := make([]rules.AddressSpan, len(spans))
-	for i, sp := range spans {
-		out[i] = rules.AddressSpan{Low: uint32(sp.First), High: uint32(sp.Last)}
-	}
-	return out, false
 }
 
 type zoneResolver func(*rules.Snapshot, net.IP, net.IP) (string, string)
@@ -322,28 +255,6 @@ func messageDirection(state *flow.State) string {
 		return "response"
 	}
 	return "request"
-}
-
-func attrString(attrs map[string]any, key string) string {
-	if attrs == nil {
-		return ""
-	}
-	switch v := attrs[key].(type) {
-	case string:
-		return v
-	case uint8:
-		return strconv.FormatUint(uint64(v), 10)
-	case uint16:
-		return strconv.FormatUint(uint64(v), 10)
-	case int:
-		return strconv.Itoa(v)
-	case int64:
-		return strconv.FormatInt(v, 10)
-	case float64:
-		return strconv.FormatInt(int64(v), 10)
-	default:
-		return ""
-	}
 }
 
 // servicePort returns the server port of the packet's connection: the

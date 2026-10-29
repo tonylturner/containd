@@ -56,6 +56,9 @@ func validateIEC104Predicate(p ICSPredicate, ruleID string) error {
 	if err := validateIEC104CA(p.CA, ruleID); err != nil {
 		return err
 	}
+	if err := validateIEC104Selectors(p, ruleID); err != nil {
+		return err
+	}
 	return validateIEC104IOA(p.IOA, ruleID)
 }
 

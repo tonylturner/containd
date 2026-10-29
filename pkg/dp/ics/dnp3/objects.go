@@ -216,6 +216,9 @@ func objectsLen(b []byte, oh ObjectHeader, fc uint8) (int, objectWalkStop) {
 		return 0, walkComplete
 	}
 	prefix := int(oh.Qualifier>>4) & 0x07
+	if oh.Qualifier&0x0F == rangeFreeFormat && prefix < prefixSize1 {
+		return 0, walkUnsupported // free-format values need an object-size prefix
+	}
 	switch {
 	case prefix >= prefixSize1 && prefix <= prefixSize1+2:
 		n, stop := sizePrefixedLen(b, oh.Count, 1<<(prefix-prefixSize1))

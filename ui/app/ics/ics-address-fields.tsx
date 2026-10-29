@@ -30,7 +30,7 @@ export function ICSAddressFields({
       </div>
     );
   }
-  if (protocol !== "modbus") return null;
+  if (protocol !== "modbus" && protocol !== "dnp3") return null;
   const meta = protoMeta(protocol);
   const label = meta.addrLabel ?? "Register / coil addresses";
   return (

@@ -20,9 +20,15 @@ func TestModbusTemplateAccessLists(t *testing.T) {
 
 func TestDNP3TemplateDescribesAllowedOperations(t *testing.T) {
 	rules := DNP3SecureOperations()
-	if !slices.Equal(rules[0].ICS.FunctionCode, []uint8{1, 2, 20}) ||
-		!strings.Contains(rules[0].Description, "FC 2: Write, FC 20: Enable Unsolicited") ||
-		!strings.Contains(rules[0].Description, "not read-only") {
+	if !slices.Equal(rules[0].ICS.FunctionCode, []uint8{0, 1, 20, 21, 23, 24}) {
 		t.Fatalf("allow=%+v", rules[0])
+	}
+	for _, fc := range []string{"FC 0:", "FC 1:", "FC 20:", "FC 21:", "FC 23:", "FC 24:"} {
+		if !strings.Contains(rules[0].Description, fc) {
+			t.Fatalf("allow description missing %q: %q", fc, rules[0].Description)
+		}
+	}
+	if strings.Contains(strings.ToLower(rules[0].Description), "read-only") {
+		t.Fatalf("allow description claims read-only: %q", rules[0].Description)
 	}
 }

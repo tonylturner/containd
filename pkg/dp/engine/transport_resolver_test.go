@@ -345,9 +345,9 @@ func TestTransportDNATCoordinatesAndConnectionConsumers(t *testing.T) {
 			// Policy stays on the observed wire key, even though logical
 			// inventory and connection-scoped consumers use CT evidence.
 			pkt := &dpi.ParsedPacket{Proto: "tcp", DstPort: 1502, SrcPort: 41000}
-			ctx, ok := evalContextFromDPIEvent(&rules.Snapshot{}, states[0], pkt, dpi.Event{Proto: "modbus", Kind: "request"}, "", "")
-			if !ok || ctx.DstIP.String() != evidence.Original.Destination.Addr().String() || ctx.Port != "1502" {
-				t.Fatalf("policy was normalized: %+v", ctx)
+			ctxs := evalContextsFromDPIEvent(&rules.Snapshot{}, states[0], pkt, dpi.Event{Proto: "modbus", Kind: "request"}, "", "")
+			if len(ctxs) != 1 || ctxs[0].DstIP.String() != evidence.Original.Destination.Addr().String() || ctxs[0].Port != "1502" {
+				t.Fatalf("policy was normalized: %+v", ctxs)
 			}
 			if conformanceKey(states[0]) != conformanceKey(states[1]) {
 				t.Fatal("NAT split conformance identity")

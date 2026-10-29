@@ -23,6 +23,18 @@ func ICSPredicate(p config.ICSPredicate) dprules.ICSPredicate {
 		TypeIDs:       append([]int(nil), p.TypeIDs...),
 		Classes:       append([]string(nil), p.Classes...),
 		CA:            append([]uint16(nil), p.CA...),
+		COT:           append([]int(nil), p.COT...),
+		Originators:   append([]int(nil), p.Originators...),
+		Negative:      cloneBool(p.Negative),
+		Test:          cloneBool(p.Test),
+		SelectExecute: p.SelectExecute,
+		Masters:       append([]uint16(nil), p.Masters...),
+		Outstations:   append([]uint16(nil), p.Outstations...),
+		Groups:        append([]int(nil), p.Groups...),
+		Variations:    append([]int(nil), p.Variations...),
+		Instances:     append([]uint16(nil), p.Instances...),
+		Attributes:    append([]uint16(nil), p.Attributes...),
+		Tags:          append([]string(nil), p.Tags...),
 	}
 	if p.UnitID != nil {
 		unitID := *p.UnitID
@@ -35,4 +47,12 @@ func ICSPredicate(p config.ICSPredicate) dprules.ICSPredicate {
 		}
 	}
 	return out
+}
+
+func cloneBool(b *bool) *bool {
+	if b == nil {
+		return nil
+	}
+	v := *b
+	return &v
 }

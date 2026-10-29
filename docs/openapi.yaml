@@ -523,8 +523,28 @@ components:
         L3/L4 rule. Semantic values need `protocol`. OR within a list, AND
         across fields; an absent field matches any value.
 
+        New lists reject null, empty arrays and null items on create/replace;
+        omit for ANY. The general /firewall/rules/{id} merge PATCH uses null
+        to clear any known ICS key and omission to retain it. The ICS-specific
+        /firewall/ics-rules/{id} PATCH replaces the whole rule (omitted = ANY).
+        Preview receives the full effective predicate, never removal nulls.
+        Each object is judged independently under ALLOW-first precedence;
+        any denied object denies the message. Incomplete inspection adds an
+        unknown-object context: object-qualified ALLOW fails, object-qualified
+        DENY matches, with all other constraints still required.
+        DNP3 station selectors apply only to application messages, not link-only
+        frames. addresses selects points and requires groups. Wire variation 0
+        matches ALLOW only when 0 is listed, and any variation-constrained DENY.
+        DNP3/CIP reject unitId. CIP tags cannot combine with logical selectors;
+        tag matching ignores case and element indexes and selects subtrees.
+        ALLOW requires selector-prefix-of-target; DENY matches either prefix
+        direction. Logical targets never match tags; prefer tag ALLOW with
+        default deny. Unknown objects/instances/attributes fail constrained
+        ALLOW and match constrained DENY; absent values otherwise fail both.
+
         IEC 60870-5-104 (`protocol: iec104`):
-        - `typeIds`, `classes`, `ca` and `ioa` are iec104-only. `null`, `[]`
+        - `typeIds`, `classes`, `ca`, `ioa`, `cot`, `originators`,
+          `negative`, `test` and `selectExecute` are iec104-only. `null`, `[]`
           and null items are rejected; omit the field to match any value.
           Numbers must be JSON integers.
         - `functionCode`, `unitId`, `addresses`, `objectClasses` and
@@ -533,10 +553,10 @@ components:
         - IEC104 rules match the session tuple (client = TCP opener,
           server port 2404) whatever the wire direction; `direction` selects
           the half. Inside the IEC104 envelope only iec104 rules are
-          evaluated, in order, and no match is DENY regardless of
+          evaluated with ALLOW-first precedence; no match is DENY regardless of
           `firewall.defaultAction`.
         - An enforce ALLOW rule may name only Type IDs with a decoder
-          descriptor (1, 3, 13, 30, 31, 45-51, 58-64, 70, 100-103, 105, 107) and
+          descriptor (1, 3, 5, 7, 9, 11, 13, 15, 21, 30-37, 45-51, 58-64, 70, 100-103, 105, 107) and
           not the `unknown` class. Broadcast (CA 65535) and malformed
           objects never match an ALLOW.
         - IEC104 enforce (effective mode: rule `mode`, else
@@ -565,9 +585,9 @@ components:
           - {type: string}
           - {type: object, additionalProperties: true}
           nullable: true
-        unitId: {type: integer, minimum: 0, maximum: 255, description: Modbus unit id}
-        addresses: {type: array, items: {type: string}, description: "Modbus-only address entries, each one value or an inclusive low-high range, decimal or 0x hex, low <= high, 0-65535. Nonempty addresses are rejected for DNP3 and CIP in every mode; protocol-specific station, point and CIP path selectors are not available yet. IEC104 uses ca and ioa."}
-        objectClasses: {type: array, items: {type: integer}, description: CIP object classes (cip only)}
+        unitId: {type: integer, minimum: 0, maximum: 255, description: "Modbus-only unit id; rejected on DNP3/CIP"}
+        addresses: {type: array, items: {type: string}, description: "Closed decimal/0x ranges: Modbus registers/coils 0-65535 or DNP3 point indexes 0-4294967295 (requires groups). ALLOW contains every span; DENY overlaps any span. CIP rejects addresses; IEC104 uses ca/ioa."}
+        objectClasses: {type: array, items: {type: integer, minimum: 0, maximum: 65535}, description: CIP logical object classes (cip only)}
         readOnly:
           type: boolean
           description: >
@@ -575,9 +595,9 @@ components:
             GI (100) and read (102) requests, end of initialization (70),
             S-frames and U-frames. false is no constraint, never "writes
             only".
-        writeOnly: {type: boolean, description: Match writes only (not iec104)}
+        writeOnly: {type: boolean, description: Match positively classified writes and controls (not iec104)}
         direction: {type: string, enum: [request, response]}
-        mode: {type: string, enum: ["", learn, enforce], description: "Overrides dataplane.dpiMode for this rule. Empty or absent inherits the global mode; in a rule patch, an empty string clears a stored mode."}
+        mode: {type: string, enum: ["", learn, enforce], description: "Overrides dataplane.dpiMode for this rule. Empty or absent inherits the global mode; in a merge patch, null or an empty string clears a stored mode."}
         typeIds:
           type: array
           minItems: 1
@@ -597,6 +617,54 @@ components:
           minItems: 1
           items: {$ref: "#/components/schemas/IOARange"}
           description: IEC104 information object address ranges; duplicates and overlaps are rejected
+        cot:
+          type: array
+          minItems: 1
+          items: {type: integer, minimum: 1, maximum: 63}
+          description: IEC104 cause of transmission
+        originators:
+          type: array
+          minItems: 1
+          items: {type: integer, minimum: 0, maximum: 255}
+          description: IEC104 originator addresses
+        masters:
+          type: array
+          minItems: 1
+          items: {type: integer, minimum: 0, maximum: 65519}
+          description: DNP3 master stations; application messages only
+        outstations:
+          type: array
+          minItems: 1
+          items: {type: integer, minimum: 0, maximum: 65519}
+          description: DNP3 outstations; application messages only
+        groups:
+          type: array
+          minItems: 1
+          items: {type: integer, minimum: 0, maximum: 255}
+          description: DNP3 object groups
+        variations:
+          type: array
+          minItems: 1
+          items: {type: integer, minimum: 0, maximum: 255}
+          description: DNP3 variations; 0 is not a wildcard
+        instances:
+          type: array
+          minItems: 1
+          items: {type: integer, minimum: 0, maximum: 65535}
+          description: CIP logical instances; 8/16-bit segments only
+        attributes:
+          type: array
+          minItems: 1
+          items: {type: integer, minimum: 0, maximum: 65535}
+          description: CIP logical attributes; unknown for aggregate services
+        negative: {type: boolean, description: "IEC104 exact P/N bit; false is a restriction"}
+        test: {type: boolean, description: "IEC104 exact T bit; false is a restriction"}
+        selectExecute: {type: string, enum: [select, execute], description: "IEC104 S/E qualifier; typeIds omitted or subset of 45-50 and 58-63, excluding bitstrings 51/64"}
+        tags:
+          type: array
+          minItems: 1
+          items: {type: string}
+          description: "CIP dot-separated symbolic names, each [A-Za-z_][A-Za-z0-9_]* up to 40 characters; optional first Program:Name. No brackets. Mutually exclusive with objectClasses/instances/attributes."
       example:
         protocol: iec104
         typeIds: [46]
@@ -2195,6 +2263,18 @@ components:
         classes: {items: {type: string}, type: array}
         ioa: {items: {$ref: '#/components/schemas/RulesIOARange'}, type: array}
         typeIds: {items: {type: integer}, type: array}
+        cot: {type: array, minItems: 1, items: {type: integer, minimum: 1, maximum: 63}, description: "IEC104 cause of transmission"}
+        originators: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 255}, description: "IEC104 originator addresses"}
+        masters: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 65519}, description: "DNP3 master stations; application messages only"}
+        outstations: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 65519}, description: "DNP3 outstations; application messages only"}
+        groups: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 255}, description: "DNP3 object groups"}
+        variations: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 255}, description: "DNP3 variations; 0 is not a wildcard"}
+        instances: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 65535}, description: "CIP logical instances; 8/16-bit segments only"}
+        attributes: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 65535}, description: "CIP logical attributes; unknown for aggregate services"}
+        negative: {type: boolean}
+        test: {type: boolean}
+        selectExecute: {type: string, enum: [select, execute]}
+        tags: {type: array, minItems: 1, items: {type: string}, description: "CIP symbolic selectors; logical targets never match"}
       type: object
     RulesIDSCondition:
       properties:
@@ -5179,7 +5259,15 @@ paths:
       description: Downloads running IDS rules, not candidate rules.
       responses:
         '200':
-          description: Exported rule text
+          description: >-
+            Exported rule text (possibly no accepted rules). Every format includes
+            JSON comments of the form '# refused: {"rule_id":"...","reason":"..."}'
+            for refused rules, using '//' instead of '#' for YARA.
+            Refused rules are not emitted as active rules.
+          headers:
+            X-Containd-IDS-Refused:
+              description: Number of rules refused because their predicates cannot be preserved.
+              schema: {type: integer, minimum: 0}
           content:
             text/plain:
               schema: {type: string}
