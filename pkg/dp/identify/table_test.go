@@ -187,6 +187,7 @@ func TestCoverageBudgets(t *testing.T) {
 		}, Budget},
 		{"bytes", func(b *Budgets) { b.BytesPerDirection = 4 }, []Arrival{
 			{Sequence: 100, Payload: []byte{0, 1, 0, 0}},
+			{Direction: 1, Sequence: 200, Payload: []byte{0, 1, 0, 0}},
 		}, Budget},
 		{"beyond bytes", func(b *Budgets) { b.BytesPerDirection = 4 }, []Arrival{
 			{Sequence: 100, Payload: make([]byte, 5)},
@@ -211,12 +212,16 @@ func TestCoverageBudgets(t *testing.T) {
 		})
 	}
 	table, now := newTestTable(t, DefaultBudgets(), ics.TCP, 12345)
-	*now = now.Add(time.Hour) // SYN-only entries have no payload deadline.
+	*now = now.Add(4 * time.Second)
 	if d, _ := table.Poll(testKey); d.State != NeedMore {
 		t.Fatal(d)
 	}
 	observe(t, table, Arrival{Sequence: 100, Payload: []byte{0}})
-	*now = now.Add(5 * time.Second)
+	*now = now.Add(4 * time.Second)
+	if d, _ := table.Poll(testKey); d.State != NeedMore {
+		t.Fatal("payload deadline did not restart from first payload", d)
+	}
+	*now = now.Add(time.Second)
 	if d, _ := table.Poll(testKey); d.State != Incomplete || d.Coverage != Timeout {
 		t.Fatal(d)
 	}
@@ -314,16 +319,28 @@ func TestAmbiguityAndNegativeCache(t *testing.T) {
 	if d.State != Ambiguous || d.Protocol != "" || table.Counters().Ambiguity != 1 {
 		t.Fatal(d, table.Counters())
 	}
+	corpus := negativeCorpus()
 	for _, port := range []uint16{502, 20000, 2404, 44818, 12345} {
-		for _, b := range negativeCorpus() {
-			table, _ := newTestTable(t, DefaultBudgets(), ics.TCP, port)
+		for index, b := range corpus {
+			table, now := newTestTable(t, DefaultBudgets(), ics.TCP, port)
 			d = observe(t, table, Arrival{Sequence: 100, Payload: b})
-			if d.State == Confirmed {
+			want := Reject
+			if index == len(corpus)-1 {
+				want = NeedMore // complete NOPs supply no identity evidence
+			}
+			if d.State != want || d.Coverage != "" {
 				t.Fatal(port, d)
+			}
+			if want == NeedMore {
+				*now = now.Add(5 * time.Second)
+				d, _ = table.Poll(testKey)
+				if d.State != Incomplete || d.Coverage != Timeout {
+					t.Fatal(d)
+				}
 			}
 			before := table.Counters()
 			next := observe(t, table, Arrival{Sequence: 100 + uint32(len(b)), Payload: fixtures()[1].request})
-			if terminal(d.State) && (d != next || table.Counters() != before) {
+			if d != next || table.Counters() != before {
 				t.Fatal("terminal cache changed")
 			}
 		}

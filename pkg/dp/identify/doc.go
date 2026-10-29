@@ -6,8 +6,10 @@
 // The caller opens an opaque Key for each connection incarnation, then observes
 // both TCP SYN directions and subsequent payload arrivals. Missing SYN coverage
 // is explicit; no offset scanning is performed. For UDP, each Arrival is one
-// entire datagram. Poll applies the injected ingestion clock's deadline when
-// traffic is idle. Close, tuple reuse and reconfiguration require Release.
+// entire datagram. Poll or Sweep applies deadlines when traffic is idle: from
+// Open for SYN-only entries, and from first payload thereafter. Sweep returns
+// newly expired keys; callers Release them after consuming timeout decisions.
+// Close, tuple reuse and reconfiguration also require Release.
 //
 // A unique confirmed Decision can bind a decoder, but never authorizes traffic.
 // Expected records registry port expectations independently of content identity.
@@ -24,8 +26,10 @@
 // already in Replay. Replay.Bytes are contiguous directional TCP prefixes;
 // Replay.Sequence and Replay.Pending preserve origins and out-of-order bytes for
 // the caller's bound stream reassembler. For UDP, replay each Datagram boundary
-// independently. An incomplete decision's replay may contain gaps; it is not a
-// successful decoder binding.
+// independently. Oversized arrivals retain only their budgeted prefix for a
+// rejection pass; they can never confirm. Datagram.Length preserves the original
+// UDP boundary even when clipped. An incomplete decision's replay may contain
+// gaps or clipped bytes; it is not a successful decoder binding.
 //
 // Admission charges retained backing-array capacities plus EntryCharge, not
 // just logical payload lengths. Terminal entries also consume the entry cap.

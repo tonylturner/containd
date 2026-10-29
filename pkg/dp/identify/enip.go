@@ -15,10 +15,10 @@ type enipMessage struct {
 	service uint8
 }
 
-func enipEvidence(b []byte, udp bool) evidence {
+func enipEvidence(b []byte, udp bool, wireLength int) evidence {
 	e := pending(b)
 	for offset := 0; offset < len(b); {
-		h, size, err := readEncapsulation(b[offset:], udp)
+		h, size, err := readEncapsulation(b[offset:], udp, wireLength)
 		if err != nil {
 			return invalid(b)
 		}
@@ -53,7 +53,7 @@ func enipEvidence(b []byte, udp bool) evidence {
 
 // Header checks also apply to partial frames so a known bad boundary rejects
 // without waiting for the advertised body. The shared reader owns decoding.
-func readEncapsulation(b []byte, udp bool) (*cip.EIPHeader, int, error) {
+func readEncapsulation(b []byte, udp bool, wireLength int) (*cip.EIPHeader, int, error) {
 	if len(b) < 2 {
 		return nil, 0, nil
 	}
@@ -72,7 +72,7 @@ func readEncapsulation(b []byte, udp bool) (*cip.EIPHeader, int, error) {
 	size := 24 + int(le16(b[2:]))
 	status := binary.LittleEndian.Uint32(b[8:12])
 	if size > 65536 || binary.LittleEndian.Uint32(b[20:24]) != 0 || !knownStatus(status) ||
-		command == 0 && status != 0 || udp && size != len(b) {
+		command == 0 && status != 0 || udp && size != wireLength {
 		return nil, 0, cip.ErrInvalidCPF
 	}
 	if len(b) < size {

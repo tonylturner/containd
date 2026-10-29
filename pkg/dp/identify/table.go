@@ -14,6 +14,7 @@ type entry struct {
 	meta      Meta
 	prefixes  [2]prefix
 	datagrams []Datagram
+	opened    time.Time
 	first     time.Time
 	started   bool
 	arrivals  int
@@ -65,10 +66,11 @@ func (t *Table) Open(key Key, meta Meta) bool {
 		t.counts.Overflow++
 		return false
 	}
-	e := &entry{meta: meta, decision: Decision{State: NeedMore}}
+	e := &entry{meta: meta, opened: t.now(), decision: Decision{State: NeedMore}}
 	for d, port := range meta.Ports {
 		for _, p := range protocols {
-			if ics.IsProtocolPortOn(string(p), meta.Transport, port) {
+			if !(meta.Transport == ics.UDP && port == ics.CIPImplicitPort) &&
+				ics.IsProtocolPortOn(string(p), meta.Transport, port) {
 				e.decision.Expected[d] = p
 			}
 		}
@@ -91,7 +93,7 @@ func (t *Table) Observe(key Key, a Arrival) (Decision, bool) {
 	if terminal(e.decision.State) {
 		return e.decision, true
 	}
-	if t.expire(e) {
+	if t.expire(e, t.now()) {
 		return e.decision, true
 	}
 	p := &e.prefixes[a.Direction]
@@ -113,7 +115,7 @@ func (t *Table) Observe(key Key, a Arrival) (Decision, bool) {
 			return e.decision, true
 		}
 		if len(e.datagrams) == 0 {
-			t.decide(e) // reject an empty first datagram without allocating
+			t.decide(e, true) // reject an empty first datagram without allocating
 			return e.decision, true
 		}
 	}
@@ -127,11 +129,6 @@ func (t *Table) Observe(key Key, a Arrival) (Decision, bool) {
 	if len(a.Payload) > 0 {
 		e.arrivals++
 	}
-	if e.arrivals > t.budgets.Arrivals ||
-		e.meta.Transport == ics.UDP && len(e.datagrams) >= t.budgets.UDPDatagrams {
-		t.finish(e, Budget)
-		return e.decision, true
-	}
 	if len(a.Payload) > 0 && !t.allocate(e, p) {
 		t.counts.Overflow++
 		t.finish(e, Budget)
@@ -139,27 +136,43 @@ func (t *Table) Observe(key Key, a Arrival) (Decision, bool) {
 	}
 	changed := true
 	var coverage Coverage
-	if e.meta.Transport == ics.UDP {
-		if len(a.Payload) > len(p.data)-p.length {
-			coverage = Budget
-		} else {
-			start := p.length
-			p.length += copy(p.data[start:], a.Payload)
-			e.datagrams = append(e.datagrams, Datagram{a.Direction, Range{start, p.length}})
+	payload := a.Payload
+	available := len(p.data) - p.length
+	if e.meta.Transport == ics.TCP {
+		start := int(int32(sequence - p.base))
+		if start < 0 {
+			t.finish(e, Conflict)
+			return e.decision, true
 		}
-	} else {
-		changed, coverage = p.add(sequence, a.Payload, t.budgets.PendingRanges)
+		available = max(0, len(p.data)-start)
+	}
+	clipped := len(payload) > available
+	if clipped {
+		payload = payload[:available]
+	}
+	if e.meta.Transport == ics.UDP {
+		start := p.length
+		p.length += copy(p.data[start:], payload)
+		e.datagrams = append(e.datagrams, Datagram{a.Direction, Range{start, p.length}, len(a.Payload)})
+	} else if len(payload) > 0 {
+		changed, coverage = p.add(sequence, payload, t.budgets.PendingRanges)
 	}
 	if coverage != "" {
 		t.finish(e, coverage)
+	} else if clipped {
+		t.decide(e, false)
+		if e.decision.State != Reject {
+			t.finish(e, Budget)
+		}
 	} else if changed {
-		t.decide(e)
+		t.decide(e, true)
 	}
 	// The last allowed arrival can confirm. Otherwise it exhausts the budget;
 	// callers do not need to invent an extra packet to learn about exhaustion.
 	if !terminal(e.decision.State) && (e.arrivals == t.budgets.Arrivals ||
 		e.meta.Transport == ics.UDP && len(e.datagrams) == t.budgets.UDPDatagrams ||
-		p.length == t.budgets.BytesPerDirection) {
+		e.prefixes[0].length == t.budgets.BytesPerDirection &&
+			e.prefixes[1].length == t.budgets.BytesPerDirection) {
 		t.finish(e, Budget)
 	}
 	return e.decision, true
@@ -200,7 +213,7 @@ func (t *Table) allocate(e *entry, p *prefix) bool {
 	return true
 }
 
-func (t *Table) decide(e *entry) {
+func (t *Table) decide(e *entry, complete bool) {
 	active, confirmed, waiting := 0, 0, false
 	for i, p := range protocols {
 		var r Result
@@ -235,7 +248,7 @@ func (t *Table) decide(e *entry) {
 			t.counts.Candidates++
 			e.candidate = true
 		}
-		if confirmed == 1 && !waiting {
+		if confirmed == 1 && complete {
 			e.decision.State = Confirmed
 			t.counts.Confirms++
 		}
@@ -252,7 +265,18 @@ func udpResult(e *entry, protocol Protocol) Result {
 		return Probe(protocol, e.meta.Transport, nil, nil)
 	}
 	best := udpProbe(e, protocol, e.datagrams[0], nil)
+	states := [2]State{NeedMore, NeedMore}
+	var examined [2]Range
 	for _, a := range e.datagrams {
+		r := udpProbe(e, protocol, a, nil)
+		state := r.States[a.Direction]
+		if state == Reject || states[a.Direction] != Reject && strength(state) > strength(states[a.Direction]) {
+			states[a.Direction] = state
+		}
+		examined[a.Direction].End = max(examined[a.Direction].End, a.Range.End)
+		if strength(r.State) > strength(best.State) {
+			best = r
+		}
 		for _, b := range e.datagrams {
 			if a.Direction == b.Direction {
 				continue
@@ -262,20 +286,22 @@ func udpResult(e *entry, protocol Protocol) Result {
 				best = r
 			}
 		}
-		r := udpProbe(e, protocol, a, nil)
-		if strength(r.State) > strength(best.State) {
-			best = r
-		}
+	}
+	best.States, best.Examined = states, examined
+	if best.State == Confirmed && (states[0] == Reject || states[1] == Reject) {
+		best.State, best.Reason = Candidate, "contradictory datagram evidence"
 	}
 	return best
 }
 
 func udpProbe(e *entry, protocol Protocol, a Datagram, b *Datagram) Result {
 	var other []byte
+	lengths := [2]int{a.Length, 0}
 	if b != nil {
 		other = datagramBytes(e, *b)
+		lengths[1] = b.Length
 	}
-	r := Probe(protocol, e.meta.Transport, datagramBytes(e, a), other)
+	r := probe(protocol, e.meta.Transport, datagramBytes(e, a), other, lengths)
 	r.Examined[0].Start += a.Range.Start
 	r.Examined[0].End += a.Range.Start
 	if b != nil {
@@ -284,6 +310,7 @@ func udpProbe(e *entry, protocol Protocol, a Datagram, b *Datagram) Result {
 	}
 	if a.Direction == 1 {
 		r.Examined[0], r.Examined[1] = r.Examined[1], r.Examined[0]
+		r.States[0], r.States[1] = r.States[1], r.States[0]
 		if r.Role == Client {
 			r.Role = Server
 		} else if r.Role == Server {
@@ -306,8 +333,12 @@ func (t *Table) finish(e *entry, reason Coverage) {
 	}
 }
 
-func (t *Table) expire(e *entry) bool {
-	if !terminal(e.decision.State) && e.started && t.now().Sub(e.first) >= t.budgets.Duration {
+func (t *Table) expire(e *entry, now time.Time) bool {
+	first := e.opened
+	if e.started {
+		first = e.first
+	}
+	if !terminal(e.decision.State) && now.Sub(first) >= t.budgets.Duration {
 		t.finish(e, Timeout)
 	}
 	return terminal(e.decision.State)
@@ -320,8 +351,21 @@ func (t *Table) Poll(key Key) (Decision, bool) {
 	if !ok {
 		return Decision{}, false
 	}
-	t.expire(e)
+	t.expire(e, t.now())
 	return e.decision, true
+}
+
+// Sweep expires all pending deadlines in the injected ingestion clock's domain.
+// It returns newly expired keys for the caller to Poll/Take and Release. Like
+// Poll, it preserves terminal decisions until explicit Release, not eviction.
+func (t *Table) Sweep(now time.Time) []Key {
+	var expired []Key
+	for key, e := range t.entries {
+		if !terminal(e.decision.State) && t.expire(e, now) {
+			expired = append(expired, key)
+		}
+	}
+	return expired
 }
 
 // Take transfers the retained prefix exactly once for a terminal decision.

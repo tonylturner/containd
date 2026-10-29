@@ -113,6 +113,7 @@ type Counters struct {
 type Datagram struct {
 	Direction uint8
 	Range     Range
+	Length    int // original datagram length; may exceed Range length for an incomplete clipped replay
 }
 
 // Segment is a retained TCP range beyond a gap. Feed it through the bound

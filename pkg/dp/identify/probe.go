@@ -26,12 +26,18 @@ type evidence struct {
 // arguments are whole individual datagrams, never concatenated datagrams.
 // Callers must bound their input (Table enforces its configured byte budget).
 func Probe(p Protocol, transport uint8, forward, reverse []byte) Result {
+	return probe(p, transport, forward, reverse, [2]int{len(forward), len(reverse)})
+}
+
+// wireLengths preserves UDP boundaries when admission clips the available bytes.
+// Public Probe always receives complete datagrams.
+func probe(p Protocol, transport uint8, forward, reverse []byte, wireLengths [2]int) Result {
 	r := Result{Protocol: p, State: Reject, States: [2]State{Reject, Reject}, Transport: transport, Role: Unknown, Version: ProfileVersion}
 	if transport != ics.TCP && (transport != ics.UDP || p != ENIP) {
 		r.Reason = "unsupported transport"
 		return r
 	}
-	a, b := inspect(p, transport, forward), inspect(p, transport, reverse)
+	a, b := inspect(p, transport, forward, wireLengths[0]), inspect(p, transport, reverse, wireLengths[1])
 	r.States = [2]State{a.state, b.state}
 	r.Examined = [2]Range{{End: a.end}, {End: b.end}}
 	best := a
@@ -42,7 +48,7 @@ func Probe(p Protocol, transport uint8, forward, reverse []byte) Result {
 	r.Role = a.role
 	if len(forward) == 0 && len(reverse) == 0 {
 		r.State, r.Reason = NeedMore, "empty"
-		if transport == ics.UDP {
+		if transport == ics.UDP && wireLengths == [2]int{} {
 			r.State, r.Reason = Reject, "empty datagram"
 			r.States[0] = Reject
 		}
@@ -96,7 +102,7 @@ func strength(s State) int {
 	}
 }
 
-func inspect(p Protocol, transport uint8, b []byte) evidence {
+func inspect(p Protocol, transport uint8, b []byte, wireLength int) evidence {
 	if len(b) == 0 {
 		return evidence{state: NeedMore, role: Unknown, why: "empty direction"}
 	}
@@ -109,8 +115,8 @@ func inspect(p Protocol, transport uint8, b []byte) evidence {
 	case IEC104:
 		e = iecEvidence(b)
 	case ENIP:
-		e = enipEvidence(b, transport == ics.UDP)
-		if transport == ics.UDP && e.state == NeedMore && !e.neutral {
+		e = enipEvidence(b, transport == ics.UDP, wireLength)
+		if transport == ics.UDP && e.state == NeedMore && !e.neutral && wireLength == len(b) {
 			e = invalid(b)
 		}
 	default:
