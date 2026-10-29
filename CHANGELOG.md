@@ -14,11 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retain only that tuple's bounded address spans; DNP3 and CIP suggestions no
   longer misrepresent station, object-group or path values as addresses.
   Previously generated wider rules are not removed automatically.
-- DNP3 and CIP rules reject nonempty `addresses`, which could never match
-  decoded traffic and silently defeated address-qualified denials. Both rule
-  editors keep unsupported stored filters visible for explicit removal, but
-  no longer offer new ones. Stored configurations with these filters start in
-  management recovery with the offending rule and cause until corrected.
+- CIP rules reject `addresses`; DNP3 now interprets them as point indexes and
+  requires object groups. DNP3/CIP reject the ineffective Modbus `unitId` filter.
+  Both editors expose unsupported stored filters for explicit removal; invalid
+  stored predicates enter management recovery until corrected.
 - Modbus address rules now cover the whole request span. An `ALLOW` with
   `addresses` matches only when every register or coil the request reads or
   writes lies inside the listed entries; previously only the starting address
@@ -36,6 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hash`.
 
 ### Added
+
+- Both ICS editors, CLI and API schemas expose DNP3 station/group/variation/point
+  selectors, CIP instance/attribute/tag selectors, and IEC 104 cause, originator,
+  P/N, T and select/execute selectors. Clearing a selector sends a merge-PATCH
+  null; previews send the complete effective predicate without removal markers.
+- DNP3 secure-operations templates explicitly allow Confirm and startup functions,
+  restrict Write to time/IIN groups 50/80, and deny Save Configuration alongside
+  restart and stop operations.
 
 - `services.av.scan` selects the traffic the scanning gate intercepts:
   include and exclude entries of directional zone pairs, destination ports

@@ -1,47 +1,9 @@
-import { expect, test, type Page } from "@playwright/test";
-import type { FirewallRule, ICSPredicate } from "../lib/api";
+import { expect, test } from "@playwright/test";
+import { effectivePredicate } from "../app/ics/ics-shared";
+import { openEditor } from "./fixtures/ics-editor";
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 
-async function openEditor(page: Page, surface: string, ics: ICSPredicate) {
-  let stored: FirewallRule = { id: "selector", action: "ALLOW", protocols: [{ name: "tcp", port: "502" }], ics };
-  const patches: { ics: ICSPredicate }[] = [];
-  const previews: FirewallRule[] = [];
-  await page.addInitScript(() => {
-    localStorage.setItem("containd.auth.token", "test-token");
-    localStorage.setItem("containd.auth.role", "admin");
-  });
-  await page.route("**/api/v1/**", async (route) => {
-    const request = route.request();
-    const path = new URL(request.url()).pathname;
-    if (path === "/api/v1/firewall/rules/selector" && request.method() === "PATCH") {
-      const patch = request.postDataJSON();
-      patches.push(patch);
-      const merged = { ...stored.ics, ...patch.ics } as Record<string, unknown>;
-      for (const key of Object.keys(merged)) if (merged[key] === null) delete merged[key];
-      stored = { ...stored, ...patch, ics: merged };
-      await route.fulfill({ json: stored });
-      return;
-    }
-    if (path === "/api/v1/firewall/rules/preview") {
-      previews.push(request.postDataJSON());
-      await route.fulfill({ json: { match_count: 0, sample_matches: [], time_range: null, total_events: 0 } });
-      return;
-    }
-    let body: unknown = {};
-    if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") body = user;
-    if (path === "/api/v1/firewall/rules") body = [stored];
-    if (path === "/api/v1/zones") body = [];
-    if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
-    if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "learn" };
-    await route.fulfill({ json: body });
-  });
-  const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
-  await page.goto(`/${surface}/`);
-  await loaded;
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
-  return { patches, previews, saved: () => stored };
-}
 
 for (const surface of ["ics", "firewall"]) {
   const save = surface === "ics" ? "Save filter" : "Save changes";
@@ -54,7 +16,7 @@ for (const surface of ["ics", "firewall"]) {
       await expect.poll(() => seen.previews.length).toBe(1);
       await form.getByRole("button", { name: save }).click();
       await expect.poll(() => seen.patches.length).toBe(1);
-      expect(seen.previews[0].ics).toEqual(seen.patches[0].ics);
+      expect(seen.previews[0].ics).toEqual(effectivePredicate(seen.patches[0].ics));
       expect(seen.patches[0].ics.functionCode).toEqual(codes);
       expect(seen.patches[0].ics.direction).toBe("request");
     });
@@ -79,7 +41,7 @@ for (const surface of ["ics", "firewall"]) {
       const reloaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules" && r.request().method() === "GET");
       await form.getByRole("button", { name: save }).click();
       await reloaded;
-      expect(seen.previews[0].ics).toEqual(seen.patches[0].ics);
+      expect(seen.previews[0].ics).toEqual(effectivePredicate(seen.patches[0].ics));
       expect(seen.patches[0].ics).toMatchObject({ functionCode: null, ...(protocol === "modbus" ? { unitId: null, addresses: null } : { objectClasses: null }) });
       expect(seen.saved().ics).toMatchObject({ protocol, direction: "response" });
       expect(seen.saved().ics?.functionCode).toBeUndefined();
@@ -98,8 +60,8 @@ for (const surface of ["ics", "firewall"]) {
     await expect.poll(() => seen.previews.length).toBe(1);
     await form.getByRole("button", { name: save }).click();
     await expect.poll(() => seen.patches.length).toBe(1);
-    expect(seen.previews[0].ics).toEqual(seen.patches[0].ics);
-    expect(seen.patches[0].ics.mode).toBe("");
+    expect(seen.previews[0].ics).toEqual(effectivePredicate(seen.patches[0].ics));
+    expect(seen.patches[0].ics.mode).toBeNull();
   });
 
   for (const token of ["3,no", "-1", "1.5", "256"]) {
@@ -128,7 +90,7 @@ test("template preview renders nested rule protocol and codes", async ({ page })
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") body = user;
     if (path === "/api/v1/zones") body = [];
     if (path === "/api/v1/templates/ics") body = [{ name: "Read operations", protocol: "cip", description: "Read services" }];
-    if (path === "/api/v1/templates/ics/apply") body = { rules: [{ id: "generated", description: "Generated read", action: "ALLOW", ics: { protocol: "cip", functionCode: [14, 76] } }] };
+    if (path === "/api/v1/templates/ics/apply") body = { rules: [{ id: "generated", description: "Generated read", action: "ALLOW", ics: { protocol: "cip", functionCode: [14, 76] } }, { id: "dnp-time", action: "ALLOW", ics: { protocol: "dnp3", functionCode: [2], groups: [50, 80] } }] };
     await route.fulfill({ json: body });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/templates/ics");
@@ -139,4 +101,5 @@ test("template preview renders nested rule protocol and codes", async ({ page })
   const row = page.getByRole("row").filter({ hasText: "generated" });
   await expect(row).toContainText("cip");
   await expect(row).toContainText("14, 76");
+  await expect(page.getByRole("row").filter({ hasText: "dnp-time" })).toContainText("groups=50, 80");
 });

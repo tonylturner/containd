@@ -5,15 +5,14 @@ import { useState } from "react";
 import {
   api,
   type FirewallRule,
-  type ICSPredicate,
   type ICSPredicatePatch,
   type RulePreview,
 } from "../../lib/api";
 import { InfoTip } from "../../components/InfoTip";
 import { RuleImpactSummary } from "../firewall/firewall-rule-warnings";
 import {
-  buildICSRuleUpdate,
-  addressFilterError,
+  genericSelectorDraftFrom,
+  effectivePredicate,
   selectorFieldError,
   icsAddressDraftFrom,
   type ICSMode,
@@ -22,10 +21,9 @@ import {
   PROTOCOLS,
   protoMeta,
 } from "./ics-shared";
-import {
-  buildIEC104RuleICS,
-  iec104DraftFrom,
-} from "./iec104";
+import { iec104DraftFrom } from "./iec104";
+import { buildRuleICS } from "../firewall/firewall-ics-fields";
+import { ICSSelectorFields } from "./ics-selector-fields";
 import { IEC104Fields } from "./iec104-fields";
 import { ICSAddressFields } from "./ics-address-fields";
 
@@ -56,6 +54,7 @@ export function EditICSModal({
   const [readOnly, setReadOnly] = useState(rule.ics?.readOnly ?? false);
   const [writeOnly, setWriteOnly] = useState(rule.ics?.writeOnly ?? false);
   const [mode, setMode] = useState<ICSModeSelection>(rule.ics?.mode ?? "");
+  const [selectors, setSelectors] = useState(() => genericSelectorDraftFrom(rule.ics));
   const [iec, setIec] = useState(() => iec104DraftFrom(rule.ics));
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<RulePreview | null>(null);
@@ -65,27 +64,11 @@ export function EditICSModal({
   const selectorError = enabled ? selectorFieldError(protocol, functionCodes, unitId, objectClasses) : null;
   const isIEC104 = protocol === "iec104";
 
-  // The predicate Save would stage; preview checks the same one.
-  function buildICS():
-    | { ok: true; ics: ICSPredicate | undefined }
-    | { ok: false; error: string } {
-    if (!enabled) return { ok: true, ics: undefined };
-    const addressError = addressFilterError(protocol, addresses);
-    if (addressError) return { ok: false, error: addressError };
-    if (selectorError) return { ok: false, error: selectorError };
-    const built = isIEC104
-      ? buildIEC104RuleICS(iec, mode, rule.action, rule.ics, globalMode)
-      : {
-          ok: true as const,
-          ics: buildICSRuleUpdate(protocol, functionCodes, addresses, unitId,
-            objectClasses, readOnly, writeOnly, mode, rule.ics),
-        };
-    if (!built.ok) return built;
-    // Preview and PATCH both inherit using the same explicit empty mode.
-    return {
-      ok: true,
-      ics: mode === "" && rule.ics?.mode ? { ...built.ics, mode: "" } : built.ics,
-    };
+  // Both surfaces use the same validated builder. Only PATCH carries nulls.
+  function buildICS() {
+    return buildRuleICS({ enabled, protocol, functionCodes, addresses, unitId,
+      objectClasses, readOnly, writeOnly, mode, iec, selectors,
+      action: rule.action, existing: rule.ics, globalMode });
   }
 
   function save() {
@@ -108,7 +91,7 @@ export function EditICSModal({
       return;
     }
     setPreviewing(true);
-    const res = await api.previewFirewallRule({ ...rule, ics: built.ics });
+    const res = await api.previewFirewallRule({ ...rule, ics: effectivePredicate(built.ics) });
     setPreviewing(false);
     if (!res.ok) {
       setPreview(null);
@@ -120,7 +103,7 @@ export function EditICSModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 animate-fade-in">
-      <div className="w-full max-w-xl rounded-xs border bg-(--surface) p-5 shadow-card-lg animate-fade-in">
+      <div className="max-h-[95vh] overflow-y-auto w-full max-w-xl rounded-xs border bg-(--surface) p-5 shadow-card-lg animate-fade-in">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-(--text)">
             ICS filter &mdash; rule{" "}
@@ -238,6 +221,7 @@ export function EditICSModal({
               </div>
             )}
 
+            <ICSSelectorFields protocol={protocol} draft={selectors} onChange={setSelectors} unitId={unitId} onUnitIdChange={setUnitId} disabled={!enabled} />
             <div className="grid gap-3 md:grid-cols-2">
               <label className="flex items-center gap-2">
                 <input

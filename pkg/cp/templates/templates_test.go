@@ -35,7 +35,7 @@ func TestICSTemplateProtocolPorts(t *testing.T) {
 		ruleCount int
 	}{
 		{"modbus-read-only", ics.ModbusPort, "502", 2},
-		{"dnp3-secure-operations", ics.DNP3Port, "20000", 2},
+		{"dnp3-secure-operations", ics.DNP3Port, "20000", 3},
 		{"cip-monitor-only", ics.CIPPort, "44818", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

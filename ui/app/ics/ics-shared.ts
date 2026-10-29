@@ -1,13 +1,13 @@
-import type { ICSPredicate } from "../../lib/api";
+import type { ICSPredicate, ICSPredicatePatch } from "../../lib/api";
 
 export type ICSMode = "enforce" | "learn";
 export type ICSModeSelection = ICSMode | "";
 
 export const UNSUPPORTED_ADDRESSES =
-  "Address filters are not supported for DNP3 or CIP. Remove this filter before saving; protocol-specific station, point and CIP path selectors are not available yet.";
+  "Address filters are not supported for CIP. Remove this filter before saving; use object classes, instances, attributes or tags.";
 
 export function addressFilterError(protocol: string, addresses: string): string | null {
-  return (protocol === "dnp3" || protocol === "cip") && addresses.trim()
+  return protocol === "cip" && addresses.trim()
     ? UNSUPPORTED_ADDRESSES
     : null;
 }
@@ -76,6 +76,9 @@ export const PROTOCOLS: Record<string, ProtocolMeta> = {
     port: "20000",
     fcLabel: "Function codes",
     fcPlaceholder: "1, 2, 3",
+    addrLabel: "Point indexes",
+    addrPlaceholder: "0-10, 100",
+    addrHelp: "Closed point-index ranges, 0-4294967295. Requires object groups. Unknown indexes fail ALLOW and match DENY.",
     fcHelp:
       "DNP3 application function codes (1=Read, 2=Write, 3=Select, 4=Operate, 5=Direct Operate, 13=Cold Restart, 14=Warm Restart).",
   },
@@ -148,6 +151,52 @@ export function selectorFieldError(protocol: string, codes: string, unit: string
   }
 }
 
+export const GENERIC_SELECTOR_FIELDS = ["masters", "outstations", "groups", "variations", "instances", "attributes", "tags"] as const;
+export type GenericSelectorDraft = Record<typeof GENERIC_SELECTOR_FIELDS[number], string> & {
+  direction: "" | "request" | "response";
+};
+
+export function genericSelectorDraftFrom(ics?: ICSPredicate): GenericSelectorDraft {
+  return {
+    masters: (ics?.masters ?? []).join(", "), outstations: (ics?.outstations ?? []).join(", "),
+    groups: (ics?.groups ?? []).join(", "), variations: (ics?.variations ?? []).join(", "),
+    instances: (ics?.instances ?? []).join(", "), attributes: (ics?.attributes ?? []).join(", "),
+    tags: (ics?.tags ?? []).join(", "), direction: ics?.direction ?? "",
+  };
+}
+
+export const UNSUPPORTED_UNIT_ID = "unitId is not supported for DNP3 or CIP: these decoders emit no unit ID. Remove this filter before saving.";
+
+/** PATCH is the validated effective predicate plus explicit removals. */
+export function predicatePatch(effective: ICSPredicate, existing?: ICSPredicate): ICSPredicatePatch {
+  const patch: ICSPredicatePatch = { ...effective };
+  if (existing && existing.protocol === effective.protocol) {
+    for (const key of Object.keys(existing) as (keyof ICSPredicate)[]) {
+      if (existing[key] !== undefined && effective[key] === undefined) Object.assign(patch, { [key]: null });
+    }
+  }
+  return patch;
+}
+
+/** Never send merge-patch nulls to create/replace/preview endpoints. */
+export function effectivePredicate(patch?: ICSPredicatePatch | null): ICSPredicate | undefined {
+  return patch == null ? undefined : Object.fromEntries(Object.entries(patch).filter(([, v]) => v != null)) as ICSPredicate;
+}
+
+function parseAddresses(protocol: string, text: string): string[] {
+  const entries = text.split(",").map((v) => v.trim()).filter(Boolean);
+  const error = addressFilterError(protocol, text);
+  if (error) throw new Error(error);
+  const max = protocol === "dnp3" ? 4294967295 : 65535;
+  for (const entry of entries) {
+    const parts = entry.split("-").map((v) => v.trim());
+    if (parts.length > 2 || parts.some((v) => !v)) throw new Error(`Invalid address range: ${entry}`);
+    const values = parts.map((v) => parseSelectorCSV(v, "Address", max)[0]);
+    if (values[0] > values[values.length - 1]) throw new Error(`Address range starts after it ends: ${entry}`);
+  }
+  return entries;
+}
+
 export function buildICSRuleUpdate(
   protocol: string,
   functionCodes: string,
@@ -158,34 +207,58 @@ export function buildICSRuleUpdate(
   writeOnly: boolean,
   mode: ICSModeSelection,
   existing?: ICSPredicate,
-): ICSPredicate {
+  selectors = genericSelectorDraftFrom(existing),
+): ICSPredicatePatch {
+  if (!isSupportedICSProtocol(protocol)) throw new Error(`Unsupported ICS protocol: ${protocol}`);
+  if (protocol !== "modbus" && unitId.trim()) throw new Error(UNSUPPORTED_UNIT_ID);
+  if (readOnly && writeOnly) throw new Error("Read-only and write-only are mutually exclusive.");
+  const ics: ICSPredicate = { protocol, readOnly, writeOnly };
   const codes = parseSelectorCSV(functionCodes, "Function / service codes", 255);
-  const classes = protocol === "cip" ? parseSelectorCSV(objectClasses, "Object classes", 65535) : [];
-  const sameProtocol = existing?.protocol === protocol ? existing : undefined;
-  const addressList = addresses.split(",").map((s) => s.trim()).filter(Boolean);
-  const ics: ICSPredicate = {
-    protocol,
-    readOnly,
-    writeOnly,
-    ...(sameProtocol?.direction ? { direction: sameProtocol.direction } : {}),
-    ...(mode ? { mode } : {}),
-  };
-  // Omission retains a stored restriction on PATCH. Null clears it, and is
-  // also accepted by create/preview, keeping those payloads identical.
   if (codes.length) ics.functionCode = codes;
-  else if (sameProtocol?.functionCode?.length) ics.functionCode = null;
+  const addressList = parseAddresses(protocol, addresses);
   if (addressList.length) ics.addresses = addressList;
-  else if (sameProtocol?.addresses?.length) ics.addresses = null;
+  if (selectors.direction) ics.direction = selectors.direction;
+  if (mode) ics.mode = mode;
   if (protocol === "modbus") {
     const uid = parseUnitID(unitId);
     if (uid != null) ics.unitId = uid;
-    else if (sameProtocol?.unitId != null) ics.unitId = null;
-  } else if (sameProtocol?.unitId != null) {
-    // The server accepts legacy unit selectors on other generic protocols;
-    // a form without a unit input must not silently widen those predicates.
-    ics.unitId = sameProtocol.unitId;
   }
-  if (classes.length) ics.objectClasses = classes;
-  else if (sameProtocol?.objectClasses?.length) ics.objectClasses = null;
-  return ics;
+  if (protocol === "dnp3") {
+    for (const key of ["masters", "outstations", "groups", "variations"] as const) {
+      const values = parseSelectorCSV(selectors[key], key, key === "masters" || key === "outstations" ? 65519 : 255);
+      if (values.length) ics[key] = values;
+    }
+    if (addressList.length && !ics.groups?.length) throw new Error("DNP3 point indexes require non-empty groups.");
+  }
+  if (protocol === "cip") {
+    for (const [key, text] of [["objectClasses", objectClasses], ["instances", selectors.instances], ["attributes", selectors.attributes]] as const) {
+      const values = parseSelectorCSV(text, key, 65535);
+      if (values.length) ics[key] = values;
+    }
+    const tags = selectors.tags.split(",").map((v) => v.trim()).filter(Boolean);
+    if (tags.length) {
+      if (ics.objectClasses || ics.instances || ics.attributes) throw new Error("Tags cannot combine with objectClasses, instances or attributes.");
+      for (const tag of tags) {
+        if (!tag.split(".").every((segment, i) => {
+          const name = i === 0 && segment.startsWith("Program:") ? segment.slice(8) : segment;
+          return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && name.length <= 40;
+        })) throw new Error(`Invalid tag: ${tag}. Use dot-separated names (up to 40 characters each), optional first Program:Name, no brackets.`);
+      }
+      ics.tags = tags;
+    }
+  }
+  return predicatePatch(ics, existing);
+}
+
+/** Compact restrictions for review tables; never hide a constrained target. */
+export function summarizeGenericICS(ics: ICSPredicate, includeCodes = true): string {
+  const parts = includeCodes ? [`fc=${ics.functionCode?.join(", ") || "*"}`] : [];
+  if (ics.unitId != null) parts.push(`unitId=${ics.unitId}`);
+  for (const key of ["addresses", "objectClasses", ...GENERIC_SELECTOR_FIELDS] as const) {
+    if (ics[key]?.length) parts.push(`${key}=${ics[key]?.join(", ")}`);
+  }
+  if (ics.direction) parts.push(ics.direction);
+  if (ics.readOnly) parts.push("read-only");
+  if (ics.writeOnly) parts.push("write-only");
+  return parts.join(" · ");
 }
