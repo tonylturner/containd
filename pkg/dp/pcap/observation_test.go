@@ -105,6 +105,37 @@ func TestIdentificationFixtures(t *testing.T) {
 	}
 }
 
+func TestIdentificationEndpoints(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		reverse                  bool
+		clientPort, serverPort   uint16
+		flags                    byte
+		wantSrc, wantDst         string
+		wantSrcPort, wantDstPort uint16
+	}{
+		{"SYN", false, 49152, 1502, 0x02, "10.0.0.1", "10.0.0.2", 49152, 1502},
+		{"SYN overrides registry port", false, 502, 1502, 0x02, "10.0.0.1", "10.0.0.2", 502, 1502},
+		{"SYN-ACK first", true, 49152, 1502, 0x12, "10.0.0.1", "10.0.0.2", 49152, 1502},
+		{"unknown midstream keeps capture order", true, 49152, 1502, 0x10, "10.0.0.2", "10.0.0.1", 1502, 49152},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := orientedModbusFrame(tc.reverse, tc.clientPort, tc.serverPort, 99, tc.flags, nil)
+			result, err := Analyze(bytes.NewReader(buildPCAP([][]byte{frame})), modbus.NewDecoder())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Identifications) != 1 {
+				t.Fatalf("identifications: %+v", result.Identifications)
+			}
+			id := result.Identifications[0]
+			if id.SrcIP != tc.wantSrc || id.DstIP != tc.wantDst || id.SrcPort != tc.wantSrcPort || id.DstPort != tc.wantDstPort {
+				t.Fatalf("endpoints: %+v", id)
+			}
+		})
+	}
+}
+
 func TestOutsideRulePorts(t *testing.T) {
 	for _, tc := range []struct {
 		protocols []rules.Protocol

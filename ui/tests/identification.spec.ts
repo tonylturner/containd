@@ -32,8 +32,8 @@ async function mockAPI(page: Page) {
           rules: [], profiles: [], eventSummary: { modbus: 2 },
           stats: { events: [], flows: [], protocols: { modbus: 2 }, duration: 100000000, packetCount: 5, byteCount: 400,
             identifications: [
-              { key: "capture/1", flowId: flow.flowId, attributes: identification },
-              { key: "capture/2", flowId: "midstream", attributes: { ...identification, protocol: "", identification_state: "identification_incomplete", identification_coverage: "midstream/no-SYN", binding: "none", mismatch: false, expected: ["", ""], outside_rule_port_scope: "unknown", syn_coverage: [false, false] } },
+              { key: "capture/1", flowId: flow.flowId, srcIp: flow.srcIp, dstIp: flow.dstIp, srcPort: flow.srcPort, dstPort: flow.dstPort, attributes: identification },
+              { key: "capture/2", flowId: "2001:db8::1|2001:db8::2|49153|1502|006|0", srcIp: "2001:db8::1", dstIp: "2001:db8::2", srcPort: 49153, dstPort: 1502, attributes: { ...identification, protocol: "", identification_state: "identification_incomplete", identification_coverage: "midstream/no-SYN", binding: "none", mismatch: false, expected: ["", ""], service_port: 1502, outside_rule_port_scope: "unknown", syn_coverage: [false, false] } },
             ] },
         }
       : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
@@ -81,6 +81,11 @@ test("PCAP shows identity, coverage, binding, endpoints and unknown scope", asyn
   const section = page.getByRole("region", { name: "Content identifications (2)", exact: true });
   await expect(section).toBeVisible();
   await expect(section.getByText("modbus · content", { exact: true })).toBeVisible();
+  const connection = section.getByRole("cell", { name: "10.0.0.1:49152 → 10.0.0.2:20000", exact: true });
+  await expect(connection).toBeVisible();
+  await expect(connection).toHaveAttribute("title", `capture/1\n${flow.flowId}`);
+  await expect(section.getByRole("cell", { name: "[2001:db8::1]:49153 → [2001:db8::2]:1502", exact: true })).toBeVisible();
+  await expect(section.getByText(flow.flowId, { exact: true })).toHaveCount(0);
   for (const text of ["observation", "none / dnp3", "tcp/20000", "midstream/no-SYN", "Unknown (no snapshot)"])
     await expect(section.getByText(text, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("cell", { name: "identify", exact: true })).toHaveCount(0);

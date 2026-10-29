@@ -1,4 +1,5 @@
 import type { PcapIdentification } from "../../lib/api";
+import { formatEndpoint } from "../../lib/endpoint";
 import { IdentificationBadge } from "../flows/identification-badge";
 
 export function IdentificationTable({ identifications }: { identifications: PcapIdentification[] }) {
@@ -13,9 +14,11 @@ export function IdentificationTable({ identifications }: { identifications: Pcap
               <tr>{["Connection", "Identified", "State / coverage", "Binding", "Expected endpoints", "Service", "Rule port scope"].map((label) => <th key={label} className="px-4 py-2">{label}</th>)}</tr>
             </thead>
             <tbody>
-              {identifications.map(({ key, flowId, attributes: id }) => (
+              {identifications.map(({ key, flowId, srcIp, dstIp, srcPort, dstPort, attributes: id }) => (
                 <tr key={key} className="border-t table-row-hover transition-ui">
-                  <td className="max-w-64 break-all px-4 py-2 font-mono text-xs text-(--text)" title={key}>{flowId}</td>
+                  <td className="max-w-64 break-words px-4 py-2 font-mono text-xs text-(--text)" title={`${key}\n${flowId}`}>
+                    {formatEndpoint(srcIp, srcPort)} → {formatEndpoint(dstIp, dstPort)}
+                  </td>
                   <td className="px-4 py-2"><IdentificationBadge identification={id} /></td>
                   <td className="px-4 py-2 text-xs text-(--text)">
                     <div>{id.identification_state}</div>

@@ -334,8 +334,10 @@ other events of the flow remain retained; they do not resurrect expired flows.
 
 `POST /api/v1/pcap/analyze` (multipart `file`) and
 `POST /api/v1/pcap/analyze/{name}` return policy analysis. `stats.identifications`
-is an array of `{key, flowId, attributes}`: `key` is a run-qualified offline
-incarnation, and `attributes` uses the same spellings above. `stats.events`
+is an array of `{key, flowId, srcIp, dstIp, srcPort, dstPort, attributes}`:
+`key` is a run-qualified offline incarnation. The endpoints follow captured SYN
+client-to-server roles when available, otherwise the flow's orientation hint.
+`attributes` uses the same spellings above. `stats.events`
 includes identification and passive decoder events. Suggestions exclude
 observation-bound connections. The engine's internal PCAP analysis endpoints
 return the analysis directly, with `identifications` at the top level and

@@ -584,6 +584,11 @@ export type ObservationAttributes = {
 export type PcapIdentification = {
   key: string;
   flowId: string;
+  /** Client to server from captured SYN roles; otherwise the flow's orientation hint. */
+  srcIp: string;
+  dstIp: string;
+  srcPort: number;
+  dstPort: number;
   attributes: IdentificationAttributes;
 };
 

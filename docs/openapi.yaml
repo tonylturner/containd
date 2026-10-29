@@ -1460,10 +1460,14 @@ components:
           items: {type: boolean}
     PcapIdentification:
       type: object
-      required: [key, flowId, attributes]
+      required: [key, flowId, srcIp, dstIp, srcPort, dstPort, attributes]
       properties:
         key: {type: string, description: Run-qualified offline connection incarnation.}
         flowId: {type: string}
+        srcIp: {type: string, description: Client address from captured SYN roles; otherwise the flow orientation hint.}
+        dstIp: {type: string, description: Server address from captured SYN roles; otherwise the flow orientation hint.}
+        srcPort: {type: integer, minimum: 0, maximum: 65535}
+        dstPort: {type: integer, minimum: 0, maximum: 65535}
         attributes: {$ref: '#/components/schemas/IdentificationAttributes'}
     PcapAnalysisResult:
       properties:
