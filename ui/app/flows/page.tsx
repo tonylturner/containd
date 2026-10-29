@@ -10,6 +10,7 @@ import { Shell } from "../../components/Shell";
 import { SkeletonList } from "../../components/Skeleton";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EmptyState } from "../../components/EmptyState";
+import { IdentificationBadge } from "./identification-badge";
 import { TagList } from "../../components/TagList";
 
 const UNAVAILABLE = "Flows unavailable — the engine could not be reached.";
@@ -193,7 +194,9 @@ function FlowsInner() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-slate-100">
-                    {f.application || f.transport || "Unknown"}
+                    {f.identification || f.application ? (
+                      <IdentificationBadge identification={f.identification} application={f.application} />
+                    ) : f.transport || "Unknown"}
                   </td>
                   <td className="px-4 py-3 text-(--text)">
                     {formatEndpoint(f.srcIp, f.srcPort)} → {formatEndpoint(f.dstIp, f.dstPort)}

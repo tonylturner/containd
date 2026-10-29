@@ -12,14 +12,17 @@ import {
   isAdmin,
   listPcaps,
   type PcapItem,
+  type PcapIdentification,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { IdentificationTable } from "./identifications";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
 /* -- Types matching backend PolicyAnalysis / AnalysisResult -- */
 
 type AnalysisStats = {
+  identifications: PcapIdentification[];
   events: unknown[];
   flows: FlowSummary[];
   protocols: Record<string, number>;
@@ -468,6 +471,8 @@ function AnalysisResults({
         </div>
       </div>
 
+      <IdentificationTable identifications={stats.identifications ?? []} />
+
       {/* Event summary table */}
       {eventEntries.length > 0 && (
         <div className="overflow-hidden rounded-xs border">
@@ -639,7 +644,7 @@ function AnalysisResults({
       {rules.length === 0 && (
         <div className="text-sm text-(--text-muted)">
           No rules generated from this PCAP. The capture may not contain
-          recognizable ICS protocol traffic.
+          learnable standard-port ICS requests. Observation-bound connections and IEC 104 are not used for suggestions.
         </div>
       )}
     </div>

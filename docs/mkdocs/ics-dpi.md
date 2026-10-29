@@ -1084,3 +1084,42 @@ ASDU input is truncated to 127 IOAs and counted as point overflow. Expiry is not
 overflow. Counts are retained-history totals, not lifetime traffic or unique
 missing-device counts. Clearing inventory or restarting the engine resets data
 and overflow totals. See [API Reference](api-reference.md#passive-inventory).
+
+## Content identification
+
+AF_PACKET capture (when DPI is enabled) and offline PCAP analysis identify
+Modbus/TCP, DNP3/TCP, IEC 104 and EtherNet/IP encapsulation (CIP) by content,
+including on alternate service ports. Disabled ICS protocols are not probed.
+Live discovery respects DPI address and domain exclusions. NFQUEUE does not
+run content identification. UDP/2222 implicit I/O remains port-selected.
+
+Identification **never changes a verdict or the meaning of rule ports**. The
+existing port-selected decoder runs immediately. A confirmed protocol gets a
+separate passive decoder only when the legacy path does not already decode
+that protocol. These events carry `observation_only: true` and
+`binding_source: observation`; they do not enforce rules or generate automatic
+ALLOW suggestions. Observation-bound connections are excluded from offline
+policy suggestions, including legacy events emitted before confirmation.
+
+Flows show the bound application, whether identification is by **content** or
+only **port**, and a **Mismatch** badge when content differs from a registry
+port expectation. Mismatch preserves the original port-selected decoder and
+can add passive decoding of the confirmed protocol. **Outside rule ports**
+means at least one ICS rule names that protocol but none covers the observed
+service transport and port. This checks a single rule snapshot, not source,
+destination or other rule predicates; it is not a hypothetical rule hit. A
+rule without explicit transport/ports covers only that protocol's registry
+ports. PCAP analysis without a rule snapshot reports scope as `unknown`.
+
+Evidence is bounded to 1 KiB per direction, 16 arrivals and 5 seconds per
+connection (with bounded entries and total bytes). Only passive decoding
+waits for confirmation. The 5-second evidence window is activity-driven:
+idle evidence finalizes on the next arrival, sweep, close or PCAP EOF, not on
+a promised timer deadline. PCAP deadlines use a nondecreasing capture-time
+watermark, so out-of-order timestamps do not rewind the evidence clock. Ambiguous evidence can resolve with later bytes;
+exhaustion or EOF yields an incomplete result with candidates retained.
+TCP identification requires SYN coverage: midstream capture does not confirm
+or start a passive decoder. Truncation, missing bytes, conflicting evidence
+and budget exhaustion can leave an identification incomplete. There is no
+fallback scan or midstream replay. Identification results and observation-decoded events
+retain the capture timestamps. PCAP analysis never increments live metrics.

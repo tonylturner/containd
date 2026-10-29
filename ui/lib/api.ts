@@ -558,12 +558,41 @@ export type ConntrackEntry = {
   tags?: string[];
 };
 
+/** `identify` / `identification` event attributes; endpoint arrays use capture order. */
+export type IdentificationAttributes = {
+  protocol: string;
+  identification_state: "confirmed" | "reject" | "identification_incomplete";
+  reason: string;
+  identification_coverage: string;
+  identification_candidates: string[] | null;
+  expected: [string, string];
+  service_transport: "tcp" | "udp";
+  service_port: number;
+  mismatch: boolean;
+  binding: "observation" | "legacy" | "none";
+  outside_rule_port_scope: boolean | "unknown";
+  profile_version: number;
+  syn_coverage: [boolean, boolean];
+};
+
+/** Passive decoder events have no verdict or auto-ALLOW authority. */
+export type ObservationAttributes = {
+  observation_only: true;
+  binding_source: "observation";
+};
+
+export type PcapIdentification = {
+  key: string;
+  flowId: string;
+  attributes: IdentificationAttributes;
+};
+
 export type TelemetryEvent = {
   id: number;
   flowId: string;
   proto: string;
   kind: string;
-  attributes?: Record<string, unknown>;
+  attributes?: Record<string, unknown> & Partial<IdentificationAttributes & ObservationAttributes>;
   timestamp: string;
   srcIp?: string;
   dstIp?: string;
@@ -584,6 +613,7 @@ export type FlowSummary = {
   dstPort?: number;
   transport?: string;
   application?: string;
+  identification?: IdentificationAttributes;
   eventCount: number;
   avDetected?: boolean;
   avBlocked?: boolean;
