@@ -95,6 +95,9 @@ func parseSuricataSnortLine(line, sourceFormat string) (config.IDSRule, error) {
 		return config.IDSRule{}, err
 	}
 	opts := parseOptions(optionsRaw)
+	if sourceFormat == "snort" {
+		opts = normalizeSnortContentOptions(opts)
+	}
 	rule := buildBaseIDSRule(trimmed, sourceFormat, fields)
 	applyRuleIdentity(&rule, opts, sourceFormat)
 	applyRuleSeverityAndLabels(&rule, opts)
@@ -280,15 +283,14 @@ func sourceFormatPrefix(sourceFormat string) string {
 // Returns a slice of [keyword, value] pairs preserving order (some keywords repeat).
 func parseOptions(raw string) [][2]string {
 	var opts [][2]string
-	// Options are semicolon-delimited. Values may contain escaped semicolons.
+	// Options are semicolon-delimited outside quoted or escaped values.
 	remaining := raw
 	for remaining != "" {
 		remaining = strings.TrimSpace(remaining)
 		if remaining == "" {
 			break
 		}
-		// Find next unescaped semicolon.
-		idx := findUnescapedSemicolon(remaining)
+		idx := findOptionDelimiter(remaining, ';')
 		var part string
 		if idx < 0 {
 			part = remaining
@@ -314,13 +316,18 @@ func parseOptions(raw string) [][2]string {
 	return opts
 }
 
-func findUnescapedSemicolon(s string) int {
+// findOptionDelimiter ignores delimiters inside quotes and escaped characters.
+func findOptionDelimiter(s string, delimiter byte) int {
+	quoted := false
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\\' {
 			i++ // skip escaped character
 			continue
 		}
-		if s[i] == ';' {
+		if s[i] == '"' {
+			quoted = !quoted
+		}
+		if s[i] == delimiter && !quoted {
 			return i
 		}
 	}
@@ -378,7 +385,7 @@ func parseContentMatches(opts [][2]string) []config.ContentMatch {
 				cm.Negate = true
 				val = val[1:]
 			}
-			val = unquote(val)
+			val = unescapeContentPattern(unquote(val))
 			// Check for hex content: |DE AD BE EF|.
 			if strings.HasPrefix(val, "|") && strings.HasSuffix(val, "|") {
 				cm.IsHex = true
@@ -399,6 +406,19 @@ func parseContentMatches(opts [][2]string) []config.ContentMatch {
 	}
 
 	return matches
+}
+
+// unescapeContentPattern reverses escapeSuricataString in one pass, leaving
+// other escape sequences untouched rather than changing their meaning.
+func unescapeContentPattern(s string) string {
+	var out strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && strings.ContainsRune(`\";`, rune(s[i+1])) {
+			i++
+		}
+		out.WriteByte(s[i])
+	}
+	return out.String()
 }
 
 func applyContentModifier(current *config.ContentMatch, keyword, value string) {
