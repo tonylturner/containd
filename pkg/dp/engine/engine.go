@@ -801,6 +801,9 @@ func (e *Engine) sweepFlows(now time.Time) {
 	for _, st := range expired {
 		e.endFlowStream(st, nil)
 	}
+	if e.transport != nil {
+		e.transport.sweepAdmission(now)
+	}
 }
 
 // ManagementReservation is trusted startup authority, never accepted in payloads.

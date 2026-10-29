@@ -16,8 +16,7 @@ func processTransportAdmission(t *testing.T, e *Engine, r *transportResolver) {
 	case p := <-r.queue:
 		c := r.resolve(context.Background(), p.packet, false)
 		e.handleTransportPacket(p.packet, c, p.history)
-		r.count.Add(-1)
-		r.bytes.Add(-int64(len(p.packet.Payload)))
+		r.releaseAdmission(p)
 	default:
 		t.Fatal("no admitted packet")
 	}

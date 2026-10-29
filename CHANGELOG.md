@@ -219,6 +219,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Dropped-only transport loss histories expire after recovery, freeing admission
+  capacity so a stopped SYN burst cannot permanently disable unmatched-reply
+  detection for later connections. Queued and live histories remain protected;
+  `coverage_index_reclaimed` counts expired unbound histories removed by a sweep.
 - Port-reusing SYNs reserve their own correlation-loss history before queueing,
   so overflow during reordering cannot leave a new incarnation falsely covered.
 - Excluded opening SYNs no longer grant complete correlation coverage;

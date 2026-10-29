@@ -43,6 +43,7 @@ type transportAdmission struct {
 	connection *flow.Connection
 	synSeq     uint32
 	hasSYN     bool
+	queued     int // includes the in-flight worker packet; under admissionMu
 }
 
 type transportAlias struct {
@@ -135,6 +136,9 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 	pkt.Payload, pkt.SrcIP, pkt.DstIP = bytes.Clone(pkt.Payload), bytes.Clone(pkt.SrcIP), bytes.Clone(pkt.DstIP)
 	select {
 	case r.queue <- transportPacket{packet: pkt, at: time.Now(), history: history}:
+		if history != nil {
+			history.queued++
+		}
 	default:
 		r.bytes.Add(-n)
 		r.count.Add(-1)
@@ -203,8 +207,7 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 		r.closed = true
 		drain()
 		for _, p := range pending {
-			r.bytes.Add(-int64(len(p.packet.Payload)))
-			r.count.Add(-1)
+			r.releaseAdmissionLocked(p)
 			r.authority.count("canceled")
 		}
 		r.aliases = make(map[conntrack.Tuple]*transportAlias)
@@ -244,8 +247,7 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			if ctx.Err() == nil {
 				e.handleTransportPacket(p.packet, c, p.history)
 			}
-			r.bytes.Add(-int64(len(p.packet.Payload)))
-			r.count.Add(-1)
+			r.releaseAdmission(p)
 		}
 	}
 }

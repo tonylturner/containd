@@ -25,8 +25,7 @@ func TestTransportNATExcludedRequestsDoNotBecomeUnmatched(t *testing.T) {
 		case q := <-r.queue:
 			c := r.resolve(context.Background(), q.packet, false)
 			e.handleTransportPacket(q.packet, c, q.history)
-			r.count.Add(-1)
-			r.bytes.Add(-int64(len(q.packet.Payload)))
+			r.releaseAdmission(q)
 		default:
 		}
 	}

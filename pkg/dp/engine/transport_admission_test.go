@@ -65,7 +65,6 @@ func TestTransportOverflowScopesLossIncludingQueuedOpener(t *testing.T) {
 	pkt.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagSYN, Seq: 100}
 	r.admit(e, pkt)
 	queued := <-r.queue
-	r.count.Add(-1)
 	other := &flow.Connection{Key: "unrelated", Status: "resolved"}
 	other.Coverage().Store(true)
 	tuple := natEvidence().Original
@@ -77,6 +76,7 @@ func TestTransportOverflowScopesLossIncludingQueuedOpener(t *testing.T) {
 	r.authority.check(context.Background())
 	c := r.resolve(context.Background(), queued.packet, false)
 	e.handleTransportPacket(pkt, c, queued.history)
+	r.releaseAdmission(queued)
 	e.flowMu.Lock()
 	started := e.tupleStateLocked(packetKey(pkt).Tuple()).Connection.Load()
 	e.flowMu.Unlock()

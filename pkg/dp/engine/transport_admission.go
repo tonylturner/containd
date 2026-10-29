@@ -61,7 +61,8 @@ func transportOverflowIdentity(pkt capture.Packet, c *flow.Connection) (flow.Key
 
 // The loss index is independent of lookup TTLs: a quiet live connection still
 // needs a tuple-scoped loss marker. Placeholders retain loss while its opener
-// is queued. Closed incarnations are reclaimed, never live ones.
+// is queued. Closed incarnations are reclaimed, never live ones. The flow
+// sweep separately reclaims expired, unbound histories with no queued owners.
 func (r *transportResolver) admissionHistoryLocked(tuple conntrack.Tuple) *transportAdmission {
 	if entry := r.indexed[tuple]; entry != nil {
 		if !entry.connection.Closed().Load() {
@@ -75,6 +76,35 @@ func (r *transportResolver) admissionHistoryLocked(tuple conntrack.Tuple) *trans
 	entry := &transportAdmission{connection: &flow.Connection{}}
 	r.indexed[tuple] = entry
 	return entry
+}
+
+// Sweep only on the existing flow-sweep cadence, not on admission/capacity
+// checks. A queued or in-flight packet still owns its token even after the
+// recovery timeout; it may later bind the history to a live incarnation.
+func (r *transportResolver) sweepAdmission(now time.Time) {
+	r.admissionMu.Lock()
+	defer r.admissionMu.Unlock()
+	for tuple, entry := range r.indexed {
+		if entry.connection.Key == "" && entry.queued == 0 &&
+			entry.connection.CorrelationRecoveryElapsed(now) {
+			delete(r.indexed, tuple)
+			r.authority.count("coverage_index_reclaimed")
+		}
+	}
+}
+
+func (r *transportResolver) releaseAdmission(p transportPacket) {
+	r.admissionMu.Lock()
+	defer r.admissionMu.Unlock()
+	r.releaseAdmissionLocked(p)
+}
+
+func (r *transportResolver) releaseAdmissionLocked(p transportPacket) {
+	if p.history != nil {
+		p.history.queued--
+	}
+	r.bytes.Add(-int64(len(p.packet.Payload)))
+	r.count.Add(-1)
 }
 
 // Connection close/expiry knows its aliases, so reclamation is indexed rather

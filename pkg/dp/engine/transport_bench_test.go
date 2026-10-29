@@ -65,8 +65,7 @@ func BenchmarkTransportCopyAdmission(b *testing.B) {
 	for range b.N {
 		r.admit(e, pkt)
 		p := <-r.queue
-		r.bytes.Add(-int64(len(p.packet.Payload)))
-		r.count.Add(-1)
+		r.releaseAdmission(p)
 	}
 	b.StopTimer()
 	b.ReportMetric(float64(r.authority.snapshot().Counters["queue_overflow"]), "lost")

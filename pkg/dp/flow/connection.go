@@ -100,10 +100,16 @@ func (c *Connection) LoseCorrelation(at time.Time, timeout time.Duration) {
 	}
 }
 func (c *Connection) CorrelationAvailable(at time.Time) bool {
+	return c.Coverage().Load() && c.CorrelationRecoveryElapsed(at)
+}
+
+// CorrelationRecoveryElapsed reports whether the latest loss window has ended,
+// independently of SYN coverage. Unbound histories may be retired only then.
+func (c *Connection) CorrelationRecoveryElapsed(at time.Time) bool {
 	if at.IsZero() {
 		at = time.Now()
 	}
-	return c.Coverage().Load() && at.UnixNano() >= c.mutable().recoveryUntil.Load()
+	return at.UnixNano() >= c.mutable().recoveryUntil.Load()
 }
 func (c *Connection) ReportUnavailable() bool {
 	return c.mutable().unavailableReported.CompareAndSwap(false, true)

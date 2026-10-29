@@ -1999,7 +1999,8 @@ components:
             resolved, not_found, lookup_error, lookup_timeout, ambiguous, unsupported_zone,
             unsupported_tuple, zone_unverified. Admission/correlation counters are queue_overflow
             (every drop), admission_timeout, cache_capacity, coverage_capacity (unindexed tuple
-            observations), canceled, correlation_unavailable (emitted anomalies). No worker retries.
+            observations), coverage_index_reclaimed (expired unbound tuple histories evicted by
+            the flow sweep), canceled, correlation_unavailable (emitted anomalies). No worker retries.
         modbus:
           type: object
           properties:
