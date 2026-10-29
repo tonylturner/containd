@@ -12,6 +12,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/cip"
 	"github.com/tonylturner/containd/pkg/dp/ics/dnp3"
@@ -79,6 +80,16 @@ func (l *Learner) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
 	proto := strings.ToLower(ev.Proto)
 	if !ics.Learnable(proto) || !isRequestEvent(proto, ev) {
 		return
+	}
+	if key, ok := flow.ParseKey(ev.FlowID); ok && ev.Connection.Verified() {
+		if ev.Connection.Direction(key) != flow.DirForward {
+			return
+		}
+		src, dst, verified := ev.Connection.LogicalIPs(key)
+		if !verified {
+			return
+		}
+		srcIP, dstIP = src, dst
 	}
 
 	tuple, addresses, learnable := learnableTupleForEvent(proto, srcIP, dstIP, ev)

@@ -121,6 +121,9 @@ type conformanceAlerts struct {
 }
 
 func conformanceKey(state *flow.State) string {
+	if c := state.Connection.Load(); c != nil {
+		return c.Key
+	}
 	key := state.Key
 	if key.Dir == flow.DirReverse {
 		key = key.Reversed()
@@ -167,7 +170,11 @@ func (a *conformanceAlerts) end(state *flow.State, reset bool) {
 	defer a.mu.Unlock()
 	key := conformanceKey(state)
 	if conn := a.conns[key]; conn != nil {
-		conn.fin[state.Key.Dir] = true
+		direction := state.Key.Dir
+		if c := state.Connection.Load(); c != nil {
+			direction = c.Direction(state.Key)
+		}
+		conn.fin[direction] = true
 		if reset || conn.fin[0] && conn.fin[1] {
 			delete(a.conns, key)
 		}

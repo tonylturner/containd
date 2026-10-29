@@ -20,34 +20,38 @@ import (
 
 // Event is a normalized DPI/IDS/Firewall event for telemetry.
 type Event struct {
-	ID         uint64         `json:"id"`
-	FlowID     string         `json:"flowId"`
-	Proto      string         `json:"proto"`
-	Kind       string         `json:"kind"`
-	Attributes map[string]any `json:"attributes,omitempty"`
-	Timestamp  time.Time      `json:"timestamp"`
-	SrcIP      string         `json:"srcIp,omitempty"`
-	DstIP      string         `json:"dstIp,omitempty"`
-	SrcPort    uint16         `json:"srcPort,omitempty"`
-	DstPort    uint16         `json:"dstPort,omitempty"`
-	Transport  string         `json:"transport,omitempty"` // tcp, udp, icmp or icmpv6
-	Hash       string         `json:"hash,omitempty"`      // optional content hash for AV events
+	ID                    uint64                     `json:"id"`
+	FlowID                string                     `json:"flowId"`
+	TransportConnectionID flow.TransportConnectionID `json:"transportConnectionId,omitempty"`
+	CorrelationStatus     string                     `json:"correlationStatus,omitempty"`
+	Proto                 string                     `json:"proto"`
+	Kind                  string                     `json:"kind"`
+	Attributes            map[string]any             `json:"attributes,omitempty"`
+	Timestamp             time.Time                  `json:"timestamp"`
+	SrcIP                 string                     `json:"srcIp,omitempty"`
+	DstIP                 string                     `json:"dstIp,omitempty"`
+	SrcPort               uint16                     `json:"srcPort,omitempty"`
+	DstPort               uint16                     `json:"dstPort,omitempty"`
+	Transport             string                     `json:"transport,omitempty"` // tcp, udp, icmp or icmpv6
+	Hash                  string                     `json:"hash,omitempty"`      // optional content hash for AV events
 }
 
 // FlowSummary is a coarse flow rollup derived from events.
 type FlowSummary struct {
-	FlowID      string    `json:"flowId"`
-	FirstSeen   time.Time `json:"firstSeen"`
-	LastSeen    time.Time `json:"lastSeen"`
-	SrcIP       string    `json:"srcIp,omitempty"`
-	DstIP       string    `json:"dstIp,omitempty"`
-	SrcPort     uint16    `json:"srcPort,omitempty"`
-	DstPort     uint16    `json:"dstPort,omitempty"`
-	Transport   string    `json:"transport,omitempty"`
-	Application string    `json:"application,omitempty"`
-	EventCount  uint64    `json:"eventCount"`
-	AvDetected  bool      `json:"avDetected,omitempty"`
-	AvBlocked   bool      `json:"avBlocked,omitempty"`
+	FlowID                string                     `json:"flowId"`
+	TransportConnectionID flow.TransportConnectionID `json:"transportConnectionId,omitempty"`
+	CorrelationStatus     string                     `json:"correlationStatus,omitempty"`
+	FirstSeen             time.Time                  `json:"firstSeen"`
+	LastSeen              time.Time                  `json:"lastSeen"`
+	SrcIP                 string                     `json:"srcIp,omitempty"`
+	DstIP                 string                     `json:"dstIp,omitempty"`
+	SrcPort               uint16                     `json:"srcPort,omitempty"`
+	DstPort               uint16                     `json:"dstPort,omitempty"`
+	Transport             string                     `json:"transport,omitempty"`
+	Application           string                     `json:"application,omitempty"`
+	EventCount            uint64                     `json:"eventCount"`
+	AvDetected            bool                       `json:"avDetected,omitempty"`
+	AvBlocked             bool                       `json:"avBlocked,omitempty"`
 	// SessionID is set for an IEC104 session incarnation: its events from
 	// both wire directions form one group.
 	SessionID string `json:"session_id,omitempty"`
@@ -220,12 +224,14 @@ func (s *Store) Record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event)
 	for _, ev := range in {
 		id := s.idBase + s.nextID.Add(1)
 		out := Event{
-			ID:         id,
-			FlowID:     ev.FlowID,
-			Proto:      ev.Proto,
-			Kind:       ev.Kind,
-			Attributes: ev.Attributes,
-			Timestamp:  ev.Timestamp,
+			ID:                    id,
+			FlowID:                ev.FlowID,
+			TransportConnectionID: ev.TransportConnectionID,
+			CorrelationStatus:     ev.CorrelationStatus,
+			Proto:                 ev.Proto,
+			Kind:                  ev.Kind,
+			Attributes:            ev.Attributes,
+			Timestamp:             ev.Timestamp,
 		}
 		if state != nil {
 			out.SrcIP = state.Key.SrcIP.String()
@@ -233,6 +239,15 @@ func (s *Store) Record(state *flow.State, pkt *dpi.ParsedPacket, in []dpi.Event)
 			out.SrcPort = state.Key.SrcPort
 			out.DstPort = state.Key.DstPort
 			out.Attributes = WithTags(out.Attributes, state.Tags)
+		}
+		connection := ev.Connection
+		if connection == nil && state != nil {
+			connection = state.Connection.Load()
+		}
+		if connection != nil {
+			connection.Published().Store(true)
+			out.TransportConnectionID = connection.PublicID()
+			out.CorrelationStatus = connection.ResolutionStatus()
 		}
 		if pkt != nil {
 			out.Transport = pkt.Proto
@@ -360,22 +375,30 @@ func (s *Store) Flows(limit int) []FlowSummary {
 		f, ok := byFlow[key]
 		if !ok {
 			f = &FlowSummary{
-				FlowID:      ev.FlowID,
-				FirstSeen:   ev.Timestamp,
-				LastSeen:    ev.Timestamp,
-				SrcIP:       ev.SrcIP,
-				DstIP:       ev.DstIP,
-				SrcPort:     ev.SrcPort,
-				DstPort:     ev.DstPort,
-				Transport:   ev.Transport,
-				Application: ev.Proto,
-				SessionID:   sessionID,
+				FlowID:                ev.FlowID,
+				TransportConnectionID: ev.TransportConnectionID,
+				CorrelationStatus:     ev.CorrelationStatus,
+				FirstSeen:             ev.Timestamp,
+				LastSeen:              ev.Timestamp,
+				SrcIP:                 ev.SrcIP,
+				DstIP:                 ev.DstIP,
+				SrcPort:               ev.SrcPort,
+				DstPort:               ev.DstPort,
+				Transport:             ev.Transport,
+				Application:           ev.Proto,
+				SessionID:             sessionID,
 			}
 			if sessionID != "" {
 				f.FlowID = sessionID
 			}
 			byFlow[key] = f
 			order = append(order, key)
+		}
+		if f.TransportConnectionID != ev.TransportConnectionID || f.CorrelationStatus != ev.CorrelationStatus {
+			if f.TransportConnectionID != ev.TransportConnectionID {
+				f.TransportConnectionID = ""
+			}
+			f.CorrelationStatus = "mixed"
 		}
 		if sessionID != "" && isClientSide(ev) {
 			// Orient the group on the session tuple: client → server.

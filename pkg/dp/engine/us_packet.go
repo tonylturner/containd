@@ -155,14 +155,12 @@ func (e *Engine) endStreamsOnClose(state *flow.State, pkt *dpi.ParsedPacket, acc
 	e.recordFlowEndEvents(state, pkt, evs)
 	if ended {
 		e.conformance.end(state, pkt.TCPRst)
+		e.closeCorrelation(state, pkt.TCPRst, false)
 	}
 	if !ended || !pkt.TCPRst {
 		return
 	}
-	rev := state.Key.Reversed()
-	e.flowMu.Lock()
-	revState := e.flows[rev.Hash()]
-	e.flowMu.Unlock()
+	revState := e.peerFlow(state)
 	if revState != nil {
 		evs, _ := e.dpiMgr.ResetStream(revState, pkt)
 		e.recordFlowEndEvents(revState, pkt, evs)
@@ -174,10 +172,9 @@ func (e *Engine) endStreamsOnClose(state *flow.State, pkt *dpi.ParsedPacket, acc
 func (e *Engine) endFlowStream(state *flow.State, pkt *dpi.ParsedPacket) {
 	evs, _ := e.dpiMgr.OnFlowEnd(state)
 	e.recordFlowEndEvents(state, pkt, evs)
-	e.flowMu.Lock()
-	reverse := e.flows[state.Key.Reversed().Hash()]
-	e.flowMu.Unlock()
+	reverse := e.peerFlow(state)
 	e.conformance.end(state, reverse == nil)
+	e.closeCorrelation(state, false, true)
 }
 
 func (e *Engine) recordFlowEndEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) {

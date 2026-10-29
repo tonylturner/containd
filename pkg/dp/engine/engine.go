@@ -90,8 +90,10 @@ type Engine struct {
 	// gateAdmit is the admission state of the scanning gate (scan_admit.go):
 	// written by SetGateAdmit and into every applied ruleset, under
 	// lifecycleMu. It outlives Reconfigure, as the kernel ruleset does.
-	gateAdmit enforce.GateAdmitState
-	domains   *domainExclusions
+	gateAdmit  enforce.GateAdmitState
+	domains    *domainExclusions
+	transport  *transportResolver
+	wireSerial uint64 // under flowMu; never reset during Reconfigure
 }
 
 // RulesetStatus describes the installed ruleset: its compiled text,
@@ -113,6 +115,7 @@ type RulesetStatus struct {
 	Warnings              []enforce.RuleWarning `json:"warnings,omitempty"`
 	ICSCoverage           []coverage.Rule       `json:"icsCoverage,omitempty"`
 	SchedulePlanner       *SchedulePlan         `json:"schedulePlanner,omitempty"`
+	TransportIdentity     *TransportStatus      `json:"transportIdentity,omitempty"`
 }
 
 type EnforceConfig struct {
@@ -251,6 +254,9 @@ func New(cfg Config) (*Engine, error) {
 			e.updater = enforce.NewNftUpdater(comp.TableName)
 		}
 	}
+	if err := e.initTransport(cfg); err != nil {
+		return nil, err
+	}
 	return e, nil
 }
 
@@ -322,6 +328,8 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 		e.compiler.EngineAPI = e.engineAPI
 	}
 	e.applier = fresh.applier
+	e.transport = fresh.transport
+	e.learner = fresh.learner
 	e.updater = fresh.updater
 	e.dpiMgr = fresh.dpiMgr
 	e.inventory = fresh.inventory
@@ -384,12 +392,26 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	runCapture := e.capture
 	e.runCancel = runCancel
 	e.runCapture = runCapture
-	if err := runCapture.Start(runCtx, e.HandlePacket); err != nil {
+	handler := e.HandlePacket
+	var transportDone chan struct{}
+	if e.transport != nil {
+		r := e.transport
+		r.admissionMu.Lock()
+		r.closed = false
+		r.admissionMu.Unlock()
+		transportDone = make(chan struct{})
+		go func() { defer close(transportDone); r.run(runCtx, e) }()
+		handler = func(pkt capture.Packet) capture.Decision { return r.admit(e, pkt) }
+	}
+	if err := runCapture.Start(runCtx, handler); err != nil {
 		if e.nfqueueGroup != 0 {
 			e.iec.health.fault(faultQueue, "queue bind: "+err.Error())
 			e.gate.own(0)
 		}
 		runCancel()
+		if transportDone != nil {
+			<-transportDone
+		}
 		e.runCancel = nil
 		e.runCapture = nil
 		e.started.Store(false)
@@ -470,6 +492,9 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	}()
 	go func() {
 		run.Wait()
+		if transportDone != nil {
+			<-transportDone
+		}
 		close(runDone)
 	}()
 	return group, nil
@@ -596,6 +621,10 @@ func entryMatchesProtocolPorts(entry rules.Entry, state *flow.State, pkt *dpi.Pa
 // handlePacket runs flow tracking, DPI and enforcement for one captured
 // packet and decides it.
 func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
+	return e.handlePacketConnection(pkt, nil)
+}
+
+func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Connection) capture.Decision {
 	if e == nil {
 		return acceptDecision
 	}
@@ -610,10 +639,12 @@ func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
 	}
 	defer e.lockGenericTCP(pkt)()
 	e.reopenDeniedTCP(pkt)
+	e.retireTransportIncarnation(pkt, connection)
 	state := e.trackFlow(pkt, now)
 	if state == nil {
 		return acceptDecision
 	}
+	e.bindTransport(state, connection)
 	if d, ok := e.handleIECPacket(pkt, state); ok {
 		return d
 	}
@@ -707,7 +738,7 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow
 	state.IdleTimeout = 5 * time.Minute
 	state.Tags = e.flowTags(key)
 	e.flows[key.Hash()] = state
-	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 && handshakeMarked(pkt) {
+	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 {
 		if e.tcpISNs == nil {
 			e.tcpISNs = make(map[string]uint32)
 		}
