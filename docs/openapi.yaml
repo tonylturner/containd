@@ -1471,6 +1471,9 @@ components:
         attributes: {$ref: '#/components/schemas/IdentificationAttributes'}
     PcapAnalysisResult:
       properties:
+        truncated:
+          type: boolean
+          description: True when any packet record was truncated or the final record was incomplete at end of file.
         identifications: {type: array, items: {$ref: "#/components/schemas/PcapIdentification"}}
         byteCount: {type: integer}
         duration:

@@ -344,6 +344,9 @@ observation-bound connections. The engine's internal PCAP analysis endpoints
 return the analysis directly, with `identifications` at the top level and
 scope evaluated against their rule snapshot. Policy analysis without a
 snapshot reports `outside_rule_port_scope: "unknown"`.
+The `stats.truncated` boolean indicates that a packet record was cut short or
+the final record was partial at EOF; when true, missing events or
+identifications may be due to truncated records.
 
 See [Content identification](ics-dpi.md#content-identification) for protocol,
 capture-mode, timing and coverage limits.

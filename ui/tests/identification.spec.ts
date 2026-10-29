@@ -31,6 +31,7 @@ async function mockAPI(page: Page) {
       : path === "/api/v1/pcap/analyze/alternate.pcap" ? {
           rules: [], profiles: [], eventSummary: { modbus: 2 },
           stats: { events: [], flows: [], protocols: { modbus: 2 }, duration: 100000000, packetCount: 5, byteCount: 400,
+            truncated: new URL(page.url()).searchParams.get("truncated") === "true",
             identifications: [
               { key: "capture/1", flowId: flow.flowId, srcIp: flow.srcIp, dstIp: flow.dstIp, srcPort: flow.srcPort, dstPort: flow.dstPort, attributes: identification },
               { key: "capture/2", flowId: "2001:db8::1|2001:db8::2|49153|1502|006|0", srcIp: "2001:db8::1", dstIp: "2001:db8::2", srcPort: 49153, dstPort: 1502, attributes: { ...identification, protocol: "", identification_state: "identification_incomplete", identification_coverage: "midstream/no-SYN", binding: "none", mismatch: false, expected: ["", ""], service_port: 1502, outside_rule_port_scope: "unknown", syn_coverage: [false, false] } },
@@ -90,5 +91,22 @@ test("PCAP shows identity, coverage, binding, endpoints and unknown scope", asyn
     await expect(section.getByText(text, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("cell", { name: "identify", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Stage .*Rule/ })).toHaveCount(0);
+  await expect(page.getByText("The capture is incomplete. Missing events or identifications may be due to truncated records.")).toHaveCount(0);
   await screenshot(page, "pcap");
+});
+
+test("PCAP warns when analysis reports truncated coverage", async ({ page }) => {
+  const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/pcap/list");
+  await page.goto("/pcap/?truncated=true");
+  await loaded;
+  const analyzed = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/pcap/analyze/alternate.pcap");
+  await page.getByRole("row").filter({ hasText: "alternate.pcap" }).getByRole("button", { name: "Analyze", exact: true }).click();
+  await analyzed;
+  const warning = page.getByRole("status").getByText("The capture is incomplete. Missing events or identifications may be due to truncated records.");
+  await expect(warning).toBeVisible();
+  const dir = process.env.IDENTIFY_SCREENSHOTS;
+  if (dir) {
+    await mkdir(dir, { recursive: true });
+    await page.screenshot({ path: `${dir}/pcap-truncated.png`, fullPage: true });
+  }
 });

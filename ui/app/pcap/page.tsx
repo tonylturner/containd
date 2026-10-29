@@ -29,6 +29,7 @@ type AnalysisStats = {
   duration: number; // nanoseconds
   packetCount: number;
   byteCount: number;
+  truncated: boolean;
 };
 
 type FlowSummary = {
@@ -445,6 +446,11 @@ function AnalysisResults({
 
   return (
     <div className="mt-4 space-y-4">
+      {stats.truncated && (
+        <div role="status" className="rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+          The capture is incomplete. Missing events or identifications may be due to truncated records.
+        </div>
+      )}
       {/* Stats summary */}
       <div className="grid gap-3 md:grid-cols-4">
         <StatCard label="Packets" value={stats.packetCount.toLocaleString()} />
