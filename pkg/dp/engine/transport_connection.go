@@ -57,7 +57,7 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 		old := st.Connection.Load()
 		newSYN := pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 &&
 			pkt.TCP.Flags&capture.TCPFlagACK == 0
-		if isn, ok := e.tcpISNs[st.Key.Hash()]; ok && isn == pkt.TCP.Seq {
+		if isn, ok := e.transportISNs[st.Key.Hash()]; ok && isn == pkt.TCP.Seq {
 			newSYN = false
 		}
 		newGeneration := incoming != nil && incoming.Verified() && old != nil && old.Evidence != nil &&
@@ -77,6 +77,16 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 	e.flowMu.Unlock()
 	for _, old := range retired {
 		e.endFlowStream(old, nil)
+	}
+}
+
+func (e *Engine) noteTransportSYNLocked(pkt capture.Packet, key flow.Key) {
+	if !pkt.Token.Inline() && pkt.Proto == 6 && pkt.TCP.Valid &&
+		pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 {
+		if e.transportISNs == nil {
+			e.transportISNs = make(map[string]uint32)
+		}
+		e.transportISNs[key.Hash()] = pkt.TCP.Seq
 	}
 }
 

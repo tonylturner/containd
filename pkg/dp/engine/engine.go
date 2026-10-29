@@ -90,10 +90,11 @@ type Engine struct {
 	// gateAdmit is the admission state of the scanning gate (scan_admit.go):
 	// written by SetGateAdmit and into every applied ruleset, under
 	// lifecycleMu. It outlives Reconfigure, as the kernel ruleset does.
-	gateAdmit  enforce.GateAdmitState
-	domains    *domainExclusions
-	transport  *transportResolver
-	wireSerial uint64 // under flowMu; never reset during Reconfigure
+	gateAdmit     enforce.GateAdmitState
+	domains       *domainExclusions
+	transport     *transportResolver
+	wireSerial    uint64            // under flowMu; never reset during Reconfigure
+	transportISNs map[string]uint32 // raw capture incarnation hints, not deny tombstones
 }
 
 // RulesetStatus describes the installed ruleset: its compiled text,
@@ -329,7 +330,6 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	}
 	e.applier = fresh.applier
 	e.transport = fresh.transport
-	e.learner = fresh.learner
 	e.updater = fresh.updater
 	e.dpiMgr = fresh.dpiMgr
 	e.inventory = fresh.inventory
@@ -350,6 +350,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.onError = fresh.onError
 	e.flows = fresh.flows
 	e.tcpISNs = fresh.tcpISNs
+	e.transportISNs = fresh.transportISNs
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
@@ -738,7 +739,8 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow
 	state.IdleTimeout = 5 * time.Minute
 	state.Tags = e.flowTags(key)
 	e.flows[key.Hash()] = state
-	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 {
+	e.noteTransportSYNLocked(pkt, key)
+	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 && handshakeMarked(pkt) {
 		if e.tcpISNs == nil {
 			e.tcpISNs = make(map[string]uint32)
 		}
@@ -772,6 +774,7 @@ func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 	}
 	delete(e.flows, hash)
 	delete(e.tcpISNs, hash)
+	delete(e.transportISNs, hash)
 	metrics.FlowsActive.Dec()
 	return st
 }
