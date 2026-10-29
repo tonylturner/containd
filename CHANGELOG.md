@@ -216,6 +216,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Modbus and DNP3 access classification no longer treats unknown function
+  codes as reads. Modbus Write File Record, diagnostic writes, and DNP3
+  freeze, configuration, file and authentication controls cannot match
+  read-only allows. Unknown diagnostic sub-functions and MEI types omit access
+  classification. The Modbus template includes Write File Record in its
+  write denials; the DNP3 example correctly describes its write and enable
+  unsolicited allowances.
 - Modbus exception replies now complete their request's transaction, so an
   exception no longer leaves the transaction pending, and an exception with
   no prior request is reported like an unmatched response.

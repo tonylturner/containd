@@ -245,7 +245,7 @@ the value in brackets is the event's `proto`.
 | Protocol | `kind` values | Attributes |
 | --- | --- | --- |
 | Modbus/TCP (`modbus`) | `request`, `response`, `exception`, `malformed` | `transaction_id`, `unit_id`, `function_code`, `is_write`, `raw_hex`; data-access fields per function code (see [ICS Firewall Rule Predicates](#ics-firewall-rule-predicates)): requests `address` with `quantity` (1–4, 15, 16; plus `byte_count` for 15, 16), `value` (5, 6), `and_mask`, `or_mask` (22), or `read_address`, `read_quantity`, `write_address`, `write_quantity`, `byte_count` (23); read responses `byte_count` and, for registers, `register_count`; write responses the fields they echo; `sub_function`, `sub_function_name` (code 8; sub-functions 1, 3, 4, 10 and 20 are writes; supported names cover 0–4, 10–18 and 20); invalid per-sub-function layout is `modbus.pdu_layout`; unknown sub-functions are reported as undecoded `modbus.diagnostics_subfunction`; `mei_type` (code 43), `mei_type_name` (MEI type 14); `exception_code`, `exception_description` (exceptions, with `function_code` set to the base code); `error` (malformed) |
-| DNP3 (`dnp3`) | `request`, `response`, `restart` (codes 13, 14), `control` (codes 18, 19), `malformed` | `function_code`, `function_name`, `is_write`, `is_control`, `source_address`, `destination_address`, `direction` (`master` or `outstation`, from the link DIR bit), `iin_flags`, `object_groups`, `qualifier`, `object_count`, `objects` with point records that may include an `index` and decoded `crob`, `link_ranges`, `transport_segments`, `application_fragment`, `application_complete`, `raw_hex`; `error` (malformed), `conformance` and `undecoded` codes (listed below) |
+| DNP3 (`dnp3`) | `request`, `response`, `restart` (codes 13, 14), `control` (codes 3–12, 15–22, 24–33), `malformed` | `function_code`, `function_name`, `is_write`, `is_control`, `source_address`, `destination_address`, `direction` (`master` or `outstation`, from the link DIR bit), `iin_flags`, `object_groups`, `qualifier`, `object_count`, `objects` with point records that may include an `index` and decoded `crob`, `link_ranges`, `transport_segments`, `application_fragment`, `application_complete`, `raw_hex`; `error` (malformed), `conformance` and `undecoded` codes (listed below) |
 | IEC 104 (`iec104`) | `apci`, `request`, `response`, `malformed`, `unsupported` | See below |
 | CIP/EtherNet/IP (`cip`) | `request`, `response`, `session` (EtherNet/IP commands without a CIP message) | See below |
 
@@ -360,6 +360,26 @@ than IEC 104 are:
 | `readOnly`, `writeOnly` | Read/write class from an explicitly present `is_write`; not both true |
 | `direction` | `request` or `response`; omit for both |
 | `mode` | `learn` or `enforce`; omit to inherit global mode |
+
+Modbus and DNP3 access classification uses explicit known operations. Unknown
+operations omit `is_write` and `is_control`, so they match neither `readOnly`
+nor `writeOnly`. These attributes describe function semantics, not successful
+execution or whole-message conformance.
+
+| Protocol | Read (`is_write: false`) | Write/control (`is_write: true`) |
+| --- | --- | --- |
+| Modbus | FC 1–4, 7, 11, 12, 17, 20, 24; FC 8 sub-functions 0, 2, 11–18; FC 43 MEI type 14 (Read Device Identification) | FC 5, 6, 15, 16, 21, 22, 23; FC 8 sub-functions 1, 3, 4, 10, 20 |
+| DNP3 | FC 0 (Confirm), 1 (Read), 23 (Delay Measure); known responses 129–131 retain their non-write classification | FC 2 (Write); FC 3–22 and 24–33 are controls, also carrying `is_control: true` |
+
+Other function codes, private/vendor extensions such as Modbus FC 90, unknown
+FC 8 sub-functions, and FC 43 MEI types other than 14 are unknown, not reads.
+MEI 13 (CANopen General Reference) is not inherently read-only. Modbus replies
+use their own function/subtype; exceptions use the base function but have no
+diagnostic or MEI subtype, so FC 8/43 exceptions remain unknown. DNP3 response
+codes outside 129–131 remain unknown even though their high bit identifies a
+response-form header. Response access is not inferred from request correlation.
+DNP3 `restart` events identify FC 13/14; the other control functions above use
+kind `control`.
 
 Each `addresses` entry is one value (`256`, `0x0100`) or an inclusive range
 `low-high` (`100-511`, `0x0100-0x01FF`). Values are unsigned decimal or hex with
@@ -714,6 +734,13 @@ CIP example. There is no IEC 104 template. Purdue and maintenance-window
 templates belong to the general registry, not this four-template set. Applying
 templates stages candidate changes; see
 [Policy Model](policy-model.md#templates-and-preview).
+
+The Modbus read-only template allows FC 1–4 and denies listed write functions,
+including FC 21 (Write File Record); use default deny to exclude all other
+functions. The `dnp3-secure-operations` example is **not read-only**: it allows
+FC 1 (Read), FC 2 (Write), and FC 20 (Enable Unsolicited), while denying
+FC 13/14 (Restart) and FC 18 (Stop Application). Review these allowances before
+applying it.
 
 ## IEC 104 Holdback Diagnostics
 
