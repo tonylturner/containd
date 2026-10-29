@@ -4,6 +4,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"testing"
 	"time"
@@ -14,6 +15,37 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/identify"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
+
+func TestObservationTableOwnedGeneration(t *testing.T) {
+	for _, mode := range []string{"learn", "enforce"} {
+		t.Run(mode, func(t *testing.T) {
+			e := newObservationEngine(t)
+			e.LoadRules(rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{{ICS: rules.ICSPredicate{Protocol: "iec104", Mode: mode}, Action: rules.ActionAllow}}})
+			trace := observationTrace(2404, true)
+			var retained *flow.State
+			for generation := 1; generation <= 2; generation++ {
+				evidence := &conntrack.Evidence{ID: uint32(generation), Start: uint64(generation), TimeoutSeconds: 120,
+					Original: packetKey(trace[0]).Tuple(), Reply: packetKey(trace[1]).Tuple()}
+				incoming := &flow.Connection{Key: fmt.Sprint(generation), ID: flow.TransportConnectionID(fmt.Sprint(generation)), Status: "resolved", Evidence: evidence}
+				for _, pkt := range trace {
+					// Deliberately keep the ISNs: retirement must recognize
+					// the CT generation independently, only once per generation.
+					e.handleTransportPacket(pkt, incoming, nil)
+					st := e.tupleStateLocked(packetKey(trace[0]).Tuple())
+					if retained == nil {
+						retained = st
+					}
+					if st != retained {
+						t.Fatal("CT generation replaced table-owned legacy flow")
+					}
+				}
+				if got := e.observation.observer.Counters().Outcomes[2][0]; got != uint64(generation) {
+					t.Fatalf("generation %d: confirmations=%d; generation was missed or repeatedly retired", generation, got)
+				}
+			}
+		})
+	}
+}
 
 func newObservationEngine(t *testing.T) *Engine {
 	t.Helper()

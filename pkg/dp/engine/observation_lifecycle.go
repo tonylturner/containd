@@ -7,6 +7,27 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/identify"
 )
 
+// The IEC table may reuse its directional states across wire incarnations.
+// Recycle only observer-owned state, retaining every legacy lifecycle field.
+// Caller holds flowMu; records must be collected before reopening the marker.
+func (e *Engine) retireObservationLocked(st *flow.State, incoming *flow.Connection) {
+	if live, c := e.observation, st.Connection.Load(); live != nil && c != nil {
+		key := identify.Key(c.Key)
+		if ctx := live.entries[key]; ctx != nil {
+			e.observationPending = append(e.observationPending, live.records(live.observer.Release(key))...)
+			ports := [2]uint16{st.Key.SrcPort, st.Key.DstPort}
+			if c.Direction(st.Key) == flow.DirReverse {
+				ports[0], ports[1] = ports[1], ports[0]
+			}
+			ctx.refused = !live.observer.Open(key, identify.Meta{Transport: st.Key.Proto, Ports: ports})
+			if incoming != nil && incoming.Evidence != nil {
+				ctx.generation = incoming.Evidence
+			}
+			live.syncMetrics()
+		}
+	}
+}
+
 // flowMu -> observer -> manager. Context survives a single direction's expiry
 // so that the other direction cannot reopen a retired marker.
 func (e *Engine) releaseObservationLocked(st *flow.State) {
