@@ -136,7 +136,6 @@ func TestPatchFirewallRuleICS(t *testing.T) {
 	}{
 		{"duplicate key inside ics", `{"ics":{"ca":[1],"ca":[2]}}`, `duplicate key \"ca\"`, 0},
 		{"unknown key inside ics", `{"ics":{"typeIDs":[46]}}`, `unknown key \"typeIDs\"`, 0},
-		{"null on a new field", `{"ics":{"typeIds":null}}`, "must not be null", 0},
 		{"writeOnly false on iec104", `{"ics":{"writeOnly":false}}`, "writeOnly is not supported", 0},
 		{"validation runs after the merge", `{"ics":{"ca":[65535]}}`, "broadcast address", 1},
 	}

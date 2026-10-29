@@ -34,6 +34,7 @@ func TestPatchICSPredicate(t *testing.T) {
 			`{"objectClasses":null,"writeOnly":null}`, ICSPredicate{Protocol: "cip"}},
 		{"generic omitted selectors stay", modbus, `{}`, modbus},
 		{"empty patch keeps", iec, `{}`, iec},
+		{"IEC null clears", iec, `{"typeIds":null,"ca":null}`, ICSPredicate{Protocol: "iec104", Mode: "enforce"}},
 		{"null clears", iec, `null`, ICSPredicate{}},
 	}
 	for _, tc := range cases {
@@ -56,7 +57,6 @@ func TestPatchICSPredicate(t *testing.T) {
 	}{
 		{"duplicate key in patch", iec, `{"ca":[1],"ca":[2]}`, `duplicate key "ca"`},
 		{"unknown key in patch", iec, `{"typeID":[46]}`, `unknown key "typeID"`},
-		{"null on a new field", iec, `{"typeIds":null}`, "typeIds: must not be null"},
 		{"writeOnly false merged into iec104", iec, `{"writeOnly":false}`, "writeOnly is not supported for protocol iec104"},
 		{"modbus fields kept on iec104 merge", modbus, `{"protocol":"modbus","typeIds":[46]}`, "typeIds is only supported for protocol iec104"},
 	}

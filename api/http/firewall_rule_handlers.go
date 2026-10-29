@@ -200,6 +200,10 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
+		if err := config.ValidateICSPredicate(req.ICS, req.ID); err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid rule payload", err.Error())
+			return
+		}
 
 		entry := rules.Entry{
 			ID:           req.ID,

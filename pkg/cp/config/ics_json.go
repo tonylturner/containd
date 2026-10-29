@@ -27,6 +27,18 @@ type icsPredicateJSON struct {
 	Classes       []string   `json:"classes,omitempty"`
 	CA            []uint16   `json:"ca,omitempty"`
 	IOA           []IOARange `json:"ioa,omitempty"`
+	COT           []int      `json:"cot,omitempty"`
+	Originators   []int      `json:"originators,omitempty"`
+	Negative      *bool      `json:"negative,omitempty"`
+	Test          *bool      `json:"test,omitempty"`
+	SelectExecute string     `json:"selectExecute,omitempty"`
+	Masters       []uint16   `json:"masters,omitempty"`
+	Outstations   []uint16   `json:"outstations,omitempty"`
+	Groups        []int      `json:"groups,omitempty"`
+	Variations    []int      `json:"variations,omitempty"`
+	Instances     []uint16   `json:"instances,omitempty"`
+	Attributes    []uint16   `json:"attributes,omitempty"`
+	Tags          []string   `json:"tags,omitempty"`
 }
 
 func (p ICSPredicate) MarshalJSON() ([]byte, error) {
@@ -43,6 +55,18 @@ func (p ICSPredicate) MarshalJSON() ([]byte, error) {
 		Classes:       p.Classes,
 		CA:            p.CA,
 		IOA:           p.IOA,
+		COT:           p.COT,
+		Originators:   p.Originators,
+		Negative:      p.Negative,
+		Test:          p.Test,
+		SelectExecute: p.SelectExecute,
+		Masters:       p.Masters,
+		Outstations:   p.Outstations,
+		Groups:        p.Groups,
+		Variations:    p.Variations,
+		Instances:     p.Instances,
+		Attributes:    p.Attributes,
+		Tags:          p.Tags,
 	}
 	if len(p.FunctionCode) > 0 {
 		out.FunctionCode = make([]int, 0, len(p.FunctionCode))
@@ -54,7 +78,7 @@ func (p ICSPredicate) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON decodes an ICS predicate strictly: unknown
-// and duplicate keys are errors, the IEC104 list fields reject null, empty
+// and duplicate keys are errors, the protocol-specific list fields reject null, empty
 // lists and null elements, and keys a protocol does not support are
 // rejected by presence (so "writeOnly": false on iec104 is an error).
 // Every accepted functionCode form stays accepted. A JSON null predicate
@@ -91,7 +115,8 @@ func (p *ICSPredicate) UnmarshalJSON(data []byte) error {
 var icsPredicateKeys = []string{
 	"protocol", "functionCode", "unitId", "addresses", "objectClasses",
 	"readOnly", "writeOnly", "direction", "mode",
-	"typeIds", "classes", "ca", "ioa",
+	"typeIds", "classes", "ca", "ioa", "cot", "originators", "negative", "test", "selectExecute",
+	"masters", "outstations", "groups", "variations", "instances", "attributes", "tags",
 }
 
 // iec104ForbiddenKeys are the generic keys an iec104 predicate must not
@@ -99,7 +124,10 @@ var icsPredicateKeys = []string{
 var iec104ForbiddenKeys = []string{"functionCode", "unitId", "addresses", "objectClasses", "writeOnly"}
 
 // iec104OnlyKeys are the keys only an iec104 predicate may carry.
-var iec104OnlyKeys = []string{"typeIds", "classes", "ca", "ioa"}
+var iec104OnlyKeys = []string{"typeIds", "classes", "ca", "ioa", "cot", "originators", "negative", "test", "selectExecute"}
+
+var dnp3OnlyKeys = []string{"masters", "outstations", "groups", "variations"}
+var cipOnlyKeys = []string{"instances", "attributes", "tags"}
 
 func (p *ICSPredicate) decodeField(key string, raw json.RawMessage) error {
 	var err error
@@ -132,6 +160,40 @@ func (p *ICSPredicate) decodeField(key string, raw json.RawMessage) error {
 		p.CA, err = decodeIECList[uint16](raw)
 	case "ioa":
 		p.IOA, err = decodeIECList[IOARange](raw)
+	case "cot":
+		p.COT, err = decodeIECList[int](raw)
+	case "originators":
+		p.Originators, err = decodeIECList[int](raw)
+	case "masters":
+		p.Masters, err = decodeIECList[uint16](raw)
+	case "outstations":
+		p.Outstations, err = decodeIECList[uint16](raw)
+	case "groups":
+		p.Groups, err = decodeIECList[int](raw)
+	case "variations":
+		p.Variations, err = decodeIECList[int](raw)
+	case "instances":
+		p.Instances, err = decodeIECList[uint16](raw)
+	case "attributes":
+		p.Attributes, err = decodeIECList[uint16](raw)
+	case "tags":
+		p.Tags, err = decodeIECList[string](raw)
+	case "negative", "test", "selectExecute":
+		if isJSONNull(raw) {
+			err = errors.New("must not be null; omit the field to match any value")
+		} else {
+			switch key {
+			case "negative":
+				err = json.Unmarshal(raw, &p.Negative)
+			case "test":
+				err = json.Unmarshal(raw, &p.Test)
+			case "selectExecute":
+				err = json.Unmarshal(raw, &p.SelectExecute)
+				if err == nil && p.SelectExecute == "" {
+					err = errors.New(`must be "select" or "execute"`)
+				}
+			}
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("ics %s: %w", key, err)
@@ -140,28 +202,34 @@ func (p *ICSPredicate) decodeField(key string, raw json.RawMessage) error {
 }
 
 func checkICSKeysForProtocol(protocol string, fields map[string]json.RawMessage) error {
-	switch protocol {
-	case "":
-		// Semantic values without a protocol are a validation error;
-		// Validate checks them by value so programmatic configs are covered.
+	if protocol == "" {
+		// Semantic validation covers programmatically constructed predicates too.
 		return nil
-	case ICSProtocolIEC104:
+	}
+	for _, scope := range []struct {
+		protocol string
+		keys     []string
+	}{{ICSProtocolIEC104, iec104OnlyKeys}, {"dnp3", dnp3OnlyKeys}, {"cip", cipOnlyKeys}} {
+		if protocol == scope.protocol {
+			continue
+		}
+		for _, key := range scope.keys {
+			if _, ok := fields[key]; ok {
+				return fmt.Errorf("ics %s is only supported for protocol %s", key, scope.protocol)
+			}
+		}
+	}
+	if protocol == ICSProtocolIEC104 {
 		for _, key := range iec104ForbiddenKeys {
 			if _, ok := fields[key]; ok {
 				return fmt.Errorf("ics %s is not supported for protocol iec104", key)
-			}
-		}
-	default:
-		for _, key := range iec104OnlyKeys {
-			if _, ok := fields[key]; ok {
-				return fmt.Errorf("ics %s is only supported for protocol iec104", key)
 			}
 		}
 	}
 	return nil
 }
 
-// decodeIECList decodes one of the IEC104 list fields. Absent means
+// decodeIECList decodes a strict selector list. Absent means
 // "match any", so null, [] and null elements are errors rather than
 // silently widening or narrowing the rule.
 func decodeIECList[T any](raw json.RawMessage) ([]T, error) {
