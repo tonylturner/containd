@@ -64,10 +64,13 @@ func (e *Engine) peerFlow(state *flow.State) *flow.State {
 // streams before their tuple can be reused, except when the IEC table owns
 // their lifecycle. Inline admission remains unchanged.
 func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.Connection) {
-	if pkt.Token.Inline() || isIECPort(pkt) && e.observation == nil {
+	if pkt.Token.Inline() {
 		return
 	}
 	iecOwned := e.iecOwnsPacket(pkt)
+	if iecOwned && e.observation == nil {
+		return
+	}
 	e.flowMu.Lock()
 	st := e.tupleStateLocked(packetKey(pkt).Tuple())
 	var retired []*flow.State

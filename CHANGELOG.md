@@ -235,6 +235,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- TCP/2404 flows outside IEC 104 table ownership now use generic TCP
+  decision serialization, denial reconnects and incarnation retirement.
+
 - Modbus transaction pairing separates connection incarnations, directions,
   transaction IDs and unit IDs, including locally masqueraded AF_PACKET
   traffic. Missing connection evidence reports correlation unavailable instead
