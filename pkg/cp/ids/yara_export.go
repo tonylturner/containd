@@ -4,7 +4,6 @@
 package ids
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 
@@ -12,30 +11,20 @@ import (
 )
 
 // ExportYARARule converts a containd IDSRule to a YARA rule string.
-// If the rule was originally imported from YARA and has RawSource, it is
-// returned as-is for a lossless round-trip.
+// Equivalent cached source is returned unchanged; stale or corrupt source
+// falls through to native export and its preserve-or-refuse checks.
 func ExportYARARule(rule config.IDSRule) (string, error) {
-	if rule.SourceFormat == "yara" && rule.RawSource != "" {
-		return rule.RawSource, nil
-	}
-	return buildYARARule(rule), nil
+	return exportWithSourceCache(rule, FormatYARA, func(rule config.IDSRule) (string, error) {
+		if err := checkYARAExportPredicates(rule); err != nil {
+			return "", err
+		}
+		return buildYARARule(rule), nil
+	})
 }
 
 // ExportYARARules converts multiple IDSRules to YARA .yar format.
-func ExportYARARules(rules []config.IDSRule) ([]byte, error) {
-	var buf bytes.Buffer
-	for i, rule := range rules {
-		if i > 0 {
-			buf.WriteString("\n")
-		}
-		s, err := ExportYARARule(rule)
-		if err != nil {
-			return nil, err
-		}
-		buf.WriteString(s)
-		buf.WriteString("\n")
-	}
-	return buf.Bytes(), nil
+func ExportYARARules(rules []config.IDSRule) (ExportResult, error) {
+	return exportRuleSet(rules, ExportYARARule, "//", "\n")
 }
 
 func buildYARARule(rule config.IDSRule) string {
@@ -67,7 +56,7 @@ func buildYARARule(rule config.IDSRule) string {
 		sb.WriteString(fmt.Sprintf("        author = \"%s\"\n", escapeYARAString(author)))
 	}
 	if rule.Severity != "" {
-		sb.WriteString(fmt.Sprintf("        severity = \"%s\"\n", rule.Severity))
+		sb.WriteString(fmt.Sprintf("        severity = \"%s\"\n", escapeYARAString(rule.Severity)))
 	}
 	for _, ref := range rule.References {
 		sb.WriteString(fmt.Sprintf("        reference = \"%s\"\n", escapeYARAString(ref)))
@@ -157,5 +146,8 @@ func yaraIdentifier(s string) string {
 func escapeYARAString(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\r", `\r`)
+	s = strings.ReplaceAll(s, "\t", `\t`)
 	return s
 }

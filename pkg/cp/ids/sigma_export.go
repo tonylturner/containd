@@ -4,199 +4,141 @@
 package ids
 
 import (
-	"bytes"
+	"fmt"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/ics"
 	"gopkg.in/yaml.v3"
 )
 
-// ExportSigmaRule converts a containd IDSRule to Sigma YAML bytes.
-// If the rule was originally imported from Sigma and has RawSource, it is
-// returned as-is for a lossless round-trip.
+// ExportSigmaRule is an inverse of containd's Sigma importer, not a mapping to
+// a third-party backend schema. Original source is returned byte-for-byte only
+// while its matching predicates still agree with the normalized rule.
 func ExportSigmaRule(rule config.IDSRule) ([]byte, error) {
-	if rule.SourceFormat == "sigma" && rule.RawSource != "" {
-		return []byte(rule.RawSource), nil
-	}
-	sr := buildSigmaRule(rule)
-	return yaml.Marshal(sr)
+	text, err := exportWithSourceCache(rule, FormatSigma, func(rule config.IDSRule) (string, error) {
+		data, err := exportNativeSigmaRule(rule)
+		return string(data), err
+	})
+	return []byte(text), err
 }
 
-// ExportSigmaRules converts multiple IDSRules to a multi-document Sigma YAML.
-func ExportSigmaRules(rules []config.IDSRule) ([]byte, error) {
-	var buf bytes.Buffer
-	for i, rule := range rules {
-		if i > 0 {
-			buf.WriteString("---\n")
+func exportNativeSigmaRule(rule config.IDSRule) ([]byte, error) {
+	for _, filter := range []struct{ name, value string }{
+		{"srcAddr", rule.SrcAddr}, {"dstAddr", rule.DstAddr},
+		{"srcPort", rule.SrcPort}, {"dstPort", rule.DstPort},
+	} {
+		if filter.value != "" {
+			return nil, sigmaRefusal(rule, fmt.Sprintf("%s=%q (no importer mapping)", filter.name, filter.value))
 		}
-		b, err := ExportSigmaRule(rule)
-		if err != nil {
-			return nil, err
+	}
+	if len(rule.ContentMatches) > 0 {
+		return nil, sigmaRefusal(rule, "contentMatches (no Sigma byte-buffer mapping)")
+	}
+	if len(rule.YARAStrings) > 0 {
+		return nil, sigmaRefusal(rule, "yaraStrings (no Sigma byte-buffer mapping)")
+	}
+
+	if len(rule.ConversionNotes) > 0 || rule.Labels["evaluable"] == "false" {
+		return nil, sigmaRefusal(rule, "conversionNotes/evaluable (unrepresented source predicates)")
+	}
+	if err := ics.ValidateIDS(rule.ID, rule.Proto); err != nil {
+		return nil, sigmaRefusal(rule, fmt.Sprintf("proto=%q (%v)", rule.Proto, err))
+	}
+	if mapSigmaLevel(rule.Severity) != rule.Severity {
+		return nil, sigmaRefusal(rule, fmt.Sprintf("severity=%q", rule.Severity))
+	}
+	detection := map[string]any{}
+	expression, err := sigmaConditionExpression(rule, rule.When, "when", detection)
+	if err != nil {
+		return nil, err
+	}
+	detection["condition"] = expression
+	sr := sigmaExportRule{ID: rule.ID, Title: firstNonEmpty(rule.Title, rule.ID), Description: rule.Description, Level: rule.Severity,
+		Detection: detection, Status: rule.Labels["sigma.status"], References: rule.References}
+	if sr.ID == "" {
+		return nil, sigmaRefusal(rule, "id (empty native IDs never match)")
+	}
+	if source := rule.Labels["sigma.logsource"]; source != "" {
+		if err := yaml.Unmarshal([]byte(source), &sr.LogSource); err != nil {
+			return nil, sigmaRefusal(rule, "sigma.logsource (invalid mapping)")
 		}
-		buf.Write(b)
 	}
-	return buf.Bytes(), nil
-}
-
-// sigmaExportRule is the output structure for Sigma YAML export.
-type sigmaExportRule struct {
-	Title       string            `yaml:"title"`
-	ID          string            `yaml:"id,omitempty"`
-	Description string            `yaml:"description,omitempty"`
-	Level       string            `yaml:"level,omitempty"`
-	Status      string            `yaml:"status,omitempty"`
-	Tags        []string          `yaml:"tags,omitempty"`
-	LogSource   map[string]string `yaml:"logsource,omitempty"`
-	Detection   map[string]any    `yaml:"detection,omitempty"`
-	References  []string          `yaml:"references,omitempty"`
-	Fields      []string          `yaml:"fields,omitempty"`
-}
-
-func buildSigmaRule(rule config.IDSRule) sigmaExportRule {
-	sr := sigmaExportRule{
-		Title:       firstNonEmpty(rule.Title, rule.ID),
-		ID:          rule.ID,
-		Description: rule.Description,
-		Level:       mapSeverityToSigmaLevel(rule.Severity),
-		References:  rule.References,
+	if len(sr.References) == 0 && rule.Labels["sigma.references"] != "" {
+		sr.References = strings.Split(rule.Labels["sigma.references"], ",")
 	}
-
-	// Build tags from proto/kind and preserved sigma tags.
-	var tags []string
+	for _, tag := range strings.Split(rule.Labels["sigma.tags"], ",") {
+		if tag != "" && !sigmaFilterTag(tag) {
+			sr.Tags = append(sr.Tags, tag)
+		}
+	}
 	if rule.Proto != "" {
-		tags = append(tags, "containd.proto."+rule.Proto)
+		sr.Tags = append(sr.Tags, "containd.proto."+rule.Proto)
 	}
 	if rule.Kind != "" {
-		tags = append(tags, "containd.kind."+rule.Kind)
+		sr.Tags = append(sr.Tags, "containd.kind."+rule.Kind)
 	}
-	if st, ok := rule.Labels["sigma.tags"]; ok {
-		for _, t := range strings.Split(st, ",") {
-			t = strings.TrimSpace(t)
-			if t != "" && !containsString(tags, t) {
-				tags = append(tags, t)
-			}
-		}
+	data, err := yaml.Marshal(sr)
+	if err != nil {
+		return nil, err
 	}
-	if len(tags) > 0 {
-		sr.Tags = tags
+	// This check also catches YAML scalar coercion and future importer changes.
+	decoded, err := ConvertSigmaYAML(data)
+	if err != nil {
+		return nil, sigmaRefusal(rule, fmt.Sprintf("detection (%v)", err))
 	}
-
-	// Restore sigma.status.
-	if s, ok := rule.Labels["sigma.status"]; ok {
-		sr.Status = s
+	if predicate := rulePredicateDifference(rule, decoded); predicate != "" {
+		return nil, sigmaRefusal(rule, predicate+" (importer reads the value differently)")
 	}
-
-	// Restore logsource.
-	if ls, ok := rule.Labels["sigma.logsource"]; ok {
-		m := map[string]string{}
-		_ = yaml.Unmarshal([]byte(ls), &m)
-		if len(m) > 0 {
-			sr.LogSource = m
-		}
-	}
-
-	// Build detection from IDSCondition.
-	det := buildSigmaDetection(rule.When)
-	if len(det) > 0 {
-		sr.Detection = det
-	}
-
-	return sr
+	return data, nil
 }
 
-// buildSigmaDetection converts an IDSCondition tree back to a Sigma detection map.
-func buildSigmaDetection(cond config.IDSCondition) map[string]any {
-	if isEmptyCondition(cond) {
-		return nil
-	}
-
-	det := map[string]any{}
-	selName := conditionToSelection(cond, det, "selection", 0)
-	det["condition"] = selName
-	return det
+// sigmaExportRule emits metadata supported by the importer without empty fields.
+type sigmaExportRule struct {
+	Title       string         `yaml:"title"`
+	ID          string         `yaml:"id,omitempty"`
+	Description string         `yaml:"description,omitempty"`
+	Level       string         `yaml:"level,omitempty"`
+	Status      string         `yaml:"status,omitempty"`
+	Tags        []string       `yaml:"tags,omitempty"`
+	LogSource   map[string]any `yaml:"logsource,omitempty"`
+	Detection   map[string]any `yaml:"detection"`
+	References  []string       `yaml:"references,omitempty"`
 }
 
-// conditionToSelection recursively converts an IDSCondition to Sigma selections.
-// Returns the condition expression string.
-func conditionToSelection(cond config.IDSCondition, det map[string]any, prefix string, counter int) string {
-	// Leaf condition.
-	if cond.Field != "" {
-		selName := prefix
-		if counter > 0 {
-			selName = prefix + "_" + strings.ReplaceAll(cond.Field, ".", "_")
-		}
-		fieldKey := reverseNormalizeField(cond.Field)
-		if cond.Op != "" && cond.Op != "equals" {
-			fieldKey += "|" + cond.Op
-		}
-		det[selName] = map[string]any{fieldKey: cond.Value}
-		return selName
-	}
-
-	// NOT condition.
-	if cond.Not != nil {
-		inner := conditionToSelection(*cond.Not, det, prefix+"_not", 0)
-		return "not " + inner
-	}
-
-	// ALL (and) condition.
-	if len(cond.All) > 0 {
-		var parts []string
-		for i, sub := range cond.All {
-			name := conditionToSelection(sub, det, prefix, i)
-			parts = append(parts, name)
-		}
-		if len(parts) == 1 {
-			return parts[0]
-		}
-		return "(" + strings.Join(parts, " and ") + ")"
-	}
-
-	// ANY (or) condition.
-	if len(cond.Any) > 0 {
-		var parts []string
-		for i, sub := range cond.Any {
-			name := conditionToSelection(sub, det, prefix, i)
-			parts = append(parts, name)
-		}
-		if len(parts) == 1 {
-			return parts[0]
-		}
-		return "(" + strings.Join(parts, " or ") + ")"
-	}
-
-	return prefix
-}
-
-func reverseNormalizeField(f string) string {
-	f = strings.TrimPrefix(f, "attr.")
-	return f
-}
-
-func mapSeverityToSigmaLevel(sev string) string {
-	switch strings.ToLower(sev) {
-	case "low":
-		return "low"
-	case "medium":
-		return "medium"
-	case "high":
-		return "high"
-	case "critical":
-		return "critical"
-	default:
-		return ""
-	}
-}
-
-func isEmptyCondition(c config.IDSCondition) bool {
-	return c.Field == "" && c.Not == nil && len(c.All) == 0 && len(c.Any) == 0
-}
-
-func containsString(ss []string, s string) bool {
-	for _, v := range ss {
-		if v == s {
+func sigmaFilterTag(tag string) bool {
+	for _, prefix := range []string{"proto.", "kind.", "containd.proto.", "containd.kind."} {
+		if strings.HasPrefix(tag, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+func sigmaRefusal(rule config.IDSRule, predicate string) error {
+	return &RuleExportError{RuleID: rule.ID, Format: FormatSigma, Predicate: predicate}
+}
+
+// ExportSigmaRules joins accepted documents without changing predicates. Explicit document
+// starts (including directives) must not get a second, empty document before them.
+func ExportSigmaRules(rules []config.IDSRule) (ExportResult, error) {
+	return exportJoinedRuleSet(rules, func(rule config.IDSRule) (string, error) {
+		data, err := ExportSigmaRule(rule)
+		text := string(data)
+		if err == nil && len(rules) > 1 && sigmaUTF16Source(data) {
+			return "", sigmaRefusal(rule, "rawSource encoding (UTF-16 bytes cannot be joined with UTF-8 documents or refusal comments)")
+		}
+		if len(rules) > 1 {
+			text = strings.TrimPrefix(text, "\ufeff")
+		} // only a stream may carry a leading encoding BOM
+		return text, err
+	}, "#", func(body *strings.Builder, text string) {
+		if body.Len() > 0 {
+			body.WriteByte('\n')
+			if !sigmaExplicitDocument(text) {
+				body.WriteString("---\n")
+			}
+		}
+		body.WriteString(text)
+	})
 }

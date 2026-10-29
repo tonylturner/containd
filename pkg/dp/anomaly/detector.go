@@ -76,9 +76,10 @@ type Detector struct {
 	dnp3RestartFromNonMaster  bool
 	cipProgramChangeDetection bool
 
-	// Per-flow tracking of last transaction IDs (for Modbus request/response pairing).
-	// Key: "srcIP->dstIP"
-	pendingTxns map[string]map[uint16]bool // flow -> set of pending transaction IDs
+	// Bounded Modbus transactions, scoped to connection incarnation and direction.
+	pendingTxns      map[string]*pendingConnection
+	pairing          PairingStats
+	lastPendingSweep time.Time
 
 	writeRate *rateTracker
 	totalRate *rateTracker
@@ -100,7 +101,7 @@ func New(opts ...Option) *Detector {
 		totalRateThreshold:        defaultTotalRateThreshold,
 		dnp3RestartFromNonMaster:  true,
 		cipProgramChangeDetection: true,
-		pendingTxns:               make(map[string]map[uint16]bool),
+		pendingTxns:               make(map[string]*pendingConnection),
 		writeRate:                 newRateTracker(),
 		totalRate:                 newRateTracker(),
 		apduSeen:                  make(map[string]struct{}),
@@ -252,40 +253,8 @@ func (d *Detector) checkModbus(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 		})
 	}
 
-	// Track transaction IDs for request/response pairing.
 	if hasTxn {
-		fk := flowKey(srcIP, dstIP)
-		reverseFk := flowKey(dstIP, srcIP)
-
-		if ev.Kind == "request" {
-			if d.pendingTxns[fk] == nil {
-				d.pendingTxns[fk] = make(map[uint16]bool)
-			}
-			d.pendingTxns[fk][txnID] = true
-		} else if ev.Kind == "response" || (ev.Kind == "exception" && isModbusExceptionReply(ev, srcIP, dstIP)) {
-			// A response should match a prior request on the reverse flow.
-			pending := d.pendingTxns[reverseFk]
-			if pending == nil || !pending[txnID] {
-				replyKind := "response"
-				if ev.Kind == "exception" {
-					replyKind = "exception"
-				}
-				out = append(out, Anomaly{
-					Type:     "protocol_violation",
-					Protocol: "modbus",
-					Severity: "medium",
-					Message:  fmt.Sprintf("Modbus %s (txn %d) without prior request", replyKind, txnID),
-					SourceIP: srcIP,
-					DestIP:   dstIP,
-					Attributes: map[string]any{
-						"transaction_id": txnID,
-					},
-					Timestamp: ev.Timestamp,
-				})
-			} else {
-				delete(pending, txnID)
-			}
-		}
+		out = append(out, d.pairModbus(srcIP, dstIP, ev, txnID, unitID, hasUnit)...)
 	}
 
 	return out
@@ -293,6 +262,9 @@ func (d *Detector) checkModbus(srcIP, dstIP string, ev dpi.Event) []Anomaly {
 
 func isModbusExceptionReply(ev dpi.Event, srcIP, dstIP string) bool {
 	key, ok := flow.ParseKey(ev.FlowID)
+	if ok && ev.Connection.Verified() {
+		return ev.Connection.Direction(key) == flow.DirReverse
+	}
 	return ok &&
 		key.Dir == flow.DirReverse &&
 		key.SrcIP.String() == srcIP &&
@@ -336,7 +308,9 @@ func (d *Detector) Clear() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	d.pendingTxns = make(map[string]map[uint16]bool)
+	d.pendingTxns = make(map[string]*pendingConnection)
+	d.pairing = PairingStats{}
+	d.lastPendingSweep = time.Time{}
 	d.writeRate = newRateTracker()
 	d.totalRate = newRateTracker()
 	d.apduSeen = make(map[string]struct{})

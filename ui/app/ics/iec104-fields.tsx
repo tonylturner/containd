@@ -144,6 +144,29 @@ export function IEC104Fields({
         </div>
       </div>
 
+      <div className="grid gap-3 md:grid-cols-2">
+        {([ ["cot", "Cause of transmission (1-63)"], ["originators", "Originators (0-255)"] ] as const).map(([key, label]) => (
+          <label key={key} className={LABEL}>{label}
+            <input aria-label={label} value={draft[key]} onChange={(e) => set(key, e.target.value)} disabled={disabled} placeholder="Empty = any" className="mt-1 input-industrial w-full disabled:opacity-60" />
+          </label>
+        ))}
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        {([ ["negative", "P/N flag"], ["test", "Test flag"] ] as const).map(([key, label]) => (
+          <label key={key} className={LABEL}>{label}
+            <select aria-label={label} value={draft[key]} onChange={(e) => set(key, e.target.value as "" | "true" | "false")} disabled={disabled} className="mt-1 input-industrial w-full disabled:opacity-60">
+              <option value="">Any</option><option value="false">False (0)</option><option value="true">True (1)</option>
+            </select>
+          </label>
+        ))}
+        <label className={LABEL}>Select / execute
+          <select aria-label="Select / execute" value={draft.selectExecute} onChange={(e) => set("selectExecute", e.target.value as IEC104Draft["selectExecute"])} disabled={disabled} className="mt-1 input-industrial w-full disabled:opacity-60">
+            <option value="">Any</option><option value="select">Select</option><option value="execute">Execute</option>
+          </select>
+        </label>
+      </div>
+      <p className="text-xs text-(--text-muted)">Select/execute applies only to Type IDs 45–50 and 58–63. ASDU selectors do not match S/U frames.</p>
+
       <label className="flex items-center gap-2 text-sm text-(--text)">
         <input
           type="checkbox"

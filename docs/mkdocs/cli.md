@@ -278,8 +278,12 @@ deletion leaves SSH connections open.
 
 `set firewall ics-rule <id> <action> <protocol> [options...]` accepts the
 existing zone and Modbus/CIP-style flags (`--src-zone`, `--dst-zone`,
-`--function-code`, `--unit-id`, `--addresses`, `--read-only`, `--write-only`,
-and `--mode`). For IEC 104 (`protocol` is `iec104`), use:
+`--function-code`, `--object-classes`, `--unit-id`, `--addresses`, `--read-only`,
+`--write-only`, and `--mode`). The command creates a new rule; it does not update an existing ID.
+For CIP, `--object-classes <classes>` accepts comma-separated class IDs from
+0 through 65535 in decimal or `0x`-prefixed hex (for example `4,0x66`).
+`show firewall ics-rules` includes these values in `OBJECT_CLASSES`.
+For IEC 104 (`protocol` is `iec104`), use:
 
 - `--type-ids <ids>` — comma-separated decimal TypeIDs from 1 through 255.
 - `--classes <classes>` — comma-separated `monitor`, `control`, `system`, or `unknown`.
@@ -288,6 +292,24 @@ and `--mode`). For IEC 104 (`protocol` is `iec104`), use:
 - `--read-only` — restrict the rule to read-only IEC traffic.
 - `--direction <request|response>` — select the session half.
 - `--mode <learn|enforce>` — choose the rule's ICS mode.
+
+Additional IEC 104 selectors:
+
+- `--cot <values>` — causes 1–63; `--originators <values>` — addresses 0–255.
+- `--negative <true|false>` and `--test <true|false>` — exact P/N and T flags, including explicit false.
+- `--select-execute <select|execute>` — only omitted Type IDs or 45–50, 58–63.
+
+DNP3 selectors are `--masters` and `--outstations` (0–65519), `--groups` and
+`--variations` (0–255), and `--addresses` (closed point-index ranges,
+0–4294967295; requires groups). Stations apply to application messages only.
+CIP selectors are `--instances` and `--attributes` (0–65535), or `--tags`
+(comma-separated symbolic paths, for example `Motor.Speed,Program:Main.Pump`).
+Tags cannot combine with `--object-classes`, `--instances` or `--attributes`.
+New numeric lists accept decimal or `0x` hex. Omit a flag for ANY; `0` remains
+an explicit value. `--unit-id` is Modbus-only; CIP does not accept `--addresses`.
+The show table includes every selector, distinguishing absent booleans from false.
+See [predicate semantics](ics-dpi.md#object-station-and-target-matching) for
+variation 0, unknown targets, tag limitations and whole-message matching.
 
 Example: allow supported monitoring types 1 (single-point) and 30 (timestamped
 single-point) in server responses for common address 1 and the selected IOAs:

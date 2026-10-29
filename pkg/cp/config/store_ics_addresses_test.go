@@ -46,7 +46,7 @@ func TestStoredUnsupportedAddressesRemainRepairable(t *testing.T) {
 			}
 			// This is the validation used by bootConflict and replay preflight.
 			conflict := ValidateForStore(store, loaded)
-			if conflict == nil || !strings.Contains(conflict.Error(), "rule ics-1: Address filters are not supported for DNP3 or CIP.") {
+			if conflict == nil || !strings.Contains(conflict.Error(), "rule ics-1 ics addresses") {
 				t.Fatalf("boot/replay cause: %v", conflict)
 			}
 			// Boot records the validation cause, rather than replaying this policy.

@@ -18,7 +18,7 @@ modes:
                   2..254, so the frame boundary is lost; nothing follows it,
                   so a server that gives up on it closes without unread data
 
-pid-nonzero prints PID_NONZERO_PORT and bad-length prints BAD_LENGTH_PORT
+read prints READ_PORT, pid-nonzero prints PID_NONZERO_PORT, and bad-length prints BAD_LENGTH_PORT
 (the client's TCP port) before any reply, so the harness can find the
 connection's events.
 
@@ -124,6 +124,7 @@ def run(mode: str, host: str, port: int, source: str, value: int) -> int:
                     break
             return 0
         if mode == "read":
+            print(f"READ_PORT {conn.getsockname()[1]}", flush=True)
             print(exchange(conn, "read", 1, value), flush=True)
             return 0
         if mode == "read-split":

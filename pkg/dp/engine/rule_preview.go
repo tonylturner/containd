@@ -67,7 +67,7 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 		result.ICSCoverage = &cov[0]
 	}
 	evaluator := rules.NewEvaluator(candidate)
-	parsing := e.ICSParsing(iecProtocol)
+	parsing := e.ICSParsing(entry.ICS.Protocol)
 	for _, ev := range evs {
 		if result.TimeRange == nil {
 			result.TimeRange = &PreviewTimeRange{Start: ev.Timestamp, End: ev.Timestamp}
@@ -79,19 +79,31 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 				result.TimeRange.End = ev.Timestamp
 			}
 		}
-		ctx, ok := previewEventContext(snap, entry, ev, resolve, parsing)
-		if !ok {
+		contexts := previewEventContexts(snap, entry, ev, resolve, parsing)
+		matches := len(contexts) > 0
+		for _, ctx := range contexts {
+			var matched *rules.Entry
+			if entry.ICS.Protocol == rules.ProtocolIEC104 {
+				_, matched = evaluator.EvaluateIEC104(ctx)
+			} else {
+				matched = evaluator.AnyMatch(ctx)
+			}
+			if entry.Action == rules.ActionAllow {
+				if matched == nil {
+					matches = false
+					break
+				}
+			} else {
+				matches = matched != nil
+				if matches {
+					break
+				}
+			}
+		}
+		if !matches {
 			continue
 		}
-		var matched *rules.Entry
-		if entry.ICS.Protocol == rules.ProtocolIEC104 {
-			_, matched = evaluator.EvaluateIEC104(ctx)
-		} else {
-			matched = evaluator.AnyMatch(ctx)
-		}
-		if matched == nil {
-			continue
-		}
+
 		result.MatchCount++
 		if len(result.SampleMatches) < maxSamples {
 			result.SampleMatches = append(result.SampleMatches, ev)
@@ -111,25 +123,25 @@ func (e *Engine) enforcedQueueID() int {
 	return e.compiler.QueueID
 }
 
-// previewEventContext builds the context a candidate would be evaluated
-// with for one retained event. parsing is the IEC104 parsing mode the live
+// previewEventContexts builds the contexts a candidate would be evaluated
+// with for one retained event. parsing is the protocol's mode the live
 // verdict uses: under strict, an event with findings is denied before any
 // ALLOW, so an ALLOW candidate cannot match it.
-func previewEventContext(snap *rules.Snapshot, entry rules.Entry, ev events.Event, resolve zoneResolver, parsing ics.Parsing) (rules.EvalContext, bool) {
+func previewEventContexts(snap *rules.Snapshot, entry rules.Entry, ev events.Event, resolve zoneResolver, parsing ics.Parsing) []rules.EvalContext {
 	decoded := dpi.Event{FlowID: ev.FlowID, Proto: ev.Proto, Kind: ev.Kind, Attributes: ev.Attributes, Timestamp: ev.Timestamp}
 	src, dst := net.ParseIP(ev.SrcIP), net.ParseIP(ev.DstIP)
 	if src == nil || dst == nil {
-		return rules.EvalContext{}, false
+		return nil
 	}
 	if entry.ICS.Protocol == rules.ProtocolIEC104 {
 		if ev.Proto != iecProtocol || ev.Transport != "tcp" || !iecWireEvent(ev.Kind) || iecEventDenialReason(decoded) != "" ||
 			entry.Action == rules.ActionAllow && iecStrictPreempts(decoded, parsing) {
-			return rules.EvalContext{}, false
+			return nil
 		}
 		from, okFrom := addrPort(src, ev.SrcPort)
 		to, okTo := addrPort(dst, ev.DstPort)
 		if !okFrom || !okTo {
-			return rules.EvalContext{}, false // IEC runtime is IPv4 only
+			return nil // IEC runtime is IPv4 only
 		}
 		// Decoder direction is authoritative, including when both endpoints
 		// use port 2404. Port heuristics cannot recover that session tuple.
@@ -140,21 +152,21 @@ func previewEventContext(snap *rules.Snapshot, entry rules.Entry, ev events.Even
 			client, server = to, from
 		case "request":
 		default:
-			return rules.EvalContext{}, false
+			return nil
 		}
 		if server.Port() != iec104Port {
-			return rules.EvalContext{}, false
+			return nil
 		}
 		ctx := iecSessionContext(snap, client, server, resolve)
 		ctx.ICS = iecContextFromDPIEvent(decoded, iec104.SafeRead)
 		ctx.Now = ev.Timestamp
-		return ctx, true
+		return []rules.EvalContext{ctx}
 	}
 
 	if entry.ICS.Protocol == "" {
 		srcZone, dstZone := resolve(snap, src, dst)
-		return rules.EvalContext{SrcIP: src, DstIP: dst, SrcZone: srcZone, DstZone: dstZone,
-			Proto: ev.Transport, Port: strconv.Itoa(int(ev.DstPort)), Identities: snap.IdentitiesOf(src), Now: ev.Timestamp}, true
+		return []rules.EvalContext{{SrcIP: src, DstIP: dst, SrcZone: srcZone, DstZone: dstZone,
+			Proto: ev.Transport, Port: strconv.Itoa(int(ev.DstPort)), Identities: snap.IdentitiesOf(src), Now: ev.Timestamp}}
 	}
 	// DPI events retain the directional flow.Key.Hash. Use its direction,
 	// not the message kind (unsolicited server messages can be requests).
@@ -168,15 +180,20 @@ func previewEventContext(snap *rules.Snapshot, entry rules.Entry, ev events.Even
 	if ev.FlowID != key.Hash() {
 		key.Dir = flow.DirForward
 		if ev.FlowID != key.Hash() {
-			return rules.EvalContext{}, false // not a retained runtime DPI flow
+			return nil // not a retained runtime DPI flow
 		}
 	}
 	state := &flow.State{Key: key}
 	srcZone, dstZone := resolve(snap, key.OpenerIP(), key.ServerIP())
 	pkt := &dpi.ParsedPacket{Proto: ev.Transport, SrcPort: ev.SrcPort, DstPort: ev.DstPort}
-	ctx, ok := evalContextFromDPIEvent(snap, state, pkt, decoded, srcZone, dstZone)
-	ctx.Now = ev.Timestamp
-	return ctx, ok
+	if entry.Action == rules.ActionAllow && hasInspectionFindings(decoded) && parsing == ics.Strict && shouldInspectFirewallEntry(entry, state, pkt) {
+		return nil
+	}
+	contexts := evalContextsFromDPIEvent(snap, state, pkt, decoded, srcZone, dstZone)
+	for i := range contexts {
+		contexts[i].Now = ev.Timestamp
+	}
+	return contexts
 }
 
 func iecWireEvent(kind string) bool {

@@ -142,6 +142,23 @@ type ICSPredicate struct {
 	Classes []string   `json:"classes,omitempty"` // monitor|control|system|unknown
 	CA      []uint16   `json:"ca,omitempty"`      // 0..65534
 	IOA     []IOARange `json:"ioa,omitempty"`
+	// IEC 104 COT, originator, P/N, T and S/E predicates.
+	COT           []int  `json:"cot,omitempty"`
+	Originators   []int  `json:"originators,omitempty"`
+	Negative      *bool  `json:"negative,omitempty"`
+	Test          *bool  `json:"test,omitempty"`
+	SelectExecute string `json:"selectExecute,omitempty"`
+
+	// DNP3 station and object predicates; Addresses are point indexes.
+	Masters     []uint16 `json:"masters,omitempty"`
+	Outstations []uint16 `json:"outstations,omitempty"`
+	Groups      []int    `json:"groups,omitempty"`
+	Variations  []int    `json:"variations,omitempty"`
+
+	// CIP target predicates beside ObjectClasses.
+	Instances  []uint16 `json:"instances,omitempty"`
+	Attributes []uint16 `json:"attributes,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
 }
 
 // IOARange is a closed IEC104 information object address range,

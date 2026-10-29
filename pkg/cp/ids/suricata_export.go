@@ -4,8 +4,6 @@
 package ids
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -13,42 +11,25 @@ import (
 )
 
 // ExportSuricataRule converts a containd IDSRule to a Suricata rule string.
-// If the rule was originally imported from Suricata and has RawSource, it is
-// returned as-is for a lossless round-trip.
+// Equivalent cached source is returned unchanged; stale or corrupt source
+// falls through to native export and its preserve-or-refuse checks.
 func ExportSuricataRule(rule config.IDSRule) (string, error) {
-	if rule.SourceFormat == "suricata" && rule.RawSource != "" {
-		return rule.RawSource, nil
-	}
-	if err := checkExportableProto(rule); err != nil {
-		return "", err
-	}
-	return buildSuricataRule(rule), nil
+	return exportWithSourceCache(rule, FormatSuricata, func(rule config.IDSRule) (string, error) {
+		if err := checkRulesFilePredicates(rule, FormatSuricata); err != nil {
+			return "", err
+		}
+		return buildSuricataRule(rule), nil
+	})
 }
 
-// ExportSuricataRules converts multiple IDSRules to Suricata .rules format. Rules
-// whose protocol it cannot express are skipped.
-func ExportSuricataRules(rules []config.IDSRule) ([]byte, error) {
-	var buf bytes.Buffer
-	for _, rule := range rules {
-		s, err := ExportSuricataRule(rule)
-		if errors.Is(err, ErrUnexportableProto) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		buf.WriteString(s)
-		buf.WriteString("\n")
-	}
-	return buf.Bytes(), nil
+// ExportSuricataRules returns rules text and explicit, commented refusals.
+func ExportSuricataRules(rules []config.IDSRule) (ExportResult, error) {
+	return exportRulesFile(rules, ExportSuricataRule)
 }
 
 func buildSuricataRule(rule config.IDSRule) string {
 	action := firstNonEmpty(rule.Action, "alert")
-	proto := firstNonEmpty(rule.Proto, "ip")
-
-	// Map protocol names to Suricata protocol keywords.
-	suriProto := mapProtoToSuricata(proto)
+	suriProto := strings.ToLower(firstNonEmpty(rule.Proto, "ip"))
 
 	srcAddr := firstNonEmpty(rule.SrcAddr, "any")
 	srcPort := firstNonEmpty(rule.SrcPort, "any")
@@ -92,7 +73,7 @@ func buildSuricataContent(cm config.ContentMatch) []string {
 	var opts []string
 	var contentVal string
 	if cm.IsHex {
-		contentVal = fmt.Sprintf("|%s|", cm.Pattern)
+		contentVal = fmt.Sprintf("\"|%s|\"", cm.Pattern)
 	} else {
 		contentVal = fmt.Sprintf("\"%s\"", escapeSuricataString(cm.Pattern))
 	}
@@ -110,29 +91,13 @@ func buildSuricataContent(cm config.ContentMatch) []string {
 	if cm.Offset > 0 {
 		opts = append(opts, fmt.Sprintf("offset:%d", cm.Offset))
 	}
-	if cm.Distance > 0 {
+	if cm.Distance != 0 {
 		opts = append(opts, fmt.Sprintf("distance:%d", cm.Distance))
 	}
 	if cm.Within > 0 {
 		opts = append(opts, fmt.Sprintf("within:%d", cm.Within))
 	}
 	return opts
-}
-
-func mapProtoToSuricata(proto string) string {
-	switch strings.ToLower(proto) {
-	case "tcp", "udp", "icmp", "ip":
-		return strings.ToLower(proto)
-	case "http", "dns", "tls", "ssh", "ftp", "smtp":
-		return strings.ToLower(proto)
-	case "cip":
-		// Suricata names its EtherNet/IP application protocol enip.
-		return "enip"
-	case "modbus", "dnp3":
-		return strings.ToLower(proto)
-	default:
-		return "ip"
-	}
 }
 
 func escapeSuricataString(s string) string {

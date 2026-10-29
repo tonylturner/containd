@@ -6,7 +6,7 @@ import { isAdmin, type FirewallRule, type Zone } from "../../lib/api";
 import { summarizeIEC104 } from "../ics/iec104";
 import { ICSCoverageCell } from "../ics/ics-coverage";
 import type { ICSCoverageView } from "../ics/ics-coverage-model";
-import { formatICSMode, isSupportedICSProtocol } from "../ics/ics-shared";
+import { summarizeGenericICS, formatICSMode, isSupportedICSProtocol } from "../ics/ics-shared";
 import { zoneName } from "../../lib/zones";
 import { RuleCountersCell, RuleCountersNote, type CountersState } from "./firewall-rule-counters";
 import {
@@ -137,7 +137,7 @@ export function FirewallRuleTable({
                         <span className="text-xs text-(--text)">
                           {r.ics.protocol === "iec104"
                             ? `iec104 ${summarizeIEC104(r.ics).types} ${summarizeIEC104(r.ics).addresses}`
-                            : `${r.ics.protocol} fc=${(r.ics.functionCode ?? []).join(",") || "*"}`}
+                            : `${r.ics.protocol} ${summarizeGenericICS(r.ics)}`}
                         </span>
                         {!isSupportedICSProtocol(r.ics.protocol) && (
                           <StatusBadge variant="warning">unsupported</StatusBadge>

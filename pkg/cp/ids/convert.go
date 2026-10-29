@@ -43,12 +43,12 @@ func ImportRules(data []byte, format string) ([]config.IDSRule, error) {
 }
 
 // Export is an alias for ExportRules.
-func Export(format string, rules []config.IDSRule) ([]byte, error) {
+func Export(format string, rules []config.IDSRule) (ExportResult, error) {
 	return ExportRules(rules, format)
 }
 
 // ExportRules converts normalized IDSRules to the specified output format.
-func ExportRules(rules []config.IDSRule, format string) ([]byte, error) {
+func ExportRules(rules []config.IDSRule, format string) (ExportResult, error) {
 	switch strings.ToLower(format) {
 	case FormatSuricata:
 		return ExportSuricataRules(rules)
@@ -59,7 +59,7 @@ func ExportRules(rules []config.IDSRule, format string) ([]byte, error) {
 	case FormatSigma:
 		return ExportSigmaRules(rules)
 	default:
-		return nil, fmt.Errorf("unsupported export format: %s", format)
+		return ExportResult{}, fmt.Errorf("unsupported export format: %s", format)
 	}
 }
 

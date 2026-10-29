@@ -43,6 +43,27 @@ type ICSContext struct {
 	// Modbus request with an unknown function code or a malformed PDU.
 	Spans        []AddressSpan
 	SpansUnknown bool
+	// ObjectUnknown marks a context whose object or target the decoder
+	// could not establish (an unwalkable DNP3 object header, an ambiguous
+	// or unsupported CIP path), or a part of the message that was not
+	// inspected. A rule with any object selector never ALLOWs such a
+	// context and always DENYs it; other constraints still apply.
+	ObjectUnknown bool
+	// DNP3: station addresses by role, and the one object header this
+	// context judges (Spans carry its point indexes).
+	Master, Outstation *uint16
+	Group, Variation   *uint8
+	// CIP: the operation's own target from 8- or 16-bit logical segments.
+	// Symbol holds Logix symbolic segment names and is nil for a logical
+	// (class-based) target.
+	Instance  *uint16
+	Attribute *uint16
+	Symbol    []string
+	// InstanceUnknown and AttributeUnknown mark an operation that may
+	// touch instances or attributes beyond its EPATH (enumeration, list
+	// and all-attribute services). Like SpansUnknown, the matching
+	// selector then never ALLOWs and always DENYs.
+	InstanceUnknown, AttributeUnknown bool
 	// IEC104 is set only for IEC 60870-5-104 events.
 	IEC104 *IEC104Context
 }
@@ -60,6 +81,7 @@ type compiledEntry struct {
 	src, dst  networks         // pre-parsed Sources and Destinations
 	schedule  compiledSchedule // pre-parsed Schedule
 	addresses addrSet          // pre-parsed ICS addresses
+	tagPaths  [][]string       // pre-split CIP symbolic selectors
 	ports     []compiledPort   // pre-parsed protocol port ranges (one per Protocol)
 	iec       *compiledIEC104  // set for ics.protocol iec104 entries only
 }
@@ -132,6 +154,7 @@ func compileEntry(entry Entry) compiledEntry {
 	}
 
 	ce.addresses = compileAddrs(entry.ICS.Addresses)
+	ce.tagPaths = compileTagPaths(entry.ICS.Tags)
 
 	// Pre-parse protocol port ranges.
 	ce.ports = make([]compiledPort, len(entry.Protocols))
@@ -242,8 +265,8 @@ func matchICSCompiled(ce *compiledEntry, ctx EvalContext) bool {
 	return matchICSProtocol(ce.ICS, ctx) &&
 		matchICSFunctionCode(ce.ICS, ctx) &&
 		matchICSUnitID(ce.ICS, ctx) &&
-		matchICSAddresses(ce, ctx) &&
-		matchICSObjectClass(ce.ICS, ctx) &&
+		matchICSStations(ce.ICS, ctx.ICS) &&
+		matchICSObjects(ce, ctx) &&
 		matchICSDirection(ce.ICS, ctx) &&
 		matchICSAccessMode(ce.ICS, ctx)
 }
@@ -329,17 +352,30 @@ func contains(list []string, v string) bool {
 	return false
 }
 
+// Mode is operational metadata and deliberately does not narrow packets.
 func icsPredicateEmpty(p ICSPredicate) bool {
 	return p.Protocol == "" &&
 		len(p.FunctionCode) == 0 &&
 		p.UnitID == nil &&
 		len(p.Addresses) == 0 &&
 		len(p.ObjectClasses) == 0 &&
+		len(p.Masters) == 0 &&
+		len(p.Outstations) == 0 &&
+		len(p.Groups) == 0 &&
+		len(p.Variations) == 0 &&
+		len(p.Instances) == 0 &&
+		len(p.Attributes) == 0 &&
+		len(p.Tags) == 0 &&
 		p.Direction == "" &&
 		!p.ReadOnly &&
 		!p.WriteOnly &&
 		len(p.TypeIDs) == 0 &&
 		len(p.Classes) == 0 &&
 		len(p.CA) == 0 &&
-		len(p.IOA) == 0
+		len(p.IOA) == 0 &&
+		len(p.COT) == 0 &&
+		len(p.Originators) == 0 &&
+		p.Negative == nil &&
+		p.Test == nil &&
+		p.SelectExecute == ""
 }

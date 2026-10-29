@@ -136,7 +136,6 @@ func TestPatchFirewallRuleICS(t *testing.T) {
 	}{
 		{"duplicate key inside ics", `{"ics":{"ca":[1],"ca":[2]}}`, `duplicate key \"ca\"`, 0},
 		{"unknown key inside ics", `{"ics":{"typeIDs":[46]}}`, `unknown key \"typeIDs\"`, 0},
-		{"null on a new field", `{"ics":{"typeIds":null}}`, "must not be null", 0},
 		{"writeOnly false on iec104", `{"ics":{"writeOnly":false}}`, "writeOnly is not supported", 0},
 		{"validation runs after the merge", `{"ics":{"ca":[65535]}}`, "broadcast address", 1},
 	}
@@ -151,5 +150,59 @@ func TestPatchFirewallRuleICS(t *testing.T) {
 				t.Fatalf("store.Save calls = %d, want %d", m.calls, tc.saveCalls)
 			}
 		})
+	}
+}
+
+func TestGenericICSSelectorClearReload(t *testing.T) {
+	for _, ics := range []config.ICSPredicate{
+		{Protocol: "modbus", FunctionCode: []uint8{3}, UnitID: new(uint8(0)), Addresses: []string{"0-10"}, Direction: "request"},
+		{Protocol: "cip", FunctionCode: []uint8{14}, ObjectClasses: []uint16{4}, Direction: "request"},
+	} {
+		t.Run(ics.Protocol, func(t *testing.T) {
+			store := iecPatchStore(ics)
+			body := `{"ics":{"functionCode":null,"unitId":null,"addresses":null,"objectClasses":null}}`
+			rec := patchRule(t, store, body)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("patch: %d %s", rec.Code, rec.Body.String())
+			}
+			rec = httptest.NewRecorder()
+			NewServer(store, nil).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/firewall/rules", nil))
+			var rules []config.Rule
+			if err := json.Unmarshal(rec.Body.Bytes(), &rules); err != nil {
+				t.Fatal(err)
+			}
+			want := config.ICSPredicate{Protocol: ics.Protocol, Direction: "request"}
+			if rec.Code != http.StatusOK || len(rules) != 1 || !reflect.DeepEqual(rules[0].ICS, want) {
+				t.Fatalf("reloaded = %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestICSRuleListAndDashboardUseAllPredicateFields(t *testing.T) {
+	predicates := []config.ICSPredicate{
+		{Protocol: "modbus"}, {ObjectClasses: []uint16{4}}, {Direction: "request"},
+		{TypeIDs: []int{1}}, {Classes: []string{"monitor"}}, {CA: []uint16{0}},
+		{IOA: []config.IOARange{{Start: 0, End: 0}}},
+	}
+	store := iecPatchStore(config.ICSPredicate{})
+	store.cfg.Firewall.Rules = nil
+	for i, p := range predicates {
+		store.cfg.Firewall.Rules = append(store.cfg.Firewall.Rules, config.Rule{ID: string(rune('a' + i)), ICS: p, Action: config.ActionAllow})
+	}
+	store.cfg.Firewall.Rules = append(store.cfg.Firewall.Rules,
+		config.Rule{ID: "plain", Action: config.ActionAllow},
+		config.Rule{ID: "mode-only", Action: config.ActionAllow, ICS: config.ICSPredicate{Mode: "learn"}})
+	if got := countICSRules(store.cfg.Firewall.Rules); got != len(predicates) {
+		t.Fatalf("dashboard ICS count = %d, want %d", got, len(predicates))
+	}
+	rec := httptest.NewRecorder()
+	NewServer(store, nil).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/firewall/ics-rules", nil))
+	var listed []config.Rule
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || len(listed) != len(predicates) {
+		t.Fatalf("ICS list = %d %s", rec.Code, rec.Body.String())
 	}
 }

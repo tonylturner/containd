@@ -23,13 +23,14 @@ func (e *Engine) domainRule(name string) string {
 }
 
 func (e *Engine) domainClientState(state *flow.State) *flow.State {
-	if state.Key.Dir == flow.DirForward {
+	direction := state.Key.Dir
+	if c := state.Connection.Load(); c != nil {
+		direction = c.Direction(state.Key)
+	}
+	if direction == flow.DirForward {
 		return state
 	}
-	e.flowMu.Lock()
-	client := e.flows[state.Key.Reversed().Hash()]
-	e.flowMu.Unlock()
-	return client
+	return e.peerFlow(state)
 }
 
 // observeDomainExclusions runs before selective DPI, independently of decoder

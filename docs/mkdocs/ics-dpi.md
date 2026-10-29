@@ -104,8 +104,7 @@ delivery once. Events with either finding are excluded from learned profiles.
 | Enforce scope | Evaluate decoded fields as usual; pass unless policy denies | Drop the packet and reset the session; decision reason `nonconformant` |
 | Learn (monitor) scope | Rules observe; no on-wire effect | Report `would_drop`; no on-wire effect |
 
-A decoded policy denial takes precedence and retains its own reason. Strict
-nonconformance is decided before ALLOW rules. Tolerant is not a policy bypass:
+A decoded policy denial takes precedence and retains its own reason. Strict nonconformance is decided before ALLOW rules. Tolerant is not a policy bypass:
 under an allowlist, an unreadable field cannot satisfy an ALLOW that names that
 field, so the message falls to the default action. A broader ALLOW using only
 readable fields can still match.
@@ -134,6 +133,133 @@ findings. An unsupported Type ID is still a decoded type byte: tolerant rules
 decide it, with an `iec104.unsupported_type` finding. Changing parsing applies
 to new decisions after the config push, not by resetting existing sessions
 solely because their parsing mode changed.
+
+## Transport identity and NAT
+
+Live AF_PACKET DPI events and their derived alerts carry an optional
+`transportConnectionId`. It identifies a locally tracked TCP/UDP connection
+incarnation across the original and reply conntrack tuples, including source
+port remapping. It is separate from the directional `flowId`, IEC 104
+`session_id` and CIP's numeric `connection_id`. Published IDs are never renamed.
+Events retain their observed wire addresses and ports; `/flows` remains
+directional and includes the shared transport ID rather than regrouping it.
+Existing IEC 104 `session_id` grouping is unchanged.
+If one directional rollup contains differing evidence or incarnations,
+`correlationStatus` is `mixed`, and differing transport IDs are omitted.
+
+`correlationStatus` describes identity evidence: `resolved`, `wire`,
+`zone_unverified`, `unsupported_zone`, `unsupported_tuple`, `not_found`,
+`lookup_error`, `lookup_timeout`, `ambiguous`, `admission_timeout`,
+`cache_capacity` or `queue_overflow`. Authority or lookup failures downgrade
+status without removing an issued ID or changing the incarnation's pairing
+key. A history without a public ID can adopt verified identity, including its
+pending requests; previously published events are not rewritten. PCAP and
+NFQUEUE report `wire`: they retain wire-connection pairing without claiming
+live conntrack evidence or querying it.
+Policy evaluation, protocol dispatch, wire resets and kernel deletion
+coordinates keep their existing address semantics. Arbitrary public-port
+DNAT does not enable decoding on that port.
+
+Modbus pending requests are keyed by connection incarnation, request
+direction, transaction ID and unit ID. Coverage requires observing the
+incarnation's opening SYN being admitted to inspection and correlation, not
+merely tracked as a wire packet or seen as a request. Excluded openers do not
+grant coverage. Deliberately bypassed packets extend the recovery timeout on an
+already-correlated incarnation, without broadening inspection or changing
+wire-based exclusions. An unknown reply with verified
+identity and complete coverage raises a protocol violation. Known pairs still
+match when capture began midstream or evidence is unavailable.
+Missing identity or capture coverage instead raises an
+`ids` anomaly with `anomaly_type: correlation_unavailable` and a
+`correlation_status` reason. These reasons also include `capture_incomplete`,
+`pending_capacity`, `pending_incomplete`, `wire_identity_missing` and
+`tuple_mismatch`. Pending state is capped at 4,096 connections and 256
+transactions per connection, expires transactions after two minutes, and is
+cleared on connection close or reuse. Correlation-unavailable anomalies are
+emitted at most once per incarnation, while unavailable observations continue
+to be counted. After an actual observation loss, unmatched
+claims re-arm only after a full two-minute quiet pairing timeout since the
+latest gap, and only if the opening SYN was captured. Thus transactions that
+could predate a gap cannot cause unmatched claims; detection is not disabled
+permanently.
+
+Only default conntrack zone zero is supported. The resolver reads
+`nft -j list ruleset` at startup, after containd's ruleset applications and
+reconciliations, and every five seconds. It includes all tables and families,
+including other applications' rules. Any `ct zone` assignment or xt `CT`
+target prevents zone-zero authority; read errors leave it unverified. Each
+read has a 500 ms deadline and runs in a separate goroutine, never blocking
+packet processing. Ruleset apply invalidates authority immediately and requests
+an asynchronous recheck after completion; each packet uses an immutable
+evidence snapshot. Routine successful reads preserve authority and cached
+identities while in flight. Errors or detected zone setters revoke authority.
+An evidence downgrade gates unmatched claims until evidence is verified again,
+but does not itself count as packet loss or start a recovery timeout.
+This is periodic namespace observation, not
+synchronization with external ruleset writers; an external change can take
+until the next check to be detected. Conntrack zones are not firewall
+interface policy zones.
+
+Only traffic selected for industrial DPI enters correlation admission; other
+traffic follows normal packet processing without a CT lookup.
+Capture admission never performs network I/O or waits for a lookup. One
+worker owns exact GETs, O/R aliases and correlation processing. Its 25 ms
+timestamp reorder window lets an earlier request from another capture
+interface precede a reply, including requests queued during a lookup.
+Admission holds at most 512 packets and 4 MiB of payload. Overflow loses an
+observation, not a forwarded packet. Every drop increments `queue_overflow`,
+but emits at most one `dpi.correlation.unavailable` event per second. This
+kind carries `correlationStatus: queue_overflow`, the matching
+`correlation_status` attribute, wire endpoints, directional `flowId` and
+protocol/transport hints when known, and an already-known transport ID.
+It does not claim payload decoding. Loss is scoped to the affected tuple and
+incarnation, not unrelated connections. A new-ISN SYN reserves its own loss
+history immediately at admission, including while it waits in the reorder
+window; retransmissions retain that history. Backlogged
+packets older than 500 ms degrade to unavailable evidence. The alias cache
+holds at most 16,384 aliases, revalidates positive entries after one second
+(or the shorter kernel timeout), and prunes negative entries at their 100 ms
+expiry. Each miss sends one direction-agnostic exact GET with a 100 ms native
+deadline, within a 200 ms resolver budget; confirmation waits for a later
+packet, never a worker retry sleep. No table dump or per-packet lookup occurs
+on cache hits. A separate bounded 16,384-tuple loss index survives lookup TTL
+expiry and reclaims a connection's aliases directly on close or expiry, without
+scanning the index on capture admission. Dropped-only, unbound histories become
+evictable once two minutes have passed since their latest loss. The existing
+activity-driven flow sweep, triggered by packet processing when 30 seconds have
+elapsed since its last run, removes them. It never removes a queued/in-flight
+token or a live connection's history.
+`coverage_index_reclaimed` counts those expired unbound entries removed.
+
+While the index is full, affected connections cannot claim complete coverage;
+`coverage_capacity` counts unindexed observations. After capacity is reclaimed,
+an already-started connection must regain indexing and wait a full two-minute
+pairing timeout, with no further loss or inspection bypass, before unmatched
+replies can alert again. This still requires an inspected, admitted opening SYN;
+midstream-only captures do not acquire complete coverage by waiting. A new
+connection with a fully inspected opening SYN after capacity returns can claim
+coverage immediately. No worker restart is needed after a stopped flood.
+
+The engine ruleset status includes `transportIdentity` for live AF_PACKET
+capture. `zoneStatus` is `verified`, `zone_unverified` or `unsupported_zone`;
+`zoneCheckedAt`, `zoneError` and `zoneSetters` describe the last read.
+Sparse cumulative `counters` include:
+
+- Authority: `zone_checks`, `zone_read_errors`, `zone_setter_checks`.
+- Resolution: `lookups`, `cache_hits`, `resolved`, `not_found`,
+  `lookup_error`, `lookup_timeout`, `ambiguous`, `unsupported_zone`,
+  `unsupported_tuple`, `zone_unverified`.
+- Admission and correlation: `queue_overflow`, `admission_timeout`,
+  `cache_capacity`, `coverage_capacity`, `coverage_index_reclaimed`, `canceled`,
+  `correlation_unavailable`.
+
+The `modbus` object reports `matched`, `unmatched`, `unavailable`, `capacity`
+and `expired` totals plus current `pendingConnections` and
+`pendingTransactions`. `unavailable` counts observations, while
+`correlation_unavailable` counts emitted anomalies; `queue_overflow` counts
+every dropped observation regardless of event rate limiting.
+Missing sparse counters mean zero. These are
+observation-health signals, not inline enforcement readiness.
 
 ## DPI exclusions
 
@@ -242,6 +368,11 @@ the first 512 payload bytes (IEC 104: the APDU). An attribute is present only
 when the decoder found its value. The tables list what each ICS decoder emits;
 the value in brackets is the event's `proto`.
 
+`coverage_incomplete: true` marks a DNP3 fragment or CIP operation whose
+contained objects or operations were not fully inspected. The attribute is
+omitted on fully covered messages; it is separate from `conformance` and
+`undecoded` findings. See [Incomplete inspection](#incomplete-inspection).
+
 | Protocol | `kind` values | Attributes |
 | --- | --- | --- |
 | Modbus/TCP (`modbus`) | `request`, `response`, `exception`, `malformed` | `transaction_id`, `unit_id`, `function_code`, `is_write`, `raw_hex`; data-access fields per function code (see [ICS Firewall Rule Predicates](#ics-firewall-rule-predicates)): requests `address` with `quantity` (1–4, 15, 16; plus `byte_count` for 15, 16), `value` (5, 6), `and_mask`, `or_mask` (22), or `read_address`, `read_quantity`, `write_address`, `write_quantity`, `byte_count` (23); read responses `byte_count` and, for registers, `register_count`; write responses the fields they echo; `sub_function`, `sub_function_name` (code 8; sub-functions 1, 3, 4, 10 and 20 are writes; supported names cover 0–4, 10–18 and 20); invalid per-sub-function layout is `modbus.pdu_layout`; unknown sub-functions are reported as undecoded `modbus.diagnostics_subfunction`; `mei_type` (code 43), `mei_type_name` (MEI type 14); `exception_code`, `exception_description` (exceptions, with `function_code` set to the base code); `error` (malformed) |
@@ -258,6 +389,11 @@ independently: earlier TCP packets are not held back and whole-response
 prevention is not atomic. Point records preserve indices only when present
 (absence is not index zero); group 12 variation 1 CROBs expose their encoded
 control, operation, trip/close, queue/clear, count, on/off times and status.
+The fragment event carries `coverage_incomplete: true` when the object walk
+stops at an unknown, unsupported, size-prefixed, free-format or truncated
+layout, a reserved range code or an inspection budget. Readable headers and
+partial point lists remain in `objects`, including each header's `covered`
+byte count; a partial point list also marks coverage incomplete.
 
 DNP3 conformance codes are `dnp3.data_crc`, `dnp3.application_header`,
 `dnp3.object_walk`, `dnp3.crob_value`, `dnp3.link_duplicate`,
@@ -291,6 +427,9 @@ the server), `session_id`, `apdu_id`, `apci_type` (`I`, `S` or `U`) and
 An I-format APDU emits one event per information object. Types outside the
 supported set emit `unsupported` with a conformance finding; parsing mode and
 rules determine the verdict, not the event kind alone.
+When a role-violating ASDU's layout decodes, it still emits every object,
+each as `malformed` with the role finding and its own IOA and object index.
+The existing APDU-length and object-count limits bound this emission.
 
 CIP events report each EtherNet/IP layer as attributes. The protocol name `cip` covers the whole EtherNet/IP stack: one decoder toggle
 and one protocol match. The name `enip` is rejected at rule, signature, Sigma
@@ -312,7 +451,17 @@ UDP port 44818 carries encapsulation commands such as ListIdentity, decoded like
 | Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle`, `enip_status`, `enip_sender_context`, `enip_options` |
 | Implicit I/O (UDP 2222) | `connection_id`, `sequence`, `data_length` (whole connected data item), `cpf_item_types` |
 | Common Packet Format (CPF) | `cpf_item_types`: item types in packet order as one comma-joined lowercase hex string with no spaces; plus selected item `cpf_item_index`, `cpf_data_item_type`, and, when available, `connection_id`, `connected_sequence` |
-| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; responses retain `response_reserved`, `general_status`, `additional_status_count` and `additional_status` when present; MSP parents carry `multi_service_count` and `multi_service_decoded_count`; each child carries `msp: true`, `msp_index` and `msp_index_path` |
+| CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `cip_target` (requests: `logical`, `symbolic` or `unknown`), `cip_symbol` (symbolic targets only, an array of symbol-name segments), `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; responses retain `response_reserved`, `general_status`, `additional_status_count` and `additional_status` when present; MSP parents carry `multi_service_count` and `multi_service_decoded_count`; each child carries `msp: true`, `msp_index` and `msp_index_path`; incomplete wrappers and roots with uninspected extra CPF data items carry `coverage_incomplete: true` |
+
+Every CIP request operation, including MSP children, carries `cip_target`. Supported logical paths name a class, optionally an instance,
+then at most one attribute, member or connection point, using 8/16-bit segments.
+Symbolic paths contain one or more ANSI `0x91` symbols with optional 8/16-bit
+element segments; `cip_symbol` preserves the symbol segments in order, without
+element indexes. Repeated logical segments, mixed logical/symbolic paths,
+32-bit segments and other unsupported paths are `unknown`, never truncated to
+a supported target. Partial logical fields can remain as telemetry but do not
+make an unknown target known. Responses have no wire target and carry no `cip_target`, so object
+selectors (class, instance, attribute, tag) never match a response.
 
 CIP access classification uses the request's own complete, supported EPATH,
 not the service number alone. `is_write: false` identifies a supported read;
@@ -393,8 +542,11 @@ than IEC 104 are:
 | `protocol` | `modbus`, `dnp3`, or `cip` |
 | `functionCode` | Array of numeric function/service codes, 0–255; evaluated from `function_code` |
 | `unitId` | Optional Modbus unit ID, 0–255; evaluated from `unit_id` |
-| `addresses` | Modbus-only array of address entries, each one value or an inclusive `low-high` range (see below); evaluated against the addresses the message touches |
-| `objectClasses` | CIP object-class IDs, 0–65535; evaluated from `object_class`; CIP only |
+| `addresses` | Modbus register/coil or DNP3 point-index array of entries, each one value or an inclusive `low-high` range (see below); evaluated against the addresses the message touches |
+| `masters`, `outstations` | DNP3 station addresses, 0–65519; reserved 65520–65535 are rejected |
+| `groups`, `variations` | DNP3 object-header groups and variations, 0–255 |
+| `objectClasses`, `instances`, `attributes` | CIP logical target selectors, 0–65535 |
+| `tags` | CIP symbolic tag-path list; cannot combine with logical target selectors |
 | `readOnly`, `writeOnly` | Read/write class from an explicitly present `is_write`; not both true |
 | `direction` | `request` or `response`; omit for both |
 | `mode` | `learn` or `enforce`; omit to inherit global mode |
@@ -428,12 +580,12 @@ Validation refuses any other entry, such as
 configuration with such an entry starts in management recovery until a valid
 configuration is committed.
 
-The `addresses` predicate is supported only for Modbus. DNP3 and CIP rules
-with nonempty `addresses` are rejected in every mode because their decoded
-station, object and path fields are not numeric address predicates. An existing
-stored rule keeps its filter and starts in management recovery with the cause;
-remove the unsupported filter explicitly and commit a valid configuration to
-resume normal policy. IEC 104 uses `ca` and `ioa` instead.
+DNP3 `addresses` selects **point indexes**, not station addresses, and requires
+nonempty `groups`. Its closed ranges use the same syntax, with endpoints
+0–4294967295. CIP rejects `addresses`; use logical target selectors or tags.
+DNP3 and CIP reject `unitId`: neither decoder emits a Modbus unit identifier.
+Stored invalid predicates remain visible in management recovery until explicitly
+repaired and a valid configuration committed. IEC 104 uses `ca` and `ioa` instead.
 
 A message touches a set of address spans. A Modbus request touches the span
 from its starting address for its quantity: function codes 1–4, 15 and 16 name
@@ -453,8 +605,12 @@ registers written, 1–121 registers written by function code 23), a byte count
 that disagrees with the quantity, or a span past 65535. So is a message from the
 connection's opener that the decoder does not decode as a request. Modbus replies
 carry no request address: a read reply touches no address, and a write reply
-touches only the address and quantity it echoes. For the other protocols a
-message touches the one numeric `address` its decoder emits, or none.
+touches only the address and quantity it echoes.
+
+DNP3 indexes come from each object header: start/stop qualifiers name a span,
+and index-prefix qualifiers name individual points. Virtual, all-objects and
+count-only qualifiers have unknown point indexes; an address-qualified ALLOW
+fails and an address-qualified DENY matches those unknown indexes.
 
 Modbus events carry only fields present on the wire: requests have `address`
 with `quantity` (function codes 1–4, 15, 16, plus `byte_count` for 15 and 16),
@@ -487,19 +643,81 @@ Example: a firewall rule that allows Modbus reads of holding registers 0–99
 With `mode: "enforce"` the rule needs a nonzero `dataplane.nfqueueGroup` (see
 [DPI Modes](#dpi-modes)).
 
-Only metadata actually emitted by the decoder can satisfy these conditions.
-There are no firewall selectors for DNP3 station addresses/object headers, CIP
-instance/attribute/EPATH/MSP. Decoder telemetry and IDS attributes are not
-additional firewall selector fields. Protocol-specific station, point and CIP
-path selectors are not available yet.
+### Object, station and target matching
 
-ICS messages follow the firewall's precedence (see
-[Actions and precedence](policy-model.md#actions-and-precedence)): any matching
-`ALLOW` admits the message, whatever its position; otherwise the first matching
-`DENY` or `RESET` by rule ID denies it. An ICS `DENY` that overlaps any `ALLOW`,
-including a plain L3/L4 `ALLOW` on the same port, is therefore shadowed and
-never denies anything there; the ruleset warnings name such rules. Strict
-nonconformance is rejected before ALLOW matching as described in
+Fields are ANDed; members within each list are ORed. An omitted selector means
+ANY. A selector whose value is absent does not match either ALLOW or DENY,
+except for the explicitly unknown cases below. Each DNP3 object header and each
+CIP operation is evaluated independently through the unchanged firewall
+[precedence](policy-model.md#actions-and-precedence): ALLOW first, then the
+first matching DENY by ID, then the default. **Any denied object denies the
+message**; different ALLOW rules may cover different objects. Modbus retains
+whole-PDU span containment in a single rule. A complete CIP Multiple Service
+Packet wrapper is a container, not an operation; only its children are judged.
+A broad L3/L4 ALLOW can therefore shadow a generic ICS DENY; ruleset warnings
+identify such overlaps. IEC 104 retains its separate inspection envelope below.
+
+DNP3 masters/outstations apply only to application messages, never link-only
+frames. Link DIR identifies the master (source when DIR=1, destination when
+DIR=0). Groups and variations come from **every** object header, not only the
+first. Omitted variations mean ANY. Wire variation 0 satisfies ALLOW only if 0
+is listed; any constrained DENY matches wire variation 0. Selector 0 does not
+match concrete nonzero variations.
+
+CIP logical targets support 8- and 16-bit class/instance/attribute segments;
+32-bit segments and unsupported or mixed paths are unknown, never truncated.
+Instance-enumerating services (0x11 and class 0x6B service 0x55) have unknown
+instances. Attributes are known only for single-attribute services 0x0E/0x10 and
+member services 0x18/0x19. Unknown instance/attribute selectors fail ALLOW and
+match DENY. Object facts and unknown-object flags apply only to CIP service
+operations. Non-operation encapsulation events and implicit I/O retain message
+facts but have no object facts or unknown flags, so a rule with an object
+selector matches neither ALLOW nor DENY. If a SendRRData/SendUnitData data item
+exists but its CIP operation cannot be decoded, or an unknown encapsulation
+command carries a payload, coverage is unknown: object-selector DENYs match
+and ALLOWs do not. Read-only requires positive read evidence; controls are
+writes, never reads, and structural/unknown services satisfy neither access
+constraint.
+
+Tag paths are dot-separated names (`Motor.Speed`, `Program:Main.Motor`): each
+name matches `[A-Za-z_][A-Za-z0-9_]*`, at most 40 characters; only the first
+segment may have `Program:`. Brackets are not accepted in selectors. Comparison
+is case-insensitive by segment; target element indexes are ignored (all elements
+and subtrees are selected). ALLOW requires the selector to be a prefix of the
+target. DENY matches either prefix direction, so denying `A.B` also overlaps an
+operation on aggregate `A`. **Logical targets never match a tag selector**, even
+instance-addressed Symbol class 0x6B access. A tag DENY does not protect that
+access; prefer tag ALLOW lists with default deny.
+
+### Incomplete inspection
+
+A message not fully inspected adds an **unknown-object context**, with only
+message-wide facts (L3/L4, protocol, direction, DNP3 stations). DNP3 retains its
+fragment-wide function code and access category; CIP MSP coverage contexts have
+neither, because inner services are unknown. This includes incomplete/unsupported
+DNP3 object walks, partial point lists and reserved qualifiers, incomplete CIP
+nested MSP decoding or uninspected CPF data items. Decoder events mark
+`coverage_incomplete: true`, omitted otherwise. Each incomplete MSP wrapper
+carries the marker, including ancestors of an incomplete nested wrapper:
+declared/decoded count mismatches, service/depth budget exhaustion and
+`cip.msp_layout` all mark incomplete coverage. Uninspected extra CPF data items
+mark the root operation, not its already inspected children.
+An ALLOW with any object selector fails this context; a DENY with any object
+selector matches it. Function, access, station, direction and L3/L4 constraints
+still apply: this is not an unconditional denial. An ALLOW must omit object
+selectors; for CIP MSP coverage it must also omit function and access constraints.
+Unknown-object handling overrides only the object-selector conjunction, not
+other fields.
+IEC 104 retains each decoded object, including role-violating ASDUs.
+
+Create/replace rejects explicit `null` or `[]` for the new selector fields;
+omit them for ANY. The general `/firewall/rules/{id}` merge PATCH uses `null`
+to clear any known ICS key (including old IEC fields), omission to retain it.
+The `/firewall/ics-rules/{id}` PATCH replaces the whole rule: omitted selectors
+become ANY. Editors preview the full effective predicate, not the null-bearing
+PATCH delta.
+
+Strict nonconformance is rejected before ALLOW matching as described in
 [Parsing modes](#parsing-modes). `RESET`,
 `RATE_LIMIT` and `TAG` rules take no ICS protocol.
 
@@ -513,6 +731,10 @@ With `protocol: "iec104"`, use these fields instead of the generic selectors:
 | `classes` | Array drawn from `monitor`, `control`, `system`, `unknown`; enforce `ALLOW` cannot include `unknown` |
 | `ca` | Common-address array, 0–65534; broadcast 65535 cannot be named |
 | `ioa` | Inclusive ranges such as `[{"start": 0, "end": 100}]`, endpoints 0–16777215, no overlaps |
+| `cot` | Cause-of-transmission list, 1–63 |
+| `originators` | Originator address list, 0–255 |
+| `negative`, `test` | Exact P/N and T flags; `false` is a restriction, not omission |
+| `selectExecute` | `select` or `execute`; Type IDs must be omitted or contained in 45–50, 58–63 (51/64 have no S/E) |
 | `readOnly` | Restrict to the decoder's safe-read set; false means no read constraint, not writes-only |
 | `direction`, `mode` | Same spellings and mode inheritance as above |
 
@@ -520,7 +742,9 @@ Omit a list to match any value. Present IEC lists reject `null`, empty arrays,
 and null members. IOA entries require exactly `start` and `end`. Predicate keys
 are case-sensitive; unknown or duplicate keys are rejected. IEC 104 rejects
 `functionCode`, `unitId`, `addresses`, `objectClasses`, and `writeOnly` by presence,
-even with a zero/false value. IEC-only list fields are rejected on other protocols.
+even with a zero/false value. All protocol-specific fields are rejected on other
+protocols. COT, originator,
+P/N, T and S/E selectors require their ASDU values; S/U frames do not carry them.
 
 Supported descriptor Type IDs are 1, 3, 5, 7, 9, 11, 13, 15, 21; 30–37;
 45–51; 58–64; 70, 100, 101, 102, 103, 105, and 107. Other types decode as
@@ -643,14 +867,12 @@ Detectors have no tuning controls.
 | `protocol_violation` | critical | CIP message with service code 0x07 (Stop), request or reply |
 | `protocol_violation` | high | CIP message with service code 0x06 (Start), request or reply |
 | `protocol_violation` | high | IEC 104 role violation: a monitor type (1–44) from the client, or a control or system activation/deactivation from the server |
-| `protocol_violation` | high | More than one ICS protocol from one source to one destination address |
 | `rate_anomaly` | high | More than 1,000 ICS events from one source to one destination address in the current and previous clock minute |
 | `rate_anomaly` | critical | More than 100 write events (`is_write: true`) in the same window |
 
 These checks use the source and destination IP addresses, not ports. While a
-pair is above a rate limit, each further event raises another finding. After a
-pair shows a second protocol, each further ICS event of that pair raises that
-finding again. IEC 104 rate counts use one event per APDU. The `ids` /
+pair is above a rate limit, each further event raises another finding.
+IEC 104 rate counts use one event per APDU. The `ids` /
 `anomaly` event of a finding
 from an IEC 104 event also copies that event's identity attributes, such as
 `session_id`, `apdu_id`, `type_id`, `ca` and `ioa`.
@@ -738,7 +960,7 @@ for an unknown ID. Additions and removals are audited as `signatures.add` and
 **Signature changes are live and temporary.** They are not part of the
 candidate or running configuration, and export does not include them. An
 engine restart, or a committed change to the `dataplane` settings, rebuilds
-the signature engine with the 23 built-in signatures. This removes custom
+the signature engine with the built-in signatures. This removes custom
 signatures, restores deleted built-in signatures and clears the match list.
 The engine keeps the 4,096 newest matches. Each match has `signature`,
 `timestamp` and the matched `event`, whose keys are `FlowID`, `Proto`, `Kind`,
@@ -782,9 +1004,11 @@ enforcing. See
 
 The Modbus read-only template allows FC 1–4 and denies listed write functions,
 including FC 21 (Write File Record); use default deny to exclude all other
-functions. The `dnp3-secure-operations` example is **not read-only**: it allows
-FC 1 (Read), FC 2 (Write), and FC 20 (Enable Unsolicited), while denying
-FC 13/14 (Restart) and FC 18 (Stop Application). Review these allowances before
+functions. The `dnp3-secure-operations` template is **not read-only**: it allows
+FC 0 (Confirm), 1 (Read), 20/21 (Enable/Disable Unsolicited), 23 (Delay
+Measure) and 24 (Record Current Time), allows FC 2 (Write) only for groups 50
+(time) and 80 (internal indications), and denies FC 13/14 (Restart), 18 (Stop
+Application) and 19 (Save Configuration). Review these allowances before
 applying it.
 
 ## IEC 104 Holdback Diagnostics

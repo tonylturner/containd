@@ -19,7 +19,7 @@ func init() {
 	})
 	register(Template{
 		Name:        "dnp3-secure-operations",
-		Description: "DNP3 example – allow read, write and enable unsolicited; deny restart and stop",
+		Description: "DNP3 secure operations – allow startup operations and time/IIN writes, deny restart, stop and save configuration",
 		Rules:       DNP3SecureOperations(),
 	})
 	register(Template{
@@ -87,28 +87,37 @@ func ModbusRegisterGuard(allowedRanges []string) []config.Rule {
 	return rules
 }
 
-// DNP3SecureOperations returns an example allowing read, write and enable
-// unsolicited, while denying restart and stop application. It is not read-only.
+// DNP3SecureOperations returns rules that allow safe DNP3 function codes and
+// deny restart, stop application and save configuration. Writes are limited to
+// time and internal-indication object groups, not arbitrary output groups.
 func DNP3SecureOperations() []config.Rule {
 	return []config.Rule{
 		{
 			ID:          "tpl-dnp3-allow-reads",
-			Description: "Allow DNP3 operations (FC 1: Read, FC 2: Write, FC 20: Enable Unsolicited); not read-only",
+			Description: "Allow DNP3 startup operations (FC 0: Confirm, FC 1: Read, FC 20: Enable Unsolicited, FC 21: Disable Unsolicited, FC 23: Delay Measure, FC 24: Record Current Time)",
 			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.DNP3Port)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "dnp3",
-				FunctionCode: []uint8{1, 2, 20},
+				FunctionCode: []uint8{0, 1, 20, 21, 23, 24},
 			},
 			Log:    true,
 			Action: config.ActionAllow,
 		},
 		{
+			ID:          "tpl-dnp3-allow-time-iin-writes",
+			Description: "Allow DNP3 Write (FC 2) only for time (group 50) and internal indications (group 80)",
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.DNP3Port)}},
+			ICS:         config.ICSPredicate{Protocol: "dnp3", FunctionCode: []uint8{2}, Groups: []int{50, 80}},
+			Log:         true,
+			Action:      config.ActionAllow,
+		},
+		{
 			ID:          "tpl-dnp3-deny-dangerous",
-			Description: "Deny DNP3 dangerous operations (FC 13: Cold Restart, FC 14: Warm Restart, FC 18: Stop Application)",
+			Description: "Deny DNP3 dangerous operations (FC 13: Cold Restart, FC 14: Warm Restart, FC 18: Stop Application, FC 19: Save Configuration)",
 			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.DNP3Port)}},
 			ICS: config.ICSPredicate{
 				Protocol:     "dnp3",
-				FunctionCode: []uint8{13, 14, 18},
+				FunctionCode: []uint8{13, 14, 18, 19},
 			},
 			Log:    true,
 			Action: config.ActionDeny,

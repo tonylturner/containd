@@ -89,8 +89,9 @@ func TestModbusResponseWithoutRequest(t *testing.T) {
 
 	// Send a response without a prior request.
 	ev := dpi.Event{
-		Proto: "modbus",
-		Kind:  "response",
+		FlowID: modbusFlowID("10.0.0.2", "10.0.0.1", 502, 40000, flow.DirReverse),
+		Proto:  "modbus",
+		Kind:   "response",
 		Attributes: map[string]any{
 			"transaction_id": uint16(42),
 			"function_code":  3,
@@ -117,8 +118,9 @@ func TestModbusResponseMatchesRequest(t *testing.T) {
 
 	// Send a request.
 	reqEv := dpi.Event{
-		Proto: "modbus",
-		Kind:  "request",
+		FlowID: modbusFlowID(src, dst, 40000, 502, flow.DirForward),
+		Proto:  "modbus",
+		Kind:   "request",
 		Attributes: map[string]any{
 			"transaction_id": uint16(42),
 			"function_code":  3,
@@ -129,8 +131,9 @@ func TestModbusResponseMatchesRequest(t *testing.T) {
 
 	// Send a matching response (from dst back to src).
 	respEv := dpi.Event{
-		Proto: "modbus",
-		Kind:  "response",
+		FlowID: modbusFlowID(dst, src, 502, 40000, flow.DirReverse),
+		Proto:  "modbus",
+		Kind:   "response",
 		Attributes: map[string]any{
 			"transaction_id": uint16(42),
 			"function_code":  3,
@@ -170,8 +173,9 @@ func TestModbusExceptionCompletesRequest(t *testing.T) {
 	d := New()
 	client, server := "10.0.0.1", "10.0.0.2"
 	d.Check(client, server, dpi.Event{
-		Proto: "modbus",
-		Kind:  "request",
+		FlowID: modbusFlowID(client, server, 40000, 502, flow.DirForward),
+		Proto:  "modbus",
+		Kind:   "request",
 		Attributes: map[string]any{
 			"transaction_id": uint16(42),
 			"function_code":  uint8(3),
@@ -190,7 +194,7 @@ func TestModbusExceptionCompletesRequest(t *testing.T) {
 	if got := d.Check(server, client, exception); len(got) != 0 {
 		t.Fatalf("matching exception should complete request without anomaly: %+v", got)
 	}
-	if d.pendingTxns[flowKey(client, server)][42] {
+	if d.PairingStats().PendingTransactions != 0 {
 		t.Fatal("matching exception did not remove the pending transaction")
 	}
 
@@ -239,8 +243,9 @@ func TestModbusExceptionRequiresKnownServerDirection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d := New()
 			d.Check(client, server, dpi.Event{
-				Proto: "modbus",
-				Kind:  "request",
+				FlowID: modbusFlowID(client, server, 40000, 502, flow.DirForward),
+				Proto:  "modbus",
+				Kind:   "request",
 				Attributes: map[string]any{
 					"transaction_id": uint16(42),
 				},
@@ -258,15 +263,16 @@ func TestModbusExceptionRequiresKnownServerDirection(t *testing.T) {
 			if got := d.Check(tc.source, tc.dest, exception); len(got) != 0 {
 				t.Fatalf("unknown/non-server direction must not be treated as a reply: %+v", got)
 			}
-			if !d.pendingTxns[flowKey(client, server)][42] {
+			if d.PairingStats().PendingTransactions != 1 {
 				t.Fatal("unknown/non-server direction consumed the pending transaction")
 			}
 
 			// The actual reverse response still matches, proving the exception
 			// neither consumed nor otherwise changed the pending request.
 			response := dpi.Event{
-				Proto: "modbus",
-				Kind:  "response",
+				FlowID: modbusFlowID(server, client, 502, 40000, flow.DirReverse),
+				Proto:  "modbus",
+				Kind:   "response",
 				Attributes: map[string]any{
 					"transaction_id": uint16(42),
 				},
