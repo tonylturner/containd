@@ -157,7 +157,7 @@ func TestExportDispatcher(t *testing.T) {
 		if err != nil {
 			t.Errorf("Export(%s) error: %v", fmt, err)
 		}
-		if len(out) == 0 {
+		if len(out.Text) == 0 {
 			t.Errorf("Export(%s) returned empty output", fmt)
 		}
 	}

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Snort 3 IDS exports refuse unsupported application predicates
+  instead of widening them to generic traffic. Downloads list every refusal in
+  comments and report a refused count in the API header and Export panel.
+  Same-format imported source remains lossless; native content uses the target
+  engine's option syntax.
+
 ### Security
 
 - Learned ICS rules now come only from supported requests and are split by

@@ -4,8 +4,6 @@
 package ids
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -16,37 +14,26 @@ import (
 // If the rule was originally imported from Snort and has RawSource, it is
 // returned as-is for a lossless round-trip.
 func ExportSnortRule(rule config.IDSRule) (string, error) {
+	if err := checkExportEnabled(rule, FormatSnort); err != nil {
+		return "", err
+	}
 	if rule.SourceFormat == "snort" && rule.RawSource != "" {
 		return rule.RawSource, nil
 	}
-	if err := checkExportableProto(rule); err != nil {
+	if err := checkRulesFilePredicates(rule, FormatSnort); err != nil {
 		return "", err
 	}
 	return buildSnortRule(rule), nil
 }
 
-// ExportSnortRules converts multiple IDSRules to Snort .rules format. Rules
-// whose protocol it cannot express are skipped.
-func ExportSnortRules(rules []config.IDSRule) ([]byte, error) {
-	var buf bytes.Buffer
-	for _, rule := range rules {
-		s, err := ExportSnortRule(rule)
-		if errors.Is(err, ErrUnexportableProto) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		buf.WriteString(s)
-		buf.WriteString("\n")
-	}
-	return buf.Bytes(), nil
+// ExportSnortRules returns rules text and explicit, commented refusals.
+func ExportSnortRules(rules []config.IDSRule) (ExportResult, error) {
+	return exportRulesFile(rules, ExportSnortRule)
 }
 
 func buildSnortRule(rule config.IDSRule) string {
 	action := firstNonEmpty(rule.Action, "alert")
-	proto := firstNonEmpty(rule.Proto, "ip")
-	snortProto := mapProtoToSnort(proto)
+	snortProto := strings.ToLower(firstNonEmpty(rule.Proto, "ip"))
 
 	srcAddr := firstNonEmpty(rule.SrcAddr, "any")
 	srcPort := firstNonEmpty(rule.SrcPort, "any")
@@ -94,7 +81,7 @@ func buildSnortContent(cm config.ContentMatch) []string {
 	var opts []string
 	var contentVal string
 	if cm.IsHex {
-		contentVal = fmt.Sprintf("|%s|", cm.Pattern)
+		contentVal = fmt.Sprintf("\"|%s|\"", cm.Pattern)
 	} else {
 		contentVal = fmt.Sprintf("\"%s\"", escapeSuricataString(cm.Pattern))
 	}
@@ -107,27 +94,19 @@ func buildSnortContent(cm config.ContentMatch) []string {
 		opts = append(opts, "nocase")
 	}
 	if cm.Depth > 0 {
-		opts = append(opts, fmt.Sprintf("depth:%d", cm.Depth))
+		opts = append(opts, fmt.Sprintf("depth %d", cm.Depth))
 	}
 	if cm.Offset > 0 {
-		opts = append(opts, fmt.Sprintf("offset:%d", cm.Offset))
+		opts = append(opts, fmt.Sprintf("offset %d", cm.Offset))
 	}
-	if cm.Distance > 0 {
-		opts = append(opts, fmt.Sprintf("distance:%d", cm.Distance))
+	if cm.Distance != 0 {
+		opts = append(opts, fmt.Sprintf("distance %d", cm.Distance))
 	}
 	if cm.Within > 0 {
-		opts = append(opts, fmt.Sprintf("within:%d", cm.Within))
+		opts = append(opts, fmt.Sprintf("within %d", cm.Within))
 	}
-	return opts
-}
-
-func mapProtoToSnort(proto string) string {
-	switch strings.ToLower(proto) {
-	case "tcp", "udp", "icmp", "ip":
-		return strings.ToLower(proto)
-	default:
-		return "ip"
-	}
+	// Snort 3 modifiers belong to the content option, not separate options.
+	return []string{strings.Join(opts, ", ")}
 }
 
 func extractSnortSID(id string) string {

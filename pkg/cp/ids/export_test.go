@@ -194,10 +194,10 @@ func TestExportSnortFromFields(t *testing.T) {
 	if !strings.Contains(out, `msg:"Snort Test"`) {
 		t.Errorf("missing msg: %s", out)
 	}
-	if !strings.Contains(out, "depth:100") {
+	if !strings.Contains(out, "depth 100") {
 		t.Errorf("missing depth: %s", out)
 	}
-	if !strings.Contains(out, "offset:10") {
+	if !strings.Contains(out, "offset 10") {
 		t.Errorf("missing offset: %s", out)
 	}
 	if !strings.Contains(out, "priority:1") {
@@ -217,7 +217,7 @@ func TestExportSnortMultipleRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	lines := strings.Split(strings.TrimSpace(string(out.Text)), "\n")
 	if len(lines) != 2 {
 		t.Errorf("expected 2 lines, got %d", len(lines))
 	}
