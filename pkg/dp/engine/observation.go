@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
@@ -30,6 +31,10 @@ type observationContext struct {
 	iecOwned bool
 	snapshot *rules.Snapshot
 	refused  bool // Open is attempted only once, including at capacity.
+	// The table can retain legacy connection evidence across tuple reuse.
+	// Passive incarnation retirement must remember the latest generation
+	// independently, without rewriting that legacy evidence.
+	generation *conntrack.Evidence
 }
 
 type observationRecord struct {
@@ -133,17 +138,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	parsed := observationPacket(st)
 	selected := e.ShouldInspect(st, parsed)
 	snapshot := e.ruleSnap.Load()
-	iecOwned := false
-	if isIECPort(pkt) && e.iec != nil {
-		e.iec.mu.Lock()
-		if e.iec.hasIEC {
-			src, _ := addrPort(pkt.SrcIP, pkt.SrcPort)
-			dst, _ := addrPort(pkt.DstIP, pkt.DstPort)
-			client, server := orient(src, dst)
-			iecOwned, _ = e.iec.envelopeLocked(e.iec.sessionCtx(client, server))
-		}
-		e.iec.mu.Unlock()
-	}
+	iecOwned := e.iecOwnsPacket(pkt)
 	e.flowMu.Lock()
 	live := e.observation
 	if live == nil {
@@ -165,7 +160,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 			e.flowMu.Unlock()
 			return
 		}
-		ctx = &observationContext{}
+		ctx = &observationContext{generation: connection.Evidence}
 		live.entries[key] = ctx
 		ports := [2]uint16{pkt.SrcPort, pkt.DstPort}
 		if connection.Direction(st.Key) == flow.DirReverse {

@@ -14,6 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
@@ -62,6 +63,20 @@ func oracleSnapshot(e *Engine, s *oracleSpy) oracleState {
 	return out
 }
 
+type oracleFlow struct {
+	FirstSeen, LastSeen time.Time
+	Packets, Bytes      uint64
+	Closed              bool
+}
+
+func oracleFlows(e *Engine) map[string]oracleFlow {
+	out := make(map[string]oracleFlow)
+	for key, st := range e.flows {
+		out[key] = oracleFlow{st.FirstSeen, st.LastSeen, st.Packets, st.Bytes, st.Connection.Load().Closed().Load()}
+	}
+	return out
+}
+
 // The oracle compares each packet, not endpoints or final cache state. Concrete
 // cache-write and submission spies catch transient work, including queued jobs
 // that would otherwise be invisible until a later worker tick.
@@ -73,16 +88,19 @@ func TestObservationVerdictOracle(t *testing.T) {
 		mode                  string
 		deny                  bool
 		binding               string
+		keepOpen              bool
 	}{
-		{"standard-deny-default", 502, false, true, false, "enforce", true, "legacy"},
-		{"standard-deny-strict", 502, false, true, true, "enforce", true, "legacy"},
-		{"standard-unselected", 502, false, false, false, "", false, "observation"},
-		{"standard-mismatch", 20000, false, true, false, "enforce", true, "observation"},
-		{"2404-no-rule", 2404, true, false, false, "", false, "observation"},
-		{"2404-learn", 2404, true, true, false, "learn", false, "legacy"},
-		{"2404-enforce", 2404, true, true, false, "enforce", false, "legacy"},
-		{"alternate-modbus", 1502, false, true, true, "enforce", true, "observation"},
-		{"alternate-iec104", 12404, true, true, true, "enforce", true, "observation"},
+		{"standard-deny-default", 502, false, true, false, "enforce", true, "legacy", false},
+		{"standard-deny-strict", 502, false, true, true, "enforce", true, "legacy", false},
+		{"standard-unselected", 502, false, false, false, "", false, "observation", false},
+		{"standard-mismatch", 20000, false, true, false, "enforce", true, "observation", false},
+		{"2404-no-rule", 2404, true, false, false, "", false, "observation", false},
+		{"2404-learn", 2404, true, true, false, "learn", false, "legacy", false},
+		{"2404-enforce", 2404, true, true, false, "enforce", false, "legacy", false},
+		{"2404-learn-reuse-open", 2404, true, true, false, "learn", false, "legacy", true},
+		{"2404-enforce-reuse-open", 2404, true, true, false, "enforce", false, "legacy", true},
+		{"alternate-modbus", 1502, false, true, true, "enforce", true, "observation", false},
+		{"alternate-iec104", 12404, true, true, true, "enforce", true, "observation", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,7 +163,9 @@ func TestObservationVerdictOracle(t *testing.T) {
 			reset := trace[0]
 			reset.TCP.Flags = capture.TCPFlagRST | capture.TCPFlagACK
 			reset.Payload = nil
-			trace = append(trace, reset)
+			if !tc.keepOpen {
+				trace = append(trace, reset)
+			}
 			drops := 0
 			for n, pkt := range trace {
 				now = now.Add(time.Millisecond)
@@ -163,6 +183,9 @@ func TestObservationVerdictOracle(t *testing.T) {
 				before, after := oracleSnapshot(engines[0], spies[0]), oracleSnapshot(engines[1], spies[1])
 				if !reflect.DeepEqual(before, after) {
 					t.Fatalf("packet %d side effects:\n%+v\n%+v", n, before, after)
+				}
+				if tc.port == 2404 && tc.selected && !reflect.DeepEqual(oracleFlows(engines[0]), oracleFlows(engines[1])) {
+					t.Fatalf("packet %d changed table-owned flow lifecycle", n)
 				}
 				// Deterministically drain every scheduled job after recording submissions.
 				for i, e := range engines {
@@ -199,6 +222,10 @@ func TestObservationVerdictOracle(t *testing.T) {
 			// Reuse the tuples with a fresh ISN too. In particular, 2404's
 			// identity retirement must not change its independent table owner.
 			reopened := observationTrace(tc.port, tc.iec)
+			var retained [2]*flow.State
+			for i, e := range engines {
+				retained[i] = e.tupleStateLocked(packetKey(reopened[0]).Tuple())
+			}
 			for n, pkt := range reopened {
 				if n%2 == 0 {
 					pkt.TCP.Seq += 1000
@@ -212,6 +239,16 @@ func TestObservationVerdictOracle(t *testing.T) {
 				spies[1].measureVerdicts(func() { b = engines[1].HandlePacket(pkt) })
 				if !reflect.DeepEqual(a, b) || !reflect.DeepEqual(oracleSnapshot(engines[0], spies[0]), oracleSnapshot(engines[1], spies[1])) {
 					t.Fatalf("reopen packet %d changed legacy outputs", n)
+				}
+				if tc.port == 2404 && tc.selected {
+					for i, e := range engines {
+						if st := e.tupleStateLocked(packetKey(reopened[0]).Tuple()); st != retained[i] {
+							t.Fatalf("reopen packet %d replaced table-owned flow (observer=%v)", n, i == 1)
+						}
+					}
+					if !reflect.DeepEqual(oracleFlows(engines[0]), oracleFlows(engines[1])) {
+						t.Fatalf("reopen packet %d changed table-owned flow lifecycle", n)
+					}
 				}
 				for i, e := range engines {
 					spies[i].measureVerdicts(func() {
