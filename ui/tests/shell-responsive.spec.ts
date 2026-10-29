@@ -57,16 +57,33 @@ test("390px shell leaves room for content and exposes navigation", async ({ page
   await expect(page.getByRole("heading", { name: "Interfaces", exact: true })).toBeVisible();
 });
 
-test("mobile navigation closes with Escape and its toggle", async ({ page }) => {
+for (const focus of ["toggle", "sidebar link", "page"] as const) {
+  test(`mobile navigation closes with Escape from the ${focus}`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openZones(page);
+    const toggle = page.getByRole("button", { name: "Navigation", exact: true });
+    const navigation = page.getByRole("navigation", { name: "Main navigation" });
+    await toggle.click();
+    await expect(navigation).toBeVisible();
+    if (focus === "sidebar link") {
+      await navigation.getByRole("link", { name: "Dashboard", exact: true }).focus();
+    } else if (focus === "page") {
+      await page.getByLabel("Zone name", { exact: true }).focus();
+    } else {
+      await expect(toggle).toBeFocused();
+    }
+    await page.keyboard.press("Escape");
+    await expect(navigation).toBeHidden();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toBeFocused();
+  });
+}
+
+test("mobile navigation closes with its toggle", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openZones(page);
   const toggle = page.getByRole("button", { name: "Navigation", exact: true });
   const navigation = page.getByRole("navigation", { name: "Main navigation" });
-  await toggle.click();
-  await navigation.getByRole("link", { name: "Dashboard", exact: true }).focus();
-  await page.keyboard.press("Escape");
-  await expect(navigation).toBeHidden();
-  await expect(toggle).toBeFocused();
   await toggle.click();
   await expect(navigation).toBeVisible();
   await toggle.click();

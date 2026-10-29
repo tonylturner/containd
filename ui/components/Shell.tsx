@@ -270,7 +270,15 @@ export function Shell({
   }
 
   return (
-    <div className="relative min-h-screen bg-[#080a0f] text-slate-100">
+    <div
+      className="relative min-h-screen bg-[#080a0f] text-slate-100"
+      onKeyDown={(event) => {
+        if (navigationOpen && event.key === "Escape") {
+          event.preventDefault();
+          closeNavigation();
+        }
+      }}
+    >
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-black focus:px-4 focus:py-2 focus:text-white"
@@ -315,12 +323,6 @@ export function Shell({
         <aside
           id="shell-sidebar"
           aria-label="Sidebar"
-          onKeyDown={(event) => {
-            if (navigationOpen && event.key === "Escape") {
-              event.preventDefault();
-              closeNavigation();
-            }
-          }}
           onClick={(event) => {
             if (navigationOpen && (event.target as Element).closest("a")) {
               closeNavigation();
