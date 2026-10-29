@@ -65,6 +65,8 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	if len(pkt.Payload) != eipHeaderSize+int(hdr.Length) {
 		for _, ev := range events {
 			addFinding(ev.Attributes, "cip.encapsulation_length")
+			delete(ev.Attributes, "is_write")
+			delete(ev.Attributes, "is_control")
 		}
 	}
 	return events, nil

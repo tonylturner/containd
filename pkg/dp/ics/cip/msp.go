@@ -85,9 +85,6 @@ func parseMSP(data []byte, response *bool, budget *int, depth int) MSPResult {
 			r.Conformance = append(r.Conformance, "cip.message_short")
 			continue
 		}
-		if err != nil {
-			msg.Conformance = append(msg.Conformance, messageErrorCode(err))
-		}
 		if response != nil && msg.IsResponse != *response {
 			msg.Conformance = append(msg.Conformance, "cip.msp_response_mismatch")
 		}

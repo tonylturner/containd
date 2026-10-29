@@ -216,6 +216,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- CIP read-only rules no longer classify Apply Attributes, Set Member,
+  connection controls or class-specific mutations as reads. Classification
+  uses the request target and validates supported read bodies; unknown
+  operations and uncorrelated replies have no read/write category. The CIP
+  monitor template uses read-only/write-only predicates instead of unsafe
+  service-code lists. Previously saved template rules require replacement.
+- Protocol read counters require explicit read evidence instead of treating
+  every non-write event as a read. CIP learning uses decoded target-aware
+  service names and excludes requests without a known access category.
 - Modbus exception replies now complete their request's transaction, so an
   exception no longer leaves the transaction pending, and an exception with
   no prior request is reported like an unmatched response.

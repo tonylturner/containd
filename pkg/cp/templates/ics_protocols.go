@@ -24,7 +24,7 @@ func init() {
 	})
 	register(Template{
 		Name:        "cip-monitor-only",
-		Description: "CIP/EtherNet-IP monitor-only – allow read services, deny writes and control commands",
+		Description: "CIP/EtherNet-IP monitor-only – allow classified reads, deny classified writes and control commands",
 		Rules:       CIPMonitorOnly(),
 	})
 }
@@ -121,22 +121,22 @@ func CIPMonitorOnly() []config.Rule {
 	return []config.Rule{
 		{
 			ID:          "tpl-cip-allow-reads",
-			Description: "Allow CIP read services (0x01: Get_Attributes_All, 0x03: Get_Attribute_List, 0x0D: Get_Attribute_Single, 0x0E: Get_Member, 0x4C: Read_Tag, 0x4E: Read_Tag_Fragmented)",
+			Description: "Allow CIP requests classified as reads for their decoded target",
 			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.CIPPort)}},
 			ICS: config.ICSPredicate{
-				Protocol:     "cip",
-				FunctionCode: []uint8{0x01, 0x03, 0x0D, 0x0E, 0x4C, 0x4E},
+				Protocol: "cip",
+				ReadOnly: true,
 			},
 			Log:    true,
 			Action: config.ActionAllow,
 		},
 		{
 			ID:          "tpl-cip-deny-write-control",
-			Description: "Deny CIP write and control services (0x05: Reset, 0x06: Start, 0x07: Stop, 0x4D: Write_Tag, 0x4F: Write_Tag_Fragmented)",
+			Description: "Deny CIP requests classified as writes or control operations",
 			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.CIPPort)}},
 			ICS: config.ICSPredicate{
-				Protocol:     "cip",
-				FunctionCode: []uint8{0x05, 0x06, 0x07, 0x4D, 0x4F},
+				Protocol:  "cip",
+				WriteOnly: true,
 			},
 			Log:    true,
 			Action: config.ActionDeny,
