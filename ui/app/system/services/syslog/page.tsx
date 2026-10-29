@@ -1,5 +1,8 @@
 "use client";
 
+import { useConfigForm } from "../../../../lib/use-config-form";
+import { useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,33 +20,35 @@ import { SyslogAuditStatusPanel } from "./syslog-audit-status";
 export default function SyslogPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const [cfg, setCfg] = useState<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 });
+  const { editor, cfg, setCfg, adoptConfig, acceptConfig } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 });
   const [status, setStatus] = useState<SyslogStatus | null>(null);
-  const [newFwd, setNewFwd] = useState<SyslogForwarder>({
+  const form = useConfigForm({ forwarder: {
     address: "",
     port: 514,
     proto: "udp",
-  });
+  } as SyslogForwarder });
+  const [newFwd, setNewFwd] = form.field("forwarder");
+  const { refreshForm } = form;
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     setLoading(true);
     setError(null);
     try {
       const svc = await api.getServicesStatus();
       setStatus(svc?.syslog ?? null);
       const s = await api.getSyslog();
-      setCfg(
+      refreshForm(s, keepEdits);
+      adoptConfig(
         s ?? {
           forwarders: [],
           batchSize: 500,
           flushEvery: 2,
-        },
-      );
+        }, keepEdits);
       toast("Syslog status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -53,7 +58,7 @@ export default function SyslogPage() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, adoptConfig, refreshForm]);
 
   useConfigRefresh(refresh);
 
@@ -83,6 +88,7 @@ export default function SyslogPage() {
       return;
     }
     setCfg((c) => ({
+      ...c,
       forwarders: [...(c.forwarders ?? []), { ...newFwd, address: newFwd.address.trim() }],
     }));
     setNewFwd({ address: "", port: 514, proto: "udp" });
@@ -91,6 +97,7 @@ export default function SyslogPage() {
   function deleteForwarder(idx: number) {
     if (!canEdit) return;
     setCfg((c) => ({
+      ...c,
       forwarders: (c.forwarders ?? []).filter((_, i) => i !== idx),
     }));
   }
@@ -98,12 +105,13 @@ export default function SyslogPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
+    const submitted = editor;
     const saved = await save.run("save", () => api.setSyslog(cfg), {
       success: "Syslog staged — commit to apply.",
       failure: "Failed to save syslog settings.",
     });
     if (!saved) return;
-    if (saved.ok) setCfg(saved.data);
+    if (saved.ok) acceptConfig(submitted, saved.data);
     else setError(saved.error);
   }
 
@@ -113,7 +121,7 @@ export default function SyslogPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={() => refresh()}
+            onClick={() => refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -139,6 +147,7 @@ export default function SyslogPage() {
         </div>
       }
     >
+      <ConfigEditNotice superseded={editor.superseded || form.editor.superseded} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.

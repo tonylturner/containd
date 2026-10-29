@@ -1,8 +1,10 @@
 "use client";
 
+import { useConfigEditor } from "../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { api, isAdmin, type DHCPConfig, type DHCPLease, type DHCPPool, type DHCPReservation, type DHCPStatus } from "../../lib/api";
@@ -29,35 +31,6 @@ function normalize(cfg: DHCPConfig | null): DHCPConfig {
   };
 }
 
-/**
- * The form next to the config last read from or accepted by the server.
- * `superseded` marks a server copy that changed while edits were unsaved.
- */
-type Editor = { cfg: DHCPConfig; server: DHCPConfig; superseded: boolean };
-
-function sameConfig(a: DHCPConfig, b: DHCPConfig): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function fresh(cfg: DHCPConfig): Editor {
-  return { cfg, server: cfg, superseded: false };
-}
-
-/**
- * Takes a config just read from the server. Unsaved edits stay in place unless
- * the user asked for the reload, so a refresh triggered elsewhere, such as the
- * one that follows a staged save, cannot discard them.
- */
-function adopt(editor: Editor, next: DHCPConfig, keepEdits: boolean): Editor {
-  if (!keepEdits || sameConfig(editor.cfg, editor.server)) return fresh(next);
-  return { cfg: editor.cfg, server: next, superseded: editor.superseded || !sameConfig(next, editor.server) };
-}
-
-/** Takes the server's echo of a save; edits made since the save was submitted stay in place. */
-function accept(editor: Editor, submitted: DHCPConfig, next: DHCPConfig): Editor {
-  return sameConfig(editor.cfg, submitted) ? fresh(next) : { cfg: editor.cfg, server: next, superseded: false };
-}
-
 function poolsToText(pools: DHCPPool[]): string {
   return pools.map((p) => `${p.iface},${p.start},${p.end}`).join("\n");
 }
@@ -70,8 +43,7 @@ function textToPools(text: string): DHCPPool[] {
     .map((l) => {
       const [iface, start, end] = l.split(",").map((s) => s.trim());
       return { iface: iface || "", start: start || "", end: end || "" };
-    })
-    .filter((p) => p.iface && p.start && p.end);
+    });
 }
 
 function reservationsToText(reservations: DHCPReservation[]): string {
@@ -86,19 +58,13 @@ function textToReservations(text: string): DHCPReservation[] {
     .map((l) => {
       const [iface, mac, ip] = l.split(",").map((s) => s.trim());
       return { iface: iface || "", mac: mac || "", ip: ip || "" };
-    })
-    .filter((r) => r.iface && r.mac && r.ip);
+    });
 }
 
 export default function DHCPPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const [editor, setEditor] = useState<Editor>(() => fresh(normalize(null)));
-  const { cfg } = editor;
-  const dirty = !sameConfig(cfg, editor.server);
-  const setCfg = useCallback((update: (cfg: DHCPConfig) => DHCPConfig) => {
-    setEditor((e) => ({ ...e, cfg: update(e.cfg) }));
-  }, []);
+  const { editor, cfg, setCfg, dirty, adoptConfig, acceptConfig, text, setText } = useConfigEditor(() => normalize(null));
   const [status, setStatus] = useState<DHCPStatus | null>(null);
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
@@ -116,7 +82,7 @@ export default function DHCPPage() {
       const svc = await api.getServicesStatus();
       setStatus(svc?.dhcp ?? null);
       const next = normalize(await api.getDHCP());
-      setEditor((e) => adopt(e, next, keepEdits));
+      adoptConfig(next, keepEdits);
       toast("DHCP status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -125,7 +91,7 @@ export default function DHCPPage() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, adoptConfig]);
 
   const refreshLeases = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     setLeaseError(null);
@@ -165,16 +131,21 @@ export default function DHCPPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
-  const listenIfacesText = useMemo(() => (cfg.listenIfaces ?? []).join(", "), [cfg.listenIfaces]);
-  const dnsServersText = useMemo(() => (cfg.dnsServers ?? []).join(", "), [cfg.dnsServers]);
-  const poolsText = useMemo(() => poolsToText(cfg.pools ?? []), [cfg.pools]);
-  const reservationsText = useMemo(() => reservationsToText(cfg.reservations ?? []), [cfg.reservations]);
+  const listenIfacesText = text("listenIfaces", (cfg.listenIfaces ?? []).join(", "));
+  const dnsServersText = text("dnsServers", (cfg.dnsServers ?? []).join(", "));
+  const poolsText = text("pools", poolsToText(cfg.pools ?? []));
+  const reservationsText = text("reservations", reservationsToText(cfg.reservations ?? []));
 
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    const submitted = cfg;
-    const saved = await save.run("save", () => api.setDHCP(submitted), {
+    const submitted = editor;
+    const payload = { ...cfg,
+      listenIfaces: listenIfacesText.split(",").map((s) => s.trim()).filter(Boolean),
+      dnsServers: dnsServersText.split(",").map((s) => s.trim()).filter(Boolean),
+      pools: textToPools(poolsText), reservations: textToReservations(reservationsText),
+    };
+    const saved = await save.run("save", () => api.setDHCP(payload), {
       success: "DHCP staged — commit to apply.",
       failure: "Failed to save DHCP settings.",
     });
@@ -184,7 +155,7 @@ export default function DHCPPage() {
       return;
     }
     const next = normalize(saved.data);
-    setEditor((e) => accept(e, submitted, next));
+    acceptConfig(submitted, next);
   }
 
   return (
@@ -331,15 +302,7 @@ export default function DHCPPage() {
                 <input
                   value={listenIfacesText}
                   disabled={!canEdit}
-                  onChange={(e) =>
-                    setCfg((c) => ({
-                      ...c,
-                      listenIfaces: e.target.value
-                        .split(",")
-                        .map((s) => s.trim())
-                        .filter(Boolean),
-                    }))
-                  }
+                  onChange={(e) => setText("listenIfaces", e.target.value)}
                   placeholder="lan2, lan3"
                   className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
@@ -381,15 +344,7 @@ export default function DHCPPage() {
                 <input
                   value={dnsServersText}
                   disabled={!canEdit}
-                  onChange={(e) =>
-                    setCfg((c) => ({
-                      ...c,
-                      dnsServers: e.target.value
-                        .split(",")
-                        .map((s) => s.trim())
-                        .filter(Boolean),
-                    }))
-                  }
+                  onChange={(e) => setText("dnsServers", e.target.value)}
                   placeholder="192.168.1.1, 1.1.1.1"
                   className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
@@ -418,7 +373,7 @@ export default function DHCPPage() {
                   rows={6}
                   value={poolsText}
                   disabled={!canEdit}
-                  onChange={(e) => setCfg((c) => ({ ...c, pools: textToPools(e.target.value) }))}
+                  onChange={(e) => setText("pools", e.target.value)}
                   placeholder={"lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200"}
                   className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
@@ -433,7 +388,7 @@ export default function DHCPPage() {
                   rows={6}
                   value={reservationsText}
                   disabled={!canEdit}
-                  onChange={(e) => setCfg((c) => ({ ...c, reservations: textToReservations(e.target.value) }))}
+                  onChange={(e) => setText("reservations", e.target.value)}
                   placeholder={"lan2,aa:bb:cc:dd:ee:ff,192.168.10.50"}
                   className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />

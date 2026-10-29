@@ -245,6 +245,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pauses for two quiet minutes after packet loss or an inspection bypass, and
   resumes on its own; resolver admission is limited to industrial traffic and
   bounded. NFQUEUE and PCAP evidence reports `correlationStatus: wire`.
+- Successful IDS imports and zone, interface and identity collection changes
+  appear immediately without discarding unrelated edits. Saving IDS rules keeps
+  imported additions; import and creation forms do not block configuration refreshes.
+  VPN profile uploads likewise update their configuration path while retaining edits.
+- DHCP, DNS, NTP, syslog, AV, proxy, VPN, IDS, NAT, routing, zone, interface,
+  wizard and identity editors keep unsaved edits during staged-save, commit
+  and automatic refreshes, and warn when settings change on the server.
+  Explicit Refresh discards edits. List fields retain unfinished text while typing.
 - CIP read-only rules no longer classify Apply Attributes, Set Member,
   connection controls or class-specific mutations as reads. Classification
   uses the request target and validates supported read bodies; unknown
