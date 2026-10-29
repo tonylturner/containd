@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 containd Authors
 
-//go:build linux
-
 package pcap
 
 import (
@@ -10,6 +8,7 @@ import (
 	"encoding/binary"
 	"strings"
 	"testing"
+	"time"
 )
 
 func makePCAPRecord(inclLen uint32, payload []byte) []byte {
@@ -21,7 +20,8 @@ func makePCAPRecord(inclLen uint32, payload []byte) []byte {
 
 func TestReadPCAPPacketRejectsLengthAboveSnaplen(t *testing.T) {
 	data := makePCAPRecord(128, nil)
-	_, _, err := readPCAPPacket(bytes.NewReader(data), 64)
+	reader := &pcapReader{r: bytes.NewReader(data), order: binary.LittleEndian, tick: time.Microsecond, snaplen: 64}
+	_, _, _, err := reader.readRecord()
 	if err == nil {
 		t.Fatal("expected error for packet length above snaplen")
 	}
@@ -31,8 +31,9 @@ func TestReadPCAPPacketRejectsLengthAboveSnaplen(t *testing.T) {
 }
 
 func TestReadPCAPPacketRejectsLengthAboveMaximum(t *testing.T) {
-	data := makePCAPRecord(maxPCAPPacketLen+1, nil)
-	_, _, err := readPCAPPacket(bytes.NewReader(data), maxPCAPPacketLen+1)
+	data := makePCAPRecord(maxPCAPRecordSize+1, nil)
+	reader := &pcapReader{r: bytes.NewReader(data), order: binary.LittleEndian, tick: time.Microsecond, snaplen: maxPCAPRecordSize + 1}
+	_, _, _, err := reader.readRecord()
 	if err == nil {
 		t.Fatal("expected error for packet length above max")
 	}
@@ -44,9 +45,10 @@ func TestReadPCAPPacketRejectsLengthAboveMaximum(t *testing.T) {
 func TestReadPCAPPacketAcceptsValidLength(t *testing.T) {
 	payload := []byte{1, 2, 3, 4}
 	data := makePCAPRecord(uint32(len(payload)), payload)
-	_, got, err := readPCAPPacket(bytes.NewReader(data), 64)
+	reader := &pcapReader{r: bytes.NewReader(data), order: binary.LittleEndian, tick: time.Microsecond, snaplen: 64}
+	_, got, _, err := reader.readRecord()
 	if err != nil {
-		t.Fatalf("readPCAPPacket() error = %v", err)
+		t.Fatalf("readRecord() error = %v", err)
 	}
 	if !bytes.Equal(got, payload) {
 		t.Fatalf("payload mismatch: got %v want %v", got, payload)

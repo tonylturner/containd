@@ -235,6 +235,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PCAP analysis and replay honor big-endian and nanosecond captures. Analysis
+  reports truncated coverage for partial final records instead of hiding them.
+
 - Live and offline DPI events retain packet capture timestamps, including
   malformed events; ICS tagging no longer replaces them with wall time.
 

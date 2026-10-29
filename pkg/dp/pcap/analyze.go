@@ -19,8 +19,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/learn"
 )
 
-const maxPCAPRecordSize = 16 << 20 // 16 MiB
-
 // AnalysisResult holds the outcome of offline PCAP analysis.
 type AnalysisResult struct {
 	Identifications []Identification `json:"identifications"`
@@ -31,6 +29,9 @@ type AnalysisResult struct {
 	Duration        time.Duration  `json:"duration"`
 	PacketCount     int            `json:"packetCount"`
 	ByteCount       int            `json:"byteCount"`
+	// Truncated reports incomplete records or captured packets. A partial
+	// record header cannot safely be attributed to any particular flow.
+	Truncated bool `json:"truncated"`
 }
 
 // FlowSummary describes a single network flow observed in the PCAP.
@@ -53,7 +54,7 @@ type eventCallback func(srcIP, dstIP string, ev dpi.Event)
 // AnalyzeForPolicy. If onEvent is non-nil it is called for each DPI event
 // with the packet-level source and destination IPs.
 func analyzeCore(r io.Reader, opts AnalysisOptions, onEvent eventCallback, decoders ...dpi.Decoder) (*AnalysisResult, error) {
-	snaplen, err := readPCAPHeader(r)
+	reader, err := newPCAPReader(r)
 	if err != nil {
 		return nil, fmt.Errorf("pcap header: %w", err)
 	}
@@ -84,13 +85,20 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, onEvent eventCallback, decod
 	var firstTS, lastTS time.Time
 
 	for {
-		ts, data, truncated, err := readPCAPRecord(r, snaplen)
-		if err != nil {
-			if endOfPCAP(err) {
-				break
-			}
-			return nil, fmt.Errorf("pcap record: %w", err)
+		ts, data, truncated, err := reader.readRecord()
+		if err == io.EOF {
+			break
 		}
+		if err != nil {
+			if err != io.ErrUnexpectedEOF {
+				return nil, fmt.Errorf("pcap record: %w", err)
+			}
+			result.Truncated = true
+			if data == nil {
+				break // incomplete record header: no trustworthy tuple
+			}
+		}
+		result.Truncated = result.Truncated || truncated
 		updateAnalysisPacketStats(result, ts, len(data), &firstTS, &lastTS)
 		if ts.After(watermark) {
 			watermark = ts
@@ -114,7 +122,7 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, onEvent eventCallback, decod
 		}
 		observer.record(observer.packet(pkt, state, ts, truncated), result, flowEvents, onEvent)
 		var events []dpi.Event
-		if pkt.Invalid == "" {
+		if pkt.Invalid == "" && !truncated {
 			events = analyzePacket(mgr, sessions, state, pkt, ts)
 		}
 		recordAnalysisEvents(result, flowEvents, hash, pkt.SrcIP.String(), pkt.DstIP.String(), events, onEvent)
@@ -130,10 +138,6 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, onEvent eventCallback, decod
 	}
 
 	return result, nil
-}
-
-func endOfPCAP(err error) bool {
-	return err == io.EOF || err == io.ErrUnexpectedEOF
 }
 
 func updateAnalysisPacketStats(result *AnalysisResult, ts time.Time, size int, firstTS, lastTS *time.Time) {
@@ -332,56 +336,6 @@ func AnalyzeForPolicy(r io.Reader, decoders ...dpi.Decoder) (*PolicyAnalysis, er
 		Stats:        *result,
 		EventSummary: eventSummary,
 	}, nil
-}
-
-// pcapMagicLE is the PCAP magic number in little-endian byte order.
-const pcapMagicLE = 0xa1b2c3d4
-
-// pcapMagicBE is the PCAP magic number in big-endian byte order (swapped).
-const pcapMagicBE = 0xd4c3b2a1
-
-// readPCAPHeader reads and validates the 24-byte PCAP global header.
-func readPCAPHeader(r io.Reader) (uint32, error) {
-	header := make([]byte, 24)
-	if _, err := io.ReadFull(r, header); err != nil {
-		return 0, err
-	}
-	magic := binary.LittleEndian.Uint32(header[0:])
-	if magic != pcapMagicLE && magic != pcapMagicBE {
-		return 0, fmt.Errorf("invalid pcap magic: 0x%08x", magic)
-	}
-	snaplen := binary.LittleEndian.Uint32(header[16:])
-	if magic == pcapMagicBE {
-		snaplen = binary.BigEndian.Uint32(header[16:])
-	}
-	return snaplen, nil
-}
-
-// readPCAPRecord reads a single PCAP packet record (16-byte header + data).
-func readPCAPRecord(r io.Reader, snaplen uint32) (time.Time, []byte, bool, error) {
-	rec := make([]byte, 16)
-	if _, err := io.ReadFull(r, rec); err != nil {
-		return time.Time{}, nil, false, err
-	}
-	sec := binary.LittleEndian.Uint32(rec[0:])
-	usec := binary.LittleEndian.Uint32(rec[4:])
-	inclLen := binary.LittleEndian.Uint32(rec[8:])
-	truncated := binary.LittleEndian.Uint32(rec[12:]) > inclLen
-	if snaplen > 0 && inclLen > snaplen {
-		return time.Time{}, nil, false, fmt.Errorf("invalid captured length %d exceeds snaplen %d", inclLen, snaplen)
-	}
-	if inclLen > maxPCAPRecordSize {
-		return time.Time{}, nil, false, fmt.Errorf("invalid captured length %d exceeds maximum %d", inclLen, maxPCAPRecordSize)
-	}
-	if inclLen == 0 {
-		return time.Unix(int64(sec), int64(usec)*1000), nil, truncated, nil
-	}
-	data := make([]byte, inclLen)
-	if _, err := io.ReadFull(r, data); err != nil {
-		return time.Time{}, nil, false, err
-	}
-	ts := time.Unix(int64(sec), int64(usec)*1000)
-	return ts, data, truncated, nil
 }
 
 // decodeEthernetPacket strips the Ethernet (and one 802.1Q) header and
