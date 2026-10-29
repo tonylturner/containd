@@ -55,11 +55,9 @@ func ExportRules(rules []config.IDSRule, format string) (ExportResult, error) {
 	case FormatSnort:
 		return ExportSnortRules(rules)
 	case FormatYARA:
-		text, err := ExportYARARules(rules)
-		return ExportResult{Text: text}, err
+		return ExportYARARules(rules)
 	case FormatSigma:
-		text, err := ExportSigmaRules(rules)
-		return ExportResult{Text: text}, err
+		return ExportSigmaRules(rules)
 	default:
 		return ExportResult{}, fmt.Errorf("unsupported export format: %s", format)
 	}

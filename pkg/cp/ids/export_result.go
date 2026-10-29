@@ -17,7 +17,7 @@ type ExportRefusal struct {
 }
 
 // ExportResult includes downloadable text and every refused rule.
-// Text includes one JSON comment per refusal for rules-file formats.
+// Text includes one JSON comment per refusal, using the target comment syntax.
 type ExportResult struct {
 	Text     []byte
 	Refusals []ExportRefusal
@@ -41,6 +41,10 @@ func (e *RuleExportError) Is(target error) bool {
 }
 
 func exportRulesFile(rules []config.IDSRule, single func(config.IDSRule) (string, error)) (ExportResult, error) {
+	return exportRuleSet(rules, single, "#", "")
+}
+
+func exportRuleSet(rules []config.IDSRule, single func(config.IDSRule) (string, error), comment, separator string) (ExportResult, error) {
 	var result ExportResult
 	var body bytes.Buffer
 	for _, rule := range rules {
@@ -53,12 +57,15 @@ func exportRulesFile(rules []config.IDSRule, single func(config.IDSRule) (string
 			result.Refusals = append(result.Refusals, ExportRefusal{RuleID: refusal.RuleID, Reason: refusal.Error()})
 			continue
 		}
+		if body.Len() > 0 {
+			body.WriteString(separator)
+		}
 		body.WriteString(text)
 		body.WriteByte('\n')
 	}
 	var out bytes.Buffer
 	if len(result.Refusals) > 0 {
-		fmt.Fprintf(&out, "# containd: %d rule(s) refused; not included below\n", len(result.Refusals))
+		fmt.Fprintf(&out, "%s containd: %d rule(s) refused; not included below\n", comment, len(result.Refusals))
 		for _, refusal := range result.Refusals {
 			// JSON escaping keeps untrusted IDs and predicates on one comment
 			// line, including embedded newlines and Unicode line separators.
@@ -66,7 +73,7 @@ func exportRulesFile(rules []config.IDSRule, single func(config.IDSRule) (string
 			if err != nil {
 				return ExportResult{}, err
 			}
-			fmt.Fprintf(&out, "# refused: %s\n", data)
+			fmt.Fprintf(&out, "%s refused: %s\n", comment, data)
 		}
 	}
 	out.Write(body.Bytes())

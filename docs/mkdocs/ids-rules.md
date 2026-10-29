@@ -121,13 +121,32 @@ there are currently no native application-predicate mappings.
 
 The response stays a file attachment, even when every rule is refused.
 `X-Containd-IDS-Refused` gives the refused count (zero for a complete export).
-Rules files begin with a comment for each refusal, containing JSON
-`{"rule_id":"...","reason":"..."}` after `# refused: `. No refused rule is
-emitted as an active rule. The Export panel shows the count after download;
-inspect the comments before installing the file in another engine.
+All formats begin with a comment for each refusal, containing JSON
+`{"rule_id":"...","reason":"..."}` after `# refused: ` (`// refused: ` for YARA).
+No refused rule is emitted as an active rule. The Export panel shows the count
+after download; inspect the comments before installing the file in another engine.
 
-Sigma and YARA exports retain their existing conversion behavior; they are not
-covered by the rules-file semantic-equivalence guarantee. Same-format
-`rawSource` is authoritative: to edit an imported rule's source semantics,
-edit and reimport the original source rather than expecting normalized edits
-to rewrite it.
+Sigma and YARA use the same preserve-or-refuse policy:
+
+- **Sigma:** only original Sigma detection source is exported. There is no
+  established target-backend mapping for native decoder fields; `attr.` is not
+  stripped and native conditions are not approximated as Sigma modifiers.
+  Protocol and kind quick filters are refused, even alongside original source:
+  Sigma metadata tags cannot enforce them. Network scope and byte-buffer
+  predicates are also refused. Native rules without original Sigma source are
+  refused rather than emitted without a detection.
+  Current Sigma imports do not retain per-rule original source, so they are
+  refused too; the JSON backup remains available without lossy conversion.
+- **YARA:** pure `yaraStrings` content definitions and their `yara.condition`
+  expression are exported (default: `any of them`). Original YARA source remains
+  unchanged. Any protocol, kind, `when`, network scope or network
+  `contentMatches` predicate is refused, including when attached to original
+  YARA source. Metadata-only rules are refused.
+  Synthesized rules accept literal hex byte pairs without modifiers and regex
+  patterns without delimiter slashes or newlines; unsupported syntax is refused.
+  Conditions must be a single expression, not additional rule source.
+
+Disabled rules are refused in every format. Same-format `rawSource` remains
+authoritative for its original source predicates: edit and reimport the source
+rather than expecting normalized edits to rewrite it. The additional Sigma and
+YARA constraints listed above are never silently discarded.

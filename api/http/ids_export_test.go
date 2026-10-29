@@ -26,8 +26,18 @@ func TestIDSExportDownload(t *testing.T) {
 		{"empty", "snort", "0", "text/plain", nil, 200},
 		{"case", "SNORT", "0", "text/plain", []config.IDSRule{{ID: "1", Proto: "tcp"}}, 200},
 		{"default", "", "0", "text/plain", []config.IDSRule{{ID: "1", Proto: "tcp"}}, 200},
-		{"sigma", "sigma", "0", "text/yaml", []config.IDSRule{{ID: "1", Title: "Sigma"}}, 200},
-		{"yara", "yara", "0", "text/plain", []config.IDSRule{{ID: "1", Title: "YARA"}}, 200},
+		{"sigma", "sigma", "0", "text/yaml", []config.IDSRule{{ID: "1", SourceFormat: "sigma", RawSource: "title: Sigma\ndetection: {selection: {field: value}, condition: selection}\n"}}, 200},
+		{"yara", "yara", "0", "text/plain", []config.IDSRule{{ID: "1", Title: "YARA", YARAStrings: []config.YARAString{{Name: "$a", Pattern: "test"}}}}, 200},
+		{"sigma refused", "sigma", "1", "text/yaml", []config.IDSRule{{ID: "2", Proto: "modbus"}}, 200},
+		{"yara refused", "yara", "1", "text/plain", []config.IDSRule{{ID: "2", Proto: "modbus"}}, 200},
+		{"sigma partial", "sigma", "1", "text/yaml", []config.IDSRule{
+			{ID: "2", Proto: "modbus"},
+			{ID: "1", SourceFormat: "sigma", RawSource: "title: Sigma\ndetection: {selection: {field: value}, condition: selection}\n"},
+		}, 200},
+		{"yara partial", "yara", "1", "text/plain", []config.IDSRule{
+			{ID: "2", Proto: "modbus"},
+			{ID: "1", Title: "YARA", YARAStrings: []config.YARAString{{Name: "$a", Pattern: "test"}}},
+		}, 200},
 		{"unsupported", "unknown", "", "", nil, 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,12 +60,25 @@ func TestIDSExportDownload(t *testing.T) {
 				!strings.HasPrefix(rec.Header().Get("Content-Type"), tc.contentType) {
 				t.Fatalf("headers = %v", rec.Header())
 			}
-			if tc.count == "1" && (!strings.Contains(rec.Body.String(), `# refused: {"rule_id":"2"`) ||
+			prefix := "#"
+			if tc.query == "yara" {
+				prefix = "//"
+			}
+			if tc.count == "1" && (!strings.Contains(rec.Body.String(), prefix+` refused: {"rule_id":"2"`) ||
 				!strings.Contains(rec.Body.String(), "proto=") || strings.Contains(rec.Body.String(), "alert ip ")) {
 				t.Fatalf("missing refusal or widened rule: %s", rec.Body)
 			}
-			if strings.Contains(tc.name, "partial") && !strings.Contains(rec.Body.String(), "alert tcp ") {
-				t.Fatalf("lost accepted rule: %s", rec.Body)
+			if strings.Contains(tc.name, "partial") {
+				acceptedText := "alert tcp "
+				switch tc.query {
+				case "sigma":
+					acceptedText = "title: Sigma"
+				case "yara":
+					acceptedText = "rule YARA"
+				}
+				if !strings.Contains(rec.Body.String(), acceptedText) {
+					t.Fatalf("lost accepted rule: %s", rec.Body)
+				}
 			}
 		})
 	}

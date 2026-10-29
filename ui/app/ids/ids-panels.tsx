@@ -309,7 +309,7 @@ export function ExportPanel({ ruleCount }: { ruleCount: number }) {
   return (
     <Card title="Export rules">
       <p className="mb-4 text-xs text-(--text-muted)">
-        Download running rules in your chosen format. Snort and Suricata refuse
+        Download running rules in your chosen format. All formats refuse
         rules they cannot preserve; the file lists each refusal. Unsaved and
         staged changes are not included.
       </p>

@@ -4,6 +4,7 @@
 package ids
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -49,31 +50,22 @@ func TestExportSigmaFromFields(t *testing.T) {
 		Labels: map[string]string{},
 	}
 	out, err := ExportSigmaRule(rule)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	s := string(out)
-	if !strings.Contains(s, "title: Test Detection") {
-		t.Errorf("missing title in output: %s", s)
-	}
-	if !strings.Contains(s, "level: high") {
-		t.Errorf("missing level in output: %s", s)
-	}
-	if !strings.Contains(s, "containd.proto.modbus") {
-		t.Errorf("missing proto tag in output: %s", s)
+	var refusal *RuleExportError
+	if len(out) != 0 || !errors.As(err, &refusal) || refusal.RuleID != rule.ID || !strings.Contains(refusal.Predicate, "proto") {
+		t.Fatalf("native filters lost: %q %v", out, err)
 	}
 }
 
 func TestExportSigmaMultipleRules(t *testing.T) {
 	rules := []config.IDSRule{
-		{ID: "r1", Title: "Rule One", Labels: map[string]string{}},
-		{ID: "r2", Title: "Rule Two", Labels: map[string]string{}},
+		{ID: "r1", SourceFormat: FormatSigma, RawSource: "title: One\ndetection: {selection: {field: value}, condition: selection}\n"},
+		{ID: "r2", SourceFormat: FormatSigma, RawSource: "title: Two\ndetection: {selection: {field: value}, condition: selection}\n"},
 	}
 	out, err := ExportSigmaRules(rules)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(string(out), "---") {
+	if !strings.Contains(string(out.Text), "---") {
 		t.Error("expected document separator in multi-rule output")
 	}
 }
@@ -294,17 +286,19 @@ func TestExportYARAFromFields(t *testing.T) {
 func TestExportYARAMultipleRules(t *testing.T) {
 	rules := []config.IDSRule{
 		{
-			ID:    "r1",
-			Title: "RuleOne",
+			ID:          "r1",
+			Title:       "RuleOne",
+			YARAStrings: []config.YARAString{{Name: "$a", Pattern: "one", Type: "text"}},
 			Labels: map[string]string{
-				"yara.condition": "true",
+				"yara.condition": "$a",
 			},
 		},
 		{
-			ID:    "r2",
-			Title: "RuleTwo",
+			ID:          "r2",
+			Title:       "RuleTwo",
+			YARAStrings: []config.YARAString{{Name: "$a", Pattern: "two", Type: "text"}},
 			Labels: map[string]string{
-				"yara.condition": "true",
+				"yara.condition": "$a",
 			},
 		},
 	}
@@ -312,7 +306,7 @@ func TestExportYARAMultipleRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	s := string(out)
+	s := string(out.Text)
 	if strings.Count(s, "rule ") != 2 {
 		t.Errorf("expected 2 rules in output, got: %s", s)
 	}

@@ -44,6 +44,22 @@ for (const format of ["Snort", "Suricata"]) {
   }
 }
 
+for (const [format, ext, prefix] of [["Sigma", ".yml", "#"], ["YARA", ".yar", "//"]]) {
+  test(`${format} download reports refused native predicates`, async ({ page }) => {
+    await openExport(page);
+    await page.route("**/api/v1/ids/export?**", (route) => route.fulfill({
+      contentType: format === "Sigma" ? "text/yaml" : "text/plain",
+      headers: { "X-Containd-IDS-Refused": "1" },
+      body: `${prefix} refused: {"rule_id":"rule-1","reason":"cannot preserve proto=modbus"}\n`,
+    }));
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: new RegExp(format) }).click();
+    expect((await download).suggestedFilename()).toMatch(new RegExp(`\\${ext}$`));
+    await expect(page.getByRole("status", { name: "Export result" })).toContainText("1 rule refused.");
+    await expect(page.getByRole("status", { name: "Export result" })).toContainText("refusal comments");
+  });
+}
+
 test("failed export clears old counts and allows retry", async ({ page }) => {
   await openExport(page);
   let attempt = 0;

@@ -5119,10 +5119,10 @@ paths:
       responses:
         '200':
           description: >-
-            Exported rule text (possibly no accepted rules). Snort and Suricata
-            files include JSON comments of the form '# refused: {"rule_id":"...",
-            "reason":"..."}' for every refused rule. Refused rules are not emitted
-            as active rules.
+            Exported rule text (possibly no accepted rules). Every format includes
+            JSON comments of the form '# refused: {"rule_id":"...","reason":"..."}'
+            for refused rules, using '//' instead of '#' for YARA.
+            Refused rules are not emitted as active rules.
           headers:
             X-Containd-IDS-Refused:
               description: Number of rules refused because their predicates cannot be preserved.

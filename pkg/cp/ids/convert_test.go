@@ -160,6 +160,13 @@ func TestExportDispatcher(t *testing.T) {
 		if len(out.Text) == 0 {
 			t.Errorf("Export(%s) returned empty output", fmt)
 		}
+		wantRefusals := 0
+		if fmt == FormatSigma || fmt == FormatYARA {
+			wantRefusals = 1
+		}
+		if len(out.Refusals) != wantRefusals {
+			t.Errorf("Export(%s) refusals=%d want=%d", fmt, len(out.Refusals), wantRefusals)
+		}
 	}
 }
 
