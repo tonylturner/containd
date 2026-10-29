@@ -2,7 +2,6 @@
 package cip
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"slices"
 
@@ -31,10 +30,16 @@ func addPathFields(path []byte, attrs map[string]any) {
 		return
 	}
 	attrs["cip_path"] = hex.EncodeToString(path)
-	for pos := 0; pos < len(path); {
-		seg := path[pos]
+	p := decodePath(path)
+	if p.finding != "" {
+		addFinding(attrs, p.finding)
+	}
+	if p.undecoded != "" {
+		addUndecoded(attrs, p.undecoded)
+	}
+	for _, seg := range p.segments {
 		key := ""
-		switch seg {
+		switch seg.code {
 		case 0x20, 0x21:
 			key = "object_class"
 		case 0x24, 0x25:
@@ -45,40 +50,16 @@ func addPathFields(path []byte, attrs map[string]any) {
 			key = "connection_point"
 		case 0x30, 0x31:
 			key = "attribute_id"
-		case 0x91: // ANSI extended symbolic segment, padded to a word
-			if pos+2 > len(path) {
-				addFinding(attrs, "cip.epath_truncated")
-				return
-			}
-			size := 2 + (int(path[pos+1])+1)/2*2
-			if size > len(path)-pos {
-				addFinding(attrs, "cip.epath_truncated")
-				return
-			}
-			pos += size
-			continue
 		default:
-			// No guessed offsets through unsupported segment formats.
-			addUndecoded(attrs, "cip.epath_unsupported")
-			return
+			continue
 		}
-		size := 2
-		if seg&1 != 0 {
-			size = 4
-		}
-		if size > len(path)-pos {
-			addFinding(attrs, "cip.epath_truncated")
-			return
-		}
-		value := uint16(path[pos+1])
-		if size == 4 {
-			value = binary.LittleEndian.Uint16(path[pos+2 : pos+4])
-		}
-		attrs[key] = value
+		attrs[key] = seg.value
 		if key == "object_class" {
-			attrs["object_class_name"] = ObjectClassName(value)
+			attrs["object_class_name"] = ObjectClassName(seg.value)
 		}
-		pos += size
+	}
+	if p.finding != "" || p.undecoded != "" {
+		return
 	}
 	class, hasClass := attrs["object_class"].(uint16)
 	instance, hasInstance := attrs["instance_id"].(uint16)

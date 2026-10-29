@@ -19,10 +19,11 @@ func (d policyScopeDecoder) OnPacket(*flow.State, *dpi.ParsedPacket) ([]dpi.Even
 	var events []dpi.Event
 	for _, protocol := range d.protocols {
 		// Enough identity for every learnable protocol: Modbus unit, FC and
-		// span, DNP3 function code, CIP service code.
+		// span, DNP3 function code, CIP service identity and access category.
 		events = append(events, dpi.Event{Proto: protocol, Kind: "request", Attributes: map[string]any{
 			"function_code": uint8(3), "unit_id": uint8(1), "address": uint16(0), "quantity": uint16(1),
-			"service_code": uint8(0x0e),
+			"service_code": uint8(0x0e), "service_name": "Get_Attribute_Single",
+			"is_write": false, "is_control": false,
 		}})
 	}
 	return events, nil

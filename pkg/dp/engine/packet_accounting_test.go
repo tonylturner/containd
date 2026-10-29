@@ -131,9 +131,9 @@ func TestAccountingGenericSplitCoalescedAndRetransmit(t *testing.T) {
 	e.HandlePacket(recordPacket(100, capture.TCPFlagPSH, "AA"))
 	assertAccounting(t, e, "rec", 1, 2, 0, 0, 0, 0)
 	e.HandlePacket(recordPacket(102, capture.TCPFlagPSH, "AABBBB"))
-	assertAccounting(t, e, "rec", 2, 8, 2, 2, 0, 0)
+	assertAccounting(t, e, "rec", 2, 8, 2, 0, 0, 0)
 	e.HandlePacket(recordPacket(100, capture.TCPFlagPSH, "AA"))
-	assertAccounting(t, e, "rec", 3, 10, 2, 2, 0, 0)
+	assertAccounting(t, e, "rec", 3, 10, 2, 0, 0, 0)
 }
 
 type accountingEndFramer struct{ recordFramer }
@@ -151,7 +151,7 @@ func TestAccountingFlowEndAddsOnlyEvents(t *testing.T) {
 		e.dpiMgr = dpi.NewManager(accountingEndFramer{})
 		// A payload-bearing close produces both packet events and flow-end events.
 		e.HandlePacket(recordPacket(100, flag, "AAAA"))
-		assertAccounting(t, e, "rec", 1, 4, 3, 1, 1, 1)
+		assertAccounting(t, e, "rec", 1, 4, 3, 0, 1, 1)
 	}
 }
 

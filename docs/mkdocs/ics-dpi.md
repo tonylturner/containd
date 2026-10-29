@@ -314,6 +314,44 @@ UDP port 44818 carries encapsulation commands such as ListIdentity, decoded like
 | Common Packet Format (CPF) | `cpf_item_types`: item types in packet order as one comma-joined lowercase hex string with no spaces; plus selected item `cpf_item_index`, `cpf_data_item_type`, and, when available, `connection_id`, `connected_sequence` |
 | CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; responses retain `response_reserved`, `general_status`, `additional_status_count` and `additional_status` when present; MSP parents carry `multi_service_count` and `multi_service_decoded_count`; each child carries `msp: true`, `msp_index` and `msp_index_path` |
 
+CIP access classification uses the request's own complete, supported EPATH,
+not the service number alone. `is_write: false` identifies a supported read;
+writes and controls carry `is_write: true`, with controls also carrying
+`is_control: true`. Unknown operations, structural wrappers and uncorrelated
+responses carry neither flag. They match neither `readOnly` nor `writeOnly`.
+Protocol statistics count them as events but not reads or writes; event totals
+need not equal the sum of reads, writes and alerts. Learning accepts CIP
+requests only with a known target-aware service name and access category.
+
+Common reads `0x01`, `0x0E` and `0x18` require empty bodies. `0x03` requires
+a nonempty, exact-length list of attribute IDs. `0x0D` is Apply Attributes
+(write), `0x19` is Set Member (write), and `0x15` is Restore (write).
+Reserved codes and `0x14` as an EtherNet/IP request are unknown; `0x11`
+Find Next Object Instance is named but its body is not supported.
+
+Object-specific codes depend on class. The supported Logix profile recognizes
+ANSI-symbolic paths consisting only of nonempty `0x91` segments and optional
+8/16-bit member segments, or Symbol class `0x6B` instance addressing.
+`0x4C` Read Tag requires exactly a nonzero 16-bit element count; `0x52`
+Read Tag Fragmented requires that count plus a 32-bit byte offset.
+Symbol `0x55` requires a nonempty, exact-length attribute-ID list.
+Template class `0x6C` instance `0x4C` requires a 32-bit offset and 16-bit
+byte count, not a tag-read body. Symbolic `0x4E` is Read Modify Write
+(write); Connection Manager class `0x06`, instance 1, `0x4E` is Forward
+Close (control). Class `0x06` `0x5B` is Large Forward Open (control), not a
+read. `0x4C` on File `0x37`, Connection Configuration `0xF3`, TCP/IP `0xF5`,
+Ethernet Link `0xF6` and Device Level Ring `0x47` is a write or control.
+
+Incomplete, ambiguous, unsupported or mixed symbolic/logical paths never
+classify as reads. Logical IDs wider than 16 bits and program-scoped browse
+prefixes are unsupported. Unconnected Send bodies, CM query bodies
+(`0x56`, `0x57`, `0x5A`), Modbus bridge reads/passthrough, PCCC commands,
+File upload transfers without file association, and Connection Configuration
+Get Status remain unknown. MSP (`0x0A`) is structural; children have their own
+categories. Per-child classification is not whole-message authorization or
+proof that a rule covers every route, child, attribute or element range.
+Responses require separate reply policy because request correlation is absent.
+
 MSP sub-events retain encapsulation and CPF/response metadata; inspection is
 bounded to 32 children total and nesting depth 8. CIP wire violations carry
 `conformance` codes: `cip.unknown_command`, `cip.encapsulation_length`,
@@ -732,7 +770,14 @@ syslog forwarding.
 Four ICS API templates provide two Modbus variants, one DNP3 example, and one
 CIP example. There is no IEC 104 template. Purdue and maintenance-window
 templates belong to the general registry, not this four-template set. Applying
-templates stages candidate changes; see
+templates stages candidate changes. The CIP monitor template uses `readOnly`
+for its ALLOW and `writeOnly` for its DENY, including control operations.
+Unknown and structural operations need separate policy; this template is not a
+catch-all DENY. Existing saved template rules are not migrated at startup.
+The general template registry skips existing rule IDs; remove old CIP template
+rules before reapplying there. The ICS template API stages replacements for
+matching IDs. Review the saved rules, default action and reply policy before
+enforcing. See
 [Policy Model](policy-model.md#templates-and-preview).
 
 The Modbus read-only template allows FC 1–4 and denies listed write functions,

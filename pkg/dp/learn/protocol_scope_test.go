@@ -21,8 +21,8 @@ func TestRecordEventIndustrialScope(t *testing.T) {
 	events := []dpi.Event{
 		{Proto: "modbus", Kind: "request", Attributes: map[string]any{"function_code": uint8(6), "unit_id": uint8(1), "address": uint16(10), "is_write": true}},
 		{Proto: "dnp3", Kind: "request", Attributes: map[string]any{"function_code": uint8(1), "function_name": "read", "object_groups": "60,60,60", "is_write": false}},
-		{Proto: "cip", Kind: "request", Attributes: map[string]any{"service_code": uint8(0x4c), "service_name": "Read_Tag", "object_class": uint16(4), "cip_path": "01042001", "address": "1/2/3", "is_write": false}},
-		{Proto: "cip", Kind: "request", Attributes: map[string]any{"service_code": uint8(0x4c), "service_name": "Read_Tag", "object_class": uint16(1), "cip_path": "01012001", "address": "1/2/3", "is_write": false}},
+		{Proto: "cip", Kind: "request", Attributes: map[string]any{"service_code": uint8(0x4c), "service_name": "Read_Tag", "object_class": uint16(0x6b), "cip_path": "206b2401", "is_write": false}},
+		{Proto: "cip", Kind: "request", Attributes: map[string]any{"service_code": uint8(0x4c), "service_name": "Template_Read", "object_class": uint16(0x6c), "cip_path": "206c2401", "is_write": false}},
 	}
 	for _, event := range events {
 		learner.RecordEvent("192.0.2.1", "192.0.2.2", event)
@@ -63,8 +63,8 @@ func TestRecordEventIndustrialScope(t *testing.T) {
 			if rule.ICS.UnitID != nil {
 				t.Errorf("CIP unexpectedly has Modbus unit ID %d", *rule.ICS.UnitID)
 			}
-			if len(rule.ICS.ObjectClasses) != 2 || rule.ICS.ObjectClasses[0] != 1 || rule.ICS.ObjectClasses[1] != 4 {
-				t.Errorf("CIP object classes = %v, want only observed classes [1 4]", rule.ICS.ObjectClasses)
+			if len(rule.ICS.ObjectClasses) != 2 || rule.ICS.ObjectClasses[0] != 0x6b || rule.ICS.ObjectClasses[1] != 0x6c {
+				t.Errorf("CIP object classes = %v, want only observed classes [0x6b 0x6c]", rule.ICS.ObjectClasses)
 			}
 		}
 	}
@@ -79,7 +79,7 @@ func TestLearnerAcceptsOnlySupportedRequests(t *testing.T) {
 	validAttributes := map[string]map[string]any{
 		"modbus": {"function_code": uint8(3), "unit_id": uint8(1), "address": uint16(10), "quantity": uint16(1)},
 		"dnp3":   {"function_code": uint8(1), "function_name": "read"},
-		"cip":    {"service_code": uint8(0x4c), "service_name": "Read_Tag"},
+		"cip":    {"service_code": uint8(0x4c), "service_name": "Read_Tag", "is_write": false},
 	}
 	for _, protocol := range []string{"modbus", "dnp3", "cip"} {
 		t.Run(protocol, func(t *testing.T) {
@@ -115,6 +115,9 @@ func TestLearnerAcceptsOnlySupportedRequests(t *testing.T) {
 	for _, event := range []dpi.Event{
 		{Proto: "dnp3", Kind: eventfields.KindRequest, Attributes: map[string]any{"function_code": uint8(34)}},
 		{Proto: "cip", Kind: eventfields.KindRequest, Attributes: map[string]any{"service_code": uint8(0x7f)}},
+		{Proto: "cip", Kind: eventfields.KindRequest, Attributes: map[string]any{"service_code": uint8(0x4c), "service_name": "Unknown(0x4C)", "is_write": false}},
+		{Proto: "cip", Kind: eventfields.KindRequest, Attributes: map[string]any{"service_code": uint8(0x4c), "service_name": "Read_Tag"}},
+		{Proto: "cip", Kind: eventfields.KindRequest, Attributes: map[string]any{"service_code": uint8(0x4c), "is_write": false}},
 	} {
 		learner := New()
 		learner.RecordEvent("192.0.2.1", "192.0.2.2", event)
