@@ -5,11 +5,29 @@ package engine
 import (
 	"fmt"
 
+	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
+
+// Seeing a wire SYN is not proof that its requests reached correlation.
+// Deliberate inspection bypasses extend the same bounded recovery window as
+// dropped observations, without changing exclusions or wire policy inputs.
+func noteCorrelationInspection(state *flow.State, pkt capture.Packet, inspected bool) {
+	c := state.Connection.Load()
+	if c == nil {
+		return
+	}
+	if !inspected {
+		c.LoseCorrelation(pkt.Timestamp, anomaly.ModbusPairingTimeout)
+		return
+	}
+	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 {
+		c.Coverage().Store(true)
+	}
+}
 
 func (e *Engine) handleTransportPacket(pkt capture.Packet, c *flow.Connection) {
 	defer func() {

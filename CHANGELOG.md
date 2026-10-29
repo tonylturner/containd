@@ -219,6 +219,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Excluded opening SYNs no longer grant complete correlation coverage;
+  deliberately bypassed requests keep translated replies from becoming false
+  unmatched-reply violations.
 - Successful background conntrack-zone checks preserve verified evidence;
   temporary authority changes no longer impose a false packet-loss recovery
   window on continuously captured Modbus connections.

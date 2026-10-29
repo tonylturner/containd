@@ -163,7 +163,11 @@ DNAT does not enable decoding on that port.
 
 Modbus pending requests are keyed by connection incarnation, request
 direction, transaction ID and unit ID. Coverage requires observing the
-incarnation's opening SYN, not merely a request. An unknown reply with verified
+incarnation's opening SYN being admitted to inspection and correlation, not
+merely tracked as a wire packet or seen as a request. Excluded openers do not
+grant coverage. Deliberately bypassed packets extend the recovery timeout on an
+already-correlated incarnation, without broadening inspection or changing
+wire-based exclusions. An unknown reply with verified
 identity and complete coverage raises a protocol violation. Known pairs still
 match when capture began midstream or evidence is unavailable.
 Missing identity or capture coverage instead raises an

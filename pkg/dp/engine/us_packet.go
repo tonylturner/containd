@@ -40,10 +40,11 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 // inline flow in the scope of an enforce ICS rule fails closed on a stream
 // error, a stream picked up mid-connection, or a decoder panic the same
 // way (failClosedRule).
-func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capture.Decision) {
+func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correlationAdmitted bool) (d capture.Decision) {
 	e.recordPacketStats(pkt, state)
 	e.iec.answerPickupChallenge(pkt)
 	if e.isDeniedTCP(state) {
+		noteCorrelationInspection(state, pkt, false)
 		return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
 	}
 	parsed := dpi.ParsedPacket{
@@ -66,6 +67,9 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 	flowHash := state.Key.Hash()
 	e.observeDomainExclusions(state, &parsed)
 	shouldInspect := e.ShouldInspect(state, &parsed)
+	if !shouldInspect {
+		noteCorrelationInspection(state, pkt, false)
+	}
 	if cached, ok := e.verdictCache.Get(flowHash); ok {
 		switch {
 		case cached.Action == verdict.AllowContinue:
@@ -76,6 +80,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 				return acceptDecision
 			}
 		default:
+			noteCorrelationInspection(state, pkt, false)
 			return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
 		}
 	}
@@ -91,6 +96,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State) (d capt
 		// unparsed, as before.
 		return acceptDecision
 	}
+	noteCorrelationInspection(state, pkt, correlationAdmitted)
 	scope := e.failClosedRule(pkt, state, &parsed)
 	parsed.FailClosed = scope != nil
 	res, panicErr := e.inspectFlow(state, &parsed)

@@ -649,13 +649,10 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	if connection != nil && e.transport != nil {
 		e.transport.trackConnection(state, now)
 	}
-	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 {
-		state.Connection.Load().Coverage().Store(true)
-	}
 	if d, ok := e.handleIECPacket(pkt, state); ok {
 		return d
 	}
-	return e.handleFlowPacket(pkt, state)
+	return e.handleFlowPacket(pkt, state, connection != nil || e.transport == nil)
 }
 
 // trackFlow returns the state of the packet's connection direction. Each
