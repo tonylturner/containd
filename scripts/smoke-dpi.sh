@@ -72,29 +72,26 @@ timestamp() {
 }
 
 log() { echo "[$(timestamp)] $*"; }
-pass() { TESTS_PASSED=$((TESTS_PASSED + 1)); log "PASS: $*"; }
+pass() {
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+  log "PASS: $*"
+}
 # check_fail records a failed assertion and lets the run continue, so one
 # run reports every assertion.
-check_fail() { FAILURES+=("$*"); log "FAIL: $*"; }
+check_fail() {
+  FAILURES+=("$*")
+  log "FAIL: $*"
+}
 
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
+# shellcheck source=scripts/smoke-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/smoke-lib.sh"
 # shellcheck source=scripts/smoke-engine-api.sh
 source "$(dirname "${BASH_SOURCE[0]}")/smoke-engine-api.sh"
 # shellcheck source=scripts/smoke-dpi-lib-parsing.sh
 source "$(dirname "${BASH_SOURCE[0]}")/smoke-dpi-lib-parsing.sh"
-
-# COMPOSE_FILE is a colon-separated list, as in docker compose itself, so an
-# override file can follow the base harness file.
-compose() {
-  local files=() args=() file
-  IFS=: read -r -a files <<<"$COMPOSE_FILE"
-  for file in "${files[@]}"; do
-    args+=(-f "$file")
-  done
-  docker compose --project-name "$SMOKE_PROJECT" "${args[@]}" "$@"
-}
 
 ensure_tools() {
   for bin in docker jq curl; do
@@ -587,17 +584,20 @@ export START_TS
 export MODBUS_SRC="${LAN_NET}.5"
 export MODBUS_DST="${WAN_NET}.4"
 
-modbus_event_filter=$(cat <<'EOF'
+modbus_event_filter=$(
+  cat <<'EOF'
 any(.[]; .proto == "modbus" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
 EOF
 )
 
-modbus_deny_filter=$(cat <<'EOF'
+modbus_deny_filter=$(
+  cat <<'EOF'
 any(.[]; .kind == "firewall.rule.hit" and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
 EOF
 )
 
-modbus_inventory_filter=$(cat <<'EOF'
+modbus_inventory_filter=$(
+  cat <<'EOF'
 any(.[]; .protocol == "modbus" and ((.lastSeen | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)) and (.ip == env.MODBUS_SRC or .ip == env.MODBUS_DST))
 EOF
 )
@@ -623,7 +623,10 @@ log "Programming OT client and Modbus server routes through engine..."
 sed 's/^/  /' "$WORK_DIR/route-setup-dpi.log"
 
 OT_ROUTE=$(compose exec -T ot_client ip route get "${WAN_NET}.4" | tr -d '\r')
-echo "$OT_ROUTE" | grep -q "via ${LAN_NET}.2" || { log "ot_client route not via engine: $OT_ROUTE"; exit 1; }
+echo "$OT_ROUTE" | grep -q "via ${LAN_NET}.2" || {
+  log "ot_client route not via engine: $OT_ROUTE"
+  exit 1
+}
 pass "OT client route uses engine for Modbus traffic"
 
 log "Testing Modbus read allow..."
@@ -788,11 +791,13 @@ if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
   fi
 fi
 
-persistent_write_filter=$(cat <<'EOF'
+persistent_write_filter=$(
+  cat <<'EOF'
 any(.[]; .proto == "modbus" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and .srcPort == (env.PERSIST_PORT | tonumber) and .attributes.function_code == 6 and .attributes.is_write == true and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))
 EOF
 )
-persistent_deny_filter=$(cat <<'EOF'
+persistent_deny_filter=$(
+  cat <<'EOF'
 any(.[]; .kind == "firewall.rule.hit" and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))
 EOF
 )
