@@ -38,16 +38,21 @@ func testRulesFileProtocolAllowlist(t *testing.T, format string, export func(con
 					t.Fatalf("application export = %q, %v", text, err)
 				}
 			}
-			// RawSource is the authority for same-format imported rules, even
-			// when normalized protocol enrichment cannot be reversed.
-			raw := "alert tcp any any -> any 502 (modbus_func:5; sid:9;)\n"
-			rule.SourceFormat, rule.RawSource = format, raw
-			text, err = export(rule)
-			if err != nil || text != raw {
-				t.Fatalf("round-trip = %q, %v", text, err)
-			}
 		})
 	}
+	t.Run("unchanged-import", func(t *testing.T) {
+		raw := "alert tcp any any -> any 502 (modbus_func:5; sid:9;)\n"
+		rules, err := ImportRules([]byte(raw), format)
+		if err != nil || len(rules) != 1 {
+			t.Fatalf("import=%+v,%v", rules, err)
+		}
+		rule := rules[0]
+		rule.RawSource = raw
+		text, err := export(rule)
+		if err != nil || text != raw {
+			t.Fatalf("round-trip=%q,%v", text, err)
+		}
+	})
 }
 
 func TestSnortExportRefusesConditions(t *testing.T) {

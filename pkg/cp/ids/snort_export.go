@@ -11,19 +11,15 @@ import (
 )
 
 // ExportSnortRule converts a containd IDSRule to a Snort rule string.
-// If the rule was originally imported from Snort and has RawSource, it is
-// returned as-is for a lossless round-trip.
+// Equivalent cached source is returned unchanged; stale or corrupt source
+// falls through to native export and its preserve-or-refuse checks.
 func ExportSnortRule(rule config.IDSRule) (string, error) {
-	if err := checkExportEnabled(rule, FormatSnort); err != nil {
-		return "", err
-	}
-	if rule.SourceFormat == "snort" && rule.RawSource != "" {
-		return rule.RawSource, nil
-	}
-	if err := checkRulesFilePredicates(rule, FormatSnort); err != nil {
-		return "", err
-	}
-	return buildSnortRule(rule), nil
+	return exportWithSourceCache(rule, FormatSnort, func(rule config.IDSRule) (string, error) {
+		if err := checkRulesFilePredicates(rule, FormatSnort); err != nil {
+			return "", err
+		}
+		return buildSnortRule(rule), nil
+	})
 }
 
 // ExportSnortRules returns rules text and explicit, commented refusals.

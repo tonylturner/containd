@@ -287,8 +287,16 @@ func TestSigmaExportStaleSource(t *testing.T) {
 			}
 			text, err := ExportSigmaRule(rule)
 			var refusal *RuleExportError
-			if len(text) != 0 || !errors.As(err, &refusal) || !strings.Contains(refusal.Predicate, field) {
-				t.Fatalf("stale %s = %q, %v", field, text, err)
+			switch field {
+			case "evaluable", "enabled", "id":
+				if len(text) != 0 || !errors.As(err, &refusal) || !strings.Contains(refusal.Predicate, field) {
+					t.Fatalf("stale %s=%q,%v", field, text, err)
+				}
+			default:
+				if err != nil || string(text) == rule.RawSource {
+					t.Fatalf("cache did not regenerate %s: %q,%v", field, text, err)
+				}
+				assertSigmaRoundTrip(t, rule, text)
 			}
 		})
 	}

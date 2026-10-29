@@ -16,9 +16,14 @@ import (
 // a third-party backend schema. Original source is returned byte-for-byte only
 // while its matching predicates still agree with the normalized rule.
 func ExportSigmaRule(rule config.IDSRule) ([]byte, error) {
-	if err := checkExportEnabled(rule, FormatSigma); err != nil {
-		return nil, err
-	}
+	text, err := exportWithSourceCache(rule, FormatSigma, func(rule config.IDSRule) (string, error) {
+		data, err := exportNativeSigmaRule(rule)
+		return string(data), err
+	})
+	return []byte(text), err
+}
+
+func exportNativeSigmaRule(rule config.IDSRule) ([]byte, error) {
 	for _, filter := range []struct{ name, value string }{
 		{"srcAddr", rule.SrcAddr}, {"dstAddr", rule.DstAddr},
 		{"srcPort", rule.SrcPort}, {"dstPort", rule.DstPort},
@@ -33,16 +38,7 @@ func ExportSigmaRule(rule config.IDSRule) ([]byte, error) {
 	if len(rule.YARAStrings) > 0 {
 		return nil, sigmaRefusal(rule, "yaraStrings (no Sigma byte-buffer mapping)")
 	}
-	if rule.SourceFormat == FormatSigma && rule.RawSource != "" {
-		original, err := ConvertSigmaFile([]byte(rule.RawSource))
-		if err != nil || len(original) != 1 {
-			return nil, sigmaRefusal(rule, "rawSource (expected one valid Sigma document)")
-		}
-		if predicate := sigmaPredicateDifference(rule, original[0]); predicate != "" {
-			return nil, sigmaRefusal(rule, predicate+" (rawSource disagrees; edit and reimport the source)")
-		}
-		return []byte(rule.RawSource), nil
-	}
+
 	if len(rule.ConversionNotes) > 0 || rule.Labels["evaluable"] == "false" {
 		return nil, sigmaRefusal(rule, "conversionNotes/evaluable (unrepresented source predicates)")
 	}
@@ -91,7 +87,7 @@ func ExportSigmaRule(rule config.IDSRule) ([]byte, error) {
 	if err != nil {
 		return nil, sigmaRefusal(rule, fmt.Sprintf("detection (%v)", err))
 	}
-	if predicate := sigmaPredicateDifference(rule, decoded); predicate != "" {
+	if predicate := rulePredicateDifference(rule, decoded); predicate != "" {
 		return nil, sigmaRefusal(rule, predicate+" (importer reads the value differently)")
 	}
 	return data, nil
@@ -127,11 +123,11 @@ func sigmaRefusal(rule config.IDSRule, predicate string) error {
 // starts (including directives) must not get a second, empty document before them.
 func ExportSigmaRules(rules []config.IDSRule) (ExportResult, error) {
 	return exportJoinedRuleSet(rules, func(rule config.IDSRule) (string, error) {
-		if len(rules) > 1 && sigmaUTF16Source([]byte(rule.RawSource)) {
-			return "", sigmaRefusal(rule, "rawSource encoding (UTF-16 bytes cannot be joined with UTF-8 documents or refusal comments)")
-		}
 		data, err := ExportSigmaRule(rule)
 		text := string(data)
+		if err == nil && len(rules) > 1 && sigmaUTF16Source(data) {
+			return "", sigmaRefusal(rule, "rawSource encoding (UTF-16 bytes cannot be joined with UTF-8 documents or refusal comments)")
+		}
 		if len(rules) > 1 {
 			text = strings.TrimPrefix(text, "\ufeff")
 		} // only a stream may carry a leading encoding BOM

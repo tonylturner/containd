@@ -65,7 +65,11 @@ func TestYARAExportPredicates(t *testing.T) {
 	raw := yaraExportSource
 	for _, filter := range []string{"", "proto", "kind", "enabled"} {
 		t.Run(format+"/raw/"+filter, func(t *testing.T) {
-			rule := config.IDSRule{ID: "raw", SourceFormat: format, RawSource: raw}
+			rules, err := ImportRules([]byte(raw), format)
+			if err != nil || len(rules) != 1 {
+				t.Fatalf("import=%+v,%v", rules, err)
+			}
+			rule := rules[0]
 			switch filter {
 			case "proto":
 				rule.Proto = "modbus"
@@ -90,7 +94,7 @@ func TestYARAExportPredicates(t *testing.T) {
 	for name, rule := range map[string]config.IDSRule{
 		"raw-when": {SourceFormat: FormatYARA, RawSource: yaraExportSource, When: leaf},
 		"source":   {SourceFormat: FormatSnort, YARAStrings: pure.YARAStrings},
-		"missing":  {SourceFormat: FormatYARA, YARAStrings: pure.YARAStrings},
+		"missing":  {SourceFormat: FormatYARA, YARAStrings: pure.YARAStrings, ConversionNotes: []string{"not evaluated against DPI events"}},
 		"address":  {SrcAddr: "10.0.0.0/8", YARAStrings: pure.YARAStrings},
 		"notes":    {ConversionNotes: []string{"unmapped"}, YARAStrings: pure.YARAStrings},
 		"type":     {YARAStrings: []config.YARAString{{Name: "$a", Pattern: "test", Type: "unknown"}}},
@@ -123,15 +127,11 @@ func TestContentExportRefusalReports(t *testing.T) {
 					if format == FormatYARA {
 						source = strings.Replace(raw, "rule Content ", "rule Content"+strconv.Itoa(i)+" ", 1)
 					}
-					rule := config.IDSRule{ID: "accepted-" + strconv.Itoa(i), SourceFormat: format, RawSource: source}
-					if format == FormatSigma {
-						var err error
-						rule, err = ConvertSigmaYAML([]byte(source))
-						if err != nil {
-							t.Fatal(err)
-						}
+					imported, err := ImportRules([]byte(source), format)
+					if err != nil || len(imported) != 1 {
+						t.Fatalf("import=%+v,%v", imported, err)
 					}
-					rules = append(rules, rule)
+					rules = append(rules, imported[0])
 				}
 				out, err := ExportRules(rules, format)
 				if err != nil || len(out.Refusals) != 1 {

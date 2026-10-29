@@ -11,19 +11,15 @@ import (
 )
 
 // ExportSuricataRule converts a containd IDSRule to a Suricata rule string.
-// If the rule was originally imported from Suricata and has RawSource, it is
-// returned as-is for a lossless round-trip.
+// Equivalent cached source is returned unchanged; stale or corrupt source
+// falls through to native export and its preserve-or-refuse checks.
 func ExportSuricataRule(rule config.IDSRule) (string, error) {
-	if err := checkExportEnabled(rule, FormatSuricata); err != nil {
-		return "", err
-	}
-	if rule.SourceFormat == "suricata" && rule.RawSource != "" {
-		return rule.RawSource, nil
-	}
-	if err := checkRulesFilePredicates(rule, FormatSuricata); err != nil {
-		return "", err
-	}
-	return buildSuricataRule(rule), nil
+	return exportWithSourceCache(rule, FormatSuricata, func(rule config.IDSRule) (string, error) {
+		if err := checkRulesFilePredicates(rule, FormatSuricata); err != nil {
+			return "", err
+		}
+		return buildSuricataRule(rule), nil
+	})
 }
 
 // ExportSuricataRules returns rules text and explicit, commented refusals.

@@ -15,13 +15,10 @@ var (
 )
 
 func checkYARAExportPredicates(rule config.IDSRule) error {
-	if err := checkExportEnabled(rule, FormatYARA); err != nil {
-		return err
-	}
 	refuse := func(predicate string) error {
 		return &RuleExportError{RuleID: rule.ID, Format: FormatYARA, Predicate: predicate}
 	}
-	// Even original YARA source cannot carry added decoder/event constraints.
+	// Native YARA output cannot carry decoder/event constraints.
 	for _, filter := range []struct{ name, value string }{
 		{"proto", rule.Proto}, {"kind", rule.Kind},
 		{"srcAddr", rule.SrcAddr}, {"dstAddr", rule.DstAddr},
@@ -37,14 +34,11 @@ func checkYARAExportPredicates(rule config.IDSRule) error {
 	if len(rule.ContentMatches) > 0 {
 		return refuse("contentMatches (network inspection buffers are not YARA byte buffers)")
 	}
-	if rule.SourceFormat == FormatYARA && rule.RawSource != "" {
-		return nil
+	if rule.SourceFormat != "" && rule.SourceFormat != FormatNative && rule.SourceFormat != FormatYARA {
+		return refuse("sourceFormat (cross-format predicates)")
 	}
-	if rule.SourceFormat != "" && rule.SourceFormat != FormatNative {
-		return refuse("sourceFormat (original YARA source required for imported rules)")
-	}
-	if len(rule.ConversionNotes) > 0 {
-		return refuse("conversionNotes (unrepresented source predicates)")
+	if len(rule.ConversionNotes) > 0 || rule.Labels["evaluable"] == "false" {
+		return refuse("conversionNotes/evaluable (unrepresented source predicates)")
 	}
 	if rule.Action != "" || rule.Labels["sigma.logsource"] != "" {
 		return refuse("action or Sigma logsource")

@@ -11,16 +11,15 @@ import (
 )
 
 // ExportYARARule converts a containd IDSRule to a YARA rule string.
-// If the rule was originally imported from YARA and has RawSource, it is
-// returned as-is for a lossless round-trip.
+// Equivalent cached source is returned unchanged; stale or corrupt source
+// falls through to native export and its preserve-or-refuse checks.
 func ExportYARARule(rule config.IDSRule) (string, error) {
-	if err := checkYARAExportPredicates(rule); err != nil {
-		return "", err
-	}
-	if rule.SourceFormat == "yara" && rule.RawSource != "" {
-		return rule.RawSource, nil
-	}
-	return buildYARARule(rule), nil
+	return exportWithSourceCache(rule, FormatYARA, func(rule config.IDSRule) (string, error) {
+		if err := checkYARAExportPredicates(rule); err != nil {
+			return "", err
+		}
+		return buildYARARule(rule), nil
+	})
 }
 
 // ExportYARARules converts multiple IDSRules to YARA .yar format.

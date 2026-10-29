@@ -4,7 +4,6 @@ package ids
 import (
 	"fmt"
 	"math"
-	"reflect"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -114,129 +113,6 @@ func sigmaExportValue(v any) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-// Equality is on matching predicates, not Go storage: enabled defaults to true,
-// YAML/JSON have different numeric containers, and AND/OR are commutative with
-// identity singleton groups. Do not equate numeric strings with numbers: the
-// evaluator treats them differently for some operations.
-func sigmaPredicateDifference(a, b config.IDSRule) string {
-	if (a.ID == "") != (b.ID == "") {
-		return "id"
-	}
-	for _, filter := range []struct{ name, a, b string }{
-		{"proto", a.Proto, b.Proto}, {"kind", a.Kind, b.Kind}, {"srcAddr", a.SrcAddr, b.SrcAddr}, {"dstAddr", a.DstAddr, b.DstAddr},
-		{"srcPort", a.SrcPort, b.SrcPort}, {"dstPort", a.DstPort, b.DstPort}, {"severity", a.Severity, b.Severity},
-	} {
-		if filter.a != filter.b {
-			return filter.name
-		}
-	}
-	if (a.Enabled != nil && !*a.Enabled) != (b.Enabled != nil && !*b.Enabled) {
-		return "enabled"
-	}
-	if (a.Labels["evaluable"] == "false") != (b.Labels["evaluable"] == "false") {
-		return "evaluable"
-	}
-	if !sigmaConditionsEqual(a.When, b.When) {
-		return "when"
-	}
-	return ""
-}
-
-func sigmaConditionsEqual(a, b config.IDSCondition) bool {
-	a = sigmaUnwrapSingleton(a)
-	b = sigmaUnwrapSingleton(b)
-	if a.Field != b.Field || sigmaDefaultOp(a) != sigmaDefaultOp(b) || !reflect.DeepEqual(sigmaCanonicalValue(a.Value), sigmaCanonicalValue(b.Value)) {
-		return false
-	}
-	if (a.Not == nil) != (b.Not == nil) {
-		return false
-	}
-	if a.Not != nil && !sigmaConditionsEqual(*a.Not, *b.Not) {
-		return false
-	}
-	return sigmaConditionGroupEqual(a.All, b.All) && sigmaConditionGroupEqual(a.Any, b.Any)
-}
-
-func sigmaDefaultOp(c config.IDSCondition) string {
-	if c.Field != "" && c.Op == "" {
-		return "equals"
-	}
-	return c.Op
-}
-
-func sigmaUnwrapSingleton(c config.IDSCondition) config.IDSCondition {
-	for c.Field == "" && c.Op == "" && c.Value == nil && c.Not == nil {
-		if len(c.All) == 1 && len(c.Any) == 0 {
-			c = c.All[0]
-		} else if len(c.Any) == 1 && len(c.All) == 0 {
-			c = c.Any[0]
-		} else {
-			break
-		}
-	}
-	return c
-}
-
-func sigmaConditionGroupEqual(a, b []config.IDSCondition) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	used := make([]bool, len(b))
-	for _, left := range a {
-		found := false
-		for j, right := range b {
-			if !used[j] && sigmaConditionsEqual(left, right) {
-				used[j] = true
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
-}
-
-func sigmaCanonicalValue(value any) any {
-	switch v := value.(type) {
-	case int:
-		return float64(v)
-	case int64:
-		return float64(v)
-	case uint8:
-		return float64(v)
-	case uint16:
-		return float64(v)
-	case uint32:
-		return float64(v)
-	case uint64:
-		return float64(v)
-	case float32:
-		return float64(v)
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for key, item := range v {
-			out[key] = sigmaCanonicalValue(item)
-		}
-		return out
-	case []string:
-		out := make([]any, len(v))
-		for i, s := range v {
-			out[i] = s
-		}
-		return out
-	case []any:
-		out := make([]any, len(v))
-		for i, s := range v {
-			out[i] = sigmaCanonicalValue(s)
-		}
-		return out
-	default:
-		return value
 	}
 }
 

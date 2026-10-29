@@ -77,11 +77,11 @@ func TestExportSigmaMultipleRules(t *testing.T) {
 
 func TestExportSuricataRoundTrip(t *testing.T) {
 	raw := `alert tcp any any -> any 502 (msg:"Modbus Write"; content:"|00 05|"; sid:1000001; rev:1;)`
-	rule := config.IDSRule{
-		ID:           "suricata-1000001",
-		SourceFormat: "suricata",
-		RawSource:    raw,
+	rules, err := ImportRules([]byte(raw), FormatSuricata)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("import=%+v,%v", rules, err)
 	}
+	rule := rules[0]
 	out, err := ExportSuricataRule(rule)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -159,11 +159,11 @@ func TestExportSuricataMultipleRules(t *testing.T) {
 
 func TestExportSnortRoundTrip(t *testing.T) {
 	raw := `alert tcp any any -> any 80 (msg:"HTTP Test"; sid:100; rev:1;)`
-	rule := config.IDSRule{
-		ID:           "snort-100",
-		SourceFormat: "snort",
-		RawSource:    raw,
+	rules, err := ImportRules([]byte(raw), FormatSnort)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("import=%+v,%v", rules, err)
 	}
+	rule := rules[0]
 	out, err := ExportSnortRule(rule)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -229,11 +229,11 @@ func TestExportYARARoundTrip(t *testing.T) {
     condition:
         $a
 }`
-	rule := config.IDSRule{
-		ID:           "yara-testmalware",
-		SourceFormat: "yara",
-		RawSource:    raw,
+	rules, err := ImportRules([]byte(raw), FormatYARA)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("import=%+v,%v", rules, err)
 	}
+	rule := rules[0]
 	out, err := ExportYARARule(rule)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

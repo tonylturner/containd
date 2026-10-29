@@ -107,10 +107,10 @@ predicate. The current conservative mapping is:
 | Removed or unknown protocols (including native `enip`) | Refused |
 | `kind`, any `when` predicate or Boolean condition tree | Refused, including service, Modbus function/unit/data, DNP3 function/object/indications and CIP service/class/instance/attribute tests |
 | Cross-format imported rules or YARA predicates | Refused; their unrepresented source predicates cannot safely be discarded |
-| Imported rules without original source, conversion notes recording lost predicates | Refused |
+| Imported rules without valid cached source | Native regeneration only when exact; conversion notes or non-evaluable guards prevent discarding unrepresented predicates |
 | Empty/multiline content, non-byte-pair hex, literal pipes in text content, negative depth/offset/within | Refused; use explicit hex bytes for literal pipes |
 | Disabled rules | Refused rather than activated in the exported file |
-| Same-format import with `rawSource` | Original source returned unchanged (unless disabled); normalized fields are not merged into it |
+| Same-format import with `rawSource` | Re-imported and returned unchanged only when its predicates still agree; otherwise native regeneration or a named refusal |
 
 The content/header vocabulary is described in the
 [Snort 3 rule-writing guide](https://docs.snort.org/rules/headers/)
@@ -154,19 +154,27 @@ Sigma and YARA use the same preserve-or-refuse policy:
   A single retained UTF-16 source can be exported alone, but is refused in a
   multi-rule export that would mix encodings.
   Original source is returned unchanged while its matching predicates and
-  severity agree with the normalized rule; stale source is refused with the
-  conflicting predicate named. Edit and reimport the source to resolve it.
+  severity agree with the normalized rule. Edited rules use the native inverse
+  when their cached source is stale or corrupt; predicates without an inverse
+  are refused rather than exporting their old values.
 - **YARA:** pure `yaraStrings` content definitions and their `yara.condition`
-  expression are exported (default: `any of them`). Original YARA source remains
-  unchanged. Any protocol, kind, `when`, network scope or network
-  `contentMatches` predicate is refused, including when attached to original
+  expression are exported (default: `any of them`). Valid, equivalent cached
+  YARA source remains unchanged. Any protocol, kind, `when`, network scope or
+  network `contentMatches` predicate is refused, including when attached to original
   YARA source. Metadata-only rules are refused.
   Synthesized rules accept literal hex byte pairs without modifiers and regex
   patterns without delimiter slashes or newlines; unsupported syntax is refused.
   Conditions must be a single expression, not additional rule source.
 
-Disabled rules are refused in every format. Same-format `rawSource` remains
-authoritative for its original source predicates: edit and reimport the source
-rather than expecting normalized edits to rewrite it. Sigma additionally checks
-that source and normalized predicates still agree. The constraints listed above
-are never silently discarded.
+Disabled rules are refused in every format. In all four formats, `rawSource` is
+an export cache, not an override for edited predicates. Before reuse, containd
+re-imports the source with that format's converter and compares event conditions,
+quick filters, network scope, byte matches and modifiers, YARA conditions, action,
+severity and matching guards. Equivalent source is returned byte for byte. A
+parse failure or difference falls through to native export, which either keeps
+the current predicates or reports a refusal naming what it cannot preserve.
+Conversion notes and non-evaluable guards are not cleared to make regeneration
+succeed. YARA imports carry such guards, so an invalidated YARA cache is refused
+when its native representation cannot be exported exactly. Formatting and
+non-predicate metadata may remain as in the original source while its cache is
+valid; use the JSON backup for the complete normalized rule record.

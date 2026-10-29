@@ -19,11 +19,8 @@ func checkRulesFilePredicates(rule config.IDSRule, format string) error {
 	if rule.SourceFormat != "" && rule.SourceFormat != FormatNative && rule.SourceFormat != format {
 		return refuse(fmt.Sprintf("sourceFormat=%q (cross-format predicates)", rule.SourceFormat))
 	}
-	if rule.SourceFormat == format {
-		return refuse("rawSource missing for imported rule")
-	}
-	if len(rule.ConversionNotes) > 0 {
-		return refuse("conversionNotes (unrepresented source predicates)")
+	if len(rule.ConversionNotes) > 0 || rule.Labels["evaluable"] == "false" {
+		return refuse("conversionNotes/evaluable (unrepresented source predicates)")
 	}
 	switch strings.ToLower(rule.Proto) {
 	case "", "ip", "tcp", "udp", "icmp":

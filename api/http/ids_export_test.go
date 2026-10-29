@@ -92,3 +92,36 @@ func TestIDSExportDownload(t *testing.T) {
 		})
 	}
 }
+
+func TestIDSExportEditedImportedSnort(t *testing.T) {
+	source := `alert tcp any any -> any any (msg:"Cache"; sid:77; rev:9;)`
+	rule, err := cpids.ParseSnortLine(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The edit narrows the destination port, but leaves the old source attached,
+	// just as editing an imported rule through the management UI does.
+	rule.DstPort = "10001"
+	store := stageStore(t)
+	if err := store.SaveIDSRules(context.Background(), []config.IDSRule{rule}); err != nil {
+		t.Fatal(err)
+	}
+	server := gin.New()
+	server.GET("/export", idsExportHandler(store))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/export?format=snort", nil))
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Containd-IDS-Refused") != "0" {
+		t.Fatalf("response=%d,%v,%s", rec.Code, rec.Header(), rec.Body)
+	}
+	text := strings.TrimSpace(rec.Body.String())
+	if text == source || !strings.HasPrefix(text, "alert tcp any any -> any 10001 (") {
+		t.Fatalf("export widened the edited port: %s", text)
+	}
+	exported, err := cpids.ParseSnortLine(text)
+	if err != nil || exported.DstPort != rule.DstPort {
+		t.Fatalf("edited import=%+v,%v", exported, err)
+	}
+	if rule.RawSource != source {
+		t.Fatal("export changed the stored source cache")
+	}
+}
