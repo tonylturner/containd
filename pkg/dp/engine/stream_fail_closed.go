@@ -119,7 +119,7 @@ func (e *Engine) failClosed(pkt capture.Packet, state *flow.State, parsed *dpi.P
 	}
 	e.closeDeniedTCP(pkt, state, proto, reason)
 	e.eventStore.Append(events.Event{
-		FlowID:    state.Key.Hash(),
+		FlowID:    state.ID(),
 		Proto:     proto,
 		Kind:      eventfields.KindDecision,
 		Timestamp: time.Now().UTC(),
@@ -148,7 +148,7 @@ func (e *Engine) stillDenied(pkt capture.Packet, state *flow.State) capture.Deci
 
 // denyFlow caches a denial without installing a kernel block.
 func (e *Engine) denyFlow(state *flow.State, reason string) {
-	e.verdictCache.Put(state.Key.Hash(), verdict.Verdict{Action: verdict.DenyDrop, Reason: reason})
+	e.verdictCache.Put(state.ID(), verdict.Verdict{Action: verdict.DenyDrop, Reason: reason})
 }
 
 // deniedStream reports the error of a stream whose connection the policy

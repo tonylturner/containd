@@ -114,7 +114,7 @@ func (r *transportResolver) noteDecodeLossLocked(pkt capture.Packet, history *tr
 func (e *Engine) bindDecodeCoverageLocked(st *flow.State, history *transportAdmission) {
 	// A packet can retain its state after concurrent denial retirement or
 	// sweeping. Never resurrect that state (or attach its history to a reuse).
-	if e.flows[st.Key.Hash()] != st {
+	if e.flows[st.Key.MapKey()] != st {
 		return
 	}
 	r := e.transport
@@ -254,7 +254,7 @@ func (e *Engine) consumeDecodeLoss(p transportPacket, connection *flow.Connectio
 	}
 	var target *transportCoverage
 	for _, key := range tuples {
-		if st := e.tupleStateLocked(key.Tuple()); st != nil && e.flows[st.Key.Hash()] == st {
+		if st := e.tupleStateLocked(key.Tuple()); st != nil && e.flows[st.Key.MapKey()] == st {
 			current := st.Connection.Load()
 			if current != nil && (current.Key == connection.Key || !connection.Verified() ||
 				sameGeneration(current.Evidence, connection.Evidence)) {

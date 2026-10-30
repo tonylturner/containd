@@ -65,7 +65,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 	}
 	defer func() { e.endStreamsOnClose(state, &parsed, d.Action == capture.Accept) }()
 
-	flowHash := state.Key.Hash()
+	flowHash := state.ID()
 	if !decodingStopped {
 		e.observeDomainExclusions(state, &parsed)
 	}

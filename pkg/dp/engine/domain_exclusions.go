@@ -97,7 +97,7 @@ func (e *Engine) observeDomain(state *flow.State, pkt *dpi.ParsedPacket, discove
 	if rule != "" {
 		e.countDomainExclusion(rule)
 		e.recordDomainCounter("dpi_exclusion_" + reason)
-		slog.Debug("DPI domain exclusion matched", "rule", rule, "reason", reason, "name", name, "flow", state.Key.Hash())
+		slog.Debug("DPI domain exclusion matched", "rule", rule, "reason", reason, "name", name, "flow", state.ID())
 	}
 }
 
@@ -123,12 +123,12 @@ func (e *Engine) pruneDomainDecisionsLocked() {
 	e.flowMu.Lock()
 	defer e.flowMu.Unlock()
 	for state := range e.domains.discoveryDecisions {
-		if e.flows[state.Key.Hash()] != state {
+		if e.flows[state.Key.MapKey()] != state {
 			delete(e.domains.discoveryDecisions, state)
 		}
 	}
 	for state := range e.domains.decisions {
-		if e.flows[state.Key.Hash()] != state {
+		if e.flows[state.Key.MapKey()] != state {
 			delete(e.domains.decisions, state)
 		}
 	}

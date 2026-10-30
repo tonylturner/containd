@@ -153,11 +153,13 @@ func (r *transportResolver) trackConnectionLocked(state *flow.State, at time.Tim
 		// must neither steal its slot nor copy its losses into the predecessor.
 		return
 	}
-	tuples := []conntrack.Tuple{observed}
+	tuples := [3]conntrack.Tuple{observed}
+	count := 1
 	if c.Evidence != nil {
-		tuples = append(tuples, c.Evidence.Original, c.Evidence.Reply)
+		tuples[1], tuples[2] = c.Evidence.Original, c.Evidence.Reply
+		count = len(tuples)
 	}
-	for _, tuple := range tuples {
+	for _, tuple := range tuples[:count] {
 		entry := r.indexed[tuple]
 		if entry != nil && !entry.connection.Closed().Load() {
 			if entry != history && entry.hasSYN && entry.connection.Key == "" {

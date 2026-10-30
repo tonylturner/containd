@@ -150,26 +150,24 @@ func (m *Manager) candidates(state *flow.State) []Decoder {
 		portMap = m.udpByPort
 	}
 
-	// Collect port-indexed decoders for both src and dst ports.
-	var indexed []Decoder
-	if portMap != nil {
-		if decs := portMap[state.Key.SrcPort]; len(decs) > 0 {
-			indexed = append(indexed, decs...)
-		}
-		if decs := portMap[state.Key.DstPort]; len(decs) > 0 {
-			// Avoid duplicates when SrcPort == DstPort.
-			if state.Key.SrcPort != state.Key.DstPort {
-				indexed = append(indexed, decs...)
-			}
-		}
+	src := portMap[state.Key.SrcPort]
+	var dst []Decoder
+	if state.Key.SrcPort != state.Key.DstPort {
+		dst = portMap[state.Key.DstPort]
 	}
-
-	if len(indexed) == 0 {
+	// Most flows select one immutable registry slice. Do not copy it on
+	// every packet; only combined lists need their own backing storage.
+	switch {
+	case len(src) == 0 && len(dst) == 0:
 		return m.anyDecoders
+	case len(dst) == 0 && len(m.anyDecoders) == 0:
+		return src
+	case len(src) == 0 && len(m.anyDecoders) == 0:
+		return dst
 	}
-	if len(m.anyDecoders) == 0 {
-		return indexed
-	}
+	indexed := make([]Decoder, 0, len(src)+len(dst)+len(m.anyDecoders))
+	indexed = append(indexed, src...)
+	indexed = append(indexed, dst...)
 	return append(indexed, m.anyDecoders...)
 }
 
@@ -191,11 +189,11 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 
 	// Clean up reassembly buffer for this flow.
 	if m.reassembler != nil {
-		key := state.Key.Hash()
+		key := state.ID()
 		m.reassembler.complete(key)
 		m.endStream(key)
 	}
-	at, ok := m.eventTimes[state.Key.Hash()]
+	at, ok := m.eventTimes[state.ID()]
 	if !ok {
 		at = eventTime(state, nil)
 	}
@@ -205,7 +203,7 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 // flowEnd returns the decoders' flow-end events. Must be called with
 // streamMu held.
 func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
-	delete(m.eventTimes, state.Key.Hash())
+	delete(m.eventTimes, state.ID())
 	var out []Event
 	var errs []error
 	for _, d := range m.candidates(state) {

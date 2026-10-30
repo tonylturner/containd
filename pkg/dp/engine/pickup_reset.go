@@ -79,7 +79,7 @@ func (e *Engine) genericResetEvent(state *flow.State, proto, reason string, targ
 	if k.Dir == flow.DirReverse {
 		k = k.Reversed()
 	}
-	e.eventStore.Append(events.Event{FlowID: state.Key.Hash(), Proto: proto, Kind: eventfields.KindSession,
+	e.eventStore.Append(events.Event{FlowID: state.ID(), Proto: proto, Kind: eventfields.KindSession,
 		Timestamp: time.Now().UTC(), SrcIP: k.SrcIP.String(), DstIP: k.DstIP.String(), SrcPort: k.SrcPort, DstPort: k.DstPort,
 		Transport: "tcp", Attributes: attrs})
 }

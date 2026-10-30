@@ -44,7 +44,7 @@ func (e *Engine) handleTransportPacket(pkt capture.Packet, c *flow.Connection, h
 // association does not rewrite the flow's key or require a service-port hint.
 func (e *Engine) tupleStateLocked(tuple conntrack.Tuple) *flow.State {
 	for _, dir := range []flow.Direction{flow.DirForward, flow.DirReverse} {
-		if st := e.flows[flow.TupleKey(tuple, dir).Hash()]; st != nil {
+		if st := e.flows[flow.TupleMapKey(tuple, dir)]; st != nil {
 			return st
 		}
 	}
@@ -88,7 +88,7 @@ func (e *Engine) retireTransportIncarnationLocked(pkt capture.Packet, incoming *
 		old := st.Connection.Load()
 		newSYN := pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 &&
 			pkt.TCP.Flags&capture.TCPFlagACK == 0
-		if isn, ok := e.transportISNs[st.Key.Hash()]; ok && isn == pkt.TCP.Seq {
+		if isn, ok := e.transportISNs[st.Key.MapKey()]; ok && isn == pkt.TCP.Seq {
 			newSYN = false
 		}
 		var evidence *conntrack.Evidence
@@ -124,7 +124,7 @@ func (e *Engine) retireTransportIncarnationLocked(pkt capture.Packet, incoming *
 				peer = old.Peer(st.Key)
 			}
 			for _, candidate := range []*flow.State{st, e.tupleStateLocked(peer.Tuple())} {
-				if candidate != nil && e.flows[candidate.Key.Hash()] == candidate {
+				if candidate != nil && e.flows[candidate.Key.MapKey()] == candidate {
 					retired = append(retired, e.dropFlowLocked(candidate.Key))
 				}
 			}
@@ -185,9 +185,9 @@ func (e *Engine) noteTransportSYNLocked(pkt capture.Packet, key flow.Key) {
 	if !pkt.Token.Inline() && pkt.Proto == 6 && pkt.TCP.Valid &&
 		pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 {
 		if e.transportISNs == nil {
-			e.transportISNs = make(map[string]uint32)
+			e.transportISNs = make(map[flow.MapKey]uint32)
 		}
-		e.transportISNs[key.Hash()] = pkt.TCP.Seq
+		e.transportISNs[key.MapKey()] = pkt.TCP.Seq
 	}
 }
 

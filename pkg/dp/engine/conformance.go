@@ -221,5 +221,5 @@ func conformanceFlowID(state *flow.State, ev dpi.Event) string {
 	if ev.FlowID != "" {
 		return ev.FlowID
 	}
-	return state.Key.Hash()
+	return state.ID()
 }

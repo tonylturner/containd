@@ -42,7 +42,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
 	at := eventTime(state, pkt)
-	m.eventTimes[state.Key.Hash()] = at
+	m.eventTimes[state.ID()] = at
 	defer func() { stampResult(&res, at) }()
 	candidates := m.candidates(state)
 	tcp := pkt.Proto == "tcp"
@@ -235,7 +235,7 @@ func malformedEvent(state *flow.State, pkt *ParsedPacket, proto string, err erro
 		attrs[eventfields.KeySessionID] = pkt.Session
 	}
 	return Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      proto,
 		Kind:       "malformed",
 		Attributes: attrs,
@@ -265,7 +265,7 @@ func streamKey(state *flow.State, pkt *ParsedPacket) (key, session string, pos p
 	if pkt.HasOffset {
 		return sessionStreamKey(pkt.Session, pkt.Dir), pkt.Session, position{kind: posOffset, off: pkt.Offset}
 	}
-	hash := state.Key.Hash()
+	hash := state.ID()
 	if pkt.TCPSeqValid {
 		return hash, hash, position{kind: posSeq, seq: pkt.TCPSeq}
 	}

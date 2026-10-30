@@ -37,8 +37,8 @@ func TestTransportRawSYNDoesNotChangeDenyISNs(t *testing.T) {
 	e.HandlePacket(pkt)
 	e.flowMu.Lock()
 	st := e.tupleStateLocked(natEvidence().Original)
-	_, denyRecorded := e.tcpISNs[st.Key.Hash()]
-	rawRecorded := e.transportISNs[st.Key.Hash()] == 100
+	_, denyRecorded := e.tcpISNs[st.Key.MapKey()]
+	rawRecorded := e.transportISNs[st.Key.MapKey()] == 100
 	e.flowMu.Unlock()
 	e.HandlePacket(pkt) // retransmission must retain the incarnation
 	e.flowMu.Lock()
