@@ -291,7 +291,7 @@ For IEC 104 (`protocol` is `iec104`), use:
 - `--ioa <ranges>` — comma-separated decimal addresses or inclusive ranges, for example `0,65536-65567,16777215` (the 24-bit address space).
 - `--read-only` — restrict the rule to read-only IEC traffic.
 - `--direction <request|response>` — select the session half.
-- `--mode <learn|enforce>` — choose the rule's ICS mode.
+- `--mode <monitor|enforce>` — choose the rule's ICS mode.
 
 Additional IEC 104 selectors:
 

@@ -35,7 +35,7 @@ PCAP analysis:
 - ICS marker and port detector are additional utility registrations, not protocols.
 
 Protocol toggles select decoders; they do not create matching firewall rules.
-See [ICS DPI](ics-dpi.md) for predicates, learn-mode limits, and IEC 104 behavior.
+See [ICS DPI](ics-dpi.md) for predicates, monitor-mode limits, and IEC 104 behavior.
 
 ## Policy and runtime state
 

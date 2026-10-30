@@ -59,7 +59,7 @@ rule is reported in the ruleset warnings
 
 - **AF_PACKET** observes packet copies and cannot prevent delivery of a packet
   already observed. ICS rules in effective enforce mode are therefore rejected
-  at validation while `nfqueueGroup` is 0; use learn mode with AF_PACKET.
+  at validation while `nfqueueGroup` is 0; use monitor mode with AF_PACKET.
 - **NFQUEUE** holds selected packets for userspace verdicts. Set the candidate
   dataplane's `nfqueueGroup` to a nonzero queue (for example 101), preserve the
   rest of the dataplane settings, and commit. The queue and rules must be active
@@ -81,15 +81,15 @@ observations and retained-event rule preview remain wire-based. See
 [Transport identity and NAT](ics-dpi.md#transport-identity-and-nat) for resolution
 statuses and late-verification behavior.
 
-DPI effective mode is per-rule `ics.mode`, then global `dpiMode`, then `learn`.
-Learn suppresses the corresponding DPI denial, **not** independent nftables
-firewall decisions or an explicit enforce-mode rule. See
+DPI effective mode is per-rule `ics.mode`, then global `dpiMode`, then `monitor`.
+Monitor rules never admit or deny traffic; independent nftables decisions,
+enforcing rules and strict enforce scopes still apply. See
 [ICS DPI modes](ics-dpi.md#dpi-modes).
 
 IEC 104 enforce rules require DPI enabled, its decoder enabled, NFQUEUE capture,
 and no overlapping DPI exclusion. Inside the IEC inspection envelope unmatched,
 malformed, unsupported, or broadcast object traffic cannot be allowed by a broad
-TCP rule. Enforce-mode tracking exhaustion is fail closed; learn-mode exhaustion
+TCP rule. Enforce-mode tracking exhaustion is fail closed; monitor-mode exhaustion
 accepts new connections without inspection. These are protocol-specific limits,
 not a universal fail-open/fail-closed guarantee. AV has separate failure settings;
 see [Config Format](config-format.md). In an enforce envelope an IEC 104
@@ -153,7 +153,8 @@ injector, or for IPv6, the connection is only dropped. A reset that fails
 makes the `iec104Enforcement` health object unhealthy while such a rule is
 loaded, even without an IEC 104 envelope (`active` stays false); the
 `enforce_unhealthy` session event still describes IEC 104 envelopes only.
-Learn-mode flows and packets without an inline verdict still pass.
+Monitor rules and observations without an inline verdict do not change delivery;
+other enforcing rules, defaults and strict scopes can still block.
 
 Inspection starts only at a SYN of a handshake that the kernel's connection
 tracking has not seen complete. A SYN without payload sent into an
@@ -171,7 +172,7 @@ prohibited command is actually stopped, not only which mode is configured.
 
 | State | Meaning |
 | --- | --- |
-| `monitoring` | The effective mode is learn: the rule observes by design. |
+| `monitoring` | The effective mode is monitor: the rule observes by design. |
 | `enforcing` | An inline path inspects every flow in the rule's scope. |
 | `partial` | Enforcing, but an exclusion lets some flows in scope skip inspection. |
 | `not_enforcing` | The effective mode is enforce, but nothing stops a prohibited command. |
@@ -192,7 +193,7 @@ Exclusion reasons name the exclusion in `value`. Reasons that only the running
 engine can know (`queue-unavailable`) carry `runtime: true`; every other reason
 also appears in a static evaluation of the same rules and settings, so the
 candidate and the applied coverage differ in configuration only when they
-differ without runtime reasons and match counts. A learn rule keeps
+differ without runtime reasons and match counts. A monitor rule keeps
 `monitoring` and lists the reasons that limit what it observes. Unrelated
 exclusions never lower a rule. Coverage appears in:
 
