@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +45,15 @@ func Import(ctx context.Context, r io.ReadSeeker, store evidence.Store, metadata
 	sealed := ds.State == evidence.DatasetSealed
 	var ingestErr error
 	var serial uint64
+	var pending []evidence.Observation
+	pendingBytes := 0
+	commit := func() {
+		if len(pending) == 0 || ingestErr != nil {
+			return
+		}
+		_, ingestErr = store.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: pending})
+		pending, pendingBytes = nil, 0
+	}
 	opts.MaxFlows = 4096
 	opts.MaxDisplayEvents = 200
 	opts.OnEvents = func(events []dpi.Event, packet int) {
@@ -68,10 +78,19 @@ func Import(ctx context.Context, r io.ReadSeeker, store evidence.Store, metadata
 					last := uint64(packet)
 					p.Evidence[i].PacketLast = &last
 				}
-				if _, err := store.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: []evidence.Observation{p}}); err != nil {
+				encoded, err := json.Marshal(p)
+				if err != nil {
 					ingestErr = err
 					return
 				}
+				if len(pending) == 128 || pendingBytes+len(encoded)+1 > (1<<20)-4096 {
+					commit()
+					if ingestErr != nil {
+						return
+					}
+				}
+				pending = append(pending, p)
+				pendingBytes += len(encoded) + 1
 			}
 			batch = nil
 		}
@@ -93,6 +112,7 @@ func Import(ctx context.Context, r io.ReadSeeker, store evidence.Store, metadata
 		flush()
 	}
 	stats, parseErr := AnalyzeWithOptions(importReader{ctx, r}, opts, decoders...)
+	commit()
 	gaps := []string{}
 	if parseErr != nil {
 		gaps = append(gaps, "import_failed")
