@@ -91,6 +91,7 @@ parsing_denied() {
     if wait_parsing_events "$name" "$port" "$since" '
       any(.[]; .proto == "iec104" and .kind == "ics.decision" and .attributes.decision == "deny"
         and .attributes.reason == $reason and ($reason != "rule" or .attributes.ruleId == "deny-other-iec104")
+        and ($reason != "nonconformant" or (.attributes.scopeId != null and .attributes.ruleId == null and .attributes.action == null and .attributes.findingCode == $code))
         and any(.attributes.conformance[]?; . == $code))
       and ([.[] | select(.proto == "ids" and .kind == "alert" and .attributes.rule_id == "ics-conformance"
         and any(.attributes.conformance[]?; . == $code))] | length == 1 and .[0].attributes.action == "dropped and reset")' \
@@ -148,11 +149,11 @@ parsing_allowed() {
 }
 
 # run_parsing_gates applies strict parsing for the reset gates, keeps strict
-# under a learn policy for the no-reset gates, then restores the tolerant
+# under a monitor policy for the no-reset gates, then restores the tolerant
 # default for the decoded-content gates. It leaves the EU enforce policy
 # (tolerant) applied.
 run_parsing_gates() {
-  local strict_policy learn_policy scen since out sock
+  local strict_policy monitor_policy scen since out sock
   strict_policy=$(jq '.dataPlane.dpiIcsParsing = {"iec104": "strict"}' <<<"$EU_POLICY")
   if apply_config "$strict_policy" "EU enforce policy, strict IEC 104 parsing"; then
     gate_pass "strict IEC 104 parsing (dpiIcsParsing.iec104 = strict) is accepted and applied"
@@ -163,17 +164,17 @@ run_parsing_gates() {
   sleep 2
   parsing_denied "strict: bad-length (APCI length 2, frame boundary lost)" bad-length malformed "" \
     -ca "$ALLOWED_CA" -ioa "$ALLOWED_IOA"
-  parsing_denied "strict: malformed-dcs (DCS 3, IOA unreadable) at the allowed point" malformed-dcs rule iec104.element \
+  parsing_denied "strict: malformed-dcs (DCS 3, IOA unreadable) at the allowed point" malformed-dcs nonconformant iec104.element \
     -ca "$ALLOWED_CA" -ioa "$ALLOWED_IOA"
-  parsing_denied "strict: unsupported-type (Type ID 104)" unsupported-type rule iec104.unsupported_type \
+  parsing_denied "strict: unsupported-type (Type ID 104)" unsupported-type nonconformant iec104.unsupported_type \
     -ca "$ALLOWED_CA" -ioa "$ALLOWED_IOA"
-  parsing_denied "strict: role-violation (client sends Type ID 1)" role-violation rule iec104.role \
+  parsing_denied "strict: role-violation (client sends Type ID 1)" role-violation nonconformant iec104.role \
     -ca "$ALLOWED_CA" -ioa 1002
   parsing_denied "strict: reserved-bits on the allowed command" reserved-bits nonconformant iec104.reserved_bits \
     -ca "$ALLOWED_CA" -ioa "$ALLOWED_IOA" -dcs "$DCS_CLOSE"
 
-  learn_policy=$(jq '.dataPlane.dpiMode = "learn" | .firewall.rules |= map(.ics.mode = "learn")' <<<"$strict_policy")
-  if apply_config "$learn_policy" "EU learn policy, strict parsing"; then
+  monitor_policy=$(jq --argjson l4 "$(jq '.firewall.rules' <<<"$BASELINE")" '.dataPlane.dpiMode = "monitor" | .firewall.rules |= map(.ics.mode = "monitor") | .firewall.rules += $l4' <<<"$strict_policy")
+  if apply_config "$monitor_policy" "EU monitor policy, strict parsing"; then
     sleep 2
     for scen in bad-length malformed-dcs unsupported-type; do
       since=$(timestamp)
@@ -181,14 +182,14 @@ run_parsing_gates() {
       sock=$(socket_of "$out")
       sleep 1
       if [[ "$sock" != reset ]] && iec_event_since "$since"; then
-        gate_pass "strict learn: $scen raises an IEC104 event and is not reset" "client_socket=$sock"
+        gate_pass "strict monitor: $scen raises an IEC104 event and is not reset" "client_socket=$sock"
       else
-        gate_fail "strict learn: $scen raises an IEC104 event and is not reset" \
+        gate_fail "strict monitor: $scen raises an IEC104 event and is not reset" \
           "client_socket=${sock:-none}; IEC104 malformed/unsupported event: $(iec_event_since "$since" && echo yes || echo no)"
       fi
     done
   else
-    fail "could not apply the EU learn policy"
+    fail "could not apply the EU monitor policy"
   fi
 
   if apply_config "$EU_POLICY" "EU enforce policy, tolerant parsing (restore)"; then

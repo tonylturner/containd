@@ -509,6 +509,14 @@ assert_not_received() {
   fi
 }
 
+if [[ ${SMOKE_RULE_MODES_ONLY:-0} == 1 ]]; then
+  # shellcheck source=scripts/smoke-rule-modes-iec104-lib.sh
+  source "$ROOT/scripts/smoke-rule-modes-iec104-lib.sh"
+  run_iec_rule_modes_matrix || fatal "rule mode matrix failed"
+  [[ $FAIL_COUNT == 0 && $GATE_FAIL_COUNT == 0 ]]
+  exit
+fi
+
 # ---- monitoring (passes on the L4 path) -------------------------------------
 
 # shellcheck source=scripts/smoke-iec104-observe.sh

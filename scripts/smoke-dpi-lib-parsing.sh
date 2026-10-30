@@ -9,7 +9,7 @@
 # for inside a frame whose length it knows and raises one conformance alert
 # per connection per finding; strict drops that content and resets the
 # session. A lost frame boundary resets in both modes. Without an inline path
-# (afpacket) the traffic runs in learn mode, so strict reports would_drop and
+# (afpacket) the traffic runs in monitor mode, so strict reports would_drop and
 # nothing is reset by the firewall.
 # shellcheck disable=SC2016 # Dollar variables in jq programs are jq bindings.
 
@@ -106,7 +106,7 @@ probe_pid_nonzero() {
     want_requests=2 want_action=passed
     label="Tolerant: both PID 1 reads reach the server and are answered"
     if [[ "$parsing" == strict ]]; then
-      label="Strict (learn, no inline path): both PID 1 reads reach the server"
+      label="Strict (monitor, no inline path): both PID 1 reads reach the server"
       want_decision=would_drop want_action="would drop"
     fi
     if [[ "$status" -eq 0 && "$reads" -eq 2 && "$after" == $((before + 2)) ]]; then
@@ -168,7 +168,7 @@ probe_bad_length() {
     label="$parsing: a lost MBAP frame boundary (length 1) resets the session"
     want="Connection reset"
   else
-    label="$parsing (learn, no inline path): a lost MBAP frame boundary (length 1) reaches the server, which closes"
+    label="$parsing (monitor, no inline path): a lost MBAP frame boundary (length 1) reaches the server, which closes"
     want="connection closed"
   fi
   if [[ "$status" -eq 3 && "$err" == *"$want"* ]]; then

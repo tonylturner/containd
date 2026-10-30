@@ -14,7 +14,7 @@ set -euo pipefail
 # SMOKE_DPI_CAPTURE=afpacket (default) observes copies of the traffic on the
 # interfaces, which cannot stop a command. It asserts that management
 # refuses the ICS rules in enforce mode without an inline path, then runs
-# the traffic with the rules in learn mode: they report monitoring, denied
+# the traffic with the rules in monitor mode: they report monitoring, denied
 # writes reach the server, and nothing is blocked. The exact conformant read
 # has request and reply DPI events sharing one transportConnectionId.
 #
@@ -32,7 +32,7 @@ set -euo pipefail
 # tolerant parsing, the default, a Modbus read whose protocol identifier is
 # not 0 reaches the server with one ics-conformance alert per connection;
 # with dataplane.dpiIcsParsing.modbus = "strict", pushed through the API, it
-# is dropped and the session reset (would_drop in learn mode); a lost MBAP
+# is dropped and the session reset (would_drop in monitor mode); a lost MBAP
 # frame boundary resets in both modes.
 # AF_PACKET additionally checks content-confirmed passive Modbus/1502 and
 # IEC104/12404 decoding, exact directional events and no reset/block attempts.
@@ -560,11 +560,11 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
 ')
 
 # AF_PACKET has no inline path: enforce is refused, so the traffic runs in
-# learn mode.
+# monitor mode.
 if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
   log "Checking that enforce without NFQUEUE is refused..."
   assert_enforce_refused "$UPDATED_CFG"
-  UPDATED_CFG=$(jq '.dataPlane.dpiMode = "learn"' <<<"$UPDATED_CFG")
+  UPDATED_CFG=$(jq '.dataPlane.dpiMode = "monitor" | .firewall.rules += [{id:"smoke-l4", sourceZones:["lan"], destZones:["wan"], action:"ALLOW"}]' <<<"$UPDATED_CFG")
   COVERAGE_STATE=monitoring
 else
   COVERAGE_STATE=enforcing
@@ -598,7 +598,7 @@ EOF
 
 modbus_deny_filter=$(
   cat <<'EOF'
-any(.[]; .kind == "firewall.rule.hit" and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
+any(.[]; ((.kind == "firewall.rule.hit") or (.kind == "ics.decision" and .attributes.mode == "monitor" and .attributes.decision == "would_drop")) and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))
 EOF
 )
 
@@ -634,6 +634,14 @@ echo "$OT_ROUTE" | grep -q "via ${LAN_NET}.2" || {
   exit 1
 }
 pass "OT client route uses engine for Modbus traffic"
+
+if [[ ${SMOKE_RULE_MODES_ONLY:-0} == 1 ]]; then
+  # shellcheck source=scripts/smoke-rule-modes-lib.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/smoke-rule-modes-lib.sh"
+  run_rule_modes_matrix
+  [[ ${#FAILURES[@]} == 0 ]]
+  exit
+fi
 
 log "Testing Modbus read allow..."
 READ_STATUS=0
@@ -755,12 +763,12 @@ if compose exec -T ot_client python /opt/modbus/client.py write "$MODBUS_DST" 50
   if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
     log "Initial Modbus write completed ($(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.out"))"
   else
-    pass "Learn: the denied Modbus write reaches the server ($(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.out"))"
+    pass "Monitor: the denied Modbus write reaches the server ($(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.out"))"
   fi
 elif [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
   log "Initial Modbus write blocked immediately ($(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.err"))"
 else
-  check_fail "Learn: the denied Modbus write was blocked: $(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.err")"
+  check_fail "Monitor: the denied Modbus write was blocked: $(tr -d '\r' <"$WORK_DIR/modbus-write-trigger.err")"
 fi
 
 if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_deny_filter"; then
@@ -789,11 +797,11 @@ if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
     check_fail "DNP3 reconnect failed: $(cat "$WORK_DIR/dnp3-reconnect.err")"
   fi
 else
-  log "Testing follow-up Modbus write is not blocked in learn mode..."
+  log "Testing follow-up Modbus write is not blocked in monitor mode..."
   if [[ $FOLLOW_UP_STATUS -eq 0 ]]; then
-    pass "Learn: follow-up Modbus write is not blocked"
+    pass "Monitor: follow-up Modbus write is not blocked"
   else
-    check_fail "Learn: follow-up Modbus write failed (exit $FOLLOW_UP_STATUS): $(tr -d '\r' <"$WORK_DIR/modbus-write-blocked.err")"
+    check_fail "Monitor: follow-up Modbus write failed (exit $FOLLOW_UP_STATUS): $(tr -d '\r' <"$WORK_DIR/modbus-write-blocked.err")"
   fi
   assert_no_dynamic_block "$MODBUS_SRC" 502
 fi
@@ -835,9 +843,9 @@ pass "Persistent connection read reply received (client port ${PERSIST_PORT})"
 if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
   if tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | sed -n 3p | grep -q '^WRITE_OK' &&
     tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | sed -n 4p | grep -q '^READ_OK'; then
-    pass "Learn: the write and the following read complete on the persistent connection"
+    pass "Monitor: the write and the following read complete on the persistent connection"
   else
-    check_fail "Learn: the persistent connection did not complete write and read: $(tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | tr '\n' ' ')"
+    check_fail "Monitor: the persistent connection did not complete write and read: $(tr -d '\r' <"$WORK_DIR"/modbus-persistent.out | tr '\n' ' ')"
   fi
 fi
 
@@ -848,7 +856,7 @@ EOF
 )
 persistent_deny_filter=$(
   cat <<'EOF'
-any(.[]; .kind == "firewall.rule.hit" and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))
+any(.[]; ((.kind == "firewall.rule.hit") or (.kind == "ics.decision" and .attributes.mode == "monitor" and .attributes.decision == "would_drop")) and .attributes.ruleId == "smoke-modbus-write-deny" and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.PERSIST_TS | fromdateiso8601)))
 EOF
 )
 

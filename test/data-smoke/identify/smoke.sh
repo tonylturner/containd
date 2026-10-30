@@ -20,7 +20,7 @@ run_identification_probes() {
       {id:"smoke-identify-delivery", sources:$clients, destinations:[$server],
        protocols:[{name:"tcp",port:"1502"},{name:"tcp",port:"12404"}], action:"ALLOW"},
       {id:"smoke-iec104-scope", protocols:[{name:"tcp",port:"2404"}],
-       ics:{protocol:"iec104",mode:"learn"}, action:"ALLOW"}]
+       ics:{protocol:"iec104",mode:"monitor"}, action:"ALLOW"}]
   ' <<<"$UPDATED_CFG")
   local code
   code=$(curl -s --max-time 10 -w '%{http_code}' -o "$WORK_DIR/identify-save.json" \
