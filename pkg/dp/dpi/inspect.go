@@ -13,8 +13,9 @@ import (
 
 // Inspect passes the packet to the decoders that support the flow. TCP
 // payload is fed through the reassembler so that decoders see the stream,
-// not single segments. The first supporting StreamDecoder (registration
-// order) frames the stream through ParseStream and alone trims it; other
+// not single segments. The first stream pins a supporting StreamDecoder
+// for both directions (server port first, registration order within a port).
+// It frames the stream through ParseStream and alone trims it; other
 // packet decoders get OnPacket with only the captured segment.
 //
 // Streams are keyed by the directional flow hash, or by Session and Dir
@@ -49,13 +50,20 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	stream := m.reassembles(pkt)
 	var framer StreamDecoder
 	if stream {
-		framer = firstFramer(candidates, state)
+		for _, expired := range m.reassembler.sweep(time.Now()) {
+			m.endStream(expired)
+		}
+		framer = m.flowFramer(state, pkt)
 	}
 	if framer != nil {
 		res.Framed = true
 		res.Proto = framer.Protocol()
 	}
 	key, session, pos := streamKey(state, pkt)
+	if framer != nil {
+		// Also runs on decoder panic, so FailStream retains the same owner.
+		defer func() { m.reassembler.pinFramer(key, framer) }()
+	}
 	var errEvent *Event
 	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
 		anchored, discarded := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake)
@@ -78,9 +86,6 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 
 	if framer != nil && res.Err == nil && len(pkt.Payload) > 0 && !(pkt.FailClosed && pkt.TCPRst) {
 		now := time.Now()
-		for _, expired := range m.reassembler.sweep(now) {
-			m.endStream(expired)
-		}
 		fed := m.reassembler.feed(key, pos, pkt.Payload, now, true, pkt.HasOffset, pkt.FailClosed)
 		res.Gap = fed.gap
 		switch {
@@ -136,8 +141,7 @@ func streamError(state *flow.State, pkt *ParsedPacket, res *InspectResult, se *S
 	return &ev
 }
 
-// firstFramer returns the first registered StreamDecoder supporting the
-// flow, or nil.
+// firstFramer returns the first supporting StreamDecoder in candidate order.
 func firstFramer(candidates []Decoder, state *flow.State) StreamDecoder {
 	for _, d := range candidates {
 		if sd, ok := d.(StreamDecoder); ok && sd.Supports(state) {

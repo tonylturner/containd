@@ -67,7 +67,7 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, onEvent eventCallback, decod
 	}
 	mgr := dpi.NewManager(decoders...)
 	sessions := newOfflineSessions()
-	observer, err := newOfflineObserver(sessions, opts, decoders)
+	observer, err := newOfflineObserver(mgr, sessions, opts, decoders)
 	if err != nil {
 		return nil, err
 	}

@@ -235,6 +235,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- TCP flows pin one stream framer for both directions, preferring the server
+  port when endpoints use different ICS ports, in live and PCAP inspection.
+
 - AF_PACKET resolver queue or byte overflow stops passive DPI and identification
   decoding for the affected connection incarnation, without changing forwarding.
   A `dpi.coverage.loss` event and `containd_dpi_coverage_losses_total` counter expose

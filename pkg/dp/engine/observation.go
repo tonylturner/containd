@@ -30,6 +30,7 @@ type observationContext struct {
 	states   [2]*flow.State
 	selected bool
 	iecOwned bool
+	framer   string // actual/prospective port-selected TCP owner, not every supporting decoder
 	snapshot *rules.Snapshot
 	refused  bool // Open is attempted only once, including at capacity.
 	// The table can retain legacy connection evidence across tuple reuse.
@@ -73,7 +74,7 @@ func legacyDecodes(c *observationContext, protocol identify.Protocol) bool {
 	if c == nil {
 		return false
 	}
-	if protocol == identify.IEC104 && c.iecOwned {
+	if protocol == identify.IEC104 && c.iecOwned && c.framer == string(protocol) {
 		return true
 	}
 	if !c.selected {
@@ -86,6 +87,9 @@ func legacyDecodes(c *observationContext, protocol identify.Protocol) bool {
 		}
 		if st != nil && st.Key.Proto == 6 && (st.Key.SrcPort == iec104Port || st.Key.DstPort == iec104Port) {
 			return false
+		}
+		if st != nil && st.Key.Proto == 6 {
+			return c.framer == string(protocol)
 		}
 		if st != nil && (ics.IsProtocolPortOn(string(protocol), st.Key.Proto, st.Key.SrcPort) || ics.IsProtocolPortOn(string(protocol), st.Key.Proto, st.Key.DstPort)) {
 			// The generic legacy path never decodes IEC104 without a table owner.
@@ -140,6 +144,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	selected := e.ShouldInspect(st, parsed)
 	snapshot := e.ruleSnap.Load()
 	iecOwned := e.iecOwnsPacket(pkt)
+	framer := e.dpiMgr.FramingProtocol(st, parsed)
 	e.flowMu.Lock()
 	live := e.observation
 	if live == nil {
@@ -171,6 +176,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	}
 	dir := uint8(connection.Direction(st.Key))
 	ctx.states[dir], ctx.selected, ctx.iecOwned, ctx.snapshot = st, selected, iecOwned, snapshot
+	ctx.framer = framer
 	var output observe.Output
 	if !enabled {
 		output = live.observer.Finish(key)

@@ -86,9 +86,10 @@ func TestIdentificationIECSessionOwnership(t *testing.T) {
 		{"IEC-source-port", 2404, 12404, true, "iec104", "observation", 2},
 		{"IEC-no-SYN-ACK", 49152, 2404, false, "iec104", "observation", 2},
 		{"modbus-IEC-source", 2404, 502, true, "modbus", "observation", 2},
-		// With a session, legacy decoding does run. Its competing port
-		// framers decode only the request; ownership must not duplicate it.
-		{"modbus-IEC-session", 502, 2404, true, "modbus", "legacy", 1},
+		// The server port owns framing; Modbus content beside an IEC104
+		// owner must be passively decoded in both directions.
+		{"modbus-IEC-session", 502, 2404, true, "modbus", "observation", 2},
+		{"IEC-session-Modbus-source", 502, 2404, true, "iec104", "legacy", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			frame := func(reverse bool, seq uint32, flags byte, payload []byte) []byte {

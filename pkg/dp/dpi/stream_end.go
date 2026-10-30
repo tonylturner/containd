@@ -85,12 +85,13 @@ func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket, kind StreamEr
 	}
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
-	framer := firstFramer(m.candidates(state), state)
+	framer := m.flowFramer(state, pkt)
 	if framer == nil {
 		return
 	}
 	key, _, _ := streamKey(state, pkt)
 	m.reassembler.fail(key, &StreamError{Kind: kind, Offset: m.reassembler.watermark(key), Proto: framer.Protocol()})
+	m.reassembler.pinFramer(key, framer)
 	m.endStream(key)
 }
 

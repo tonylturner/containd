@@ -44,6 +44,10 @@ func (s oooSegment) end() int64 { return s.off + int64(len(s.data)) }
 // stream holds the bytes of one TCP stream direction that the manager has
 // not consumed yet.
 type stream struct {
+	// framer is the connection's port-selected decoder. Keeping the pin
+	// with transport state gives it exactly the same lifetime, including
+	// failed/closed streams and session-owned streams.
+	framer StreamDecoder
 	// strict streams belong to a framed decoder: buffer bounds, the
 	// out-of-order bound and conflicting overlaps are errors. Other streams
 	// keep the sliding window (oldest bytes dropped) and ignore conflicts.
@@ -76,6 +80,29 @@ type stream struct {
 	// connection on its tuple. Its next bytes cannot be framed, as for a
 	// stream that began without a SYN.
 	lost bool
+}
+
+// framingDecoder returns either direction's pin. The manager serializes
+// selection and adoption with its streamMu.
+func (r *reassembler) framingDecoder(key, peer string) StreamDecoder {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, k := range []string{key, peer} {
+		if s := r.streams[k]; s != nil && s.framer != nil {
+			return s.framer
+		}
+	}
+	return nil
+}
+
+// pinFramer adopts the selected decoder only if the operation retained
+// transport state. An empty packet that creates no stream cannot leak a pin.
+func (r *reassembler) pinFramer(key string, decoder StreamDecoder) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s := r.streams[key]; s != nil {
+		s.framer = decoder
+	}
 }
 
 // pickedUp reports a stream whose bytes need not start at a frame: it
