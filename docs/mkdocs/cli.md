@@ -118,11 +118,10 @@ Session JWTs never belong in the WebSocket URL; `?token=` is not accepted.
 
 Tickets expire after 30 seconds and are single-use, even if the connection
 attempt fails. Each connection or reconnect needs a fresh ticket. Restarting
-management discards outstanding tickets. Each identity may hold eight pending
-tickets; further issuance returns `429` until a ticket is consumed or expires.
-User accounts share this limit across sessions; legacy tokens and store-less
-lab authentication share it by role. The bounded ticket store returns `503`
-when its global 4096-ticket capacity is full.
+management discards outstanding tickets. Issuance has no global, identity or IP
+count limit; users sharing a lab account are not rejected because of pending
+ticket counts.
+Expired entries are cleaned lazily on the next issuance or redemption.
 For session-backed authentication, logout, session expiry or revocation before
 upgrade invalidates the ticket. Lab-mode credentials remain session-less as
 with other management requests. The issuer's identity and role must still

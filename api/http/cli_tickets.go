@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"container/list"
 	"crypto/rand"
 	"net/http"
 	"sync"
@@ -12,10 +13,8 @@ import (
 )
 
 const (
-	cliTicketTTL              = 30 * time.Second
-	cliTicketCapacity         = 4096
-	cliTicketIdentityCapacity = 8
-	ctxCLITicketKey           = "cliTicket"
+	cliTicketTTL    = 30 * time.Second
+	ctxCLITicketKey = "cliTicket"
 )
 
 type cliIdentity struct {
@@ -29,16 +28,8 @@ func cliIdentityFor(c *gin.Context) cliIdentity {
 	}
 }
 
-func (i cliIdentity) owner() string {
-	if i.user != "" {
-		// One account shares its quota across sessions and role changes.
-		return "user:" + i.user
-	}
-	// Legacy tokens and store-less lab auth expose only a shared role identity.
-	return "role:" + i.role
-}
-
 type cliTicket struct {
+	key      string
 	identity cliIdentity
 	// Kept only in process memory, for reauthentication and CLI loopback calls.
 	credential string
@@ -47,21 +38,31 @@ type cliTicket struct {
 
 type cliTickets struct {
 	mu      sync.Mutex
-	pending map[string]cliTicket
+	pending map[string]*list.Element
+	expiry  list.List
 	now     func() time.Time
 }
 
 func newCLITickets() *cliTickets {
-	return &cliTickets{pending: make(map[string]cliTicket), now: time.Now}
+	return &cliTickets{pending: make(map[string]*list.Element), now: time.Now}
 }
 
 // Cleanup is lazy on both issuance and redemption: no background worker or
-// shutdown lifecycle is needed, and idle storage never exceeds the hard cap.
+// shutdown lifecycle is needed. A fixed TTL and monotonic issuance clock under
+// the mutex put entries in expiry order. Cleanup checks only the head plus expired
+// entries; each is removed at most once, giving amortised O(1) work per issuance.
 func (t *cliTickets) cleanup(now time.Time) {
-	for key, ticket := range t.pending {
-		if !now.Before(ticket.expires) {
-			delete(t.pending, key)
+	for front := t.expiry.Front(); front != nil; front = t.expiry.Front() {
+		ticket := front.Value.(cliTicket)
+		if now.Before(ticket.expires) {
+			return
 		}
+		delete(t.pending, ticket.key)
+		t.expiry.Remove(front)
+	}
+	if len(t.pending) == 0 {
+		// Release the map's high-water allocation after an expired burst.
+		t.pending = make(map[string]*list.Element)
 	}
 }
 
@@ -70,34 +71,16 @@ func (t *cliTickets) issue() gin.HandlerFunc {
 		t.mu.Lock()
 		now := t.now()
 		t.cleanup(now)
-		identity := cliIdentityFor(c)
-		owner := identity.owner()
-		pending := 0
-		for _, ticket := range t.pending {
-			if ticket.identity.owner() == owner {
-				pending++
-			}
-		}
-		if pending >= cliTicketIdentityCapacity {
-			t.mu.Unlock()
-			apiError(c, http.StatusTooManyRequests, "too many pending console tickets for this identity")
-			return
-		}
-		if len(t.pending) >= cliTicketCapacity {
-			t.mu.Unlock()
-			apiError(c, http.StatusServiceUnavailable, "console ticket capacity reached")
-			return
-		}
 		// crypto/rand.Text supplies at least 128 bits without URL metacharacters.
 		key := rand.Text()
 		credential := bearerOrCookie(c)
 		if refreshed := c.Writer.Header().Get("X-Auth-Token"); refreshed != "" {
 			credential = refreshed
 		}
-		t.pending[key] = cliTicket{
-			identity: identity, credential: credential,
+		t.pending[key] = t.expiry.PushBack(cliTicket{
+			key: key, identity: cliIdentityFor(c), credential: credential,
 			expires: now.Add(cliTicketTTL),
-		}
+		})
 		t.mu.Unlock()
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, gin.H{"ticket": key, "expiresIn": int(cliTicketTTL.Seconds())})
@@ -108,7 +91,12 @@ func (t *cliTickets) redeem() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		t.mu.Lock()
 		t.cleanup(t.now())
-		ticket, ok := t.pending[c.Query("ticket")]
+		entry, ok := t.pending[c.Query("ticket")]
+		var ticket cliTicket
+		if ok {
+			ticket = entry.Value.(cliTicket)
+			t.expiry.Remove(entry)
+		}
 		delete(t.pending, c.Query("ticket"))
 		t.mu.Unlock()
 		if !ok {

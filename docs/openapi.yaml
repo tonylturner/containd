@@ -5657,7 +5657,9 @@ paths:
         Authenticate with the management cookie or Bearer credential. Returns an
         opaque ticket bound to the authenticated user, role and session, valid
         for 30 seconds. Obtain a fresh ticket before each connection. Tickets
-        are held in a bounded process-local store and do not survive restarts.
+        are held in a process-local store without issuance count limits and do
+        not survive restarts. Expired entries are cleaned lazily on the next
+        issuance or redemption.
       responses:
         '200':
           description: Ticket issued; Cache-Control is no-store
@@ -5673,10 +5675,6 @@ paths:
           description: Authentication required
         '403':
           description: Cross-origin cookie request or restricted account
-        '429':
-          description: Identity already has eight pending tickets; consume one or wait for expiry
-        '503':
-          description: Ticket capacity reached or authentication backend unavailable
   /cli/ws:
     get:
       summary: Upgrade to interactive CLI WebSocket

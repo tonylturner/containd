@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,15 +31,12 @@ func decodeCLITicket(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return body.Ticket
 }
 
-func TestCLITicketLifetimeCapacityAndAtomicConsume(t *testing.T) {
+func TestCLITicketLifetimeAndAtomicConsume(t *testing.T) {
 	tickets := newCLITickets()
 	now := time.Now()
 	tickets.now = func() time.Time { return now }
 	r := gin.New()
-	r.POST("/ticket", func(c *gin.Context) {
-		c.Set(ctxRoleKey, "view")
-		c.Set(ctxUserKey, c.GetHeader("X-Test-User"))
-	}, tickets.issue())
+	r.POST("/ticket", func(c *gin.Context) { c.Set(ctxRoleKey, "view") }, tickets.issue())
 	r.GET("/ws", tickets.redeem(), func(c *gin.Context) {
 		expected, _ := c.Get(ctxCLITicketKey)
 		if expected != (cliIdentity{role: "view"}) || c.GetHeader("Authorization") != "Bearer issuer" {
@@ -48,15 +44,13 @@ func TestCLITicketLifetimeCapacityAndAtomicConsume(t *testing.T) {
 		}
 		c.Status(http.StatusNoContent)
 	})
-	issueForUser := func(user string) *httptest.ResponseRecorder {
+	issue := func() *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/ticket", nil)
 		req.Header.Set("Authorization", "Bearer issuer")
-		req.Header.Set("X-Test-User", user)
 		r.ServeHTTP(rec, req)
 		return rec
 	}
-	issue := func() *httptest.ResponseRecorder { return issueForUser("") }
 	consume := func(key string) int {
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ws?ticket="+key, nil))
@@ -73,92 +67,87 @@ func TestCLITicketLifetimeCapacityAndAtomicConsume(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if successes.Load() != 1 || consume(key) != 401 || consume("unknown") != 401 || consume("") != 401 {
+	if successes.Load() != 1 || consume(key) != 401 || consume("unknown") != 401 || consume("") != 401 ||
+		tickets.expiry.Len() != 0 {
 		t.Fatal("ticket must be consumed exactly once")
 	}
 	key = decodeCLITicket(t, issue())
 	now = now.Add(cliTicketTTL)
-	if consume(key) != 401 || len(tickets.pending) != 0 {
+	if consume(key) != 401 || len(tickets.pending) != 0 || tickets.expiry.Len() != 0 {
 		t.Fatal("expired ticket accepted or retained")
 	}
-	for i := range cliTicketCapacity {
-		decodeCLITicket(t, issueForUser(strconv.Itoa(i)))
-	}
-	if rec := issue(); rec.Code != http.StatusServiceUnavailable || len(tickets.pending) != cliTicketCapacity {
-		t.Fatal("ticket capacity not enforced")
-	}
+	decodeCLITicket(t, issue())
 	now = now.Add(cliTicketTTL)
 	decodeCLITicket(t, issue())
-	if len(tickets.pending) != 1 {
+	if len(tickets.pending) != 1 || tickets.expiry.Len() != 1 {
 		t.Fatal("issuance did not clean expired tickets")
 	}
 }
 
-func TestCLITicketPerIdentityCapacity(t *testing.T) {
+func TestCLITicketPendingIssuanceDoesNotStarveLabUsers(t *testing.T) {
 	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
-	t.Setenv("CONTAIND_LAB_MODE", "0")
+	t.Setenv("CONTAIND_LAB_MODE", "1")
 	us := newMockUserStore()
-	secret := []byte(testJWTSecret)
-	viewToken, viewID := addTestUser(us, secret, "viewer", "viewer", "view", false)
-	adminToken, _ := addTestAdmin(us, secret)
-	// A second session must not give the same account another quota.
-	alternate := *us.sessions["sess-"+viewID]
-	alternate.ID = "alternate-view-session"
-	us.sessions[alternate.ID] = &alternate
-	alternateToken := signTestJWT(secret, viewID, "viewer", "view", alternate.ID, alternate.ExpiresAt)
+	_, uid := addTestAdmin(us, []byte(testJWTSecret))
+	tokens := make([]string, 2)
+	for i, sub := range []string{"student-one", "student-two"} {
+		var err error
+		tokens[i], err = jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub": sub, "exp": time.Now().Add(time.Hour).Unix(),
+		}).SignedString([]byte(testJWTSecret))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	tickets := newCLITickets()
 	now := time.Now()
 	tickets.now = func() time.Time { return now }
 	r := gin.New()
 	r.POST("/ticket", authMiddleware(us), tickets.issue())
-	r.GET("/redeem", tickets.redeem(), authMiddleware(us), verifyCLITicketIdentity,
-		func(c *gin.Context) { c.Status(http.StatusNoContent) })
-	issue := func(token string) *httptest.ResponseRecorder {
+	r.GET("/redeem", tickets.redeem(), authMiddleware(us), verifyCLITicketIdentity, func(c *gin.Context) {
+		if cliIdentityFor(c) != (cliIdentity{user: uid, role: "admin", session: "lab"}) {
+			t.Errorf("lab identity changed: %+v", cliIdentityFor(c))
+		}
+		c.Status(http.StatusNoContent)
+	})
+	issue := func(token string) string {
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, jwtAuthedRequest(http.MethodPost, "/ticket", nil, token))
-		return rec
+		return decodeCLITicket(t, rec)
 	}
-	var first string
-	for range cliTicketIdentityCapacity {
-		first = decodeCLITicket(t, issue(viewToken))
-	}
-	for _, token := range []string{viewToken, alternateToken} {
-		if rec := issue(token); rec.Code != http.StatusTooManyRequests {
-			t.Fatalf("identity quota: status=%d body=%s", rec.Code, rec.Body)
+	consume := func(key string, want int) {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/redeem?ticket="+key, nil))
+		if rec.Code != want {
+			t.Fatalf("redemption: status=%d body=%s", rec.Code, rec.Body)
 		}
 	}
-	decodeCLITicket(t, issue(adminToken)) // Another admin still has capacity.
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/redeem?ticket="+first, nil))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("redemption: status=%d body=%s", rec.Code, rec.Body)
+	// All callers resolve to the same lab account. Pending tickets must not
+	// block either this caller or another student's next connection.
+	const pendingCount = 5000
+	var first string
+	for range pendingCount {
+		first = issue(tokens[0])
 	}
-	decodeCLITicket(t, issue(viewToken)) // Consumption immediately frees a slot.
-	now = now.Add(cliTicketTTL)
-	decodeCLITicket(t, issue(viewToken))
-	if len(tickets.pending) != 1 {
-		t.Fatal("expiry did not free identity and global capacity")
+	other := issue(tokens[1])
+	if len(tickets.pending) != pendingCount+1 || tickets.expiry.Len() != pendingCount+1 {
+		t.Fatal("pending tickets were limited or lost")
 	}
-}
-
-func TestCLITicketLegacyCapacityIsolation(t *testing.T) {
-	t.Setenv("CONTAIND_JWT_SECRET", "")
-	t.Setenv("CONTAIND_LAB_MODE", "0")
-	t.Setenv("CONTAIND_ADMIN_TOKEN", "admin-credential")
-	t.Setenv("CONTAIND_AUDITOR_TOKEN", "view-credential")
-	r := NewServer(&mockStore{cfg: config.DefaultConfig()}, nil)
-	issue := func(token string) *httptest.ResponseRecorder {
-		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, jwtAuthedRequest(http.MethodPost, "/api/v1/cli/ws/ticket", nil, token))
-		return rec
+	consume(other, http.StatusNoContent)
+	if len(tickets.pending) != pendingCount || tickets.expiry.Len() != pendingCount {
+		t.Fatal("consumption did not remove the expiry entry")
 	}
-	for range cliTicketIdentityCapacity {
-		decodeCLITicket(t, issue("view-credential"))
+	now = now.Add(cliTicketTTL / 2)
+	fresh := issue(tokens[1])
+	now = now.Add(cliTicketTTL / 2)
+	consume(first, http.StatusUnauthorized)
+	if len(tickets.pending) != 1 || tickets.expiry.Len() != 1 {
+		t.Fatal("expiry did not free old entries while preserving the fresh ticket")
 	}
-	if rec := issue("view-credential"); rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("view credential quota: status=%d body=%s", rec.Code, rec.Body)
+	consume(fresh, http.StatusNoContent)
+	if len(tickets.pending) != 0 || tickets.expiry.Len() != 0 {
+		t.Fatal("consumption retained pending or expiry entries")
 	}
-	decodeCLITicket(t, issue("admin-credential"))
 }
 
 func TestCLITicketSessionAuth(t *testing.T) {
