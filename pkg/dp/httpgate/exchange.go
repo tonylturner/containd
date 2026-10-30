@@ -75,6 +75,9 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 		u, err := c.upstream(tx.set)
 		if err != nil {
 			c.srv.emit(c.connEvent("dial: " + err.Error()))
+			if body.release != nil {
+				body.release()
+			}
 			c.refuse(refusal(502, "Bad Gateway", "containd: upstream connection failed\n", tx.headOnly()), true)
 			return false
 		}
@@ -82,6 +85,10 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 		u.used = true
 		stop := make(chan struct{})
 		tx.sendDone, tx.sendErr = make(chan struct{}), nil
+		tx.uploadDone = nil
+		if body.release != nil {
+			tx.uploadDone = make(chan struct{})
+		}
 		tx.spliceCh = make(chan struct{})
 		done := make(chan respResult, 1)
 		go func() {
@@ -97,6 +104,7 @@ func (tx *transaction) exchange(body bodySource, pass *avscan.Result) bool {
 		}
 		if body.release != nil {
 			body.release()
+			close(tx.uploadDone)
 		}
 		if sendErr != nil && !errors.Is(sendErr, errStopped) {
 			u.close()
@@ -170,6 +178,13 @@ func (tx *transaction) stopSend(u *upstream, stop chan struct{}) {
 		tx.c.client.bound(drainWindow)
 	}
 	u.boundWrite(drainWindow)
+	// The origin can answer before the sender's final Write returns.
+	// Bound it first, then wait for the held upload's resources to be
+	// released before admitting a download or exposing a final response.
+	// Unheld requests have no slot to release and remain full-duplex.
+	if tx.uploadDone != nil {
+		<-tx.uploadDone
+	}
 }
 
 func closed(ch <-chan struct{}) bool {

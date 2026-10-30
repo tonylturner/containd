@@ -58,9 +58,10 @@ type offlineObserver struct {
 	byTuple  map[string]*offlineConnection
 	byKey    map[identify.Key]*offlineConnection
 	decoders []dpi.Decoder
+	sessions *offlineSessions
 }
 
-func newOfflineObserver(runID string, opts AnalysisOptions, decoders []dpi.Decoder) (*offlineObserver, error) {
+func newOfflineObserver(sessions *offlineSessions, opts AnalysisOptions, decoders []dpi.Decoder) (*offlineObserver, error) {
 	// Only enabled ICS decoders get fresh observation instances. Never share a
 	// stateful decoder with the port-selected manager or a live engine.
 	factories := []dpi.StreamDecoder{modbus.NewDecoder(), dnp3.NewDecoderWithClock(opts.Now), iec104.NewDecoder(), cip.NewDecoder()}
@@ -83,7 +84,7 @@ func newOfflineObserver(runID string, opts AnalysisOptions, decoders []dpi.Decod
 	if err != nil {
 		return nil, err
 	}
-	o := &offlineObserver{runID: runID, byTuple: map[string]*offlineConnection{}, byKey: map[identify.Key]*offlineConnection{}, decoders: decoders}
+	o := &offlineObserver{runID: sessions.runID, sessions: sessions, byTuple: map[string]*offlineConnection{}, byKey: map[identify.Key]*offlineConnection{}, decoders: decoders}
 	o.observer, err = observe.New(observe.Options{Budgets: budgets, Markers: budgets.Entries, Manager: mgr, Now: opts.Now,
 		LegacyDecodes: o.legacyDecodes,
 		Scope: func(key identify.Key, p identify.Protocol) any {
@@ -100,9 +101,21 @@ func newOfflineObserver(runID string, opts AnalysisOptions, decoders []dpi.Decod
 // gets passive decoding; an already selected matching decoder is not duplicated.
 func (o *offlineObserver) legacyDecodes(key identify.Key, p identify.Protocol) bool {
 	c := o.byKey[key]
+	st := c.states[0]
+	if p == identify.ENIP && cip.UsesImplicitIO(st) {
+		return false
+	}
+	if st.Key.Proto == ics.TCP && (st.Key.SrcPort == ics.IEC104Port || st.Key.DstPort == ics.IEC104Port) {
+		// annotate bypasses every legacy decoder on this tuple until a
+		// session has both handshake directions, not just the IEC decoder.
+		s, _, _ := o.sessions.lookup(c.endpoints[0], c.endpoints[1])
+		if s == nil || s.dirs[1] == nil {
+			return false
+		}
+	}
 	for _, d := range o.decoders {
 		sd, ok := d.(dpi.StreamDecoder)
-		if !ok || !d.Supports(c.states[0]) {
+		if !ok || !d.Supports(st) {
 			continue
 		}
 		if sd.Protocol() == string(p) {

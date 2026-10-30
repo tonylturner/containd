@@ -249,6 +249,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TCP/2404 flows outside IEC 104 table ownership now use generic TCP
   decision serialization, denial reconnects and incarnation retirement.
 
+- The HTTP scanning gate releases a held upload's object slot before its
+  final response reaches the client, so a following upload or the response's
+  download scan is not refused as busy by the previous upload.
 - Modbus transaction pairing separates connection incarnations, directions,
   transaction IDs and unit IDs, including locally masqueraded AF_PACKET
   traffic. Missing connection evidence reports correlation unavailable instead
