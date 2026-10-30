@@ -251,7 +251,7 @@ func (m *Manager) EndStream(session string) {
 		key := sessionStreamKey(session, dir)
 		m.reassembler.complete(key)
 		m.endStream(key)
-		delete(m.selected, key)
+		m.releaseSelection(key)
 	}
 }
 

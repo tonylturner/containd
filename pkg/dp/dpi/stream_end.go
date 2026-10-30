@@ -20,7 +20,7 @@ func (m *Manager) DiscardFlow(state *flow.State) {
 	}
 	m.endStream(key)
 	delete(m.eventTimes, key)
-	delete(m.selected, key)
+	m.releaseFlowSelection(key)
 }
 
 // A legacy flow stream ends at its flow's end (OnFlowEnd), at a FIN or RST

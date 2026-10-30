@@ -5,6 +5,7 @@ package engine
 import (
 	"net/netip"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -134,6 +135,72 @@ func TestNATDispatchLateEvidenceKeepsCommittedDecoder(t *testing.T) {
 	}
 	if result := manager.Inspect(state, &dpi.ParsedPacket{Proto: "tcp"}); result.Proto != "dnp3" {
 		t.Fatalf("flow end did not retire dispatch selection: %+v", result)
+	}
+}
+
+func TestNATSessionSelectionReleasedByFlowSweep(t *testing.T) {
+	e, _ := newEnforceEngine(t, rules.ActionAllow)
+	state := natPolicyStates(policyNAT())[0]
+	state.IdleTimeout = time.Second
+	e.flowMu.Lock()
+	e.flows[state.Key.MapKey()] = state
+	e.flowMu.Unlock()
+	pkt := &dpi.ParsedPacket{Proto: "tcp", HasOffset: true, Session: "swept-without-EndStream", Dir: dpi.ClientToServer}
+	if result := e.DPI().Inspect(state, pkt); result.Proto != "modbus" {
+		t.Fatalf("did not commit session decoder: %+v", result)
+	}
+	e.sweepFlows(state.LastSeen.Add(2 * time.Second))
+	e.flowMu.Lock()
+	remaining := len(e.flows)
+	e.flowMu.Unlock()
+	if remaining != 0 {
+		t.Fatal("flow was not swept")
+	}
+	next := policyNAT()
+	evidence := *next.Evidence
+	evidence.Reply.Source = netip.AddrPortFrom(evidence.Reply.Source.Addr(), 20000)
+	next.Evidence = &evidence
+	state.Connection.Store(next)
+	if result := e.DPI().Inspect(state, pkt); result.Proto != "dnp3" {
+		t.Fatalf("sweep retained session dispatch without EndStream: %+v", result)
+	}
+	e.DPI().DiscardFlow(state)
+}
+
+func TestNATTagBindingConcurrentEventSnapshots(t *testing.T) {
+	e, _ := newEnforceEngine(t, rules.ActionAllow,
+		tagEntry("backend", "backend", func(entry *rules.Entry) {
+			entry.Protocols = []rules.Protocol{{Name: "tcp", Port: "502"}}
+		}),
+		tagEntry("public", "public", func(entry *rules.Entry) {
+			entry.Protocols = []rules.Protocol{{Name: "tcp", Port: "1502"}}
+		}))
+	verified := policyNAT()
+	unverified := &flow.Connection{Key: verified.Key, Status: "not_found", Evidence: verified.Evidence}
+	state := natPolicyStates(verified)[0]
+	e.bindTransport(state, verified)
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 100 {
+			e.bindTransport(state, unverified)
+			e.bindTransport(state, verified)
+		}
+	})
+	wg.Go(func() {
+		for range 100 {
+			e.recordTaggedEvents(state, nil, []dpi.Event{{FlowID: state.ID(), Proto: "modbus", Kind: "request"}})
+		}
+	})
+	wg.Wait()
+	list := e.Events().List(0)
+	if len(list) != 100 {
+		t.Fatalf("recorded %d events, want 100", len(list))
+	}
+	for _, event := range list {
+		tags, ok := event.Attributes[events.KeyTags].([]string)
+		if !ok || len(tags) != 1 || tags[0] != "backend" && tags[0] != "public" {
+			t.Fatalf("incoherent tag snapshot: %+v", event)
+		}
 	}
 }
 

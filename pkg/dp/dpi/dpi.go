@@ -87,8 +87,10 @@ type Manager struct {
 	anyDecoders []Decoder            // decoders with no port-specific hint
 	reassembler *reassembler
 	streamEnds  map[string]streamEnd
-	selected    map[string][]Decoder // committed dispatch until flow end, under streamMu
-	eventTimes  map[string]time.Time // last inspected capture time, under streamMu
+	selected    map[string][]Decoder           // committed dispatch until flow end, under streamMu
+	flowStreams map[string]map[string]struct{} // session keys owned by each flow, under streamMu
+	streamFlows map[string]map[string]struct{} // flow owners of each session key, under streamMu
+	eventTimes  map[string]time.Time           // last inspected capture time, under streamMu
 }
 
 type streamEnd struct {
@@ -105,6 +107,8 @@ func NewManager(decoders ...Decoder) *Manager {
 		streamEnds:  make(map[string]streamEnd),
 		eventTimes:  make(map[string]time.Time),
 		selected:    make(map[string][]Decoder),
+		flowStreams: make(map[string]map[string]struct{}),
+		streamFlows: make(map[string]map[string]struct{}),
 	}
 	for _, d := range decoders {
 		m.Add(d)
@@ -206,7 +210,7 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 // flowEnd returns the decoders' flow-end events. Must be called with
 // streamMu held.
 func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
-	defer delete(m.selected, state.ID())
+	defer m.releaseFlowSelection(state.ID())
 	delete(m.eventTimes, state.ID())
 	var out []Event
 	var errs []error
@@ -227,6 +231,7 @@ func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
 // Callers hold streamMu.
 func (m *Manager) dispatch(state *flow.State, id string) []Decoder {
 	if selected := m.selected[id]; len(selected) != 0 {
+		m.ownSelection(state.ID(), id)
 		return selected
 	}
 	var selected []Decoder
@@ -237,6 +242,7 @@ func (m *Manager) dispatch(state *flow.State, id string) []Decoder {
 	}
 	if len(selected) != 0 {
 		m.selected[id] = selected
+		m.ownSelection(state.ID(), id)
 	}
 	return selected
 }
