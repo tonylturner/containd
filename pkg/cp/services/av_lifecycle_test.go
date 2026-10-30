@@ -251,6 +251,8 @@ func TestAVManagerSupervisesOneClamdAndFreshclam(t *testing.T) {
 		t.Fatalf("RunFreshclamNow: %v", err)
 	}
 	waitFor(t, 3*time.Second, func() bool { return countLines(fake.freshLog, "run") == 2 })
+	// The log line marks the start; the next manual run needs this one finished.
+	waitFor(t, 3*time.Second, func() bool { return mgr.Status(context.Background())["freshclam_runs"] == 2 })
 
 	// A successful download reloads clamd and starts a new definitions generation.
 	fake.setFreshclamExit(t, "0")
