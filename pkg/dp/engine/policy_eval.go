@@ -214,13 +214,6 @@ func isStreamErrorEvent(ev dpi.Event) bool {
 // both directions through EvaluateIEC104 and deny unmatched replies.
 func isReply(state *flow.State) bool { return state.ServiceKey().Dir == flow.DirReverse }
 
-func messageDirection(state *flow.State) string {
-	if isReply(state) {
-		return "response"
-	}
-	return "request"
-}
-
 // servicePort returns the server port of the packet's connection: the
 // destination port when the sender opened the connection, the source port
 // on its replies.
