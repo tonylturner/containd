@@ -354,7 +354,6 @@ test("Firewall create form sends only IEC keys for an iec104 rule", async ({ pag
     typeIds: [100],
     classes: ["system"],
     readOnly: false,
-    mode: "learn",
   });
 });
 

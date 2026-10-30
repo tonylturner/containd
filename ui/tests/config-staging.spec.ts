@@ -300,7 +300,7 @@ for (const bank of [
 
 test("Config review includes unknown sections and complete known top-level sections", async ({ page }) => {
   const running: ConfigDiff["running"] & Record<string, unknown> = {
-    firewall: { defaultAction: "ALLOW" }, dataplane: { dpiMode: "learn" }, futureSection: { mode: "before" },
+    firewall: { defaultAction: "ALLOW" }, dataplane: { dpiMode: "monitor" }, futureSection: { mode: "before" },
   };
   const candidate: ConfigDiff["candidate"] & Record<string, unknown> = {
     firewall: { defaultAction: "DENY" }, dataplane: { dpiMode: "enforce" }, futureSection: { mode: "after" },

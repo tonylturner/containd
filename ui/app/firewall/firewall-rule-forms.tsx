@@ -20,7 +20,7 @@ import {
 } from "../../lib/api";
 import { validateIPOrCIDRList } from "../../lib/validate";
 import { iec104DraftFrom, type IEC104Draft } from "../ics/iec104";
-import { genericSelectorDraftFrom, effectivePredicate, type GenericSelectorDraft, icsAddressDraftFrom, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
+import { genericSelectorDraftFrom, effectivePredicate, type GenericSelectorDraft, icsAddressDraftFrom, type ICSModeSelection } from "../ics/ics-shared";
 import { zoneLabel } from "../../lib/zones";
 import { ICSPredicateFields, buildRuleICS } from "./firewall-ics-fields";
 import {
@@ -76,7 +76,7 @@ function buildRuleParts(
   policy: PolicyDraft,
   ics: ICSDraft,
   tagsInUse: string[],
-  globalMode: ICSMode | undefined,
+  globalMode: ICSModeSelection | undefined,
   existing?: ICSPredicate,
 ): Built<{ fields: PolicyFields; ics: ICSPredicatePatch | undefined }> {
   const fields = buildPolicy(policy, tagsInUse);
@@ -131,7 +131,7 @@ function NoZonesHint({ zones }: { zones: Zone[] }) {
   );
 }
 
-function ruleDraftFrom(rule: FirewallRule, rules: FirewallRule[], zones: Zone[], globalMode: ICSMode | undefined) {
+function ruleDraftFrom(rule: FirewallRule, rules: FirewallRule[], zones: Zone[], globalMode: ICSModeSelection | undefined) {
   return {
     context: { rules, zones, globalMode },
     description: rule.description ?? "",
@@ -159,7 +159,7 @@ export function EditRuleModal({
   context: FirewallRule[];
   zones: Zone[];
   rule: FirewallRule;
-  globalMode: ICSMode | undefined;
+  globalMode: ICSModeSelection | undefined;
   /** Distinct TAG labels of the other rules. */
   tagsInUse: string[];
   onClose: () => void;
@@ -331,7 +331,7 @@ export function CreateRuleForm({
   onCreate,
 }: {
   zones: Zone[];
-  globalMode: ICSMode | undefined;
+  globalMode: ICSModeSelection | undefined;
   /** Distinct TAG labels of the existing rules. */
   tagsInUse: string[];
   context: FirewallRule[];
@@ -339,7 +339,7 @@ export function CreateRuleForm({
 }) {
   const form = useConfigForm({
     id: "", description: "", log: false, srcZone: "", dstZone: "", sources: "", destinations: "",
-    proto: "tcp", port: "502", policy: policyDraftFrom(), ics: icsDraftFrom(undefined, "learn"),
+    proto: "tcp", port: "502", policy: policyDraftFrom(), ics: icsDraftFrom(undefined, ""),
   });
   const { refreshForm } = form;
   useEffect(() => { refreshForm({ rules: context, zones, globalMode, tagsInUse }); }, [refreshForm, context, zones, globalMode, tagsInUse]);

@@ -15,7 +15,7 @@ snapshot and cannot certify nft enforcement.
 
 ## Schema
 
-This complete example uses schema `0.1.8`. It defines two routed networks and a
+This complete example uses schema `0.1.9`. It defines two routed networks and a
 single TCP/80 allow rule. With enforcement enabled, other new forwarded
 connections are denied. Enforcement is off until you enable it deliberately. Replace the illustrative kernel devices and
 addresses with your deployment's values before applying it. This is not the
@@ -23,7 +23,7 @@ Docker starter topology.
 
 ```json
 {
-  "schema_version": "0.1.8",
+  "schema_version": "0.1.9",
   "description": "Two-zone routed lab; adapt device names and addressing before committing",
   "system": {
     "hostname": "containd",

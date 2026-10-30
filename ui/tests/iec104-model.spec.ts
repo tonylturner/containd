@@ -39,27 +39,27 @@ test("EU breaker rule serialises to the IEC 104 rule wire shape", () => {
 });
 
 test("an empty draft emits no list fields and no forbidden keys", () => {
-  const res = buildIEC104RuleICS({ ...empty, readOnly: true }, "learn", "ALLOW");
+  const res = buildIEC104RuleICS({ ...empty, readOnly: true }, "monitor", "ALLOW");
   expect(res).toEqual({
     ok: true,
-    ics: { protocol: "iec104", readOnly: true, mode: "learn" },
+    ics: { protocol: "iec104", readOnly: true, mode: "monitor" },
   });
 });
 
 test("inherited mode display resolves the global mode without inventing a rule override", () => {
   expect(formatICSMode(undefined, "enforce")).toEqual({
-    label: "inherit (enforce)",
+    label: "Inherit (Enforce)",
     effectiveMode: "enforce",
     inherited: true,
   });
   expect(formatICSMode(undefined, undefined)).toEqual({
-    label: "inherit (learning)",
-    effectiveMode: "learn",
+    label: "Inherit (Monitor (safe))",
+    effectiveMode: "monitor",
     inherited: true,
   });
-  expect(formatICSMode("learn", "enforce")).toEqual({
-    label: "learning",
-    effectiveMode: "learn",
+  expect(formatICSMode("monitor", "enforce")).toEqual({
+    label: "Monitor (safe)",
+    effectiveMode: "monitor",
     inherited: false,
   });
 
@@ -132,13 +132,13 @@ test("client checks mirror the server IEC 104 field ranges", () => {
   }
 });
 
-test("allow rules may name only decoded Type IDs unless learning", () => {
+test("allow rules may name only decoded Type IDs unless monitoring", () => {
   const draft = { ...empty, typeIds: "46, 104" };
   const allow = buildIEC104RuleICS(draft, "enforce", "ALLOW");
   expect(allow.ok).toBe(false);
   if (!allow.ok) expect(allow.error).toMatch(/104 is not decoded/);
   expect(buildIEC104RuleICS(draft, "enforce", "DENY").ok).toBe(true);
-  expect(buildIEC104RuleICS(draft, "learn", "ALLOW").ok).toBe(true);
+  expect(buildIEC104RuleICS(draft, "monitor", "ALLOW").ok).toBe(true);
 });
 
 test("single-point monitor Type IDs are decoded and may be allowed", () => {

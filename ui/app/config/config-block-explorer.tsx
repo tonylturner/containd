@@ -43,7 +43,7 @@ const BLOCK_OPTIONS: Array<{ key: BlockKey; label: string; help: string }> = [
   { key: "ids", label: "IDS", help: "Detection rules, Sigma/YARA imports, and settings." },
   { key: "services", label: "Services", help: "DNS, NTP, DHCP, proxy, VPN, AV, and syslog." },
   { key: "dataPlane", label: "Data plane", help: "Enforcement, capture interfaces, nftables." },
-  { key: "dpi", label: "DPI", help: "DPI mode (learn/enforce), protocol enable/disable, exclusions." },
+  { key: "dpi", label: "DPI", help: "DPI mode (monitor/enforce), protocol enable/disable, exclusions." },
   { key: "pcap", label: "PCAP", help: "Capture settings and forwarding." },
 ];
 

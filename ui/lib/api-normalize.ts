@@ -107,7 +107,7 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
         ? record.direction
         : undefined,
     mode:
-      record.mode === "enforce" || record.mode === "learn"
+      record.mode === "enforce" || record.mode === "monitor"
         ? record.mode
         : undefined,
     typeIds: toIntegerList(record.typeIds),
