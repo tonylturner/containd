@@ -30,6 +30,9 @@ func TestFlowFramerBothDirections(t *testing.T) {
 				key := flow.Key{SrcIP: net.ParseIP("10.0.0.1"), DstIP: net.ParseIP("10.0.0.2"),
 					SrcPort: tc.client, DstPort: tc.server, Proto: 6}
 				states := []*flow.State{flow.NewState(key, time.Now()), flow.NewState(key.Reversed(), time.Now())}
+				if matches, committed := m.CommittedProtocol(states[0], tc.protocol); !matches || committed {
+					t.Fatalf("prospective owner: matches=%t committed=%t", matches, committed)
+				}
 				packets := []*dpi.ParsedPacket{
 					{Proto: "tcp", HasOffset: true, Session: "s", Dir: dpi.ClientToServer, Payload: tc.request},
 					{Proto: "tcp", HasOffset: true, Session: "s", Dir: dpi.ServerToClient, Payload: tc.reply},
@@ -42,6 +45,14 @@ func TestFlowFramerBothDirections(t *testing.T) {
 					res := m.Inspect(states[i], packets[i])
 					if res.Err != nil || res.Proto != tc.protocol || len(res.Frames) != 1 || len(res.Events) != 1 || res.Events[0].Proto != tc.protocol {
 						t.Fatalf("direction %d: %+v", i, res)
+					}
+					for _, state := range states {
+						for _, protocol := range []string{"iec104", "modbus"} {
+							matches, committed := m.CommittedProtocol(state, protocol)
+							if !committed || matches != (protocol == tc.protocol) {
+								t.Fatalf("direction %d owner %s: matches=%t committed=%t", i, protocol, matches, committed)
+							}
+						}
 					}
 				}
 				m.EndStream("s")

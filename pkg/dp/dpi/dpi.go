@@ -157,24 +157,28 @@ func (m *Manager) candidates(state *flow.State) []Decoder {
 	}
 
 	key := state.ServiceKey()
-	src := portMap[key.SrcPort]
-	var dst []Decoder
-	if key.SrcPort != key.DstPort {
-		dst = portMap[key.DstPort]
+	first, second := key.SrcPort, key.DstPort
+	if key.Proto == 6 && key.Dir == flow.DirForward {
+		first, second = second, first // TCP server first, even on verified NAT service coordinates
+	}
+	firstDecoders := portMap[first]
+	var secondDecoders []Decoder
+	if first != second {
+		secondDecoders = portMap[second]
 	}
 	// Most flows select one immutable registry slice. Do not copy it on
 	// every packet; only combined lists need their own backing storage.
 	switch {
-	case len(src) == 0 && len(dst) == 0:
+	case len(firstDecoders) == 0 && len(secondDecoders) == 0:
 		return m.anyDecoders
-	case len(dst) == 0 && len(m.anyDecoders) == 0:
-		return src
-	case len(src) == 0 && len(m.anyDecoders) == 0:
-		return dst
+	case len(secondDecoders) == 0 && len(m.anyDecoders) == 0:
+		return firstDecoders
+	case len(firstDecoders) == 0 && len(m.anyDecoders) == 0:
+		return secondDecoders
 	}
-	indexed := make([]Decoder, 0, len(src)+len(dst)+len(m.anyDecoders))
-	indexed = append(indexed, src...)
-	indexed = append(indexed, dst...)
+	indexed := make([]Decoder, 0, len(firstDecoders)+len(secondDecoders)+len(m.anyDecoders))
+	indexed = append(indexed, firstDecoders...)
+	indexed = append(indexed, secondDecoders...)
 	return append(indexed, m.anyDecoders...)
 }
 
@@ -214,7 +218,7 @@ func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
 	delete(m.eventTimes, state.ID())
 	var out []Event
 	var errs []error
-	for _, d := range m.dispatch(state, state.ID()) {
+	for _, d := range m.dispatch(state, state.ID(), peerFlowID(state)) {
 		events, err := d.OnFlowEnd(state)
 		if err != nil {
 			errs = append(errs, err)
@@ -229,17 +233,13 @@ func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
 // after framing has started; it must not reinterpret that stream with a new
 // decoder. A flow not yet selected can use newly verified service ports.
 // Callers hold streamMu.
-func (m *Manager) dispatch(state *flow.State, id string) []Decoder {
-	if selected := m.selected[id]; len(selected) != 0 {
+func (m *Manager) dispatch(state *flow.State, id, peer string) []Decoder {
+	if selected := m.committedSelection(state, id, peer); len(selected) != 0 {
+		m.selected[id] = selected
 		m.ownSelection(state.ID(), id)
 		return selected
 	}
-	var selected []Decoder
-	for _, d := range m.candidates(state) {
-		if d != nil && d.Supports(state) {
-			selected = append(selected, d)
-		}
-	}
+	selected := m.supportedCandidates(state)
 	if len(selected) != 0 {
 		m.selected[id] = selected
 		m.ownSelection(state.ID(), id)
@@ -247,16 +247,36 @@ func (m *Manager) dispatch(state *flow.State, id string) []Decoder {
 	return selected
 }
 
-// CommittedProtocol reports legacy directional dispatch ownership, so passive
-// identification does not infer a different owner from newly verified ports.
+func (m *Manager) supportedCandidates(state *flow.State) []Decoder {
+	var selected []Decoder
+	for _, d := range m.candidates(state) {
+		if d != nil && d.Supports(state) {
+			selected = append(selected, d)
+		}
+	}
+	return selected
+}
+
+// CommittedProtocol reports the single TCP framer owning either direction,
+// including session dispatch, so passive identification cannot invent an owner
+// from another supporting decoder. Before commitment it reports the same
+// server-first choice dispatch would make, with committed=false and no writes.
 func (m *Manager) CommittedProtocol(state *flow.State, proto string) (matches, committed bool) {
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
-	selected := m.selected[state.ID()]
+	selected := m.committedSelection(state, state.ID(), peerFlowID(state))
+	committed = len(selected) != 0
+	if !committed {
+		selected = m.supportedCandidates(state)
+	}
+	if state.Key.Proto == 6 {
+		framer := firstFramer(selected)
+		return framer != nil && framer.Protocol() == proto, committed
+	}
 	for _, decoder := range selected {
 		if stream, ok := decoder.(StreamDecoder); ok && stream.Protocol() == proto {
-			return true, true
+			return true, committed
 		}
 	}
-	return false, len(selected) != 0
+	return false, committed
 }

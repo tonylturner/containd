@@ -106,21 +106,17 @@ func (o *offlineObserver) legacyDecodes(key identify.Key, p identify.Protocol) b
 	if p == identify.ENIP && cip.UsesImplicitIO(st) {
 		return false
 	}
-	parsed := &dpi.ParsedPacket{Proto: "tcp"}
 	if st.Key.Proto == ics.TCP && (st.Key.SrcPort == ics.IEC104Port || st.Key.DstPort == ics.IEC104Port) {
 		// annotate bypasses every legacy decoder on this tuple until a
 		// session has both handshake directions, not just the IEC decoder.
-		s, _, dir := o.sessions.lookup(c.endpoints[0], c.endpoints[1])
+		s, _, _ := o.sessions.lookup(c.endpoints[0], c.endpoints[1])
 		if s == nil || s.dirs[1] == nil {
 			return false
 		}
-		parsed.HasOffset, parsed.Session, parsed.Dir = true, s.id, dpi.ClientToServer
-		if dir == 1 {
-			parsed.Dir = dpi.ServerToClient
-		}
 	}
 	if st.Key.Proto == ics.TCP {
-		return o.manager.FramingProtocol(st, parsed) == string(p)
+		matches, _ := o.manager.CommittedProtocol(st, string(p))
+		return matches
 	}
 	for _, d := range o.decoders {
 		sd, ok := d.(dpi.StreamDecoder)

@@ -2,6 +2,38 @@
 
 package dpi
 
+import "github.com/tonylturner/containd/pkg/dp/flow"
+
+// committedSelection shares one dispatch across TCP directions and session
+// keys. The existing ownership indexes also bridge wire and session dispatch,
+// without another pin or lifecycle. Callers hold streamMu.
+func (m *Manager) committedSelection(state *flow.State, id, peer string) []Decoder {
+	if selected := m.selected[id]; len(selected) != 0 {
+		return selected
+	}
+	if state.Key.Proto != 6 {
+		return nil
+	}
+	if selected := m.selected[peer]; len(selected) != 0 {
+		return selected
+	}
+	for _, flowID := range []string{state.ID(), peerFlowID(state)} {
+		if selected := m.selected[flowID]; len(selected) != 0 {
+			return selected
+		}
+		for key := range m.flowStreams[flowID] {
+			if selected := m.selected[key]; len(selected) != 0 {
+				return selected
+			}
+		}
+	}
+	return nil
+}
+
+func peerFlowID(state *flow.State) string {
+	return state.Connection.Load().Peer(state.Key).Hash()
+}
+
 // Session streams are independent of directional wire flow IDs. Keep both
 // ownership indexes so flow sweeps and explicit session ends can release their
 // selections without scanning unrelated flows. All callers hold streamMu.

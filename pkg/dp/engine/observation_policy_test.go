@@ -48,7 +48,7 @@ func TestLegacyDecodesAndScope(t *testing.T) {
 			key.Proto = tc.transport
 			state := flow.NewState(key, time.Now())
 			ctx := &observationContext{states: [2]*flow.State{state, nil}, selected: tc.selected, iecOwned: tc.owned}
-			ctx.framer = dpi.NewManager(DefaultDecoders()...).FramingProtocol(state, observationPacket(state))
+			ctx.legacy = dpi.NewManager(DefaultDecoders()...)
 			if got := legacyDecodes(ctx, tc.p); got != tc.want {
 				t.Fatalf("legacy=%v want %v", got, tc.want)
 			}

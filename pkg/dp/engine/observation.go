@@ -31,7 +31,6 @@ type observationContext struct {
 	legacy   *dpi.Manager
 	selected bool
 	iecOwned bool
-	framer   string // actual/prospective port-selected TCP owner, not every supporting decoder
 	snapshot *rules.Snapshot
 	refused  bool // Open is attempted only once, including at capacity.
 	// The table can retain legacy connection evidence across tuple reuse.
@@ -75,10 +74,7 @@ func legacyDecodes(c *observationContext, protocol identify.Protocol) bool {
 	if c == nil {
 		return false
 	}
-	if protocol == identify.IEC104 && c.iecOwned && c.framer == string(protocol) {
-		return true
-	}
-	if !c.selected {
+	if !c.selected && !(protocol == identify.IEC104 && c.iecOwned) {
 		return false
 	}
 	for _, st := range c.states {
@@ -91,17 +87,21 @@ func legacyDecodes(c *observationContext, protocol identify.Protocol) bool {
 			return false
 		}
 		if key.Proto == 6 && (key.SrcPort == iec104Port || key.DstPort == iec104Port) {
-			return false
-		}
-		if st.Key.Proto == 6 {
-			return c.framer == string(protocol)
+			if protocol != identify.IEC104 || !c.iecOwned {
+				return false
+			}
+			if c.legacy != nil {
+				matches, _ := c.legacy.CommittedProtocol(st, "iec104")
+				return matches
+			}
+			return true
 		}
 		if c.legacy != nil {
 			name := string(protocol)
 			if protocol == identify.ENIP {
 				name = "cip"
 			}
-			if matches, committed := c.legacy.CommittedProtocol(st, name); committed {
+			if matches, committed := c.legacy.CommittedProtocol(st, name); committed || key.Proto == 6 {
 				return matches
 			}
 		}
@@ -158,7 +158,6 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	selected := e.ShouldInspect(st, parsed)
 	snapshot := e.ruleSnap.Load()
 	iecOwned := e.iecOwnsState(pkt, st)
-	framer := e.dpiMgr.FramingProtocol(st, parsed)
 	e.flowMu.Lock()
 	live := e.observation
 	if live == nil {
@@ -190,7 +189,6 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	}
 	dir := uint8(connection.Direction(st.Key))
 	ctx.states[dir], ctx.selected, ctx.iecOwned, ctx.snapshot = st, selected, iecOwned, snapshot
-	ctx.framer = framer
 	var output observe.Output
 	if !enabled {
 		output = live.observer.Finish(key)

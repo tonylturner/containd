@@ -46,7 +46,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	m.eventTimes[state.ID()] = at
 	defer func() { stampResult(&res, at) }()
 	key, session, pos := streamKey(state, pkt)
-	candidates := m.dispatch(state, key)
+	candidates := m.dispatch(state, key, peerStreamKey(state, pkt))
 	tcp := pkt.Proto == "tcp"
 	stream := m.reassembles(pkt)
 	var framer StreamDecoder
@@ -54,15 +54,11 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 		for _, expired := range m.reassembler.sweep(time.Now()) {
 			m.endStream(expired)
 		}
-		framer = m.flowFramer(state, pkt)
+		framer = firstFramer(candidates)
 	}
 	if framer != nil {
 		res.Framed = true
 		res.Proto = framer.Protocol()
-	}
-	if framer != nil {
-		// Also runs on decoder panic, so FailStream retains the same owner.
-		defer func() { m.reassembler.pinFramer(key, framer) }()
 	}
 	var errEvent *Event
 	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
@@ -282,5 +278,19 @@ func sessionStreamKey(session string, dir StreamDir) string {
 		return "session/" + session + "/s"
 	default:
 		return "session/" + session + "/?"
+	}
+}
+
+func peerStreamKey(state *flow.State, pkt *ParsedPacket) string {
+	if !pkt.HasOffset {
+		return peerFlowID(state)
+	}
+	switch pkt.Dir {
+	case ClientToServer:
+		return sessionStreamKey(pkt.Session, ServerToClient)
+	case ServerToClient:
+		return sessionStreamKey(pkt.Session, ClientToServer)
+	default:
+		return ""
 	}
 }
