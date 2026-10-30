@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 
 import { api, fetchDataPlane, isAdmin, type Interface, type InterfaceState } from "../../lib/api";
 import { IECPressurePanel } from "./iec-pressure";
@@ -75,7 +75,7 @@ function parseTraceroute(output: string): Hop[] {
   return hops;
 }
 
-function smallSpark(values: number[]): JSX.Element {
+function smallSpark(values: number[]): ReactElement {
   if (values.length === 0) return <span className="text-(--text-muted)">—</span>;
   const max = Math.max(...values);
   const min = Math.min(...values);

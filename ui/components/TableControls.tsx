@@ -1,5 +1,4 @@
 "use client";
-import React from "react";
 
 export function SearchBar({ value, onChange, placeholder, className = "w-full max-w-sm" }: {
   value: string; onChange: (s: string) => void; placeholder?: string;
