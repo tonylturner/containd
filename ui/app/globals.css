@@ -308,29 +308,6 @@ body::before {
   background: var(--amber);
 }
 
-/* ── ReactFlow overrides ──────────────────────────────────── */
-
-.reactflow-controls {
-  background: rgba(0, 0, 0, 0.65);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.reactflow-controls button {
-  background: rgba(0, 0, 0, 0.8);
-  color: var(--text);
-  border-bottom: 1px solid var(--border);
-}
-
-.reactflow-controls button:hover {
-  background: rgba(245, 158, 11, 0.08);
-}
-
-.reactflow-controls button svg {
-  stroke: var(--text);
-}
-
 /* ── Industrial form elements ─────────────────────────────── */
 
 .input-industrial {
