@@ -8,7 +8,7 @@ import { summarizeIEC104 } from "../ics/iec104";
 import { RuleImpactSummary } from "../firewall/firewall-rule-warnings";
 
 export const secondaryButton =
-  "rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-40";
+  "rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-30 disabled:cursor-not-allowed";
 export const primaryButton =
   "rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-black transition-ui hover:brightness-110 disabled:opacity-40";
 

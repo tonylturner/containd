@@ -39,6 +39,14 @@ test("selection starts empty, Generate is explicit, scope and frozen proof are v
     name: "Suggestion modbus-1",
     exact: true,
   });
+  const emptyStage = page.getByRole("button", {
+    name: "Stage 0 selected",
+    exact: true,
+  });
+  await expect(emptyStage).toBeDisabled();
+  await expect(emptyStage).toHaveCSS("cursor", "not-allowed");
+  await expect(emptyStage).toHaveCSS("opacity", "0.3");
+  await expect(emptyStage).toHaveClass(/bg-\(--surface2\)/);
   await expect(modbus).toContainText("unitId=0");
   await expect(modbus).toContainText("10-11");
   await expect(modbus).toContainText("24/24 passed");
@@ -267,9 +275,30 @@ for (const width of [1440, 390])
       await expect(page.getByLabel("Dataset review")).toBeVisible();
       expect(
         await page.evaluate(
-          () => document.documentElement.scrollWidth <= window.innerWidth,
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth,
         ),
       ).toBe(true);
+      if (width === 390) {
+        const datasets = page.getByLabel("Dataset list", { exact: true });
+        await expect(datasets.getByRole("table")).toHaveCount(0);
+        for (const label of [
+          "Dataset",
+          "Source",
+          "State",
+          "Records / bytes",
+          "Gaps",
+          "Expires",
+        ]) {
+          await expect(
+            datasets.getByRole("term").filter({ hasText: new RegExp(`^${label}$`) }),
+          ).toBeVisible();
+        }
+        expect(
+          await datasets.evaluate((el) => el.scrollWidth <= el.clientWidth),
+        ).toBe(true);
+      }
       const dir = process.env.LEARNER_SCREENSHOTS;
       if (dir) {
         await mkdir(dir, { recursive: true });

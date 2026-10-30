@@ -15,6 +15,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 import { IdentificationTable } from "./identifications";
+import { DatasetList } from "./dataset-list";
 import { DatasetReview, dataOf, ReasonCounts } from "./dataset-review";
 import { primaryButton, secondaryButton } from "./suggestion-review";
 
@@ -277,57 +278,11 @@ export default function PcapAnalysisPage() {
           </p>
         )}
         {!!datasets?.items?.length && (
-          <div className="overflow-x-auto rounded-xs border">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs uppercase">
-                <tr>
-                  {[
-                    "Dataset / source",
-                    "State",
-                    "Records / bytes",
-                    "Gaps",
-                    "Expires",
-                    "Review",
-                  ].map((h) => (
-                    <th key={h} className="px-3 py-2">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {datasets.items.map((d) => (
-                  <tr key={d.id} className="border-t table-row-hover">
-                    <td className="max-w-60 break-all px-3 py-2 font-mono text-xs">
-                      {d.id}
-                      <span className="block text-(--text-muted)">
-                        {d.source}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">{d.state}</td>
-                    <td className="px-3 py-2">
-                      {d.records} / {d.bytes.toLocaleString()}
-                    </td>
-                    <td className="px-3 py-2">
-                      {d.gaps?.join(", ") || "None reported"}
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      {new Date(d.expiresAt).toLocaleString()}
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        className={secondaryButton}
-                        aria-pressed={chosen?.id === d.id}
-                        onClick={() => setChosen(d)}
-                      >
-                        Open {d.id}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DatasetList
+            datasets={datasets.items}
+            selectedId={chosen?.id}
+            onOpen={setChosen}
+          />
         )}
         {datasets?.nextCursor && (
           <button

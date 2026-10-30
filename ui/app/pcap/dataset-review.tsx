@@ -218,7 +218,7 @@ export function DatasetReview({
               Generate suggestions
             </button>
             <button
-              className={primaryButton}
+              className={eligible.length ? primaryButton : secondaryButton}
               disabled={
                 busy ||
                 !!receipt ||
