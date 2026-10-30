@@ -34,8 +34,8 @@ func beforeRuleModes(schema string) bool {
 	return schema == "" || err == nil && compareSemver(v, semver{minor: 1, patch: 9}) < 0
 }
 
-func upgradeRuleModes019(cfg *Config) {
-	rec := &RuleModeMigration{Timestamp: time.Now().UTC(), SchemaBefore: cfg.SchemaVersion, SchemaAfter: "0.1.9"}
+func upgradeRuleModes019(cfg *Config, originalSchema string) {
+	rec := &RuleModeMigration{Timestamp: time.Now().UTC(), SchemaBefore: originalSchema, SchemaAfter: "0.1.9"}
 	rec.ID = uint64(rec.Timestamp.UnixNano())
 	if cfg.DataPlane.DPIMode == "learn" {
 		rec.Changes = append(rec.Changes, RuleModeChange{Path: "dataplane.dpiMode", Action: "rewrite", Old: "learn", New: "monitor"})

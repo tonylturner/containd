@@ -173,7 +173,7 @@ func removeRetiredBuiltins(cfg *Config) []string {
 
 func beforeIndustrialScope(schema string) bool {
 	version, err := parseSemver(schema)
-	return schema == "" || err == nil && compareSemver(version, semver{patch: 8, minor: 1}) < 0
+	return err == nil && compareSemver(version, semver{patch: 8, minor: 1}) < 0
 }
 
 func sameBuiltin(a, b IDSRule) bool {
