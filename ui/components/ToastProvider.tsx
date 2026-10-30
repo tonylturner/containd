@@ -13,6 +13,7 @@ const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const nextId = useRef(0);
 
   // Clean up all pending timers on unmount
   useEffect(() => {
@@ -24,8 +25,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addToast = useCallback((message: string, tone: Toast["tone"] = "info") => {
+    const toast = { id: ++nextId.current, message, tone };
     setToasts((prev) => {
-      const next = [...prev, { id: Date.now(), message, tone }];
+      const next = [...prev, toast];
       return next.slice(-4);
     });
     const timer = setTimeout(() => {

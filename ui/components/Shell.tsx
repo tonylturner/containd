@@ -3,7 +3,8 @@
 import * as React from "react";
 import { ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { navigateToUI, uiNavigationPath } from "../lib/ui-navigation";
 import { type User, api } from "../lib/api";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { ConfigStatusBar } from "./ConfigStatusBar";
@@ -67,6 +68,7 @@ export function Shell({
   actions?: ReactNode;
 }) {
   const pathname = usePathname() || "/";
+  const router = useRouter();
   const [initialPath] = React.useState(pathname);
   const storedNavigation = React.useSyncExternalStore(subscribeNavigation, navigationSnapshot, () => "{}");
   const [navigationChoice, setNavigationChoice] = React.useState<{ path: string; groups: Record<string, boolean> } | null>(null);
@@ -114,11 +116,12 @@ export function Shell({
         | "unauthenticated" = "unauthenticated",
     ) => {
       if (typeof window === "undefined") return;
-      if (pathname.startsWith("/login")) return;
+      if (pathname.startsWith("/login") || pathname.startsWith("/containd/login")) return;
       if (redirectingRef.current) return;
       redirectingRef.current = true;
       const next = pathname.startsWith("/") ? pathname : "/";
-      const url = `/login?reason=${encodeURIComponent(reason)}&next=${encodeURIComponent(next)}`;
+      const login = `/login?reason=${encodeURIComponent(reason)}&next=${encodeURIComponent(next)}`;
+      const url = uiNavigationPath(login, window.location.pathname);
       appendRedirectTrace({
         ts: new Date().toISOString(),
         from: pathname,
@@ -126,9 +129,9 @@ export function Shell({
         reason,
         stack: new Error("redirectToLogin").stack || undefined,
       });
-      window.location.href = url;
+      navigateToUI(router, login);
     },
-    [pathname],
+    [pathname, router],
   );
 
   React.useEffect(() => {
@@ -227,7 +230,7 @@ export function Shell({
         pathname.startsWith("/system/") &&
         typeof window !== "undefined"
       ) {
-        window.location.href = "/forbidden";
+        navigateToUI(router, "/forbidden");
         return;
       }
       setAuthChecked(true);
@@ -235,7 +238,7 @@ export function Shell({
     return () => {
       canceled = true;
     };
-  }, [pathname, redirectToLogin]);
+  }, [pathname, redirectToLogin, router]);
 
   // Session keepalive: periodically touch the session so the JWT and cookie
   // stay fresh while the user is actively viewing any page.
@@ -506,8 +509,9 @@ export function Shell({
                     type="button"
                     onClick={async () => {
                       await api.logout();
+                      verifiedSession = null;
                       if (typeof window !== "undefined")
-                        window.location.href = "/login?reason=logout";
+                        navigateToUI(router, "/login?reason=logout");
                     }}
                     className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-red-400 transition-ui hover:bg-red-500/10"
                   >

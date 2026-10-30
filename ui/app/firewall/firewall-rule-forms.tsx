@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { sameConfig } from "../../lib/config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
@@ -168,7 +168,7 @@ export function EditRuleModal({
   const draft = useConfigEditor(() => ruleDraftFrom(rule, context, zones, globalMode));
   const { cfg, setCfg, adoptConfig } = draft;
   const latest = useRef(draft.editor);
-  latest.current = draft.editor;
+  useLayoutEffect(() => { latest.current = draft.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { adoptConfig(ruleDraftFrom(rule, context, zones, globalMode)); }, [adoptConfig, rule, context, zones, globalMode]);

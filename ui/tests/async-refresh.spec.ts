@@ -67,3 +67,34 @@ test("a background NAT refresh keeps the existing draft mounted while awaiting I
   await answered;
   await expect(draft).toHaveValue("192.0.");
 });
+
+test("retrying the security matrix clears the previous error while IO is pending", async ({ page }) => {
+  await page.route("**/api/v1/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const json = path.endsWith("/auth/me") || path.endsWith("/auth/session")
+      ? { id: "admin", username: "containd", role: "admin" }
+      : path.endsWith("/config/diff") ? { changed: false }
+      : path.endsWith("/zones") ? [] : {};
+    return route.fulfill({ json });
+  });
+  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ status: 503, json: {} }));
+  await page.goto("/topology/");
+  await page.getByRole("button", { name: "SECURITY", exact: true }).click();
+  const error = page.getByText("Error: Failed to load security data", { exact: true });
+  await expect(error).toBeVisible();
+
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/v1/security/conduits", async (route) => {
+    await held;
+    await route.fulfill({ json: {} });
+  });
+  const requested = page.waitForRequest("**/api/v1/security/conduits");
+  await error.locator("..").getByRole("button", { name: "Retry", exact: true }).click();
+  await requested;
+  await expect(error).toHaveCount(0);
+  const answered = page.waitForResponse("**/api/v1/security/conduits");
+  release();
+  await answered;
+  await expect(page.getByRole("status", { name: "Zones below target" })).toContainText("No zones configured.");
+});

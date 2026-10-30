@@ -31,7 +31,7 @@ export default function SecurityView() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const { initialLoading: loading, refresh: fetchData } = useAsyncRefresh(useCallback(async () => {
+  const { initialLoading: loading, loading: refreshing, refresh: fetchData } = useAsyncRefresh(useCallback(async () => {
     try {
       const [zones, conds] = await Promise.all([
         api.listZones(),
@@ -124,7 +124,7 @@ export default function SecurityView() {
     );
   }
 
-  if (error) {
+  if (error && !refreshing) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
         <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--topo-red)" }}>{error}</div>

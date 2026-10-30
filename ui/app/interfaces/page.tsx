@@ -9,7 +9,7 @@ import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 
 import { api, isAdmin, type Interface, type InterfaceState, type Zone } from "../../lib/api";
@@ -97,23 +97,11 @@ export default function InterfacesPage() {
     setRuntimeStatus(s === null ? "unavailable" : "ready");
   }, [refreshForm, adoptRows]));
 
-  const unboundConfigured = useMemo(() => {
-    const byDev = new Set(
-      ifaces
-        .map((i) => (i.device || "").trim())
-        .filter(Boolean),
-    );
-    const missingRuntime = ifaces.filter((i) => !runtimeFor(i, state));
-    const osIfaces = state
-      .map((s) => s.name)
-      .filter((n) => n !== "lo")
-      .sort();
-    const unassignedOS = osIfaces.filter((n) => !byDev.has(n));
-    return {
-      missingRuntime,
-      unassignedOS,
-    };
-  }, [ifaces, state]);
+  const boundDevices = new Set(ifaces.map((iface) => (iface.device || "").trim()).filter(Boolean));
+  const unboundConfigured = {
+    missingRuntime: ifaces.filter((iface) => !runtimeFor(iface, state)),
+    unassignedOS: state.map((iface) => iface.name).filter((name) => name !== "lo" && !boundDevices.has(name)).sort(),
+  };
 
   useConfigRefresh(refresh);
 

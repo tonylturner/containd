@@ -32,7 +32,7 @@ export function RulePolicyFields({
   onChange: (draft: PolicyDraft) => void;
 }) {
   const tzList = useId();
-  const zones = useMemo(timezones, []);
+  const zones = useMemo(() => timezones(), []);
   const set = (patch: Partial<PolicyDraft>) => onChange({ ...draft, ...patch });
   const info = actionInfo(draft.action);
   const toggleDay = (day: string, on: boolean) =>

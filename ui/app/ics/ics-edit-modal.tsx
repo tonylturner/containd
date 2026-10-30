@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 import { sameConfig } from "../../lib/config-editor";
 
@@ -63,7 +63,7 @@ export function EditICSModal({
   const draft = useConfigEditor(() => filterDraftFrom(rule, context, globalMode));
   const { cfg, setCfg, adoptConfig } = draft;
   const latest = useRef(draft.editor);
-  latest.current = draft.editor;
+  useLayoutEffect(() => { latest.current = draft.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { adoptConfig(filterDraftFrom(rule, context, globalMode)); }, [adoptConfig, rule, context, globalMode]);

@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 import { api, clearLocalAuth, getLastAuthError, type ApiFailure } from "../../lib/api";
 import { withRetryTime } from "../../lib/utils";
+import { navigateToUI } from "../../lib/ui-navigation";
 
 type State = "idle" | "logging_in" | "verifying_mfa" | "error";
 
@@ -26,6 +27,7 @@ export default function LoginPage() {
 }
 
 function LoginInner() {
+  const router = useRouter();
   const params = useSearchParams();
   const paramsKey = params?.toString() ?? "";
   const [username, setUsername] = useState("");
@@ -75,7 +77,7 @@ function LoginInner() {
     }
     if (typeof window !== "undefined") {
       const next = params?.get("next");
-      window.location.href = next && next.startsWith("/") ? next : "/";
+      navigateToUI(router, next ?? "/");
     }
   }
 
@@ -152,7 +154,7 @@ function LoginInner() {
               <button
                 type="button"
                 onClick={() => {
-                  if (typeof window !== "undefined") window.location.href = "/";
+                  if (typeof window !== "undefined") navigateToUI(router, "/");
                 }}
                 className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
               >

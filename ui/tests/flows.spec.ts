@@ -41,15 +41,17 @@ test("flows show loading until the first answer, and polls keep the rows", async
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(String(err)));
   await page.clock.install();
-  let calls = 0;
+  let reply = flows;
   let release: () => void = () => {};
   let gate = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/v1/flows") {
-      calls++;
+      // Strict Mode can issue multiple mount reads. Every read in the initial
+      // phase gets the same snapshot; only the subsequent poll changes it.
+      const snapshot = reply;
       await gate;
-      await route.fulfill({ json: calls === 1 ? flows : flows.slice(0, 1) });
+      await route.fulfill({ json: snapshot });
       return;
     }
     const body = path.endsWith("/auth/me") || path.endsWith("/auth/session")
@@ -72,6 +74,7 @@ test("flows show loading until the first answer, and polls keep the rows", async
   await expect(page.getByText("Showing 2 of 2 flows", { exact: true })).toBeVisible();
 
   // Hold the poll: the rows and footer stay while it runs.
+  reply = flows.slice(0, 1);
   gate = new Promise<void>((resolve) => { release = resolve; });
   const poll = page.waitForRequest((r) => new URL(r.url()).pathname === "/api/v1/flows");
   await page.clock.runFor(10_000);

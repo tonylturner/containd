@@ -7,7 +7,7 @@ import { notifyConfigMutation } from "../../lib/config-events";
 import { getJSONList, postJSON } from "../../lib/api-request";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api, apiURL, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
 import { Shell } from "../../components/Shell";
@@ -250,7 +250,7 @@ function TemplateModal({
   const [destZones, setDestZones] = form.field("destZones");
   const [params, setParams] = form.field("params");
   const latest = useRef(form.editor);
-  latest.current = form.editor;
+  useLayoutEffect(() => { latest.current = form.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [preview, setPreview] = useState<FirewallRule[] | null>(null);

@@ -48,7 +48,8 @@ export default function Home() {
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const [configDirty, setConfigDirty] = useState<boolean | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
-  const [clock, setClock] = useState("");
+  const [now, setNow] = useState<number | null>(null);
+  const clock = now === null ? "" : new Date(now).toLocaleTimeString("en-US", { hour12: false });
   const [simRunning, setSimRunning] = useState<boolean | null>(null);
   const [simUnavailable, setSimUnavailable] = useState(false);
   const [flowsUnavailable, setFlowsUnavailable] = useState(false);
@@ -56,8 +57,7 @@ export default function Home() {
 
   // Clock
   useEffect(() => {
-    const tick = () =>
-      setClock(new Date().toLocaleTimeString("en-US", { hour12: false }));
+    const tick = () => setNow(Date.now());
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
@@ -304,7 +304,7 @@ export default function Home() {
               value={
                 flows.filter((f) => {
                   if (!f.lastSeen) return false;
-                  return Date.now() - new Date(f.lastSeen).getTime() < 120_000;
+                  return now !== null && now - new Date(f.lastSeen).getTime() < 120_000;
                 }).length
               }
               color="text-emerald-400"

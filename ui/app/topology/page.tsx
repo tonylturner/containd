@@ -64,7 +64,7 @@ function TopologyInner() {
   const [syncTime, setSyncTime] = useState("\u2014");
   const [currentView, setCurrentView] = useState("logical");
   const [topoError, setTopoError] = useState<string | null>(null);
-  const nodeDataRef = useRef<Record<string, TopoNodeData>>({});
+  const [nodeData, setNodeData] = useState<Record<string, TopoNodeData>>({});
   const health = useHealth();
   const installed = useInstalledRuleset();
   const { fitView } = useReactFlow();
@@ -80,7 +80,7 @@ function TopologyInner() {
 
       setTopoError(null);
 
-      nodeDataRef.current = result.nodeDataMap;
+      setNodeData(result.nodeDataMap);
       setNodes(result.nodes);
       setEdges(result.edges);
       setSyncTime(new Date().toLocaleTimeString("en-US", { hour12: false }));
@@ -135,7 +135,7 @@ function TopologyInner() {
     setNodes((prev) => applyNodeChanges(changes, prev));
   }, []);
 
-  const selected = selectedId ? nodeDataRef.current[selectedId] : null;
+  const selected = selectedId ? nodeData[selectedId] : null;
   const selectedData = selected ? withHealth(selected, health) : null;
   const status = topologyStatus(health, installed);
   const statusColor = TONE_COLORS[status.tone];
