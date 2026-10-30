@@ -43,6 +43,7 @@ func TestTransportReusedSYNReceivesQueuedLoss(t *testing.T) {
 				r.admit(e, ack)
 			}
 			syn.TCP.Seq++
+			syn.Timestamp = time.Now()
 			r.admit(e, syn) // Still waiting inside the timestamp reorder window.
 			freshSlot := r.indexed[evidence.Original]
 			if freshSlot == oldSlot || freshSlot.connection.Key != "" {
@@ -53,6 +54,7 @@ func TestTransportReusedSYNReceivesQueuedLoss(t *testing.T) {
 			}
 			req := transportWire(evidence.Original, time.Now(), modbusADU(1, 3, 10, 2))
 			r.admit(e, req) // The new incarnation's first request is lost.
+			syn.Timestamp = time.Now()
 			r.admit(e, syn) // A SYN retransmission must retain its loss history.
 			if r.indexed[evidence.Original] != freshSlot || !old.CorrelationAvailable(time.Now()) {
 				t.Fatal("new-incarnation overflow landed on the predecessor")
@@ -68,10 +70,15 @@ func TestTransportReusedSYNReceivesQueuedLoss(t *testing.T) {
 			if fresh.Key == old.Key || !fresh.Coverage().Load() || fresh.CorrelationAvailable(time.Now()) {
 				t.Fatal("fresh incarnation lost its queued overflow history")
 			}
+			notice := <-r.losses
+			e.consumeDecodeLoss(notice, r.resolve(context.Background(), notice.packet, false))
 			reply := transportWire(evidence.Reply, time.Now(), modbusReadReply(1))
 			e.handleTransportPacket(reply, r.resolve(context.Background(), reply, false), nil)
-			if stats := e.AnomalyDetector().PairingStats(); stats.Unmatched != 0 || stats.Unavailable != 1 {
-				t.Fatalf("lost request became an unmatched reply: %+v", stats)
+			if stats := e.AnomalyDetector().PairingStats(); stats.Unmatched != 0 || stats.Unavailable != 0 {
+				t.Fatalf("reply was decoded after the queued loss: %+v", stats)
+			}
+			if len(transportModbusEvents(e)) != 0 || coverageLossCount(e) != 1 {
+				t.Fatal("loss did not stop the new incarnation exactly once")
 			}
 		})
 	}

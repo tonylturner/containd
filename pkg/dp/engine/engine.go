@@ -95,8 +95,9 @@ type Engine struct {
 	observation        *liveObserver
 	observationPending []observationRecord // finalized under flowMu; recorded after unlocking
 	transport          *transportResolver
-	wireSerial         uint64            // under flowMu; never reset during Reconfigure
-	transportISNs      map[string]uint32 // raw capture incarnation hints, not deny tombstones
+	wireSerial         uint64                             // under flowMu; never reset during Reconfigure
+	transportISNs      map[string]uint32                  // raw capture incarnation hints, not deny tombstones
+	transportCoverage  map[*flow.State]*transportCoverage // under flowMu; fields under admissionMu
 }
 
 // RulesetStatus describes the installed ruleset: its compiled text,
@@ -366,6 +367,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.flows = fresh.flows
 	e.tcpISNs = fresh.tcpISNs
 	e.transportISNs = fresh.transportISNs
+	e.transportCoverage = fresh.transportCoverage
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
@@ -664,8 +666,14 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	e.bindTransport(state, connection)
 	if connection != nil && e.transport != nil {
 		e.transport.trackConnection(state, now, history)
+		e.flowMu.Lock()
+		e.transport.admissionMu.Lock()
+		e.bindDecodeCoverageLocked(state, history)
+		e.transport.admissionMu.Unlock()
+		e.flowMu.Unlock()
 	}
-	if e.observation != nil {
+	stopped := e.applyDecodeCoverage(state, pkt)
+	if e.observation != nil && !stopped {
 		e.observePacket(pkt, state)
 	}
 	if d, ok := e.handleIECPacket(pkt, state); ok {

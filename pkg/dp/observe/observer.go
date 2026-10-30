@@ -200,6 +200,25 @@ func (o *Observer) Sweep(now time.Time) Output {
 	return out
 }
 
+// Stop discards evidence and ends passive decoding after a capture loss.
+// Unlike Finish, it never replays pending bytes or emits decoder events.
+// The terminal marker survives until Release, so it cannot be reopened.
+func (o *Observer) Stop(key identify.Key) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	c := o.entries[key]
+	if c == nil {
+		return
+	}
+	o.table.Release(key)
+	c.stamps = nil
+	c.coverage = identify.Truncated
+	o.serial++
+	c.ended = o.serial
+	o.endBinding(c)
+	c.binding = None
+}
+
 // Finish ends a binding and finalizes pending evidence, retaining the marker.
 func (o *Observer) Finish(key identify.Key) Output {
 	o.mu.Lock()

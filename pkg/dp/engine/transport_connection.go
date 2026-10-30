@@ -68,9 +68,6 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 		return
 	}
 	iecOwned := e.iecOwnsPacket(pkt)
-	if iecOwned && e.observation == nil {
-		return
-	}
 	e.flowMu.Lock()
 	st := e.tupleStateLocked(packetKey(pkt).Tuple())
 	var retired []*flow.State
@@ -85,6 +82,13 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 		if old != nil {
 			evidence = old.Evidence
 		}
+		if iecOwned && e.transport != nil {
+			e.transport.admissionMu.Lock()
+			if marker := e.transportCoverage[st].root(); marker != nil && marker.generation != nil {
+				evidence = marker.generation
+			}
+			e.transport.admissionMu.Unlock()
+		}
 		if iecOwned && e.observation != nil && old != nil {
 			if ctx := e.observation.entries[identify.Key(old.Key)]; ctx != nil {
 				evidence = ctx.generation
@@ -97,6 +101,7 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 			// passive incarnation marker; never end its directional streams,
 			// close correlation or replace its flow state.
 			if newSYN || newGeneration {
+				e.retireDecodeCoverageLocked(st, incoming)
 				e.retireObservationLocked(st, incoming)
 				e.noteTransportSYNLocked(pkt, st.Key)
 			}

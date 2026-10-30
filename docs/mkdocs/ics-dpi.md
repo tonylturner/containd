@@ -30,6 +30,15 @@ profile collection additionally requires at least one committed firewall entry
 with explicit `ics.mode: "learn"`; setting the global mode alone is insufficient.
 This gate does not limit collection to only events matching that entry.
 
+If the AF_PACKET NAT resolver loses a packet to queue or byte pressure, passive
+DPI and identification decoding stop for that connection incarnation, including
+retransmissions and the reverse direction. Forwarding and existing verdicts do
+not change. A `dpi.coverage.loss` event and the fixed-label
+`containd_dpi_coverage_losses_total` counter report lost coverage. Decoding resumes
+only at the existing new-SYN/conntrack-generation boundary, not after an idle
+decoder reset. If a loss cannot be indexed at capacity, already-started
+unindexed streams conservatively stop at their next worker packet too.
+
 ## Configuration and protocol toggles
 
 Use the Firewall page's DPI configuration UI or the authenticated management API.

@@ -235,6 +235,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- AF_PACKET resolver queue or byte overflow stops passive DPI and identification
+  decoding for the affected connection incarnation, without changing forwarding.
+  A `dpi.coverage.loss` event and `containd_dpi_coverage_losses_total` counter expose
+  the loss; a new connection incarnation can decode again.
+
 - PCAP analysis and replay honor big-endian and nanosecond captures. Analysis
   reports truncated coverage for partial final records instead of hiding them.
 

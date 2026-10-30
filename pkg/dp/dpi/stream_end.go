@@ -5,6 +5,23 @@ package dpi
 
 import "github.com/tonylturner/containd/pkg/dp/flow"
 
+// DiscardFlow releases passive reassembly and decoder stream state without
+// synthesizing flow-end events or a fail-closed stream error. The owner must
+// prevent further Inspect calls until a new connection incarnation.
+func (m *Manager) DiscardFlow(state *flow.State) {
+	if m == nil {
+		return
+	}
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
+	key := state.Key.Hash()
+	if m.reassembler != nil {
+		m.reassembler.complete(key)
+	}
+	m.endStream(key)
+	delete(m.eventTimes, key)
+}
+
 // A legacy flow stream ends at its flow's end (OnFlowEnd), at a FIN or RST
 // (CloseStream, ResetStream), or fails (FailStream). A stream that fails
 // closed must stay aligned with what its receiver accepts, so a close that

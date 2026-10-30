@@ -201,6 +201,11 @@ func (e *Engine) transportEligible(pkt capture.Packet) bool {
 		r.admissionMu.Lock()
 		entry := r.indexed[state.Key.Tuple()]
 		settled := entry != nil && entry.settled && entry.queued == 0
+		if settled && entry.coverage != nil && entry.coverage.root().lost {
+			// Loss notices and subsequent packets must keep the worker's
+			// ordering, even after discovery has reached a terminal result.
+			settled = false
+		}
 		if settled && pkt.TCP.Valid && isSYN(pkt.TCP.Flags) && (!entry.hasSYN || entry.synSeq != pkt.TCP.Seq) {
 			settled = false
 		}

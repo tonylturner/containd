@@ -36,6 +36,7 @@ type transportPacket struct {
 	packet  capture.Packet
 	at      time.Time
 	history *transportAdmission
+	loss    *transportCoverage
 }
 
 // An admission slot outlives its placeholder-to-root handoff. Queued packets
@@ -46,6 +47,7 @@ type transportAdmission struct {
 	hasSYN     bool
 	settled    bool // terminal discovery with no port-selected decoder
 	queued     int  // includes the in-flight worker packet; under admissionMu
+	coverage   *transportCoverage
 }
 
 type transportAlias struct {
@@ -57,18 +59,21 @@ type transportAlias struct {
 }
 
 type transportResolver struct {
-	admissionMu  sync.Mutex
-	closed       bool
-	indexed      map[conntrack.Tuple]*transportAdmission // under admissionMu, independent of lookup TTL
-	overflowNext time.Time
-	authority    *transportAuthority
-	reader       conntrack.IdentityReader
-	queue        chan transportPacket
-	count        atomic.Int64
-	bytes        atomic.Int64
-	aliases      map[conntrack.Tuple]*transportAlias // worker-owned, O/R only
-	epoch        string
-	serial       uint64
+	admissionMu   sync.Mutex
+	closed        bool
+	indexed       map[conntrack.Tuple]*transportAdmission // under admissionMu, independent of lookup TTL
+	overflowNext  time.Time
+	authority     *transportAuthority
+	reader        conntrack.IdentityReader
+	queue         chan transportPacket
+	count         atomic.Int64
+	bytes         atomic.Int64
+	aliases       map[conntrack.Tuple]*transportAlias // worker-owned, O/R only
+	epoch         string
+	serial        uint64
+	losses        chan transportPacket
+	lossFallback  bool   // unscheduled notices retained in bounded histories
+	unindexedLoss uint64 // conservative barrier for already-started unindexed streams
 }
 
 func (e *Engine) initTransport(cfg Config) error {
@@ -99,7 +104,8 @@ func newTransportResolver(zones zoneSetterReader, reader conntrack.IdentityReade
 	}
 	return &transportResolver{authority: newTransportAuthority(zones), reader: reader,
 		queue: make(chan transportPacket, transportQueueLimit), indexed: make(map[conntrack.Tuple]*transportAdmission), aliases: make(map[conntrack.Tuple]*transportAlias),
-		epoch: hex.EncodeToString(epoch[:])}, nil
+		losses: make(chan transportPacket, transportQueueLimit),
+		epoch:  hex.EncodeToString(epoch[:])}, nil
 }
 
 func (r *transportResolver) nextKey() string {
@@ -126,12 +132,14 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 	history := r.admitHistoryLocked(pkt)
 	if r.count.Add(1) > transportQueueLimit {
 		r.count.Add(-1)
+		r.noteDecodeLossLocked(pkt, history)
 		r.unavailable(e, pkt, "queue_overflow")
 		return acceptDecision
 	}
 	if r.bytes.Add(n) > transportByteLimit {
 		r.bytes.Add(-n)
 		r.count.Add(-1)
+		r.noteDecodeLossLocked(pkt, history)
 		r.unavailable(e, pkt, "queue_overflow")
 		return acceptDecision
 	}
@@ -148,6 +156,7 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 	default:
 		r.bytes.Add(-n)
 		r.count.Add(-1)
+		r.noteDecodeLossLocked(pkt, history)
 		r.unavailable(e, pkt, "queue_overflow")
 	}
 	return acceptDecision
@@ -201,13 +210,37 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 				pending = append(pending, p)
 				sorted = false
 			default:
+				goto losses
+			}
+		}
+	losses:
+		for len(pending) < 2*transportQueueLimit {
+			select {
+			case p := <-r.losses:
+				pending = append(pending, p)
+				sorted = false
+			default:
 				return
 			}
 		}
 	}
 	sortPending := func() {
+		r.admissionMu.Lock()
+		for i := range pending {
+			if pending[i].loss != nil {
+				c := pending[i].loss.root()
+				if !pending[i].packet.Timestamp.Equal(c.packet.Timestamp) {
+					pending[i].packet, pending[i].at = c.packet, c.at
+					sorted = false
+				}
+			}
+		}
+		r.admissionMu.Unlock()
 		if !sorted {
 			sort.SliceStable(pending, func(i, j int) bool {
+				if pending[i].packet.Timestamp.Equal(pending[j].packet.Timestamp) {
+					return pending[i].loss != nil && pending[j].loss == nil
+				}
 				return pending[i].packet.Timestamp.Before(pending[j].packet.Timestamp)
 			})
 			sorted = true
@@ -217,9 +250,20 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 		r.admissionMu.Lock()
 		defer r.admissionMu.Unlock()
 		r.closed = true
-		drain()
+		for {
+			select {
+			case p := <-r.queue:
+				r.releaseAdmissionLocked(p)
+				r.authority.count("canceled")
+			default:
+				goto released
+			}
+		}
+	released:
 		for _, p := range pending {
-			r.releaseAdmissionLocked(p)
+			if p.loss == nil {
+				r.releaseAdmissionLocked(p)
+			}
 			r.authority.count("canceled")
 		}
 		r.aliases = make(map[conntrack.Tuple]*transportAlias)
@@ -241,6 +285,11 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			default:
 			}
 			drain()
+			fallback := r.decodeLossFallback(e, pending)
+			if len(fallback) != 0 {
+				pending = append(pending, fallback...)
+				sorted = false
+			}
 			sortPending()
 			if len(pending) == 0 || time.Since(pending[0].at) < transportOrderDelay {
 				break
@@ -257,9 +306,15 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			pending[0] = transportPacket{}
 			pending = pending[1:]
 			if ctx.Err() == nil {
-				e.handleTransportPacket(p.packet, c, p.history)
+				if p.loss != nil {
+					e.consumeDecodeLoss(p, c)
+				} else {
+					e.handleTransportPacket(p.packet, c, p.history)
+				}
 			}
-			r.releaseAdmission(p)
+			if p.loss == nil {
+				r.releaseAdmission(p)
+			}
 		}
 	}
 }
