@@ -52,7 +52,7 @@ func findingEvents(e *Engine, kind string) []events.Event {
 func TestConformanceVerdictMatrix(t *testing.T) {
 	for _, p := range resetProtocols() {
 		for _, parsing := range []string{"tolerant", "strict"} {
-			for _, mode := range []string{"enforce", "learn"} {
+			for _, mode := range []string{"enforce", "monitor"} {
 				for _, decodedDeny := range []bool{false, true} {
 					name := p.name + "/" + parsing + "/" + mode
 					if decodedDeny {
@@ -65,7 +65,11 @@ func TestConformanceVerdictMatrix(t *testing.T) {
 						for i := range snap.Firewall {
 							snap.Firewall[i].ICS.Mode = mode
 						}
+						if mode == "monitor" {
+							snap.Default = rules.ActionAllow
+						}
 						f.e.LoadRules(snap)
+						f.observeOnly = mode == "monitor"
 						f.e.SetICSParsing(map[string]string{p.name: parsing})
 						dec := map[string]dpi.StreamDecoder{"modbus": modbus.NewDecoder(), "dnp3": dnp3.NewDecoder(), "cip": cip.NewDecoder()}[p.name]
 						f.e.dpiMgr = dpi.NewManager(findingDecoder{dec})
@@ -85,7 +89,7 @@ func TestConformanceVerdictMatrix(t *testing.T) {
 							assertResetEvidence(t, f.e)
 						} else {
 							drainResetWorker(t, f.e)
-							if parsing == "strict" || decodedDeny {
+							if parsing == "strict" {
 								action = "would drop"
 							}
 							for _, ev := range f.e.Events().List(0) {
@@ -103,10 +107,20 @@ func TestConformanceVerdictMatrix(t *testing.T) {
 							alerts[0].SrcIP == "" || alerts[0].FlowID == "" {
 							t.Fatalf("alerts = %+v, want %s", alerts, action)
 						}
-						decisions := findingEvents(f.e, eventfields.KindDecision)
-						if parsing == "strict" || decodedDeny {
+						allDecisions := findingEvents(f.e, eventfields.KindDecision)
+						var decisions []events.Event
+						for _, d := range allDecisions {
+							if d.Attributes["mode"] == "monitor" && d.Attributes["reason"] == "rule" {
+								if d.Attributes["ruleId"] == nil || d.Attributes["action"] == nil {
+									t.Fatal("missing monitor attribution")
+								}
+								continue
+							}
+							decisions = append(decisions, d)
+						}
+						if parsing == "strict" || decodedDeny && mode == "enforce" {
 							reason := reasonNonconformant
-							if decodedDeny {
+							if decodedDeny && parsing != "strict" {
 								reason = "rule"
 							}
 							decision := decisionWouldDrop
@@ -213,12 +227,12 @@ func TestStrictFindingsBeforeAllowAndAfterDecodedDeny(t *testing.T) {
 	f.e.dpiMgr = dpi.NewManager(findingDecoder{modbus.NewDecoder()})
 	f.syn()
 	payload := append(modbusADU(1, 3, 0, 2), modbusADU(2, 6, 1, 2)...)
-	if got := f.decide(0, ackPsh, payload); got.Action != capture.Drop || got.Reason != reasonDPIDeny {
-		t.Fatalf("decoded deny lost to earlier findings: %+v", got)
+	if got := f.decide(0, ackPsh, payload); got.Action != capture.Drop || got.Reason != reasonNonconformant {
+		t.Fatalf("strict scope did not preempt decoded denial: %+v", got)
 	}
 	for _, ev := range findingEvents(f.e, eventfields.KindDecision) {
-		if ev.Attributes[eventfields.KeyReason] == reasonNonconformant {
-			t.Fatal("nonconformant reason preempted decoded deny")
+		if ev.Attributes[eventfields.KeyReason] != reasonNonconformant || ev.Attributes["scopeId"] == nil || ev.Attributes["ruleId"] != nil {
+			t.Fatal("strict scope attribution lost")
 		}
 	}
 }
@@ -239,7 +253,7 @@ func TestConformanceAlertReportsFailClosedOutcome(t *testing.T) {
 }
 
 func TestStrictFindingsOwnDefaultDecision(t *testing.T) {
-	for _, mode := range []string{"enforce", "learn"} {
+	for _, mode := range []string{"enforce", "monitor"} {
 		t.Run(mode, func(t *testing.T) {
 			e, err := New(Config{DPIMode: "enforce", DPIICSParsing: map[string]string{"cip": "strict"}})
 			if err != nil {

@@ -25,7 +25,7 @@ func TestTCP2404LifecycleOwnership(t *testing.T) {
 					e.LoadRules(rules.Snapshot{Firewall: []rules.Entry{{
 						ID: "iec", Sources: []string{source},
 						Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}},
-						ICS:       rules.ICSPredicate{Protocol: "iec104", Mode: "learn"},
+						ICS:       rules.ICSPredicate{Protocol: "iec104", Mode: "monitor"},
 					}}})
 				}
 				pkt := recordPacket(100, 0, "")
@@ -61,7 +61,7 @@ func TestTCP2404LifecycleOwnership(t *testing.T) {
 					t.Fatalf("old incarnation retained = %v, owned = %v", retained, owned)
 				}
 
-				guard := e.rememberDeniedTCP(st.Key)
+				guard := e.rememberDeniedTCP(st.Key, st.ServiceKey())
 				if guard == nil {
 					t.Fatal("missing test tombstone")
 				}

@@ -25,8 +25,8 @@ func TestHandlePacketCompetingICSPorts(t *testing.T) {
 		t.Run(fmt.Sprintf("%d-%d/%s", tc.client, tc.server, tc.protocol), func(t *testing.T) {
 			e := newObservationEngine(t)
 			e.LoadRules(rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{
-				{ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "learn"}, Action: rules.ActionAllow},
-				{ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "learn"}, Action: rules.ActionAllow},
+				{ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "monitor"}, Action: rules.ActionAllow},
+				{ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "monitor"}, Action: rules.ActionAllow},
 			}})
 			trace := observationTrace(tc.server, tc.iec)
 			// STARTDT activation/confirmation alone suffices for two IEC frames.

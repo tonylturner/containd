@@ -20,6 +20,7 @@ const iecBroadcastCA = 65535
 type iecDecision struct {
 	decision string // allow | deny | would_drop
 	ruleID   string
+	scopeID  string
 	action   string
 	mode     string
 	reason   string
@@ -33,14 +34,19 @@ func (d iecDecision) enforced() bool { return d.decision == decisionDeny }
 // and unframeable bytes are denied without a rule; everything else is
 // matched against the IEC104 rules only, with whatever fields the decoder
 // read, and no match is DENY in the envelope mode. Under strict parsing an
-// event with conformance or undecoded findings is denied before any ALLOW and instead of
-// the default, with reason nonconformant; a matched DENY keeps its own
-// reason. In a learn envelope, or under a learn-mode rule, a deny is
-// would_drop.
+// event with conformance or undecoded findings is denied before rule
+// arbitration, with reason nonconformant and scope attribution. In a monitor
+// envelope a deny is would_drop; monitor rules never arbitrate a verdict.
 func (t *iecTable) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
-	d := iecDecision{action: string(rules.ActionDeny), mode: s.mode}
-	d.reason = iecEventDenialReason(ev)
-	if d.reason == "" {
+	d := iecDecision{action: string(rules.ActionDeny), mode: s.mode, reason: iecEventDenialReason(ev)}
+	if iecStrictPreempts(ev, t.parsing) {
+		d.reason, d.action = reasonNonconformant, ""
+		if t.policy != nil {
+			if scope := t.policy.IEC104Scope(s.ctx, t.globalMode); scope != nil {
+				d.scopeID = scope.ID
+			}
+		}
+	} else if d.reason == "" {
 		ctx := s.ctx
 		ctx.ICS = t.iecContext(ev)
 		action, entry := rules.ActionDeny, (*rules.Entry)(nil)
@@ -52,14 +58,9 @@ func (t *iecTable) decideLocked(s *iecSession, ev dpi.Event) iecDecision {
 			d.reason, d.ruleID, d.action, d.log = reasonRule, entry.ID, string(entry.Action), entry.Log
 			d.mode = rules.EffectiveMode(entry.ICS.Mode, t.globalMode)
 		}
-		switch strict := iecStrictPreempts(ev, t.parsing); {
-		case action == rules.ActionAllow && !strict:
+		if action == rules.ActionAllow {
 			d.decision = decisionAllow
 			return d
-		case strict && action == rules.ActionAllow, strict && entry == nil:
-			d = iecDecision{action: string(rules.ActionDeny), mode: s.mode, reason: reasonNonconformant}
-		case strict:
-			d.mode = s.mode // a matched DENY is enforced with the envelope, as strict would
 		}
 	}
 	if s.mode == "enforce" && d.mode == "enforce" {
@@ -170,9 +171,28 @@ type iecJudgement struct {
 // judged, even after a deny.
 func (t *iecTable) judgeLocked(s *iecSession, evs []dpi.Event, now time.Time) iecJudgement {
 	var j iecJudgement
+	seen := map[string]map[string]bool{}
 	for _, ev := range evs {
 		if !strings.EqualFold(ev.Proto, iecProtocol) {
 			continue
+		}
+		if t.policy != nil {
+			ctx := s.ctx
+			ctx.ICS = t.iecContext(ev)
+			apdu, _ := eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
+			if seen[apdu] == nil {
+				seen[apdu] = map[string]bool{}
+			}
+			for _, entry := range t.policy.MonitorMatches(ctx) {
+				if seen[apdu][entry.ID] {
+					continue
+				}
+				seen[apdu][entry.ID] = true
+				if t.shadow != nil {
+					t.shadow(t.snap, entry)
+				}
+				j.events = append(j.events, s.decisionEvent(ev, iecDecision{decision: shadowDecision(entry), ruleID: entry.ID, action: string(entry.Action), mode: "monitor", reason: reasonRule}, now))
+			}
 		}
 		d := t.decideLocked(s, ev)
 		s.inventoryDecisionLocked(ev, d)

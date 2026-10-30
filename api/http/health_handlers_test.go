@@ -427,7 +427,7 @@ func TestHealthReportsICSEnforcementCounts(t *testing.T) {
 		{RuleID: "secret-rule-a", Protocol: "modbus", Mode: "enforce", State: coverage.Enforcing},
 		{RuleID: "secret-rule-b", Protocol: "dnp3", Mode: "enforce", State: coverage.Partial,
 			Reasons: []coverage.Reason{{Code: coverage.ExclusionOverlap, Value: "192.0.2.44", Message: "excluded"}}},
-		{RuleID: "secret-rule-c", Protocol: "modbus", Mode: "learn", State: coverage.Monitoring},
+		{RuleID: "secret-rule-c", Protocol: "modbus", Mode: "monitor", State: coverage.Monitoring},
 	}
 	for _, tc := range []struct {
 		name   string

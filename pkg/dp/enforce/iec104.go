@@ -32,7 +32,7 @@ func (c *Compiler) SteersIEC104(snap *rules.Snapshot) bool {
 		return false
 	}
 	for _, e := range snap.Firewall {
-		if isIEC104Rule(e) && admitsIEC104Port(e.Protocols) {
+		if isIEC104Rule(e) && !rules.MonitorICS(e, snap.DPIMode) && admitsIEC104Port(e.Protocols) {
 			return true
 		}
 	}
@@ -119,7 +119,11 @@ func compileIEC104Steering(e rules.Entry, zones zoneIndex) ([]string, error) {
 	}
 	replyIn, _ := zones.clause("iifname", e.DestZones)
 	replyOut, _ := zones.clause("oifname", e.SourceZones)
-	verdict := counterStmt(e.ID) + " jump " + IEC104EnvelopeChain
+	chain := IEC104EnvelopeChain
+	if rules.MonitorICS(e, "") {
+		chain = ICSQueueChain
+	}
+	verdict := unobservedGuard + " " + counterStmt(e.ID) + " jump " + chain
 	port := strconv.Itoa(ics.IEC104Port)
 	var lines []string
 	for _, s := range scopes {

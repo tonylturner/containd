@@ -93,14 +93,15 @@ func conditional(e rules.Entry) bool {
 // kernelDecided reports whether nftables decides e: a deciding rule that is
 // not queued to the engine.
 func (p *predicates) kernelDecided(e rules.Entry) bool {
-	return e.Action.Decides() && !queuedToEngine(e, p.queueID)
+	return e.Action.Decides() && !rules.MonitorICS(e, p.snap.DPIMode) && !queuedToEngine(e, p.queueID)
 }
 
 // rechecksQueued reports whether e is a conditional ALLOW queued to the
 // engine whose replies the kernel rechecks. IEC104 rules are not: their
 // steering queues both directions of a session to the engine.
 func (p *predicates) rechecksQueued(e rules.Entry) bool {
-	return queuedToEngine(e, p.queueID) && !isIEC104Rule(e) && e.Action == rules.ActionAllow && conditional(e)
+	return !rules.MonitorICS(e, p.snap.DPIMode) && queuedToEngine(e, p.queueID) &&
+		!isIEC104Rule(e) && e.Action == rules.ActionAllow && conditional(e)
 }
 
 // kernelGuarded reports whether the kernel evaluates e's predicates: on

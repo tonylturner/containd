@@ -18,7 +18,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
-	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/itdpi"
@@ -78,21 +77,9 @@ func (e *Engine) recordInventoryEvents(srcIP, dstIP string, evs []dpi.Event) {
 	}
 }
 
-func (e *Engine) recordLearnEvents(srcIP, dstIP string, evs []dpi.Event) {
-	if e == nil || e.learner == nil || srcIP == "" || dstIP == "" || !e.hasLearnMode() {
-		return
-	}
-	for _, ev := range evs {
-		// The envelope remains authoritative even after incarnation retirement
-		// or a configuration drain removes the live binding marker.
-		if passive, _ := ev.Attributes[eventfields.KeyObservationOnly].(bool); passive {
-			continue
-		}
-		if learnableICSEvent(ev) && !hasInspectionFindings(ev) {
-			e.learner.RecordEvent(srcIP, dstIP, ev)
-		}
-	}
-}
+// recordLearnEvents is intentionally inactive until an explicit live watch
+// owns collection. Rule enforcement mode never starts a learner.
+func (e *Engine) recordLearnEvents(_, _ string, _ []dpi.Event) {}
 
 func (e *Engine) recordAnomalyAlerts(state *flow.State, pkt *dpi.ParsedPacket, srcIP, dstIP string, evs []dpi.Event) {
 	if e == nil || e.anomalyDetector == nil || srcIP == "" || dstIP == "" {
@@ -262,20 +249,6 @@ func (e *Engine) SignatureEngine() *signatures.Engine {
 	return e.sigEngine
 }
 
-// hasLearnMode returns true if any firewall entry has Mode == "learn".
-func (e *Engine) hasLearnMode() bool {
-	snap := e.ruleSnap.Load()
-	if snap == nil {
-		return false
-	}
-	for _, entry := range snap.Firewall {
-		if strings.EqualFold(entry.ICS.Mode, "learn") {
-			return true
-		}
-	}
-	return false
-}
-
 func isICSEvent(proto, _ string) bool {
 	proto = strings.ToLower(proto)
 	return proto == "ics" || ics.Supported(proto)
@@ -284,7 +257,8 @@ func isICSEvent(proto, _ string) bool {
 // Evaluate applies the current rule snapshot to a simple context.
 func (e *Engine) Evaluate(ctx rules.EvalContext) rules.Action {
 	ev := e.ruleSnap.Evaluator()
-	return ev.Evaluate(ctx)
+	action, _ := ev.EvaluateEnforcing(ctx)
+	return action
 }
 
 // EvaluateVerdict returns a baseline verdict for the current snapshot.
@@ -309,7 +283,7 @@ func (e *Engine) EvaluateVerdictMatch(ctx rules.EvalContext) (verdict.Verdict, *
 func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool, state *flow.State) (verdict.Verdict, *rules.Entry) {
 	start := time.Now()
 	ev := e.ruleSnap.Evaluator()
-	action, matched := ev.EvaluateMatch(ctx)
+	action, matched := ev.EvaluateEnforcing(ctx)
 	if matched == nil && !applyDefault {
 		action = rules.ActionAllow
 	}
@@ -371,7 +345,7 @@ func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool, 
 // effectiveMode returns the mode that should govern verdict application
 // for the matched rule, following the 3-tier resolution:
 //
-//	per-rule ICSPredicate.Mode > global Engine.dpiMode > "learn" (safe default)
+//	per-rule ICSPredicate.Mode > installed global DPI mode > "monitor" (safe default)
 //
 // The safe default makes new deployments operate in monitor-only mode
 // unless an operator explicitly opts into enforce — a real OT environment
@@ -384,6 +358,9 @@ func (e *Engine) effectiveMode(matched *rules.Entry) string {
 	}
 	if e != nil {
 		globalMode = e.dpiMode
+		if snap := e.CurrentRules(); snap != nil && snap.DPIMode != "" {
+			globalMode = snap.DPIMode
+		}
 	}
 	return rules.EffectiveMode(ruleMode, globalMode)
 }

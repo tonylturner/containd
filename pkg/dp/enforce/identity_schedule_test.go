@@ -35,7 +35,7 @@ func goldenSnapshot() *rules.Snapshot {
 			{ID: "no-contractors", SourceZones: []string{"l3"}, Identities: []string{"contractor"}, Action: rules.ActionDeny, Schedule: maintenanceWindow},
 			{ID: "web", Protocols: []rules.Protocol{{Name: "tcp", Port: "443"}}, Action: rules.ActionAllow},
 			{ID: "modbus", Destinations: []string{"10.1.0.0/24"}, Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-				ICS: rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}}, Identities: []string{"engineer"}, Action: rules.ActionAllow},
+				ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus", FunctionCode: []uint8{3}}, Identities: []string{"engineer"}, Action: rules.ActionAllow},
 			{ID: "reset-telnet", Identities: []string{"contractor"}, Protocols: []rules.Protocol{{Name: "tcp", Port: "23"}}, Action: rules.ActionReset, Schedule: maintenanceWindow},
 			{ID: "snmp-meter", Identities: []string{"engineer"}, Protocols: []rules.Protocol{{Name: "udp", Port: "161"}},
 				Action: rules.ActionRateLimit, RateLimit: &rules.RateLimit{PacketsPerSecond: 10}},
@@ -237,7 +237,7 @@ func TestIdentityLowering(t *testing.T) {
 // engine.
 func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 	entry := rules.Entry{ID: "modbus", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-		ICS: rules.ICSPredicate{Protocol: "modbus"}, Identities: []string{"ops"}, Action: rules.ActionAllow, Schedule: maintenanceWindow}
+		ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}, Identities: []string{"ops"}, Action: rules.ActionAllow, Schedule: maintenanceWindow}
 	snap := &rules.Snapshot{Firewall: []rules.Entry{entry}, IdentityBindings: []rules.IdentityBinding{{IP: "10.0.0.5", Identities: []string{"ops"}}}}
 	c := goldenCompiler()
 	queued, err := compileWithoutCounters(c, snap)
@@ -246,7 +246,7 @@ func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 	}
 	set := "@schedule_allow_41_0120_0360_416d65726963612f4e65775f596f726b"
 	for _, want := range []string{
-		"    tcp dport 502 jump ics_queue;\n    ct state established jump conditional_scope;\n",
+		"    meta mark & 0x04000000 == 0 tcp dport 502 jump ics_queue;\n    ct state established jump conditional_scope;\n",
 		"  chain conditional_scope {\n    meta l4proto tcp ct reply proto-src 502 goto conditional_policy;\n  }\n",
 		"    ct status dnat return;\n    meta l4proto tcp ct reply proto-src 502 ct original ip saddr @identity4_6f7073 meta time " + set + " return;\n    drop;\n",
 	} {
@@ -264,7 +264,7 @@ func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(text, "    tcp dport 502 jump ics_queue;\n") || strings.Contains(text, "identity4_") ||
+		if !strings.Contains(text, "    meta mark & 0x04000000 == 0 tcp dport 502 jump ics_queue;\n") || strings.Contains(text, "identity4_") ||
 			strings.Contains(text, "schedule_") || strings.Contains(text, conditionalScopeChain) {
 			t.Fatalf("queued %s rule was guarded:\n%s", a, text)
 		}

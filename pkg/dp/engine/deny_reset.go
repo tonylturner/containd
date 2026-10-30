@@ -24,6 +24,7 @@ type deniedTCP struct {
 	isn     uint32
 	hasISN  bool
 	key     flow.Key
+	service flow.Key // immutable policy tuple of the denied incarnation
 	tuple   flow.MapKey
 	expires time.Time
 	order   *list.Element
@@ -58,7 +59,7 @@ func (e *Engine) closeDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 	// Publish the guard only after both streams and the verdict cache have
 	// failed. An immediate capacity eviction must clear all of that state;
 	// nothing may recreate it after the guard has been retired.
-	if d := e.rememberDeniedTCP(state.Key); d != nil {
+	if d := e.rememberDeniedTCP(state.Key, state.ServiceKey()); d != nil {
 		e.resetDeniedTCP(pkt, state, proto, reason, d)
 	}
 }

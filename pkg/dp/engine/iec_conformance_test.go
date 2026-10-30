@@ -10,6 +10,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
@@ -119,7 +120,7 @@ func assertIECAlert(t *testing.T, e *Engine, findings []string, action string) {
 func TestIECConformanceMatrix(t *testing.T) {
 	for _, tc := range iecConformanceCases {
 		for _, parsing := range []ics.Parsing{ics.Tolerant, ics.Strict} {
-			for _, mode := range []string{"enforce", "learn"} {
+			for _, mode := range []string{"enforce", "monitor"} {
 				for _, policy := range []string{"broad", "typed"} {
 					t.Run(fmt.Sprintf("%s/%s/%s/%s", tc.name, parsing, mode, policy), func(t *testing.T) {
 						snap := iecBroadPolicy(mode)
@@ -127,41 +128,69 @@ func TestIECConformanceMatrix(t *testing.T) {
 							snap = iecTypedPolicy(mode)
 						}
 						h := newIECConformanceHarness(t, mode, parsing, snap)
-						if _, d := h.send(true, startdtAct); d.Action != capture.Accept {
+						if _, d := h.send(true, startdtAct); d.Action != h.passingDisposition() {
 							t.Fatalf("STARTDT act = %+v", d)
 						}
 						_, d := h.send(tc.fromClient, tc.payload)
-						// What the decoded fields give under this policy.
-						ruleID, reason, allowed := "", reasonDefault, false
-						if policy == "broad" {
-							ruleID, reason, allowed = "all", reasonRule, true
-						} else if tc.typedRule != "" {
-							ruleID, reason = tc.typedRule, reasonRule
-						}
-						if parsing == ics.Strict && (allowed || ruleID == "") {
-							ruleID, reason, allowed = "", reasonNonconformant, false
-						}
-						wantDrop := mode == "enforce" && !allowed
+						matched := policy == "broad" || tc.typedRule != ""
+						allowed := policy == "broad"
+						wantDrop := mode == "enforce" && (parsing == ics.Strict || !allowed)
 						if (d.Action == capture.Drop) != wantDrop {
-							t.Fatalf("decision = %+v, want drop %v", d, wantDrop)
+							t.Fatalf("decision=%+v want drop %v", d, wantDrop)
 						}
-						action, decision := "passed", decisionAllow
-						switch {
-						case wantDrop:
-							action, decision = "dropped and reset", decisionDeny
-						case !allowed:
-							action, decision = "would drop", decisionWouldDrop
+						action := "passed"
+						if wantDrop {
+							action = "dropped and reset"
+						} else if parsing == ics.Strict || mode == "monitor" {
+							action = "would drop"
 						}
 						assertIECAlert(t, h.e, tc.findings, action)
 						decs := iecDecisions(h)
-						if len(decs) != 1 {
-							t.Fatalf("decisions = %+v, want one logged decision", decs)
+						wantCount := 1
+						if mode == "monitor" {
+							wantCount = 1
+							if matched {
+								wantCount++
+							}
+
 						}
-						codes, _ := eventfields.Strings(decs[0], eventfields.KeyConformance)
-						if decs[0][eventfields.KeyDecision] != decision || decs[0][eventfields.KeyReason] != reason ||
-							decs[0][eventfields.KeyRuleID] != ruleID || decs[0][eventfields.KeyMode] != mode ||
-							!reflect.DeepEqual(codes, tc.findings) {
-							t.Fatalf("decision = %+v, want %s/%s by %q with %v", decs[0], decision, reason, ruleID, tc.findings)
+						if len(decs) != wantCount {
+							t.Fatalf("decisions=%+v want %d", decs, wantCount)
+						}
+						for _, dec := range decs {
+							codes, _ := eventfields.Strings(dec, eventfields.KeyConformance)
+							if dec["mode"] != mode || !reflect.DeepEqual(codes, tc.findings) {
+								t.Fatal(dec)
+							}
+							if dec["reason"] == reasonRule {
+								id := tc.typedRule
+								if policy == "broad" {
+									id = "all"
+								}
+								decision := decisionDeny
+								if allowed {
+									decision = decisionAllow
+								}
+								if mode == "monitor" {
+									decision = decisionWouldDrop
+									if allowed {
+										decision = decisionWouldAllow
+									}
+								}
+								if dec["ruleId"] != id || dec["decision"] != decision {
+									t.Fatalf("rule decision: %+v", dec)
+								}
+							} else if parsing == ics.Strict {
+								decision := decisionDeny
+								if mode == "monitor" {
+									decision = decisionWouldDrop
+								}
+								if dec["reason"] != reasonNonconformant || dec["ruleId"] != nil || dec["scopeId"] == nil || dec["action"] != nil || dec["decision"] != decision {
+									t.Fatalf("scope decision: %+v", dec)
+								}
+							} else if dec["reason"] != reasonDefault || (dec["decision"] != decisionDeny && dec["decision"] != decisionWouldDrop) {
+								t.Fatal(dec)
+							}
 						}
 						if wantDrop {
 							if got := h.outcomes(); len(got) == 0 || got[0] != outcomeAborted {
@@ -185,7 +214,7 @@ func TestIECConformanceMatrix(t *testing.T) {
 func TestIECTolerantAllowMatchesDecodedFields(t *testing.T) {
 	h := newIECConformanceHarness(t, "enforce", ics.Tolerant, iecScoped("enforce",
 		rules.Entry{ID: "gi", Action: rules.ActionAllow, ICS: rules.ICSPredicate{TypeIDs: []int{100}, CA: []uint16{1}}}))
-	if _, d := h.send(true, iecReservedGI); d.Action != capture.Accept {
+	if _, d := h.send(true, iecReservedGI); d.Action != h.passingDisposition() {
 		t.Fatalf("reserved-bit GI under a typed ALLOW = %+v, want Accept", d)
 	}
 	decs := iecDecisions(h)
@@ -206,14 +235,14 @@ func TestIECTolerantAllowMatchesDecodedFields(t *testing.T) {
 func TestIECConformanceAlertOncePerConnection(t *testing.T) {
 	h := newIECConformanceHarness(t, "enforce", ics.Tolerant, iecBroadPolicy("enforce"))
 	for i := 0; i < 3; i++ {
-		if _, d := h.send(true, iecReservedGI); d.Action != capture.Accept {
+		if _, d := h.send(true, iecReservedGI); d.Action != h.passingDisposition() {
 			t.Fatalf("send %d = %+v", i, d)
 		}
 	}
 	if got := findingEvents(h.e, "alert"); len(got) != 1 {
 		t.Fatalf("alerts after repeats = %d, want 1", len(got))
 	}
-	if _, d := h.send(true, iecProfileTwoCommands); d.Action != capture.Accept {
+	if _, d := h.send(true, iecProfileTwoCommands); d.Action != h.passingDisposition() {
 		t.Fatalf("profile APDU = %+v", d)
 	}
 	alerts := findingEvents(h.e, "alert")
@@ -222,7 +251,7 @@ func TestIECConformanceAlertOncePerConnection(t *testing.T) {
 	}
 	// The client closes with a RST at its forwarded end; the next SYN on the
 	// tuple opens a new incarnation whose findings alert again.
-	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST|capture.TCPFlagACK, h.cSeq, h.sSeq, nil)); d.Action != capture.Accept {
+	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST|capture.TCPFlagACK, h.cSeq, h.sSeq, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("RST = %+v", d)
 	}
 	h.clientISN, h.serverISN = testClientISN-1000, testServerISN+1000
@@ -232,11 +261,11 @@ func TestIECConformanceAlertOncePerConnection(t *testing.T) {
 		h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, h.serverISN, h.cSeq, nil),
 		h.pkt(true, capture.TCPFlagACK, h.cSeq, h.sSeq, nil),
 	} {
-		if d := h.e.handlePacket(p); d.Action != capture.Accept {
+		if d := h.e.handlePacket(p); d.Action != h.passingDisposition() {
 			t.Fatalf("second handshake %+v: %+v", p.TCP, d)
 		}
 	}
-	if _, d := h.send(true, iecReservedGI); d.Action != capture.Accept {
+	if _, d := h.send(true, iecReservedGI); d.Action != h.passingDisposition() {
 		t.Fatalf("second incarnation = %+v", d)
 	}
 	if got := findingEvents(h.e, "alert"); len(got) != 3 {
@@ -249,7 +278,7 @@ func TestIECConformanceAlertOncePerConnection(t *testing.T) {
 // and stops parsing without an alert (learn).
 func TestIECFrameBoundaryLossResetsInBothModes(t *testing.T) {
 	for _, parsing := range []ics.Parsing{ics.Tolerant, ics.Strict} {
-		for _, mode := range []string{"enforce", "learn"} {
+		for _, mode := range []string{"enforce", "monitor"} {
 			t.Run(string(parsing)+"/"+mode, func(t *testing.T) {
 				h := newIECConformanceHarness(t, mode, parsing, iecBroadPolicy(mode))
 				_, d := h.send(true, iecBadStart)
@@ -262,10 +291,15 @@ func TestIECFrameBoundaryLossResetsInBothModes(t *testing.T) {
 						sessions[0].Attributes[eventfields.KeyReason] != abortDeny.name {
 						t.Fatalf("session events = %+v, want aborted/deny", sessions)
 					}
-				} else if d.Action != capture.Accept || len(h.outcomes()) != 0 {
+				} else if d.Action != h.passingDisposition() || len(h.outcomes()) != 0 {
 					t.Fatalf("learn bad start octet = %+v, outcomes %v", d, h.outcomes())
 				}
-				decs := h.eventsOf(eventfields.KindDecision)
+				var decs []events.Event
+				for _, ev := range h.eventsOf(eventfields.KindDecision) {
+					if ev.Attributes["reason"] == reasonMalformed {
+						decs = append(decs, ev)
+					}
+				}
 				if len(decs) != 1 || decs[0].Attributes[eventfields.KeyReason] != reasonMalformed || len(iecDecisions(h)) != 0 {
 					t.Fatalf("decisions = %+v, want one malformed denial without findings", decs)
 				}
@@ -281,7 +315,7 @@ func TestIECFrameBoundaryLossResetsInBothModes(t *testing.T) {
 // itself.
 func TestIECParsingChangeAppliesToNewDecisions(t *testing.T) {
 	h := newIECConformanceHarness(t, "enforce", ics.Tolerant, iecBroadPolicy("enforce"))
-	if _, d := h.send(true, iecReservedGI); d.Action != capture.Accept {
+	if _, d := h.send(true, iecReservedGI); d.Action != h.passingDisposition() {
 		t.Fatalf("tolerant = %+v", d)
 	}
 	h.e.SetICSParsing(map[string]string{iecProtocol: string(ics.Strict)})

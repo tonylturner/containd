@@ -179,8 +179,8 @@ func synRST(f capture.TCPFlags) bool { return f&capture.TCPFlagSYN != 0 && f&cap
 // handshake segment: it never opens, establishes, refuses or closes an
 // incarnation, so a SYN-ACK with RST cannot establish one whose client it
 // resets. Every session of either mode drops it, as does an enforce
-// envelope; learn traffic of no session passes it untracked, like every
-// other learn packet not observed from its SYN.
+// envelope; monitor traffic of no session passes it untracked, like every
+// other monitor packet not observed from its SYN.
 func (t *iecTable) synRSTLocked(s *iecSession, state *flow.State) (iecResult, bool) {
 	if s != nil {
 		return dropped(reasonIECInvalid), true
@@ -234,7 +234,7 @@ func (t *iecTable) newPacketLocked(pkt capture.Packet, src, dst netip.AddrPort, 
 		return iecResult{}, false
 	}
 	if mode != "enforce" || pkt.TCP.Flags&capture.TCPFlagRST != 0 && len(pkt.Payload) == 0 {
-		// Learn: observed, never parsed mid-stream. A bare RST closes.
+		// Monitor: observed, never parsed mid-stream. A bare RST closes.
 		return accepted(reasonIECAccept), true
 	}
 	return t.midstreamLocked(client, server, ctx, pkt, src == client, state, now), true
@@ -249,7 +249,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 			countIECAbort(abortBound)
 			return dropped(reasonIECFailClose)
 		}
-		// Learn is fail open when observation capacity is exhausted. Do not
+		// Monitor is fail open when observation capacity is exhausted. Do not
 		// allocate an incarnation or byte stream for this tuple.
 		res := accepted(reasonIECUntracked)
 		event := untrackedEvent(client, server, now)
@@ -384,7 +384,7 @@ func reopensLocked(s *iecSession, dir int, pkt capture.Packet) bool {
 // reopenLocked ends an established incarnation whose tuple a new
 // connection's SYN reopens. An enforce incarnation aborts: the SYN drops,
 // both endpoints are reset, and the client's retransmitted SYN opens the
-// next incarnation from the tombstone. A learn incarnation closes, and the
+// next incarnation from the tombstone. A monitor incarnation closes, and the
 // SYN opens the next one at once.
 func (t *iecTable) reopenLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (iecResult, bool) {
 	if s.mode == "enforce" {

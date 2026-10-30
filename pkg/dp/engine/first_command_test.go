@@ -186,14 +186,15 @@ var firstCommandTokens atomic.Uint32
 // fcFlow is one client connection to the protocol's server port. Offsets
 // are relative to the first payload byte.
 type fcFlow struct {
-	t      *testing.T
-	e      *Engine
-	up     *firstCommandUpdater
-	port   uint16
-	client uint16
-	isn    uint32
-	next   uint32 // offset of the next new byte
-	denies int    // DPI denials seen
+	t           *testing.T
+	e           *Engine
+	up          *firstCommandUpdater
+	port        uint16
+	client      uint16
+	isn         uint32
+	next        uint32 // offset of the next new byte
+	denies      int    // DPI denials seen
+	observeOnly bool
 }
 
 func newFCFlow(t *testing.T, mode string, port uint16) *fcFlow {
@@ -210,14 +211,23 @@ func (f *fcFlow) decide(off uint32, flags capture.TCPFlags, payload []byte) capt
 	v := capture.VerdictAccept
 	if d.Action == capture.Drop {
 		v = capture.VerdictDrop
+	} else if d.Action == capture.Repeat {
+		v = capture.VerdictRepeat
 	}
 	f.e.hooks.onVerdict(pkt.Token, v, nil)
 	return d
 }
 
+func (f *fcFlow) passingDisposition() capture.Disposition {
+	if f.observeOnly {
+		return capture.Repeat
+	}
+	return capture.Accept
+}
+
 func (f *fcFlow) syn() {
 	f.t.Helper()
-	if d := f.decide(0, capture.TCPFlagSYN, nil); d.Action != capture.Accept {
+	if d := f.decide(0, capture.TCPFlagSYN, nil); d.Action != f.passingDisposition() {
 		f.t.Fatalf("SYN decision = %+v, want Accept", d)
 	}
 }
@@ -231,7 +241,7 @@ func (f *fcFlow) accept(what string, payload []byte) {
 
 func (f *fcFlow) acceptAt(off uint32, what string, payload []byte) {
 	f.t.Helper()
-	if d := f.decide(off, ackPsh, payload); d.Action != capture.Accept {
+	if d := f.decide(off, ackPsh, payload); d.Action != f.passingDisposition() {
 		f.t.Fatalf("%s at offset %d: decision = %+v, want Accept", what, off, d)
 	}
 }

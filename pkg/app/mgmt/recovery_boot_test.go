@@ -240,7 +240,7 @@ func TestInvalidStoredConfigBootsIntoRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate.Firewall.Rules[0].ICS.Mode = "learn"
+	candidate.Firewall.Rules[0].ICS.Mode = "monitor"
 	if err := stores.store.SaveCandidate(ctx, candidate); err != nil {
 		t.Fatal(err)
 	}

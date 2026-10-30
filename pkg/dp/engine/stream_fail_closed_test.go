@@ -20,22 +20,24 @@ import (
 // The tests in this file drive inline packets through the real Modbus and
 // DNP3 decoders under the first-command policy. A stream that cannot be
 // inspected must drop the packet and deny the flow when an enforce rule's
-// scope holds it, and keep passing when only learn rules do.
+// scope holds it, and keep passing when only monitor rules do.
 
-// learnPolicy is the first-command policy with every rule in learn mode.
+// learnPolicy is the first-command policy with every rule in monitor mode.
 func learnPolicy() rules.Snapshot {
 	snap := firstCommandPolicy()
+	snap.Default = rules.ActionAllow
 	for i := range snap.Firewall {
-		snap.Firewall[i].ICS.Mode = "learn"
+		snap.Firewall[i].ICS.Mode = "monitor"
 	}
 	return snap
 }
 
-// newModeFlow is a first-command flow under the enforce or learn policy.
+// newModeFlow is a first-command flow under the enforce or monitor policy.
 func newModeFlow(t *testing.T, mode string, port uint16) *fcFlow {
 	f := newFCFlow(t, "ok", port)
-	if mode == "learn" {
+	if mode == "monitor" {
 		f.e.LoadRules(learnPolicy())
+		f.observeOnly = true
 	}
 	return f
 }
@@ -160,19 +162,19 @@ func TestFailClosedOnStreamErrors(t *testing.T) {
 				f.failedClosed("read on the failed stream", f.decide(f.next, ackPsh, p.read(3)), p.name+"-read", failClosedStream, 1)
 			})
 			t.Run(p.name+"/"+tc.name+"/learn", func(t *testing.T) {
-				f := newModeFlow(t, "learn", p.port)
+				f := newModeFlow(t, "monitor", p.port)
 				f.syn()
 				f.accept("read 1", p.read(1))
-				if d := tc.send(f, p); d.Action != capture.Accept {
+				if d := tc.send(f, p); d.Action != capture.Repeat {
 					t.Fatalf("stream error under learn rules = %+v, want Accept", d)
 				}
-				hits := ruleHits(f.e, p.name+"-read")
+				hits := shadowHits(f.e, p.name+"-read")
 				// The aligned read starts the restarted stream.
 				f.accept("read after the stream error", p.read(3))
-				if got := ruleHits(f.e, p.name+"-read"); got != hits+1 {
+				if got := shadowHits(f.e, p.name+"-read"); got != hits+1 {
 					t.Fatalf("read rule hits %d -> %d, want the read decoded", hits, got)
 				}
-				f.noBlock("learn")
+				f.noBlock("monitor")
 			})
 		}
 	}
@@ -229,7 +231,7 @@ func TestFailClosedOnlyInline(t *testing.T) {
 // enforce flow and still reports the panic; under learn rules the panic
 // takes HandlePacket's recovery and the packet passes.
 func TestFailClosedOnDecoderPanic(t *testing.T) {
-	for _, mode := range []string{"enforce", "learn"} {
+	for _, mode := range []string{"enforce", "monitor"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newModeFlow(t, mode, 502)
 			var mu sync.Mutex
@@ -247,10 +249,10 @@ func TestFailClosedOnDecoderPanic(t *testing.T) {
 					t.Fatalf("event proto = %q, want modbus", ev.Proto)
 				}
 			} else {
-				if d.Action != capture.Accept {
-					t.Fatalf("decoder panic under learn rules = %+v, want Accept", d)
+				if d.Action != capture.Repeat {
+					t.Fatalf("decoder panic under monitor rules = %+v, want Accept", d)
 				}
-				f.noBlock("learn")
+				f.noBlock("monitor")
 			}
 			mu.Lock()
 			defer mu.Unlock()

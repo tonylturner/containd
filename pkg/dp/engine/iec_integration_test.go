@@ -73,7 +73,7 @@ func TestIECRealDecoderAndEvaluator(t *testing.T) {
 		{"STOPDT act (read-only, alerted)", true, stopdtAct},
 	}
 	for _, s := range steps {
-		if _, d := h.send(s.fromClient, s.payload); d.Action != capture.Accept {
+		if _, d := h.send(s.fromClient, s.payload); d.Action != h.passingDisposition() {
 			t.Fatalf("%s = %+v, want Accept; decisions %+v", s.name, d, h.eventsOf("ics.decision"))
 		}
 	}
@@ -98,7 +98,7 @@ func TestIECRealDecoderAndEvaluator(t *testing.T) {
 		{"wrong CA", ics.Tolerant, apdu(46, 6, 2, 2001, 0x01), "rule", nil},
 		{"broadcast CA", ics.Tolerant, apdu(46, 6, 65535, 2001, 0x01), "broadcast", nil},
 		{"client sends monitor data", ics.Tolerant, apdu(3, 3, 1, 1001, 0x02), "rule", []string{iec104.FindingRole}},
-		{"client sends monitor data, strict", ics.Strict, apdu(3, 3, 1, 1001, 0x02), "rule", []string{iec104.FindingRole}},
+		{"client sends monitor data, strict", ics.Strict, apdu(3, 3, 1, 1001, 0x02), reasonNonconformant, []string{iec104.FindingRole}},
 	} {
 		h2 := newIECHarness(t, "enforce")
 		h2.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
@@ -145,7 +145,7 @@ func TestIECUnmatchedReplyStillDeniedAfterUSReplyMerge(t *testing.T) {
 	snap.Firewall[0].ICS.Direction = "request"
 	h.e.LoadRules(snap)
 	h.handshake()
-	if _, d := h.send(true, startdtAct); d.Action != capture.Accept {
+	if _, d := h.send(true, startdtAct); d.Action != h.passingDisposition() {
 		t.Fatalf("matched request = %+v, want Accept", d)
 	}
 	if _, d := h.send(false, startdtCon); d.Action != capture.Drop {

@@ -33,6 +33,7 @@ var engineClientInterfaces = map[string]any{
 	"EventQueryClient":      EventQueryClient(httpEngineClient),
 	"InventoryClient":       InventoryClient(httpEngineClient),
 	"LearnClient":           LearnClient(httpEngineClient),
+	"ShadowCountersClient":  ShadowCountersClient(httpEngineClient),
 	"RuleCountersClient":    RuleCountersClient(httpEngineClient),
 	"RulePreviewClient":     RulePreviewClient(httpEngineClient),
 	"RulesetPreviewClient":  RulesetPreviewClient(httpEngineClient),

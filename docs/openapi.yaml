@@ -567,7 +567,7 @@ components:
           not the `unknown` class. Broadcast (CA 65535) and malformed
           objects never match an ALLOW.
         - IEC104 enforce (effective mode: rule `mode`, else
-          `dataplane.dpiMode`, else learn) is rejected on save, candidate,
+          `dataplane.dpiMode`, else monitor) is rejected on save, candidate,
           commit and import unless `dataplane.dpiEnabled` is true,
           `dataplane.dpiIcsProtocols.iec104` is not false,
           `dataplane.nfqueueGroup` is non-zero (NFQUEUE capture), and no
@@ -604,7 +604,7 @@ components:
             only".
         writeOnly: {type: boolean, description: Match positively classified writes and controls (not iec104)}
         direction: {type: string, enum: [request, response]}
-        mode: {type: string, enum: ["", learn, enforce], description: "Overrides dataplane.dpiMode for this rule. Empty or absent inherits the global mode; in a merge patch, null or an empty string clears a stored mode."}
+        mode: {type: string, enum: ["", monitor, enforce], description: "Requires ics.protocol. Monitor observes every match without admitting, dropping or holding traffic; enforcing rules and strict scopes remain independent. Empty or absent inherits dataplane.dpiMode (default monitor); null or empty clears a stored override. learn is rejected; use monitor."}
         typeIds:
           type: array
           minItems: 1
@@ -765,7 +765,7 @@ components:
             ranges: {type: array, items: {type: string}, description: Register address ranges (legacy modbus_register_guard shape)}
         mode:
           type: string
-          enum: ['', learn, enforce]
+          enum: ['', monitor, enforce]
           description: Empty inherits global DPI mode.
 
     RulePreviewResponse:
@@ -1077,7 +1077,7 @@ components:
             Per-protocol parsing. Omitted map or keys mean tolerant; the API also accepts an empty
             string as the default. Unknown protocols or other values return 400.
             Tolerant evaluates decoded fields and alerts on nonconformance inside known-length frames.
-            Strict drops nonconformant frames and resets the session in enforce scope; learn scope
+            Strict drops nonconformant frames and resets the session in enforce scope; monitor scope
             reports would_drop without blocking. Lost frame boundaries and integrity faults fail
             closed in enforce scope in both parsing modes.
         dpiIcsProtocols:
@@ -1090,7 +1090,7 @@ components:
             cip: {type: boolean}
           description: 'Unknown keys (true or false) return 400: dataplane.dpiIcsProtocols: protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
         dpiMock: {type: boolean}
-        dpiMode: {type: string, enum: ['', learn, enforce], description: Empty inherits learn mode. Other values are rejected.}
+        dpiMode: {type: string, enum: ['', monitor, enforce], description: Empty inherits monitor mode. Other values are rejected.}
         dpiProtocols: {additionalProperties: {type: boolean}, type: object}
         enforceTable:
           type: string
@@ -1266,7 +1266,7 @@ components:
         firstSeen: {type: string, format: date-time}
         lastSeen: {type: string, format: date-time}
         attemptedCommands: {type: integer, minimum: 0, description: Decoded control-direction command APDUs.}
-        acceptedCommands: {type: integer, minimum: 0, description: Commands allowed in inline enforce mode whose carrying packets all completed an Accept verdict. Always 0 in learn and monitor modes.}
+        acceptedCommands: {type: integer, minimum: 0, description: Commands allowed in inline enforce mode whose carrying packets all completed an Accept verdict. Always 0 in monitor mode.}
         points:
           type: array
           maxItems: 256
@@ -2189,7 +2189,7 @@ components:
       properties:
         ruleId: {type: string}
         protocol: {type: string}
-        mode: {type: string, enum: [learn, enforce], description: Effective mode (rule mode, then dataplane.dpiMode, then learn).}
+        mode: {type: string, enum: [monitor, enforce], description: Effective mode (rule mode, then dataplane.dpiMode, then monitor).}
         state: {type: string, enum: [monitoring, enforcing, partial, not_enforcing]}
         reasons:
           type: array
@@ -2213,7 +2213,7 @@ components:
         state:
           type: string
           enum: [none, monitoring, enforcing, partial, not_enforcing, unknown]
-          description: none without ICS rules, the worst state among enforce rules, monitoring when all are learn, unknown when the engine cannot be read.
+          description: none without ICS rules, the worst state among enforce rules, monitoring when all are monitor, unknown when the engine cannot be read.
         enforcing: {type: integer}
         partial: {type: integer}
         notEnforcing: {type: integer}
@@ -3462,9 +3462,17 @@ paths:
         in: query
         description: Case-insensitive proto equality.
         schema: {type: string}
+      - name: ruleId
+        in: query
+        description: Exact case-sensitive rule identifier.
+        schema: {type: string}
+      - name: mode
+        in: query
+        description: Effective decision mode.
+        schema: {type: string, enum: [monitor, enforce]}
       - name: decision
         in: query
-        description: Case-insensitive attributes.decision equality (allow, deny, would_drop).
+        description: Case-insensitive attributes.decision equality (allow, deny, would_allow, would_drop).
         schema: {type: string}
       - name: verdict
         in: query
@@ -4881,6 +4889,45 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/TlsInfoResponse'}
+  /firewall/shadow-counters:
+    get:
+      summary: Applied-policy monitor message counters
+      description: >-
+        View-role access. Independent of nftables. Every effective-monitor ICS rule of the installed
+        snapshot is listed, including zero counts. One match per rule per decoded message, not per
+        object. Memory counters reset on successful policy install or restart; failed applies retain
+        the installed snapshot and counts. Before first apply or on engine unavailability returns available false, never zeros.
+        NFQUEUE observations repeat into the ordinary firewall; queues have no bypass when the engine is down.
+      tags: [Firewall]
+      responses:
+        '200':
+          description: Counters or an explicit unavailability reason
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  required: [available, snapshotVersion, since, unit, rules]
+                  properties:
+                    available: {type: boolean, enum: [true]}
+                    snapshotVersion: {type: string}
+                    since: {type: string, format: date-time}
+                    unit: {type: string, enum: [messages]}
+                    rules:
+                      type: array
+                      items:
+                        type: object
+                        required: [ruleId, shadowMatches, wouldAllow, wouldDeny]
+                        properties:
+                          ruleId: {type: string}
+                          shadowMatches: {type: integer, minimum: 0}
+                          wouldAllow: {type: integer, minimum: 0}
+                          wouldDeny: {type: integer, minimum: 0}
+                - type: object
+                  required: [available, reason]
+                  properties:
+                    available: {type: boolean, enum: [false]}
+                    reason: {type: string}
   /firewall/counters:
     get:
       summary: Per-rule counters of the applied ruleset
@@ -5474,7 +5521,7 @@ paths:
               type: object
               properties:
                 name: {type: string}
-                mode: {type: string, enum: ['', learn, enforce]}
+                mode: {type: string, enum: ['', monitor, enforce]}
               required: [name]
       responses:
         '200':

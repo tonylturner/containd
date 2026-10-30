@@ -30,6 +30,9 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 	if envelopeMarked(pkt) {
 		return capture.Decision{Action: capture.Drop, Reason: reasonInvalidMarked + ":" + pkt.Invalid}
 	}
+	if pkt.Token.Inline() {
+		return observedDecision(pkt)
+	}
 	return acceptDecision
 }
 
@@ -243,6 +246,9 @@ func (e *Engine) HandlePacket(pkt capture.Packet) (d capture.Decision) {
 		}
 		e.reportPacketPanic(packetPanic(r))
 		d = acceptDecision
+		if pkt.Token.Inline() {
+			d = observedDecision(pkt)
+		}
 		if envelopeMarked(pkt) {
 			d = capture.Decision{Action: capture.Drop, Reason: reasonIECFailClose}
 		}

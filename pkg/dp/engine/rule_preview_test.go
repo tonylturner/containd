@@ -120,7 +120,7 @@ func TestPreviewRuleIEC104RuntimeParity(t *testing.T) {
 						}
 					}
 					// A strict ALLOW naming only the unsupported type matches nothing.
-					nothing := parsing == ics.Strict && action == rules.ActionAllow && reflect.DeepEqual(predicate.TypeIDs, []int{2})
+					nothing := parsing == ics.Strict && reflect.DeepEqual(predicate.TypeIDs, []int{2})
 					got := e.previewRule(entry, previewZoneResolver)
 					if got.MatchCount != want || (want == 0) != nothing {
 						t.Fatalf("preview=%d runtime=%d", got.MatchCount, want)
@@ -203,12 +203,12 @@ func TestPreviewRuleEnvelopeDenialsNeverMatch(t *testing.T) {
 							attrs["error"] = "type 100 is not in the supported IEC 104 type set"
 							attrs["conformance"] = []string{"iec104.unsupported_type"}
 						}
-						if parsing == ics.Tolerant || action == rules.ActionDeny {
+						if parsing == ics.Tolerant {
 							want = 1
 						}
 					}
 					e.eventStore.Append(iecEvent(0, kind, true, attrs))
-					got := e.PreviewRule(rules.Entry{Action: action, ICS: rules.ICSPredicate{Protocol: "iec104"}})
+					got := e.PreviewRule(rules.Entry{Action: action, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"}})
 					if got.MatchCount != want {
 						t.Fatalf("matches = %d, want %d: %+v", got.MatchCount, want, got)
 					}

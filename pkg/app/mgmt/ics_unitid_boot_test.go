@@ -37,7 +37,7 @@ func TestStoredDNP3UnitIDBootsIntoRecovery(t *testing.T) {
 	// Model every snapshot written before unitId capability validation existed.
 	want := []config.Rule{{
 		ID: "legacy-unit", Action: config.ActionAllow,
-		ICS: config.ICSPredicate{Protocol: "dnp3", UnitID: new(uint8(0)), Mode: "learn"},
+		ICS: config.ICSPredicate{Protocol: "dnp3", UnitID: new(uint8(0)), Mode: "monitor"},
 	}}
 	setStoredRules(t, path, want)
 	db, err := sql.Open("sqlite", path)

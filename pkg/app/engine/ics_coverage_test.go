@@ -40,7 +40,7 @@ func TestCandidateAndAppliedCoverageAgree(t *testing.T) {
 	snap := rules.Snapshot{Firewall: []rules.Entry{
 		{ID: "modbus", Action: rules.ActionAllow, Sources: []string{"10.0.0.5/32"},
 			ICS: rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}}},
-		{ID: "dnp3", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "dnp3", Mode: "learn"}},
+		{ID: "dnp3", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "dnp3", Mode: "monitor"}},
 		{ID: "iec", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"}},
 		{ID: "l4", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Mode: "enforce"}},
 	}}

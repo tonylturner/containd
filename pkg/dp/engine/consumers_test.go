@@ -18,7 +18,7 @@ func TestIEC104EventsNeverFeedInventoryOrLearner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.LoadRules(rules.Snapshot{Firewall: []rules.Entry{{ID: "learn", ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "learn"}}}})
+	e.LoadRules(rules.Snapshot{Firewall: []rules.Entry{{ID: "monitor", ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "monitor"}}}})
 	state := flow.NewState(flow.Key{SrcIP: net.ParseIP("10.60.60.10"), DstIP: net.ParseIP("10.30.30.30"), SrcPort: 40000, DstPort: 2404, Proto: 6}, time.Now())
 	cmd := dpi.Event{Proto: "iec104", Kind: "request", Attributes: map[string]any{
 		"session_id": "run-1", "apdu_id": "run-1/c/0", "class": "control", "type_id": uint8(46),

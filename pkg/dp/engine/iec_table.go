@@ -50,9 +50,18 @@ const (
 type iecPolicy interface {
 	IEC104Envelope(ctx rules.EvalContext, globalMode string) (bool, string)
 	EvaluateIEC104(ctx rules.EvalContext) (rules.Action, *rules.Entry)
+	MonitorMatches(rules.EvalContext) []*rules.Entry
+	IEC104Scope(rules.EvalContext, string) *rules.Entry
 }
 
-func newRulesPolicy(snap *rules.Snapshot) iecPolicy { return rules.NewEvaluator(snap) }
+type enforcingIECPolicy struct{ *rules.Evaluator }
+
+func (p enforcingIECPolicy) EvaluateIEC104(ctx rules.EvalContext) (rules.Action, *rules.Entry) {
+	return p.EvaluateIEC104Enforcing(ctx)
+}
+func newRulesPolicy(snap *rules.Snapshot) iecPolicy {
+	return enforcingIECPolicy{rules.NewEvaluator(snap)}
+}
 
 type iecKey struct{ client, server netip.AddrPort }
 
@@ -79,7 +88,7 @@ type iecSession struct {
 	dirs       [2]*iecDir
 	held       []*heldPacket
 	heldBytes  int
-	stopParse  bool // learn envelope: parsing stopped after a stream error
+	stopParse  bool // monitor envelope: parsing stopped after a stream error
 	reconnects bool // first STARTDT con counts as a reconnect
 	reset      *connReset
 	next       *iecSession         // new incarnation whose handshake is pending
@@ -132,6 +141,7 @@ type iecTable struct {
 	settler    func() capture.Settler
 	jobs       *worker
 	emit       func([]iecTelemetry)
+	shadow     func(*rules.Snapshot, *rules.Entry)
 	markAbort  func(sessionID string)
 	onError    func(error)
 	newPolicy  func(*rules.Snapshot) iecPolicy
@@ -288,9 +298,13 @@ func hasEnforceICS(snap *rules.Snapshot, globalMode string) bool {
 // envelope or mode changed are aborted; sessions of an
 // unchanged envelope continue.
 func (t *iecTable) setPolicy(snap *rules.Snapshot) {
-	hasIEC, active := hasEnforceIEC(snap, t.globalMode)
 	var acts iecActions
 	t.mu.Lock()
+	if snap != nil && snap.DPIMode != "" {
+		t.globalMode = snap.DPIMode
+	}
+	hasIEC, active := hasEnforceIEC(snap, t.globalMode)
+	hasICS := hasEnforceICS(snap, t.globalMode)
 	t.snap, t.hasIEC = snap, hasIEC
 	t.policy = t.newPolicy(snap)
 	now := t.now()
@@ -306,7 +320,7 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 		case s.mode == "enforce" || mode == "enforce":
 			acts.merge(t.abortLocked(s, abortPolicy, "", nil, now))
 		default:
-			// A learn session left every envelope: stop tracking it.
+			// A monitor session left every envelope: stop tracking it.
 			t.dpi.EndStream(s.id)
 			acts.merge(t.deleteLocked(key, s))
 		}
@@ -314,7 +328,7 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 	t.mu.Unlock()
 	if t.health != nil {
 		t.health.clear(faultEnvelope)
-		t.health.setICS(hasEnforceICS(snap, t.globalMode))
+		t.health.setICS(hasICS)
 		t.health.setActive(active)
 	}
 	t.apply(acts)

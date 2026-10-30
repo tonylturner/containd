@@ -11,7 +11,7 @@ package coverage
 type State string
 
 const (
-	// Monitoring: the effective mode is learn; the rule observes by design.
+	// Monitoring: the effective mode is monitor; the rule observes by design.
 	Monitoring State = "monitoring"
 	// Enforcing: an inline path inspects every flow of the rule's scope.
 	Enforcing State = "enforcing"
@@ -60,7 +60,7 @@ type Reason struct {
 }
 
 // Rule is the coverage of one firewall rule with an ICS protocol predicate.
-// Mode is the effective mode (rule mode, then global dpiMode, then learn).
+// Mode is the effective mode (rule mode, then global dpiMode, then monitor).
 type Rule struct {
 	RuleID   string   `json:"ruleId"`
 	Protocol string   `json:"protocol"`

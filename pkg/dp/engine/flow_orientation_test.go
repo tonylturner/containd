@@ -295,7 +295,7 @@ func TestModbusResponseDirectionRule(t *testing.T) {
 	e.LoadRules(rules.Snapshot{Default: rules.ActionDeny, IDS: rules.IDSConfig{Enabled: true}, Firewall: []rules.Entry{{
 		ID: "response-only", Action: rules.ActionAllow, Log: true,
 		Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-		ICS:       rules.ICSPredicate{Protocol: "modbus", Direction: "response", FunctionCode: []uint8{3}},
+		ICS:       rules.ICSPredicate{Protocol: "modbus", Mode: "enforce", Direction: "response", FunctionCode: []uint8{3}},
 	}}})
 	e.handlePacket(segment(false, 100, capture.TCPFlagSYN, nil))
 	e.handlePacket(segment(false, 100, ackPsh, modbusADU(1, 3, 0, 1)))

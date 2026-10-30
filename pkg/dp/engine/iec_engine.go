@@ -34,6 +34,7 @@ func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
 	t.health = health
 	t.jobs = e.hooks.blocks
 	t.emit = emit
+	t.shadow = e.countShadow
 	t.markAbort = store.MarkAborted
 	t.onError = cfg.OnError
 	t.settler = capManager.Settler

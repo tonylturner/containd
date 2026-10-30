@@ -41,7 +41,7 @@ func TestIECEstablishedSYNOpensNothing(t *testing.T) {
 	if d := h.e.handlePacket(h.establishedSYN(999, iframe(46, 1))); d.Action != capture.Drop || d.Reason != reasonIECInvalid {
 		t.Fatalf("SYN with data = %+v, want Drop by %s", d, reasonIECInvalid)
 	}
-	if d := h.e.handlePacket(h.establishedSYN(999, nil)); d.Action != capture.Accept || d.Reason != reasonIECEstablishedSYN {
+	if d := h.e.handlePacket(h.establishedSYN(999, nil)); d.Action != h.passingDisposition() || d.Reason != reasonIECEstablishedSYN {
 		t.Fatalf("SYN into the connection = %+v, want Accept by %s", d, reasonIECEstablishedSYN)
 	}
 	if _, ok := h.sessionState(); ok {
@@ -67,14 +67,14 @@ func TestIECEstablishedSYNOpensNothing(t *testing.T) {
 	if d := h.e.handlePacket(h.establishedSYN(777, nil)); d.Action != capture.Drop || d.Reason != reasonIECTombstone {
 		t.Fatalf("SYN into the connection on the tombstone = %+v, want Drop by %s", d, reasonIECTombstone)
 	}
-	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != capture.Accept {
+	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("handshake SYN = %+v, want Accept", d)
 	}
-	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 778, nil)); d.Action != capture.Accept {
+	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 778, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("SYN-ACK = %+v, want Accept", d)
 	}
 	h.cSeq, h.sSeq = 778, 9001
-	if _, d := h.send(true, iframe(46, 1)); d.Action != capture.Accept {
+	if _, d := h.send(true, iframe(46, 1)); d.Action != h.passingDisposition() {
 		t.Fatalf("command on the next incarnation = %+v, want Accept", d)
 	}
 	if evs := h.eventsOf("request"); len(evs) != 1 {
@@ -89,10 +89,10 @@ func TestIECEstablishedSYNOpensNothing(t *testing.T) {
 func TestIECEstablishedSYNOnSessionStates(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.handshake()
-	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST, h.cSeq, 0, nil)); d.Action != capture.Accept {
+	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST, h.cSeq, 0, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("client RST = %+v, want Accept", d)
 	}
-	if d := h.e.handlePacket(h.establishedSYN(777, nil)); d.Action != capture.Accept || d.Reason != reasonIECClosed {
+	if d := h.e.handlePacket(h.establishedSYN(777, nil)); d.Action != h.passingDisposition() || d.Reason != reasonIECClosed {
 		t.Fatalf("SYN into the connection on the closed session = %+v, want Accept by %s", d, reasonIECClosed)
 	}
 	if st, _ := h.sessionState(); st != iecClosed {
@@ -100,18 +100,18 @@ func TestIECEstablishedSYNOnSessionStates(t *testing.T) {
 	}
 
 	h = newIECHarness(t, "enforce")
-	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 100, 0, nil)); d.Action != capture.Accept {
+	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 100, 0, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("handshake SYN = %+v, want Accept", d)
 	}
 	if d := h.e.handlePacket(h.establishedSYN(500, nil)); d.Action != capture.Drop || d.Reason != reasonIECInvalid {
 		t.Fatalf("SYN with a new ISN into the connection = %+v, want Drop by %s", d, reasonIECInvalid)
 	}
-	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 101, nil)); d.Action != capture.Accept {
+	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 101, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("SYN-ACK of the first SYN = %+v, want Accept", d)
 	}
 
-	h = newIECHarness(t, "learn")
-	if d := h.e.handlePacket(h.establishedSYN(100, nil)); d.Action != capture.Accept || d.Reason != reasonIECAccept {
+	h = newIECHarness(t, "monitor")
+	if d := h.e.handlePacket(h.establishedSYN(100, nil)); d.Action != h.passingDisposition() || d.Reason != reasonIECAccept {
 		t.Fatalf("learn SYN = %+v, want Accept by %s", d, reasonIECAccept)
 	}
 	if st, ok := h.sessionState(); !ok || st != iecSynSent {
