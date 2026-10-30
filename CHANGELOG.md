@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Verified AF_PACKET ICS policy and decoder dispatch use the post-DNAT backend
+  and pre-SNAT client on both observed legs. Conntrack deletion uses the verified
+  original tuple while RST injection retains packet-space endpoints.
+
 - ICS decoder events expose CIP request targets (logical, symbolic or unknown;
   responses carry none) and mark
   incomplete CIP MSP/CPF and DNP3 object coverage for per-object policy checks.

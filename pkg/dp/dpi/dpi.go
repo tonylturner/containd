@@ -87,6 +87,7 @@ type Manager struct {
 	anyDecoders []Decoder            // decoders with no port-specific hint
 	reassembler *reassembler
 	streamEnds  map[string]streamEnd
+	selected    map[string][]Decoder // committed dispatch until flow end, under streamMu
 	eventTimes  map[string]time.Time // last inspected capture time, under streamMu
 }
 
@@ -103,6 +104,7 @@ func NewManager(decoders ...Decoder) *Manager {
 		reassembler: newReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
 		streamEnds:  make(map[string]streamEnd),
 		eventTimes:  make(map[string]time.Time),
+		selected:    make(map[string][]Decoder),
 	}
 	for _, d := range decoders {
 		m.Add(d)
@@ -150,10 +152,11 @@ func (m *Manager) candidates(state *flow.State) []Decoder {
 		portMap = m.udpByPort
 	}
 
-	src := portMap[state.Key.SrcPort]
+	key := state.ServiceKey()
+	src := portMap[key.SrcPort]
 	var dst []Decoder
-	if state.Key.SrcPort != state.Key.DstPort {
-		dst = portMap[state.Key.DstPort]
+	if key.SrcPort != key.DstPort {
+		dst = portMap[key.DstPort]
 	}
 	// Most flows select one immutable registry slice. Do not copy it on
 	// every packet; only combined lists need their own backing storage.
@@ -203,13 +206,11 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 // flowEnd returns the decoders' flow-end events. Must be called with
 // streamMu held.
 func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
+	defer delete(m.selected, state.ID())
 	delete(m.eventTimes, state.ID())
 	var out []Event
 	var errs []error
-	for _, d := range m.candidates(state) {
-		if d == nil || !d.Supports(state) {
-			continue
-		}
+	for _, d := range m.dispatch(state, state.ID()) {
 		events, err := d.OnFlowEnd(state)
 		if err != nil {
 			errs = append(errs, err)
@@ -218,4 +219,38 @@ func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
 	}
 	stampEvents(out, at)
 	return out, errors.Join(errs...)
+}
+
+// dispatch commits the first nonempty decoder selection. Evidence may arrive
+// after framing has started; it must not reinterpret that stream with a new
+// decoder. A flow not yet selected can use newly verified service ports.
+// Callers hold streamMu.
+func (m *Manager) dispatch(state *flow.State, id string) []Decoder {
+	if selected := m.selected[id]; len(selected) != 0 {
+		return selected
+	}
+	var selected []Decoder
+	for _, d := range m.candidates(state) {
+		if d != nil && d.Supports(state) {
+			selected = append(selected, d)
+		}
+	}
+	if len(selected) != 0 {
+		m.selected[id] = selected
+	}
+	return selected
+}
+
+// CommittedProtocol reports legacy directional dispatch ownership, so passive
+// identification does not infer a different owner from newly verified ports.
+func (m *Manager) CommittedProtocol(state *flow.State, proto string) (matches, committed bool) {
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
+	selected := m.selected[state.ID()]
+	for _, decoder := range selected {
+		if stream, ok := decoder.(StreamDecoder); ok && stream.Protocol() == proto {
+			return true, true
+		}
+	}
+	return false, len(selected) != 0
 }

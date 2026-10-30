@@ -21,10 +21,11 @@ func evalContextsFromDPIEvent(snap *rules.Snapshot, state *flow.State, pkt *dpi.
 	if state == nil || pkt == nil || !isRuleEvaluableICSEvent(ev.Proto) || isStreamErrorEvent(ev) {
 		return nil
 	}
+	key := state.ServiceKey()
 	base := rules.EvalContext{
-		SrcZone: srcZone, DstZone: dstZone, SrcIP: state.Key.OpenerIP(), DstIP: state.Key.ServerIP(),
+		SrcZone: srcZone, DstZone: dstZone, SrcIP: key.OpenerIP(), DstIP: key.ServerIP(),
 		Proto: strings.ToLower(pkt.Proto), Port: strconv.Itoa(int(servicePort(state, pkt))),
-		Identities: snap.IdentitiesOf(state.Key.OpenerIP()),
+		Identities: snap.IdentitiesOf(key.OpenerIP()),
 	}
 	objects := icsContextsFromDPIEvent(state, ev, nil)
 	contexts := make([]rules.EvalContext, len(objects))

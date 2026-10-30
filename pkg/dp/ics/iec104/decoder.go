@@ -65,7 +65,8 @@ func (d *Decoder) Supports(state *flow.State) bool {
 	if state == nil || state.Key.Proto != 6 {
 		return false
 	}
-	return state.Key.SrcPort == Port || state.Key.DstPort == Port
+	key := state.ServiceKey()
+	return key.SrcPort == Port || key.DstPort == Port
 }
 
 // Ports implements dpi.PortHinter.

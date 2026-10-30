@@ -767,7 +767,7 @@ func (e *Engine) connectionStateLocked(pkt capture.Packet, now time.Time) (*flow
 	}
 	state := flow.NewState(key, now)
 	state.IdleTimeout = 5 * time.Minute
-	state.Tags = e.flowTags(key)
+	state.Tags = e.flowTags(state)
 	e.flows[key.MapKey()] = state
 	e.noteTransportSYNLocked(pkt, key)
 	if pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 && handshakeMarked(pkt) {

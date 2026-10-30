@@ -44,18 +44,18 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	at := eventTime(state, pkt)
 	m.eventTimes[state.ID()] = at
 	defer func() { stampResult(&res, at) }()
-	candidates := m.candidates(state)
+	key, session, pos := streamKey(state, pkt)
+	candidates := m.dispatch(state, key)
 	tcp := pkt.Proto == "tcp"
 	stream := m.reassembles(pkt)
 	var framer StreamDecoder
 	if stream {
-		framer = firstFramer(candidates, state)
+		framer = firstFramer(candidates)
 	}
 	if framer != nil {
 		res.Framed = true
 		res.Proto = framer.Protocol()
 	}
-	key, session, pos := streamKey(state, pkt)
 	var errEvent *Event
 	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
 		anchored, discarded := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake)
@@ -99,9 +99,6 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	}
 
 	for _, d := range candidates {
-		if d == nil || !d.Supports(state) {
-			continue
-		}
 		if _, ok := d.(StreamDecoder); ok && tcp {
 			continue // on TCP a StreamDecoder only ever frames through ParseStream
 		}
@@ -138,9 +135,9 @@ func streamError(state *flow.State, pkt *ParsedPacket, res *InspectResult, se *S
 
 // firstFramer returns the first registered StreamDecoder supporting the
 // flow, or nil.
-func firstFramer(candidates []Decoder, state *flow.State) StreamDecoder {
+func firstFramer(candidates []Decoder) StreamDecoder {
 	for _, d := range candidates {
-		if sd, ok := d.(StreamDecoder); ok && sd.Supports(state) {
+		if sd, ok := d.(StreamDecoder); ok {
 			return sd
 		}
 	}
@@ -254,6 +251,7 @@ func (m *Manager) EndStream(session string) {
 		key := sessionStreamKey(session, dir)
 		m.reassembler.complete(key)
 		m.endStream(key)
+		delete(m.selected, key)
 	}
 }
 

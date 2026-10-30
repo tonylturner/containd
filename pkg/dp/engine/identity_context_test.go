@@ -66,12 +66,12 @@ func TestTagsFollowOpenerIdentities(t *testing.T) {
 		t.Fatalf("connection tags = %v, %v; want [ops] for the bound opener only", got[0].Tags, got[1].Tags)
 	}
 	reply := flow.Key{SrcIP: net.ParseIP(testServer), DstIP: net.ParseIP(testClient), SrcPort: 502, DstPort: 41000, Proto: 6, Dir: flow.DirReverse}
-	if tags := e.flowTags(reply); !slices.Equal(tags, []string{"ops"}) {
+	if tags := e.flowTags(&flow.State{Key: reply}); !slices.Equal(tags, []string{"ops"}) {
 		t.Fatalf("reply flow tags = %v, want the opener's [ops]", tags)
 	}
 	table := newIECTable("enforce", &zoneCache{})
 	table.snap, table.policy = &snap, rules.NewEvaluator(&snap)
-	evs := table.withSessionTags([]events.Event{{SrcIP: testClient, DstIP: testServer, DstPort: iec104Port, Transport: "tcp"}})
+	evs := table.withSessionTags([]iecTelemetry{{Event: events.Event{SrcIP: testClient, DstIP: testServer, DstPort: iec104Port, Transport: "tcp"}}})
 	if got := evs[0].Attributes[events.KeyTags]; !reflect.DeepEqual(got, []string{"ops"}) {
 		t.Fatalf("IEC 104 session tags = %v, want [ops]", got)
 	}

@@ -342,12 +342,11 @@ func TestTransportDNATCoordinatesAndConnectionConsumers(t *testing.T) {
 				e.Learner().Profiles()[0].DestIP != "10.20.0.4" {
 				t.Fatal("NAT addresses became logical assets")
 			}
-			// Policy stays on the observed wire key, even though logical
-			// inventory and connection-scoped consumers use CT evidence.
+			// Policy and logical inventory share verified service coordinates.
 			pkt := &dpi.ParsedPacket{Proto: "tcp", DstPort: 1502, SrcPort: 41000}
 			ctxs := evalContextsFromDPIEvent(&rules.Snapshot{}, states[0], pkt, dpi.Event{Proto: "modbus", Kind: "request"}, "", "")
-			if len(ctxs) != 1 || ctxs[0].DstIP.String() != evidence.Original.Destination.Addr().String() || ctxs[0].Port != "1502" {
-				t.Fatalf("policy was normalized: %+v", ctxs)
+			if len(ctxs) != 1 || ctxs[0].DstIP.String() != evidence.Reply.Source.Addr().String() || ctxs[0].Port != "502" {
+				t.Fatalf("policy did not use backend: %+v", ctxs)
 			}
 			if conformanceKey(states[0]) != conformanceKey(states[1]) {
 				t.Fatal("NAT split conformance identity")

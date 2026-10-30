@@ -34,7 +34,8 @@ func (s *ConnectionSlot) Store(c *Connection) {
 	s.pointer.Store(c)
 }
 
-// Connection is shared correlation evidence, never policy/reset coordinates.
+// Connection is shared correlation evidence and verified service/CT authority.
+// Wire reset coordinates always come from the captured packet.
 // ID, Key, Status and Evidence are immutable after construction. An issued ID
 // freezes assignment; an ID-less history may still acquire verified evidence.
 type Connection struct {
@@ -173,15 +174,29 @@ func (c *Connection) Peer(k Key) Key {
 	return TupleKey(c.Evidence.Original, DirForward)
 }
 
-// LogicalIPs returns event-direction client/backend coordinates for consumers
-// that explicitly support them. Wire endpoints and FlowID are not rewritten.
-func (c *Connection) LogicalIPs(k Key) (string, string, bool) {
-	if !c.Verified() || k.Tuple() != c.Evidence.Original && k.Tuple() != c.Evidence.Reply {
-		return "", "", false
+// ServiceKey returns service coordinates in this state's direction. Verified
+// evidence uses the pre-SNAT client and post-DNAT backend, as forward-chain
+// policy does. Without that authority the wire key is the only known tuple.
+// This never rewrites the state's wire identity or reassembly key.
+func (s *State) ServiceKey() Key {
+	k := s.Key
+	c := s.Connection.Load()
+	if !c.Verified() {
+		return k
 	}
-	client, backend := c.Evidence.Original.Source.Addr().String(), c.Evidence.Reply.Source.Addr().String()
-	if c.Direction(k) == DirReverse {
-		return backend, client, true
+	client, server := c.Evidence.Original.Source, c.Evidence.Reply.Source
+	k.Dir = c.Direction(s.Key)
+	if k.Dir == DirReverse {
+		client, server = server, client
 	}
-	return client, backend, true
+	k.SrcIP, k.DstIP = net.IP(client.Addr().AsSlice()), net.IP(server.Addr().AsSlice())
+	k.SrcPort, k.DstPort = client.Port(), server.Port()
+	return k
+}
+
+// LogicalIPs returns event-direction service addresses, with the same authority
+// as policy and dispatch. The bool distinguishes verified evidence from wire.
+func (s *State) LogicalIPs() (string, string, bool) {
+	k := s.ServiceKey()
+	return k.SrcIP.String(), k.DstIP.String(), s.Connection.Load().Verified()
 }

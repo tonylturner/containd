@@ -51,7 +51,8 @@ func (e *Engine) failClosedRule(pkt capture.Packet, state *flow.State, parsed *d
 		return nil
 	}
 	snap := p.snapshot
-	ctx := rules.EvalContext{SrcIP: state.Key.OpenerIP(), DstIP: state.Key.ServerIP()}
+	key := state.ServiceKey()
+	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP()}
 	zoned := false
 	for i := range snap.Firewall {
 		entry := &snap.Firewall[i]

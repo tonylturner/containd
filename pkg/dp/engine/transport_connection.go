@@ -68,7 +68,9 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 	if pkt.Token.Inline() {
 		return
 	}
-	iecOwned := e.iecOwnsPacket(pkt)
+	state := wireServiceState(pkt)
+	state.Connection.Store(incoming)
+	iecOwned := e.iecOwnsState(pkt, state)
 	e.flowMu.Lock()
 	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
 	e.flowMu.Unlock()
@@ -137,7 +139,9 @@ func (e *Engine) retireTransportIncarnationLocked(pkt capture.Packet, incoming *
 // it already needs. A real retirement still ends streams before creating the
 // replacement state, preserving peer lookup and close ordering.
 func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming *flow.Connection) *flow.State {
-	iecOwned := !pkt.Token.Inline() && e.iecOwnsPacket(pkt)
+	hint := wireServiceState(pkt)
+	hint.Connection.Store(incoming)
+	iecOwned := !pkt.Token.Inline() && e.iecOwnsState(pkt, hint)
 	e.flowMu.Lock()
 	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
 	if len(retired) != 0 {
@@ -157,8 +161,18 @@ func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming 
 // Otherwise ownership is decided from the same opener-oriented envelope as
 // the table's new-session path. Call before taking flowMu.
 func (e *Engine) iecOwnsPacket(pkt capture.Packet) bool {
+	state := wireServiceState(pkt)
+	e.flowMu.Lock()
+	if retained := e.tupleStateLocked(state.Key.Tuple()); retained != nil {
+		state.Connection.Store(retained.Connection.Load())
+	}
+	e.flowMu.Unlock()
+	return e.iecOwnsState(pkt, state)
+}
+
+func (e *Engine) iecOwnsState(pkt capture.Packet, state *flow.State) bool {
 	t := e.iec
-	if !isIECPort(pkt) || t == nil {
+	if t == nil {
 		return false
 	}
 	t.mu.Lock()
@@ -168,16 +182,23 @@ func (e *Engine) iecOwnsPacket(pkt capture.Packet) bool {
 	}
 	src, srcOK := addrPort(pkt.SrcIP, pkt.SrcPort)
 	dst, dstOK := addrPort(pkt.DstIP, pkt.DstPort)
+	if !isIECFlow(state) {
+		if srcOK && dstOK {
+			session, _ := t.lookupLocked(src, dst)
+			return session != nil
+		}
+		return false
+	}
 	if !srcOK || !dstOK {
 		// Non-IPv4 traffic is table-owned only inside an enforce
 		// envelope. This query has no actions or session mutations.
-		_, owned := t.nonIPv4Locked(pkt)
+		_, owned := t.nonIPv4Locked(state)
 		return owned
 	}
 	if session, _ := t.lookupLocked(src, dst); session != nil {
 		return true
 	}
-	matched, _ := t.envelopeLocked(t.sessionCtx(orient(src, dst)))
+	matched, _ := t.envelopeLocked(t.stateContext(state))
 	return matched
 }
 
@@ -250,6 +271,7 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 	}
 	e.adoptTransportPending(incoming, old)
 	state.Connection.Store(incoming)
+	state.Tags = e.flowTags(state)
 	if incoming.Evidence != nil {
 		for _, tuple := range []conntrack.Tuple{incoming.Evidence.Original, incoming.Evidence.Reply} {
 			if peer := e.tupleStateLocked(tuple); peer != nil {
@@ -257,6 +279,7 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 				e.adoptTransportPending(incoming, previous)
 				if previous == nil || previous.ID == "" || previous.ID == incoming.ID {
 					peer.Connection.Store(incoming)
+					peer.Tags = e.flowTags(peer)
 				}
 			}
 		}

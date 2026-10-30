@@ -20,6 +20,7 @@ func (m *Manager) DiscardFlow(state *flow.State) {
 	}
 	m.endStream(key)
 	delete(m.eventTimes, key)
+	delete(m.selected, key)
 }
 
 // A legacy flow stream ends at its flow's end (OnFlowEnd), at a FIN or RST
@@ -85,11 +86,11 @@ func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket, kind StreamEr
 	}
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
-	framer := firstFramer(m.candidates(state), state)
+	key, _, _ := streamKey(state, pkt)
+	framer := firstFramer(m.dispatch(state, key))
 	if framer == nil {
 		return
 	}
-	key, _, _ := streamKey(state, pkt)
 	m.reassembler.fail(key, &StreamError{Kind: kind, Offset: m.reassembler.watermark(key), Proto: framer.Protocol()})
 	m.endStream(key)
 }

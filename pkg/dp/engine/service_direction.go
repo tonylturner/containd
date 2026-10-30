@@ -13,3 +13,15 @@ import (
 func icsServiceDirection(pkt capture.Packet) (flow.Direction, bool) {
 	return flow.ICSServiceDirection(pkt.Proto, pkt.SrcPort, pkt.DstPort)
 }
+
+// wireServiceState is used before any connection evidence has been admitted.
+func wireServiceState(pkt capture.Packet) *flow.State {
+	state := &flow.State{Key: packetKey(pkt)}
+	if dir, known := icsServiceDirection(pkt); known {
+		state.Key.Dir = dir
+	}
+	if dir, known := handshakeDirection(pkt); known {
+		state.Key.Dir = dir
+	}
+	return state
+}

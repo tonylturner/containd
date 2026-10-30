@@ -100,8 +100,8 @@ type State struct {
 	IdleTimeout time.Duration
 	HardTimeout time.Duration
 	LastAction  string
-	// Tags are the labels of the TAG rules that matched the connection
-	// when this direction's state was created; fixed for its lifetime.
+	// Tags are the labels of the TAG rules that match this connection
+	// at evidence binding. The engine guards updates and snapshots with flowMu.
 	Tags []string
 }
 

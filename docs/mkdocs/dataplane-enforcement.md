@@ -73,6 +73,14 @@ rule is reported in the ruleset warnings
   Generic DPI can cache per-flow verdicts; IEC 104 retains session-level
   inspection.
 
+For verified AF_PACKET observations, ICS policy coordinates match the forward
+chain: pre-SNAT client → post-DNAT backend, including the backend service port.
+Wire event endpoints, flow IDs, reassembly and RST addresses are unchanged;
+verified conntrack deletion uses the kernel's original tuple. Unverified
+observations and retained-event rule preview remain wire-based. See
+[Transport identity and NAT](ics-dpi.md#transport-identity-and-nat) for resolution
+statuses and late-verification behavior.
+
 DPI effective mode is per-rule `ics.mode`, then global `dpiMode`, then `learn`.
 Learn suppresses the corresponding DPI denial, **not** independent nftables
 firewall decisions or an explicit enforce-mode rule. See

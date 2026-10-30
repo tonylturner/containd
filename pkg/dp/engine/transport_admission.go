@@ -17,15 +17,14 @@ func (e *Engine) legacyTransportEligible(pkt capture.Packet) bool {
 	if pkt.Invalid != "" || pkt.Proto != 6 && pkt.Proto != 17 {
 		return false
 	}
-	state := &flow.State{Key: packetKey(pkt)}
-	if dir, known := icsServiceDirection(pkt); known {
-		state.Key.Dir = dir
-	}
+	state := wireServiceState(pkt)
+
 	parsed := &dpi.ParsedPacket{Proto: pkt.Transport, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
 	if !e.ShouldInspect(state, parsed) {
 		return false
 	}
-	if ics.IsDecoderPortOn(pkt.Proto, pkt.SrcPort) || ics.IsDecoderPortOn(pkt.Proto, pkt.DstPort) {
+	key := state.ServiceKey()
+	if ics.IsDecoderPortOn(key.Proto, key.SrcPort) || ics.IsDecoderPortOn(key.Proto, key.DstPort) {
 		return true
 	}
 	if snap := e.ruleSnap.Load(); snap != nil {
