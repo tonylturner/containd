@@ -83,6 +83,67 @@ async function announce(page: Page, path: string, event = CONFIG_COMMITTED) {
   ]);
 }
 
+for (const item of [
+  { name: "DNS", route: "/system/services/dns/", path: "/services/dns", label: "Enable DNS resolver" },
+  { name: "NTP", route: "/system/services/ntp/", path: "/services/ntp", label: "Enable NTP client" },
+  { name: "AV", route: "/system/services/av/", path: "/services/av", label: "Enable AV/ICAP scanning" },
+  { name: "VPN", route: "/vpn/", path: "/services/vpn", label: "Enable WireGuard" },
+  { name: "IDS", route: "/ids/", path: "/ids/rules", label: "Enable IDS engine" },
+]) {
+  test(`${item.name} keeps a reversion to the old server value during an outstanding save`, async ({ page }) => {
+    const server = await mockAPI(page);
+    await open(page, item.route, item.path);
+    const enabled = page.getByRole("checkbox", { name: item.label });
+    await expect(enabled).not.toBeChecked();
+    await enabled.check();
+    let release!: () => void;
+    server.hold = new Promise<void>((resolve) => { release = resolve; });
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(() => server.writes.length).toBe(1);
+    await enabled.uncheck();
+    // A read of the submitted value arrives before the save acknowledgement.
+    server.data[item.path] = server.writes[0].body;
+    await announce(page, item.path);
+    await expect(enabled).not.toBeChecked();
+    const refreshed = page.waitForResponse(read(item.path));
+    release();
+    await refreshed;
+    await expect(enabled).not.toBeChecked();
+    // It remains an unsaved change, not just a temporarily retained value.
+    server.hold = null;
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(() => server.writes.length).toBe(2);
+    expect(server.writes[1].body).toMatchObject(item.name === "VPN"
+      ? { wireguard: { enabled: false } } : { enabled: false });
+  });
+}
+
+test("a row reversion to its derived value remains explicit while its save is outstanding", async ({ page }) => {
+  const server = await mockAPI(page);
+  server.data["/zones"] = [{ name: "lan", alias: "Original" }];
+  await open(page, "/zones/", "/zones");
+  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "lan", exact: true }) });
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  await row.getByRole("textbox").first().fill("Submitted");
+  let release!: () => void;
+  server.hold = new Promise<void>((resolve) => { release = resolve; });
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => server.writes.length).toBe(1);
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  const alias = row.getByRole("textbox").first();
+  await alias.fill("Original");
+  server.data["/zones"] = [{ name: "lan", alias: "Submitted" }];
+  await announce(page, "/zones");
+  const refreshed = page.waitForResponse(read("/zones"));
+  release();
+  await refreshed;
+  await expect(alias).toHaveValue("Original");
+  server.hold = null;
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => server.writes.length).toBe(2);
+  expect(server.writes[1].body).toMatchObject({ alias: "Original" });
+});
+
 type TextPage = {
   name: string; route: string; path: string;
   field: (page: Page) => Locator;

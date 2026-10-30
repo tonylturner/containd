@@ -112,11 +112,11 @@ export function EditICSModal({
       setError(built.error);
       return;
     }
-    const submitted = draft.editor;
+    const submitted = draft.beginSave();
     setSaving(true);
     const saved = await onSave(built.ics);
     setSaving(false);
-    if (!saved || !mounted.current) return;
+    if (!saved || !mounted.current) { draft.failSave(submitted); return; }
     draft.acceptConfig(submitted, filterDraftFrom(saved, context, globalMode));
     if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
   }

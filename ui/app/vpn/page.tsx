@@ -43,7 +43,7 @@ export default function VPNPage() {
   const canEdit = isAdmin();
   const toast = useToast();
   const confirm = useConfirm();
-  const { editor, cfg, setCfg, adoptConfig, acceptConfig, acceptCollection, text, setText } = useConfigEditor(() => normalize(null));
+  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, acceptCollection, text, setText } = useConfigEditor(() => normalize(null));
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -214,7 +214,7 @@ export default function VPNPage() {
       setError(e instanceof Error ? e.message : "Invalid peers JSON.");
       return;
     }
-    const submitted = editor;
+    const submitted = beginSave();
     setSaveState("saving");
 
     // If using managed OpenVPN, ensure configPath is cleared so the backend prefers managed.
@@ -242,6 +242,7 @@ export default function VPNPage() {
     });
     setSaveState(saved.ok ? "saved" : "error");
     if (!saved.ok) {
+      failSave(submitted);
       const msg = saved.error || "Failed to save VPN settings.";
       setError(msg);
       toast(msg, "error");

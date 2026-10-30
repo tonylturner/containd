@@ -1,5 +1,66 @@
 import { expect, test } from "@playwright/test";
-import { accept, acceptCollection, adopt, fresh, isDirty, reconcileRows, sameConfig, upsertRow } from "../lib/config-editor";
+import { accept, acceptCollection, adopt, beginSave, failSave, fresh, isDirty, reconcileRows, sameConfig, upsertRow, type ConfigEditor } from "../lib/config-editor";
+
+function start<T>(editor: ConfigEditor<T>) {
+  const submitted = { id: Symbol("test-save"), cfg: editor.cfg, raw: editor.raw };
+  return { submitted, saving: beginSave(editor, submitted) };
+}
+
+test("reverting to the old server during a save survives reads before and after its acknowledgement", () => {
+  const server = { mode: "learn" };
+  const { submitted, saving } = start({ ...fresh(server), cfg: { mode: "enforce" } });
+  const reverted = { ...saving, cfg: server };
+  expect(isDirty(reverted)).toBe(true);
+  const refreshed = adopt(reverted, submitted.cfg);
+  expect(refreshed.cfg).toEqual(server);
+  const acknowledged = accept(refreshed, submitted, submitted.cfg);
+  expect(acknowledged.pending).toEqual([]);
+  expect(acknowledged.server).toEqual(submitted.cfg);
+  expect(isDirty(acknowledged)).toBe(true);
+  expect(adopt(acknowledged, submitted.cfg).cfg).toEqual(server);
+});
+
+test("an acknowledgement before the background read also keeps an edit made while saving", () => {
+  const server = { mode: "learn" };
+  const { submitted, saving } = start({ ...fresh(server), cfg: { mode: "enforce" } });
+  const acknowledged = accept({ ...saving, cfg: server }, submitted, submitted.cfg);
+  expect(adopt(acknowledged, submitted.cfg).cfg).toEqual(server);
+  expect(isDirty(acknowledged)).toBe(true);
+});
+
+test("a failed save clears only pending state and keeps structured and raw edits", () => {
+  const { submitted, saving } = start({ ...fresh({ enabled: false }), cfg: { enabled: true } });
+  const later = { ...saving, cfg: { enabled: false }, raw: { peers: "[ " } };
+  const failed = failSave(later, submitted);
+  expect(failed).toEqual({ ...later, pending: [] });
+  expect(isDirty(failed)).toBe(true);
+  const reverted = failSave({ ...saving, cfg: saving.server }, submitted);
+  expect(isDirty(reverted)).toBe(false);
+  expect(adopt(reverted, { enabled: true }).cfg.enabled).toBe(true);
+});
+
+test("a clean background read retains pending snapshots for a subsequent reversion", () => {
+  const { submitted, saving } = start(fresh({ enabled: false }));
+  const read = adopt(saving, { enabled: false });
+  expect(read.pending).toEqual([submitted]);
+  expect(isDirty({ ...read, cfg: { enabled: true } })).toBe(true);
+  expect(accept(read, submitted, submitted.cfg)).toEqual(fresh(submitted.cfg));
+});
+
+test("overlapping saves settle only their own snapshots, and explicit Refresh invalidates old acknowledgements", () => {
+  const first = start({ ...fresh({ mode: "learn" }), cfg: { mode: "enforce" } });
+  const second = start({ ...first.saving, cfg: { mode: "learn" } });
+  const settled = accept(second.saving, second.submitted, second.submitted.cfg);
+  expect(settled.pending).toEqual([first.submitted]);
+  expect(isDirty(settled)).toBe(true);
+  const acknowledged = accept(settled, first.submitted, first.submitted.cfg);
+  expect(acknowledged.cfg.mode).toBe("learn");
+  expect(acknowledged.pending).toEqual([]);
+  expect(isDirty(acknowledged)).toBe(true);
+  expect(failSave(second.saving, first.submitted).pending).toEqual([second.submitted]);
+  const refreshed = adopt(first.saving, { mode: "learn" }, false);
+  expect(accept(refreshed, first.submitted, first.submitted.cfg)).toEqual(refreshed);
+});
 
 test("background reads keep structured and raw-only edits; explicit refresh discards both", () => {
   const server = { enabled: false };
@@ -13,11 +74,11 @@ test("background reads keep structured and raw-only edits; explicit refresh disc
 });
 
 test("save echoes accept only the submitted draft, including raw-only later edits", () => {
-  const submitted = { ...fresh({ enabled: false }), raw: { peers: "[]" } };
-  const later = { ...submitted, raw: { peers: "[ " } };
+  const { submitted, saving } = start({ ...fresh({ enabled: false }), raw: { peers: "[]" } });
+  const later = { ...saving, raw: { peers: "[ " } };
   expect(accept(later, submitted, { enabled: false }).raw).toEqual(later.raw);
-  expect(accept(submitted, submitted, { enabled: false })).toEqual(fresh({ enabled: false }));
-  const structured = { ...submitted, cfg: { enabled: true } };
+  expect(accept(saving, submitted, { enabled: false })).toEqual(fresh({ enabled: false }));
+  const structured = { ...saving, cfg: { enabled: true } };
   expect(accept(structured, submitted, { enabled: false }).cfg.enabled).toBe(true);
 });
 
@@ -52,15 +113,16 @@ test("collection acknowledgements update both copies and retain unrelated struct
 });
 
 test("row saves share collection acknowledgement but cannot clear later typing or dotted siblings", () => {
-  const submitted = {
+  const { submitted, saving } = start({
     ...fresh([{ name: "lan" }, { name: "lan.prod" }]),
     raw: { '"lan".alias': '"submitted"', '"lan.prod".alias': '"other"' },
-  };
-  const later = { ...submitted, raw: { ...submitted.raw, '"lan".alias': '"later"' } };
+  });
+  const later = { ...saving, raw: { ...submitted.raw, '"lan".alias': '"later"' } };
   const saved = { name: "lan", alias: "saved" };
   const update = (rows: { name: string }[]) => upsertRow(rows, saved, (r) => r.name);
-  expect(acceptCollection(submitted, update, ['"lan".'], submitted).raw).toEqual({ '"lan.prod".alias': '"other"' });
+  expect(acceptCollection(saving, update, ['"lan".'], submitted).raw).toEqual({ '"lan.prod".alias': '"other"' });
   expect(acceptCollection(later, update, ['"lan".'], submitted).raw).toEqual(later.raw);
+  expect(acceptCollection(later, update, ['"lan".'], submitted).pending).toEqual([]);
   const deleted = acceptCollection(later, (rows) => rows.filter((r) => r.name !== "lan"), ['"lan".']);
   expect(deleted.raw).toEqual({ '"lan.prod".alias': '"other"' });
 });

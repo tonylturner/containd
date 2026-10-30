@@ -40,9 +40,9 @@ export function DPIProtocolModal({
   useEffect(() => { adoptConfig({ protocols, context }); }, [adoptConfig, protocols, context]);
 
   async function save() {
-    const submitted = editor.editor;
+    const submitted = editor.beginSave();
     const saved = await onSave(draft);
-    if (!saved || !mounted.current) return;
+    if (!saved || !mounted.current) { editor.failSave(submitted); return; }
     editor.acceptConfig(submitted, { protocols: saved.dpiProtocols ?? {}, context: saved });
     if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
   }
@@ -194,9 +194,9 @@ export function ICSDPIConfigModal({
   const [activeProto, setActiveProto] = useState<string | null>(null);
 
   async function save() {
-    const submitted = editor.editor;
+    const submitted = editor.beginSave();
     const saved = await onSave(draft, draftParsing);
-    if (!saved || !mounted.current) return;
+    if (!saved || !mounted.current) { editor.failSave(submitted); return; }
     editor.acceptConfig(submitted, { protocols: saved.dpiIcsProtocols ?? {}, parsing: saved.dpiIcsParsing ?? {}, context: saved });
     if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
   }
@@ -482,9 +482,9 @@ export function DPIExclusionModal({
   useEffect(() => { adoptConfig({ rows: exclusions, context }); refreshForm(context); }, [adoptConfig, refreshForm, exclusions, context]);
 
   async function save() {
-    const submitted = editor.editor;
+    const submitted = editor.beginSave();
     const saved = await onSave(draft);
-    if (!saved || !mounted.current) return;
+    if (!saved || !mounted.current) { editor.failSave(submitted); return; }
     editor.acceptConfig(submitted, { rows: saved.dpiExclusions ?? [], context: saved });
     if (sameConfig(latest.current.editor.cfg, submitted.cfg) && !latest.current.fields.newValue && !latest.current.fields.newReason) onClose();
   }

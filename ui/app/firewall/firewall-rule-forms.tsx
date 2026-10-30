@@ -242,11 +242,11 @@ export function EditRuleModal({
   async function save() {
     const built = build();
     if (!built) return;
-    const submitted = draft.editor;
+    const submitted = draft.beginSave();
     setSaving(true);
     const saved = await onSave(built.patch);
     setSaving(false);
-    if (!saved || !mounted.current) return;
+    if (!saved || !mounted.current) { draft.failSave(submitted); return; }
     draft.acceptConfig(submitted, ruleDraftFrom(saved, context, zones, globalMode));
     if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
   }
