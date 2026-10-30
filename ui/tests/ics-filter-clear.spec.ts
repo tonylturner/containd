@@ -70,7 +70,7 @@ async function openEditor(page: Page, rule: Record<string, unknown>) {
     let body: unknown = {};
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") body = user;
     if (path === "/api/v1/firewall/rules") body = [rule];
-    if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "learn" };
+    if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "monitor" };
     await route.fulfill({ json: body });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
@@ -85,7 +85,7 @@ test("choosing inherit clears a stored safety mode", async ({ page }) => {
   const mode = page.getByLabel("Safety mode");
   await expect(mode).toHaveValue("enforce");
   await mode.selectOption("");
-  await expect(mode.locator("option:checked")).toHaveText("Inherit global (learning)");
+  await expect(mode.locator("option:checked")).toHaveText("Inherit (Monitor (safe))");
   await page.getByRole("button", { name: "Save filter" }).click();
   await expect.poll(() => patches.length).toBe(1);
   expect(patches[0]).toMatchObject({ ics: { protocol: "modbus", functionCode: [3], readOnly: true, mode: null } });

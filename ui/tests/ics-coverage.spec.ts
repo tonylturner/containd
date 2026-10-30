@@ -8,7 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
 const admin = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
 const viewer = { id: "view-1", username: "operator", role: "view", mfaRequired: false };
 
-function icsRule(id: string, protocol: string, mode?: "enforce" | "learn") {
+function icsRule(id: string, protocol: string, mode?: "enforce" | "monitor") {
   return {
     id,
     action: "ALLOW",
@@ -23,7 +23,7 @@ const rules = [
   icsRule("plc-read", "modbus", "enforce"),
   icsRule("plc-inherit", "modbus"),
   icsRule("dnp3-ops", "dnp3", "enforce"),
-  icsRule("plc-learn", "modbus", "learn"),
+  icsRule("plc-learn", "modbus", "monitor"),
   icsRule("plc-pending", "modbus", "enforce"),
   icsRule("plc-drift", "modbus", "enforce"),
   icsRule("plc-queue", "modbus", "enforce"),
@@ -47,7 +47,7 @@ const candidate = [
   cov("plc-read", "enforcing"),
   cov("plc-inherit", "partial", "enforce", [exclusion]),
   cov("dnp3-ops", "not_enforcing", "enforce", [dpiOff]),
-  cov("plc-learn", "monitoring", "learn"),
+  cov("plc-learn", "monitoring", "monitor"),
   cov("plc-pending", "enforcing"),
   cov("plc-drift", "enforcing"),
   cov("plc-queue", "enforcing"),
@@ -56,7 +56,7 @@ const applied = [
   cov("plc-read", "enforcing"),
   cov("plc-inherit", "partial", "enforce", [{ ...exclusion, matches: 7 }]),
   cov("dnp3-ops", "not_enforcing", "enforce", [dpiOff]),
-  cov("plc-learn", "monitoring", "learn"),
+  cov("plc-learn", "monitoring", "monitor"),
   cov("plc-drift", "not_enforcing", "enforce", [decoderOff]),
   cov("plc-queue", "not_enforcing", "enforce", [queueDown]),
 ];
@@ -162,8 +162,8 @@ test("ICS page shows applied coverage for each state, never mode alone", async (
 
   // The mode column states the effective mode with no protection colour.
   const inheritRow = page.getByRole("row").filter({ hasText: "plc-inherit" });
-  await expect(inheritRow.getByText("inherit (enforce)")).toHaveClass(/badge-offline/);
-  await expect(page.getByRole("row").filter({ hasText: "plc-learn" }).getByText("learning", { exact: true })).toHaveClass(/badge-offline/);
+  await expect(inheritRow.getByText("Inherit (Enforce)")).toHaveClass(/badge-offline/);
+  await expect(page.getByRole("row").filter({ hasText: "plc-learn" }).getByText("Monitor (safe)", { exact: true })).toHaveClass(/badge-offline/);
 
   // Green appears only on enforcing coverage (the DPI switch badge sits outside the table).
   await expect(page.locator("table .badge-secure")).toHaveText([
@@ -309,10 +309,10 @@ test("firewall table labels an inherited mode by its effective mode", async ({ p
   await open(page, "/firewall/");
 
   const inheritRow = page.getByRole("row").filter({ hasText: "plc-inherit" });
-  await expect(inheritRow.getByText("inherit (learning)")).toHaveClass(/badge-offline/);
-  await expect(inheritRow.getByText("enforce", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("row").filter({ hasText: "plc-read" }).getByText("enforce", { exact: true })).toBeVisible();
-  await expect(page.getByRole("row").filter({ hasText: "plc-learn" }).getByText("learning", { exact: true })).toBeVisible();
+  await expect(inheritRow.getByText("Inherit (Monitor (safe))")).toHaveClass(/badge-offline/);
+  await expect(inheritRow.getByText("Enforce", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("row").filter({ hasText: "plc-read" }).getByText("Enforce", { exact: true })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "plc-learn" }).getByText("Monitor (safe)", { exact: true })).toBeVisible();
 });
 
 test("firewall table shows coverage beside the effective mode", async ({ page }) => {
@@ -320,7 +320,7 @@ test("firewall table shows coverage beside the effective mode", async ({ page })
   await open(page, "/firewall/");
 
   const inheritRow = page.getByRole("row").filter({ hasText: "plc-inherit" });
-  await expect(inheritRow.getByText("inherit (enforce)")).toBeVisible();
+  await expect(inheritRow.getByText("Inherit (Enforce)")).toBeVisible();
   await expect(coverageOf(page, "plc-inherit").getByText("applied: partial")).toHaveClass(/badge-warning/);
   await expect(coverageOf(page, "dnp3-ops").getByText("applied: not enforcing")).toHaveClass(/badge-critical/);
   await expect(coverageOf(page, "plc-drift").getByText("candidate: enforcing")).toBeVisible();

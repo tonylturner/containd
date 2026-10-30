@@ -1,6 +1,6 @@
 import type { ICSPredicate, ICSPredicatePatch } from "../../lib/api";
 
-export type ICSMode = "enforce" | "learn";
+export type ICSMode = "enforce" | "monitor";
 export type ICSModeSelection = ICSMode | "";
 
 export const UNSUPPORTED_ADDRESSES =
@@ -21,30 +21,15 @@ export function icsAddressDraftFrom(ics: ICSPredicate | undefined): string {
     : text;
 }
 
-function normalizeMode(mode: string | undefined): ICSMode | "" | "other" {
-  const m = (mode ?? "").trim().toLowerCase();
-  if (m === "" || m === "enforce" || m === "learn") return m;
-  return "other";
-}
-
-/**
- * Resolves the effective mode as the engine does: the rule mode, then the
- * global DPI mode, then learn; anything but "enforce" never enforces.
- */
+/** Rule override, global fallback, then the safe default. No legacy aliases. */
 export function formatICSMode(
   ruleMode: string | undefined,
   globalMode: string | undefined,
 ): { label: string; effectiveMode: ICSMode; inherited: boolean } {
-  const rule = normalizeMode(ruleMode);
-  const inherited = rule === "";
-  const resolved = inherited ? normalizeMode(globalMode) : rule;
-  const effectiveMode: ICSMode = resolved === "enforce" ? "enforce" : "learn";
-  const effectiveLabel = effectiveMode === "learn" ? "learning" : "enforce";
-  return {
-    label: inherited ? `inherit (${effectiveLabel})` : effectiveLabel,
-    effectiveMode,
-    inherited,
-  };
+  const inherited = !ruleMode;
+  const effectiveMode: ICSMode = (ruleMode || globalMode) === "enforce" ? "enforce" : "monitor";
+  const label = effectiveMode === "monitor" ? "Monitor (safe)" : "Enforce";
+  return { label: inherited ? `Inherit (${label})` : label, effectiveMode, inherited };
 }
 
 export type ProtocolMeta = {

@@ -12,7 +12,7 @@ async function mockAPI(page: Page) {
     "/interfaces/state": [],
     "/identities": { mappings: [{ ip: "192.0.2.5", identities: ["operator"] }] },
     "/firewall/rules": [],
-    "/dataplane": { captureInterfaces: [], dpiMock: false, dpiEnabled: true, dpiMode: "learn", dpiIcsProtocols: { modbus: true } },
+    "/dataplane": { captureInterfaces: [], dpiMock: false, dpiEnabled: true, dpiMode: "monitor", dpiIcsProtocols: { modbus: true } },
     "/templates/ics": [{ name: "Test baseline", description: "Test template", protocol: "modbus", parameters: [{ name: "codes", label: "Codes", type: "text", placeholder: "3, 16" }] }],
     "/firewall/nat": { enabled: false, portForwards: [] },
     "/routing": { gateways: [], routes: [], rules: [] },
@@ -448,7 +448,7 @@ test("OpenVPN CSV inputs keep trailing separators and parse only their save snap
   expect(server.writes[0].body).toMatchObject({ openvpn: { server: { pushDNS: ["192.0.2.53"], pushRoutes: ["192.0.2.0/24"] } } });
 });
 
-const draftRule = { id: "ot-rule", description: "Original", action: "ALLOW", ics: { protocol: "modbus", functionCode: [3], mode: "learn" } };
+const draftRule = { id: "ot-rule", description: "Original", action: "ALLOW", ics: { protocol: "modbus", functionCode: [3], mode: "monitor" } };
 
 for (const surface of ["Firewall", "ICS"]) {
   test(`${surface} modal keeps raw edits across server removal and a save echo with later typing`, async ({ page }) => {
@@ -544,7 +544,7 @@ test("Firewall DPI parsing and unfinished exclusions survive background refresh 
   await page.getByRole("button", { name: "Add Exclusion", exact: true }).click();
   const reason = page.getByPlaceholder("Reason (optional)");
   await reason.fill("unfinished, ");
-  server.data["/dataplane"] = { ...server.data["/dataplane"] as object, dpiMode: "learn" };
+  server.data["/dataplane"] = { ...server.data["/dataplane"] as object, dpiMode: "monitor" };
   await announce(page, "/dataplane");
   await expect(reason).toHaveValue("unfinished, ");
   await page.getByRole("button", { name: "Save", exact: true }).click();

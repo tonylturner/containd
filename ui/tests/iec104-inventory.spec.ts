@@ -25,7 +25,7 @@ for (const mobile of [false, true]) {
     const panel = page.getByRole("region", { name: "Passive IEC 104 inventory" });
     await expect(panel).toContainText("never generates auto-ALLOW rules");
     await expect(panel).toContainText("inline enforce mode only");
-    await expect(panel).toContainText("Learn/monitor and non-inline capture never claim delivery");
+    await expect(panel).toContainText("Monitor and non-inline capture never claim delivery");
     await expect(panel).toContainText("128 pairs · 32 CAs per pair · 256 points per CA");
     for (const [label, count] of [["Pairs", 2], ["CAs", 3], ["Points", 4], ["Lost outcomes", 8], ["Legacy assets", 5]] as const)
       await expect(panel).toContainText(`${label} overflow: ${count}`);

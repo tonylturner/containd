@@ -7,10 +7,11 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useEffect, useRef, useState } from "react";
 
-import { api, apiURL, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
+import { api, apiURL, fetchDataPlane, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
-import { summarizeGenericICS } from "../ics/ics-shared";
+import { summarizeGenericICS, formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
+import { ICSModeSelect } from "../ics/ics-mode-select";
 import { SkeletonList } from "../../components/Skeleton";
 import { useConfigForm } from "../../lib/use-config-form";
 import { ConfigEditNotice } from "../../lib/use-config-editor";
@@ -36,6 +37,7 @@ type TemplateParameter = {
 
 type TemplateApplyRequest = {
   template: string;
+  mode?: ICSModeSelection;
   sourceZones?: string[];
   destZones?: string[];
   parameters?: Record<string, string>;
@@ -98,13 +100,15 @@ export default function TemplatesPage() {
   const [templates, setTemplates] = useState<ICSTemplate[] | null>([]);
   // Until the first answer the list is unknown, not empty.
   const [loading, setLoading] = useState(true);
+  const [globalMode, setGlobalMode] = useState<ICSModeSelection>("");
   const [zones, setZones] = useState<Zone[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<ICSTemplate | null>(null);
 
   async function refresh({ keepEdits = true }: { keepEdits?: boolean } = {}) {
-    const [t, z] = await Promise.all([fetchTemplates(), api.listZones()]);
+    const [t, z, dp] = await Promise.all([fetchTemplates(), api.listZones(), fetchDataPlane()]);
+    setGlobalMode(dp?.dpiMode ?? "");
     setTemplates(t);
     setZones(z ?? []);
     setLoading(false);
@@ -213,6 +217,7 @@ export default function TemplatesPage() {
       {activeTemplate && (
         <TemplateModal
           template={activeTemplate}
+          globalMode={globalMode}
           context={templates}
           zones={zones}
           canEdit={canEdit}
@@ -232,6 +237,7 @@ export default function TemplatesPage() {
 
 function TemplateModal({
   context,
+  globalMode,
   template,
   zones,
   canEdit,
@@ -240,6 +246,7 @@ function TemplateModal({
   onError,
 }: {
   context: ICSTemplate[] | null;
+  globalMode: ICSModeSelection;
   template: ICSTemplate;
   zones: Zone[];
   canEdit: boolean;
@@ -247,11 +254,12 @@ function TemplateModal({
   onSuccess: (msg: string, close: boolean) => void;
   onError: (msg: string) => void;
 }) {
-  const form = useConfigForm({ sourceZones: [] as string[], destZones: [] as string[], params: {} as Record<string, string> });
+  const form = useConfigForm({ sourceZones: [] as string[], destZones: [] as string[], params: {} as Record<string, string>, mode: "" as ICSModeSelection });
   const { refreshForm } = form;
-  useEffect(() => { refreshForm({ templates: context, zones }); }, [refreshForm, context, zones]);
+  useEffect(() => { refreshForm({ templates: context, zones, globalMode }); }, [refreshForm, context, zones, globalMode]);
   const [sourceZones, setSourceZones] = form.field("sourceZones");
   const [destZones, setDestZones] = form.field("destZones");
+  const [mode, setMode] = form.field("mode");
   const [params, setParams] = form.field("params");
   const latest = useRef(form.editor);
   latest.current = form.editor;
@@ -263,6 +271,7 @@ function TemplateModal({
   function buildRequest(): TemplateApplyRequest {
     return {
       template: template.name,
+      mode,
       sourceZones: sourceZones.length > 0 ? sourceZones : undefined,
       destZones: destZones.length > 0 ? destZones : undefined,
       parameters: Object.keys(params).length > 0 ? params : undefined,
@@ -297,7 +306,7 @@ function TemplateModal({
     if (created > 0) parts.push(`${created} created`);
     if (updated > 0) parts.push(`${updated} updated`);
     if (parts.length === 0) parts.push(`${res.rules.length} rules`);
-    form.acceptFields(submitted, ["sourceZones", "destZones", "params"]);
+    form.acceptFields(submitted, ["sourceZones", "destZones", "params", "mode"]);
     onSuccess(`Template "${template.name}" staged — commit to apply. ${parts.join(", ")}.`,
       sameConfig(latest.current.cfg.fields, submitted.cfg.fields));
   }
@@ -390,6 +399,8 @@ function TemplateModal({
             </div>
           </div>
 
+          {template.protocol && <ICSModeSelect value={mode} onChange={setMode} globalMode={globalMode} />}
+          <p className="text-xs text-(--text-muted)">Mode applies only to generated ICS rules. Monitor rules never admit traffic; other firewall rules and defaults still apply.</p>
           {/* Template-specific parameters */}
           {(template.parameters ?? []).map((p) => (
             <div key={p.name}>
@@ -469,6 +480,7 @@ function TemplateModal({
                               className={`rounded-full px-2 py-0.5 text-xs ${protoBadgeClass(r.ics?.protocol ?? "")}`}
                             >
                               {r.ics?.protocol || "-"}
+                              {r.ics?.protocol && <span className="block">{formatICSMode(r.ics.mode, globalMode).label}</span>}
                             </span>
                           </td>
                           <td className="px-4 py-2 font-mono text-xs text-(--text)">

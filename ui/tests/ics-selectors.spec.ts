@@ -23,7 +23,7 @@ for (const text of ["-1", "256", "3.2", "3,no", "Infinity", "3e1"]) {
 
 test("normalization and drafts retain every predicate field", () => {
   const predicates: ICSPredicate[] = [
-    { protocol: "modbus", functionCode: [0, 3], unitId: 0, addresses: ["0-10"], readOnly: true, writeOnly: false, direction: "request", mode: "learn" },
+    { protocol: "modbus", functionCode: [0, 3], unitId: 0, addresses: ["0-10"], readOnly: true, writeOnly: false, direction: "request", mode: "monitor" },
     { protocol: "cip", functionCode: [14], objectClasses: [0, 4, 65535], direction: "response", readOnly: false, writeOnly: true, mode: "enforce" },
     { protocol: "iec104", typeIds: [1], classes: ["monitor"], ca: [0], ioa: [{ start: 0, end: 0 }], direction: "response", readOnly: true, mode: "enforce" },
   ];

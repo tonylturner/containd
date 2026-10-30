@@ -143,7 +143,7 @@ export type DataPlaneConfig = {
   enforceTable?: string;
   dpiMock?: boolean;
   dpiEnabled?: boolean;
-  dpiMode?: "learn" | "enforce";
+  dpiMode?: "" | "monitor" | "enforce";
   dpiProtocols?: Record<string, boolean>;
   dpiIcsProtocols?: Record<string, boolean>;
   dpiIcsParsing?: Record<string, "tolerant" | "strict">;
@@ -634,8 +634,10 @@ export type ICSEvidenceKind = "ics.decision" | "ics.verdict" | "ics.session";
 /** `ics.decision` attributes: a rule decision, not a delivery outcome. */
 export type ICSDecisionAttributes = {
   session_id: string;
-  decision: "allow" | "deny" | "would_drop";
+  decision: "allow" | "deny" | "would_allow" | "would_drop";
   ruleId: string;
+  scopeId?: string;
+  findingCode?: string;
   action?: string;
   mode?: string;
   /**
