@@ -91,9 +91,14 @@ func icsContextsFromDPIEvent(state *flow.State, ev dpi.Event, safeRead func(map[
 		if ev.Kind == eventfields.KindResponse {
 			return []rules.ICSContext{base}
 		}
-		// Service 0x0a is a container, not an operation. Its children carry
-		// their own targets; an incomplete wrapper contributes coverage only.
-		if !base.HasFunctionCode || base.FunctionCode != 0x0a {
+		// Encapsulation and implicit-I/O events have message facts but no CIP
+		// service operation. Keep their base context for message selectors,
+		// without turning absent object facts into unknown object coverage.
+		if ev.Kind == "session" {
+			objects = append(objects, base)
+		} else if !base.HasFunctionCode || base.FunctionCode != 0x0a {
+			// Service 0x0a is a container, not an operation. Its children carry
+			// their own targets; an incomplete wrapper contributes coverage only.
 			target, _ := eventfields.String(a, eventfields.KeyCIPTarget)
 			base.ObjectUnknown = target == "unknown"
 			if v, ok := eventfields.Uint16(a, eventfields.KeyObjectClass); ok {

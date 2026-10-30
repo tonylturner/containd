@@ -56,6 +56,7 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 			msg, err := explicit.Message, explicit.MessageError
 			if err != nil && msg == nil {
 				addFinding(attrs, messageErrorCode(err))
+				attrs[eventfields.KeyCoverageIncomplete] = true
 			}
 			if msg != nil {
 				budget := maxMSPServices
@@ -76,6 +77,7 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 		// non-explicit commands and encapsulation error bodies carry data,
 		// not an unwalked service/path or nested CIP operation.
 		addUndecoded(attrs, "cip.encapsulation_payload_unsupported")
+		attrs[eventfields.KeyCoverageIncomplete] = true
 	}
 	return []dpi.Event{newEvent(state, "session", attrs)}
 }
