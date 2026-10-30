@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   applyNodeChanges,
   Edge,
   Node,
   NodeChange,
+  useNodesInitialized,
   useReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -68,11 +69,13 @@ function TopologyInner() {
   const health = useHealth();
   const installed = useInstalledRuleset();
   const { fitView } = useReactFlow();
+  const nodesInitialized = useNodesInitialized();
 
   // ── Fetch & build ──
-  const { refresh: fetchData } = useAsyncRefresh(useCallback(async () => {
+  const { refresh: fetchData } = useAsyncRefresh(useCallback(async (signal?: AbortSignal) => {
     try {
       const result = await buildTopology();
+      if (signal?.aborted) return;
       if (!result) {
         setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
         return;
@@ -81,14 +84,23 @@ function TopologyInner() {
       setTopoError(null);
 
       setNodeData(result.nodeDataMap);
-      setNodes(result.nodes);
+      setNodes((previous) => {
+        const byId = new Map(previous.map((node) => [node.id, node]));
+        return result.nodes.map((node) => {
+          const existing = byId.get(node.id);
+          // Update data without resetting ReactFlow's measured dimensions,
+          // selection or the operator's dragged position on every poll.
+          return existing && existing.type === node.type ? { ...existing, data: node.data } : node;
+        });
+      });
       setEdges(result.edges);
       setSyncTime(new Date().toLocaleTimeString("en-US", { hour12: false }));
     } catch (e) {
+      if (signal?.aborted) return;
       if (e instanceof DOMException && e.name === "AbortError") return;
       setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
     }
-  }, []));
+  }, []), { initialArgs: (signal): [AbortSignal] => [signal] });
 
   useEffect(() => {
     const refresh = () => { void fetchData(); };
@@ -98,13 +110,10 @@ function TopologyInner() {
 
   const initialFitDone = useRef(false);
   useEffect(() => {
-    if (!nodes.length || initialFitDone.current) return;
-    const timer = setTimeout(() => {
-      fitView({ padding: 0.15, duration: 400 });
-      initialFitDone.current = true;
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [nodes.length, fitView]);
+    if (!nodesInitialized || initialFitDone.current) return;
+    void fitView({ padding: 0.15, duration: 400 });
+    initialFitDone.current = true;
+  }, [nodesInitialized, fitView]);
 
   useEffect(() => {
     const wrappedFetch = () => { if (!document.hidden) void fetchData(); };
@@ -115,10 +124,6 @@ function TopologyInner() {
       document.removeEventListener("visibilitychange", wrappedFetch);
     };
   }, [fetchData]);
-
-  const visibleNodes = useMemo(() => nodes.map((node) => ({
-    ...node, data: { ...node.data, selected: node.id === selectedId },
-  })), [nodes, selectedId]);
 
   // ── Handle node click ──
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -186,7 +191,7 @@ function TopologyInner() {
         <div className={s.workspace} style={panelOpen ? undefined : { gridTemplateColumns: "1fr" }}>
           <div className={s.flowWrap}>
             <ReactFlow
-              nodes={visibleNodes}
+              nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
               onNodeClick={onNodeClick}

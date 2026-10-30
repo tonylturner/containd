@@ -102,7 +102,6 @@ export type TopoNodeData = {
   tx?: string;
   vlan?: number | null;
   desc?: string;
-  selected?: boolean;
 };
 
 export interface TopologyAction {
@@ -132,10 +131,10 @@ const hStyle: React.CSSProperties = {
   pointerEvents: "none",
 };
 
-function InternetNode({ data }: NodeProps<Node<TopoNodeData>>) {
+function InternetNode({ data, selected }: NodeProps<Node<TopoNodeData>>) {
   return (
     <div
-      className={`${s.nodeCard} ${s.accentGray} ${data.selected ? s.nodeCardSelected : ""}`}
+      className={`${s.nodeCard} ${s.accentGray} ${selected ? s.nodeCardSelected : ""}`}
     >
       <Handle type="source" position={Position.Bottom} style={hStyle} />
       <div className={s.nodeHeader}>
@@ -149,11 +148,11 @@ function InternetNode({ data }: NodeProps<Node<TopoNodeData>>) {
   );
 }
 
-function GatewayNode({ data }: NodeProps<Node<TopoNodeData>>) {
+function GatewayNode({ data, selected }: NodeProps<Node<TopoNodeData>>) {
   const sc = STATUS_COLORS[data.status || "ok"];
   return (
     <div
-      className={`${s.nodeCard} ${s.accentCyan} ${data.selected ? s.nodeCardSelected : ""}`}
+      className={`${s.nodeCard} ${s.accentCyan} ${selected ? s.nodeCardSelected : ""}`}
     >
       <Handle type="target" position={Position.Top} style={hStyle} />
       <Handle type="source" position={Position.Bottom} style={hStyle} />
@@ -172,10 +171,10 @@ function GatewayNode({ data }: NodeProps<Node<TopoNodeData>>) {
   );
 }
 
-function FirewallNode({ data }: NodeProps<Node<TopoNodeData>>) {
+function FirewallNode({ data, selected }: NodeProps<Node<TopoNodeData>>) {
   return (
     <div
-      className={`${s.nodeCard} ${s.accentAmber} ${data.selected ? s.nodeCardSelected : ""}`}
+      className={`${s.nodeCard} ${s.accentAmber} ${selected ? s.nodeCardSelected : ""}`}
       style={{ minWidth: 160 }}
     >
       <Handle type="target" position={Position.Top} style={hStyle} />
@@ -196,7 +195,7 @@ function FirewallNode({ data }: NodeProps<Node<TopoNodeData>>) {
   );
 }
 
-function ZoneNode({ data }: NodeProps<Node<TopoNodeData>>) {
+function ZoneNode({ data, selected }: NodeProps<Node<TopoNodeData>>) {
   const st = data.status || "ok";
   const sc = STATUS_COLORS[st];
   const accentCls =
@@ -205,7 +204,7 @@ function ZoneNode({ data }: NodeProps<Node<TopoNodeData>>) {
     st === "crit" ? s.nameRed : st === "warn" ? s.nameAmber : s.nameGreen;
   return (
     <div
-      className={`${s.nodeCard} ${accentCls} ${data.selected ? s.nodeCardSelected : ""}`}
+      className={`${s.nodeCard} ${accentCls} ${selected ? s.nodeCardSelected : ""}`}
     >
       <Handle type="target" position={Position.Top} style={hStyle} />
       <Handle type="source" position={Position.Bottom} style={hStyle} />
