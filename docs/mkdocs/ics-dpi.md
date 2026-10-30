@@ -16,19 +16,32 @@ and learning are optional, not prerequisites.
 
 - **Monitor (safe)** observes every matching rule independently. A monitor rule
   never admits, drops, holds or resets traffic, including an `ALLOW` rule. It
-  opens no fail-closed envelope and adds no NFQUEUE ownership. Other enforcing
-  rules, firewall defaults and strict enforce scopes can still deny that traffic.
+  opens no fail-closed envelope. Other enforcing rules, firewall defaults and
+  strict enforce scopes can still deny that traffic.
 - **Enforce** applies policy inline. ICS rules resolving to enforce require a
   nonzero `dataplane.nfqueueGroup`; AF_PACKET capture only observes copies and
   cannot stop the first command. Candidate save, import and commit validate this.
   A global enforce setting with no enforcing ICS rules needs no queue.
 
-Monitor-only traffic needs DPI, its decoder and an existing capture path (for
-example an AF_PACKET capture interface). Mixed scopes keep their enforcing
-steering. Observation runs synchronously on decoded messages the engine already
-sees; it adds no hold condition, but is not a zero-latency guarantee. Disabled
-DPI/decoders, exclusions and capture loss limit observations. Enforce mode alone
-does not prove protection either: see [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
+Monitor-only traffic needs DPI, its decoder and capture:
+
+- With `dataplane.nfqueueGroup: 0`, AF_PACKET observes packet copies passively.
+  Monitor rules add no packet steering.
+- With a nonzero queue group, monitor-only ICS traffic still passes through the
+  engine's single NFQUEUE capture source. The engine feeds the decoder once,
+  then immediately releases the packet back to the ruleset without a monitor
+  hold. An observation mark prevents repeat queueing through any ICS queue rule.
+  Later L4 rules, established-connection handling and the default policy decide
+  its outcome as if no ICS rules applied. Monitoring therefore adds engine
+  traversal and processing latency, but does not change that outcome. No queue
+  bypass is enabled: engine-down queue behavior is unchanged, and monitoring
+  does not guarantee forwarding when the engine is unavailable.
+
+When an enforcing ICS rule or scope also applies at L3/L4, its enforcing policy
+still decides the packet; monitor matches remain independent observations.
+Disabled DPI/decoders, exclusions and capture loss limit observations. Enforce
+mode alone does not prove protection either:
+see [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
 
 ### Shadow evidence and applied-policy counters
 
