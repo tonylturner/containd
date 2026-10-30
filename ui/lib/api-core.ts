@@ -29,6 +29,15 @@ export function apiWebSocketURL(
   return `${wsProtocol}://${host}${resolveBasePath(pathname)}${path}`;
 }
 
+export function cliWebSocketURL(
+  ticket: string,
+  protocol: string,
+  host: string,
+  pathname?: string,
+): string {
+  return `${apiWebSocketURL("/api/v1/cli/ws", protocol, host, pathname)}?ticket=${encodeURIComponent(ticket)}`;
+}
+
 const TOKEN_KEY = "containd.auth.token";
 const ROLE_KEY = "containd.auth.role";
 const SESSION_TOKEN_KEY = "containd.session.token";

@@ -107,6 +107,25 @@ Roles:
 - `admin` (full access)
 - `view` (read-only)
 
+## Web console connections
+
+The in-app console first authenticates `POST /api/v1/cli/ws/ticket` with the
+management cookie or a Bearer credential, then opens
+`/api/v1/cli/ws?ticket=<ticket>` with a same-host `Origin`. Session JWTs never
+belong in the WebSocket URL; `?token=` is not accepted.
+
+Tickets expire after 30 seconds and are single-use, even if the connection
+attempt fails. Each connection or reconnect needs a fresh ticket. Restarting
+management discards outstanding tickets. The bounded ticket store returns
+`503` when full; wait for outstanding tickets to expire before retrying.
+For session-backed authentication, logout, session expiry or revocation before
+upgrade invalidates the ticket. Lab-mode credentials remain session-less as
+with other management requests. The issuer's identity and role must still
+match. A cookie alone cannot open
+the WebSocket. Management access logs redact ticket and token query values.
+Reverse proxies should redact these values too, since a ticket is a temporary
+credential until consumed.
+
 ## SSH console (appliance-style)
 
 `containd mgmt` exposes an SSH console that runs the same CLI registry (admin-only).

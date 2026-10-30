@@ -5649,15 +5649,57 @@ paths:
         in: query
         required: false
         schema: {type: string}
+  /cli/ws/ticket:
+    post:
+      summary: Issue a single-use interactive CLI WebSocket ticket
+      tags: [Cli]
+      description: >-
+        Authenticate with the management cookie or Bearer credential. Returns an
+        opaque ticket bound to the authenticated user, role and session, valid
+        for 30 seconds. Obtain a fresh ticket before each connection. Tickets
+        are held in a bounded process-local store and do not survive restarts.
+      responses:
+        '200':
+          description: Ticket issued; Cache-Control is no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, expiresIn]
+                properties:
+                  ticket: {type: string}
+                  expiresIn: {type: integer, enum: [30]}
+        '401':
+          description: Authentication required
+        '403':
+          description: Cross-origin cookie request or restricted account
+        '503':
+          description: Ticket capacity reached or authentication backend unavailable
   /cli/ws:
     get:
       summary: Upgrade to interactive CLI WebSocket
       tags: [Cli]
-      description: 'Requires same-host Origin and authentication. Client sends a command string or {line: string}; server sends JSON {output:
-        string, error?: string}.'
+      security: []
+      description: >-
+        Requires a same-host Origin and a fresh ticket from POST /cli/ws/ticket.
+        A ticket is consumed atomically on its first attempt, including attempts
+        that fail Origin validation. The issuer's authentication is revalidated
+        before upgrade: revoked or expired sessions are rejected. Cookies and
+        Bearer headers alone do not authorize upgrades; JWTs in query parameters
+        are not accepted. Client sends a command string or {line: string};
+        server sends JSON {output: string, error?: string}.
+      parameters:
+      - name: ticket
+        in: query
+        required: true
+        schema: {type: string}
       responses:
         '101':
           description: Success
+        '401':
+          description: Missing, unknown, expired, reused or invalidated ticket
+        '403':
+          description: Origin rejected or account restricted
   /services/vpn/openvpn/profile:
     post:
       summary: Upload foreground OpenVPN profile and stage its path (admin)
