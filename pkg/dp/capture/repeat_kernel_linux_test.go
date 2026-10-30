@@ -5,12 +5,17 @@ package capture
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
-	"os/exec"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/dp/enforce"
+	"github.com/tonylturner/containd/pkg/dp/rules"
+	"golang.org/x/sys/unix"
 )
 
 // Run with CONTAIND_NETNS_KERNEL_TEST=1 in an isolated Linux network namespace
@@ -20,15 +25,29 @@ func TestKernelNFQueueRepeatMarkResumesFirewall(t *testing.T) {
 	const queue = 4714
 	const observed uint32 = 0x04000000
 	var seen atomic.Int32
+	invalidMarks := make(chan uint32, 8)
 	mgr, err := NewManager(Config{Mode: "nfqueue", QueueID: queue})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = mgr.Start(context.Background(), func(p Packet) Decision {
+		if p.Invalid != "" {
+			select {
+			case invalidMarks <- p.Mark:
+			default:
+			}
+			if enforce.EnvelopeMarked(p.Mark) {
+				return Decision{Action: Drop}
+			}
+			return Decision{Action: Repeat, Mark: p.Mark & ^enforce.QueueMarkMask | observed}
+		}
+		if p.Transport != "udp" {
+			return Decision{Action: Drop}
+		}
 		if seen.Add(1) > 2 {
 			return Decision{Action: Drop}
 		} // bound a broken requeue loop
-		if p.Mark != 0x000000ab {
+		if p.Mark & ^enforce.QueueMarkMask != 0x000000ab {
 			t.Errorf("original mark %#x", p.Mark)
 		}
 		return Decision{Action: Repeat, Mark: p.Mark&0xf0ffffff | observed}
@@ -44,29 +63,24 @@ func TestKernelNFQueueRepeatMarkResumesFirewall(t *testing.T) {
 			}
 			defer ln.Close()
 			port := ln.LocalAddr().(*net.UDPAddr).Port
-			final := "drop"
-			if allow {
-				final = "accept"
-			}
-			nft(t, fmt.Sprintf(`table inet containd_repeat_test {
- chain out {
-  type filter hook output priority 0; policy accept;
-  udp dport %d meta mark & 0x04000000 == 0 meta mark set 0x000000ab queue num %d
-  udp dport %d meta mark & 0x04000000 == 0 queue num %d
-  udp dport %d meta mark != 0x040000ab drop
-  udp dport %d %s
- }
-}`, port, queue, port, queue, port, port, final))
-			defer func() {
-				if out, err := exec.Command("nft", "delete", "table", "inet", "containd_repeat_test").CombinedOutput(); err != nil {
-					t.Errorf("cleanup: %v %s", err, out)
-				}
-			}()
+			installRepeatPolicy(t, queue, allow, port, false)
+
 			conn, err := net.DialUDP("udp4", nil, ln.LocalAddr().(*net.UDPAddr))
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer conn.Close()
+			raw, err := conn.SyscallConn()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var markErr error
+			if err := raw.Control(func(fd uintptr) { markErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, 0xab) }); err != nil {
+				t.Fatal(err)
+			}
+			if markErr != nil {
+				t.Fatal(markErr)
+			}
 			before := seen.Load()
 			if _, err = conn.Write([]byte("repeat")); err != nil {
 				t.Fatal(err)
@@ -86,5 +100,89 @@ func TestKernelNFQueueRepeatMarkResumesFirewall(t *testing.T) {
 				t.Fatalf("queued %d times, want exactly once", got)
 			}
 		})
+	}
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprint("invalid-mixed/reverse=", reverse), func(t *testing.T) {
+			installRepeatPolicy(t, queue, true, 44818, reverse)
+			sendExtensionSYN(t)
+			select {
+			case mark := <-invalidMarks:
+				if !enforce.EnvelopeMarked(mark) {
+					t.Fatalf("invalid TCP/2404 queued without envelope mark: %#x", mark)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("extension-header packet did not reach the queue")
+			}
+		})
+	}
+}
+
+// Use the complete compiled mixed policy. Only move its policy hook from
+// forward to output to exercise it over loopback without a routing lab.
+// Steering, mark guards, counters, conntrack and default verdicts stay intact.
+func installRepeatPolicy(t *testing.T, queue int, allow bool, port int, reverse bool) {
+	t.Helper()
+	mid, eid := "a-monitor", "z-enforce"
+	if reverse {
+		mid, eid = eid, mid
+	}
+	snap := &rules.Snapshot{Default: rules.ActionDeny, DPIMode: "monitor", Firewall: []rules.Entry{
+		{ID: mid, Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104"}},
+		{ID: eid, Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"}},
+		{ID: "udp-monitor", Action: rules.ActionDeny, Protocols: []rules.Protocol{{Name: "udp", Port: fmt.Sprint(port)}}, ICS: rules.ICSPredicate{Protocol: "cip", Mode: "monitor"}},
+	}}
+	if allow {
+		snap.Default = rules.ActionAllow
+	}
+	c := enforce.NewCompiler()
+	c.TableName = "containd_repeat_test"
+	c.QueueID = queue
+	c.IEC104EnvelopeOpen = true
+	text, err := c.CompileFirewall(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = strings.Replace(text, "type filter hook forward priority 0;", "type filter hook output priority 0;", 1)
+	if err := enforce.NewNftApplier().Apply(context.Background(), text); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { nft(t, c.DeleteTables()) })
+}
+
+func sendExtensionSYN(t *testing.T) {
+	t.Helper()
+	// IPv6 + hop-by-hop header + valid TCP SYN to the IEC104 service.
+	packet := make([]byte, 68)
+	packet[0] = 0x60
+	binary.BigEndian.PutUint16(packet[4:6], 28)
+	packet[7] = 64
+	packet[23] = 1
+	packet[39] = 1
+	packet[40] = 6
+	tcp := packet[48:]
+	binary.BigEndian.PutUint16(tcp[0:2], 40000)
+	binary.BigEndian.PutUint16(tcp[2:4], 2404)
+	binary.BigEndian.PutUint32(tcp[4:8], 1)
+	tcp[12] = 0x50
+	tcp[13] = 2
+	binary.BigEndian.PutUint16(tcp[14:16], 4096)
+	pseudo := append([]byte(nil), packet[8:40]...)
+	pseudo = append(pseudo, 0, 0, 0, 20, 0, 0, 0, 6)
+	pseudo = append(pseudo, tcp...)
+	var sum uint32
+	for i := 0; i < len(pseudo); i += 2 {
+		sum += uint32(binary.BigEndian.Uint16(pseudo[i : i+2]))
+	}
+	for sum>>16 != 0 {
+		sum = (sum & 0xffff) + (sum >> 16)
+	}
+	binary.BigEndian.PutUint16(tcp[16:18], ^uint16(sum))
+	fd, err := unix.Socket(unix.AF_INET6, unix.SOCK_RAW, unix.IPPROTO_RAW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(fd)
+	if err := unix.Sendto(fd, packet, 0, &unix.SockaddrInet6{Addr: [16]byte{15: 1}}); err != nil {
+		t.Fatal(err)
 	}
 }

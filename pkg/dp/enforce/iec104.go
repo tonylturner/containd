@@ -46,7 +46,10 @@ func isIEC104Rule(e rules.Entry) bool {
 }
 
 // writeIEC104Steering emits the envelope steering of every IEC104 rule,
-// sorted by rule ID. Each rule's session scope (opener -> server port 2404)
+// enforcing scopes first, then monitor scopes, each sorted by rule ID.
+// An overlapping monitor must not queue a packet without EnvelopeMark
+// before an enforce scope can claim it, including packets with no trusted tuple.
+// Each rule's session scope (opener -> server port 2404)
 // jumps to IEC104EnvelopeChain in both directions, whatever the rule's
 // action: the engine judges the content. These lines go before the
 // conntrack established accept and every ordinary accept, so neither
@@ -58,7 +61,13 @@ func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot,
 			entries = append(entries, e)
 		}
 	}
-	sort.SliceStable(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+	sort.SliceStable(entries, func(i, j int) bool {
+		left, right := rules.MonitorICS(entries[i], snap.DPIMode), rules.MonitorICS(entries[j], snap.DPIMode)
+		if left != right {
+			return !left
+		}
+		return entries[i].ID < entries[j].ID
+	})
 	for _, e := range entries {
 		steering, err := compileIEC104Steering(e, zones)
 		if err != nil {

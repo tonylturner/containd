@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,9 @@ func TestRuleModesUpgradeAndValidation(t *testing.T) {
 			}
 			if c.modeMigration == nil || len(c.modeMigration.Changes) != 3 || c.modeMigration.Changes[2].Action != "clear" {
 				t.Fatalf("evidence: %+v", c.modeMigration)
+			}
+			if c.modeMigration.SchemaBefore != version {
+				t.Fatalf("original schema %q lost: %+v", version, c.modeMigration)
 			}
 			rec := c.modeMigration
 			if err := c.Validate(); err != nil || c.modeMigration != rec {
@@ -99,7 +103,7 @@ func TestRuleModesOrderedThreeBankBoot(t *testing.T) {
 					t.Fatalf("mode outbox: %+v %v", modes, err)
 				}
 				for _, rec := range modes {
-					if len(rec.Changes) != 3 || rec.SchemaBefore != "0.1.8" || rec.SchemaAfter != "0.1.9" {
+					if len(rec.Changes) != 3 || rec.SchemaBefore != version || rec.SchemaAfter != "0.1.9" {
 						t.Fatalf("record: %+v", rec)
 					}
 				}
@@ -108,7 +112,7 @@ func TestRuleModesOrderedThreeBankBoot(t *testing.T) {
 					t.Fatal(err)
 				}
 				want := 1
-				if version == "0.1.8" {
+				if version == "" || version == "0.1.8" {
 					want = 0
 				}
 				if len(scope) != want {
@@ -125,12 +129,42 @@ func TestRuleModesOrderedThreeBankBoot(t *testing.T) {
 					if want == 1 && (len(got.IDS.Rules) != 2 || got.IDS.Rules[0].Proto != "cip") {
 						t.Fatalf("scope ordering: %+v", got.IDS.Rules)
 					}
+					if want == 0 && !reflect.DeepEqual(got.IDS.Rules, c.IDS.Rules) {
+						t.Fatalf("ineligible scope migration changed IDS bank %s: %+v", bank, got.IDS.Rules)
+					}
 				}
 				if err := s.Close(); err != nil {
 					t.Fatal(err)
 				}
 			}
 		})
+	}
+}
+
+func TestVersionlessRuleModeImportPreservesIDSBuiltins(t *testing.T) {
+	c := legacyModes("")
+	c.IDS.Rules = append(historicalCIPBuiltinDefinitions(), retiredBuiltinDefinitions()...)
+	want, err := json.Marshal(c.IDS.Rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := UpgradeInPlace(c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.Marshal(c.IDS.Rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) || c.scopeMigration != nil {
+		t.Fatalf("versionless import unexpectedly rewrote IDS builtins: %s; scope audit %+v", got, c.scopeMigration)
+	}
+	if c.modeMigration == nil || c.modeMigration.SchemaBefore != "" || c.DataPlane.DPIMode != "monitor" {
+		t.Fatalf("versionless mode migration missing: %+v", c.modeMigration)
+	}
+	// An unstamped body does not assert an old IDS schema. As before, POST
+	// validation must reject unsupported legacy predicates, not rewrite them.
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), `proto "enip"`) {
+		t.Fatalf("unsupported unstamped IDS predicate was accepted: %v", err)
 	}
 }
 

@@ -49,8 +49,9 @@ func (e *Engine) ICSParsing(proto string) ics.Parsing {
 }
 
 // conformanceScope uses the same L3/L4 scope as fail-closed inspection, but
-// includes monitor/non-inline observations and only the event's protocol.
-// Any enforcing scope wins over a monitor ALLOW's payload predicates.
+// includes monitor/non-inline observations. Enforcing ownership is L3/L4,
+// not narrowed by the protocol the decoder happens to find. Monitor-only
+// evidence remains local to the event's protocol.
 func (e *Engine) conformanceScope(state *flow.State, pkt *dpi.ParsedPacket, proto string) *rules.Entry {
 	p := e.ruleSnap.current.Load()
 	if p == nil || p.snapshot == nil {
@@ -62,14 +63,14 @@ func (e *Engine) conformanceScope(state *flow.State, pkt *dpi.ParsedPacket, prot
 	var monitor *rules.Entry
 	for i := range p.snapshot.Firewall {
 		entry := &p.snapshot.Firewall[i]
-		if !strings.EqualFold(entry.ICS.Protocol, proto) ||
+		if entry.ICS.Protocol == "" || strings.EqualFold(entry.ICS.Protocol, rules.ProtocolIEC104) ||
 			!shouldInspectFirewallEntry(*entry, state, pkt) || !p.evaluator.AddressScopeMatch(i, ctx) {
 			continue
 		}
 		if e.effectiveMode(entry) == "enforce" {
 			return entry
 		}
-		if monitor == nil {
+		if monitor == nil && strings.EqualFold(entry.ICS.Protocol, proto) {
 			monitor = entry
 		}
 	}

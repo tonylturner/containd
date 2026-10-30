@@ -31,7 +31,7 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 		return capture.Decision{Action: capture.Drop, Reason: reasonInvalidMarked + ":" + pkt.Invalid}
 	}
 	if pkt.Token.Inline() {
-		return observedDecision(pkt)
+		return observedDecision(pkt, acceptDecision)
 	}
 	return acceptDecision
 }
@@ -43,10 +43,14 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 // inline flow in the scope of an enforce ICS rule fails closed on a stream
 // error, a stream picked up mid-connection, or a decoder panic the same
 // way (failClosedRule).
-func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correlationAdmitted, decodingStopped bool) (d capture.Decision) {
+func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correlationAdmitted, decodingStopped, observeOnly bool) (d capture.Decision) {
 	e.recordPacketStats(pkt, state)
 	e.iec.answerPickupChallenge(pkt)
 	if e.isDeniedTCP(state) {
+		// A retained denial from a removed enforce scope owns no admission.
+		if observeOnly {
+			return acceptDecision
+		}
 		noteCorrelationInspection(state, pkt, false)
 		return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
 	}
@@ -86,8 +90,10 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 				return acceptDecision
 			}
 		default:
-			noteCorrelationInspection(state, pkt, false)
-			return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
+			if !observeOnly {
+				noteCorrelationInspection(state, pkt, false)
+				return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
+			}
 		}
 	}
 	if !shouldInspect {
@@ -247,7 +253,7 @@ func (e *Engine) HandlePacket(pkt capture.Packet) (d capture.Decision) {
 		e.reportPacketPanic(packetPanic(r))
 		d = acceptDecision
 		if pkt.Token.Inline() {
-			d = observedDecision(pkt)
+			d = observedDecision(pkt, acceptDecision)
 		}
 		if envelopeMarked(pkt) {
 			d = capture.Decision{Action: capture.Drop, Reason: reasonIECFailClose}

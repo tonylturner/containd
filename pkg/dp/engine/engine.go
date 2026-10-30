@@ -48,7 +48,8 @@ type Engine struct {
 	runCancel             context.CancelFunc
 	runDone               chan struct{}
 	ruleSnap              ruleSnapshots
-	zones                 zoneCache // outlives Reconfigure, as the namespace does
+	policyMu              sync.RWMutex // packet readers see snapshot and IEC policy as one generation
+	zones                 zoneCache    // outlives Reconfigure, as the namespace does
 	started               atomic.Bool
 	epoch                 atomic.Uint64 // counts Reconfigure calls; ends stale start retries
 	compiler              *enforce.Compiler
@@ -330,6 +331,8 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.runCapture = nil
 	e.runDone = nil
 
+	e.policyMu.Lock()
+	defer e.policyMu.Unlock()
 	e.flowMu.Lock()
 	observationRecords := e.observationPending
 	e.observationPending = nil
@@ -526,6 +529,8 @@ func (e *Engine) LoadRules(snap rules.Snapshot) {
 	if snap.DPIMode == "" {
 		snap.DPIMode = e.dpiMode
 	}
+	e.policyMu.Lock()
+	defer e.policyMu.Unlock()
 	e.ruleSnap.Store(&snap)
 	e.iec.setPolicy(&snap)
 }
@@ -562,6 +567,8 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 		warnings = e.compiler.RuleWarnings(&snap)
 	}
 
+	e.policyMu.Lock()
+	defer e.policyMu.Unlock()
 	appliedAt := time.Now().UTC()
 	e.ruleSnap.Install(&snap, appliedAt)
 	e.iec.setPolicy(&snap)
@@ -657,6 +664,8 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	if e == nil {
 		return acceptDecision
 	}
+	e.policyMu.RLock()
+	defer e.policyMu.RUnlock()
 	metrics.PacketsTotal.Inc()
 	metrics.BytesTotal.Add(float64(len(pkt.Payload)))
 	if pkt.Invalid != "" {
@@ -669,20 +678,12 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	defer e.lockGenericTCP(pkt)()
 	e.reopenDeniedTCP(pkt)
 	state := e.trackTransportFlow(pkt, now, connection)
-	if state == nil {
-		if pkt.Token.Inline() {
-			return observedDecision(pkt)
-		}
-		return acceptDecision
-	}
 	e.bindTransport(state, connection)
-	if pkt.Token.Inline() && !e.enforcingPacketScope(pkt, state) {
-		// Observation is synchronous, but never owns admission or holds a token.
-		defer func() {
-			repeated := observedDecision(pkt)
-			repeated.Reason = decision.Reason
-			decision = repeated
-		}()
+	observeOnly := pkt.Token.Inline() && !e.enforcingPacketScope(pkt, state)
+	if observeOnly {
+		// Only a successful observation may resume ordinary nft policy.
+		// Holds and fail-closed drops keep their token ownership intact.
+		defer func() { decision = observedDecision(pkt, decision) }()
 	}
 	stopped := e.prepareDecodeCoverage(state, pkt, now, connection, history)
 	if e.observation != nil && (!stopped || pkt.Token.Inline()) {
@@ -691,7 +692,7 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	if d, ok := e.handleIECPacket(pkt, state); ok {
 		return d
 	}
-	return e.handleFlowPacket(pkt, state, connection != nil || e.transport == nil, stopped)
+	return e.handleFlowPacket(pkt, state, connection != nil || e.transport == nil, stopped, observeOnly)
 }
 
 // trackFlow returns the state of the packet's connection direction. Each
