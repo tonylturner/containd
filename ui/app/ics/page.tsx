@@ -55,7 +55,7 @@ export default function ICSPolicyPage() {
   const installed = useInstalledRuleset();
   const queueGroup = dpiConfig.nfqueueGroup ?? 0;
 
-  async function refresh() {
+  async function refresh({ keepEdits = true }: { keepEdits?: boolean } = {}) {
     setError(null);
     const [list, dp] = await Promise.all([api.listFirewallRules(), fetchDataPlane()]);
     if (dp) setDpiConfig(dp);
@@ -64,6 +64,7 @@ export default function ICSPolicyPage() {
       return;
     }
     setRules(list);
+    if (!keepEdits) setEditing(null);
   }
 
   useConfigRefresh(refresh);
@@ -97,14 +98,14 @@ export default function ICSPolicyPage() {
     const result = await api.updateFirewallRule(id, { ics: ics ?? null });
     if (!result.ok) {
       setError(result.error);
-      return;
+      return null;
     }
     toast(
       ics ? "ICS filter staged — commit to apply." : "ICS filter removal staged — commit to apply.",
       "success",
     );
-    setEditing(null);
     refresh();
+    return result.data;
   }
 
   return (
@@ -113,7 +114,7 @@ export default function ICSPolicyPage() {
       actions={
         <button
           onClick={() => {
-            void refresh();
+            void refresh({ keepEdits: false });
             void coverage.reload();
           }}
           className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
@@ -350,7 +351,8 @@ export default function ICSPolicyPage() {
 
       {editing && canEdit && (
         <EditICSModal
-          rule={editing}
+          rule={rules.find((r) => r.id === editing.id) ?? editing}
+          context={rules}
           globalMode={dpiConfig.dpiMode}
           onClose={() => setEditing(null)}
           onSave={(ics) => onSave(editing.id, ics)}

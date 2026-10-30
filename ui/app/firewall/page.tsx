@@ -57,6 +57,7 @@ export default function FirewallPage() {
   const health = useHealth();
   const installed = useInstalledRuleset();
   const [editing, setEditing] = useState<FirewallRule | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [quickStarting, setQuickStarting] = useState(false);
   const confirm = useConfirm();
   const tips: Tip[] = [
@@ -102,7 +103,7 @@ export default function FirewallPage() {
     },
   ];
 
-  async function refresh() {
+  async function refresh({ keepEdits = true }: { keepEdits?: boolean } = {}) {
     const [r, z, n, rt, dp, c] = await Promise.all([
       api.listFirewallRules(),
       api.listZones(),
@@ -118,6 +119,10 @@ export default function FirewallPage() {
     setRouting(rt);
     if (dp) {
       setDpiConfig(dp);
+    }
+    if (!keepEdits) {
+      setEditing(null);
+      setRefreshKey((key) => key + 1);
     }
   }
 
@@ -159,10 +164,11 @@ export default function FirewallPage() {
     const created = await api.createFirewallRule(rule);
     if (!created.ok) {
       setError(created.error || "Failed to create rule (check zones/CIDRs).");
-      return;
+      return false;
     }
     setNotice(created.warning ? `Rule staged — commit to apply. Warning: ${created.warning}` : "Rule staged — commit to apply.");
     refresh();
+    return true;
   }
 
   async function onUpdate(id: string, patch: FirewallRulePatch) {
@@ -171,11 +177,11 @@ export default function FirewallPage() {
     const updated = await api.updateFirewallRule(id, patch);
     if (!updated.ok) {
       setError(updated.error || "Failed to update rule.");
-      return;
+      return null;
     }
-    setEditing(null);
     setNotice(updated.warning ? `Rule staged — commit to apply. Warning: ${updated.warning}` : "Rule staged — commit to apply.");
     refresh();
+    return updated.data;
   }
   const outboundStatus = (() => {
     const isDefaultDst = (dst: string) => {
@@ -297,7 +303,7 @@ export default function FirewallPage() {
             </button>
           )}
           <button
-            onClick={refresh}
+            onClick={() => refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -405,10 +411,12 @@ export default function FirewallPage() {
         )}
       </Card>
 
-      <DPIConfigSection config={dpiConfig} health={health} onChange={setDpiConfig} />
+      <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} health={health} onChange={setDpiConfig} />
 
       {isAdmin() && (
         <CreateRuleForm
+          key={`create-${refreshKey}`}
+          context={rules}
           zones={zones}
           globalMode={dpiConfig.dpiMode}
           tagsInUse={tagsInUse(rules)}
@@ -440,7 +448,8 @@ export default function FirewallPage() {
       {editing && isAdmin() && (
         <EditRuleModal
           zones={zones}
-          rule={editing}
+          rule={rules.find((r) => r.id === editing.id) ?? editing}
+          context={rules}
           globalMode={dpiConfig.dpiMode}
           tagsInUse={tagsInUse(rules, editing.id)}
           onClose={() => setEditing(null)}

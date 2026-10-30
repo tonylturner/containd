@@ -250,7 +250,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imported additions; import and creation forms do not block configuration refreshes.
   VPN profile uploads likewise update their configuration path while retaining edits.
 - DHCP, DNS, NTP, syslog, AV, proxy, VPN, IDS, NAT, routing, zone, interface,
-  wizard and identity editors keep unsaved edits during staged-save, commit
+  wizard, identity, firewall, ICS and template editors keep unsaved edits during staged-save, commit
   and automatic refreshes, and warn when settings change on the server.
   Explicit Refresh discards edits. List fields retain unfinished text while typing.
 - On narrow screens, the sidebar collapses behind a Menu button so the main
