@@ -18,6 +18,13 @@ type Decoder struct{}
 
 func NewDecoder() *Decoder { return &Decoder{} }
 
+// UsesImplicitIO reports whether port-selected decoding uses the implicit I/O
+// layer, not ENIP encapsulation. The I/O port takes precedence over port 44818.
+func UsesImplicitIO(state *flow.State) bool {
+	return state != nil && state.Key.Proto == ics.UDP &&
+		(state.Key.SrcPort == ics.CIPImplicitPort || state.Key.DstPort == ics.CIPImplicitPort)
+}
+
 func (d *Decoder) Supports(state *flow.State) bool {
 	if state == nil {
 		return false
@@ -26,7 +33,7 @@ func (d *Decoder) Supports(state *flow.State) bool {
 	case 6: // TCP — explicit messaging on port 44818
 		return state.Key.SrcPort == ics.CIPPort || state.Key.DstPort == ics.CIPPort
 	case 17: // UDP — implicit I/O on 2222, packet-only encapsulation on 44818
-		return state.Key.SrcPort == ics.CIPImplicitPort || state.Key.DstPort == ics.CIPImplicitPort ||
+		return UsesImplicitIO(state) ||
 			state.Key.SrcPort == ics.CIPPort || state.Key.DstPort == ics.CIPPort
 	default:
 		return false
@@ -50,7 +57,7 @@ func (d *Decoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.Even
 	}
 	// Every datagram on the I/O port is one bounded frame, so an empty or
 	// malformed one is still reported rather than silently skipped.
-	if state != nil && state.Key.Proto == 17 && (state.Key.SrcPort == ics.CIPImplicitPort || state.Key.DstPort == ics.CIPImplicitPort) {
+	if UsesImplicitIO(state) {
 		return []dpi.Event{ioEvent(state, pkt.Payload)}, nil
 	}
 	return d.OnProtocolPacket(state, pkt)

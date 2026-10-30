@@ -22,21 +22,28 @@ func TestLegacyDecodesAndScope(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
 		port, source    uint16
+		transport       uint8
 		selected, owned bool
 		p               identify.Protocol
 		want            bool
 	}{
-		{"match", 502, 41000, true, false, identify.Modbus, true},
-		{"unselected", 502, 41000, false, false, identify.Modbus, false},
-		{"mismatch", 20000, 41000, true, false, identify.Modbus, false},
-		{"source-registry", 41000, 502, true, false, identify.Modbus, true},
-		{"IEC-bypass", 502, 2404, true, false, identify.Modbus, false},
-		{"IEC-unowned", 2404, 41000, true, false, identify.IEC104, false},
-		{"IEC-table", 2404, 41000, false, true, identify.IEC104, true},
+		{"match", 502, 41000, 6, true, false, identify.Modbus, true},
+		{"unselected", 502, 41000, 6, false, false, identify.Modbus, false},
+		{"mismatch", 20000, 41000, 6, true, false, identify.Modbus, false},
+		{"source-registry", 41000, 502, 6, true, false, identify.Modbus, true},
+		{"IEC-bypass", 502, 2404, 6, true, false, identify.Modbus, false},
+		{"IEC-unowned", 2404, 41000, 6, true, false, identify.IEC104, false},
+		{"IEC-table", 2404, 41000, 6, false, true, identify.IEC104, true},
+		{"ENIP-implicit-source", 41000, 2222, 17, true, false, identify.ENIP, false},
+		{"ENIP-implicit-destination", 2222, 41000, 17, true, false, identify.ENIP, false},
+		{"ENIP-implicit-precedence", 44818, 2222, 17, true, false, identify.ENIP, false},
+		{"ENIP-encapsulation", 44818, 41000, 17, true, false, identify.ENIP, true},
+		{"ENIP-TCP", 44818, 2222, 6, true, false, identify.ENIP, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			key := packetKey(observationTrace(tc.port, false)[0])
 			key.SrcPort = tc.source
+			key.Proto = tc.transport
 			state := flow.NewState(key, time.Now())
 			ctx := &observationContext{states: [2]*flow.State{state, nil}, selected: tc.selected, iecOwned: tc.owned}
 			if got := legacyDecodes(ctx, tc.p); got != tc.want {
