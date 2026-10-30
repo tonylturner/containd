@@ -48,7 +48,7 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 	// HTTP/2 cleartext preface.
 	if bytes.HasPrefix(pkt.Payload, []byte("PRI * HTTP/2.0")) {
 		ev := dpi.Event{
-			FlowID: state.Key.Hash(),
+			FlowID: state.ID(),
 			Proto:  "http2",
 			Kind:   "preface",
 			Attributes: map[string]any{
@@ -75,7 +75,7 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 			"src_port":  pkt.SrcPort,
 			"dst_port":  pkt.DstPort,
 		}
-		ev := dpi.Event{FlowID: state.Key.Hash(), Proto: "http", Kind: "response", Attributes: attrs}
+		ev := dpi.Event{FlowID: state.ID(), Proto: "http", Kind: "response", Attributes: attrs}
 		return []dpi.Event{ev}, nil
 	}
 	parts := strings.SplitN(line, " ", 3)
@@ -114,7 +114,7 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 		"src_port":   pkt.SrcPort,
 		"dst_port":   pkt.DstPort,
 	}
-	ev := dpi.Event{FlowID: state.Key.Hash(), Proto: "http", Kind: "request", Attributes: attrs}
+	ev := dpi.Event{FlowID: state.ID(), Proto: "http", Kind: "request", Attributes: attrs}
 	return []dpi.Event{ev}, nil
 }
 

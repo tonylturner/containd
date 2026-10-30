@@ -121,7 +121,7 @@ func (d *SMBDecoder) parseSMBv1(state *flow.State, pkt *dpi.ParsedPacket, smb []
 	}
 
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "smb",
 		Kind:       cmdName,
 		Attributes: attrs,
@@ -160,7 +160,7 @@ func (d *SMBDecoder) parseSMBv2(state *flow.State, pkt *dpi.ParsedPacket, smb []
 	}
 
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "smb",
 		Kind:       cmdName,
 		Attributes: attrs,

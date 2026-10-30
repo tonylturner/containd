@@ -313,5 +313,5 @@ func flowID(state *flow.State) string {
 	if state == nil {
 		return ""
 	}
-	return state.Key.Hash()
+	return state.ID()
 }

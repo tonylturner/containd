@@ -195,7 +195,7 @@ func flowID(state *flow.State) string {
 	if state == nil {
 		return ""
 	}
-	return state.Key.Hash()
+	return state.ID()
 }
 
 func (d *Decoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {

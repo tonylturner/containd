@@ -95,7 +95,7 @@ func (d *DNSDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 		"dst_port":  pkt.DstPort,
 	}
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "dns",
 		Kind:       kind,
 		Attributes: attrs,
