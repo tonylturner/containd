@@ -372,6 +372,9 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
 	fresh.iec.zones = &e.zones
+	// The replacement table's counter callback must use the surviving
+	// engine's installed policy, not the discarded constructor's snapshots.
+	fresh.iec.shadow = e.countShadow
 	e.iec = fresh.iec
 	e.flowMu.Unlock()
 	e.recordObservations(observationRecords)

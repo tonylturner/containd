@@ -337,7 +337,7 @@ apply_config() {
   ruleset="$WORK_DIR/ruleset.json"
   $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset" || return 1
   snap=$(jq -c '.snapshot' "$ruleset")
-  code=$(echo "$cfg" | jq -c '.dataPlane' | engine_post firewall /internal/config "$resp")
+  code=$(echo "$cfg" | jq -c '.dataplane' | engine_post firewall /internal/config "$resp")
   [[ "$code" == "200" ]] || { log "engine config for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
   code=$(engine_post firewall /internal/apply_rules "$resp" <<<"$snap")
   [[ "$code" == "200" ]] || { log "engine apply_rules for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
@@ -360,8 +360,8 @@ BASELINE=$(echo "$CFG" | jq \
     ]
   | .system.mgmt.httpListenAddr=":18080"
   | .system.mgmt.listenAddr=":18080"
-  | .dataPlane.enforcement = true
-  | .dataPlane.enforceTable = "containd"
+  | .dataplane.enforcement = true
+  | .dataplane.enforceTable = "containd"
   | .firewall.defaultAction = "DENY"
   | .firewall.rules = [
       {id:"cc-rtu-2404", sourceZones:["lan4"], destZones:["lan1"],
@@ -400,11 +400,11 @@ fi
 # typeIds/classes/ca/ioa predicates for semantic enforcement.
 EU_POLICY=$(echo "$BASELINE" | jq \
   --arg ccIp "$CC_IP" --arg rtuIp "$RTU_IP" --argjson ca "$ALLOWED_CA" --argjson ioa "$ALLOWED_IOA" '
-  .dataPlane.dpiEnabled = true
-  | .dataPlane.dpiMode = "enforce"
-  | .dataPlane.nfqueueGroup = 101
-  | .dataPlane.nflogGroup = 100
-  | .dataPlane.dpiIcsProtocols = {"iec104": true}
+  .dataplane.dpiEnabled = true
+  | .dataplane.dpiMode = "enforce"
+  | .dataplane.nfqueueGroup = 101
+  | .dataplane.nflogGroup = 100
+  | .dataplane.dpiIcsProtocols = {"iec104": true}
   | .firewall.rules = [
       {id:"cc-rtu-iec104-session", sourceZones:["lan4"], destZones:["lan1"],
        sources:[($ccIp + "/32")], destinations:[($rtuIp + "/32")],
@@ -722,9 +722,9 @@ reject_check() {
   fi
 }
 reject_check "IEC enforce with the iec104 decoder off is refused before save" \
-  "$(echo "$EU_POLICY" | jq '.dataPlane.dpiIcsProtocols.iec104 = false')"
+  "$(echo "$EU_POLICY" | jq '.dataplane.dpiIcsProtocols.iec104 = false')"
 reject_check "IEC enforce without NFQUEUE capture (nfqueueGroup 0) is refused before save" \
-  "$(echo "$EU_POLICY" | jq 'del(.dataPlane.nfqueueGroup)')"
+  "$(echo "$EU_POLICY" | jq 'del(.dataplane.nfqueueGroup)')"
 apply_config "$EU_POLICY" "EU enforce policy (restore after rejection checks)" || fail "could not restore the EU enforce policy"
 
 # Capture policy-reset recoveries before the deliberately held queue starts.
