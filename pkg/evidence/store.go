@@ -65,6 +65,9 @@ type IngestRequest struct {
 	DatasetID string        `json:"datasetId"`
 	Parents   []Observation `json:"parents"`
 	Seal      bool          `json:"seal"`
+	// Gaps retains capture/queue loss that cannot be attributed to a parent.
+	// Codes are bounded metadata, never packet payloads or free-form logs.
+	Gaps []string `json:"gaps,omitempty"`
 }
 
 // IngestResult exposes admission loss, including an entire rejected parent.
