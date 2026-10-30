@@ -17,7 +17,7 @@ import { Card } from "../../../../components/Card";
 export default function NTPPage() {
   const canEdit = isAdmin();
   const [status, setStatus] = useState<NTPStatus | null>(null);
-  const { editor, cfg, setCfg, adoptConfig, acceptConfig, text, setText } = useConfigEditor<NTPConfig>({
+  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<NTPConfig>({
     enabled: false,
     servers: [],
     intervalSeconds: 0,
@@ -61,14 +61,14 @@ export default function NTPPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    const submitted = editor;
+    const submitted = beginSave();
     const saved = await save.run("save", () => api.setNTP({ ...cfg, servers: serversText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
       success: "NTP settings staged — commit to apply.",
       failure: "Failed to save NTP settings.",
     });
-    if (!saved) return;
+    if (!saved) { failSave(submitted); return; }
     if (saved.ok) acceptConfig(submitted, saved.data);
-    else setError(saved.error);
+    else { failSave(submitted); setError(saved.error); }
   }
 
   return (

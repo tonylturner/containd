@@ -149,10 +149,9 @@ test("decoder toggles list only supported protocols and preserve unsupported key
   await expect(page.getByText(`Not saved: ${unsupportedMapError}`)).toBeVisible();
   expect(seen.dataPlanePosts[0]?.dpiIcsProtocols).toEqual({ s7comm: false });
 
-  await page.getByRole("button", { name: "Configure", exact: true }).first().click();
-  modal = page.locator("div.fixed.inset-0").filter({
-    has: page.getByRole("heading", { name: "ICS Protocol DPI Configuration" }),
-  });
+  // A rejected save keeps the editor open with the draft.
+  await expect(modal).toBeVisible();
+  await expect(modal).toContainText("s7comm");
   await modal.getByRole("button", { name: "Remove unsupported protocol s7comm" }).click();
   await modal.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => seen.dataPlanePosts.length).toBe(2);

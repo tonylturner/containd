@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
+import { sameConfig } from "../../lib/config-editor";
 
 import {
   api,
@@ -27,38 +29,70 @@ import { ICSSelectorFields } from "./ics-selector-fields";
 import { IEC104Fields } from "./iec104-fields";
 import { ICSAddressFields } from "./ics-address-fields";
 
+function filterDraftFrom(rule: FirewallRule, rules: FirewallRule[], globalMode: ICSMode | undefined) {
+  return {
+    context: { rules, globalMode },
+    enabled: !!rule.ics?.protocol,
+    protocol: rule.ics?.protocol ?? "modbus",
+    functionCodes: (rule.ics?.functionCode ?? []).join(", "),
+    addresses: icsAddressDraftFrom(rule.ics),
+    unitId: rule.ics?.unitId?.toString() ?? "",
+    objectClasses: (rule.ics?.objectClasses ?? []).map((v) => "0x" + v.toString(16)).join(", "),
+    readOnly: rule.ics?.readOnly ?? false,
+    writeOnly: rule.ics?.writeOnly ?? false,
+    mode: (rule.ics?.mode ?? "") as ICSModeSelection,
+    selectors: genericSelectorDraftFrom(rule.ics),
+    iec: iec104DraftFrom(rule.ics),
+  };
+}
+
 export function EditICSModal({
+  context,
   rule,
   globalMode,
   onClose,
   onSave,
 }: {
+  context: FirewallRule[];
   rule: FirewallRule;
   globalMode?: ICSMode;
   onClose: () => void;
   /** The predicate to stage; undefined removes it. */
-  onSave: (ics: ICSPredicatePatch | undefined) => void;
+  onSave: (ics: ICSPredicatePatch | undefined) => Promise<FirewallRule | null>;
 }) {
-  const [enabled, setEnabled] = useState(!!rule.ics?.protocol);
-  const [protocol, setProtocol] = useState(rule.ics?.protocol ?? "modbus");
-  const [functionCodes, setFunctionCodes] = useState(
-    (rule.ics?.functionCode ?? []).join(", "),
-  );
-  const [addresses, setAddresses] = useState(
-    icsAddressDraftFrom(rule.ics),
-  );
-  const [unitId, setUnitId] = useState(rule.ics?.unitId?.toString() ?? "");
-  const [objectClasses, setObjectClasses] = useState(
-    (rule.ics?.objectClasses ?? []).map((v) => "0x" + v.toString(16)).join(", "),
-  );
-  const [readOnly, setReadOnly] = useState(rule.ics?.readOnly ?? false);
-  const [writeOnly, setWriteOnly] = useState(rule.ics?.writeOnly ?? false);
-  const [mode, setMode] = useState<ICSModeSelection>(rule.ics?.mode ?? "");
-  const [selectors, setSelectors] = useState(() => genericSelectorDraftFrom(rule.ics));
-  const [iec, setIec] = useState(() => iec104DraftFrom(rule.ics));
+  const draft = useConfigEditor(() => filterDraftFrom(rule, context, globalMode));
+  const { cfg, setCfg, adoptConfig } = draft;
+  const latest = useRef(draft.editor);
+  latest.current = draft.editor;
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { adoptConfig(filterDraftFrom(rule, context, globalMode)); }, [adoptConfig, rule, context, globalMode]);
+  const enabled = cfg.enabled;
+  const setEnabled = (enabled: typeof cfg.enabled) => setCfg((c) => ({ ...c, enabled }));
+  const protocol = cfg.protocol;
+  const setProtocol = (protocol: typeof cfg.protocol) => setCfg((c) => ({ ...c, protocol }));
+  const functionCodes = cfg.functionCodes;
+  const setFunctionCodes = (functionCodes: typeof cfg.functionCodes) => setCfg((c) => ({ ...c, functionCodes }));
+  const addresses = cfg.addresses;
+  const setAddresses = (addresses: typeof cfg.addresses) => setCfg((c) => ({ ...c, addresses }));
+  const unitId = cfg.unitId;
+  const setUnitId = (unitId: typeof cfg.unitId) => setCfg((c) => ({ ...c, unitId }));
+  const objectClasses = cfg.objectClasses;
+  const setObjectClasses = (objectClasses: typeof cfg.objectClasses) => setCfg((c) => ({ ...c, objectClasses }));
+  const readOnly = cfg.readOnly;
+  const setReadOnly = (readOnly: typeof cfg.readOnly) => setCfg((c) => ({ ...c, readOnly }));
+  const writeOnly = cfg.writeOnly;
+  const setWriteOnly = (writeOnly: typeof cfg.writeOnly) => setCfg((c) => ({ ...c, writeOnly }));
+  const mode = cfg.mode;
+  const setMode = (mode: typeof cfg.mode) => setCfg((c) => ({ ...c, mode }));
+  const selectors = cfg.selectors;
+  const setSelectors = (selectors: typeof cfg.selectors) => setCfg((c) => ({ ...c, selectors }));
+  const iec = cfg.iec;
+  const setIec = (iec: typeof cfg.iec) => setCfg((c) => ({ ...c, iec }));
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<RulePreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const meta = protoMeta(protocol);
   const selectorError = enabled ? selectorFieldError(protocol, functionCodes, unitId, objectClasses) : null;
@@ -71,14 +105,20 @@ export function EditICSModal({
       action: rule.action, existing: rule.ics, globalMode });
   }
 
-  function save() {
+  async function save() {
     setError(null);
     const built = buildICS();
     if (!built.ok) {
       setError(built.error);
       return;
     }
-    onSave(built.ics);
+    const submitted = draft.beginSave();
+    setSaving(true);
+    const saved = await onSave(built.ics);
+    setSaving(false);
+    if (!saved || !mounted.current) { draft.failSave(submitted); return; }
+    draft.acceptConfig(submitted, filterDraftFrom(saved, context, globalMode));
+    if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
   }
 
   // Previews the whole rule with the edited predicate, so the zones, sources,
@@ -117,6 +157,7 @@ export function EditICSModal({
           </button>
         </div>
 
+        <ConfigEditNotice superseded={draft.editor.superseded} />
         <div className="space-y-4 text-sm">
           <label className="flex items-center gap-2">
             <input
@@ -287,6 +328,7 @@ export function EditICSModal({
           </button>
           <button
             onClick={save}
+            disabled={saving}
             className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
           >
             Save filter

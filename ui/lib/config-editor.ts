@@ -1,8 +1,15 @@
+export type ConfigSubmission<T> = {
+  readonly id: symbol;
+  readonly cfg: T;
+  readonly raw: Record<string, string>;
+};
+
 export type ConfigEditor<T> = {
   cfg: T;
   server: T;
   raw: Record<string, string>;
   superseded: boolean;
+  pending: ConfigSubmission<T>[];
 };
 
 export function sameConfig(a: unknown, b: unknown): boolean {
@@ -12,24 +19,37 @@ export function sameConfig(a: unknown, b: unknown): boolean {
 }
 
 export function fresh<T>(cfg: T): ConfigEditor<T> {
-  return { cfg, server: cfg, raw: {}, superseded: false };
+  return { cfg, server: cfg, raw: {}, superseded: false, pending: [] };
 }
 
 export function isDirty<T>(editor: ConfigEditor<T>): boolean {
-  return Object.keys(editor.raw).length > 0 || !sameConfig(editor.cfg, editor.server);
+  return Object.keys(editor.raw).length > 0 || !sameConfig(editor.cfg, editor.server)
+    || editor.pending.some((submitted) => !sameConfig(editor.cfg, submitted.cfg) || !sameConfig(editor.raw, submitted.raw));
+}
+
+export function beginSave<T>(editor: ConfigEditor<T>, submitted: ConfigSubmission<T>): ConfigEditor<T> {
+  return { ...editor, pending: [...editor.pending, submitted] };
+}
+
+/** A failure ends only its own request and never changes the draft. */
+export function failSave<T>(editor: ConfigEditor<T>, submitted: ConfigSubmission<T>): ConfigEditor<T> {
+  return { ...editor, pending: editor.pending.filter((entry) => entry.id !== submitted.id) };
 }
 
 /** Background reads never discard either structured or unfinished text edits. */
 export function adopt<T>(editor: ConfigEditor<T>, next: T, keepEdits = true): ConfigEditor<T> {
-  if (!keepEdits || !isDirty(editor)) return fresh(next);
+  if (!keepEdits) return fresh(next);
+  if (!isDirty(editor)) return { ...fresh(next), pending: editor.pending };
   return { ...editor, server: next, superseded: editor.superseded || !sameConfig(next, editor.server) };
 }
 
 /** Compare the entire submitted draft, not a parsed/normalized wire payload. */
-export function accept<T>(editor: ConfigEditor<T>, submitted: ConfigEditor<T>, next: T): ConfigEditor<T> {
+export function accept<T>(editor: ConfigEditor<T>, submitted: ConfigSubmission<T>, next: T): ConfigEditor<T> {
+  if (!editor.pending.some((entry) => entry.id === submitted.id)) return editor;
+  const settled = failSave(editor, submitted);
   return sameConfig(editor.cfg, submitted.cfg) && sameConfig(editor.raw, submitted.raw)
-    ? fresh(next)
-    : { ...editor, server: next, superseded: false };
+    ? { ...fresh(next), pending: settled.pending }
+    : { ...settled, server: next, superseded: false };
 }
 
 /** Apply only an acknowledged mutation, to both copies, not a background snapshot.
@@ -39,11 +59,13 @@ export function acceptCollection<T>(
   editor: ConfigEditor<T>,
   update: (cfg: T) => T,
   prefixes: string[] = [],
-  submitted?: ConfigEditor<T>,
+  submitted?: ConfigSubmission<T>,
 ): ConfigEditor<T> {
+  if (submitted && !editor.pending.some((entry) => entry.id === submitted.id)) return editor;
   const raw = Object.fromEntries(Object.entries(editor.raw).filter(([key, value]) =>
     !prefixes.some((prefix) => key.startsWith(prefix)) || (submitted && value !== submitted.raw[key])));
-  const next = { ...editor, cfg: update(editor.cfg), server: update(editor.server), raw };
+  const settled = submitted ? failSave(editor, submitted) : editor;
+  const next = { ...settled, cfg: update(editor.cfg), server: update(editor.server), raw };
   return { ...next, superseded: isDirty(next) && editor.superseded };
 }
 

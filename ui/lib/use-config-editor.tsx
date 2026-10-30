@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState, type SetStateAction } from "react";
-import { accept, acceptCollection as acknowledge, adopt, fresh, isDirty, sameConfig, type ConfigEditor } from "./config-editor";
+import { accept, acceptCollection as acknowledge, adopt, beginSave as begin, failSave as fail, fresh, isDirty, sameConfig, type ConfigSubmission } from "./config-editor";
 
 export function useConfigEditor<T>(initial: T | (() => T)) {
   const [editor, setEditor] = useState(() => fresh(
@@ -13,7 +13,17 @@ export function useConfigEditor<T>(initial: T | (() => T)) {
   const adoptConfig = useCallback((next: T, keepEdits = true) => {
     setEditor((e) => adopt(e, next, keepEdits));
   }, []);
-  const acceptConfig = useCallback((submitted: ConfigEditor<T>, next: T) => {
+  // A submission is captured before enqueueing state, never inside an updater
+  // (React may replay updaters). Tokens let independent row saves overlap.
+  const beginSave = (raw = editor.raw): ConfigSubmission<T> => {
+    const submitted = { id: Symbol("config-save"), cfg: editor.cfg, raw };
+    setEditor((e) => begin(e, submitted));
+    return submitted;
+  };
+  const failSave = useCallback((submitted: ConfigSubmission<T>) => {
+    setEditor((e) => fail(e, submitted));
+  }, []);
+  const acceptConfig = useCallback((submitted: ConfigSubmission<T>, next: T) => {
     setEditor((e) => accept(e, submitted, next));
   }, []);
   const setText = useCallback((key: string, value: string) => {
@@ -27,7 +37,7 @@ export function useConfigEditor<T>(initial: T | (() => T)) {
   }, []);
   // Row saves acknowledge only that row. Other drafts, and typing after the
   // request started, are not part of the acknowledgement.
-  const acceptRow = useCallback((submitted: ConfigEditor<T>, update: (rows: T) => T, prefix: string) => {
+  const acceptRow = useCallback((submitted: ConfigSubmission<T>, update: (rows: T) => T, prefix: string) => {
     setEditor((e) => acknowledge(e, update, [prefix], submitted));
   }, []);
   function field<V>(key: string, derived: V): [V, (value: SetStateAction<V>) => void] {
@@ -35,7 +45,8 @@ export function useConfigEditor<T>(initial: T | (() => T)) {
     return [value, (update) => setEditor((e) => {
       const current = key in e.raw ? JSON.parse(e.raw[key]) as V : derived;
       const next = typeof update === "function" ? (update as (v: V) => V)(current) : update;
-      if (sameConfig(next, derived)) {
+      // Reverting to a pre-save value is still a new edit while saving.
+      if (sameConfig(next, derived) && e.pending.length === 0) {
         const raw = { ...e.raw };
         delete raw[key];
         return { ...e, raw };
@@ -44,7 +55,7 @@ export function useConfigEditor<T>(initial: T | (() => T)) {
     })];
   }
   return {
-    editor, cfg: editor.cfg, setCfg, adoptConfig, acceptConfig,
+    editor, cfg: editor.cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig,
     dirty: isDirty(editor), setText, field, clearText, acceptRow, acceptCollection,
     text: (key: string, derived: string) => editor.raw[key] ?? derived,
   };

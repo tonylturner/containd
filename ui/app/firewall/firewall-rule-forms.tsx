@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { sameConfig } from "../../lib/config-editor";
+import { useConfigForm } from "../../lib/use-config-form";
+import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 import { Card } from "../../components/Card";
 import { InfoTip } from "../../components/InfoTip";
 import {
@@ -128,7 +131,24 @@ function NoZonesHint({ zones }: { zones: Zone[] }) {
   );
 }
 
+function ruleDraftFrom(rule: FirewallRule, rules: FirewallRule[], zones: Zone[], globalMode: ICSMode | undefined) {
+  return {
+    context: { rules, zones, globalMode },
+    description: rule.description ?? "",
+    log: rule.log ?? false,
+    srcZone: (rule.sourceZones ?? [])[0] ?? "",
+    dstZone: (rule.destZones ?? [])[0] ?? "",
+    sources: (rule.sources ?? []).join(", "),
+    destinations: (rule.destinations ?? []).join(", "),
+    proto: (rule.protocols ?? [])[0]?.name ?? "tcp",
+    port: (rule.protocols ?? [])[0]?.port ?? "",
+    policy: policyDraftFrom(rule),
+    ics: icsDraftFrom(rule.ics, rule.ics?.mode ?? ""),
+  };
+}
+
 export function EditRuleModal({
+  context,
   zones,
   rule,
   globalMode,
@@ -136,28 +156,46 @@ export function EditRuleModal({
   onClose,
   onSave,
 }: {
+  context: FirewallRule[];
   zones: Zone[];
   rule: FirewallRule;
   globalMode: ICSMode | undefined;
   /** Distinct TAG labels of the other rules. */
   tagsInUse: string[];
   onClose: () => void;
-  onSave: (patch: FirewallRulePatch) => void;
+  onSave: (patch: FirewallRulePatch) => Promise<FirewallRule | null>;
 }) {
-  const [description, setDescription] = useState(rule.description ?? "");
-  const [log, setLog] = useState(rule.log ?? false);
-  const [srcZone, setSrcZone] = useState((rule.sourceZones ?? [])[0] ?? "");
-  const [dstZone, setDstZone] = useState((rule.destZones ?? [])[0] ?? "");
-  const [sources, setSources] = useState((rule.sources ?? []).join(", "));
-  const [destinations, setDestinations] = useState((rule.destinations ?? []).join(", "));
-  const [proto, setProto] = useState((rule.protocols ?? [])[0]?.name ?? "tcp");
-  const [port, setPort] = useState((rule.protocols ?? [])[0]?.port ?? "");
-  const [policy, setPolicy] = useState(() => policyDraftFrom(rule));
-  // An empty ICS mode inherits the global mode; keep it empty.
-  const [ics, setIcs] = useState(() => icsDraftFrom(rule.ics, rule.ics?.mode ?? ""));
+  const draft = useConfigEditor(() => ruleDraftFrom(rule, context, zones, globalMode));
+  const { cfg, setCfg, adoptConfig } = draft;
+  const latest = useRef(draft.editor);
+  latest.current = draft.editor;
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { adoptConfig(ruleDraftFrom(rule, context, zones, globalMode)); }, [adoptConfig, rule, context, zones, globalMode]);
+  const description = cfg.description;
+  const setDescription = (description: typeof cfg.description) => setCfg((c) => ({ ...c, description }));
+  const log = cfg.log;
+  const setLog = (log: typeof cfg.log) => setCfg((c) => ({ ...c, log }));
+  const srcZone = cfg.srcZone;
+  const setSrcZone = (srcZone: typeof cfg.srcZone) => setCfg((c) => ({ ...c, srcZone }));
+  const dstZone = cfg.dstZone;
+  const setDstZone = (dstZone: typeof cfg.dstZone) => setCfg((c) => ({ ...c, dstZone }));
+  const sources = cfg.sources;
+  const setSources = (sources: typeof cfg.sources) => setCfg((c) => ({ ...c, sources }));
+  const destinations = cfg.destinations;
+  const setDestinations = (destinations: typeof cfg.destinations) => setCfg((c) => ({ ...c, destinations }));
+  const proto = cfg.proto;
+  const setProto = (proto: typeof cfg.proto) => setCfg((c) => ({ ...c, proto }));
+  const port = cfg.port;
+  const setPort = (port: typeof cfg.port) => setCfg((c) => ({ ...c, port }));
+  const policy = cfg.policy;
+  const setPolicy = (policy: typeof cfg.policy) => setCfg((c) => ({ ...c, policy }));
+  const ics = cfg.ics;
+  const setIcs = (ics: typeof cfg.ics) => setCfg((c) => ({ ...c, ics }));
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<RulePreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   function build(): { patch: FirewallRulePatch; preview: FirewallRule } | null {
     setError(null);
@@ -201,9 +239,16 @@ export function EditRuleModal({
     };
   }
 
-  function save() {
+  async function save() {
     const built = build();
-    if (built) onSave(built.patch);
+    if (!built) return;
+    const submitted = draft.beginSave();
+    setSaving(true);
+    const saved = await onSave(built.patch);
+    setSaving(false);
+    if (!saved || !mounted.current) { draft.failSave(submitted); return; }
+    draft.acceptConfig(submitted, ruleDraftFrom(saved, context, zones, globalMode));
+    if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
   }
 
   async function previewImpact() {
@@ -228,15 +273,18 @@ export function EditRuleModal({
           <button onClick={onClose} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Close</button>
         </div>
 
+        <ConfigEditNotice superseded={draft.editor.superseded} />
         <div className="grid gap-3 md:grid-cols-3">
           <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-3" />
           <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
             <option value="">Source zone (any)</option>
+            {srcZone && !zones.some((z) => z.name === srcZone) && <option value={srcZone}>{srcZone} (no longer on server)</option>}
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
           <NoZonesHint zones={zones} />
           <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
             <option value="">Dest zone (any)</option>
+            {dstZone && !zones.some((z) => z.name === dstZone) && <option value={dstZone}>{dstZone} (no longer on server)</option>}
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
           <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
@@ -268,7 +316,7 @@ export function EditRuleModal({
             {previewing ? "Previewing..." : "Preview impact"}
           </button>
           <button onClick={onClose} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui">Cancel</button>
-          <button onClick={save} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110">Save changes</button>
+          <button onClick={save} disabled={saving} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110">Save changes</button>
         </div>
       </div>
     </div>
@@ -276,6 +324,7 @@ export function EditRuleModal({
 }
 
 export function CreateRuleForm({
+  context,
   zones,
   globalMode,
   tagsInUse,
@@ -285,20 +334,26 @@ export function CreateRuleForm({
   globalMode: ICSMode | undefined;
   /** Distinct TAG labels of the existing rules. */
   tagsInUse: string[];
-  onCreate: (rule: FirewallRule) => Promise<void>;
+  context: FirewallRule[];
+  onCreate: (rule: FirewallRule) => Promise<boolean>;
 }) {
-  const [id, setId] = useState("");
-  const [description, setDescription] = useState("");
-  const [log, setLog] = useState(false);
-  const [srcZone, setSrcZone] = useState("");
-  const [dstZone, setDstZone] = useState("");
-  const [sources, setSources] = useState("");
-  const [destinations, setDestinations] = useState("");
-  const [proto, setProto] = useState("tcp");
-  const [port, setPort] = useState("502");
-  const [policy, setPolicy] = useState(() => policyDraftFrom());
-  // New ICS filters start in learning mode, the safe default.
-  const [ics, setIcs] = useState(() => icsDraftFrom(undefined, "learn"));
+  const form = useConfigForm({
+    id: "", description: "", log: false, srcZone: "", dstZone: "", sources: "", destinations: "",
+    proto: "tcp", port: "502", policy: policyDraftFrom(), ics: icsDraftFrom(undefined, "learn"),
+  });
+  const { refreshForm } = form;
+  useEffect(() => { refreshForm({ rules: context, zones, globalMode, tagsInUse }); }, [refreshForm, context, zones, globalMode, tagsInUse]);
+  const [id, setId] = form.field("id");
+  const [description, setDescription] = form.field("description");
+  const [log, setLog] = form.field("log");
+  const [srcZone, setSrcZone] = form.field("srcZone");
+  const [dstZone, setDstZone] = form.field("dstZone");
+  const [sources, setSources] = form.field("sources");
+  const [destinations, setDestinations] = form.field("destinations");
+  const [proto, setProto] = form.field("proto");
+  const [port, setPort] = form.field("port");
+  const [policy, setPolicy] = form.field("policy");
+  const [ics, setIcs] = form.field("ics");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -338,16 +393,15 @@ export function CreateRuleForm({
       log: log || undefined,
     };
     setSaving(true);
-    await onCreate(rule);
+    const submitted = form.editor;
+    const ok = await onCreate(rule);
     setSaving(false);
-    setId("");
-    setDescription("");
-    setSources("");
-    setDestinations("");
+    if (ok) form.acceptFields(submitted, ["id", "description", "sources", "destinations"]);
   }
 
   return (
     <Card padding="lg" className="mt-6">
+      <ConfigEditNotice superseded={form.editor.superseded} />
       <h2 className="text-sm font-semibold text-(--text)">Create rule</h2>
       <div className="mt-3 grid gap-3 md:grid-cols-3">
         <input value={id} onChange={(e) => setId(e.target.value)} placeholder="id (e.g. mb-allow)" className="input-industrial" />
@@ -357,11 +411,13 @@ export function CreateRuleForm({
       <div className="mt-3 grid gap-3 md:grid-cols-4">
         <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
           <option value="">Source zone (any)</option>
+          {srcZone && !zones.some((z) => z.name === srcZone) && <option value={srcZone}>{srcZone} (no longer on server)</option>}
           {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
         </select>
         <NoZonesHint zones={zones} />
         <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
           <option value="">Dest zone (any)</option>
+          {dstZone && !zones.some((z) => z.name === dstZone) && <option value={dstZone}>{dstZone} (no longer on server)</option>}
           {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
         </select>
         <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial" />

@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
+import { useConfigForm } from "../../lib/use-config-form";
+import { sameConfig } from "../../lib/config-editor";
 
 import type { DataPlaneConfig, DPIExclusion } from "../../lib/api";
 import {
@@ -12,15 +15,37 @@ import {
 // The DPI section's editors: IT decoders, ICS decoders and exclusions.
 
 export function DPIProtocolModal({
+  context,
+  saving,
   protocols,
   onSave,
   onClose,
 }: {
+  context: DataPlaneConfig;
+  saving: boolean;
   protocols: Record<string, boolean>;
-  onSave: (p: Record<string, boolean>) => void;
+  onSave: (p: Record<string, boolean>) => Promise<DataPlaneConfig | null>;
   onClose: () => void;
 }) {
-  const [draft, setDraft] = useState<Record<string, boolean>>({ ...protocols });
+  const editor = useConfigEditor({ protocols, context });
+  const { cfg, setCfg, adoptConfig } = editor;
+  const draft = cfg.protocols;
+  const setDraft = (update: React.SetStateAction<typeof protocols>) => setCfg((c) => ({
+    ...c, protocols: typeof update === "function" ? update(c.protocols) : update,
+  }));
+  const latest = useRef(editor.editor);
+  latest.current = editor.editor;
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { adoptConfig({ protocols, context }); }, [adoptConfig, protocols, context]);
+
+  async function save() {
+    const submitted = editor.beginSave();
+    const saved = await onSave(draft);
+    if (!saved || !mounted.current) { editor.failSave(submitted); return; }
+    editor.acceptConfig(submitted, { protocols: saved.dpiProtocols ?? {}, context: saved });
+    if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
+  }
 
   function toggle(key: string) {
     setDraft((d) => ({ ...d, [key]: d[key] === false ? true : false }));
@@ -65,6 +90,7 @@ export function DPIProtocolModal({
           </div>
         </div>
 
+        <ConfigEditNotice superseded={editor.editor.superseded} />
         <div className="space-y-1">
           {IT_PROTOCOLS.map((p) => {
             const on = draft[p.key] !== false;
@@ -120,7 +146,8 @@ export function DPIProtocolModal({
             Cancel
           </button>
           <button
-            onClick={() => onSave(draft)}
+            onClick={save}
+            disabled={saving}
             className="rounded-xs bg-(--amber) px-3 py-1.5 text-xs font-medium text-white transition-ui hover:brightness-110"
           >
             Save
@@ -132,24 +159,47 @@ export function DPIProtocolModal({
 }
 
 export function ICSDPIConfigModal({
+  context,
+  saving,
   icsProtocols,
   parsing,
   onSave,
   onClose,
 }: {
+  context: DataPlaneConfig;
+  saving: boolean;
   icsProtocols: Record<string, boolean>;
   parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>;
   onSave: (
     p: Record<string, boolean>,
     parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>,
-  ) => void;
+  ) => Promise<DataPlaneConfig | null>;
   onClose: () => void;
 }) {
-  const [draft, setDraft] = useState<Record<string, boolean>>({
-    ...icsProtocols,
-  });
+  const editor = useConfigEditor({ protocols: icsProtocols, parsing, context });
+  const { cfg, setCfg, adoptConfig } = editor;
+  const draft = cfg.protocols;
+  const draftParsing = cfg.parsing;
+  const setDraft = (update: React.SetStateAction<Record<string, boolean>>) => setCfg((c) => ({
+    ...c, protocols: typeof update === "function" ? update(c.protocols) : update,
+  }));
+  const setDraftParsing = (update: React.SetStateAction<typeof parsing>) => setCfg((c) => ({
+    ...c, parsing: typeof update === "function" ? update(c.parsing) : update,
+  }));
+  const latest = useRef(editor.editor);
+  latest.current = editor.editor;
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { adoptConfig({ protocols: icsProtocols, parsing, context }); }, [adoptConfig, icsProtocols, parsing, context]);
   const [activeProto, setActiveProto] = useState<string | null>(null);
-  const [draftParsing, setDraftParsing] = useState({ ...parsing });
+
+  async function save() {
+    const submitted = editor.beginSave();
+    const saved = await onSave(draft, draftParsing);
+    if (!saved || !mounted.current) { editor.failSave(submitted); return; }
+    editor.acceptConfig(submitted, { protocols: saved.dpiIcsProtocols ?? {}, parsing: saved.dpiIcsParsing ?? {}, context: saved });
+    if (sameConfig(latest.current.cfg, submitted.cfg)) onClose();
+  }
 
   function toggle(key: string) {
     setDraft((d) => ({ ...d, [key]: d[key] === false ? true : false }));
@@ -199,6 +249,7 @@ export function ICSDPIConfigModal({
           </div>
         </div>
 
+        <ConfigEditNotice superseded={editor.editor.superseded} />
         <div className="space-y-1">
           {ICS_DPI_PROTOCOLS.map((p) => {
             const on = draft[p.key] !== false;
@@ -390,7 +441,8 @@ export function ICSDPIConfigModal({
             Cancel
           </button>
           <button
-            onClick={() => onSave(draft, draftParsing)}
+            onClick={save}
+            disabled={saving}
             className="rounded-xs bg-(--amber) px-3 py-1.5 text-xs font-medium text-white transition-ui hover:brightness-110"
           >
             Save
@@ -402,18 +454,40 @@ export function ICSDPIConfigModal({
 }
 
 export function DPIExclusionModal({
+  context,
+  saving,
   exclusions,
   onSave,
   onClose,
 }: {
+  context: DataPlaneConfig;
+  saving: boolean;
   exclusions: DPIExclusion[];
-  onSave: (e: DPIExclusion[]) => void;
+  onSave: (e: DPIExclusion[]) => Promise<DataPlaneConfig | null>;
   onClose: () => void;
 }) {
-  const [draft, setDraft] = useState<DPIExclusion[]>([...exclusions]);
-  const [newValue, setNewValue] = useState("");
-  const [newType, setNewType] = useState<"ip" | "cidr" | "domain">("ip");
-  const [newReason, setNewReason] = useState("");
+  const editor = useConfigEditor({ rows: exclusions, context });
+  const { cfg, setCfg, adoptConfig } = editor;
+  const draft = cfg.rows;
+  const setDraft = (rows: DPIExclusion[]) => setCfg((c) => ({ ...c, rows }));
+  const form = useConfigForm({ newValue: "", newType: "ip" as "ip" | "cidr" | "domain", newReason: "" });
+  const { refreshForm } = form;
+  const [newValue, setNewValue] = form.field("newValue");
+  const [newType, setNewType] = form.field("newType");
+  const [newReason, setNewReason] = form.field("newReason");
+  const latest = useRef({ editor: editor.editor, fields: form.editor.cfg.fields });
+  latest.current = { editor: editor.editor, fields: form.editor.cfg.fields };
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { adoptConfig({ rows: exclusions, context }); refreshForm(context); }, [adoptConfig, refreshForm, exclusions, context]);
+
+  async function save() {
+    const submitted = editor.beginSave();
+    const saved = await onSave(draft);
+    if (!saved || !mounted.current) { editor.failSave(submitted); return; }
+    editor.acceptConfig(submitted, { rows: saved.dpiExclusions ?? [], context: saved });
+    if (sameConfig(latest.current.editor.cfg, submitted.cfg) && !latest.current.fields.newValue && !latest.current.fields.newReason) onClose();
+  }
 
   function detectType(v: string): "ip" | "cidr" | "domain" {
     if (v.includes("/")) return "cidr";
@@ -454,6 +528,7 @@ export function DPIExclusionModal({
           entirely.
         </p>
 
+        <ConfigEditNotice superseded={editor.editor.superseded || form.editor.superseded} />
         <div className="flex gap-2 mb-4">
           <select
             value={newType}
@@ -552,7 +627,8 @@ export function DPIExclusionModal({
             Cancel
           </button>
           <button
-            onClick={() => onSave(draft)}
+            onClick={save}
+            disabled={saving}
             className="rounded-xs bg-(--amber) px-3 py-1.5 text-xs font-medium text-white transition-ui hover:brightness-110"
           >
             Save
