@@ -230,6 +230,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The HTTP scanning gate releases a held upload's object slot before its
+  final response reaches the client, so a following upload or the response's
+  download scan is not refused as busy by the previous upload.
 - Empty ICS function/service code fields now mean any code in both rule editors,
   without injecting zero from whitespace or separators. Invalid selector values
   block saving and preview, and clearing generic restrictions removes them.

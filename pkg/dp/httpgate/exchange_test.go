@@ -119,12 +119,15 @@ func TestResponseBeforeSendReturnsWatchesClient(t *testing.T) {
 // whether the upload completed and the pipelined request can be served.
 func TestUploadResponseBeforeFinalWriteReturnsKeepsConnection(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		scan bool
-		disk bool
+		name     string
+		scan     bool
+		disk     bool
+		download bool
 	}{
 		{name: "held-memory", scan: true},
 		{name: "held-disk", scan: true, disk: true},
+		{name: "held-memory-scanned-response", scan: true, download: true},
+		{name: "held-disk-scanned-response", scan: true, disk: true, download: true},
 		{name: "streamed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,7 +141,8 @@ func TestUploadResponseBeforeFinalWriteReturnsKeepsConnection(t *testing.T) {
 			defer release()
 			g := startGate(t, o, func(s *Settings) {
 				s.ScanUploads = tc.scan
-				s.ScanDownloads = false
+				s.ScanDownloads = tc.download
+				s.MaxConcurrentObjects = 1
 				if tc.disk {
 					s.MemoryThreshold = 1
 				}
@@ -146,12 +150,24 @@ func TestUploadResponseBeforeFinalWriteReturnsKeepsConnection(t *testing.T) {
 			c := g.client()
 			c.write(req)
 			c.write(getRequest("/second", "X-Pad: "+strings.Repeat("a", 20<<10)+"\r\n"))
+			if tc.scan {
+				// The origin has the upload bytes, but its sender still
+				// owns the spool and slot until the final Write returns.
+				// A completed response must not let another client race
+				// that release and be refused as busy.
+				expectEvent(t, g.events.next(t), avscan.Upload, avscan.Clean, "", avscan.Deliver)
+				c.expectSilence(100 * time.Millisecond)
+				release()
+			}
 			resp, rb := c.response("POST")
 			if resp.StatusCode != 200 || string(rb) != "path=/first" {
 				t.Fatalf("first response: status %d body %q", resp.StatusCode, rb)
 			}
-			// Reading the full first response proves stopSend ran while
-			// the final upload Write is still latched.
+			if tc.download {
+				expectEvent(t, g.events.next(t), avscan.Download, avscan.Clean, "", avscan.Deliver)
+			}
+			// An unheld upload can respond while its Write is latched:
+			// it has no object slot that completion must release.
 			release()
 			resp, rb = c.response("GET")
 			if resp.StatusCode != 200 || string(rb) != "path=/second" {

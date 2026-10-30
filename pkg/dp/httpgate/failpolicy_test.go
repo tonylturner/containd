@@ -314,6 +314,48 @@ func TestBusyObjectLimitFollowsPolicy(t *testing.T) {
 	})
 }
 
+// A refused held upload must release its slot before the refusal, not
+// after draining the connection: another connection can arrive meanwhile.
+func TestRefusedUploadReleasesObjectBeforeResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+	}{
+		{"infected", 403},
+		{"disk", 403},
+		{"dial", 502},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := echoOrigin(t, &bodyLog{})
+			if tc.name == "dial" {
+				o.dial = func(context.Context, netip.AddrPort, netip.AddrPort) (net.Conn, error) {
+					return nil, errors.New("dial failed")
+				}
+			}
+			g := startGate(t, o, func(s *Settings) {
+				s.ScanDownloads = false
+				s.MaxConcurrentObjects = 1
+				if tc.name == "disk" {
+					s.MemoryThreshold = 1
+					s.SpoolDir = "/nonexistent/httpgate-spool"
+				}
+			})
+			c := g.client()
+			body := []byte("clean upload")
+			if tc.name == "infected" {
+				body = []byte(infectedMarker)
+			}
+			c.write(requestCL("POST", "/refused", "", body))
+			if resp, _ := c.response("POST"); resp.StatusCode != tc.status {
+				t.Fatalf("status %d, want %d", resp.StatusCode, tc.status)
+			}
+			if n := g.srv.heldObjects.Load(); n != 0 {
+				t.Fatalf("%d objects still held after the refusal", n)
+			}
+		})
+	}
+}
+
 // MaxConnections is a hard admission bound: a connection over it is
 // closed at accept time with nothing allocated for it, a flood of them
 // yields one bounded-rate event, and the limit-holding connection keeps

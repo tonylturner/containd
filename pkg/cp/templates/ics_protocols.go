@@ -75,7 +75,7 @@ func ModbusRegisterGuard(allowedRanges []string) []config.Rule {
 		{
 			ID:          "tpl-modbus-register-allow",
 			Description: fmt.Sprintf("Allow Modbus access to register ranges %v", allowedRanges),
-			Protocols:   []config.Protocol{{Name: "tcp", Port: "502"}},
+			Protocols:   []config.Protocol{{Name: "tcp", Port: strconv.Itoa(ics.ModbusPort)}},
 			ICS: config.ICSPredicate{
 				Protocol:  "modbus",
 				Addresses: allowedRanges,
