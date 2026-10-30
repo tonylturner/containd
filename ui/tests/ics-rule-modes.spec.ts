@@ -100,12 +100,14 @@ for (const path of ["/ics/", "/firewall/"]) {
     const loaded = page.waitForResponse((r) => r.url().includes("firewall/shadow-counters"));
     await page.goto(path);
     await loaded;
-    await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText(since);
+    await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText(`Applied-policy shadow counters since ${since}`);
     const trial = page.getByLabel("Shadow matches of trial", { exact: true });
     await expect(trial).toContainText("12 messages");
     await expect(trial).toContainText("10 would allow · 2 would deny");
+    await expect(trial).not.toContainText("Applied policy");
     await expect(page.getByLabel("Shadow matches of zero", { exact: true })).toContainText("0 messages");
     await expect(page.getByLabel("Shadow matches of pending", { exact: true })).toContainText("not applied yet");
+    await expect(page.getByLabel("Shadow matches of pending", { exact: true }).getByRole("link", { name: "Monitor events" })).toBeVisible();
     if (process.env.RULE_MODES_SCREENSHOTS) {
       await page.screenshot({ path: `${process.env.RULE_MODES_SCREENSHOTS}/${path.replaceAll("/", "")}-shadow.png`, fullPage: true, animations: "disabled" });
     }
@@ -210,14 +212,15 @@ for (const path of ["/ics/", "/firewall/"]) {
   });
 }
 
-test("candidate promotion preserves applied monitor counts and labels them separately", async ({ page }) => {
+test("candidate promotion preserves applied monitor counts without a repeated policy label", async ({ page }) => {
   await mock(page, { ...snapshot, rules: [...snapshot.rules,
     { ruleId: "active", shadowMatches: 3, wouldAllow: 0, wouldDeny: 3 }] });
   await page.goto("/ics/");
   const active = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "active", exact: true }) });
   await expect(active.getByText("Enforce", { exact: true })).toBeVisible();
   await expect(active.getByLabel("Shadow matches of active", { exact: true })).toContainText("3 messages");
-  await expect(active).toContainText("Applied policy (candidate changed)");
+  await expect(active.getByLabel("Shadow matches of active", { exact: true })).not.toContainText("Applied policy");
+  await expect(active.getByRole("link", { name: "Monitor events" })).toBeVisible();
 });
 
 for (const path of ["/ics/", "/firewall/"]) {

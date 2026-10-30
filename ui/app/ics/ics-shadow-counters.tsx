@@ -48,7 +48,6 @@ export function ShadowCountersCell({ rule, globalMode, counters }: {
       : <>
         <div>{count.shadowMatches.toLocaleString()} messages</div>
         <div>{count.wouldAllow.toLocaleString()} would allow · {count.wouldDeny.toLocaleString()} would deny</div>
-        <div className="text-(--text-muted)">Applied policy{!monitor && " (candidate changed)"}</div>
       </>}
     <Link href={`/events/?${params}`} className="block text-(--amber) hover:underline">Monitor events</Link>
   </div>;
