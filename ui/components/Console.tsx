@@ -429,8 +429,6 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
 
       socket.onopen = () => {
         setConnected(true);
-        term.writeln("containd in-app CLI. Type 'show version'.");
-        term.write(prompt);
       };
 
       socket.onmessage = (ev) => {

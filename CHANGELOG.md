@@ -241,6 +241,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The web console displays its server greeting once, followed by a clean prompt.
 - Management URL builders avoid duplicate base-path prefixes when a reverse
   proxy has already rewritten API or asset paths.
 - Console ticket upgrades work through proxies that omit the published port
