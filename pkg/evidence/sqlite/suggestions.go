@@ -405,3 +405,34 @@ func (s *Store) MarkStaged(ctx context.Context, req learn.ApplyRequest) error {
 		return err
 	})
 }
+
+// ReleaseStage releases only a known failed candidate mutation. Lost completion
+// after a successful mutation must instead retry the frozen request.
+func (s *Store) ReleaseStage(ctx context.Context, req learn.ApplyRequest) error {
+	if err := ValidateApply(req); err != nil {
+		return err
+	}
+	b, err := encode(req)
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, func(tx *sql.Tx) error {
+		var prior []byte
+		var completed bool
+		err := tx.QueryRowContext(ctx, `SELECT request,completed FROM stage_requests WHERE id=?`, req.RequestID).Scan(&prior, &completed)
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(prior, b) {
+			return learn.ErrStale
+		}
+		if completed {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM stage_requests WHERE id=?`, req.RequestID)
+		return err
+	})
+}

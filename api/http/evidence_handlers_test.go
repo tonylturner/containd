@@ -23,6 +23,7 @@ type evidenceStageEngine struct {
 	resolveError   error
 	completeError  error
 	resolves, done int
+	releases       int
 }
 
 func (e *evidenceStageEngine) Learn(_ context.Context, method, path, _ string, body json.RawMessage) (json.RawMessage, error) {
@@ -40,6 +41,9 @@ func (e *evidenceStageEngine) Learn(_ context.Context, method, path, _ string, b
 			return nil, e.resolveError
 		}
 		return json.Marshal(e.frozen)
+	case "/learn/stage/release":
+		e.releases++
+		return nil, nil
 	case "/learn/stage/complete":
 		e.done++
 		return nil, e.completeError
@@ -129,7 +133,7 @@ func TestEvidenceStageConflictRollsBackWholeBatch(t *testing.T) {
 	}
 	e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, frozen: []learn.Suggestion{s}}
 	rec := requestStage(t, NewServerWithEngine(store, nil, e), "POST", "/learn/apply", learn.ApplyRequest{RequestID: "conflict", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}})
-	if rec.Code != 409 || e.done != 0 {
+	if rec.Code != 409 || e.done != 0 || e.releases != 1 {
 		t.Fatalf("conflict: %d %s", rec.Code, rec.Body)
 	}
 	assertConfigResponseHeader(t, rec, "")

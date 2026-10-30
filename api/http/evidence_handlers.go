@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	engineclient "github.com/tonylturner/containd/api/engine"
@@ -172,6 +173,13 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 			return nil
 		})
 		if err != nil {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
+			_, releaseErr := client.Learn(cleanup, http.MethodPost, "/learn/stage/release", c.GetString("actor"), body)
+			cancel()
+			if releaseErr != nil {
+				evidenceHTTPError(c, releaseErr)
+				return
+			}
 			if errors.Is(err, conflict) {
 				apiError(c, 409, err.Error())
 			} else {

@@ -61,7 +61,7 @@ func evidencePage(w http.ResponseWriter, r *http.Request) (evidence.PageRequest,
 	return p, true
 }
 func (a *evidenceAPI) register(mux *http.ServeMux) {
-	for _, pattern := range []string{"POST /internal/learn/watches", "GET /internal/learn/watches", "GET /internal/learn/watches/{id}", "POST /internal/learn/watches/{id}/stop", "GET /internal/learn/datasets", "GET /internal/learn/datasets/{id}", "GET /internal/learn/datasets/{id}/observations", "DELETE /internal/learn/datasets/{id}", "POST /internal/learn/generate", "GET /internal/learn/suggestions", "GET /internal/learn/suggestions/{id}", "POST /internal/learn/suggestions/{id}/review", "GET /internal/learn/counters", "POST /internal/learn/stage/resolve", "POST /internal/learn/stage/complete"} {
+	for _, pattern := range []string{"POST /internal/learn/watches", "GET /internal/learn/watches", "GET /internal/learn/watches/{id}", "POST /internal/learn/watches/{id}/stop", "GET /internal/learn/datasets", "GET /internal/learn/datasets/{id}", "GET /internal/learn/datasets/{id}/observations", "DELETE /internal/learn/datasets/{id}", "POST /internal/learn/generate", "GET /internal/learn/suggestions", "GET /internal/learn/suggestions/{id}", "POST /internal/learn/suggestions/{id}/review", "GET /internal/learn/counters", "POST /internal/learn/stage/resolve", "POST /internal/learn/stage/complete", "POST /internal/learn/stage/release"} {
 		mux.HandleFunc(pattern, a.serve)
 	}
 }
@@ -146,7 +146,7 @@ func (a *evidenceAPI) serve(w http.ResponseWriter, r *http.Request) {
 		result, err = a.store.ReviewSuggestion(ctx, actor, req)
 	case "GET /internal/learn/counters":
 		result, err = a.store.Counters(ctx)
-	case "POST /internal/learn/stage/resolve", "POST /internal/learn/stage/complete":
+	case "POST /internal/learn/stage/resolve", "POST /internal/learn/stage/complete", "POST /internal/learn/stage/release":
 		var req learn.ApplyRequest
 		if !evidenceBody(w, r, &req) {
 			return
@@ -157,8 +157,10 @@ func (a *evidenceAPI) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.Pattern == "POST /internal/learn/stage/resolve" {
 			result, err = a.store.ResolveForStage(ctx, req)
-		} else {
+		} else if r.Pattern == "POST /internal/learn/stage/complete" {
 			err = a.store.MarkStaged(ctx, req)
+		} else {
+			err = a.store.ReleaseStage(ctx, req)
 		}
 	default:
 		http.NotFound(w, r)

@@ -8366,3 +8366,48 @@ x-internal-paths:
             text/plain:
               schema:
                 type: string
+  /internal/learn/stage/release:
+    post:
+      summary: Release a reservation after a known failed candidate mutation
+      security: []
+      tags:
+      - Learn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnApplyRequest'
+      responses:
+        '204':
+          description: Uncompleted reservation released; completed receipts remain intact
+        '400':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
