@@ -1,6 +1,7 @@
 "use client";
 
 import { ReactNode } from "react";
+import { uiRoutePath } from "../lib/ui-navigation";
 
 export type NavItem = { href: string; label: string };
 export type NavGroup = {
@@ -150,7 +151,7 @@ export function docsHrefForPath(pathname: string): string {
     { prefix: "/system/settings/", href: "/docs/api-reference/" },
     { prefix: "/system/users/", href: "/docs/api-reference/" },
   ];
-  const match = mappings.find((entry) => pathname.startsWith(entry.prefix));
+  const match = mappings.find((entry) => pathname.startsWith(uiRoutePath(entry.prefix)));
   return match?.href ?? "/docs/";
 }
 

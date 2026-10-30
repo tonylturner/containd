@@ -1,5 +1,15 @@
 import { expect, test } from "@playwright/test";
-import { navigateToUI, uiNavigationPath } from "../lib/ui-navigation";
+import { navigateToUI, uiNavigationPath, uiRoutePath } from "../lib/ui-navigation";
+
+test("route paths strip only the mount known by the runtime base-path authority", () => {
+  for (const path of ["/", "/system/services/dns/", "/zones/"]) {
+    expect(uiRoutePath(path)).toBe(path);
+    expect(uiRoutePath(`/containd${path}`)).toBe(path);
+  }
+  expect(uiRoutePath("/containd", "/containd/login/")).toBe("/");
+  expect(uiRoutePath("/containd-other/zones/")).toBe("/containd-other/zones/");
+  expect(uiRoutePath("/zones/containd/")).toBe("/zones/containd/");
+});
 
 for (const destination of ["/login?reason=expired&next=%2Fassets%2F", "/login?reason=logout", "/forbidden", "/"]) {
   test(`navigation preserves the runtime mount for ${destination}`, () => {

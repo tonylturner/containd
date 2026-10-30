@@ -1,12 +1,17 @@
 import { staticAssetURL } from "./api-core";
 
+/** Read a route without the runtime mount used by the current UI URL. */
+export function uiRoutePath(path: string, pathname = path): string {
+  const base = staticAssetURL("/", pathname).slice(0, -1);
+  return base && (path === base || path.startsWith(`${base}/`))
+    ? path.slice(base.length) || "/" : path;
+}
+
 /** Resolve an internal destination under the UI's runtime mount, exactly once. */
 export function uiNavigationPath(path: string, pathname: string): string {
   const internal = path.startsWith("/") && !path.startsWith("//") && !path.includes("\\") ? path : "/";
   const parsed = new URL(internal, "https://ui.invalid");
-  const base = staticAssetURL("/", pathname).slice(0, -1);
-  const route = base && (parsed.pathname === base || parsed.pathname.startsWith(`${base}/`))
-    ? parsed.pathname.slice(base.length) || "/" : parsed.pathname;
+  const route = uiRoutePath(parsed.pathname, pathname);
   return `${staticAssetURL(route, pathname)}${parsed.search}${parsed.hash}`;
 }
 
