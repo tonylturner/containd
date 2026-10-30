@@ -85,7 +85,10 @@ func TestInventoryAssetsClient(t *testing.T) {
 					http.NotFound(w, r)
 					return
 				}
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tc.status)
+				// Static fixtures deliberately include malformed JSON to exercise the client decoder.
+				// nosemgrep: go.lang.security.audit.xss.no-io-writestring-to-responsewriter.no-io-writestring-to-responsewriter
 				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer srv.Close()
@@ -420,10 +423,14 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		if !strings.Contains(r.Header.Get("Content-Type"), "multipart/form-data") {
 			t.Fatalf("analyze content-type = %q", r.Header.Get("Content-Type"))
 		}
-		_ = json.NewEncoder(w).Encode(pcap.AnalysisResult{PacketCount: 1, Protocols: map[string]int{"dns": 1}})
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Error(err)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(pcap.ImportResult{Stats: pcap.AnalysisResult{PacketCount: 1, Protocols: map[string]int{"dns": 1}}})
 	})
 	mux.HandleFunc("/internal/pcap/analyze/capture-1.pcap", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(pcap.AnalysisResult{PacketCount: 2, Protocols: map[string]int{"modbus": 1}})
+		_ = json.NewEncoder(w).Encode(pcap.ImportResult{Stats: pcap.AnalysisResult{PacketCount: 2, Protocols: map[string]int{"modbus": 1}}})
 	})
 	mux.HandleFunc("/internal/ruleset_status", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(dpengine.RulesetStatus{Ruleset: "loaded", ICSCoverage: []coverage.Rule{
@@ -509,11 +516,11 @@ func TestHTTPClientAdditionalEndpoints(t *testing.T) {
 		t.Fatalf("DownloadPcap body = %q, %v", string(body), err)
 	}
 	analysis, err := c.AnalyzePcap(ctx, "capture-1.pcap", strings.NewReader("pcap-bytes"))
-	if err != nil || analysis.PacketCount != 1 || analysis.Protocols["dns"] != 1 {
+	if err != nil || analysis.Stats.PacketCount != 1 || analysis.Stats.Protocols["dns"] != 1 {
 		t.Fatalf("AnalyzePcap = %#v, %v", analysis, err)
 	}
 	analysis, err = c.AnalyzePcapByName(ctx, "capture-1.pcap")
-	if err != nil || analysis.PacketCount != 2 || analysis.Protocols["modbus"] != 1 {
+	if err != nil || analysis.Stats.PacketCount != 2 || analysis.Stats.Protocols["modbus"] != 1 {
 		t.Fatalf("AnalyzePcapByName = %#v, %v", analysis, err)
 	}
 	ruleset, err := c.RulesetStatus(ctx)
@@ -589,7 +596,10 @@ func TestConfigureServicesWarnings(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&svc); err != nil {
 					t.Errorf("decode services: %v", err)
 				}
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tc.status)
+				// Static fixtures deliberately include malformed JSON to exercise the client decoder.
+				// nosemgrep: go.lang.security.audit.xss.no-io-writestring-to-responsewriter.no-io-writestring-to-responsewriter
 				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer srv.Close()

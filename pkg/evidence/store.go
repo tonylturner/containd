@@ -23,6 +23,7 @@ const (
 	WithheldDNP3CountOnly    WithheldReason = "dnp3_count_only"
 	WithheldDNP3Variation    WithheldReason = "dnp3_variation_wildcard"
 	WithheldDNP3Indexless    WithheldReason = "dnp3_indexless_control"
+	WithheldDNP3Values       WithheldReason = "dnp3_values"
 	WithheldCorrelation      WithheldReason = "unrepresentable_correlation"
 	WithheldIECQualifier     WithheldReason = "iec104_qualifier"
 	WithheldIECValue         WithheldReason = "iec104_value"
@@ -54,6 +55,7 @@ type Counters struct {
 	EvictedRecords  uint64                    `json:"evictedRecords"`
 	EvictedBytes    uint64                    `json:"evictedBytes"`
 	ExpiredRecords  uint64                    `json:"expiredRecords"`
+	LostBatches     uint64                    `json:"lostBatches"`
 	RejectedParents uint64                    `json:"rejectedParents"`
 	Withheld        map[WithheldReason]uint64 `json:"withheld"`
 }
@@ -67,7 +69,8 @@ type IngestRequest struct {
 	Seal      bool          `json:"seal"`
 	// Gaps retains capture/queue loss that cannot be attributed to a parent.
 	// Codes are bounded metadata, never packet payloads or free-form logs.
-	Gaps []string `json:"gaps,omitempty"`
+	Gaps        []string `json:"gaps,omitempty"`
+	LostBatches uint64   `json:"lostBatches,omitempty"`
 }
 
 // IngestResult exposes admission loss, including an entire rejected parent.

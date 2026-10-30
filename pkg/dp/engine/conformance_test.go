@@ -134,7 +134,7 @@ func TestConformanceVerdictMatrix(t *testing.T) {
 						} else if len(decisions) != 0 {
 							t.Fatalf("tolerant allow decisions: %+v", decisions)
 						}
-						if len(f.e.Learner().Profiles()) != 0 || len(f.e.Inventory().List()) == 0 {
+						if f.e.learnWatch.Load() != nil || len(f.e.Inventory().List()) == 0 {
 							t.Fatal("findings must remain in inventory but never enter learner")
 						}
 						select {

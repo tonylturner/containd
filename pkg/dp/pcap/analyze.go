@@ -7,31 +7,29 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
-	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
-	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
-	"github.com/tonylturner/containd/pkg/dp/learn"
 )
 
 // AnalysisResult holds the outcome of offline PCAP analysis.
 type AnalysisResult struct {
-	Identifications []Identification `json:"identifications"`
-	observed        map[string]bool
-	Events          []dpi.Event    `json:"events"`
-	Flows           []FlowSummary  `json:"flows"`
-	Protocols       map[string]int `json:"protocols"`
-	Duration        time.Duration  `json:"duration"`
-	PacketCount     int            `json:"packetCount"`
-	ByteCount       int            `json:"byteCount"`
+	Identifications  []Identification `json:"identifications"`
+	onEvents         func([]dpi.Event, int)
+	maxDisplayEvents int
+	Events           []dpi.Event    `json:"events"`
+	Flows            []FlowSummary  `json:"flows"`
+	Protocols        map[string]int `json:"protocols"`
+	Duration         time.Duration  `json:"duration"`
+	PacketCount      int            `json:"packetCount"`
+	ByteCount        int            `json:"byteCount"`
 	// Truncated reports incomplete records or captured packets. A partial
 	// record header cannot safely be attributed to any particular flow.
-	Truncated bool `json:"truncated"`
+	Truncated        bool `json:"truncated"`
+	DisplayTruncated bool `json:"displayTruncated"`
 }
 
 // FlowSummary describes a single network flow observed in the PCAP.
@@ -45,15 +43,8 @@ type FlowSummary struct {
 	LastSeen  time.Time `json:"lastSeen"`
 }
 
-// eventCallback is called for each DPI event with the source and destination
-// IPs of the packet that produced it. Used by AnalyzeForPolicy to feed events
-// to the learner without re-parsing the PCAP.
-type eventCallback func(srcIP, dstIP string, ev dpi.Event)
-
-// analyzeCore is the shared PCAP analysis loop used by both Analyze and
-// AnalyzeForPolicy. If onEvent is non-nil it is called for each DPI event
-// with the packet-level source and destination IPs.
-func analyzeCore(r io.Reader, opts AnalysisOptions, onEvent eventCallback, decoders ...dpi.Decoder) (*AnalysisResult, error) {
+// analyzeCore parses offline traffic without generating permission.
+func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*AnalysisResult, error) {
 	reader, err := newPCAPReader(r)
 	if err != nil {
 		return nil, fmt.Errorf("pcap header: %w", err)
@@ -76,9 +67,9 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, onEvent eventCallback, decod
 	flowEvents := make(map[string]int)
 
 	result := &AnalysisResult{
-		Events:          []dpi.Event{},
+		Events:   []dpi.Event{},
+		onEvents: opts.OnEvents, maxDisplayEvents: opts.MaxDisplayEvents,
 		Identifications: []Identification{},
-		observed:        map[string]bool{},
 		Protocols:       make(map[string]int),
 	}
 
@@ -103,12 +94,15 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, onEvent eventCallback, decod
 		if ts.After(watermark) {
 			watermark = ts
 		}
-		observer.record(observer.observer.Sweep(opts.Now()), result, flowEvents, onEvent)
+		observer.record(observer.observer.Sweep(opts.Now()), result, flowEvents)
 		pkt, ok := decodeEthernetPacket(data)
 		if !ok {
 			continue
 		}
 		hash, state, reoriented := analysisFlowState(flows, pkt, ts)
+		if opts.MaxFlows > 0 && len(flows) > opts.MaxFlows {
+			return nil, fmt.Errorf("analysis flow budget exceeded")
+		}
 		for i := range reoriented {
 			old := &reoriented[i]
 			events, _ := mgr.OnFlowEnd(old)
@@ -118,18 +112,18 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, onEvent eventCallback, decod
 			// Summaries use wire tuples independently of orientation.
 			key := old.Key
 			key.Dir = flow.DirForward
-			recordAnalysisEvents(result, flowEvents, key.Hash(), key.SrcIP.String(), key.DstIP.String(), events, onEvent)
+			recordAnalysisEvents(result, flowEvents, key.Hash(), events)
 		}
-		observer.record(observer.packet(pkt, state, ts, truncated), result, flowEvents, onEvent)
+		observer.record(observer.packet(pkt, state, ts, truncated), result, flowEvents)
 		var events []dpi.Event
 		if pkt.Invalid == "" && !truncated {
 			events = analyzePacket(mgr, sessions, state, pkt, ts)
 		}
-		recordAnalysisEvents(result, flowEvents, hash, pkt.SrcIP.String(), pkt.DstIP.String(), events, onEvent)
+		recordAnalysisEvents(result, flowEvents, hash, events)
 	}
 
-	observer.record(observer.observer.Drain(), result, flowEvents, onEvent)
-	finalizeAnalysisFlows(mgr, flows, result, flowEvents, onEvent)
+	observer.record(observer.observer.Drain(), result, flowEvents)
+	finalizeAnalysisFlows(mgr, flows, result, flowEvents)
 
 	result.Flows = buildFlowSummaries(flows, flowEvents)
 
@@ -222,26 +216,30 @@ func analyzePacket(mgr *dpi.Manager, sessions *offlineSessions, state *flow.Stat
 	return events
 }
 
-func recordAnalysisEvents(result *AnalysisResult, flowEvents map[string]int, hash, srcStr, dstStr string, events []dpi.Event, onEvent eventCallback) {
+func recordAnalysisEvents(result *AnalysisResult, flowEvents map[string]int, hash string, events []dpi.Event) {
+	if result.onEvents != nil {
+		result.onEvents(events, result.PacketCount)
+	}
 	for _, ev := range events {
-		if onEvent != nil {
-			onEvent(srcStr, dstStr, ev)
-		}
 		if ev.Proto != eventfields.ProtoIdentify {
 			result.Protocols[ev.Proto]++
 		}
 	}
-	result.Events = append(result.Events, events...)
 	flowEvents[hash] += len(events)
+	if result.maxDisplayEvents > 0 && len(result.Events)+len(events) > result.maxDisplayEvents {
+		result.DisplayTruncated = true
+		events = events[:max(0, result.maxDisplayEvents-len(result.Events))]
+	}
+	result.Events = append(result.Events, events...)
 }
 
-func finalizeAnalysisFlows(mgr *dpi.Manager, flows map[string]*flow.State, result *AnalysisResult, flowEvents map[string]int, onEvent eventCallback) {
+func finalizeAnalysisFlows(mgr *dpi.Manager, flows map[string]*flow.State, result *AnalysisResult, flowEvents map[string]int) {
 	for hash, state := range flows {
 		events, _ := mgr.OnFlowEnd(state)
 		for i := range events {
 			events[i].Connection = state.Connection.Load()
 		}
-		recordAnalysisEvents(result, flowEvents, hash, state.Key.SrcIP.String(), state.Key.DstIP.String(), events, onEvent)
+		recordAnalysisEvents(result, flowEvents, hash, events)
 	}
 }
 
@@ -282,60 +280,7 @@ func Analyze(r io.Reader, decoders ...dpi.Decoder) (*AnalysisResult, error) {
 
 // AnalyzeWithOptions analyzes with a caller-owned rule snapshot and clock.
 func AnalyzeWithOptions(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*AnalysisResult, error) {
-	return analyzeCore(r, opts, nil, decoders...)
-}
-
-// PolicyAnalysis holds the outcome of PCAP-to-policy analysis, combining
-// the standard analysis stats with auto-generated firewall rules.
-type PolicyAnalysis struct {
-	Rules        []config.Rule          `json:"rules"`
-	Profiles     []learn.LearnedProfile `json:"profiles"`
-	Stats        AnalysisResult         `json:"stats"`
-	EventSummary map[string]int         `json:"eventSummary"`
-}
-
-// AnalyzeForPolicy reads a PCAP file, runs DPI analysis, and generates
-// allowlist firewall rules from the observed traffic. Rules are returned
-// for review and are not auto-applied.
-func AnalyzeForPolicy(r io.Reader, decoders ...dpi.Decoder) (*PolicyAnalysis, error) {
-	learner := learn.New()
-	eventSummary := make(map[string]int)
-
-	type candidate struct {
-		src, dst string
-		ev       dpi.Event
-	}
-	var candidates []candidate
-	onEvent := func(srcIP, dstIP string, ev dpi.Event) {
-		if ev.Proto == eventfields.ProtoIdentify {
-			return
-		}
-		eventSummary[ev.Proto]++
-		// IT/utility traffic remains visible in analysis, not ICS policy.
-		// IEC104 is also summarised but never auto-learned.
-		if ics.Learnable(strings.ToLower(ev.Proto)) {
-			candidates = append(candidates, candidate{srcIP, dstIP, ev})
-		}
-	}
-
-	result, err := analyzeCore(r, AnalysisOptions{}, onEvent, decoders...)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, c := range candidates {
-		if c.ev.Connection != nil && result.observed[c.ev.Connection.Key] {
-			continue
-		}
-		learner.RecordEvent(c.src, c.dst, c.ev)
-	}
-
-	return &PolicyAnalysis{
-		Rules:        learner.GenerateRules(),
-		Profiles:     learner.Profiles(),
-		Stats:        *result,
-		EventSummary: eventSummary,
-	}, nil
+	return analyzeCore(r, opts, decoders...)
 }
 
 // decodeEthernetPacket strips the Ethernet (and one 802.1Q) header and

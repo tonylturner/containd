@@ -4,8 +4,10 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -14,7 +16,6 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
-	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 )
 
@@ -277,68 +278,58 @@ func replayPCAPHandler(engine EngineClient) gin.HandlerFunc {
 	}
 }
 
+type PcapImportClient interface {
+	AnalyzePcap(context.Context, string, io.Reader) (*pcap.ImportResult, error)
+	AnalyzePcapByName(context.Context, string) (*pcap.ImportResult, error)
+}
+
 func analyzePCAPUploadHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if err := c.Request.ParseMultipartForm(64 << 20); err != nil {
-			apiError(c, http.StatusBadRequest, "invalid multipart form")
+		client, ok := engine.(PcapImportClient)
+		if !ok {
+			apiError(c, 503, "engine evidence unavailable")
 			return
 		}
-		file, _, err := c.Request.FormFile("file")
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 65<<20)
+		if err := c.Request.ParseMultipartForm(1 << 20); err != nil {
+			apiError(c, 400, "invalid multipart form")
+			return
+		}
+		if c.Request.MultipartForm != nil {
+			defer func() {
+				if err := c.Request.MultipartForm.RemoveAll(); err != nil {
+					slog.Warn("multipart cleanup failed", "error", err)
+				}
+			}()
+		}
+		file, header, err := c.Request.FormFile("file")
 		if err != nil {
-			apiError(c, http.StatusBadRequest, "file required")
+			apiError(c, 400, "file required")
 			return
 		}
 		defer file.Close()
-		var magic [4]byte
-		if _, err := io.ReadFull(file, magic[:]); err != nil {
-			apiError(c, http.StatusBadRequest, "file too small or unreadable")
-			return
-		}
-		switch {
-		case magic == [4]byte{0xd4, 0xc3, 0xb2, 0xa1}:
-		case magic == [4]byte{0xa1, 0xb2, 0xc3, 0xd4}:
-		case magic == [4]byte{0x0a, 0x0d, 0x0d, 0x0a}:
-		default:
-			apiError(c, http.StatusBadRequest, "not a valid pcap/pcapng file")
-			return
-		}
-		if _, err := file.Seek(0, io.SeekStart); err != nil {
-			apiError(c, http.StatusInternalServerError, "failed to rewind file")
-			return
-		}
-		result, err := pcap.AnalyzeForPolicy(file, dpengine.DefaultDecoders()...)
+		result, err := client.AnalyzePcap(c.Request.Context(), header.Filename, file)
 		if err != nil {
-			apiError(c, http.StatusBadRequest, "analysis failed: "+err.Error())
+			evidenceHTTPError(c, err)
 			return
 		}
-		auditLog(c, audit.Record{Action: "pcap.analyze", Target: "upload"})
-		c.JSON(http.StatusOK, result)
+		auditLog(c, audit.Record{Action: "pcap.analyze", Target: result.Dataset.ID})
+		c.JSON(200, result)
 	}
 }
-
 func analyzePCAPNameHandler(engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		name := strings.TrimSpace(c.Param("name"))
-		if name == "" {
-			apiError(c, http.StatusBadRequest, "name required")
+		client, ok := engine.(PcapImportClient)
+		if !ok {
+			apiError(c, 503, "engine evidence unavailable")
 			return
 		}
-		if engine == nil {
-			apiError(c, http.StatusBadRequest, "engine unavailable")
-			return
-		}
-		resp, err := engine.DownloadPcap(c.Request.Context(), name)
+		result, err := client.AnalyzePcapByName(c.Request.Context(), c.Param("name"))
 		if err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+			evidenceHTTPError(c, err)
 			return
 		}
-		defer resp.Body.Close()
-		result, err := pcap.AnalyzeForPolicy(resp.Body, dpengine.DefaultDecoders()...)
-		if err != nil {
-			apiError(c, http.StatusBadRequest, "analysis failed: "+err.Error())
-			return
-		}
-		auditLog(c, audit.Record{Action: "pcap.analyze", Target: name})
-		c.JSON(http.StatusOK, result)
+		auditLog(c, audit.Record{Action: "pcap.analyze", Target: result.Dataset.ID})
+		c.JSON(200, result)
 	}
 }

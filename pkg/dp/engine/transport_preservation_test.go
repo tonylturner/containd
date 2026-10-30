@@ -3,21 +3,68 @@
 package engine
 
 import (
+	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
-func TestTransportReconfigurePreservesLearnedProfiles(t *testing.T) {
+func TestInspectionSnapshotDuringReconfigure(t *testing.T) {
 	e, _, _ := newTransportTest(t, &transportCTFake{})
-	e.Learner().RecordEvent("10.10.0.5", "10.20.0.4", dpi.Event{Proto: "modbus", Kind: "request",
-		Attributes: map[string]any{"function_code": uint8(3), "unit_id": uint8(1), "address": uint16(10), "quantity": uint16(2)}})
-	if len(e.Learner().Profiles()) != 1 {
-		t.Fatal("fixture did not learn")
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	readers.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				inputs := e.InspectionSnapshot()
+				if len(inputs.Parsing) != 4 {
+					t.Error("partial parsing profile")
+					return
+				}
+			}
+		}
+	})
+	defer func() { close(stop); readers.Wait() }()
+	for range 10 {
+		fresh, err := New(Config{Events: e.Events()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Reconfigure(fresh); err != nil {
+			t.Fatal(err)
+		}
 	}
-	learner := e.Learner()
+}
+
+func TestInspectionSnapshotCreatesIndependentOfflineDecoders(t *testing.T) {
+	e, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := e.InspectionSnapshot()
+	fresh, err := inputs.NewDecoders()
+	if err != nil || len(fresh) != len(inputs.Decoders) {
+		t.Fatal("offline registry changed enabled protocols", err)
+	}
+	for i := range fresh {
+		// Zero-sized stateless decoder pointers may legally compare equal.
+		if reflect.TypeOf(fresh[i]).Elem().Size() > 0 && fresh[i] == inputs.Decoders[i] {
+			t.Fatal("offline import shares live decoder state")
+		}
+	}
+}
+
+func TestTransportReconfigurePreservesExplicitWatchHook(t *testing.T) {
+	e, _, _ := newTransportTest(t, &transportCTFake{})
+	e.SetLearnWatchHook(func(*flow.State, []dpi.Event) {})
+	hook := e.learnWatch.Load()
 	fresh, err := New(Config{Events: e.Events()})
 	if err != nil {
 		t.Fatal(err)
@@ -25,8 +72,8 @@ func TestTransportReconfigurePreservesLearnedProfiles(t *testing.T) {
 	if err := e.Reconfigure(fresh); err != nil {
 		t.Fatal(err)
 	}
-	if e.Learner() != learner || len(e.Learner().Profiles()) != 1 {
-		t.Fatal("reconfigure discarded learned profiles")
+	if e.learnWatch.Load() != hook {
+		t.Fatal("reconfigure discarded the explicit collector")
 	}
 }
 

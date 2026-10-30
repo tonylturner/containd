@@ -112,18 +112,36 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 		if err != nil {
 			return result, err
 		}
-		content := SuggestionContent{Versions: Versions{Schema: SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: GeneratorVersion, Evaluator: EvaluatorVersion, Decoder: ds.DecoderVersion, Profile: ds.ProfileFingerprint, Snapshot: ds.SnapshotFingerprint}, EvidenceDigest: digest, Rules: group.rules, Limits: []string{"Finite boundary replay; selector relations, not transaction or delivery guarantees."}, RequiresCoordinateReview: group.parents[0].Service.Coordinates == evidence.CoordinatesWire}
+		content := SuggestionContent{Versions: Versions{Schema: SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: GeneratorVersion, Evaluator: EvaluatorVersion, Decoder: ds.DecoderVersion, Profile: ds.ProfileFingerprint, Snapshot: ds.SnapshotFingerprint}, EvidenceDigest: digest, Rules: group.rules, Limits: []string{"Finite boundary replay; selector relations, not transaction or delivery guarantees."}, RequiresCoordinateReview: needsCoordinateReview(group.parents)}
 		draft, err := g.Store.PutDraft(ctx, Suggestion{DatasetID: ds.ID, Content: content})
 		if err != nil {
 			return result, err
+		}
+		if draft.Status == SuggestionDraft && draft.DatasetID != ds.ID {
+			// Content identity excludes source IDs. A failed historical draft
+			// cannot acquire different positive references under the same ID.
+			for _, o := range group.parents {
+				if err := withheld(o, []evidence.WithheldReason{evidence.WithheldReplay}); err != nil {
+					return result, err
+				}
+			}
+			continue
 		}
 		if draft.Status == SuggestionDraft {
 			refs := make([]evidence.EvidenceRef, 0, len(group.parents))
 			for _, o := range group.parents {
 				refs = append(refs, evidence.EvidenceRef{DatasetID: ds.ID, ObservationID: o.ID})
 			}
+			// Failed replay deliberately returns a concrete, non-pointer proof
+			// value for bounded counterexample retention; it is never certified.
+			// nosemgrep: trailofbits.go.invalid-usage-of-modified-variable.invalid-usage-of-modified-variable
 			proof, err := g.Certifier.Certify(ctx, content, refs)
 			if err != nil {
+				if len(proof.Counterexamples) > 0 {
+					if _, saveErr := g.Store.SaveReplayFailure(ctx, Selection{ID: draft.ID, Revision: draft.Revision}, proof); saveErr != nil {
+						return result, saveErr
+					}
+				}
 				for _, o := range group.parents {
 					if err := withheld(o, []evidence.WithheldReason{evidence.WithheldReplay}); err != nil {
 						return result, err
@@ -147,7 +165,7 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 // It never unions targets from different parents or invents missing selectors.
 func GenerateRelation(o evidence.Observation) ([]config.Rule, []evidence.WithheldReason) {
 	var reasons []evidence.WithheldReason
-	if !o.Quality.Complete || len(o.Quality.Loss) > 0 {
+	if !parentComplete(o) || len(o.Quality.Loss) > 0 {
 		reasons = append(reasons, evidence.WithheldIncomplete)
 	}
 	if !o.Quality.Decoded || len(o.Quality.Undecoded) > 0 {
@@ -305,7 +323,6 @@ var dnpTable = []objectRequirement{
 	{evidence.WithheldDNP3Indexless, func(o evidence.DNP3Object) bool {
 		return o.Qualifier == nil || (*o.Qualifier > 2 && *o.Qualifier != 0x17 && *o.Qualifier != 0x28 && *o.Qualifier != 0x39)
 	}},
-	{evidence.WithheldCorrelation, func(o evidence.DNP3Object) bool { return o.DataDigest != "" }},
 }
 
 func dnpRequirements(o evidence.DNP3Object) []evidence.WithheldReason {
@@ -344,9 +361,13 @@ var iecTable = []closedRequirement{
 			return nil
 		}
 	}, func(o evidence.IEC104Object) string { return o.ValueDigest }},
-	{evidence.WithheldIECQualifier, func(uint8) []string {
+	{evidence.WithheldIECQualifier, func(t uint8) []string {
 		var out []string
-		for i := range 32 {
+		size := 32
+		if t == 48 || t == 49 || t == 50 || t == 61 || t == 62 || t == 63 {
+			size = 128
+		}
+		for i := range size {
 			out = append(out, strconv.Itoa(i))
 		}
 		return out
@@ -364,6 +385,9 @@ func closedDomains(parents []evidence.Observation) []evidence.WithheldReason {
 	}
 	if parents[0].Modbus != nil {
 		return modbusDomains(parents)
+	}
+	if parents[0].DNP3 != nil {
+		return dnpDomains(parents)
 	}
 	if parents[0].IEC104 == nil {
 		return nil
@@ -392,6 +416,37 @@ func closedDomains(parents []evidence.Observation) []evidence.WithheldReason {
 		}
 		if !complete {
 			reasons = append(reasons, r.reason)
+		}
+	}
+	// Full marginal domains are insufficient if value and qualifier remain
+	// correlated. The unqualified predicate admits their Cartesian product.
+	if len(reasons) == 0 && len(iecTable) > 1 {
+		products := map[uint32]map[string]bool{}
+		for _, p := range parents {
+			for _, obj := range p.IEC104.Objects {
+				if obj.IOA == nil {
+					continue
+				}
+				if products[*obj.IOA] == nil {
+					products[*obj.IOA] = map[string]bool{}
+				}
+				var tuple []string
+				for _, r := range iecTable {
+					tuple = append(tuple, r.value(obj))
+				}
+				digest, _ := evidence.Digest(tuple)
+				products[*obj.IOA][digest] = true
+			}
+		}
+		expected := 1
+		for _, r := range iecTable {
+			expected *= len(r.domain(*parents[0].IEC104.TypeID))
+		}
+		for _, product := range products {
+			if len(product) != expected {
+				reasons = append(reasons, evidence.WithheldCorrelation)
+				break
+			}
 		}
 	}
 	return reasons
@@ -438,4 +493,119 @@ func modbusDomains(parents []evidence.Observation) []evidence.WithheldReason {
 		return nil
 	}
 	return []evidence.WithheldReason{evidence.WithheldModbusValues}
+}
+
+func needsCoordinateReview(parents []evidence.Observation) bool {
+	for _, p := range parents {
+		if p.Service.Coordinates == evidence.CoordinatesWire {
+			return true
+		}
+	}
+	return false
+}
+
+type dnpClosedRequirement struct {
+	reason evidence.WithheldReason
+	domain func(evidence.DNP3Object) map[string]bool
+	value  func(evidence.DNP3Object) string
+}
+
+var dnpClosedTable = []dnpClosedRequirement{{evidence.WithheldDNP3Values, dnpValueDomain, func(o evidence.DNP3Object) string { return o.DataDigest }}}
+
+func dnpDomains(parents []evidence.Observation) []evidence.WithheldReason {
+	var reasons []evidence.WithheldReason
+	for _, requirement := range dnpClosedTable {
+		complete := true
+		for _, obj := range parents[0].DNP3.Objects {
+			if requirement.value(obj) == "" {
+				continue
+			}
+			domain := requirement.domain(obj)
+			seen := map[string]bool{}
+			key := dnpTargetKey(obj)
+			for _, p := range parents {
+				found := false
+				for _, candidate := range p.DNP3.Objects {
+					if dnpTargetKey(candidate) != key {
+						continue
+					}
+					value := requirement.value(candidate)
+					if !domain[value] {
+						complete = false
+					}
+					seen[value] = true
+					found = true
+				}
+				complete = complete && found
+			}
+			complete = complete && len(domain) > 0 && len(seen) == len(domain)
+		}
+		if !complete {
+			reasons = append(reasons, requirement.reason)
+		}
+	}
+	return reasons
+}
+func dnpValueDomain(o evidence.DNP3Object) map[string]bool {
+	if o.Group == nil || o.Variation == nil || o.Count == nil {
+		return nil
+	}
+	bits := map[uint16]uint32{0x0101: 1, 0x0301: 2, 0x0a01: 1, 0x5001: 1}[uint16(*o.Group)<<8|uint16(*o.Variation)]
+	if bits == 0 || *o.Count == 0 || uint64(bits)*uint64(*o.Count) > 14 {
+		return nil
+	}
+	domain := map[string]bool{}
+	for state := range 1 << (bits * *o.Count) {
+		values := make([]int, int(*o.Count))
+		for i := range values {
+			values[i] = (state >> (uint32(i) * bits)) & ((1 << bits) - 1)
+		}
+		digest, _ := evidence.Digest(values)
+		domain[digest] = true
+	}
+	return domain
+}
+
+func parentComplete(o evidence.Observation) bool {
+	if !o.Quality.Complete {
+		return false
+	}
+	if o.IEC104 != nil {
+		if len(o.IEC104.Objects) != int(o.ObjectCount) {
+			return false
+		}
+		for i, obj := range o.IEC104.Objects {
+			if obj.Index != uint32(i) {
+				return false
+			}
+		}
+	}
+	if o.DNP3 != nil {
+		for i, obj := range o.DNP3.Objects {
+			if obj.Index != uint32(i) {
+				return false
+			}
+			if obj.Count != nil && len(obj.Spans) > 0 {
+				var n uint64
+				for _, sp := range obj.Spans {
+					if sp.Last < sp.First {
+						return false
+					}
+					n += uint64(sp.Last) - uint64(sp.First) + 1
+				}
+				if n != uint64(*obj.Count) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func dnpTargetKey(o evidence.DNP3Object) string {
+	key, _ := evidence.Digest(struct {
+		Group, Variation *uint8
+		Spans            []evidence.Span
+	}{o.Group, o.Variation, o.Spans})
+	return key
 }

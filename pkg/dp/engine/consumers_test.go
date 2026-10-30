@@ -13,7 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestIEC104EventsNeverFeedInventoryOrLearner(t *testing.T) {
+func TestIEC104EventsPreserveSignatureAndInventoryBoundaries(t *testing.T) {
 	e, err := New(Config{DPIEnabled: true})
 	if err != nil {
 		t.Fatal(err)
@@ -28,8 +28,8 @@ func TestIEC104EventsNeverFeedInventoryOrLearner(t *testing.T) {
 	if got := e.Inventory().List(); len(got) != 0 {
 		t.Fatalf("inventory learned IEC104: %+v", got)
 	}
-	if got := e.Learner().Profiles(); len(got) != 0 {
-		t.Fatalf("learner learned IEC104: %+v", got)
+	if e.learnWatch.Load() != nil {
+		t.Fatal("traffic started a live watch")
 	}
 	var alert map[string]any
 	for _, ev := range e.Events().List(0) {

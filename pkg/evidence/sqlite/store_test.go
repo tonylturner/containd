@@ -182,6 +182,62 @@ func TestWatchDeadlineAndStop(t *testing.T) {
 	}
 }
 
+func TestWatchDeadlineRejectsWholeLateBatchAndCountsLoss(t *testing.T) {
+	ctx := context.Background()
+	s, now, _ := newStore(t, evidence.Budgets{})
+	watch, err := s.StartWatch(ctx, evidence.StartWatchRequest{DurationSeconds: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds, err := s.GetDataset(ctx, watch.DatasetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(time.Second)
+	out, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: []evidence.Observation{parent(ds, "late")}, LostBatches: 2})
+	if err != nil || out.Accepted != 0 || out.Rejected != 1 {
+		t.Fatalf("late parent admitted: %+v %v", out, err)
+	}
+	if _, err := s.StopWatch(ctx, watch.ID); err != nil {
+		t.Fatal(err)
+	}
+	ds, err = s.GetDataset(ctx, ds.ID)
+	if err != nil || ds.Records != 0 || len(ds.Gaps) != 1 {
+		t.Fatal("late parent loss hidden", err)
+	}
+	counts, err := s.Counters(ctx)
+	if err != nil || counts.RejectedParents != 1 || counts.LostBatches != 2 {
+		t.Fatalf("loss counters: %+v %v", counts, err)
+	}
+}
+
+func TestExpiredWatchAndDeleteReturnExpiredBeforeAndAfterMaintenance(t *testing.T) {
+	ctx := context.Background()
+	s, now, _ := newStore(t, evidence.Budgets{})
+	watch, err := s.StartWatch(ctx, evidence.StartWatchRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StopWatch(ctx, watch.ID); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(evidence.Retention)
+	for range 2 {
+		if _, err := s.GetWatch(ctx, watch.ID); !errors.Is(err, learn.ErrExpired) {
+			t.Fatalf("expired watch visible or unknown: %v", err)
+		}
+		if _, err := s.StopWatch(ctx, watch.ID); !errors.Is(err, learn.ErrExpired) {
+			t.Fatalf("expired stop: %v", err)
+		}
+		if err := s.DeleteDataset(ctx, watch.DatasetID); !errors.Is(err, learn.ErrExpired) {
+			t.Fatalf("expired delete: %v", err)
+		}
+		if err := s.Maintain(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func certified(t *testing.T, s *Store, d evidence.Dataset) learn.Suggestion {
 	t.Helper()
 	ctx := context.Background()

@@ -103,14 +103,14 @@ func TestObservationExclusionsAndConsumers(t *testing.T) {
 	for _, p := range observationTrace(1502, false) {
 		e.HandlePacket(p)
 	}
-	if len(e.Learner().Profiles()) != 0 || len(e.Learner().GenerateRules()) != 0 {
+	if e.learnWatch.Load() != nil {
 		t.Fatal("passive connection entered portless learner")
 	}
 	trace := observationTrace(1502, false)
 	state := e.tupleStateLocked(packetKey(trace[0]).Tuple())
 	e.sweepFlows(trace[0].Timestamp.Add(6 * time.Minute))
 	e.RecordDPIEvents(state, observationPacket(state), []dpi.Event{{Proto: "modbus", Kind: "request", Attributes: map[string]any{"observation_only": true, "function_code": uint8(3), "unit_id": uint8(1)}}})
-	if len(e.Learner().Profiles()) != 0 {
+	if e.learnWatch.Load() != nil {
 		t.Fatal("retired passive event entered learner without a live marker")
 	}
 	if len(e.Inventory().List()) == 0 {

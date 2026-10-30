@@ -30,6 +30,7 @@ func addRequestFields(fc uint8, pdu []byte, attrs map[string]any) {
 		addWords(pdu, attrs, attrAddress, attrQuantity)
 		if (fc == 15 || fc == 16) && len(pdu) >= 5 {
 			attrs[attrByteCount] = pdu[4]
+			addWriteValues(fc, pdu[5:], be16(pdu, 2), attrs)
 		}
 	case 5, 6:
 		addWords(pdu, attrs, attrAddress, attrValue)
@@ -39,6 +40,7 @@ func addRequestFields(fc uint8, pdu []byte, attrs map[string]any) {
 		addWords(pdu, attrs, attrReadAddress, attrReadQuantity, attrWriteAddress, attrWriteQuantity)
 		if len(pdu) >= 9 {
 			attrs[attrByteCount] = pdu[8]
+			addWriteValues(16, pdu[9:], be16(pdu, 6), attrs)
 		}
 	}
 }
@@ -72,3 +74,23 @@ func addWords(pdu []byte, attrs map[string]any, keys ...string) {
 }
 
 func be16(b []byte, off int) uint16 { return binary.BigEndian.Uint16(b[off : off+2]) }
+
+// Retain all declared write values or none, never a truncated child prefix.
+func addWriteValues(fc uint8, data []byte, count uint16, attrs map[string]any) {
+	needed := int(count) * 2
+	if fc == 15 {
+		needed = (int(count) + 7) / 8
+	}
+	if count == 0 || len(data) != needed {
+		return
+	}
+	values := make([]uint16, int(count))
+	for i := range values {
+		if fc == 15 {
+			values[i] = uint16((data[i/8] >> (i % 8)) & 1)
+		} else {
+			values[i] = be16(data, 2*i)
+		}
+	}
+	attrs["values"] = values
+}

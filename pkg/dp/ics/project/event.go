@@ -19,7 +19,11 @@ import (
 // addresses. Coverage is a separate object with message-wide facts only.
 func Objects(state *flow.State, ev dpi.Event, safeRead func(map[string]any) bool) []rules.ICSContext {
 	if strings.EqualFold(ev.Proto, eventfields.ProtoIEC104) {
-		return []rules.ICSContext{*iecObject(ev, safeRead)}
+		object := iecObject(ev, safeRead)
+		if incomplete, _ := eventfields.Bool(ev.Attributes, eventfields.KeyCoverageIncomplete); incomplete {
+			object.ObjectUnknown = true
+		}
+		return []rules.ICSContext{*object}
 	}
 	a := ev.Attributes
 	write, hasWrite := eventfields.Bool(a, eventfields.KeyIsWrite)

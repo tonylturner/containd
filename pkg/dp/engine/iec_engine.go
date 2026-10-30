@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
@@ -21,6 +22,9 @@ func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
 	store := e.eventStore
 	var t *iecTable
 	emit := func(evs []iecTelemetry) {
+		for _, event := range evs {
+			e.recordLearnOutcome([]dpi.Event{{Proto: event.Proto, Kind: event.Kind, Attributes: event.Attributes, Timestamp: event.Timestamp}})
+		}
 		for _, ev := range t.withSessionTags(evs) {
 			store.Append(ev)
 		}
@@ -30,6 +34,9 @@ func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
 	})
 	t = newIECTable(cfg.DPIMode, &e.zones)
 	t.inventory = e.inventory
+	t.learnDelivery = func(id string) {
+		e.recordLearnOutcome([]dpi.Event{{Proto: "iec104", Kind: "evidence.delivery", Attributes: map[string]any{"apdu_id": id, "delivery": "delivered"}, Timestamp: time.Now().UTC()}})
+	}
 	t.dpi = e.dpiMgr
 	t.health = health
 	t.jobs = e.hooks.blocks

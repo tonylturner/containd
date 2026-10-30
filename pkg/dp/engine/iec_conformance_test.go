@@ -199,7 +199,7 @@ func TestIECConformanceMatrix(t *testing.T) {
 						} else if len(h.outcomes()) != 0 || len(h.inj.Resets()) != 0 {
 							t.Fatalf("on-wire effect without a drop: %v", h.outcomes())
 						}
-						if len(h.e.Learner().Profiles()) != 0 {
+						if h.e.learnWatch.Load() != nil {
 							t.Fatal("findings entered the learner")
 						}
 					})

@@ -69,6 +69,14 @@ func Observation(o evidence.Observation) ([]rules.EvalContext, error) {
 		if m.MEIType != nil {
 			put("mei_type", *m.MEIType)
 		}
+		if m.FunctionCode != nil {
+			if *m.FunctionCode == 15 {
+				put("byte_count", (len(m.Values)+7)/8)
+			}
+			if *m.FunctionCode == 16 {
+				put("byte_count", 2*len(m.Values))
+			}
+		}
 		for i, sp := range m.Spans {
 			if sp.First > sp.Last || sp.Last > 65535 {
 				return nil, fmt.Errorf("invalid Modbus span")
@@ -115,7 +123,8 @@ func Observation(o evidence.Observation) ([]rules.EvalContext, error) {
 		for _, obj := range d.Objects {
 			h := dnp3.ObjectHeader{}
 			if obj.Group == nil {
-				return nil, fmt.Errorf("missing DNP3 group")
+				put(eventfields.KeyCoverageIncomplete, true)
+				continue
 			}
 			h.Group = *obj.Group
 			if obj.Variation != nil {

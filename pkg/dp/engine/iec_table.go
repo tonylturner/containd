@@ -132,23 +132,24 @@ func newIECDir(isn uint32) *iecDir {
 // iecTable holds the IEC104 sessions of one engine configuration. mu is the
 // session lock: it is never held across verdict submission or I/O.
 type iecTable struct {
-	mu         sync.Mutex
-	zones      *zoneCache // the engine's
-	now        func() time.Time
-	dpi        *dpi.Manager
-	injector   session.Injector
-	health     *iecHealth
-	settler    func() capture.Settler
-	jobs       *worker
-	emit       func([]iecTelemetry)
-	shadow     func(*rules.Snapshot, *rules.Entry)
-	markAbort  func(sessionID string)
-	onError    func(error)
-	newPolicy  func(*rules.Snapshot) iecPolicy
-	safeRead   func(map[string]any) bool
-	newID      func() string
-	ctDelete   func(context.Context, conntrack.DeleteRequest) error // after the resets
-	globalMode string
+	mu            sync.Mutex
+	zones         *zoneCache // the engine's
+	now           func() time.Time
+	dpi           *dpi.Manager
+	injector      session.Injector
+	health        *iecHealth
+	settler       func() capture.Settler
+	jobs          *worker
+	emit          func([]iecTelemetry)
+	learnDelivery func(string)
+	shadow        func(*rules.Snapshot, *rules.Entry)
+	markAbort     func(sessionID string)
+	onError       func(error)
+	newPolicy     func(*rules.Snapshot) iecPolicy
+	safeRead      func(map[string]any) bool
+	newID         func() string
+	ctDelete      func(context.Context, conntrack.DeleteRequest) error // after the resets
+	globalMode    string
 	// parsing is the IEC104 parsing mode of the packet under decision. The
 	// engine resolves it per packet (ICSParsing) and packet stores it under
 	// mu, so a mode change applies to later decisions without retiring

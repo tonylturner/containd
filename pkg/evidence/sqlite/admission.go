@@ -181,6 +181,7 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 		if d.State != evidence.DatasetCollecting && d.State != evidence.DatasetImporting {
 			return ErrConflict
 		}
+		late := false
 		if d.Source == evidence.SourceLive {
 			if req.Seal {
 				return ErrConflict // only StopWatch can stop and seal a lease
@@ -189,9 +190,10 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 			if err != nil {
 				return err
 			}
-			if w.StoppedAt != nil || !s.now().Before(w.Deadline) {
+			if w.StoppedAt != nil {
 				return ErrConflict
 			}
+			late = !s.now().Before(w.Deadline)
 		}
 		for _, gap := range req.Gaps {
 			d.Gaps = appendUnique(d.Gaps, gap)
@@ -203,7 +205,21 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 		if err != nil {
 			return err
 		}
+		c.LostBatches += req.LostBatches
+		if c.Withheld == nil {
+			c.Withheld = map[evidence.WithheldReason]uint64{}
+		}
+		if late && len(req.Parents) > 0 {
+			result.Rejected = uint64(len(req.Parents))
+			c.RejectedParents += result.Rejected
+			result.Reasons[evidence.WithheldExpired] = result.Rejected
+			c.Withheld[evidence.WithheldExpired] += result.Rejected
+			d.Gaps = appendUnique(d.Gaps, "watch_deadline_loss")
+		}
 		for _, parent := range req.Parents {
+			if late {
+				continue
+			}
 			if parent.DatasetID != d.ID || parent.Source != d.Source {
 				return ErrConflict
 			}
@@ -247,6 +263,7 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 				result.Rejected++
 				c.RejectedParents++
 				result.Reasons[evidence.WithheldBudget]++
+				c.Withheld[evidence.WithheldBudget]++
 				d.Gaps = appendUnique(d.Gaps, "budget_exceeded")
 				continue
 			}
@@ -257,6 +274,7 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 				result.Rejected++
 				c.RejectedParents++
 				result.Reasons[evidence.WithheldBudget]++
+				c.Withheld[evidence.WithheldBudget]++
 				d.Gaps = appendUnique(d.Gaps, "budget_exceeded")
 				continue
 			}
@@ -273,6 +291,8 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 			return err
 		}
 		current.RejectedParents = c.RejectedParents
+		current.LostBatches = c.LostBatches
+		current.Withheld = c.Withheld
 		if err := saveCounters(ctx, tx, current); err != nil {
 			return err
 		}

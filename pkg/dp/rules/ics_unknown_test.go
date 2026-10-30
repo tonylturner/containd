@@ -4,6 +4,22 @@ package rules
 
 import "testing"
 
+func TestIECIncompleteCoverageRetainsMessageConstraints(t *testing.T) {
+	typeID, ioa, ca := uint8(45), uint32(7), uint16(1)
+	obj := ICSContext{Protocol: "iec104", Direction: "request", ObjectUnknown: true,
+		IEC104: &IEC104Context{APCIType: "I", TypeID: &typeID, IOA: &ioa, CA: &ca}}
+	for _, action := range []Action{ActionAllow, ActionDeny} {
+		entry := Entry{Action: action, ICS: ICSPredicate{Protocol: "iec104", TypeIDs: []int{45}, CA: []uint16{1}, IOA: []IOARange{{Start: 7, End: 7}}}}
+		if got := PreviewMatch(entry, EvalContext{ICS: &obj}); got != (action == ActionDeny) {
+			t.Fatalf("unknown child coverage action %s: %v", action, got)
+		}
+		entry.ICS.CA = []uint16{2}
+		if PreviewMatch(entry, EvalContext{ICS: &obj}) {
+			t.Fatal("unknown child coverage erased message constraints")
+		}
+	}
+}
+
 func TestICSObjectUnknown(t *testing.T) {
 	selectors := map[string]ICSPredicate{
 		"group":     {Protocol: "dnp3", Groups: []int{1}},

@@ -159,7 +159,7 @@ func (s *Store) ListObservations(ctx context.Context, id string, p evidence.Page
 
 func (s *Store) DeleteDataset(ctx context.Context, id string) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
-		d, err := read[evidence.Dataset](ctx, tx, `SELECT data FROM datasets WHERE id=?`, id)
+		d, err := s.dataset(ctx, tx, id)
 		if err != nil {
 			return err
 		}
@@ -220,6 +220,9 @@ func (s *Store) stop(ctx context.Context, tx *sql.Tx, w evidence.Watch, reason s
 	if err != nil {
 		return w, err
 	}
+	if reason == "restart" {
+		d.Gaps = appendUnique(d.Gaps, "watch_restart")
+	}
 	return w, s.seal(ctx, tx, d)
 }
 
@@ -227,18 +230,32 @@ func (s *Store) StopWatch(ctx context.Context, id string) (evidence.Watch, error
 	var w evidence.Watch
 	err := s.write(ctx, func(tx *sql.Tx) error {
 		var err error
-		w, err = read[evidence.Watch](ctx, tx, `SELECT data FROM watches WHERE id=?`, id)
+		w, err = s.watch(ctx, tx, id)
 		if err != nil {
 			return err
 		}
-		w, err = s.stop(ctx, tx, w, "operator")
+		reason := "operator"
+		if !s.now().Before(w.Deadline) {
+			reason = "deadline"
+		}
+		w, err = s.stop(ctx, tx, w, reason)
 		return err
 	})
 	return w, err
 }
 
 func (s *Store) GetWatch(ctx context.Context, id string) (evidence.Watch, error) {
-	return read[evidence.Watch](ctx, s.db, `SELECT data FROM watches WHERE id=?`, id)
+	return s.watch(ctx, s.db, id)
+}
+func (s *Store) watch(ctx context.Context, db reader, id string) (evidence.Watch, error) {
+	w, err := read[evidence.Watch](ctx, db, `SELECT data FROM watches WHERE id=?`, id)
+	if err == ErrNotFound {
+		err = s.missingFrom(ctx, db, id)
+	}
+	if err == nil {
+		_, err = s.dataset(ctx, db, w.DatasetID)
+	}
+	return w, err
 }
 
 func (s *Store) ListWatches(ctx context.Context, p evidence.PageRequest) (evidence.WatchPage, error) {

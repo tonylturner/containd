@@ -60,6 +60,8 @@ type SuggestionStore interface {
 	evidence.Store
 	PutDraft(context.Context, Suggestion) (Suggestion, error)
 	SaveCertification(context.Context, Selection, Certification) (Suggestion, error)
+	// SaveReplayFailure retains bounded counterexamples without certifying a draft.
+	SaveReplayFailure(context.Context, Selection, Certification) (Suggestion, error)
 	GetSuggestion(context.Context, string) (Suggestion, error)
 	ListSuggestions(context.Context, string, evidence.PageRequest) (SuggestionPage, error)
 	ReviewSuggestion(context.Context, string, ReviewRequest) (Suggestion, error)

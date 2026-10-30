@@ -278,7 +278,7 @@ func (m *Manager) Upload(name string, r io.Reader) (Item, error) {
 	return item, nil
 }
 
-func (m *Manager) Open(name string) (io.ReadCloser, int64, error) {
+func (m *Manager) Open(name string) (*os.File, int64, error) {
 	path, err := m.safePath(name)
 	if err != nil {
 		return nil, 0, err

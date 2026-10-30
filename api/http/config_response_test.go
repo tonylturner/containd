@@ -123,19 +123,3 @@ func TestConfigResponseHeaderAbsentForPreviewAndErrors(t *testing.T) {
 		})
 	}
 }
-
-type noLearnRulesEngine struct{ *stageEngine }
-
-func (*noLearnRulesEngine) GenerateLearnRules(context.Context) ([]config.Rule, error) {
-	return nil, nil
-}
-
-func TestConfigResponseHeaderAbsentWhenLearnDoesNotStage(t *testing.T) {
-	engine := &noLearnRulesEngine{&stageEngine{mockEngine: &mockEngine{}}}
-	server := NewServerWithEngine(stageStore(t), nil, engine)
-	rec := requestStage(t, server, "POST", "/learn/apply", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("learn no-op failed: %d %s", rec.Code, rec.Body)
-	}
-	assertConfigResponseHeader(t, rec, "")
-}

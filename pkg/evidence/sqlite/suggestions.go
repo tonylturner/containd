@@ -86,6 +86,12 @@ func (s *Store) PutDraft(ctx context.Context, v learn.Suggestion) (learn.Suggest
 }
 
 func (s *Store) SaveCertification(ctx context.Context, selection learn.Selection, p learn.Certification) (learn.Suggestion, error) {
+	return s.saveReplay(ctx, selection, p, true)
+}
+func (s *Store) SaveReplayFailure(ctx context.Context, selection learn.Selection, p learn.Certification) (learn.Suggestion, error) {
+	return s.saveReplay(ctx, selection, p, false)
+}
+func (s *Store) saveReplay(ctx context.Context, selection learn.Selection, p learn.Certification, certified bool) (learn.Suggestion, error) {
 	var v learn.Suggestion
 	err := s.write(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -96,13 +102,19 @@ func (s *Store) SaveCertification(ctx context.Context, selection learn.Selection
 		if selection.Revision == 0 || selection.Revision != v.Revision || v.Status != learn.SuggestionDraft {
 			return learn.ErrStale
 		}
-		if err := p.ValidateBinding(v.Content); err != nil {
-			return err
+		if certified {
+			if err := p.ValidateBinding(v.Content); err != nil {
+				return err
+			}
+		} else {
+			if p.ContentID != v.ID || p.EvidenceDigest != v.Content.EvidenceDigest || p.Versions != v.Content.Versions || p.CertifiedAt.IsZero() || len(p.Counterexamples) == 0 || len(p.Counterexamples) > 50 || p.Positive.Failed+p.Negative.Failed == 0 {
+				return learn.ErrNotCertified
+			}
 		}
 		if !s.compatibleProof(p.Versions) {
 			return learn.ErrStale
 		}
-		if len(p.ParentRefs) > 10000 || p.Positive.Total != uint64(len(p.ParentRefs)) || p.Negative.Total > 100000 {
+		if len(p.ParentRefs) == 0 || len(p.ParentRefs) > 10000 || p.Positive.Passed+p.Positive.Failed != p.Positive.Total || p.Negative.Passed+p.Negative.Failed != p.Negative.Total || p.Positive.Total != uint64(len(p.ParentRefs)) || p.Negative.Total > 100000 {
 			return ErrBudget
 		}
 		seen := map[string]bool{}
@@ -129,7 +141,10 @@ func (s *Store) SaveCertification(ctx context.Context, selection learn.Selection
 		if digest != v.Content.EvidenceDigest {
 			return learn.ErrNotCertified
 		}
-		v.Proof, v.Status, v.Revision = &p, learn.SuggestionCertified, v.Revision+1
+		v.Proof, v.Revision = &p, v.Revision+1
+		if certified {
+			v.Status = learn.SuggestionCertified
+		}
 		return s.updateSuggestion(ctx, tx, v, []string{v.DatasetID})
 	})
 	return v, err

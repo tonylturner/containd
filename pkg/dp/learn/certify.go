@@ -51,17 +51,20 @@ func (c *CompilerCertifier) Certify(ctx context.Context, content SuggestionConte
 		return proof, err
 	}
 	evaluator := rules.NewEvaluator(&snapshot)
-	accepts := func(o evidence.Observation) bool {
+	accepts := func(o evidence.Observation) (bool, error) {
 		contexts, err := project.Observation(o)
-		if err != nil || len(contexts) == 0 {
-			return false
+		if err != nil {
+			return false, err
+		}
+		if len(contexts) == 0 {
+			return false, fmt.Errorf("no projected contexts")
 		}
 		for _, context := range contexts {
 			if evaluator.AnyMatch(context) == nil {
-				return false
+				return false, nil
 			}
 		}
-		return true
+		return true, nil
 	}
 	failure := func(ref evidence.EvidenceRef, mutation string, o evidence.Observation, expected, actual string) {
 		if len(proof.Counterexamples) >= 50 {
@@ -78,23 +81,40 @@ func (c *CompilerCertifier) Certify(ctx context.Context, content SuggestionConte
 			return proof, ErrStale
 		}
 		proof.Positive.Total++
-		if accepts(o) {
+		accepted, projectionErr := accepts(o)
+		eligible := parentComplete(o) && o.Quality.Decoded && len(o.Quality.Conformance)+len(o.Quality.Undecoded)+len(o.Quality.Loss) == 0
+		if accepted && eligible && projectionErr == nil {
 			proof.Positive.Passed++
 		} else {
 			proof.Positive.Failed++
 			failure(refs[i], "positive", o, "accept", "reject")
 		}
-		for _, mutation := range boundaryMutations(o) {
+		var replayErr error
+		boundaryMutations(o, func(mutation mutation) bool {
+			if err := ctx.Err(); err != nil {
+				replayErr = err
+				return false
+			}
 			if proof.Negative.Total >= 100000 {
-				return proof, fmt.Errorf("negative replay budget exceeded")
+				replayErr = fmt.Errorf("negative replay budget exceeded")
+				return false
 			}
 			proof.Negative.Total++
-			if !accepts(mutation.parent) {
+			accepted, projectionErr := accepts(mutation.parent)
+			if !accepted && projectionErr == nil {
 				proof.Negative.Passed++
 			} else {
 				proof.Negative.Failed++
-				failure(refs[i], mutation.name, mutation.parent, "reject", "accept")
+				actual := "accept"
+				if projectionErr != nil {
+					actual = "projection_error"
+				}
+				failure(refs[i], mutation.name, mutation.parent, "reject", actual)
 			}
+			return true
+		})
+		if replayErr != nil {
+			return proof, replayErr
 		}
 	}
 	now := time.Now
@@ -160,15 +180,19 @@ type mutation struct {
 	parent evidence.Observation
 }
 
-func boundaryMutations(o evidence.Observation) []mutation {
-	var out []mutation
+func boundaryMutations(o evidence.Observation, visit func(mutation) bool) {
+	stopped := false
 	add := func(name string, edit func(*evidence.Observation)) {
+		if stopped {
+			return
+		}
 		b, _ := json.Marshal(o)
 		var copy evidence.Observation
 		_ = json.Unmarshal(b, &copy)
 		edit(&copy)
-		out = append(out, mutation{name, copy})
+		stopped = !visit(mutation{name, copy})
 	}
+	add("missing_coverage", func(p *evidence.Observation) { p.Quality.Complete = false })
 	add("client", func(p *evidence.Observation) { p.Service.ClientIP = differentIP(p.Service.ClientIP) })
 	add("server", func(p *evidence.Observation) { p.Service.ServerIP = differentIP(p.Service.ServerIP) })
 	add("service", func(p *evidence.Observation) { p.Service.ServerPort++ })
@@ -220,6 +244,46 @@ func boundaryMutations(o evidence.Observation) []mutation {
 			})
 		}
 		for i := range o.DNP3.Objects {
+			if stopped {
+				return
+			}
+			obj := o.DNP3.Objects[i]
+			usedVariations := map[uint8]bool{}
+			for _, other := range o.DNP3.Objects {
+				if other.Group != nil && obj.Group != nil && *other.Group == *obj.Group && other.Variation != nil {
+					usedVariations[*other.Variation] = true
+				}
+			}
+			if variation, ok := unusedByte(usedVariations); ok {
+				add(fmt.Sprintf("variation_%d", i), func(p *evidence.Observation) { p.DNP3.Objects[i].Variation = &variation })
+			}
+			add(fmt.Sprintf("all_objects_%d", i), func(p *evidence.Observation) {
+				q := uint8(6)
+				p.DNP3.Objects[i].Qualifier = &q
+				p.DNP3.Objects[i].AllObjects = true
+				p.DNP3.Objects[i].Spans = nil
+			})
+			add(fmt.Sprintf("count_only_%d", i), func(p *evidence.Observation) {
+				q := uint8(7)
+				p.DNP3.Objects[i].Qualifier = &q
+				p.DNP3.Objects[i].Spans = nil
+			})
+			for _, span := range obj.Spans {
+				var values []uint32
+				if span.First > 0 {
+					values = append(values, span.First-1)
+				}
+				if span.Last < ^uint32(0) {
+					values = append(values, span.Last+1)
+				}
+				for _, value := range values {
+					if !dnpRelationContains(o.DNP3, obj, value) {
+						add(fmt.Sprintf("boundary_%d_%d", i, value), func(p *evidence.Observation) {
+							p.DNP3.Objects[i].Spans = []evidence.Span{{First: value, Last: value, Role: "target"}}
+						})
+					}
+				}
+			}
 			add(fmt.Sprintf("missing_group_%d", i), func(p *evidence.Observation) { p.DNP3.Objects[i].Group = nil })
 			add(fmt.Sprintf("missing_variation_%d", i), func(p *evidence.Observation) { p.DNP3.Objects[i].Variation = nil })
 			add(fmt.Sprintf("missing_indexes_%d", i), func(p *evidence.Observation) { p.DNP3.Objects[i].Spans = nil })
@@ -233,6 +297,9 @@ func boundaryMutations(o evidence.Observation) []mutation {
 				})
 			}
 			for j := range o.DNP3.Objects {
+				if stopped {
+					return
+				}
 				if i == j {
 					continue
 				}
@@ -276,11 +343,25 @@ func boundaryMutations(o evidence.Observation) []mutation {
 			p.ObjectCount++
 		})
 		for i := range o.IEC104.Objects {
+			obj := o.IEC104.Objects[i]
+			if obj.IOA != nil {
+				var values []uint32
+				if *obj.IOA > 0 {
+					values = append(values, *obj.IOA-1)
+				}
+				if *obj.IOA < 16777215 {
+					values = append(values, *obj.IOA+1)
+				}
+				for _, value := range values {
+					if !used[value] {
+						add(fmt.Sprintf("ioa_boundary_%d_%d", i, value), func(p *evidence.Observation) { p.IEC104.Objects[i].IOA = &value })
+					}
+				}
+			}
 			add(fmt.Sprintf("missing_ioa_%d", i), func(p *evidence.Observation) { p.IEC104.Objects[i].IOA = nil })
 			add(fmt.Sprintf("select_execute_%d", i), func(p *evidence.Observation) { *p.IEC104.Objects[i].Select = !*p.IEC104.Objects[i].Select })
 		}
 	}
-	return out
 }
 func differentIP(text string) string {
 	ip, err := netip.ParseAddr(text)

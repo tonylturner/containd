@@ -25,8 +25,11 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
+	"github.com/tonylturner/containd/pkg/evidence"
+	"github.com/tonylturner/containd/pkg/evidence/sqlite"
 )
 
 type Options struct {
@@ -175,13 +178,28 @@ func Run(ctx context.Context, opts Options) error {
 		})
 	}
 
+	evidenceStore, err := sqlite.Open(common.Env("CONTAIND_EVIDENCE_DB", "/data/evidence.db"), sqlite.Options{CompatibleProof: func(v learn.Versions) bool { return learn.CompatibleVersions(v) && v.Decoder == decoderVersion }, WatchMetadata: func() (evidence.Dataset, error) { return evidenceMetadata(dpEngine) }})
+	if err != nil {
+		return fmt.Errorf("evidence authority unavailable: %w", err)
+	}
+	defer func() { _ = evidenceStore.Close() }()
+	watchCtx, stopWatchWorker := context.WithCancel(ctx)
+	evidenceCollector := newEvidenceWatch(watchCtx, evidenceStore, dpEngine)
+	defer func() {
+		dpEngine.SetLearnWatchHook(nil)
+		stopWatchWorker()
+		<-evidenceCollector.done
+		<-evidenceCollector.maintained
+	}()
+	learnerAPI := &evidenceAPI{store: evidenceStore, watch: evidenceCollector, generator: &learn.Generator{Store: evidenceStore, Certifier: &learn.CompilerCertifier{Store: evidenceStore}, CountWithheld: evidenceStore.CountWithheld}}
 	mux := http.NewServeMux()
+	learnerAPI.register(mux)
 	pcapMgr := pcap.NewManager(common.Env("CONTAIND_PCAP_DIR", "/data/pcaps"))
 	// Captures outlive their start request; close their files on shutdown.
 	defer func() { _ = pcapMgr.Stop() }()
 	mux.HandleFunc("/health", healthHandler(dpEngine, guard))
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if dpEngine == nil {
+		if dpEngine == nil || evidenceCollector.err() != nil {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		}
@@ -203,8 +221,8 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/pcap/tag", pcapTagHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/delete", pcapDeleteHandler(pcapMgr))
 	mux.HandleFunc("/internal/pcap/replay", pcapReplayHandler(pcapMgr))
-	mux.HandleFunc("/internal/pcap/analyze", pcapAnalyzeUploadHandler(pcapMgr, dpEngine))
-	mux.HandleFunc("/internal/pcap/analyze/", pcapAnalyzeNameHandler(pcapMgr, dpEngine))
+	mux.HandleFunc("/internal/pcap/analyze", pcapAnalyzeUploadHandler(pcapMgr, dpEngine, evidenceStore))
+	mux.HandleFunc("/internal/pcap/analyze/", pcapAnalyzeNameHandler(pcapMgr, dpEngine, evidenceStore))
 	mux.HandleFunc("/internal/interfaces", interfacesHandler(logger, ownership))
 	mux.HandleFunc("/internal/routing", routingHandler(logger, ownership))
 	mux.HandleFunc("/internal/interfaces/state", interfacesStateHandler())
@@ -221,9 +239,6 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/inventory", inventoryHandler(dpEngine))
 	mux.HandleFunc("/internal/inventory/", inventoryItemHandler(dpEngine))
 	mux.HandleFunc("/internal/anomalies", anomaliesHandler(dpEngine))
-	mux.HandleFunc("/internal/learn", learnHandler(dpEngine))
-	mux.HandleFunc("/internal/learn/profiles", learnProfilesHandler(dpEngine))
-	mux.HandleFunc("/internal/learn/rules", learnRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/signatures", signaturesHandler(dpEngine))
 	mux.HandleFunc("/internal/signatures/matches", signatureMatchesHandler(dpEngine))
 	mux.HandleFunc("/internal/conntrack", conntrackHandler(dpEngine))

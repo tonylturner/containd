@@ -542,6 +542,7 @@ func TestEnginePcapHandlers(t *testing.T) {
 		// upload still exists when Replay opens the file.
 		time.Sleep(25 * time.Millisecond)
 
+		evidenceAPI := newEvidenceTestAPI(t)
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
 		part, err := writer.CreateFormFile("file", "analysis.pcap")
@@ -558,7 +559,7 @@ func TestEnginePcapHandlers(t *testing.T) {
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/pcap/analyze/upload", &body)
 		req.Header.Set("Content-Type", writer.FormDataContentType())
-		pcapAnalyzeUploadHandler(mgr, nil).ServeHTTP(rec, req)
+		pcapAnalyzeUploadHandler(mgr, evidenceAPI.watch.engine, evidenceAPI.store).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("pcap analyze upload status = %d body=%s", rec.Code, rec.Body.String())
 		}
@@ -566,27 +567,27 @@ func TestEnginePcapHandlers(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&analysis); err != nil {
 			t.Fatalf("decode analyze upload response: %v", err)
 		}
-		if got := analysis["packetCount"]; got == nil {
+		if got := analysis["stats"]; got == nil {
 			t.Fatalf("unexpected analyze upload response: %#v", analysis)
 		}
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/pcap/analyze/", nil)
-		pcapAnalyzeNameHandler(mgr, nil).ServeHTTP(rec, req)
+		pcapAnalyzeNameHandler(mgr, evidenceAPI.watch.engine, evidenceAPI.store).ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("pcap analyze name missing status = %d", rec.Code)
 		}
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/pcap/analyze/missing.pcap", nil)
-		pcapAnalyzeNameHandler(mgr, nil).ServeHTTP(rec, req)
+		pcapAnalyzeNameHandler(mgr, evidenceAPI.watch.engine, evidenceAPI.store).ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("pcap analyze name missing file status = %d", rec.Code)
 		}
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/pcap/analyze/"+item.Name, nil)
-		pcapAnalyzeNameHandler(mgr, nil).ServeHTTP(rec, req)
+		pcapAnalyzeNameHandler(mgr, evidenceAPI.watch.engine, evidenceAPI.store).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("pcap analyze name status = %d body=%s", rec.Code, rec.Body.String())
 		}

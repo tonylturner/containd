@@ -3,6 +3,7 @@
 package learn
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -30,15 +31,22 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 		if ev.Kind != "request" && ev.Kind != "response" && ev.Kind != "apci" && ev.Kind != "malformed" && ev.Kind != "unsupported" && ev.Kind != "exception" && ev.Kind != "session" {
 			continue
 		}
-		k := state.ServiceKey()
 		wire := state.Key
+		k := wire
+		if ds.Source == evidence.SourceLive {
+			k = state.ServiceKey()
+		}
 		coordinates := evidence.CoordinatesWire
-		authority := evidence.Authority{Wire: tuple(wire), Correlation: "wire", RoleCertain: true, RoleEvidence: "connection_orientation", StandardPort: ics.IsProtocolPortOn(ev.Proto, k.Proto, serverPort(k))}
+		authority := evidence.Authority{Wire: tuple(wire), Correlation: "wire", RoleCertain: roleCertain(state, ev), RoleEvidence: "decoder_and_connection", StandardPort: ics.IsProtocolPortOn(ev.Proto, k.Proto, serverPort(k))}
 		if ds.Source == evidence.SourceLive && state.Connection.Load().Verified() {
 			logical := tuple(k)
 			authority.Logical = &logical
 			authority.Correlation = "verified"
-			authority.MappingFingerprint, _ = evidence.Digest(state.Connection.Load().Evidence)
+			ct := state.Connection.Load().Evidence
+			authority.MappingFingerprint, _ = evidence.Digest(struct {
+				Original, Reply any
+				Zone            uint16
+			}{ct.Original, ct.Reply, ct.Zone})
 			coordinates = evidence.CoordinatesLogical
 		}
 		direction := "request"
@@ -93,6 +101,15 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 					o.Quality.Complete = false
 				}
 			}
+			if values, ok := a["values"]; ok {
+				data, err := json.Marshal(values)
+				if err != nil {
+					return nil, err
+				}
+				if err := json.Unmarshal(data, &m.Values); err != nil {
+					return nil, fmt.Errorf("invalid modbus values: %w", err)
+				}
+			}
 			if v := wordPtr(a, "value"); v != nil {
 				m.Values = append(m.Values, *v)
 			}
@@ -127,12 +144,7 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 				if unknown && h.Addressing != "all" && h.Addressing != "count" {
 					o.Quality.Complete = false
 				}
-				for _, point := range h.Points {
-					if point.CROB != nil {
-						obj.DataDigest, _ = evidence.Digest(h.Points)
-						break
-					}
-				}
+				obj.DataDigest = h.DataDigest
 				d.Objects = append(d.Objects, obj)
 				o.ObjectCount += uint32(max(1, len(h.Points)))
 			}
@@ -230,4 +242,33 @@ func boolPtr(a map[string]any, k string) *bool {
 		return &v
 	}
 	return nil
+}
+
+// Without verified correlation or a captured opener, echoed write layouts do
+// not establish request direction. Unambiguous read layouts and protocol-level
+// station/session direction can still establish roles in midstream captures.
+func roleCertain(state *flow.State, ev dpi.Event) bool {
+	c := state.Connection.Load()
+	if c.Verified() || c != nil && c.Coverage().Load() {
+		return true
+	}
+	switch ev.Proto {
+	case "modbus":
+		fc := bytePtr(ev.Attributes, eventfields.KeyFunctionCode)
+		if ev.Kind == "request" && fc != nil {
+			switch *fc {
+			case 3, 4, 7, 11, 12, 17:
+				return true
+			}
+		}
+	case "dnp3":
+		master, outstation := project.DNP3Stations(ev.Attributes)
+		direction, _ := eventfields.String(ev.Attributes, eventfields.KeyDirection)
+		return master != nil && outstation != nil && ((direction == "master" && state.Key.Dir == flow.DirForward) || (direction == "outstation" && state.Key.Dir == flow.DirReverse))
+	case "iec104":
+		direction, ok := eventfields.String(ev.Attributes, eventfields.KeyDirection)
+		apdu, present := eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
+		return ok && (direction == "request" || direction == "response") && present && apdu != ""
+	}
+	return false
 }

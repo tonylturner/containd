@@ -2,9 +2,10 @@
 package learn
 
 import (
-	"github.com/tonylturner/containd/pkg/evidence"
 	"slices"
 	"testing"
+
+	"github.com/tonylturner/containd/pkg/evidence"
 )
 
 func TestIECClosedValueDomain(t *testing.T) {
@@ -24,6 +25,20 @@ func TestIECClosedValueDomain(t *testing.T) {
 		if reasons := closedDomains(parents); slices.Contains(reasons, evidence.WithheldIECValue) {
 			t.Fatalf("whole closed domain withheld: %+v", reasons)
 		}
+	}
+}
+
+func TestIECFullMarginalsDoNotLoseCorrelation(t *testing.T) {
+	typeID, ioa := uint8(45), uint32(7)
+	var parents []evidence.Observation
+	for qualifier := range uint8(32) {
+		value, _ := evidence.Digest(qualifier % 2)
+		q := qualifier
+		parents = append(parents, evidence.Observation{IEC104: &evidence.IEC104{TypeID: &typeID, Objects: []evidence.IEC104Object{{IOA: &ioa, Qualifier: &q, ValueDigest: value}}}})
+	}
+	reasons := closedDomains(parents)
+	if slices.Contains(reasons, evidence.WithheldIECValue) || slices.Contains(reasons, evidence.WithheldIECQualifier) || !slices.Contains(reasons, evidence.WithheldCorrelation) {
+		t.Fatalf("full marginal domains must remove their reasons without permitting unobserved combinations: %v", reasons)
 	}
 }
 func TestModbusClosedCoilDomain(t *testing.T) {

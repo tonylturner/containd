@@ -196,9 +196,8 @@ func TestTransportResolverOrdersNATReplyAfterQueuedRequest(t *testing.T) {
 			t.Fatalf("logical role = %+v", asset)
 		}
 	}
-	profiles := e.Learner().Profiles()
-	if len(profiles) != 0 {
-		t.Fatalf("logical profiles = %+v", profiles)
+	if e.learnWatch.Load() != nil {
+		t.Fatal("traffic started a live watch")
 	}
 	if len(e.Events().Flows(0)) != 2 {
 		t.Fatal("transport identity regrouped directional flows")
@@ -338,7 +337,7 @@ func TestTransportDNATCoordinatesAndConnectionConsumers(t *testing.T) {
 				}
 				e.RecordDPIEvents(st, &dpi.ParsedPacket{Proto: "tcp"}, []dpi.Event{ev})
 			}
-			if len(e.Inventory().GetAssets("10.20.0.2")) != 0 || len(e.Learner().Profiles()) != 0 {
+			if len(e.Inventory().GetAssets("10.20.0.2")) != 0 || e.learnWatch.Load() != nil {
 				t.Fatal("NAT addresses became logical assets")
 			}
 			// Policy and logical inventory share verified service coordinates.

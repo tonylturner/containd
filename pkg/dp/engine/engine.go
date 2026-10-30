@@ -23,7 +23,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
-	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
@@ -81,7 +80,7 @@ type Engine struct {
 	verdictCache          *VerdictCache
 	inventory             *inventory.Inventory
 	anomalyDetector       *anomaly.Detector
-	learner               *learn.Learner
+	learnWatch            atomic.Pointer[learnWatchHook]
 	sigEngine             *signatures.Engine
 	stats                 *stats.Tracker
 	hooks                 *inlineHooks
@@ -228,7 +227,6 @@ func New(cfg Config) (*Engine, error) {
 	e.SetICSParsing(cfg.DPIICSParsing)
 	e.inventory = inventory.New()
 	e.anomalyDetector = anomaly.New()
-	e.learner = learn.New()
 	e.sigEngine = signatures.New()
 	e.sigEngine.LoadBuiltins()
 	e.stats = stats.New()
