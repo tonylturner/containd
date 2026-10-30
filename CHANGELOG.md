@@ -240,6 +240,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Management URL builders avoid duplicate base-path prefixes when a reverse
   proxy has already rewritten API or asset paths.
+- Console ticket upgrades work through proxies that omit the published port
+  from `Host`; ticket issuance retains cookie-authenticated origin checks.
 - AF_PACKET resolver queue or byte overflow stops passive DPI and identification
   decoding for the affected connection incarnation, without changing forwarding.
   A `dpi.coverage.loss` event and `containd_dpi_coverage_losses_total` counter expose

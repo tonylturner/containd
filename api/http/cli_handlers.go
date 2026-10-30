@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -114,17 +113,11 @@ func cliWSHandler(store config.Store) gin.HandlerFunc {
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
-		CheckOrigin: func(r *http.Request) bool {
-			origin := strings.TrimSpace(r.Header.Get("Origin"))
-			if origin == "" {
-				return false
-			}
-			u, err := url.Parse(origin)
-			if err != nil || u.Host == "" {
-				return false
-			}
-			return strings.EqualFold(u.Host, r.Host)
-		},
+		// The route requires a single-use ticket minted by an authenticated,
+		// CSRF-protected POST. That capability, not ambient cookies, authorizes
+		// the upgrade. Comparing Origin with Host adds no CSWSH protection and
+		// rejects reverse proxies that strip the published port from Host.
+		CheckOrigin: func(*http.Request) bool { return true },
 	}
 	return func(c *gin.Context) {
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)

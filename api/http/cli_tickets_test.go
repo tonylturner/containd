@@ -153,9 +153,9 @@ func TestCLITicketSessionAuth(t *testing.T) {
 	headers.Del("Cookie")
 	key := issue(false)
 	headers.Set("Origin", "https://evil.example")
-	dial("?ticket="+key, 403)
+	dial("?ticket="+key, 101) // The ticket, not Origin, authorizes the upgrade.
 	headers.Set("Origin", srv.URL)
-	dial("?ticket="+key, 401) // Failed Origin checks still burn the ticket.
+	dial("?ticket="+key, 401)
 
 	key = issue(false)
 	// The actual logout route must invalidate already-issued tickets.
@@ -167,6 +167,52 @@ func TestCLITicketSessionAuth(t *testing.T) {
 	dial("?ticket="+key, 401)
 	if !us.sessions["sess-"+uid].Revoked {
 		t.Fatal("logout did not revoke session")
+	}
+}
+
+func TestCLIWSProxyHostWithoutPort(t *testing.T) {
+	t.Setenv("CONTAIND_JWT_SECRET", testJWTSecret)
+	t.Setenv("CONTAIND_LAB_MODE", "0")
+	t.Setenv("CONTAIND_ALLOWED_ORIGINS", "http://localhost:8088")
+	us := newMockUserStore()
+	token, _ := addTestAdmin(us, []byte(testJWTSecret))
+	r := setupJWTServer(&mockStore{cfg: config.DefaultConfig()}, us)
+	// The proxy strips the published port from Host on the ticket POST too.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/cli/ws/ticket", nil)
+	req.Host = "localhost"
+	req.Header.Set("Origin", "http://localhost:8088")
+	req.AddCookie(&http.Cookie{Name: "containd_token", Value: token})
+	r.ServeHTTP(rec, req)
+	ticket := decodeCLITicket(t, rec)
+
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/cli/ws"
+	headers := http.Header{"Host": {"localhost"}, "Origin": {"http://localhost:8088"}}
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL+"?ticket="+ticket, headers)
+	if err != nil {
+		t.Fatalf("proxy upgrade: response=%v error=%v", resp, err)
+	}
+	defer conn.Close()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("proxy upgrade: status=%d", resp.StatusCode)
+	}
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatal(err)
+	}
+	for _, origin := range []string{"http://localhost:8088", ""} {
+		headers.Set("Origin", origin)
+		unauthed, rejected, err := websocket.DefaultDialer.Dial(wsURL, headers)
+		if unauthed != nil {
+			unauthed.Close()
+		}
+		if rejected != nil && rejected.Body != nil {
+			rejected.Body.Close()
+		}
+		if err == nil || rejected == nil || rejected.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("upgrade without ticket: response=%v error=%v", rejected, err)
+		}
 	}
 }
 

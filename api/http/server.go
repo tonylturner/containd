@@ -235,8 +235,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	// WebSockets always require a one-use ticket, including cookie clients.
 	// Reauthenticate its issuer before upgrade, not the browser's ambient user.
 	tickets := newCLITickets()
-	api.GET("/cli/ws", enforceSameOriginOnCookieAuth(allowedOriginsFromEnv()),
-		tickets.redeem(), authMiddleware(userStore), verifyCLITicketIdentity, cliWSHandler(store))
+	api.GET("/cli/ws", tickets.redeem(), authMiddleware(userStore), verifyCLITicketIdentity, cliWSHandler(store))
 	// All other endpoints require auth (unless lab mode).
 	protected := api.Group("")
 	protected.Use(enforceSameOriginOnCookieAuth(allowedOriginsFromEnv()))

@@ -111,8 +111,10 @@ Roles:
 
 The in-app console first authenticates `POST /api/v1/cli/ws/ticket` with the
 management cookie or a Bearer credential, then opens
-`/api/v1/cli/ws?ticket=<ticket>` with a same-host `Origin`. Session JWTs never
-belong in the WebSocket URL; `?token=` is not accepted.
+`/api/v1/cli/ws?ticket=<ticket>`. The ticket POST enforces cookie-authenticated
+origin restrictions. The upgrade uses only the ticket, without comparing
+`Origin` and `Host`, so proxies can strip the published port from `Host`.
+Session JWTs never belong in the WebSocket URL; `?token=` is not accepted.
 
 Tickets expire after 30 seconds and are single-use, even if the connection
 attempt fails. Each connection or reconnect needs a fresh ticket. Restarting
