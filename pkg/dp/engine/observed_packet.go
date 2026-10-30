@@ -52,6 +52,14 @@ func (e *Engine) enforcingPacketScope(pkt capture.Packet, state *flow.State) boo
 	return false
 }
 
-func observedDecision(pkt capture.Packet) capture.Decision {
-	return capture.Decision{Action: capture.Repeat, Mark: pkt.Mark & ^enforce.QueueMarkMask | enforce.ObservedMark, Reason: "ics_observed"}
+func observedDecision(pkt capture.Packet, decision capture.Decision) capture.Decision {
+	if decision.Action != capture.Accept {
+		return decision
+	}
+	decision.Action = capture.Repeat
+	decision.Mark = pkt.Mark & ^enforce.QueueMarkMask | enforce.ObservedMark
+	if decision.Reason == "" {
+		decision.Reason = "ics_observed"
+	}
+	return decision
 }
