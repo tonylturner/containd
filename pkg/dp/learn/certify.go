@@ -206,6 +206,11 @@ func boundaryMutations(o evidence.Observation, visit func(mutation) bool) {
 	add("direction", func(p *evidence.Observation) { p.Service.Direction = "response" })
 	switch {
 	case o.Modbus != nil:
+		if o.Modbus.FunctionCode != nil && *o.Modbus.FunctionCode == 5 {
+			for _, value := range []uint16{1, 0x1234, 0xffff} {
+				add(fmt.Sprintf("invalid_coil_value_%d", value), func(p *evidence.Observation) { p.Modbus.Values = []uint16{value} })
+			}
+		}
 		add("unit", func(p *evidence.Observation) { *p.Modbus.UnitID++ })
 		add("missing_unit", func(p *evidence.Observation) { p.Modbus.UnitID = nil })
 		add("function", func(p *evidence.Observation) { *p.Modbus.FunctionCode++ })
@@ -320,6 +325,18 @@ func boundaryMutations(o evidence.Observation, visit func(mutation) bool) {
 			}
 		}
 	case o.IEC104 != nil:
+		if o.IEC104.TypeID != nil {
+			switch *o.IEC104.TypeID {
+			case 46, 47, 59, 60:
+				for i := range o.IEC104.Objects {
+					for _, value := range []uint8{0, 3} {
+						add(fmt.Sprintf("reserved_command_value_%d_%d", i, value), func(p *evidence.Observation) {
+							p.IEC104.Objects[i].ValueDigest, _ = evidence.Digest(value)
+						})
+					}
+				}
+			}
+		}
 		add("type", func(p *evidence.Observation) { *p.IEC104.TypeID++ })
 		add("ca", func(p *evidence.Observation) { *p.IEC104.CA++ })
 		add("cot", func(p *evidence.Observation) { *p.IEC104.COT++ })

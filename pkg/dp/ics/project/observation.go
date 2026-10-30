@@ -60,6 +60,9 @@ func Observation(o evidence.Observation) ([]rules.EvalContext, error) {
 			put(eventfields.KeyUnitID, *m.UnitID)
 		}
 		if m.FunctionCode != nil {
+			if *m.FunctionCode == 5 && len(m.Values) == 1 {
+				put(eventfields.KeyValue, m.Values[0])
+			}
 			put(eventfields.KeyFunctionCode, *m.FunctionCode)
 			put(eventfields.KeyIsWrite, modbus.IsWriteFunctionCode(*m.FunctionCode))
 		}
@@ -193,6 +196,16 @@ func Observation(o evidence.Observation) ([]rules.EvalContext, error) {
 			}
 			if obj.Qualifier != nil {
 				a[eventfields.KeyQualifier] = *obj.Qualifier
+			}
+			// Closed command values are retained as canonical digests. Restore
+			// their finite decoded state, including reserved negative states,
+			// through the same value-validity projection as live events.
+			for value := range uint8(4) {
+				digest, _ := evidence.Digest(value)
+				if obj.ValueDigest == digest {
+					a[eventfields.KeyValue] = value
+					break
+				}
 			}
 			events = append(events, dpi.Event{Proto: s.Protocol, Kind: s.Direction, Attributes: a, Timestamp: o.CapturedAt})
 		}

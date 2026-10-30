@@ -34,6 +34,11 @@ func Objects(state *flow.State, ev dpi.Event, safeRead func(map[string]any) bool
 	var objects []rules.ICSContext
 	switch base.Protocol {
 	case eventfields.ProtoModbus:
+		if base.HasFunctionCode && base.FunctionCode == 5 {
+			if value, ok := eventfields.Uint16(a, eventfields.KeyValue); ok {
+				base.ValueInvalid = value != 0 && value != 0xff00
+			}
+		}
 		if unit, ok := eventfields.Uint8(a, eventfields.KeyUnitID); ok {
 			base.UnitID = &unit
 		}
@@ -239,7 +244,16 @@ func iecObject(ev dpi.Event, safeRead func(map[string]any) bool) *rules.ICSConte
 		c.SafeRead = safeRead(a)
 	}
 	dir, _ := eventfields.String(a, eventfields.KeyDirection)
-	return &rules.ICSContext{Protocol: eventfields.ProtoIEC104, Direction: dir, IEC104: c}
+	invalid := false
+	if c.TypeID != nil {
+		switch *c.TypeID {
+		case 46, 47, 59, 60:
+			if value, ok := eventfields.Uint8(a, eventfields.KeyValue); ok {
+				invalid = value != 1 && value != 2
+			}
+		}
+	}
+	return &rules.ICSContext{Protocol: eventfields.ProtoIEC104, Direction: dir, IEC104: c, ValueInvalid: invalid}
 }
 
 func iecBroadcast(a map[string]any) bool {

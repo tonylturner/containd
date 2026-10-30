@@ -10,11 +10,12 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
 const GeneratorVersion = "exact-1"
-const EvaluatorVersion = "project-1"
+const EvaluatorVersion = rules.EvaluatorVersion
 
 // CompatibleVersions deliberately does not reinterpret historical decoder or
 // profile inputs. Their immutable fingerprints stay part of content identity.
