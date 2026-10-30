@@ -99,7 +99,7 @@ for (const [key, label] of protocols) {
   });
 }
 
-test("cancel leaves parsing untouched and a rejected save restores the candidate", async ({ page }) => {
+test("cancel leaves parsing untouched and a rejected save keeps the draft open", async ({ page }) => {
   const { saves } = await openEditor(page, { modbus: "strict" }, true);
   await modal(page).getByLabel("Modbus/TCP parsing").selectOption("tolerant");
   await modal(page).getByRole("button", { name: "Cancel", exact: true }).click();
@@ -109,6 +109,8 @@ test("cancel leaves parsing untouched and a rejected save restores the candidate
   await modal(page).getByLabel("Modbus/TCP parsing").selectOption("tolerant");
   await modal(page).getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Not saved: parsing rejected")).toBeVisible();
+  await expect(modal(page).getByLabel("Modbus/TCP parsing")).toHaveValue("tolerant");
+  await modal(page).getByRole("button", { name: "Cancel", exact: true }).click();
   await configure(page);
   await expect(modal(page).getByLabel("Modbus/TCP parsing")).toHaveValue("strict");
 });

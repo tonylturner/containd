@@ -125,13 +125,14 @@ export default function ProxiesPage() {
     if (!canEdit) return;
     setError(null);
     setSaveState("saving");
-    const submitted = forwardDraft.editor;
+    const submitted = forwardDraft.beginSave();
     const saved = await api.setForwardProxy({ ...forward,
       listenZones: listenZonesCSV.split(",").map((s) => s.trim()).filter(Boolean),
       allowedDomains: allowedDomainsCSV.split(",").map((s) => s.trim()).filter(Boolean),
     });
     setSaveState(saved.ok ? "saved" : "error");
     if (!saved.ok) {
+      forwardDraft.failSave(submitted);
       const msg = saved.error || "Failed to save forward proxy settings.";
       setError(msg);
       toast(msg, "error");
@@ -146,10 +147,11 @@ export default function ProxiesPage() {
     if (!canEdit) return;
     setError(null);
     setSaveState("saving");
-    const submitted = reverseDraft.editor;
+    const submitted = reverseDraft.beginSave();
     const saved = await api.setReverseProxy(reverse);
     setSaveState(saved.ok ? "saved" : "error");
     if (!saved.ok) {
+      reverseDraft.failSave(submitted);
       const msg = saved.error || "Failed to save reverse proxy settings.";
       setError(msg);
       toast(msg, "error");

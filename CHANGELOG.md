@@ -253,6 +253,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TCP/2404 flows outside IEC 104 table ownership now use generic TCP
   decision serialization, denial reconnects and incarnation retirement.
 
+- The HTTP scanning gate releases a held upload's object slot before its
+  final response reaches the client, so a following upload or the response's
+  download scan is not refused as busy by the previous upload.
 - Modbus transaction pairing separates connection incarnations, directions,
   transaction IDs and unit IDs, including locally masqueraded AF_PACKET
   traffic. Missing connection evidence reports correlation unavailable instead
@@ -273,9 +276,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imported additions; import and creation forms do not block configuration refreshes.
   VPN profile uploads likewise update their configuration path while retaining edits.
 - DHCP, DNS, NTP, syslog, AV, proxy, VPN, IDS, NAT, routing, zone, interface,
-  wizard and identity editors keep unsaved edits during staged-save, commit
+  wizard, identity, firewall, ICS and template editors keep unsaved edits during staged-save, commit
   and automatic refreshes, and warn when settings change on the server.
-  Explicit Refresh discards edits. List fields retain unfinished text while typing.
+  Edits made while a save is outstanding survive its acknowledgement, even when
+  changed back to the previous server value. Explicit Refresh discards edits.
+  List fields retain unfinished text while typing.
 - On narrow screens, the sidebar collapses behind a Menu button so the main
   content has the full viewport width. Navigation closes after choosing a
   link or pressing Escape; the desktop sidebar stays visible.

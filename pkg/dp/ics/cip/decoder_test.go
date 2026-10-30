@@ -12,6 +12,33 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
+func TestUsesImplicitIO(t *testing.T) {
+	if UsesImplicitIO(nil) {
+		t.Fatal("nil state selects implicit I/O")
+	}
+	for _, tc := range []struct {
+		name     string
+		proto    uint8
+		src, dst uint16
+		want     bool
+	}{
+		{"UDP-source", 17, 2222, 49152, true},
+		{"UDP-destination", 17, 49152, 2222, true},
+		{"UDP-both", 17, 2222, 2222, true},
+		{"UDP-precedence", 17, 44818, 2222, true},
+		{"UDP-encapsulation", 17, 44818, 49152, false},
+		{"TCP", 6, 2222, 44818, false},
+		{"other-transport", 1, 2222, 49152, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := flow.NewState(keyFor("10.0.0.1", "10.0.0.2", tc.src, tc.dst, tc.proto), time.Now())
+			if got := UsesImplicitIO(state); got != tc.want {
+				t.Fatalf("implicit I/O=%v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // buildEIPHeader creates a raw EIP encapsulation header with the given command
 // and data payload.
 func buildEIPHeader(command uint16, sessionHandle uint32, data []byte) []byte {

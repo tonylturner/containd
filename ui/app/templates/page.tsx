@@ -5,13 +5,16 @@ import { notifyConfigMutation } from "../../lib/config-events";
 import { getJSONList, postJSON } from "../../lib/api-request";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, apiURL, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 import { summarizeGenericICS } from "../ics/ics-shared";
 import { SkeletonList } from "../../components/Skeleton";
+import { useConfigForm } from "../../lib/use-config-form";
+import { ConfigEditNotice } from "../../lib/use-config-editor";
+import { sameConfig } from "../../lib/config-editor";
 
 /* ── Types ─────────────────────────────────────────────────────── */
 
@@ -100,11 +103,12 @@ export default function TemplatesPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<ICSTemplate | null>(null);
 
-  async function refresh() {
+  async function refresh({ keepEdits = true }: { keepEdits?: boolean } = {}) {
     const [t, z] = await Promise.all([fetchTemplates(), api.listZones()]);
     setTemplates(t);
     setZones(z ?? []);
     setLoading(false);
+    if (!keepEdits) setActiveTemplate(null);
   }
 
   useConfigRefresh(refresh);
@@ -118,7 +122,7 @@ export default function TemplatesPage() {
       title="ICS Rule Templates"
       actions={
         <button
-          onClick={refresh}
+          onClick={() => refresh({ keepEdits: false })}
           className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
         >
           Refresh
@@ -209,12 +213,13 @@ export default function TemplatesPage() {
       {activeTemplate && (
         <TemplateModal
           template={activeTemplate}
+          context={templates}
           zones={zones}
           canEdit={canEdit}
           onClose={() => setActiveTemplate(null)}
-          onSuccess={(msg) => {
+          onSuccess={(msg, close) => {
             setSuccess(msg);
-            setActiveTemplate(null);
+            if (close) setActiveTemplate(null);
           }}
           onError={(msg) => setError(msg)}
         />
@@ -226,6 +231,7 @@ export default function TemplatesPage() {
 /* ── Template Configuration Modal ──────────────────────────────── */
 
 function TemplateModal({
+  context,
   template,
   zones,
   canEdit,
@@ -233,16 +239,24 @@ function TemplateModal({
   onSuccess,
   onError,
 }: {
+  context: ICSTemplate[] | null;
   template: ICSTemplate;
   zones: Zone[];
   canEdit: boolean;
   onClose: () => void;
-  onSuccess: (msg: string) => void;
+  onSuccess: (msg: string, close: boolean) => void;
   onError: (msg: string) => void;
 }) {
-  const [sourceZones, setSourceZones] = useState<string[]>([]);
-  const [destZones, setDestZones] = useState<string[]>([]);
-  const [params, setParams] = useState<Record<string, string>>({});
+  const form = useConfigForm({ sourceZones: [] as string[], destZones: [] as string[], params: {} as Record<string, string> });
+  const { refreshForm } = form;
+  useEffect(() => { refreshForm({ templates: context, zones }); }, [refreshForm, context, zones]);
+  const [sourceZones, setSourceZones] = form.field("sourceZones");
+  const [destZones, setDestZones] = form.field("destZones");
+  const [params, setParams] = form.field("params");
+  const latest = useRef(form.editor);
+  latest.current = form.editor;
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [preview, setPreview] = useState<FirewallRule[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -269,7 +283,9 @@ function TemplateModal({
   async function handleApply() {
     if (!canEdit) return;
     setLoading(true);
+    const submitted = form.editor;
     const res = await applyTemplate(buildRequest());
+    if (!mounted.current) return;
     setLoading(false);
     if (!res) {
       onError("Failed to apply template.");
@@ -281,7 +297,9 @@ function TemplateModal({
     if (created > 0) parts.push(`${created} created`);
     if (updated > 0) parts.push(`${updated} updated`);
     if (parts.length === 0) parts.push(`${res.rules.length} rules`);
-    onSuccess(`Template "${template.name}" staged — commit to apply. ${parts.join(", ")}.`);
+    form.acceptFields(submitted, ["sourceZones", "destZones", "params"]);
+    onSuccess(`Template "${template.name}" staged — commit to apply. ${parts.join(", ")}.`,
+      sameConfig(latest.current.cfg.fields, submitted.cfg.fields));
   }
 
   function toggleZone(
@@ -314,6 +332,7 @@ function TemplateModal({
           </button>
         </div>
 
+        <ConfigEditNotice superseded={form.editor.superseded} />
         <div className="space-y-4 text-sm">
           {/* Zone selectors */}
           <div className="grid gap-4 md:grid-cols-2">
@@ -322,19 +341,19 @@ function TemplateModal({
                 Source Zones (optional)
               </label>
               <div className="mt-1 flex flex-wrap gap-1">
-                {zones.map((z) => (
+                {Array.from(new Set([...zones.map((z) => z.name), ...sourceZones])).map((name) => (
                   <button
-                    key={z.name}
+                    key={name}
                     onClick={() =>
-                      toggleZone(z.name, sourceZones, setSourceZones)
+                      toggleZone(name, sourceZones, setSourceZones)
                     }
                     className={`rounded-full px-2 py-0.5 text-xs ${
-                      sourceZones.includes(z.name)
+                      sourceZones.includes(name)
                         ? "text-(--amber)"
                         : "text-(--text) "
                     }`}
                   >
-                    {z.name}
+                    {name}{!zones.some((zone) => zone.name === name) && " (no longer on server)"}
                   </button>
                 ))}
                 {zones.length === 0 && (
@@ -349,17 +368,17 @@ function TemplateModal({
                 Destination Zones (optional)
               </label>
               <div className="mt-1 flex flex-wrap gap-1">
-                {zones.map((z) => (
+                {Array.from(new Set([...zones.map((z) => z.name), ...destZones])).map((name) => (
                   <button
-                    key={z.name}
-                    onClick={() => toggleZone(z.name, destZones, setDestZones)}
+                    key={name}
+                    onClick={() => toggleZone(name, destZones, setDestZones)}
                     className={`rounded-full px-2 py-0.5 text-xs ${
-                      destZones.includes(z.name)
+                      destZones.includes(name)
                         ? "text-(--amber)"
                         : "text-(--text) "
                     }`}
                   >
-                    {z.name}
+                    {name}{!zones.some((zone) => zone.name === name) && " (no longer on server)"}
                   </button>
                 ))}
                 {zones.length === 0 && (

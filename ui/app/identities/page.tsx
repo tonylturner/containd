@@ -80,9 +80,10 @@ export default function IdentitiesPage() {
 
   async function stage(binding: IdentityBinding): Promise<boolean> {
     setError(null);
-    const submitted = rowsDraft.editor;
+    const submitted = rowsDraft.beginSave();
     const res = await api.setIdentityBinding(binding);
     if (!res.ok) {
+      rowsDraft.failSave(submitted);
       setError(res.error);
       return false;
     }

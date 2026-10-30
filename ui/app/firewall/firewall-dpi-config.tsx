@@ -55,22 +55,21 @@ export function DPIConfigSection({
     (p) => icsProtos[p.key] !== false,
   ).length;
 
-  // Stages the change optimistically and reverts it when the server
-  // rejects it, for example an IEC 104 enforce policy that needs the decoder.
+  // Failed requests leave the editor open; only acknowledged state replaces
+  // the displayed server copy.
   async function save(updated: DataPlaneConfig) {
-    if (!canEdit) return;
-    const previous = cfg;
-    onChange(updated);
+    if (!canEdit || saving) return null;
     setSaving(true);
     setSaveError(null);
     const result = await setDataPlane(updated);
     setSaving(false);
     setSaveState(result.ok ? "saved" : "error");
     if (!result.ok) {
-      onChange(previous);
       setSaveError(result.error);
+      return null;
     }
-    setTimeout(() => setSaveState("idle"), 1500);
+    onChange(result.data);
+    return result.data;
   }
 
   function toggleDPI() {
@@ -82,14 +81,14 @@ export function DPIConfigSection({
   }
 
   function saveProtos(newProtos: Record<string, boolean>) {
-    save({ ...cfg, dpiProtocols: newProtos });
+    return save({ ...cfg, dpiProtocols: newProtos });
   }
 
   function saveICSProtos(
     newICSProtos: Record<string, boolean>,
     parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>,
   ) {
-    save({
+    return save({
       ...cfg,
       dpiIcsProtocols: newICSProtos,
       ...(Object.keys(parsing).length > 0 ? { dpiIcsParsing: parsing } : {}),
@@ -97,7 +96,7 @@ export function DPIConfigSection({
   }
 
   function saveExclusions(newExcl: DPIExclusion[]) {
-    save({ ...cfg, dpiExclusions: newExcl });
+    return save({ ...cfg, dpiExclusions: newExcl });
   }
 
   return (
@@ -128,6 +127,7 @@ export function DPIConfigSection({
             {canEdit && (
               <button
                 onClick={toggleDPI}
+                disabled={saving}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   dpiOn ? "bg-emerald-500" : "bg-white/10"
                 }`}
@@ -164,7 +164,7 @@ export function DPIConfigSection({
                 {canEdit && (
                   <div className="flex items-center rounded-xs border overflow-hidden">
                     <button
-                      onClick={() => setMode("learn")}
+                      onClick={() => setMode("learn")} disabled={saving}
                       className={`px-3 py-1 text-[10px] font-medium transition-ui ${
                         dpiMode === "learn"
                           ? "bg-blue-500/20 text-blue-400 border-r "
@@ -174,7 +174,7 @@ export function DPIConfigSection({
                       Learning
                     </button>
                     <button
-                      onClick={() => setMode("enforce")}
+                      onClick={() => setMode("enforce")} disabled={saving}
                       className={`px-3 py-1 text-[10px] font-medium transition-ui ${
                         dpiMode === "enforce"
                           ? ""
@@ -341,32 +341,29 @@ export function DPIConfigSection({
 
       {showProtoModal && (
         <DPIProtocolModal
+          context={cfg}
           protocols={protos}
-          onSave={(p) => {
-            saveProtos(p);
-            setShowProtoModal(false);
-          }}
+          saving={saving}
+          onSave={saveProtos}
           onClose={() => setShowProtoModal(false)}
         />
       )}
       {showExclModal && (
         <DPIExclusionModal
+          context={cfg}
           exclusions={exclusions}
-          onSave={(e) => {
-            saveExclusions(e);
-            setShowExclModal(false);
-          }}
+          saving={saving}
+          onSave={saveExclusions}
           onClose={() => setShowExclModal(false)}
         />
       )}
       {showICSConfigModal && (
         <ICSDPIConfigModal
+          context={cfg}
           icsProtocols={icsProtos}
           parsing={cfg.dpiIcsParsing ?? {}}
-          onSave={(p, parsing) => {
-            saveICSProtos(p, parsing);
-            setShowICSConfigModal(false);
-          }}
+          saving={saving}
+          onSave={saveICSProtos}
           onClose={() => setShowICSConfigModal(false)}
         />
       )}

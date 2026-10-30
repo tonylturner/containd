@@ -11,6 +11,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/ics/cip"
 	"github.com/tonylturner/containd/pkg/dp/identify"
 	"github.com/tonylturner/containd/pkg/dp/observe"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -85,7 +86,7 @@ func legacyDecodes(c *observationContext, protocol identify.Protocol) bool {
 		}
 		key := st.ServiceKey()
 		// UDP/2222 selects legacy implicit I/O, never the confirmed ENIP layer.
-		if protocol == identify.ENIP && key.Proto == 17 && (key.SrcPort == ics.CIPImplicitPort || key.DstPort == ics.CIPImplicitPort) {
+		if protocol == identify.ENIP && cip.UsesImplicitIO(st) {
 			return false
 		}
 		if key.Proto == 6 && (key.SrcPort == iec104Port || key.DstPort == iec104Port) {

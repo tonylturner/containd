@@ -12,6 +12,8 @@ async function mockAPI(page: Page) {
     "/interfaces/state": [],
     "/identities": { mappings: [{ ip: "192.0.2.5", identities: ["operator"] }] },
     "/firewall/rules": [],
+    "/dataplane": { captureInterfaces: [], dpiMock: false, dpiEnabled: true, dpiMode: "learn", dpiIcsProtocols: { modbus: true } },
+    "/templates/ics": [{ name: "Test baseline", description: "Test template", protocol: "modbus", parameters: [{ name: "codes", label: "Codes", type: "text", placeholder: "3, 16" }] }],
     "/firewall/nat": { enabled: false, portForwards: [] },
     "/routing": { gateways: [], routes: [], rules: [] },
     "/ids/rules": { enabled: false, rules: [{ id: "test-rule", title: "Test rule", enabled: true }] },
@@ -28,7 +30,7 @@ async function mockAPI(page: Page) {
     "/assets": [],
     "/config/diff": { changed: false, changedSections: [] },
   };
-  const server = { data, failedReads: new Set<string>(), writes: [] as { path: string; body: unknown }[], hold: null as Promise<void> | null };
+  const server = { data, failedReads: new Set<string>(), failedWrites: new Set<string>(), writes: [] as { path: string; body: unknown }[], hold: null as Promise<void> | null };
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
     localStorage.setItem("containd.auth.role", "admin");
@@ -45,8 +47,19 @@ async function mockAPI(page: Page) {
     const body = req.postDataJSON();
     server.writes.push({ path, body });
     if (server.hold) await server.hold;
+    if (server.failedWrites.has(path)) return route.fulfill({ status: 400, json: { error: "rejected" } });
     let result = body;
-    if (path.startsWith("/zones/") || path.startsWith("/interfaces/")) {
+    if (path === "/templates/ics/apply") {
+      return route.fulfill({ json: { rules: [], created: 0 }, headers: body.preview ? {} : { "X-Containd-Config": "staged" } });
+    }
+    if (path === "/firewall/rules" && req.method() === "POST") {
+      data[path] = [...data[path] as object[], body];
+    } else if (path.startsWith("/firewall/rules/")) {
+      const id = decodeURIComponent(path.slice("/firewall/rules/".length));
+      const rows = data["/firewall/rules"] as { id: string }[];
+      result = { ...rows.find((row) => row.id === id), id, ...body };
+      data["/firewall/rules"] = [...rows.filter((row) => row.id !== id), result];
+    } else if (path.startsWith("/zones/") || path.startsWith("/interfaces/")) {
       const collection = path.slice(0, path.lastIndexOf("/"));
       const name = decodeURIComponent(path.slice(path.lastIndexOf("/") + 1));
       data[collection] = (data[collection] as { name: string }[]).map((row) =>
@@ -69,6 +82,67 @@ async function announce(page: Page, path: string, event = CONFIG_COMMITTED) {
     page.evaluate((name) => window.dispatchEvent(new CustomEvent(name)), event),
   ]);
 }
+
+for (const item of [
+  { name: "DNS", route: "/system/services/dns/", path: "/services/dns", label: "Enable DNS resolver" },
+  { name: "NTP", route: "/system/services/ntp/", path: "/services/ntp", label: "Enable NTP client" },
+  { name: "AV", route: "/system/services/av/", path: "/services/av", label: "Enable AV/ICAP scanning" },
+  { name: "VPN", route: "/vpn/", path: "/services/vpn", label: "Enable WireGuard" },
+  { name: "IDS", route: "/ids/", path: "/ids/rules", label: "Enable IDS engine" },
+]) {
+  test(`${item.name} keeps a reversion to the old server value during an outstanding save`, async ({ page }) => {
+    const server = await mockAPI(page);
+    await open(page, item.route, item.path);
+    const enabled = page.getByRole("checkbox", { name: item.label });
+    await expect(enabled).not.toBeChecked();
+    await enabled.check();
+    let release!: () => void;
+    server.hold = new Promise<void>((resolve) => { release = resolve; });
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(() => server.writes.length).toBe(1);
+    await enabled.uncheck();
+    // A read of the submitted value arrives before the save acknowledgement.
+    server.data[item.path] = server.writes[0].body;
+    await announce(page, item.path);
+    await expect(enabled).not.toBeChecked();
+    const refreshed = page.waitForResponse(read(item.path));
+    release();
+    await refreshed;
+    await expect(enabled).not.toBeChecked();
+    // It remains an unsaved change, not just a temporarily retained value.
+    server.hold = null;
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(() => server.writes.length).toBe(2);
+    expect(server.writes[1].body).toMatchObject(item.name === "VPN"
+      ? { wireguard: { enabled: false } } : { enabled: false });
+  });
+}
+
+test("a row reversion to its derived value remains explicit while its save is outstanding", async ({ page }) => {
+  const server = await mockAPI(page);
+  server.data["/zones"] = [{ name: "lan", alias: "Original" }];
+  await open(page, "/zones/", "/zones");
+  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "lan", exact: true }) });
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  await row.getByRole("textbox").first().fill("Submitted");
+  let release!: () => void;
+  server.hold = new Promise<void>((resolve) => { release = resolve; });
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => server.writes.length).toBe(1);
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  const alias = row.getByRole("textbox").first();
+  await alias.fill("Original");
+  server.data["/zones"] = [{ name: "lan", alias: "Submitted" }];
+  await announce(page, "/zones");
+  const refreshed = page.waitForResponse(read("/zones"));
+  release();
+  await refreshed;
+  await expect(alias).toHaveValue("Original");
+  server.hold = null;
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => server.writes.length).toBe(2);
+  expect(server.writes[1].body).toMatchObject({ alias: "Original" });
+});
 
 type TextPage = {
   name: string; route: string; path: string;
@@ -372,4 +446,182 @@ test("OpenVPN CSV inputs keep trailing separators and parse only their save snap
   await refreshed;
   await expect(dns).toHaveValue("192.0.2.53, 192.");
   expect(server.writes[0].body).toMatchObject({ openvpn: { server: { pushDNS: ["192.0.2.53"], pushRoutes: ["192.0.2.0/24"] } } });
+});
+
+const draftRule = { id: "ot-rule", description: "Original", action: "ALLOW", ics: { protocol: "modbus", functionCode: [3], mode: "learn" } };
+
+for (const surface of ["Firewall", "ICS"]) {
+  test(`${surface} modal keeps raw edits across server removal and a save echo with later typing`, async ({ page }) => {
+    const server = await mockAPI(page);
+    server.data["/firewall/rules"] = [draftRule];
+    await open(page, surface === "Firewall" ? "/firewall/" : "/ics/", "/firewall/rules");
+    await page.getByRole("row").filter({ hasText: "ot-rule" }).getByRole("button", { name: "Edit", exact: true }).click();
+    const input = surface === "Firewall" ? page.getByPlaceholder("sources CIDR (csv)").last()
+      : page.getByPlaceholder("3, 16");
+    const raw = surface === "Firewall" ? "192.0.2.0/24, " : "3, ";
+    await input.fill(raw);
+    server.data["/firewall/rules"] = [];
+    for (const event of [CONFIG_STAGED, CONFIG_COMMITTED]) {
+      await announce(page, "/firewall/rules", event);
+      await expect(input).toHaveValue(raw);
+      await expect(page.getByRole("status", { name: "Unsaved edits" }).first()).toBeVisible();
+    }
+    let release!: () => void;
+    server.hold = new Promise<void>((resolve) => { release = resolve; });
+    await page.getByRole("button", { name: surface === "Firewall" ? "Save changes" : "Save filter", exact: true }).click();
+    await expect.poll(() => server.writes.length).toBe(1);
+    await input.fill(raw + (surface === "Firewall" ? "198.51." : "16,"));
+    const refreshed = page.waitForResponse(read("/firewall/rules"));
+    release();
+    await refreshed;
+    await expect(input).toHaveValue(raw + (surface === "Firewall" ? "198.51." : "16,"));
+    expect(server.writes[0].body).toMatchObject(surface === "Firewall" ? { sources: ["192.0.2.0/24"] } : { ics: { functionCode: [3] } });
+    await page.getByRole("button", { name: "Refresh", exact: true }).press("Enter");
+    await expect(input).toHaveCount(surface === "Firewall" ? 1 : 0);
+    if (surface === "Firewall") await expect(input).toHaveValue("");
+  });
+}
+
+test("Firewall creation keeps failed submissions and later typing, independently of collection refreshes", async ({ page }) => {
+  const server = await mockAPI(page);
+  await open(page, "/firewall/", "/firewall/rules");
+  const id = page.getByPlaceholder("id (e.g. mb-allow)");
+  const sources = page.getByPlaceholder("sources CIDR (csv)");
+  await id.fill("new-rule");
+  await sources.fill("192.0.2.0/24, ");
+  const sourceZone = page.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Source zone (any)", exact: true }) });
+  await sourceZone.selectOption("lan");
+  server.data["/zones"] = [{ name: "wan" }];
+  server.data["/firewall/rules"] = [draftRule];
+  await announce(page, "/firewall/rules");
+  await expect(page.getByRole("row").filter({ hasText: "ot-rule" })).toBeVisible();
+  await expect(sources).toHaveValue("192.0.2.0/24, ");
+  await expect(sourceZone).toHaveValue("lan");
+  await expect(sourceZone.getByRole("option", { selected: true })).toContainText("no longer on server");
+  server.failedWrites.add("/firewall/rules");
+  await page.getByRole("button", { name: "Create rule", exact: true }).click();
+  await expect(page.getByText("rejected", { exact: true })).toBeVisible();
+  await expect(id).toHaveValue("new-rule");
+  await expect(sources).toHaveValue("192.0.2.0/24, ");
+  server.failedWrites.clear();
+  let release!: () => void;
+  server.hold = new Promise<void>((resolve) => { release = resolve; });
+  await page.getByRole("button", { name: "Create rule", exact: true }).click();
+  await expect.poll(() => server.writes.length).toBe(2);
+  await sources.fill("192.0.2.0/24, 198.51.");
+  release();
+  await expect(id).toHaveValue("");
+  await expect(sources).toHaveValue("192.0.2.0/24, 198.51.");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(sources).toHaveValue("");
+});
+
+test("Firewall DPI parsing and unfinished exclusions survive background refresh and failed saves", async ({ page }) => {
+  const server = await mockAPI(page);
+  await open(page, "/firewall/", "/dataplane");
+  await page.getByRole("button", { name: "Configure", exact: true }).first().click();
+  const parsing = page.getByRole("combobox", { name: "Modbus/TCP parsing" });
+  await parsing.selectOption("strict");
+  server.data["/dataplane"] = { ...server.data["/dataplane"] as object, dpiMode: "enforce" };
+  await announce(page, "/dataplane");
+  await expect(parsing).toHaveValue("strict");
+  await expect(page.getByRole("status", { name: "Unsaved edits" })).toBeVisible();
+  server.failedWrites.add("/dataplane");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Not saved: rejected")).toBeVisible();
+  await expect(parsing).toHaveValue("strict");
+  server.failedWrites.clear();
+  let release!: () => void;
+  server.hold = new Promise<void>((resolve) => { release = resolve; });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => server.writes.length).toBe(2);
+  await parsing.selectOption("tolerant");
+  release();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  await expect(parsing).toHaveValue("tolerant");
+  expect(server.writes[1].body).toMatchObject({ dpiMode: "enforce", dpiIcsParsing: { modbus: "strict" } });
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("button", { name: "Add Exclusion", exact: true }).click();
+  const reason = page.getByPlaceholder("Reason (optional)");
+  await reason.fill("unfinished, ");
+  server.data["/dataplane"] = { ...server.data["/dataplane"] as object, dpiMode: "learn" };
+  await announce(page, "/dataplane");
+  await expect(reason).toHaveValue("unfinished, ");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(reason).toHaveValue("unfinished, ");
+  await page.getByRole("button", { name: "Refresh", exact: true }).press("Enter");
+  await expect(reason).toHaveCount(0);
+});
+
+test("Templates keep parameters and zone selections through preview, notifications and later stage typing", async ({ page }) => {
+  const server = await mockAPI(page);
+  await open(page, "/templates/", "/templates/ics");
+  await page.getByRole("button", { name: "Generate Rules" }).click();
+  const codes = page.getByPlaceholder("3, 16");
+  await codes.fill("3, ");
+  await page.getByRole("button", { name: "lan", exact: true }).first().click();
+  server.data["/zones"] = [{ name: "wan" }, { name: "dmz" }];
+  server.data["/templates/ics"] = [{ name: "Test baseline", description: "Changed template", protocol: "modbus", parameters: [] }];
+  for (const event of [CONFIG_STAGED, CONFIG_COMMITTED]) {
+    await announce(page, "/zones", event);
+    await expect(codes).toHaveValue("3, ");
+    await expect(page.getByRole("status", { name: "Unsaved edits" })).toBeVisible();
+  }
+  await expect(page.getByRole("button", { name: "lan (no longer on server)", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(page.getByText("Preview: 0 Rule(s)")).toBeVisible();
+  await expect(codes).toHaveValue("3, ");
+  server.failedWrites.add("/templates/ics/apply");
+  await page.getByRole("button", { name: "Stage", exact: true }).click();
+  await expect(page.getByText("Failed to apply template.", { exact: true })).toBeVisible();
+  await expect(codes).toHaveValue("3, ");
+  server.failedWrites.clear();
+  let release!: () => void;
+  server.hold = new Promise<void>((resolve) => { release = resolve; });
+  await page.getByRole("button", { name: "Stage", exact: true }).click();
+  await expect.poll(() => server.writes.length).toBe(3);
+  await codes.fill("3, 16, ");
+  release();
+  await expect(page.getByRole("button", { name: "Stage", exact: true })).toBeEnabled();
+  await expect(codes).toHaveValue("3, 16, ");
+  expect(server.writes[2].body).toMatchObject({ parameters: { codes: "3, " }, sourceZones: ["lan"] });
+  await page.getByRole("button", { name: "Refresh", exact: true }).press("Enter");
+  await expect(codes).toHaveCount(0);
+});
+
+
+for (const surface of ["Firewall", "ICS"]) {
+  test(`${surface} pristine modal adopts the new server copy without an unsaved warning`, async ({ page }) => {
+    const server = await mockAPI(page);
+    server.data["/firewall/rules"] = [draftRule];
+    await open(page, surface === "Firewall" ? "/firewall/" : "/ics/", "/firewall/rules");
+    await page.getByRole("row").filter({ hasText: "ot-rule" }).getByRole("button", { name: "Edit", exact: true }).click();
+    server.data["/firewall/rules"] = [{ ...draftRule, description: "New server copy", ics: { ...draftRule.ics, functionCode: [16] } }];
+    await announce(page, "/firewall/rules");
+    const input = surface === "Firewall" ? page.getByPlaceholder("description").last() : page.getByPlaceholder("3, 16");
+    await expect(input).toHaveValue(surface === "Firewall" ? "New server copy" : "16");
+    await expect(page.getByRole("status", { name: "Unsaved edits" })).toHaveCount(0);
+  });
+}
+
+test("Firewall IT decoder draft survives a refresh and acknowledges only the submitted snapshot", async ({ page }) => {
+  const server = await mockAPI(page);
+  await open(page, "/firewall/", "/dataplane");
+  await page.getByRole("button", { name: "Configure", exact: true }).nth(1).click();
+  const modal = page.locator("div.fixed").filter({ has: page.getByRole("heading", { name: "IT Protocol DPI Configuration" }) });
+  await modal.getByRole("button", { name: "Disable All", exact: true }).click();
+  server.data["/dataplane"] = { ...server.data["/dataplane"] as object, dpiMode: "enforce" };
+  await announce(page, "/dataplane");
+  await expect(modal.getByRole("status", { name: "Unsaved edits" })).toBeVisible();
+  let release!: () => void;
+  server.hold = new Promise<void>((resolve) => { release = resolve; });
+  await modal.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => server.writes.length).toBe(1);
+  await modal.getByRole("button", { name: "Enable All", exact: true }).click();
+  release();
+  await expect(modal.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  expect(server.writes[0].body).toMatchObject({ dpiProtocols: { http: false }, dpiMode: "enforce" });
+  await modal.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(modal).toHaveCount(0);
+  expect(server.writes[1].body).toMatchObject({ dpiProtocols: { http: true } });
 });

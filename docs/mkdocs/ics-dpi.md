@@ -214,7 +214,10 @@ to be counted. After an actual observation loss, unmatched
 claims re-arm only after a full two-minute quiet pairing timeout since the
 latest gap, and only if the opening SYN was captured. Thus transactions that
 could predate a gap cannot cause unmatched claims; detection is not disabled
-permanently.
+permanently. An AF_PACKET resolver queue or byte overflow is different: it
+stops decoding for the rest of that connection incarnation (see
+[DPI Modes](#dpi-modes)), so pairing resumes only on a new incarnation, not
+after the quiet timeout.
 
 Only default conntrack zone zero is supported. The resolver reads
 `nft -j list ruleset` at startup, after containd's ruleset applications and
@@ -826,8 +829,9 @@ observation is not authorization.
    observed address spans, and every learned rule matches request direction
    only. DNP3 rules carry their function code; CIP rules carry their service
    code and observed object classes, including a class-less request where
-   applicable. Neither protocol gets an `addresses` filter; station, point and
-   CIP path selectors are not available.
+   applicable. Neither protocol gets an `addresses` filter. The learner does
+   not generate DNP3 station/group/point or CIP instance/attribute/tag
+   selectors; add them to a staged rule by hand where needed.
 4. `POST /api/v1/learn/apply` stages generated rules in candidate configuration
    (`status: staged`); it does not activate them. Generated rules leave
    `ics.mode` empty, so they inherit the global `dpiMode`: they enforce only
@@ -1007,8 +1011,9 @@ statistics, event summaries, profiles, and generated rules for review. IEC 104
 is summarized but never generates permissive learned rules. Results **do not
 update live inventory, stage candidate rules, or commit policy**.
 
-The engine's separate `/internal/pcap/analyze` endpoints call `Analyze`, returning
-only events, flows, protocol/count statistics, and duration. These internal
+The engine's separate `/internal/pcap/analyze` endpoints call `AnalyzeWithOptions`,
+returning events, flows, content identifications, protocol/count statistics,
+duration and a `truncated` flag for partial or snap-length-cut records. These internal
 endpoints are not the public policy-generation interface. See
 [API Reference](api-reference.md) for public requests.
 
