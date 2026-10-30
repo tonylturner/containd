@@ -204,6 +204,7 @@ function TopologyInner() {
             >
               <Background color="rgba(245,158,11,0.06)" gap={28} size={1} />
               <Controls
+                position="top-left"
                 showInteractive={false}
                 style={{ background: "#0e130e", border: "1px solid rgba(245,158,11,0.14)", borderRadius: 0 }}
               />

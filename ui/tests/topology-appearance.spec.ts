@@ -69,3 +69,44 @@ test("canvas keeps its edges, hidden handles, selection glow and minimap", async
   await expect(page.locator(".react-flow__minimap-node")).toHaveCount(6);
   await expect(page.locator(".react-flow__attribution")).toHaveCount(0);
 });
+
+for (const width of [1440, 1024]) {
+  test.describe(`${width}px canvas overlays`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test("legend and minimap leave every Controls button visible and clickable", async ({ page }) => {
+      await page.locator('.react-flow__node[data-id="fw-main"]').click();
+      await page.locator(".react-flow").evaluate((el) => el.scrollIntoView({ block: "end" }));
+      const controls = page.locator(".react-flow__controls");
+      const legend = page.locator('[class*="canvasLegend"]');
+      const minimap = page.locator(".react-flow__minimap");
+      await expect(legend).toBeInViewport({ ratio: 1 });
+      await expect(minimap).toBeInViewport({ ratio: 1 });
+      const controlsBox = await controls.boundingBox();
+      expect(controlsBox).not.toBeNull();
+      for (const overlay of [legend, minimap]) {
+        const box = await overlay.boundingBox();
+        expect(box).not.toBeNull();
+        // A pointer-events:none legend can visually cover controls even when
+        // hit testing reaches the button. Check geometry as well as hit testing.
+        expect(controlsBox!.x + controlsBox!.width <= box!.x ||
+          box!.x + box!.width <= controlsBox!.x ||
+          controlsBox!.y + controlsBox!.height <= box!.y ||
+          box!.y + box!.height <= controlsBox!.y).toBe(true);
+      }
+      const buttons = controls.locator("button");
+      await expect(buttons).toHaveCount(3);
+      for (const button of await buttons.all()) {
+        await expect(button).toBeVisible();
+        await expect(button).toBeInViewport({ ratio: 1 });
+        await expect(button).toBeEnabled();
+        expect(await button.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+          return hit === el || (hit !== null && el.contains(hit));
+        })).toBe(true);
+        await button.click();
+      }
+    });
+  });
+}
