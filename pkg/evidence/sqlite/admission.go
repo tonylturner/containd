@@ -181,7 +181,7 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 		if d.State != evidence.DatasetCollecting && d.State != evidence.DatasetImporting {
 			return ErrConflict
 		}
-		late := false
+		var deadline int64
 		if d.Source == evidence.SourceLive {
 			if req.Seal {
 				return ErrConflict // only StopWatch can stop and seal a lease
@@ -193,7 +193,7 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 			if w.StoppedAt != nil {
 				return ErrConflict
 			}
-			late = !s.now().Before(w.Deadline)
+			deadline = w.Deadline.UnixNano()
 		}
 		for _, gap := range req.Gaps {
 			d.Gaps = appendUnique(d.Gaps, gap)
@@ -209,15 +209,17 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 		if c.Withheld == nil {
 			c.Withheld = map[evidence.WithheldReason]uint64{}
 		}
-		if late && len(req.Parents) > 0 {
-			result.Rejected = uint64(len(req.Parents))
-			c.RejectedParents += result.Rejected
-			result.Reasons[evidence.WithheldExpired] = result.Rejected
-			c.Withheld[evidence.WithheldExpired] += result.Rejected
-			d.Gaps = appendUnique(d.Gaps, "watch_deadline_loss")
-		}
 		for _, parent := range req.Parents {
-			if late {
+			collected := req.CollectedAt
+			if collected.IsZero() {
+				collected = s.now()
+			}
+			if deadline != 0 && (collected.UnixNano() > deadline || parent.CapturedAt.UnixNano() > deadline) {
+				result.Rejected++
+				c.RejectedParents++
+				result.Reasons[evidence.WithheldExpired]++
+				c.Withheld[evidence.WithheldExpired]++
+				// Traffic outside the lease is not a loss inside the dataset.
 				continue
 			}
 			if parent.DatasetID != d.ID || parent.Source != d.Source {

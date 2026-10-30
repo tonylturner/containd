@@ -2,7 +2,10 @@
 
 package evidence
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // WithheldReason is a stable machine-readable reason, not a translated message.
 // Observation-only data is still retained; no reason permits a broader fallback.
@@ -71,6 +74,9 @@ type IngestRequest struct {
 	// Codes are bounded metadata, never packet payloads or free-form logs.
 	Gaps        []string `json:"gaps,omitempty"`
 	LostBatches uint64   `json:"lostBatches,omitempty"`
+	// CollectedAt is the trusted worker lease boundary, not capture input.
+	// Only in-process collectors can supply it; it is never decoded from JSON.
+	CollectedAt time.Time `json:"-"`
 }
 
 // IngestResult exposes admission loss, including an entire rejected parent.

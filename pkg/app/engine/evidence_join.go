@@ -17,11 +17,12 @@ const joinBytes = 32 << 20
 const joinTTL = 60 * time.Second
 
 type pendingEvidence struct {
-	parent  *evidence.Observation
-	lease   *watchLease
-	outcome evidence.Outcome
-	at      time.Time
-	bytes   int
+	parent      *evidence.Observation
+	lease       *watchLease
+	outcome     evidence.Outcome
+	at          time.Time
+	bytes       int
+	collectedAt time.Time
 }
 type evidenceJoin struct {
 	watch   *evidenceWatch
@@ -33,13 +34,13 @@ type evidenceJoin struct {
 func newEvidenceJoin(w *evidenceWatch, ctx context.Context) *evidenceJoin {
 	return &evidenceJoin{watch: w, ctx: ctx, entries: map[string]*pendingEvidence{}}
 }
-func (j *evidenceJoin) write(lease *watchLease, parents []evidence.Observation) {
+func (j *evidenceJoin) write(lease *watchLease, parents []evidence.Observation, collectedAt time.Time) {
 	lost := lease.dropped.Swap(0)
 	gaps := []string{}
 	if lost > 0 {
 		gaps = append(gaps, "watch_collection_loss")
 	}
-	_, err := j.watch.store.Ingest(j.ctx, evidence.IngestRequest{DatasetID: lease.dataset.ID, Parents: parents, Gaps: gaps, LostBatches: lost})
+	_, err := j.watch.store.Ingest(j.ctx, evidence.IngestRequest{DatasetID: lease.dataset.ID, Parents: parents, Gaps: gaps, LostBatches: lost, CollectedAt: collectedAt})
 	j.watch.fail(err)
 }
 func (j *evidenceJoin) finish(key string) {
@@ -51,7 +52,7 @@ func (j *evidenceJoin) finish(key string) {
 		if entry.parent.Outcome.Delivery == "" {
 			entry.parent.Outcome.Delivery = "unknown"
 		}
-		j.write(entry.lease, []evidence.Observation{*entry.parent})
+		j.write(entry.lease, []evidence.Observation{*entry.parent}, entry.collectedAt)
 	}
 }
 func (j *evidenceJoin) oldest() string {
@@ -93,12 +94,13 @@ func (j *evidenceJoin) account(key string) {
 func (j *evidenceJoin) accept(batch evidenceBatch) {
 	for _, parent := range batch.parents {
 		if parent.IEC104 == nil {
-			j.write(batch.lease, []evidence.Observation{parent})
+			j.write(batch.lease, []evidence.Observation{parent}, batch.collectedAt)
 			continue
 		}
 		e := j.entry(parent.ParentID, batch.lease)
 		p := parent
 		e.parent = &p
+		e.collectedAt = batch.collectedAt
 		j.account(parent.ParentID)
 	}
 	for _, ev := range batch.outcomes {

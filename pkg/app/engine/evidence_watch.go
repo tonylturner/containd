@@ -27,10 +27,11 @@ type watchLease struct {
 	inflight atomic.Int64
 }
 type evidenceBatch struct {
-	lease    *watchLease
-	parents  []evidence.Observation
-	outcomes []dpi.Event
-	barrier  chan error
+	lease       *watchLease
+	parents     []evidence.Observation
+	outcomes    []dpi.Event
+	barrier     chan error
+	collectedAt time.Time
 }
 type evidenceWatch struct {
 	mu         sync.Mutex
@@ -93,6 +94,10 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 	if lease == nil {
 		return
 	}
+	collectedAt := w.store.Clock()
+	if !collectedAt.Before(lease.watch.Deadline) {
+		return
+	}
 	lease.inflight.Add(1)
 	defer lease.inflight.Add(-1)
 	if lease != w.active.Load() {
@@ -142,7 +147,7 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 		return
 	}
 	select {
-	case w.queue <- evidenceBatch{lease: lease, parents: parents, outcomes: outcomes}:
+	case w.queue <- evidenceBatch{lease: lease, parents: parents, outcomes: outcomes, collectedAt: collectedAt}:
 	default:
 		lease.dropped.Add(1)
 	}

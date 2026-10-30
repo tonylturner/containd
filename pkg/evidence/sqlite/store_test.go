@@ -182,7 +182,7 @@ func TestWatchDeadlineAndStop(t *testing.T) {
 	}
 }
 
-func TestWatchDeadlineRejectsWholeLateBatchAndCountsLoss(t *testing.T) {
+func TestWatchDeadlineRejectsLateParentsWithoutVoidingDataset(t *testing.T) {
 	ctx := context.Background()
 	s, now, _ := newStore(t, evidence.Budgets{})
 	watch, err := s.StartWatch(ctx, evidence.StartWatchRequest{DurationSeconds: 1})
@@ -193,8 +193,10 @@ func TestWatchDeadlineRejectsWholeLateBatchAndCountsLoss(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	*now = now.Add(time.Second)
-	out, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: []evidence.Observation{parent(ds, "late")}, LostBatches: 2})
+	*now = now.Add(2 * time.Second)
+	late := parent(ds, "late")
+	late.CapturedAt = watch.Deadline.Add(time.Nanosecond)
+	out, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: []evidence.Observation{late}, LostBatches: 2})
 	if err != nil || out.Accepted != 0 || out.Rejected != 1 {
 		t.Fatalf("late parent admitted: %+v %v", out, err)
 	}
@@ -202,7 +204,7 @@ func TestWatchDeadlineRejectsWholeLateBatchAndCountsLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	ds, err = s.GetDataset(ctx, ds.ID)
-	if err != nil || ds.Records != 0 || len(ds.Gaps) != 1 {
+	if err != nil || ds.Records != 0 || len(ds.Gaps) != 0 {
 		t.Fatal("late parent loss hidden", err)
 	}
 	counts, err := s.Counters(ctx)

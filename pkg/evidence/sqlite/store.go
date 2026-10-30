@@ -343,9 +343,12 @@ func (s *Store) physicalBudget() error {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// Clock returns the authority's lease/retention clock, never capture time.
+func (s *Store) Clock() time.Time { return s.now().UTC() }
+
 // Maintain is called by the engine worker, never implicitly starts collection.
 func (s *Store) Maintain(ctx context.Context) error {
-	if err := s.write(ctx, func(tx *sql.Tx) error { return s.stopDue(ctx, tx, false) }); err != nil {
+	if err := s.write(ctx, func(_ *sql.Tx) error { return nil }); err != nil {
 		return err
 	}
 	return s.checkpoint(ctx)
