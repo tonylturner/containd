@@ -166,7 +166,16 @@ func (s *Store) DeleteDataset(ctx context.Context, id string) error {
 		if d.State != evidence.DatasetSealed {
 			return ErrConflict
 		}
-		return deleteDataset(ctx, tx, id, false, s.now().Add(evidence.Retention).UnixNano())
+		if err := deleteDataset(ctx, tx, id, false, s.now().Add(evidence.Retention).UnixNano()); err != nil {
+			return err
+		}
+		// An explicit removal of a failed/interrupted capture is permission
+		// to retry that source. Automatic expiry/eviction keeps tombstones.
+		// Suggestion tombstones remain: deleted proofs are never resurrected.
+		if d.Source == evidence.SourcePCAP && len(d.Gaps) > 0 {
+			_, err = tx.ExecContext(ctx, `DELETE FROM tombstones WHERE id=?`, id)
+		}
+		return err
 	})
 }
 
