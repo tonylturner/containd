@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { upsertRow } from "../../lib/config-editor";
 
 import type { ConfigFields } from "../../lib/use-config-editor";
@@ -8,7 +10,7 @@ import { useConfigForm } from "../../lib/use-config-form";
 import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -61,7 +63,7 @@ export default function IdentitiesPage() {
   const [labels, setLabels] = form.field("labels");
   const [saving, setSaving] = useState(false);
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
+  const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [res, ruleList] = await Promise.all([api.listIdentityBindings(), api.listFirewallRules()]);
     setRules(ruleList ?? []);
     if (!res.ok) {
@@ -71,12 +73,9 @@ export default function IdentitiesPage() {
     setLoadError(null);
     adoptRows(res.data, keepEdits);
     refreshForm(res.data, keepEdits);
-  }, [refreshForm, adoptRows]);
+  }, [refreshForm, adoptRows]));
 
   useConfigRefresh(refresh);
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   async function stage(binding: IdentityBinding): Promise<boolean> {
     setError(null);

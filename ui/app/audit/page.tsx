@@ -1,6 +1,8 @@
  "use client";
 
-import { useEffect, useState } from "react";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
+import { useCallback, useState } from "react";
 
 import { api, type AuditRecord } from "../../lib/api";
 import { Shell } from "../../components/Shell";
@@ -12,26 +14,22 @@ export default function AuditPage() {
   const [records, setRecords] = useState<AuditRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  async function refresh() {
-    setError(null);
+  const { loading, refresh } = useAsyncRefresh(useCallback(async () => {
     const list = await api.listAudit();
+    setError(null);
     if (!list) {
       setError("Failed to load audit records.");
       setRecords([]);
       return;
     }
     setRecords(list);
-  }
+  }, []));
 
   const table = useTableControls(records, {
     defaultSort: "timestamp",
     defaultDir: "desc",
     searchKeys: ["actor", "action", "target"],
   });
-
-  useEffect(() => {
-    refresh();
-  }, []);
 
   return (
     <Shell
@@ -45,7 +43,7 @@ export default function AuditPage() {
         </button>
       }
     >
-      {error && (
+      {!loading && error && (
         <div className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           {error}
         </div>

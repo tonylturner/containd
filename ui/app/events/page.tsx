@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { api, type TelemetryEvent } from "../../lib/api";
 import { formatEndpoint } from "../../lib/endpoint";
 import { Shell } from "../../components/Shell";
@@ -46,8 +47,12 @@ function eventSubtitle(ev: TelemetryEvent): string {
 
 function EventsInner() {
   const searchParams = useSearchParams();
-  const [events, setEvents] = useState<TelemetryEvent[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [live, setLive] = useState(true);
+  return <EventsContent key={searchParams.toString()} live={live} setLive={setLive} />;
+}
+
+function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispatch<React.SetStateAction<boolean>> }) {
+  const searchParams = useSearchParams();
   const [filter, setFilter] = useState<EventFilter>(() => { const type = searchParams.get("filter"); return FILTER_OPTIONS.some((option) => option.value === type) ? type as EventFilter : "all"; });
   const [kindPrefix, setKindPrefix] = useState(searchParams.get("kind") || "");
   const [onlyDetections, setOnlyDetections] = useState(searchParams.get("av") === "1");
@@ -59,38 +64,46 @@ function EventsInner() {
   const [verdict, setVerdict] = useState(searchParams.get("verdict") || "");
   const [since, setSince] = useState(searchParams.get("since") || "");
   const [cursor, setCursor] = useState(searchParams.get("cursor") || "");
-  const [nextCursor, setNextCursor] = useState("");
-  const [truncated, setTruncated] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [live, setLive] = useState(true);
   const requestRef = useRef<AbortController | null>(null);
   const query = useMemo(() => ({
     session: sessionFilter, flow: flowFilter, apdu, protocol, decision, verdict, since, cursor,
     kind: kindPrefix.trim(), category: filter, detections: onlyDetections ? "1" : "",
   }), [sessionFilter, flowFilter, apdu, protocol, decision, verdict, since, cursor, kindPrefix, filter, onlyDetections]);
 
-  const refresh = useCallback(async (olderCursor?: string) => {
+  const queryKey = JSON.stringify([query, live]);
+  const [result, setResult] = useState<{
+    key: string; events: TelemetryEvent[]; nextCursor: string; truncated: boolean; error: string | null;
+  } | null>(null);
+  const events = useMemo(() => result?.key === queryKey ? result.events : [], [result, queryKey]);
+  const nextCursor = result?.key === queryKey ? result.nextCursor : "";
+  const truncated = result?.key === queryKey && result.truncated;
+
+  const { loading, refresh } = useAsyncRefresh(useCallback(async (olderCursor?: string) => {
     requestRef.current?.abort();
     const controller = new AbortController();
     requestRef.current = controller;
-    setError(null);
-    setLoading(true);
     try {
       const page = await api.queryEvents({ ...query, cursor: olderCursor || query.cursor }, controller.signal);
       if (controller.signal.aborted) return;
-      if (!page) { setEvents([]); setNextCursor(""); setTruncated(false); setError("Failed to load events. Check query bounds and engine availability."); return; }
-      setEvents((previous) => olderCursor ? [...previous, ...page.events.filter((ev) => !previous.some((old) => old.id === ev.id))] : page.events);
-      setNextCursor(page.nextCursor || "");
-      setTruncated(page.historyTruncated);
-      if (page.engineError) setError(`Engine evidence unavailable: ${page.engineError}`);
+      if (!page) {
+        setResult({ key: queryKey, events: [], nextCursor: "", truncated: false,
+          error: "Failed to load events. Check query bounds and engine availability." });
+        return;
+      }
+      setResult((previous) => {
+        const earlier = previous?.key === queryKey ? previous.events : [];
+        return { key: queryKey,
+          events: olderCursor ? [...earlier, ...page.events.filter((ev) => !earlier.some((old) => old.id === ev.id))] : page.events,
+          nextCursor: page.nextCursor || "", truncated: page.historyTruncated,
+          error: page.engineError ? `Engine evidence unavailable: ${page.engineError}` : null,
+        };
+      });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
-      setEvents([]); setNextCursor(""); setTruncated(false);
-      setError("Failed to load events.");
-    } finally {
-      if (!controller.signal.aborted) setLoading(false);
+      setResult({ key: queryKey, events: [], nextCursor: "", truncated: false, error: "Failed to load events." });
     }
-  }, [query]);
+  }, [query, queryKey]));
+  const error = !loading && result?.key === queryKey ? result.error : null;
 
   function manualRefresh() { void refresh(); }
   const filteredEvents = events;
@@ -109,13 +122,9 @@ function EventsInner() {
 
   // Progressive rendering: show PAGE_SIZE items at a time
   const PAGE_SIZE = 50;
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [windowSize, setWindowSize] = useState({ key: queryKey, count: PAGE_SIZE });
+  const visibleCount = windowSize.key === queryKey ? windowSize.count : PAGE_SIZE;
   const sentinelRef = useRef<HTMLDivElement | null>(null);
-
-  // Reset visible count when filters change
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [query]);
 
   const visibleEvents = useMemo(
     () => filteredEvents.slice(0, visibleCount),
@@ -125,8 +134,8 @@ function EventsInner() {
   const hasMore = visibleCount < filteredEvents.length;
 
   const loadMore = useCallback(() => {
-    setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, filteredEvents.length));
-  }, [filteredEvents.length]);
+    setWindowSize((prev) => ({ key: queryKey, count: Math.min((prev.key === queryKey ? prev.count : PAGE_SIZE) + PAGE_SIZE, filteredEvents.length) }));
+  }, [filteredEvents.length, queryKey]);
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {
@@ -143,23 +152,6 @@ function EventsInner() {
   }, [loadMore]);
 
   useEffect(() => {
-    const type = searchParams.get("filter");
-    setFilter(FILTER_OPTIONS.some((option) => option.value === type) ? type as EventFilter : "all");
-    setSessionFilter(searchParams.get("session") || "");
-    setFlowFilter(searchParams.get("flow") || "");
-    setAPDU(searchParams.get("apdu") || "");
-    setKindPrefix(searchParams.get("kind") || "");
-    setProtocol(searchParams.get("protocol") || "");
-    setDecision(searchParams.get("decision") || "");
-    setVerdict(searchParams.get("verdict") || "");
-    setSince(searchParams.get("since") || "");
-    setCursor(searchParams.get("cursor") || "");
-    setOnlyDetections(searchParams.get("av") === "1");
-  }, [searchParams]);
-
-  useEffect(() => {
-    setEvents([]); setNextCursor(""); setTruncated(false);
-    void refresh();
     if (!live) return () => requestRef.current?.abort();
     const id = setInterval(() => { if (!document.hidden) void refresh(); }, 10000);
     const onVisible = () => { if (!document.hidden) void refresh(); };

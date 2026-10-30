@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useConfigForm } from "../../lib/use-config-form";
 import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
 
@@ -60,16 +62,14 @@ export default function ProxiesPage() {
   const { refreshForm: refreshSite } = siteDraft;
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    setLoading(true);
-    setError(null);
+  const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     try {
       setStatus(await api.getServicesStatus());
       const fp = await api.getForwardProxy();
+      setError(null);
       if (fp) {
         adoptForward({
           enabled: fp.enabled ?? false,
@@ -94,16 +94,10 @@ export default function ProxiesPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to refresh proxies.");
       toast("Failed to refresh proxies", "error");
-    } finally {
-      setLoading(false);
     }
-  }, [toast, adoptForward, adoptReverse, refreshSite]);
+  }, [toast, adoptForward, adoptReverse, refreshSite]));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -328,7 +322,7 @@ export default function ProxiesPage() {
           )}
         </Card>
       </div>
-      {error && (
+      {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>

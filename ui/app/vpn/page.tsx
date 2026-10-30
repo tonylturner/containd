@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useConfigForm } from "../../lib/use-config-form";
 import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
 
@@ -57,7 +59,6 @@ export default function VPNPage() {
   const clientForm = useConfigForm({ name: "" });
   const [newClientName, setNewClientName] = clientForm.field("name");
   const { refreshForm: refreshClient } = clientForm;
-  const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
@@ -113,12 +114,11 @@ export default function VPNPage() {
     return out;
   }, [cfg.openvpn]);
 
-  const refresh = useCallback(
+  const { loading, refresh } = useAsyncRefresh(useCallback(
     async ({ silent = false, keepEdits = true }: { silent?: boolean; keepEdits?: boolean } = {}) => {
-      setLoading(true);
-      setError(null);
       try {
         const current = await api.getVPN();
+        setError(null);
         adoptConfig(normalize(current), keepEdits);
         refreshClient(current?.openvpn, keepEdits);
         const [states, zonesResp, ifacesResp] = await Promise.all([
@@ -160,18 +160,13 @@ export default function VPNPage() {
         setError(msg);
         if (!silent) toast("Failed to refresh VPN status", "error");
       } finally {
-        setLoading(false);
         setLastUpdated(new Date());
       }
     },
     [toast, adoptConfig, refreshClient],
-  );
+  ), { initialArgs: [{ silent: true }] });
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh({ silent: true });
-  }, [refresh]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -367,7 +362,7 @@ export default function VPNPage() {
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
       <VPNRuntimeStatusCard cfg={cfg} loading={loading} svcStatus={svcStatus} />
-      {error && (
+      {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>

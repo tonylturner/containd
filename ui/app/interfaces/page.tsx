@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { reconcileRows, upsertRow } from "../../lib/config-editor";
 
 import { useConfigForm } from "../../lib/use-config-form";
@@ -7,7 +9,7 @@ import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { api, isAdmin, type Interface, type InterfaceState, type Zone } from "../../lib/api";
@@ -80,7 +82,7 @@ export default function InterfacesPage() {
     },
   ];
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
+  const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [i, z, s, r] = await Promise.all([
       api.listInterfaces(),
       api.listZones(),
@@ -93,7 +95,7 @@ export default function InterfacesPage() {
     setZones(z ?? []);
     setState(s ?? []);
     setRuntimeStatus(s === null ? "unavailable" : "ready");
-  }, [refreshForm, adoptRows]);
+  }, [refreshForm, adoptRows]));
 
   const unboundConfigured = useMemo(() => {
     const byDev = new Set(
@@ -114,10 +116,6 @@ export default function InterfacesPage() {
   }, [ifaces, state]);
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   async function onAutoAssign() {
     setError(null);

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   applyNodeChanges,
@@ -39,6 +39,7 @@ const SecurityView = dynamic(() => import("./SecurityView"), {
 });
 import { Shell } from "../../components/Shell";
 import { CONFIG_COMMITTED } from "../../lib/config-events";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { useHealth } from "../../hooks/useHealth";
 import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 import s from "./topology.module.css";
@@ -69,7 +70,7 @@ function TopologyInner() {
   const { fitView } = useReactFlow();
 
   // ── Fetch & build ──
-  const fetchData = useCallback(async () => {
+  const { refresh: fetchData } = useAsyncRefresh(useCallback(async () => {
     try {
       const result = await buildTopology();
       if (!result) {
@@ -87,7 +88,7 @@ function TopologyInner() {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
     }
-  }, []);
+  }, []));
 
   useEffect(() => {
     const refresh = () => { void fetchData(); };
@@ -97,28 +98,27 @@ function TopologyInner() {
 
   const initialFitDone = useRef(false);
   useEffect(() => {
-    const controller = new AbortController();
-    fetchData().then(() => {
-      // Delay fitView to let ReactFlow measure nodes
-      setTimeout(() => { fitView({ padding: 0.15, duration: 400 }); initialFitDone.current = true; }, 200);
-    });
-    const wrappedFetch = () => { if (!document.hidden) fetchData(); };
-    const iv = setInterval(wrappedFetch, 30000);
-    const onVisible = () => { if (!document.hidden) fetchData(); };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      controller.abort();
-      clearInterval(iv);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [fetchData, fitView]);
+    if (!nodes.length || initialFitDone.current) return;
+    const timer = setTimeout(() => {
+      fitView({ padding: 0.15, duration: 400 });
+      initialFitDone.current = true;
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [nodes.length, fitView]);
 
-  // ── Update selection highlight on nodes ──
   useEffect(() => {
-    setNodes((prev) =>
-      prev.map((n) => (n.data.selected !== (n.id === selectedId) ? { ...n, data: { ...n.data, selected: n.id === selectedId } } : n)),
-    );
-  }, [selectedId]);
+    const wrappedFetch = () => { if (!document.hidden) void fetchData(); };
+    const iv = setInterval(wrappedFetch, 30000);
+    document.addEventListener("visibilitychange", wrappedFetch);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", wrappedFetch);
+    };
+  }, [fetchData]);
+
+  const visibleNodes = useMemo(() => nodes.map((node) => ({
+    ...node, data: { ...node.data, selected: node.id === selectedId },
+  })), [nodes, selectedId]);
 
   // ── Handle node click ──
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -186,7 +186,7 @@ function TopologyInner() {
         <div className={s.workspace} style={panelOpen ? undefined : { gridTemplateColumns: "1fr" }}>
           <div className={s.flowWrap}>
             <ReactFlow
-              nodes={nodes}
+              nodes={visibleNodes}
               edges={edges}
               nodeTypes={nodeTypes}
               onNodeClick={onNodeClick}

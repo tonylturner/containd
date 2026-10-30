@@ -83,8 +83,6 @@ export default function AlertsPage() {
   const clampedPage = Math.min(page, totalPages - 1);
   const pageData = alerts.slice(clampedPage * pageSize, (clampedPage + 1) * pageSize);
 
-  useEffect(() => { setPage(0); }, [search, sevFilter, pageSize]);
-
   // Severity summary
   const sevCounts = useMemo(() => {
     const c = { critical: 0, high: 0, medium: 0, low: 0 };
@@ -127,7 +125,7 @@ export default function AlertsPage() {
       {/* Severity summary */}
       <div className="mb-4 flex gap-3">
         {(["critical", "high", "medium", "low"] as const).map((s) => (
-          <button key={s} onClick={() => setSevFilter(sevFilter === s ? "" : s)}
+          <button key={s} onClick={() => { setSevFilter(sevFilter === s ? "" : s); setPage(0); }}
             className={`flex items-center gap-1.5 rounded-xs border px-3 py-1.5 text-xs tabular-nums transition-ui ${
               sevFilter === s ? ""
                 : "bg-(--surface) text-(--text-muted) hover:text-(--text)"
@@ -142,7 +140,7 @@ export default function AlertsPage() {
 
       {/* Search */}
       <div className="mb-3 max-w-lg">
-        <SearchBar value={search} onChange={setSearch} placeholder="Search alerts by message, ID, anomaly type, IP..." className="w-full" />
+        <SearchBar value={search} onChange={(value) => { setSearch(value); setPage(0); }} placeholder="Search alerts by message, ID, anomaly type, IP..." className="w-full" />
       </div>
 
       {alerts.length === 0 ? (

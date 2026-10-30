@@ -1,11 +1,13 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useState, type SetStateAction } from "react";
 import Link from "next/link";
 
 import {
@@ -32,7 +34,6 @@ export default function NATPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [nat, setNat] = useState<NATConfig>({ enabled: false });
   // Until the first answer the settings are unknown, not disabled or empty.
-  const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -68,7 +69,7 @@ export default function NATPage() {
     },
   ];
 
-  async function refresh({ keepEdits = true }: { keepEdits?: boolean } = {}) {
+  const { initialLoading: loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [z, n] = await Promise.all([api.listZones(), api.getNAT()]);
     // Never save stand-in settings. After the first success, keep drafts
     // mounted but disabled while the current server copy is unavailable.
@@ -81,14 +82,9 @@ export default function NATPage() {
     } else {
       setLoadError(UNAVAILABLE);
     }
-    setLoading(false);
-  }
+  }, []));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, []);
 
   return (
     <Shell

@@ -21,6 +21,19 @@ import {
 // Self-contained subflows such as nav metadata and profile/account UI belong
 // in sibling modules instead of growing this file again.
 
+const NAV_STORAGE_KEY = "containd.nav.collapsed";
+function subscribeNavigation(notify: () => void) {
+  window.addEventListener("storage", notify);
+  window.addEventListener("containd:nav", notify);
+  return () => {
+    window.removeEventListener("storage", notify);
+    window.removeEventListener("containd:nav", notify);
+  };
+}
+function navigationSnapshot() {
+  try { return localStorage.getItem(NAV_STORAGE_KEY) ?? "{}"; } catch { return "{}"; }
+}
+
 const REDIRECT_TRACE_KEY = "containd.auth.redirect_trace";
 
 let verifiedSession: User | null = null;
@@ -54,12 +67,15 @@ export function Shell({
   actions?: ReactNode;
 }) {
   const pathname = usePathname() || "/";
-  const [collapsed, setCollapsed] = React.useState<Record<string, boolean>>({});
+  const [initialPath] = React.useState(pathname);
+  const storedNavigation = React.useSyncExternalStore(subscribeNavigation, navigationSnapshot, () => "{}");
+  const [navigationChoice, setNavigationChoice] = React.useState<{ path: string; groups: Record<string, boolean> } | null>(null);
   const [authChecked, setAuthChecked] = React.useState(() => !!verifiedSession);
   const [authError, setAuthError] = React.useState<string | null>(null);
   const [me, setMe] = React.useState<User | null>(() => verifiedSession);
   const [menuOpen, setMenuOpen] = React.useState(false);
-  const [navigationOpen, setNavigationOpen] = React.useState(false);
+  const [navigationPath, setNavigationPath] = React.useState<string | null>(null);
+  const navigationOpen = navigationPath === pathname;
   const navigationToggleRef = React.useRef<HTMLButtonElement>(null);
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [profileTab, setProfileTab] = React.useState<
@@ -74,28 +90,20 @@ export function Shell({
   const forceMFA = pendingMFA && isMFAGraceExpired(me?.mfaGraceUntil);
   const mfaGraceDisplay = formatOptionalDate(me?.mfaGraceUntil);
 
-  React.useEffect(() => {
-    setNavigationOpen(false);
-  }, [pathname]);
-
   function closeNavigation() {
-    setNavigationOpen(false);
+    setNavigationPath(null);
     navigationToggleRef.current?.focus();
   }
 
-  // Auto-expand nav group containing the active page
-  React.useEffect(() => {
-    if (!pathname || pathname === "/") return;
-    for (const g of navGroups) {
-      if (g.items.some((item) => pathname.startsWith(item.href))) {
-        setCollapsed((prev) => {
-          if (prev[g.label] === false) return prev;
-          return { ...prev, [g.label]: false };
-        });
-        break;
-      }
-    }
-  }, [pathname, navGroups]);
+  const collapsed = React.useMemo(() => {
+    if (navigationChoice?.path === pathname) return navigationChoice.groups;
+    let saved: Record<string, boolean> = {};
+    try { saved = JSON.parse(storedNavigation); } catch { /* Use group defaults for invalid storage. */ }
+    return Object.fromEntries(navGroups.map((group) => [group.label,
+      pathname !== initialPath && group.items.some((item) => pathname !== "/" && pathname.startsWith(item.href))
+        ? false : saved?.[group.label] ?? group.defaultCollapsed ?? true,
+    ]));
+  }, [navGroups, pathname, initialPath, navigationChoice, storedNavigation]);
 
   const redirectToLogin = React.useCallback(
     (
@@ -122,19 +130,6 @@ export function Shell({
     },
     [pathname],
   );
-
-  React.useEffect(() => {
-    try {
-      const raw = localStorage.getItem("containd.nav.collapsed");
-      if (raw) {
-        setCollapsed(JSON.parse(raw));
-        return;
-      }
-    } catch {}
-    const init: Record<string, boolean> = {};
-    for (const g of navGroups) init[g.label] = g.defaultCollapsed ?? true;
-    setCollapsed(init);
-  }, [navGroups]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -199,12 +194,9 @@ export function Shell({
 
   React.useEffect(() => {
     if (pathname.startsWith("/login")) {
-      setAuthChecked(true);
-      setAuthError(null);
       return;
     }
     let canceled = false;
-    setAuthError(null);
     api.meStatus().then(({ status, data }) => {
       if (canceled) return;
       if (status === 401) {
@@ -216,6 +208,7 @@ export function Shell({
         setAuthError("Unable to verify session (API unavailable).");
         return;
       }
+      setAuthError(null);
       verifiedSession = data;
       setMe(data);
       if (data?.mustChangePassword) {
@@ -260,13 +253,12 @@ export function Shell({
   }, [pathname, redirectToLogin]);
 
   function toggle(label: string) {
-    setCollapsed((prev) => {
-      const next = { ...prev, [label]: !prev[label] };
-      try {
-        localStorage.setItem("containd.nav.collapsed", JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+    const next = { ...collapsed, [label]: !collapsed[label] };
+    setNavigationChoice({ path: pathname, groups: next });
+    try {
+      localStorage.setItem(NAV_STORAGE_KEY, JSON.stringify(next));
+      window.dispatchEvent(new Event("containd:nav"));
+    } catch { /* Navigation still works without persistent storage. */ }
   }
 
   return (
@@ -296,7 +288,7 @@ export function Shell({
           aria-label="Navigation"
           aria-controls="shell-sidebar"
           aria-expanded={navigationOpen}
-          onClick={() => setNavigationOpen((open) => !open)}
+          onClick={() => setNavigationPath(navigationOpen ? null : pathname)}
           className="inline-flex items-center gap-2 rounded-lg border border-white/8 bg-white/4 px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/8 focus-visible:shadow-focus-ring"
         >
           <svg

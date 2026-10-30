@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 
+import { useAsyncRefresh } from "../../../hooks/useAsyncRefresh";
 import { Shell } from "../../../components/Shell";
 import { Card } from "../../../components/Card";
 import { api, isAdmin, type TLSInfo } from "../../../lib/api";
@@ -11,6 +12,7 @@ import {
   getShowTips,
   setPersistCLIHistory,
   setShowTips,
+  subscribePrefs,
 } from "../../../lib/prefs";
 import { certUploadNotice, tlsView } from "./tls-view";
 
@@ -23,19 +25,13 @@ export default function SystemSettingsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
-  const [showTips, setShowTipsState] = useState(true);
-  const [persistHistory, setPersistHistory] = useState(false);
+  const showTips = useSyncExternalStore(subscribePrefs, getShowTips, () => true);
+  const persistHistory = useSyncExternalStore(subscribePrefs, getPersistCLIHistory, () => false);
 
-  async function refresh() {
+  const { refresh } = useAsyncRefresh(useCallback(async () => {
     const info = await api.getTLSInfo();
     setTLSInfo(info);
-  }
-
-  useEffect(() => {
-    refresh();
-    setShowTipsState(getShowTips());
-    setPersistHistory(getPersistCLIHistory());
-  }, []);
+  }, []));
 
   const view = tlsView(tlsInfo);
 
@@ -192,7 +188,6 @@ export default function SystemSettingsPage() {
               checked={showTips}
               onChange={(e) => {
                 const next = e.target.checked;
-                setShowTipsState(next);
                 setShowTips(next);
               }}
               className="h-4 w-4"
@@ -205,7 +200,6 @@ export default function SystemSettingsPage() {
               checked={persistHistory}
               onChange={(e) => {
                 const next = e.target.checked;
-                setPersistHistory(next);
                 setPersistCLIHistory(next);
               }}
               className="h-4 w-4"

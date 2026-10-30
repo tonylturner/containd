@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { api, fetchDataPlane, isAdmin, type Interface, type InterfaceState } from "../../lib/api";
 import { IECPressurePanel } from "./iec-pressure";
 import { Shell } from "../../components/Shell";
@@ -169,13 +170,13 @@ export default function DiagnosticsPage() {
       });
   }, [ifaces, state]);
 
-  async function refreshInterfaceState() {
-    setState(await api.listInterfaceState());
+  const { refresh: refreshInterfaceState } = useAsyncRefresh(useCallback(async () => {
+    const state = await api.listInterfaceState();
+    setState(state);
     setInterfaceStateLoading(false);
-  }
+  }, []));
 
   useEffect(() => {
-    void refreshInterfaceState();
     (async () => {
       const [i, dp] = await Promise.all([api.listInterfaces(), fetchDataPlane()]);
       setIfaces(i ?? []);

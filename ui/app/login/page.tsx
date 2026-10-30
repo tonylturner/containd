@@ -32,7 +32,10 @@ function LoginInner() {
   const [password, setPassword] = useState("");
   const [state, setState] = useState<State>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
+  const [loginInfo, setInfo] = useState<string | null>(null);
+  const reason = (params.get("reason") ?? "").toLowerCase();
+  const info = loginInfo ?? (reason === "expired" ? "Session expired. Please log in again."
+    : reason === "logout" ? "You have been logged out." : null);
   const [detail, setDetail] = useState<string | null>(null);
   const [alreadyLoggedIn, setAlreadyLoggedIn] = useState(false);
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
@@ -42,13 +45,6 @@ function LoginInner() {
     const sp = new URLSearchParams(paramsKey);
     const reason = (sp.get("reason") ?? "").toLowerCase();
     const shouldClearLocal = reason === "expired" || reason === "logout";
-    if (reason === "expired") {
-      setInfo("Session expired. Please log in again.");
-    } else if (reason === "logout") {
-      setInfo("You have been logged out.");
-    } else {
-      setInfo(null);
-    }
     (async () => {
       // Clear local token/role so stale localStorage auth can't override a valid cookie session.
       if (shouldClearLocal) clearLocalAuth();

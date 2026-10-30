@@ -1,8 +1,10 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 
 import {
@@ -55,9 +57,9 @@ export default function ICSPolicyPage() {
   const installed = useInstalledRuleset();
   const queueGroup = dpiConfig.nfqueueGroup ?? 0;
 
-  async function refresh({ keepEdits = true }: { keepEdits?: boolean } = {}) {
-    setError(null);
+  const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [list, dp] = await Promise.all([api.listFirewallRules(), fetchDataPlane()]);
+    setError(null);
     if (dp) setDpiConfig(dp);
     if (!list) {
       setError("Failed to load firewall rules.");
@@ -65,13 +67,9 @@ export default function ICSPolicyPage() {
     }
     setRules(list);
     if (!keepEdits) setEditing(null);
-  }
+  }, []));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, []);
 
   const icsRules = useMemo(
     () =>
@@ -123,7 +121,7 @@ export default function ICSPolicyPage() {
         </button>
       }
     >
-      {error && (
+      {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </div>

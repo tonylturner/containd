@@ -1,11 +1,13 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { notifyConfigMutation } from "../../lib/config-events";
 
 import { postJSONResult } from "../../lib/api-request";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import {
   apiURL,
@@ -163,16 +165,12 @@ export default function PcapAnalysisPage() {
   } | null>(null);
   const [existingSelectedRules, setExistingSelectedRules] = useState<Set<string>>(new Set());
 
-  async function refreshPcaps() {
+  const { refresh: refreshPcaps } = useAsyncRefresh(useCallback(async () => {
     const list = await listPcaps();
     setPcaps(list);
-  }
+  }, []));
 
   useConfigRefresh(refreshPcaps);
-
-  useEffect(() => {
-    refreshPcaps();
-  }, []);
 
   async function handleAnalyzeUpload() {
     if (!uploadFile) return;

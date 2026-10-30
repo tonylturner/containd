@@ -23,19 +23,22 @@ function Disclosure({ summary, children }: { summary: ReactNode; children: () =>
 }
 
 export function IEC104Inventory({ refreshKey }: { refreshKey: number }) {
+  return <InventoryContent key={refreshKey} />;
+}
+
+function InventoryContent() {
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "unavailable">("loading");
 
   useEffect(() => {
     let active = true;
-    setState("loading");
     api.getIEC104Inventory().then(({ data }) => {
       if (!active) return;
       setInventory(data);
       setState(data ? "ready" : "unavailable");
     });
     return () => { active = false; };
-  }, [refreshKey]);
+  }, []);
 
   return (
     <Card title="Passive IEC 104 inventory" className="mt-6">

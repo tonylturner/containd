@@ -67,3 +67,13 @@ export function clearDismissedTips() {
     window.dispatchEvent(new CustomEvent("containd:prefs"));
   } catch {}
 }
+
+/** Preferences may change in this tab or in another management tab. */
+export function subscribePrefs(notify: () => void): () => void {
+  window.addEventListener("containd:prefs", notify);
+  window.addEventListener("storage", notify);
+  return () => {
+    window.removeEventListener("containd:prefs", notify);
+    window.removeEventListener("storage", notify);
+  };
+}

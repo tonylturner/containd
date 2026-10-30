@@ -1,11 +1,13 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { notifyConfigMutation } from "../../lib/config-events";
 
 import { getJSONList, postJSON } from "../../lib/api-request";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, apiURL, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
 import { Shell } from "../../components/Shell";
@@ -97,25 +99,19 @@ export default function TemplatesPage() {
   const canEdit = isAdmin();
   const [templates, setTemplates] = useState<ICSTemplate[] | null>([]);
   // Until the first answer the list is unknown, not empty.
-  const [loading, setLoading] = useState(true);
   const [zones, setZones] = useState<Zone[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<ICSTemplate | null>(null);
 
-  async function refresh({ keepEdits = true }: { keepEdits?: boolean } = {}) {
+  const { initialLoading: loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [t, z] = await Promise.all([fetchTemplates(), api.listZones()]);
     setTemplates(t);
     setZones(z ?? []);
-    setLoading(false);
     if (!keepEdits) setActiveTemplate(null);
-  }
+  }, []));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, []);
 
   return (
     <Shell
