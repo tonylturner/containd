@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The web console uses 30-second, single-use WebSocket tickets instead of
   session JWTs in URLs. Upgrades require a ticket; `?token=` is no longer
   accepted. Management access logs redact credential query values.
+- Console ticket issuance allows at most eight pending tickets per identity
+  (`429` when exceeded), preventing one account from filling the global store.
 - ICS decoder events expose CIP request targets (logical, symbolic or unknown;
   responses carry none) and mark
   incomplete CIP MSP/CPF and DNP3 object coverage for per-object policy checks.

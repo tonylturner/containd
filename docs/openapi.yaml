@@ -5673,6 +5673,8 @@ paths:
           description: Authentication required
         '403':
           description: Cross-origin cookie request or restricted account
+        '429':
+          description: Identity already has eight pending tickets; consume one or wait for expiry
         '503':
           description: Ticket capacity reached or authentication backend unavailable
   /cli/ws:

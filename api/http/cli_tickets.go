@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	cliTicketTTL      = 30 * time.Second
-	cliTicketCapacity = 4096
-	ctxCLITicketKey   = "cliTicket"
+	cliTicketTTL              = 30 * time.Second
+	cliTicketCapacity         = 4096
+	cliTicketIdentityCapacity = 8
+	ctxCLITicketKey           = "cliTicket"
 )
 
 type cliIdentity struct {
@@ -26,6 +27,15 @@ func cliIdentityFor(c *gin.Context) cliIdentity {
 		user: c.GetString(ctxUserKey), role: c.GetString(ctxRoleKey),
 		session: c.GetString(ctxSessionKey), actor: c.GetString("actor"),
 	}
+}
+
+func (i cliIdentity) owner() string {
+	if i.user != "" {
+		// One account shares its quota across sessions and role changes.
+		return "user:" + i.user
+	}
+	// Legacy tokens and store-less lab auth expose only a shared role identity.
+	return "role:" + i.role
 }
 
 type cliTicket struct {
@@ -60,6 +70,19 @@ func (t *cliTickets) issue() gin.HandlerFunc {
 		t.mu.Lock()
 		now := t.now()
 		t.cleanup(now)
+		identity := cliIdentityFor(c)
+		owner := identity.owner()
+		pending := 0
+		for _, ticket := range t.pending {
+			if ticket.identity.owner() == owner {
+				pending++
+			}
+		}
+		if pending >= cliTicketIdentityCapacity {
+			t.mu.Unlock()
+			apiError(c, http.StatusTooManyRequests, "too many pending console tickets for this identity")
+			return
+		}
 		if len(t.pending) >= cliTicketCapacity {
 			t.mu.Unlock()
 			apiError(c, http.StatusServiceUnavailable, "console ticket capacity reached")
@@ -72,7 +95,7 @@ func (t *cliTickets) issue() gin.HandlerFunc {
 			credential = refreshed
 		}
 		t.pending[key] = cliTicket{
-			identity: cliIdentityFor(c), credential: credential,
+			identity: identity, credential: credential,
 			expires: now.Add(cliTicketTTL),
 		}
 		t.mu.Unlock()
