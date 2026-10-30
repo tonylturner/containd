@@ -35,6 +35,9 @@ type transaction struct {
 	// when the response side ended the send first.
 	sendDone chan struct{}
 	sendErr  error
+	// uploadDone, when non-nil, closes after the sender releases the held
+	// upload's spool and object slot. A final response must wait for it.
+	uploadDone chan struct{}
 	// spliceCh is closed when the response side switched to a raw splice.
 	spliceCh chan struct{}
 	// streamed is the body bytes forwarded to the client before the
@@ -108,6 +111,7 @@ func (tx *transaction) holdUpload(body io.Reader) bool {
 		action := tx.set.decide(res, tx.ics)
 		tx.emit(avscan.Upload, res, action, sp.size, sp, false, 0)
 		if action == avscan.Block {
+			release()
 			tx.c.refuse(refusal(403, "Forbidden", blockBody(res), tx.headOnly()), true)
 			return false
 		}
@@ -115,6 +119,7 @@ func (tx *transaction) holdUpload(body io.Reader) bool {
 	case fillOversized, fillDisk:
 		res := partialResult(outcome, detail)
 		if tx.set.decide(res, tx.ics) == avscan.Block {
+			release()
 			tx.refuseUpload(res, max(sp.size, h.declaredLength()), sp, true)
 			return false
 		}

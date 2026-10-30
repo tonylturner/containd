@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"syscall"
 	"testing"
@@ -237,29 +238,54 @@ func TestStreamTailScannerErrorFollowsPolicy(t *testing.T) {
 		o := httpOrigin(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(body)
 		}))
+		// Do not let socket buffering hide a client that waits for the
+		// verdict before consuming the streamed prefix.
+		o.dst = func(c net.Conn) (netip.AddrPort, error) {
+			if err := c.(*net.TCPConn).SetWriteBuffer(4096); err != nil {
+				return netip.AddrPort{}, err
+			}
+			return o.addr, nil
+		}
 		g := startGate(t, o, streamTail(policy))
 		g.scanner.setVerdict(func(avscan.Object, []byte) avscan.Result {
 			return avscan.Result{Verdict: avscan.Unscanned, Reason: avscan.ReasonScannerError, Backend: "fake", Detail: "clamd: broken pipe"}
 		})
+		release := g.scanner.holdScans()
+		defer release()
 		c := g.client()
 		c.write(getRequest("/err", ""))
+		// Drain the exact prefix before releasing the verdict. Waiting
+		// for its event first can deadlock behind socket backpressure;
+		// resetting with that prefix still queued also races its delivery.
+		_ = c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		resp, err := http.ReadResponse(c.br, &http.Request{Method: "GET"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		prefix := make([]byte, streamBody-streamTailBytes)
+		if _, err := io.ReadFull(resp.Body, prefix); err != nil {
+			t.Fatalf("streamed prefix: %v", err)
+		}
+		if !bytes.Equal(prefix, body[:len(prefix)]) {
+			t.Fatal("streamed prefix differs from the origin")
+		}
+		g.scanner.waitScanStarted(t)
+		release()
+		tail, err := io.ReadAll(resp.Body)
 		ev := g.events.next(t)
 		expectEvent(t, ev, avscan.Download, avscan.Unscanned, avscan.ReasonScannerError, unscannedAction(policy))
 		if ev.Streamed != streamBody-streamTailBytes || ev.Size != streamBody {
 			t.Fatalf("event %+v", ev)
 		}
-		_ = c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		h, got, err := decodeResponse(t, nil, c.conn, "GET")
 		if policy == avscan.FailClosed {
-			// The reset discards what the gate had not transmitted yet, so
-			// the client holds at most the prefix.
-			if !errors.Is(err, syscall.ECONNRESET) || len(got) > streamBody-streamTailBytes || !bytes.Equal(got, body[:len(got)]) {
-				t.Fatalf("fail-closed: %d body bytes, err %v, want at most the prefix then a reset", len(got), err)
+			if !errors.Is(err, syscall.ECONNRESET) || len(tail) != 0 {
+				t.Fatalf("fail-closed: %d tail bytes, err %v, want no tail then a reset", len(tail), err)
 			}
 			return
 		}
-		if err != nil || h.status != 200 || !bytes.Equal(got, body) {
-			t.Fatalf("fail-open: status %d, %d bytes, err %v", h.status, len(got), err)
+		if err != nil || resp.StatusCode != 200 || !bytes.Equal(tail, body[len(prefix):]) {
+			t.Fatalf("fail-open: status %d, %d tail bytes, err %v", resp.StatusCode, len(tail), err)
 		}
 	})
 }
