@@ -140,8 +140,7 @@ func (t *iecTable) packet(pkt capture.Packet, state *flow.State, parsing ics.Par
 	}
 	s, dir := t.lookupLocked(src, dst)
 	if s != nil {
-		s.flow = state
-		s.ctx = t.stateContext(state)
+		s.ctx = t.sessionContext(s)
 	}
 	switch {
 	case synRST(pkt.TCP.Flags):
@@ -266,7 +265,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 		countIECAbort(abortInjector)
 		return dropped(reasonIECFailClose)
 	}
-	n := &iecSession{id: t.newID(), flow: state, client: client, server: server, ctx: ctx, mode: mode, lastSeen: now}
+	n := &iecSession{id: t.newID(), flow: &flow.State{Key: state.ServiceKey()}, client: client, server: server, ctx: ctx, mode: mode, lastSeen: now}
 	n.dirs[iecDirClient] = newIECDir(pkt.TCP.Seq)
 	_, n.reconnects = t.reconnect[pairKey(client, server)]
 	key := iecKey{client: client, server: server}
@@ -290,7 +289,7 @@ func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.Eval
 		countIECAbort(abortBound)
 		return dropped(reasonIECFailClose)
 	}
-	s := &iecSession{id: t.newID(), flow: state, client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}
+	s := &iecSession{id: t.newID(), flow: &flow.State{Key: state.ServiceKey()}, client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}
 	t.sessions[iecKey{client: client, server: server}] = s
 	dir := iecDirSrv
 	if fromClient {

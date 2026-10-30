@@ -26,6 +26,19 @@ func (e *Engine) enforcingPacketScope(pkt capture.Packet, state *flow.State) boo
 		key = denied.service
 	}
 	e.flowMu.Unlock()
+	// IEC incarnations (including tombstones) retain their opener/service
+	// coordinates independently of mutable generic flow orientation.
+	if t := e.iec; t != nil {
+		t.mu.Lock()
+		src, srcOK := addrPort(pkt.SrcIP, pkt.SrcPort)
+		dst, dstOK := addrPort(pkt.DstIP, pkt.DstPort)
+		if srcOK && dstOK {
+			if s, _ := t.lookupLocked(src, dst); s != nil && s.flow != nil {
+				key = s.flow.ServiceKey()
+			}
+		}
+		t.mu.Unlock()
+	}
 	scopeState := &flow.State{Key: key}
 	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP()}
 	ctx.SrcZone, ctx.DstZone = e.zones.resolve(p.snapshot, ctx.SrcIP, ctx.DstIP)
