@@ -112,6 +112,11 @@ func (r *transportResolver) noteDecodeLossLocked(pkt capture.Packet, history *tr
 
 // Caller holds flowMu then admissionMu, the same order as trackConnection.
 func (e *Engine) bindDecodeCoverageLocked(st *flow.State, history *transportAdmission) {
+	// A packet can retain its state after concurrent denial retirement or
+	// sweeping. Never resurrect that state (or attach its history to a reuse).
+	if e.flows[st.Key.Hash()] != st {
+		return
+	}
 	r := e.transport
 	if e.transportCoverage == nil {
 		e.transportCoverage = make(map[*flow.State]*transportCoverage)
@@ -242,7 +247,7 @@ func (e *Engine) consumeDecodeLoss(p transportPacket, connection *flow.Connectio
 	}
 	var target *transportCoverage
 	for _, key := range tuples {
-		if st := e.tupleStateLocked(key.Tuple()); st != nil {
+		if st := e.tupleStateLocked(key.Tuple()); st != nil && e.flows[st.Key.Hash()] == st {
 			current := st.Connection.Load()
 			if current != nil && (current.Key == connection.Key || !connection.Verified() ||
 				sameGeneration(current.Evidence, connection.Evidence)) {
@@ -313,12 +318,17 @@ func (e *Engine) stopDecodeCoverage(marker *transportCoverage, connection *flow.
 	c.stopped = true
 	c.dirty = false
 	var states []*flow.State
-	for st, candidate := range e.transportCoverage {
-		if candidate.root() == c {
+	// Only the two connection tuples can own these streams. Do not scan
+	// every live flow under flowMu during a burst of overflow notices.
+	key := packetKey(c.packet)
+	if connection == nil {
+		if st := e.tupleStateLocked(key.Tuple()); st != nil {
+			connection = st.Connection.Load()
+		}
+	}
+	for _, key := range []flow.Key{key, connection.Peer(key)} {
+		if st := e.tupleStateLocked(key.Tuple()); st != nil && e.transportCoverage[st].root() == c {
 			states = append(states, st)
-			if connection == nil {
-				connection = st.Connection.Load()
-			}
 		}
 	}
 	report := !c.reported

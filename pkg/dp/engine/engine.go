@@ -806,6 +806,7 @@ func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 	delete(e.flows, hash)
 	delete(e.tcpISNs, hash)
 	delete(e.transportISNs, hash)
+	delete(e.transportCoverage, st)
 	metrics.FlowsActive.Dec()
 	return st
 }
@@ -822,6 +823,7 @@ func (e *Engine) sweepFlows(now time.Time) {
 			delete(e.flows, k)
 			delete(e.tcpISNs, k)
 			delete(e.transportISNs, k)
+			delete(e.transportCoverage, st)
 			metrics.FlowsActive.Dec()
 			if st != nil {
 				expired = append(expired, st)

@@ -185,9 +185,6 @@ func (e *Engine) endStreamsOnClose(state *flow.State, pkt *dpi.ParsedPacket, acc
 func (e *Engine) endFlowStream(state *flow.State, pkt *dpi.ParsedPacket) {
 	evs, _ := e.dpiMgr.OnFlowEnd(state)
 	e.recordFlowEndEvents(state, pkt, evs)
-	e.flowMu.Lock()
-	delete(e.transportCoverage, state)
-	e.flowMu.Unlock()
 	reverse := e.peerFlow(state)
 	e.conformance.end(state, reverse == nil)
 	e.closeCorrelation(state, false, true)
