@@ -473,20 +473,20 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
    zones:[{name:"wan"},{name:"lan"}],
    interfaces:[{name:"wan",device:$wan,zone:"wan"},
                {name:"lan1",device:$lan,zone:"lan"}],
-   dataPlane:{}, ids:{enabled:true},
+   dataplane:{}, ids:{enabled:true},
    firewall:{defaultAction:"DENY",rules:[],nat:{enabled:true,egressZone:"wan",sourceZones:["lan"]}}}
   | .system.mgmt.httpListenAddr=":18080"
   | .system.mgmt.listenAddr=":18080"
   | if $capture == "nfqueue"
-    then .dataPlane.nfqueueGroup = $queue | del(.dataPlane.captureInterfaces)
-    else .dataPlane.captureInterfaces = [$wan, $lan] | del(.dataPlane.nfqueueGroup)
+    then .dataplane.nfqueueGroup = $queue | del(.dataplane.captureInterfaces)
+    else .dataplane.captureInterfaces = [$wan, $lan] | del(.dataplane.nfqueueGroup)
     end
-  | .dataPlane.enforcement = true
-  | .dataPlane.enforceTable = "containd"
-  | .dataPlane.dpiEnabled = true
-  | .dataPlane.dpiMode = "enforce"
-  | .dataPlane.dpiMock = false
-  | .dataPlane.dpiIcsProtocols = ((.dataPlane.dpiIcsProtocols // {}) + {"modbus": true, "dnp3": true})
+  | .dataplane.enforcement = true
+  | .dataplane.enforceTable = "containd"
+  | .dataplane.dpiEnabled = true
+  | .dataplane.dpiMode = "enforce"
+  | .dataplane.dpiMock = false
+  | .dataplane.dpiIcsProtocols = ((.dataplane.dpiIcsProtocols // {}) + {"modbus": true, "dnp3": true})
   | .firewall.rules = [
         {
           id:"smoke-modbus-read",
@@ -564,13 +564,13 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
 if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
   log "Checking that enforce without NFQUEUE is refused..."
   assert_enforce_refused "$UPDATED_CFG"
-  UPDATED_CFG=$(jq '.dataPlane.dpiMode = "monitor" | .firewall.rules += [{id:"smoke-l4", sourceZones:["lan"], destZones:["wan"], action:"ALLOW"}]' <<<"$UPDATED_CFG")
+  UPDATED_CFG=$(jq '.dataplane.dpiMode = "monitor" | .firewall.rules += [{id:"smoke-l4", sourceZones:["lan"], destZones:["wan"], action:"ALLOW"}]' <<<"$UPDATED_CFG")
   COVERAGE_STATE=monitoring
 else
   COVERAGE_STATE=enforcing
 fi
 
-DATAPLANE_CFG=$(echo "$UPDATED_CFG" | jq '.dataPlane')
+DATAPLANE_CFG=$(echo "$UPDATED_CFG" | jq '.dataplane')
 
 tmp_cfg_resp=$(mktemp)
 tmp_cfg_err=$(mktemp)
