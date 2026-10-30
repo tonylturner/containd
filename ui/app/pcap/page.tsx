@@ -1,372 +1,326 @@
 "use client";
 
-import { notifyConfigMutation } from "../../lib/config-events";
-
-import { postJSONResult } from "../../lib/api-request";
-import { useConfigRefresh } from "../../lib/use-config-refresh";
-
-import { useEffect, useState } from "react";
-
+import { useCallback, useEffect, useState } from "react";
+import { isAdmin, listPcaps, type PcapItem } from "../../lib/api";
 import {
-  apiURL,
-  isAdmin,
-  listPcaps,
-  type PcapItem,
-  type PcapIdentification,
-} from "../../lib/api";
+  analyzeUpload,
+  learner,
+  type LearnCounters,
+  type LearnDataset,
+  type LearnPage,
+  type LearnWatch,
+  type PcapImportResult,
+} from "../../lib/api-learn";
+import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { Shell } from "../../components/Shell";
-import { IdentificationTable } from "./identifications";
 import { Card } from "../../components/Card";
-import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-
-/* -- Types matching backend PolicyAnalysis / AnalysisResult -- */
-
-type AnalysisStats = {
-  identifications: PcapIdentification[];
-  events: unknown[];
-  flows: FlowSummary[];
-  protocols: Record<string, number>;
-  duration: number; // nanoseconds
-  packetCount: number;
-  byteCount: number;
-  truncated: boolean;
-};
-
-type FlowSummary = {
-  key: string;
-  protocol: string;
-  packets: number;
-  bytes: number;
-  events: number;
-  firstSeen: string;
-  lastSeen: string;
-};
-
-type PolicyRule = {
-  id: string;
-  description?: string;
-  sourceZones?: string[];
-  destZones?: string[];
-  sources?: string[];
-  destinations?: string[];
-  protocols?: { name: string; port?: string }[];
-  ics?: {
-    protocol?: string;
-    functionCodes?: number[];
-    unitIDs?: number[];
-    addresses?: string[];
-    direction?: string;
-  };
-  action: string;
-};
-
-type LearnedProfile = {
-  protocol: string;
-  sourceIP: string;
-  destIP: string;
-  unitIDs?: Record<string, boolean>;
-  functionCodes?: Record<string, boolean>;
-  addresses?: Record<string, boolean>;
-  readSeen: boolean;
-  writeSeen: boolean;
-  packetCount: number;
-};
-
-type PolicyAnalysis = {
-  rules: PolicyRule[];
-  profiles: LearnedProfile[];
-  stats: AnalysisStats;
-  eventSummary: Record<string, number>;
-};
-
-/* -- Helpers -- */
-
-async function analyzePcapUpload(file: File): Promise<PolicyAnalysis | null> {
-  try {
-    const form = new FormData();
-    form.append("file", file, file.name);
-    const res = await fetch(apiURL("/api/v1/pcap/analyze"), {
-      method: "POST",
-      credentials: "include",
-      body: form,
-    });
-    if (!res.ok) return null;
-    notifyConfigMutation(res);
-    return (await res.json()) as PolicyAnalysis;
-  } catch {
-    return null;
-  }
-}
-
-async function analyzePcapByName(name: string): Promise<PolicyAnalysis | null> {
-  try {
-    const res = await fetch(
-      apiURL(`/api/v1/pcap/analyze/${encodeURIComponent(name)}`),
-      {
-        method: "POST",
-        credentials: "include",
-      },
-    );
-    if (!res.ok) return null;
-    notifyConfigMutation(res);
-    return (await res.json()) as PolicyAnalysis;
-  } catch {
-    return null;
-  }
-}
-
-async function applyGeneratedRules(rules: PolicyRule[]): Promise<{ count: number; error?: string }> {
-  let count = 0;
-  for (const rule of rules) {
-    const result = await postJSONResult("/api/v1/firewall/rules", rule);
-    if (!result.ok) return { count, error: result.error };
-    count++;
-  }
-  return { count };
-}
-
-/* -- Format helpers -- */
-
-function fmtDuration(nanos: number): string {
-  const secs = nanos / 1e9;
-  if (secs < 60) return `${secs.toFixed(1)}s`;
-  if (secs < 3600) return `${(secs / 60).toFixed(1)}m`;
-  return `${(secs / 3600).toFixed(1)}h`;
-}
-
-function fmtSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/* -- Page -- */
+import { IdentificationTable } from "./identifications";
+import { DatasetReview, dataOf, ReasonCounts } from "./dataset-review";
+import { primaryButton, secondaryButton } from "./suggestion-review";
 
 export default function PcapAnalysisPage() {
   const canEdit = isAdmin();
-  const confirm = useConfirm();
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
-  // Upload section
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<PolicyAnalysis | null>(null);
-  const [selectedRules, setSelectedRules] = useState<Set<string>>(new Set());
-
-  // Existing PCAPs
+  const [datasets, setDatasets] = useState<LearnPage<LearnDataset> | null>(
+    null,
+  );
+  const [watches, setWatches] = useState<LearnPage<LearnWatch> | null>(null);
+  const [counters, setCounters] = useState<LearnCounters | null>(null);
   const [pcaps, setPcaps] = useState<PcapItem[]>([]);
-  const [existingAnalyzing, setExistingAnalyzing] = useState<string | null>(null);
-  const [existingResult, setExistingResult] = useState<{
-    name: string;
-    result: PolicyAnalysis;
-  } | null>(null);
-  const [existingSelectedRules, setExistingSelectedRules] = useState<Set<string>>(new Set());
+  const [chosen, setChosen] = useState<LearnDataset | null>(null);
+  const [imported, setImported] = useState<PcapImportResult | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [duration, setDuration] = useState("3600");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
-  async function refreshPcaps() {
-    const list = await listPcaps();
-    setPcaps(list);
-  }
-
-  useConfigRefresh(refreshPcaps);
-
-  useEffect(() => {
-    refreshPcaps();
+  const refresh = useCallback(async () => {
+    try {
+      const [ds, ws, cs, ps] = await Promise.all([
+        learner.datasets(),
+        learner.watches(),
+        learner.counters(),
+        listPcaps(),
+      ]);
+      const fresh = dataOf(ds);
+      setDatasets(fresh);
+      setWatches(dataOf(ws));
+      setCounters(dataOf(cs));
+      setPcaps(ps);
+      setChosen((prev) =>
+        prev
+          ? ((fresh.items ?? []).find((d) => d.id === prev.id) ?? null)
+          : null,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setDatasets(null);
+      setWatches(null);
+      setCounters(null);
+    }
   }, []);
+  useEffect(() => {
+    void refresh();
+    const timer = setInterval(() => void refresh(), 10000);
+    return () => clearInterval(timer);
+  }, [refresh]);
+  useConfigRefresh(refresh);
 
-  async function handleAnalyzeUpload() {
-    if (!uploadFile) return;
-    setError(null);
-    setSuccess(null);
-    setAnalyzing(true);
-    setResult(null);
-    const res = await analyzePcapUpload(uploadFile);
-    setAnalyzing(false);
-    if (!res) {
-      setError("Failed to analyze PCAP file.");
-      return;
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
-    setResult(res);
-    setSelectedRules(new Set(res.rules.map((r) => r.id)));
-    refreshPcaps();
   }
-
-  async function handleAnalyzeExisting(name: string) {
-    setError(null);
-    setSuccess(null);
-    setExistingAnalyzing(name);
-    setExistingResult(null);
-    const res = await analyzePcapByName(name);
-    setExistingAnalyzing(null);
-    if (!res) {
-      setError(`Failed to analyze PCAP: ${name}`);
-      return;
-    }
-    setExistingResult({ name, result: res });
-    setExistingSelectedRules(new Set(res.rules.map((r) => r.id)));
+  async function showImport(result: PcapImportResult) {
+    setImported(result);
+    await refresh();
+    setChosen(result.dataset);
   }
-
-  async function handleApplyRules(
-    rules: PolicyRule[],
-    selected: Set<string>,
-  ) {
-    setError(null);
-    setSuccess(null);
-    const toApply = rules.filter((r) => selected.has(r.id));
-    if (toApply.length === 0) {
-      setError("No rules selected.");
-      return;
-    }
-    const result = await applyGeneratedRules(toApply);
-    if (result.error) {
-      setError(`${result.count} rule(s) staged — commit to apply. Remaining rules failed: ${result.error}`);
-      return;
-    }
-    setSuccess(`${result.count} rule(s) staged — commit to apply.`);
-  }
-
+  const active = (watches?.items ?? []).filter(
+    (w) => !w.stoppedAt && Date.parse(w.deadline) > Date.now(),
+  );
+  const seconds = Number(duration);
   return (
     <Shell
       title="PCAP Analysis"
       actions={
         <button
-          onClick={refreshPcaps}
-          className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
+          className={secondaryButton}
+          disabled={busy}
+          onClick={() => void run(refresh)}
         >
           Refresh
         </button>
       }
     >
-      <ConfirmDialog {...confirm.props} />
-      {error && (
-        <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          {error}
-        </div>
-      )}
-      {success && (
-        <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
-          {success}
-        </div>
-      )}
-
-      {/* -- Section 1: PCAP Upload & Analysis -- */}
-      <Card title="Upload & Analyze PCAP" padding="lg" className="mb-6">
-        <p className="mb-4 text-sm text-(--text-muted)">
-          Upload a .pcap file for DPI analysis. The engine will extract flows,
-          detect ICS protocols, and generate suggested firewall rules.
+      <p className="mb-4 max-w-prose text-sm text-(--text-muted)">
+        Import a capture or watch live traffic, generate certified suggestions,
+        then review and stage selected revisions. Learning never changes running
+        policy. The candidate diff and commit bar is the only activation path.
+      </p>
+      {!canEdit && (
+        <p className="mb-4 text-sm">
+          Read-only viewer. An administrator imports, generates, reviews and
+          stages suggestions.
         </p>
-
-        <div className="flex items-center gap-3">
-          <label className="flex-1">
+      )}
+      {error && (
+        <p
+          role="alert"
+          className="mb-4 break-words rounded-xs border border-red/30 bg-red/10 p-3 text-sm text-(--red)"
+        >
+          {error}
+        </p>
+      )}
+      {canEdit && (
+        <Card title="Upload & Analyze PCAP" className="mb-6">
+          <p className="mb-3 text-sm text-(--text-muted)">
+            Analyze imports evidence only; Generate is a separate action.
+            Classic .pcap, up to 64 MiB. PCAPng is not supported.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
             <input
+              aria-label="PCAP file"
               type="file"
-              accept=".pcap,.pcapng"
-              onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-(--text) file:mr-3 file:rounded-xs file:border-0 file:px-3 file:py-2 file:text-sm file:text-(--text)"
+              accept=".pcap"
+              className="min-w-0 max-w-full flex-1 text-sm"
+              disabled={busy}
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
-          </label>
+            <button
+              className={primaryButton}
+              disabled={busy || !file}
+              onClick={() =>
+                void run(async () => {
+                  if (!file) return;
+                  if (file.size > 64 * 1024 * 1024)
+                    throw new Error("PCAP exceeds the 64 MiB import limit.");
+                  await showImport(dataOf(await analyzeUpload(file)));
+                })
+              }
+            >
+              {busy ? "Working…" : "Analyze"}
+            </button>
+          </div>
+        </Card>
+      )}
+      <Card title="Live watch" className="mb-6">
+        <p className="mb-3 text-sm text-(--text-muted)">
+          One active watch. Default 1 hour, maximum 24 hours. Stop seals its
+          dataset for the same review workflow. Restart never resumes
+          collection; rule modes do not start a watch.
+        </p>
+        {canEdit && (
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <label className="text-sm">
+              Duration (seconds)
+              <input
+                className="ml-2 w-28 rounded-xs border bg-(--surface2) px-2 py-1.5"
+                type="number"
+                min="1"
+                max="86400"
+                step="1"
+                value={duration}
+                disabled={busy}
+                onChange={(e) => setDuration(e.target.value)}
+              />
+            </label>
+            <button
+              className={primaryButton}
+              disabled={
+                busy ||
+                !watches ||
+                !!active.length ||
+                !Number.isInteger(seconds) ||
+                seconds < 1 ||
+                seconds > 86400
+              }
+              onClick={() =>
+                void run(async () => {
+                  const res = await learner.start(seconds);
+                  await refresh();
+                  const watch = dataOf(res);
+                  const ds = dataOf(await learner.datasets());
+                  setDatasets(ds);
+                  setChosen(
+                    (ds.items ?? []).find((d) => d.id === watch.datasetId) ??
+                      null,
+                  );
+                })
+              }
+            >
+              Start watch
+            </button>
+          </div>
+        )}
+        {!watches && (
+          <p className="text-sm">Watch status unavailable or loading.</p>
+        )}
+        {watches && !watches.items?.length && (
+          <p className="text-sm">No live watches.</p>
+        )}
+        <ul className="space-y-2">
+          {(watches?.items ?? []).map((w) => {
+            const running = !w.stoppedAt && Date.parse(w.deadline) > Date.now();
+            return (
+              <li
+                key={w.id}
+                className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-xs"
+              >
+                <div className="min-w-0">
+                  <p className="break-all font-mono">{w.id}</p>
+                  <p>
+                    {running ? "Collecting" : "Stopped"} · deadline{" "}
+                    {new Date(w.deadline).toLocaleString()}{" "}
+                    {w.stopReason && `· ${w.stopReason}`}
+                  </p>
+                  <p className="break-all text-(--text-muted)">
+                    Dataset {w.datasetId}
+                  </p>
+                </div>
+                {canEdit && running && (
+                  <button
+                    className={secondaryButton}
+                    disabled={busy}
+                    onClick={() =>
+                      void run(async () => {
+                        const res = await learner.stop(w.id);
+                        await refresh();
+                        dataOf(res);
+                      })
+                    }
+                  >
+                    Stop watch
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {watches?.nextCursor && (
           <button
-            onClick={handleAnalyzeUpload}
-            disabled={!uploadFile || analyzing}
-            className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-40"
-          >
-            {analyzing ? "Analyzing..." : "Analyze"}
-          </button>
-        </div>
-
-        {result && (
-          <AnalysisResults
-            result={result}
-            selectedRules={selectedRules}
-            onToggleRule={(id) =>
-              setSelectedRules((prev) => {
-                const next = new Set(prev);
-                next.has(id) ? next.delete(id) : next.add(id);
-                return next;
+            className={`${secondaryButton} mt-2`}
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                const next = dataOf(await learner.watches(watches.nextCursor));
+                setWatches({
+                  ...next,
+                  items: [...(watches.items ?? []), ...(next.items ?? [])],
+                });
               })
             }
-            onToggleAll={() =>
-              setSelectedRules((prev) =>
-                prev.size === result.rules.length
-                  ? new Set()
-                  : new Set(result.rules.map((r) => r.id)),
-              )
-            }
-            onApply={() => {
-              confirm.open({
-                title: "Stage Rules",
-                message: `Stage ${selectedRules.size} generated rule(s)? Commit is required to apply them.`,
-                confirmLabel: "Stage",
-                onConfirm: () => handleApplyRules(result.rules, selectedRules),
-              });
-            }}
-            canEdit={canEdit}
-          />
+          >
+            Load more watches
+          </button>
         )}
       </Card>
-
-      {/* -- Section 2: Existing PCAPs -- */}
-      <Card title="Existing PCAP Files" padding="lg">
-        <p className="mb-4 text-sm text-(--text-muted)">
-          Previously uploaded or captured PCAPs. Click Analyze to extract
-          protocols and generate rules.
+      <Card title="Evidence datasets" className="mb-6">
+        <p className="mb-3 text-xs text-(--text-muted)">
+          Retention: 7 days. Store ceilings: 32 datasets, 100,000 records, 128
+          MiB normalized evidence; 256 KiB / 4,096 objects per parent. Evictions
+          invalidate dependent proofs.
         </p>
-
-        {pcaps.length === 0 ? (
-          <div className="text-sm text-(--text-muted)">No PCAP files found.</div>
-        ) : (
-          <div className="overflow-hidden rounded-xs border">
-            <table className="w-full text-sm">
-              <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
+        {!datasets && (
+          <p className="text-sm">
+            Datasets unavailable or loading. Refresh to retry.
+          </p>
+        )}
+        {datasets && !datasets.items?.length && (
+          <p className="text-sm">
+            No retained datasets. Import a PCAP or start a live watch.
+          </p>
+        )}
+        {!!datasets?.items?.length && (
+          <div className="overflow-x-auto rounded-xs border">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs uppercase">
                 <tr>
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Interface</th>
-                  <th className="px-4 py-3">Size</th>
-                  <th className="px-4 py-3">Created</th>
-                  <th className="px-4 py-3">Tags</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                  {[
+                    "Dataset / source",
+                    "State",
+                    "Records / bytes",
+                    "Gaps",
+                    "Expires",
+                    "Review",
+                  ].map((h) => (
+                    <th key={h} className="px-3 py-2">
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {pcaps.map((p) => (
-                  <tr key={p.name} className="border-t table-row-hover transition-ui">
-                    <td className="px-4 py-3 font-mono text-xs text-(--text)">
-                      {p.name}
+                {datasets.items.map((d) => (
+                  <tr key={d.id} className="border-t table-row-hover">
+                    <td className="max-w-60 break-all px-3 py-2 font-mono text-xs">
+                      {d.id}
+                      <span className="block text-(--text-muted)">
+                        {d.source}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-(--text)">
-                      {p.interface || "-"}
+                    <td className="px-3 py-2">{d.state}</td>
+                    <td className="px-3 py-2">
+                      {d.records} / {d.bytes.toLocaleString()}
                     </td>
-                    <td className="px-4 py-3 text-(--text)">
-                      {fmtSize(p.sizeBytes)}
+                    <td className="px-3 py-2">
+                      {d.gaps?.join(", ") || "None reported"}
                     </td>
-                    <td className="px-4 py-3 text-(--text)">
-                      {new Date(p.createdAt).toLocaleString()}
+                    <td className="px-3 py-2 text-xs">
+                      {new Date(d.expiresAt).toLocaleString()}
                     </td>
-                    <td className="px-4 py-3">
-                      {(p.tags ?? []).length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {p.tags!.map((t) => (
-                            <span
-                              key={t}
-                              className="rounded-full px-2 py-0.5 text-xs text-(--text)"
-                            >
-                              {t}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-(--text-muted)">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-3 py-2">
                       <button
-                        onClick={() => handleAnalyzeExisting(p.name)}
-                        disabled={existingAnalyzing === p.name}
-                        className="rounded-md bg-(--amber) px-2 py-1 text-xs font-medium text-white hover:brightness-110 transition-ui disabled:opacity-40"
+                        className={secondaryButton}
+                        aria-pressed={chosen?.id === d.id}
+                        onClick={() => setChosen(d)}
                       >
-                        {existingAnalyzing === p.name
-                          ? "Analyzing..."
-                          : "Analyze"}
+                        Open {d.id}
                       </button>
                     </td>
                   </tr>
@@ -375,297 +329,117 @@ export default function PcapAnalysisPage() {
             </table>
           </div>
         )}
-
-        {existingResult && (
-          <div className="mt-4">
-            <div className="mb-2 text-sm text-(--text)">
-              Results for{" "}
-              <span className="font-mono text-(--amber)">{existingResult.name}</span>
-            </div>
-            <AnalysisResults
-              result={existingResult.result}
-              selectedRules={existingSelectedRules}
-              onToggleRule={(id) =>
-                setExistingSelectedRules((prev) => {
-                  const next = new Set(prev);
-                  next.has(id) ? next.delete(id) : next.add(id);
-                  return next;
-                })
-              }
-              onToggleAll={() =>
-                setExistingSelectedRules((prev) =>
-                  prev.size === existingResult.result.rules.length
-                    ? new Set()
-                    : new Set(existingResult.result.rules.map((r) => r.id)),
-                )
-              }
-              onApply={() => {
-                confirm.open({
-                  title: "Stage Rules",
-                  message: `Stage ${existingSelectedRules.size} generated rule(s)? Commit is required to apply them.`,
-                  confirmLabel: "Stage",
-                  onConfirm: () =>
-                    handleApplyRules(
-                      existingResult.result.rules,
-                      existingSelectedRules,
-                    ),
+        {datasets?.nextCursor && (
+          <button
+            className={`${secondaryButton} mt-2`}
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                const next = dataOf(
+                  await learner.datasets(datasets.nextCursor),
+                );
+                setDatasets({
+                  ...next,
+                  items: [...(datasets.items ?? []), ...(next.items ?? [])],
                 });
-              }}
-              canEdit={canEdit}
-            />
-          </div>
+              })
+            }
+          >
+            Load more datasets
+          </button>
+        )}
+        {counters && (
+          <details className="mt-4 text-xs">
+            <summary className="cursor-pointer">
+              Store-wide admission and withheld counts
+            </summary>
+            <p className="mt-2">
+              {counters.records} records / {counters.bytes} bytes · evicted{" "}
+              {counters.evictedRecords} records / {counters.evictedBytes} bytes
+              · expired {counters.expiredRecords} · lost batches{" "}
+              {counters.lostBatches} · rejected parents{" "}
+              {counters.rejectedParents}
+            </p>
+            <p className="mt-2">
+              Durable totals, not per-dataset counts. Last-generation dataset
+              reasons appear in its review below.
+            </p>
+            <ReasonCounts counts={counters.withheld} />
+          </details>
         )}
       </Card>
-    </Shell>
-  );
-}
-
-/* -- Analysis Results Component -- */
-
-function AnalysisResults({
-  result,
-  selectedRules,
-  onToggleRule,
-  onToggleAll,
-  onApply,
-  canEdit,
-}: {
-  result: PolicyAnalysis;
-  selectedRules: Set<string>;
-  onToggleRule: (id: string) => void;
-  onToggleAll: () => void;
-  onApply: () => void;
-  canEdit: boolean;
-}) {
-  const { stats, eventSummary, rules, profiles } = result;
-  const protocolList = Object.keys(stats.protocols ?? {});
-  const eventEntries = Object.entries(eventSummary ?? {}).sort(
-    ([, a], [, b]) => b - a,
-  );
-  const flowCount = stats.flows?.length ?? 0;
-
-  return (
-    <div className="mt-4 space-y-4">
-      {stats.truncated && (
-        <div role="status" className="rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
-          The capture is incomplete. Missing events or identifications may be due to truncated records.
-        </div>
-      )}
-      {/* Stats summary */}
-      <div className="grid gap-3 md:grid-cols-4">
-        <StatCard label="Packets" value={stats.packetCount.toLocaleString()} />
-        <StatCard label="Flows" value={flowCount.toLocaleString()} />
-        <StatCard label="Duration" value={fmtDuration(stats.duration)} />
-        <div className="rounded-xs border bg-(--surface) p-3">
-          <div className="text-xs uppercase tracking-wide text-(--text-muted)">
-            Protocols
-          </div>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {protocolList.length > 0 ? (
-              protocolList.map((p) => (
-                <span
-                  key={p}
-                  className="rounded-full px-2 py-0.5 text-xs text-(--text)"
-                >
-                  {p} ({stats.protocols[p]})
-                </span>
-              ))
-            ) : (
-              <span className="text-xs text-(--text-muted)">none detected</span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <IdentificationTable identifications={stats.identifications ?? []} />
-
-      {/* Event summary table */}
-      {eventEntries.length > 0 && (
-        <div className="overflow-hidden rounded-xs border">
-          <table className="w-full text-sm">
-            <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
-              <tr>
-                <th className="px-4 py-2">Protocol</th>
-                <th className="px-4 py-2">Event Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              {eventEntries.map(([proto, count]) => (
-                <tr key={proto} className="border-t table-row-hover transition-ui">
-                  <td className="px-4 py-2 text-(--text)">{proto}</td>
-                  <td className="px-4 py-2 font-mono text-xs text-(--text)">
-                    {count.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Learned profiles */}
-      {profiles && profiles.length > 0 && (
-        <>
-          <h3 className="text-sm font-semibold text-(--text)">
-            Learned Profiles ({profiles.length})
-          </h3>
-          <div className="overflow-hidden rounded-xs border">
-            <table className="w-full text-sm">
-              <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
-                <tr>
-                  <th className="px-4 py-2">Protocol</th>
-                  <th className="px-4 py-2">Source</th>
-                  <th className="px-4 py-2">Destination</th>
-                  <th className="px-4 py-2">Packets</th>
-                  <th className="px-4 py-2">Read/Write</th>
-                </tr>
-              </thead>
-              <tbody>
-                {profiles.map((p, i) => (
-                  <tr key={i} className="border-t table-row-hover transition-ui">
-                    <td className="px-4 py-2">
-                      <span className="rounded-full px-2 py-0.5 text-xs text-(--text)">
-                        {p.protocol}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 font-mono text-xs text-(--text)">
-                      {p.sourceIP}
-                    </td>
-                    <td className="px-4 py-2 font-mono text-xs text-(--text)">
-                      {p.destIP}
-                    </td>
-                    <td className="px-4 py-2 font-mono text-xs text-(--text)">
-                      {p.packetCount}
-                    </td>
-                    <td className="px-4 py-2 text-xs">
-                      {p.readSeen && (
-                        <span className="mr-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-emerald-400">
-                          Read
-                        </span>
-                      )}
-                      {p.writeSeen && (
-                        <span className="rounded-full px-2 py-0.5">
-                          Write
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      {/* Generated rules */}
-      {rules.length > 0 && (
-        <>
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-(--text)">
-              Generated Rules ({rules.length})
-            </h3>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onToggleAll}
-                className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
+      {canEdit && (
+        <Card title="Existing PCAP Files" className="mb-6">
+          <p className="mb-3 text-sm text-(--text-muted)">
+            Analyze a named capture to import a dataset; no rules are generated
+            automatically.
+          </p>
+          {!pcaps.length && <p className="text-sm">No PCAP files found.</p>}
+          <ul className="space-y-2">
+            {pcaps.map((p) => (
+              <li
+                key={p.name}
+                className="flex flex-wrap items-center justify-between gap-3 border-t pt-2"
               >
-                {selectedRules.size === rules.length
-                  ? "Deselect All"
-                  : "Select All"}
-              </button>
-              {canEdit && (
+                <span className="min-w-0 break-all font-mono text-xs">
+                  {p.name} · {p.sizeBytes.toLocaleString()} bytes
+                </span>
                 <button
-                  onClick={onApply}
-                  disabled={selectedRules.size === 0}
-                  className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-40"
+                  className={secondaryButton}
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () =>
+                      showImport(dataOf(await learner.analyze(p.name))),
+                    )
+                  }
                 >
-                  Stage {selectedRules.size} Rule(s)
+                  Analyze
                 </button>
-              )}
-            </div>
-          </div>
-          <div className="overflow-hidden rounded-xs border">
-            <table className="w-full text-sm">
-              <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
-                <tr>
-                  <th className="w-8 px-4 py-2"></th>
-                  <th className="px-4 py-2">Description</th>
-                  <th className="px-4 py-2">Sources</th>
-                  <th className="px-4 py-2">Destinations</th>
-                  <th className="px-4 py-2">ICS Protocol</th>
-                  <th className="px-4 py-2">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rules.map((r) => (
-                  <tr key={r.id} className="border-t table-row-hover transition-ui">
-                    <td className="px-4 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedRules.has(r.id)}
-                        onChange={() => onToggleRule(r.id)}
-                        className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)"
-                      />
-                    </td>
-                    <td className="px-4 py-2 text-(--text)">
-                      {r.description || r.id}
-                    </td>
-                    <td className="px-4 py-2 font-mono text-xs text-(--text)">
-                      {(r.sources ?? []).join(", ") || "*"}
-                    </td>
-                    <td className="px-4 py-2 font-mono text-xs text-(--text)">
-                      {(r.destinations ?? []).join(", ") || "*"}
-                    </td>
-                    <td className="px-4 py-2">
-                      {r.ics?.protocol ? (
-                        <span className="rounded-full px-2 py-0.5 text-xs text-(--text)">
-                          {r.ics.protocol}
-                          {r.ics.functionCodes &&
-                            r.ics.functionCodes.length > 0 &&
-                            ` FC:${r.ics.functionCodes.join(",")}`}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-(--text-muted)">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs ${
-                          r.action === "ALLOW"
-                            ? "bg-emerald-500/20 text-emerald-400"
-                            : "bg-red-500/20 text-red-400"
-                        }`}
-                      >
-                        {r.action}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
-
-      {rules.length === 0 && (
-        <div className="text-sm text-(--text-muted)">
-          No rules generated from this PCAP. The capture may not contain
-          learnable standard-port ICS requests. Observation-bound connections and IEC 104 are not used for suggestions.
-        </div>
+      {imported && (
+        <Card title="Last import statistics" className="mb-6">
+          <p className="mb-2 break-all text-xs">
+            Dataset {imported.dataset.id}
+          </p>
+          <p className="mb-2 text-sm">
+            {imported.stats.packetCount ?? 0} packets ·{" "}
+            {imported.stats.byteCount ?? 0} bytes ·{" "}
+            {imported.stats.flows?.length ?? 0} flows ·{" "}
+            {((imported.stats.duration ?? 0) / 1e9).toFixed(1)} seconds
+          </p>
+          <p className="mb-2 text-xs">
+            Protocols:{" "}
+            {Object.entries(imported.stats.protocols ?? {})
+              .map(([p, n]) => `${p}: ${n}`)
+              .join(", ") || "none"}
+          </p>
+          {imported.stats.truncated && (
+            <p role="status" className="mb-2 text-sm text-(--amber)">
+              Capture truncated: missing records may leave incomplete evidence.
+            </p>
+          )}
+          {imported.stats.displayTruncated && (
+            <p role="status" className="mb-2 text-sm text-(--amber)">
+              Display sample capped; normalized evidence is not sampled.
+            </p>
+          )}
+          <IdentificationTable
+            identifications={imported.stats.identifications ?? []}
+          />
+        </Card>
       )}
-    </div>
-  );
-}
-
-/* -- Stat Card -- */
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xs border bg-(--surface) p-3">
-      <div className="text-xs uppercase tracking-wide text-(--text-muted)">
-        {label}
-      </div>
-      <div className="mt-1 text-lg font-semibold text-(--text)">{value}</div>
-    </div>
+      {chosen && (
+        <DatasetReview
+          key={chosen.id}
+          dataset={chosen}
+          canEdit={canEdit}
+          onChanged={refresh}
+        />
+      )}
+    </Shell>
   );
 }
