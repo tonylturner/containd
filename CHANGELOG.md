@@ -138,6 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The management UI builds with Next.js 16 and ESLint 10 (flat config).
 - `GET /api/v1/inventory/{ip}` returns an array with every protocol and role
   observed for the address, and 404 when there is none.
 - Apply ICS parsing policy to framed but undecoded content and exclude it from learned allowances.
@@ -235,6 +236,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Behind a reverse proxy that mounts the UI under `/containd/`, login,
+  logout and forbidden redirects stay under the mount instead of leaving it.
 - AF_PACKET resolver queue or byte overflow stops passive DPI and identification
   decoding for the affected connection incarnation, without changing forwarding.
   A `dpi.coverage.loss` event and `containd_dpi_coverage_losses_total` counter expose
