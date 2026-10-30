@@ -211,6 +211,15 @@ func (w *evidenceWatch) start(ctx context.Context, req evidence.StartWatchReques
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.err() != nil {
+		if w.active.Load() != nil {
+			return evidence.Watch{}, sqlite.ErrConflict
+		}
+		if err := w.store.Maintain(ctx); err != nil {
+			return evidence.Watch{}, err
+		}
+		w.failure.Store(nil)
+	}
 	watch, err := w.store.StartWatch(ctx, req)
 	if err != nil {
 		return watch, err
@@ -269,7 +278,11 @@ func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch
 		return watch, context.Canceled
 	case err := <-barrier:
 		if err != nil {
-			return watch, err
+			// Persist the loss and seal even after an earlier ingestion error.
+			// A healthy cleanup write must remain possible.
+			if _, writeErr := w.store.Ingest(ctx, evidence.IngestRequest{DatasetID: lease.dataset.ID, Gaps: []string{"watch_storage_loss"}}); writeErr != nil {
+				return watch, writeErr
+			}
 		}
 	case <-ctx.Done():
 		return watch, ctx.Err()

@@ -66,10 +66,7 @@ func (a *evidenceAPI) register(mux *http.ServeMux) {
 	}
 }
 func (a *evidenceAPI) serve(w http.ResponseWriter, r *http.Request) {
-	if a.watch.err() != nil {
-		http.Error(w, "evidence collector unavailable", http.StatusServiceUnavailable)
-		return
-	}
+	// Collector failures affect readiness, not authority reads or cleanup.
 	var result any
 	var err error
 	ctx := r.Context()

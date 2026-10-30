@@ -123,7 +123,11 @@ func (s *Store) fitExcept(ctx context.Context, tx *sql.Tx, protected []string, a
 		if err != nil {
 			return err
 		}
-		if records+addRecords <= s.limits.MaxRecords && bytes+addBytes <= s.limits.MaxBytes && datasets+addDatasets <= s.limits.MaxDatasets {
+		physical, err := physicalFits(ctx, tx, addBytes, addRecords, addDatasets)
+		if err != nil {
+			return err
+		}
+		if physical && records+addRecords <= s.limits.MaxRecords && bytes+addBytes <= s.limits.MaxBytes && datasets+addDatasets <= s.limits.MaxDatasets {
 			return nil
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT id FROM datasets WHERE state='sealed' ORDER BY created,id`)
@@ -389,4 +393,20 @@ func (s *Store) CountWithheld(ctx context.Context, parent, version string, reaso
 		c.EvictedRecords, c.EvictedBytes = current.EvictedRecords, current.EvictedBytes
 		return saveCounters(ctx, tx, c)
 	})
+}
+
+// JSON gauges exclude B-trees, indexes and overflow-page fragmentation. Bound
+// actual occupied SQLite pages too, reserving space before attempting a write.
+// Whole-dataset eviction frees pages within this same transaction.
+func physicalFits(ctx context.Context, tx reader, bytes, records, datasets uint64) (bool, error) {
+	var pages, free uint64
+	if err := tx.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&pages); err != nil {
+		return false, err
+	}
+	if err := tx.QueryRowContext(ctx, `PRAGMA freelist_count`).Scan(&free); err != nil {
+		return false, err
+	}
+	const databaseBytes = 120 << 20
+	const reserve = 8 << 20
+	return (pages-free)*4096+2*bytes+16384*(records+datasets) <= databaseBytes-reserve, nil
 }
