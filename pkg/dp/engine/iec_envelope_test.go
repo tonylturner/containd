@@ -28,7 +28,8 @@ func TestIECTableNonIPv4UsesRegistryPort(t *testing.T) {
 			pkt.SrcIP, pkt.DstIP = pkt.DstIP, pkt.SrcIP
 			pkt.SrcPort, pkt.DstPort = pkt.DstPort, pkt.SrcPort
 		}
-		result, matched := tab.nonIPv4Locked(wireServiceState(pkt))
+		state := wireServiceState(pkt)
+		result, matched := tab.nonIPv4Locked(&state)
 		if !matched || result.decision.Action != capture.Drop || result.decision.Reason != reasonIECInvalid {
 			t.Fatalf("reverse=%v matched=%v result=%+v", reverse, matched, result)
 		}

@@ -264,9 +264,6 @@ func messageDirection(state *flow.State) string {
 func servicePort(state *flow.State, pkt *dpi.ParsedPacket) uint16 {
 	if state != nil {
 		key := state.ServiceKey()
-		if !state.Connection.Load().Verified() && pkt != nil {
-			key.SrcPort, key.DstPort = pkt.SrcPort, pkt.DstPort
-		}
 		if key.Dir == flow.DirReverse {
 			return key.SrcPort
 		}

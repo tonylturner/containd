@@ -15,23 +15,39 @@ type TransportConnectionID string
 
 // ConnectionSlot is copyable with a State snapshot; the shared atomic slot
 // keeps concurrent metadata readers safe. Initialize states with NewState.
-type ConnectionSlot struct{ pointer *atomic.Pointer[Connection] }
+type ConnectionSlot struct{ pointer *connectionSlot }
+
+type connectionSlot struct {
+	connection atomic.Pointer[Connection]
+	service    atomic.Pointer[serviceKey]
+}
+
+// Immutable after publication; snapshots may share the slot even when their
+// wire keys differ. Both inputs must match before reusing the derived key.
+type serviceKey struct {
+	connection *Connection
+	wire       MapKey
+	key        Key
+}
 
 func newConnectionSlot() ConnectionSlot {
-	return ConnectionSlot{pointer: &atomic.Pointer[Connection]{}}
+	return ConnectionSlot{pointer: &connectionSlot{}}
 }
 func (s ConnectionSlot) Load() *Connection {
 	if s.pointer == nil {
 		return nil
 	}
-	return s.pointer.Load()
+	return s.pointer.connection.Load()
 }
 func (s *ConnectionSlot) Store(c *Connection) {
 	// Zero-value states are useful to standalone decoders before sharing.
 	if s.pointer == nil {
+		if c == nil {
+			return
+		}
 		*s = newConnectionSlot()
 	}
-	s.pointer.Store(c)
+	s.pointer.connection.Store(c)
 }
 
 // Connection is shared correlation evidence and verified service/CT authority.
@@ -177,12 +193,18 @@ func (c *Connection) Peer(k Key) Key {
 // ServiceKey returns service coordinates in this state's direction. Verified
 // evidence uses the pre-SNAT client and post-DNAT backend, as forward-chain
 // policy does. Without that authority the wire key is the only known tuple.
-// This never rewrites the state's wire identity or reassembly key.
+// This never rewrites the state's wire identity or reassembly key. The shared
+// atomic slot caches immutable results by connection pointer and wire key.
+// As with ID, callers must not mutate Key concurrently with readers.
 func (s *State) ServiceKey() Key {
 	k := s.Key
 	c := s.Connection.Load()
 	if !c.Verified() {
 		return k
+	}
+	wire := k.MapKey()
+	if cached := s.Connection.pointer.service.Load(); cached != nil && cached.connection == c && cached.wire == wire {
+		return cached.key
 	}
 	client, server := c.Evidence.Original.Source, c.Evidence.Reply.Source
 	k.Dir = c.Direction(s.Key)
@@ -191,6 +213,7 @@ func (s *State) ServiceKey() Key {
 	}
 	k.SrcIP, k.DstIP = net.IP(client.Addr().AsSlice()), net.IP(server.Addr().AsSlice())
 	k.SrcPort, k.DstPort = client.Port(), server.Port()
+	s.Connection.pointer.service.Store(&serviceKey{connection: c, wire: wire, key: k})
 	return k
 }
 

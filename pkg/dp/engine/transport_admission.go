@@ -20,7 +20,7 @@ func (e *Engine) legacyTransportEligible(pkt capture.Packet) bool {
 	state := wireServiceState(pkt)
 
 	parsed := &dpi.ParsedPacket{Proto: pkt.Transport, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
-	if !e.ShouldInspect(state, parsed) {
+	if !e.ShouldInspect(&state, parsed) {
 		return false
 	}
 	key := state.ServiceKey()
@@ -29,7 +29,7 @@ func (e *Engine) legacyTransportEligible(pkt capture.Packet) bool {
 	}
 	if snap := e.ruleSnap.Load(); snap != nil {
 		for _, entry := range snap.Firewall {
-			if shouldInspectFirewallEntry(entry, state, parsed) {
+			if shouldInspectFirewallEntry(entry, &state, parsed) {
 				return true
 			}
 		}

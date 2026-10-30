@@ -15,8 +15,8 @@ func icsServiceDirection(pkt capture.Packet) (flow.Direction, bool) {
 }
 
 // wireServiceState is used before any connection evidence has been admitted.
-func wireServiceState(pkt capture.Packet) *flow.State {
-	state := &flow.State{Key: packetKey(pkt)}
+func wireServiceState(pkt capture.Packet) flow.State {
+	state := flow.State{Key: packetKey(pkt)}
 	if dir, known := icsServiceDirection(pkt); known {
 		state.Key.Dir = dir
 	}
