@@ -46,7 +46,7 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	m.eventTimes[state.ID()] = at
 	defer func() { stampResult(&res, at) }()
 	key, session, pos := streamKey(state, pkt)
-	candidates := m.dispatch(state, key, peerStreamKey(state, pkt))
+	candidates := m.dispatch(state, key, pkt)
 	tcp := pkt.Proto == "tcp"
 	stream := m.reassembles(pkt)
 	var framer StreamDecoder
@@ -282,7 +282,7 @@ func sessionStreamKey(session string, dir StreamDir) string {
 }
 
 func peerStreamKey(state *flow.State, pkt *ParsedPacket) string {
-	if !pkt.HasOffset {
+	if pkt == nil || !pkt.HasOffset {
 		return peerFlowID(state)
 	}
 	switch pkt.Dir {

@@ -7,17 +7,24 @@ import "github.com/tonylturner/containd/pkg/dp/flow"
 // committedSelection shares one dispatch across TCP directions and session
 // keys. The existing ownership indexes also bridge wire and session dispatch,
 // without another pin or lifecycle. Callers hold streamMu.
-func (m *Manager) committedSelection(state *flow.State, id, peer string) []Decoder {
+func (m *Manager) committedSelection(state *flow.State, id string, pkt *ParsedPacket) []Decoder {
 	if selected := m.selected[id]; len(selected) != 0 {
 		return selected
 	}
 	if state.Key.Proto != 6 {
 		return nil
 	}
+	// Hashing the peer allocates. Resolve it only when this direction has
+	// no committed selection, never on an established packet's own-id hit.
+	peer := peerStreamKey(state, pkt)
 	if selected := m.selected[peer]; len(selected) != 0 {
 		return selected
 	}
-	for _, flowID := range []string{state.ID(), peerFlowID(state)} {
+	peerFlow := peer
+	if pkt != nil && pkt.HasOffset {
+		peerFlow = peerFlowID(state)
+	}
+	for _, flowID := range []string{state.ID(), peerFlow} {
 		if selected := m.selected[flowID]; len(selected) != 0 {
 			return selected
 		}

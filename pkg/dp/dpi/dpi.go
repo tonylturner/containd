@@ -218,7 +218,7 @@ func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
 	delete(m.eventTimes, state.ID())
 	var out []Event
 	var errs []error
-	for _, d := range m.dispatch(state, state.ID(), peerFlowID(state)) {
+	for _, d := range m.dispatch(state, state.ID(), nil) {
 		events, err := d.OnFlowEnd(state)
 		if err != nil {
 			errs = append(errs, err)
@@ -233,8 +233,8 @@ func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
 // after framing has started; it must not reinterpret that stream with a new
 // decoder. A flow not yet selected can use newly verified service ports.
 // Callers hold streamMu.
-func (m *Manager) dispatch(state *flow.State, id, peer string) []Decoder {
-	if selected := m.committedSelection(state, id, peer); len(selected) != 0 {
+func (m *Manager) dispatch(state *flow.State, id string, pkt *ParsedPacket) []Decoder {
+	if selected := m.committedSelection(state, id, pkt); len(selected) != 0 {
 		m.selected[id] = selected
 		m.ownSelection(state.ID(), id)
 		return selected
@@ -264,7 +264,7 @@ func (m *Manager) supportedCandidates(state *flow.State) []Decoder {
 func (m *Manager) CommittedProtocol(state *flow.State, proto string) (matches, committed bool) {
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
-	selected := m.committedSelection(state, state.ID(), peerFlowID(state))
+	selected := m.committedSelection(state, state.ID(), nil)
 	committed = len(selected) != 0
 	if !committed {
 		selected = m.supportedCandidates(state)

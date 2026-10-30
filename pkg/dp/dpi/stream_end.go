@@ -87,7 +87,7 @@ func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket, kind StreamEr
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
 	key, _, _ := streamKey(state, pkt)
-	framer := firstFramer(m.dispatch(state, key, peerStreamKey(state, pkt)))
+	framer := firstFramer(m.dispatch(state, key, pkt))
 	if framer == nil {
 		return
 	}
