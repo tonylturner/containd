@@ -142,6 +142,13 @@ for (const flow of ["password change", "MFA disable"] as const) {
     const dialog = await openProfile(page, flow === "password change" ? "Change password" : "Profile", {
       [path]: { status: 401, json: { error: message } },
     });
+    // Snapshot before submitting: the 401 schedules its session check, which
+    // can run before the UI assertion below under load.
+    const sessionChecksBeforeSubmit = sessionChecks.length;
+    const failedCheck = page.waitForResponse((response) => {
+      const request = response.request();
+      return new URL(response.url()).pathname === path && request.method() === "POST";
+    });
     if (flow === "password change") {
       await dialog.getByPlaceholder("Current password").fill("wrong");
       await dialog.getByPlaceholder("New password (min 8 chars)").fill("a new long passphrase");
@@ -152,12 +159,19 @@ for (const flow of ["password change", "MFA disable"] as const) {
       await dialog.getByLabel("Authentication code").fill("123456");
       await dialog.getByRole("button", { name: "Disable MFA" }).click();
     }
+    const response = await failedCheck;
+    expect(response.status()).toBe(401);
+    expect(response.request().postDataJSON()).toEqual(
+      flow === "password change"
+        ? { currentPassword: "wrong", newPassword: "a new long passphrase" }
+        : { currentPassword: "wrong", code: "123456" },
+    );
+    expect(await response.json()).toEqual({ error: message });
     await expect(dialog.getByText(message, { exact: true })).toBeVisible();
     await expect(dialog.getByText("Unauthorized")).toHaveCount(0);
     // The 401 still starts the session-expired check; the session is valid,
     // so it re-reads /auth/me and keeps the page.
-    const before = sessionChecks.length;
-    await expect.poll(() => sessionChecks.length, { timeout: 5_000 }).toBeGreaterThan(before);
+    await expect.poll(() => sessionChecks.length, { timeout: 5_000 }).toBeGreaterThan(sessionChecksBeforeSubmit);
     await page.waitForLoadState("networkidle");
     await expect(page).toHaveURL(/\/zones\/$/);
     await expect(dialog.getByText(message, { exact: true })).toBeVisible();
