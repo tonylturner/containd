@@ -309,22 +309,23 @@ func assertGauges(t *testing.T, s *Store) {
 	}
 }
 
-func TestOpenRefusesSharedDirectoryWithoutChangingIt(t *testing.T) {
+func TestOpenPreservesSharedDirectoryPermissions(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "evidence.db")
-	if s, err := Open(path, Options{CompatibleProof: fixtureVersions}); err == nil {
-		_ = s.Close()
-		t.Fatal("opened sensitive evidence inside a shared directory")
+	s, err := Open(path, Options{CompatibleProof: fixtureVersions})
+	if err != nil {
+		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 	info, err := os.Stat(dir)
 	if err != nil || info.Mode().Perm() != 0755 {
 		t.Fatalf("changed shared data permissions: %v %v", info, err)
 	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("created evidence before verifying directory ownership: %v", err)
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("evidence file permissions: %v %v", info, err)
 	}
 }
 

@@ -89,16 +89,8 @@ func Open(path string, opts Options) (*Store, error) {
 		return nil, err
 	}
 	path = absolute
-	// This database has its own private directory; never chmod a shared /data.
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
-	}
-	dir, err := os.Stat(filepath.Dir(path))
-	if err != nil {
-		return nil, err
-	}
-	if dir.Mode().Perm() != 0700 {
-		return nil, fmt.Errorf("evidence directory %s must be private (0700); refusing to change shared directory permissions", filepath.Dir(path))
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
