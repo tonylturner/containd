@@ -61,7 +61,7 @@ func (s *Store) PutDraft(ctx context.Context, v learn.Suggestion) (learn.Suggest
 		if err != nil {
 			return err
 		}
-		if d.State != evidence.DatasetSealed || len(d.Gaps) != 0 {
+		if d.State != evidence.DatasetSealed {
 			return ErrConflict
 		}
 		var total, perDataset int

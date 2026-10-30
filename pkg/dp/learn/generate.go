@@ -40,7 +40,7 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 	if err != nil {
 		return result, err
 	}
-	if ds.State != evidence.DatasetSealed || len(ds.Gaps) > 0 {
+	if ds.State != evidence.DatasetSealed {
 		return result, ErrNotCertified
 	}
 	groups := map[string]*relationGroup{}
@@ -114,6 +114,11 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 			return result, err
 		}
 		content := SuggestionContent{Versions: Versions{Schema: SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: GeneratorVersion, Evaluator: EvaluatorVersion, Decoder: ds.DecoderVersion, Profile: ds.ProfileFingerprint, Snapshot: ds.SnapshotFingerprint}, EvidenceDigest: digest, Rules: group.rules, Limits: []string{"Finite boundary replay; selector relations, not transaction or delivery guarantees."}, RequiresCoordinateReview: needsCoordinateReview(group.parents)}
+		gaps := append([]string(nil), ds.Gaps...)
+		sort.Strings(gaps)
+		for _, gap := range gaps {
+			content.Limits = append(content.Limits, "Dataset collection limit: "+gap+"; proof covers retained complete parents only.")
+		}
 		draft, err := g.Store.PutDraft(ctx, Suggestion{DatasetID: ds.ID, Content: content})
 		if err != nil {
 			return result, err

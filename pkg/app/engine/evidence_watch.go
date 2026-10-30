@@ -25,6 +25,7 @@ type watchLease struct {
 	watch    evidence.Watch
 	dropped  atomic.Uint64
 	inflight atomic.Int64
+	changed  atomic.Bool
 }
 type evidenceBatch struct {
 	lease       *watchLease
@@ -91,7 +92,7 @@ func (w *evidenceWatch) err() error {
 }
 func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 	lease := w.active.Load()
-	if lease == nil {
+	if lease == nil || lease.changed.Load() {
 		return
 	}
 	collectedAt := w.store.Clock()
@@ -106,7 +107,7 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 	if state != nil {
 		metadata, err := evidenceMetadata(w.engine)
 		if err != nil || metadata.ProfileFingerprint != lease.dataset.ProfileFingerprint || metadata.SnapshotFingerprint != lease.dataset.SnapshotFingerprint {
-			lease.dropped.Add(1)
+			lease.changed.Store(true)
 			return
 		}
 	}
@@ -182,9 +183,17 @@ func (w *evidenceWatch) maintain(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if lease := w.active.Load(); lease != nil && !time.Now().Before(lease.watch.Deadline) {
-				_, err := w.stop(ctx, lease.watch.ID)
-				w.fail(err)
+			if lease := w.active.Load(); lease != nil {
+				metadata, err := evidenceMetadata(w.engine)
+				if err != nil {
+					w.fail(err)
+				} else if metadata.ProfileFingerprint != lease.dataset.ProfileFingerprint || metadata.SnapshotFingerprint != lease.dataset.SnapshotFingerprint {
+					lease.changed.Store(true)
+				}
+				if lease.changed.Load() || !w.store.Clock().Before(lease.watch.Deadline) {
+					_, err := w.stop(ctx, lease.watch.ID)
+					w.fail(err)
+				}
 			}
 			w.mu.Lock()
 			if w.err() == nil {
@@ -269,6 +278,9 @@ func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch
 		if _, err := w.store.Ingest(ctx, evidence.IngestRequest{DatasetID: lease.dataset.ID, Gaps: []string{"watch_collection_loss"}, LostBatches: dropped}); err != nil {
 			return watch, err
 		}
+	}
+	if lease.changed.Load() {
+		return w.store.StopWatchReason(ctx, id, "policy_changed")
 	}
 	return w.store.StopWatch(ctx, id)
 }

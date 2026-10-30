@@ -1531,6 +1531,7 @@ components:
           format: date-time
           type: string
         stopReason:
+          description: operator, deadline, restart, budget or policy_changed. Policy changes stop collection before accepting new-snapshot parents.
           type: string
         stoppedAt:
           format: date-time
@@ -4558,8 +4559,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       description: Imports normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly
         generate suggestions after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import
-        has bounded flow and display resources. Any evidence admission loss is visible in dataset gaps and prevents
-        certification.
+        has bounded flow and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
   /pcap/analyze/{name}:
     post:
       summary: Analyze a previously uploaded PCAP by name (admin)
@@ -4611,8 +4611,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       description: Imports normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly
         generate suggestions after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import
-        has bounded flow and display resources. Any evidence admission loss is visible in dataset gaps and prevents
-        certification.
+        has bounded flow and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
 
   # ── ICS Rule Templates ──────────────────────────────────────────
   /templates/ics:
@@ -7532,7 +7531,7 @@ x-internal-paths:
       description: Engine-internal trusted management boundary; never exposed as a public management route. Imports
         normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly generate suggestions
         after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import has bounded flow
-        and display resources. Any evidence admission loss is visible in dataset gaps and prevents certification.
+        and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
       security: []
   /internal/pcap/analyze/{name}:
     post:
@@ -7586,7 +7585,7 @@ x-internal-paths:
       description: Engine-internal trusted management boundary; never exposed as a public management route. Imports
         normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly generate suggestions
         after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import has bounded flow
-        and display resources. Any evidence admission loss is visible in dataset gaps and prevents certification.
+        and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
       security: []
   /internal/learn/watches:
     post:

@@ -144,7 +144,7 @@ func loadParents(ctx context.Context, store evidence.Store, refs []evidence.Evid
 		if err != nil {
 			return nil, err
 		}
-		if ds.State != evidence.DatasetSealed || len(ds.Gaps) > 0 {
+		if ds.State != evidence.DatasetSealed {
 			return nil, ErrNotCertified
 		}
 		found := map[string]evidence.Observation{}

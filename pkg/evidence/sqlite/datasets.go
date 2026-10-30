@@ -222,11 +222,21 @@ func (s *Store) stop(ctx context.Context, tx *sql.Tx, w evidence.Watch, reason s
 	}
 	if reason == "restart" {
 		d.Gaps = appendUnique(d.Gaps, "watch_restart")
+	} else if reason == "policy_changed" {
+		d.Gaps = appendUnique(d.Gaps, "policy_changed")
 	}
 	return w, s.seal(ctx, tx, d)
 }
 
 func (s *Store) StopWatch(ctx context.Context, id string) (evidence.Watch, error) {
+	return s.StopWatchReason(ctx, id, "")
+}
+
+// StopWatchReason seals an explicit lease after its collector has drained.
+func (s *Store) StopWatchReason(ctx context.Context, id, reason string) (evidence.Watch, error) {
+	if reason != "" && reason != "policy_changed" {
+		return evidence.Watch{}, ErrConflict
+	}
 	var w evidence.Watch
 	err := s.write(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -234,11 +244,14 @@ func (s *Store) StopWatch(ctx context.Context, id string) (evidence.Watch, error
 		if err != nil {
 			return err
 		}
-		reason := "operator"
-		if !s.now().Before(w.Deadline) {
-			reason = "deadline"
+		stopReason := reason
+		if stopReason == "" {
+			stopReason = "operator"
+			if !s.now().Before(w.Deadline) {
+				stopReason = "deadline"
+			}
 		}
-		w, err = s.stop(ctx, tx, w, reason)
+		w, err = s.stop(ctx, tx, w, stopReason)
 		return err
 	})
 	return w, err

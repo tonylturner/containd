@@ -56,7 +56,7 @@ type Watch struct {
 	StartedAt  time.Time  `json:"startedAt"`
 	Deadline   time.Time  `json:"deadline"`
 	StoppedAt  *time.Time `json:"stoppedAt,omitempty"`
-	StopReason string     `json:"stopReason,omitempty"` // operator|deadline|restart|budget
+	StopReason string     `json:"stopReason,omitempty"` // operator|deadline|restart|budget|policy_changed
 }
 
 // StartWatchRequest uses seconds on the wire rather than Go nanoseconds.
