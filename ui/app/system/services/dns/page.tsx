@@ -19,7 +19,7 @@ import { Card } from "../../../../components/Card";
 export default function DNSPage() {
   const canEdit = isAdmin();
   const [status, setStatus] = useState<DNSStatus | null>(null);
-  const { editor, cfg, setCfg, adoptConfig, acceptConfig, text, setText } = useConfigEditor<DNSConfig>({
+  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<DNSConfig>({
     enabled: false,
     listenPort: 53,
     upstreamServers: [],
@@ -66,14 +66,14 @@ export default function DNSPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    const submitted = editor;
+    const submitted = beginSave();
     const saved = await save.run("save", () => api.setDNS({ ...cfg, upstreamServers: upstreamText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
       success: "DNS settings staged — commit to apply.",
       failure: "Failed to save DNS settings.",
     });
-    if (!saved) return;
+    if (!saved) { failSave(submitted); return; }
     if (saved.ok) acceptConfig(submitted, saved.data);
-    else setError(saved.error);
+    else { failSave(submitted); setError(saved.error); }
     await refresh();
   }
 

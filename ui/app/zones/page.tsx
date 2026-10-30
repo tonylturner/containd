@@ -104,9 +104,10 @@ export default function ZonesPage() {
 
   async function onUpdate(zoneName: string, patch: Partial<Zone>) {
     setError(null);
-    const submitted = rowsDraft.editor;
+    const submitted = rowsDraft.beginSave();
     const result = await api.updateZone(zoneName, patch);
     if (!result.ok) {
+      rowsDraft.failSave(submitted);
       setError(result.error);
       return;
     }
