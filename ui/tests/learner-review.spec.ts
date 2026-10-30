@@ -49,7 +49,25 @@ test("selection starts empty, Generate is explicit, scope and frozen proof are v
   await expect(emptyStage).toHaveClass(/bg-\(--surface2\)/);
   await expect(modbus).toContainText("unitId=0");
   await expect(modbus).toContainText("10-11");
-  await expect(modbus).toContainText("24/24 passed");
+  const evidence = modbus.getByLabel("Frozen certification");
+  await expect(evidence).toHaveJSProperty("open", false);
+  await expect(evidence.locator("summary")).toContainText(
+    "replay 24/24 · boundaries 16/16",
+  );
+  await expect(evidence.getByLabel("Certification warnings")).toHaveClass(
+    /text-\(--amber\)/,
+  );
+  await expect(evidence.getByLabel("Certification warnings")).toHaveText(
+    "Supported selector relations only; not transaction equality.",
+  );
+  await expect(modbus.getByText(/transaction equality/)).toHaveCount(1);
+  await expect(
+    modbus.getByText("Evidence digest: evidence-sha", { exact: true }),
+  ).not.toBeVisible();
+  await evidence.locator("summary").click();
+  await expect(
+    modbus.getByText("Evidence digest: evidence-sha", { exact: true }),
+  ).toBeVisible();
   await modbus
     .getByRole("button", { name: "Preview live recent evidence" })
     .click();
@@ -201,7 +219,10 @@ test("viewer reads proof and authority but has no mutation or selection actions"
   const state = await mockLearner(page, "view");
   await openDataset(page);
   await expect(
-    page.getByText("Certified evidence (frozen)", { exact: true }).first(),
+    page
+      .locator("summary")
+      .filter({ hasText: "Certified evidence (frozen)" })
+      .first(),
   ).toBeVisible();
   for (const name of [
     /Analyze/,
@@ -263,6 +284,69 @@ test("expired and uncertified suggestions cannot be selected", async ({
   await expect(page.getByLabel("Select iec-1", { exact: true })).toBeDisabled();
 });
 
+test("collapsed certification keeps failures and every limitation visible", async ({
+  page,
+}) => {
+  const state = await mockLearner(page);
+  const suggestion = state.suggestions[0];
+  suggestion.proof!.negative.passed--;
+  suggestion.proof!.negative.failed++;
+  suggestion.content.limits = [
+    "NAT mapping must be verified.",
+    "Finite boundary coverage.",
+  ];
+  suggestion.content.withheld = ["Unexpressible values withheld."];
+  await openDataset(page);
+  const modbus = page.getByRole("article", {
+    name: "Suggestion modbus-1",
+    exact: true,
+  });
+  const evidence = modbus.getByLabel("Frozen certification");
+  await expect(evidence).toHaveJSProperty("open", false);
+  const summary = evidence.locator("summary");
+  await expect(summary).toContainText("replay 24/24 · boundaries 15/16");
+  const warnings = summary.getByLabel("Certification warnings");
+  await expect(warnings).toBeVisible();
+  await expect(warnings).toHaveClass(/text-\(--amber\)/);
+  for (const text of [
+    "1 replay failure(s).",
+    ...suggestion.content.limits,
+    ...suggestion.content.withheld,
+  ]) {
+    await expect(warnings).toContainText(text);
+  }
+  await expect(
+    modbus.getByLabel("Select modbus-1", { exact: true }),
+  ).toBeDisabled();
+});
+
+test("390px dataset cards keep long identifiers and gaps within the page", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 1000 });
+  const state = await mockLearner(page);
+  state.datasets[0].id = "a".repeat(64);
+  state.datasets[0].gaps = ["admission-loss-".repeat(20)];
+  await page.goto("/pcap/");
+  const datasets = page.getByLabel("Dataset list", { exact: true });
+  await expect(
+    datasets.getByRole("button", {
+      name: `Open ${state.datasets[0].id}`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(
+    await datasets.evaluate((el) => el.scrollWidth <= el.clientWidth),
+  ).toBe(true);
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+});
+
 for (const width of [1440, 390])
   for (const colorScheme of ["light", "dark"] as const) {
     test(`PCAP review fits ${width}px with ${colorScheme} preference`, async ({
@@ -292,7 +376,9 @@ for (const width of [1440, 390])
           "Expires",
         ]) {
           await expect(
-            datasets.getByRole("term").filter({ hasText: new RegExp(`^${label}$`) }),
+            datasets
+              .getByRole("term")
+              .filter({ hasText: new RegExp(`^${label}$`) }),
           ).toBeVisible();
         }
         expect(
@@ -305,6 +391,8 @@ for (const width of [1440, 390])
         await page.screenshot({
           path: `${dir}/pcap-${width}-${colorScheme}.png`,
           fullPage: true,
+          // Hide development chrome only during capture; never alter app config.
+          style: "nextjs-portal { display: none !important; }",
         });
       }
     });

@@ -106,6 +106,25 @@ export function SuggestionReview({
   const expired = Date.parse(s.expiresAt) <= Date.now();
   const reviewable =
     !expired && !!s.proof && ["certified", "reviewed"].includes(s.status);
+  const failures = s.proof
+    ? s.proof.positive.failed + s.proof.negative.failed
+    : 0;
+  const counterexamples = s.proof?.counterexamples?.length ?? 0;
+  const limitations = s.content.limits?.length
+    ? s.content.limits
+    : [
+        "Exact within supported selector relations, not byte-for-byte transaction equality. Finite replay is not universal protocol correctness.",
+      ];
+  const warnings = [
+    ...new Set([
+      ...(!s.proof ? ["No certification; cannot stage."] : []),
+      ...(failures ? [`${failures} replay failure(s).`] : []),
+      ...(counterexamples ? [`${counterexamples} counterexample(s).`] : []),
+      ...(expired ? ["Evidence expired."] : []),
+      ...limitations,
+      ...(s.content.withheld ?? []),
+    ]),
+  ];
   return (
     <article
       aria-label={`Suggestion ${s.id}`}
@@ -155,9 +174,27 @@ export function SuggestionReview({
           <RuleScope key={r.id} rule={r} canEdit={canEdit} />
         ))}
       </ul>
-      <details className="rounded-xs border bg-(--surface) p-3" open>
+      <details
+        aria-label="Frozen certification"
+        className="rounded-xs border bg-(--surface) p-3"
+      >
         <summary className="cursor-pointer text-sm font-semibold">
           Certified evidence (frozen)
+          {s.proof && (
+            <>
+              {" · replay "}
+              {s.proof.positive.passed}/{s.proof.positive.total}
+              {" · boundaries "}
+              {s.proof.negative.passed}/{s.proof.negative.total}
+            </>
+          )}
+          {" · "}
+          <span
+            aria-label="Certification warnings"
+            className="font-normal text-(--amber)"
+          >
+            {warnings.join(" ")}
+          </span>
         </summary>
         {s.proof ? (
           <div className="mt-2 space-y-1 break-words text-xs">
@@ -194,18 +231,6 @@ export function SuggestionReview({
             No certification available. Cannot stage.
           </p>
         )}
-        <p className="mt-2 text-xs">
-          Exact within supported selector relations, not byte-for-byte
-          transaction equality. Finite replay is not universal protocol
-          correctness.
-        </p>
-        <ul className="mt-2 list-inside list-disc text-xs">
-          {[...(s.content.limits ?? []), ...(s.content.withheld ?? [])].map(
-            (l, i) => (
-              <li key={i}>{l}</li>
-            ),
-          )}
-        </ul>
       </details>
       {(s.legacyOverlaps ?? []).map((o) => (
         <p key={o.ruleId} className="break-words text-xs text-(--amber)">

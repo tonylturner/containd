@@ -58,14 +58,12 @@ export function DatasetList({
           <thead className="text-xs uppercase">
             <tr>
               {[
-                ...[
-                  "Dataset",
-                  "Source",
-                  "State",
-                  "Records / bytes",
-                  "Gaps",
-                  "Expires",
-                ],
+                "Dataset",
+                "Source",
+                "State",
+                "Records / bytes",
+                "Gaps",
+                "Expires",
                 "Review",
               ].map((label) => (
                 <th key={label} className="px-3 py-2">
