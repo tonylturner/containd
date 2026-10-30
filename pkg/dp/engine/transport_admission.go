@@ -140,9 +140,13 @@ func (r *transportResolver) admitHistoryLocked(pkt capture.Packet) *transportAdm
 }
 
 func (r *transportResolver) trackConnection(state *flow.State, at time.Time, history *transportAdmission) {
-	c := state.Connection.Load()
 	r.admissionMu.Lock()
 	defer r.admissionMu.Unlock()
+	r.trackConnectionLocked(state, at, history)
+}
+
+func (r *transportResolver) trackConnectionLocked(state *flow.State, at time.Time, history *transportAdmission) {
+	c := state.Connection.Load()
 	observed := state.Key.Tuple()
 	if history != nil && r.indexed[observed] != history {
 		// A later admitted SYN already owns this tuple. Older queued packets

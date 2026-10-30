@@ -4,6 +4,7 @@ package engine
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
@@ -69,6 +70,18 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 	}
 	iecOwned := e.iecOwnsPacket(pkt)
 	e.flowMu.Lock()
+	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
+	e.flowMu.Unlock()
+	for _, old := range retired {
+		e.endFlowStream(old, nil)
+	}
+}
+
+// Caller holds flowMu; IEC ownership is queried before acquiring it.
+func (e *Engine) retireTransportIncarnationLocked(pkt capture.Packet, incoming *flow.Connection, iecOwned bool) []*flow.State {
+	if pkt.Token.Inline() {
+		return nil
+	}
 	st := e.tupleStateLocked(packetKey(pkt).Tuple())
 	var retired []*flow.State
 	if st != nil {
@@ -117,10 +130,27 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 			}
 		}
 	}
-	e.flowMu.Unlock()
-	for _, old := range retired {
-		e.endFlowStream(old, nil)
+	return retired
+}
+
+// The healthy path checks incarnation retirement under the flow-tracking lock
+// it already needs. A real retirement still ends streams before creating the
+// replacement state, preserving peer lookup and close ordering.
+func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming *flow.Connection) *flow.State {
+	iecOwned := !pkt.Token.Inline() && e.iecOwnsPacket(pkt)
+	e.flowMu.Lock()
+	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
+	if len(retired) != 0 {
+		e.flowMu.Unlock()
+		for _, old := range retired {
+			e.endFlowStream(old, nil)
+		}
+		e.flowMu.Lock()
 	}
+	state, forgotten, needsSweep := e.trackFlowLocked(pkt, now)
+	e.flowMu.Unlock()
+	e.finishFlowTracking(forgotten, needsSweep, now)
+	return state
 }
 
 // A retained IEC session owns its tuple even if its current envelope changes.

@@ -658,28 +658,19 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	}
 	defer e.lockGenericTCP(pkt)()
 	e.reopenDeniedTCP(pkt)
-	e.retireTransportIncarnation(pkt, connection)
-	state := e.trackFlow(pkt, now)
+	state := e.trackTransportFlow(pkt, now, connection)
 	if state == nil {
 		return acceptDecision
 	}
 	e.bindTransport(state, connection)
-	if connection != nil && e.transport != nil {
-		e.transport.trackConnection(state, now, history)
-		e.flowMu.Lock()
-		e.transport.admissionMu.Lock()
-		e.bindDecodeCoverageLocked(state, history)
-		e.transport.admissionMu.Unlock()
-		e.flowMu.Unlock()
-	}
-	stopped := e.applyDecodeCoverage(state, pkt)
-	if e.observation != nil && !stopped {
+	stopped := e.prepareDecodeCoverage(state, pkt, now, connection, history)
+	if e.observation != nil && (!stopped || pkt.Token.Inline()) {
 		e.observePacket(pkt, state)
 	}
 	if d, ok := e.handleIECPacket(pkt, state); ok {
 		return d
 	}
-	return e.handleFlowPacket(pkt, state, connection != nil || e.transport == nil)
+	return e.handleFlowPacket(pkt, state, connection != nil || e.transport == nil, stopped)
 }
 
 // trackFlow returns the state of the packet's connection direction. Each
@@ -688,6 +679,14 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 // (DirForward) or accepted it (DirReverse).
 func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 	e.flowMu.Lock()
+	state, forgotten, needsSweep := e.trackFlowLocked(pkt, now)
+	e.flowMu.Unlock()
+	e.finishFlowTracking(forgotten, needsSweep, now)
+	return state
+}
+
+// Caller holds flowMu; stream cleanup and sweeping run after unlocking.
+func (e *Engine) trackFlowLocked(pkt capture.Packet, now time.Time) (*flow.State, []*flow.State, bool) {
 	state, forgotten := e.connectionStateLocked(pkt, now)
 	state.Touch(uint64(len(pkt.Payload)), now)
 	if state.Packets == 1 && state.Key.Dir == flow.DirForward {
@@ -699,8 +698,10 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 	if needsSweep {
 		e.lastSweep = now
 	}
-	e.flowMu.Unlock()
+	return state, forgotten, needsSweep
+}
 
+func (e *Engine) finishFlowTracking(forgotten []*flow.State, needsSweep bool, now time.Time) {
 	// End the forgotten connection's streams before this packet starts the
 	// new one.
 	for _, st := range forgotten {
@@ -709,7 +710,6 @@ func (e *Engine) trackFlow(pkt capture.Packet, now time.Time) *flow.State {
 	if needsSweep {
 		e.sweepFlows(now)
 	}
-	return state
 }
 
 // connectionStateLocked finds or creates the direction state for pkt. A
