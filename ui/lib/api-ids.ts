@@ -1,6 +1,5 @@
 import { notifyConfigMutation } from "./config-events";
 import {
-  apiURL,
   authHeaders,
   clearAuthExpired,
   fetchWithSession,
@@ -139,36 +138,50 @@ export const idsAPI = {
       };
     }
   },
-  exportIDSRules: async (format: string): Promise<boolean> => {
-    const res = await fetch(
-      apiURL(`/api/v1/ids/export?format=${encodeURIComponent(format)}`),
-      {
-        credentials: "include",
-        headers: authHeaders(),
-      },
-    );
-    if (!res.ok) return false;
-    const blob = await res.blob();
-    const ext: Record<string, string> = {
-      suricata: ".rules",
-      snort: ".rules",
-      yara: ".yar",
-      sigma: ".yml",
-    };
-    const now = new Date();
-    const yy = String(now.getFullYear()).slice(2);
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    const filename = `${format}-${yy}${mm}${dd}${ext[format] || ".txt"}`;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    return true;
+  exportIDSRules: async (
+    format: string,
+  ): Promise<ApiResult<{ refusedCount: number }>> => {
+    try {
+      const res = await fetchWithSession(
+        `/api/v1/ids/export?format=${encodeURIComponent(format)}`,
+        { credentials: "include", headers: authHeaders() },
+      );
+      if (handleUnauthorized(res)) return failureOf(res);
+      clearAuthExpired();
+      if (!res.ok) return failureOf(res);
+      const countHeader = res.headers.get("X-Containd-IDS-Refused");
+      const refusedCount = Number(countHeader);
+      if (countHeader === null || !/^(0|[1-9]\d*)$/.test(countHeader) ||
+          !Number.isSafeInteger(refusedCount) || refusedCount < 0) {
+        return { ok: false, error: "Export response is missing a valid refusal count." };
+      }
+      const blob = await res.blob();
+      const ext: Record<string, string> = {
+        suricata: ".rules",
+        snort: ".rules",
+        yara: ".yar",
+        sigma: ".yml",
+      };
+      const now = new Date();
+      const yy = String(now.getFullYear()).slice(2);
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const dd = String(now.getDate()).padStart(2, "0");
+      const filename = `${format}-${yy}${mm}${dd}${ext[format] || ".txt"}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return { ok: true, data: { refusedCount } };
+    } catch (e) {
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : "Network error",
+      };
+    }
   },
   getIDSSources: () => getJSONList<IDSRuleSource>("/api/v1/ids/sources"),
 };

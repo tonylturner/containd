@@ -1,8 +1,10 @@
 "use client";
 
+import { useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { api, isAdmin, type NTPConfig, type NTPStatus } from "../../../../lib/api";
 import { Shell } from "../../../../components/Shell";
@@ -15,7 +17,7 @@ import { Card } from "../../../../components/Card";
 export default function NTPPage() {
   const canEdit = isAdmin();
   const [status, setStatus] = useState<NTPStatus | null>(null);
-  const [cfg, setCfg] = useState<NTPConfig>({
+  const { editor, cfg, setCfg, adoptConfig, acceptConfig, text, setText } = useConfigEditor<NTPConfig>({
     enabled: false,
     servers: [],
     intervalSeconds: 0,
@@ -26,19 +28,19 @@ export default function NTPPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     setLoading(true);
     const svc = await api.getServicesStatus();
     setStatus(svc?.ntp ?? null);
     const s = await api.getNTP();
-    setCfg({
+    adoptConfig({
       enabled: s?.enabled ?? false,
       servers: s?.servers ?? [],
       intervalSeconds: s?.intervalSeconds ?? 0,
-    });
+    }, keepEdits);
     setLoading(false);
     setLastUpdated(new Date());
-  }, []);
+  }, [adoptConfig]);
 
   useConfigRefresh(refresh);
 
@@ -54,20 +56,18 @@ export default function NTPPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
-  const serversText = useMemo(
-    () => (cfg.servers ?? []).join("\n"),
-    [cfg.servers],
-  );
+  const serversText = text("servers", (cfg.servers ?? []).join("\n"));
 
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    const saved = await save.run("save", () => api.setNTP(cfg), {
+    const submitted = editor;
+    const saved = await save.run("save", () => api.setNTP({ ...cfg, servers: serversText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
       success: "NTP settings staged — commit to apply.",
       failure: "Failed to save NTP settings.",
     });
     if (!saved) return;
-    if (saved.ok) setCfg(saved.data);
+    if (saved.ok) acceptConfig(submitted, saved.data);
     else setError(saved.error);
   }
 
@@ -77,7 +77,7 @@ export default function NTPPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={refresh}
+            onClick={() => refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -103,6 +103,7 @@ export default function NTPPage() {
         </div>
       }
     >
+      <ConfigEditNotice superseded={editor.superseded} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -213,15 +214,7 @@ export default function NTPPage() {
               rows={5}
               value={serversText}
               disabled={!canEdit}
-              onChange={(e) =>
-                setCfg((c) => ({
-                  ...c,
-                  servers: e.target.value
-                    .split("\n")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                }))
-              }
+              onChange={(e) => setText("servers", e.target.value)}
               placeholder="pool.ntp.org\n192.0.2.10"
               className="mt-1 w-full input-industrial"
             />

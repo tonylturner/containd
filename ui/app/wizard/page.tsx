@@ -1,5 +1,8 @@
 "use client";
 
+import { useConfigForm } from "../../lib/use-config-form";
+import { ConfigEditNotice } from "../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useEffect, useState, useCallback } from "react";
@@ -44,31 +47,39 @@ export default function WizardPage() {
   const [success, setSuccess] = useState<string | null>(null);
 
   /* wizard form state */
-  const [lanZone, setLanZone] = useState("");
-  const [wanZone, setWanZone] = useState("");
+  const form = useConfigForm({
+    lanZone: "", wanZone: "",
+    serverIp: "", serverPort: "", pubProto: "tcp" as "tcp" | "udp", ingressZone: "",
+    icsProto: "modbus", icsSrcZone: "", icsDstZone: "",
+    icsAccess: "readonly" as "readonly" | "readwrite" | "monitor",
+    izSrcZone: "", izDstZone: "", izAny: true, izSelected: new Set<string>(),
+  });
+  const { refreshForm } = form;
+  const [lanZone, setLanZone] = form.field("lanZone");
+  const [wanZone, setWanZone] = form.field("wanZone");
 
-  const [serverIp, setServerIp] = useState("");
-  const [serverPort, setServerPort] = useState("");
-  const [pubProto, setPubProto] = useState<"tcp" | "udp">("tcp");
-  const [ingressZone, setIngressZone] = useState("");
+  const [serverIp, setServerIp] = form.field("serverIp");
+  const [serverPort, setServerPort] = form.field("serverPort");
+  const [pubProto, setPubProto] = form.field("pubProto");
+  const [ingressZone, setIngressZone] = form.field("ingressZone");
 
-  const [icsProto, setIcsProto] = useState("modbus");
-  const [icsSrcZone, setIcsSrcZone] = useState("");
-  const [icsDstZone, setIcsDstZone] = useState("");
-  const [icsAccess, setIcsAccess] = useState<"readonly" | "readwrite" | "monitor">("readonly");
+  const [icsProto, setIcsProto] = form.field("icsProto");
+  const [icsSrcZone, setIcsSrcZone] = form.field("icsSrcZone");
+  const [icsDstZone, setIcsDstZone] = form.field("icsDstZone");
+  const [icsAccess, setIcsAccess] = form.field("icsAccess");
 
-  const [izSrcZone, setIzSrcZone] = useState("");
-  const [izDstZone, setIzDstZone] = useState("");
-  const [izAny, setIzAny] = useState(true);
-  const [izSelected, setIzSelected] = useState<Set<string>>(new Set());
+  const [izSrcZone, setIzSrcZone] = form.field("izSrcZone");
+  const [izDstZone, setIzDstZone] = form.field("izDstZone");
+  const [izAny, setIzAny] = form.field("izAny");
+  const [izSelected, setIzSelected] = form.field("izSelected");
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [z, n] = await Promise.all([api.listZones(), api.getNAT()]);
+    refreshForm({ zones: z, nat: n }, keepEdits);
     setZones(z ?? []);
     setNatConfig(n ?? { enabled: false });
     setLoading(false);
-  }, []);
+  }, [refreshForm]);
 
   useConfigRefresh(refresh);
 
@@ -327,7 +338,12 @@ export default function WizardPage() {
   /* ── render ──────────────────────────────────────────────────── */
 
   return (
-    <Shell title="Policy Wizard">
+    <Shell title="Policy Wizard" actions={
+      <button onClick={() => { reset(); void refresh({ keepEdits: false }); }} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui">
+        Refresh
+      </button>
+    }>
+      <ConfigEditNotice superseded={form.editor.superseded} />
       <p className="mb-6 text-sm text-(--text-muted)">
         Select a common connectivity scenario below. The wizard will walk you through each step and stage the necessary firewall rules and NAT configuration automatically.
       </p>

@@ -5320,7 +5320,15 @@ paths:
       description: Downloads running IDS rules, not candidate rules.
       responses:
         '200':
-          description: Exported rule text
+          description: >-
+            Exported rule text (possibly no accepted rules). Every format includes
+            JSON comments of the form '# refused: {"rule_id":"...","reason":"..."}'
+            for refused rules, using '//' instead of '#' for YARA.
+            Refused rules are not emitted as active rules.
+          headers:
+            X-Containd-IDS-Refused:
+              description: Number of rules refused because their predicates cannot be preserved.
+              schema: {type: integer, minimum: 0}
           content:
             text/plain:
               schema: {type: string}

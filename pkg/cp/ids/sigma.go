@@ -35,11 +35,14 @@ type SigmaRule struct {
 
 // ConvertSigmaYAML reads a Sigma YAML rule (single document) and returns a containd IDSRule.
 func ConvertSigmaYAML(in []byte) (config.IDSRule, error) {
-	var sr SigmaRule
-	if err := yaml.Unmarshal(in, &sr); err != nil {
+	rules, err := ConvertSigmaFile(in)
+	if err != nil {
 		return config.IDSRule{}, err
 	}
-	return ConvertSigmaRule(sr)
+	if len(rules) != 1 {
+		return config.IDSRule{}, fmt.Errorf("expected one Sigma document, got %d", len(rules))
+	}
+	return rules[0], nil
 }
 
 // ConvertSigmaFile parses raw Sigma YAML data (which may contain multiple
@@ -47,23 +50,35 @@ func ConvertSigmaYAML(in []byte) (config.IDSRule, error) {
 func ConvertSigmaFile(data []byte) ([]config.IDSRule, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var rules []config.IDSRule
+	var documents []*yaml.Node
 	for {
-		var sr SigmaRule
-		err := dec.Decode(&sr)
+		var doc yaml.Node
+		err := dec.Decode(&doc)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return nil, err
 		}
+		var sr SigmaRule
+		if err := doc.Decode(&sr); err != nil {
+			return nil, err
+		}
 		r, err := ConvertSigmaRule(sr)
 		if err != nil {
 			return nil, err
 		}
-		r.SourceFormat = "sigma"
-		r.RawSource = "" // multi-doc: cannot preserve per-rule raw source easily
 		rules = append(rules, r)
+		documents = append(documents, &doc)
 	}
+	sources, err := sigmaDocumentSources(data, documents)
+	if err != nil {
+		return nil, err
+	}
+	for i := range rules {
+		rules[i].RawSource = sources[i]
+	}
+
 	if len(rules) == 0 {
 		return nil, fmt.Errorf("no Sigma rules found in data")
 	}

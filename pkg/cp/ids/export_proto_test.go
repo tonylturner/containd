@@ -11,18 +11,17 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-// IEC104 rules are skipped instead of being rendered as "ip" rules that
-// would fire on any traffic.
-func TestExportSkipsIEC104Rules(t *testing.T) {
+// IEC104 rules are refused instead of being rendered as generic IP.
+func TestExportRefusesIEC104Rules(t *testing.T) {
 	rules := []config.IDSRule{
-		{ID: "1", Title: "Modbus write", Proto: "modbus"},
+		{ID: "1", Title: "TCP rule", Proto: "tcp"},
 		{ID: "2", Title: "IEC104 command", Proto: "iec104"},
 		{ID: "3", Title: "IEC104 STOPDT", Proto: " IEC104 "},
 	}
 	for _, tc := range []struct {
 		name   string
 		single func(config.IDSRule) (string, error)
-		multi  func([]config.IDSRule) ([]byte, error)
+		multi  func([]config.IDSRule) (ExportResult, error)
 	}{
 		{"suricata", ExportSuricataRule, ExportSuricataRules},
 		{"snort", ExportSnortRule, ExportSnortRules},
@@ -35,9 +34,17 @@ func TestExportSkipsIEC104Rules(t *testing.T) {
 			if err != nil {
 				t.Fatalf("export: %v", err)
 			}
-			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-			if len(lines) != 1 || !strings.Contains(lines[0], "Modbus write") {
-				t.Fatalf("export = %q, want only the modbus rule", out)
+			var lines []string
+			for _, line := range strings.Split(strings.TrimSpace(string(out.Text)), "\n") {
+				if !strings.HasPrefix(line, "#") {
+					lines = append(lines, line)
+				}
+			}
+			if len(lines) != 1 || !strings.Contains(lines[0], "TCP rule") {
+				t.Fatalf("export = %q, want only the TCP rule", out)
+			}
+			if len(out.Refusals) != 2 {
+				t.Fatalf("refusals = %+v", out.Refusals)
 			}
 		})
 	}

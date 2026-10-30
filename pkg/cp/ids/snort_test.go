@@ -6,7 +6,10 @@ package ids
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func TestParseSnortBasicAlert(t *testing.T) {
@@ -168,5 +171,72 @@ func TestParseSnortNoSIDFallback(t *testing.T) {
 	}
 	if r.ID != "snort-no-sid" {
 		t.Fatalf("expected fallback ID snort-no-sid, got %s", r.ID)
+	}
+}
+
+func TestParseSnort3ContentModifiers(t *testing.T) {
+	line := `alert tcp any any -> any any (msg:"Snort 3"; content:!"a\";b,c\;d\\", nocase, depth 30, offset 2; content:"|DE AD BE EF|", distance -3, within 40; content:"tail", distance 3; nocase; depth:10; sid:900;)`
+	rule, err := ParseSnortLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []config.ContentMatch{
+		{Pattern: "a\";b,c;d\\", Negate: true, Nocase: true, Depth: 30, Offset: 2},
+		{Pattern: "DE AD BE EF", IsHex: true, Distance: -3, Within: 40},
+		{Pattern: "tail", Distance: 3, Nocase: true, Depth: 10},
+	}
+	if !reflect.DeepEqual(rule.ContentMatches, want) {
+		t.Fatalf("got %#v, want %#v", rule.ContentMatches, want)
+	}
+}
+
+func TestSnort3UnknownContentModifiers(t *testing.T) {
+	commaForm := `alert tcp any any -> any any (content:"abc", fast_pattern, fast_pattern_offset 2, future_modifier 7, nocase; sid:901;)`
+	separateForm := `alert tcp any any -> any any (content:"abc"; fast_pattern; fast_pattern_offset:2; future_modifier:7; nocase; sid:901;)`
+	commaRule, err := ParseSnortLine(commaForm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	separateRule, err := ParseSnortLine(separateForm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(commaRule.ContentMatches, separateRule.ContentMatches) {
+		t.Fatalf("content differs: %#v vs %#v", commaRule.ContentMatches, separateRule.ContentMatches)
+	}
+	wantNotes := []string{
+		`keyword "fast_pattern" not fully mapped`,
+		`keyword "fast_pattern_offset" not fully mapped`,
+		`keyword "future_modifier" not fully mapped`,
+		`keyword "nocase" not fully mapped`,
+		`keyword "content" not fully mapped`,
+	}
+	if !reflect.DeepEqual(commaRule.ConversionNotes, separateRule.ConversionNotes) ||
+		!reflect.DeepEqual(commaRule.ConversionNotes, wantNotes) {
+		t.Fatalf("conversion notes differ: comma=%v separate=%v want=%v",
+			commaRule.ConversionNotes, separateRule.ConversionNotes, wantNotes)
+	}
+	if commaRule.Labels["evaluable"] != "false" || commaRule.RawSource != commaForm {
+		t.Fatalf("unknown modifiers must mark rule non-evaluable and retain raw source: %+v", commaRule)
+	}
+}
+
+func TestSnort3ContentModifiersAreSnortOnly(t *testing.T) {
+	line := `alert tcp any any -> any any (content:"abc,def", nocase, depth 10; sid:902;)`
+	snort, err := ParseSnortLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suricata, err := ParseSuricataLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snort.ContentMatches) != 1 || snort.ContentMatches[0].Pattern != "abc,def" ||
+		!snort.ContentMatches[0].Nocase || snort.ContentMatches[0].Depth != 10 {
+		t.Fatalf("Snort 3 modifiers not parsed: %#v", snort.ContentMatches)
+	}
+	if len(suricata.ContentMatches) != 1 || suricata.ContentMatches[0].Nocase ||
+		suricata.ContentMatches[0].Depth != 0 || suricata.Labels["evaluable"] != "false" {
+		t.Fatalf("Suricata must not interpret Snort 3 modifiers: %+v", suricata)
 	}
 }

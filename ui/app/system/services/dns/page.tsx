@@ -1,8 +1,10 @@
 "use client";
 
+import { useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { api, isAdmin, type DNSConfig, type DNSStatus } from "../../../../lib/api";
@@ -17,7 +19,7 @@ import { Card } from "../../../../components/Card";
 export default function DNSPage() {
   const canEdit = isAdmin();
   const [status, setStatus] = useState<DNSStatus | null>(null);
-  const [cfg, setCfg] = useState<DNSConfig>({
+  const { editor, cfg, setCfg, adoptConfig, acceptConfig, text, setText } = useConfigEditor<DNSConfig>({
     enabled: false,
     listenPort: 53,
     upstreamServers: [],
@@ -29,21 +31,21 @@ export default function DNSPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     setLoading(true);
     const svc = await api.getServicesStatus();
     setStatus(svc?.dns ?? null);
     const s = await api.getDNS();
-    setCfg({
+    adoptConfig({
       enabled: s?.enabled ?? false,
       listenPort: s?.listenPort ?? 53,
       listenZones: s?.listenZones ?? [],
       upstreamServers: s?.upstreamServers ?? [],
       cacheSizeMB: s?.cacheSizeMB ?? 0,
-    });
+    }, keepEdits);
     setLastUpdated(new Date());
     setLoading(false);
-  }, []);
+  }, [adoptConfig]);
 
   useConfigRefresh(refresh);
 
@@ -59,20 +61,18 @@ export default function DNSPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
-  const upstreamText = useMemo(
-    () => (cfg.upstreamServers ?? []).join("\n"),
-    [cfg.upstreamServers],
-  );
+  const upstreamText = text("upstreamServers", (cfg.upstreamServers ?? []).join("\n"));
 
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    const saved = await save.run("save", () => api.setDNS(cfg), {
+    const submitted = editor;
+    const saved = await save.run("save", () => api.setDNS({ ...cfg, upstreamServers: upstreamText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
       success: "DNS settings staged — commit to apply.",
       failure: "Failed to save DNS settings.",
     });
     if (!saved) return;
-    if (saved.ok) setCfg(saved.data);
+    if (saved.ok) acceptConfig(submitted, saved.data);
     else setError(saved.error);
     await refresh();
   }
@@ -83,7 +83,7 @@ export default function DNSPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={refresh}
+            onClick={() => refresh({ keepEdits: false })}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -109,6 +109,7 @@ export default function DNSPage() {
         </div>
       }
     >
+      <ConfigEditNotice superseded={editor.superseded} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -210,15 +211,7 @@ export default function DNSPage() {
               rows={5}
               value={upstreamText}
               disabled={!canEdit}
-              onChange={(e) =>
-                setCfg((c) => ({
-                  ...c,
-                  upstreamServers: e.target.value
-                    .split("\n")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                }))
-              }
+              onChange={(e) => setText("upstreamServers", e.target.value)}
               placeholder="1.1.1.1\n8.8.8.8"
               className="mt-1 w-full input-industrial"
             />
