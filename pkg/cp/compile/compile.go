@@ -24,6 +24,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 
 	snap := dprules.Snapshot{
 		Version:    cfg.Version,
+		DPIMode:    cfg.DataPlane.DPIMode,
 		Firewall:   make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
 		LocalInput: make([]dprules.LocalServiceRule, 0, 8),
 		Default:    dprules.Action(cfg.Firewall.EffectiveDefaultAction()),

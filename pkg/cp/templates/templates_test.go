@@ -300,11 +300,11 @@ func TestApplyWithOptsLearnMode(t *testing.T) {
 	// Explicit learn override — locks rules to monitor regardless of
 	// global setting.
 	cfg := &config.Config{}
-	if err := ApplyWithOpts("modbus-read-only", cfg, ApplyOpts{Mode: "learn"}); err != nil {
+	if err := ApplyWithOpts("modbus-read-only", cfg, ApplyOpts{Mode: "monitor"}); err != nil {
 		t.Fatalf("ApplyWithOpts: %v", err)
 	}
 	for _, r := range cfg.Firewall.Rules {
-		if r.ICS.Mode != "learn" {
+		if r.ICS.Mode != "monitor" {
 			t.Errorf("rule %q has Mode:%q after learn override, want learn", r.ID, r.ICS.Mode)
 		}
 	}

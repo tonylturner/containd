@@ -17,10 +17,16 @@ const ICSProtocolIEC104 = "iec104"
 // constructed in Go. Preview can use it without a whole candidate configuration.
 // Whole-policy activation and enforce-ALLOW descriptor checks still need Validate.
 func ValidateICSPredicate(p ICSPredicate, ruleID string) error {
-	if p.Mode != "" && p.Mode != "learn" && p.Mode != "enforce" {
+	if p.Mode == "learn" {
+		return fmt.Errorf("rule %s ics.mode learn is no longer supported; use monitor", ruleID)
+	}
+	if p.Mode != "" && p.Mode != "monitor" && p.Mode != "enforce" {
 		return fmt.Errorf("rule %s ics mode invalid %q", ruleID, p.Mode)
 	}
 	if p.Protocol == "" {
+		if p.Mode != "" {
+			return fmt.Errorf("rule %s ics.mode requires ics.protocol", ruleID)
+		}
 		return validateICSWithoutProtocol(p, ruleID)
 	}
 	if err := ics.ValidateRule(ruleID, p.Protocol); err != nil {

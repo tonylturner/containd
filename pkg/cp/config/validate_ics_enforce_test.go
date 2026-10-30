@@ -13,7 +13,7 @@ import (
 // genericICSConfig returns a config with one Modbus-style rule of protocol
 // proto and rule mode mode, under the given global mode and queue.
 func genericICSConfig(proto, mode, global string, queue uint16) *Config {
-	return &Config{
+	return &Config{SchemaVersion: SchemaVersionCurrent,
 		System: SystemConfig{Hostname: "containd"},
 		Zones:  []Zone{{Name: "lan"}, {Name: "wan"}},
 		DataPlane: DataPlaneConfig{
@@ -39,7 +39,7 @@ func genericICSConfig(proto, mode, global string, queue uint16) *Config {
 // every other combination of rule and global mode is valid without it.
 func TestValidateICSEnforceNeedsInlinePath(t *testing.T) {
 	generic := []string{"modbus", "dnp3", "cip"}
-	modes := []string{"", "learn", "enforce"}
+	modes := []string{"", "monitor", "enforce"}
 	for _, proto := range generic {
 		for _, rule := range modes {
 			for _, global := range modes {
@@ -50,7 +50,7 @@ func TestValidateICSEnforceNeedsInlinePath(t *testing.T) {
 					switch {
 					case enforce && queue == 0:
 						if err == nil || !strings.Contains(err.Error(), "rule ics-1") ||
-							!strings.Contains(err.Error(), "dataplane.nfqueueGroup") || !strings.Contains(err.Error(), "ics.mode to learn") {
+							!strings.Contains(err.Error(), "dataplane.nfqueueGroup") || !strings.Contains(err.Error(), "ics.mode to monitor") {
 							t.Errorf("%s queue 0: err = %v, want a refusal naming the rule and the fix", name, err)
 						}
 					case err != nil:
@@ -74,13 +74,10 @@ func TestValidateICSEnforceLegalWithoutRefusal(t *testing.T) {
 		name   string
 		mutate func(*Config)
 	}{
-		{"mode on an L3/L4 rule without a protocol", func(c *Config) {
-			c.DataPlane.NFQueueGroup = 0
-			c.Firewall.Rules[0].ICS = ICSPredicate{Mode: "enforce"}
-		}},
+
 		{"explicit learn under global enforce", func(c *Config) {
 			c.DataPlane.NFQueueGroup = 0
-			c.Firewall.Rules[0].ICS.Mode = "learn"
+			c.Firewall.Rules[0].ICS.Mode = "monitor"
 		}},
 		{"nft enforcement off", func(c *Config) { c.DataPlane.Enforcement = false }},
 		{"DPI master off", func(c *Config) { c.DataPlane.DPIEnabled = false }},
@@ -128,12 +125,12 @@ func TestValidateGlobalEnforceWithoutSemanticRules(t *testing.T) {
 }
 
 func TestValidateDPIModeEnum(t *testing.T) {
-	for _, mode := range []string{"monitor", "Enforce", "LEARN", " learn"} {
-		cfg := genericICSConfig("modbus", "learn", mode, 0)
+	for _, mode := range []string{"observe", "Enforce", "LEARN", " learn"} {
+		cfg := genericICSConfig("modbus", "monitor", mode, 0)
 		wantValidateError(t, cfg, "dataplane.dpiMode invalid")
 	}
-	for _, mode := range []string{"", "learn", "enforce"} {
-		if err := genericICSConfig("modbus", "learn", mode, 0).Validate(); err != nil {
+	for _, mode := range []string{"", "monitor", "enforce"} {
+		if err := genericICSConfig("modbus", "monitor", mode, 0).Validate(); err != nil {
 			t.Fatalf("dpiMode %q rejected: %v", mode, err)
 		}
 	}
@@ -148,7 +145,7 @@ func TestStoreRejectsICSEnforceWithoutInlinePath(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	running := genericICSConfig("modbus", "learn", "enforce", 0)
+	running := genericICSConfig("modbus", "monitor", "enforce", 0)
 	if err := store.Save(ctx, running); err != nil {
 		t.Fatalf("save learn config: %v", err)
 	}
@@ -167,7 +164,7 @@ func TestStoreRejectsICSEnforceWithoutInlinePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(before.Firewall.Rules, after.Firewall.Rules) || after.Firewall.Rules[0].ICS.Mode != "learn" {
+	if !reflect.DeepEqual(before.Firewall.Rules, after.Firewall.Rules) || after.Firewall.Rules[0].ICS.Mode != "monitor" {
 		t.Fatalf("running config changed after a refused save: %+v", after.Firewall.Rules)
 	}
 }

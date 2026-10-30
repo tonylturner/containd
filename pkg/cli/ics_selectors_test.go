@@ -61,7 +61,7 @@ func TestICSSelectorShowTable(t *testing.T) {
 		{ID: "cip-logical", ICS: config.ICSPredicate{Protocol: "cip", Instances: []uint16{0, 65535}, Attributes: []uint16{3, 4}}},
 		{ID: "cip-tag", ICS: config.ICSPredicate{Protocol: "cip", Tags: []string{"Program:Main.Motor"}}},
 		{ID: "iec", ICS: config.ICSPredicate{Protocol: "iec104", COT: []int{1, 63}, Originators: []int{0, 255}, Negative: &no, Test: &yes, SelectExecute: "execute"}},
-	}, "learn")
+	}, "monitor")
 	for _, want := range []string{"MASTERS", "OUTSTATIONS", "GROUPS", "VARIATIONS", "INSTANCES", "ATTRIBUTES", "TAGS", "COT", "ORIGINATORS", "NEGATIVE", "TEST", "SELECT_EXECUTE", "0,65519", "2,3", "50,80", "0,1", "0,65535", "3,4", "Program:Main.Motor", "1,63", "0,255", "false", "true", "execute"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("table missing %q: %s", want, out.String())

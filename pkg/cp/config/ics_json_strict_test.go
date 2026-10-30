@@ -85,7 +85,7 @@ func TestICSPredicateStrictDecodeAccepts(t *testing.T) {
 		{"modbus writeOnly false", `{"protocol":"modbus","writeOnly":false,"readOnly":false}`, ICSPredicate{Protocol: "modbus"}},
 		{"ioa zero and above 16 bits", `{"protocol":"iec104","ioa":[{"start":0,"end":0},{"end":65536,"start":65536}]}`,
 			ICSPredicate{Protocol: "iec104", IOA: []IOARange{{Start: 0, End: 0}, {Start: 65536, End: 65536}}}},
-		{"iec104 readOnly false", `{"protocol":"iec104","readOnly":false,"mode":"learn"}`, ICSPredicate{Protocol: "iec104", Mode: "learn"}},
+		{"iec104 readOnly false", `{"protocol":"iec104","readOnly":false,"mode":"monitor"}`, ICSPredicate{Protocol: "iec104", Mode: "monitor"}},
 		{"iec104 control request with address filters", `{"protocol":"iec104","typeIds":[46],"classes":["control"],"direction":"request","ca":[1],"ioa":[{"start":65536,"end":65567}],"readOnly":false,"mode":"enforce"}`,
 			ICSPredicate{Protocol: "iec104", TypeIDs: []int{46}, Classes: []string{"control"}, Direction: "request", CA: []uint16{1}, IOA: []IOARange{{Start: 65536, End: 65567}}, Mode: "enforce"}},
 	}

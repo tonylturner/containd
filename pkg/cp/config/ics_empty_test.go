@@ -28,7 +28,7 @@ func TestICSPredicateEmpty(t *testing.T) {
 			t.Errorf("nonempty predicate: %+v", p)
 		}
 	}
-	for _, p := range []ICSPredicate{{}, {Mode: "enforce"}, {Mode: "learn"}, {Protocol: " ", Direction: " "}} {
+	for _, p := range []ICSPredicate{{}, {Mode: "enforce"}, {Mode: "monitor"}, {Protocol: " ", Direction: " "}} {
 		if !p.Empty() {
 			t.Errorf("empty predicate: %+v", p)
 		}
