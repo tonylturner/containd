@@ -499,9 +499,24 @@ runRtu(void)
     if (env && *env)
         periodicMs = atoi(env);
 
+    int port = 2404;
+    env = getenv("IEC104_PORT");
+    if (env && *env)
+    {
+        char* end = NULL;
+        long parsed = strtol(env, &end, 10);
+        if (*end != '\0' || parsed < 1 || parsed > 65535)
+        {
+            fprintf(stderr, "invalid IEC104_PORT: %s\n", env);
+            return 2;
+        }
+        port = (int) parsed;
+    }
+
     rtuLock = Semaphore_create(1);
     CS104_Slave slave = CS104_Slave_create(50, 50);
     CS104_Slave_setLocalAddress(slave, "0.0.0.0");
+    CS104_Slave_setLocalPort(slave, port);
     /* Every connection is its own redundancy group: each active session gets
      * every event, so a long-lived control centre keeps its telemetry while
      * one-shot command clients come and go. */
@@ -518,7 +533,7 @@ runRtu(void)
         CS104_Slave_destroy(slave);
         return 1;
     }
-    printf("RTU listening on 0.0.0.0:2404 (state file %s)\n", stateFile);
+    printf("RTU listening on 0.0.0.0:%d (state file %s)\n", port, stateFile);
     fflush(stdout);
 
     int lastBreaker = breakerPos;
@@ -820,7 +835,7 @@ usage(void)
         "scenarios: gi [CA] | sbo CA IOA VALUE | select CA IOA VALUE |\n"
         "           execute CA IOA VALUE | direct CA IOA VALUE |\n"
         "           single CA IOA VALUE | stopstart\n"
-        "env: RTU STATE_FILE, PERIODIC_MS (0 disables); client IEC104_T3 seconds\n"
+        "env: RTU STATE_FILE, IEC104_PORT (2404), PERIODIC_MS (0 disables); client IEC104_T3 seconds\n"
         "double-command VALUE: 1=open 2=close\n");
     return 2;
 }

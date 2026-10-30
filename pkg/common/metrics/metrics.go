@@ -32,6 +32,12 @@ var (
 		Name:      "dpi_events_total",
 		Help:      "Total DPI events generated.",
 	})
+	DPICoverageLosses = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "dpi",
+		Name:      "coverage_losses_total",
+		Help:      "Connection incarnations whose passive decoding stopped after transport observation loss.",
+	})
 	IDSAlertsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace,
 		Subsystem: "dp",

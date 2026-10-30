@@ -77,11 +77,11 @@ func TestAnalyzePersistentModbusConnection(t *testing.T) {
 		fc      uint8
 		isWrite bool
 	}{{10, 3, false}, {11, 6, true}, {12, 3, false}}
-	if len(result.Events) != len(want) {
-		t.Fatalf("got %d events, want %d: %+v", len(result.Events), len(want), result.Events)
+	if len(decodedEvents(result.Events)) != len(want) {
+		t.Fatalf("got %d events, want %d: %+v", len(decodedEvents(result.Events)), len(want), decodedEvents(result.Events))
 	}
 	for i, w := range want {
-		attrs := result.Events[i].Attributes
+		attrs := decodedEvents(result.Events)[i].Attributes
 		if attrs["transaction_id"] != w.tid || attrs["function_code"] != w.fc || attrs["is_write"] != w.isWrite {
 			t.Fatalf("event %d = %+v, want tid=%d fc=%d is_write=%v", i, attrs, w.tid, w.fc, w.isWrite)
 		}

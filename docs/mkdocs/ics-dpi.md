@@ -30,6 +30,15 @@ profile collection additionally requires at least one committed firewall entry
 with explicit `ics.mode: "learn"`; setting the global mode alone is insufficient.
 This gate does not limit collection to only events matching that entry.
 
+If the AF_PACKET NAT resolver loses a packet to queue or byte pressure, passive
+DPI and identification decoding stop for that connection incarnation, including
+retransmissions and the reverse direction. Forwarding and existing verdicts do
+not change. A `dpi.coverage.loss` event and the fixed-label
+`containd_dpi_coverage_losses_total` counter report lost coverage. Decoding resumes
+only at the existing new-SYN/conntrack-generation boundary, not after an idle
+decoder reset. If a loss cannot be indexed at capacity, already-started
+unindexed streams conservatively stop at their next worker packet too.
+
 ## Configuration and protocol toggles
 
 Use the Firewall page's DPI configuration UI or the authenticated management API.
@@ -181,7 +190,10 @@ to be counted. After an actual observation loss, unmatched
 claims re-arm only after a full two-minute quiet pairing timeout since the
 latest gap, and only if the opening SYN was captured. Thus transactions that
 could predate a gap cannot cause unmatched claims; detection is not disabled
-permanently.
+permanently. An AF_PACKET resolver queue or byte overflow is different: it
+stops decoding for the rest of that connection incarnation (see
+[DPI Modes](#dpi-modes)), so pairing resumes only on a new incarnation, not
+after the quiet timeout.
 
 Only default conntrack zone zero is supported. The resolver reads
 `nft -j list ruleset` at startup, after containd's ruleset applications and
@@ -793,8 +805,9 @@ observation is not authorization.
    observed address spans, and every learned rule matches request direction
    only. DNP3 rules carry their function code; CIP rules carry their service
    code and observed object classes, including a class-less request where
-   applicable. Neither protocol gets an `addresses` filter; station, point and
-   CIP path selectors are not available.
+   applicable. Neither protocol gets an `addresses` filter. The learner does
+   not generate DNP3 station/group/point or CIP instance/attribute/tag
+   selectors; add them to a staged rule by hand where needed.
 4. `POST /api/v1/learn/apply` stages generated rules in candidate configuration
    (`status: staged`); it does not activate them. Generated rules leave
    `ics.mode` empty, so they inherit the global `dpiMode`: they enforce only
@@ -974,8 +987,9 @@ statistics, event summaries, profiles, and generated rules for review. IEC 104
 is summarized but never generates permissive learned rules. Results **do not
 update live inventory, stage candidate rules, or commit policy**.
 
-The engine's separate `/internal/pcap/analyze` endpoints call `Analyze`, returning
-only events, flows, protocol/count statistics, and duration. These internal
+The engine's separate `/internal/pcap/analyze` endpoints call `AnalyzeWithOptions`,
+returning events, flows, content identifications, protocol/count statistics,
+duration and a `truncated` flag for partial or snap-length-cut records. These internal
 endpoints are not the public policy-generation interface. See
 [API Reference](api-reference.md) for public requests.
 
@@ -1091,3 +1105,42 @@ ASDU input is truncated to 127 IOAs and counted as point overflow. Expiry is not
 overflow. Counts are retained-history totals, not lifetime traffic or unique
 missing-device counts. Clearing inventory or restarting the engine resets data
 and overflow totals. See [API Reference](api-reference.md#passive-inventory).
+
+## Content identification
+
+AF_PACKET capture (when DPI is enabled) and offline PCAP analysis identify
+Modbus/TCP, DNP3/TCP, IEC 104 and EtherNet/IP encapsulation (CIP) by content,
+including on alternate service ports. Disabled ICS protocols are not probed.
+Live discovery respects DPI address and domain exclusions. NFQUEUE does not
+run content identification. UDP/2222 implicit I/O remains port-selected.
+
+Identification **never changes a verdict or the meaning of rule ports**. The
+existing port-selected decoder runs immediately. A confirmed protocol gets a
+separate passive decoder only when the legacy path does not already decode
+that protocol. These events carry `observation_only: true` and
+`binding_source: observation`; they do not enforce rules or generate automatic
+ALLOW suggestions. Observation-bound connections are excluded from offline
+policy suggestions, including legacy events emitted before confirmation.
+
+Flows show the bound application, whether identification is by **content** or
+only **port**, and a **Mismatch** badge when content differs from a registry
+port expectation. Mismatch preserves the original port-selected decoder and
+can add passive decoding of the confirmed protocol. **Outside rule ports**
+means at least one ICS rule names that protocol but none covers the observed
+service transport and port. This checks a single rule snapshot, not source,
+destination or other rule predicates; it is not a hypothetical rule hit. A
+rule without explicit transport/ports covers only that protocol's registry
+ports. PCAP analysis without a rule snapshot reports scope as `unknown`.
+
+Evidence is bounded to 1 KiB per direction, 16 arrivals and 5 seconds per
+connection (with bounded entries and total bytes). Only passive decoding
+waits for confirmation. The 5-second evidence window is activity-driven:
+idle evidence finalizes on the next arrival, sweep, close or PCAP EOF, not on
+a promised timer deadline. PCAP deadlines use a nondecreasing capture-time
+watermark, so out-of-order timestamps do not rewind the evidence clock. Ambiguous evidence can resolve with later bytes;
+exhaustion or EOF yields an incomplete result with candidates retained.
+TCP identification requires SYN coverage: midstream capture does not confirm
+or start a passive decoder. Truncation, missing bytes, conflicting evidence
+and budget exhaustion can leave an identification incomplete. There is no
+fallback scan or midstream replay. Identification results and observation-decoded events
+retain the capture timestamps. PCAP analysis never increments live metrics.

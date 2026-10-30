@@ -28,7 +28,9 @@ func (r eventRing) at(i int) Event {
 }
 
 func (s *Store) appendGeneral(ev Event) {
+	s.retainBinding(ev)
 	if old, evicted := s.general.push(ev); evicted {
+		s.releaseBinding(old)
 		s.historyTruncated = true
 		s.spillEvent(old)
 	}

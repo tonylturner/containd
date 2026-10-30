@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/itdpi"
@@ -37,22 +38,30 @@ func (e *Engine) domainClientState(state *flow.State) *flow.State {
 // event toggles. DNS can still be learned from a flow already excluded from DPI.
 // IEC104 uses its envelope path and is never exempted by a domain association.
 func (e *Engine) observeDomainExclusions(state *flow.State, pkt *dpi.ParsedPacket) {
+	e.observeDomain(state, pkt, false)
+}
+
+func (e *Engine) observeDomain(state *flow.State, pkt *dpi.ParsedPacket, discovery bool) {
 	d := e.domains
 	if d == nil || state == nil || pkt == nil {
 		return
 	}
-	if isIECFlow(state) {
+	if isIECFlow(state) && !discovery {
 		return
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	decisions := d.decisions
+	if discovery {
+		decisions = d.discoveryDecisions
+	}
 	now := d.now()
 	if d.lastPrune.IsZero() || now.Sub(d.lastPrune) >= 30*time.Second {
 		e.pruneDomainDecisionsLocked()
 		d.lastPrune = now
 	}
 	if pkt.TCPSyn && state.Key.Dir == flow.DirForward {
-		delete(d.decisions, state)
+		delete(decisions, state)
 	}
 	if len(pkt.Payload) == 0 {
 		return
@@ -71,7 +80,7 @@ func (e *Engine) observeDomainExclusions(state *flow.State, pkt *dpi.ParsedPacke
 	if state.Key.Dir != flow.DirForward {
 		return
 	}
-	if _, decided := d.decisions[state]; decided {
+	if _, decided := decisions[state]; decided {
 		return
 	}
 	name, reason := "", "dns"
@@ -84,7 +93,7 @@ func (e *Engine) observeDomainExclusions(state *flow.State, pkt *dpi.ParsedPacke
 		name = d.lookup(ip)
 	}
 	rule := e.domainRule(name)
-	d.decisions[state] = rule != ""
+	decisions[state] = rule != ""
 	if rule != "" {
 		e.countDomainExclusion(rule)
 		e.recordDomainCounter("dpi_exclusion_" + reason)
@@ -113,6 +122,11 @@ func (e *Engine) domainExcluded(state *flow.State) bool {
 func (e *Engine) pruneDomainDecisionsLocked() {
 	e.flowMu.Lock()
 	defer e.flowMu.Unlock()
+	for state := range e.domains.discoveryDecisions {
+		if e.flows[state.Key.Hash()] != state {
+			delete(e.domains.discoveryDecisions, state)
+		}
+	}
 	for state := range e.domains.decisions {
 		if e.flows[state.Key.Hash()] != state {
 			delete(e.domains.decisions, state)
@@ -124,4 +138,19 @@ func (e *Engine) pruneDomainDecisionsLocked() {
 // reason-level flow hits and capacity evictions without another telemetry API.
 func (e *Engine) recordDomainCounter(reason string) {
 	e.recordProtoStats([]dpi.Event{{Proto: reason, Kind: "counter", Timestamp: e.domains.now()}})
+}
+
+// Discovery has its own domain decision, including TCP/2404. It never changes
+// the envelope owner's historical exemption.
+func (e *Engine) discoveryDomainExcluded(state *flow.State, pkt capture.Packet) bool {
+	if e.domains == nil {
+		return false
+	}
+	parsed := observationPacket(state)
+	parsed.Payload, parsed.TCPSyn = pkt.Payload, pkt.TCP.Flags&capture.TCPFlagSYN != 0
+	e.observeDomain(state, parsed, true)
+	client := e.domainClientState(state)
+	e.domains.mu.Lock()
+	defer e.domains.mu.Unlock()
+	return e.domains.discoveryDecisions[client]
 }

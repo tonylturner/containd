@@ -53,13 +53,30 @@ func assertSameEvents(t testing.TB, got, want []dpi.Event) {
 	}
 	for i := range got {
 		g, w := got[i], want[i]
-		if g.Timestamp.IsZero() || w.Timestamp.IsZero() {
-			t.Fatal("missing event timestamp")
-		}
+		// Raw decoder events are timeless; the manager stamps its output.
 		g.Timestamp, w.Timestamp = time.Time{}, time.Time{}
 		if !reflect.DeepEqual(g, w) {
 			t.Fatalf("event %d = %+v, want %+v", i, g, w)
 		}
+	}
+}
+
+func TestManagerCaptureTimestamps(t *testing.T) {
+	at := time.Unix(1234567890, 123456789)
+	for _, fixture := range streamFixtures() {
+		t.Run(fixture.name, func(t *testing.T) {
+			res := dpi.NewManager(NewDecoder()).Inspect(cipState(), &dpi.ParsedPacket{
+				Proto: "tcp", Payload: fixture.raw, Timestamp: at,
+			})
+			if len(res.Events) != fixture.events {
+				t.Fatalf("events = %d, want %d", len(res.Events), fixture.events)
+			}
+			for _, ev := range res.Events {
+				if !ev.Timestamp.Equal(at) {
+					t.Fatalf("timestamp = %v, want %v", ev.Timestamp, at)
+				}
+			}
+		})
 	}
 }
 

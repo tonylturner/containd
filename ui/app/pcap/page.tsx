@@ -12,20 +12,24 @@ import {
   isAdmin,
   listPcaps,
   type PcapItem,
+  type PcapIdentification,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
+import { IdentificationTable } from "./identifications";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 
 /* -- Types matching backend PolicyAnalysis / AnalysisResult -- */
 
 type AnalysisStats = {
+  identifications: PcapIdentification[];
   events: unknown[];
   flows: FlowSummary[];
   protocols: Record<string, number>;
   duration: number; // nanoseconds
   packetCount: number;
   byteCount: number;
+  truncated: boolean;
 };
 
 type FlowSummary = {
@@ -442,6 +446,11 @@ function AnalysisResults({
 
   return (
     <div className="mt-4 space-y-4">
+      {stats.truncated && (
+        <div role="status" className="rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
+          The capture is incomplete. Missing events or identifications may be due to truncated records.
+        </div>
+      )}
       {/* Stats summary */}
       <div className="grid gap-3 md:grid-cols-4">
         <StatCard label="Packets" value={stats.packetCount.toLocaleString()} />
@@ -467,6 +476,8 @@ function AnalysisResults({
           </div>
         </div>
       </div>
+
+      <IdentificationTable identifications={stats.identifications ?? []} />
 
       {/* Event summary table */}
       {eventEntries.length > 0 && (
@@ -639,7 +650,7 @@ function AnalysisResults({
       {rules.length === 0 && (
         <div className="text-sm text-(--text-muted)">
           No rules generated from this PCAP. The capture may not contain
-          recognizable ICS protocol traffic.
+          learnable standard-port ICS requests. Observation-bound connections and IEC 104 are not used for suggestions.
         </div>
       )}
     </div>

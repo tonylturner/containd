@@ -48,6 +48,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		return capture.Decision{Action: capture.Drop, Reason: reasonCachedDeny}
 	}
 	parsed := dpi.ParsedPacket{
+		Timestamp:    pkt.Timestamp,
 		Payload:      pkt.Payload,
 		Proto:        pkt.Transport,
 		SrcPort:      pkt.SrcPort,
@@ -65,7 +66,9 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 	defer func() { e.endStreamsOnClose(state, &parsed, d.Action == capture.Accept) }()
 
 	flowHash := state.Key.Hash()
-	e.observeDomainExclusions(state, &parsed)
+	if !e.decodingStopped(state) {
+		e.observeDomainExclusions(state, &parsed)
+	}
 	shouldInspect := e.ShouldInspect(state, &parsed)
 	if !shouldInspect {
 		noteCorrelationInspection(state, pkt, false)
@@ -94,6 +97,10 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		// IEC104 is parsed only on a session tracked from its SYN
 		// (HasOffset); outside every envelope it passes
 		// unparsed, as before.
+		return acceptDecision
+	}
+	if e.decodingStopped(state) {
+		noteCorrelationInspection(state, pkt, false)
 		return acceptDecision
 	}
 	noteCorrelationInspection(state, pkt, correlationAdmitted)
@@ -184,7 +191,7 @@ func (e *Engine) endFlowStream(state *flow.State, pkt *dpi.ParsedPacket) {
 }
 
 func (e *Engine) recordFlowEndEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) {
-	if len(evs) > 0 {
+	if len(evs) > 0 && !e.decodingStopped(state) {
 		e.RecordDPIEvents(state, pkt, evs)
 	}
 }

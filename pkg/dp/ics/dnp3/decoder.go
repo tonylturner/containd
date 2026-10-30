@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -203,7 +202,6 @@ func frameEvents(state *flow.State, frame *DNP3Frame, raw []byte) []dpi.Event {
 		Proto:      eventfields.ProtoDNP3,
 		Kind:       kind,
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}}
 }
 
@@ -228,7 +226,6 @@ func malformedEvent(state *flow.State, b []byte, err error) dpi.Event {
 			eventfields.KeyError: err.Error(),
 			"raw_hex":            rawHex(b),
 		},
-		Timestamp: time.Now().UTC(),
 	}
 }
 

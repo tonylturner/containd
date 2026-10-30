@@ -8,6 +8,7 @@ import { api, type TelemetryEvent } from "../../lib/api";
 import { formatEndpoint } from "../../lib/endpoint";
 import { Shell } from "../../components/Shell";
 import { StatusBadge } from "../../components/StatusBadge";
+import { IdentificationBadge } from "../flows/identification-badge";
 import { describeICSEvidence } from "./iec104-evidence";
 
 type EventFilter = "all" | "service" | "dpi" | "firewall" | "proxy" | "iec104";
@@ -22,6 +23,7 @@ const FILTER_OPTIONS: Array<{ value: EventFilter; label: string }> = [
 ];
 
 function eventHeadline(ev: TelemetryEvent): string {
+  if (ev.proto === "identify" && ev.kind === "identification") return "Content identification";
   const evidence = describeICSEvidence(ev);
   if (evidence) return evidence.headline;
   if (ev.kind === "service.av.detected") return "Antivirus detection";
@@ -354,6 +356,16 @@ function EventsInner() {
               {formatEndpoint(ev.srcIp, ev.srcPort)} → {formatEndpoint(ev.dstIp, ev.dstPort)}{" "}
               {ev.transport ? `(${ev.transport})` : ""}
             </div>
+            {ev.kind === "identification" && ev.proto === "identify" && ev.attributes && (
+              <div className="mt-2">
+                <IdentificationBadge identification={ev.attributes} />
+              </div>
+            )}
+            {ev.attributes?.observation_only === true && (
+              <StatusBadge variant="neutral" className="mt-2">
+                Observation only
+              </StatusBadge>
+            )}
             {evidence && (
               <div className="mt-2 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">

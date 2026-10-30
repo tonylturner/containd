@@ -394,7 +394,11 @@ components:
           additionalProperties: true
           description: >-
             Event-specific attributes. Events of a flow that TAG rules label carry the labels
-            as tags, a sorted array of strings.
+            as tags, a sorted array of strings. identify/identification uses IdentificationAttributes.
+            Passive decoder output carries observation_only true and binding_source observation.
+          properties:
+            observation_only: {type: boolean, description: True only for passive observation decoding; no verdict authority.}
+            binding_source: {type: string, enum: [observation]}
         timestamp: {type: string, format: date-time}
         srcIp: {type: string}
         dstIp: {type: string}
@@ -442,7 +446,10 @@ components:
         srcPort: {type: integer}
         dstPort: {type: integer}
         transport: {type: string}
-        application: {type: string}
+        application:
+          type: string
+          description: Confirmed bound protocol, otherwise legacy decoder protocol; never a utility marker.
+        identification: {$ref: '#/components/schemas/IdentificationAttributes'}
         eventCount: {type: integer, format: uint64}
         avDetected: {type: boolean}
         avBlocked: {type: boolean}
@@ -1110,7 +1117,13 @@ components:
       type: object
     DpiEvent:
       properties:
-        Attributes: {additionalProperties: {}, type: object}
+        Attributes:
+          type: object
+          additionalProperties: true
+          description: IdentificationAttributes for identify/identification; passive decoder events carry observation_only and binding_source.
+          properties:
+            observation_only: {type: boolean}
+            binding_source: {type: string, enum: [observation]}
         FlowID: {type: string}
         transportConnectionId: {type: string, description: Local transport connection incarnation established from verified evidence and retained across later evidence failures; independent of FlowID and protocol session handles.}
         correlationStatus: {$ref: '#/components/schemas/TransportCorrelationStatus'}
@@ -1412,8 +1425,56 @@ components:
         port: {type: integer}
         proto: {type: string}
       type: object
+    IdentificationAttributes:
+      type: object
+      required: [protocol, identification_state, reason, expected, service_transport, service_port, mismatch, binding, outside_rule_port_scope, profile_version, syn_coverage]
+      properties:
+        protocol: {type: string, description: Empty when no unique protocol is identified.}
+        identification_state: {type: string, enum: [confirmed, reject, identification_incomplete]}
+        reason: {type: string, description: Probe reason; distinct from coverage.}
+        identification_coverage: {type: string, enum: [budget, timeout, conflict, midstream/no-SYN, truncated, closed]}
+        identification_candidates:
+          type: array
+          nullable: true
+          items: {type: string}
+        expected:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: {type: string}
+          description: Endpoint-order registry expectations; empty string means none.
+        service_transport: {type: string, enum: [tcp, udp]}
+        service_port: {type: integer, minimum: 0, maximum: 65535}
+        mismatch: {type: boolean}
+        binding: {type: string, enum: [observation, legacy, none]}
+        outside_rule_port_scope:
+          oneOf:
+            - {type: boolean}
+            - {type: string, enum: [unknown]}
+          description: At least one rule names the protocol but none covers its transport/port; unknown without a snapshot. Does not evaluate address predicates.
+        profile_version: {type: integer}
+        syn_coverage:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: {type: boolean}
+    PcapIdentification:
+      type: object
+      required: [key, flowId, srcIp, dstIp, srcPort, dstPort, attributes]
+      properties:
+        key: {type: string, description: Run-qualified offline connection incarnation.}
+        flowId: {type: string}
+        srcIp: {type: string, description: Client address from captured SYN roles; otherwise the flow orientation hint.}
+        dstIp: {type: string, description: Server address from captured SYN roles; otherwise the flow orientation hint.}
+        srcPort: {type: integer, minimum: 0, maximum: 65535}
+        dstPort: {type: integer, minimum: 0, maximum: 65535}
+        attributes: {$ref: '#/components/schemas/IdentificationAttributes'}
     PcapAnalysisResult:
       properties:
+        truncated:
+          type: boolean
+          description: True when any packet record was truncated or the final record was incomplete at end of file.
+        identifications: {type: array, items: {$ref: "#/components/schemas/PcapIdentification"}}
         byteCount: {type: integer}
         duration:
           type: integer

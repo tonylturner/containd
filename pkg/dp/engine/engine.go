@@ -90,11 +90,14 @@ type Engine struct {
 	// gateAdmit is the admission state of the scanning gate (scan_admit.go):
 	// written by SetGateAdmit and into every applied ruleset, under
 	// lifecycleMu. It outlives Reconfigure, as the kernel ruleset does.
-	gateAdmit     enforce.GateAdmitState
-	domains       *domainExclusions
-	transport     *transportResolver
-	wireSerial    uint64            // under flowMu; never reset during Reconfigure
-	transportISNs map[string]uint32 // raw capture incarnation hints, not deny tombstones
+	gateAdmit          enforce.GateAdmitState
+	domains            *domainExclusions
+	observation        *liveObserver
+	observationPending []observationRecord // finalized under flowMu; recorded after unlocking
+	transport          *transportResolver
+	wireSerial         uint64                             // under flowMu; never reset during Reconfigure
+	transportISNs      map[string]uint32                  // raw capture incarnation hints, not deny tombstones
+	transportCoverage  map[*flow.State]*transportCoverage // under flowMu; fields under admissionMu
 }
 
 // RulesetStatus describes the installed ruleset: its compiled text,
@@ -258,6 +261,12 @@ func New(cfg Config) (*Engine, error) {
 	if err := e.initTransport(cfg); err != nil {
 		return nil, err
 	}
+	if e.transport != nil {
+		e.observation, err = newLiveObserver(cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return e, nil
 }
 
@@ -322,6 +331,13 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.runDone = nil
 
 	e.flowMu.Lock()
+	observationRecords := e.observationPending
+	e.observationPending = nil
+	if e.observation != nil {
+		observationRecords = append(observationRecords, e.observation.records(e.observation.observer.Drain())...)
+		e.observation.syncMetrics()
+	}
+	e.observation = fresh.observation
 	e.capture = fresh.capture
 	e.compiler = fresh.compiler
 	if e.compiler != nil {
@@ -351,12 +367,14 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.flows = fresh.flows
 	e.tcpISNs = fresh.tcpISNs
 	e.transportISNs = fresh.transportISNs
+	e.transportCoverage = fresh.transportCoverage
 	e.lastSweep = fresh.lastSweep
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
 	fresh.iec.zones = &e.zones
 	e.iec = fresh.iec
 	e.flowMu.Unlock()
+	e.recordObservations(observationRecords)
 	e.epoch.Add(1)
 	e.started.Store(false)
 	// The old queue is closed and the new one is not bound yet: the
@@ -648,6 +666,15 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	e.bindTransport(state, connection)
 	if connection != nil && e.transport != nil {
 		e.transport.trackConnection(state, now, history)
+		e.flowMu.Lock()
+		e.transport.admissionMu.Lock()
+		e.bindDecodeCoverageLocked(state, history)
+		e.transport.admissionMu.Unlock()
+		e.flowMu.Unlock()
+	}
+	stopped := e.applyDecodeCoverage(state, pkt)
+	if e.observation != nil && !stopped {
+		e.observePacket(pkt, state)
 	}
 	if d, ok := e.handleIECPacket(pkt, state); ok {
 		return d
@@ -775,9 +802,11 @@ func (e *Engine) dropFlowLocked(key flow.Key) *flow.State {
 	if !ok {
 		return nil
 	}
+	e.releaseObservationLocked(st)
 	delete(e.flows, hash)
 	delete(e.tcpISNs, hash)
 	delete(e.transportISNs, hash)
+	delete(e.transportCoverage, st)
 	metrics.FlowsActive.Dec()
 	return st
 }
@@ -788,16 +817,30 @@ func (e *Engine) sweepFlows(now time.Time) {
 	e.flowMu.Lock()
 	for k, st := range e.flows {
 		if st == nil || st.Expired(now) {
+			if st != nil {
+				e.releaseObservationLocked(st)
+			}
 			delete(e.flows, k)
 			delete(e.tcpISNs, k)
 			delete(e.transportISNs, k)
+			delete(e.transportCoverage, st)
 			metrics.FlowsActive.Dec()
 			if st != nil {
 				expired = append(expired, st)
 			}
 		}
 	}
+	var observationRecords []observationRecord
+	if e.observation != nil {
+		output := e.observation.observer.Sweep(e.observation.now())
+		e.settleObservationsLocked(output)
+		observationRecords = e.observation.records(output)
+		e.observation.syncMetrics()
+	}
+	observationRecords = append(observationRecords, e.observationPending...)
+	e.observationPending = nil
 	e.flowMu.Unlock()
+	e.recordObservations(observationRecords)
 	for _, st := range expired {
 		e.endFlowStream(st, nil)
 	}

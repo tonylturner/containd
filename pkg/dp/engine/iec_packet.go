@@ -654,7 +654,8 @@ func (t *iecTable) dataLocked(s *iecSession, dir int, pkt capture.Packet, state 
 func (t *iecTable) inspectLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, start int64, fresh []byte, res *iecResult, now time.Time) (denied bool, trigger string, failed bool) {
 	d := s.dirs[dir]
 	ir := t.dpi.Inspect(state, &dpi.ParsedPacket{
-		Payload: fresh, Proto: "tcp", SrcPort: pkt.SrcPort, DstPort: pkt.DstPort,
+		Timestamp: pkt.Timestamp,
+		Payload:   fresh, Proto: "tcp", SrcPort: pkt.SrcPort, DstPort: pkt.DstPort,
 		TCPSeq: d.seq.Seq(start), TCPSeqValid: true,
 		Offset: start, HasOffset: true, Session: s.id, Dir: dpiDir(dir),
 	})

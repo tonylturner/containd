@@ -26,9 +26,10 @@ const (
 
 // Engine event kinds for decisions and their outcomes.
 const (
-	KindDecision = "ics.decision"
-	KindVerdict  = "ics.verdict"
-	KindSession  = "ics.session"
+	KindDecision     = "ics.decision"
+	KindVerdict      = "ics.verdict"
+	KindSession      = "ics.session"
+	KindCoverageLoss = "dpi.coverage.loss"
 )
 
 // Shared attribute keys used by several ICS decoders and consumers.

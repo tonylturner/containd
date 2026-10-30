@@ -18,6 +18,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/itdpi"
@@ -43,7 +44,9 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	bindEventConnections(state, evs)
 	srcIP, dstIP := stateIPs(state)
 	e.recordInventoryEvents(srcIP, dstIP, evs)
-	e.recordLearnEvents(srcIP, dstIP, evs)
+	if !e.observationBound(state) {
+		e.recordLearnEvents(srcIP, dstIP, evs)
+	}
 	e.recordAnomalyAlerts(state, pkt, srcIP, dstIP, evs)
 	e.recordSignatureAlerts(state, pkt, evs)
 	e.eventStore.Record(state, pkt, evs)
@@ -80,6 +83,11 @@ func (e *Engine) recordLearnEvents(srcIP, dstIP string, evs []dpi.Event) {
 		return
 	}
 	for _, ev := range evs {
+		// The envelope remains authoritative even after incarnation retirement
+		// or a configuration drain removes the live binding marker.
+		if passive, _ := ev.Attributes[eventfields.KeyObservationOnly].(bool); passive {
+			continue
+		}
 		if learnableICSEvent(ev) && !hasInspectionFindings(ev) {
 			e.learner.RecordEvent(srcIP, dstIP, ev)
 		}
@@ -130,6 +138,9 @@ func (e *Engine) recordSignatureAlerts(state *flow.State, pkt *dpi.ParsedPacket,
 		return
 	}
 	for _, ev := range evs {
+		if identificationEvent(ev) {
+			continue
+		}
 		for _, m := range e.sigEngine.Match(ev) {
 			e.eventStore.Record(state, pkt, []dpi.Event{signatureAlertFromMatch(ev, m)})
 		}
@@ -157,7 +168,9 @@ func (e *Engine) recordProtoStats(evs []dpi.Event) {
 		return
 	}
 	for _, ev := range evs {
-		e.stats.RecordEvent(ev)
+		if !identificationEvent(ev) {
+			e.stats.RecordEvent(ev)
+		}
 	}
 }
 
@@ -169,7 +182,9 @@ func (e *Engine) recordEvaluatedIDSAlerts(state *flow.State, pkt *dpi.ParsedPack
 	eval := ids.New(snap.IDS)
 	var alerts []dpi.Event
 	for _, ev := range evs {
-		alerts = append(alerts, eval.Evaluate(ev)...)
+		if !identificationEvent(ev) {
+			alerts = append(alerts, eval.Evaluate(ev)...)
+		}
 	}
 	if len(alerts) == 0 {
 		return

@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -88,7 +87,6 @@ func (d *TLSDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 		Proto:      "tls",
 		Kind:       "client_hello",
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return []dpi.Event{ev}, nil
 }

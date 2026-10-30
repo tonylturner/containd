@@ -15,19 +15,23 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 )
 
-const maxPCAPRecordSize = 16 << 20 // 16 MiB
-
 // AnalysisResult holds the outcome of offline PCAP analysis.
 type AnalysisResult struct {
-	Events      []dpi.Event    `json:"events"`
-	Flows       []FlowSummary  `json:"flows"`
-	Protocols   map[string]int `json:"protocols"`
-	Duration    time.Duration  `json:"duration"`
-	PacketCount int            `json:"packetCount"`
-	ByteCount   int            `json:"byteCount"`
+	Identifications []Identification `json:"identifications"`
+	observed        map[string]bool
+	Events          []dpi.Event    `json:"events"`
+	Flows           []FlowSummary  `json:"flows"`
+	Protocols       map[string]int `json:"protocols"`
+	Duration        time.Duration  `json:"duration"`
+	PacketCount     int            `json:"packetCount"`
+	ByteCount       int            `json:"byteCount"`
+	// Truncated reports incomplete records or captured packets. A partial
+	// record header cannot safely be attributed to any particular flow.
+	Truncated bool `json:"truncated"`
 }
 
 // FlowSummary describes a single network flow observed in the PCAP.
@@ -36,7 +40,7 @@ type FlowSummary struct {
 	Protocol  string    `json:"protocol"`
 	Packets   int       `json:"packets"`
 	Bytes     int       `json:"bytes"`
-	Events    int       `json:"events"`
+	Events    int       `json:"events"` // All retained events, including identification, as in live rollups.
 	FirstSeen time.Time `json:"firstSeen"`
 	LastSeen  time.Time `json:"lastSeen"`
 }
@@ -49,34 +53,57 @@ type eventCallback func(srcIP, dstIP string, ev dpi.Event)
 // analyzeCore is the shared PCAP analysis loop used by both Analyze and
 // AnalyzeForPolicy. If onEvent is non-nil it is called for each DPI event
 // with the packet-level source and destination IPs.
-func analyzeCore(r io.Reader, onEvent eventCallback, decoders ...dpi.Decoder) (*AnalysisResult, error) {
-	snaplen, err := readPCAPHeader(r)
+func analyzeCore(r io.Reader, opts AnalysisOptions, onEvent eventCallback, decoders ...dpi.Decoder) (*AnalysisResult, error) {
+	reader, err := newPCAPReader(r)
 	if err != nil {
 		return nil, fmt.Errorf("pcap header: %w", err)
 	}
 
+	// Advance a nondecreasing capture watermark for offline deadlines, while
+	// Packet.At retains the original (possibly out-of-order) capture time.
+	var watermark time.Time
+	if opts.Now == nil {
+		opts.Now = func() time.Time { return watermark }
+	}
 	mgr := dpi.NewManager(decoders...)
 	sessions := newOfflineSessions()
+	observer, err := newOfflineObserver(sessions, opts, decoders)
+	if err != nil {
+		return nil, err
+	}
 
 	flows := make(map[string]*flow.State)
 	flowEvents := make(map[string]int)
 
 	result := &AnalysisResult{
-		Events:    []dpi.Event{},
-		Protocols: make(map[string]int),
+		Events:          []dpi.Event{},
+		Identifications: []Identification{},
+		observed:        map[string]bool{},
+		Protocols:       make(map[string]int),
 	}
 
 	var firstTS, lastTS time.Time
 
 	for {
-		ts, data, err := readPCAPRecord(r, snaplen)
-		if err != nil {
-			if endOfPCAP(err) {
-				break
-			}
-			return nil, fmt.Errorf("pcap record: %w", err)
+		ts, data, truncated, err := reader.readRecord()
+		if err == io.EOF {
+			break
 		}
+		if err != nil {
+			if err != io.ErrUnexpectedEOF {
+				return nil, fmt.Errorf("pcap record: %w", err)
+			}
+			result.Truncated = true
+			if data == nil {
+				break // incomplete record header: no trustworthy tuple
+			}
+		}
+		result.Truncated = result.Truncated || truncated
 		updateAnalysisPacketStats(result, ts, len(data), &firstTS, &lastTS)
+		if ts.After(watermark) {
+			watermark = ts
+		}
+		observer.record(observer.observer.Sweep(opts.Now()), result, flowEvents, onEvent)
 		pkt, ok := decodeEthernetPacket(data)
 		if !ok {
 			continue
@@ -85,15 +112,23 @@ func analyzeCore(r io.Reader, onEvent eventCallback, decoders ...dpi.Decoder) (*
 		for i := range reoriented {
 			old := &reoriented[i]
 			events, _ := mgr.OnFlowEnd(old)
+			for i := range events {
+				events[i].Connection = old.Connection.Load()
+			}
 			// Summaries use wire tuples independently of orientation.
 			key := old.Key
 			key.Dir = flow.DirForward
 			recordAnalysisEvents(result, flowEvents, key.Hash(), key.SrcIP.String(), key.DstIP.String(), events, onEvent)
 		}
-		events := analyzePacket(mgr, sessions, state, pkt, ts)
+		observer.record(observer.packet(pkt, state, ts, truncated), result, flowEvents, onEvent)
+		var events []dpi.Event
+		if pkt.Invalid == "" && !truncated {
+			events = analyzePacket(mgr, sessions, state, pkt, ts)
+		}
 		recordAnalysisEvents(result, flowEvents, hash, pkt.SrcIP.String(), pkt.DstIP.String(), events, onEvent)
 	}
 
+	observer.record(observer.observer.Drain(), result, flowEvents, onEvent)
 	finalizeAnalysisFlows(mgr, flows, result, flowEvents, onEvent)
 
 	result.Flows = buildFlowSummaries(flows, flowEvents)
@@ -103,10 +138,6 @@ func analyzeCore(r io.Reader, onEvent eventCallback, decoders ...dpi.Decoder) (*
 	}
 
 	return result, nil
-}
-
-func endOfPCAP(err error) bool {
-	return err == io.EOF || err == io.ErrUnexpectedEOF
 }
 
 func updateAnalysisPacketStats(result *AnalysisResult, ts time.Time, size int, firstTS, lastTS *time.Time) {
@@ -169,6 +200,7 @@ func analysisFlowState(flows map[string]*flow.State, pkt capture.Packet, ts time
 // malformed event is among them and the analysis continues.
 func analyzePacket(mgr *dpi.Manager, sessions *offlineSessions, state *flow.State, pkt capture.Packet, ts time.Time) []dpi.Event {
 	parsed := &dpi.ParsedPacket{
+		Timestamp:   ts,
 		Payload:     pkt.Payload,
 		Proto:       pkt.Transport,
 		SrcPort:     pkt.SrcPort,
@@ -184,16 +216,10 @@ func analyzePacket(mgr *dpi.Manager, sessions *offlineSessions, state *flow.Stat
 		return nil
 	}
 	events, _ := mgr.OnPacket(state, parsed)
-	stampEvents(events, ts)
-	return events
-}
-
-func stampEvents(events []dpi.Event, ts time.Time) {
 	for i := range events {
-		if events[i].Timestamp.IsZero() {
-			events[i].Timestamp = ts
-		}
+		events[i].Connection = state.Connection.Load()
 	}
+	return events
 }
 
 func recordAnalysisEvents(result *AnalysisResult, flowEvents map[string]int, hash, srcStr, dstStr string, events []dpi.Event, onEvent eventCallback) {
@@ -201,7 +227,9 @@ func recordAnalysisEvents(result *AnalysisResult, flowEvents map[string]int, has
 		if onEvent != nil {
 			onEvent(srcStr, dstStr, ev)
 		}
-		result.Protocols[ev.Proto]++
+		if ev.Proto != eventfields.ProtoIdentify {
+			result.Protocols[ev.Proto]++
+		}
 	}
 	result.Events = append(result.Events, events...)
 	flowEvents[hash] += len(events)
@@ -210,6 +238,9 @@ func recordAnalysisEvents(result *AnalysisResult, flowEvents map[string]int, has
 func finalizeAnalysisFlows(mgr *dpi.Manager, flows map[string]*flow.State, result *AnalysisResult, flowEvents map[string]int, onEvent eventCallback) {
 	for hash, state := range flows {
 		events, _ := mgr.OnFlowEnd(state)
+		for i := range events {
+			events[i].Connection = state.Connection.Load()
+		}
 		recordAnalysisEvents(result, flowEvents, hash, state.Key.SrcIP.String(), state.Key.DstIP.String(), events, onEvent)
 	}
 }
@@ -246,7 +277,12 @@ func flowTransport(proto uint8) string {
 // decoders, and returns structured analysis results. It works entirely offline
 // and does not require a network interface or Linux-specific APIs.
 func Analyze(r io.Reader, decoders ...dpi.Decoder) (*AnalysisResult, error) {
-	return analyzeCore(r, nil, decoders...)
+	return AnalyzeWithOptions(r, AnalysisOptions{}, decoders...)
+}
+
+// AnalyzeWithOptions analyzes with a caller-owned rule snapshot and clock.
+func AnalyzeWithOptions(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*AnalysisResult, error) {
+	return analyzeCore(r, opts, nil, decoders...)
 }
 
 // PolicyAnalysis holds the outcome of PCAP-to-policy analysis, combining
@@ -265,18 +301,33 @@ func AnalyzeForPolicy(r io.Reader, decoders ...dpi.Decoder) (*PolicyAnalysis, er
 	learner := learn.New()
 	eventSummary := make(map[string]int)
 
+	type candidate struct {
+		src, dst string
+		ev       dpi.Event
+	}
+	var candidates []candidate
 	onEvent := func(srcIP, dstIP string, ev dpi.Event) {
+		if ev.Proto == eventfields.ProtoIdentify {
+			return
+		}
 		eventSummary[ev.Proto]++
 		// IT/utility traffic remains visible in analysis, not ICS policy.
 		// IEC104 is also summarised but never auto-learned.
 		if ics.Learnable(strings.ToLower(ev.Proto)) {
-			learner.RecordEvent(srcIP, dstIP, ev)
+			candidates = append(candidates, candidate{srcIP, dstIP, ev})
 		}
 	}
 
-	result, err := analyzeCore(r, onEvent, decoders...)
+	result, err := analyzeCore(r, AnalysisOptions{}, onEvent, decoders...)
 	if err != nil {
 		return nil, err
+	}
+
+	for _, c := range candidates {
+		if c.ev.Connection != nil && result.observed[c.ev.Connection.Key] {
+			continue
+		}
+		learner.RecordEvent(c.src, c.dst, c.ev)
 	}
 
 	return &PolicyAnalysis{
@@ -287,58 +338,10 @@ func AnalyzeForPolicy(r io.Reader, decoders ...dpi.Decoder) (*PolicyAnalysis, er
 	}, nil
 }
 
-// pcapMagicLE is the PCAP magic number in little-endian byte order.
-const pcapMagicLE = 0xa1b2c3d4
-
-// pcapMagicBE is the PCAP magic number in big-endian byte order (swapped).
-const pcapMagicBE = 0xd4c3b2a1
-
-// readPCAPHeader reads and validates the 24-byte PCAP global header.
-func readPCAPHeader(r io.Reader) (uint32, error) {
-	header := make([]byte, 24)
-	if _, err := io.ReadFull(r, header); err != nil {
-		return 0, err
-	}
-	magic := binary.LittleEndian.Uint32(header[0:])
-	if magic != pcapMagicLE && magic != pcapMagicBE {
-		return 0, fmt.Errorf("invalid pcap magic: 0x%08x", magic)
-	}
-	snaplen := binary.LittleEndian.Uint32(header[16:])
-	if magic == pcapMagicBE {
-		snaplen = binary.BigEndian.Uint32(header[16:])
-	}
-	return snaplen, nil
-}
-
-// readPCAPRecord reads a single PCAP packet record (16-byte header + data).
-func readPCAPRecord(r io.Reader, snaplen uint32) (time.Time, []byte, error) {
-	rec := make([]byte, 16)
-	if _, err := io.ReadFull(r, rec); err != nil {
-		return time.Time{}, nil, err
-	}
-	sec := binary.LittleEndian.Uint32(rec[0:])
-	usec := binary.LittleEndian.Uint32(rec[4:])
-	inclLen := binary.LittleEndian.Uint32(rec[8:])
-	if snaplen > 0 && inclLen > snaplen {
-		return time.Time{}, nil, fmt.Errorf("invalid captured length %d exceeds snaplen %d", inclLen, snaplen)
-	}
-	if inclLen > maxPCAPRecordSize {
-		return time.Time{}, nil, fmt.Errorf("invalid captured length %d exceeds maximum %d", inclLen, maxPCAPRecordSize)
-	}
-	if inclLen == 0 {
-		return time.Unix(int64(sec), int64(usec)*1000), nil, nil
-	}
-	data := make([]byte, inclLen)
-	if _, err := io.ReadFull(r, data); err != nil {
-		return time.Time{}, nil, err
-	}
-	ts := time.Unix(int64(sec), int64(usec)*1000)
-	return ts, data, nil
-}
-
 // decodeEthernetPacket strips the Ethernet (and one 802.1Q) header and
 // decodes the IP packet with capture.DecodeIPPacket, the decoder the live
-// capture path uses. Packets that do not decode cleanly are skipped.
+// capture path uses. Packets without usable headers are skipped; truncated TCP payload is
+// passed only to the observer, never to the legacy decoder.
 func decodeEthernetPacket(data []byte) (capture.Packet, bool) {
 	if len(data) < 14 {
 		return capture.Packet{}, false
@@ -359,5 +362,5 @@ func decodeEthernetPacket(data []byte) (capture.Packet, bool) {
 		return capture.Packet{}, false
 	}
 	pkt := capture.DecodeIPPacket(ipData)
-	return pkt, pkt.Invalid == ""
+	return pkt, pkt.Invalid == "" || pkt.Invalid == capture.InvalidTruncated && pkt.TCP.Valid
 }

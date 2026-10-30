@@ -19,6 +19,8 @@ type VerdictCache struct {
 	entries map[string]*cachedVerdict
 	ttl     time.Duration
 	maxSize int
+	now     func() time.Time
+	changed func(string, string, verdict.Verdict)
 }
 
 type cachedVerdict struct {
@@ -36,6 +38,7 @@ func NewVerdictCache(ttl time.Duration, maxSize int) *VerdictCache {
 	}
 	return &VerdictCache{
 		entries: make(map[string]*cachedVerdict, 256),
+		now:     time.Now,
 		ttl:     ttl,
 		maxSize: maxSize,
 	}
@@ -52,7 +55,7 @@ func (vc *VerdictCache) Get(flowHash string) (verdict.Verdict, bool) {
 		return verdict.Verdict{}, false
 	}
 	v := entry.verdict
-	expired := time.Since(entry.createdAt) > vc.ttl
+	expired := vc.now().Sub(entry.createdAt) > vc.ttl
 	vc.mu.RUnlock()
 	if expired {
 		// Lazy eviction — don't bother locking for write here;
@@ -68,6 +71,9 @@ func (vc *VerdictCache) Get(flowHash string) (verdict.Verdict, bool) {
 func (vc *VerdictCache) Put(flowHash string, v verdict.Verdict) {
 	vc.mu.Lock()
 	defer vc.mu.Unlock()
+	if vc.changed != nil {
+		vc.changed("put", flowHash, v)
+	}
 	// Evict expired entries if we are at capacity.
 	if len(vc.entries) >= vc.maxSize {
 		vc.evictExpiredLocked()
@@ -85,13 +91,16 @@ func (vc *VerdictCache) Put(flowHash string, v verdict.Verdict) {
 	}
 	vc.entries[flowHash] = &cachedVerdict{
 		verdict:   v,
-		createdAt: time.Now(),
+		createdAt: vc.now(),
 	}
 }
 
 // Invalidate removes a specific flow's cached verdict.
 func (vc *VerdictCache) Invalidate(flowHash string) {
 	vc.mu.Lock()
+	if vc.changed != nil {
+		vc.changed("invalidate", flowHash, verdict.Verdict{})
+	}
 	delete(vc.entries, flowHash)
 	vc.mu.Unlock()
 }
@@ -106,12 +115,15 @@ func (vc *VerdictCache) Len() int {
 // Flush removes all entries from the cache.
 func (vc *VerdictCache) Flush() {
 	vc.mu.Lock()
+	if vc.changed != nil {
+		vc.changed("flush", "", verdict.Verdict{})
+	}
 	vc.entries = make(map[string]*cachedVerdict, 256)
 	vc.mu.Unlock()
 }
 
 func (vc *VerdictCache) evictExpiredLocked() {
-	now := time.Now()
+	now := vc.now()
 	for k, v := range vc.entries {
 		if now.Sub(v.createdAt) > vc.ttl {
 			delete(vc.entries, k)

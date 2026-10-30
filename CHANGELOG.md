@@ -40,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Content identification for Modbus, DNP3, IEC 104 and EtherNet/IP on AF_PACKET
+  and in PCAP analysis, with passive alternate-port decoding, content/port
+  badges, mismatch and outside-rule-port scope evidence. Identification never
+  changes verdicts; observation-bound connections do not generate ALLOW rules.
+  Prometheus exposes identification outcomes, incomplete reasons, capacity
+  refusals, transport losses and observer occupancy under `containd_identify_*`.
+- DPI events and directional flow summaries include a verified
+  `transportConnectionId` for locally tracked AF_PACKET TCP/UDP connections,
+  with correlation status and conntrack-zone authority health.
 - Both ICS editors, CLI and API schemas expose DNP3 station/group/variation/point
   selectors, CIP instance/attribute/tag selectors, and IEC 104 cause, originator,
   P/N, T and select/execute selectors. Clearing a selector sends a merge-PATCH
@@ -47,10 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DNP3 secure-operations templates explicitly allow Confirm and startup functions,
   restrict Write to time/IIN groups 50/80, and deny Save Configuration alongside
   restart and stop operations.
-
-- DPI events and directional flow summaries include a verified
-  `transportConnectionId` for locally tracked AF_PACKET TCP/UDP connections,
-  with correlation status and conntrack-zone authority health.
 - `services.av.scan` selects the traffic the scanning gate intercepts:
   include and exclude entries of directional zone pairs, destination ports
   and CIDRs, a download mode (`hold` or `stream_tail`) and the ICS-marked
@@ -230,15 +235,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- AF_PACKET resolver queue or byte overflow stops passive DPI and identification
+  decoding for the affected connection incarnation, without changing forwarding.
+  A `dpi.coverage.loss` event and `containd_dpi_coverage_losses_total` counter expose
+  the loss; a new connection incarnation can decode again.
+
+- PCAP analysis and replay honor big-endian and nanosecond captures. Analysis
+  reports truncated coverage for partial final records instead of hiding them.
+
+- Live and offline DPI events retain packet capture timestamps, including
+  malformed events; ICS tagging no longer replaces them with wall time.
+
+- TCP/2404 flows outside IEC 104 table ownership now use generic TCP
+  decision serialization, denial reconnects and incarnation retirement.
+
 - The HTTP scanning gate releases a held upload's object slot before its
   final response reaches the client, so a following upload or the response's
   download scan is not refused as busy by the previous upload.
-- Empty ICS function/service code fields now mean any code in both rule editors,
-  without injecting zero from whitespace or separators. Invalid selector values
-  block saving and preview, and clearing generic restrictions removes them.
-- Template previews display the generated rule's nested ICS protocol and codes.
-  ICS rule listing and dashboard counts recognize all predicate fields, and the
-  CLI accepts and displays CIP object classes.
 - Modbus transaction pairing separates connection incarnations, directions,
   transaction IDs and unit IDs, including locally masqueraded AF_PACKET
   traffic. Missing connection evidence reports correlation unavailable instead
@@ -248,6 +261,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pauses for two quiet minutes after packet loss or an inspection bypass, and
   resumes on its own; resolver admission is limited to industrial traffic and
   bounded. NFQUEUE and PCAP evidence reports `correlationStatus: wire`.
+- Empty ICS function/service code fields now mean any code in both rule editors,
+  without injecting zero from whitespace or separators. Invalid selector values
+  block saving and preview, and clearing generic restrictions removes them.
+- Template previews display the generated rule's nested ICS protocol and codes.
+  ICS rule listing and dashboard counts recognize all predicate fields, and the
+  CLI accepts and displays CIP object classes.
 - Successful IDS imports and zone, interface and identity collection changes
   appear immediately without discarding unrelated edits. Saving IDS rules keeps
   imported additions; import and creation forms do not block configuration refreshes.

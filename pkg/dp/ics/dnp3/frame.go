@@ -20,6 +20,13 @@ type DNP3Frame struct {
 	Data         []byte // Payload after data-link header (CRC-stripped user data)
 }
 
+// DataCRCValid reports whether all data-block CRCs passed when ParseFrame
+// decoded this frame. Link-only frames have no data blocks and return true.
+// It says nothing about the application payload's validity.
+func (f *DNP3Frame) DataCRCValid() bool {
+	return f != nil && !f.badDataCRC
+}
+
 // Control byte bit masks.
 const (
 	ControlDIR = 0x80 // Direction bit: 1 = master, 0 = outstation

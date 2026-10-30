@@ -5,7 +5,6 @@ package itdpi
 
 import (
 	"bytes"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -37,7 +36,6 @@ func (d *PortDetector) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi
 		Proto:      proto,
 		Kind:       "detect",
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return []dpi.Event{ev}, nil
 }

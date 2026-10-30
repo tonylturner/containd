@@ -13,7 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
-func (e *Engine) transportEligible(pkt capture.Packet) bool {
+func (e *Engine) legacyTransportEligible(pkt capture.Packet) bool {
 	if pkt.Invalid != "" || pkt.Proto != 6 && pkt.Proto != 17 {
 		return false
 	}
@@ -182,5 +182,55 @@ func (r *transportResolver) trackConnection(state *flow.State, at time.Time, his
 			continue
 		}
 		entry.connection = c
+	}
+}
+
+// Discovery widens only passive identity admission, not decoder selection.
+func (e *Engine) transportEligible(pkt capture.Packet) bool {
+	if e.legacyTransportEligible(pkt) {
+		return true
+	}
+	if pkt.Invalid != "" || pkt.Proto != 6 && pkt.Proto != 17 || e.observation == nil {
+		return false
+	}
+	state := &flow.State{Key: packetKey(pkt)}
+	if !e.dpiInspectionEnabled(state) {
+		return false
+	}
+	if r := e.transport; r != nil {
+		r.admissionMu.Lock()
+		entry := r.indexed[state.Key.Tuple()]
+		settled := entry != nil && entry.settled && entry.queued == 0
+		if settled && entry.coverage != nil && entry.coverage.root().lost {
+			// Loss notices and subsequent packets must keep the worker's
+			// ordering, even after discovery has reached a terminal result.
+			settled = false
+		}
+		if settled && pkt.TCP.Valid && isSYN(pkt.TCP.Flags) && (!entry.hasSYN || entry.synSeq != pkt.TCP.Seq) {
+			settled = false
+		}
+		r.admissionMu.Unlock()
+		if settled {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *transportResolver) settleObservation(st *flow.State) {
+	c := st.Connection.Load()
+	if c == nil {
+		return
+	}
+	tuples := []conntrack.Tuple{st.Key.Tuple(), st.Key.Reversed().Tuple()}
+	if c.Evidence != nil {
+		tuples = append(tuples, c.Evidence.Original, c.Evidence.Reply)
+	}
+	r.admissionMu.Lock()
+	defer r.admissionMu.Unlock()
+	for _, tuple := range tuples {
+		if entry := r.indexed[tuple]; entry != nil && entry.connection.Key == c.Key {
+			entry.settled = true
+		}
 	}
 }

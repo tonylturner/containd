@@ -19,14 +19,16 @@ const (
 // ParsedPacket is a minimal packet representation for DPI decoders.
 // Capture will populate this in later phases.
 type ParsedPacket struct {
-	Payload []byte
-	Proto   string // "tcp", "udp"
-	SrcPort uint16
-	DstPort uint16
-	TCPSeq  uint32 // TCP sequence number (0 for UDP)
-	TCPSyn  bool   // TCPSeq is the first payload sequence (after the SYN)
-	TCPFin  bool   // the segment carries FIN
-	TCPRst  bool   // the segment carries RST
+	// Timestamp is the capture time of the packet completing an event.
+	Timestamp time.Time
+	Payload   []byte
+	Proto     string // "tcp", "udp"
+	SrcPort   uint16
+	DstPort   uint16
+	TCPSeq    uint32 // TCP sequence number (0 for UDP)
+	TCPSyn    bool   // TCPSeq is the first payload sequence (after the SYN)
+	TCPFin    bool   // the segment carries FIN
+	TCPRst    bool   // the segment carries RST
 	// TCPHandshake marks a SYN or SYN-ACK of a connection whose handshake
 	// the kernel's connection tracking has not seen complete. A fail-closed
 	// one without it anchors no stream: it was sent into an established
@@ -56,7 +58,8 @@ type Event struct {
 	Timestamp             time.Time
 }
 
-// Decoder inspects packets for a given flow and emits protocol events.
+// Decoder inspects packets for a given flow and returns protocol events.
+// The manager assigns event timestamps at its output boundary.
 type Decoder interface {
 	Supports(state *flow.State) bool
 	OnPacket(state *flow.State, pkt *ParsedPacket) ([]Event, error)
@@ -76,13 +79,15 @@ type PortHinter interface {
 
 // Manager dispatches packets to registered decoders.
 type Manager struct {
-	streamMu    sync.Mutex // one feed/parse/trim transaction across capture workers
+	observation map[string]StreamDecoder // immutable explicit observation registry
+	streamMu    sync.Mutex               // one feed/parse/trim transaction across capture workers
 	decoders    []Decoder
 	tcpByPort   map[uint16][]Decoder // TCP port -> matching decoders
 	udpByPort   map[uint16][]Decoder // UDP port -> matching decoders
 	anyDecoders []Decoder            // decoders with no port-specific hint
 	reassembler *reassembler
 	streamEnds  map[string]streamEnd
+	eventTimes  map[string]time.Time // last inspected capture time, under streamMu
 }
 
 type streamEnd struct {
@@ -97,6 +102,7 @@ func NewManager(decoders ...Decoder) *Manager {
 		udpByPort:   make(map[uint16][]Decoder),
 		reassembler: newReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
 		streamEnds:  make(map[string]streamEnd),
+		eventTimes:  make(map[string]time.Time),
 	}
 	for _, d := range decoders {
 		m.Add(d)
@@ -189,12 +195,17 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 		m.reassembler.complete(key)
 		m.endStream(key)
 	}
-	return m.flowEnd(state)
+	at, ok := m.eventTimes[state.Key.Hash()]
+	if !ok {
+		at = eventTime(state, nil)
+	}
+	return m.flowEnd(state, at)
 }
 
 // flowEnd returns the decoders' flow-end events. Must be called with
 // streamMu held.
-func (m *Manager) flowEnd(state *flow.State) ([]Event, error) {
+func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
+	delete(m.eventTimes, state.Key.Hash())
 	var out []Event
 	var errs []error
 	for _, d := range m.candidates(state) {
@@ -207,5 +218,6 @@ func (m *Manager) flowEnd(state *flow.State) ([]Event, error) {
 		}
 		out = append(out, events...)
 	}
+	stampEvents(out, at)
 	return out, errors.Join(errs...)
 }

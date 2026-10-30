@@ -6,7 +6,6 @@ package itdpi
 import (
 	"bytes"
 	"encoding/binary"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -127,7 +126,6 @@ func (d *SSHDecoder) parseVersionExchange(state *flow.State, pkt *dpi.ParsedPack
 		Proto:      "ssh",
 		Kind:       "version_exchange",
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return ev, true
 }
@@ -221,7 +219,6 @@ func (d *SSHDecoder) parseKexInit(state *flow.State, pkt *dpi.ParsedPacket) (dpi
 		Proto:      "ssh",
 		Kind:       "kex_init",
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return ev, true
 }

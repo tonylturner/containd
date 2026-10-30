@@ -30,7 +30,7 @@ test("flows show the TAG labels that matched them", async ({ page }) => {
   await page.goto("/flows/");
   await loaded;
   await expect(page.getByRole("columnheader", { name: "Tags" })).toBeVisible();
-  const row = (app: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name: app, exact: true }) });
+  const row = (app: string) => page.getByRole("row").filter({ has: page.getByText(`${app} · port`, { exact: true }) });
   await expect(row("ssh")).toContainText("ot.vendor");
   await expect(row("ssh")).toContainText("vendor-access");
   await expect(row("modbus").getByRole("cell").nth(3)).toHaveText("—");
@@ -76,7 +76,7 @@ test("flows show loading until the first answer, and polls keep the rows", async
   const poll = page.waitForRequest((r) => new URL(r.url()).pathname === "/api/v1/flows");
   await page.clock.runFor(10_000);
   await poll;
-  await expect(page.getByRole("cell", { name: "ssh", exact: true })).toBeVisible();
+  await expect(page.getByText("ssh · port", { exact: true })).toBeVisible();
   await expect(page.getByText("Showing 2 of 2 flows", { exact: true })).toBeVisible();
   await expect(page.locator("main .animate-pulse")).toHaveCount(0);
 

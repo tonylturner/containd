@@ -10,6 +10,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/identify"
 )
 
 // Seeing a wire SYN is not proof that its requests reached correlation.
@@ -60,11 +61,13 @@ func (e *Engine) peerFlow(state *flow.State) *flow.State {
 }
 
 // A fresh raw SYN or verified kernel generation retires both directional
-// streams before their tuple can be reused. Inline admission remains unchanged.
+// streams before their tuple can be reused, except when the IEC table owns
+// their lifecycle. Inline admission remains unchanged.
 func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.Connection) {
-	if pkt.Token.Inline() || isIECPort(pkt) {
+	if pkt.Token.Inline() {
 		return
 	}
+	iecOwned := e.iecOwnsPacket(pkt)
 	e.flowMu.Lock()
 	st := e.tupleStateLocked(packetKey(pkt).Tuple())
 	var retired []*flow.State
@@ -75,9 +78,34 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 		if isn, ok := e.transportISNs[st.Key.Hash()]; ok && isn == pkt.TCP.Seq {
 			newSYN = false
 		}
-		newGeneration := incoming != nil && incoming.Verified() && old != nil && old.Evidence != nil &&
-			!sameGeneration(old.Evidence, incoming.Evidence)
-		if newSYN || newGeneration || old != nil && old.Closed().Load() {
+		var evidence *conntrack.Evidence
+		if old != nil {
+			evidence = old.Evidence
+		}
+		if iecOwned && e.transport != nil {
+			e.transport.admissionMu.Lock()
+			if marker := e.transportCoverage[st].root(); marker != nil && marker.generation != nil {
+				evidence = marker.generation
+			}
+			e.transport.admissionMu.Unlock()
+		}
+		if iecOwned && e.observation != nil && old != nil {
+			if ctx := e.observation.entries[identify.Key(old.Key)]; ctx != nil {
+				evidence = ctx.generation
+			}
+		}
+		newGeneration := incoming != nil && incoming.Verified() && evidence != nil &&
+			!sameGeneration(evidence, incoming.Evidence)
+		if iecOwned {
+			// The table owns legacy flow/session retirement. Only recycle the
+			// passive incarnation marker; never end its directional streams,
+			// close correlation or replace its flow state.
+			if newSYN || newGeneration {
+				e.retireDecodeCoverageLocked(st, incoming)
+				e.retireObservationLocked(st, incoming)
+				e.noteTransportSYNLocked(pkt, st.Key)
+			}
+		} else if newSYN || newGeneration || old != nil && old.Closed().Load() {
 			peer := st.Key.Reversed()
 			if old != nil {
 				peer = old.Peer(st.Key)
@@ -93,6 +121,34 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 	for _, old := range retired {
 		e.endFlowStream(old, nil)
 	}
+}
+
+// A retained IEC session owns its tuple even if its current envelope changes.
+// Otherwise ownership is decided from the same opener-oriented envelope as
+// the table's new-session path. Call before taking flowMu.
+func (e *Engine) iecOwnsPacket(pkt capture.Packet) bool {
+	t := e.iec
+	if !isIECPort(pkt) || t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.hasIEC {
+		return false
+	}
+	src, srcOK := addrPort(pkt.SrcIP, pkt.SrcPort)
+	dst, dstOK := addrPort(pkt.DstIP, pkt.DstPort)
+	if !srcOK || !dstOK {
+		// Non-IPv4 traffic is table-owned only inside an enforce
+		// envelope. This query has no actions or session mutations.
+		_, owned := t.nonIPv4Locked(pkt)
+		return owned
+	}
+	if session, _ := t.lookupLocked(src, dst); session != nil {
+		return true
+	}
+	matched, _ := t.envelopeLocked(t.sessionCtx(orient(src, dst)))
+	return matched
 }
 
 func (e *Engine) noteTransportSYNLocked(pkt capture.Packet, key flow.Key) {
@@ -179,6 +235,7 @@ func (e *Engine) bindTransport(state *flow.State, incoming *flow.Connection) {
 
 func (e *Engine) adoptTransportPending(incoming, previous *flow.Connection) {
 	if incoming.Evidence != nil && previous != nil && previous.ID == "" && previous.Key != incoming.Key {
+		e.adoptObservationLocked(incoming, previous)
 		incoming.MergeHistory(previous)
 		if e.anomalyDetector != nil {
 			e.anomalyDetector.AdoptConnection(previous.Key, incoming)
@@ -218,6 +275,7 @@ func (e *Engine) closeCorrelation(state *flow.State, reset, expired bool) {
 		}
 	}
 	if reset || expired || c.FIN().Load() == 3 {
+		e.finishObservation(state)
 		c.Closed().Store(true)
 		if e.transport != nil {
 			e.transport.retireAdmission(state)

@@ -5,6 +5,23 @@ package dpi
 
 import "github.com/tonylturner/containd/pkg/dp/flow"
 
+// DiscardFlow releases passive reassembly and decoder stream state without
+// synthesizing flow-end events or a fail-closed stream error. The owner must
+// prevent further Inspect calls until a new connection incarnation.
+func (m *Manager) DiscardFlow(state *flow.State) {
+	if m == nil {
+		return
+	}
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
+	key := state.Key.Hash()
+	if m.reassembler != nil {
+		m.reassembler.complete(key)
+	}
+	m.endStream(key)
+	delete(m.eventTimes, key)
+}
+
 // A legacy flow stream ends at its flow's end (OnFlowEnd), at a FIN or RST
 // (CloseStream, ResetStream), or fails (FailStream). A stream that fails
 // closed must stay aligned with what its receiver accepts, so a close that
@@ -33,7 +50,7 @@ func (m *Manager) CloseStream(state *flow.State, pkt *ParsedPacket) (bool, []Eve
 		return false, nil, nil
 	}
 	m.endStream(key)
-	evs, err := m.flowEnd(state)
+	evs, err := m.flowEnd(state, eventTime(state, pkt))
 	return true, evs, err
 }
 
@@ -51,7 +68,7 @@ func (m *Manager) ResetStream(peer *flow.State, pkt *ParsedPacket) ([]Event, err
 		return nil, nil
 	}
 	m.endStream(peer.Key.Hash())
-	return m.flowEnd(peer)
+	return m.flowEnd(peer, eventTime(peer, pkt))
 }
 
 // FailStream fails the framed stream of a packet with a StreamError of

@@ -106,6 +106,28 @@ services:
     depends_on:
       - engine
 
+  # Passive identification fixtures reuse the routed endpoint namespaces.
+  # They are opt-in so forwarding/enforcement smoke startup stays unchanged.
+  identify_rtu:
+    profiles: [identify]
+    build:
+      context: ../test/iec104/endpoint
+    image: ${IEC104_ENDPOINT_IMAGE:-containd-iec104-endpoint:identify-smoke}
+    network_mode: "service:modbus_server"
+    environment:
+      - IEC104_PORT=12404
+      - PERIODIC_MS=0
+    depends_on:
+      - modbus_server
+
+  identify_cc:
+    profiles: [identify]
+    image: ${IEC104_ENDPOINT_IMAGE:-containd-iec104-endpoint:identify-smoke}
+    network_mode: "service:ot_client"
+    entrypoint: ["sleep", "infinity"]
+    depends_on:
+      - ot_client
+
   # Origins for the scanning-gate smoke (scripts/smoke-av-gate.sh): av_server
   # on the WAN side serves the EICAR and clean objects on the selected port
   # 8080 and the unselected port 8082; av_target is the LAN target of its

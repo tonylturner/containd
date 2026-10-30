@@ -5,7 +5,6 @@ package itdpi
 
 import (
 	"encoding/binary"
-	"time"
 	"unicode/utf16"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -126,7 +125,6 @@ func (d *SMBDecoder) parseSMBv1(state *flow.State, pkt *dpi.ParsedPacket, smb []
 		Proto:      "smb",
 		Kind:       cmdName,
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return []dpi.Event{ev}, nil
 }
@@ -166,7 +164,6 @@ func (d *SMBDecoder) parseSMBv2(state *flow.State, pkt *dpi.ParsedPacket, smb []
 		Proto:      "smb",
 		Kind:       cmdName,
 		Attributes: attrs,
-		Timestamp:  time.Now().UTC(),
 	}
 	return []dpi.Event{ev}, nil
 }

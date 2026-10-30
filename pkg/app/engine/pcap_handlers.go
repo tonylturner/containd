@@ -383,7 +383,11 @@ func pcapAnalyzeUploadHandler(mgr *pcap.Manager, dpEngine *engine.Engine) http.H
 		if dpEngine != nil && dpEngine.DPI() != nil {
 			decoders = dpEngine.DPI().Decoders()
 		}
-		result, err := pcap.Analyze(file, decoders...)
+		opts := pcap.AnalysisOptions{}
+		if dpEngine != nil {
+			opts.Rules = dpEngine.CurrentRules()
+		}
+		result, err := pcap.AnalyzeWithOptions(file, opts, decoders...)
 		if err != nil {
 			http.Error(w, "analysis failed: "+err.Error(), http.StatusBadRequest)
 			return
@@ -416,7 +420,11 @@ func pcapAnalyzeNameHandler(mgr *pcap.Manager, dpEngine *engine.Engine) http.Han
 		if dpEngine != nil && dpEngine.DPI() != nil {
 			decoders = dpEngine.DPI().Decoders()
 		}
-		result, err := pcap.Analyze(f, decoders...)
+		opts := pcap.AnalysisOptions{}
+		if dpEngine != nil {
+			opts.Rules = dpEngine.CurrentRules()
+		}
+		result, err := pcap.AnalyzeWithOptions(f, opts, decoders...)
 		if err != nil {
 			http.Error(w, "analysis failed: "+err.Error(), http.StatusBadRequest)
 			return

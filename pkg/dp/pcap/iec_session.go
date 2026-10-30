@@ -46,6 +46,16 @@ func endpoint(ip net.IP, port uint16) string {
 	return net.JoinHostPort(ip.String(), strconv.Itoa(int(port)))
 }
 
+func (o *offlineSessions) lookup(src, dst string) (*offlineSession, offlineKey, int) {
+	key, dir := offlineKey{client: src, server: dst}, 0
+	s := o.byKey[key]
+	if s == nil {
+		key, dir = offlineKey{client: dst, server: src}, 1
+		s = o.byKey[key]
+	}
+	return s, key, dir
+}
+
 // annotate fills the session fields of an IEC104 packet. iec reports a
 // TCP packet to or from port 2404; parse reports whether it may be parsed.
 func (o *offlineSessions) annotate(mgr *dpi.Manager, pkt capture.Packet, parsed *dpi.ParsedPacket) (iec, parse bool) {
@@ -63,12 +73,7 @@ func (o *offlineSessions) annotate(mgr *dpi.Manager, pkt capture.Packet, parsed 
 		}
 		return true, false
 	}
-	key, dir := offlineKey{client: src, server: dst}, 0
-	s := o.byKey[key]
-	if s == nil {
-		key, dir = offlineKey{client: dst, server: src}, 1
-		s = o.byKey[key]
-	}
+	s, key, dir := o.lookup(src, dst)
 	if s == nil {
 		return true, false
 	}
