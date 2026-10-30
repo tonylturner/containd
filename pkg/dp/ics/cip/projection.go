@@ -85,7 +85,7 @@ func encapsulationEvents(state *flow.State, hdr *EIPHeader) []dpi.Event {
 func newEvent(state *flow.State, kind string, attrs map[string]any) dpi.Event {
 	id := ""
 	if state != nil {
-		id = state.Key.Hash()
+		id = state.ID()
 	}
 	return dpi.Event{FlowID: id, Proto: eventfields.ProtoCIP, Kind: kind,
 		Attributes: attrs}

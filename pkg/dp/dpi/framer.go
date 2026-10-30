@@ -43,5 +43,10 @@ func (m *Manager) flowFramer(state *flow.State, pkt *ParsedPacket) StreamDecoder
 	if state.Key.Dir == flow.DirForward {
 		serverFirst.Key = state.Key.Reversed()
 	}
-	return firstFramer(m.candidates(&serverFirst), state)
+	for _, d := range m.candidates(&serverFirst) {
+		if sd, ok := d.(StreamDecoder); ok && sd.Supports(state) {
+			return sd
+		}
+	}
+	return nil
 }

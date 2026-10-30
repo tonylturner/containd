@@ -238,9 +238,10 @@ export default function InterfacesPage() {
       const gwErr = validateIP(patch.gateway);
       if (gwErr) { setError(gwErr); return; }
     }
-    const submitted = rowsDraft.editor;
+    const submitted = rowsDraft.beginSave();
     const updated = await api.updateInterface(ifaceName, patch);
     if (!updated.ok) {
+      rowsDraft.failSave(submitted);
       setError(updated.error || "Failed to update interface.");
       return;
     }

@@ -34,8 +34,10 @@ func stampResult(res *InspectResult, at time.Time) {
 	for i := range res.Frames {
 		stampEvents(res.Frames[i].Events, at)
 	}
-	var fe *FrameError
-	if len(res.Events) > 0 && errors.As(res.Err, &fe) && fe.Event.Kind != "" {
-		fe.Event.Timestamp = at
+	if len(res.Events) > 0 && res.Err != nil {
+		var fe *FrameError
+		if errors.As(res.Err, &fe) && fe.Event.Kind != "" {
+			fe.Event.Timestamp = at
+		}
 	}
 }

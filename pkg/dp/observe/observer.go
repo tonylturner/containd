@@ -157,7 +157,7 @@ func (o *Observer) consume(key identify.Key, c *connection) Output {
 	}
 	for _, state := range c.states {
 		if state != nil {
-			ev.FlowID = state.Key.Hash()
+			ev.FlowID = state.ID()
 			break
 		}
 	}

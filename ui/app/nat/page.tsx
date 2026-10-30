@@ -190,7 +190,7 @@ function NATCard({
   nat: NATConfig;
   onSave: (cfg: NATConfig) => Promise<NATConfig | null>;
 }) {
-  const { editor, cfg, setCfg, adoptConfig, acceptConfig, dirty } = useConfigEditor(() => snat(nat));
+  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, dirty } = useConfigEditor(() => snat(nat));
   const enabled = !!cfg.enabled;
   const egressZone = cfg.egressZone ?? "";
   const sourceZones = cfg.sourceZones ?? [];
@@ -314,12 +314,13 @@ function NATCard({
           <button
             disabled={!dirty}
             onClick={async () => {
-              const submitted = editor;
+              const submitted = beginSave();
               const saved = await onSave({ ...nat, ...cfg,
                 egressZone: egressZone.trim() || undefined,
                 sourceZones: sourceZones.map((z) => z.trim()).filter(Boolean),
               });
               if (saved) acceptConfig(submitted, snat(saved));
+              else failSave(submitted);
             }}
             className={
               "rounded-xs px-3 py-1.5 text-sm font-medium transition-ui " +
@@ -347,7 +348,7 @@ function PortForwardsCard({
   nat: NATConfig;
   onSave: (cfg: NATConfig) => Promise<NATConfig | null>;
 }) {
-  const { editor, cfg: items, setCfg: setItems, adoptConfig, acceptConfig, dirty } = useConfigEditor<PortForward[]>(nat.portForwards ?? []);
+  const { editor, cfg: items, setCfg: setItems, adoptConfig, beginSave, failSave, acceptConfig, dirty } = useConfigEditor<PortForward[]>(nat.portForwards ?? []);
   const form = useConfigForm({
     ingressChoice: "", newProto: "tcp" as "tcp" | "udp",
     newListen: "", newDestIp: "", newDestPort: "", newSources: "", newDesc: "",
@@ -439,9 +440,10 @@ function PortForwardsCard({
 
   async function save() {
     setError(null);
-    const submitted = editor;
+    const submitted = beginSave();
     const saved = await onSave({ ...nat, portForwards: items });
     if (saved) acceptConfig(submitted, saved.portForwards ?? []);
+    else failSave(submitted);
   }
 
   function toggle(id: string, enabled: boolean) {

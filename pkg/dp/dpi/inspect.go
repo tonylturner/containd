@@ -43,9 +43,10 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
 	at := eventTime(state, pkt)
-	m.eventTimes[state.Key.Hash()] = at
+	m.eventTimes[state.ID()] = at
 	defer func() { stampResult(&res, at) }()
-	candidates := m.candidates(state)
+	key, session, pos := streamKey(state, pkt)
+	candidates := m.dispatch(state, key)
 	tcp := pkt.Proto == "tcp"
 	stream := m.reassembles(pkt)
 	var framer StreamDecoder
@@ -59,7 +60,6 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 		res.Framed = true
 		res.Proto = framer.Protocol()
 	}
-	key, session, pos := streamKey(state, pkt)
 	if framer != nil {
 		// Also runs on decoder panic, so FailStream retains the same owner.
 		defer func() { m.reassembler.pinFramer(key, framer) }()
@@ -104,9 +104,6 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	}
 
 	for _, d := range candidates {
-		if d == nil || !d.Supports(state) {
-			continue
-		}
 		if _, ok := d.(StreamDecoder); ok && tcp {
 			continue // on TCP a StreamDecoder only ever frames through ParseStream
 		}
@@ -141,10 +138,10 @@ func streamError(state *flow.State, pkt *ParsedPacket, res *InspectResult, se *S
 	return &ev
 }
 
-// firstFramer returns the first supporting StreamDecoder in candidate order.
-func firstFramer(candidates []Decoder, state *flow.State) StreamDecoder {
+// firstFramer returns the first StreamDecoder in committed candidate order.
+func firstFramer(candidates []Decoder) StreamDecoder {
 	for _, d := range candidates {
-		if sd, ok := d.(StreamDecoder); ok && sd.Supports(state) {
+		if sd, ok := d.(StreamDecoder); ok {
 			return sd
 		}
 	}
@@ -239,7 +236,7 @@ func malformedEvent(state *flow.State, pkt *ParsedPacket, proto string, err erro
 		attrs[eventfields.KeySessionID] = pkt.Session
 	}
 	return Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      proto,
 		Kind:       "malformed",
 		Attributes: attrs,
@@ -258,6 +255,7 @@ func (m *Manager) EndStream(session string) {
 		key := sessionStreamKey(session, dir)
 		m.reassembler.complete(key)
 		m.endStream(key)
+		m.releaseSelection(key)
 	}
 }
 
@@ -269,7 +267,7 @@ func streamKey(state *flow.State, pkt *ParsedPacket) (key, session string, pos p
 	if pkt.HasOffset {
 		return sessionStreamKey(pkt.Session, pkt.Dir), pkt.Session, position{kind: posOffset, off: pkt.Offset}
 	}
-	hash := state.Key.Hash()
+	hash := state.ID()
 	if pkt.TCPSeqValid {
 		return hash, hash, position{kind: posSeq, seq: pkt.TCPSeq}
 	}

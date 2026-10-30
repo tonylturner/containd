@@ -56,7 +56,8 @@ func (e *Engine) conformanceScope(state *flow.State, pkt *dpi.ParsedPacket, prot
 	if p == nil || p.snapshot == nil {
 		return nil
 	}
-	ctx := rules.EvalContext{SrcIP: state.Key.OpenerIP(), DstIP: state.Key.ServerIP()}
+	key := state.ServiceKey()
+	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP()}
 	ctx.SrcZone, ctx.DstZone = e.zones.resolve(p.snapshot, ctx.SrcIP, ctx.DstIP)
 	var learn *rules.Entry
 	for i := range p.snapshot.Firewall {
@@ -91,7 +92,7 @@ func (e *Engine) recordConformanceDecision(state *flow.State, pkt *dpi.ParsedPac
 	if scope != nil {
 		attrs[eventfields.KeyRuleID] = scope.ID
 	}
-	e.eventStore.Record(state, pkt, []dpi.Event{{
+	e.recordTaggedEvents(state, pkt, []dpi.Event{{
 		FlowID: conformanceFlowID(state, ev), Proto: ev.Proto, Kind: eventfields.KindDecision,
 		Timestamp: time.Now().UTC(), Attributes: attrs,
 	}})
@@ -211,7 +212,7 @@ func (e *Engine) recordConformanceAlert(state *flow.State, pkt *dpi.ParsedPacket
 			"protocol": ev.Proto, "action": action, key: fresh,
 		})
 		metrics.IDSAlertsTotal.Inc()
-		e.eventStore.Record(state, pkt, []dpi.Event{{
+		e.recordTaggedEvents(state, pkt, []dpi.Event{{
 			FlowID: conformanceFlowID(state, ev), Proto: "ids", Kind: "alert", Timestamp: time.Now().UTC(), Attributes: attrs,
 		}})
 	}
@@ -221,5 +222,5 @@ func conformanceFlowID(state *flow.State, ev dpi.Event) string {
 	if ev.FlowID != "" {
 		return ev.FlowID
 	}
-	return state.Key.Hash()
+	return state.ID()
 }

@@ -61,7 +61,8 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 	// action governs requests only: a reply is enforced only when a rule
 	// matches it. NFQUEUE mode behaves the same, because replies take the
 	// established conntrack path there and are never queued.
-	srcZone, dstZone := e.zones.resolve(snap, state.Key.OpenerIP(), state.Key.ServerIP())
+	key := state.ServiceKey()
+	srcZone, dstZone := e.zones.resolve(snap, key.OpenerIP(), key.ServerIP())
 	applyDefault := !isReply(state)
 	// First arbitrate decoded denials across the whole packet. A later decoded
 	// deny keeps its reason even when an earlier event has strict findings.
@@ -95,7 +96,7 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 			var v verdict.Verdict
 			var matched *rules.Entry
 			if !denied.Denies() {
-				v, matched = e.evaluateVerdictMatch(ctx, applyDefault)
+				v, matched = e.evaluateVerdictMatch(ctx, applyDefault, state)
 			}
 			// Strict replaces defaults, but never a decoded rule denial.
 			if r.strict && matched == nil {
@@ -248,7 +249,7 @@ func isStreamErrorEvent(ev dpi.Event) bool {
 
 // isReply is deliberately limited to the US path; IEC envelopes evaluate
 // both directions through EvaluateIEC104 and deny unmatched replies.
-func isReply(state *flow.State) bool { return state.Key.Dir == flow.DirReverse }
+func isReply(state *flow.State) bool { return state.ServiceKey().Dir == flow.DirReverse }
 
 func messageDirection(state *flow.State) string {
 	if isReply(state) {
@@ -261,8 +262,12 @@ func messageDirection(state *flow.State) string {
 // destination port when the sender opened the connection, the source port
 // on its replies.
 func servicePort(state *flow.State, pkt *dpi.ParsedPacket) uint16 {
-	if state != nil && state.Key.Dir == flow.DirReverse {
-		return pkt.SrcPort
+	if state != nil {
+		key := state.ServiceKey()
+		if key.Dir == flow.DirReverse {
+			return key.SrcPort
+		}
+		return key.DstPort
 	}
 	return pkt.DstPort
 }

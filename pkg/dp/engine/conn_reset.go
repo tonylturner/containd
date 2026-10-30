@@ -11,6 +11,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
@@ -80,7 +81,10 @@ func (t *iecTable) sendRST(r session.Reset) error {
 
 // deleteConntrack deletes the conntrack entry of a connection the engine
 // reset; what names the connection in the error report.
-func (t *iecTable) deleteConntrack(client, server netip.AddrPort, what string) {
+func (t *iecTable) deleteConntrack(client, server netip.AddrPort, connection *flow.Connection, what string) {
+	if connection.Verified() {
+		client, server = connection.Evidence.Original.Source, connection.Evidence.Original.Destination
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	err := t.ctDelete(ctx, conntrack.DeleteRequest{

@@ -138,7 +138,7 @@ func TestTransportAdoptsBothUnresolvedDirectionalHistories(t *testing.T) {
 	for i, state := range []*flow.State{original, reply} {
 		c := r.unresolved("not_found")
 		state.Connection.Store(c)
-		e.flows[state.Key.Hash()] = state
+		e.flows[state.Key.MapKey()] = state
 		e.RecordDPIEvents(state, nil, []dpi.Event{{Proto: "modbus", Kind: "request", FlowID: state.Key.Hash(),
 			Timestamp: time.Now(), Attributes: map[string]any{
 				"transaction_id": uint16(i + 1), "unit_id": uint8(1), "function_code": uint8(3)}}})

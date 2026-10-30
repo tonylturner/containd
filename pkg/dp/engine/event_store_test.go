@@ -33,8 +33,8 @@ func TestReconfigureKeepsSharedEventStore(t *testing.T) {
 
 	// Exercise all store-bound IEC callbacks on the replacement table.
 	sessionID := nextLiveSessionID()
-	e.iec.emit([]events.Event{{Proto: "iec104", Kind: "response",
-		Attributes: map[string]any{"session_id": sessionID}}})
+	e.iec.emit([]iecTelemetry{{Event: events.Event{Proto: "iec104", Kind: "response",
+		Attributes: map[string]any{"session_id": sessionID}}}})
 	if got := store.Flows(0); len(got) != 2 { // one generic group + the IEC session
 		t.Fatalf("IEC emit did not reach the shared store: %+v", got)
 	}

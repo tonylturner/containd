@@ -57,7 +57,7 @@ func TestTCP2404LifecycleOwnership(t *testing.T) {
 				e.flowMu.Unlock()
 				pkt.TCP.Seq++
 				e.retireTransportIncarnation(pkt, nil)
-				if retained := e.flows[st.Key.Hash()] == st; retained != owned {
+				if retained := e.flows[st.Key.MapKey()] == st; retained != owned {
 					t.Fatalf("old incarnation retained = %v, owned = %v", retained, owned)
 				}
 
@@ -67,7 +67,7 @@ func TestTCP2404LifecycleOwnership(t *testing.T) {
 				}
 				markHandshake(&pkt)
 				e.reopenDeniedTCP(pkt)
-				if retained := e.deniedTCP[tcpTupleHash(st.Key)] != nil; retained != owned {
+				if retained := e.deniedTCP[tcpTupleKey(st.Key)] != nil; retained != owned {
 					t.Fatalf("tombstone retained = %v, owned = %v", retained, owned)
 				}
 			})

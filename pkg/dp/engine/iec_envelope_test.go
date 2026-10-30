@@ -22,13 +22,14 @@ func TestIECTableNonIPv4UsesRegistryPort(t *testing.T) {
 		ICS:       rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"},
 	}}})
 	pkt := capture.Packet{SrcIP: net.ParseIP("2001:db8::10"), DstIP: net.ParseIP("2001:db8::20"),
-		SrcPort: 40000, DstPort: 2404}
+		SrcPort: 40000, DstPort: 2404, Proto: 6}
 	for _, reverse := range []bool{false, true} {
 		if reverse {
 			pkt.SrcIP, pkt.DstIP = pkt.DstIP, pkt.SrcIP
 			pkt.SrcPort, pkt.DstPort = pkt.DstPort, pkt.SrcPort
 		}
-		result, matched := tab.nonIPv4Locked(pkt)
+		state := wireServiceState(pkt)
+		result, matched := tab.nonIPv4Locked(&state)
 		if !matched || result.decision.Action != capture.Drop || result.decision.Reason != reasonIECInvalid {
 			t.Fatalf("reverse=%v matched=%v result=%+v", reverse, matched, result)
 		}

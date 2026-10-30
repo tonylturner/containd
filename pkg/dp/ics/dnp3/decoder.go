@@ -26,7 +26,8 @@ func (d *Decoder) Supports(state *flow.State) bool {
 	if state.Key.Proto != 6 {
 		return false
 	}
-	return state.Key.SrcPort == ics.DNP3Port || state.Key.DstPort == ics.DNP3Port
+	key := state.ServiceKey()
+	return key.SrcPort == ics.DNP3Port || key.DstPort == ics.DNP3Port
 }
 
 // Ports implements dpi.PortHinter for port-based dispatch.
@@ -243,7 +244,7 @@ func flowID(state *flow.State) string {
 	if state == nil {
 		return ""
 	}
-	return state.Key.Hash()
+	return state.ID()
 }
 
 func (d *Decoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {

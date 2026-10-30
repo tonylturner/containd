@@ -83,7 +83,7 @@ func (d *TLSDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 		"transport":     pkt.Proto,
 	}
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "tls",
 		Kind:       "client_hello",
 		Attributes: attrs,

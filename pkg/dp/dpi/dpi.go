@@ -87,7 +87,10 @@ type Manager struct {
 	anyDecoders []Decoder            // decoders with no port-specific hint
 	reassembler *reassembler
 	streamEnds  map[string]streamEnd
-	eventTimes  map[string]time.Time // last inspected capture time, under streamMu
+	selected    map[string][]Decoder           // committed dispatch until flow end, under streamMu
+	flowStreams map[string]map[string]struct{} // session keys owned by each flow, under streamMu
+	streamFlows map[string]map[string]struct{} // flow owners of each session key, under streamMu
+	eventTimes  map[string]time.Time           // last inspected capture time, under streamMu
 }
 
 type streamEnd struct {
@@ -103,6 +106,9 @@ func NewManager(decoders ...Decoder) *Manager {
 		reassembler: newReassembler(defaultReassemblyMax, defaultReassemblyTimeout),
 		streamEnds:  make(map[string]streamEnd),
 		eventTimes:  make(map[string]time.Time),
+		selected:    make(map[string][]Decoder),
+		flowStreams: make(map[string]map[string]struct{}),
+		streamFlows: make(map[string]map[string]struct{}),
 	}
 	for _, d := range decoders {
 		m.Add(d)
@@ -150,26 +156,25 @@ func (m *Manager) candidates(state *flow.State) []Decoder {
 		portMap = m.udpByPort
 	}
 
-	// Collect port-indexed decoders for both src and dst ports.
-	var indexed []Decoder
-	if portMap != nil {
-		if decs := portMap[state.Key.SrcPort]; len(decs) > 0 {
-			indexed = append(indexed, decs...)
-		}
-		if decs := portMap[state.Key.DstPort]; len(decs) > 0 {
-			// Avoid duplicates when SrcPort == DstPort.
-			if state.Key.SrcPort != state.Key.DstPort {
-				indexed = append(indexed, decs...)
-			}
-		}
+	key := state.ServiceKey()
+	src := portMap[key.SrcPort]
+	var dst []Decoder
+	if key.SrcPort != key.DstPort {
+		dst = portMap[key.DstPort]
 	}
-
-	if len(indexed) == 0 {
+	// Most flows select one immutable registry slice. Do not copy it on
+	// every packet; only combined lists need their own backing storage.
+	switch {
+	case len(src) == 0 && len(dst) == 0:
 		return m.anyDecoders
+	case len(dst) == 0 && len(m.anyDecoders) == 0:
+		return src
+	case len(src) == 0 && len(m.anyDecoders) == 0:
+		return dst
 	}
-	if len(m.anyDecoders) == 0 {
-		return indexed
-	}
+	indexed := make([]Decoder, 0, len(src)+len(dst)+len(m.anyDecoders))
+	indexed = append(indexed, src...)
+	indexed = append(indexed, dst...)
 	return append(indexed, m.anyDecoders...)
 }
 
@@ -191,11 +196,11 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 
 	// Clean up reassembly buffer for this flow.
 	if m.reassembler != nil {
-		key := state.Key.Hash()
+		key := state.ID()
 		m.reassembler.complete(key)
 		m.endStream(key)
 	}
-	at, ok := m.eventTimes[state.Key.Hash()]
+	at, ok := m.eventTimes[state.ID()]
 	if !ok {
 		at = eventTime(state, nil)
 	}
@@ -205,13 +210,11 @@ func (m *Manager) OnFlowEnd(state *flow.State) ([]Event, error) {
 // flowEnd returns the decoders' flow-end events. Must be called with
 // streamMu held.
 func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
-	delete(m.eventTimes, state.Key.Hash())
+	defer m.releaseFlowSelection(state.ID())
+	delete(m.eventTimes, state.ID())
 	var out []Event
 	var errs []error
-	for _, d := range m.candidates(state) {
-		if d == nil || !d.Supports(state) {
-			continue
-		}
+	for _, d := range m.dispatch(state, state.ID()) {
 		events, err := d.OnFlowEnd(state)
 		if err != nil {
 			errs = append(errs, err)
@@ -220,4 +223,40 @@ func (m *Manager) flowEnd(state *flow.State, at time.Time) ([]Event, error) {
 	}
 	stampEvents(out, at)
 	return out, errors.Join(errs...)
+}
+
+// dispatch commits the first nonempty decoder selection. Evidence may arrive
+// after framing has started; it must not reinterpret that stream with a new
+// decoder. A flow not yet selected can use newly verified service ports.
+// Callers hold streamMu.
+func (m *Manager) dispatch(state *flow.State, id string) []Decoder {
+	if selected := m.selected[id]; len(selected) != 0 {
+		m.ownSelection(state.ID(), id)
+		return selected
+	}
+	var selected []Decoder
+	for _, d := range m.candidates(state) {
+		if d != nil && d.Supports(state) {
+			selected = append(selected, d)
+		}
+	}
+	if len(selected) != 0 {
+		m.selected[id] = selected
+		m.ownSelection(state.ID(), id)
+	}
+	return selected
+}
+
+// CommittedProtocol reports legacy directional dispatch ownership, so passive
+// identification does not infer a different owner from newly verified ports.
+func (m *Manager) CommittedProtocol(state *flow.State, proto string) (matches, committed bool) {
+	m.streamMu.Lock()
+	defer m.streamMu.Unlock()
+	selected := m.selected[state.ID()]
+	for _, decoder := range selected {
+		if stream, ok := decoder.(StreamDecoder); ok && stream.Protocol() == proto {
+			return true, true
+		}
+	}
+	return false, len(selected) != 0
 }

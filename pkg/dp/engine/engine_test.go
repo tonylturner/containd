@@ -458,6 +458,7 @@ func TestShouldInspectICSHeuristics(t *testing.T) {
 	if !e.ShouldInspect(state, &dpi.ParsedPacket{Proto: "tcp", SrcPort: 12345, DstPort: 502}) {
 		t.Fatal("expected inspect for modbus port")
 	}
+	state.Key.DstPort = 80
 	if e.ShouldInspect(state, &dpi.ParsedPacket{Proto: "tcp", SrcPort: 12345, DstPort: 80}) {
 		t.Fatal("expected no inspect for non-ICS port")
 	}

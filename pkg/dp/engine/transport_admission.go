@@ -17,20 +17,19 @@ func (e *Engine) legacyTransportEligible(pkt capture.Packet) bool {
 	if pkt.Invalid != "" || pkt.Proto != 6 && pkt.Proto != 17 {
 		return false
 	}
-	state := &flow.State{Key: packetKey(pkt)}
-	if dir, known := icsServiceDirection(pkt); known {
-		state.Key.Dir = dir
-	}
+	state := wireServiceState(pkt)
+
 	parsed := &dpi.ParsedPacket{Proto: pkt.Transport, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
-	if !e.ShouldInspect(state, parsed) {
+	if !e.ShouldInspect(&state, parsed) {
 		return false
 	}
-	if ics.IsDecoderPortOn(pkt.Proto, pkt.SrcPort) || ics.IsDecoderPortOn(pkt.Proto, pkt.DstPort) {
+	key := state.ServiceKey()
+	if ics.IsDecoderPortOn(key.Proto, key.SrcPort) || ics.IsDecoderPortOn(key.Proto, key.DstPort) {
 		return true
 	}
 	if snap := e.ruleSnap.Load(); snap != nil {
 		for _, entry := range snap.Firewall {
-			if shouldInspectFirewallEntry(entry, state, parsed) {
+			if shouldInspectFirewallEntry(entry, &state, parsed) {
 				return true
 			}
 		}
@@ -140,20 +139,26 @@ func (r *transportResolver) admitHistoryLocked(pkt capture.Packet) *transportAdm
 }
 
 func (r *transportResolver) trackConnection(state *flow.State, at time.Time, history *transportAdmission) {
-	c := state.Connection.Load()
 	r.admissionMu.Lock()
 	defer r.admissionMu.Unlock()
+	r.trackConnectionLocked(state, at, history)
+}
+
+func (r *transportResolver) trackConnectionLocked(state *flow.State, at time.Time, history *transportAdmission) {
+	c := state.Connection.Load()
 	observed := state.Key.Tuple()
 	if history != nil && r.indexed[observed] != history {
 		// A later admitted SYN already owns this tuple. Older queued packets
 		// must neither steal its slot nor copy its losses into the predecessor.
 		return
 	}
-	tuples := []conntrack.Tuple{observed}
+	tuples := [3]conntrack.Tuple{observed}
+	count := 1
 	if c.Evidence != nil {
-		tuples = append(tuples, c.Evidence.Original, c.Evidence.Reply)
+		tuples[1], tuples[2] = c.Evidence.Original, c.Evidence.Reply
+		count = len(tuples)
 	}
-	for _, tuple := range tuples {
+	for _, tuple := range tuples[:count] {
 		entry := r.indexed[tuple]
 		if entry != nil && !entry.connection.Closed().Load() {
 			if entry != history && entry.hasSYN && entry.connection.Key == "" {

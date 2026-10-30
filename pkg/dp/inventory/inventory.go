@@ -55,7 +55,9 @@ func New() *Inventory {
 // Without CT, roles use the wire FlowID, never the event kind.
 func (inv *Inventory) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
 	if key, ok := flow.ParseKey(ev.FlowID); ok {
-		if src, dst, verified := ev.Connection.LogicalIPs(key); verified {
+		state := &flow.State{Key: key}
+		state.Connection.Store(ev.Connection)
+		if src, dst, verified := state.LogicalIPs(); verified {
 			srcIP, dstIP = src, dst
 		}
 	}
@@ -174,8 +176,10 @@ func (inv *Inventory) recordCIP(srcIP, dstIP string, ev dpi.Event) {
 func eventRoles(srcIP, dstIP string, ev dpi.Event, initiator, responder string) (string, string) {
 	key, ok := flow.ParseKey(ev.FlowID)
 	if ok {
-		if src, dst, verified := ev.Connection.LogicalIPs(key); verified && src == srcIP && dst == dstIP {
-			if ev.Connection.Direction(key) == flow.DirReverse {
+		state := &flow.State{Key: key}
+		state.Connection.Store(ev.Connection)
+		if src, dst, verified := state.LogicalIPs(); verified && src == srcIP && dst == dstIP {
+			if state.ServiceKey().Dir == flow.DirReverse {
 				return responder, initiator
 			}
 			return initiator, responder

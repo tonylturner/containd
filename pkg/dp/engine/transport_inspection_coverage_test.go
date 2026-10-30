@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Exclusion applies to the original client's wire IP, not to the SNAT reply.
+// Exclusion uses the original client, including on the verified SNAT reply.
 // Seeing its SYN must not prove that its deliberately uninspected requests
 // were all entered into the transaction table.
 func TestTransportNATExcludedRequestsDoNotBecomeUnmatched(t *testing.T) {
@@ -46,18 +46,13 @@ func TestTransportNATExcludedRequestsDoNotBecomeUnmatched(t *testing.T) {
 		reply := transportWire(evidence.Reply, at.Add(delta+time.Millisecond), []byte{0, byte(i + 1), 0, 0, 0, 7, 1, 3, 4, 0, 10, 0, 11})
 		reply.TCP = capture.TCPMeta{Valid: true, Flags: capture.TCPFlagACK, Seq: 2000 + uint32(i*13)}
 		if !e.transportEligible(reply) {
-			t.Fatal("translated reply unexpectedly excluded")
+			t.Fatal("wire admission excluded a reply before evidence resolution")
 		}
 		deliver(reply)
 	}
 	evs := transportModbusEvents(e)
-	if len(evs) != 2 {
-		t.Fatalf("decoded %d events, want two replies: %+v", len(evs), evs)
-	}
-	for _, ev := range evs {
-		if ev.Kind != "response" {
-			t.Fatalf("unexpected inspected request: %+v", ev)
-		}
+	if len(evs) != 0 {
+		t.Fatalf("excluded logical connection decoded %d events: %+v", len(evs), evs)
 	}
 	stats := e.AnomalyDetector().PairingStats()
 	if stats.Unmatched != 0 {

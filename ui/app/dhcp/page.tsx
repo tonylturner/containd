@@ -64,7 +64,7 @@ function textToReservations(text: string): DHCPReservation[] {
 export default function DHCPPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const { editor, cfg, setCfg, dirty, adoptConfig, acceptConfig, text, setText } = useConfigEditor(() => normalize(null));
+  const { editor, cfg, setCfg, dirty, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor(() => normalize(null));
   const [status, setStatus] = useState<DHCPStatus | null>(null);
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
@@ -139,7 +139,7 @@ export default function DHCPPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    const submitted = editor;
+    const submitted = beginSave();
     const payload = { ...cfg,
       listenIfaces: listenIfacesText.split(",").map((s) => s.trim()).filter(Boolean),
       dnsServers: dnsServersText.split(",").map((s) => s.trim()).filter(Boolean),
@@ -149,8 +149,9 @@ export default function DHCPPage() {
       success: "DHCP staged — commit to apply.",
       failure: "Failed to save DHCP settings.",
     });
-    if (!saved) return;
+    if (!saved) { failSave(submitted); return; }
     if (!saved.ok) {
+      failSave(submitted);
       setError(saved.error);
       return;
     }

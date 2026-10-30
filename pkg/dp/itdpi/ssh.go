@@ -122,7 +122,7 @@ func (d *SSHDecoder) parseVersionExchange(state *flow.State, pkt *dpi.ParsedPack
 	}
 
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "ssh",
 		Kind:       "version_exchange",
 		Attributes: attrs,
@@ -215,7 +215,7 @@ func (d *SSHDecoder) parseKexInit(state *flow.State, pkt *dpi.ParsedPacket) (dpi
 	}
 
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "ssh",
 		Kind:       "kex_init",
 		Attributes: attrs,

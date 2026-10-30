@@ -65,7 +65,7 @@ func TestIECAPCIAlertsObservational(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			h := newAPCIHarness(t, mode)
 			emit := h.e.iec.emit
-			h.e.iec.emit = func(evs []events.Event) {
+			h.e.iec.emit = func(evs []iecTelemetry) {
 				if !h.e.iec.mu.TryLock() {
 					t.Fatal("event consumer called under the session lock")
 				}

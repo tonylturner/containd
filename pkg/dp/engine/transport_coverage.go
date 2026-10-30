@@ -105,7 +105,7 @@ func (r *transportResolver) noteDecodeLossLocked(pkt capture.Packet, history *tr
 	default:
 		// No unbounded side queue. The marker itself retains the loss.
 		// The worker collects these bounded index/flow/packet owners.
-		r.lossFallback = true
+		r.lossFallback.Store(true)
 		c.conservative = true
 	}
 }
@@ -114,7 +114,7 @@ func (r *transportResolver) noteDecodeLossLocked(pkt capture.Packet, history *tr
 func (e *Engine) bindDecodeCoverageLocked(st *flow.State, history *transportAdmission) {
 	// A packet can retain its state after concurrent denial retirement or
 	// sweeping. Never resurrect that state (or attach its history to a reuse).
-	if e.flows[st.Key.Hash()] != st {
+	if e.flows[st.Key.MapKey()] != st {
 		return
 	}
 	r := e.transport
@@ -139,7 +139,7 @@ func (e *Engine) bindDecodeCoverageLocked(st *flow.State, history *transportAdmi
 				c.packet, c.at, c.reason = previous.packet, previous.at, previous.reason
 			}
 			c.lost, c.conservative = true, true
-			r.lossFallback = true
+			r.lossFallback.Store(true)
 		}
 	}
 	tuples := []flow.Key{st.Key, connection.Peer(st.Key)}
@@ -176,14 +176,14 @@ func (e *Engine) bindDecodeCoverageLocked(st *flow.State, history *transportAdmi
 // A full notice channel cannot discard a stop marker. Scan only on that rare
 // path and cap the pending window, collecting from already bounded owners.
 func (r *transportResolver) decodeLossFallback(e *Engine, pending []transportPacket) []transportPacket {
+	if !r.lossFallback.Load() {
+		return nil
+	}
 	e.flowMu.Lock()
 	defer e.flowMu.Unlock()
 	r.admissionMu.Lock()
 	defer r.admissionMu.Unlock()
-	if !r.lossFallback {
-		return nil
-	}
-	r.lossFallback = false
+	r.lossFallback.Store(false)
 	var out []transportPacket
 	add := func(c *transportCoverage) {
 		c = c.root()
@@ -191,7 +191,7 @@ func (r *transportResolver) decodeLossFallback(e *Engine, pending []transportPac
 			return
 		}
 		if len(pending)+len(out) >= 2*transportQueueLimit {
-			r.lossFallback = true
+			r.lossFallback.Store(true)
 			return
 		}
 		c.scheduled = true
@@ -214,18 +214,25 @@ func (r *transportResolver) decodeLossFallback(e *Engine, pending []transportPac
 // Stop at the worker's loss point. A late/earlier notice or equal timestamp
 // stops conservatively at the next packet; already processed bytes cannot be
 // retracted. This guard also covers a notice still waiting for a bounded slot.
-func (e *Engine) applyDecodeCoverage(st *flow.State, pkt capture.Packet) bool {
+// Bind admission and coverage and decide once per worker packet. Only the
+// resolver worker stops decoding; capture admission can record a future loss,
+// but cannot invalidate this packet's stopped snapshot mid-inspection.
+func (e *Engine) prepareDecodeCoverage(st *flow.State, pkt capture.Packet, at time.Time, incoming *flow.Connection, history *transportAdmission) bool {
 	r := e.transport
-	if r == nil || pkt.Token.Inline() {
+	if r == nil {
 		return false
 	}
 	e.flowMu.Lock()
 	r.admissionMu.Lock()
+	if incoming != nil {
+		r.trackConnectionLocked(st, at, history)
+		e.bindDecodeCoverageLocked(st, history)
+	}
 	c := e.transportCoverage[st].root()
-	stop := c != nil && (c.stopped || c.conservative && c.lost && !pkt.Timestamp.Before(c.packet.Timestamp))
+	stop := c != nil && (c.stopped || !pkt.Token.Inline() && c.conservative && c.lost && !pkt.Timestamp.Before(c.packet.Timestamp))
 	r.admissionMu.Unlock()
 	e.flowMu.Unlock()
-	if stop {
+	if stop && !pkt.Token.Inline() {
 		e.stopDecodeCoverage(c, st.Connection.Load())
 	}
 	return stop
@@ -247,7 +254,7 @@ func (e *Engine) consumeDecodeLoss(p transportPacket, connection *flow.Connectio
 	}
 	var target *transportCoverage
 	for _, key := range tuples {
-		if st := e.tupleStateLocked(key.Tuple()); st != nil && e.flows[st.Key.Hash()] == st {
+		if st := e.tupleStateLocked(key.Tuple()); st != nil && e.flows[st.Key.MapKey()] == st {
 			current := st.Connection.Load()
 			if current != nil && (current.Key == connection.Key || !connection.Verified() ||
 				sameGeneration(current.Evidence, connection.Evidence)) {

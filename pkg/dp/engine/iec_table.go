@@ -16,7 +16,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
-	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
@@ -69,6 +68,7 @@ const (
 // iecSession is one IEC104 session incarnation, from its SYN.
 type iecSession struct {
 	id         string
+	flow       *flow.State // service authority; client/server below stay in packet space
 	client     netip.AddrPort
 	server     netip.AddrPort
 	ctx        rules.EvalContext // opener-oriented session tuple
@@ -131,7 +131,7 @@ type iecTable struct {
 	health     *iecHealth
 	settler    func() capture.Settler
 	jobs       *worker
-	emit       func([]events.Event)
+	emit       func([]iecTelemetry)
 	markAbort  func(sessionID string)
 	onError    func(error)
 	newPolicy  func(*rules.Snapshot) iecPolicy
@@ -202,6 +202,23 @@ func pairKey(client, server netip.AddrPort) string {
 // sessionCtx is the opener-oriented evaluation context of a session.
 func (t *iecTable) sessionCtx(client, server netip.AddrPort) rules.EvalContext {
 	return iecSessionContext(t.snap, client, server, t.zones.resolve)
+}
+
+// stateContext uses the same service authority as generic ICS policy.
+func (t *iecTable) stateContext(state *flow.State) rules.EvalContext {
+	key := state.ServiceKey()
+	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP(), Proto: "tcp",
+		Port: strconv.Itoa(int(servicePort(state, nil)))}
+	ctx.SrcZone, ctx.DstZone = t.zones.resolve(t.snap, ctx.SrcIP, ctx.DstIP)
+	ctx.Identities = t.snap.IdentitiesOf(ctx.SrcIP)
+	return ctx
+}
+
+func (t *iecTable) sessionContext(s *iecSession) rules.EvalContext {
+	if s.flow != nil {
+		return t.stateContext(s.flow)
+	}
+	return t.sessionCtx(s.client, s.server)
 }
 
 func iecSessionContext(snap *rules.Snapshot, client, server netip.AddrPort, resolve zoneResolver) rules.EvalContext {
@@ -281,7 +298,7 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 		if s.state != iecSynSent && s.state != iecEstablished {
 			continue
 		}
-		ctx := t.sessionCtx(s.client, s.server)
+		ctx := t.sessionContext(s)
 		matched, mode := t.envelopeLocked(ctx)
 		switch {
 		case matched && mode == s.mode:

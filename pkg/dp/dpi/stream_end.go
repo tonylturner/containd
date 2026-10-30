@@ -14,12 +14,13 @@ func (m *Manager) DiscardFlow(state *flow.State) {
 	}
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
-	key := state.Key.Hash()
+	key := state.ID()
 	if m.reassembler != nil {
 		m.reassembler.complete(key)
 	}
 	m.endStream(key)
 	delete(m.eventTimes, key)
+	m.releaseFlowSelection(key)
 }
 
 // A legacy flow stream ends at its flow's end (OnFlowEnd), at a FIN or RST
@@ -64,10 +65,10 @@ func (m *Manager) ResetStream(peer *flow.State, pkt *ParsedPacket) ([]Event, err
 	}
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
-	if !m.reassembler.endPeer(peer.Key.Hash(), pkt.FailClosed) {
+	if !m.reassembler.endPeer(peer.ID(), pkt.FailClosed) {
 		return nil, nil
 	}
-	m.endStream(peer.Key.Hash())
+	m.endStream(peer.ID())
 	return m.flowEnd(peer, eventTime(peer, pkt))
 }
 
@@ -85,11 +86,12 @@ func (m *Manager) FailStream(state *flow.State, pkt *ParsedPacket, kind StreamEr
 	}
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
+	key, _, _ := streamKey(state, pkt)
+	m.dispatch(state, key)
 	framer := m.flowFramer(state, pkt)
 	if framer == nil {
 		return
 	}
-	key, _, _ := streamKey(state, pkt)
 	m.reassembler.fail(key, &StreamError{Kind: kind, Offset: m.reassembler.watermark(key), Proto: framer.Protocol()})
 	m.reassembler.pinFramer(key, framer)
 	m.endStream(key)

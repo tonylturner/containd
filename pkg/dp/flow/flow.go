@@ -5,8 +5,8 @@ package flow
 
 import (
 	"net"
+	"net/netip"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -63,30 +63,33 @@ func (k Key) ServerIP() net.IP {
 	return k.DstIP
 }
 
-// Hash provides a simple string hash for map usage.
-// Uses strings.Builder to minimize allocations on the hot path.
+// Hash returns the public directional flow ID. Its textual format is stable;
+// internal tuple maps should use MapKey instead.
 func (k Key) Hash() string {
-	var b strings.Builder
-	b.Grow(64) // pre-allocate typical size
-	b.WriteString(k.SrcIP.String())
-	b.WriteByte('|')
-	b.WriteString(k.DstIP.String())
-	b.WriteByte('|')
-	b.WriteString(strconv.FormatUint(uint64(k.SrcPort), 10))
-	b.WriteByte('|')
-	b.WriteString(strconv.FormatUint(uint64(k.DstPort), 10))
-	b.WriteByte('|')
-	b.WriteByte('0' + k.Proto/100%10)
-	b.WriteByte('0' + k.Proto/10%10)
-	b.WriteByte('0' + k.Proto%10)
-	b.WriteByte('|')
-	b.WriteByte('0' + byte(k.Dir))
-	return b.String()
+	var buf [128]byte // two IPv6 addresses, ports, protocol and separators
+	b := appendIP(buf[:0], k.SrcIP)
+	b = append(b, '|')
+	b = appendIP(b, k.DstIP)
+	b = append(b, '|')
+	b = strconv.AppendUint(b, uint64(k.SrcPort), 10)
+	b = append(b, '|')
+	b = strconv.AppendUint(b, uint64(k.DstPort), 10)
+	b = append(b, '|', '0'+k.Proto/100%10, '0'+k.Proto/10%10, '0'+k.Proto%10, '|', '0'+byte(k.Dir))
+	return string(b)
+}
+
+func appendIP(b []byte, ip net.IP) []byte {
+	if addr, ok := netip.AddrFromSlice(ip); ok {
+		return addr.Unmap().AppendTo(b)
+	}
+	return append(b, ip.String()...)
 }
 
 // State holds runtime flow state and timestamps.
 type State struct {
 	Key         Key
+	idKey       MapKey
+	id          string
 	Connection  ConnectionSlot `json:"-"`
 	FirstSeen   time.Time
 	LastSeen    time.Time
@@ -97,18 +100,31 @@ type State struct {
 	IdleTimeout time.Duration
 	HardTimeout time.Duration
 	LastAction  string
-	// Tags are the labels of the TAG rules that matched the connection
-	// when this direction's state was created; fixed for its lifetime.
+	// Tags are the labels of the TAG rules that match this connection
+	// at evidence binding. The engine guards updates and snapshots with flowMu.
 	Tags []string
 }
 
 func NewState(key Key, now time.Time) *State {
 	return &State{
 		Key:        key,
+		idKey:      key.MapKey(),
+		id:         key.Hash(),
 		Connection: newConnectionSlot(),
 		FirstSeen:  now,
 		LastSeen:   now,
 	}
+}
+
+// ID returns the public flow ID without formatting the tuple again. The cache
+// is immutable so State snapshots remain copyable. Standalone callers may
+// construct states directly or edit Key (including its IP slices); those keys
+// are formatted afresh rather than returning a stale ID.
+func (s *State) ID() string {
+	if s.id != "" && s.idKey == s.Key.MapKey() {
+		return s.id
+	}
+	return s.Key.Hash()
 }
 
 // Touch updates timestamps and counters.

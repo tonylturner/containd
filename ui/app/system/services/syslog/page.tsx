@@ -20,7 +20,7 @@ import { SyslogAuditStatusPanel } from "./syslog-audit-status";
 export default function SyslogPage() {
   const canEdit = isAdmin();
   const toast = useToast();
-  const { editor, cfg, setCfg, adoptConfig, acceptConfig } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 });
+  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 });
   const [status, setStatus] = useState<SyslogStatus | null>(null);
   const form = useConfigForm({ forwarder: {
     address: "",
@@ -105,14 +105,14 @@ export default function SyslogPage() {
   async function onSave() {
     if (!canEdit) return;
     setError(null);
-    const submitted = editor;
+    const submitted = beginSave();
     const saved = await save.run("save", () => api.setSyslog(cfg), {
       success: "Syslog staged — commit to apply.",
       failure: "Failed to save syslog settings.",
     });
-    if (!saved) return;
+    if (!saved) { failSave(submitted); return; }
     if (saved.ok) acceptConfig(submitted, saved.data);
-    else setError(saved.error);
+    else { failSave(submitted); setError(saved.error); }
   }
 
   return (

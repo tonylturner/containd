@@ -36,7 +36,7 @@ import { isRuleEnabled } from "./ids-shared";
 export default function IDSPage() {
   const canEdit = isAdmin();
   const draft = useConfigEditor<IDSConfig>({ enabled: false, rules: [] });
-  const { editor, cfg: ids, setCfg: setIds, adoptConfig, acceptConfig, text, setText, clearText } = draft;
+  const { editor, cfg: ids, setCfg: setIds, adoptConfig, beginSave, failSave, acceptConfig, text, setText, clearText } = draft;
   const { acceptCollection } = draft;
   const panelForm = useConfigForm<IDSPanelFields>({ name: "", filter: "", format: "", sigmaText: "" });
   const { refreshForm } = panelForm;
@@ -87,9 +87,9 @@ export default function IDSPage() {
     if (!canEdit || importPending) return;
     setError(null);
     // The modal is not submitted by the page Save button.
-    const submitted = { ...editor, raw: {} };
+    const submitted = beginSave({});
     const saved = await api.setIDS(ids);
-    if (!saved.ok) { setError(saved.error || "Failed to save IDS rules."); return; }
+    if (!saved.ok) { failSave(submitted); setError(saved.error || "Failed to save IDS rules."); return; }
     acceptConfig(submitted, saved.data);
     flashSuccess("IDS rules staged — commit to apply.");
   }
