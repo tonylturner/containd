@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { expect, test } from "./fixtures/topology-test";
 import type { ConfigDiff } from "../lib/api-config";
 
 async function setup(page: Page) {

@@ -9,24 +9,24 @@ import {
   NodeChange,
   useReactFlow,
   ReactFlowProvider,
-} from "reactflow";
-import type { BackgroundProps, ControlProps, MiniMapProps } from "reactflow";
-import "reactflow/dist/style.css";
+} from "@xyflow/react";
+import type { BackgroundProps, ControlProps, MiniMapProps } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 
 const ReactFlow = dynamic(
-  () => import("reactflow").then((m) => m.default),
+  () => import("@xyflow/react").then((m) => m.ReactFlow<Node<TopoNodeData>>),
   { ssr: false, loading: () => <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading topology...</div> },
 );
 const Background = dynamic(
-  () => import("reactflow").then((m) => m.Background as React.ComponentType<BackgroundProps>),
+  () => import("@xyflow/react").then((m) => m.Background as React.ComponentType<BackgroundProps>),
   { ssr: false },
 );
 const Controls = dynamic(
-  () => import("reactflow").then((m) => m.Controls as React.ComponentType<ControlProps>),
+  () => import("@xyflow/react").then((m) => m.Controls as React.ComponentType<ControlProps>),
   { ssr: false },
 );
 const MiniMap = dynamic(
-  () => import("reactflow").then((m) => m.MiniMap as React.ComponentType<MiniMapProps>),
+  () => import("@xyflow/react").then((m) => m.MiniMap as React.ComponentType<MiniMapProps>),
   { ssr: false },
 );
 const PhysicalView = dynamic(() => import("./PhysicalView"), {
@@ -131,7 +131,7 @@ function TopologyInner() {
   }, []);
 
   // ── Handle all node changes (position, dimensions, selection, etc.) ──
-  const onNodesChange = useCallback((changes: NodeChange[]) => {
+  const onNodesChange = useCallback((changes: NodeChange<Node<TopoNodeData>>[]) => {
     setNodes((prev) => applyNodeChanges(changes, prev));
   }, []);
 

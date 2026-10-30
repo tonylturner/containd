@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Edge, Handle, Node, NodeProps, Position } from "reactflow";
+import { Edge, Handle, Node, NodeProps, Position } from "@xyflow/react";
 
 import {
   api,
@@ -75,7 +75,7 @@ export function buildTopologyRules(rules: FirewallRule[], counters: ApiResult<Ru
   });
 }
 
-export interface TopoNodeData {
+export type TopoNodeData = {
   label: string;
   nodeType: "internet" | "gateway" | "firewall" | "zone";
   status?: "ok" | "warn" | "crit" | "down";
@@ -103,7 +103,7 @@ export interface TopoNodeData {
   vlan?: number | null;
   desc?: string;
   selected?: boolean;
-}
+};
 
 export interface TopologyAction {
   href: string;
@@ -132,7 +132,7 @@ const hStyle: React.CSSProperties = {
   pointerEvents: "none",
 };
 
-function InternetNode({ data }: NodeProps<TopoNodeData>) {
+function InternetNode({ data }: NodeProps<Node<TopoNodeData>>) {
   return (
     <div
       className={`${s.nodeCard} ${s.accentGray} ${data.selected ? s.nodeCardSelected : ""}`}
@@ -149,7 +149,7 @@ function InternetNode({ data }: NodeProps<TopoNodeData>) {
   );
 }
 
-function GatewayNode({ data }: NodeProps<TopoNodeData>) {
+function GatewayNode({ data }: NodeProps<Node<TopoNodeData>>) {
   const sc = STATUS_COLORS[data.status || "ok"];
   return (
     <div
@@ -172,7 +172,7 @@ function GatewayNode({ data }: NodeProps<TopoNodeData>) {
   );
 }
 
-function FirewallNode({ data }: NodeProps<TopoNodeData>) {
+function FirewallNode({ data }: NodeProps<Node<TopoNodeData>>) {
   return (
     <div
       className={`${s.nodeCard} ${s.accentAmber} ${data.selected ? s.nodeCardSelected : ""}`}
@@ -196,7 +196,7 @@ function FirewallNode({ data }: NodeProps<TopoNodeData>) {
   );
 }
 
-function ZoneNode({ data }: NodeProps<TopoNodeData>) {
+function ZoneNode({ data }: NodeProps<Node<TopoNodeData>>) {
   const st = data.status || "ok";
   const sc = STATUS_COLORS[st];
   const accentCls =

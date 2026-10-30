@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/topology-test";
 
 import { buildTopologyRules } from "../app/topology/topology-shared";
 import type { FirewallRule } from "../lib/api";
