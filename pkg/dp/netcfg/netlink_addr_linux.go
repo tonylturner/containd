@@ -7,6 +7,7 @@ package netcfg
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -20,182 +21,46 @@ import (
 var nlSeq uint32
 
 func addAddr(ifIndex int, ipnet *net.IPNet) error {
-	if ipnet == nil {
+	err := createAddr(ifIndex, ipnet)
+	if errors.Is(err, unix.EEXIST) {
 		return nil
 	}
-	ip := ipnet.IP
-	if ip == nil {
-		return nil
-	}
-	var family int
-	if ip4 := ip.To4(); ip4 != nil {
-		ip = ip4
-		family = unix.AF_INET
-	} else {
-		ip = ip.To16()
-		family = unix.AF_INET6
-		if ip == nil {
-			return errors.New("invalid IP")
-		}
-	}
-	prefixLen, _ := ipnet.Mask.Size()
+	return err
+}
 
-	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
-	if err != nil {
-		return err
-	}
-	defer unix.Close(fd)
-	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return err
-	}
-
-	seq := atomic.AddUint32(&nlSeq, 1)
-
-	var req bytes.Buffer
-	hdr := unix.NlMsghdr{
-		Type:  unix.RTM_NEWADDR,
-		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_EXCL,
-		Seq:   seq,
-		Pid:   uint32(unix.Getpid()),
-	}
-	_ = binary.Write(&req, binary.NativeEndian, hdr)
-
-	ifa := unix.IfAddrmsg{
-		Family:    uint8(family),
-		Prefixlen: uint8(prefixLen),
-		Flags:     0,
-		Scope:     0,
-		Index:     uint32(ifIndex),
-	}
-	_ = binary.Write(&req, binary.NativeEndian, ifa)
-
-	addRtAttr(&req, unix.IFA_LOCAL, ip)
-	addRtAttr(&req, unix.IFA_ADDRESS, ip)
-
-	b := req.Bytes()
-	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
-
-	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return err
-	}
-
-	buf := make([]byte, 8192)
-	n, _, err := unix.Recvfrom(fd, buf, 0)
-	if err != nil {
-		return err
-	}
-	msgs, err := syscall.ParseNetlinkMessage(buf[:n])
-	if err != nil {
-		return err
-	}
-	for _, m := range msgs {
-		if m.Header.Seq != seq {
-			continue
-		}
-		switch m.Header.Type {
-		case unix.NLMSG_ERROR:
-			if len(m.Data) < 4 {
-				return errors.New("netlink error")
-			}
-			code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
-			if code == 0 {
-				return nil
-			}
-			if -code == int32(unix.EEXIST) {
-				return nil
-			}
-			return unix.Errno(-code)
-		case unix.NLMSG_DONE:
-			return nil
-		}
-	}
-	return nil
+// createAddr distinguishes a newly created address from foreign existing intent.
+func createAddr(ifIndex int, ipnet *net.IPNet) error {
+	return mutateAddr(ifIndex, ipnet, unix.RTM_NEWADDR, unix.NLM_F_CREATE|unix.NLM_F_EXCL)
 }
 
 func delAddr(ifIndex int, ipnet *net.IPNet) error {
-	if ipnet == nil {
+	err := mutateAddr(ifIndex, ipnet, unix.RTM_DELADDR, 0)
+	if errors.Is(err, unix.EADDRNOTAVAIL) {
 		return nil
 	}
-	ip := ipnet.IP
+	return err
+}
+
+func mutateAddr(ifIndex int, ipnet *net.IPNet, kind, flags uint16) error {
+	if ipnet == nil || ipnet.IP == nil {
+		return errors.New("missing address")
+	}
+	ip := ipnet.IP.To4()
+	family := unix.AF_INET
 	if ip == nil {
-		return nil
-	}
-	var family int
-	if ip4 := ip.To4(); ip4 != nil {
-		ip = ip4
-		family = unix.AF_INET
-	} else {
-		ip = ip.To16()
+		ip = ipnet.IP.To16()
 		family = unix.AF_INET6
-		if ip == nil {
-			return errors.New("invalid IP")
-		}
 	}
-	prefixLen, _ := ipnet.Mask.Size()
-
-	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
-	if err != nil {
-		return err
+	if ip == nil {
+		return errors.New("invalid IP")
 	}
-	defer unix.Close(fd)
-	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return err
-	}
-	seq := atomic.AddUint32(&nlSeq, 1)
-
-	var req bytes.Buffer
-	hdr := unix.NlMsghdr{
-		Type:  unix.RTM_DELADDR,
-		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK,
-		Seq:   seq,
-		Pid:   uint32(unix.Getpid()),
-	}
-	_ = binary.Write(&req, binary.NativeEndian, hdr)
-	ifa := unix.IfAddrmsg{
-		Family:    uint8(family),
-		Prefixlen: uint8(prefixLen),
-		Flags:     0,
-		Scope:     0,
-		Index:     uint32(ifIndex),
-	}
-	_ = binary.Write(&req, binary.NativeEndian, ifa)
-	addRtAttr(&req, unix.IFA_LOCAL, ip)
-	addRtAttr(&req, unix.IFA_ADDRESS, ip)
-
-	b := req.Bytes()
-	(*unix.NlMsghdr)(unsafe.Pointer(&b[0])).Len = uint32(len(b))
-	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return err
-	}
-	buf := make([]byte, 8192)
-	n, _, err := unix.Recvfrom(fd, buf, 0)
-	if err != nil {
-		return err
-	}
-	msgs, err := syscall.ParseNetlinkMessage(buf[:n])
-	if err != nil {
-		return err
-	}
-	for _, m := range msgs {
-		if m.Header.Seq != seq {
-			continue
-		}
-		if m.Header.Type != unix.NLMSG_ERROR {
-			continue
-		}
-		if len(m.Data) < 4 {
-			return errors.New("netlink error")
-		}
-		code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
-		if code == 0 {
-			return nil
-		}
-		if -code == int32(unix.EADDRNOTAVAIL) {
-			return nil
-		}
-		return unix.Errno(-code)
-	}
-	return nil
+	prefix, _ := ipnet.Mask.Size()
+	var payload bytes.Buffer
+	payload.Write(netlinkPayload(unix.IfAddrmsg{Family: uint8(family), Prefixlen: uint8(prefix), Index: uint32(ifIndex)}))
+	addRtAttr(&payload, unix.IFA_LOCAL, ip)
+	addRtAttr(&payload, unix.IFA_ADDRESS, ip)
+	_, err := netlinkRequest(context.Background(), kind, unix.NLM_F_ACK|flags, payload.Bytes())
+	return err
 }
 
 func listAddrs(ifIndex int, family int) ([]*net.IPNet, error) {

@@ -123,7 +123,7 @@ func TestUpdateUser(t *testing.T) {
 	ctx := context.Background()
 
 	u, _ := s.Create(ctx, User{Username: "dana", Role: "view"}, storeCredential("dana-view"))
-	updated, err := s.Update(ctx, u.ID, User{FirstName: "Dana", Email: "dana@example.com"})
+	updated, err := s.Update(ctx, u.ID, Patch{FirstName: new("Dana"), Email: new("dana@example.com")})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestUpdateInvalidRole(t *testing.T) {
 	ctx := context.Background()
 
 	u, _ := s.Create(ctx, User{Username: "eve", Role: "admin"}, storeCredential("eve-admin"))
-	_, err := s.Update(ctx, u.ID, User{Role: "superadmin"})
+	_, err := s.Update(ctx, u.ID, Patch{Role: "superadmin"})
 	if err == nil {
 		t.Fatal("expected error for invalid role")
 	}
@@ -474,5 +474,28 @@ END;`); err != nil {
 	list, err := s.List(ctx)
 	if err != nil || len(list) != 1 || list[0].ID != u.ID {
 		t.Fatalf("users changed after rollback: %+v (%v)", list, err)
+	}
+}
+
+func TestUpdatePreservesOmittedProfile(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u, err := s.Create(ctx, User{Username: "profile", Role: "view", FirstName: "First", LastName: "Last", Email: "mail@example.com"}, storeCredential("profile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Update(ctx, u.ID, Patch{Role: "view"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FirstName != u.FirstName || got.LastName != u.LastName || got.Email != u.Email {
+		t.Fatalf("omitted fields changed: %+v", got)
+	}
+	got, err = s.Update(ctx, u.ID, Patch{FirstName: new(""), LastName: new(""), Email: new("")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FirstName != "" || got.LastName != "" || got.Email != "" {
+		t.Fatalf("fields not cleared: %+v", got)
 	}
 }

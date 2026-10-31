@@ -46,6 +46,7 @@ What the design delivers by default:
 - Sessions are server-side records behind signed JWTs, with a 30-minute idle
   limit and a 4-hour maximum. Logout revokes the session. Outside lab mode,
   management refuses to start with an empty or example `CONTAIND_JWT_SECRET`.
+- The last admin cannot be deleted or demoted, including by concurrent requests.
 - API routes enforce the `admin` or `view` role. SSH accepts only `admin`
   accounts.
 - SSH password login of an account with MFA asks for its TOTP code. An account
@@ -54,6 +55,12 @@ What the design delivers by default:
   connections. The session that made the change stays signed in.
 - A TOTP code works once. Web/API and SSH refuse a code whose time step is not
   later than the account's last accepted one, including after a restart.
+- Each MFA login or enrollment challenge works once and expires after five
+  minutes. Pending and consumed state survives management restarts. A password,
+  TOTP or role change invalidates pending challenges; start login or setup again.
+  Incorrect codes leave the challenge usable until expiry; login code failures
+  still count toward the per-account limit. Expired challenge rows are pruned
+  when challenges are issued or redeemed.
 - The SSH menu and setup wizard ask for the current password before they change
   the signed-in account's password, so a session opened with a key cannot set it.
 - Web/API login and SSH login, including TOTP codes, are rate-limited. SSH

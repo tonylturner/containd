@@ -53,6 +53,22 @@ That complements the other validation workflows:
   scheduled checks of the published images (see
   [SBOM](sbom.md#scheduled-checks-of-published-images))
 
+## Release CI Gate
+
+Run the promotion decision tests offline:
+
+```bash
+python3 scripts/release-ci-gate.test.py
+actionlint .github/workflows/release.yml
+```
+
+The tests exercise exact-commit push-to-main matching, rejected PR/unrelated
+runs, unsuccessful conclusions, latest attempts, pagination, API errors and the
+workflow's bounded polling block with fake API responses and no real sleeps.
+No workflow is dispatched and no registry is contacted. See
+[Update Policy](update-policy.md#when-latest-moves) for promotion and retry
+behavior.
+
 ## UI Route Smoke
 
 `npm run test:routes` runs **all Playwright specs** in `ui/tests/`, not only
@@ -201,6 +217,26 @@ named Docker volumes, and passes extra arguments to `go test`. It runs the
 packages one at a time (`go test -p 1`) because the netcfg and engine tests
 install the gate's policy routing in the namespace-global table 104010 and
 would remove each other's objects in parallel.
+
+## Interface Address Ownership Tests
+
+The address ownership tests create disposable namespaces and dummy devices.
+They cover foreign primary/secondary preservation, owned address changes and
+removal, IPv6 link-local preservation, process restart, legacy unmarked addresses,
+reserved management protection, and explicit replacement. Run them only in a
+disposable privileged Linux container:
+
+```sh
+GOOS=linux CGO_ENABLED=0 go test -c -o build/netcfg.test ./pkg/dp/netcfg
+docker run --rm --privileged -e CONTAIND_NETNS_KERNEL_TEST=1 \
+  -v "$PWD/build:/w" alpine:3.21 sh -c \
+  "apk add -q iproute2 && /w/netcfg.test -test.run 'Address.*Kernel' -test.v"
+```
+
+`TestOwnershipAddressKernel` in `pkg/app/engine` exercises routine interface
+apply and the ownership manager's periodic/event reconcile operation, including
+empty intent and cancellation. Run it in the same disposable container with
+iproute2, using a compiled engine test binary, or a native Linux Go race runner.
 
 ## Kernel NFQUEUE Oracle
 

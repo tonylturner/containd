@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+
+- Release promotion to `:latest`, including manual promotion, now requires
+  successful CI from a push to main for the exact peeled tag commit. Pending CI
+  waits for a bounded poll; missing, failed or cancelled CI fails promotion with
+  evidence in the workflow summary.
+
+### Security
+
+- Prevent concurrent deletion or demotion of the last administrator.
+- Make MFA login and enrollment challenges single-use and durable across management
+  restarts, and invalidate them on password, TOTP or role changes. Pending
+  challenges issued before this upgrade must be restarted.
+
+### Fixed
+
+- Direct CLI login explains when an account needs MFA, password rotation or MFA
+  enrollment and directs users to the web UI or SSH.
+- Partial account profile updates preserve omitted fields and still allow explicit clearing.
+
+### Fixed
+
+- Routine interface apply and reconciliation remove only stale addresses
+  containd created, preserving Docker/foreign primary and secondary addresses,
+  IPv6 link-local addresses and the reserved management device. Address ownership
+  persists across engine process restarts; unmarked addresses from 0.1.36 and
+  earlier remain unowned on upgrade. Destructive replacement remains an explicit
+  administrator operation. See [address ownership and upgrades](docs/mkdocs/dataplane.md#interface-address-ownership-and-upgrades).
 
 ### Security
 

@@ -23,6 +23,7 @@ import (
 
 type ownershipState struct {
 	ifaces     []config.Interface
+	ifacesSet  bool
 	routing    config.RoutingConfig
 	routingSet bool
 }
@@ -57,6 +58,7 @@ func (m *ownershipManager) setInterfaces(ifaces []config.Interface) {
 	defer m.stateMu.Unlock()
 	st := m.state.Load().(ownershipState)
 	st.ifaces = append([]config.Interface(nil), ifaces...)
+	st.ifacesSet = true
 	m.state.Store(st)
 	m.triggerReconcile()
 }
@@ -104,6 +106,51 @@ func (m *ownershipManager) start(ctx context.Context) {
 	go m.netlinkWatchLoop(ctx)
 }
 
+func (m *ownershipManager) reconcile(ctx context.Context, reason string) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+	if err := m.guard.Reconcile(ctx); err != nil {
+		m.setLastError(err)
+		return
+	}
+	st := m.state.Load().(ownershipState)
+	if !st.ifacesSet && !st.routingSet {
+		return
+	}
+	applyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := config.ValidateManagementInterfaces(st.ifaces, m.reservation); err != nil {
+		m.setLastError(err)
+		return
+	}
+	if err := config.ValidateManagementRouting(st.routing, m.reservation); err != nil {
+		m.setLastError(err)
+		return
+	}
+	// Interfaces: converge only owned addresses (REPLACE is admin-triggered only).
+	if st.ifacesSet {
+		if err := netcfg.ApplyInterfacesWithOptions(applyCtx, st.ifaces, netcfg.ApplyOptions{Reservation: m.reservation}); err != nil {
+			m.setLastError(err)
+			m.logger.Errorf("ownership reconcile (%s) apply interfaces failed: %v", reason, err)
+			return
+		}
+	}
+
+	// Routing: converge owned entries, including empty intent. Resolve logical names
+	// using the current interface bindings before applying.
+	if st.routingSet {
+		resolved := resolveRoutingIfaces(st.routing, st.ifaces)
+		if err := netcfg.ApplyRouting(applyCtx, resolved); err != nil {
+			m.setLastError(err)
+			m.logger.Errorf("ownership reconcile (%s) apply routing failed: %v", reason, err)
+			return
+		}
+	}
+
+	m.setLastError(nil)
+}
+
 func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 	// Run periodically even without netlink events so drift is corrected.
 	ticker := time.NewTicker(10 * time.Second)
@@ -118,51 +165,6 @@ func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 			debounce.Stop()
 		}
 	}()
-
-	reconcileNow := func(reason string) {
-		m.applyMu.Lock()
-		defer m.applyMu.Unlock()
-		if err := m.guard.Reconcile(ctx); err != nil {
-			m.setLastError(err)
-			return
-		}
-		st := m.state.Load().(ownershipState)
-		if len(st.ifaces) == 0 && !st.routingSet {
-			return
-		}
-		applyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-
-		if err := config.ValidateManagementInterfaces(st.ifaces, m.reservation); err != nil {
-			m.setLastError(err)
-			return
-		}
-		if err := config.ValidateManagementRouting(st.routing, m.reservation); err != nil {
-			m.setLastError(err)
-			return
-		}
-		// Interfaces: additive, non-destructive apply (REPLACE is admin-triggered only).
-		if len(st.ifaces) > 0 {
-			if err := netcfg.ApplyInterfaces(applyCtx, st.ifaces); err != nil {
-				m.setLastError(err)
-				m.logger.Errorf("ownership reconcile (%s) apply interfaces failed: %v", reason, err)
-				return
-			}
-		}
-
-		// Routing: converge owned entries, including empty intent. Resolve logical names
-		// using the current interface bindings before applying.
-		if st.routingSet {
-			resolved := resolveRoutingIfaces(st.routing, st.ifaces)
-			if err := netcfg.ApplyRouting(applyCtx, resolved); err != nil {
-				m.setLastError(err)
-				m.logger.Errorf("ownership reconcile (%s) apply routing failed: %v", reason, err)
-				return
-			}
-		}
-
-		m.setLastError(nil)
-	}
 
 	for {
 		select {
@@ -185,12 +187,12 @@ func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 		case <-debounceC:
 			if pending {
 				pending = false
-				reconcileNow("event")
+				m.reconcile(ctx, "event")
 			}
 			debounceC = nil
 			debounce = nil
 		case <-ticker.C:
-			reconcileNow("periodic")
+			m.reconcile(ctx, "periodic")
 		}
 	}
 }

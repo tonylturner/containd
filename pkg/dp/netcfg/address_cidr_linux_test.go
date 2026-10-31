@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -42,7 +43,7 @@ func TestParseAddressCIDRPreservesHost(t *testing.T) {
 
 func TestDesiredInterfaceAddrsPreservesHost(t *testing.T) {
 	iface := config.Interface{Name: "test", Addresses: []string{"10.99.99.2/24", "2001:db8::42/64"}}
-	all, v4, err := desiredInterfaceAddrs(context.Background(), iface)
+	all, err := desiredInterfaceAddrs(context.Background(), iface)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +52,8 @@ func TestDesiredInterfaceAddrsPreservesHost(t *testing.T) {
 			t.Errorf("desired addresses missing %s: %v", cidr, all)
 		}
 	}
-	if _, ok := v4["10.99.99.2/24"]; !ok || len(v4) != 1 || len(all) != 2 {
-		t.Fatalf("unexpected desired sets: all=%v IPv4=%v", all, v4)
+	if len(all) != 2 {
+		t.Fatalf("unexpected desired set: %v", all)
 	}
 	for _, cidr := range []string{"10.99.99.0/24", "2001:db8::/64"} {
 		if _, ok := all[cidr]; ok {
@@ -61,18 +62,17 @@ func TestDesiredInterfaceAddrsPreservesHost(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := desiredInterfaceAddrs(ctx, iface); err == nil {
+	if _, err := desiredInterfaceAddrs(ctx, iface); err == nil {
 		t.Fatal("accepted canceled context")
 	}
-	if _, _, err := desiredInterfaceAddrs(context.Background(), config.Interface{Addresses: []string{"bad"}}); err == nil {
+	if _, err := desiredInterfaceAddrs(context.Background(), config.Interface{Addresses: []string{"bad"}}); err == nil {
 		t.Fatal("accepted invalid address")
 	}
 }
 
 func TestAddressCIDRKernelPreservesHost(t *testing.T) {
-	if os.Geteuid() != 0 {
-		t.Skip("requires root and CAP_NET_ADMIN in an isolated network namespace")
-	}
+	routingKernelContext(t)
+	t.Setenv("CONTAIND_ADDRESS_STATE_PATH", filepath.Join(t.TempDir(), "addresses.json"))
 	device := fmt.Sprintf("cidr%d", os.Getpid())
 	if _, err := net.InterfaceByName(device); err == nil {
 		t.Fatalf("test device %s already exists", device)
@@ -107,14 +107,14 @@ func TestAddressCIDRKernelPreservesHost(t *testing.T) {
 		t.Fatalf("kernel addresses = %v, want 10.99.99.2/24", got)
 	}
 	iface := config.Interface{Name: device, Addresses: []string{"10.99.99.19/24"}}
-	if err := applyStaticInterface(context.Background(), iface, device, ApplyOptions{}); err != nil {
+	if err := ApplyInterfaces(context.Background(), []config.Interface{iface}); err != nil {
 		t.Fatal(err)
 	}
 	got, err = listAddrs(nic.Index, unix.AF_INET)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].String() != "10.99.99.19/24" {
-		t.Fatalf("static replacement addresses = %v, want 10.99.99.19/24", got)
+	if len(got) != 2 || got[0].String() != "10.99.99.2/24" || got[1].String() != "10.99.99.19/24" {
+		t.Fatalf("static addresses = %v, want foreign .2 and desired .19", got)
 	}
 }

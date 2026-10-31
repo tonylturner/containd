@@ -256,8 +256,8 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg d
     else . end)
   | .system.mgmt.httpListenAddr=":18080"
   | .system.mgmt.listenAddr=":18080"
-  | .dataPlane.enforcement = true
-  | .dataPlane.enforceTable = "containd"
+  | .dataplane.enforcement = true
+  | .dataplane.enforceTable = "containd"
   | .firewall.nat.enabled = true
   | .firewall.nat.egressZone = "wan"
   | .firewall.nat.sourceZones = (if $mutation == "no-masquerade" then ["dmz"] else ["lan"] end)

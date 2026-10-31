@@ -331,8 +331,8 @@ apply_policy() {
       else . end)
     | .system.mgmt.httpListenAddr=":18080"
     | .system.mgmt.listenAddr=":18080"
-    | .dataPlane.enforcement = true
-    | .dataPlane.enforceTable = "containd"
+    | .dataplane.enforcement = true
+    | .dataplane.enforceTable = "containd"
     | .firewall.nat.enabled = true
     | .firewall.nat.egressZone = "wan"
     | .firewall.nat.sourceZones = ["lan"]
