@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -25,11 +26,11 @@ import (
 // a fail-closed stream, and opens an enforce IEC104 session, only at a
 // handshake segment with the mark.
 const (
-	QueueMarkMask uint32 = 0x0f000000
-	EnvelopeMark  uint32 = 0x01000000
-	HandshakeMark uint32 = 0x02000000
+	QueueMarkMask uint32 = markabi.QueueMarkMask
+	EnvelopeMark  uint32 = markabi.EnvelopeMark
+	HandshakeMark uint32 = markabi.HandshakeMark
 	// ObservedMark skips all ICS steering on the repeated traversal.
-	ObservedMark uint32 = 0x04000000
+	ObservedMark uint32 = markabi.ObservedMark
 )
 
 // EnvelopeMarked reports whether an NFQUEUE skb mark carries EnvelopeMark.

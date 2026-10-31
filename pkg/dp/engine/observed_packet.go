@@ -4,8 +4,8 @@ package engine
 import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
-	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -57,7 +57,7 @@ func observedDecision(pkt capture.Packet, decision capture.Decision) capture.Dec
 		return decision
 	}
 	decision.Action = capture.Repeat
-	decision.Mark = pkt.Mark & ^enforce.QueueMarkMask | enforce.ObservedMark
+	decision.Mark = pkt.Mark & ^markabi.QueueMarkMask | markabi.ObservedMark
 	if decision.Reason == "" {
 		decision.Reason = "ics_observed"
 	}
