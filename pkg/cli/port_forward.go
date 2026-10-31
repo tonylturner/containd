@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,16 +72,23 @@ func setPortForwardAddAPI(api *API) Command {
 		if api == nil {
 			return fmt.Errorf("api unavailable")
 		}
+		allow := true
+		if len(args) > 0 && args[len(args)-1] == "no-allow" {
+			allow = false
+			args = args[:len(args)-1]
+		}
 		pf, err := parsePortForwardAddArgs(args)
 		if err != nil {
 			return err
 		}
-		if err := addPortForward(ctx, api, pf); err != nil {
+		var result struct {
+			Placement *config.ForwardPlacement `json:"placement"`
+		}
+		if err := api.mutateJSON(ctx, http.MethodPost, "/api/v1/firewall/port-forwards", map[string]any{"forward": pf, "allowRule": allow}, &result, out); err != nil {
 			return err
 		}
 		if out != nil {
-			fmt.Fprintln(out, stagedMessage)
-			_ = showPortForwardsAPI(api)(ctx, out, nil)
+			printForwardPlacement(out, result.Placement)
 		}
 		return nil
 	}
@@ -87,7 +96,7 @@ func setPortForwardAddAPI(api *API) Command {
 
 func parsePortForwardAddArgs(args []string) (config.PortForward, error) {
 	if len(args) < 5 {
-		return config.PortForward{}, fmt.Errorf("usage: set port-forward add <id> <ingress_zone> <tcp|udp> <listen_port> <dest_ip[:dest_port]> [sources <cidr1,cidr2>] [desc <text>] [off]")
+		return config.PortForward{}, fmt.Errorf("usage: set port-forward add <id> <ingress_zone> <tcp|udp> <listen_port> <dest_ip[:dest_port]> [sources <cidr1,cidr2>] [desc <text>] [off] [no-allow]")
 	}
 	pf := config.PortForward{
 		ID:          strings.TrimSpace(args[0]),
@@ -214,18 +223,19 @@ func parseAllowedSourceCIDRs(value string) ([]string, error) {
 	return outCIDRs, nil
 }
 
-func addPortForward(ctx context.Context, api *API, pf config.PortForward) error {
-	var nat config.NATConfig
-	if err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
-		return err
+func printForwardPlacement(out io.Writer, p *config.ForwardPlacement) {
+	if p == nil {
+		fmt.Fprintln(out, "No allow rule requested.")
+		return
 	}
-	for _, existing := range nat.PortForwards {
-		if existing.ID == pf.ID {
-			return fmt.Errorf("port-forward already exists: %s", pf.ID)
-		}
+	if p.Rule != nil {
+		fmt.Fprintf(out, "Inserted rule %s at position %d.\n", p.Rule.ID, p.Index+1)
+	} else {
+		fmt.Fprintf(out, "Placement: %s; governing rules: %s\n", p.Reason, strings.Join(p.RuleIDs, ", "))
 	}
-	nat.PortForwards = append(nat.PortForwards, pf)
-	return api.postJSON(ctx, "/api/v1/firewall/nat", nat, nil)
+	if p.Warning != nil {
+		fmt.Fprintln(out, "Warning:", p.Warning.Message)
+	}
 }
 
 func setPortForwardDelAPI(api *API) Command {
@@ -238,30 +248,17 @@ func setPortForwardDelAPI(api *API) Command {
 		}
 		id := strings.TrimSpace(args[0])
 
-		var nat config.NATConfig
-		if err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
-			return err
+		var result struct {
+			Deleted []string `json:"deletedRuleIds"`
+			Edited  []string `json:"editedRuleIds"`
 		}
-		filtered := make([]config.PortForward, 0, len(nat.PortForwards))
-		removed := false
-		for _, pf := range nat.PortForwards {
-			if pf.ID == id {
-				removed = true
-				continue
-			}
-			filtered = append(filtered, pf)
-		}
-		if !removed {
-			return fmt.Errorf("port-forward not found: %s", id)
-		}
-		nat.PortForwards = filtered
-		if err := api.postJSON(ctx, "/api/v1/firewall/nat", nat, nil); err != nil {
+		if err := api.mutateJSON(ctx, http.MethodDelete, "/api/v1/firewall/port-forwards/"+url.PathEscape(id), nil, &result, out); err != nil {
 			return err
 		}
 		if out != nil {
-			fmt.Fprintln(out, stagedMessage)
-			_ = showPortForwardsAPI(api)(ctx, out, nil)
+			fmt.Fprintf(out, "Deleted rules: %s\nEdited rules: %s\n", joinCSV(result.Deleted), joinCSV(result.Edited))
 		}
+
 		return nil
 	}
 }

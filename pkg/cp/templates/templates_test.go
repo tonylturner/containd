@@ -9,6 +9,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 func TestListReturnsAllTemplates(t *testing.T) {
@@ -307,5 +308,33 @@ func TestApplyWithOptsLearnMode(t *testing.T) {
 		if r.ICS.Mode != "monitor" {
 			t.Errorf("rule %q has Mode:%q after learn override, want learn", r.ID, r.ICS.Mode)
 		}
+	}
+}
+
+func TestPurdueOrderedExceptions(t *testing.T) {
+	list := purdueRules()
+	if list[len(list)-1].ID != "purdue-default-deny" {
+		t.Fatal("catch-all must follow exceptions")
+	}
+	cfg := config.DefaultConfig()
+	cfg.Firewall.Rules = []config.Rule{{ID: "existing", Action: config.ActionDeny}}
+	if err := Apply("purdue-baseline", cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Firewall.Rules[0].ID != "existing" || cfg.Firewall.Rules[1].ID != list[0].ID {
+		t.Fatal("template did not append in order")
+	}
+	snap := &rules.Snapshot{Default: rules.ActionDeny}
+	for _, r := range list {
+		snap.Firewall = append(snap.Firewall, rules.Entry{ID: r.ID, SourceZones: r.SourceZones, DestZones: r.DestZones, Action: rules.Action(r.Action)})
+	}
+	eval := rules.NewEvaluator(snap)
+	action, winner := eval.EvaluateMatch(rules.EvalContext{SrcZone: ZoneL1, DstZone: ZoneL0})
+	if action != rules.ActionAllow || winner == nil || winner.ID != "purdue-l1-to-l0" {
+		t.Fatalf("exception=%s %+v", action, winner)
+	}
+	action, winner = eval.EvaluateMatch(rules.EvalContext{SrcZone: ZoneL5, DstZone: ZoneL1})
+	if action != rules.ActionDeny || winner == nil || winner.ID != "purdue-block-l5-to-ot" {
+		t.Fatalf("explicit deny=%s %+v", action, winner)
 	}
 }
