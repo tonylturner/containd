@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Interface PATCH writes preserve every omitted setting. Interface edits send
+  explicit clears for removed aliases, device bindings, zones and VLAN settings.
 - Service, policy, network, PCAP and staged-config editors block saves until settings
   load successfully and while reads are unavailable. Failed refreshes keep drafts
   instead of substituting defaults or reporting success; saves preserve unrelated

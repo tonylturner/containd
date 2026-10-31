@@ -519,6 +519,48 @@ for (const stored of [
   });
 }
 
+test("Interfaces sends explicit clears when removing an alias and leaving VLAN", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
+  let iface: Interface = {
+    name: "vlan-test", alias: "Plant VLAN", device: "eth2", zone: "ot",
+    type: "vlan", parent: "eth0", vlanId: 123, addressMode: "static",
+    addresses: ["192.0.2.2/24"], gateway: "192.0.2.1",
+    access: { mgmt: true, http: false, https: true, ssh: false },
+  };
+  const writes: Partial<Interface>[] = [];
+  await page.route("**/api/v1/interfaces", (route) => route.fulfill(json([iface])));
+  await page.route("**/api/v1/interfaces/vlan-test", async (route) => {
+    const patch = route.request().postDataJSON() as Partial<Interface>;
+    writes.push(patch);
+    iface = { ...iface, ...patch };
+    await route.fulfill(json(iface));
+  });
+  const loaded = page.waitForResponse((res) => res.url().endsWith("/api/v1/interfaces"));
+  await page.goto("/interfaces");
+  await loaded;
+  const row = page.getByRole("row").filter({
+    has: page.getByRole("cell", { name: "vlan-test", exact: true }),
+  });
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  await row.getByPlaceholder("alias (optional)").fill("");
+  await row.getByRole("combobox").first().selectOption("physical");
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Interface staged — commit to apply.", { exact: true })).toBeVisible();
+  expect(writes).toEqual([{
+    type: "physical", alias: "", members: [], parent: "", vlanId: 0,
+    device: "eth2", zone: "ot", addressMode: "static",
+    addresses: ["192.0.2.2/24"], gateway: "192.0.2.1",
+    access: { mgmt: true, http: false, https: true, ssh: false },
+  }]);
+
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  await row.getByPlaceholder("os iface (e.g. eth0)").fill("");
+  await row.getByRole("cell").nth(5).getByRole("combobox").selectOption("");
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toEqual({ ...writes[0], device: "", zone: "" });
+});
+
 test("topology uses OS/Docker fallback in zone subnets, interface details and physical pills", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(String(err)));

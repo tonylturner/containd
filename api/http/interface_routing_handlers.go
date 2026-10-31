@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -257,43 +258,27 @@ func deleteInterfaceHandler(store config.Store) gin.HandlerFunc {
 func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
+		var patch map[string]json.RawMessage
 		var iface config.Interface
-		if err := c.ShouldBindJSON(&iface); err != nil {
+		if err := c.ShouldBindJSON(&patch); err != nil || patch == nil {
 			apiError(c, http.StatusBadRequest, "invalid interface payload")
 			return
 		}
 		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
-			isAccessUnset := func(a config.InterfaceAccess) bool {
-				return a.Mgmt == nil && a.HTTP == nil && a.HTTPS == nil && a.SSH == nil
-			}
-			updated := false
 			for i, existing := range cfg.Interfaces {
 				if existing.Name == name {
-					if iface.Name == "" {
-						iface.Name = existing.Name
-					}
-					if strings.TrimSpace(iface.Device) == "" {
-						iface.Device = existing.Device
-					}
-					if strings.TrimSpace(iface.Zone) == "" {
-						iface.Zone = existing.Zone
-					}
-					if iface.Addresses == nil {
-						iface.Addresses = existing.Addresses
-					}
-					if isAccessUnset(iface.Access) {
-						iface.Access = existing.Access
+					var err error
+					iface, err = mergeInterfacePatch(existing, patch)
+					if err != nil {
+						apiError(c, http.StatusBadRequest, "invalid interface payload")
+						return false
 					}
 					cfg.Interfaces[i] = iface
-					updated = true
-					break
+					return true
 				}
 			}
-			if !updated {
-				apiError(c, http.StatusNotFound, "interface not found")
-				return false
-			}
-			return true
+			apiError(c, http.StatusNotFound, "interface not found")
+			return false
 		})
 		if !ok {
 			return
@@ -301,6 +286,29 @@ func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
 		auditLog(c, audit.Record{Action: "interfaces.update", Target: name, Detail: "candidate"})
 		c.JSON(http.StatusOK, iface)
 	}
+}
+
+// Merge top-level fields, decoding into a fresh value so explicit null clears
+// scalars and access as well as slices. A supplied access object replaces it.
+func mergeInterfacePatch(existing config.Interface, patch map[string]json.RawMessage) (config.Interface, error) {
+	var iface config.Interface
+	data, err := json.Marshal(existing)
+	if err != nil {
+		return iface, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return iface, err
+	}
+	for key, value := range patch {
+		fields[key] = value
+	}
+	data, err = json.Marshal(fields)
+	if err != nil {
+		return iface, err
+	}
+	err = json.Unmarshal(data, &iface)
+	return iface, err
 }
 
 func getRoutingHandler(store config.Store) gin.HandlerFunc {

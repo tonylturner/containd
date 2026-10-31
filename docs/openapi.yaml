@@ -2097,8 +2097,7 @@ components:
         vlanId: {type: integer}
         zone: {type: string}
       type: object
-      description: PATCH retains omitted/empty name, device and zone; nil addresses and unset access retain existing values. Other fields
-        replace.
+      description: Logical interface configuration.
     InterfaceAccess:
       properties:
         http: {type: boolean}
@@ -2106,6 +2105,28 @@ components:
         mgmt: {type: boolean}
         ssh: {type: boolean}
       type: object
+    InterfacePatch:
+      type: object
+      properties:
+        access:
+          type: object
+          nullable: true
+          properties:
+            http: {type: boolean, nullable: true}
+            https: {type: boolean, nullable: true}
+            mgmt: {type: boolean, nullable: true}
+            ssh: {type: boolean, nullable: true}
+        addressMode: {type: string, nullable: true}
+        addresses: {items: {type: string}, type: array, nullable: true}
+        alias: {type: string, nullable: true}
+        device: {type: string, nullable: true}
+        gateway: {type: string, nullable: true}
+        members: {items: {type: string}, type: array, nullable: true}
+        name: {type: string, nullable: true}
+        parent: {type: string, nullable: true}
+        type: {type: string, nullable: true}
+        vlanId: {type: integer, nullable: true}
+        zone: {type: string, nullable: true}
     InterfaceState:
       properties:
         addrs: {items: {type: string}, type: array}
@@ -5823,12 +5844,18 @@ paths:
     patch:
       summary: Update interface (admin)
       tags: [Interfaces]
-      description: Stages the shared candidate; commit to apply.
+      description: >-
+        Stages the shared candidate; commit to apply. Omitted fields retain their
+        stored values. Supplied fields replace them, including empty strings,
+        empty arrays, zero and false. Null clears a field to its zero value.
+        Device and zone can be cleared explicitly. A supplied access object
+        replaces the entire access object; it is not recursively merged.
+        The resulting interface must pass configuration validation.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/Interface'}
+            schema: {$ref: '#/components/schemas/InterfacePatch'}
       responses:
         '200':
           description: Success

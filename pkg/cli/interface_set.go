@@ -8,8 +8,8 @@ import (
 	"io"
 )
 
-// The interface endpoint preserves only some omitted fields. Send the complete
-// current interface, retaining explicit empty arrays when clearing addresses.
+// PATCH preserves omitted fields. Send the complete current interface with
+// explicit clearing values, retaining empty arrays when clearing addresses.
 func patchExistingInterface(ctx context.Context, api *API, name string, patch map[string]any, out io.Writer) error {
 	var ifaces []map[string]any
 	if err := api.getConfigJSON(ctx, "/api/v1/interfaces", &ifaces); err != nil {
