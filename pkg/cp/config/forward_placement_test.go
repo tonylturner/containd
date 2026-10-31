@@ -100,6 +100,7 @@ func TestForwardPlacementScopeProof(t *testing.T) {
 		"schedule":                {func(c *Config) { c.Firewall.Rules[0].Schedule = &ScheduleConfig{} }, "partial"},
 		"unknown routed zone":     {func(c *Config) { c.Firewall.Rules[0].DestZones = []string{"lan"} }, "partial"},
 		"unknown token":           {func(c *Config) { c.Firewall.Rules[0].Sources = []string{"vpn:any"} }, "partial"},
+		"mapped IPv4 scope":       {func(c *Config) { c.Firewall.Rules[0].Sources = []string{"::ffff:198.51.100.0/120"} }, "inside"},
 		"unknown historical port": {func(c *Config) { c.Firewall.Rules[0].Protocols[0].Port = "bad" }, "partial"},
 		"canonical forward transport": {func(c *Config) {
 			c.Firewall.NAT.PortForwards[0].Proto = " TCP "

@@ -3,7 +3,6 @@ package config
 
 import (
 	"fmt"
-	"net/netip"
 	"slices"
 	"strings"
 
@@ -203,14 +202,14 @@ func prefixIntersection(forward, scope []string) (overlap, contains bool) {
 	}
 	contains = true
 	for _, raw := range forward {
-		f, err := netip.ParsePrefix(strings.TrimSpace(raw))
-		if err != nil {
+		f, ok := scopePrefix(raw)
+		if !ok {
 			return true, false
 		}
 		covered := false
 		for _, rawScope := range scope {
-			s, err := netip.ParsePrefix(strings.TrimSpace(rawScope))
-			if err != nil {
+			s, ok := scopePrefix(rawScope)
+			if !ok {
 				// Includes unresolved VPN tokens and malformed historical rows.
 				overlap = true
 				continue
