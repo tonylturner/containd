@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+
+- Release promotion to `:latest`, including manual promotion, now requires
+  successful CI from a push to main for the exact peeled tag commit. Pending CI
+  waits for a bounded poll; missing, failed or cancelled CI fails promotion with
+  evidence in the workflow summary.
 
 ### Security
 

@@ -53,6 +53,22 @@ That complements the other validation workflows:
   scheduled checks of the published images (see
   [SBOM](sbom.md#scheduled-checks-of-published-images))
 
+## Release CI Gate
+
+Run the promotion decision tests offline:
+
+```bash
+python3 scripts/release-ci-gate.test.py
+actionlint .github/workflows/release.yml
+```
+
+The tests exercise exact-commit push-to-main matching, rejected PR/unrelated
+runs, unsuccessful conclusions, latest attempts, pagination, API errors and the
+workflow's bounded polling block with fake API responses and no real sleeps.
+No workflow is dispatched and no registry is contacted. See
+[Update Policy](update-policy.md#when-latest-moves) for promotion and retry
+behavior.
+
 ## UI Route Smoke
 
 `npm run test:routes` runs **all Playwright specs** in `ui/tests/`, not only
