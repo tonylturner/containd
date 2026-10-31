@@ -484,6 +484,13 @@ components:
             to any of these labels (exact, case-sensitive). An unbound opener matches
             no identity rule, ALLOW or DENY. Removing a binding also stops established
             connections that only a conditional ALLOW admitted.
+        viaForwards:
+          type: array
+          items: {type: string}
+          description: >-
+            Any referenced current port forward must match verified containd-owned
+            translation, original ingress/public coordinates and backend service.
+            Disabled or unbound forwards match nothing. Unknown IDs are rejected.
         ics:
           allOf:
           - $ref: "#/components/schemas/ICSPredicate"
@@ -492,9 +499,11 @@ components:
           type: string
           enum: [ALLOW, DENY, RESET, RATE_LIMIT, TAG]
           description: >-
-            ALLOW, DENY and RESET decide: a packet is allowed if any matching ALLOW exists,
-            otherwise the first matching DENY or RESET by rule ID decides, otherwise
-            firewall.defaultAction. RESET rejects back to the sender (TCP reset for TCP,
+            ALLOW, DENY and RESET decide in configured list order: the first matching
+            enforcing terminal wins, otherwise firewall.defaultAction applies.
+            Monitor ICS rules never decide. With inline inspection, enforcing ICS
+            terminals admit transport for inspection regardless of message action.
+            RESET rejects back to the sender (TCP reset for TCP,
             ICMP or ICMPv6 administratively prohibited otherwise). RATE_LIMIT and TAG are
             effects that never admit traffic. RESET, RATE_LIMIT and TAG take no ICS protocol.
         rateLimit:
@@ -535,7 +544,7 @@ components:
         to clear any known ICS key and omission to retain it. The ICS-specific
         /firewall/ics-rules/{id} PATCH replaces the whole rule (omitted = ANY).
         Preview receives the full effective predicate, never removal nulls.
-        Each object is judged independently under ALLOW-first precedence;
+        Each object is judged independently in configured first-match order;
         any denied object denies the message. Incomplete inspection adds an
         unknown-object context: object-qualified ALLOW fails, object-qualified
         DENY matches, with all other constraints still required.
@@ -561,7 +570,7 @@ components:
         - IEC104 rules match the session tuple (client = TCP opener,
           server port 2404) whatever the wire direction; `direction` selects
           the half. Inside the IEC104 envelope only iec104 rules are
-          evaluated with ALLOW-first precedence; no match is DENY regardless of
+          evaluated in configured enforcing order; no match is DENY regardless of
           `firewall.defaultAction`.
         - An enforce ALLOW rule may name only Type IDs with a decoder
           descriptor (1, 3, 5, 7, 9, 11, 13, 15, 21, 30-37, 45-51, 58-64, 70, 100-103, 105, 107) and
@@ -2413,6 +2422,10 @@ components:
         table: {type: integer}
       type: object
     PortForward:
+      description: >-
+        DNAT translation only; firewall policy decides admission. Blank listenAddress
+        selects current IPv4 addresses of the ingress device, including secondaries.
+        NAT.enabled controls source NAT and does not disable port forwards.
       properties:
         allowedSources: {items: {type: string}, type: array}
         description: {type: string}
@@ -2421,7 +2434,11 @@ components:
         enabled: {type: boolean}
         id: {type: string}
         ingressZone: {type: string}
-        listenPort: {type: integer}
+        listenAddress:
+          type: string
+          description: Optional exact IPv4 public destination; empty means ingress-device-local.
+          example: "203.0.113.2"
+        listenPort: {type: integer, minimum: 1, maximum: 65535}
         proto: {type: string}
       type: object
     Protocol:
@@ -3115,18 +3132,19 @@ components:
         because of the part predicate names: identities no bound address satisfies
         (identity), source or destination zones none of which has an interface (zone, listed
         in zones), or sources and destinations that share no address family
-        (addressFamily). Or a DENY or RESET rule that an ALLOW shadows (shadowedBy): the
-        ALLOW matches all of its traffic, so it never decides anything.
+        (addressFamily), or a via constraint with no matching enabled/bound forward
+        (forward). A terminal may also be shadowed by an earlier covering terminal
+        (shadowedBy), of any deciding action.
       properties:
         ruleId: {type: string}
         predicate:
           type: string
-          enum: [identity, zone, addressFamily]
+          enum: [identity, zone, addressFamily, forward]
         zones:
           type: array
           items: {type: string}
           description: For predicate zone, the rule's zones that have no interfaces, sorted.
-        shadowedBy: {type: string, description: ID of the ALLOW rule that shadows this DENY or RESET rule.}
+        shadowedBy: {type: string, description: ID of the earlier covering terminal that shadows this rule.}
         action: {type: string, enum: [ALLOW, DENY, RESET, RATE_LIMIT, TAG]}
         message: {type: string}
     RateLimit:
@@ -3197,6 +3215,7 @@ components:
         Schedule: {$ref: '#/components/schemas/RulesSchedulePredicate'}
         SourceZones: {items: {type: string}, type: array}
         Sources: {items: {type: string}, type: array}
+        ViaForwards: {items: {type: string}, type: array}
       type: object
     RulesICSPredicate:
       properties:
@@ -3300,9 +3319,27 @@ components:
         Enabled: {type: boolean}
         ID: {type: string}
         IngressZone: {type: string}
+        ListenAddress: {type: string}
         ListenPort: {type: integer}
         Proto: {type: string}
       type: object
+    ForwardMatch:
+      type: object
+      description: >-
+        Resolved current forward selector, keyed by forward ID in ForwardMatches.
+        Requires the owned-forward conntrack bit; tuple equality alone never matches.
+        Public coordinates come from the original tuple and Backend from reply source.
+      required: [Enabled, IngressDevices, Protocol, ListenAddress, ListenPort, AllowedSources, Backend]
+      properties:
+        Enabled: {type: boolean}
+        IngressDevices: {type: array, nullable: true, items: {type: string}}
+        Protocol: {type: string, enum: [tcp, udp]}
+        ListenAddress:
+          type: string
+          description: IPv4 address; empty string requires the original destination in LocalIPv4ByDevice for original ingress.
+        ListenPort: {type: integer, minimum: 1, maximum: 65535}
+        AllowedSources: {type: array, nullable: true, items: {type: string}, description: IPv4 prefixes; empty means unrestricted.}
+        Backend: {type: string, description: IPv4 address and effective service port as address:port.}
     RulesProtocol:
       properties:
         Name: {type: string}
@@ -3331,6 +3368,13 @@ components:
       type: object
     RulesSnapshot:
       properties:
+        AdmissionParity: {type: integer, enum: [0, 4], description: Runtime admission parity; never persisted operator configuration.}
+        ForwardMatches: {type: object, additionalProperties: {$ref: '#/components/schemas/ForwardMatch'}}
+        LocalIPv4ByDevice:
+          type: object
+          description: Immutable current IPv4 addresses by kernel ingress device; never inferred from other devices.
+          additionalProperties: {type: array, items: {type: string, format: ipv4}}
+        DPIMode: {type: string}
         Default: {type: string}
         Firewall: {items: {$ref: '#/components/schemas/RulesEntry'}, type: array}
         Gate: {$ref: '#/components/schemas/RulesGateSelection'}
