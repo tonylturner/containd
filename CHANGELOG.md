@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Reject unsafe daemon configuration fields and require valid proxy TLS certificate/key pairs before publishing configuration.
 - Restrict OpenVPN profile imports to the shared bounded parser; manage client credentials by issuer/serial ID with read-only downloads and durable revocation.
+- OpenVPN credential lists report whether a running managed server has loaded the current revocation list; the VPN page offers Apply revocation only while it has not.
 - Prevent concurrent deletion or demotion of the last administrator.
 - Make MFA login and enrollment challenges single-use and durable across management
   restarts, and invalidate them on password, TOTP or role changes. Pending
