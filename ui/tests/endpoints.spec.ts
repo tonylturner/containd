@@ -95,5 +95,5 @@ test("the NAT page brackets an IPv6 port forward destination", async ({ page }) 
   });
   await open(page, "/nat/", "/api/v1/firewall/nat");
   await expect(page.getByRole("cell", { name: "[2001:db8::5]:2404", exact: true })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "192.0.2.5", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "192.0.2.5:8443", exact: true })).toBeVisible();
 });
