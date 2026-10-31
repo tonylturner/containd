@@ -920,6 +920,9 @@ collection. Observation is not authorization, even when the traffic was delivere
    suggestions. The maximum is 128 suggestions and 128 total rules per request.
    If completion is uncertain after a network/engine error, retry the **same
    request ID and ordered selections**: the candidate may already be staged.
+   Retries use the resolved snapshot for seven days from resolution, even after dataset deletion, eviction or expiry; after that, the request ID is unknown.
+   Completion failures after candidate persistence return a retryable `503`
+   naming the request ID, not a rejection.
 6. Reviewed suggestions stage as explicit `ics.mode: "monitor"` ALLOW rules,
    including IEC 104. Review the candidate diff and use the normal **Commit** or
    **Commit-confirmed** bar to apply them. Committed monitor rules do not authorize
@@ -960,9 +963,13 @@ override with `CONTAIND_EVIDENCE_DB`) across restarts and expires after seven da
 by the store clock. Ceilings are 32 datasets, 100,000 records and 128 MiB of
 normalized evidence; each parent is limited to 256 KiB and 4,096 objects. Loss,
 rejection, eviction, expiry and withheld reasons are exposed, not silently
-interpreted as complete coverage. Evidence admission gaps prevent certification;
-deletion or eviction invalidates dependent proofs. Dataset review shows the last
-generation's per-dataset withheld counts; store-wide counters are durable totals.
+interpreted as complete coverage. Dataset gaps are collection limitations, not a
+blanket certification blocker: Generate can certify retained complete parents;
+the backend decides which parents are eligible. Deletion or eviction invalidates
+dependent proofs for new stage requests.
+Resolved staging snapshots and completed receipts count toward the storage
+budget and are purged when their retry window expires. Dataset review shows the
+last generation's per-dataset withheld counts; store-wide counters are durable totals.
 
 `GET /api/v1/learn/datasets`, `/learn/watches`, `/learn/suggestions` and dataset
 `/observations` reads use bounded pages (`items`, `nextCursor`, maximum `limit`
