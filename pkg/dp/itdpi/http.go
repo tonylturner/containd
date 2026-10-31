@@ -4,7 +4,6 @@
 package itdpi
 
 import (
-	"bufio"
 	"bytes"
 	"net/url"
 	"strings"
@@ -121,22 +120,23 @@ func (d *HTTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.
 func (d *HTTPDecoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) { return nil, nil }
 
 func parseHTTP(payload []byte) (string, map[string]string) {
-	r := bufio.NewReader(bytes.NewReader(payload))
-	first, err := r.ReadString('\n')
-	if err != nil {
+	firstEnd := bytes.IndexByte(payload, '\n')
+	if firstEnd < 0 {
 		return "", nil
 	}
-	first = strings.TrimSpace(first)
+	first := strings.TrimSpace(string(payload[:firstEnd]))
 	if !looksLikeHTTPLine(first) {
 		return "", nil
 	}
 	headers := map[string]string{}
+	rest := payload[firstEnd+1:]
 	for {
-		l, err := r.ReadString('\n')
-		if err != nil {
+		end := bytes.IndexByte(rest, '\n')
+		if end < 0 {
 			break
 		}
-		l = strings.TrimSpace(l)
+		l := strings.TrimSpace(string(rest[:end]))
+		rest = rest[end+1:]
 		if l == "" {
 			break
 		}
