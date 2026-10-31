@@ -92,8 +92,8 @@ could admit at L7 and mask an enforce DENY through ALLOW precedence. As monitor
 it does neither: that traffic is now denied (and reset where the envelope resets).
 A former learn DENY no longer drops at L4 without a queue. Audit existing rules
 and arrange separate enforcing/L4 allowances where observation needs traffic.
-Back up before upgrading: 0.1.36 cannot read schema 0.1.9; restore a pre-upgrade
-backup to downgrade.
+Back up before upgrading: 0.1.35 and earlier cannot read schema 0.1.9; restore
+a pre-upgrade backup to downgrade.
 
 Monitoring is observation, **not learning**. It never starts evidence collection.
 See [Learning](#learning) for the separate explicit workflow.

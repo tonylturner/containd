@@ -108,10 +108,11 @@ To configure managed server mode:
 The engine is the only antivirus owner, in split and combined (`all`)
 deployments alike. It applies the committed AV settings, runs clamd and the
 FreshClam schedule, stores custom definitions and runs the scanning gate.
-Antivirus backends scan complete HTTP objects that the gate holds; nothing
-is scanned from packet previews. Management delegates status, updates and
-definitions to the engine over its internal API; when the engine is
-unreachable these routes return `503` and the status `av` entry reports
+Antivirus backends scan complete HTTP objects; whether delivery is held or
+streamed depends on the download mode below. Nothing is scanned from packet
+previews. Management delegates status, updates and definitions to the engine
+over its internal API. When the engine is unreachable, these routes return
+`503` and the status `av` entry reports
 `"available": false`.
 
 ### Scanning gate
@@ -119,10 +120,13 @@ unreachable these routes return `503` and the status `av` entry reports
 With `enabled`, at least one `scan.include` entry and `httpDownload` or
 `httpUpload` set, the engine intercepts HTTP/1.x connections transparently:
 nftables steers each selected connection to a loopback listener of the
-engine, which holds every selected message body, scans it, and only then
-delivers or refuses the whole message. Clients and servers are configured
-for nothing; the server sees the client's own IP address on another source
-port. Only the existing source NAT changes what the server sees: a
+engine. The gate scans complete selected message bodies; uploads are held
+until the verdict in every mode, and downloads are held until the verdict in
+`hold` mode. With `stream_tail`, a download is forwarded except for its final
+64 KiB, which is held until the verdict. A detection refuses a held body or
+resets both connections after a streamed prefix. Clients and servers are
+configured for nothing; the server sees the client's own IP address on another
+source port. Only the existing source NAT changes what the server sees: a
 connection that `nat` would masquerade today, because its egress is the
 masquerading zone or because it is an inbound port forward's return path,
 is masqueraded with the gate as without it.
