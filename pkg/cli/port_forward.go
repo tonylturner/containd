@@ -216,7 +216,9 @@ func parseAllowedSourceCIDRs(value string) ([]string, error) {
 
 func addPortForward(ctx context.Context, api *API, pf config.PortForward) error {
 	var nat config.NATConfig
-	_ = api.getJSON(ctx, "/api/v1/firewall/nat", &nat)
+	if err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
+		return err
+	}
 	for _, existing := range nat.PortForwards {
 		if existing.ID == pf.ID {
 			return fmt.Errorf("port-forward already exists: %s", pf.ID)
@@ -237,7 +239,7 @@ func setPortForwardDelAPI(api *API) Command {
 		id := strings.TrimSpace(args[0])
 
 		var nat config.NATConfig
-		if err := api.getJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
+		if err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
 			return err
 		}
 		filtered := make([]config.PortForward, 0, len(nat.PortForwards))
@@ -278,7 +280,7 @@ func setPortForwardEnableAPI(api *API, enabled bool) Command {
 		id := strings.TrimSpace(args[0])
 
 		var nat config.NATConfig
-		if err := api.getJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
+		if err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
 			return err
 		}
 		updated := false

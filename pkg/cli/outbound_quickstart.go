@@ -24,14 +24,6 @@ type outboundIface struct {
 	Zone   string `json:"zone,omitempty"`
 }
 
-type outboundFirewallRule struct {
-	ID          string   `json:"id"`
-	Description string   `json:"description,omitempty"`
-	SourceZones []string `json:"sourceZones,omitempty"`
-	DestZones   []string `json:"destZones,omitempty"`
-	Action      string   `json:"action"`
-}
-
 const (
 	quickstartGatewayName = "wan-gw"
 	quickstartAllowRuleID = "allow-lan-mgmt-wan"
@@ -50,13 +42,30 @@ func setOutboundQuickstartLANWAN(api *API) Command {
 		if err != nil {
 			return err
 		}
-		if err := applyQuickstartRouting(ctx, api, wanDev, gwIP); err != nil {
+		routing, err := prepareQuickstartRouting(ctx, api, wanDev, gwIP)
+		if err != nil {
 			return err
 		}
-		if err := applyQuickstartNAT(ctx, api); err != nil {
+		var nat config.NATConfig
+		if err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
 			return err
 		}
-		if err := ensureQuickstartAllowRule(ctx, api); err != nil {
+		var rules []config.Rule
+		if err := api.getConfigJSON(ctx, "/api/v1/firewall/rules", &rules); err != nil {
+			return err
+		}
+
+		// Finish every authoritative read before staging any part of the edit.
+		nat.Enabled = true
+		nat.EgressZone = "wan"
+		nat.SourceZones = []string{"lan", "mgmt"}
+		if err := api.postJSON(ctx, "/api/v1/routing", routing, nil); err != nil {
+			return err
+		}
+		if err := api.postJSON(ctx, "/api/v1/firewall/nat", nat, nil); err != nil {
+			return err
+		}
+		if err := ensureQuickstartAllowRule(ctx, api, rules); err != nil {
 			return err
 		}
 
@@ -98,34 +107,40 @@ func inferWANGateway(ctx context.Context, api *API) (string, string, error) {
 	return wanDev, gwIP, nil
 }
 
-func applyQuickstartRouting(ctx context.Context, api *API, wanDev, gwIP string) error {
+func prepareQuickstartRouting(ctx context.Context, api *API, wanDev, gwIP string) (config.RoutingConfig, error) {
 	var routing config.RoutingConfig
-	if err := api.getJSON(ctx, "/api/v1/routing", &routing); err != nil {
-		return err
+	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
+		return routing, err
 	}
-	gateway := config.Gateway{
-		Name:        quickstartGatewayName,
-		Address:     gwIP,
-		Iface:       wanDev,
-		Description: "Quick start: WAN default gateway",
-	}
-	route := config.StaticRoute{Dst: "default", Gateway: quickstartGatewayName, Iface: wanDev, Table: 0}
-	routing.Gateways = upsertFirst(routing.Gateways, gateway, func(g config.Gateway) bool { return g.Name == quickstartGatewayName })
-	routing.Routes = upsertFirst(routing.Routes, route, func(r config.StaticRoute) bool {
-		return isDefaultQuickstartRoute(r.Dst) && r.Table == 0
+	routing.Gateways = upsertFirst(routing.Gateways, func(g config.Gateway) bool {
+		return g.Name == quickstartGatewayName
+	}, func(g *config.Gateway) {
+		g.Name = quickstartGatewayName
+		g.Address = gwIP
+		g.Iface = wanDev
+		g.Description = "Quick start: WAN default gateway"
 	})
-	return api.postJSON(ctx, "/api/v1/routing", routing, nil)
+	routing.Routes = upsertFirst(routing.Routes, func(r config.StaticRoute) bool {
+		return isDefaultQuickstartRoute(r.Dst) && r.Table == 0
+	}, func(r *config.StaticRoute) {
+		r.Dst = "default"
+		r.Gateway = quickstartGatewayName
+		r.Iface = wanDev
+	})
+	return routing, nil
 }
 
-// upsertFirst replaces the first item that matches with item, or appends item
-// when none does.
-func upsertFirst[T any](items []T, item T, match func(T) bool) []T {
+// upsertFirst edits the first matching item, or appends a new item when none
+// matches. Editing in place preserves fields outside the requested change.
+func upsertFirst[T any](items []T, match func(T) bool, edit func(*T)) []T {
 	for i := range items {
 		if match(items[i]) {
-			items[i] = item
+			edit(&items[i])
 			return items
 		}
 	}
+	var item T
+	edit(&item)
 	return append(items, item)
 }
 
@@ -134,29 +149,22 @@ func isDefaultQuickstartRoute(dst string) bool {
 	return d == "default" || d == "0.0.0.0/0"
 }
 
-func applyQuickstartNAT(ctx context.Context, api *API) error {
-	var nat config.NATConfig
-	_ = api.getJSON(ctx, "/api/v1/firewall/nat", &nat)
-	nat.Enabled = true
-	nat.EgressZone = "wan"
-	nat.SourceZones = []string{"lan", "mgmt"}
-	return api.postJSON(ctx, "/api/v1/firewall/nat", nat, nil)
-}
-
-func ensureQuickstartAllowRule(ctx context.Context, api *API) error {
-	var rules []outboundFirewallRule
-	_ = api.getJSON(ctx, "/api/v1/firewall/rules", &rules)
-	allow := outboundFirewallRule{
-		ID:          quickstartAllowRuleID,
-		Description: "Quick start: allow LAN/MGMT to WAN",
-		SourceZones: []string{"lan", "mgmt"},
-		DestZones:   []string{"wan"},
-		Action:      "ALLOW",
-	}
+func ensureQuickstartAllowRule(ctx context.Context, api *API, rules []config.Rule) error {
+	allow := config.Rule{ID: quickstartAllowRuleID}
+	exists := false
 	for _, r := range rules {
 		if r.ID == quickstartAllowRuleID {
-			return api.patchJSON(ctx, "/api/v1/firewall/rules/"+urlEscape(quickstartAllowRuleID), allow, nil)
+			allow = r
+			exists = true
+			break
 		}
+	}
+	allow.Description = "Quick start: allow LAN/MGMT to WAN"
+	allow.SourceZones = []string{"lan", "mgmt"}
+	allow.DestZones = []string{"wan"}
+	allow.Action = config.ActionAllow
+	if exists {
+		return api.patchJSON(ctx, "/api/v1/firewall/rules/"+urlEscape(quickstartAllowRuleID), allow, nil)
 	}
 	return api.postJSON(ctx, "/api/v1/firewall/rules", allow, nil)
 }

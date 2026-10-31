@@ -171,3 +171,30 @@ test("the firewall quick start stages the same gateway and default route as the 
   await expect(page.getByText(/Outbound quick start staged — commit to apply: default route via wan-gw/)).toBeVisible();
   expect(writes[0]).toEqual({ path: "/routing", body: stagedRouting("198.51.100.6") });
 });
+
+test("default-route setup preserves existing gateway metadata and route metrics", () => {
+  const routing = {
+    gateways: [{ name: "wan-gw", address: "192.0.2.254", alias: "Uplink", description: "Existing" }],
+    routes: [{ dst: "default", gateway: "wan-gw", table: 0, metric: 99 }],
+    rules: [{ table: 100, src: "192.0.2.0/24" }],
+  };
+  expect(withDefaultRoute(routing, { name: "wan-gw", address: "192.0.2.1", iface: "eth1" })).toEqual({
+    ...routing,
+    gateways: [{ ...routing.gateways[0], address: "192.0.2.1", iface: "eth1" }],
+    routes: [{ ...routing.routes[0], iface: "eth1" }],
+  });
+});
+
+test("firewall quick start sends nothing when its fresh routing read fails", async ({ page }) => {
+  const writes = await serveWan(page, "192.0.2.2/24");
+  await page.goto("/firewall/");
+  const quickStart = page.getByRole("button", { name: "Quick start (LAN→WAN)", exact: true });
+  await expect(quickStart).toBeEnabled();
+  await page.route("**/api/v1/routing", (route) => route.request().method() === "GET"
+    ? route.fulfill({ status: 503, json: { error: "unavailable" } }) : route.fallback());
+  await quickStart.click();
+  await page.getByRole("dialog").getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByText("Routing configuration unavailable; no quick-start changes were staged.", { exact: true })).toBeVisible();
+  await expect(quickStart).toBeDisabled();
+  expect(writes).toEqual([]);
+});

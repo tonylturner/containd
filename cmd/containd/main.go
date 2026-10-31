@@ -145,6 +145,8 @@ func runCLI(ctx context.Context) error {
 	// It falls back to plain line reading when stdin isn't a TTY (the
 	// CLI is also used non-interactively from scripts), so the same
 	// loop works in both modes.
+	_, terminalErr := liner.TerminalMode()
+	interactive := terminalErr == nil
 	state := liner.NewLiner()
 	defer state.Close()
 	state.SetCtrlCAborts(true)
@@ -183,11 +185,34 @@ func runCLI(ctx context.Context) error {
 		}()
 	}
 
+	return runCLILoop(prompt, state.Prompt, state.AppendHistory, func(line string, buf *strings.Builder) error {
+		return reg.ParseAndExecute(cmdCtx, line, buf)
+	}, interactive, os.Stdout, os.Stderr)
+}
+
+var errCLISessionCommandFailed = errors.New("one or more CLI commands failed")
+
+func runCLILoop(
+	prompt string,
+	readLine func(string) (string, error),
+	appendHistory func(string),
+	execute func(string, *strings.Builder) error,
+	interactive bool,
+	stdout, stderr io.Writer,
+) error {
+	failed := false
+	sessionResult := func() error {
+		if !interactive && failed {
+			return errCLISessionCommandFailed
+		}
+		return nil
+	}
+
 	for {
-		line, err := state.Prompt(prompt)
+		line, err := readLine(prompt)
 		if err != nil {
 			if errors.Is(err, liner.ErrPromptAborted) || errors.Is(err, io.EOF) {
-				return nil
+				return sessionResult()
 			}
 			return err
 		}
@@ -195,7 +220,7 @@ func runCLI(ctx context.Context) error {
 		if line == "" {
 			continue
 		}
-		state.AppendHistory(line)
+		appendHistory(line)
 
 		switch strings.ToLower(line) {
 		// Both "exit"/"quit"/"logout" and "shell"/"bash" leave the
@@ -205,16 +230,17 @@ func runCLI(ctx context.Context) error {
 		// shell on return — so `shell` and `bash` are equivalent
 		// to `exit` here, not a separate sub-shell.
 		case "exit", "quit", "logout", "shell", "bash":
-			return nil
+			return sessionResult()
 		}
 		var buf strings.Builder
-		if err := reg.ParseAndExecute(cmdCtx, line, &buf); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		if err := execute(line, &buf); err != nil {
+			failed = true
+			fmt.Fprintln(stderr, err)
 		}
 		if buf.Len() > 0 {
-			fmt.Print(buf.String())
+			fmt.Fprint(stdout, buf.String())
 			if !strings.HasSuffix(buf.String(), "\n") {
-				fmt.Println()
+				fmt.Fprintln(stdout)
 			}
 		}
 	}

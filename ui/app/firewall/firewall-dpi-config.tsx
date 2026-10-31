@@ -25,9 +25,11 @@ import {
 export function DPIConfigSection({
   config: cfg,
   health,
+  available,
   onChange,
 }: {
   config: DataPlaneConfig;
+  available: boolean;
   /** Runtime health; undefined while unknown. */
   health: HealthResponse | undefined;
   onChange: (c: DataPlaneConfig) => void;
@@ -60,7 +62,7 @@ export function DPIConfigSection({
   // Failed requests leave the editor open; only acknowledged state replaces
   // the displayed server copy.
   async function save(updated: DataPlaneConfig) {
-    if (!canEdit || saving) return null;
+    if (!canEdit || !available || saving) return null;
     setSaving(true);
     setSaveError(null);
     const result = await setDataPlane(updated);
@@ -129,7 +131,7 @@ export function DPIConfigSection({
             {canEdit && (
               <button
                 onClick={toggleDPI}
-                disabled={saving}
+                disabled={saving || !available}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   dpiOn ? "bg-emerald-500" : "bg-white/10"
                 }`}
@@ -163,7 +165,7 @@ export function DPIConfigSection({
                   </span>
                   <InfoTip label="Monitor rules observe independently and never admit or block. Other enforcing rules and scopes still apply. Monitoring does not start learning." />
                 </div>
-                {canEdit && <ICSModeSelect label="ICS DPI Mode" value={dpiMode} onChange={setMode} disabled={saving} />}
+                {canEdit && <ICSModeSelect label="ICS DPI Mode" value={dpiMode} onChange={setMode} disabled={saving || !available} />}
               </div>
               <p className="mt-1 text-[10px] text-(--text-dim)">
                 Candidate {formatICSMode(dpiMode, undefined).label} — commit to apply. Per-rule overrides take precedence.
@@ -320,7 +322,7 @@ export function DPIConfigSection({
         <DPIProtocolModal
           context={cfg}
           protocols={protos}
-          saving={saving}
+          saving={saving || !available}
           onSave={saveProtos}
           onClose={() => setShowProtoModal(false)}
         />
@@ -329,7 +331,7 @@ export function DPIConfigSection({
         <DPIExclusionModal
           context={cfg}
           exclusions={exclusions}
-          saving={saving}
+          saving={saving || !available}
           onSave={saveExclusions}
           onClose={() => setShowExclModal(false)}
         />
@@ -339,7 +341,7 @@ export function DPIConfigSection({
           context={cfg}
           icsProtocols={icsProtos}
           parsing={cfg.dpiIcsParsing ?? {}}
-          saving={saving}
+          saving={saving || !available}
           onSave={saveICSProtos}
           onClose={() => setShowICSConfigModal(false)}
         />

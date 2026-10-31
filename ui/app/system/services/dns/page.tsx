@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
-import { useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
@@ -20,13 +20,14 @@ import { Card } from "../../../../components/Card";
 
 export default function DNSPage() {
   const canEdit = isAdmin();
+  const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [status, setStatus] = useState<DNSStatus | null>(null);
   const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<DNSConfig>({
     enabled: false,
     listenPort: 53,
     upstreamServers: [],
     cacheSizeMB: 0,
-  });
+  }, false);
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -36,15 +37,11 @@ export default function DNSPage() {
     const svc = await api.getServicesStatus();
     setStatus(svc?.dns ?? null);
     const s = await api.getDNS();
-    adoptConfig({
-      enabled: s?.enabled ?? false,
-      listenPort: s?.listenPort ?? 53,
-      listenZones: s?.listenZones ?? [],
-      upstreamServers: s?.upstreamServers ?? [],
-      cacheSizeMB: s?.cacheSizeMB ?? 0,
-    }, keepEdits);
+    if (!checkLoaded(s)) return;
+    setError(null);
+    adoptConfig(s, keepEdits);
     setLastUpdated(new Date());
-  }, [adoptConfig]));
+  }, [adoptConfig, checkLoaded]));
 
   useConfigRefresh(refresh);
 
@@ -59,7 +56,7 @@ export default function DNSPage() {
   const upstreamText = text("upstreamServers", (cfg.upstreamServers ?? []).join("\n"));
 
   async function onSave() {
-    if (!canEdit) return;
+    if (!canEdit || !canSave || loading) return;
     setError(null);
     const submitted = beginSave();
     const saved = await save.run("save", () => api.setDNS({ ...cfg, upstreamServers: upstreamText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
@@ -86,7 +83,7 @@ export default function DNSPage() {
           {canEdit && (
             <button
               onClick={onSave}
-              disabled={save.pending !== null}
+              disabled={!canSave || loading || save.pending !== null}
               className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
               {save.pending ? "Saving\u2026" : "Save"}
@@ -104,7 +101,9 @@ export default function DNSPage() {
         </div>
       }
     >
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={editor.superseded} />
+      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -252,6 +251,7 @@ export default function DNSPage() {
 
         <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </Card>
+      </fieldset>
     </Shell>
   );
 }

@@ -251,7 +251,12 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 			rec = requestStage(t, server, "GET", test.list, nil)
 			assertConfigResponseHeader(t, rec, "")
 			var got any
-			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || !reflect.DeepEqual(got, jsonValue(t, editableValue(candidate, test.list))) {
+			want := jsonValue(t, editableValue(candidate, test.list))
+			// Empty collection responses are arrays even if persistence stores nil.
+			if want == nil {
+				want = []any{}
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || !reflect.DeepEqual(got, want) {
 				t.Fatalf("list did not return candidate: status=%d body=%s err=%v", rec.Code, rec.Body, err)
 			}
 			if len(audit.records) != 1 || audit.records[0].Actor != "stage-tester" || audit.records[0].Detail != "candidate" {

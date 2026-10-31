@@ -7,7 +7,7 @@ import { upsertRow } from "../../lib/config-editor";
 import type { ConfigFields } from "../../lib/use-config-editor";
 
 import { useConfigForm } from "../../lib/use-config-form";
-import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
+import { ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
 
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
@@ -49,10 +49,11 @@ function unboundRuleLabels(rules: FirewallRule[], bindings: IdentityBinding[]): 
 }
 
 export default function IdentitiesPage() {
+  const { canSave, canSaveNow, loadError: configLoadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const confirm = useConfirm();
   const canEdit = isAdmin();
-  const rowsDraft = useConfigEditor<IdentityBinding[]>([]);
+  const rowsDraft = useConfigEditor<IdentityBinding[]>([], false);
   const { cfg: bindings, adoptConfig: adoptRows } = rowsDraft;
   const [rules, setRules] = useState<FirewallRule[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -66,6 +67,7 @@ export default function IdentitiesPage() {
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [res, ruleList] = await Promise.all([api.listIdentityBindings(), api.listFirewallRules()]);
     setRules(ruleList ?? []);
+    checkLoaded(res.ok ? res.data : null);
     if (!res.ok) {
       setLoadError(res.error);
       return;
@@ -73,11 +75,12 @@ export default function IdentitiesPage() {
     setLoadError(null);
     adoptRows(res.data, keepEdits);
     refreshForm(res.data, keepEdits);
-  }, [refreshForm, adoptRows]));
+  }, [checkLoaded, refreshForm, adoptRows]));
 
   useConfigRefresh(refresh);
 
   async function stage(binding: IdentityBinding): Promise<boolean> {
+    if (!canSaveNow()) return false;
     setError(null);
     const submitted = rowsDraft.beginSave();
     const res = await api.setIdentityBinding(binding);
@@ -93,6 +96,7 @@ export default function IdentitiesPage() {
   }
 
   async function onCreate() {
+    if (!canSaveNow()) return;
     const checked = bindingError(ip, labels);
     if ("error" in checked) {
       setError(checked.error);
@@ -112,6 +116,7 @@ export default function IdentitiesPage() {
       confirmLabel: "Remove",
       variant: "danger",
       onConfirm: async () => {
+        if (!canSaveNow()) return;
         setError(null);
         const res = await api.deleteIdentityBinding(address);
         if (!res.ok) {
@@ -139,7 +144,9 @@ export default function IdentitiesPage() {
         </button>
       }
     >
+      {configLoadError && <p role="alert" className="mb-4 text-sm text-red-400">{configLoadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
+      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -168,7 +175,7 @@ export default function IdentitiesPage() {
           <div className="mt-3 grid gap-3 md:grid-cols-4">
             <input aria-label="Address" value={ip} onChange={(e) => setIp(e.target.value)} placeholder="address (e.g. 10.0.0.5)" className="input-industrial" />
             <input aria-label="Identities" value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="identities (comma-separated)" className="input-industrial md:col-span-2" />
-            <button onClick={onCreate} disabled={saving || (bindings.length >= MAX_BINDINGS && !replacing)} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
+            <button onClick={onCreate} disabled={!canSave || saving || (bindings.length >= MAX_BINDINGS && !replacing)} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
               {saving ? "Staging..." : replacing ? "Replace binding" : "Bind"}
             </button>
           </div>
@@ -213,6 +220,7 @@ export default function IdentitiesPage() {
           </div>
         </>
       )}
+      </fieldset>
       <ConfirmDialog {...confirm.props} />
     </Shell>
   );

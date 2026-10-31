@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigLoad } from "../../lib/use-config-editor";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
@@ -45,6 +47,7 @@ import { useICSCoverage } from "./use-ics-coverage";
 export default function ICSPolicyPage() {
   const toast = useToast();
   const canEdit = isAdmin();
+  const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [rules, setRules] = useState<FirewallRule[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<FirewallRule | null>(null);
@@ -61,15 +64,12 @@ export default function ICSPolicyPage() {
 
   const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [list, dp] = await Promise.all([api.listFirewallRules(), fetchDataPlane()]);
+    if (!checkLoaded(list)) return;
     setError(null);
     if (dp) setDpiConfig(dp);
-    if (!list) {
-      setError("Failed to load firewall rules.");
-      return;
-    }
     setRules(list);
     if (!keepEdits) setEditing(null);
-  }, []));
+  }, [checkLoaded]));
 
   useConfigRefresh(refresh);
 
@@ -95,6 +95,7 @@ export default function ICSPolicyPage() {
   // stored one, where an omitted key would keep it.
   async function onSave(id: string, ics: ICSPredicatePatch | undefined) {
     setError(null);
+    if (!canSave) return null;
     const result = await api.updateFirewallRule(id, { ics: ics ?? null });
     if (!result.ok) {
       setError(result.error);
@@ -124,6 +125,7 @@ export default function ICSPolicyPage() {
         </button>
       }
     >
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
@@ -355,6 +357,7 @@ export default function ICSPolicyPage() {
 
       {editing && canEdit && (
         <EditICSModal
+          available={canSave}
           rule={rules.find((r) => r.id === editing.id) ?? editing}
           context={rules}
           globalMode={dpiConfig.dpiMode}

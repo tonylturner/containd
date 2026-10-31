@@ -364,6 +364,58 @@ test("Config candidate editor saves the omitted bank unchanged and summary uses 
   await expect(page.getByText("Running IDS bank: 30000 committed rules. Restores stage the candidate bank; commit promotes both.", { exact: true })).toBeVisible();
 });
 
+test("saved candidate JSON adopts a later server refresh", async ({ page }) => {
+  const diff = configDiff({ candidate: { system: { hostname: "initial" } } });
+  const state = await setupConfigReview(page, diff);
+  await page.goto("/config/?tab=candidate");
+  const editor = page.getByRole("textbox", { name: "Staged config JSON", exact: true });
+  await expect(editor).toHaveValue(JSON.stringify(diff.candidate, null, 2));
+  diff.candidate = { system: { hostname: "saved" } };
+  await editor.fill(JSON.stringify(diff.candidate, null, 2));
+  await page.getByRole("button", { name: "Save staged config", exact: true }).click();
+  await expect(page.getByText("Candidate staged — commit to apply.", { exact: true })).toBeVisible();
+  diff.candidate = { system: { hostname: "restored" } };
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
+  await expect(editor).toHaveValue(JSON.stringify(diff.candidate, null, 2));
+  await page.getByRole("button", { name: "Save staged config", exact: true }).click();
+  await expect.poll(() => state.writes.length).toBe(2);
+  expect(state.writes[1]).toEqual({ path: "/config/candidate", body: diff.candidate });
+});
+
+test("candidate JSON edited during a pending save stays a draft", async ({ page }) => {
+  const diff = configDiff({ candidate: { system: { hostname: "initial" } } });
+  await setupConfigReview(page, diff);
+  let submitted: unknown;
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/v1/config/candidate", async (route) => {
+    submitted = route.request().postDataJSON();
+    await held;
+    await route.fulfill({ json: { status: "staged" } });
+  });
+  await page.goto("/config/?tab=candidate");
+  const editor = page.getByRole("textbox", { name: "Staged config JSON", exact: true });
+  await expect(editor).toHaveValue(JSON.stringify(diff.candidate, null, 2));
+  diff.candidate = { system: { hostname: "submitted" } };
+  const saved = JSON.stringify(diff.candidate, null, 2);
+  await editor.fill(saved);
+  try {
+    await page.getByRole("button", { name: "Save staged config", exact: true }).click();
+    await expect.poll(() => submitted).toEqual(diff.candidate);
+    const draft = JSON.stringify({ system: { hostname: "still editing" } }, null, 2);
+    await editor.fill(draft);
+    release();
+    await expect(page.getByText("Candidate staged — commit to apply.", { exact: true })).toBeVisible();
+    await expect(editor).toHaveValue(draft);
+    diff.candidate = { system: { hostname: "restored" } };
+    const refreshed = page.waitForResponse("**/api/v1/config/diff");
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
+    await (await refreshed).finished();
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await expect(editor).toHaveValue(draft);
+  } finally { release(); }
+});
+
 test("Config IDS explorer shows the selected bank count and a browse link without fetching rules", async ({ page }) => {
   const diff = configDiff({
     changed: true, changedSections: ["ids"],

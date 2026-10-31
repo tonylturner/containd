@@ -405,8 +405,8 @@ export function InterfaceRow({
             <button
               onClick={async () => {
                 await onUpdate(iface.name, {
-                  type: itype || undefined,
-                  alias: alias.trim() || undefined,
+                  type: itype,
+                  alias: alias.trim(),
                   members:
                     itype === "bridge"
                       ? members
@@ -414,13 +414,13 @@ export function InterfaceRow({
                           .map((s) => s.trim())
                           .filter(Boolean)
                       : [],
-                  parent: itype === "vlan" ? parent.trim() || undefined : undefined,
+                  parent: itype === "vlan" ? parent.trim() : "",
                   vlanId:
                     itype === "vlan" && vlanId.trim()
                       ? Number.parseInt(vlanId, 10)
-                      : undefined,
-                  device: device.trim() || undefined,
-                  zone: zone || undefined,
+                      : 0,
+                  device: device.trim(),
+                  zone,
                   addressMode: mode === (iface.addressMode ?? "") ? iface.addressMode : mode,
                   addresses:
                     mode === (iface.addressMode ?? "") && addresses === (iface.addresses ?? []).join(", ")
