@@ -123,6 +123,8 @@ func (e *Engine) clearGateIndex(ctx context.Context, index uint8) error {
 	return nil
 }
 
+// sweepAdmission runs after publication with lifecycleMu held, not policyMu:
+// stale admissions already rematch, while the next flip/index reuse must wait.
 func (e *Engine) sweepAdmission(ctx context.Context, old *rules.Snapshot, oldParity uint32, changed bool) error {
 	// Complete both classes even if the first sweep fails. Their dirty state
 	// is independent, and neither can be reused until recovery succeeds.

@@ -8,9 +8,11 @@ import (
 	"net/netip"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -194,9 +196,10 @@ func TestApplyPublicationPrecedesInstallAndSerializesSweeps(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("apply did not reach sweep")
 	}
-	if e.policyMu.TryRLock() {
+	if !e.policyMu.TryRLock() {
+		t.Error("sweep blocks policy readers")
+	} else {
 		e.policyMu.RUnlock()
-		t.Error("writer released before sweep completion")
 	}
 	if e.lifecycleMu.TryLock() {
 		e.lifecycleMu.Unlock()
@@ -208,6 +211,89 @@ func TestApplyPublicationPrecedesInstallAndSerializesSweeps(t *testing.T) {
 	}
 	if !strings.Contains(e.RulesetStatus().Ruleset, "0x00000006") {
 		t.Fatal("installed policy did not use chosen parity")
+	}
+}
+
+func TestPacketVerdictDuringAdmissionSweep(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mask uint32
+	}{
+		{"parity", markabi.AdmittedBit},
+		{"retired gate index", enforce.GateZoneCtMask},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, _ := admissionEngine(t)
+			ctx := context.Background()
+			snap := rules.Snapshot{Default: rules.ActionAllow,
+				Gate: rules.GateSelection{Zones: []rules.GateZone{{Name: "old", Index: 1}}}}
+			if err := e.ApplyRules(ctx, snap); err != nil {
+				t.Fatal(err)
+			}
+			sweeping, release, applied := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			e.clearMarks = func(_ context.Context, _, _, clear uint32) (int, error) {
+				if clear == tc.mask {
+					close(sweeping)
+					<-release
+				}
+				return 1, nil
+			}
+			// Retiring the zone changes policy and exercises both sweep
+			// classes; each subtest stalls only its selected class.
+			snap.Gate.Zones = nil
+			snap.Version = "new-policy"
+			var applyErr error
+			var packetDone chan struct{}
+			t.Cleanup(func() {
+				unblock()
+				<-applied
+				if packetDone != nil {
+					<-packetDone
+				}
+			})
+			go func() {
+				defer close(applied)
+				applyErr = e.ApplyRules(ctx, snap)
+			}()
+			select {
+			case <-sweeping:
+			case <-time.After(3 * time.Second):
+				t.Fatal("apply did not reach sweep")
+			}
+			if e.lifecycleMu.TryLock() {
+				e.lifecycleMu.Unlock()
+				t.Fatal("sweep did not exclude another flip/index reuse")
+			}
+			verdict := make(chan capture.Decision, 1)
+			packetDone = make(chan struct{})
+			go func() {
+				defer close(packetDone)
+				verdict <- e.HandlePacket(modbusWritePacket(capture.NewToken(1, 1)))
+			}()
+			select {
+			case d := <-verdict:
+				if d.Action != capture.Repeat || d.Mark&markabi.ObservedMark == 0 {
+					t.Fatalf("packet verdict=%+v", d)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("packet verdict blocked behind sweep")
+			}
+			select {
+			case <-applied:
+				t.Fatal("apply completed before sweep was released")
+			default:
+			}
+			if e.CurrentRules().Version != snap.Version || e.CurrentRules().AdmissionParity != markabi.ParityBit {
+				t.Fatal("packet did not have the new published policy")
+			}
+			unblock()
+			<-applied
+			if applyErr != nil {
+				t.Fatal(applyErr)
+			}
+		})
 	}
 }
 
