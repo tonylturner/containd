@@ -83,7 +83,7 @@ func loginHandler(userStore users.Store) gin.HandlerFunc {
 		}
 		loginLimiter.Success(key)
 		if u.MFAEnabled && strings.TrimSpace(u.TOTPSecret) != "" {
-			challengeToken, err := signMFAChallenge(jwtSecret(), mfaChallengePurposeLogin, u.ID, "")
+			challengeToken, err := signMFAChallenge(c.Request.Context(), userStore, jwtSecret(), mfaChallengePurposeLogin, u, "")
 			if err != nil {
 				apiError(c, http.StatusInternalServerError, "failed to create MFA challenge")
 				return
@@ -218,9 +218,9 @@ func authSessionHandler(userStore users.Store) gin.HandlerFunc {
 }
 
 type updateMeRequest struct {
-	FirstName string `json:"firstName,omitempty"`
-	LastName  string `json:"lastName,omitempty"`
-	Email     string `json:"email,omitempty"`
+	FirstName *string `json:"firstName,omitempty"`
+	LastName  *string `json:"lastName,omitempty"`
+	Email     *string `json:"email,omitempty"`
 }
 
 func updateMeHandler(userStore users.Store) gin.HandlerFunc {
@@ -235,7 +235,7 @@ func updateMeHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		patch := users.User{FirstName: req.FirstName, LastName: req.LastName, Email: req.Email}
+		patch := users.Patch{FirstName: req.FirstName, LastName: req.LastName, Email: req.Email}
 		u, err := userStore.Update(c.Request.Context(), uid, patch)
 		if err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())

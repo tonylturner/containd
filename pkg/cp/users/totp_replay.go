@@ -34,10 +34,24 @@ func (s *SQLiteStore) AcceptTOTP(ctx context.Context, id string, code string, no
 		return fmt.Errorf("begin accept totp: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	result := acceptTOTP(ctx, tx, id, code, now)
+	if result != nil {
+		if _, _, refused := Refusal(result); !refused {
+			return result
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit accept totp: %w", err)
+	}
+	return result
+}
+
+// acceptTOTP leaves commit ownership with the caller, including failure counters.
+func acceptTOTP(ctx context.Context, tx *sql.Tx, id, code string, now time.Time) error {
 	var secret string
 	var enabled bool
 	var lastStep int64
-	err = tx.QueryRowContext(ctx, `SELECT mfa_totp_secret, mfa_totp_enabled, mfa_totp_last_step FROM users WHERE id = ?`, id).Scan(&secret, &enabled, &lastStep)
+	err := tx.QueryRowContext(ctx, `SELECT mfa_totp_secret, mfa_totp_enabled, mfa_totp_last_step FROM users WHERE id = ?`, id).Scan(&secret, &enabled, &lastStep)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -58,12 +72,18 @@ func (s *SQLiteStore) AcceptTOTP(ctx context.Context, id string, code string, no
 		return err
 	}
 	if locked := st.refuse(now); locked != nil {
-		return commitFactor(ctx, tx, st, locked)
+		if err := st.save(ctx, tx); err != nil {
+			return err
+		}
+		return locked
 	}
 	step, ok := matchTOTPStep(secret, code, now)
 	if !ok {
 		st.fail(now)
-		return commitFactor(ctx, tx, st, ErrInvalidTOTP)
+		if err := st.save(ctx, tx); err != nil {
+			return err
+		}
+		return ErrInvalidTOTP
 	}
 	if step <= lastStep {
 		return ErrTOTPReused
@@ -79,9 +99,6 @@ func (s *SQLiteStore) AcceptTOTP(ctx context.Context, id string, code string, no
 	}
 	if err := clearFactor(ctx, tx, id, FactorTOTP); err != nil {
 		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit accept totp: %w", err)
 	}
 	return nil
 }

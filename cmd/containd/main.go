@@ -272,10 +272,25 @@ func cliLogin(ctx context.Context, baseURL string, client *http.Client) (string,
 		return "", fmt.Errorf("login returned %d", resp.StatusCode)
 	}
 	var result struct {
-		Token string `json:"token"`
+		Token       string `json:"token"`
+		MFARequired bool   `json:"mfaRequired"`
+		User        struct {
+			MustChangePassword bool `json:"mustChangePassword"`
+			MFARequired        bool `json:"mfaRequired"`
+			MFAEnabled         bool `json:"mfaEnabled"`
+		} `json:"user"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
+	}
+	if result.User.MustChangePassword {
+		return "", errors.New("account requires a password change; sign in through the web UI or SSH to change it before using direct CLI login")
+	}
+	if result.MFARequired {
+		return "", errors.New("account requires MFA; use the web console or sign in through SSH instead of direct CLI login")
+	}
+	if result.User.MFARequired && !result.User.MFAEnabled {
+		return "", errors.New("account requires MFA enrollment; complete setup in the web UI before using direct CLI login")
 	}
 	if result.Token == "" {
 		return "", fmt.Errorf("empty token in login response")
