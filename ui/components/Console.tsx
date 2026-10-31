@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-import { api, getSessionToken } from "../lib/api";
-import { apiWebSocketURL } from "../lib/api-core";
+import { api } from "../lib/api";
+import { cliWebSocketURL } from "../lib/api-core";
 import { getPersistCLIHistory } from "../lib/prefs";
 
 type CLIResponse = { output?: string; error?: string };
@@ -27,17 +27,6 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
   const busyRef = useRef(false);
   const commandsRef = useRef<string[]>([]);
   const persistHistoryRef = useRef(false);
-
-  const wsURL = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    const token = getSessionToken();
-    const base = apiWebSocketURL(
-      "/api/v1/cli/ws",
-      window.location.protocol,
-      window.location.host,
-    );
-    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
-  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -418,54 +407,73 @@ export function Console({ prompt = "containd# " }: { prompt?: string }) {
   }, [prompt]);
 
   useEffect(() => {
-    if (!wsURL) return;
     if (!termReady) return;
     const term = termRef.current;
     if (!term) return;
-    const ws = new WebSocket(wsURL);
-    wsRef.current = ws;
+    let disposed = false;
+    let ws: WebSocket | null = null;
     setStatusMsg(null);
 
-    ws.onopen = () => {
-      setConnected(true);
-      term.writeln("containd in-app CLI. Type 'show version'.");
-      term.write(prompt);
-    };
-
-    ws.onmessage = (ev) => {
-      busyRef.current = false;
-      let payload: CLIResponse | null = null;
-      try {
-        payload = JSON.parse(ev.data);
-      } catch {
-        payload = { output: String(ev.data ?? "") };
+    const connect = async () => {
+      const result = await api.createCLIWebSocketTicket();
+      if (disposed) return;
+      if (!result || typeof result.ticket !== "string" || !result.ticket) {
+        setStatusMsg("Console authentication failed. Refresh to reconnect.");
+        return;
       }
-      if (payload?.output) {
-        const normalized = payload.output.replace(/\r?\n/g, "\r\n");
-        term.write(normalized);
-        if (!normalized.endsWith("\r\n")) {
-          term.write("\r\n");
+      const socket = new WebSocket(cliWebSocketURL(
+        result.ticket, window.location.protocol, window.location.host,
+      ));
+      ws = socket;
+      wsRef.current = socket;
+
+      socket.onopen = () => {
+        setConnected(true);
+      };
+
+      socket.onmessage = (ev) => {
+        busyRef.current = false;
+        let payload: CLIResponse | null = null;
+        try {
+          payload = JSON.parse(ev.data);
+        } catch {
+          payload = { output: String(ev.data ?? "") };
         }
-      }
-      if (payload?.error) {
-        term.write(`\x1b[33m${payload.error}\x1b[0m\r\n`);
-      }
-      term.write(prompt);
+        if (payload?.output) {
+          const normalized = payload.output.replace(/\r?\n/g, "\r\n");
+          term.write(normalized);
+          if (!normalized.endsWith("\r\n")) {
+            term.write("\r\n");
+          }
+        }
+        if (payload?.error) {
+          term.write(`\x1b[33m${payload.error}\x1b[0m\r\n`);
+        }
+        term.write(prompt);
+      };
+
+      socket.onclose = () => {
+        setConnected(false);
+        setStatusMsg("Disconnected. Refresh to reconnect.");
+      };
+
+      socket.onerror = () => {
+        setStatusMsg("Console connection error.");
+      };
     };
 
-    ws.onclose = () => {
-      setConnected(false);
-      setStatusMsg("Disconnected. Refresh to reconnect.");
-    };
-
-    ws.onerror = () => {
-      setStatusMsg("Console connection error.");
-    };
+    void connect();
 
     return () => {
-      ws.close();
+      disposed = true;
+      if (ws) {
+        ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+        ws.close();
+        if (wsRef.current === ws) wsRef.current = null;
+      }
+      setConnected(false);
     };
-  }, [prompt, termReady, wsURL]);
+  }, [prompt, termReady]);
 
   useEffect(() => {
     let alive = true;

@@ -551,7 +551,8 @@ components:
 
         IEC 60870-5-104 (`protocol: iec104`):
         - `typeIds`, `classes`, `ca`, `ioa`, `cot`, `originators`,
-          `negative`, `test` and `selectExecute` are iec104-only. `null`, `[]`
+          `negative`, `test`, `selectExecute`, `commandStates` and
+          `commandQualifiers` are iec104-only. `null`, `[]`
           and null items are rejected; omit the field to match any value.
           Numbers must be JSON integers.
         - `functionCode`, `unitId`, `addresses`, `objectClasses` and
@@ -667,6 +668,8 @@ components:
         negative: {type: boolean, description: "IEC104 exact P/N bit; false is a restriction"}
         test: {type: boolean, description: "IEC104 exact T bit; false is a restriction"}
         selectExecute: {type: string, enum: [select, execute], description: "IEC104 S/E qualifier; typeIds omitted or subset of 45-50 and 58-63, excluding bitstrings 51/64"}
+        commandStates: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 2}, description: "IEC104 SCS/DCS/RCS; requires typeIds wholly in 45/58 (states 0..1) or 46/47/59/60 (states 1..2). Mixed state domains rejected. Omit to match any; absent packet field never matches."}
+        commandQualifiers: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 31}, description: "IEC104 QU bits 2-6; requires explicit typeIds subset of 45,46,47,58,59,60. Omit to match any; absent packet field never matches."}
         tags:
           type: array
           minItems: 1
@@ -3200,6 +3203,8 @@ components:
         negative: {type: boolean}
         test: {type: boolean}
         selectExecute: {type: string, enum: [select, execute]}
+        commandStates: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 2}, description: "IEC104 SCS/DCS/RCS; requires typeIds wholly in 45/58 (states 0..1) or 46/47/59/60 (states 1..2). Mixed state domains rejected. Omit to match any; absent packet field never matches."}
+        commandQualifiers: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 31}, description: "IEC104 QU bits 2-6; requires explicit typeIds subset of 45,46,47,58,59,60. Omit to match any; absent packet field never matches."}
         tags: {type: array, minItems: 1, items: {type: string}, description: "CIP symbolic selectors; logical targets never match"}
       type: object
     RulesIDSCondition:
@@ -7264,15 +7269,58 @@ paths:
         in: query
         required: false
         schema: {type: string}
+  /cli/ws/ticket:
+    post:
+      summary: Issue a single-use interactive CLI WebSocket ticket
+      tags: [Cli]
+      description: >-
+        Authenticate with the management cookie or Bearer credential. Returns an
+        opaque ticket bound to the authenticated user, role and session, valid
+        for 30 seconds. Obtain a fresh ticket before each connection. Tickets
+        are held in a process-local store without issuance count limits and do
+        not survive restarts. Expired entries are cleaned lazily on the next
+        issuance or redemption.
+      responses:
+        '200':
+          description: Ticket issued; Cache-Control is no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, expiresIn]
+                properties:
+                  ticket: {type: string}
+                  expiresIn: {type: integer, enum: [30]}
+        '401':
+          description: Authentication required
+        '403':
+          description: Cross-origin cookie request or restricted account
   /cli/ws:
     get:
       summary: Upgrade to interactive CLI WebSocket
       tags: [Cli]
-      description: 'Requires same-host Origin and authentication. Client sends a command string or {line: string}; server sends JSON {output:
-        string, error?: string}.'
+      security: []
+      description: >-
+        Requires a fresh ticket from the authenticated, CSRF-protected
+        POST /cli/ws/ticket. No Origin-to-Host comparison is required, allowing
+        reverse proxies to rewrite Host. A ticket is consumed atomically on its
+        first attempt, including failed upgrades. The issuer's authentication is revalidated
+        before upgrade: revoked or expired sessions are rejected. Cookies and
+        Bearer headers alone do not authorize upgrades; JWTs in query parameters
+        are not accepted. Client sends a command string or {line: string};
+        server sends JSON {output: string, error?: string}.
+      parameters:
+      - name: ticket
+        in: query
+        required: true
+        schema: {type: string}
       responses:
         '101':
           description: Success
+        '401':
+          description: Missing, unknown, expired, reused or invalidated ticket
+        '403':
+          description: Account restricted
   /services/vpn/openvpn/profile:
     post:
       summary: Upload foreground OpenVPN profile and stage its path (admin)

@@ -153,9 +153,9 @@ verify_generated_sets() {
 	jq -e 'any(.items[]; any(.content.rules[]; .ics.protocol == "modbus" and ((.ics.functionCode // []) | index(5) != null)))' \
 		"$items" >/dev/null ||
 		exact_fail "$label generation did not certify a Modbus FC5 coil suggestion; response=$(cat "$items")"
-	jq -e 'any(.items[]; any(.content.rules[]; .ics.protocol == "iec104" and ((.ics.typeIds // []) | index(46) != null)))' \
+	jq -e 'any(.items[]; any(.content.rules[]; .ics.protocol == "iec104" and .ics.typeIds == [46] and .ics.commandStates == [1] and .ics.commandQualifiers == [0] and .ics.selectExecute == "execute"))' \
 		"$items" >/dev/null ||
-		exact_fail "$label generation did not certify the receiver-verified IEC 104 type-46 command; response=$(cat "$items")"
+		exact_fail "$label generation did not certify the partial IEC 104 type-46 observation with state=1/QU=0/execute bound; response=$(cat "$items")"
 	jq -e 'all(.items[]; .status == "certified" or .status == "reviewed")' "$items" >/dev/null ||
 		exact_fail "$label generation returned a suggestion without a passing certificate; response=$(cat "$items")"
 }
@@ -340,17 +340,13 @@ JSON
 	exact_drive_modbus_read "$CAPTURE_MODE live-watch Modbus FC3" "$MODE_RESULTS/live-fc3.log"
 	exact_drive_coil 0 "$CAPTURE_MODE live-watch FC5 OFF" "$MODE_RESULTS/live-fc5-off.log"
 	exact_drive_coil 65280 "$CAPTURE_MODE live-watch FC5 ON" "$MODE_RESULTS/live-fc5-on.log"
-	for qualifier in $(seq 0 31); do
-		for value in 1 2; do
-			exact_drive_sbo "$value" "$qualifier" "$CAPTURE_MODE live-watch IEC104 SBO" \
-				"$MODE_RESULTS/live-iec104-q${qualifier}-value${value}.log"
-		done
-	done
+	exact_drive_sbo 1 0 "$CAPTURE_MODE live-watch IEC104 partial observation" "$MODE_RESULTS/live-iec104-q0-value1.log"
 	AFTER_RTU=$(exact_rtu_state)
-	[[ $(jq '.writes_applied' <<<"$AFTER_RTU") -ge $(($(jq '.writes_applied' <<<"$BEFORE_RTU") + 64)) ]] ||
-		exact_fail "$CAPTURE_MODE IEC SBO matrix did not actuate all 64 value/qualifier combinations at the receiver; before=$BEFORE_RTU after=$AFTER_RTU"
-	exact_pass_record "$CAPTURE_MODE live IEC receiver confirms the full Type-46 value/qualifier boundary" \
-		"64 positive SBO operations; RTU before=$BEFORE_RTU after=$AFTER_RTU"
+	[[ $(jq '.writes_applied' <<<"$AFTER_RTU") -eq $(($(jq '.writes_applied' <<<"$BEFORE_RTU") + 1)) ]] ||
+		exact_fail "$CAPTURE_MODE observed IEC command did not actuate once; before=$BEFORE_RTU after=$AFTER_RTU"
+	exact_pass_record "$CAPTURE_MODE live IEC receiver confirms only Type-46 state=1/QU=0" \
+		"one positive SBO operation; only its execute is eligible; RTU before=$BEFORE_RTU after=$AFTER_RTU"
+
 	sleep 1
 	API_OUTPUT="$MODE_RESULTS/live-watch-before-stop.json"
 	exact_api_get "/learn/watches/$LIVE_WATCH_ID" "$API_OUTPUT" "$CAPTURE_MODE live watch status before stop"
@@ -566,11 +562,49 @@ JSON
 			exact_fail "$CAPTURE_MODE reserved FC5 0x1234 was not denied before the receiver; client=$RESERVED_STATUS FC5 requests=$FC5_BEFORE->$FC5_AFTER coilWrites=$WRITES_BEFORE->$WRITES_AFTER state=$(exact_modbus_state) clientOutput=$(cat "$MODE_RESULTS/enforced-fc5-reserved.log")"
 		exact_pass_record "$CAPTURE_MODE enforced FC5 ALLOW admits only the legitimate closed-domain values at the receiver" \
 			"0 and 0xff00 delivered; 0x1234 receiver request count unchanged at $FC5_AFTER"
+		# Promote only the reviewed execute suggestion. Startup remains deliberate
+		# policy. A direct execute has no prior selection at this SBO-only RTU:
+		# its negative confirmation proves delivery, not successful actuation.
+		exact_api_get /config "$MODE_RESULTS/running-before-iec-enforce.json" "$CAPTURE_MODE running config before IEC mode edit"
+		jq --arg id "$IEC_RULE_ID" '
+			(.firewall.rules[] | select(.id == $id)) as $command
+			| .firewall.rules |= map(if .id == $id then .ics.mode="enforce" else . end)
+			| .firewall.rules += [
+			  ($command | .id="exact-learner-iec-session" | .ics={protocol:"iec104",mode:"enforce",readOnly:true}),
+			  ($command | .id="exact-learner-iec-confirm" | .ics={protocol:"iec104",mode:"enforce",direction:"response",typeIds:[46],ca:[1],ioa:[{start:2001,end:2001}]})
+			]
+		' "$MODE_RESULTS/running-before-iec-enforce.json" >"$MODE_RESULTS/iec-enforce-candidate.json"
+		exact_api_post /config/candidate "$MODE_RESULTS/iec-enforce-candidate.json" \
+			"$MODE_RESULTS/iec-enforce-save.json" "$CAPTURE_MODE normal IEC ALLOW mode edit"
+		exact_api_get /config "$MODE_RESULTS/running-before-iec-commit.json" "$CAPTURE_MODE running policy before IEC commit"
+		jq -e --arg id "$IEC_RULE_ID" '.firewall.rules[] | select(.id == $id) | .ics.mode == "monitor"' \
+			"$MODE_RESULTS/running-before-iec-commit.json" >/dev/null || exact_fail "IEC candidate edit activated before commit"
+		exact_api_post /config/commit "$MODE_RESULTS/commit-request.json" \
+			"$MODE_RESULTS/iec-enforce-commit.json" "$CAPTURE_MODE commit IEC enforce candidate edit"
+		exact_api_get /config "$MODE_RESULTS/running-after-iec-commit.json" "$CAPTURE_MODE active IEC enforce rule"
+		jq -e --arg id "$IEC_RULE_ID" '.firewall.rules[] | select(.id == $id) | .ics.mode == "enforce" and .ics.commandStates == [1] and .ics.commandQualifiers == [0]' \
+			"$MODE_RESULTS/running-after-iec-commit.json" >/dev/null || exact_fail "IEC enforce tuple was not activated"
+		BEFORE_RTU=$(exact_rtu_state)
+		compose exec -T iec_cc iec104ep cmd "$RTU_IP" 2404 execute 1 2001 1 \
+			>"$MODE_RESULTS/enforced-iec-observed.log" 2>&1 && IEC_OBSERVED_STATUS=0 || IEC_OBSERVED_STATUS=$?
+		AFTER_RTU=$(exact_rtu_state)
+		[[ $IEC_OBSERVED_STATUS == 1 && $(jq '.commands_received' <<<"$AFTER_RTU") -eq $(($(jq '.commands_received' <<<"$BEFORE_RTU") + 1)) ]] ||
+			exact_fail "observed IEC state did not reach the SBO-only receiver for negative confirmation; client=$IEC_OBSERVED_STATUS before=$BEFORE_RTU after=$AFTER_RTU output=$(cat "$MODE_RESULTS/enforced-iec-observed.log")"
+		BEFORE_RTU=$AFTER_RTU
+		compose exec -T iec_cc iec104ep cmd "$RTU_IP" 2404 execute 1 2001 2 \
+			>"$MODE_RESULTS/enforced-iec-unobserved.log" 2>&1 && IEC_UNOBSERVED_STATUS=0 || IEC_UNOBSERVED_STATUS=$?
+		sleep 0.5
+		AFTER_RTU=$(exact_rtu_state)
+		[[ $IEC_UNOBSERVED_STATUS != 0 && $(jq '.commands_received' <<<"$AFTER_RTU") -eq $(jq '.commands_received' <<<"$BEFORE_RTU") && $(jq '.writes_applied' <<<"$AFTER_RTU") -eq $(jq '.writes_applied' <<<"$BEFORE_RTU") ]] ||
+			exact_fail "unobserved IEC state reached the receiver; client=$IEC_UNOBSERVED_STATUS before=$BEFORE_RTU after=$AFTER_RTU output=$(cat "$MODE_RESULTS/enforced-iec-unobserved.log")"
+		exact_pass_record "$CAPTURE_MODE enforced IEC predicate delivers observed state and blocks unobserved state before receiver" \
+			"state=1/QU=0 received (SBO negative confirmation); state=2/QU=0 commands_received unchanged; RTU=$AFTER_RTU"
+
 	else
 		cat >"$MODE_RESULTS/fc5-enforcement-capability.json" <<'JSON'
-{"status":"not-applicable","reason":"AF_PACKET is passive and cannot reject packets; the receiver-side reserved FC5 assertion runs in the NFQUEUE stack."}
+{"status":"not-applicable","reason":"AF_PACKET is passive and cannot reject packets; receiver-side FC5 and IEC state rejection assertions run in the NFQUEUE stack."}
 JSON
-		printf 'INFO: AF_PACKET is passive; receiver-side rejection of FC5 0x1234 is verified in the isolated NFQUEUE run.\n'
+		printf 'INFO: AF_PACKET is passive; receiver-side rejection of FC5 0x1234 and unobserved IEC states is verified in the isolated NFQUEUE run.\n'
 	fi
 
 	# Reboot the real all-mode container with its evidence database on the

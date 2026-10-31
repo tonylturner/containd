@@ -140,10 +140,13 @@ func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	store := &mockStore{cfg: config.DefaultConfig()}
 	srv := httptest.NewServer(NewServer(store, nil))
 	defer srv.Close()
+	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: srv.Listener.Addr().String(), Enabled: true}})
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/cli/ws"
+	rec := httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/v1/cli/ws/ticket", nil))
+	ticket := decodeCLITicket(t, rec)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/cli/ws?ticket=" + ticket
 	headers := http.Header{}
-	headers.Set("Authorization", "Bearer "+testAdminToken)
 	headers.Set("Origin", srv.URL)
 
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, headers)
@@ -182,6 +185,17 @@ func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	}
 	if cmdResp.Error != "" {
 		t.Fatalf("unexpected websocket error: %+v", cmdResp)
+	}
+	// This command needs the loopback API, not just the local registry. The
+	// issuer's credential must survive redemption without a browser cookie.
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"line":"show health"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadJSON(&cmdResp); err != nil {
+		t.Fatal(err)
+	}
+	if cmdResp.Error != "" || !strings.Contains(cmdResp.Output, "status") {
+		t.Fatalf("ticket-authenticated loopback command: %+v", cmdResp)
 	}
 }
 

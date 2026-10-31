@@ -12,6 +12,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ics/project"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
@@ -158,6 +159,9 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 			if ioa, ok := eventfields.Uint32(a, eventfields.KeyIOA); ok {
 				idx, _ := eventfields.Uint32(a, eventfields.KeyObjectIndex)
 				obj := evidence.IEC104Object{Index: idx, IOA: &ioa, Select: boolPtr(a, eventfields.KeySelect), Qualifier: bytePtr(a, eventfields.KeyQualifier)}
+				if iec.APCIType == "I" && iec.TypeID != nil && len(rules.IEC104CommandStates(*iec.TypeID)) > 0 {
+					obj.CommandState = bytePtr(a, eventfields.KeyValue)
+				}
 				if v, ok := a[eventfields.KeyValue]; ok {
 					obj.ValueDigest, _ = evidence.Digest(v)
 				}

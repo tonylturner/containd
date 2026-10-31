@@ -197,15 +197,8 @@ func Observation(o evidence.Observation) ([]rules.EvalContext, error) {
 			if obj.Qualifier != nil {
 				a[eventfields.KeyQualifier] = *obj.Qualifier
 			}
-			// Closed command values are retained as canonical digests. Restore
-			// their finite decoded state, including reserved negative states,
-			// through the same value-validity projection as live events.
-			for value := range uint8(4) {
-				digest, _ := evidence.Digest(value)
-				if obj.ValueDigest == digest {
-					a[eventfields.KeyValue] = value
-					break
-				}
+			if obj.CommandState != nil {
+				a[eventfields.KeyValue] = *obj.CommandState
 			}
 			events = append(events, dpi.Event{Proto: s.Protocol, Kind: s.Direction, Attributes: a, Timestamp: o.CapturedAt})
 		}

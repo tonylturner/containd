@@ -233,6 +233,14 @@ func iecObject(ev dpi.Event, safeRead func(map[string]any) bool) *rules.ICSConte
 		if v, ok := eventfields.Bool(a, eventfields.KeyCOTTest); ok {
 			c.Test = &v
 		}
+		if c.TypeID != nil && len(rules.IEC104CommandStates(*c.TypeID)) > 0 {
+			if v, ok := eventfields.Uint8(a, eventfields.KeyValue); ok {
+				c.CommandState = &v
+			}
+			if v, ok := eventfields.Uint8(a, eventfields.KeyQualifier); ok {
+				c.CommandQualifier = &v
+			}
+		}
 		if c.TypeID != nil && ((*c.TypeID >= 45 && *c.TypeID <= 50) || (*c.TypeID >= 58 && *c.TypeID <= 63)) {
 			if v, ok := eventfields.Bool(a, eventfields.KeySelect); ok {
 				c.Select = &v

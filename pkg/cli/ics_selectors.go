@@ -47,6 +47,10 @@ func applyICSSelector(p *config.ICSPredicate, flag, value string) error {
 		maxValue = 65519
 	case "--groups", "--variations", "--originators":
 		maxValue = 255
+	case "--command-states":
+		maxValue = 2
+	case "--command-qualifiers":
+		maxValue = 31
 	case "--cot":
 		maxValue = 63
 	}
@@ -78,6 +82,10 @@ func applyICSSelector(p *config.ICSPredicate, flag, value string) error {
 			}
 		}
 		p.COT = ints
+	case "--command-states":
+		p.CommandStates = ints
+	case "--command-qualifiers":
+		p.CommandQualifiers = ints
 	case "--originators":
 		p.Originators = ints
 	default:

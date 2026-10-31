@@ -67,6 +67,8 @@ export function suggestion(id = "modbus-1", iec = false): LearnSuggestion {
                 negative: false,
                 test: false,
                 selectExecute: "execute",
+                commandStates: [1],
+                commandQualifiers: [0],
                 direction: "request",
               }
             : {

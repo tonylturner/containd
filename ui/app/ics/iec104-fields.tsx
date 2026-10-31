@@ -1,9 +1,11 @@
 "use client";
 
+import { useId } from "react";
 import { InfoTip } from "../../components/InfoTip";
 import type { IEC104Class } from "../../lib/api";
 import {
   IEC104_CLASSES,
+  commandStateHelp,
   iec104TypeInfo,
   parseTypeIds,
   type IEC104Draft,
@@ -32,6 +34,7 @@ export function IEC104Fields({
   disabled?: boolean;
 }) {
   const parsedTypes = parseTypeIds(draft.typeIds);
+  const stateHelpId = useId();
 
   function set<K extends keyof IEC104Draft>(key: K, value: IEC104Draft[K]) {
     onChange({ ...draft, [key]: value });
@@ -166,6 +169,21 @@ export function IEC104Fields({
         </label>
       </div>
       <p className="text-xs text-(--text-muted)">Select/execute applies only to Type IDs 45–50 and 58–63. ASDU selectors do not match S/U frames.</p>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div>
+          <label className={LABEL}>Command states (comma-separated)
+            <input aria-label="Command states" aria-describedby={stateHelpId} value={draft.commandStates} onChange={(e) => set("commandStates", e.target.value)} disabled={disabled} placeholder="Empty = any" className="mt-1 input-industrial w-full disabled:opacity-60" />
+          </label>
+          <p id={stateHelpId} className="text-xs text-(--text-muted)">
+            {commandStateHelp(parsedTypes.ok ? parsedTypes.value : [])}
+          </p>
+        </div>
+        <label className={LABEL}>Command qualifiers (QU, 0-31)
+          <input aria-label="Command qualifiers (QU)" value={draft.commandQualifiers} onChange={(e) => set("commandQualifiers", e.target.value)} disabled={disabled} placeholder="Empty = any" className="mt-1 input-industrial w-full disabled:opacity-60" />
+        </label>
+      </div>
+      <p className="text-xs text-(--text-muted)">State and QU filters require explicit Type IDs: 45, 46, 47, 58, 59 or 60. Empty = any; a bound filter never matches an object without that field.</p>
 
       <label className="flex items-center gap-2 text-sm text-(--text)">
         <input

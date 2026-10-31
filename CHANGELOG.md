@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The web console uses 30-second, single-use WebSocket tickets instead of
+  session JWTs in URLs. Upgrades require a ticket; `?token=` is no longer
+  accepted. Management access logs redact credential query values.
+- Console ticket issuance has no count limits, so pending-ticket counts no
+  longer deny connections for shared lab accounts. Tickets remain single-use
+  with a 30-second lifetime and lazy expiry cleanup.
 - ICS modes are now rule-local `monitor` or `enforce` (rule > global > monitor).
   Monitor rules only observe; they never admit, drop, hold or reset traffic.
   A former `learn` ALLOW inside an enforce envelope used to admit at L7 and
@@ -60,12 +66,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- IEC 104 `commandStates` (SCS/DCS/RCS) and `commandQualifiers` (QU)
+  predicates constrain single, double and regulating-step commands; exact
+  learner suggestions bind the observed state/qualifier tuple.
 - PCAP Analysis now brings imported captures and bounded live watches into one
   evidence review workflow: explicitly generate certified suggestions, inspect
   replay proof and withheld reasons, review IEC 104 and wire/NAT scope, then
   atomically stage selected revisions as monitor rules. Learning never changes
   running policy; candidate commit and a deliberate mode edit remain required
-  to enforce. Unsupported relations are withheld, and CIP is observation-only.
+  to enforce. IEC state/QU command subsets can certify; setpoint values/QL,
+  bitstrings and select-before-operate sequences remain withheld. Other
+  unsupported relations are withheld, and CIP is observation-only.
 - Firewall and ICS tables show applied-policy shadow message matches,
   would-allow/would-deny counts and their start time, with rule-filtered monitor
   events. `GET /api/v1/firewall/shadow-counters` distinguishes unavailable from
@@ -284,6 +295,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   logout and forbidden redirects stay under the mount instead of leaving it.
   The breadcrumb no longer shows the mount as a page, and the active navigation
   item is highlighted.
+- The web console displays its server greeting once, followed by a clean prompt.
+- Management URL builders avoid duplicate base-path prefixes when a reverse
+  proxy has already rewritten API or asset paths.
+- Console ticket upgrades work through proxies that omit the published port
+  from `Host`; ticket issuance retains cookie-authenticated origin checks.
 - Modbus write-single-coil (FC5) values other than ON (`0xFF00`) and OFF
   (`0x0000`) are invalid on the wire and no longer match an ICS ALLOW, in monitor
   or enforce mode. An enforce ALLOW for FC5 now leaves such writes to the

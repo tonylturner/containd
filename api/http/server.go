@@ -181,7 +181,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		}
 	}
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(accessLogger(), gin.Recovery())
 	r.Use(func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "DENY")
@@ -224,6 +224,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	// Logout is intentionally unauthenticated so clients can always clear cookies
 	// even if their session expired or local token state is gone.
 	api.POST("/auth/logout", logoutHandler(userStore))
+	// WebSockets always require a one-use ticket, including cookie clients.
+	// Reauthenticate its issuer before upgrade, not the browser's ambient user.
+	tickets := newCLITickets()
+	api.GET("/cli/ws", tickets.redeem(), authMiddleware(userStore), verifyCLITicketIdentity, cliWSHandler(store))
 	// All other endpoints require auth (unless lab mode).
 	protected := api.Group("")
 	protected.Use(enforceSameOriginOnCookieAuth(allowedOriginsFromEnv()))
@@ -376,7 +380,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/cli/execute", cliExecuteHandler(store))
 		protected.GET("/cli/commands", cliCommandsHandler(store))
 		protected.GET("/cli/complete", cliCompleteHandler(store))
-		protected.GET("/cli/ws", cliWSHandler(store))
+		protected.POST("/cli/ws/ticket", tickets.issue())
 		// Users (admin only).
 		protected.GET("/users", requireAdmin(), listUsersHandler(userStore))
 		protected.POST("/users", requireAdmin(), rateLimitSensitive(), createUserHandler(userStore))

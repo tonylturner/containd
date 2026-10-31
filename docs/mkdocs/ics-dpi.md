@@ -840,9 +840,15 @@ With `protocol: "iec104"`, use these fields instead of the generic selectors:
 | `cot` | Cause-of-transmission list, 1–63 |
 | `originators` | Originator address list, 0–255 |
 | `negative`, `test` | Exact P/N and T flags; `false` is a restriction, not omission |
+| `commandStates` | SCS 0–1 for Type IDs 45/58, or DCS/RCS 1–2 for 46/47/59/60; requires explicit Type IDs in one domain group |
+| `commandQualifiers` | QU 0–31 (bits 2–6); requires explicit Type IDs contained in 45/46/47/58/59/60 |
 | `selectExecute` | `select` or `execute`; Type IDs must be omitted or contained in 45–50, 58–63 (51/64 have no S/E) |
 | `readOnly` | Restrict to the decoder's safe-read set; false means no read constraint, not writes-only |
 | `direction`, `mode` | Same spellings and mode inheritance as above |
+
+Command state/qualifier fields exist only on I-frame objects of the six
+command types. Constrained rules never match objects missing these fields,
+for any action. Duplicate list values are permitted, as for `cot`.
 
 Omit a list to match any value. Present IEC lists reject `null`, empty arrays,
 and null members. IOA entries require exactly `start` and `end`. Predicate keys
@@ -951,9 +957,11 @@ nonconformant or authority-less parents cannot yield actionable suggestions.
   point relations are certified together as needed. All-objects, count-only,
   wildcard variation, indexless controls and unexpressible values are withheld.
 - **IEC 104:** supported commands only, always admin-reviewed and staged as
-  monitor. Unsupported values, qualifiers and select-before-operate sequences
-  are withheld; where the complete closed value domain was observed, no value
-  predicate is needed. Monitoring ASDUs, APCI/startup behavior and broadcast CAs
+  monitor. Single, double and regulating-step commands (45/46/47/58/59/60)
+  bind each observed state and QU qualifier alongside IOA and select/execute;
+  even a partial observation can certify without admitting unobserved tuples.
+  Setpoint values/QL, bitstrings and select-before-operate sequences remain
+  withheld. Monitoring ASDUs, APCI/startup behavior and broadcast CAs
   do not become command ALLOWs. Use deliberate policy/templates for startup.
 - **CIP:** observations are retained, but no actionable CIP rules are offered.
   Content identified on nonstandard service ports remains observation-only.

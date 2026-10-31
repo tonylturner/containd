@@ -13,6 +13,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
@@ -23,6 +24,32 @@ import (
 )
 
 func ptr[T any](v T) *T { return &v }
+
+func TestExactIECMonitoringWithheldOnlyAsNonCommand(t *testing.T) {
+	for _, direction := range []string{"request", "response"} {
+		t.Run(direction, func(t *testing.T) {
+			o := evidence.Observation{
+				Quality:   evidence.Quality{Complete: true, Decoded: true},
+				Authority: evidence.Authority{RoleCertain: true, StandardPort: true},
+				Service: evidence.ServiceKey{
+					ClientIP: "192.0.2.1", ServerIP: "192.0.2.2",
+					ServerPort: 2404, Transport: "tcp", Direction: direction, Protocol: "iec104",
+				},
+				ObjectCount: 1,
+				IEC104: &evidence.IEC104{
+					APCIType: "I", TypeID: ptr(uint8(31)), CA: ptr(uint16(1)),
+					COT: ptr(uint8(3)), Originator: ptr(uint8(0)),
+					Negative: ptr(false), Test: ptr(false),
+					Objects: []evidence.IEC104Object{{Index: 0, IOA: ptr(uint32(1001))}},
+				},
+			}
+			bundle, reasons := learn.GenerateRelation(o)
+			if len(bundle) != 0 || !slices.Equal(reasons, []evidence.WithheldReason{evidence.WithheldIECNonCommand}) {
+				t.Fatalf("monitoring ASDU: rules=%v reasons=%v", bundle, reasons)
+			}
+		})
+	}
+}
 
 func TestExactWireAndVerifiedNATCoordinates(t *testing.T) {
 	state := requestState()
@@ -164,7 +191,7 @@ func TestExactServiceIsolationAndIPv6(t *testing.T) {
 	}
 }
 
-func TestExactIECWholeParentAndClosedDomainCertification(t *testing.T) {
+func TestExactIECPartialCommandCertification(t *testing.T) {
 	for _, typeID := range []uint8{45, 46, 47, 58, 59, 60} {
 		t.Run(fmt.Sprint(typeID), func(t *testing.T) {
 			ctx := context.Background()
@@ -188,40 +215,86 @@ func TestExactIECWholeParentAndClosedDomainCertification(t *testing.T) {
 				}}
 			}
 			// Use the decoder's authoritative field names, not JSON/display aliases.
-			for value := range uint8(2) {
-				for qualifier := range uint8(32) {
-					stateValue := value
-					if typeID != 45 && typeID != 58 {
-						stateValue++
-					}
-					ev := event(string(rune(1+int(value)*32+int(qualifier))), stateValue, qualifier)
-					parents, err := learn.Normalize(ds, state, []dpi.Event{ev}, &serial)
-					if err != nil || len(parents) != 1 {
-						t.Fatalf("normalize %v", err)
-					}
-					if _, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: parents}); err != nil {
-						t.Fatal(err)
-					}
-				}
+			stateValue := uint8(1)
+			if typeID == 45 || typeID == 58 {
+				stateValue = 0
 			}
+			ev := event("partial", stateValue, 0)
+			parents, err := learn.Normalize(ds, state, []dpi.Event{ev}, &serial)
+			if err != nil || len(parents) != 1 {
+				t.Fatalf("normalize %v", err)
+			}
+			if _, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: parents}); err != nil {
+				t.Fatal(err)
+			}
+
 			if _, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Seal: true}); err != nil {
 				t.Fatal(err)
 			}
 			g := learn.Generator{Store: s, Certifier: &learn.CompilerCertifier{Store: s}, CountWithheld: s.CountWithheld}
 			result, err := g.Generate(ctx, learn.GenerateRequest{DatasetID: ds.ID})
 			if err != nil || len(result.Suggestions) != 1 {
-				t.Fatalf("full closed domain: %+v %v", result, err)
+				t.Fatalf("partial command: %+v %v", result, err)
 			}
 			proposal, err := s.GetSuggestion(ctx, result.Suggestions[0].ID)
-			if err != nil || proposal.Proof.Positive.Total != 64 || proposal.Content.Rules[0].ICS.Mode != "monitor" {
-				t.Fatal("whole-parent proof lost", err)
+			if err != nil || proposal.Proof.Positive.Total != 1 || proposal.Content.Rules[0].ICS.Mode != "monitor" {
+				t.Fatal("partial observation proof lost", err)
+			}
+			if !slices.Equal(proposal.Content.Rules[0].ICS.CommandStates, []int{int(stateValue)}) || !slices.Equal(proposal.Content.Rules[0].ICS.CommandQualifiers, []int{0}) {
+				t.Fatal("command tuple not bound")
+			}
+			// Removing either binding must fail the certifier's independent
+			// state/QU boundary replay, not merely change content identity.
+			for _, field := range []string{"state", "qualifier"} {
+				broad := proposal.Content
+				broad.Rules = append([]config.Rule(nil), proposal.Content.Rules...)
+				if field == "state" {
+					broad.Rules[0].ICS.CommandStates = nil
+				} else {
+					broad.Rules[0].ICS.CommandQualifiers = nil
+				}
+				proof, err := (&learn.CompilerCertifier{Store: s}).Certify(ctx, broad, proposal.Proof.ParentRefs)
+				wantFailures := uint64(2) // alternate state and missing state
+				if field == "qualifier" {
+					wantFailures = 32
+				} // 31 other QU values and missing QU
+				if err == nil || proof.Negative.Failed != wantFailures {
+					t.Fatalf("unbound %s certified: %+v %v", field, proof, err)
+				}
 			}
 			if _, err := s.ResolveForStage(ctx, learn.ApplyRequest{RequestID: "unreviewed", Selections: result.Suggestions}); err != learn.ErrReviewRequired {
 				t.Fatalf("IEC review bypass: %v", err)
 			}
-			ev := event("incomplete", 1, 0)
+			selected := event("select", 1, 0)
+			selected.Attributes[eventfields.KeySelect] = true
+			sbo, err := learn.Normalize(ds, state, []dpi.Event{selected}, &serial)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, reasons := learn.GenerateRelation(sbo[0]); !slices.Contains(reasons, evidence.WithheldIECSBO) {
+				t.Fatal("SBO withholding changed", reasons)
+			}
+			for _, id := range []uint8{48, 49, 50, 51, 61, 62, 63, 64} {
+				unsupported := event("unsupported", 1, 0)
+				unsupported.Attributes[eventfields.KeyTypeID] = id
+				ps, err := learn.Normalize(ds, state, []dpi.Event{unsupported}, &serial)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if ps[0].IEC104.Objects[0].CommandState != nil {
+					t.Fatal("adapter invented command state")
+				}
+				_, reasons := learn.GenerateRelation(ps[0])
+				if !slices.Contains(reasons, evidence.WithheldIECValue) {
+					t.Fatal("unbounded value not withheld", id, reasons)
+				}
+				if !slices.Contains(reasons, evidence.WithheldIECQualifier) {
+					t.Fatal("unbound qualifier not withheld", id, reasons)
+				}
+			}
+			ev = event("incomplete", 1, 0)
 			ev.Attributes[eventfields.KeyObjectCount] = uint32(2)
-			parents, err := learn.Normalize(ds, state, []dpi.Event{ev}, &serial)
+			parents, err = learn.Normalize(ds, state, []dpi.Event{ev}, &serial)
 			if err != nil {
 				t.Fatal(err)
 			}

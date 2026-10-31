@@ -62,6 +62,8 @@ async function listConntrack(limit: number): Promise<ApiResult<ConntrackEntry[]>
 }
 
 export const consoleAPI = {
+  createCLIWebSocketTicket: () =>
+    postJSON<{ ticket: string; expiresIn: number }>("/api/v1/cli/ws/ticket", {}),
   getManagementReservation: () => getJSON<ManagementReservation>("/api/v1/system/management-reservation"),
   listCLICommands: () => getJSONList<string>("/api/v1/cli/commands"),
   executeCLI: (line: string) =>
