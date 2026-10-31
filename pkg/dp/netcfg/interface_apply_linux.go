@@ -7,6 +7,7 @@ package netcfg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -51,6 +52,16 @@ func (r interfaceResolver) deviceFor(iface config.Interface) string {
 }
 
 func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyOptions) error {
+	addressApplyMu.Lock()
+	defer addressApplyMu.Unlock()
+	owned, err := loadAddressOwnership()
+	if err != nil {
+		return err
+	}
+	// Prove persistence is writable before changing any addresses.
+	if err := owned.save(); err != nil {
+		return fmt.Errorf("save address ownership: %w", err)
+	}
 	if shouldEnableForwarding(ifaces) {
 		if err := enableForwarding(); err != nil {
 			return err
@@ -63,7 +74,41 @@ func applyInterfaces(ctx context.Context, ifaces []config.Interface, opts ApplyO
 		return err
 	}
 	for _, iface := range ifaces {
-		if err := applyInterfaceConfig(ctx, iface, bridgeMembers, resolver, opts); err != nil {
+		if err := applyInterfaceConfig(ctx, iface, bridgeMembers, resolver, opts, owned); err != nil {
+			return err
+		}
+	}
+	// Removed bindings also have empty intent, but explicit Replace never
+	// broadens to foreign addresses on devices absent from the configuration.
+	configured := map[string]bool{}
+	for _, iface := range ifaces {
+		configured[resolver.deviceFor(iface)] = true
+	}
+	live, err := net.Interfaces()
+	if err != nil {
+		return err
+	}
+	devices := map[string]*net.Interface{}
+	for i := range live {
+		devices[live[i].Name] = &live[i]
+	}
+	for _, a := range append([]ownedAddress(nil), owned.Addresses...) {
+		if configured[a.Device] {
+			continue
+		}
+		if opts.Reservation != nil && a.Device == opts.Reservation.Device {
+			continue
+		}
+		nic := devices[a.Device]
+		if nic == nil {
+			// Deleted devices cannot retain their old addresses.
+			if err := owned.forget(a); err != nil {
+				return err
+			}
+			continue
+		}
+		configured[a.Device] = true
+		if err := deleteStaleInterfaceAddrs(nic, nil, ApplyOptions{}, owned); err != nil {
 			return err
 		}
 	}
@@ -140,7 +185,7 @@ func ensureVLANInterface(dev string, iface config.Interface, resolver interfaceR
 	return nil
 }
 
-func applyInterfaceConfig(ctx context.Context, iface config.Interface, bridgeMembers map[string]string, resolver interfaceResolver, opts ApplyOptions) error {
+func applyInterfaceConfig(ctx context.Context, iface config.Interface, bridgeMembers map[string]string, resolver interfaceResolver, opts ApplyOptions, owned *addressOwnership) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -150,6 +195,9 @@ func applyInterfaceConfig(ctx context.Context, iface config.Interface, bridgeMem
 	if dev == "" {
 		return nil
 	}
+	if opts.Reservation != nil && dev == opts.Reservation.Device {
+		return nil
+	}
 	if err := validateBridgeMemberConfig(iface, dev, bridgeMembers); err != nil {
 		return err
 	}
@@ -157,12 +205,9 @@ func applyInterfaceConfig(ctx context.Context, iface config.Interface, bridgeMem
 		return nil
 	}
 	if strings.EqualFold(strings.TrimSpace(iface.AddressMode), "dhcp") {
-		return applyDHCPInterface(ctx, iface, dev)
+		return applyDHCPInterface(ctx, iface, dev, owned)
 	}
-	if len(iface.Addresses) == 0 {
-		return nil
-	}
-	return applyStaticInterface(ctx, iface, dev, opts)
+	return applyStaticInterface(ctx, iface, dev, opts, owned)
 }
 
 func validateBridgeMemberConfig(iface config.Interface, dev string, bridgeMembers map[string]string) error {
@@ -172,7 +217,7 @@ func validateBridgeMemberConfig(iface config.Interface, dev string, bridgeMember
 	return nil
 }
 
-func applyDHCPInterface(ctx context.Context, iface config.Interface, dev string) error {
+func applyDHCPInterface(ctx context.Context, iface config.Interface, dev string, owned *addressOwnership) error {
 	if err := setLinkUp(dev); err != nil {
 		return fmt.Errorf("set link up %s: %w", dev, err)
 	}
@@ -180,7 +225,10 @@ func applyDHCPInterface(ctx context.Context, iface config.Interface, dev string)
 	if err != nil {
 		return fmt.Errorf("interface %s (%s) not found: %w", iface.Name, dev, err)
 	}
-	existing, _ := listAddrs(nic.Index, unix.AF_INET)
+	existing, err := listAddrs(nic.Index, unix.AF_INET)
+	if err != nil {
+		return fmt.Errorf("list DHCP addresses %s: %w", dev, err)
+	}
 	if hasUsableIPv4(existing) {
 		return nil
 	}
@@ -192,7 +240,7 @@ func applyDHCPInterface(ctx context.Context, iface config.Interface, dev string)
 	if err != nil || ipnet == nil {
 		return fmt.Errorf("dhcp on %s: invalid lease cidr %q", dev, lease.AddrCIDR)
 	}
-	if err := addAddr(nic.Index, ipnet); err != nil {
+	if err := owned.add(nic, ipnet); err != nil {
 		return fmt.Errorf("dhcp add addr %s %s: %w", dev, ipnet.String(), err)
 	}
 	if gw := strings.TrimSpace(lease.RouterIP); gw != "" {
@@ -217,7 +265,18 @@ func hasUsableIPv4(existing []*net.IPNet) bool {
 	return false
 }
 
-func applyStaticInterface(ctx context.Context, iface config.Interface, dev string, opts ApplyOptions) error {
+func applyStaticInterface(ctx context.Context, iface config.Interface, dev string, opts ApplyOptions, owned *addressOwnership) error {
+	// Unbound logical roles may not exist yet.
+	if len(iface.Addresses) == 0 {
+		hasOwned := false
+		for _, a := range owned.Addresses {
+			hasOwned = hasOwned || a.Device == dev
+		}
+		if !hasOwned {
+			return nil
+		}
+		opts.Replace = false
+	}
 	nic, err := net.InterfaceByName(dev)
 	if err != nil {
 		return fmt.Errorf("interface %s (%s) not found: %w", iface.Name, dev, err)
@@ -225,11 +284,11 @@ func applyStaticInterface(ctx context.Context, iface config.Interface, dev strin
 	if err := setLinkUp(dev); err != nil {
 		return fmt.Errorf("set link up %s: %w", dev, err)
 	}
-	desired, desiredV4, err := desiredInterfaceAddrs(ctx, iface)
+	desired, err := desiredInterfaceAddrs(ctx, iface)
 	if err != nil {
 		return err
 	}
-	if err := replaceInterfaceAddrsIfNeeded(nic.Index, dev, desired, desiredV4, opts); err != nil {
+	if err := replaceInterfaceAddrsIfNeeded(nic, desired, opts, owned); err != nil {
 		return err
 	}
 	if gw := strings.TrimSpace(iface.Gateway); gw != "" {
@@ -240,13 +299,12 @@ func applyStaticInterface(ctx context.Context, iface config.Interface, dev strin
 	return nil
 }
 
-func desiredInterfaceAddrs(ctx context.Context, iface config.Interface) (map[string]struct{}, map[string]struct{}, error) {
+func desiredInterfaceAddrs(ctx context.Context, iface config.Interface) (map[string]struct{}, error) {
 	desired := map[string]struct{}{}
-	desiredV4 := map[string]struct{}{}
 	for _, cidr := range iface.Addresses {
 		select {
 		case <-ctx.Done():
-			return nil, nil, ctx.Err()
+			return nil, ctx.Err()
 		default:
 		}
 		cidr = strings.TrimSpace(cidr)
@@ -255,71 +313,92 @@ func desiredInterfaceAddrs(ctx context.Context, iface config.Interface) (map[str
 		}
 		ipnet, err := parseAddressCIDR(cidr)
 		if err != nil || ipnet == nil || ipnet.IP == nil {
-			return nil, nil, fmt.Errorf("interface %s invalid CIDR %q", iface.Name, cidr)
+			return nil, fmt.Errorf("interface %s invalid CIDR %q", iface.Name, cidr)
 		}
 		desired[ipnet.String()] = struct{}{}
-		if ipnet.IP.To4() != nil {
-			desiredV4[ipnet.String()] = struct{}{}
-		}
 	}
-	return desired, desiredV4, nil
+	return desired, nil
 }
 
-func replaceInterfaceAddrsIfNeeded(ifIndex int, dev string, desired, desiredV4 map[string]struct{}, opts ApplyOptions) error {
+func replaceInterfaceAddrsIfNeeded(nic *net.Interface, desired map[string]struct{}, opts ApplyOptions, owned *addressOwnership) error {
 	// Delete stale addresses before installing the new ones: removing an IPv4
 	// primary also removes its same-subnet secondaries on kernels without
 	// promote_secondaries. Adding the desired host first can therefore lose it.
-	if err := deleteStaleInterfaceAddrs(ifIndex, dev, desired, desiredV4, opts); err != nil {
+	if err := deleteStaleInterfaceAddrs(nic, desired, opts, owned); err != nil {
 		return err
 	}
 	for cidr := range desired {
 		ipnet, err := parseAddressCIDR(cidr)
 		if err != nil || ipnet == nil {
-			return fmt.Errorf("interface %s invalid desired CIDR %q", dev, cidr)
+			return fmt.Errorf("interface %s invalid desired CIDR %q", nic.Name, cidr)
 		}
-		if err := addAddr(ifIndex, ipnet); err != nil {
-			return fmt.Errorf("add addr %s %s: %w", dev, ipnet.String(), err)
+		if err := owned.add(nic, ipnet); err != nil {
+			return fmt.Errorf("add addr %s %s: %w", nic.Name, ipnet.String(), err)
 		}
 	}
 	return nil
 }
 
-func deleteStaleInterfaceAddrs(ifIndex int, dev string, desired, desiredV4 map[string]struct{}, opts ApplyOptions) error {
-	replaceV4 := len(desiredV4) > 0
-	if !opts.Replace && !replaceV4 {
-		return nil
-	}
-	existing, err := listAddrs(ifIndex, unix.AF_UNSPEC)
+func deleteStaleInterfaceAddrs(nic *net.Interface, desired map[string]struct{}, opts ApplyOptions, owned *addressOwnership) (err error) {
+	existing, err := listAddrs(nic.Index, unix.AF_UNSPEC)
 	if err != nil {
-		return fmt.Errorf("list addrs %s: %w", dev, err)
+		return fmt.Errorf("list addrs %s: %w", nic.Name, err)
 	}
+	// Drop ownership records for addresses no longer present before any new
+	// exclusive creates; EEXIST must never adopt a previously foreign address.
+	present := map[string]bool{}
 	for _, ipnet := range existing {
-		if skipAddrDeletion(ipnet, desired, replaceV4, opts) {
+		present[ipnet.String()] = true
+	}
+	for _, a := range append([]ownedAddress(nil), owned.Addresses...) {
+		if a.Device == nic.Name && (!present[a.CIDR] || a != addressKey(nic, a.CIDR)) {
+			if err := owned.forget(a); err != nil {
+				return err
+			}
+		}
+	}
+	var restore func() error
+	defer func() {
+		if restore != nil {
+			err = errors.Join(err, restore())
+		}
+	}()
+	for _, ipnet := range existing {
+		if skipAddrDeletion(ipnet, desired, owned.owns(nic, ipnet.String()), opts) {
 			continue
 		}
-		if err := delAddr(ifIndex, ipnet); err != nil {
-			return fmt.Errorf("del addr %s %s: %w", dev, ipnet.String(), err)
+		if ipnet.IP.To4() != nil && restore == nil {
+			restore, err = preserveIPv4Secondaries(nic.Name)
+			if err != nil {
+				return err
+			}
+		}
+		// Revoke durable ownership before deletion: a crash must not leave a
+		// deletion record that could later claim a foreign re-use of this tuple.
+		if err := owned.forget(addressKey(nic, ipnet.String())); err != nil {
+			return err
+		}
+		if err := delAddr(nic.Index, ipnet); err != nil {
+			return fmt.Errorf("del addr %s %s: %w", nic.Name, ipnet.String(), err)
 		}
 	}
 	return nil
 }
 
-func skipAddrDeletion(ipnet *net.IPNet, desired map[string]struct{}, replaceV4 bool, opts ApplyOptions) bool {
+func skipAddrDeletion(ipnet *net.IPNet, desired map[string]struct{}, owned bool, opts ApplyOptions) bool {
 	if ipnet == nil {
 		return true
 	}
 	if _, ok := desired[ipnet.String()]; ok {
 		return true
 	}
-	if ipnet.IP != nil && ipnet.IP.To4() == nil {
-		if ipnet.IP.To16() != nil && ipnet.IP.IsLinkLocalUnicast() {
-			return true
-		}
-		if !opts.Replace && replaceV4 {
-			return true
-		}
+	if ipnet.IP.IsLinkLocalUnicast() {
+		return true
 	}
-	return false
+	if opts.Reservation != nil && ipnet.IP.Equal(net.IP(opts.Reservation.Local.Addr().AsSlice())) {
+		return true
+	}
+	return !opts.Replace && !owned
 }
 
 func shouldEnableForwarding(ifaces []config.Interface) bool {

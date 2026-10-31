@@ -6,6 +6,7 @@ package netcfg
 import (
 	"context"
 
+	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -13,15 +14,25 @@ type ApplyOptions struct {
 	// Replace, when true, removes any non-desired interface addresses for interfaces
 	// that declare Addresses in config (explicit, admin-triggered).
 	Replace bool
+	// Reservation is immutable startup authority, never configuration input.
+	Reservation *mgmtpath.Reservation
 }
 
-// ApplyInterfaces applies interface addressing intent to the OS.
+// ApplyInterfaces adds desired addresses and removes only stale owned addresses.
 // Platform-specific implementations may be a no-op on unsupported systems.
 func ApplyInterfaces(ctx context.Context, ifaces []config.Interface) error {
-	return applyInterfaces(ctx, ifaces, ApplyOptions{})
+	return ApplyInterfacesWithOptions(ctx, ifaces, ApplyOptions{})
 }
 
-// ApplyInterfacesReplace performs a reconcile pass (replace semantics) for interfaces with configured addresses.
+// ApplyInterfacesWithOptions converges owned addresses while protecting the
+// reserved management device, including during explicit replacement.
+func ApplyInterfacesWithOptions(ctx context.Context, ifaces []config.Interface, opts ApplyOptions) error {
+	return applyInterfaces(ctx, ifaces, opts)
+}
+
+// ApplyInterfacesReplace explicitly removes foreign as well as owned stale
+// addresses on interfaces declaring addresses. Link-local addresses are spared.
+// Engines with a reserved management path use ApplyInterfacesWithOptions.
 func ApplyInterfacesReplace(ctx context.Context, ifaces []config.Interface) error {
 	return applyInterfaces(ctx, ifaces, ApplyOptions{Replace: true})
 }
