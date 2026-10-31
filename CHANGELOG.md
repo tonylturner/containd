@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   device, VLAN, bridge, addressing and access settings. Outbound quick start
   completes all reads before staging changes and retains unrelated NAT, routing
   and firewall rule settings.
+- Scripted `containd cli` sessions exit with status 1 if any command fails,
+  including when later commands or `exit` run.
 
 ## [0.1.36] - 2026-10-31
 

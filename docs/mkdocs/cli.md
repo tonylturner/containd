@@ -8,6 +8,10 @@ admin SSH console expose the same commands. For the starter's default SSH port:
 ssh -p 2222 containd@localhost
 ```
 
+When commands are piped to `containd cli`, it continues after command errors
+and exits with status 1 if any command fails; interactive sessions retain
+status 0 on exit.
+
 Use `help`, `show help`, or `set help` to discover commands. Configuration
 commands stage candidate edits: review `show diff`, then `commit` or
 `commit confirmed [ttl_seconds]`. Use `confirm` to retain a confirmed commit and
