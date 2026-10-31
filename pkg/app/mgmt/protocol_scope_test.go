@@ -153,7 +153,14 @@ func TestRemovedProtocolBootRecovery(t *testing.T) {
 					t.Fatalf("invalid config not exportable unchanged: %v", err)
 				}
 				if scenario == "stock-bank" {
-					if len(stores.scopeEvents) != 1 || len(stores.scopeEvents[0].Attributes["updatedRuleIds"].([]string)) != 2 || len(running.IDS.Rules) != len(config.DefaultIDSConfig().Rules) {
+					industrialCount, updatedCount := 0, 0
+					for _, event := range stores.scopeEvents {
+						if event.Kind == "config.industrial_scope.migrated" {
+							industrialCount++
+							updatedCount = len(event.Attributes["updatedRuleIds"].([]string))
+						}
+					}
+					if industrialCount != 1 || updatedCount != 2 || len(running.IDS.Rules) != len(config.DefaultIDSConfig().Rules) {
 						t.Fatal("stock bank did not migrate with an event")
 					}
 					events, err := publishScopeMigrations(ctx, stores)
