@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- IT DPI HTTP parsing reads request and header lines directly from the packet
+  payload instead of allocating a buffered reader per packet.
+- The UI drops the unused `glob` dev dependency and its override.
+
 ## [0.1.36] - 2026-10-31
 
 ### Upgrade notes
