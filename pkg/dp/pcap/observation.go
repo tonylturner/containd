@@ -58,10 +58,11 @@ type offlineObserver struct {
 	byTuple  map[string]*offlineConnection
 	byKey    map[identify.Key]*offlineConnection
 	decoders []dpi.Decoder
+	manager  *dpi.Manager
 	sessions *offlineSessions
 }
 
-func newOfflineObserver(sessions *offlineSessions, opts AnalysisOptions, decoders []dpi.Decoder) (*offlineObserver, error) {
+func newOfflineObserver(manager *dpi.Manager, sessions *offlineSessions, opts AnalysisOptions, decoders []dpi.Decoder) (*offlineObserver, error) {
 	// Only enabled ICS decoders get fresh observation instances. Never share a
 	// stateful decoder with the port-selected manager or a live engine.
 	factories := []dpi.StreamDecoder{modbus.NewDecoder(), dnp3.NewDecoderWithClock(opts.Now), iec104.NewDecoder(), cip.NewDecoder()}
@@ -84,7 +85,7 @@ func newOfflineObserver(sessions *offlineSessions, opts AnalysisOptions, decoder
 	if err != nil {
 		return nil, err
 	}
-	o := &offlineObserver{runID: sessions.runID, sessions: sessions, byTuple: map[string]*offlineConnection{}, byKey: map[identify.Key]*offlineConnection{}, decoders: decoders}
+	o := &offlineObserver{manager: manager, runID: sessions.runID, sessions: sessions, byTuple: map[string]*offlineConnection{}, byKey: map[identify.Key]*offlineConnection{}, decoders: decoders}
 	o.observer, err = observe.New(observe.Options{Budgets: budgets, Markers: budgets.Entries, Manager: mgr, Now: opts.Now,
 		LegacyDecodes: o.legacyDecodes,
 		Scope: func(key identify.Key, p identify.Protocol) any {
@@ -112,6 +113,10 @@ func (o *offlineObserver) legacyDecodes(key identify.Key, p identify.Protocol) b
 		if s == nil || s.dirs[1] == nil {
 			return false
 		}
+	}
+	if st.Key.Proto == ics.TCP {
+		matches, _ := o.manager.CommittedProtocol(st, string(p))
+		return matches
 	}
 	for _, d := range o.decoders {
 		sd, ok := d.(dpi.StreamDecoder)

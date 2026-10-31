@@ -13,8 +13,9 @@ import (
 
 // Inspect passes the packet to the decoders that support the flow. TCP
 // payload is fed through the reassembler so that decoders see the stream,
-// not single segments. The first supporting StreamDecoder (registration
-// order) frames the stream through ParseStream and alone trims it; other
+// not single segments. The first stream pins a supporting StreamDecoder
+// for both directions (server port first, registration order within a port).
+// It frames the stream through ParseStream and alone trims it; other
 // packet decoders get OnPacket with only the captured segment.
 //
 // Streams are keyed by the directional flow hash, or by Session and Dir
@@ -45,11 +46,14 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 	m.eventTimes[state.ID()] = at
 	defer func() { stampResult(&res, at) }()
 	key, session, pos := streamKey(state, pkt)
-	candidates := m.dispatch(state, key)
+	candidates := m.dispatch(state, key, pkt)
 	tcp := pkt.Proto == "tcp"
 	stream := m.reassembles(pkt)
 	var framer StreamDecoder
 	if stream {
+		for _, expired := range m.reassembler.sweep(time.Now()) {
+			m.endStream(expired)
+		}
 		framer = firstFramer(candidates)
 	}
 	if framer != nil {
@@ -78,9 +82,6 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 
 	if framer != nil && res.Err == nil && len(pkt.Payload) > 0 && !(pkt.FailClosed && pkt.TCPRst) {
 		now := time.Now()
-		for _, expired := range m.reassembler.sweep(now) {
-			m.endStream(expired)
-		}
 		fed := m.reassembler.feed(key, pos, pkt.Payload, now, true, pkt.HasOffset, pkt.FailClosed)
 		res.Gap = fed.gap
 		switch {
@@ -133,8 +134,7 @@ func streamError(state *flow.State, pkt *ParsedPacket, res *InspectResult, se *S
 	return &ev
 }
 
-// firstFramer returns the first registered StreamDecoder supporting the
-// flow, or nil.
+// firstFramer returns the first StreamDecoder in committed candidate order.
 func firstFramer(candidates []Decoder) StreamDecoder {
 	for _, d := range candidates {
 		if sd, ok := d.(StreamDecoder); ok {
@@ -278,5 +278,19 @@ func sessionStreamKey(session string, dir StreamDir) string {
 		return "session/" + session + "/s"
 	default:
 		return "session/" + session + "/?"
+	}
+}
+
+func peerStreamKey(state *flow.State, pkt *ParsedPacket) string {
+	if pkt == nil || !pkt.HasOffset {
+		return peerFlowID(state)
+	}
+	switch pkt.Dir {
+	case ClientToServer:
+		return sessionStreamKey(pkt.Session, ServerToClient)
+	case ServerToClient:
+		return sessionStreamKey(pkt.Session, ClientToServer)
+	default:
+		return ""
 	}
 }

@@ -74,10 +74,7 @@ func legacyDecodes(c *observationContext, protocol identify.Protocol) bool {
 	if c == nil {
 		return false
 	}
-	if protocol == identify.IEC104 && c.iecOwned {
-		return true
-	}
-	if !c.selected {
+	if !c.selected && !(protocol == identify.IEC104 && c.iecOwned) {
 		return false
 	}
 	for _, st := range c.states {
@@ -90,14 +87,21 @@ func legacyDecodes(c *observationContext, protocol identify.Protocol) bool {
 			return false
 		}
 		if key.Proto == 6 && (key.SrcPort == iec104Port || key.DstPort == iec104Port) {
-			return false
+			if protocol != identify.IEC104 || !c.iecOwned {
+				return false
+			}
+			if c.legacy != nil {
+				matches, _ := c.legacy.CommittedProtocol(st, "iec104")
+				return matches
+			}
+			return true
 		}
 		if c.legacy != nil {
 			name := string(protocol)
 			if protocol == identify.ENIP {
 				name = "cip"
 			}
-			if matches, committed := c.legacy.CommittedProtocol(st, name); committed {
+			if matches, committed := c.legacy.CommittedProtocol(st, name); committed || key.Proto == 6 {
 				return matches
 			}
 		}

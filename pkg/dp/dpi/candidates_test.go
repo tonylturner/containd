@@ -21,11 +21,11 @@ func TestCandidatesOrder(t *testing.T) {
 	}{
 		{"source", 6, 502, 10000, false, []Decoder{src}},
 		{"destination", 6, 10000, 80, false, []Decoder{dst, src}},
-		{"both", 6, 502, 80, false, []Decoder{src, dst, src}},
+		{"both", 6, 502, 80, false, []Decoder{dst, src, src}},
 		{"same-port", 6, 80, 80, false, []Decoder{dst, src}},
 		{"source-fallback", 6, 502, 10000, true, []Decoder{src, anyDecoder}},
 		{"destination-fallback", 6, 10000, 80, true, []Decoder{dst, src, anyDecoder}},
-		{"both-fallback", 6, 502, 80, true, []Decoder{src, dst, src, anyDecoder}},
+		{"both-fallback", 6, 502, 80, true, []Decoder{dst, src, src, anyDecoder}},
 		{"fallback-only", 6, 10000, 10001, true, []Decoder{anyDecoder}},
 		{"none", 6, 10000, 10001, false, nil},
 		{"udp", 17, 502, 80, false, []Decoder{dst}},

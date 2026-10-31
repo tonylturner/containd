@@ -3,11 +3,31 @@
 package dpi
 
 import (
+	"net"
 	"testing"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
+
+func TestCommittedTCPDispatchNoAlloc(t *testing.T) {
+	key := flow.Key{SrcIP: net.ParseIP("192.0.2.1"), DstIP: net.ParseIP("192.0.2.2"), SrcPort: 41000, DstPort: 502, Proto: 6}
+	manager := NewManager(&mockStreamDecoder{})
+	pkt := &ParsedPacket{Proto: "tcp"}
+	for _, key := range []flow.Key{key, key.Reversed()} {
+		state := flow.NewState(key, time.Now())
+		manager.Inspect(state, pkt)
+		// Exercise the packet entry point, not just the selection helper:
+		// eagerly resolving a peer before the own-id hit must also fail.
+		if n := testing.AllocsPerRun(100, func() {
+			if result := manager.Inspect(state, pkt); !result.Framed {
+				panic("committed TCP decoder missing")
+			}
+		}); n != 0 {
+			t.Fatalf("direction %d: committed packet dispatch allocated %g times, want 0", key.Dir, n)
+		}
+	}
+}
 
 func assertSelectionsEmpty(t *testing.T, manager *Manager) {
 	t.Helper()
