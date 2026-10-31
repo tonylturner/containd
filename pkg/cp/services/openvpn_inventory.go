@@ -198,7 +198,7 @@ func (i *openVPNInventory) find(id string) (*openVPNIssued, error) {
 			return &i.Credentials[n], nil
 		}
 	}
-	return nil, fmt.Errorf("unknown OpenVPN credential")
+	return nil, fmt.Errorf("%w", ErrOpenVPNUnknownCredential)
 }
 func (i *openVPNInventory) list() []OpenVPNCredential {
 	out := make([]OpenVPNCredential, 0, len(i.Credentials))
@@ -210,11 +210,11 @@ func (i *openVPNInventory) list() []OpenVPNCredential {
 }
 func (i *openVPNInventory) issue(name string) (OpenVPNCredential, error) {
 	if !validOpenVPNName(name) {
-		return OpenVPNCredential{}, fmt.Errorf("client name must be an exact lowercase filename-safe name (1-64 characters)")
+		return OpenVPNCredential{}, fmt.Errorf("%w", ErrOpenVPNInvalidClientName)
 	}
 	for _, c := range i.Credentials {
 		if c.Name == name && c.RevokedAt == nil {
-			return OpenVPNCredential{}, fmt.Errorf("client name already issued")
+			return OpenVPNCredential{}, fmt.Errorf("%w", ErrOpenVPNClientNameIssued)
 		}
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

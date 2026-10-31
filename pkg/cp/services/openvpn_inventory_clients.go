@@ -35,7 +35,7 @@ func (m *VPNManager) CreateOpenVPNClient(ctx context.Context, name string) (Open
 	}
 	cfg := m.Current().OpenVPN
 	if !cfg.Enabled || cfg.Mode != "server" || cfg.Server == nil {
-		return OpenVPNCredential{}, fmt.Errorf("managed OpenVPN server is not active")
+		return OpenVPNCredential{}, fmt.Errorf("%w", ErrOpenVPNServerNotActive)
 	}
 	openVPNAuthorityMu.Lock()
 	defer openVPNAuthorityMu.Unlock()
@@ -53,7 +53,7 @@ func (m *VPNManager) DownloadOpenVPNClient(ctx context.Context, id string) ([]by
 	}
 	cfg := m.Current().OpenVPN
 	if !cfg.Enabled || cfg.Mode != "server" || cfg.Server == nil {
-		return nil, fmt.Errorf("managed OpenVPN server is not active")
+		return nil, fmt.Errorf("%w", ErrOpenVPNServerNotActive)
 	}
 	// Validate the endpoint before embedding it. No issuance, repair or CRL
 	// renewal is reachable through a read-only download.
@@ -75,7 +75,7 @@ func (m *VPNManager) DownloadOpenVPNClient(ctx context.Context, id string) ([]by
 		return nil, err
 	}
 	if c.RevokedAt != nil {
-		return nil, fmt.Errorf("OpenVPN credential is revoked")
+		return nil, fmt.Errorf("%w", ErrOpenVPNCredentialRevoked)
 	}
 	var b strings.Builder
 	b.WriteString("client\ndev tun\nnobind\npersist-key\npersist-tun\nremote-cert-tls server\nauth-nocache\n")

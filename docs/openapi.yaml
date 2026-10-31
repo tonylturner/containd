@@ -2272,6 +2272,26 @@ components:
         type: {type: string, enum: [HOST, SUBNET, GROUP, SERVICE]}
       type: object
       description: PATCH retains omitted/empty id, name and type and nil list fields; other supplied fields replace.
+    OpenVPNCredential:
+      type: object
+      description: One issued certificate, identified by issuer SHA-256 and serial. Revoked entries remain in the inventory.
+      required: [id, issuer, serial, name, issuedAt, expiresAt]
+      properties:
+        id: {type: string, description: Opaque issuer and serial credential ID}
+        issuer: {type: string}
+        serial: {type: string}
+        name: {type: string}
+        issuedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        revokedAt: {type: string, format: date-time}
+    OpenVPNRevokeResult:
+      type: object
+      required: [credential, revoked, applied]
+      properties:
+        credential: {$ref: '#/components/schemas/OpenVPNCredential'}
+        revoked: {type: boolean, description: Revocation is durable and is never rolled back on runtime failure}
+        applied: {type: boolean, description: The active server has restarted with the signed CRL}
+        error: {type: string, description: Present when revocation is durable but runtime is not confirmed}
     OpenVPNConfig:
       properties:
         configPath: {type: string}
@@ -7350,9 +7370,13 @@ paths:
           description: Account restricted
   /services/vpn/openvpn/profile:
     post:
-      summary: Upload foreground OpenVPN profile and stage its path (admin)
+      summary: Upload bounded OpenVPN client profile and stage its path (admin)
       tags: [Services]
-      description: Stages the shared candidate; commit to apply.
+      description: >-
+        Stages the shared candidate; commit to apply. Uses the runtime's bounded
+        option and arity allowlist with inline CA, certificate, private key and
+        TLS key material only (maximum 1 MiB). Scripts, hooks, includes, plugins,
+        management directives, external file references and unknown options are rejected.
       requestBody:
         required: true
         content:
@@ -7375,10 +7399,17 @@ paths:
                   vpn: {$ref: '#/components/schemas/VPNConfig'}
           headers:
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
+        '400':
+          description: Invalid or unsupported profile
+        '401':
+          description: Authentication required
+        '403':
+          description: Administrator required
   /services/vpn/openvpn/clients:
     get:
       summary: List issued OpenVPN clients (admin)
       tags: [Services]
+      description: Reads the service-owned inventory, including revoked credentials; never issues credentials or consults the candidate.
       responses:
         '200':
           description: Success
@@ -7387,11 +7418,20 @@ paths:
               schema:
                 type: object
                 properties:
-                  clients: {type: array, items: {type: string}}
+                  clients: {type: array, items: {$ref: '#/components/schemas/OpenVPNCredential'}}
+        '401':
+          description: Authentication required
+        '403':
+          description: Administrator required
+        '503':
+          description: Credential authority unavailable
     post:
       summary: Issue OpenVPN client credentials (admin)
       tags: [Services]
-      description: Uses running managed-server settings; creates credential artifacts immediately.
+      description: >-
+        Uses the active managed-server authority, not the candidate. Creates a
+        credential immediately. Names must be exact lowercase filename-safe
+        names (1-64 characters); an active name cannot be issued again until revoked.
       requestBody:
         required: true
         content:
@@ -7399,32 +7439,89 @@ paths:
             schema:
               type: object
               properties:
-                name: {type: string}
+                name: {type: string, minLength: 1, maxLength: 64}
               required: [name]
       responses:
         '200':
           description: Success
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  name: {type: string}
-  /services/vpn/openvpn/clients/{name}:
+              schema: {$ref: '#/components/schemas/OpenVPNCredential'}
+        '400':
+          description: Invalid JSON or client name
+        '401':
+          description: Authentication required
+        '403':
+          description: Administrator required
+        '409':
+          description: Client name already issued or managed server not active
+        '500':
+          description: Authority or certificate failure
+        '503':
+          description: Credential authority unavailable
+  /services/vpn/openvpn/clients/{id}:
     get:
       summary: Download OpenVPN client profile (admin)
       tags: [Services]
+      description: Read-only download by credential ID. Never issues, repairs or renews credentials. Names are not aliases for IDs.
       responses:
         '200':
           description: Client profile with inline credentials
           content:
             application/x-openvpn-profile:
               schema: {type: string}
+        '401':
+          description: Authentication required
+        '403':
+          description: Administrator required
+        '404':
+          description: Unknown credential ID
+        '409':
+          description: Credential revoked or managed server not active
+        '503':
+          description: Credential authority unavailable
       parameters:
-      - name: name
+      - name: id
         in: path
         required: true
         schema: {type: string}
+  /services/vpn/openvpn/clients/{id}/revoke:
+    post:
+      summary: Revoke OpenVPN client credential (admin)
+      tags: [Services]
+      description: >-
+        Idempotently persists revocation and a signed CRL, then restarts the
+        active managed server. All clients reconnect once. Candidate settings
+        cannot select the issuer. Runtime failure never undoes revocation:
+        a non-2xx response with revoked=true and applied=false means durable
+        revocation but runtime not confirmed.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Revoked and runtime confirmed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OpenVPNRevokeResult'}
+        '401':
+          description: Authentication required
+        '403':
+          description: Administrator required
+        '404':
+          description: Unknown credential ID
+        '500':
+          description: Authority failed before durable revocation
+        '503':
+          description: Credential authority unavailable, or revoked but runtime not confirmed
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/OpenVPNRevokeResult'}
+                - {$ref: '#/components/schemas/ErrorResponse'}
   /services/av/update:
     post:
       summary: Start AV definition update (admin)

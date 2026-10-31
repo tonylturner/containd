@@ -6,11 +6,14 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func newOpenVPNTestInventory(t *testing.T) *openVPNInventory {
@@ -37,8 +40,12 @@ func TestOpenVPNInventoryRevocationDurable(t *testing.T) {
 		t.Fatal("issuer+serial identity broken")
 	}
 	for _, name := range []string{"alice", "Alice", "ali ce", "../alice"} {
-		if _, err := inv.issue(name); err == nil {
-			t.Fatalf("name collision accepted: %s", name)
+		want := ErrOpenVPNInvalidClientName
+		if name == "alice" {
+			want = ErrOpenVPNClientNameIssued
+		}
+		if _, err := inv.issue(name); !errors.Is(err, want) {
+			t.Fatalf("issue %s: expected %v, got %v", name, want, err)
 		}
 	}
 	result, err := revokeOpenVPNCredential(inv.dir, alice.ID)
@@ -73,8 +80,8 @@ func TestOpenVPNInventoryRevocationDurable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := revokeOpenVPNCredential(inv.dir, other.ID); err == nil {
-		t.Fatal("foreign credential accepted")
+	if _, err := revokeOpenVPNCredential(inv.dir, other.ID); !errors.Is(err, ErrOpenVPNUnknownCredential) {
+		t.Fatalf("foreign credential: %v", err)
 	}
 	replacement, err := inv.issue("alice")
 	if err != nil || replacement.ID == alice.ID {
@@ -183,8 +190,11 @@ func TestOpenVPNInventoryUnknownDownloadIsReadOnly(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CONTAIND_OPENVPN_DIR", root)
 	m := NewVPNManager(filepath.Join(root, "services"))
-	if _, err := m.DownloadOpenVPNClient(context.Background(), "missing"); err == nil {
-		t.Fatal("unknown download accepted")
+	if _, err := m.DownloadOpenVPNClient(context.Background(), "missing"); !errors.Is(err, ErrOpenVPNServerNotActive) {
+		t.Fatalf("inactive download: %v", err)
+	}
+	if _, err := m.CreateOpenVPNClient(context.Background(), "alice"); !errors.Is(err, ErrOpenVPNServerNotActive) {
+		t.Fatalf("inactive create: %v", err)
 	}
 	if got, err := m.ListOpenVPNClients(context.Background()); err != nil || len(got) != 0 {
 		t.Fatalf("empty list: %v %v", got, err)
@@ -192,6 +202,32 @@ func TestOpenVPNInventoryUnknownDownloadIsReadOnly(t *testing.T) {
 	entries, err := os.ReadDir(root)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("read created PKI: %v %v", entries, err)
+	}
+}
+
+func TestOpenVPNInventoryDownloadErrors(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CONTAIND_OPENVPN_DIR", root)
+	inv, err := openOpenVPNInventory(filepath.Join(root, "managed", "server", "pki"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := inv.issue("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewVPNManager(filepath.Join(root, "services"))
+	m.lastCfg.OpenVPN = config.OpenVPNConfig{Enabled: true, Mode: "server", Server: &config.OpenVPNManagedServerConfig{
+		ListenZone: "wan", TunnelCIDR: "10.9.0.0/24", PublicEndpoint: "vpn.example.com",
+	}}
+	if _, err := m.DownloadOpenVPNClient(context.Background(), "missing"); !errors.Is(err, ErrOpenVPNUnknownCredential) {
+		t.Fatalf("unknown download: %v", err)
+	}
+	if _, err := revokeOpenVPNCredential(inv.dir, credential.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DownloadOpenVPNClient(context.Background(), credential.ID); !errors.Is(err, ErrOpenVPNCredentialRevoked) {
+		t.Fatalf("revoked download: %v", err)
 	}
 }
 
