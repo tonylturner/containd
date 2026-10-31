@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
 ### Changed
 
 - Release promotion to `:latest`, including manual promotion, now requires
@@ -42,9 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration lists return JSON arrays rather than `null`.
 - Scripted `containd cli` sessions exit with status 1 if any command fails,
   including when later commands or `exit` run.
-
-### Fixed
-
 - Routine interface apply and reconciliation remove only stale addresses
   containd created, preserving Docker/foreign primary and secondary addresses,
   IPv6 link-local addresses and the reserved management device. Address ownership
