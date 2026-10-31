@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.36] - 2026-10-31
+
+### Upgrade notes
+
+- Back up before upgrading. Schema 0.1.7 advances through the 0.1.8
+  retired-protocol scope cut to 0.1.9, which migrates exact `learn` modes to
+  `monitor`. 0.1.35 and earlier cannot read schema 0.1.9, so downgrade requires
+  restoring a pre-upgrade backup.
+- Former `learn` ALLOWs no longer admit traffic (including NFQUEUE flows
+  subject to the default DENY), and former `learn` DENYs no longer drop at L4
+  without a queue; see Security below.
+- On upgrade, unchanged built-in IDS rules for retired protocols are removed;
+  other saved references, including custom rules, put management in recovery
+  until a valid configuration is committed.
+- Copied CIP, Modbus and DNP3 template rules are not repaired automatically;
+  re-apply the updated templates. The general template registry skips existing
+  CIP rule IDs, so remove old CIP template rules before reapplying there.
+- CIP event fields `command`, `command_code` and `session_handle` are renamed
+  to `enip_command`, `enip_command_code` and `enip_session_handle`, without
+  aliases. Upgraded configurations default to tolerant ICS parsing; select
+  `strict` if required.
+- AV scanning requires an explicit `services.av.scan.include` selection;
+  without one, no traffic is intercepted.
+- Console WebSocket connections require 30-second, single-use tickets;
+  `?token=` is no longer accepted. The `/containd/` reverse-proxy UI regression
+  affecting the RangerDanger deployment in 0.1.35 is fixed (#57).
+
 ### Security
 
 - The web console uses 30-second, single-use WebSocket tickets instead of
@@ -28,8 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Schema 0.1.9 migrates exact `learn` modes to `monitor` in running, candidate
   and previous banks and clears protocol-less modes, with durable
   `config.rule_modes.migrated` audit records per bank. Fresh writes reject
-  `learn`. Back up before upgrading: 0.1.36 cannot read schema 0.1.9; restore a
-  pre-upgrade backup to downgrade.
+  `learn`. Back up before upgrading: 0.1.35 and earlier cannot read schema
+  0.1.9; restore a pre-upgrade backup to downgrade.
 
 - Verified AF_PACKET ICS policy and decoder dispatch use the post-DNAT backend
   and pre-SNAT client on both observed legs. Conntrack deletion uses the verified
@@ -107,24 +134,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zones and assets that pass unscanned content under a closed fail policy.
   Exclusions win, and a selection may not include an ICS decoder port.
 - The engine intercepts the HTTP/1.x connections that `services.av.scan`
-  selects and scans each object before delivering it. While enforcement is
-  on, nftables steers every new TCP connection between the selected zones on
-  the selected ports, forwarded connections and inbound IPv4 port forwards
-  alike, to the engine's loopback listeners, matched on the destination after
-  DNAT. The gate holds each selected message body, scans it with the ClamAV
-  or ICAP backend and delivers or refuses the whole message; it dials the
-  server from the client's address, so the server sees the client IP unless
-  the existing source NAT masquerades the connection. The firewall policy
-  decides gated connections in both directions, revocations and temporary
-  blocks reset the gated connections they match, management is never
-  intercepted, and a connection opened before the selection covered it stays
-  unscanned until it closes. Content the gate cannot frame (HTTPS, HTTP/2,
-  `CONNECT`, `Upgrade`), partial objects (`206` or `Content-Range`) and
-  bodies larger than `maxSizeBytes` are reported as not scanned and follow
+  selects and scans each object with ClamAV or ICAP. Uploads are held in every
+  mode; downloads are held until the verdict in `hold` mode, while
+  `stream_tail` forwards all but the final 64 KiB before the verdict. While
+  enforcement is on, nftables steers every new TCP connection between the
+  selected zones on the selected ports, forwarded connections and inbound
+  IPv4 port forwards alike, to the engine's loopback listeners, matched on the
+  destination after DNAT. It dials the server from the client's address, so
+  the server sees the client IP unless the existing source NAT masquerades
+  the connection. The firewall policy decides gated connections in both
+  directions. Revocations and temporary blocks reset gated connections they
+  match. Management is never intercepted, and a connection opened before the
+  selection covered it stays unscanned until it closes. Content the gate
+  cannot frame (HTTPS, HTTP/2, `CONNECT`, `Upgrade`), partial objects (`206`
+  or `Content-Range`) and bodies larger than `maxSizeBytes` are reported as
+  not scanned and follow
   `failPolicy`; an endpoint in `scan.icsZones` or `scan.icsAssets` passes
-  unscanned outcomes under `closed`, and a detection is refused with `403`
-  under either policy. A relayed body that fails part way resets both
-  connections, so a truncated object never looks complete.
+  unscanned outcomes under `closed`. Detections are refused under either
+  policy: a detected held object gets `403`, while a streamed download whose
+  prefix was already forwarded resets both connections. A relayed body that
+  fails part way also resets both connections, so a truncated object never
+  looks complete.
 - `scan.downloadMode: stream_tail` forwards a download as it arrives except
   its last 64 KiB, which the gate holds until the verdict; a blocking verdict
   resets both connections. Uploads are held in every mode. In both download
@@ -260,17 +290,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DPI block elements installed before upgrading have no owner marker and are
   not cleared automatically; they expire within their existing 10-minute TTL.
 - Restored the full README overview and dashboard screenshot.
-- A Modbus `ALLOW` whose `addresses` covered only the start of the requests it
-  admitted now denies them: `10-11` no longer admits a read of 8 registers from
-  address 11. Before upgrading, compare each Modbus rule's `addresses` with the
-  `address` and `quantity` of the requests it admits on the Events page, and
-  widen the entries to cover whole requests.
+- Modbus `addresses` must now cover whole requests (see Security). Before
+  upgrading, compare each Modbus rule's `addresses` with the `address` and
+  `quantity` of the requests it admits on the Events page, and widen the
+  entries to cover whole requests.
 - The CLI guide documents SSH shell modes again: `appliance` and `linux`,
   how `CONTAIND_SSH_SHELL_MODE` and `set system ssh shell-mode` select them,
   switching between the CLI and the Linux shell, the PTY requirement, and the
   root-shell and lab-mode caveats.
 - The ICS DPI guide documents protocol anomaly detection, the signature API
-  with its 23 built-in signatures and temporary custom signatures, the decoded
+  with its 20 built-in signatures and temporary custom signatures, the decoded
   event fields of each ICS decoder, a Modbus function-code and address rule
   example, and how the TLS `ja3` fingerprint differs from reference JA3.
 - On upgrade, unchanged built-in IDS rules for removed industrial protocols
@@ -310,7 +339,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AF_PACKET resolver queue or byte overflow stops passive DPI and identification
   decoding for the affected connection incarnation, without changing forwarding.
   A `dpi.coverage.loss` event and `containd_dpi_coverage_losses_total` counter expose
-  the loss; a new connection incarnation can decode again.
+  the loss; decoding resumes only with a new connection incarnation.
 
 - PCAP analysis and replay honor big-endian and nanosecond captures. Analysis
   reports truncated coverage for partial final records instead of hiding them.
@@ -329,10 +358,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traffic. Missing connection evidence reports correlation unavailable instead
   of an unmatched-reply violation; inventory and learning use verified logical
   client/backend roles without changing wire telemetry or policy addresses.
-  Unmatched-reply detection requires capture from the connection's opening SYN,
-  pauses for two quiet minutes after packet loss or an inspection bypass, and
-  resumes on its own; resolver admission is limited to industrial traffic and
-  bounded. NFQUEUE and PCAP evidence reports `correlationStatus: wire`.
+  Unmatched-reply detection requires capture from the connection's opening SYN.
+  For ordinary packet loss or inspection bypass it pauses for two quiet minutes
+  and resumes; queue or byte overflow instead stops decoding for that
+  incarnation until a new connection incarnation. Resolver admission is
+  limited to industrial traffic and bounded. NFQUEUE and PCAP evidence reports
+  `correlationStatus: wire`.
 - Empty ICS function/service code fields now mean any code in both rule editors,
   without injecting zero from whitespace or separators. Invalid selector values
   block saving and preview, and clearing generic restrictions removes them.
@@ -384,12 +415,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The scanning gate tracks connections by both TCP endpoints, so connections
   sharing a client IP and port keep their own masquerading, events and resets.
-- The scanning gate keeps a client connection open after a completed upload
-  when the origin answers before the gate's last write returns; it no longer
-  treats the upload as truncated and drops the next pipelined response.
-- The DHCP page keeps unsaved edits when its configuration is reloaded after a
-  staged save, a commit or an auto refresh, and says when the server copy
-  changed underneath them. Only the Refresh button discards them.
+- The scanning gate releases a held upload's object slot before exposing its
+  final response or admitting its download scan, so a following upload or
+  response scan is not refused as busy. If the origin answers before the gate's
+  last write returns, it keeps the client connection open rather than treating
+  the upload as truncated and dropping the next pipelined response.
 - Modbus request/reply decoding and ICS policy direction follow the connection
   opener, including clients bound to port 502. Offline PCAP analysis uses
   SYN/SYN-ACK orientation, with service-port hints only for midstream captures.
@@ -406,8 +436,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `byte_count` for FC 15/16 and `read_*`/`write_*` for FC 23; read replies
   report `byte_count` and `register_count`.
 - Learned Modbus rules list each observed address span (for example `10-11`)
-  instead of only start addresses, so they keep admitting the traffic they
-  observed.
+  instead of only start addresses, so generated rules cover the traffic they
+  observed without suggesting stored rules are rewritten.
 - Sigma rules can match the Modbus fields `byte_count`, `register_count`,
   `and_mask`, `or_mask`, `read_address`, `read_quantity`, `write_address` and
   `write_quantity`.
@@ -2051,7 +2081,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.35...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.36...HEAD
+[0.1.36]: https://github.com/tonylturner/containd/compare/v0.1.35...v0.1.36
 [0.1.35]: https://github.com/tonylturner/containd/compare/v0.1.34...v0.1.35
 [0.1.34]: https://github.com/tonylturner/containd/compare/v0.1.33...v0.1.34
 [0.1.33]: https://github.com/tonylturner/containd/compare/v0.1.32...v0.1.33
