@@ -7,7 +7,7 @@ import { useConfigForm } from "../../lib/use-config-form";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
 import Link from "next/link";
 
 import {
@@ -16,6 +16,7 @@ import {
   type NATConfig,
   type PortForward,
   type Zone,
+  type FirewallRule,
 } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
@@ -25,6 +26,7 @@ import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { formatEndpoint } from "../../lib/endpoint";
 import { validateIPv4, validatePort } from "../../lib/validate";
 import { zoneLabel, zoneName } from "../../lib/zones";
+import { forwardPlacementMessage } from "../../lib/forward-placement";
 
 const UNAVAILABLE = "NAT settings unavailable — the server did not return the NAT configuration and zones.";
 
@@ -33,12 +35,16 @@ const UNAVAILABLE = "NAT settings unavailable — the server did not return the 
 export default function NATPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [nat, setNat] = useState<NATConfig>({ enabled: false });
+  const [rules, setRules] = useState<FirewallRule[] | null>(null);
   // Until the first answer the settings are unknown, not disabled or empty.
   const [loaded, setLoaded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeWarning, setNoticeWarning] = useState(false);
+  const writable = useRef(false);
+  useLayoutEffect(() => { writable.current = loaded && !loadError && isAdmin(); }, [loaded, loadError]);
 
   const tips: Tip[] = [
     {
@@ -64,13 +70,14 @@ export default function NATPage() {
     {
       id: "nat:portfwd",
       title: "Expose internal services",
-      body: "Add a port forward (DNAT) to make an internal server reachable from an external zone. Remember to also create a matching firewall allow rule.",
+      body: "A port forward translates destinations only. Firewall policy decides delivery; publishing can create a matching allow rule where safe.",
       when: () => zones.length > 0 && nat.enabled && (nat.portForwards ?? []).length === 0,
     },
   ];
 
   const { initialLoading: loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [z, n] = await Promise.all([api.listZones(), api.getNAT()]);
+    const [z, n, r] = await Promise.all([api.listZones(), api.getNAT(), api.listFirewallRules()]);
+    setRules(r);
     // Never save stand-in settings. After the first success, keep drafts
     // mounted but disabled while the current server copy is unavailable.
     if (z && n) {
@@ -110,7 +117,7 @@ export default function NATPage() {
         </div>
       )}
       {notice && (
-        <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+        <div role="status" className={`mb-4 rounded-xs border px-4 py-3 text-sm ${noticeWarning ? "border-amber/30 bg-amber/10 text-amber" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"}`}>
           {notice}
         </div>
       )}
@@ -126,8 +133,10 @@ export default function NATPage() {
         zones={zones}
         nat={nat}
         onSave={async (cfg) => {
+          if (!writable.current) return null;
           setError(null);
           setNotice(null);
+          setNoticeWarning(false);
           const saved = await api.setNAT(cfg);
           if (!saved.ok) {
             setError(saved.error || "Failed to update NAT (check zones).");
@@ -148,9 +157,39 @@ export default function NATPage() {
         key={`dnat-${reloadKey}`}
         zones={zones}
         nat={nat}
-        onSave={async (cfg) => {
+        rules={rules}
+        onPublish={async (forward, allowRule) => {
+          if (!writable.current) return false;
           setError(null);
           setNotice(null);
+          const result = await api.publishPortForward(forward, allowRule);
+          if (!result.ok) {
+            setError(result.error);
+            return false;
+          }
+          setNotice(forwardPlacementMessage(result.data) + (result.warning ? ` Warning: ${result.warning}` : ""));
+          setNoticeWarning(!!result.data.placement?.warning);
+          await refresh();
+          return true;
+        }}
+        onDelete={async (id) => {
+          if (!writable.current) return;
+          setError(null);
+          setNotice(null);
+          setNoticeWarning(false);
+          const result = await api.deletePortForward(id);
+          if (!result.ok) {
+            setError(result.error);
+            return;
+          }
+          setNotice(`Port forward deleted — commit to apply. Deleted rules: ${result.data.deletedRuleIds.join(", ") || "none"}. Edited rules: ${result.data.editedRuleIds.join(", ") || "none"}.${result.warning ? ` Warning: ${result.warning}` : ""}`);
+          await refresh();
+        }}
+        onSave={async (cfg) => {
+          if (!writable.current) return null;
+          setError(null);
+          setNotice(null);
+          setNoticeWarning(false);
           const saved = await api.setNAT(cfg);
           if (!saved.ok) {
             setError(saved.error || "Failed to update port forwards (check zones/ports).");
@@ -339,15 +378,22 @@ function PortForwardsCard({
   zones,
   nat,
   onSave,
+  rules,
+  onPublish,
+  onDelete,
 }: {
   zones: Zone[];
   nat: NATConfig;
   onSave: (cfg: NATConfig) => Promise<NATConfig | null>;
+  rules: FirewallRule[] | null;
+  onPublish: (forward: PortForward, allowRule: boolean) => Promise<boolean>;
+  onDelete: (id: string) => Promise<void>;
 }) {
   const { editor, cfg: items, setCfg: setItems, adoptConfig, beginSave, failSave, acceptConfig, dirty } = useConfigEditor<PortForward[]>(nat.portForwards ?? []);
   const form = useConfigForm({
     ingressChoice: "", newProto: "tcp" as "tcp" | "udp",
     newListen: "", newDestIp: "", newDestPort: "", newSources: "", newDesc: "",
+    allowRule: true,
   }, nat);
   const { refreshForm } = form;
   useEffect(() => { refreshForm(nat); }, [nat, refreshForm]);
@@ -358,6 +404,8 @@ function PortForwardsCard({
   const [newDestPort, setNewDestPort] = form.field("newDestPort");
   const [newSources, setNewSources] = form.field("newSources");
   const [newDesc, setNewDesc] = form.field("newDesc");
+  const [allowRule, setAllowRule] = form.field("allowRule");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirm = useConfirm();
 
@@ -376,7 +424,7 @@ function PortForwardsCard({
   const newIngress = ingressChoice || (hasZone("wan") ? "wan" : "");
 
   // One banner serves the whole row, so each message names its field.
-  function addPortForward() {
+  async function addPortForward() {
     setError(null);
     if (!newIngress) {
       setError("Ingress zone is required.");
@@ -429,38 +477,44 @@ function PortForwardsCard({
         .filter(Boolean),
       description: newDesc.trim() || undefined,
     };
-    setItems((prev) => [...prev, pf]);
-    setNewListen("");
-    setNewDestIp("");
-    setNewDestPort("");
-    setNewSources("");
-    setNewDesc("");
+    const submitted = form.editor;
+    setBusy(true);
+    const ok = await onPublish(pf, allowRule);
+    setBusy(false);
+    if (ok) form.acceptFields(submitted, ["newListen", "newDestIp", "newDestPort", "newSources", "newDesc"]);
   }
 
   async function save() {
     setError(null);
     const submitted = beginSave();
+    setBusy(true);
     const saved = await onSave({ ...nat, portForwards: items });
     if (saved) acceptConfig(submitted, saved.portForwards ?? []);
     else failSave(submitted);
+    setBusy(false);
   }
 
   function toggle(id: string, enabled: boolean) {
     setItems((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)));
   }
 
-  function remove(id: string) {
-    setItems((prev) => prev.filter((p) => p.id !== id));
-  }
-
-  function firewallLink(pf: PortForward): string {
-    const params = new URLSearchParams();
-    params.set("action", "create");
-    params.set("dest", pf.destIp);
-    params.set("port", String(pf.destPort ?? pf.listenPort));
-    params.set("proto", pf.proto);
-    if (pf.description) params.set("desc", `Allow DNAT: ${pf.description}`);
-    return `/firewall/?${params.toString()}`;
+  function confirmDelete(pf: PortForward) {
+    if (!rules) return;
+    const affected = rules.filter((r) => r.viaForwards?.includes(pf.id));
+    const deleted = affected.filter((r) => r.viaForwards?.length === 1);
+    const edited = affected.filter((r) => (r.viaForwards?.length ?? 0) > 1);
+    confirm.open({
+      title: "Delete port forward?",
+      message: <div className="space-y-2">
+        <p>Remove {pf.proto}/{pf.listenPort} → {formatEndpoint(pf.destIp, pf.destPort || pf.listenPort)}?</p>
+        <p>Rules to delete: {deleted.map((r) => r.id).join(", ") || "none"}.</p>
+        <p>Rules to edit (remove this forward): {edited.map((r) => r.id).join(", ") || "none"}.</p>
+        <p>Changes are staged; commit to apply.</p>
+      </div>,
+      confirmLabel: "Delete",
+      variant: "danger",
+      onConfirm: async () => { setBusy(true); await onDelete(pf.id); setBusy(false); },
+    });
   }
 
   return (
@@ -471,16 +525,16 @@ function PortForwardsCard({
         <div>
           <div className="text-sm font-semibold text-(--text)">Port Forwarding (DNAT)</div>
           <div className="text-xs text-(--text-muted)">
-            Destination NAT (prerouting) to expose internal services. You still need a matching{" "}
+            Port forwards only translate destinations. Delivery is decided by{" "}
             <Link href="/firewall/" className="font-semibold text-(--amber) hover:text-(--amber)">
-              firewall allow rule
+              ordered firewall policy
             </Link>.
           </div>
         </div>
         {isAdmin() && (
           <button
             onClick={save}
-            disabled={!dirty}
+            disabled={!dirty || busy}
             className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
           >
             Save
@@ -499,7 +553,10 @@ function PortForwardsCard({
             {error}
           </div>
         )}
+        {dirty && <p className="mb-3 text-xs text-(--text-muted)">Save enabled/disabled changes before adding or deleting a forward.</p>}
+        {rules === null && <p className="mb-3 text-xs text-(--text-muted)">Firewall rules unavailable; refresh before deleting a forward or viewing its rule links.</p>}
 
+        <fieldset disabled={busy} className="min-w-0">
         {isAdmin() && (
           <div className="grid gap-2 md:grid-cols-6">
             <select
@@ -550,6 +607,7 @@ function PortForwardsCard({
             />
             <button
               onClick={addPortForward}
+              disabled={dirty}
               className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui"
             >
               Add
@@ -567,6 +625,10 @@ function PortForwardsCard({
               placeholder="description (opt)"
               className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden md:col-span-3"
             />
+            <label className="flex items-center gap-2 text-sm text-(--text) md:col-span-6">
+              <input type="checkbox" checked={allowRule} onChange={(e) => setAllowRule(e.target.checked)} />
+              Create matching allow rule
+            </label>
           </div>
         )}
 
@@ -580,13 +642,14 @@ function PortForwardsCard({
                 <th className="px-4 py-3">Destination</th>
                 <th className="px-4 py-3">Sources</th>
                 <th className="px-4 py-3">Enabled</th>
+                <th className="px-4 py-3">Rules</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 && (
                 <tr>
-                  <td className="px-4 py-4 text-(--text-muted)" colSpan={7}>
+                  <td className="px-4 py-4 text-(--text-muted)" colSpan={8}>
                     No port forwards configured. Port forwards (DNAT) expose internal services to external zones.
                   </td>
                 </tr>
@@ -599,7 +662,7 @@ function PortForwardsCard({
                     {pf.listenPort}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-(--text)">
-                    {formatEndpoint(pf.destIp, pf.destPort)}
+                    {formatEndpoint(pf.destIp, pf.destPort || pf.listenPort)}
                   </td>
                   <td className="px-4 py-3 text-(--text)">
                     {(pf.allowedSources ?? []).join(", ") || "any"}
@@ -615,16 +678,15 @@ function PortForwardsCard({
                       {pf.enabled ? "on" : "off"}
                     </span>
                   </td>
+                  <td className="px-4 py-3 text-xs">
+                    {rules === null ? "unavailable" : rules.filter((r) => r.viaForwards?.includes(pf.id)).map((r) => (
+                      <Link key={r.id} href={`/firewall/#${encodeURIComponent(`rule-${r.id}`)}`} className="mr-2 text-(--amber) underline">{r.id}</Link>
+                    ))}
+                    {rules && !rules.some((r) => r.viaForwards?.includes(pf.id)) && "none"}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     {isAdmin() && (
                       <div className="flex items-center justify-end gap-2">
-                        <Link
-                          href={firewallLink(pf)}
-                          className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
-                          title="Create matching firewall rule"
-                        >
-                          + FW Rule
-                        </Link>
                         <button
                           onClick={() => toggle(pf.id, !pf.enabled)}
                           className="rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui"
@@ -632,15 +694,8 @@ function PortForwardsCard({
                           {pf.enabled ? "Disable" : "Enable"}
                         </button>
                         <button
-                          onClick={() =>
-                            confirm.open({
-                              title: "Delete port forward?",
-                              message: `Remove the ${pf.proto}/${pf.listenPort} forward to ${formatEndpoint(pf.destIp, pf.destPort)}? This change is not saved until you click Save.`,
-                              confirmLabel: "Delete",
-                              variant: "danger",
-                              onConfirm: () => remove(pf.id),
-                            })
-                          }
+                          disabled={dirty || rules === null}
+                          onClick={() => confirmDelete(pf)}
                           className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                         >
                           Delete
@@ -653,6 +708,7 @@ function PortForwardsCard({
             </tbody>
           </table>
         </div>
+        </fieldset>
       </div>
     </div>
   );

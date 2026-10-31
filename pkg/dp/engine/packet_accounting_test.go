@@ -109,8 +109,8 @@ func TestAccountingIECHeldResolutionIsNotAnArrival(t *testing.T) {
 	}
 	assertAccounting(t, h.e, "iec104", 4, 5, 0, 0, 0, 0)
 	_, d = h.send(false, payload[5:])
-	if d.Action != capture.Accept || len(d.Resolved) != 1 || d.Resolved[0].Token != p.Token {
-		t.Fatalf("completing fragment = %+v, want Accept and one resolved token", d)
+	if d.Action != capture.Repeat || len(d.Resolved) != 1 || d.Resolved[0].Token != p.Token {
+		t.Fatalf("completing fragment = %+v, want Repeat and one resolved token", d)
 	}
 	assertAccounting(t, h.e, "iec104", 5, int64(len(payload)), 1, 1, 0, 0)
 }

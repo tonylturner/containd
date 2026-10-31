@@ -33,7 +33,7 @@ func newEnforceEngine(t *testing.T, def rules.Action, entries ...rules.Entry) (*
 	up := &blockRecorder{}
 	e, err := New(Config{
 		Capture:    capture.Config{Interfaces: []string{"eth0", "eth1"}},
-		Enforce:    EnforceConfig{Enabled: true, Updater: up},
+		Enforce:    EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Updater: up},
 		DPIEnabled: true,
 		DPIMode:    "enforce",
 	})

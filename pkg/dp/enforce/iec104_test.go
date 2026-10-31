@@ -40,15 +40,13 @@ func iecSnapshot() *rules.Snapshot {
 	}
 }
 
-const envelopeJump = "meta mark & 0x04000000 == 0 jump iec104_envelope"
-
 // envelopeRules are the golden rules of the open IEC104 envelope chain: a
 // packet of a connection whose handshake conntrack has not seen complete
 // also gets HandshakeMark.
 var envelopeRules = []string{
-	"ct status assured meta mark set meta mark and 0xf0ffffff or 0x01000000 queue num 100",
-	"ct state != { invalid, untracked } meta mark set meta mark and 0xf0ffffff or 0x03000000 queue num 100",
-	"meta mark set meta mark and 0xf0ffffff or 0x01000000 queue num 100",
+	"ct status assured meta mark set meta mark and 0xe0ffffff or 0x09000000 queue num 100",
+	"ct state != { invalid, untracked } meta mark set meta mark and 0xe0ffffff or 0x0b000000 queue num 100",
+	"meta mark set meta mark and 0xe0ffffff or 0x09000000 queue num 100",
 }
 
 // envelopeChain is the golden IEC104 envelope chain in each state.
@@ -63,51 +61,22 @@ func TestCompileFirewallSteersIEC104EnvelopeBothDirections(t *testing.T) {
 		c.QueueID = 100
 		c.NFLogGroup = 7
 		c.IEC104EnvelopeOpen = open
-		full, err := compileWithoutCounters(c, iecSnapshot())
+		text, err := c.CompileFirewall(iecSnapshot())
 		if err != nil {
-			t.Fatalf("compile: %v", err)
+			t.Fatal(err)
 		}
-		// The chain is declared once, before the forward chain that jumps to it.
-		if strings.Count(full, "chain iec104_envelope") != 1 || !strings.Contains(full, envelopeChain[open]) ||
-			strings.Index(full, envelopeChain[open]) > strings.Index(full, "chain forward") {
-			t.Fatalf("open=%v: envelope chain missing, duplicated or after forward:\n%s", open, full)
+		assertText(t, text, envelopeChain[open])
+		forward := strings.Join(chainBody(t, text, "forward"), "\n")
+		assertText(t, forward, `ct direction original iifname { "eth1" } oifname { "eth2" } meta l4proto tcp ct reply proto-src 2404 ct original ip saddr { 10.60.60.0/24 } ct reply ip saddr { 10.70.0.5 }`, `ct direction reply iifname { "eth2" } oifname { "eth1" } meta l4proto tcp ct reply proto-src 2404 ct original ip saddr { 10.60.60.0/24 } ct reply ip saddr { 10.70.0.5 }`, "jump "+enforceQueueChain, "ct mark & 0x00000007")
+		if strings.Index(forward, "jump "+IEC104EnvelopeChain) > strings.Index(forward, "jump "+enforceQueueChain) {
+			t.Fatal("generic steering precedes IEC")
 		}
-		ruleset := full[strings.Index(full, "chain forward"):]
-		want := []string{
-			`    iifname { "eth1" } oifname { "eth2" } tcp dport 2404 ip saddr { 10.60.60.0/24 } ip daddr { 10.70.0.5 } ` + envelopeJump + ";\n",
-			`    iifname { "eth2" } oifname { "eth1" } tcp sport 2404 ip saddr { 10.70.0.5 } ip daddr { 10.60.60.0/24 } ` + envelopeJump + ";\n",
-			`    tcp dport 2404 ip saddr { 10.60.61.7 } ` + envelopeJump + ";\n",
-			`    tcp sport 2404 ip daddr { 10.60.61.7 } ` + envelopeJump + ";\n",
-			"    meta mark & 0x04000000 == 0 tcp dport 502 jump ics_queue;\n",
-			"    ct state { established, related } accept;\n",
-			"    tcp dport 2404 accept;\n",
-		}
-		last := -1
-		for _, line := range want {
-			i := strings.Index(ruleset, line)
-			if i < 0 {
-				t.Fatalf("open=%v: missing %q in:\n%s", open, line, ruleset)
-			}
-			if i < last {
-				t.Fatalf("open=%v: %q is out of order in:\n%s", open, line, ruleset)
-			}
-			last = i
-		}
-		if n := strings.Count(ruleset, "jump "+ICSQueueChain); n != 1 {
-			t.Fatalf("open=%v: forward queue lines = %d, want only the modbus one:\n%s", open, n, ruleset)
-		}
-		if strings.Contains(ruleset, `log prefix "containd:a-iec-allow`) {
-			t.Fatalf("IEC steering must not add an nflog clause:\n%s", ruleset)
-		}
-		if strings.Count(full, "block_flows") != 2 {
-			t.Fatalf("block_flows must appear only as the set and its drop:\n%s", ruleset)
+		if strings.Contains(text, `log prefix "containd:a-iec-allow`) {
+			t.Fatal("ICS logged twice")
 		}
 	}
 }
 
-// TestIEC104EnvelopeStateTouchesOnlyTheEnvelopeChain: the two states differ
-// in the envelope chain's single rule and nowhere else, so the US
-// Modbus/DNP3 steering and every non-envelope rule keep their shape.
 func TestIEC104EnvelopeStateTouchesOnlyTheEnvelopeChain(t *testing.T) {
 	c := NewCompiler()
 	c.QueueID = 100
@@ -157,10 +126,10 @@ func TestCompileFirewallIEC104WithoutQueueIsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if strings.Contains(ruleset, "queue") || strings.Contains(ruleset, "meta mark") {
+	if strings.Contains(ruleset, "queue num") {
 		t.Fatalf("no steering without a queue:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, `    iifname { "eth1" } oifname { "eth2" } tcp dport 2404 ip saddr { 10.60.60.0/24 } ip daddr { 10.70.0.5 } accept;`) {
+	if !strings.Contains(ruleset, `    ct state { invalid, untracked } iifname { "eth1" } oifname { "eth2" } tcp dport 2404 ip saddr { 10.60.60.0/24 } ip daddr { 10.70.0.5 } goto ordered_s2_rule_1;`) {
 		t.Fatalf("IEC rule not compiled as a plain rule:\n%s", ruleset)
 	}
 }
@@ -177,7 +146,7 @@ func TestCompileFirewallIEC104OutsidePortIsNotSteered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if strings.Contains(ruleset, "queue") || c.SteersIEC104(snap) {
+	if strings.Contains(ruleset, "jump iec104_envelope") || c.SteersIEC104(snap) {
 		t.Fatalf("an IEC rule that cannot match port 2404 has no envelope:\n%s", ruleset)
 	}
 }

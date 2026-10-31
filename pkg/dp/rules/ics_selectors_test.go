@@ -119,7 +119,7 @@ func TestCIPTagOverlap(t *testing.T) {
 }
 
 func TestCIPTagMatchingAllocatesNothing(t *testing.T) {
-	ev := NewEvaluator(&Snapshot{Firewall: []Entry{{
+	ev := NewEvaluator(&Snapshot{DPIMode: "enforce", Firewall: []Entry{{
 		ID: "tag", Action: ActionDeny, ICS: ICSPredicate{Protocol: "cip", Tags: []string{"Program:Main.A.B"}},
 	}}})
 	ctx := EvalContext{ICS: &ICSContext{Protocol: "cip", Symbol: []string{"program:MAIN", "a"}}}
@@ -200,7 +200,7 @@ func TestIEC104NewSelectors(t *testing.T) {
 					if got := PreviewMatch(entry, ctx); got != (name == "positive") {
 						t.Errorf("%s match = %v", name, got)
 					}
-					_, matched := NewEvaluator(&Snapshot{Firewall: []Entry{entry}}).EvaluateIEC104(ctx)
+					_, matched := NewEvaluator(&Snapshot{DPIMode: "enforce", Firewall: []Entry{entry}}).EvaluateIEC104(ctx)
 					if (matched != nil) != (name == "positive" && action != ActionRateLimit && action != ActionTag) {
 						t.Errorf("%s dedicated IEC evaluator match = %v", name, matched)
 					}

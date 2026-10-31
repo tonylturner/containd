@@ -5,22 +5,28 @@ package rules
 
 import (
 	"net"
+	"net/netip"
 	"strconv"
 	"time"
 )
 
 // EvaluatorVersion binds retained proofs to predicate semantics. Bump whenever
 // evaluation or its shared decoded-context projection changes acceptance.
-const EvaluatorVersion = "ics-3"
+const EvaluatorVersion = "ics-4"
 
 // EvalContext represents a simplified flow context for rule evaluation.
 type EvalContext struct {
-	SrcZone string
-	DstZone string
-	SrcIP   net.IP
-	DstIP   net.IP
-	Proto   string // tcp, udp, icmp
-	Port    string // dest port as string (e.g., "80")
+	// Devices and all service fields are original-client/backend oriented.
+	// Missing devices stay empty; no subnet-based inference is valid inline.
+	IngressDevice string
+	EgressDevice  string
+	Conntrack     *ConntrackContext
+	SrcZone       string
+	DstZone       string
+	SrcIP         net.IP
+	DstIP         net.IP
+	Proto         string // tcp, udp, icmp
+	Port          string // dest port as string (e.g., "80")
 	// Identities represent user/group or identity tags associated with the flow.
 	Identities []string
 	// ICS provides decoded ICS metadata for predicate matching.
@@ -84,6 +90,8 @@ type compiledPort struct {
 // data so that string parsing is done once at load time rather than on
 // every packet.
 type compiledEntry struct {
+	forwardMatches    map[string]ForwardMatch
+	localIPv4ByDevice map[string][]netip.Addr
 	Entry
 	src, dst  networks         // pre-parsed Sources and Destinations
 	schedule  compiledSchedule // pre-parsed Schedule
@@ -129,7 +137,6 @@ func (n *networks) holds(ip net.IP) bool {
 type Evaluator struct {
 	snapshot  *Snapshot
 	compiled  []compiledEntry
-	decide    []int // deciding entries in DecisionOrder
 	tags      []int // TAG entries
 	enforcing []int
 	monitor   []int
@@ -149,11 +156,15 @@ func (e *Evaluator) compile() {
 	e.compiled = make([]compiledEntry, len(e.snapshot.Firewall))
 	for i, entry := range e.snapshot.Firewall {
 		e.compiled[i] = compileEntry(entry)
+		e.compiled[i].forwardMatches = e.snapshot.ForwardMatches
+		e.compiled[i].localIPv4ByDevice = e.snapshot.LocalIPv4ByDevice
 	}
-	e.decide = DecisionOrder(e.snapshot.Firewall)
 	e.tags = tagIndexes(e.snapshot.Firewall)
-	for _, i := range e.decide {
-		if MonitorICS(e.compiled[i].Entry, e.snapshot.DPIMode) {
+	for i, entry := range e.snapshot.Firewall {
+		if !entry.Action.Decides() {
+			continue
+		}
+		if MonitorICS(entry, e.snapshot.DPIMode) {
 			e.monitor = append(e.monitor, i)
 		} else {
 			e.enforcing = append(e.enforcing, i)
@@ -199,12 +210,12 @@ func PreviewMatch(entry Entry, ctx EvalContext) bool {
 	return ce.matches(ctx)
 }
 
-// AddressScopeMatch reports whether the zones and addresses of the
+// AddressScopeMatch reports whether the zones, addresses and via of the
 // snapshot's firewall entry i hold ctx. Its protocols, identities, ICS
 // predicate and schedule are not consulted. It allocates nothing.
 func (e *Evaluator) AddressScopeMatch(i int, ctx EvalContext) bool {
 	ce := &e.compiled[i]
-	return matchZones(&ce.Entry, ctx) && matchCIDRs(ce, ctx)
+	return matchZones(&ce.Entry, ctx) && matchCIDRs(ce, ctx) && ce.matchVia(ctx)
 }
 
 func (e *Evaluator) Evaluate(ctx EvalContext) Action {
@@ -212,24 +223,10 @@ func (e *Evaluator) Evaluate(ctx EvalContext) Action {
 	return action
 }
 
-// EvaluateMatch returns the decision for ctx and the deciding Entry, or nil
-// when the default decides. Any matching ALLOW wins; otherwise the first
-// matching DENY or RESET by rule ID decides (DecisionOrder). RATE_LIMIT and
-// TAG entries never decide.
+// EvaluateMatch returns the first matching enforcing terminal in configured
+// order, or the ordinary default and nil. Monitor entries never decide.
 func (e *Evaluator) EvaluateMatch(ctx EvalContext) (Action, *Entry) {
-	if e.snapshot == nil {
-		return ActionDeny, nil
-	}
-	for _, i := range e.decide {
-		if ce := &e.compiled[i]; ce.matches(ctx) {
-			return ce.Action, &ce.Entry
-		}
-	}
-	// Like the nftables chain policy, only an explicit ALLOW default admits.
-	if e.snapshot.Default == ActionAllow {
-		return ActionAllow, nil
-	}
-	return ActionDeny, nil
+	return e.EvaluateEnforcing(ctx)
 }
 
 func matchZones(entry *Entry, ctx EvalContext) bool {

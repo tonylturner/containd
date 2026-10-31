@@ -47,6 +47,7 @@ require a restart; committing does not rebind management sockets.
   - `show routing`
   - `show nat`
   - `show port-forwards` (DNAT config)
+  - `show firewall rules` (configured order numbers and via-forward IDs)
   - `show conntrack [limit]` (kernel conntrack via engine; may be unavailable depending on runtime)
   - `show sessions [limit]` (alias of `show conntrack`)
   - `diag routing reconcile REPLACE`
@@ -66,12 +67,13 @@ require a restart; committing does not rebind management sockets.
   - `set route del <dst|default> [via <gw>] [dev <iface>] [table <n>] [metric <n>]`
   - `set ip rule add <table> [src <cidr>] [dst <cidr>] [priority <n>]`
   - `set ip rule del <table> [src <cidr>] [dst <cidr>] [priority <n>] | set ip rule del <table> all`
-  - `set firewall rule <id> <action> [src_zone] [dst_zone]`
+  - `add firewall rule <id> <action> [src_zone] [dst_zone] [position]`
+  - `move firewall rule <id> top|bottom|before <id>|after <id>`
   - `set firewall ics-rule <id> <action> <protocol> [options...]`
   - `delete firewall rule <id>`
   - `set nat on|off [egress <zone|default>] [sources <z1,z2|default>]`
   - `set outbound quickstart` (enables default route + SNAT + allow rule for LAN/MGMT → WAN)
-  - `set port-forward add <id> <ingress_zone> <tcp|udp> <listen_port> <dest_ip[:dest_port]> [sources <cidr1,cidr2>] [desc <text>] [off]`
+  - `set port-forward add <id> <ingress_zone> <tcp|udp> <listen_port> <dest_ip[:dest_port]> [sources <cidr1,cidr2>] [desc <text>] [off] [no-allow]`
   - `set port-forward del <id>`
   - `set port-forward enable <id>` / `set port-forward disable <id>`
   - `set dataplane enforcement <on|off> [table] [iface...]`
@@ -95,6 +97,34 @@ require a successful read of the current candidate settings. If that read fails
 or returns no data, the command reports an error and sends no write; it does not
 substitute running settings or defaults. Unspecified fields are preserved.
 Outbound quick start completes all configuration reads before staging its changes.
+
+### Rule positions and port forwards
+
+For `add firewall rule`, the optional position suffix is `top`, `bottom`,
+`before <id>` or `after <id>`; omitted means `bottom`. `set firewall rule`
+accepts the same creation syntax. `move firewall rule` repositions an existing
+rule without changing its predicates. Unknown anchors and moving a rule
+relative to itself are rejected. Changes are staged until commit.
+
+```text
+add firewall rule maintenance ALLOW ops plant before deny-plant
+move firewall rule deny-plant bottom
+set port-forward add plc wan tcp 1502 10.30.30.10:502 no-allow
+set port-forward del plc
+```
+
+Port-forward add atomically stages the forward and, by default, requests a
+matching allow rule. The output reports `Inserted rule <id> at position <n>.`
+for `generated`, or `Placement: <reason>; governing rules: <ids>` for `inside`
+or `partial`. Partial/unknown overlap prints a warning and generates no grant;
+existing policy decides delivery. A trailing `no-allow` stages translation
+only and prints `No allow rule requested.` See
+[placement reasons](policy-model.md#port-forward-publication-and-deletion).
+
+Port-forward del atomically removes the forward's references, deleting rules
+whose `viaForwards` list becomes empty and editing those that retain other IDs.
+It prints `Deleted rules: <ids>` and `Edited rules: <ids>` (an em dash for an
+empty list). Add and del both print the staged-change reminder; commit to apply.
 
 ## Learner Evidence
 

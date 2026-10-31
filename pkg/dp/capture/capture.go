@@ -51,6 +51,10 @@ type Packet struct {
 	Token     Token  // zero unless delivered inline
 	Mark      uint32 // NFQUEUE skb mark when HasMark; opaque to capture
 	HasMark   bool
+	// Queue is nil on observational sources. Missing queue/conntrack fields
+	// stay missing; a reverse tuple is never synthesized from packet headers.
+	Queue             *QueueMetadata
+	publicationPinned bool
 	// Invalid is "" when the packet decoded. Otherwise it names the reason
 	// (see the Invalid* constants); tuple fields are then best effort.
 	Invalid string
@@ -85,6 +89,33 @@ type Config struct {
 	// submission order; Stop returns after the last one.
 	OnVerdict VerdictFunc
 	OnSource  func(SourceEvent)
+	// PublicationFence pins policy through handler evaluation and the actual
+	// verdict submission. Configure before Start, never while capture runs.
+	// A handler resolves earlier tokens with Decision.Resolved, not Settle:
+	// submitting an earlier deferred token would recursively acquire the pin.
+	PublicationFence *sync.RWMutex
+}
+
+// PublicationPinned reports capture's ownership of the publication read lock.
+func (p Packet) PublicationPinned() bool { return p.publicationPinned }
+
+// SetPublicationFence binds an unstarted manager to its engine's publication.
+func (m *Manager) SetPublicationFence(fence *sync.RWMutex) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.started {
+		panic("capture: publication fence changed after start")
+	}
+	m.cfg.PublicationFence = fence
+}
+
+// RetireFlushed retires tokens dropped by a successful policy-table replacement.
+// The caller owns the publication write lock. No verdict is sent and no source
+// transition occurs; completions report known loss, never delivery.
+func (m *Manager) RetireFlushed() {
+	if g := m.settler.current(); g != nil {
+		g.retireFlushed()
+	}
 }
 
 func NewManager(cfg Config) (*Manager, error) {

@@ -21,7 +21,7 @@ import (
 func TestCIPReadOnlyFromWireThroughPolicyAndConsumers(t *testing.T) {
 	state := flow.NewState(flow.Key{SrcIP: net.ParseIP("192.0.2.1"), DstIP: net.ParseIP("192.0.2.2"),
 		SrcPort: 40000, DstPort: 44818, Proto: 6}, time.Now())
-	snapshot := rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{
+	snapshot := rules.Snapshot{DPIMode: "enforce", Default: rules.ActionDeny, Firewall: []rules.Entry{
 		{ID: "read-only", Action: rules.ActionAllow, Protocols: []rules.Protocol{{Name: "tcp", Port: "44818"}},
 			ICS: rules.ICSPredicate{Protocol: "cip", ReadOnly: true}},
 	}}

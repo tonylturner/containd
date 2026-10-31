@@ -123,13 +123,6 @@ func losslessCases(t *testing.T) []losslessCase {
 			c.Firewall.NAT.EgressZone = ""
 			c.Firewall.NAT.SourceZones = nil
 		})
-	add("port-forward add", "/api/v1/firewall/nat", setPortForwardAddAPI, []string{"new", "wan", "tcp", "80", "192.0.2.8"}, nat,
-		func(c *config.Config) {
-			c.Firewall.NAT.PortForwards = append(c.Firewall.NAT.PortForwards,
-				config.PortForward{ID: "new", Enabled: true, IngressZone: "wan", Proto: "tcp", ListenPort: 80, DestIP: "192.0.2.8"})
-		})
-	add("port-forward del", "/api/v1/firewall/nat", setPortForwardDelAPI, []string{"edit"}, nat,
-		func(c *config.Config) { c.Firewall.NAT.PortForwards = c.Firewall.NAT.PortForwards[:1] })
 	for _, enabled := range []bool{true, false} {
 		add(fmt.Sprintf("port-forward enabled=%v", enabled), "/api/v1/firewall/nat",
 			func(api *API) Command { return setPortForwardEnableAPI(api, enabled) }, []string{"edit"}, nat,

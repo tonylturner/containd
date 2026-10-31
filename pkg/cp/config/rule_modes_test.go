@@ -29,7 +29,7 @@ func TestRuleModesUpgradeAndValidation(t *testing.T) {
 			if err := c.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			if c.SchemaVersion != SchemaVersionCurrent || c.DataPlane.DPIMode != "monitor" || c.Firewall.Rules[0].ICS.Mode != "monitor" || c.Firewall.Rules[1].ICS.Mode != "" {
+			if c.SchemaVersion != SchemaVersionCurrent || c.DataPlane.DPIMode != "monitor" || c.Firewall.Rules[1].ICS.Mode != "monitor" || c.Firewall.Rules[0].ICS.Mode != "" {
 				t.Fatalf("migration: %+v", c)
 			}
 			if c.modeMigration == nil || len(c.modeMigration.Changes) != 3 || c.modeMigration.Changes[2].Action != "clear" {
@@ -123,7 +123,7 @@ func TestRuleModesOrderedThreeBankBoot(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if got.SchemaVersion != "0.1.9" || got.Firewall.Rules[0].ICS.Mode != "monitor" || got.Firewall.Rules[1].ICS.Mode != "" {
+					if got.SchemaVersion != SchemaVersionCurrent || got.Firewall.Rules[1].ICS.Mode != "monitor" || got.Firewall.Rules[0].ICS.Mode != "" {
 						t.Fatalf("bank %s: %+v", bank, got)
 					}
 					if want == 1 && (len(got.IDS.Rules) != 2 || got.IDS.Rules[0].Proto != "cip") {
@@ -239,7 +239,7 @@ func TestRuleModesBootStampsUnchangedBanks(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := readKindUnupgradedFrom(ctx, s.db, configKeyRunning, false)
-	if err != nil || got.SchemaVersion != "0.1.9" {
+	if err != nil || got.SchemaVersion != SchemaVersionCurrent {
 		t.Fatal(got, err)
 	}
 	recs, err := s.RuleModeMigrations(ctx)
@@ -285,7 +285,7 @@ func TestRuleModesUpgradeBeforeExpiredRollback(t *testing.T) {
 	}
 	defer s.Close()
 	cfg, err := s.Load(ctx)
-	if err != nil || cfg.System.Hostname != configKeyPrevious || cfg.SchemaVersion != SchemaVersionCurrent || cfg.Firewall.Rules[0].ICS.Mode != "monitor" {
+	if err != nil || cfg.System.Hostname != configKeyPrevious || cfg.SchemaVersion != SchemaVersionCurrent || cfg.Firewall.Rules[1].ICS.Mode != "monitor" {
 		t.Fatalf("rollback=%+v err=%v", cfg, err)
 	}
 	recs, err := s.RuleModeMigrations(ctx)

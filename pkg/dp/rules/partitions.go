@@ -24,6 +24,9 @@ func (e *Evaluator) EvaluateEnforcing(ctx EvalContext) (Action, *Entry) {
 // EvaluateIEC104Enforcing judges only the enforcing IEC partition. Envelope
 // defaults deny; a monitor ALLOW cannot satisfy that default.
 func (e *Evaluator) EvaluateIEC104Enforcing(ctx EvalContext) (Action, *Entry) {
+	if ctx.ICS == nil || ctx.ICS.IEC104 == nil {
+		return ActionDeny, nil
+	}
 	for _, i := range e.enforcing {
 		if ce := &e.compiled[i]; ce.iec != nil && ce.matches(ctx) {
 			return ce.Action, &ce.Entry
@@ -50,7 +53,7 @@ func (e *Evaluator) IEC104Scope(ctx EvalContext, globalMode string) *Entry {
 	var observed *Entry
 	for i := range e.compiled {
 		ce := &e.compiled[i]
-		if ce.iec == nil || !matchZones(&ce.Entry, ctx) || !matchCIDRs(ce, ctx) || !matchProtoCompiled(ce, ctx) {
+		if ce.iec == nil || !matchZones(&ce.Entry, ctx) || !matchCIDRs(ce, ctx) || !matchProtoCompiled(ce, ctx) || !ce.matchVia(ctx) {
 			continue
 		}
 		if EffectiveMode(ce.ICS.Mode, globalMode) == "enforce" {

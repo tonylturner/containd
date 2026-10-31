@@ -430,8 +430,8 @@ func showFirewallRulesAPI(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/firewall/rules", &rules); err != nil {
 			return err
 		}
-		t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "SRC", "DST", "PROTO", "ICS")
-		for _, r := range rules {
+		t := newTable("ORDER", "ID", "ACTION", "SRC_ZONES", "DST_ZONES", "SRC", "DST", "PROTO", "ICS", "VIA_FORWARDS")
+		for i, r := range rules {
 			protos := make([]string, 0, len(r.Protocols))
 			for _, p := range r.Protocols {
 				if strings.TrimSpace(p.Port) != "" {
@@ -445,6 +445,7 @@ func showFirewallRulesAPI(api *API) Command {
 				ics = r.ICS.Protocol
 			}
 			t.addRow(
+				fmt.Sprint(i+1),
 				r.ID,
 				string(r.Action),
 				joinCSV(r.SourceZones),
@@ -452,7 +453,7 @@ func showFirewallRulesAPI(api *API) Command {
 				joinCSV(r.Sources),
 				joinCSV(r.Destinations),
 				joinCSV(protos),
-				ics,
+				ics, joinCSV(r.ViaForwards),
 			)
 		}
 		t.render(out)

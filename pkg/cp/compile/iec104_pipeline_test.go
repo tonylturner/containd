@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -67,7 +68,11 @@ func TestIEC104SchemaPipeline(t *testing.T) {
 	}
 
 	// GET /config re-emits the input shape: numeric arrays and {start,end}.
-	body, err := json.Marshal(cfg.Firewall.Rules[1])
+	commandIndex := slices.IndexFunc(cfg.Firewall.Rules, func(r config.Rule) bool { return r.ID == "cc-rtu-breaker-command" })
+	if commandIndex < 0 {
+		t.Fatal("command rule missing after schema upgrade")
+	}
+	body, err := json.Marshal(cfg.Firewall.Rules[commandIndex])
 	if err != nil {
 		t.Fatalf("marshal rule: %v", err)
 	}
@@ -77,7 +82,7 @@ func TestIEC104SchemaPipeline(t *testing.T) {
 		}
 	}
 	var again config.Rule
-	if err := json.Unmarshal(body, &again); err != nil || !reflect.DeepEqual(again, cfg.Firewall.Rules[1]) {
+	if err := json.Unmarshal(body, &again); err != nil || !reflect.DeepEqual(again, cfg.Firewall.Rules[commandIndex]) {
 		t.Fatalf("rule round trip = %+v, %v", again, err)
 	}
 
@@ -137,7 +142,7 @@ func TestIEC104SchemaPipeline(t *testing.T) {
 	if in, mode := ev.IEC104Envelope(session("", rules.IEC104Context{}), cfg.DataPlane.DPIMode); !in || mode != "enforce" {
 		t.Fatalf("envelope = %v, %q; want true, enforce", in, mode)
 	}
-	if !rules.PreviewMatch(engineSnap.Firewall[1], session("request", command(65536))) {
+	if !rules.PreviewMatch(engineSnap.Firewall[commandIndex], session("request", command(65536))) {
 		t.Fatal("PreviewMatch must match the compiled command rule")
 	}
 

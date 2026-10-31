@@ -6,12 +6,11 @@ package enforce
 import (
 	"bytes"
 	"fmt"
-	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -45,48 +44,13 @@ func isIEC104Rule(e rules.Entry) bool {
 	return strings.EqualFold(strings.TrimSpace(e.ICS.Protocol), eventfields.ProtoIEC104)
 }
 
-// writeIEC104Steering emits the envelope steering of every IEC104 rule,
-// enforcing scopes first, then monitor scopes, each sorted by rule ID.
-// An overlapping monitor must not queue a packet without EnvelopeMark
-// before an enforce scope can claim it, including packets with no trusted tuple.
-// Each rule's session scope (opener -> server port 2404)
-// jumps to IEC104EnvelopeChain in both directions, whatever the rule's
-// action: the engine judges the content. These lines go before the
-// conntrack established accept and every ordinary accept, so neither
-// direction of an envelope session can bypass inspection.
-func (c *Compiler) writeIEC104Steering(lines func(string), snap *rules.Snapshot, zones zoneIndex) error {
-	entries := make([]rules.Entry, 0, len(snap.Firewall))
-	for _, e := range snap.Firewall {
-		if isIEC104Rule(e) && admitsIEC104Port(e.Protocols) {
-			entries = append(entries, e)
-		}
-	}
-	sort.SliceStable(entries, func(i, j int) bool {
-		left, right := rules.MonitorICS(entries[i], snap.DPIMode), rules.MonitorICS(entries[j], snap.DPIMode)
-		if left != right {
-			return !left
-		}
-		return entries[i].ID < entries[j].ID
-	})
-	for _, e := range entries {
-		steering, err := compileIEC104Steering(e, zones)
-		if err != nil {
-			return err
-		}
-		for _, line := range steering {
-			lines(line)
-		}
-	}
-	return nil
-}
-
 // iec104EnvelopeRules are the rules of IEC104EnvelopeChain: the marked
 // queue rules when open, drop when closed.
 func (c *Compiler) iec104EnvelopeRules(open bool) []string {
 	if !open {
 		return []string{"drop"}
 	}
-	return c.queueRules(EnvelopeMark)
+	return c.queueRules(EnvelopeMark | markabi.EnforceScopeMark)
 }
 
 // writeIEC104EnvelopeChain emits IEC104EnvelopeChain in the state of
@@ -111,36 +75,6 @@ func (c *Compiler) IEC104EnvelopeSwitch(open bool) string {
 		fmt.Fprintf(&b, "add rule inet %s %s %s\n", table, IEC104EnvelopeChain, rule)
 	}
 	return b.String()
-}
-
-// compileIEC104Steering returns the client-to-server and server-to-client
-// steering lines for one IEC104 rule, per address family, which count into
-// the rule's counter. A rule that matches nothing has none.
-func compileIEC104Steering(e rules.Entry, zones zoneIndex) ([]string, error) {
-	scopes, err := addrScopes(e)
-	if err != nil {
-		return nil, err
-	}
-	in, inOK := zones.clause("iifname", e.SourceZones)
-	out, outOK := zones.clause("oifname", e.DestZones)
-	if !inOK || !outOK {
-		return nil, nil
-	}
-	replyIn, _ := zones.clause("iifname", e.DestZones)
-	replyOut, _ := zones.clause("oifname", e.SourceZones)
-	chain := IEC104EnvelopeChain
-	if rules.MonitorICS(e, "") {
-		chain = ICSQueueChain
-	}
-	verdict := unobservedGuard + " " + counterStmt(e.ID) + " jump " + chain
-	port := strconv.Itoa(ics.IEC104Port)
-	var lines []string
-	for _, s := range scopes {
-		lines = append(lines,
-			joinClauses(append(append([]string{in, out, "tcp dport " + port}, s.header(false)...), verdict)),
-			joinClauses(append(append([]string{replyIn, replyOut, "tcp sport " + port}, s.header(true)...), verdict)))
-	}
-	return lines, nil
 }
 
 // admitsIEC104Port reports whether a rule's protocol list matches TCP

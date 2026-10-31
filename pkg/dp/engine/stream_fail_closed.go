@@ -51,18 +51,12 @@ func (e *Engine) failClosedRule(pkt capture.Packet, state *flow.State, parsed *d
 		return nil
 	}
 	snap := p.snapshot
-	key := state.ServiceKey()
-	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP()}
-	zoned := false
+	ctx := stateAddressContext(snap, state, &e.zones)
 	for i := range snap.Firewall {
 		entry := &snap.Firewall[i]
 		if entry.ICS.Protocol == "" || strings.EqualFold(entry.ICS.Protocol, rules.ProtocolIEC104) ||
 			e.effectiveMode(entry) != "enforce" || !shouldInspectFirewallEntry(*entry, state, parsed) {
 			continue
-		}
-		if !zoned && (len(entry.SourceZones) > 0 || len(entry.DestZones) > 0) {
-			ctx.SrcZone, ctx.DstZone = e.zones.resolve(snap, ctx.SrcIP, ctx.DstIP)
-			zoned = true
 		}
 		if p.evaluator.AddressScopeMatch(i, ctx) {
 			return entry

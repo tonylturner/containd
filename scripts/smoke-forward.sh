@@ -5,13 +5,17 @@ set -euo pipefail
 # Requirements: docker compose, jq, curl.
 #
 # The harness installs its own forward policy (default deny, one allow for
-# lan_client to wan_server tcp/8080), SNAT from lan to wan and a DNAT port
-# forward from the engine's WAN address to lan_target:80, then asserts:
+# lan_client to wan_server tcp/8080), SNAT from lan to wan and publishes a
+# DNAT port forward from the engine's WAN address to lan_target:80, with a
+# generated via-forward allow rule, then asserts:
 # - allowed traffic arrives, and wan_server sees the engine's WAN address as
 #   its source (masquerade), not the LAN client;
 # - the DNAT forward reaches lan_target, lan_target sees the engine's LAN
 #   address (return-path masquerade), and the DNAT rule's packet counter
 #   increases across the probe;
+# - publish without an allow translates but denies, ordered rule moves change
+#   delivery, via previews report unavailable history, and deleting a forward
+#   removes its generated rule and stops delivery;
 # - every denied flow times out. Each deny probe targets a live listener,
 #   and a control probe from the listener's own network segment proves that
 #   listener answers before the deny is asserted.
@@ -49,8 +53,9 @@ SMOKE_MUTATION=${SMOKE_MUTATION:-}
 SMOKE_RESULT_FILE=${SMOKE_RESULT_FILE:-}
 PROBE_TIMEOUT=${SMOKE_PROBE_TIMEOUT:-3}
 DNAT_PORT=${DNAT_PORT:-8088}
+NO_ALLOW_PORT=${NO_ALLOW_PORT:-8089}
 TESTS_PASSED=0
-TESTS_EXPECTED=11
+TESTS_EXPECTED=16
 FAILED_CHECKS=""
 FINISHED=0
 
@@ -73,11 +78,20 @@ pass() {
   TESTS_PASSED=$((TESTS_PASSED + 1))
   log "PASS [$1]: $2"
 }
-# check_fail records a failed check and lets the run continue, so one run
-# reports every failed check.
+# check_fail records a failed check. Only expected mutation failures continue;
+# an unexpected failure stops the run before further policy mutations.
 check_fail() {
   FAILED_CHECKS="${FAILED_CHECKS}$1"$'\n'
   log "FAIL [$1]: $2"
+  if [[ -n "$SMOKE_RESULT_FILE" ]]; then
+    printf '%s' "$FAILED_CHECKS" >"$SMOKE_RESULT_FILE"
+  fi
+  # Continue only for deliberate mutation failures; stop on product regressions.
+  case "$SMOKE_MUTATION:$1" in
+    permissive:deny-* | permissive:dnat-no-allow | no-masquerade:lan-wan-snat) return ;;
+  esac
+  FINISHED=1
+  exit 1
 }
 harness_error() {
   log "HARNESS ERROR: $*" >&2
@@ -88,9 +102,6 @@ WORK_DIR=$(mktemp -d)
 # shellcheck source=scripts/smoke-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/smoke-lib.sh"
 trap on_exit EXIT
-
-# shellcheck source=scripts/smoke-engine-api.sh
-source "$(dirname "${BASH_SOURCE[0]}")/smoke-engine-api.sh"
 
 case "$SMOKE_MUTATION" in
   "" | permissive | no-masquerade) ;;
@@ -192,12 +203,12 @@ deny_probe() {
 # dnat_packets prints the packet counter of the DNAT rule for the port
 # forward, or nothing when the rule or its counter is missing.
 dnat_packets() {
-  local table status=0
+  local port=${1:-$DNAT_PORT} table status=0
   table=$(compose exec -T engine nft list table inet containd_policy 2>"$WORK_DIR/nft.err") || status=$?
   if [[ $status -ne 0 ]]; then
     harness_error "nft list table inet containd_policy failed (exit $status): $(tr -d '\r' <"$WORK_DIR/nft.err")"
   fi
-  printf '%s\n' "$table" | tr -d '\r' | awk -v want="dnat ip to ${LAN_TARGET}:80" -v port="dport ${DNAT_PORT} " '
+  printf '%s\n' "$table" | tr -d '\r' | awk -v want="dnat ip to ${LAN_TARGET}:80" -v port="dport ${port} " '
     index($0, want) && index($0, port) {
       n++
       for (i = 1; i < NF; i++) if ($i == "packets") p = $(i + 1)
@@ -211,6 +222,38 @@ assert_route_via() {
   route=$(compose exec -T "$service" ip route get "$dst" | tr -d '\r')
   if ! echo "$route" | grep -q "via ${gateway} "; then
     harness_error "$service route to $dst not via engine: $route"
+  fi
+}
+
+# Keep the exact request/response in failures. Never commit a rejected mutation.
+# RESPONSE holds the last successful API body, including reads of candidate order.
+api_request() {
+  local method=$1 path=$2 body=${3:-} code status=0
+  code=$(curl -sS --max-time 30 --connect-timeout 5 -w '%{http_code}' \
+    -H "$AUTH_HEADER" -H 'Content-Type: application/json' \
+    -X "$method" "${BASE}${path}" --data-binary "$body" \
+    -o "$WORK_DIR/api-response" 2>"$WORK_DIR/api-error") || status=$?
+  RESPONSE=$(cat "$WORK_DIR/api-response")
+  log "API $method $path HTTP $code: $RESPONSE"
+  if [[ $status -ne 0 || $code != 200 ]]; then
+    harness_error "$method $path body=$body: HTTP $code response=$RESPONSE error=$(cat "$WORK_DIR/api-error")"
+  fi
+}
+
+commit_policy() {
+  api_request POST /config/commit
+  if ! jq -e '.status == "committed"' <<<"$RESPONSE" >/dev/null; then
+    harness_error "commit did not apply: $RESPONSE"
+  fi
+}
+
+# A fresh TCP connection is used after every commit, never an established flow.
+expect_dnat() {
+  local description=$1 outcome
+  outcome=$(probe wan_server "$ENGINE_WAN" "$DNAT_PORT")
+  log "DNAT outcome: $outcome"
+  if [[ $(reply_field "$outcome" server) != lan_target || $(reply_field "$outcome" port) != 80 ]]; then
+    check_fail rule-move-order "$description ($outcome)"
   fi
 }
 
@@ -248,8 +291,8 @@ log "Fetching current config..."
 CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
 
 log "Applying the harness policy (default deny, allow ${LAN_CLIENT} -> wan tcp/8080, SNAT lan->wan, DNAT ${DNAT_PORT} -> lan_target:80)${SMOKE_MUTATION:+ with mutation ${SMOKE_MUTATION}}..."
-UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg dnatPort "$DNAT_PORT" \
-  --arg lanTarget "$LAN_TARGET" --arg lanClient "${LAN_CLIENT}/32" --arg mutation "$SMOKE_MUTATION" '
+UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
+  --arg lanClient "${LAN_CLIENT}/32" --arg mutation "$SMOKE_MUTATION" '
   .interfaces |= map(
     if .name=="wan" then .device=$wan
     elif .name=="lan1" then .device=$lan | .zone="lan"
@@ -261,19 +304,7 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg d
   | .firewall.nat.enabled = true
   | .firewall.nat.egressZone = "wan"
   | .firewall.nat.sourceZones = (if $mutation == "no-masquerade" then ["dmz"] else ["lan"] end)
-  | .firewall.nat.portForwards = [
-      {
-        id:"lan-http",
-        enabled:true,
-        description:("WAN:" + $dnatPort + " -> lan_target:80"),
-        ingressZone:"wan",
-        proto:"tcp",
-        listenPort:($dnatPort | tonumber),
-        destIP:$lanTarget,
-        destPort:80,
-        allowedSources:[]
-      }
-    ]
+  | .firewall.nat.portForwards = []
   # The harness owns the whole forward policy, so a rule left behind by
   # an earlier run or the default config cannot open a denied flow.
   | .firewall.defaultAction = "DENY"
@@ -294,34 +325,29 @@ UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" --arg d
       }
     ] else [] end)
 ')
-tmp_cfg_resp="$WORK_DIR/tmp_cfg_resp"
-tmp_cfg_err="$WORK_DIR/tmp_cfg_err"
-code=$(echo "$UPDATED_CFG" | $CURL -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$tmp_cfg_resp" 2>"$tmp_cfg_err" || true)
-if [[ "$code" != "200" ]]; then
-  harness_error "config save failed (HTTP $code): body=$(cat "$tmp_cfg_resp"), err=$(cat "$tmp_cfg_err")"
-fi
+api_request POST /config "$UPDATED_CFG"
 
-# Bypass commit in the harness; push snapshot directly to engine.
-log "Fetching compiled snapshot from mgmt..."
-tmp_ruleset="$WORK_DIR/tmp_ruleset"
-if ! $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$tmp_ruleset"; then
-  harness_error "failed to fetch ruleset preview"
+log "Publishing lan-http with a generated via-forward allow..."
+FORWARD=$(jq -nc --arg ip "$LAN_TARGET" --argjson port "$DNAT_PORT" '
+  {id:"lan-http", enabled:true, ingressZone:"wan", proto:"tcp",
+   listenPort:$port, destIp:$ip, destPort:80}')
+api_request POST /firewall/port-forwards "$(jq -nc --argjson f "$FORWARD" '{forward:$f, allowRule:true}')"
+PUBLISH=$RESPONSE
+if ! jq -e --argjson f "$FORWARD" '
+  .forward == $f and .placement.reason == "generated" and
+  .placement.index == 0 and .placement.rule.action == "ALLOW" and
+  .placement.rule.viaForwards == ["lan-http"]' <<<"$PUBLISH" >/dev/null; then
+  check_fail publish-forward "unexpected publish response: $PUBLISH"
 fi
-SNAP=$(jq -c '.snapshot' "$tmp_ruleset")
-
-log "Enabling enforcement on engine..."
-tmp_engine_cfg_resp="$WORK_DIR/tmp_engine_cfg_resp"
-code=$(engine_post engine /internal/config "$tmp_engine_cfg_resp" <<<'{"enforcement":true,"enforceTable":"containd"}')
-if [[ "$code" != "200" ]]; then
-  harness_error "engine config failed (HTTP $code): $(cat "$tmp_engine_cfg_resp")"
+GENERATED_RULE=$(jq -c '.placement.rule' <<<"$PUBLISH")
+GENERATED_ID=$(jq -r '.id' <<<"$GENERATED_RULE")
+api_request GET /firewall/rules
+if jq -e --argjson r "$GENERATED_RULE" '.[0] == $r' <<<"$RESPONSE" >/dev/null; then
+  pass publish-forward "placement generated at index 0; persisted rule $GENERATED_ID carries viaForwards=[lan-http]"
+else
+  check_fail publish-forward "published rule not at index 0 in candidate: $RESPONSE"
 fi
-
-log "Applying snapshot to engine..."
-tmp_apply_resp="$WORK_DIR/tmp_apply_resp"
-code=$(engine_post engine /internal/apply_rules "$tmp_apply_resp" <<<"$SNAP")
-if [[ "$code" != "200" ]]; then
-  harness_error "engine apply_rules failed (HTTP $code): $(cat "$tmp_apply_resp")"
-fi
+commit_policy
 
 log "Enforced forward and NAT chains:"
 for chain in forward prerouting postrouting; do
@@ -412,6 +438,111 @@ if [[ "$(reply_field "$OUTCOME" server)" == lan_target ]]; then
   pass dnat-after-restore "WAN DNAT after restore reached lan_target ($OUTCOME)"
 else
   check_fail dnat-after-restore "WAN DNAT after restore did not reach lan_target ($OUTCOME)"
+fi
+
+log "Publishing a second, translate-only forward without permission..."
+api_request POST /firewall/port-forwards "$(jq -nc --argjson f "$FORWARD" --argjson port "$NO_ALLOW_PORT" '
+  {forward:($f | .id="lan-http-no-allow" | .listenPort=$port), allowRule:false}')"
+if ! jq -e 'has("placement") | not' <<<"$RESPONSE" >/dev/null; then
+  check_fail dnat-no-allow "allowRule=false returned placement: $RESPONSE"
+fi
+commit_policy
+NO_ALLOW_BEFORE=$(dnat_packets "$NO_ALLOW_PORT")
+OUTCOME=$(probe wan_server "$ENGINE_WAN" "$NO_ALLOW_PORT")
+NO_ALLOW_AFTER=$(dnat_packets "$NO_ALLOW_PORT")
+if [[ $OUTCOME == timeout && -n $NO_ALLOW_BEFORE && -n $NO_ALLOW_AFTER ]] && ((NO_ALLOW_AFTER > NO_ALLOW_BEFORE)); then
+  pass dnat-no-allow "placement omitted; translated packets $NO_ALLOW_BEFORE -> $NO_ALLOW_AFTER, connection timed out"
+else
+  check_fail dnat-no-allow "want translated but denied: outcome=$OUTCOME packets=$NO_ALLOW_BEFORE -> $NO_ALLOW_AFTER"
+fi
+
+log "Testing via-rule historical preview..."
+api_request POST /firewall/rules/preview "$GENERATED_RULE"
+if jq -e '(.unavailable | type == "string" and length > 0) and
+  .match_count == 0 and (.sample_matches | length == 0)' <<<"$RESPONSE" >/dev/null; then
+  pass preview-via-unavailable "via preview explains unavailable history and returns zero matches, no samples"
+else
+  check_fail preview-via-unavailable "unexpected via preview: $RESPONSE"
+fi
+
+log "Testing first-match order by moving a covering DENY..."
+api_request GET /firewall/rules
+ORIGINAL_ORDER=$(jq -c 'map(.id)' <<<"$RESPONSE")
+BOTTOM_INDEX=$(jq 'length' <<<"$ORIGINAL_ORDER")
+api_request POST /firewall/rules "$(jq -nc --arg ip "${LAN_TARGET}/32" '
+  {id:"smoke-deny-http", action:"DENY", sourceZones:["wan"], destZones:["lan"],
+   destinations:[$ip], protocols:[{name:"tcp",port:"80"}], position:"bottom"}')"
+if ! jq -e --argjson i "$BOTTOM_INDEX" '.index == $i' <<<"$RESPONSE" >/dev/null; then
+  check_fail rule-move-order "create at bottom returned wrong index: $RESPONSE"
+fi
+api_request GET /firewall/rules
+if ! jq -e --argjson order "$ORIGINAL_ORDER" 'map(.id) == $order + ["smoke-deny-http"]' <<<"$RESPONSE" >/dev/null; then
+  check_fail rule-move-order "create at bottom changed order: $RESPONSE"
+fi
+commit_policy
+expect_dnat "covering DENY at bottom blocked earlier generated allow"
+for POSITION in top bottom; do
+  api_request POST /firewall/rules/smoke-deny-http/move "{\"position\":\"$POSITION\"}"
+  if ! jq -e --arg p "$POSITION" --argjson order "$ORIGINAL_ORDER" --argjson bottom "$BOTTOM_INDEX" '
+    .index == (if $p == "top" then 0 else $bottom end) and
+    (.rules | map(.id)) == (if $p == "top" then ["smoke-deny-http"] + $order else $order + ["smoke-deny-http"] end)
+    ' <<<"$RESPONSE" >/dev/null; then
+    check_fail rule-move-order "move $POSITION returned wrong index/order: $RESPONSE"
+  fi
+  commit_policy
+  if [[ $POSITION == top ]]; then
+    OUTCOME=$(probe wan_server "$ENGINE_WAN" "$DNAT_PORT")
+    if [[ $OUTCOME != timeout ]]; then
+      check_fail rule-move-order "DENY moved to top did not drop translated traffic: $OUTCOME"
+    fi
+  else
+    expect_dnat "DENY moved back to bottom still blocked translated traffic"
+  fi
+  log "Move $POSITION: index/order and fresh-connection delivery verified"
+done
+pass rule-move-order "bottom allows, top denies, bottom allows again; indices and complete order verified"
+
+# The packaged CLI supports piped input; do not provision another CLI path.
+if compose exec -T engine sh -c 'command -v containd' >/dev/null; then
+  CLI_STATUS=0
+  CLI_OUTPUT=$(printf 'show firewall rules\nexit\n' | compose exec -T engine containd cli 2>&1) || CLI_STATUS=$?
+  log "CLI show firewall rules (exit $CLI_STATUS): $CLI_OUTPUT"
+  if [[ $CLI_STATUS -eq 0 ]]; then
+    TESTS_EXPECTED=$((TESTS_EXPECTED + 1))
+    if awk -v id="$GENERATED_ID" '
+      /ORDER/ && /VIA_FORWARDS/ { header=1 }
+      $1 == 1 && $2 == id && $NF == "lan-http" { via=1 }
+      END { exit !(header && via) }' <<<"$CLI_OUTPUT"; then
+      pass cli-rule-order "show firewall rules prints order 1 and via forward lan-http"
+    else
+      check_fail cli-rule-order "CLI omitted order numbers or via forward: $CLI_OUTPUT"
+    fi
+  else
+    log "SKIP [cli-rule-order]: stack CLI login/path unavailable: $CLI_OUTPUT"
+  fi
+else
+  log "SKIP [cli-rule-order]: containd executable not available in the stack"
+fi
+
+log "Deleting lan-http and its generated permission..."
+api_request DELETE /firewall/port-forwards/lan-http
+if ! jq -e --arg id "$GENERATED_ID" '.deletedRuleIds == [$id] and .editedRuleIds == []' <<<"$RESPONSE" >/dev/null; then
+  check_fail forward-delete "unexpected delete result: $RESPONSE"
+fi
+commit_policy
+api_request GET /firewall/rules
+if ! jq -e --arg id "$GENERATED_ID" 'all(.[]; .id != $id and ((.viaForwards // []) | index("lan-http") | not))' <<<"$RESPONSE" >/dev/null; then
+  check_fail forward-delete "generated rule/reference survived deletion: $RESPONSE"
+fi
+api_request GET /firewall/nat
+if ! jq -e 'all(.portForwards[]; .id != "lan-http")' <<<"$RESPONSE" >/dev/null; then
+  check_fail forward-delete "forward survived deletion: $RESPONSE"
+fi
+OUTCOME=$(probe wan_server "$ENGINE_WAN" "$DNAT_PORT")
+if [[ $OUTCOME == timeout || $OUTCOME == refused ]]; then
+  pass forward-delete "deleted generated rule $GENERATED_ID; fresh DNAT probe no longer arrives ($OUTCOME)"
+else
+  check_fail forward-delete "unexpected outcome after delete: $OUTCOME"
 fi
 
 FAILED_COUNT=$(printf '%s' "$FAILED_CHECKS" | grep -c . || true)

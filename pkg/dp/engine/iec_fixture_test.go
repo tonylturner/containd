@@ -185,6 +185,7 @@ func (h *iecHarness) pkt(fromClient bool, flags capture.TCPFlags, seq, ack uint3
 	} else {
 		p.SrcIP, p.DstIP, p.SrcPort, p.DstPort = h.server, h.client, iec104Port, h.cport
 	}
+	p.Queue = policyQueue(h.client, h.server, h.cport, iec104Port, !fromClient)
 	markHandshake(&p)
 	return p
 }
@@ -282,10 +283,7 @@ func contains(list []string, s string) bool {
 }
 
 func (h *iecHarness) passingDisposition() capture.Disposition {
-	if h.policy.mode == "monitor" {
-		return capture.Repeat
-	}
-	return capture.Accept
+	return capture.Repeat
 }
 
 func (h *iecHarness) deniedDisposition() capture.Disposition {

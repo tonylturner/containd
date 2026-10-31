@@ -526,6 +526,13 @@ components:
             to any of these labels (exact, case-sensitive). An unbound opener matches
             no identity rule, ALLOW or DENY. Removing a binding also stops established
             connections that only a conditional ALLOW admitted.
+        viaForwards:
+          type: array
+          items: {type: string}
+          description: >-
+            Any referenced current port forward must match verified containd-owned
+            translation, original ingress/public coordinates and backend service.
+            Disabled or unbound forwards match nothing. Unknown IDs are rejected.
         ics:
           allOf:
           - $ref: "#/components/schemas/ICSPredicate"
@@ -534,9 +541,11 @@ components:
           type: string
           enum: [ALLOW, DENY, RESET, RATE_LIMIT, TAG]
           description: >-
-            ALLOW, DENY and RESET decide: a packet is allowed if any matching ALLOW exists,
-            otherwise the first matching DENY or RESET by rule ID decides, otherwise
-            firewall.defaultAction. RESET rejects back to the sender (TCP reset for TCP,
+            ALLOW, DENY and RESET decide in configured list order: the first matching
+            enforcing terminal wins, otherwise firewall.defaultAction applies.
+            Monitor ICS rules never decide. With inline inspection, enforcing ICS
+            terminals admit transport for inspection regardless of message action.
+            RESET rejects back to the sender (TCP reset for TCP,
             ICMP or ICMPv6 administratively prohibited otherwise). RATE_LIMIT and TAG are
             effects that never admit traffic. RESET, RATE_LIMIT and TAG take no ICS protocol.
         rateLimit:
@@ -577,7 +586,7 @@ components:
         to clear any known ICS key and omission to retain it. The ICS-specific
         /firewall/ics-rules/{id} PATCH replaces the whole rule (omitted = ANY).
         Preview receives the full effective predicate, never removal nulls.
-        Each object is judged independently under ALLOW-first precedence;
+        Each object is judged independently in configured first-match order;
         any denied object denies the message. Incomplete inspection adds an
         unknown-object context: object-qualified ALLOW fails, object-qualified
         DENY matches, with all other constraints still required.
@@ -603,7 +612,7 @@ components:
         - IEC104 rules match the session tuple (client = TCP opener,
           server port 2404) whatever the wire direction; `direction` selects
           the half. Inside the IEC104 envelope only iec104 rules are
-          evaluated with ALLOW-first precedence; no match is DENY regardless of
+          evaluated in configured enforcing order; no match is DENY regardless of
           `firewall.defaultAction`.
         - An enforce ALLOW rule may name only Type IDs with a decoder
           descriptor (1, 3, 5, 7, 9, 11, 13, 15, 21, 30-37, 45-51, 58-64, 70, 100-103, 105, 107) and
@@ -1675,9 +1684,69 @@ components:
           enum: ['', monitor, enforce]
           description: Empty inherits global DPI mode.
 
+    RulePosition:
+      description: Placement in the full ordered rule list. Unknown anchors and the moved rule itself are invalid.
+      oneOf:
+      - {type: string, enum: [top, bottom]}
+      - type: object
+        required: [before]
+        additionalProperties: false
+        properties:
+          before: {type: string, minLength: 1}
+      - type: object
+        required: [after]
+        additionalProperties: false
+        properties:
+          after: {type: string, minLength: 1}
+    FirewallRuleCreate:
+      allOf:
+      - {$ref: '#/components/schemas/FirewallRule'}
+      - type: object
+        properties:
+          position:
+            allOf:
+            - {$ref: '#/components/schemas/RulePosition'}
+            default: bottom
+    FirewallRuleCreated:
+      allOf:
+      - {$ref: '#/components/schemas/FirewallRule'}
+      - type: object
+        required: [index]
+        properties:
+          index: {type: integer, minimum: 0, description: Final zero-based slot}
+    ForwardPlacement:
+      type: object
+      required: [forwardId, overlap, reason, index]
+      properties:
+        forwardId: {type: string}
+        overlap: {type: string, enum: [no-overlap, inside, partial]}
+        reason: {type: string, enum: [generated, referenced, inside, partial]}
+        index: {type: integer, description: Zero-based insertion slot when a rule is generated}
+        ruleIds: {type: array, items: {type: string}}
+        rule: {$ref: '#/components/schemas/FirewallRule'}
+        warning: {$ref: '#/components/schemas/ForwardGrantWarning'}
+    ForwardGrantWarning:
+      type: object
+      required: [forwardId, ruleIds, traffic, message]
+      properties:
+        forwardId: {type: string}
+        ruleIds: {type: array, items: {type: string}}
+        message: {type: string}
+        traffic:
+          type: object
+          properties:
+            sources: {type: array, items: {type: string}}
+            ingressZone: {type: string}
+            backendZones: {type: string}
+            protocol: {type: string}
+            backend: {type: string}
+            listenAddress: {type: string}
+            listenPort: {type: integer}
     RulePreviewResponse:
+      description: Counts matches of this one rule in isolation, not its effect in ordered policy.
       type: object
       properties:
+        unavailable: {type: string, description: "Present for viaForwards rules. Retained events do not record translation ownership; match_count is zero and sample_matches is empty. Warnings and ICS coverage remain available."}
         match_count: {type: integer, description: Number of recent events matching the rule}
         sample_matches:
           type: array
@@ -2455,6 +2524,10 @@ components:
         table: {type: integer}
       type: object
     PortForward:
+      description: >-
+        DNAT translation only; firewall policy decides admission. Blank listenAddress
+        selects current IPv4 addresses of the ingress device, including secondaries.
+        NAT.enabled controls source NAT and does not disable port forwards.
       properties:
         allowedSources: {items: {type: string}, type: array}
         description: {type: string}
@@ -2463,7 +2536,11 @@ components:
         enabled: {type: boolean}
         id: {type: string}
         ingressZone: {type: string}
-        listenPort: {type: integer}
+        listenAddress:
+          type: string
+          description: Optional exact IPv4 public destination; empty means ingress-device-local.
+          example: "203.0.113.2"
+        listenPort: {type: integer, minimum: 1, maximum: 65535}
         proto: {type: string}
       type: object
     Protocol:
@@ -3157,18 +3234,19 @@ components:
         because of the part predicate names: identities no bound address satisfies
         (identity), source or destination zones none of which has an interface (zone, listed
         in zones), or sources and destinations that share no address family
-        (addressFamily). Or a DENY or RESET rule that an ALLOW shadows (shadowedBy): the
-        ALLOW matches all of its traffic, so it never decides anything.
+        (addressFamily), or a via constraint with no matching enabled/bound forward
+        (forward). A terminal may also be shadowed by an earlier covering terminal
+        (shadowedBy), of any deciding action.
       properties:
         ruleId: {type: string}
         predicate:
           type: string
-          enum: [identity, zone, addressFamily]
+          enum: [identity, zone, addressFamily, forward]
         zones:
           type: array
           items: {type: string}
           description: For predicate zone, the rule's zones that have no interfaces, sorted.
-        shadowedBy: {type: string, description: ID of the ALLOW rule that shadows this DENY or RESET rule.}
+        shadowedBy: {type: string, description: ID of the earlier covering terminal that shadows this rule.}
         action: {type: string, enum: [ALLOW, DENY, RESET, RATE_LIMIT, TAG]}
         message: {type: string}
     RateLimit:
@@ -3239,6 +3317,7 @@ components:
         Schedule: {$ref: '#/components/schemas/RulesSchedulePredicate'}
         SourceZones: {items: {type: string}, type: array}
         Sources: {items: {type: string}, type: array}
+        ViaForwards: {items: {type: string}, type: array}
       type: object
     RulesICSPredicate:
       properties:
@@ -3342,9 +3421,27 @@ components:
         Enabled: {type: boolean}
         ID: {type: string}
         IngressZone: {type: string}
+        ListenAddress: {type: string}
         ListenPort: {type: integer}
         Proto: {type: string}
       type: object
+    ForwardMatch:
+      type: object
+      description: >-
+        Resolved current forward selector, keyed by forward ID in ForwardMatches.
+        Requires the owned-forward conntrack bit; tuple equality alone never matches.
+        Public coordinates come from the original tuple and Backend from reply source.
+      required: [Enabled, IngressDevices, Protocol, ListenAddress, ListenPort, AllowedSources, Backend]
+      properties:
+        Enabled: {type: boolean}
+        IngressDevices: {type: array, nullable: true, items: {type: string}}
+        Protocol: {type: string, enum: [tcp, udp]}
+        ListenAddress:
+          type: string
+          description: IPv4 address; empty string requires the original destination in LocalIPv4ByDevice for original ingress.
+        ListenPort: {type: integer, minimum: 1, maximum: 65535}
+        AllowedSources: {type: array, nullable: true, items: {type: string}, description: IPv4 prefixes; empty means unrestricted.}
+        Backend: {type: string, description: IPv4 address and effective service port as address:port.}
     RulesProtocol:
       properties:
         Name: {type: string}
@@ -3373,6 +3470,13 @@ components:
       type: object
     RulesSnapshot:
       properties:
+        AdmissionParity: {type: integer, enum: [0, 4], description: Runtime admission parity; never persisted operator configuration.}
+        ForwardMatches: {type: object, additionalProperties: {$ref: '#/components/schemas/ForwardMatch'}}
+        LocalIPv4ByDevice:
+          type: object
+          description: Immutable current IPv4 addresses by kernel ingress device; never inferred from other devices.
+          additionalProperties: {type: array, items: {type: string, format: ipv4}}
+        DPIMode: {type: string}
         Default: {type: string}
         Firewall: {items: {$ref: '#/components/schemas/RulesEntry'}, type: array}
         Gate: {$ref: '#/components/schemas/RulesGateSelection'}
@@ -4280,12 +4384,94 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/FirewallRule'}
+            schema: {$ref: '#/components/schemas/FirewallRuleCreate'}
       responses:
-        "200": {description: Rule created, content: {application/json: {schema: {$ref: '#/components/schemas/FirewallRule'}}}, headers: {
+        "200": {description: Rule created, content: {application/json: {schema: {$ref: '#/components/schemas/FirewallRuleCreated'}}}, headers: {
               X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
         "400": {description: Invalid rule or resulting configuration; unsupported ICS protocol names are rejected without staging or applying changes, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Stages the shared candidate; commit to apply.
+
+  /firewall/rules/{id}/move:
+    post:
+      summary: Move a candidate firewall rule (admin)
+      description: One candidate mutation. PATCH preserves the existing slot; commit to apply.
+      tags: [Firewall]
+      parameters:
+      - $ref: '#/components/parameters/pathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [position]
+              properties:
+                position: {$ref: '#/components/schemas/RulePosition'}
+      responses:
+        '200':
+          description: Final zero-based index and full ordered candidate list
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [index, rules]
+                properties:
+                  index: {type: integer, minimum: 0}
+                  rules: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}
+        '400': {description: Invalid position or anchor, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        '404': {description: Rule not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /firewall/port-forwards:
+    post:
+      summary: Publish a port forward with an optional scoped allow rule (admin)
+      description: Appends the forward and inserts the generated rule atomically. Inside overlap stays under governing ICS rules without a warning; partial overlap generates no grant and returns a fail-closed warning. Commit to apply.
+      tags: [Firewall]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [forward]
+              properties:
+                forward: {$ref: '#/components/schemas/PortForward'}
+                allowRule: {type: boolean, default: true}
+      responses:
+        '200':
+          description: Published forward and placement (omitted when allowRule is false)
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [forward]
+                properties:
+                  forward: {$ref: '#/components/schemas/PortForward'}
+                  placement: {$ref: '#/components/schemas/ForwardPlacement'}
+        '400': {description: Invalid forward or resulting candidate, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+  /firewall/port-forwards/{id}:
+    delete:
+      summary: Delete a port forward and clean up every via reference (admin)
+      description: Removes the forward ID from all rules atomically. A rule whose via list becomes empty is deleted, regardless of action. Commit to apply.
+      tags: [Firewall]
+      parameters:
+      - $ref: '#/components/parameters/pathId'
+      responses:
+        '200':
+          description: Deleted and edited rule IDs in policy order
+          headers:
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deletedRuleIds, editedRuleIds]
+                properties:
+                  deletedRuleIds: {type: array, items: {type: string}}
+                  editedRuleIds: {type: array, items: {type: string}}
+        '404': {description: Port forward not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /firewall/rules/{id}:
     patch:
@@ -4744,11 +4930,12 @@ paths:
     post:
       summary: Dry-run a proposed rule against recent traffic (admin)
       description: >
-        Matches the rule against recent events. For an iec104 rule, each
-        decoded IEC104 object event (request, response, apci, malformed,
-        unsupported) is matched in the session orientation (client to
-        server port 2404); decision events do not count. readOnly iec104
-        rules do not match in a preview yet.
+        Counts matches of this one rule in isolation, not against preceding rules
+        or default actions. Forward warnings use the candidate's enabled forwards.
+        For viaForwards rules, historical match counting is unavailable because
+        retained events do not record translation ownership; warnings and ICS
+        coverage are still computed. IEC104 object events are matched in session
+        orientation (client to server port 2404); decision events do not count.
       tags: [Firewall]
       requestBody:
         required: true
@@ -6006,7 +6193,7 @@ paths:
     post:
       summary: Replace firewall nat settings (admin)
       tags: [Firewall]
-      description: Stages the shared candidate; commit to apply.
+      description: Pure replacement of NAT settings; never creates or removes firewall rules. Dangling viaForwards references are rejected. Stages the shared candidate; commit to apply.
       requestBody:
         required: true
         content:
@@ -6020,6 +6207,7 @@ paths:
               schema: {$ref: '#/components/schemas/NATConfig'}
           headers:
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
+        '400': {description: Invalid NAT settings or dangling viaForwards references, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /ids/rules:
     get:
       summary: Get candidate ids rules settings
@@ -7210,13 +7398,13 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/FirewallRule'}
+            schema: {$ref: '#/components/schemas/FirewallRuleCreate'}
       responses:
         '200':
           description: Success
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/FirewallRule'}
+              schema: {$ref: '#/components/schemas/FirewallRuleCreated'}
           headers:
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /firewall/ics-rules/{id}:

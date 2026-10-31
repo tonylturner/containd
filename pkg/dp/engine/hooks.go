@@ -40,7 +40,7 @@ func (h *inlineHooks) onVerdict(tok capture.Token, v capture.Verdict, err error)
 	if job := h.after.take(tok); job != nil && !h.blocks.submit(job) {
 		h.reportWorkerOverflow("block worker queue full")
 	}
-	if err != nil && !errors.Is(err, capture.ErrQueueClosed) {
+	if err != nil && !errors.Is(err, capture.ErrQueueClosed) && !errors.Is(err, capture.ErrTokenFlushed) {
 		h.iec.health.fault(faultVerdict, "verdict: "+err.Error())
 		if h.onError != nil {
 			h.onError(err)

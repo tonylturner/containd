@@ -140,8 +140,10 @@ What the design delivers by default:
   protocol decoders are Go, built with cgo disabled. Untrusted packets are parsed
   in memory-safe code. Embedded third-party services, such as ClamAV, are covered
   by the SBOM and image scanning instead.
-- **Default deny.** Forwarded traffic that no rule allows is dropped. Only an
-  explicit `ALLOW` default action changes this.
+- **Default deny.** The first matching enforcing terminal rule decides forwarded
+  traffic. With no decision, traffic is dropped unless the default action is
+  explicitly `ALLOW`. A later ALLOW never overrides an earlier matching
+  enforcing DENY; see [rule precedence](policy-model.md#actions-and-precedence).
 - **Fail closed, without lockout.** Every boot validates the stored running
   configuration. If it is invalid, management enters recovery: new transit is
   dropped and management stays reachable where it was. A reserved management

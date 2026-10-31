@@ -146,18 +146,20 @@ func TestCompileSnapshotUsesICSPredicate(t *testing.T) {
 // object-class rule matched every class. They are now compiled and enforced.
 func TestCompileSnapshotEnforcesDirectionAndObjectClasses(t *testing.T) {
 	cfg := &config.Config{
-		System: config.SystemConfig{Hostname: "containd"},
+		SchemaVersion: config.SchemaVersionCurrent,
+		System:        config.SystemConfig{Hostname: "containd"},
+		DataPlane:     config.DataPlaneConfig{NFQueueGroup: 1},
 		Firewall: config.FirewallConfig{
 			DefaultAction: config.ActionAllow,
 			Rules: []config.Rule{
 				{
 					ID:     "deny-modbus-requests",
-					ICS:    config.ICSPredicate{Protocol: "modbus", Direction: "request"},
+					ICS:    config.ICSPredicate{Protocol: "modbus", Direction: "request", Mode: "enforce"},
 					Action: config.ActionDeny,
 				},
 				{
 					ID:     "deny-cip-identity",
-					ICS:    config.ICSPredicate{Protocol: "cip", ObjectClasses: []uint16{0x01}},
+					ICS:    config.ICSPredicate{Protocol: "cip", ObjectClasses: []uint16{0x01}, Mode: "enforce"},
 					Action: config.ActionDeny,
 				},
 			},

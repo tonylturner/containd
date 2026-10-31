@@ -68,7 +68,7 @@ func installGateCloser(t *testing.T, c GateCloser) {
 
 func gateCloseEngine(t *testing.T, up *gateCloseUpdater) *Engine {
 	t.Helper()
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, TableName: "containd", Updater: up}})
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, TableName: "containd", Updater: up}})
 	if err != nil {
 		t.Fatal(err)
 	}

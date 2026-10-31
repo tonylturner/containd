@@ -4,7 +4,9 @@ import type { ShadowCounters } from "../../lib/api-shadow-counters";
 import { ShadowCountersCell, ShadowCountersNote } from "../ics/ics-shadow-counters";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
-import { isAdmin, type FirewallRule, type Zone } from "../../lib/api";
+import { isAdmin, type FirewallRule, type Position, type Zone } from "../../lib/api";
+import { MoveRuleDialog } from "./firewall-rule-position";
+import { useState } from "react";
 import { summarizeIEC104 } from "../ics/iec104";
 import { ICSCoverageCell } from "../ics/ics-coverage";
 import type { ICSCoverageView } from "../ics/ics-coverage-model";
@@ -18,12 +20,11 @@ import {
   formatSchedule,
 } from "./firewall-rule-policy";
 
-/** States how rules decide; the list order means nothing. */
+/** States how ordered enforcing rules decide. */
 export function RulePrecedenceNote() {
   return (
     <p className="mb-2 text-xs text-(--text-muted)">
-      Among enforcing rules, order does not decide: any matching ALLOW wins over every DENY and RESET.
-      Otherwise the first matching DENY or RESET by rule ID decides, then the default
+      Among enforcing rules, the first matching terminal rule in list order decides, then the default
       action. Monitor ICS rules never decide. RATE_LIMIT and TAG are effects and never admit traffic.
     </p>
   );
@@ -47,9 +48,10 @@ function ActionCell({ rule }: { rule: FirewallRule }) {
 }
 
 function ConditionsCell({ rule }: { rule: FirewallRule }) {
-  if (!rule.identities?.length && !rule.schedule) return <>{"\u2014"}</>;
+  if (!rule.identities?.length && !rule.schedule && !rule.viaForwards?.length) return <>{"\u2014"}</>;
   return (
     <div className="space-y-1 text-xs">
+      {!!rule.viaForwards?.length && <div>via <span className="font-mono">{rule.viaForwards.join(", ")}</span></div>}
       {!!rule.identities?.length && (
         <div title="Opener bound to any of these identities">
           <span className="text-(--text-dim)">identity </span>
@@ -76,6 +78,8 @@ export function FirewallRuleTable({
   shadowCounters,
   onEdit,
   onDelete,
+  onMove,
+  moving,
 }: {
   rules: FirewallRule[];
   zones: Zone[];
@@ -85,7 +89,10 @@ export function FirewallRuleTable({
   shadowCounters: ShadowCounters | null;
   onEdit: (rule: FirewallRule) => void;
   onDelete: (id: string) => void;
+  onMove: (id: string, position: Position) => void;
+  moving: boolean;
 }) {
+  const [moveTarget, setMoveTarget] = useState<FirewallRule | null>(null);
   return (
     <section aria-label="Firewall rules">
       <RulePrecedenceNote />
@@ -95,6 +102,7 @@ export function FirewallRuleTable({
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
+              <th className="px-3 py-3">Order</th>
               <th className="px-3 py-3">ID</th>
               <th className="px-3 py-3">Description</th>
               <th className="px-3 py-3">Zones</th>
@@ -111,7 +119,7 @@ export function FirewallRuleTable({
           <tbody>
             {rules.length === 0 && (
               <tr>
-                <td className="px-4 py-4" colSpan={11}>
+                <td className="px-4 py-4" colSpan={12}>
                   <EmptyState
                     title="No firewall rules configured"
                     description="Create rules below to control traffic between zones."
@@ -119,8 +127,9 @@ export function FirewallRuleTable({
                 </td>
               </tr>
             )}
-            {rules.map((r) => (
-              <tr key={r.id} className="border-t table-row-hover transition-ui">
+            {rules.map((r, index) => (
+              <tr key={r.id} id={`rule-${r.id}`} className="border-t table-row-hover transition-ui">
+                <td className="px-3 py-3 font-mono">{index + 1}</td>
                 <td className="px-3 py-3 font-mono text-xs text-(--text)">{r.id}</td>
                 <td className="px-3 py-3 text-(--text)">{r.description || "\u2014"}</td>
                 <td className="px-3 py-3 text-(--text)">
@@ -172,6 +181,11 @@ export function FirewallRuleTable({
                 <td className="px-3 py-3 text-right">
                   {isAdmin() && (
                     <>
+                      <div className="mb-2 flex items-center justify-end gap-2">
+                        <button disabled={moving || index === 0} aria-label={`Move ${r.id} up`} onClick={() => onMove(r.id, { before: rules[index - 1].id })} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↑</button>
+                        <button disabled={moving || index === rules.length - 1} aria-label={`Move ${r.id} down`} onClick={() => onMove(r.id, { after: rules[index + 1].id })} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↓</button>
+                        <button disabled={moving} onClick={() => setMoveTarget(r)} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">Move to…</button>
+                      </div>
                       {(!r.ics?.protocol || isSupportedICSProtocol(r.ics.protocol)) ? (
                         <button onClick={() => onEdit(r)} className="mr-2 rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Edit</button>
                       ) : (
@@ -191,6 +205,7 @@ export function FirewallRuleTable({
           </tbody>
         </table>
       </div>
+      {moveTarget && <MoveRuleDialog rule={moveTarget} rules={rules} onClose={() => setMoveTarget(null)} onMove={(position) => { onMove(moveTarget.id, position); setMoveTarget(null); }} />}
     </section>
   );
 }

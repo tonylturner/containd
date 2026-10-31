@@ -10,7 +10,7 @@ import (
 
 var ruleJSONKeys = []string{
 	"id", "description", "sourceZones", "destZones", "sources",
-	"destinations", "protocols", "identities", "ics", "schedule",
+	"destinations", "protocols", "identities", "viaForwards", "ics", "schedule",
 	"action", "rateLimit", "tag", "log",
 }
 

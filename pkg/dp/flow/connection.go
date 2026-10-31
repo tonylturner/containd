@@ -197,6 +197,9 @@ func (c *Connection) Peer(k Key) Key {
 // atomic slot caches immutable results by connection pointer and wire key.
 // As with ID, callers must not mutate Key concurrently with readers.
 func (s *State) ServiceKey() Key {
+	if p := s.InlinePolicy.Load(); p != nil {
+		return p.Service
+	}
 	k := s.Key
 	c := s.Connection.Load()
 	if !c.Verified() {

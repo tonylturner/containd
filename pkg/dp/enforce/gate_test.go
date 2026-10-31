@@ -3,7 +3,7 @@
 package enforce
 
 import (
-	"regexp"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -18,6 +18,7 @@ import (
 func gateSnapshot() *rules.Snapshot {
 	return &rules.Snapshot{
 		Default:          rules.ActionDeny,
+		ForwardMatches:   map[string]rules.ForwardMatch{"pf-web": {Enabled: true, IngressDevices: []string{"eth0"}, Protocol: "tcp", ListenPort: 8080, Backend: netip.MustParseAddrPort("10.2.0.10:80")}},
 		ZoneIfaces:       map[string][]string{"it": {"eth1"}, "ot": {"eth2"}, "wan": {"eth0"}, "dmz": {"eth3"}},
 		IdentityBindings: []rules.IdentityBinding{{IP: "10.1.0.5", Identities: []string{"ops"}}},
 		Firewall: []rules.Entry{
@@ -84,137 +85,50 @@ func chainBody(t *testing.T, script, chain string) []string {
 	return out
 }
 
-var oifnameSet = regexp.MustCompile(`oifname \{ ("eth\d"(?:, "eth\d")*) \}`)
-
-// gateZoneIndices maps each device of gateSnapshot's gate zones to the
-// clause that matches its zone's index.
-func gateZoneIndices() map[string]string {
-	return map[string]string{
-		`"eth2"`:         gateZoneClause([]uint8{1}),
-		`"eth0"`:         gateZoneClause([]uint8{2}),
-		`"eth0", "eth2"`: gateZoneClause([]uint8{1, 2}),
-	}
-}
-
-// egressFromMark rewrites the forward chain's lines for the gate's input
-// target: a line with an egress zone outside the selection (no index) is
-// dropped, every other egress set becomes its index clause.
-func egressFromMark(t *testing.T, lines []string) []string {
-	t.Helper()
-	var out []string
-	for _, line := range lines {
-		m := oifnameSet.FindStringSubmatch(line)
-		if m == nil {
-			out = append(out, line)
-			continue
-		}
-		clause, ok := gateZoneIndices()[m[1]]
-		if !ok {
-			continue
-		}
-		out = append(out, strings.Replace(line, m[0], clause, 1))
-	}
-	return out
-}
-
-// TestGateInputDecidesLikeForward: the gate's input chain is the forward
-// chain with the gate guard, IEC104 steering (never gated) and the
-// untracked meter lines (never gated) left out, egress zones read from the
-// connection mark on original-direction lines, reply-direction lines left
-// out, and the default made explicit.
 func TestGateInputDecidesLikeForward(t *testing.T) {
 	script, err := gateCompiler().CompileFirewall(gateSnapshot())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var want []string
-	for _, line := range chainBody(t, script, "forward")[1:] {
-		switch {
-		case strings.Contains(line, "jump "+IEC104EnvelopeChain), strings.Contains(line, untrackedState), strings.Contains(line, "ct direction reply"):
-			continue
+	if chainBody(t, script, "forward")[0] != gateForwardGuard {
+		t.Fatal("missing forward guard")
+	}
+	for _, target := range []chainTarget{targetForward, targetGateInput, targetGateReply} {
+		scope, ordered := target.recheckChains()
+		base := "forward"
+		if target == targetGateInput {
+			base = GateInputChain
 		}
-		want = append(want, strings.Replace(line, "jump "+conditionalScopeChain, "jump "+GateInputChain+"_scope", 1))
-	}
-	want = append(egressFromMark(t, want), "drop")
-	got := chainBody(t, script, GateInputChain)
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("gate_in:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-	if forward := chainBody(t, script, "forward"); forward[0] != gateForwardGuard {
-		t.Fatalf("forward starts with %q, want the gate guard", forward[0])
-	}
-	for _, kind := range []string{"counter name", "log prefix", "jump " + ICSQueueChain, "ct status dnat"} {
-		if !strings.Contains(strings.Join(got, "\n"), kind) {
-			t.Fatalf("gate_in carries no %q line", kind)
+		if target == targetGateReply {
+			base = GateReplyChain
+		}
+		body := strings.Join(chainBody(t, script, base), "\n")
+		assertText(t, body, nonAdmitGuard+" goto "+ordered, "ct state established jump "+scope, "ct mark & 0x00000007 == 0x00000002 goto admit_clean", "ct state != related goto "+ordered, "ct state related goto related_clean")
+		if strings.Contains(body, "ct status dnat") {
+			t.Fatal("implicit DNAT grant")
 		}
 	}
 }
 
-// TestGateRecheckAndReplyMirrorForward: the recheck chains of the gate
-// targets are the forward recheck with egress from the mark, one direction
-// each; the reply chain passes resets, then is the meters' reply lines, the
-// recheck jump and accept.
 func TestGateRecheckAndReplyMirrorForward(t *testing.T) {
 	script, err := gateCompiler().CompileFirewall(gateSnapshot())
 	if err != nil {
 		t.Fatal(err)
 	}
-	direction := func(lines []string, keep string) []string {
-		var out []string
-		for _, l := range lines {
-			if !strings.Contains(l, "ct direction") || strings.Contains(l, keep) {
-				out = append(out, l)
-			}
+	for _, target := range []chainTarget{targetGateInput, targetGateReply} {
+		scope, ordered := target.recheckChains()
+		text := strings.Join(chainBody(t, script, ordered), "\n")
+		assertText(t, text, "ct mark & 0x0000ff00", "ct original ip saddr", "goto "+ordered+"_rule_")
+		scopeText := strings.Join(chainBody(t, script, scope), "\n")
+		if strings.Contains(scopeText, "@identity") {
+			t.Fatal("scope dispatch must ignore current identity")
 		}
-		return out
+		assertText(t, scopeText, "goto "+ordered)
 	}
-	for _, c := range []struct {
-		name, direction string
-		rewrite         func(*testing.T, []string) []string
-	}{{GateInputChain, "ct direction original", egressFromMark}, {GateReplyChain, "ct direction reply", replyIngressFromMark}} {
-		for _, suffix := range []string{"_scope", "_policy"} {
-			want := direction(chainBody(t, script, "conditional"+suffix), c.direction)
-			for i := range want {
-				want[i] = strings.Replace(want[i], "goto "+conditionalPolicyChain, "goto "+c.name+"_policy", 1)
-			}
-			want = c.rewrite(t, want)
-			if got := chainBody(t, script, c.name+suffix); strings.Join(got, "\n") != strings.Join(want, "\n") {
-				t.Fatalf("%s%s:\n%s\nwant:\n%s", c.name, suffix, strings.Join(got, "\n"), strings.Join(want, "\n"))
-			}
-		}
+	reply := chainBody(t, script, GateReplyChain)
+	if reply[0] != "tcp flags & rst == rst accept" {
+		t.Fatal("missing generated reset escape")
 	}
-	want := []string{"tcp flags & rst == rst accept"}
-	for _, line := range chainBody(t, script, "forward") {
-		if strings.Contains(line, "ct direction reply") && strings.Contains(line, "limit rate") {
-			want = append(want, line)
-		}
-	}
-	want = append(replyIngressFromMark(t, want), "ct state established jump "+GateReplyChain+"_scope", "accept")
-	if got := chainBody(t, script, GateReplyChain); strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("%s:\n%s\nwant:\n%s", GateReplyChain, strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-}
-
-var iifnameSet = regexp.MustCompile(`ct direction reply iifname \{ ("eth\d"(?:, "eth\d")*) \}`)
-
-// replyIngressFromMark rewrites reply-direction lines: the ingress set, the
-// original egress, becomes the index clause.
-func replyIngressFromMark(t *testing.T, lines []string) []string {
-	t.Helper()
-	var out []string
-	for _, line := range lines {
-		m := iifnameSet.FindStringSubmatch(line)
-		if m == nil {
-			out = append(out, line)
-			continue
-		}
-		clause, ok := gateZoneIndices()[m[1]]
-		if !ok {
-			continue
-		}
-		out = append(out, strings.Replace(line, m[0], "ct direction reply "+clause, 1))
-	}
-	return out
 }
 
 // TestGateAdmitStatesAndSwitch: the admission chain is written in the
@@ -295,7 +209,7 @@ func TestGateDeliveryOutlivesSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, token := range []string{"gate_", "ct mark", "tproxy", "chain output", "0x00800000"} {
+	for _, token := range []string{"gate_", "0x00100000", "tproxy", "chain output", "0x00800000"} {
 		if strings.Contains(plain, token) {
 			t.Fatalf("ruleset without listener ports mentions %q:\n%s", token, plain)
 		}

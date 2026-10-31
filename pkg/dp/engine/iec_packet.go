@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -148,6 +149,11 @@ func (t *iecTable) packet(pkt capture.Packet, state *flow.State, parsing ics.Par
 	}
 	s, dir := t.lookupLocked(src, dst)
 	if s != nil {
+		if evidence := state.InlinePolicy.Load(); evidence != nil && s.flow != nil {
+			copy := *evidence
+			copy.Service = s.flow.Key
+			s.flow.InlinePolicy.Store(&copy)
+		}
 		s.ctx = t.sessionContext(s)
 	}
 	switch {
@@ -274,7 +280,7 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 		countIECAbort(abortInjector)
 		return dropped(reasonIECFailClose)
 	}
-	n := &iecSession{id: t.newID(), flow: &flow.State{Key: state.ServiceKey()}, client: client, server: server, ctx: ctx, mode: mode, lastSeen: now}
+	n := &iecSession{id: t.newID(), flow: retainedIECState(state), client: client, server: server, ctx: ctx, mode: mode, lastSeen: now}
 	n.dirs[iecDirClient] = newIECDir(pkt.TCP.Seq)
 	_, n.reconnects = t.reconnect[pairKey(client, server)]
 	key := iecKey{client: client, server: server}
@@ -298,7 +304,7 @@ func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.Eval
 		countIECAbort(abortBound)
 		return dropped(reasonIECFailClose)
 	}
-	s := &iecSession{id: t.newID(), flow: &flow.State{Key: state.ServiceKey()}, client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}
+	s := &iecSession{id: t.newID(), flow: retainedIECState(state), client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}
 	t.sessions[iecKey{client: client, server: server}] = s
 	dir := iecDirSrv
 	if fromClient {
@@ -597,7 +603,7 @@ func (t *iecTable) closeLocked(s *iecSession, now time.Time) iecActions {
 
 func (t *iecTable) current(s *iecSession, dir int, pkt capture.Packet, now time.Time) *heldPacket {
 	off := s.dirs[dir].seq.Offset(pkt.TCP.Seq)
-	return &heldPacket{tok: pkt.Token, dir: dir, off: off, end: off + int64(len(pkt.Payload)),
+	return &heldPacket{tok: pkt.Token, mark: pkt.Mark, dir: dir, off: off, end: off + int64(len(pkt.Payload)),
 		fin: pkt.TCP.Flags&capture.TCPFlagFIN != 0, since: now}
 }
 
@@ -724,7 +730,7 @@ func (t *iecTable) releaseLocked(s *iecSession, dir int, pkt capture.Packet, cur
 			s.heldBytes -= int(h.end - h.off)
 			d.forwarded = max(d.forwarded, h.end)
 			finReleased = finReleased || (h.fin && h.end == d.bytes.Next())
-			res.decision.Resolved = append(res.decision.Resolved, capture.Resolution{Token: h.tok, Verdict: capture.VerdictAccept})
+			res.decision.Resolved = append(res.decision.Resolved, capture.Resolution{Token: h.tok, Verdict: capture.VerdictRepeat, Mark: markabi.Continue(h.mark, false)})
 			continue
 		}
 		kept = append(kept, h)

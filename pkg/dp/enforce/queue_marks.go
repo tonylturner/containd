@@ -7,11 +7,11 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 )
 
-// containd reserves the skb-mark bits in QueueMarkMask for the packets it
-// queues to the engine; the other mark bits are preserved. Within them,
+// Queue entry replaces ContinuationSkbMask, preserving unrelated skb bits.
+// EnforceScopeMark identifies enforcing scopes. Within QueueMarkMask,
 // EnvelopeMark means "steered to the queue by an IEC104 envelope rule"
 // and HandshakeMark "connection tracking tracks the packet in a connection
 // whose handshake it has not seen complete" (ct status not assured, ct
@@ -25,11 +25,11 @@ import (
 // a fail-closed stream, and opens an enforce IEC104 session, only at a
 // handshake segment with the mark.
 const (
-	QueueMarkMask uint32 = 0x0f000000
-	EnvelopeMark  uint32 = 0x01000000
-	HandshakeMark uint32 = 0x02000000
+	QueueMarkMask uint32 = markabi.QueueMarkMask
+	EnvelopeMark  uint32 = markabi.EnvelopeMark
+	HandshakeMark uint32 = markabi.HandshakeMark
 	// ObservedMark skips all ICS steering on the repeated traversal.
-	ObservedMark uint32 = 0x04000000
+	ObservedMark uint32 = markabi.ObservedMark
 )
 
 // EnvelopeMarked reports whether an NFQUEUE skb mark carries EnvelopeMark.
@@ -50,9 +50,9 @@ func HandshakeMarked(mark uint32) bool {
 func (c *Compiler) queueRules(mark uint32) []string {
 	set := func(bits uint32) string {
 		if bits == 0 {
-			return fmt.Sprintf("meta mark set meta mark and 0x%08x queue num %d", ^QueueMarkMask, c.QueueID)
+			return fmt.Sprintf("meta mark set meta mark and 0x%08x queue num %d", ^markabi.ContinuationSkbMask, c.QueueID)
 		}
-		return fmt.Sprintf("meta mark set meta mark and 0x%08x or 0x%08x queue num %d", ^QueueMarkMask, bits, c.QueueID)
+		return fmt.Sprintf("meta mark set meta mark and 0x%08x or 0x%08x queue num %d", ^markabi.ContinuationSkbMask, bits, c.QueueID)
 	}
 	return []string{
 		"ct status assured " + set(mark),
@@ -61,24 +61,10 @@ func (c *Compiler) queueRules(mark uint32) []string {
 	}
 }
 
-// ICSQueueChain is the regular chain the NFQUEUE line of every generic
-// (not IEC104) ICS rule jumps to. It queues the packet to the engine with
+// ICSQueueChain is the observation chain for generic ICS scopes. Enforcing
+// scopes use enforceQueueChain. Both queue the packet to the engine with
 // HandshakeMark or without containd's mark bits (queueRules).
 const ICSQueueChain = "ics_queue"
-
-// queuesICS reports whether snap has a rule whose lines jump to
-// ICSQueueChain.
-func (c *Compiler) queuesICS(snap *rules.Snapshot) bool {
-	if c.QueueID <= 0 {
-		return false
-	}
-	for _, e := range snap.Firewall {
-		if queuedToEngine(e, c.QueueID) && (!isIEC104Rule(e) || rules.MonitorICS(e, snap.DPIMode)) {
-			return true
-		}
-	}
-	return false
-}
 
 // writeICSQueueChain emits ICSQueueChain.
 func (c *Compiler) writeICSQueueChain(buf *bytes.Buffer) {
@@ -90,4 +76,4 @@ func (c *Compiler) writeICSQueueChain(buf *bytes.Buffer) {
 }
 
 // unobservedGuard prevents a repeated observation from entering any ICS queue.
-const unobservedGuard = "meta mark & 0x04000000 == 0"
+var unobservedGuard = fmt.Sprintf("meta mark & 0x%08x == 0", markabi.ObservedMark)

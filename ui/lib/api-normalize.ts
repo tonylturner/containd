@@ -185,6 +185,8 @@ export function normalizeFirewallRule(value: unknown): FirewallRule {
   if (typeof record.tag === "string" && record.tag !== "") normalized.tag = record.tag;
   const identities = toStringList(record.identities);
   if (identities.length > 0) normalized.identities = identities;
+  const viaForwards = toStringList(record.viaForwards);
+  if (viaForwards.length > 0) normalized.viaForwards = viaForwards;
   const schedule = normalizeSchedule(record.schedule);
   if (schedule) normalized.schedule = schedule;
 

@@ -80,7 +80,7 @@ func TestICSCoverageQueueOverlay(t *testing.T) {
 // The engine accepts a snapshot that enforces without an inline path, and
 // reports it instead of claiming protection.
 func TestICSCoverageContradictorySnapshot(t *testing.T) {
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: &recordingApplier{}, Updater: &recordingUpdater{}},
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: &recordingApplier{}, Updater: &recordingUpdater{}},
 		DPIEnabled: true, DPIMode: "enforce"})
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestICSCoverageContradictorySnapshot(t *testing.T) {
 // still describes the previous rules; with no earlier success it is empty.
 func TestICSCoverageAfterFailedApply(t *testing.T) {
 	applier := &recordingApplier{err: errors.New("nft apply failed")}
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier, Updater: &recordingUpdater{}},
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: applier, Updater: &recordingUpdater{}},
 		DPIEnabled: true, DPIMode: "enforce"})
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestICSCoverageDomainExclusionMatches(t *testing.T) {
 func TestPreviewRuleCarriesCoverage(t *testing.T) {
 	e := gateEngine(t, &nftModel{}, 101, &bindCapture{})
 	entry := modbusEnforceSnapshot("candidate").Firewall[0]
-	got := e.PreviewRule(entry).ICSCoverage
+	got := e.PreviewRule(PreviewRuleRequest{Entry: entry}).ICSCoverage
 	if got == nil || got.RuleID != "candidate" || got.State != coverage.NotEnforcing ||
 		len(got.Reasons) != 1 || got.Reasons[0].Code != coverage.QueueUnavailable {
 		t.Fatalf("unbound queue preview coverage = %+v", got)
@@ -227,11 +227,11 @@ func TestPreviewRuleCarriesCoverage(t *testing.T) {
 	if err := e.StartWithRetry(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.PreviewRule(entry).ICSCoverage; got == nil || got.State != coverage.Enforcing || got.Mode != "enforce" {
+	if got := e.PreviewRule(PreviewRuleRequest{Entry: entry}).ICSCoverage; got == nil || got.State != coverage.Enforcing || got.Mode != "enforce" {
 		t.Fatalf("bound queue preview coverage = %+v", got)
 	}
 	l4 := rules.Entry{ID: "l4", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Mode: "enforce"}}
-	if got := e.PreviewRule(l4).ICSCoverage; got != nil {
+	if got := e.PreviewRule(PreviewRuleRequest{Entry: l4}).ICSCoverage; got != nil {
 		t.Fatalf("rule without ICS protocol has coverage %+v", got)
 	}
 }

@@ -21,28 +21,11 @@ func compileWithoutCounters(c *Compiler, snap *rules.Snapshot) (string, error) {
 	return withoutRuleCounters(text), err
 }
 
-func compileEntryWithoutCounters(e rules.Entry, zoneIfaces map[string][]string, queueID, nflogGroup int) ([]string, error) {
-	zones, err := newZoneIndex(zoneIfaces)
-	if err != nil {
-		return nil, err
+func headerLinesText(e rules.Entry, tail string) ([]string, error) {
+	lines, err := headerLines(e, zoneLowering{}, tail)
+	var out []string
+	for _, line := range lines {
+		out = append(out, line.text)
 	}
-	lines, err := compileEntry(e, zoneLowering{idx: zones}, queueID, nflogGroup)
-	texts := make([]string, 0, len(lines))
-	for _, l := range lines {
-		texts = append(texts, withoutRuleCounters(l.text))
-	}
-	return texts, err
-}
-
-// guardedWithoutCounters is compileEntryWithoutCounters with p's predicates.
-func guardedWithoutCounters(p *predicates, e rules.Entry) ([]string, error) {
-	lines, err := compileEntry(e, p.lowering(targetForward), p.queueID, 0)
-	if err != nil {
-		return nil, err
-	}
-	guarded, err := p.guard(e, lines)
-	for i := range guarded {
-		guarded[i] = withoutRuleCounters(guarded[i])
-	}
-	return guarded, err
+	return out, err
 }

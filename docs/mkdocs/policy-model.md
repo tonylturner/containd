@@ -23,27 +23,33 @@ action means `DENY`.
 
 ### Actions and precedence
 
-Rule order in the configuration does not decide anything. A packet or ICS
-message is decided in three steps, in nftables and in the engine alike:
+The first matching enforcing terminal rule in configured order wins; otherwise
+firewall.defaultAction applies. Monitor rules never decide.
 
-1. If any matching `ALLOW` rule exists, it is allowed.
-2. Otherwise, if a `DENY` or `RESET` rule matches, the first of them by rule ID
-   decides.
-3. Otherwise the default action applies.
+Configurations below schema 0.1.10 migrate legacy rule precedence and
+port-forward permissions on upgrade. Review
+[ordered policy upgrades](config-format.md#ordered-policy-upgrades), including
+the warnings for forwards whose permissions cannot be generated safely.
 
-The rule a decision reports, in events and logs, is the first match in that
-order: `ALLOW` rules by rule ID, then `DENY` and `RESET` rules by rule ID. A
-`DENY` or `RESET` rule that overlaps an `ALLOW` is shadowed where they overlap.
-This holds for ICS rules too: an ICS `DENY` overlapping any `ALLOW`, including
-a plain L3/L4 `ALLOW`, is shadowed. IEC 104 objects are the one exception to
-the L4 part of this: they are decided among IEC 104 rules only, so a broad
+Terminals are `ALLOW`, `DENY` and `RESET`; rule IDs do not set precedence.
+Events and logs name the first matching deciding rule. Put exceptions before
+broader rules: an earlier `DENY` can shadow a later `ALLOW`, just as an earlier
+`ALLOW` can shadow a later `DENY`. This holds for ICS rules too. IEC 104
+objects are decided among IEC 104 rules only, so a broad
 `ALLOW` on TCP 2404 does not admit them (see
 [IEC 104 fields and matching](ics-dpi.md#iec-104-fields-and-matching)).
 
-The ruleset warnings (below) name a `DENY` or `RESET` rule when one `ALLOW`
-rule matches all of its traffic (`shadowedBy`). The check is conservative: a
-rule covered only by several `ALLOW` rules together is not reported, and IEC
-104 rules are left out.
+The ruleset warnings (below) name a terminal rule when an earlier unconditional
+terminal matches all of its traffic (`shadowedBy`). Effects and monitor rules
+cannot shadow decisions. The check is conservative: coverage by several rules
+together is not reported, and IEC 104 rules are checked only against earlier
+IEC 104 rules.
+
+The firewall table displays configured order and provides move controls.
+New rules default to the bottom; creation can instead select top, bottom,
+before or after another rule. Editing keeps a rule's slot. Templates append
+their ordered rules and can report a warning when an earlier terminal shadows
+an addition. CLI syntax is in [CLI](cli.md).
 
 | Action | Decides | Effect |
 | --- | --- | --- |
@@ -128,8 +134,9 @@ the server's own packets.
 The conditions also apply to established connections, in both directions.
 When a binding is removed or a window ends, a connection that only a
 conditional `ALLOW` admitted stops passing. A connection that an unconditional
-`ALLOW` also admits keeps passing. When a scheduled `DENY` window opens, it
-stops the established connections it covers. The current policy decides those
+`ALLOW` decides under the current ordered policy keeps passing. When a scheduled
+`DENY` window opens, it stops established connections for which it is the first
+matching enforcing terminal. The current policy decides those
 connections again by their original tuple, and connections outside the scope of
 any conditional rule keep the established fast path. This includes ICS
 connections steered to the engine: once a conditional ICS `ALLOW` no longer
@@ -139,9 +146,10 @@ admits a connection, its replies and server packets stop too.
 
 A rule matches nothing when no bound address satisfies its identities, when
 none of its source or destination zones has an interface, or when its sources
-and destinations share no address family. It is reported as a warning with its
-rule ID, the predicate (`identity`, `zone` with the `zones` concerned, or
-`addressFamily`), the action and the effect, in:
+and destinations share no address family. A `viaForwards` rule also matches
+nothing if none of its referenced candidate forwards can match. It is reported
+as a warning with its rule ID, the predicate (`identity`, `zone` with the
+`zones` concerned, `addressFamily`, or `forward`), the action and the effect, in:
 
 - The firewall page's nftables ruleset preview, which lists the candidate's
   warnings.
@@ -168,6 +176,49 @@ Native [IDS rules](ids-rules.md) evaluate decoded events and generate alerts;
 these are distinct from firewall decisions. Learned allowlist rules require
 review, candidate staging, and commit.
 
+## Port-forward publication and deletion
+
+A port forward translates traffic; it never admits it by itself. Firewall
+policy still decides delivery. Rules can restrict matching to connections
+translated by specific forwards with `viaForwards`; other selectors use the
+original client and translated backend service, not the public listen port.
+
+The NAT page, wizard and CLI publish through the admin-only
+`POST /api/v1/firewall/port-forwards` endpoint:
+`{"forward": {...}, "allowRule": true}`. The forward and any generated allow
+rule are staged in one atomic candidate mutation. `allowRule` defaults to true.
+The response contains `forward` and a `placement` explaining the decision:
+
+- `generated`: no enforcing ICS scope overlaps. A matching `viaForwards`
+  `ALLOW` rule is inserted before existing terminals, retaining stable
+  forward-ID order among leading grants. The response includes the rule and
+  its zero-based `index`; UI and CLI positions are one-based.
+- `inside`: an enforcing ICS rule's transport scope fully covers the forward.
+  No allow rule is generated and no warning is needed; `ruleIds` identify
+  governing ICS rules. Their semantic predicates and ordered policy still
+  decide delivery, so this is not a promise of admission.
+- `partial`: overlap is partial or cannot be proved safe. Permission generation
+  fails closed: **no allow rule is generated for any of the forward's traffic**,
+  including traffic outside the inspected subset. `warning` explains the
+  affected sources, ingress, backend zones and service. Existing inspection
+  rules and defaults stay unchanged; current policy decides delivery. Review
+  that policy explicitly rather than assuming the forward opens a path.
+
+Set `allowRule: false`, uncheck **Create matching allow rule**, or use CLI
+`no-allow` to publish translation only. The response then omits `placement`.
+Review the result and commit to activate it.
+
+The admin-only `DELETE /api/v1/firewall/port-forwards/{id}` atomically removes
+the forward and removes its ID from every rule's `viaForwards`. A rule whose
+list becomes empty is deleted, regardless of action, rather than becoming an
+unrestricted rule. Rules retaining other forward IDs are edited. The response
+lists `deletedRuleIds` and `editedRuleIds`; the UI confirms those effects before
+deletion. Deletion is staged and also needs a commit.
+
+`POST /api/v1/firewall/nat` remains a pure replacement, not a publication or
+cascading deletion operation. A replacement leaving dangling `viaForwards`
+references is rejected.
+
 ## Templates and preview
 
 The four templates at `GET /api/v1/templates/ics` comprise two Modbus variants,
@@ -183,7 +234,13 @@ Applying a template with `mode: "enforce"` is refused while
 `dataplane.nfqueueGroup` is 0, as for any ICS rule in enforce mode.
 
 Use `POST /api/v1/firewall/rules/preview` to inspect matches before committing;
-preview is not a live packet-delivery test. For a rule with an ICS protocol it
+preview counts this one rule in isolation, not its position among other rules,
+and is not a live packet-delivery test. Forward warnings use the candidate's
+forwards, while zones and identities use the engine's running inputs. For a rule
+limited by `viaForwards`, historical match counting is unavailable: retained
+events do not record which connections containd translated. The response
+explains this in `unavailable`; the UI hides counts and samples. Warnings and
+ICS coverage remain available. For a rule with an ICS protocol it
 also reports the rule's coverage (see
 [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage)).
 

@@ -26,6 +26,11 @@ func Events(ctx context.Context, store config.Store) ([]dpevents.Event, error) {
 	if modeErr != nil {
 		return nil, modeErr
 	}
+	ordered, err := orderedEvents(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	modes = append(modes, ordered...)
 	reader, ok := store.(Reader)
 	if !ok {
 		return modes, nil
@@ -48,9 +53,12 @@ func Publish(ctx context.Context, store config.Store, log audit.Store) ([]dpeven
 	if err := publishModes(ctx, store, log); err != nil {
 		return nil, err
 	}
+	if err := publishOrdered(ctx, store, log); err != nil {
+		return nil, err
+	}
 	reader, ok := store.(Reader)
 	if !ok {
-		return nil, nil
+		return Events(ctx, store)
 	}
 	records, err := reader.IndustrialScopeMigrations(ctx)
 	if err != nil || len(records) == 0 {

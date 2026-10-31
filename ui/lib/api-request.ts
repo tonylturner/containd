@@ -300,7 +300,7 @@ export async function patchJSONResult<T>(
   }
 }
 
-export async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
+export async function deleteJSONResult<T = void>(path: string): Promise<ApiResult<T>> {
   try {
     const res = await fetchWithSession(path, {
       method: "DELETE",
@@ -310,7 +310,7 @@ export async function deleteJSONResult(path: string): Promise<ApiResult<void>> {
     clearAuthExpired();
     if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
-    return { ok: true, data: undefined, warning: parseWarningHeader(res) };
+    return { ok: true, data: await parseSuccessBody<T>(res), warning: parseWarningHeader(res) };
   } catch (e) {
     return {
       ok: false,

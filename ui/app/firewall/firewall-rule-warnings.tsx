@@ -13,6 +13,8 @@ function warningKind(w: RuleWarning): string {
       return "zone without interfaces";
     case "addressFamily":
       return "no shared address family";
+    case "forward":
+      return "port forward";
     default:
       return "warning";
   }
@@ -37,8 +39,8 @@ const SCOPES = {
 /**
  * Rules that do not act as written: a rule matches nothing when no bound
  * address satisfies its identities, none of its zones has an interface, or
- * its sources and destinations share no address family; and a DENY or RESET
- * rule an ALLOW fully covers never decides. `scope` names the ruleset the warnings describe; a single
+ * its sources and destinations share no address family; and a rule fully
+ * covered by an earlier terminal never decides. `scope` names the ruleset the warnings describe; a single
  * previewed rule has none.
  */
 export function RuleWarningList({
@@ -84,11 +86,11 @@ export function RuleImpactSummary({ preview }: { preview: RulePreview }) {
   return (
     <div aria-label="Rule impact preview" className="mt-3">
       <p className="text-sm text-(--text)">
-        {preview.total_events === 0
+        {preview.unavailable || (preview.total_events === 0
           ? "No recent events to search: the engine has retained none yet."
-          : `${preview.match_count} of ${preview.total_events} recent events match this rule on its own.`}
+          : `${preview.match_count} of ${preview.total_events} recent events match this rule on its own.`)}
       </p>
-      <RulePreviewEvents preview={preview} />
+      {!preview.unavailable && <RulePreviewEvents preview={preview} />}
       <ICSCoverageSection coverage={preview.icsCoverage} />
       <RuleWarningList warnings={preview.warnings} />
     </div>

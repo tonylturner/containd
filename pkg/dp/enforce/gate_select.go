@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -218,20 +217,10 @@ func gateMasqueradeLines(snap *rules.Snapshot, zones zoneIndex) ([]string, error
 	}
 	gated := ctMarkMatch(GateCtMark, GateCtMark)
 	var out []string
-	pfs := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
-	sort.Slice(pfs, func(i, j int) bool { return pfs[i].ID < pfs[j].ID })
-	for _, pf := range pfs {
-		if len(snap.ZoneIfaces[strings.TrimSpace(pf.IngressZone)]) == 0 {
-			continue
+	for _, id := range forwardIDs(snap) {
+		for _, match := range forwardMatchClauses(snap.ForwardMatches[id], targetGateInput) {
+			out = append(out, gated+" "+match+" "+ctMarkSet(GateMasqSelCtMark))
 		}
-		match, err := compileDNATMatch(pf)
-		if err != nil {
-			return nil, err
-		}
-		if match == "" {
-			continue
-		}
-		out = append(out, fmt.Sprintf("%s %s ip daddr %s %s", gated, match, strings.TrimSpace(pf.DestIP), ctMarkSet(GateMasqSelCtMark)))
 	}
 	egress, srcZones := natMasqueradeZones(snap)
 	egressDevs, ok := zones.clause("fib daddr oifname", []string{egress})

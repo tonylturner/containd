@@ -22,7 +22,7 @@ func TestPreviewRuleHandler(t *testing.T) {
 	handler := previewRuleHandler(dp.Engine)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/rules/preview",
-		strings.NewReader(`{"Action":"ALLOW","ICS":{"Protocol":"iec104","ReadOnly":true}}`)))
+		strings.NewReader(`{"entry":{"Action":"ALLOW","ICS":{"Protocol":"iec104","ReadOnly":true}},"forwardMatches":{}}`)))
 	var got engine.PreviewRuleResponse
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil ||
 		got.MatchCount != 1 || got.TotalEvents != 1 || len(got.SampleMatches) != 1 {
@@ -34,6 +34,7 @@ func TestPreviewRuleHandler(t *testing.T) {
 	}{
 		{http.MethodGet, "", http.StatusMethodNotAllowed},
 		{http.MethodPost, "{", http.StatusBadRequest},
+		{http.MethodPost, `{"Action":"ALLOW"}`, http.StatusBadRequest},
 	} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(tc.method, "/internal/rules/preview", strings.NewReader(tc.body)))

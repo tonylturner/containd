@@ -16,20 +16,20 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // Compiler turns a dp rules.Snapshot into an nftables ruleset.
-// This is a minimal Phase 1 skeleton.
 type Compiler struct {
 	ManagementReservation *mgmtpath.Reservation
 	// EngineAPI is the non-loopback path to the engine API, or nil for none.
 	EngineAPI *EngineAPIPath
 	TableName string
 	// QueueID, when non-zero, causes DPI-eligible rules (those with an
-	// ICS predicate) to queue their traffic to NFQUEUE <QueueID> instead of
-	// accepting or dropping it, through ICSQueueChain (IEC104 rules:
-	// IEC104EnvelopeChain), for selective DPI.
+	// ICS predicate) to steer their transport scopes to NFQUEUE <QueueID>
+	// before ordered kernel admission. Enforcing IEC104 traffic uses the
+	// fail-closed IEC104EnvelopeChain readiness switch.
 	QueueID int
 	// IEC104EnvelopeOpen is the state CompileFirewall writes into
 	// IEC104EnvelopeChain: true queues envelope traffic to QueueID, false
@@ -78,6 +78,9 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if err := ValidateTableName(c.DynamicTable()); err != nil {
 		return "", err
 	}
+	if !markabi.ValidParity(snap.AdmissionParity) {
+		return "", errors.New("invalid admission parity")
+	}
 	snap = resolvedModes(snap)
 	table := c.policyTable()
 	locals, err := resolveLocalInput(snap)
@@ -97,6 +100,10 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	buf.WriteString(DeleteTable(table))
 	buf.WriteString(fmt.Sprintf("table inet %s {\n", table))
 	preds.zones.writeSets(&buf)
+	if err := writeLocalAddressSets(&buf, snap); err != nil {
+		return "", err
+	}
+	c.writeAdmissionChains(&buf, snap.AdmissionParity)
 	if err := writeRuleObjects(&buf, snap); err != nil {
 		return "", err
 	}
@@ -104,21 +111,18 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 		return "", err
 	}
 	// Regular chains are declared before the chains that jump to them.
-	if err := preds.writeRecheckChains(&buf, targetForward); err != nil {
+	if err := c.writeOrderedChains(&buf, preds, targetForward); err != nil {
 		return "", err
 	}
 	if c.SteersGate() {
 		for _, target := range []chainTarget{targetGateInput, targetGateReply} {
-			if err := preds.writeRecheckChains(&buf, target); err != nil {
+			if err := c.writeOrderedChains(&buf, preds, target); err != nil {
 				return "", err
 			}
 		}
 	}
-	if c.SteersIEC104(snap) {
-		c.writeIEC104EnvelopeChain(&buf)
-	}
-	if c.queuesICS(snap) {
-		c.writeICSQueueChain(&buf)
+	if c.QueueID > 0 {
+		c.writeInspectionChains(&buf, snap)
 	}
 	if c.SteersGate() {
 		if err := c.writeGateChains(&buf, snap, preds); err != nil {
@@ -202,72 +206,41 @@ func (c *Compiler) writeForwardChain(buf *bytes.Buffer, snap *rules.Snapshot, pr
 // so a gated connection is decided by the same rules, counters, logs and
 // queues as a forwarded one.
 func (c *Compiler) writeDecisions(buf *bytes.Buffer, snap *rules.Snapshot, preds *predicates, target chainTarget) error {
-	// RATE_LIMIT meters come first, so that they meter every packet of a
-	// flow, before IEC104 steering, NFQUEUE and the established accept.
-	meters, tags, decide := forwardSections(snap.Firewall)
-	if err := c.writeEntries(buf, preds, target, meters); err != nil {
+	meters, tags := forwardSections(snap.Firewall)
+	if err := c.writeMeters(buf, preds, target, meters); err != nil {
 		return err
 	}
-
-	// Emit dpiEligible rules (those with ICS predicates compiled to
-	// `queue num N`) BEFORE the ct established fast-path. Otherwise only
-	// the SYN of an inspected flow reaches the queue — subsequent data-
-	// bearing packets (the ones actually carrying the Modbus/DNP3/CIP
-	// PDU we need to inspect) match ct established and skip the queue
-	// entirely, so the userspace DPI decoder never sees a payload to
-	// parse. With QueueID=0 this is a no-op (compileEntry emits plain
-	// accept/drop for everything, ct established below stays optimal).
-	// IEC104 rules come first and steer both directions of their session
-	// scope, marked; they replace the rule's own line. The gate never
-	// selects the IEC104 port (an ICS decoder port), so the gate chains
-	// carry no steering.
-	if c.QueueID > 0 {
-		if target == targetForward {
-			if err := c.writeIEC104Steering(func(line string) { buf.WriteString("    " + line + ";\n") }, snap, preds.zones); err != nil {
-				return err
-			}
-		}
-		var queued []rules.Entry
-		for _, e := range decide {
-			if queuedToEngine(e, c.QueueID) && !isIEC104Rule(e) {
-				queued = append(queued, e)
-			}
-		}
-		if err := c.writeEntries(buf, preds, target, queued); err != nil {
-			return err
-		}
-	}
-
-	preds.writeRecheckJump(buf, target)
-	buf.WriteString("    ct state { established, related } accept;\n")
-	if err := c.writeDNATAccepts(buf, snap); err != nil {
+	if err := c.writeInspection(buf, preds, target); err != nil {
 		return err
 	}
-	// Emit non-dpiEligible rules after the conntrack fast-path so plain
-	// L4 traffic gets the established-flow optimization. dpiEligible
-	// rules already emitted above with QueueID > 0 are skipped here. TAG
-	// lines only count and continue. nftables is first-match, so every
-	// ALLOW emits before every DENY and RESET (rules.DecisionOrder): any
-	// matching ALLOW wins.
-	var rest []rules.Entry
-	for _, e := range append(tags, decide...) {
-		if !queuedToEngine(e, c.QueueID) {
-			rest = append(rest, e)
-		}
-	}
-	return c.writeEntries(buf, preds, target, rest)
-}
-
-// writeEntries emits the lines of entries in order, lowered for target,
-// with their identity and schedule predicates.
-func (c *Compiler) writeEntries(buf *bytes.Buffer, preds *predicates, target chainTarget, entries []rules.Entry) error {
-	zones := preds.lowering(target)
-	for _, e := range entries {
-		lines, err := compileEntry(e, zones, c.QueueID, c.NFLogGroup)
+	for _, e := range tags {
+		lines, err := preds.transportLines(target, e, false, counterStmt(e.ID), true)
 		if err != nil {
 			return err
 		}
-		guarded, err := preds.guard(e, lines)
+		for _, l := range lines {
+			fmt.Fprintln(buf, "    ct state != established "+l+";")
+		}
+	}
+	_, ordered := target.recheckChains()
+	fmt.Fprintf(buf, "    %s goto %s;\n", nonAdmitGuard, ordered)
+	preds.writeRecheckJump(buf, target)
+	fmt.Fprintf(buf, "    ct state established ct mark & 0x%08x == 0x%08x goto admit_clean;\n", markabi.AdmissionCtMask|markabi.OwnedForwardCtBit, markabi.AdmittedBit|snap.AdmissionParity)
+	fmt.Fprintf(buf, "    ct state != related goto %s;\n", ordered)
+	buf.WriteString("    ct state related goto related_clean;\n")
+	return nil
+}
+
+// writeMeters emits the meters in ID order, lowered for target,
+// with their identity and schedule predicates.
+func (c *Compiler) writeMeters(buf *bytes.Buffer, preds *predicates, target chainTarget, entries []rules.Entry) error {
+	zones := preds.lowering(target)
+	for _, e := range entries {
+		lines, err := compileMeterEntry(e, zones, c.QueueID > 0, c.NFLogGroup)
+		if err != nil {
+			return err
+		}
+		guarded, err := preds.guardFor(target, e, lines)
 		if err != nil {
 			return err
 		}
@@ -291,78 +264,67 @@ type ruleLine struct {
 	// family is the address family the line is restricted to, or
 	// familyAny.
 	family int
-	// ct marks a line that matches packets of both directions by their
-	// connection's original tuple; its predicates must too.
-	ct   bool
-	text string
+	// ct marks a line using the connection's original-oriented tuple;
+	// its identity and via predicates must use those coordinates too.
+	ct        bool
+	direction packetDirection
+	text      string
 }
 
-// compileEntry returns the lines of one rule: one per protocol (a rule
-// without protocols matches every protocol) and address family, and, for
-// RESET and RATE_LIMIT, per form of the action (actionForms, meterLines).
-// A rule that can match nothing, because its zones have no interfaces or
-// its sources and destinations share no address family, has no lines.
-//
-// Identity and schedule predicates are not part of these lines: the forward
-// chain adds them (predicates.guard).
-//
-// Each line counts into the rule's counter.
-func compileEntry(e rules.Entry, zones zoneLowering, queueID int, nflogGroup int) ([]ruleLine, error) {
+// headerLines lowers only trustworthy packet-header evidence. The caller
+// supplies its tail; all admission decisions belong to ordered transport policy.
+func headerLines(e rules.Entry, zones zoneLowering, tail string) ([]ruleLine, error) {
 	scopes, err := addrScopes(e)
 	if err != nil {
 		return nil, err
 	}
 	in, out, ok := zones.original(e)
-	if !ok || len(scopes) == 0 {
+	if !ok {
 		return nil, nil
 	}
-	queued := queuedToEngine(e, queueID)
-
-	// Build the optional log statement. Only emit for non-DPI rules:
-	// DPI-eligible rules already get visibility through the NFQUEUE
-	// userspace path (RecordDPIEvents → eventStore.Record, plus the
-	// firewall.rule.hit event from EvaluateVerdict when an enforce-mode
-	// verdict is applied). Adding a kernel log here would double-count.
-	logStmt := ""
-	if e.Log && nflogGroup > 0 && !isDPIEligible(e) {
-		logStmt = fmt.Sprintf(`log prefix "%s" group %d`, logPrefix(e.ID, e.Action), nflogGroup)
-	}
-
 	protos := e.Protocols
 	if len(protos) == 0 {
 		protos = []rules.Protocol{{}}
 	}
 	var lines []ruleLine
-	for _, p := range protos {
-		if e.Action == rules.ActionRateLimit && !queued && !rules.MonitorICS(e, "") {
-			metered, err := meterLines(e, p, scopes, zones, logStmt)
-			if err != nil {
-				return nil, err
-			}
-			if queueID > 0 {
-				// NF_REPEAT restarts this hook: the first traversal already
-				// charged its meters, so observation must not charge them twice.
-				for i := range metered {
-					metered[i].text = unobservedGuard + " " + metered[i].text
-				}
-			}
-			lines = append(lines, metered...)
-			continue
-		}
-		forms, err := actionForms(e, p, queued, counterStmt(e.ID), logStmt)
-		if err != nil {
-			return nil, err
-		}
-		match, err := protocolMatch(p)
+	for _, proto := range protos {
+		match, err := protocolMatch(proto)
 		if err != nil {
 			return nil, fmt.Errorf("entry %s: %w", e.ID, err)
 		}
-		for _, s := range scopes {
-			for _, f := range forms {
-				parts := append([]string{f.match, in, out, match}, s.header(false)...)
-				lines = append(lines, ruleLine{family: s.family, text: joinClauses(append(parts, f.stmts))})
+		for _, scope := range scopes {
+			parts := append([]string{in, out, match}, scope.header(false)...)
+			lines = append(lines, ruleLine{family: scope.family, text: joinClauses(append(parts, tail))})
+		}
+	}
+	return lines, nil
+}
+
+func compileMeterEntry(e rules.Entry, zones zoneLowering, repeat bool, nflogGroup int) ([]ruleLine, error) {
+	scopes, err := addrScopes(e)
+	if err != nil {
+		return nil, err
+	}
+	logStmt := ""
+	if e.Log && nflogGroup > 0 {
+		logStmt = fmt.Sprintf("log prefix %q group %d", logPrefix(e.ID, e.Action), nflogGroup)
+	}
+	protos := e.Protocols
+	if len(protos) == 0 {
+		protos = []rules.Protocol{{}}
+	}
+	var lines []ruleLine
+	for _, proto := range protos {
+		metered, err := meterLines(e, proto, scopes, zones, logStmt)
+		if err != nil {
+			return nil, err
+		}
+		if repeat {
+			for i := range metered {
+				metered[i].text = unobservedGuard + " " + metered[i].text
 			}
 		}
+		lines = append(lines, metered...)
 	}
 	return lines, nil
 }
@@ -460,11 +422,13 @@ const (
 	// PredicateAddressFamily: the rule's sources and destinations share no
 	// address family.
 	PredicateAddressFamily RulePredicate = "addressFamily"
+	// PredicateForward: none of the referenced forwards can match.
+	PredicateForward RulePredicate = "forward"
 )
 
 // RuleWarning reports a firewall rule that does not act as written: one
 // that matches nothing, because of the part of the rule Predicate names, or
-// a DENY or RESET rule that an ALLOW shadows (ShadowedBy).
+// a terminal hidden by an earlier covering terminal (ShadowedBy).
 type RuleWarning struct {
 	RuleID     string        `json:"ruleId"`
 	Predicate  RulePredicate `json:"predicate,omitempty"`
@@ -475,8 +439,8 @@ type RuleWarning struct {
 }
 
 // RuleWarnings lists, in rule ID order, snap's firewall rules that match
-// nothing (zoneWarnings, familyWarnings, identityWarnings), and every DENY
-// or RESET rule an ALLOW shadows (shadowWarnings).
+// nothing (zones, addresses, identities or forwards), and terminals hidden
+// by earlier covering terminals (shadowWarnings).
 func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
 	if snap == nil {
 		return nil
@@ -493,6 +457,7 @@ func (c *Compiler) RuleWarnings(snap *rules.Snapshot) []RuleWarning {
 	out = append(out, familyWarnings(snap)...)
 	out = append(out, identityWarnings(snap, idx)...)
 	out = append(out, shadowWarnings(snap)...)
+	out = append(out, forwardWarnings(snap)...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].RuleID < out[j].RuleID })
 	return out
 }
@@ -503,8 +468,8 @@ func isDPIEligible(e rules.Entry) bool {
 	return e.ICS.Protocol != ""
 }
 
-// queuedToEngine reports whether e's traffic is queued to the engine,
-// which then decides it, instead of being accepted or dropped by nftables.
+// queuedToEngine reports whether e requires inspection. Enforcing ICS
+// terminals then admit transport in S2, retaining kernel admission authority.
 func queuedToEngine(e rules.Entry, queueID int) bool {
 	return queueID > 0 && isDPIEligible(e)
 }

@@ -33,7 +33,7 @@ func TestMonitorCannotMaskInvalidEnforceEnvelope(t *testing.T) {
 				lines = append(lines, line)
 			}
 		}
-		if len(lines) != 2 || !strings.Contains(lines[0], "jump iec104_envelope") || !strings.Contains(lines[1], "jump ics_queue") {
+		if len(lines) != 2 || !strings.Contains(lines[0], "jump iec104_envelope") || !strings.Contains(lines[1], "jump iec104_monitor_queue") {
 			t.Fatalf("reverse=%t: enforce steering must precede monitor steering: %v", reverse, lines)
 		}
 		e, err := New(Config{DPIEnabled: true})

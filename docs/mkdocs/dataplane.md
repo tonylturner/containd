@@ -43,9 +43,9 @@ See [ICS DPI](ics-dpi.md) for predicates, monitor-mode limits, and IEC 104 behav
 Rules match zones, CIDRs, transport/port ranges, identity bindings, schedules
 and ICS predicates; see
 [Identity and schedule predicates](policy-model.md#identity-and-schedule-predicates).
-A packet is allowed when any matching ALLOW rule exists; otherwise a matching
-DENY or RESET applies; otherwise the default action applies. Rule order does
-not decide. IEC 104 object evaluation instead defaults to deny inside its
+The first matching enforcing terminal rule in configured order wins; otherwise
+firewall.defaultAction applies. Monitor rules never decide.
+IEC 104 object evaluation instead defaults to deny inside its
 inspection envelope. Snapshot swaps are atomic.
 
 The [ruleset preview](policy-model.md#templates-and-preview) uses the same

@@ -6,6 +6,7 @@ package enforce
 import (
 	"context"
 	"net"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -35,23 +36,16 @@ func TestCompileFirewallBasic(t *testing.T) {
 	if !strings.Contains(ruleset, "policy drop") {
 		t.Fatalf("missing default drop policy")
 	}
-	if !strings.Contains(ruleset, "tcp dport 80 accept") {
+	if !strings.Contains(ruleset, "tcp dport 80 goto ordered_s2_rule_0") {
 		t.Fatalf("missing allow rule: %s", ruleset)
 	}
-	if !strings.Contains(ruleset, "ip saddr { 10.0.0.0/8 } drop") {
+	if !strings.Contains(ruleset, "ip saddr { 10.0.0.0/8 } goto ordered_s2_rule_1") {
 		t.Fatalf("missing deny rule: %s", ruleset)
 	}
 }
 
-// TestCompileFirewallAllowsBeforeDrops pins the fix for a real-world
-// bug: a broad deny ("block lan1->lan2 for tcp/8080") and a narrow
-// allow exception ("rtac->lan2/8080 from 10.30.30.20") used to be
-// emitted in alphabetical-by-ID order. nftables is first-match, so a
-// broad drop emitted before its narrow exception silently shadowed
-// the allow — RTAC's canonical Modbus traffic black-holed even though
-// the policy declared it permitted. Allows must emit before drops so
-// the more-specific exception wins.
-func TestCompileFirewallAllowsBeforeDrops(t *testing.T) {
+// Configured order, not action or ID, controls terminal precedence.
+func TestCompileFirewallPreservesTerminalOrder(t *testing.T) {
 	compiler := NewCompiler()
 	snap := &rules.Snapshot{
 		Default: rules.ActionDeny,
@@ -60,8 +54,7 @@ func TestCompileFirewallAllowsBeforeDrops(t *testing.T) {
 			"lan2": {"eth3"},
 		},
 		Firewall: []rules.Entry{
-			// Sorted alphabetically, "deny..." < "rtac..." — the bad
-			// ordering. Action sort must override.
+			// The broad DENY deliberately precedes the narrow ALLOW.
 			{
 				ID:          "deny-ot-to-field-broad",
 				SourceZones: []string{"lan1"},
@@ -83,13 +76,13 @@ func TestCompileFirewallAllowsBeforeDrops(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	allowIdx := strings.Index(ruleset, "ip saddr { 10.30.30.20/32 } accept")
-	denyIdx := strings.Index(ruleset, "tcp dport 8080 drop")
+	allowIdx := strings.Index(ruleset, "ip saddr { 10.30.30.20/32 } goto ordered_s2_rule_1")
+	denyIdx := strings.Index(ruleset, "tcp dport 8080 goto ordered_s2_rule_0")
 	if allowIdx < 0 || denyIdx < 0 {
 		t.Fatalf("expected both allow and deny lines, got:\n%s", ruleset)
 	}
-	if allowIdx > denyIdx {
-		t.Errorf("allow line must come before deny line; got allow@%d deny@%d in:\n%s",
+	if allowIdx < denyIdx {
+		t.Errorf("configured DENY must precede ALLOW; got allow@%d deny@%d in:\n%s",
 			allowIdx, denyIdx, ruleset)
 	}
 }
@@ -122,9 +115,9 @@ func TestCompileFirewallMultiProtocol(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 	for _, want := range []string{
-		"tcp dport 502 accept",
-		"tcp dport 20000 accept",
-		"tcp dport 8080 accept",
+		"tcp dport 502 goto ordered_s2_rule_0",
+		"tcp dport 20000 goto ordered_s2_rule_0",
+		"tcp dport 8080 goto ordered_s2_rule_0",
 	} {
 		if !strings.Contains(ruleset, want) {
 			t.Errorf("expected %q in compiled ruleset, got:\n%s", want, ruleset)
@@ -145,7 +138,7 @@ func TestCompileFirewallNoProtocolsStillEmits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if !strings.Contains(ruleset, "ip saddr { 10.10.10.0/24 } drop") {
+	if !strings.Contains(ruleset, "ip saddr { 10.10.10.0/24 } goto ordered_s2_rule_0") {
 		t.Fatalf("expected source-only deny line, got:\n%s", ruleset)
 	}
 }
@@ -205,11 +198,11 @@ func TestCompileFirewallQueueRulesForDPIEntries(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 	// The ICS entry should use queue instead of accept.
-	if !strings.Contains(ruleset, "tcp dport 502 jump ics_queue") {
+	if !strings.Contains(ruleset, "tcp dport 502 jump ics_enforce_queue") {
 		t.Fatalf("expected queue rule for ICS entry, got:\n%s", ruleset)
 	}
 	// The non-ICS entry should still use accept.
-	if !strings.Contains(ruleset, "tcp dport 80 accept") {
+	if !strings.Contains(ruleset, "tcp dport 80 goto ordered_s2_rule_1") {
 		t.Fatalf("expected accept rule for non-ICS entry, got:\n%s", ruleset)
 	}
 }
@@ -235,7 +228,7 @@ func TestCompileFirewallNoQueueWithoutQueueID(t *testing.T) {
 	if strings.Contains(ruleset, "queue") {
 		t.Fatalf("did not expect queue rule when QueueID is 0, got:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, "tcp dport 502 accept") {
+	if !strings.Contains(ruleset, "tcp dport 502 goto ordered_s2_rule_0") {
 		t.Fatalf("expected accept rule, got:\n%s", ruleset)
 	}
 }
@@ -272,11 +265,11 @@ func TestCompileFirewallEmitsLogClauseForL4Rules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	wantDeny := `log prefix "containd:deny-ent-to-field:DENY " group 100 drop`
+	wantDeny := `log prefix "containd:deny-ent-to-field:DENY " group 100`
 	if !strings.Contains(ruleset, wantDeny) {
 		t.Fatalf("expected deny rule to include log clause %q, got:\n%s", wantDeny, ruleset)
 	}
-	wantAllow := `log prefix "containd:allow-rtac-to-field:ALLOW " group 100 accept`
+	wantAllow := `log prefix "containd:allow-rtac-to-field:ALLOW " group 100`
 	if !strings.Contains(ruleset, wantAllow) {
 		t.Fatalf("expected allow rule to include log clause %q, got:\n%s", wantAllow, ruleset)
 	}
@@ -314,7 +307,7 @@ func TestCompileFirewallSuppressesLogForDPIRules(t *testing.T) {
 	if strings.Contains(ruleset, "log prefix") {
 		t.Fatalf("did not expect log clause on DPI-eligible rule, got:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, "tcp dport 502 jump ics_queue") {
+	if !strings.Contains(ruleset, "tcp dport 502 jump ics_enforce_queue") {
 		t.Fatalf("expected queue verdict on DPI rule, got:\n%s", ruleset)
 	}
 }
@@ -450,7 +443,8 @@ func TestFlowBlockRejectsInvalidPort(t *testing.T) {
 func TestCompileFirewallNATChains(t *testing.T) {
 	compiler := NewCompiler()
 	snap := &rules.Snapshot{
-		Default: rules.ActionDeny,
+		Default:        rules.ActionDeny,
+		ForwardMatches: map[string]rules.ForwardMatch{"pf1": {Enabled: true, IngressDevices: []string{"wan0"}, Protocol: "tcp", ListenPort: 443, Backend: netip.MustParseAddrPort("10.0.0.10:8443"), AllowedSources: []netip.Prefix{netip.MustParsePrefix("198.51.100.10/32"), netip.MustParsePrefix("203.0.113.0/24")}}},
 		ZoneIfaces: map[string][]string{
 			"wan": {"wan0"},
 			"lan": {"lan0"},
@@ -479,12 +473,13 @@ func TestCompileFirewallNATChains(t *testing.T) {
 	if !strings.Contains(ruleset, "chain prerouting") {
 		t.Fatalf("missing prerouting chain:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, `iifname @zone_77616e ip saddr { 198.51.100.10, 203.0.113.0/24 } tcp dport 443 counter dnat ip to 10.0.0.10:8443`) {
+	if !strings.Contains(ruleset, `iifname "wan0" ip daddr @local4_77616e30 ip saddr { 198.51.100.10/32, 203.0.113.0/24 } tcp dport 443 counter ct mark set ct mark | 0x00000001 dnat ip to 10.0.0.10:8443`) {
 		t.Fatalf("missing prerouting DNAT rule:\n%s", ruleset)
 	}
-	if !strings.Contains(ruleset, `iifname @zone_77616e ct status dnat tcp dport 8443 ip saddr { 198.51.100.10, 203.0.113.0/24 } accept`) {
-		t.Fatalf("missing DNAT accept rule:\n%s", ruleset)
+	if strings.Contains(ruleset, "ct status dnat") {
+		t.Fatal("implicit DNAT permission survived")
 	}
+
 	if !strings.Contains(ruleset, "chain postrouting") {
 		t.Fatalf("missing postrouting chain:\n%s", ruleset)
 	}
@@ -587,20 +582,20 @@ func TestCompileEntryProtocolMatches(t *testing.T) {
 		proto rules.Protocol
 		want  string
 	}{
-		{"tcp port", rules.Protocol{Name: "tcp", Port: "502"}, "tcp dport 502 ip saddr { 172.30.0.4 } accept"},
-		{"tcp range", rules.Protocol{Name: "tcp", Port: "1-65535"}, "tcp dport 1-65535 ip saddr { 172.30.0.4 } accept"},
-		{"tcp no port", rules.Protocol{Name: "tcp"}, "meta l4proto tcp ip saddr { 172.30.0.4 } accept"},
-		{"udp port", rules.Protocol{Name: "udp", Port: "53"}, "udp dport 53 ip saddr { 172.30.0.4 } accept"},
-		{"udp no port", rules.Protocol{Name: "udp"}, "meta l4proto udp ip saddr { 172.30.0.4 } accept"},
-		{"icmp", rules.Protocol{Name: "icmp"}, "meta l4proto icmp ip saddr { 172.30.0.4 } accept"},
-		{"upper case", rules.Protocol{Name: "TCP"}, "meta l4proto tcp ip saddr { 172.30.0.4 } accept"},
+		{"tcp port", rules.Protocol{Name: "tcp", Port: "502"}, "tcp dport 502 ip saddr { 172.30.0.4 } goto ordered_s2_rule_0"},
+		{"tcp range", rules.Protocol{Name: "tcp", Port: "1-65535"}, "tcp dport 1-65535 ip saddr { 172.30.0.4 } goto ordered_s2_rule_0"},
+		{"tcp no port", rules.Protocol{Name: "tcp"}, "meta l4proto tcp ip saddr { 172.30.0.4 } goto ordered_s2_rule_0"},
+		{"udp port", rules.Protocol{Name: "udp", Port: "53"}, "udp dport 53 ip saddr { 172.30.0.4 } goto ordered_s2_rule_0"},
+		{"udp no port", rules.Protocol{Name: "udp"}, "meta l4proto udp ip saddr { 172.30.0.4 } goto ordered_s2_rule_0"},
+		{"icmp", rules.Protocol{Name: "icmp"}, "meta l4proto icmp ip saddr { 172.30.0.4 } goto ordered_s2_rule_0"},
+		{"upper case", rules.Protocol{Name: "TCP"}, "meta l4proto tcp ip saddr { 172.30.0.4 } goto ordered_s2_rule_0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := rules.Entry{ID: "r", Action: rules.ActionAllow, Sources: []string{"172.30.0.4"}, Protocols: []rules.Protocol{tc.proto}}
-			lines, err := compileEntryWithoutCounters(e, nil, 0, 0)
+			lines, err := headerLinesText(e, "goto ordered_s2_rule_0")
 			if err != nil {
-				t.Fatalf("compileEntry: %v", err)
+				t.Fatalf("headerLines: %v", err)
 			}
 			if len(lines) != 1 || lines[0] != tc.want {
 				t.Fatalf("lines = %q, want [%q]", lines, tc.want)
@@ -618,7 +613,7 @@ func TestCompileEntryRejectsInvalidProtocols(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := rules.Entry{ID: "r", Action: rules.ActionAllow, Protocols: []rules.Protocol{p}}
-			if lines, err := compileEntryWithoutCounters(e, nil, 0, 0); err == nil {
+			if lines, err := headerLinesText(e, "goto ordered_s2_rule_0"); err == nil {
 				t.Fatalf("expected error, got %q", lines)
 			}
 		})

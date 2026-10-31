@@ -316,7 +316,7 @@ func TestInlineSettleRejections(t *testing.T) {
 		want error
 	}{
 		{"invalid verdict", Resolution{Token: held, Verdict: 0}, ErrInvalidVerdict},
-		{"verdict out of range", Resolution{Token: held, Verdict: 3}, ErrInvalidVerdict},
+		{"verdict out of range", Resolution{Token: held, Verdict: 4}, ErrInvalidVerdict},
 		{"zero token", Resolution{Verdict: VerdictDrop}, ErrNotInline},
 		{"stale generation", Resolution{Token: old, Verdict: VerdictDrop}, ErrStaleToken},
 		{"unknown id", Resolution{Token: Token{gen: fx.gen.id, id: 99}, Verdict: VerdictDrop}, ErrUnknownToken},

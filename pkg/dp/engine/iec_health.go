@@ -18,14 +18,17 @@ type IEC104Enforcement struct {
 
 // Enforcement fault causes.
 const (
-	faultQueue    = "queue"
-	faultVerdict  = "verdict"
-	faultReset    = "reset"
-	faultInjector = "injector"
-	faultWorker   = "worker"
-	faultFraming  = "framing"
-	faultEnvelope = "envelope"
-	faultSteering = "steering"
+	faultQueue     = "queue"
+	faultVerdict   = "verdict"
+	faultReset     = "reset"
+	faultInjector  = "injector"
+	faultWorker    = "worker"
+	faultFraming   = "framing"
+	faultEnvelope  = "envelope"
+	faultSteering  = "steering"
+	faultAdmission = "admission_sweep"
+	faultGateZones = "gate_zone_sweep"
+	faultAddresses = "local_addresses"
 )
 
 // transientFaults clear when the inline source reports ready again; the
@@ -56,6 +59,11 @@ func newIECHealth(emit func(outcome, errText string)) *iecHealth {
 func (h *iecHealth) status() IEC104Enforcement {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	for _, cause := range []string{faultAdmission, faultGateZones, faultAddresses} {
+		if reason, ok := h.faults[cause]; ok {
+			return IEC104Enforcement{Active: h.active, Healthy: false, Reason: reason}
+		}
+	}
 	if h.active && len(h.faults) > 0 {
 		return IEC104Enforcement{Active: true, Healthy: false, Reason: h.reasonLocked()}
 	}

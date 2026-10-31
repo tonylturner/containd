@@ -4,7 +4,6 @@
 package enforce
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net"
@@ -13,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/florianl/go-nfqueue/v2"
 	"golang.org/x/sys/unix"
 
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -30,18 +28,24 @@ const (
 	qrWait   = 1500 * time.Millisecond // several retransmission timeouts
 )
 
-// TestKernelQueuedConditionalRecheck queues a Modbus ALLOW with an identity
-// to a consumer that accepts every packet, standing in for an engine that
-// admits every client message. Removing one opener's binding stops the
+// TestKernelQueuedConditionalRecheck queues conditional Modbus ALLOW and
+// DENY scopes to a synthetic admitting-repeat consumer. Removing one
+// opener's binding stops the
 // server's data on that opener's established connection, while the opener
 // still bound keeps its connection.
 func TestKernelQueuedConditionalRecheck(t *testing.T) {
+	for _, action := range []rules.Action{rules.ActionAllow, rules.ActionDeny} {
+		t.Run(string(action), func(t *testing.T) { testKernelQueuedConditionalRecheck(t, action) })
+	}
+}
+
+func testKernelQueuedConditionalRecheck(t *testing.T, action rules.Action) {
 	lab := newNetnsLab(t, "qrc", 150, 90*time.Second)
 	lab.run(t, "ip", "-n", lab.client, "route", "add", "198.18.160.0/24", "via", "198.18.150.1")
 	lab.run(t, "ip", "-n", lab.target, "route", "add", "198.18.150.0/24", "via", "198.18.160.1")
 	revoked, kept := "198.18.150.2", "198.18.150.3"
 	lab.run(t, "ip", "-n", lab.client, "addr", "add", kept+"/24", "dev", "qrcp0")
-	acceptQueue(t, lab.ctx, qrQueue)
+	repeatPolicyQueue(t, lab.ctx, qrQueue, false)
 	echoInNetns(t, lab.target, net.JoinHostPort(qrServer, strconv.Itoa(qrPort)))
 
 	snap := &rules.Snapshot{
@@ -51,7 +55,7 @@ func TestKernelQueuedConditionalRecheck(t *testing.T) {
 			{IP: kept, Identities: []string{"ops"}},
 		},
 		Firewall: []rules.Entry{{ID: "modbus-ops", Protocols: []rules.Protocol{{Name: "tcp", Port: strconv.Itoa(qrPort)}},
-			ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}, Identities: []string{"ops"}, Action: rules.ActionAllow}},
+			ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}, Identities: []string{"ops"}, Action: action}},
 	}
 	c := NewCompiler()
 	c.QueueID = qrQueue
@@ -72,32 +76,6 @@ func TestKernelQueuedConditionalRecheck(t *testing.T) {
 	}
 	if err := roundTrip(b); err != nil {
 		t.Fatalf("connection of the opener still bound: %v", err)
-	}
-}
-
-// acceptQueue accepts every packet queued to queue until the test ends.
-func acceptQueue(t *testing.T, ctx context.Context, queue uint16) {
-	t.Helper()
-	nf, err := nfqueue.Open(&nfqueue.Config{NfQueue: queue, MaxPacketLen: 128, MaxQueueLen: 256, Copymode: nfqueue.NfQnlCopyPacket})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runCtx, cancel := context.WithCancel(ctx)
-	t.Cleanup(func() { cancel(); _ = nf.Close() })
-	accept := func(a nfqueue.Attribute) int {
-		if a.PacketID != nil {
-			_ = nf.SetVerdict(*a.PacketID, nfqueue.NfAccept)
-		}
-		return 0
-	}
-	stopOnCancel := func(error) int {
-		if runCtx.Err() != nil {
-			return 1
-		}
-		return 0
-	}
-	if err := nf.RegisterWithErrorFunc(runCtx, accept, stopOnCancel); err != nil {
-		t.Fatal(err)
 	}
 }
 

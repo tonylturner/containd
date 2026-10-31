@@ -80,7 +80,7 @@ func TestEvaluatorRangeCrossingRead(t *testing.T) {
 		return EvalContext{ICS: &ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: 3, UnitID: &unit, Direction: "request",
 			Spans: []AddressSpan{span(first, last)}}}
 	}
-	allow := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{{
+	allow := NewEvaluator(&Snapshot{DPIMode: "enforce", Default: ActionDeny, Firewall: []Entry{{
 		ID: "allow", ICS: ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}, UnitID: &unit, Addresses: []string{"10-11"}}, Action: ActionAllow,
 	}}})
 	if got := allow.Evaluate(read(10, 11)); got != ActionAllow {
@@ -90,7 +90,7 @@ func TestEvaluatorRangeCrossingRead(t *testing.T) {
 		t.Fatalf("range-crossing read = %s, want DENY", got)
 	}
 
-	deny := NewEvaluator(&Snapshot{Default: ActionAllow, Firewall: []Entry{{
+	deny := NewEvaluator(&Snapshot{DPIMode: "enforce", Default: ActionAllow, Firewall: []Entry{{
 		ID: "deny", ICS: ICSPredicate{Protocol: "modbus", Addresses: []string{"100-199"}}, Action: ActionDeny,
 	}}})
 	if got := deny.Evaluate(read(90, 100)); got != ActionDeny {

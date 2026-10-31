@@ -44,11 +44,19 @@ func TestRuleModesOutboxRedeliversOnce(t *testing.T) {
 		}
 	}
 	rows, err := log.List(ctx, 100)
-	if err != nil || len(rows) != 1 || rows[0].Action != RuleModesKind {
+	if err != nil || len(rows) != 2 {
 		t.Fatal(rows, err)
 	}
+	kinds := map[string]bool{}
+	for _, row := range rows {
+		kinds[row.Action] = true
+	}
+	if !kinds[RuleModesKind] || !kinds[OrderedPolicyKind] {
+		t.Fatal("combined upgrade missing audit", rows)
+	}
 	evs, err := Events(ctx, s)
-	if err != nil || len(evs) != 1 || evs[0].Kind != RuleModesKind || evs[0].Attributes["bank"] != "candidate" {
+	if err != nil || len(evs) != 2 || evs[0].Kind != RuleModesKind || evs[0].Attributes["bank"] != "candidate" ||
+		evs[1].Kind != OrderedPolicyKind || evs[1].Attributes["bank"] != "candidate" {
 		t.Fatal(evs, err)
 	}
 }
