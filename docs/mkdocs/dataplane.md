@@ -60,6 +60,54 @@ For enablement, privileges, capture modes, and failure limits, see
 [Enforcement](dataplane-enforcement.md). For staging and commit semantics, see
 [Policy Model](policy-model.md).
 
+## Interface address ownership and upgrades
+
+Commit, rollback, restart replay, and periodic/event reconciliation add desired
+interface addresses and remove only stale addresses created by containd.
+An identical existing address satisfies intent without becoming owned. Docker
+and other foreign primary and secondary addresses remain, as do IPv6 link-local
+addresses and the reserved management device. Removing the last static address
+or its interface binding also removes stale owned addresses. Deletion precedes
+addition; while deleting IPv4 addresses, containd temporarily enables
+`promote_secondaries` on that device and restores its previous value afterward.
+This prevents deleting an owned primary from implicitly deleting foreign or
+desired same-subnet secondaries. Failure to enable promotion prevents deletion.
+
+Ownership uses one persisted set, `/data/interface-addresses.json`, overridden
+by `CONTAIND_ADDRESS_STATE_PATH`. Keep this engine path writable and persistent;
+read/decode/write failures are reported, not treated as an empty set. Records
+identify kernel boot, network namespace, device name, index, MAC, and host CIDR.
+They survive an engine process restart in the same namespace; a new boot or
+container network namespace starts with no owned addresses. Run one engine per
+namespace with a separate state path. Do not edit the set or externally reuse a
+recorded address tuple while containd owns it; remove it through configuration
+first. The set is ownership authority, not an inventory of all live addresses.
+
+The persisted set works for both IP families without requiring newer address
+protocol attributes or IPv4-only labels. It does not raise the Linux kernel
+requirement of Docker/WSL deployments. `IFA_PROTO` exists in Linux 5.19, but the
+deployment requirements do not guarantee that kernel floor, and address labels
+do not cover IPv6. Secondary promotion exists since Linux 2.6.12; containd writes
+it through the per-device rtnetlink API (present in Linux 2.6.39), not `/proc/sys`,
+which Docker normally mounts read-only. Only a successful exclusive address
+creation is recorded. An interrupted creation before its durable save leaves an
+unowned address. Ownership is revoked
+durably before deletion; interruption or a deletion failure in that window can
+also leave an unowned address. These conservative cases require inspection and
+explicit repair, rather than risking deletion of another owner's address.
+
+Addresses installed by **0.1.36 and earlier** have no ownership records. They
+remain unowned on upgrade, even if they match running configuration. Inspect
+legacy addresses in the appliance namespace and remove only individually
+verified stale containd addresses, or recreate the container namespace through
+normal deployment procedures. Never flush Docker or management addressing.
+
+The admin-only `POST /api/v1/interfaces/reconcile`, with
+`{"confirm":"REPLACE"}`, is the explicit destructive repair operation. It removes
+unmatched **foreign and owned** addresses only on configured interfaces declaring
+addresses, while preserving link-local addresses and the reserved management
+device. Routine reconciliation never requests this mode.
+
 ## Routing ownership and upgrades
 
 Every routing apply, including commit, rollback, restart replay, periodic

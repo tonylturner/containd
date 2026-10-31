@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Routine interface apply and reconciliation remove only stale addresses
+  containd created, preserving Docker/foreign primary and secondary addresses,
+  IPv6 link-local addresses and the reserved management device. Address ownership
+  persists across engine process restarts; unmarked addresses from 0.1.36 and
+  earlier remain unowned on upgrade. Destructive replacement remains an explicit
+  administrator operation. See [address ownership and upgrades](docs/mkdocs/dataplane.md#interface-address-ownership-and-upgrades).
+
 ## [0.1.36] - 2026-10-31
 
 ### Upgrade notes
