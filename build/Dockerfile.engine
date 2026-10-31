@@ -40,7 +40,8 @@ LABEL org.opencontainers.image.title="containd-engine" \
 
 COPY --from=builder /out/containd /usr/bin/containd
 # The engine needs CONTAIND_ENGINE_ADDR set to its address on the management
-# network; it refuses loopback or wildcard listeners in engine mode.
+# network and CONTAIND_ENGINE_SECRET for mutual TLS. It refuses loopback or
+# wildcard listeners in engine mode, except reserved shared-namespace loopback.
 EXPOSE 8081
 ENTRYPOINT ["/usr/bin/containd"]
 CMD ["engine"]

@@ -26,6 +26,7 @@ import (
 	mgmtapp "github.com/tonylturner/containd/pkg/app/mgmt"
 	"github.com/tonylturner/containd/pkg/cli"
 	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/enginetransport"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -75,6 +76,12 @@ func main() {
 		err = mgmtapp.Run(ctx, mgmtapp.Options{Reservation: reservation, Reload: reloads})
 	case "engine":
 		err = engineapp.Run(ctx, engineapp.Options{Reservation: reservation})
+	case "enginecredentials":
+		args := os.Args[1:]
+		if len(args) > 0 {
+			args = args[1:]
+		}
+		err = runEngineCredentials(args)
 	case "version":
 		fmt.Printf("containd %s (%s)\n", config.BuildVersion, config.BuildCommit)
 		return
@@ -87,7 +94,7 @@ func main() {
 		}
 		return
 	default:
-		err = fmt.Errorf("unknown mode %q (expected all|mgmt|engine|cli|version|healthcheck)", mode)
+		err = fmt.Errorf("unknown mode %q (expected all|mgmt|engine|cli|version|healthcheck|enginecredentials)", mode)
 	}
 	if err != nil {
 		if exitCode(ctx, err) == 0 {
@@ -362,4 +369,11 @@ func runAll(ctx context.Context, reservation *mgmtpath.Reservation, reloads <-ch
 		firstErr = err
 	}
 	return firstErr
+}
+
+func runEngineCredentials(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: containd enginecredentials DIRECTORY (existing directory; files must not exist)")
+	}
+	return enginetransport.Export(args[0])
 }

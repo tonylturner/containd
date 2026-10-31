@@ -184,13 +184,21 @@ unreachable from untrusted networks.
 
 ## Engine API Trust Boundary
 
-The engine HTTP API is **unauthenticated**. Management authentication and MFA do
-not protect direct engine requests. It must be reachable only by the management
-process or through a trusted private network, never by untrusted clients.
+The engine API is privileged and separate from management authentication/MFA.
+Numeric loopback listeners retain credential-free plaintext HTTP. Every other
+listener (including wildcard and `localhost`) requires TLS 1.3 mutual
+authentication derived from one dedicated `CONTAIND_ENGINE_SECRET`, even in lab
+mode or without enforcement. Management refuses remote plaintext and redirects.
 
 Combined mode (`containd all`) defaults to `127.0.0.1:8081`. Split engine mode
-(`containd engine`) defaults to `:8081` so a separate management container can
-reach it. `CONTAIND_ENGINE_ADDR` overrides these defaults; a wildcard override
-in combined mode broadens exposure too. Do not publish the engine port to
-untrusted networks. An unpublished Docker port can still be reachable by peers
-on attached networks; Docker network attachment is part of this trust boundary.
+has no default: set `CONTAIND_ENGINE_ADDR` to an interface-held management-network
+address and management's URL to `https://` with the same secret on both peers.
+Shared-namespace reserved deployments require loopback instead. Keep the network
+private; firewall admission and Docker isolation remain defense in depth.
+
+Every holder of the engine secret can act as either peer; exported client keys
+can call every engine route. Rotate by changing both peers and restarting both,
+then replace scraper credentials. Namespace-local peers and host/root-controlled
+forwarding are trusted for loopback; exposing it through a proxy is unsupported.
+Host networking makes loopback host-wide. See the
+[transport and rotation guide](docs/mkdocs/docker-compose.md#engine-secret-and-rotation).

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,9 +17,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	engineapi "github.com/tonylturner/containd/api/engine"
 	httpapi "github.com/tonylturner/containd/api/http"
 	engineapp "github.com/tonylturner/containd/pkg/app/engine"
 	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/enginetransport"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/audit"
@@ -27,43 +30,59 @@ import (
 	"go.uber.org/zap"
 )
 
-func resolveEngineURL(logger *zap.SugaredLogger, opts Options) string {
-	engineURL := common.EnvTrimmed("CONTAIND_ENGINE_URL", "")
-	if engineURL == "" && (opts.Combined || opts.Reservation != nil) {
-		engineAddr := engineapp.ListenAddr(opts.Combined)
-		if derived, ok := localEngineURL(engineAddr); ok {
-			engineURL = derived
-			logger.Infof("CONTAIND_ENGINE_URL not set; using local engine URL %q for combined mode", engineURL)
+func resolveEngineURL(logger *zap.SugaredLogger, opts Options) (*enginetransport.Target, error) {
+	raw := common.EnvTrimmed("CONTAIND_ENGINE_URL", "")
+	inProcess := opts.Combined || opts.Reservation != nil
+	addr := engineapp.ListenAddr(opts.Combined)
+	if inProcess {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CONTAIND_ENGINE_ADDR for CONTAIND_ENGINE_URL")
+		}
+		if !enginetransport.LocalHost(host) && strings.HasPrefix(strings.ToLower(raw), "http://") {
+			return nil, fmt.Errorf("CONTAIND_ENGINE_URL must use HTTPS when CONTAIND_ENGINE_ADDR is non-loopback")
 		}
 	}
-	if engineURL == "" {
-		return ""
+	if raw == "" && inProcess {
+		derived, ok := localEngineURL(addr)
+		if !ok {
+			return nil, fmt.Errorf("invalid CONTAIND_ENGINE_ADDR for deriving CONTAIND_ENGINE_URL")
+		}
+		raw = derived
 	}
-	if !strings.Contains(engineURL, "://") {
-		engineURL = "http://" + engineURL
-		logger.Warnf("CONTAIND_ENGINE_URL missing scheme; using %q", engineURL)
+	if raw == "" {
+		return nil, nil
 	}
-	return engineURL
+	target, err := enginetransport.Resolve(raw)
+	if err != nil {
+		return nil, err
+	}
+	host, _, _ := net.SplitHostPort(addr)
+	if inProcess && !enginetransport.LocalHost(host) && strings.HasPrefix(target.URL(), "http://") {
+		return nil, fmt.Errorf("CONTAIND_ENGINE_URL must use HTTPS when CONTAIND_ENGINE_ADDR is non-loopback")
+	}
+	logger.Debug("engine transport target validated")
+	return target, nil
 }
 
 func localEngineURL(addr string) (string, bool) {
-	addr = strings.TrimSpace(addr)
-	if addr == "" {
-		return "", false
-	}
-	if strings.Count(addr, ":") == 0 {
-		return "http://" + net.JoinHostPort("127.0.0.1", addr), true
-	}
-	host, port, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(strings.TrimSpace(addr))
 	if err != nil {
 		return "", false
 	}
-	host = strings.Trim(host, "[]")
-	switch host {
-	case "", "0.0.0.0", "::":
-		host = "127.0.0.1"
+	scheme := "https"
+	if enginetransport.LocalHost(host) {
+		scheme = "http"
 	}
-	return "http://" + net.JoinHostPort(host, port), true
+	if host == "" {
+		host = "127.0.0.1"
+	} else if a, err := netip.ParseAddr(host); err == nil && a.Unmap().IsUnspecified() {
+		host = "127.0.0.1"
+		if a.Unmap().Is6() {
+			host = "::1"
+		}
+	}
+	return scheme + "://" + net.JoinHostPort(host, port), true
 }
 
 func startDHCPLeaseAuditIngestor(ctx context.Context, logger *zap.SugaredLogger, engineClient any, auditStore audit.Store) {
@@ -343,17 +362,20 @@ func validateReservedStartup(cfg *config.Config, r *mgmtpath.Reservation) error 
 
 // No management-owned service may start until the engine has subscribed and
 // completed its initial guard scan. This also orders split-process startup.
-func waitForReservedEngine(ctx context.Context, base string, r *mgmtpath.Reservation) error {
+func waitForReservedEngine(ctx context.Context, client *engineapi.HTTPClient, r *mgmtpath.Reservation) error {
 	if r == nil {
 		return nil
 	}
-	u, err := url.Parse(base)
+	if client == nil {
+		return fmt.Errorf("reserved management path requires an engine target")
+	}
+	u, err := url.Parse(client.BaseURL)
 	if err != nil || u.Scheme != "http" || r.ValidateEngineBind(u.Host) != nil {
 		return fmt.Errorf("reserved management path requires a loopback HTTP engine URL")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	health := managementGuardHealth(base)
+	health := managementGuardHealth(client)
 	var last error
 	for {
 		h, err := health(ctx)

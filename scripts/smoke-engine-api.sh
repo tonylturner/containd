@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Sourced by the smoke scripts. While enforcing, the engine admits its
-# unauthenticated API only from loopback (and from the address it is bound to
-# in split mode), so the harnesses call it from inside the firewall container
+# API only from loopback (and from the address it is bound to in split mode).
+# The harnesses use the credential-free loopback path inside the firewall container
 # with the caller's `compose` function, never through a published port.
 
 # engine_api SERVICE PATH OUT [CURL_ARG...] calls the engine API in the

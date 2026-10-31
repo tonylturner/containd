@@ -6,17 +6,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
+	engineapi "github.com/tonylturner/containd/api/engine"
 	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 )
 
-func managementGuardHealth(base string) httpapi.ManagementGuardHealth {
-	client := &http.Client{Timeout: time.Second}
+func managementGuardHealth(engine *engineapi.HTTPClient) httpapi.ManagementGuardHealth {
+	if engine == nil {
+		return nil
+	}
+	client := *engine.Client
+	client.Timeout = time.Second
 	return func(ctx context.Context) (netcfg.ManagementHealth, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/health", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, engine.BaseURL+"/health", nil)
 		if err != nil {
 			return netcfg.ManagementHealth{}, err
 		}

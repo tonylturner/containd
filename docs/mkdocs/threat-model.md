@@ -50,26 +50,38 @@ The UI uses cookie-backed auth for normal use. Unsafe browser writes are constra
 ### Management Plane to Dataplane
 
 The management service validates, stages, and commits policy, then pushes a
-runtime snapshot to the engine. The engine API is an **unauthenticated privileged
-control interface**, not protected by the management `/api/v1` authentication or
-RBAC middleware. Access permits runtime policy/configuration mutation.
+runtime snapshot to the engine. This privileged API permits policy/configuration
+mutation and is separate from management `/api/v1` authentication and RBAC.
 
-In combined mode (`containd all`), its default bind is `127.0.0.1:8081`. Split
-mode (`containd engine`) has no default: `CONTAIND_ENGINE_ADDR` must name the
-engine's address on the management network, and the engine refuses to start
-with a loopback or wildcard listener. The
-[reserved management profile](management-reservation.md) is the exception: it
-runs both processes in one network namespace and requires a loopback engine
-bind.
+Numeric loopback listeners retain credential-free plaintext HTTP. Namespace-local
+peers and host/root-controlled forwarding are trusted on this path. Exposing it
+through a proxy is unsupported. With `network_mode: host`, loopback is host-wide,
+not container-private. Combined mode defaults to `127.0.0.1:8081`;
+[reserved management](management-reservation.md) requires shared-namespace
+loopback too. Split engines otherwise require an interface-held management-network
+address; they have no default and refuse wildcard/loopback binds.
 
-While enforcing, the input chain admits the engine API from loopback and, for a
-listener bound to one address, only on that address's own interface; no other
-zone reaches it, not even by routing to that address, and revocations never cut
-that path. Without enforcement nothing filters it, so every network that can
-route to the listener reaches it. Only the management process or a trusted
-private network may reach this listener: never publish or route it to an
-untrusted network. Container-network isolation and bind configuration remain
-part of the security boundary.
+Every non-loopback listener (including wildcard and `localhost`) requires TLS 1.3
+mutual authentication derived from `CONTAIND_ENGINE_SECRET`, even without
+enforcement or in lab mode. All routes, probes, metrics, redirects and unknown
+paths are behind the handshake. Management refuses remote plaintext, redirects
+and cross-origin requests; there is no plaintext fallback. See
+[engine transport and scraper setup](docker-compose.md#engine-secret-and-rotation).
+
+The dedicated engine secret lives in both containers' environments and can be
+read through `docker inspect` or `/proc/<pid>/environ` by sufficiently privileged
+actors. Every holder can act as **either peer** and call every route. Deterministic
+Ed25519 certificates and standard X.509 verification trade per-host identity and
+independent revocation for one-secret operation. Fixed 2020–9999 validity makes
+rotation, not expiry, the revocation mechanism: change both peers and restart
+both; replace exported scraper keys. No dual-secret window is supported.
+
+While enforcing, firewall input admits the API from loopback and, for a bound
+interface address, only on that address's own interface. Without enforcement,
+every network routing to the listener reaches its TLS handshake. Keep the engine
+network private and do not publish it to untrusted networks. Container-network
+isolation and bind configuration remain defense in depth; host/root compromise
+and secret holders are outside this transport boundary.
 
 ### Dataplane to Traffic
 

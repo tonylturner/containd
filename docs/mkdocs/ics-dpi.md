@@ -1225,8 +1225,13 @@ management run in one process and share the Prometheus registry. Scrape the
 management listener's `/metrics` for `containd_dp_iec104_*` gauges and counters;
 the engine API stays on `127.0.0.1:8081` by default. With separate `engine` and
 `mgmt` processes, scrape the engine listener's `/metrics` for dataplane pressure;
-the management process has its own registry. The engine API is unauthenticated:
-keep any split-mode listener on a trusted private network. Metric registration
+the management process has its own registry. Non-loopback engine metrics require
+mutual TLS. Export credentials with `containd enginecredentials DIRECTORY` and
+configure Prometheus `ca_file`, `cert_file`, `key_file` and
+`server_name: containd-engine` as shown in the
+[Compose guide](docker-compose.md#diagnostics-and-metrics-credentials). Keep the
+network private and the exported client key secret: it authorizes every engine
+route until rotation. Metric registration
 happens once per process, not once per listener. The series have no
 station/session/IP/CA/IOA labels; only the abort counter has a fixed `reason` label.
 

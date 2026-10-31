@@ -76,7 +76,7 @@ if [[ -n "${engine_map}" ]]; then
   if [[ "${engine_map%:*}" == "0.0.0.0" ]]; then
     engine_map="localhost:${engine_map##*:}"
   fi
-  echo "Engine API (host published): http://${engine_map}"
+  echo "Engine API (host published): ${engine_map} (non-loopback listeners require mutual TLS; see the Compose guide)"
 else
   echo "Engine API (host published): not published (8081 mapping disabled by default)"
 fi

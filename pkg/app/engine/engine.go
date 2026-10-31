@@ -6,6 +6,7 @@ package engineapp
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tonylturner/containd/pkg/common"
+	"github.com/tonylturner/containd/pkg/common/enginetransport"
 	"github.com/tonylturner/containd/pkg/common/logging"
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
@@ -90,6 +92,10 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("engine listener: %w", err)
 	}
 	apiPath, err := engineListener(addr, opts.Combined, opts.Reservation, nics)
+	if err != nil {
+		return err
+	}
+	tlsConfig, err := enginetransport.ListenerTLS(addr)
 	if err != nil {
 		return err
 	}
@@ -255,10 +261,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/simulation", simulationHandler(simMgr))
 
 	logger.Infof("containd engine starting on %s", addr)
-	server := &http.Server{
-		Addr:    addr,
-		Handler: mux,
-	}
+	server := engineServer(addr, mux, tlsConfig)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -268,7 +271,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := serveEngine(server, listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
@@ -280,4 +283,18 @@ func Run(ctx context.Context, opts Options) error {
 	case err := <-errCh:
 		return fmt.Errorf("engine server exited: %w", err)
 	}
+}
+
+// engineServer is the single assembly point for all registration families.
+func engineServer(addr string, handler http.Handler, config *tls.Config) *http.Server {
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	return &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, TLSConfig: config, Protocols: protocols}
+}
+
+func serveEngine(server *http.Server, listener net.Listener) error {
+	if server.TLSConfig != nil {
+		return server.ServeTLS(listener, "", "")
+	}
+	return server.Serve(listener)
 }

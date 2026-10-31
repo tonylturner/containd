@@ -5,6 +5,7 @@ package mgmtapp
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"os"
@@ -19,83 +20,82 @@ import (
 )
 
 func TestLocalEngineURL(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		addr string
-		want string
-		ok   bool
-	}{
-		{name: "default port", addr: ":8081", want: "http://127.0.0.1:8081", ok: true},
-		{name: "bare port", addr: "8081", want: "http://127.0.0.1:8081", ok: true},
-		{name: "ipv4 any", addr: "0.0.0.0:8081", want: "http://127.0.0.1:8081", ok: true},
-		{name: "ipv6 any", addr: "[::]:8081", want: "http://127.0.0.1:8081", ok: true},
-		{name: "ipv4 loopback", addr: "127.0.0.1:8081", want: "http://127.0.0.1:8081", ok: true},
-		{name: "ipv6 loopback", addr: "[::1]:8081", want: "http://[::1]:8081", ok: true},
-		{name: "empty", addr: "", want: "", ok: false},
+	for _, tc := range []struct{ addr, want string }{
+		{":8081", "https://127.0.0.1:8081"},
+		{"0.0.0.0:8081", "https://127.0.0.1:8081"},
+		{"[::]:8081", "https://[::1]:8081"},
+		{"[0:0:0:0:0:0:0:0]:8081", "https://[::1]:8081"},
+		{"[::ffff:0.0.0.0]:8081", "https://127.0.0.1:8081"},
+		{"127.0.0.1:8081", "http://127.0.0.1:8081"},
+		{"[::1]:8081", "http://[::1]:8081"},
+		{"192.0.2.1:8081", "https://192.0.2.1:8081"},
+		{"localhost:8081", "https://localhost:8081"},
+	} {
+		got, ok := localEngineURL(tc.addr)
+		if !ok || got != tc.want {
+			t.Fatalf("%s: got %s, %t", tc.addr, got, ok)
+		}
 	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got, ok := localEngineURL(tt.addr)
-			if ok != tt.ok {
-				t.Fatalf("localEngineURL(%q) ok=%v, want %v", tt.addr, ok, tt.ok)
-			}
-			if got != tt.want {
-				t.Fatalf("localEngineURL(%q)=%q, want %q", tt.addr, got, tt.want)
-			}
-		})
+	if _, ok := localEngineURL(""); ok {
+		t.Fatal("empty listener accepted")
 	}
 }
 
 func TestResolveEngineURL(t *testing.T) {
-	logger := zap.NewNop().Sugar()
-
-	t.Run("uses explicit env and normalizes scheme", func(t *testing.T) {
-		t.Setenv("CONTAIND_ENGINE_URL", "127.0.0.1:8081")
-		got := resolveEngineURL(logger, Options{})
-		if got != "http://127.0.0.1:8081" {
-			t.Fatalf("resolveEngineURL explicit env=%q, want %q", got, "http://127.0.0.1:8081")
-		}
-	})
-
-	t.Run("derives loopback url in combined mode", func(t *testing.T) {
-		t.Setenv("CONTAIND_ENGINE_URL", "")
-		t.Setenv("CONTAIND_ENGINE_ADDR", "")
-		t.Setenv("NGFW_ENGINE_ADDR", "")
-		got := resolveEngineURL(logger, Options{Combined: true})
-		if got != "http://127.0.0.1:8081" {
-			t.Fatalf("resolveEngineURL combined=%q, want %q", got, "http://127.0.0.1:8081")
-		}
-	})
-
-	t.Run("derives explicit combined listener", func(t *testing.T) {
-		t.Setenv("CONTAIND_ENGINE_URL", "")
-		t.Setenv("CONTAIND_ENGINE_ADDR", "127.0.0.1:9091")
-		if got := resolveEngineURL(logger, Options{Combined: true}); got != "http://127.0.0.1:9091" {
-			t.Fatalf("resolveEngineURL override = %q", got)
-		}
-	})
-
-	t.Run("preserves explicit combined URL", func(t *testing.T) {
-		t.Setenv("CONTAIND_ENGINE_URL", "http://127.0.0.1:8081")
-		t.Setenv("CONTAIND_ENGINE_ADDR", "")
-		if got := resolveEngineURL(logger, Options{Combined: true}); got != "http://127.0.0.1:8081" {
-			t.Fatalf("resolveEngineURL explicit combined = %q", got)
-		}
-	})
-
-	t.Run("leaves mgmt only unset when env missing", func(t *testing.T) {
-		t.Setenv("CONTAIND_ENGINE_URL", "")
-		t.Setenv("CONTAIND_ENGINE_ADDR", ":8081")
-		got := resolveEngineURL(logger, Options{})
-		if got != "" {
-			t.Fatalf("resolveEngineURL mgmt-only=%q, want empty", got)
-		}
-	})
+	secret := hex.EncodeToString([]byte("public engine transport test key"))
+	for _, tc := range []struct {
+		name, raw, addr, legacy, secret, want string
+		combined, bad                         bool
+	}{
+		{name: "normalize local", raw: "127.0.0.1:8081", want: "http://127.0.0.1:8081"},
+		{name: "default combined", combined: true, want: "http://127.0.0.1:8081"},
+		{name: "wildcard", combined: true, addr: ":8081", secret: secret, want: "https://127.0.0.1:8081"},
+		{name: "v6 wildcard", combined: true, addr: "[::]:8081", secret: secret, want: "https://[::1]:8081"},
+		{name: "interface", combined: true, addr: "192.0.2.1:8081", secret: secret, want: "https://192.0.2.1:8081"},
+		{name: "legacy remote addr", combined: true, legacy: ":8081", secret: secret, want: "https://127.0.0.1:8081"},
+		{name: "legacy local addr", combined: true, legacy: "127.0.0.1:9091", want: "http://127.0.0.1:9091"},
+		{name: "localhost needs secret", combined: true, addr: "localhost:8081", bad: true},
+		{name: "localhost TLS", combined: true, addr: "localhost:8081", secret: secret, want: "https://localhost:8081"},
+		{name: "explicit plaintext mismatch", combined: true, addr: ":8081", secret: secret, raw: "http://127.0.0.1:8081", bad: true},
+		{name: "unused invalid secret", combined: true, secret: "invalid", want: "http://127.0.0.1:8081"},
+		{name: "mgmt only unset", addr: ":8081"},
+		{name: "remote plaintext", raw: "http://192.0.2.1:8081", bad: true},
+		{name: "remote schemeless", raw: "192.0.2.1:8081", bad: true},
+		{name: "https needs secret", raw: "https://127.0.0.1:8081", bad: true},
+		{name: "https with secret", raw: "https://engine:8081", secret: secret, want: "https://engine:8081"},
+		{name: "credentials", raw: "http://user:pass@127.0.0.1:8081", bad: true},
+		{name: "path", raw: "http://127.0.0.1:8081/", bad: true},
+		{name: "query", raw: "http://127.0.0.1:8081?x", bad: true},
+		{name: "fragment", raw: "http://127.0.0.1:8081#x", bad: true},
+		{name: "unix", raw: "unix:///tmp/engine", bad: true},
+		{name: "port", raw: "http://127.0.0.1:65536", bad: true},
+		{name: "missing host", raw: "http://:8081", bad: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CONTAIND_ENGINE_URL", tc.raw)
+			t.Setenv("NGFW_ENGINE_URL", "")
+			t.Setenv("CONTAIND_ENGINE_ADDR", tc.addr)
+			t.Setenv("NGFW_ENGINE_ADDR", tc.legacy)
+			t.Setenv("CONTAIND_ENGINE_SECRET", tc.secret)
+			target, err := resolveEngineURL(zap.NewNop().Sugar(), Options{Combined: tc.combined})
+			if (err != nil) != tc.bad {
+				t.Fatalf("target %v err %v", target, err)
+			}
+			if err != nil {
+				if tc.name == "explicit plaintext mismatch" && (!strings.Contains(err.Error(), "CONTAIND_ENGINE_ADDR") || !strings.Contains(err.Error(), "CONTAIND_ENGINE_URL")) {
+					t.Fatal(err)
+				}
+				return
+			}
+			got := ""
+			if target != nil {
+				got = target.URL()
+			}
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestValidateJWTSecret(t *testing.T) {

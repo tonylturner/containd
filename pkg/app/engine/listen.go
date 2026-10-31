@@ -32,8 +32,8 @@ func ListenAddr(combined bool) string {
 const splitListenerHint = "set CONTAIND_ENGINE_ADDR to this engine's address on the management network, for example 192.0.2.10:8081"
 
 // engineListener checks the engine API listener addr and returns the path
-// enforcement admits to it besides loopback. The API is unauthenticated, so a
-// split-mode engine must bind the one address management uses to reach it:
+// enforcement admits to it besides loopback. Remote listeners require mutual
+// TLS; split-mode engines must still bind the address management uses to reach it:
 // a wildcard listener would serve every zone without enforcement and only
 // loopback with it, and a loopback listener is out of reach of a management
 // process elsewhere. The exception is a reserved management path, which puts
