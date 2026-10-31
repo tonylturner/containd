@@ -551,7 +551,8 @@ components:
 
         IEC 60870-5-104 (`protocol: iec104`):
         - `typeIds`, `classes`, `ca`, `ioa`, `cot`, `originators`,
-          `negative`, `test` and `selectExecute` are iec104-only. `null`, `[]`
+          `negative`, `test`, `selectExecute`, `commandStates` and
+          `commandQualifiers` are iec104-only. `null`, `[]`
           and null items are rejected; omit the field to match any value.
           Numbers must be JSON integers.
         - `functionCode`, `unitId`, `addresses`, `objectClasses` and
@@ -667,6 +668,8 @@ components:
         negative: {type: boolean, description: "IEC104 exact P/N bit; false is a restriction"}
         test: {type: boolean, description: "IEC104 exact T bit; false is a restriction"}
         selectExecute: {type: string, enum: [select, execute], description: "IEC104 S/E qualifier; typeIds omitted or subset of 45-50 and 58-63, excluding bitstrings 51/64"}
+        commandStates: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 2}, description: "IEC104 SCS/DCS/RCS; requires typeIds wholly in 45/58 (states 0..1) or 46/47/59/60 (states 1..2). Mixed state domains rejected. Omit to match any; absent packet field never matches."}
+        commandQualifiers: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 31}, description: "IEC104 QU bits 2-6; requires explicit typeIds subset of 45,46,47,58,59,60. Omit to match any; absent packet field never matches."}
         tags:
           type: array
           minItems: 1
@@ -3200,6 +3203,8 @@ components:
         negative: {type: boolean}
         test: {type: boolean}
         selectExecute: {type: string, enum: [select, execute]}
+        commandStates: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 2}, description: "IEC104 SCS/DCS/RCS; requires typeIds wholly in 45/58 (states 0..1) or 46/47/59/60 (states 1..2). Mixed state domains rejected. Omit to match any; absent packet field never matches."}
+        commandQualifiers: {type: array, minItems: 1, items: {type: integer, minimum: 0, maximum: 31}, description: "IEC104 QU bits 2-6; requires explicit typeIds subset of 45,46,47,58,59,60. Omit to match any; absent packet field never matches."}
         tags: {type: array, minItems: 1, items: {type: string}, description: "CIP symbolic selectors; logical targets never match"}
       type: object
     RulesIDSCondition:
