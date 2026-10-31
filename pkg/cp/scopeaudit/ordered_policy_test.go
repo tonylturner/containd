@@ -88,3 +88,63 @@ func TestForwardWarningsDurableAtUpgradeAndPublish(t *testing.T) {
 		})
 	}
 }
+
+func TestIndustrialAndOrderedEventsCoexist(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := config.NewSQLiteStore(filepath.Join(dir, "config.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c := config.DefaultConfig()
+	c.SchemaVersion = "0.1.7"
+	for i := range c.IDS.Rules {
+		if c.IDS.Rules[i].Proto == "cip" {
+			c.IDS.Rules[i].Proto = "enip"
+		}
+	}
+	// Historical stock content must remain independent of today's catalog.
+	c.IDS.Rules = append(c.IDS.Rules, config.IDSRule{
+		ID: "IDS-S7-001", Title: "S7comm PLC Stop",
+		Description: "S7comm Stop CPU (FC 0x29) halts PLC program execution.",
+		Proto:       "s7comm", Severity: "critical", Message: "S7comm PLC stop command detected",
+		When:   config.IDSCondition{Field: "attr.function_code", Op: "equals", Value: float64(0x29)},
+		Labels: map[string]string{"mitre": "T0881", "category": "ics"},
+	})
+	if err := s.Save(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	running, err := s.Load(ctx)
+	if err != nil || len(running.IDS.Rules) != len(config.DefaultIDSConfig().Rules) {
+		t.Fatal("stock IDS bank did not migrate", running, err)
+	}
+	log, err := audit.NewSQLiteStore(filepath.Join(dir, "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	for range 2 {
+		events, err := Publish(ctx, s, log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kinds := map[string]int{}
+		for _, event := range events {
+			kinds[event.Kind]++
+			if event.Kind == Kind {
+				if !reflect.DeepEqual(event.Attributes["removedRuleIds"], []string{"IDS-S7-001"}) ||
+					len(event.Attributes["updatedRuleIds"].([]string)) != 2 {
+					t.Fatal("industrial migration evidence lost", event)
+				}
+			}
+		}
+		if len(events) != 2 || kinds[Kind] != 1 || kinds[OrderedPolicyKind] != 1 {
+			t.Fatal("combined upgrade did not retain both event kinds", events)
+		}
+	}
+	rows, err := log.List(ctx, 100)
+	if err != nil || len(rows) != 2 {
+		t.Fatal("combined upgrade lost or duplicated audit records", rows, err)
+	}
+}
