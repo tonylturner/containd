@@ -26,6 +26,7 @@ type watchLease struct {
 	dropped  atomic.Uint64
 	inflight atomic.Int64
 	changed  atomic.Bool
+	token    engine.InspectionToken
 }
 type evidenceBatch struct {
 	lease       *watchLease
@@ -33,6 +34,8 @@ type evidenceBatch struct {
 	outcomes    []dpi.Event
 	barrier     chan error
 	collectedAt time.Time
+	state       *flow.State
+	events      []dpi.Event
 }
 type evidenceWatch struct {
 	mu         sync.Mutex
@@ -76,7 +79,6 @@ func newEvidenceWatch(ctx context.Context, store *sqlite.Store, e *engine.Engine
 	w := &evidenceWatch{queue: make(chan evidenceBatch, 64), done: make(chan struct{}), maintained: make(chan struct{}), store: store, engine: e}
 	go w.run(ctx)
 	go w.maintain(ctx)
-	e.SetLearnWatchHook(w.offer)
 	return w
 }
 func (w *evidenceWatch) fail(err error) {
@@ -104,51 +106,28 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 	if lease != w.active.Load() {
 		return
 	}
+
+	if w.engine.InspectionToken() != lease.token {
+		lease.changed.Store(true)
+		return
+	}
+	owned, ok := ownEvidenceEvents(events)
+	if !ok {
+		lease.dropped.Add(1)
+		return
+	}
+	var snapshot *flow.State
 	if state != nil {
-		metadata, err := evidenceMetadata(w.engine)
-		if err != nil || metadata.ProfileFingerprint != lease.dataset.ProfileFingerprint || metadata.SnapshotFingerprint != lease.dataset.SnapshotFingerprint {
-			lease.changed.Store(true)
-			return
-		}
-	}
-	data, err := json.Marshal(events)
-	if err != nil || len(data) > 1<<20 {
-		lease.dropped.Add(1)
-		return
-	}
-	var owned []dpi.Event
-	if err := json.Unmarshal(data, &owned); err != nil {
-		lease.dropped.Add(1)
-		return
-	}
-	for i := range owned {
-		owned[i].Connection = events[i].Connection
-	}
-	var parents []evidence.Observation
-	if state != nil {
-		serial := w.serial.Add(uint64(len(events))) - uint64(len(events))
-		parents, err = learn.Normalize(lease.dataset, state, owned, &serial)
-		if err != nil {
-			lease.dropped.Add(1)
-			return
-		}
-	}
-	var outcomes []dpi.Event
-	for _, ev := range owned {
-		if ev.Kind == "ics.decision" || ev.Kind == "ics.verdict" || ev.Kind == "evidence.delivery" {
-			outcomes = append(outcomes, ev)
-		}
-	}
-	size, err := json.Marshal(parents)
-	if err != nil || len(size) > 1<<20 || len(parents) > 128 {
-		lease.dropped.Add(1)
-		return
-	}
-	if len(parents) == 0 && len(outcomes) == 0 {
-		return
+		copy := *state
+		copy.Key.SrcIP = append([]byte(nil), state.Key.SrcIP...)
+		copy.Key.DstIP = append([]byte(nil), state.Key.DstIP...)
+		copy.Tags = nil
+		copy.Connection = flow.ConnectionSlot{}
+		copy.Connection.Store(state.Connection.Load())
+		snapshot = &copy
 	}
 	select {
-	case w.queue <- evidenceBatch{lease: lease, parents: parents, outcomes: outcomes, collectedAt: collectedAt}:
+	case w.queue <- evidenceBatch{lease: lease, state: snapshot, events: owned, collectedAt: collectedAt}:
 	default:
 		lease.dropped.Add(1)
 	}
@@ -167,6 +146,25 @@ func (w *evidenceWatch) run(ctx context.Context) {
 				join.flushAll()
 				batch.barrier <- w.err()
 			} else {
+				if batch.state != nil {
+					serial := w.serial.Add(uint64(len(batch.events))) - uint64(len(batch.events))
+					parents, err := learn.Normalize(batch.lease.dataset, batch.state, batch.events, &serial)
+					if err != nil {
+						batch.lease.dropped.Add(1)
+						continue
+					}
+					batch.parents = parents
+					data, err := json.Marshal(parents)
+					if err != nil || len(parents) > 128 || len(data) > (1<<20)-4096 {
+						batch.lease.dropped.Add(1)
+						continue
+					}
+				}
+				for _, ev := range batch.events {
+					if ev.Kind == "ics.decision" || ev.Kind == "ics.verdict" || ev.Kind == "evidence.delivery" {
+						batch.outcomes = append(batch.outcomes, ev)
+					}
+				}
 				join.accept(batch)
 			}
 		case <-ticker.C:
@@ -184,10 +182,7 @@ func (w *evidenceWatch) maintain(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if lease := w.active.Load(); lease != nil {
-				metadata, err := evidenceMetadata(w.engine)
-				if err != nil {
-					w.fail(err)
-				} else if metadata.ProfileFingerprint != lease.dataset.ProfileFingerprint || metadata.SnapshotFingerprint != lease.dataset.SnapshotFingerprint {
+				if w.engine.InspectionToken() != lease.token {
 					lease.changed.Store(true)
 				}
 				if lease.changed.Load() || !w.store.Clock().Before(lease.watch.Deadline) {
@@ -228,7 +223,17 @@ func (w *evidenceWatch) start(ctx context.Context, req evidence.StartWatchReques
 	if err != nil {
 		return watch, err
 	}
-	w.active.Store(&watchLease{dataset: ds, watch: watch})
+	inputs := w.engine.InspectionSnapshot()
+	metadata, err := evidenceMetadataFrom(inputs)
+	if err != nil {
+		return watch, err
+	}
+	lease := &watchLease{dataset: ds, watch: watch, token: inputs.Token}
+	if metadata.ProfileFingerprint != ds.ProfileFingerprint || metadata.SnapshotFingerprint != ds.SnapshotFingerprint {
+		lease.changed.Store(true)
+	}
+	w.active.Store(lease)
+	w.engine.SetLearnWatchHook(w.offer)
 	return watch, nil
 }
 func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch, outErr error) {
@@ -252,6 +257,7 @@ func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch
 		return watch, err
 	}
 	w.active.Store(nil)
+	w.engine.SetLearnWatchHook(nil)
 	disabled = true
 	control, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()

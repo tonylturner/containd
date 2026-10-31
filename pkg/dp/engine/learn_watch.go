@@ -14,12 +14,25 @@ type InspectionSnapshot struct {
 	Decoders []dpi.Decoder
 	Parsing  map[string]string
 	Rules    *rules.Snapshot
+	Token    InspectionToken
+}
+
+// InspectionToken is a comparable identity for immutable installed inputs.
+// It avoids serializing a policy on every forwarding event.
+type InspectionToken struct {
+	rules    *rules.Snapshot
+	parsing  *map[string]string
+	registry uint64
+}
+
+func (e *Engine) InspectionToken() InspectionToken {
+	return InspectionToken{e.CurrentRules(), e.icsParsing.Load(), e.inspectionRegistry.Load()}
 }
 
 func (e *Engine) InspectionSnapshot() InspectionSnapshot {
 	e.flowMu.Lock()
 	defer e.flowMu.Unlock()
-	inputs := InspectionSnapshot{Rules: e.CurrentRules(), Parsing: map[string]string{}}
+	inputs := InspectionSnapshot{Rules: e.CurrentRules(), Parsing: map[string]string{}, Token: e.InspectionToken()}
 	if e.dpiMgr != nil {
 		inputs.Decoders = append([]dpi.Decoder{}, e.dpiMgr.Decoders()...)
 	}

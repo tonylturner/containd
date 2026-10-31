@@ -20,7 +20,7 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence/sqlite"
 )
 
-func newEvidenceTestAPI(t *testing.T) *evidenceAPI {
+func newEvidenceTestAPI(t testing.TB) *evidenceAPI {
 	t.Helper()
 	e, err := engine.New(engine.Config{})
 	if err != nil {

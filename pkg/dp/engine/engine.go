@@ -40,6 +40,7 @@ type captureRunner interface {
 
 // Engine coordinates capture and rule enforcement components.
 type Engine struct {
+	inspectionRegistry    atomic.Uint64
 	managementReservation *mgmtpath.Reservation
 	engineAPI             *enforce.EngineAPIPath
 	capture               captureRunner
@@ -346,6 +347,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.transport = fresh.transport
 	e.updater = fresh.updater
 	e.dpiMgr = fresh.dpiMgr
+	e.inspectionRegistry.Add(1)
 	e.inventory = fresh.inventory
 	e.anomalyDetector = fresh.anomalyDetector
 	e.sigEngine = fresh.sigEngine
