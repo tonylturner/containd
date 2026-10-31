@@ -52,11 +52,7 @@ func newOrderedRecord(kind, schema string) *OrderedPolicyMigration {
 func upgradeOrderedPolicy010(cfg *Config, originalSchema string) {
 	rec := newOrderedRecord("upgrade", originalSchema)
 	rec.Before = policyRuleIDs(cfg)
-	entries := make([]rules.Entry, len(cfg.Firewall.Rules))
-	for i, r := range cfg.Firewall.Rules {
-		entries[i] = rules.Entry{ID: r.ID, Action: rules.Action(r.Action)}
-	}
-	order := rules.DecisionOrder(entries)
+	order := legacyOverlapOrder(cfg)
 	old := slices.Clone(cfg.Firewall.Rules)
 	next := 0
 	for i, r := range old {
