@@ -19,8 +19,8 @@ func deliverScopeMigrations(store config.Store, log audit.Store) gin.HandlerFunc
 		c.Next()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
 		defer cancel()
-		if _, err := scopeaudit.Publish(ctx, store, log); err != nil {
-			slog.Error("deliver industrial scope migration audit", "error", err)
+		if _, err := scopeaudit.Publish(ctx, store, log); err != nil && !audit.IsObservedFailure(err) {
+			slog.Error("deliver industrial scope migration audit failed; outbox retained for retry")
 		}
 	}
 }
