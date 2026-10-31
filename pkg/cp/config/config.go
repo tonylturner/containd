@@ -865,11 +865,13 @@ type ICSPredicate struct {
 	IOA     []IOARange `json:"ioa,omitempty"`
 	// IEC 104 cause of transmission 1..63, originator address 0..255,
 	// P/N and T bits, and the S/E qualifier of commands.
-	COT           []int  `json:"cot,omitempty"`
-	Originators   []int  `json:"originators,omitempty"`
-	Negative      *bool  `json:"negative,omitempty"`
-	Test          *bool  `json:"test,omitempty"`
-	SelectExecute string `json:"selectExecute,omitempty"` // "select" | "execute"
+	COT               []int  `json:"cot,omitempty"`
+	Originators       []int  `json:"originators,omitempty"`
+	Negative          *bool  `json:"negative,omitempty"`
+	Test              *bool  `json:"test,omitempty"`
+	SelectExecute     string `json:"selectExecute,omitempty"` // "select" | "execute"
+	CommandStates     []int  `json:"commandStates,omitempty"`
+	CommandQualifiers []int  `json:"commandQualifiers,omitempty"`
 
 	// DNP3 predicates (protocol "dnp3"); Addresses are point indexes there.
 	Masters     []uint16 `json:"masters,omitempty"`     // master station addresses
@@ -891,7 +893,7 @@ func (p ICSPredicate) Empty() bool {
 		!p.ReadOnly && !p.WriteOnly && strings.TrimSpace(p.Direction) == "" &&
 		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0 &&
 		len(p.COT) == 0 && len(p.Originators) == 0 && p.Negative == nil && p.Test == nil &&
-		strings.TrimSpace(p.SelectExecute) == "" &&
+		strings.TrimSpace(p.SelectExecute) == "" && len(p.CommandStates) == 0 && len(p.CommandQualifiers) == 0 &&
 		len(p.Masters) == 0 && len(p.Outstations) == 0 && len(p.Groups) == 0 && len(p.Variations) == 0 &&
 		len(p.Instances) == 0 && len(p.Attributes) == 0 && len(p.Tags) == 0
 }

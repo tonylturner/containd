@@ -15,7 +15,7 @@ func TestICSPredicateEmpty(t *testing.T) {
 		{TypeIDs: []int{1}}, {Classes: []string{"monitor"}},
 		{CA: []uint16{0}}, {IOA: []IOARange{{Start: 0, End: 0}}},
 		{COT: []int{6}}, {Originators: []int{0}}, {Negative: &no}, {Test: &no},
-		{SelectExecute: "select"}, {Masters: []uint16{0}}, {Outstations: []uint16{0}},
+		{CommandStates: []int{0}}, {CommandQualifiers: []int{0}}, {SelectExecute: "select"}, {Masters: []uint16{0}}, {Outstations: []uint16{0}},
 		{Groups: []int{0}}, {Variations: []int{0}}, {Instances: []uint16{0}},
 		{Attributes: []uint16{0}}, {Tags: []string{"T"}},
 	}

@@ -144,11 +144,13 @@ type ICSPredicate struct {
 	CA      []uint16   `json:"ca,omitempty"`      // 0..65534
 	IOA     []IOARange `json:"ioa,omitempty"`
 	// IEC 104 COT, originator, P/N, T and S/E predicates.
-	COT           []int  `json:"cot,omitempty"`
-	Originators   []int  `json:"originators,omitempty"`
-	Negative      *bool  `json:"negative,omitempty"`
-	Test          *bool  `json:"test,omitempty"`
-	SelectExecute string `json:"selectExecute,omitempty"`
+	COT               []int  `json:"cot,omitempty"`
+	Originators       []int  `json:"originators,omitempty"`
+	Negative          *bool  `json:"negative,omitempty"`
+	Test              *bool  `json:"test,omitempty"`
+	SelectExecute     string `json:"selectExecute,omitempty"`
+	CommandStates     []int  `json:"commandStates,omitempty"`
+	CommandQualifiers []int  `json:"commandQualifiers,omitempty"`
 
 	// DNP3 station and object predicates; Addresses are point indexes.
 	Masters     []uint16 `json:"masters,omitempty"`

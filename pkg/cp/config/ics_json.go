@@ -14,59 +14,63 @@ import (
 )
 
 type icsPredicateJSON struct {
-	Protocol      string     `json:"protocol,omitempty"`
-	FunctionCode  []int      `json:"functionCode,omitempty"`
-	UnitID        *uint8     `json:"unitId,omitempty"`
-	Addresses     []string   `json:"addresses,omitempty"`
-	ObjectClasses []uint16   `json:"objectClasses,omitempty"`
-	ReadOnly      bool       `json:"readOnly,omitempty"`
-	WriteOnly     bool       `json:"writeOnly,omitempty"`
-	Direction     string     `json:"direction,omitempty"`
-	Mode          string     `json:"mode,omitempty"`
-	TypeIDs       []int      `json:"typeIds,omitempty"`
-	Classes       []string   `json:"classes,omitempty"`
-	CA            []uint16   `json:"ca,omitempty"`
-	IOA           []IOARange `json:"ioa,omitempty"`
-	COT           []int      `json:"cot,omitempty"`
-	Originators   []int      `json:"originators,omitempty"`
-	Negative      *bool      `json:"negative,omitempty"`
-	Test          *bool      `json:"test,omitempty"`
-	SelectExecute string     `json:"selectExecute,omitempty"`
-	Masters       []uint16   `json:"masters,omitempty"`
-	Outstations   []uint16   `json:"outstations,omitempty"`
-	Groups        []int      `json:"groups,omitempty"`
-	Variations    []int      `json:"variations,omitempty"`
-	Instances     []uint16   `json:"instances,omitempty"`
-	Attributes    []uint16   `json:"attributes,omitempty"`
-	Tags          []string   `json:"tags,omitempty"`
+	Protocol          string     `json:"protocol,omitempty"`
+	FunctionCode      []int      `json:"functionCode,omitempty"`
+	UnitID            *uint8     `json:"unitId,omitempty"`
+	Addresses         []string   `json:"addresses,omitempty"`
+	ObjectClasses     []uint16   `json:"objectClasses,omitempty"`
+	ReadOnly          bool       `json:"readOnly,omitempty"`
+	WriteOnly         bool       `json:"writeOnly,omitempty"`
+	Direction         string     `json:"direction,omitempty"`
+	Mode              string     `json:"mode,omitempty"`
+	TypeIDs           []int      `json:"typeIds,omitempty"`
+	Classes           []string   `json:"classes,omitempty"`
+	CA                []uint16   `json:"ca,omitempty"`
+	IOA               []IOARange `json:"ioa,omitempty"`
+	COT               []int      `json:"cot,omitempty"`
+	Originators       []int      `json:"originators,omitempty"`
+	Negative          *bool      `json:"negative,omitempty"`
+	Test              *bool      `json:"test,omitempty"`
+	SelectExecute     string     `json:"selectExecute,omitempty"`
+	CommandStates     []int      `json:"commandStates,omitempty"`
+	CommandQualifiers []int      `json:"commandQualifiers,omitempty"`
+	Masters           []uint16   `json:"masters,omitempty"`
+	Outstations       []uint16   `json:"outstations,omitempty"`
+	Groups            []int      `json:"groups,omitempty"`
+	Variations        []int      `json:"variations,omitempty"`
+	Instances         []uint16   `json:"instances,omitempty"`
+	Attributes        []uint16   `json:"attributes,omitempty"`
+	Tags              []string   `json:"tags,omitempty"`
 }
 
 func (p ICSPredicate) MarshalJSON() ([]byte, error) {
 	out := icsPredicateJSON{
-		Protocol:      p.Protocol,
-		UnitID:        p.UnitID,
-		Addresses:     p.Addresses,
-		ObjectClasses: p.ObjectClasses,
-		ReadOnly:      p.ReadOnly,
-		WriteOnly:     p.WriteOnly,
-		Direction:     p.Direction,
-		Mode:          p.Mode,
-		TypeIDs:       p.TypeIDs,
-		Classes:       p.Classes,
-		CA:            p.CA,
-		IOA:           p.IOA,
-		COT:           p.COT,
-		Originators:   p.Originators,
-		Negative:      p.Negative,
-		Test:          p.Test,
-		SelectExecute: p.SelectExecute,
-		Masters:       p.Masters,
-		Outstations:   p.Outstations,
-		Groups:        p.Groups,
-		Variations:    p.Variations,
-		Instances:     p.Instances,
-		Attributes:    p.Attributes,
-		Tags:          p.Tags,
+		Protocol:          p.Protocol,
+		UnitID:            p.UnitID,
+		Addresses:         p.Addresses,
+		ObjectClasses:     p.ObjectClasses,
+		ReadOnly:          p.ReadOnly,
+		WriteOnly:         p.WriteOnly,
+		Direction:         p.Direction,
+		Mode:              p.Mode,
+		TypeIDs:           p.TypeIDs,
+		Classes:           p.Classes,
+		CA:                p.CA,
+		IOA:               p.IOA,
+		COT:               p.COT,
+		Originators:       p.Originators,
+		Negative:          p.Negative,
+		Test:              p.Test,
+		SelectExecute:     p.SelectExecute,
+		CommandStates:     p.CommandStates,
+		CommandQualifiers: p.CommandQualifiers,
+		Masters:           p.Masters,
+		Outstations:       p.Outstations,
+		Groups:            p.Groups,
+		Variations:        p.Variations,
+		Instances:         p.Instances,
+		Attributes:        p.Attributes,
+		Tags:              p.Tags,
 	}
 	if len(p.FunctionCode) > 0 {
 		out.FunctionCode = make([]int, 0, len(p.FunctionCode))
@@ -115,7 +119,7 @@ func (p *ICSPredicate) UnmarshalJSON(data []byte) error {
 var icsPredicateKeys = []string{
 	"protocol", "functionCode", "unitId", "addresses", "objectClasses",
 	"readOnly", "writeOnly", "direction", "mode",
-	"typeIds", "classes", "ca", "ioa", "cot", "originators", "negative", "test", "selectExecute",
+	"typeIds", "classes", "ca", "ioa", "cot", "originators", "negative", "test", "selectExecute", "commandStates", "commandQualifiers",
 	"masters", "outstations", "groups", "variations", "instances", "attributes", "tags",
 }
 
@@ -124,7 +128,7 @@ var icsPredicateKeys = []string{
 var iec104ForbiddenKeys = []string{"functionCode", "unitId", "addresses", "objectClasses", "writeOnly"}
 
 // iec104OnlyKeys are the keys only an iec104 predicate may carry.
-var iec104OnlyKeys = []string{"typeIds", "classes", "ca", "ioa", "cot", "originators", "negative", "test", "selectExecute"}
+var iec104OnlyKeys = []string{"typeIds", "classes", "ca", "ioa", "cot", "originators", "negative", "test", "selectExecute", "commandStates", "commandQualifiers"}
 
 var dnp3OnlyKeys = []string{"masters", "outstations", "groups", "variations"}
 var cipOnlyKeys = []string{"instances", "attributes", "tags"}
@@ -162,6 +166,10 @@ func (p *ICSPredicate) decodeField(key string, raw json.RawMessage) error {
 		p.IOA, err = decodeIECList[IOARange](raw)
 	case "cot":
 		p.COT, err = decodeIECList[int](raw)
+	case "commandStates":
+		p.CommandStates, err = decodeIECList[int](raw)
+	case "commandQualifiers":
+		p.CommandQualifiers, err = decodeIECList[int](raw)
 	case "originators":
 		p.Originators, err = decodeIECList[int](raw)
 	case "masters":

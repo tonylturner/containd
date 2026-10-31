@@ -128,6 +128,9 @@ func validateIEC104Selectors(p ICSPredicate, ruleID string) error {
 	if err := validateSelectorList("originators", p.Originators, 0, 255, ruleID); err != nil {
 		return err
 	}
+	if err := validateIEC104Commands(p, ruleID); err != nil {
+		return err
+	}
 	if p.SelectExecute == "" {
 		return nil
 	}
@@ -140,4 +143,33 @@ func validateIEC104Selectors(p ICSPredicate, ruleID string) error {
 		}
 	}
 	return nil
+}
+
+func validateIEC104Commands(p ICSPredicate, ruleID string) error {
+	if p.CommandStates == nil && p.CommandQualifiers == nil {
+		return nil
+	}
+	if len(p.TypeIDs) == 0 {
+		return fmt.Errorf("rule %s ics commandStates/commandQualifiers requires typeIds", ruleID)
+	}
+	low := -1
+	for _, id := range p.TypeIDs {
+		group := 0
+		switch id {
+		case 45, 58:
+			group = 0
+		case 46, 47, 59, 60:
+			group = 1
+		default:
+			return fmt.Errorf("rule %s ics commandStates/commandQualifiers is not supported for typeIds value %d", ruleID, id)
+		}
+		if p.CommandStates != nil && low != -1 && low != group {
+			return fmt.Errorf("rule %s ics commandStates requires typeIds in one state domain (45/58 or 46/47/59/60)", ruleID)
+		}
+		low = group
+	}
+	if err := validateSelectorList("commandStates", p.CommandStates, low, low+1, ruleID); err != nil {
+		return err
+	}
+	return validateSelectorList("commandQualifiers", p.CommandQualifiers, 0, 31, ruleID)
 }

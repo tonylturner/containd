@@ -133,6 +133,10 @@ func iec104FieldSet(p ICSPredicate) string {
 		return "negative"
 	case p.Test != nil:
 		return "test"
+	case p.CommandStates != nil:
+		return "commandStates"
+	case p.CommandQualifiers != nil:
+		return "commandQualifiers"
 	case p.SelectExecute != "":
 		return "selectExecute"
 	default:

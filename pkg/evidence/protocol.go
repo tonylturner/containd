@@ -61,11 +61,12 @@ type IEC104 struct {
 // IEC104Object preserves wire presence of select/execute, qualifiers and values.
 // ValueDigest binds canonical decoded value bytes, not a lossy float rendering.
 type IEC104Object struct {
-	Index       uint32  `json:"index"`
-	IOA         *uint32 `json:"ioa,omitempty"`
-	Select      *bool   `json:"select,omitempty"`
-	Qualifier   *uint8  `json:"qualifier,omitempty"`
-	ValueDigest string  `json:"valueDigest,omitempty"`
+	Index        uint32  `json:"index"`
+	IOA          *uint32 `json:"ioa,omitempty"`
+	Select       *bool   `json:"select,omitempty"`
+	Qualifier    *uint8  `json:"qualifier,omitempty"`
+	CommandState *uint8  `json:"commandState,omitempty"`
+	ValueDigest  string  `json:"valueDigest,omitempty"`
 }
 
 // CIP is observation-only. Absence of a class is never fabricated as class zero.

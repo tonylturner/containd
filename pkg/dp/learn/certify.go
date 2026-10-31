@@ -331,6 +331,7 @@ func boundaryMutations(o evidence.Observation, visit func(mutation) bool) {
 				for i := range o.IEC104.Objects {
 					for _, value := range []uint8{0, 3} {
 						add(fmt.Sprintf("reserved_command_value_%d_%d", i, value), func(p *evidence.Observation) {
+							p.IEC104.Objects[i].CommandState = &value
 							p.IEC104.Objects[i].ValueDigest, _ = evidence.Digest(value)
 						})
 					}
@@ -361,6 +362,23 @@ func boundaryMutations(o evidence.Observation, visit func(mutation) bool) {
 		})
 		for i := range o.IEC104.Objects {
 			obj := o.IEC104.Objects[i]
+			if o.IEC104.TypeID != nil && len(rules.IEC104CommandStates(*o.IEC104.TypeID)) > 0 {
+				for _, value := range rules.IEC104CommandStates(*o.IEC104.TypeID) {
+					if obj.CommandState != nil && value != *obj.CommandState {
+						add(fmt.Sprintf("command_state_%d_%d", i, value), func(p *evidence.Observation) {
+							p.IEC104.Objects[i].CommandState = &value
+							p.IEC104.Objects[i].ValueDigest, _ = evidence.Digest(value)
+						})
+					}
+				}
+				for value := range uint8(32) {
+					if obj.Qualifier != nil && value != *obj.Qualifier {
+						add(fmt.Sprintf("command_qualifier_%d_%d", i, value), func(p *evidence.Observation) { p.IEC104.Objects[i].Qualifier = &value })
+					}
+				}
+				add(fmt.Sprintf("missing_command_state_%d", i), func(p *evidence.Observation) { p.IEC104.Objects[i].CommandState = nil })
+				add(fmt.Sprintf("missing_command_qualifier_%d", i), func(p *evidence.Observation) { p.IEC104.Objects[i].Qualifier = nil })
+			}
 			if obj.IOA != nil {
 				var values []uint32
 				if *obj.IOA > 0 {

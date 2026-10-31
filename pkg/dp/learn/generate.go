@@ -14,7 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-const GeneratorVersion = "exact-1"
+const GeneratorVersion = "exact-2"
 const EvaluatorVersion = rules.EvaluatorVersion
 
 // CompatibleVersions deliberately does not reinterpret historical decoder or
@@ -270,12 +270,25 @@ func GenerateRelation(o evidence.Observation) ([]config.Rule, []evidence.Withhel
 		base.ICS.Negative = d.Negative
 		base.ICS.Test = d.Test
 		for i, obj := range d.Objects {
+			for _, requirement := range iecTable {
+				if !requirement.bound(*d.TypeID, obj) && len(requirement.domain(*d.TypeID)) == 0 {
+					reasons = append(reasons, requirement.reason)
+				}
+			}
 			if obj.IOA == nil || obj.Select == nil || obj.Index != uint32(i) {
 				reasons = append(reasons, evidence.WithheldMissingSelector)
 				continue
 			}
 			r := base
 			r.ICS.IOA = []config.IOARange{{Start: *obj.IOA, End: *obj.IOA}}
+			if len(rules.IEC104CommandStates(*d.TypeID)) > 0 {
+				if obj.CommandState == nil || obj.Qualifier == nil {
+					reasons = append(reasons, evidence.WithheldMissingSelector)
+					continue
+				}
+				r.ICS.CommandStates = []int{int(*obj.CommandState)}
+				r.ICS.CommandQualifiers = []int{int(*obj.Qualifier)}
+			}
 			r.ICS.SelectExecute = "execute"
 			if *obj.Select {
 				r.ICS.SelectExecute = "select"
@@ -343,6 +356,7 @@ func dnpRequirements(o evidence.DNP3Object) []evidence.WithheldReason {
 
 type closedRequirement struct {
 	reason evidence.WithheldReason
+	bound  func(uint8, evidence.IEC104Object) bool
 	domain func(uint8) []string
 	value  func(evidence.IEC104Object) string
 }
@@ -357,23 +371,21 @@ func numberDigests(values ...uint8) []string {
 }
 
 var iecTable = []closedRequirement{
-	{evidence.WithheldIECValue, func(t uint8) []string {
-		switch t {
-		case 45, 58:
-			return numberDigests(0, 1)
-		case 46, 47, 59, 60:
-			return numberDigests(1, 2)
-		default:
+	{evidence.WithheldIECValue, func(t uint8, o evidence.IEC104Object) bool {
+		return len(rules.IEC104CommandStates(t)) > 0 && o.CommandState != nil
+	}, func(t uint8) []string {
+		return numberDigests(rules.IEC104CommandStates(t)...)
+	}, func(o evidence.IEC104Object) string { return o.ValueDigest }},
+	{evidence.WithheldIECQualifier, func(t uint8, o evidence.IEC104Object) bool {
+		return len(rules.IEC104CommandStates(t)) > 0 && o.Qualifier != nil
+	}, func(t uint8) []string {
+		// Only state-command QU has a predicate-backed closed domain.
+		// Setpoint QL and bitstring qualifiers remain unexpressible.
+		if len(rules.IEC104CommandStates(t)) == 0 {
 			return nil
 		}
-	}, func(o evidence.IEC104Object) string { return o.ValueDigest }},
-	{evidence.WithheldIECQualifier, func(t uint8) []string {
 		var out []string
-		size := 32
-		if t == 48 || t == 49 || t == 50 || t == 61 || t == 62 || t == 63 {
-			size = 128
-		}
-		for i := range size {
+		for i := range 32 {
 			out = append(out, strconv.Itoa(i))
 		}
 		return out
@@ -399,7 +411,18 @@ func closedDomains(parents []evidence.Observation) []evidence.WithheldReason {
 		return nil
 	}
 	var reasons []evidence.WithheldReason
+	var unbound []closedRequirement
 	for _, r := range iecTable {
+		bound := true
+		for _, p := range parents {
+			for _, o := range p.IEC104.Objects {
+				bound = bound && r.bound(*p.IEC104.TypeID, o)
+			}
+		}
+		if bound {
+			continue
+		}
+		unbound = append(unbound, r)
 		domain := r.domain(*parents[0].IEC104.TypeID)
 		sets := map[uint32]map[string]bool{}
 		for _, p := range parents {
@@ -426,7 +449,7 @@ func closedDomains(parents []evidence.Observation) []evidence.WithheldReason {
 	}
 	// Full marginal domains are insufficient if value and qualifier remain
 	// correlated. The unqualified predicate admits their Cartesian product.
-	if len(reasons) == 0 && len(iecTable) > 1 {
+	if len(reasons) == 0 && len(unbound) > 1 {
 		products := map[uint32]map[string]bool{}
 		for _, p := range parents {
 			for _, obj := range p.IEC104.Objects {
@@ -437,7 +460,7 @@ func closedDomains(parents []evidence.Observation) []evidence.WithheldReason {
 					products[*obj.IOA] = map[string]bool{}
 				}
 				var tuple []string
-				for _, r := range iecTable {
+				for _, r := range unbound {
 					tuple = append(tuple, r.value(obj))
 				}
 				digest, _ := evidence.Digest(tuple)
@@ -445,7 +468,7 @@ func closedDomains(parents []evidence.Observation) []evidence.WithheldReason {
 			}
 		}
 		expected := 1
-		for _, r := range iecTable {
+		for _, r := range unbound {
 			expected *= len(r.domain(*parents[0].IEC104.TypeID))
 		}
 		for _, product := range products {
