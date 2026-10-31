@@ -77,7 +77,7 @@ const (
 // iecSession is one IEC104 session incarnation, from its SYN.
 type iecSession struct {
 	id         string
-	flow       *flow.State // service authority; client/server below stay in packet space
+	flow       *flow.State // immutable service key captured at creation; client/server stay in packet space
 	client     netip.AddrPort
 	server     netip.AddrPort
 	ctx        rules.EvalContext // opener-oriented session tuple

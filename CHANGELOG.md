@@ -14,8 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A former `learn` ALLOW inside an enforce envelope used to admit at L7 and
   could mask an enforce DENY through ALLOW precedence. As monitor it does
   neither, so that traffic is now denied (and reset where the envelope resets).
-  Former `learn` DENY rules no longer drop at L4 without a queue. Review policy
-  allowances before upgrading; other enforcing rules and strict scopes still apply.
+  Former `learn` DENY rules no longer drop at L4 without a queue. In NFQUEUE
+  mode a former `learn` ALLOW also no longer admits its flow past the firewall's
+  default DENY; traffic it matched now needs an L4 allow or an enforcing ALLOW.
+  Review policy allowances before upgrading; other enforcing rules and strict
+  scopes still apply.
 - Schema 0.1.9 migrates exact `learn` modes to `monitor` in running, candidate
   and previous banks and clears protocol-less modes, with durable
   `config.rule_modes.migrated` audit records per bank. Fresh writes reject

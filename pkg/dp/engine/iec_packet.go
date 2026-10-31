@@ -47,6 +47,14 @@ func dropped(reason string) iecResult {
 	return iecResult{decision: capture.Decision{Action: capture.Drop, Reason: reason}}
 }
 
+// Invalid transport input cannot change delivery in an observation session.
+func invalidIEC(mode string) iecResult {
+	if mode == "enforce" {
+		return dropped(reasonIECInvalid)
+	}
+	return accepted(reasonIECInvalid)
+}
+
 // droppedWith drops the current packet and every held token of acts.
 func droppedWith(reason string, acts iecActions) iecResult {
 	res := dropped(reason)
@@ -140,8 +148,7 @@ func (t *iecTable) packet(pkt capture.Packet, state *flow.State, parsing ics.Par
 	}
 	s, dir := t.lookupLocked(src, dst)
 	if s != nil {
-		s.flow = state
-		s.ctx = t.stateContext(state)
+		s.ctx = t.sessionContext(s)
 	}
 	switch {
 	case synRST(pkt.TCP.Flags):
@@ -178,12 +185,13 @@ func synRST(f capture.TCPFlags) bool { return f&capture.TCPFlagSYN != 0 && f&cap
 // synRSTLocked decides a segment carrying both SYN and RST, which is no
 // handshake segment: it never opens, establishes, refuses or closes an
 // incarnation, so a SYN-ACK with RST cannot establish one whose client it
-// resets. Every session of either mode drops it, as does an enforce
-// envelope; monitor traffic of no session passes it untracked, like every
-// other monitor packet not observed from its SYN.
+// resets. An enforcing session or envelope drops it; monitor sessions
+// observe it without changing delivery, and untracked monitor traffic passes
+// like every other monitor packet not observed from its SYN.
 func (t *iecTable) synRSTLocked(s *iecSession, state *flow.State) (iecResult, bool) {
 	if s != nil {
-		return dropped(reasonIECInvalid), true
+		_, mode := t.envelopeLocked(t.sessionContext(s))
+		return invalidIEC(mode), true
 	}
 	matched, mode := t.envelopeLocked(t.stateContext(state))
 	if !matched {
@@ -259,14 +267,14 @@ func (t *iecTable) openLocked(prev *iecSession, client, server netip.AddrPort, c
 		return res
 	}
 	if len(pkt.Payload) > 0 {
-		return dropped(reasonIECInvalid) // SYN with data (no TCP Fast Open in B)
+		return invalidIEC(mode) // SYN with data cannot open a tracked session.
 	}
 	if mode == "enforce" && !t.health.injectorReady() {
 		// No session can be reset: none may start.
 		countIECAbort(abortInjector)
 		return dropped(reasonIECFailClose)
 	}
-	n := &iecSession{id: t.newID(), flow: state, client: client, server: server, ctx: ctx, mode: mode, lastSeen: now}
+	n := &iecSession{id: t.newID(), flow: &flow.State{Key: state.ServiceKey()}, client: client, server: server, ctx: ctx, mode: mode, lastSeen: now}
 	n.dirs[iecDirClient] = newIECDir(pkt.TCP.Seq)
 	_, n.reconnects = t.reconnect[pairKey(client, server)]
 	key := iecKey{client: client, server: server}
@@ -290,7 +298,7 @@ func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.Eval
 		countIECAbort(abortBound)
 		return dropped(reasonIECFailClose)
 	}
-	s := &iecSession{id: t.newID(), flow: state, client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}
+	s := &iecSession{id: t.newID(), flow: &flow.State{Key: state.ServiceKey()}, client: client, server: server, ctx: ctx, mode: "enforce", lastSeen: now}
 	t.sessions[iecKey{client: client, server: server}] = s
 	dir := iecDirSrv
 	if fromClient {
@@ -314,22 +322,27 @@ func (t *iecTable) midstreamLocked(client, server netip.AddrPort, ctx rules.Eval
 // (opens); a retransmitted old SYN does not. The server's SYN-ACK of the
 // next incarnation, or its RST refusing that SYN (refuses), passes.
 func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Packet, state *flow.State, now time.Time) (iecResult, bool) {
+	ctx := t.sessionContext(s)
+	_, currentMode := t.envelopeLocked(ctx)
+	tombstone := accepted(reasonIECTombstone)
+	if currentMode == "enforce" {
+		tombstone = dropped(reasonIECTombstone)
+	}
 	f := pkt.TCP.Flags
 	if dir == iecDirClient && isSYN(f) {
 		if c := s.dirs[iecDirClient]; c != nil && c.isn == pkt.TCP.Seq {
-			return dropped(reasonIECTombstone), true
+			return tombstone, true
 		}
 		if s.next != nil && s.next.dirs[iecDirClient].isn == pkt.TCP.Seq {
 			return accepted(reasonIECAccept), true
 		}
-		ctx := t.stateContext(state)
 		matched, mode := t.envelopeLocked(ctx)
 		if !matched {
 			acts := t.deleteLocked(iecKey{client: s.client, server: s.server}, s)
 			return iecResult{acts: acts}, false
 		}
 		if !opens(mode, pkt) {
-			return dropped(reasonIECTombstone), true
+			return tombstone, true
 		}
 		return t.openLocked(s, s.client, s.server, ctx, mode, pkt, state, now), true
 	}
@@ -347,9 +360,10 @@ func (t *iecTable) tombstonePacketLocked(s *iecSession, dir int, pkt capture.Pac
 		t.sessions[iecKey{client: s.client, server: s.server}] = n
 		return accepted(reasonIECAccept), true
 	}
-	res := dropped(reasonIECTombstone)
-	res.acts = t.challengeLocked(s, dir, pkt, now)
-	return res, true
+	if currentMode == "enforce" {
+		tombstone.acts = t.challengeLocked(s, dir, pkt, now)
+	}
+	return tombstone, true
 }
 
 // closedPacketLocked passes the payload-free tail of a closed session and
@@ -366,7 +380,8 @@ func (t *iecTable) closedPacketLocked(s *iecSession, dir int, pkt capture.Packet
 			return t.openLocked(s, s.client, s.server, ctx, mode, pkt, state, now), true
 		}
 	}
-	if len(pkt.Payload) > 0 && s.mode == "enforce" {
+	_, mode := t.envelopeLocked(t.sessionContext(s))
+	if len(pkt.Payload) > 0 && mode == "enforce" {
 		return dropped(reasonIECClosed), true
 	}
 	return accepted(reasonIECClosed), true
@@ -405,7 +420,7 @@ func (t *iecTable) reopenLocked(s *iecSession, dir int, pkt capture.Packet, stat
 func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, now time.Time) iecResult {
 	f, seq := pkt.TCP.Flags, pkt.TCP.Seq
 	if len(pkt.Payload) > 0 {
-		return dropped(reasonIECInvalid)
+		return invalidIEC(s.mode)
 	}
 	c2s := s.dirs[iecDirClient]
 	switch {
@@ -429,7 +444,7 @@ func (t *iecTable) handshakeLocked(s *iecSession, dir int, pkt capture.Packet, n
 			return accepted(reasonIECAccept)
 		}
 	}
-	return dropped(reasonIECInvalid)
+	return invalidIEC(s.mode)
 }
 
 // livePacketLocked decides a packet of a live incarnation.
@@ -532,7 +547,7 @@ func (t *iecTable) rstLocked(s *iecSession, dir int, pkt capture.Packet, now tim
 func (t *iecTable) finLocked(s *iecSession, dir int, pkt capture.Packet, res *iecResult) {
 	d := s.dirs[dir]
 	if d.seq.Offset(pkt.TCP.Seq)+int64(len(pkt.Payload)) != d.bytes.Next() {
-		*res = dropped(reasonIECInvalid)
+		*res = invalidIEC(s.mode)
 		return
 	}
 	if len(pkt.Payload) == 0 {

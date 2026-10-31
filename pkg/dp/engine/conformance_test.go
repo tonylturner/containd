@@ -65,9 +65,6 @@ func TestConformanceVerdictMatrix(t *testing.T) {
 						for i := range snap.Firewall {
 							snap.Firewall[i].ICS.Mode = mode
 						}
-						if mode == "monitor" {
-							snap.Default = rules.ActionAllow
-						}
 						f.e.LoadRules(snap)
 						f.observeOnly = mode == "monitor"
 						f.e.SetICSParsing(map[string]string{p.name: parsing})

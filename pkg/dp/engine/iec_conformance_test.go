@@ -188,8 +188,14 @@ func TestIECConformanceMatrix(t *testing.T) {
 								if dec["reason"] != reasonNonconformant || dec["ruleId"] != nil || dec["scopeId"] == nil || dec["action"] != nil || dec["decision"] != decision {
 									t.Fatalf("scope decision: %+v", dec)
 								}
-							} else if dec["reason"] != reasonDefault || (dec["decision"] != decisionDeny && dec["decision"] != decisionWouldDrop) {
-								t.Fatal(dec)
+							} else {
+								decision := decisionDeny
+								if mode == "monitor" {
+									decision = decisionWouldDrop
+								}
+								if dec["reason"] != reasonDefault || dec["decision"] != decision {
+									t.Fatalf("default decision in %s: %+v, want %s", mode, dec, decision)
+								}
 							}
 						}
 						if wantDrop {

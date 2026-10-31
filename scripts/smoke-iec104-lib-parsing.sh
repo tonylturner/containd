@@ -154,7 +154,7 @@ parsing_allowed() {
 # (tolerant) applied.
 run_parsing_gates() {
   local strict_policy monitor_policy scen since out sock
-  strict_policy=$(jq '.dataPlane.dpiIcsParsing = {"iec104": "strict"}' <<<"$EU_POLICY")
+  strict_policy=$(jq '.dataplane.dpiIcsParsing = {"iec104": "strict"}' <<<"$EU_POLICY")
   if apply_config "$strict_policy" "EU enforce policy, strict IEC 104 parsing"; then
     gate_pass "strict IEC 104 parsing (dpiIcsParsing.iec104 = strict) is accepted and applied"
   else
@@ -173,7 +173,7 @@ run_parsing_gates() {
   parsing_denied "strict: reserved-bits on the allowed command" reserved-bits nonconformant iec104.reserved_bits \
     -ca "$ALLOWED_CA" -ioa "$ALLOWED_IOA" -dcs "$DCS_CLOSE"
 
-  monitor_policy=$(jq --argjson l4 "$(jq '.firewall.rules' <<<"$BASELINE")" '.dataPlane.dpiMode = "monitor" | .firewall.rules |= map(.ics.mode = "monitor") | .firewall.rules += $l4' <<<"$strict_policy")
+  monitor_policy=$(jq --argjson l4 "$(jq '.firewall.rules' <<<"$BASELINE")" '.dataplane.dpiMode = "monitor" | .firewall.rules |= map(.ics.mode = "monitor") | .firewall.rules += $l4' <<<"$strict_policy")
   if apply_config "$monitor_policy" "EU monitor policy, strict parsing"; then
     sleep 2
     for scen in bad-length malformed-dcs unsupported-type; do

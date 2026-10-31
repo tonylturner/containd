@@ -26,6 +26,19 @@ func (e *Engine) enforcingPacketScope(pkt capture.Packet, state *flow.State) boo
 		key = denied.service
 	}
 	e.flowMu.Unlock()
+	// IEC incarnations (including tombstones) retain their opener/service
+	// coordinates independently of mutable generic flow orientation.
+	if t := e.iec; t != nil {
+		t.mu.Lock()
+		src, srcOK := addrPort(pkt.SrcIP, pkt.SrcPort)
+		dst, dstOK := addrPort(pkt.DstIP, pkt.DstPort)
+		if srcOK && dstOK {
+			if s, _ := t.lookupLocked(src, dst); s != nil && s.flow != nil {
+				key = s.flow.ServiceKey()
+			}
+		}
+		t.mu.Unlock()
+	}
 	scopeState := &flow.State{Key: key}
 	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP()}
 	ctx.SrcZone, ctx.DstZone = e.zones.resolve(p.snapshot, ctx.SrcIP, ctx.DstIP)
@@ -39,6 +52,14 @@ func (e *Engine) enforcingPacketScope(pkt capture.Packet, state *flow.State) boo
 	return false
 }
 
-func observedDecision(pkt capture.Packet) capture.Decision {
-	return capture.Decision{Action: capture.Repeat, Mark: pkt.Mark & ^enforce.QueueMarkMask | enforce.ObservedMark, Reason: "ics_observed"}
+func observedDecision(pkt capture.Packet, decision capture.Decision) capture.Decision {
+	if decision.Action != capture.Accept {
+		return decision
+	}
+	decision.Action = capture.Repeat
+	decision.Mark = pkt.Mark & ^enforce.QueueMarkMask | enforce.ObservedMark
+	if decision.Reason == "" {
+		decision.Reason = "ics_observed"
+	}
+	return decision
 }

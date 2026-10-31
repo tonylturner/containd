@@ -25,7 +25,6 @@ import (
 // learnPolicy is the first-command policy with every rule in monitor mode.
 func learnPolicy() rules.Snapshot {
 	snap := firstCommandPolicy()
-	snap.Default = rules.ActionAllow
 	for i := range snap.Firewall {
 		snap.Firewall[i].ICS.Mode = "monitor"
 	}

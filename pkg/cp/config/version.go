@@ -96,7 +96,9 @@ func UpgradeInPlace(cfg *Config) error {
 		if got.major != cur.major || got.minor != cur.minor {
 			return fmt.Errorf("no upgrade path from schema_version %s to %s", cfg.SchemaVersion, SchemaVersionCurrent)
 		}
-		// Capture each step's evidence before advancing its schema stamp.
+		// The mode audit describes the imported/stored schema, not an
+		// intermediate stamp from the ordered industrial-scope upgrade.
+		originalSchema := cfg.SchemaVersion
 		if beforeIndustrialScope(cfg.SchemaVersion) {
 			removed, updated := upgradeIndustrialBuiltins018(cfg)
 			if len(removed)+len(updated) > 0 {
@@ -104,7 +106,7 @@ func UpgradeInPlace(cfg *Config) error {
 			}
 			cfg.SchemaVersion = "0.1.8"
 		}
-		upgradeRuleModes019(cfg)
+		upgradeRuleModes019(cfg, originalSchema)
 		cfg.SchemaVersion = SchemaVersionCurrent
 		return nil
 	}
