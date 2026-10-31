@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   responses carry none) and mark
   incomplete CIP MSP/CPF and DNP3 object coverage for per-object policy checks.
   Role-violating IEC 104 ASDUs retain every decoded object and its role finding.
+- Learned ICS rules now come only from supported requests and are split by
+  source, destination, protocol, unit and function/service code. Modbus rules
+  retain only that tuple's bounded address spans; DNP3 and CIP suggestions no
+  longer misrepresent station, object-group or path values as addresses.
+  Previously generated wider rules are not removed automatically.
 - CIP rules reject `addresses`; DNP3 now interprets them as point indexes and
   requires object groups. DNP3/CIP reject the ineffective Modbus `unitId` filter.
   Both editors expose unsupported stored filters for explicit removal; invalid
@@ -271,6 +276,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Modbus write-single-coil (FC5) values other than ON (`0xFF00`) and OFF
+  (`0x0000`) are invalid on the wire and no longer match an ICS ALLOW, in monitor
+  or enforce mode. An enforce ALLOW for FC5 now leaves such writes to the
+  default verdict; DENY and RESET rules still match them.
 - TCP flows pin one stream framer for both directions, preferring the server
   port when endpoints use different ICS ports, in live and PCAP inspection.
 
