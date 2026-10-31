@@ -307,6 +307,10 @@ func TestReviewAtomicResolutionAndRetry(t *testing.T) {
 	if err := s.MarkStaged(ctx, req); err != nil {
 		t.Fatalf("complete retry: %v", err)
 	}
+	staged, err := s.GetSuggestion(ctx, v.ID)
+	if err != nil || staged.Status != learn.SuggestionStaged || staged.Revision != v.Revision+1 {
+		t.Fatalf("surviving suggestion did not reflect the receipt: %+v %v", staged, err)
+	}
 	if _, err := s.ResolveForStage(ctx, req); err != nil {
 		t.Fatalf("resolve retry: %v", err)
 	}
@@ -564,7 +568,7 @@ func TestUnattributedCaptureGapSurvivesSealing(t *testing.T) {
 	assertGauges(t, s)
 }
 
-func TestEvictionInvalidatesProofAndStageReservation(t *testing.T) {
+func TestEvictionInvalidatesProofButPreservesStageSnapshot(t *testing.T) {
 	ctx := context.Background()
 	s, now, _ := newStore(t, evidence.Budgets{MaxRecords: 1})
 	a := create(t, s, "a")
@@ -584,11 +588,11 @@ func TestEvictionInvalidatesProofAndStageReservation(t *testing.T) {
 	if _, err := s.GetSuggestion(ctx, v.ID); !errors.Is(err, learn.ErrExpired) {
 		t.Fatalf("dependent proof survived eviction: %v", err)
 	}
-	if _, err := s.ResolveForStage(ctx, req); !errors.Is(err, learn.ErrExpired) {
-		t.Fatalf("reservation restored evicted evidence: %v", err)
+	if _, err := s.ResolveForStage(ctx, req); err != nil {
+		t.Fatalf("lost stage snapshot: %v", err)
 	}
-	if err := s.MarkStaged(ctx, req); !errors.Is(err, learn.ErrExpired) {
-		t.Fatalf("completed a reservation with evicted evidence: %v", err)
+	if err := s.MarkStaged(ctx, req); err != nil {
+		t.Fatalf("lost stage completion: %v", err)
 	}
 	assertGauges(t, s)
 }

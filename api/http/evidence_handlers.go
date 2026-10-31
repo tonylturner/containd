@@ -177,7 +177,7 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 			_, releaseErr := client.Learn(cleanup, http.MethodPost, "/learn/stage/release", c.GetString("actor"), body)
 			cancel()
 			if releaseErr != nil {
-				evidenceHTTPError(c, releaseErr)
+				apiError(c, 503, "stage release uncertain; retry requestId "+req.RequestID)
 				return
 			}
 			if errors.Is(err, conflict) {
@@ -189,7 +189,7 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 		}
 		configChangeResponse(c, "staged")
 		if _, err := client.Learn(c.Request.Context(), http.MethodPost, "/learn/stage/complete", c.GetString("actor"), body); err != nil {
-			evidenceHTTPError(c, err)
+			apiError(c, 503, "candidate durably staged; completion uncertain; retry requestId "+req.RequestID)
 			return
 		}
 		auditLog(c, audit.Record{Action: "learn.apply", Target: req.RequestID, Detail: "candidate"})

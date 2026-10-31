@@ -242,18 +242,8 @@ func (s *Store) ResolveForStage(ctx context.Context, req learn.ApplyRequest) ([]
 			if err := json.Unmarshal(resolved, &out); err != nil {
 				return err
 			}
-			// A reservation does not restore deleted/expired evidence.
-			for _, v := range out {
-				if !s.now().Before(v.ExpiresAt) {
-					return learn.ErrExpired
-				}
-				if _, err := s.suggestion(ctx, tx, v.ID); err != nil {
-					return err
-				}
-				if v.Proof == nil || !s.compatibleProof(v.Proof.Versions) {
-					return learn.ErrStale
-				}
-			}
+			// Resolve is the linearization point. Retries use the admitted
+			// snapshot, not evidence that may since have expired or been deleted.
 			return nil
 		}
 		if err != sql.ErrNoRows {
@@ -384,20 +374,20 @@ func (s *Store) MarkStaged(ctx context.Context, req learn.ApplyRequest) error {
 		if err := json.Unmarshal(resolved, &values); err != nil {
 			return err
 		}
-		protected := make([]string, 0, len(values))
 		for _, v := range values {
-			protected = append(protected, v.DatasetID)
-		}
-		for _, v := range values {
-			current, err := s.suggestion(ctx, tx, v.ID)
+			prior, err := encode(v)
 			if err != nil {
 				return err
 			}
-			if current.Revision != v.Revision {
-				return learn.ErrStale
+			v.Status, v.Revision = learn.SuggestionStaged, v.Revision+1
+			staged, err := encode(v)
+			if err != nil {
+				return err
 			}
-			current.Status, current.Revision = learn.SuggestionStaged, current.Revision+1
-			if err := s.updateSuggestion(ctx, tx, current, protected); err != nil {
+			// The receipt depends only on the resolved snapshot. Reflect it
+			// in a surviving, unchanged suggestion without resurrecting data
+			// or overwriting a later incarnation. This shrinks the stored row.
+			if _, err := tx.ExecContext(ctx, `UPDATE suggestions SET data=? WHERE id=? AND data=?`, staged, v.ID, prior); err != nil {
 				return err
 			}
 		}

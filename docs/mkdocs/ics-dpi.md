@@ -920,6 +920,9 @@ collection. Observation is not authorization, even when the traffic was delivere
    suggestions. The maximum is 128 suggestions and 128 total rules per request.
    If completion is uncertain after a network/engine error, retry the **same
    request ID and ordered selections**: the candidate may already be staged.
+   Once resolved, that request uses its durable snapshot even if the source
+   evidence is deleted, evicted or expires. Completion failures after candidate
+   persistence return a retryable `503` naming the request ID, not a rejection.
 6. Reviewed suggestions stage as explicit `ics.mode: "monitor"` ALLOW rules,
    including IEC 104. Review the candidate diff and use the normal **Commit** or
    **Commit-confirmed** bar to apply them. Committed monitor rules do not authorize
@@ -961,7 +964,11 @@ by the store clock. Ceilings are 32 datasets, 100,000 records and 128 MiB of
 normalized evidence; each parent is limited to 256 KiB and 4,096 objects. Loss,
 rejection, eviction, expiry and withheld reasons are exposed, not silently
 interpreted as complete coverage. Evidence admission gaps prevent certification;
-deletion or eviction invalidates dependent proofs. Dataset review shows the last
+deletion or eviction invalidates dependent proofs for new stage requests.
+Resolved staging snapshots and completed receipts survive evidence retention and
+remain charged to the storage budget, so recovery never needs deleted evidence.
+Only a known failed candidate mutation releases its snapshot; when retained
+receipts exhaust the budget, new admissions are refused. Dataset review shows the last
 generation's per-dataset withheld counts; store-wide counters are durable totals.
 
 `GET /api/v1/learn/datasets`, `/learn/watches`, `/learn/suggestions` and dataset
