@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useHealth } from "../hooks/useHealth";
+import { useHealth, useHealthSettled } from "../hooks/useHealth";
 
 /** Health exposes only the worst evidence state, never destinations or errors. */
 export function EvidenceBanner() {
   const health = useHealth();
+  // Before the first poll nothing is known yet; an unavailable health report is "unknown".
+  if (!useHealthSettled()) return null;
   const state = health?.evidence?.state ?? "unknown";
   if (state === "ok") return null;
   const failed = state === "degraded";

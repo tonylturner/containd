@@ -82,17 +82,17 @@ async function previewContractor(page: Page, preview: unknown) {
 
 test("rule impact preview lists the time range and collapsed sample events", async ({ page }) => {
   const modbus = {
-    id: 41, flowId: "flow-1", proto: "modbus", kind: "request", timestamp: "2026-10-26T09:15:02Z",
+    id: "41", flowId: "flow-1", proto: "modbus", kind: "request", timestamp: "2026-10-26T09:15:02Z",
     attributes: { function_code: 3, unit_id: 1 },
     srcIp: "10.10.0.5", dstIp: "10.20.0.7", srcPort: 40100, dstPort: 502, transport: "tcp",
   };
   const iec = {
-    id: 40, flowId: "flow-2", proto: "iec104", kind: "request", timestamp: "2026-10-26T09:10:00Z",
+    id: "40", flowId: "flow-2", proto: "iec104", kind: "request", timestamp: "2026-10-26T09:10:00Z",
     attributes: { type_id: 45, direction: "request" },
     srcIp: "2001:db8::5", dstIp: "2001:db8::7", srcPort: 40200, dstPort: 2404, transport: "tcp",
   };
   const ping = {
-    id: 39, flowId: "flow-3", proto: "firewall", kind: "flow.allow", timestamp: "2026-10-26T08:00:00Z",
+    id: "39", flowId: "flow-3", proto: "firewall", kind: "flow.allow", timestamp: "2026-10-26T08:00:00Z",
     srcIp: "10.10.0.6", dstIp: "10.20.0.8", transport: "icmp",
   };
   const summary = await previewContractor(page, {
