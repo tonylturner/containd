@@ -7,10 +7,10 @@ import (
 	"context"
 	"net"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/evidence"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"go.uber.org/zap"
@@ -66,9 +66,9 @@ func TestSyslogForwarderOutlivesApplyContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	mgr.SetEventLister(func(int) []dpevents.Event {
-		return []dpevents.Event{{ID: 1, Proto: "modbus", Kind: "service.modbus.read", Timestamp: time.Now().UTC()}}
-	})
+	store := dpevents.NewStore(8)
+	mgr.SetEventFeeds(testEventFeeds(store))
+	store.Append(dpevents.Event{ID: 1, Proto: "modbus", Kind: "service.modbus.read", Timestamp: time.Now().UTC()})
 
 	buf := make([]byte, 4096)
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -87,7 +87,7 @@ func TestSyslogReapplyWhileForwarderStarts(t *testing.T) {
 	mgr := NewSyslogManager()
 	mgr.log = zap.NewNop().Sugar()
 	defer mgr.Stop()
-	mgr.SetEventLister(func(int) []dpevents.Event { return nil })
+	mgr.SetEventFeeds(testEventFeeds(dpevents.NewStore(8)))
 	cfg := config.SyslogConfig{Forwarders: []config.SyslogForwarder{{Address: "127.0.0.1", Port: 514, Proto: "udp"}}}
 	for range 20 {
 		if err := mgr.Apply(context.Background(), cfg); err != nil {
@@ -108,10 +108,8 @@ func TestSyslogFlushWhileFormatChanges(t *testing.T) {
 	mgr := NewSyslogManager()
 	mgr.log = zap.NewNop().Sugar()
 	defer mgr.Stop()
-	var id atomic.Uint64
-	mgr.SetEventLister(func(int) []dpevents.Event {
-		return []dpevents.Event{{ID: id.Add(1), Proto: "modbus", Kind: "service.modbus.read", Timestamp: time.Now().UTC()}}
-	})
+	store := dpevents.NewStore(128)
+	mgr.SetEventFeeds(testEventFeeds(store))
 	cfg := func(format string) config.SyslogConfig {
 		return config.SyslogConfig{Forwarders: []config.SyslogForwarder{{Address: "127.0.0.1", Port: port, Proto: "udp"}}, Format: format}
 	}
@@ -133,6 +131,7 @@ func TestSyslogFlushWhileFormatChanges(t *testing.T) {
 		}
 	}()
 	for range 50 {
+		store.Append(dpevents.Event{Kind: "service.modbus.read", Timestamp: time.Now()})
 		mgr.flushEvents(context.Background())
 	}
 	<-done
@@ -164,8 +163,14 @@ func TestSyslogRFC5424ICMPHasNoPorts(t *testing.T) {
 		DstIP:     "2001:db8::2",
 		Transport: "icmpv6",
 	}
-	line := mgr.formatEvent(ev, "rfc5424")
-	if !strings.Contains(line, `"src":"2001:db8::1"`) || !strings.Contains(line, `"dst":"2001:db8::2"`) {
+	line, err := mgr.formatSourceEvent(ev, "rfc5424", evidence.SourceEngine, "epoch", 1)
+	if err != nil || !strings.Contains(line, `src="2001:db8::1"`) || !strings.Contains(line, `dst="2001:db8::2"`) {
 		t.Fatalf("ICMPv6 event endpoints carry a port: %s", line)
 	}
+}
+
+func testEventFeeds(store *dpevents.Store) map[evidence.Source]dpevents.FeedReader {
+	return map[evidence.Source]dpevents.FeedReader{evidence.SourceEngine: func(_ context.Context, q dpevents.FeedRequest) (dpevents.FeedPage, error) {
+		return store.ReadFeed(q), nil
+	}}
 }

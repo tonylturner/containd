@@ -150,33 +150,13 @@ func Run(ctx context.Context, opts Options) error {
 			logger.Warnf("failed to remove management runtime record: %v", err)
 		}
 	}()
+	installSyslogSources(serviceManager, engineClient, stores, logger)
 	// Best-effort initial service render on startup.
 	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
 		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
 			logger.Warnf("failed to apply initial service config: %v", applyErr)
 		}
 	}
-	serviceManager.SetEventLister(func(limit int) []dpevents.Event {
-		var out []dpevents.Event
-		type eventLister interface {
-			ListEvents(ctx context.Context, limit int) ([]dpevents.Event, error)
-		}
-		if ec, ok := engineClient.(eventLister); ok && ec != nil {
-			if evs, err := ec.ListEvents(context.Background(), limit); err == nil {
-				out = append(out, evs...)
-			}
-		}
-		out = append(out, serviceManager.ListTelemetryEvents(limit)...)
-		migrationCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		migrations, err := publishScopeMigrations(migrationCtx, stores)
-		if err != nil {
-			logger.Errorw("deliver industrial scope migration telemetry", "error", err)
-		} else {
-			out = append(out, migrations...)
-		}
-		return out
-	})
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
 	defer stopEngineSync()
 	stopReload := startConfigReload(ctx, logger, stores.store, stores.auditStore, engineClient, serviceManager, opts.Reload)

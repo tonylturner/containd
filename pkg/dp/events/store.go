@@ -21,7 +21,7 @@ import (
 
 // Event is a normalized DPI/IDS/Firewall event for telemetry.
 type Event struct {
-	ID                    uint64                     `json:"id"`
+	ID                    uint64                     `json:"id,string"`
 	FlowID                string                     `json:"flowId"`
 	TransportConnectionID flow.TransportConnectionID `json:"transportConnectionId,omitempty"`
 	CorrelationStatus     string                     `json:"correlationStatus,omitempty"`
@@ -74,6 +74,9 @@ type Store struct {
 	capacity int
 	idBase   uint64
 	nextID   atomic.Uint64
+	epoch    string
+	feedTail uint64
+	feed     eventRing
 
 	mu               sync.Mutex
 	general          eventRing
@@ -99,7 +102,7 @@ func NewStoreWithIDBase(capacity int, idBase uint64) *Store {
 	if capacity <= 0 {
 		capacity = 4096
 	}
-	return &Store{capacity: capacity, idBase: idBase, general: eventRing{capacity: capacity}, denies: eventRing{capacity: denyCapacity}}
+	return &Store{capacity: capacity, idBase: idBase, epoch: newFeedEpoch(), feed: eventRing{capacity: capacity}, general: eventRing{capacity: capacity}, denies: eventRing{capacity: denyCapacity}}
 }
 
 // NewStoreWithSpill creates a Store with spill-to-disk enabled.
