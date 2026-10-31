@@ -88,7 +88,7 @@ upgraded before validation; new rule writes and configurations stamped 0.1.9 or
 newer reject `learn` rather than accepting an alias.
 
 **Traffic behavior changes:** a former learn ALLOW inside an enforce envelope
-could admit at L7 and mask an enforce DENY through ALLOW precedence. As monitor
+could admit at L7 and mask an enforce DENY under the legacy evaluator. As monitor
 it does neither: that traffic is now denied (and reset where the envelope resets).
 A former learn DENY no longer drops at L4 without a queue. Audit existing rules
 and arrange separate enforcing/L4 allowances where observation needs traffic.
@@ -754,14 +754,16 @@ With `mode: "enforce"` the rule needs a nonzero `dataplane.nfqueueGroup` (see
 Fields are ANDed; members within each list are ORed. An omitted selector means
 ANY. A selector whose value is absent does not match either ALLOW or DENY,
 except for the explicitly unknown cases below. Each DNP3 object header and each
-CIP operation is evaluated independently through the unchanged firewall
-[precedence](policy-model.md#actions-and-precedence): ALLOW first, then the
-first matching DENY by ID, then the default. **Any denied object denies the
+CIP operation is evaluated independently through firewall
+[precedence](policy-model.md#actions-and-precedence): the first matching
+enforcing terminal in configured order wins, otherwise the default action
+applies. Monitor rules never decide. **Any denied object denies the
 message**; different ALLOW rules may cover different objects. Modbus retains
 whole-PDU span containment in a single rule. A complete CIP Multiple Service
 Packet wrapper is a container, not an operation; only its children are judged.
-A broad L3/L4 ALLOW can therefore shadow a generic ICS DENY; ruleset warnings
-identify such overlaps. IEC 104 retains its separate inspection envelope below.
+An earlier broad L3/L4 ALLOW can therefore shadow a later generic ICS DENY;
+ruleset warnings identify full coverage by an earlier unconditional terminal.
+IEC 104 retains its separate inspection envelope below.
 
 DNP3 masters/outstations apply only to application messages, never link-only
 frames. Link DIR identifies the master (source when DIR=1, destination when
@@ -879,10 +881,9 @@ reset process, timed test, malformed/unsupported events, and broadcast CA.
 
 Enforcing IEC 104 rules define an L3/L4 inspection envelope. Monitor-only rules
 open no fail-closed envelope. Inside an enforce envelope, object decisions use
-only enforcing IEC 104 rules: any matching enforce `ALLOW` admits the object,
-otherwise the first matching enforce `DENY` by rule ID denies it, and no match
-is denied. Matching monitor rules additionally record shadow evidence without
-changing this decision. A broad TCP/2404 allow rule
+only enforcing IEC 104 rules in configured order. The first matching terminal
+decides; an object with no match is denied. Matching monitor rules additionally
+record shadow evidence without changing this decision. A broad TCP/2404 allow rule
 or a generic allow default cannot bypass it. In tolerant mode, malformed or
 profile-violating content with a known length can match an `ALLOW` on fields
 that were decoded; absent fields never satisfy a predicate. Strict rejects

@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Add ordered firewall-rule placement and moves, atomic port-forward publication
+  and deletion with placement explanations, and candidate-aware previews;
+  via-forward rules report historical preview unavailable.
 - Release promotion to `:latest`, including manual promotion, now requires
   successful CI from a push to main for the exact peeled tag commit. Pending CI
   waits for a bounded poll; missing, failed or cancelled CI fails promotion with
