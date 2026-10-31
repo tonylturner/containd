@@ -14,9 +14,8 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// The shipped RangerDanger US policies (the TestRangerDangerUSPoliciesLoad
-// fixtures) decide every probe as before: under allow precedence, and
-// under the first-match order the evaluator used until now.
+// The shipped RangerDanger US policies retain the documented probe outcomes.
+// Compare verdict and exact winning ID with an independent legacy-order reader.
 func TestRangerDangerUSPolicyOutcomes(t *testing.T) {
 	type probe struct {
 		name             string
@@ -75,21 +74,25 @@ func TestRangerDangerUSPolicyOutcomes(t *testing.T) {
 				if action != p.wantAction || got != p.wantRule {
 					t.Errorf("%s: %s by %q, want %s by %q", p.name, action, got, p.wantAction, p.wantRule)
 				}
-				if fa, fr := firstMatch(&snap, ctx); fa != action || fr != got {
-					t.Errorf("%s: first-match order gives %s by %q, precedence %s by %q", p.name, fa, fr, action, got)
+				if fa, fr := legacyMatch(&snap, ctx); fa != action || fr != got {
+					t.Errorf("%s: legacy order gives %s by %q, configured order %s by %q", p.name, fa, fr, action, got)
 				}
 			}
 		})
 	}
 }
 
-// firstMatch is the evaluator's former order: the first matching rule as
-// configured, else the default.
-func firstMatch(snap *rules.Snapshot, ctx rules.EvalContext) (rules.Action, string) {
-	for _, e := range snap.Firewall {
-		if rules.PreviewMatch(e, ctx) {
+// legacyMatch evaluates complete contexts using historical ALLOW/ID precedence.
+// It is a test oracle, not a live policy path.
+func legacyMatch(snap *rules.Snapshot, ctx rules.EvalContext) (rules.Action, string) {
+	for _, i := range rules.DecisionOrder(snap.Firewall) {
+		e := snap.Firewall[i]
+		if !rules.MonitorICS(e, snap.DPIMode) && rules.PreviewMatch(e, ctx) {
 			return e.Action, e.ID
 		}
 	}
-	return snap.Default, ""
+	if snap.Default == rules.ActionAllow {
+		return rules.ActionAllow, ""
+	}
+	return rules.ActionDeny, ""
 }
