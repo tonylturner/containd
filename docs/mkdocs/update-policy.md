@@ -39,6 +39,22 @@ for that channel. Prereleases and commits outside main's history do not move it.
 The release tag must be at least the highest stable semantic-version `v*` tag
 reachable from `origin/main`. Promotion refuses older tags, including manual
 requests, and records the reason in the workflow summary.
+Both tag pushes and manual **Release** workflow runs (with the existing `tag`
+input) require a completed, successful **CI** workflow run from a **push to
+main**, with `head_sha` equal to the peeled tag commit. PR runs, other branches,
+other workflows and other commits cannot qualify. The newest matching run and
+its latest attempt take precedence; an older successful attempt cannot override
+a newer pending or failed attempt.
+
+Pending CI is checked up to 21 times, with 30 seconds between checks (at most ten
+minutes of sleeps). Each paginated API request is also limited to 30 seconds,
+bounding API time to another ten and a half minutes. A timeout fails promotion;
+after CI succeeds, re-run the **Release** workflow manually with the same tag.
+Missing, failed or cancelled CI, or an API error, fails promotion immediately.
+The workflow summary records the run ID, link, attempt and conclusion when a
+matching run exists. Prerelease, off-main and version-regression skips remain
+unchanged and do not wait for CI.
+
 Both management and engine tags are promoted to their signed digests only after
 image signature and CycloneDX attestation verification succeed with the exact
 release-tag workflow identity, GitHub OIDC issuer, and peeled release commit.

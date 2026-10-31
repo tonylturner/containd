@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Release promotion to `:latest`, including manual promotion, now requires
+  successful CI from a push to main for the exact peeled tag commit. Pending CI
+  waits for a bounded poll; missing, failed or cancelled CI fails promotion with
+  evidence in the workflow summary.
+
 ## [0.1.36] - 2026-10-31
 
 ### Upgrade notes

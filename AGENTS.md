@@ -78,5 +78,9 @@ The release workflow runs for pushed `v*` tags and checks that the tag's version
 matches `VERSION`. It resolves the tag to a commit but does not require an
 annotated tag. The workflow promotes release images to `:latest` only for a
 non-prerelease tag whose commit is an ancestor of `main`.
+Promotion also requires successful `CI` from a push to `main` for that exact
+peeled commit, using the newest run and its latest attempt. Pending CI is polled
+with a bounded wait; missing or unsuccessful CI fails promotion visibly.
 A manual workflow run can promote an existing eligible tag without rebuilding
-the images.
+the images, subject to the same CI gate. See
+[Update Policy](docs/mkdocs/update-policy.md#when-latest-moves).
