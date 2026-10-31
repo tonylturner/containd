@@ -74,7 +74,15 @@ func Run(ctx context.Context, opts Options) error {
 	if err := validateReservedEnvironment(opts.Reservation); err != nil {
 		return err
 	}
-	if err := waitForReservedEngine(ctx, resolveEngineURL(logger, opts), opts.Reservation); err != nil {
+	target, err := resolveEngineURL(logger, opts)
+	if err != nil {
+		return err
+	}
+	var transportClient *engineapi.HTTPClient
+	if target != nil {
+		transportClient = engineapi.NewHTTPClientForTarget(target)
+	}
+	if err := waitForReservedEngine(ctx, transportClient, opts.Reservation); err != nil {
 		return err
 	}
 	stores, cfg, err := initMgmtStores(logger, opts.Reservation)
@@ -103,8 +111,8 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	var engineClient httpapi.EngineClient
-	if engineURL := resolveEngineURL(logger, opts); engineURL != "" {
-		engineClient = engineapi.NewHTTPClient(engineURL)
+	if transportClient != nil {
+		engineClient = transportClient
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
 	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
@@ -119,7 +127,7 @@ func Run(ctx context.Context, opts Options) error {
 			srv.RevokeConnections(initiator)
 		}
 	})
-	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(resolveEngineURL(logger, opts)), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions)
+	router := httpapi.NewServerWithEngineAndServices(stores.store, stores.auditStore, engineClient, serviceManager, stores.userStore, managementGuardHealth(transportClient), httpapi.ManagementListenerFaults(listenerFaults.list), resetSessions)
 	serveStaticUI(router)
 	// Enforce per-interface access toggles based on the destination IP.
 	ipIndex := newIPInterfaceIndex()

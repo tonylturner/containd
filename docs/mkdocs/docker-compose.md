@@ -64,32 +64,103 @@ The default `:latest` tag moves only to signed, SBOM-attached stable releases wh
 
 ### Management ↔ Engine connectivity
 
-The management plane talks to the engine's HTTP API. Compose runs `containd all`;
-there is no Compose `CONTAIND_MODE` selector. For split deployments, run
-`containd engine` and `containd mgmt` explicitly.
+The management plane talks to the engine's privileged control API. Compose runs
+`containd all`; there is no Compose `CONTAIND_MODE` selector. For split deployments,
+run `containd engine` and `containd mgmt` explicitly.
 
-- Combined mode defaults the engine listener to `127.0.0.1:8081` and auto-wires
-  `CONTAIND_ENGINE_URL` to `http://127.0.0.1:8081` when unset.
+- Combined mode defaults to plaintext `127.0.0.1:8081`, without credentials.
+  Leave `CONTAIND_ENGINE_URL` empty to derive it from `CONTAIND_ENGINE_ADDR`.
 - Split engine mode has no default listener. Set `CONTAIND_ENGINE_ADDR` to the
-  engine's address on the management network, for example `10.10.0.2:8081`, and
-  point management's `CONTAIND_ENGINE_URL` (including scheme) at it. The engine
-  refuses to start without one: a loopback listener is out of reach of
-  management in another container, and a wildcard listener serves every network
-  without enforcement and only loopback with it. The exception is a
-  [reserved management path](management-reservation.md), which puts both
-  processes in one network namespace and requires a loopback listener.
-- `CONTAIND_ENGINE_ADDR` overrides the combined-mode listener.
+  engine's interface-held management-network address, for example `10.10.0.2:8081`,
+  and management's `CONTAIND_ENGINE_URL=https://10.10.0.2:8081`. Wildcard and
+  loopback split binds are refused, except the
+  [reserved management path](management-reservation.md), where both processes
+  share a network namespace and require loopback.
+- Any listener other than a **numeric loopback** IP requires mutual TLS: this
+  includes wildcard, interface, scoped IPv6 and `localhost` binds. Name resolution
+  never determines security. `127.0.0.0/8`, `::1` and mapped IPv4 loopback use HTTP.
+  A wildcard combined bind derives an HTTPS loopback destination (same address
+  family); an explicitly bound interface address remains the destination.
+- `http://` remote targets, remote URLs without a scheme, credentials, paths
+  (including a trailing slash), queries and fragments in engine URLs are refused.
+  An explicit HTTP URL with a remote combined listener is a startup error.
+  Management-only without an engine URL remains available without an engine.
 
-**The engine API is unauthenticated and can change appliance state. Management
-JWT authentication does not protect it.** While enforcing, the firewall admits
-it from loopback and, when the listener names one address, on that address's
-own interface only; no zone reaches it otherwise. Without enforcement, every
-network that can route to the listener reaches it, so keep a split engine's
-management network private. Do not publish the engine API. For host
-diagnostics, call it inside the container:
+#### Engine secret and rotation
+
+Generate **one dedicated secret**, then supply the same value to both peers:
+
+```sh
+openssl rand -hex 32
+# In each peer's private environment: CONTAIND_ENGINE_SECRET=<generated value>
+```
+
+The secret must encode 32 random bytes as 64 hex characters (case-insensitive,
+outer whitespace trimmed). Blank, malformed and all-same-byte values are refused;
+format validation cannot prove randomness. There is no `NGFW_` alias, lab bypass,
+plaintext fallback or management JWT reuse. Starter/dev Compose pass the variable
+through, including combined deployments with a non-loopback override.
+
+TLS 1.3 and HTTP/1.1 protect **every** remote engine route, including `/health`,
+`/readyz`, `/metrics`, telemetry and unknown paths. HKDF-SHA-256 with salt
+`containd-engine-transport-v1` and separate `server-key`, `client-key`,
+`server-serial`, `client-serial` labels derives Ed25519 identities. Fixed
+self-signed certificates are identical on every host for the same secret.
+The server has DNS identity `containd-engine`; each peer trusts only the other
+role's derived certificate using standard X.509 verification. Certificates span
+2020 through 9999: **rotation, not certificate expiry, revokes access**. Every
+holder of the secret can act as either peer; this is not per-host PKI.
+
+To rotate, change the secret on **both** peers and restart **both**. There is no
+dual-secret window. Restart closes existing keep-alive connections. Regenerate
+any exported scraper credentials too. A configured but unreachable engine keeps
+the management retry/recovery path; authentication failures are logged.
+
+#### Diagnostics and metrics credentials
+
+Keep the engine network private; mutual TLS complements interface binding and
+firewall admission, not replaces them. The supplied Compose files do not publish
+an engine port. With the default listener, diagnostics are unchanged:
 
 ```sh
 docker compose exec containd curl -s http://127.0.0.1:8081/health
+```
+
+For a remote listener, export credentials in an existing private directory with
+`CONTAIND_ENGINE_SECRET` set in that process:
+
+```sh
+mkdir -m 700 engine-credentials
+containd enginecredentials engine-credentials
+```
+
+This creates `server.crt`, `client.crt` and `client.key` (key mode 0600). Existing
+files or symlinks are refused; any failure exits non-zero. Inspect partially
+created files after failure and use a fresh directory to retry. **The client key
+can call every engine route until rotation**, not just metrics. Keep it private.
+
+Use a TLS 1.3, **OpenSSL-backed curl** (as shipped in the appliance image; check
+`curl --version`). Do not disable certificate verification:
+
+```sh
+curl --cacert engine-credentials/server.crt \
+  --cert engine-credentials/client.crt --key engine-credentials/client.key \
+  --resolve containd-engine:8081:10.10.0.2 https://containd-engine:8081/health
+```
+
+Prometheus can use the same files; mount them read-only into the scraper:
+
+```yaml
+scrape_configs:
+  - job_name: containd-engine
+    scheme: https
+    static_configs:
+      - targets: ["10.10.0.2:8081"]
+    tls_config:
+      ca_file: /etc/prometheus/engine/server.crt
+      cert_file: /etc/prometheus/engine/client.crt
+      key_file: /etc/prometheus/engine/client.key
+      server_name: containd-engine
 ```
 
 ### Low ports (DNS / DHCP)

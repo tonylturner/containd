@@ -84,12 +84,12 @@ func TestClientRulesetPreviewErrors(t *testing.T) {
 	}
 	invalid := config.DefaultConfig()
 	invalid.Firewall.Rules = []config.Rule{{ID: "bad", Action: "INVALID"}}
-	if _, err := NewHTTPClient("http://unused.invalid").PreviewRuleset(context.Background(), invalid); err == nil || !strings.Contains(err.Error(), "bad") {
+	if _, err := NewHTTPClient("http://127.0.0.1:1").PreviewRuleset(context.Background(), invalid); err == nil || !strings.Contains(err.Error(), "bad") {
 		t.Fatalf("invalid candidate preview err=%v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := NewHTTPClient("http://unused.invalid").PreviewRuleset(ctx, config.DefaultConfig()); err == nil || !strings.Contains(err.Error(), "canceled") {
+	if _, err := NewHTTPClient("http://127.0.0.1:1").PreviewRuleset(ctx, config.DefaultConfig()); err == nil || !strings.Contains(err.Error(), "canceled") {
 		t.Fatalf("canceled preview err=%v", err)
 	}
 }

@@ -497,7 +497,8 @@ listener setting supplies a value.
 | `CONTAIND_MGMT_HTTPS_ADDR` | `:8443` | Management HTTPS listen address |
 | `CONTAIND_SSH_ADDR` | `:2222` | SSH console listen address |
 | `CONTAIND_ENGINE_ADDR` | `127.0.0.1:8081` in `all`; required in `engine` | Engine API listen address. In `engine` mode, the engine's address on the management network (loopback only with a reserved management path) |
-| `CONTAIND_ENGINE_URL` | Local engine URL in `all` | Management-to-engine URL; set explicitly for split processes |
+| `CONTAIND_ENGINE_URL` | Derived engine URL in `all` | HTTP for numeric loopback listeners, HTTPS otherwise; set an HTTPS origin explicitly for remote split processes |
+| `CONTAIND_ENGINE_SECRET` | Unset | Dedicated shared 64-hex secret required for every non-loopback listener and HTTPS client; generate with `openssl rand -hex 32` |
 | `CONTAIND_CONFIG_DB` | `data/config.db` | Configuration SQLite database |
 | `CONTAIND_AUDIT_DB` | `data/audit.db` | Audit SQLite database |
 | `CONTAIND_USERS_DB` | `data/users.db` | Users SQLite database |
@@ -508,10 +509,11 @@ listener setting supplies a value.
 | `CONTAIND_ALLOWED_ORIGINS` | *(empty)* | Optional comma-separated browser origins allowed to embed or call the appliance cross-origin. Cookie-authenticated browser writes from other origins are denied unless listed here. |
 
 Relative database paths are relative to the process working directory.
-The engine API is **unauthenticated**. While enforcing, the firewall admits it
-from loopback and on the listener address's own interface only. Restrict it to
-the management process or a trusted private network; never publish the
-split-mode listener to untrusted clients.
+The engine API uses credential-free HTTP only on numeric loopback listeners.
+Every non-loopback listener requires TLS 1.3 mutual authentication, including
+probes and metrics. While enforcing, admission remains limited to loopback and
+the bound address's interface. Keep its network private. See
+[engine transport, credential export and rotation](docker-compose.md#engine-secret-and-rotation).
 
 ### Compose `.env` Inputs
 

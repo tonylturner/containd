@@ -32,8 +32,9 @@ and `containd engine` separately. See [Docker Compose](docker-compose.md).
    sinks send records to external collectors; see
    [Logging and Evidence](logging-evidence.md).
 
-The engine API is an **unauthenticated privileged control interface**. Keep it
-reachable only by management or a trusted private network; see the
+The engine API is a **privileged control interface**: numeric loopback uses
+credential-free HTTP; every non-loopback listener requires secret-derived mutual
+TLS. Keep its network private; see the
 [trust boundary](threat-model.md#management-plane-to-dataplane).
 
 ## Services and packaging

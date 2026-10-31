@@ -18,6 +18,7 @@ import (
 
 	"go.uber.org/zap"
 
+	engineapi "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -61,13 +62,13 @@ func TestReservedStartupWaitsForMatchingGuard(t *testing.T) {
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 			defer cancel()
-			err := waitForReservedEngine(ctx, server.URL, r)
+			err := waitForReservedEngine(ctx, engineapi.NewHTTPClient(server.URL), r)
 			if (err == nil) != active {
 				t.Fatalf("active=%t err=%v", active, err)
 			}
 		})
 	}
-	if waitForReservedEngine(context.Background(), "http://192.0.2.1:8081", r) == nil {
+	if waitForReservedEngine(context.Background(), engineapi.NewHTTPClient("http://192.0.2.1:8081"), r) == nil {
 		t.Fatal("accepted non-loopback engine")
 	}
 }

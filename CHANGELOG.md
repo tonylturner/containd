@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Require secret-derived TLS 1.3 mutual authentication for every non-loopback
+  engine API listener and route. Numeric loopback HTTP remains unchanged.
+  Export scraper/curl credentials with `containd enginecredentials DIRECTORY`.
+
+### Upgrade notes
+
+- Off-loopback deployments (split, or combined with a wildcard/interface
+  `CONTAIND_ENGINE_ADDR`) must set the same dedicated `CONTAIND_ENGINE_SECRET`
+  on both peers and use `https://`, or leave the engine URL empty in combined
+  mode to derive it. Generate with `openssl rand -hex 32`. No lab bypass or
+  plaintext fallback exists. Rotate by changing and restarting both peers;
+  replace any exported client credentials too.
+
 ## [0.1.36] - 2026-10-31
 
 ### Upgrade notes

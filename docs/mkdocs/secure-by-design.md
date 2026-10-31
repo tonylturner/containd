@@ -141,8 +141,9 @@ What the design delivers by default:
   path, when declared, compiles into every firewall as an independent allow, so
   policy cannot lock out the management network. See
   [Reserved Management Path](management-reservation.md).
-- **Isolated engine API.** The engine API is unauthenticated, so its reach is
-  limited by design. Combined mode binds it to `127.0.0.1:8081`. Split engine
+- **Authenticated remote engine API.** Numeric loopback retains credential-free
+  HTTP; every non-loopback listener requires TLS 1.3 mutual authentication from
+  one dedicated engine secret. Combined mode binds `127.0.0.1:8081`. Split engine
   mode refuses to start without `CONTAIND_ENGINE_ADDR` and refuses loopback or
   wildcard listeners, except on a reserved management path, where both processes
   share one network namespace. While enforcing, the firewall admits the API from loopback
@@ -235,7 +236,8 @@ These steps adapt a deployment to its network. They are guidance, not gaps.
   and prefer HTTPS.
 - Remove HTTP, HTTPS and SSH access from interfaces that do not need management.
 - In split mode, set `CONTAIND_ENGINE_ADDR` to the engine's address on a trusted
-  private management network.
+  private management network, set the same `CONTAIND_ENGINE_SECRET` on both peers,
+  and use an HTTPS engine URL. See [setup and rotation](docker-compose.md#engine-secret-and-rotation).
 - Commit only the allow rules you need. Make sure the network routes protected
   traffic through the appliance.
 - Configure a syslog forwarder, preferably over TCP, and verify that events

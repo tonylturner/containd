@@ -30,8 +30,8 @@ import (
 func TestNewHTTPClient(t *testing.T) {
 	t.Parallel()
 
-	c := NewHTTPClient("http://engine.internal")
-	if c.BaseURL != "http://engine.internal" {
+	c := NewHTTPClient("http://127.0.0.1:8081")
+	if c.BaseURL != "http://127.0.0.1:8081" {
 		t.Fatalf("BaseURL = %q", c.BaseURL)
 	}
 	if c.Client == nil || c.Client.Timeout != 5*time.Second {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/enginetransport"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -23,12 +24,24 @@ type HTTPClient struct {
 	Client  *http.Client
 }
 
+// NewHTTPClient preserves credential-free loopback callers. Invalid targets
+// produce a client that refuses every request; application startup should use
+// Resolve and NewHTTPClientForTarget to report configuration errors eagerly.
 func NewHTTPClient(baseURL string) *HTTPClient {
-	return &HTTPClient{
-		BaseURL: baseURL,
-		Client:  &http.Client{Timeout: 5 * time.Second},
+	target, err := enginetransport.Resolve(baseURL)
+	if err != nil {
+		return &HTTPClient{BaseURL: baseURL, Client: &http.Client{Timeout: 5 * time.Second, Transport: refusedTransport{err}}}
 	}
+	return NewHTTPClientForTarget(target)
 }
+
+func NewHTTPClientForTarget(target *enginetransport.Target) *HTTPClient {
+	return &HTTPClient{BaseURL: target.URL(), Client: target.Client(5 * time.Second)}
+}
+
+type refusedTransport struct{ err error }
+
+func (t refusedTransport) RoundTrip(*http.Request) (*http.Response, error) { return nil, t.err }
 
 func engineStatusError(resp *http.Response, prefix string) error {
 	body, _ := io.ReadAll(resp.Body)
