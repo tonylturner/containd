@@ -7422,7 +7422,7 @@ paths:
                   clients: {type: array, items: {$ref: '#/components/schemas/OpenVPNCredential'}}
                   revocationsApplied:
                     type: boolean
-                    description: True when no credentials are revoked, or the running managed server has loaded the current inventory CRL number; false otherwise, including when the server is inactive with revoked credentials.
+                    description: False only when revoked credentials exist and a managed server is running with a loaded CRL number different from the current inventory CRL number (including an unconfirmed loaded number after failed publication); true otherwise, including when no managed server is running. The next managed-server start loads the current CRL.
         '401':
           description: Authentication required
         '403':

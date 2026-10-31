@@ -34,7 +34,9 @@ func (m *VPNManager) ListOpenVPNClients(ctx context.Context) (OpenVPNClientList,
 		return OpenVPNClientList{}, err
 	}
 	m.mu.Lock()
-	applied := m.ovpnRunning && m.ovpnCRLNumber > 0 && m.ovpnCRLNumber == inv.CRLNumber
+	cfg := m.lastCfg.OpenVPN
+	managedServerRunning := m.ovpnRunning && cfg.Enabled && cfg.Mode == "server" && cfg.Server != nil
+	applied := !managedServerRunning || m.ovpnCRLNumber == inv.CRLNumber
 	m.mu.Unlock()
 	clients := inv.list()
 	for _, c := range clients {

@@ -348,17 +348,38 @@ func TestOpenVPNRevocationsAppliedLifecycle(t *testing.T) {
 	assertOpenVPNRevocationsApplied(t, m, true)
 	openVPNApply(t, m, cfg) // no-op apply retains the loaded CRL number
 	assertOpenVPNRevocationsApplied(t, m, true)
-	openVPNApply(t, m, config.VPNConfig{})
+	// Even an unchanged CRL number must not hide failed publication while the
+	// managed server runs: the failure clears its loaded-number acknowledgement.
+	crlPath := filepath.Join(openVPNManagedServerDir(), "pki", "crl.pem")
+	if err := os.Rename(crlPath, crlPath+".before"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(crlPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := m.RevokeOpenVPNClient(context.Background(), alice.ID); err == nil || !result.Revoked || result.Applied {
+		t.Fatalf("failed CRL publication: %+v %v", result, err)
+	}
+	if !m.Status()["openvpn_running"].(bool) {
+		t.Fatal("publication failure stopped the existing server")
+	}
 	assertOpenVPNRevocationsApplied(t, m, false)
+	if err := os.Rename(crlPath, crlPath+".blocked"); err != nil {
+		t.Fatal(err)
+	}
+	openVPNApply(t, m, cfg)
+	assertOpenVPNRevocationsApplied(t, m, true)
+	openVPNApply(t, m, config.VPNConfig{})
+	assertOpenVPNRevocationsApplied(t, m, true)
 	good := m.OpenVPNPath
 	m.OpenVPNPath = filepath.Join(t.TempDir(), "missing-openvpn")
 	if err := m.Apply(context.Background(), cfg); err == nil {
 		t.Fatal("missing binary reported ready")
 	}
-	assertOpenVPNRevocationsApplied(t, m, false)
+	assertOpenVPNRevocationsApplied(t, m, true)
 	m.OpenVPNPath = good
 	reopened := NewVPNManager(t.TempDir())
-	assertOpenVPNRevocationsApplied(t, reopened, false)
+	assertOpenVPNRevocationsApplied(t, reopened, true)
 	openVPNApply(t, m, cfg)
 	assertOpenVPNRevocationsApplied(t, m, true)
 	// An unexpected daemon exit clears acknowledgement just like disable does.
@@ -369,9 +390,9 @@ func TestOpenVPNRevocationsAppliedLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-done
-	assertOpenVPNRevocationsApplied(t, m, false)
+	assertOpenVPNRevocationsApplied(t, m, true)
 	openVPNApply(t, m, cfg)
 	client := config.VPNConfig{OpenVPN: config.OpenVPNConfig{Enabled: true, Managed: &config.OpenVPNManagedClientConfig{Remote: "vpn.example.test", CA: "ca", Cert: "cert", Key: "key"}}}
 	openVPNApply(t, m, client)
-	assertOpenVPNRevocationsApplied(t, m, false)
+	assertOpenVPNRevocationsApplied(t, m, true)
 }
