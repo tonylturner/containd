@@ -43,6 +43,35 @@ func BenchmarkHTTPDecoderRequest(b *testing.B) {
 	}
 }
 
+func BenchmarkHTTPDecoderOnPacket(b *testing.B) {
+	dec := NewHTTPDecoder()
+	state := httpFlowState(12345, 80)
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{name: "non-HTTP", payload: "random payload that is not HTTP"},
+		{name: "request", payload: "GET /index.html HTTP/1.1\r\nHost: bench.example.com\r\nUser-Agent: containd-bench\r\n\r\n"},
+		{name: "response", payload: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"},
+		{name: "HTTP/2-preface", payload: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			pkt := &dpi.ParsedPacket{
+				Payload: []byte(tc.payload),
+				Proto:   "tcp",
+				SrcPort: 12345,
+				DstPort: 80,
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, _ = dec.OnPacket(state, pkt)
+			}
+		})
+	}
+}
+
 func BenchmarkTLSDecoderClientHello(b *testing.B) {
 	dec := NewTLSDecoder()
 	state := tlsFlowState(12345, 443)
