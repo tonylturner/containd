@@ -79,20 +79,16 @@ func TestOpenVPNManagedServerRenderAndPaths(t *testing.T) {
 	t.Setenv("CONTAIND_OPENVPN_DIR", filepath.Join(root, "profiles"))
 
 	mgr := NewVPNManager(t.TempDir())
-	confPath, err := mgr.openVPNConfigPathForEnabled(config.OpenVPNConfig{
-		Enabled: true,
-		Mode:    "server",
-		Server: &config.OpenVPNManagedServerConfig{
-			ListenPort:     443,
-			Proto:          "tcp",
-			TunnelCIDR:     "10.9.0.0/24",
-			PushDNS:        []string{"1.1.1.1", " 8.8.8.8 "},
-			PushRoutes:     []string{"10.20.0.0/24"},
-			ClientToClient: true,
-		},
+	confPath, err := mgr.renderOpenVPNManagedServer(&config.OpenVPNManagedServerConfig{
+		ListenPort:     443,
+		Proto:          "tcp",
+		TunnelCIDR:     "10.9.0.0/24",
+		PushDNS:        []string{"1.1.1.1", " 8.8.8.8 "},
+		PushRoutes:     []string{"10.20.0.0/24"},
+		ClientToClient: true,
 	})
 	if err != nil {
-		t.Fatalf("openVPNConfigPathForEnabled(server): %v", err)
+		t.Fatalf("renderOpenVPNManagedServer: %v", err)
 	}
 
 	serverDir := filepath.Join(root, "managed", "server")
