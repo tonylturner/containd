@@ -1,0 +1,564 @@
+{
+  "schema_version": "0.1.0",
+  "system": {
+    "hostname": "containd",
+    "mgmt": {
+      "listenAddr": ":8080",
+      "enableHTTP": true,
+      "enableHTTPS": true,
+      "httpListenAddr": ":8080",
+      "httpsListenAddr": ":8443",
+      "tlsCertFile": "/data/tls/server.crt",
+      "tlsKeyFile": "/data/tls/server.key"
+    },
+    "ssh": {}
+  },
+  "interfaces": [
+    {
+      "name": "wan",
+      "zone": "wan",
+      "access": {
+        "mgmt": false,
+        "http": false,
+        "https": false,
+        "ssh": false
+      }
+    },
+    {
+      "name": "dmz",
+      "zone": "dmz",
+      "access": {
+        "mgmt": false,
+        "http": false,
+        "https": false,
+        "ssh": false
+      }
+    },
+    {
+      "name": "lan1",
+      "zone": "lan1",
+      "access": {
+        "mgmt": false,
+        "http": false,
+        "https": false,
+        "ssh": false
+      }
+    },
+    {
+      "name": "lan2",
+      "zone": "lan2",
+      "access": {
+        "mgmt": false,
+        "http": false,
+        "https": false,
+        "ssh": false
+      }
+    },
+    {
+      "name": "lan3",
+      "zone": "lan3",
+      "access": {
+        "mgmt": true,
+        "http": true,
+        "https": true,
+        "ssh": true
+      }
+    },
+    {
+      "name": "lan4",
+      "zone": "lan4",
+      "access": {
+        "mgmt": false,
+        "http": false,
+        "https": false,
+        "ssh": false
+      }
+    },
+    {
+      "name": "lan5",
+      "zone": "lan5",
+      "access": {
+        "mgmt": false,
+        "http": false,
+        "https": false,
+        "ssh": false
+      }
+    }
+  ],
+  "zones": [
+    {
+      "name": "wan",
+      "description": "Enterprise Zone - untrusted student and attacker access"
+    },
+    {
+      "name": "dmz",
+      "description": "Vendor and Engineering Zone"
+    },
+    {
+      "name": "lan1",
+      "description": "Station Zone - IEC104 RTU, OpenPLC and GPS clock"
+    },
+    {
+      "name": "lan2",
+      "description": "Feeder Field Zone - breaker, RMUs and OLTC Modbus endpoints"
+    },
+    {
+      "name": "lan3",
+      "description": "RangerDanger control plane - backend and containd management"
+    },
+    {
+      "name": "lan4",
+      "description": "Control Centre Zone - IEC104 client"
+    },
+    {
+      "name": "lan5",
+      "description": "Operations DMZ - read-only historian"
+    }
+  ],
+  "routing": {},
+  "dataplane": {
+    "dpiMode": "enforce",
+    "nflogGroup": 100,
+    "nfqueueGroup": 101,
+    "dpiEnabled": true
+  },
+  "pcap": {
+    "filter": {}
+  },
+  "firewall": {
+    "defaultAction": "DENY",
+    "rules": [
+      {
+        "id": "control-centre-to-rtu-iec104",
+        "description": "Allow the named Control Centre to open IEC104 sessions to the RTU",
+        "sourceZones": [
+          "lan4"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "sources": [
+          "10.60.60.20/32"
+        ],
+        "destinations": [
+          "10.30.30.20/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "2404"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "rtu-to-feeder-modbus",
+        "description": "Allow the named RTU to poll both breakers, RMUs and OLTC and control the existing command targets over Modbus TCP",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "sources": [
+          "10.30.30.20/32"
+        ],
+        "destinations": [
+          "10.40.40.20/32",
+          "10.40.40.21/32",
+          "10.40.40.22/32",
+          "10.40.40.23/32",
+          "10.40.40.24/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "502"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "plc-to-oltc-modbus",
+        "description": "Allow only the named PLC to regulate the OLTC over Modbus TCP",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "sources": [
+          "10.30.30.30/32"
+        ],
+        "destinations": [
+          "10.40.40.23/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "502"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "control-centre-to-historian-ingest",
+        "description": "Allow only the named CC to push historian snapshots",
+        "sourceZones": [
+          "lan4"
+        ],
+        "destZones": [
+          "lan5"
+        ],
+        "sources": [
+          "10.60.60.20/32"
+        ],
+        "destinations": [
+          "10.70.70.40/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8081"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "enterprise-to-historian-read",
+        "description": "Allow enterprise read-only historian access",
+        "sourceZones": [
+          "wan"
+        ],
+        "destZones": [
+          "lan5"
+        ],
+        "sources": [
+          "10.10.10.0/24"
+        ],
+        "destinations": [
+          "10.70.70.40/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "engineering-to-plc-web",
+        "description": "Allow engineering maintenance of the OpenPLC web UI",
+        "sourceZones": [
+          "dmz"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "sources": [
+          "10.20.20.20/32"
+        ],
+        "destinations": [
+          "10.30.30.30/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "deny-unauthorized-historian-ingest",
+        "description": "Deny and log other sources attempting historian snapshot ingest on TCP/8081",
+        "sourceZones": [
+          "wan",
+          "dmz",
+          "lan1",
+          "lan2",
+          "lan3",
+          "lan4",
+          "lan5"
+        ],
+        "destZones": [
+          "lan5"
+        ],
+        "destinations": [
+          "10.70.70.40/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8081"
+          }
+        ],
+        "action": "DENY",
+        "log": true
+      },
+      {
+        "id": "deny-unauthorized-plc-web",
+        "description": "Deny and log other sources attempting OpenPLC web maintenance on TCP/8080",
+        "sourceZones": [
+          "wan",
+          "dmz",
+          "lan1",
+          "lan2",
+          "lan3",
+          "lan4",
+          "lan5"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "destinations": [
+          "10.30.30.30/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          }
+        ],
+        "action": "DENY",
+        "log": true
+      },
+      {
+        "id": "deny-unauthorized-iec104",
+        "description": "Deny and log other sources attempting to reach IEC104 on TCP/2404",
+        "sourceZones": [
+          "wan",
+          "dmz",
+          "lan1",
+          "lan2",
+          "lan3",
+          "lan4",
+          "lan5"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "2404"
+          }
+        ],
+        "action": "DENY",
+        "log": true
+      },
+      {
+        "id": "deny-unauthorized-modbus",
+        "description": "Deny and log other sources attempting to reach Modbus on TCP/502",
+        "sourceZones": [
+          "wan",
+          "dmz",
+          "lan1",
+          "lan2",
+          "lan3",
+          "lan4",
+          "lan5"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "502"
+          }
+        ],
+        "action": "DENY",
+        "log": true
+      },
+      {
+        "id": "observe-cc-breaker-command",
+        "description": "Monitor only: CC breaker commands; never admits or denies",
+        "sourceZones": [
+          "lan4"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "sources": [
+          "10.60.60.20/32"
+        ],
+        "destinations": [
+          "10.30.30.20/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "2404"
+          }
+        ],
+        "action": "DENY",
+        "ics": {
+          "protocol": "iec104",
+          "mode": "monitor",
+          "direction": "request",
+          "ca": [
+            1
+          ],
+          "typeIds": [
+            46
+          ],
+          "ioa": [
+            {
+              "start": 3001,
+              "end": 3001
+            }
+          ]
+        }
+      },
+      {
+        "id": "observe-cc-oltc-step",
+        "description": "Monitor only: CC OLTC steps; never admits or denies",
+        "sourceZones": [
+          "lan4"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "sources": [
+          "10.60.60.20/32"
+        ],
+        "destinations": [
+          "10.30.30.20/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "2404"
+          }
+        ],
+        "action": "ALLOW",
+        "ics": {
+          "protocol": "iec104",
+          "mode": "monitor",
+          "direction": "request",
+          "ca": [
+            1
+          ],
+          "typeIds": [
+            47
+          ],
+          "ioa": [
+            {
+              "start": 3301,
+              "end": 3301
+            }
+          ],
+          "cot": [
+            6
+          ],
+          "commandStates": [
+            1,
+            2
+          ],
+          "commandQualifiers": [
+            0
+          ],
+          "negative": false,
+          "test": false
+        }
+      },
+      {
+        "id": "observe-cc-oltc-raise-only",
+        "description": "Monitor only: CC OLTC raises; never admits or denies",
+        "sourceZones": [
+          "lan4"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "sources": [
+          "10.60.60.20/32"
+        ],
+        "destinations": [
+          "10.30.30.20/32"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "2404"
+          }
+        ],
+        "action": "ALLOW",
+        "ics": {
+          "protocol": "iec104",
+          "mode": "monitor",
+          "direction": "request",
+          "ca": [
+            1
+          ],
+          "typeIds": [
+            47
+          ],
+          "ioa": [
+            {
+              "start": 3301,
+              "end": 3301
+            }
+          ],
+          "cot": [
+            6
+          ],
+          "commandStates": [
+            2
+          ],
+          "commandQualifiers": [
+            0
+          ],
+          "negative": false,
+          "test": false
+        }
+      }
+    ],
+    "nat": {
+      "enabled": false
+    }
+  },
+  "ids": {
+    "enabled": false
+  },
+  "services": {
+    "syslog": {
+      "forwarders": [],
+      "format": "rfc5424",
+      "batchSize": 500,
+      "flushEvery": 2
+    },
+    "dns": {
+      "enabled": false
+    },
+    "ntp": {
+      "enabled": false
+    },
+    "proxy": {
+      "forward": {
+        "enabled": false
+      },
+      "reverse": {
+        "enabled": false
+      }
+    },
+    "dhcp": {
+      "enabled": false
+    },
+    "vpn": {
+      "wireguard": {
+        "enabled": false
+      },
+      "openvpn": {
+        "enabled": false
+      }
+    },
+    "av": {
+      "enabled": false,
+      "icap": {},
+      "clamav": {}
+    }
+  }
+}

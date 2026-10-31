@@ -121,9 +121,17 @@ func TestOrderedMigrationEvaluatorCorpus(t *testing.T) {
 }
 
 func TestOrderedMigrationRangerDangerCorpus(t *testing.T) {
-	for _, name := range []string{"substation-weak.json", "substation-improved.json"} {
-		t.Run(name, func(t *testing.T) {
-			raw, err := os.ReadFile(filepath.Join("testdata", "rangerdanger", name))
+	for _, corpus := range []struct {
+		name string
+		eu   bool
+	}{
+		{name: "substation-weak.json"},
+		{name: "substation-improved.json"},
+		{name: "eu-weak.json", eu: true},
+		{name: "eu-improved.json", eu: true},
+	} {
+		t.Run(corpus.name, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("testdata", "rangerdanger", corpus.name))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,6 +150,231 @@ func TestOrderedMigrationRangerDangerCorpus(t *testing.T) {
 				t.Fatal(err)
 			}
 			ev := rules.NewEvaluator(&after)
+			if corpus.eu {
+				// Course subnets are per-zone; lan3 uses the management reservation.
+				zoneSubnets := map[string]string{
+					"wan":  "10.10.10.0/24",
+					"dmz":  "10.20.20.0/24",
+					"lan1": "10.30.30.0/24",
+					"lan2": "10.40.40.0/24",
+					"lan3": "10.99.99.0/24",
+					"lan4": "10.60.60.0/24",
+					"lan5": "10.70.70.0/24",
+				}
+				var zones []string
+				namedZones := make(map[string]bool)
+				for _, rule := range legacy.Firewall.Rules {
+					for _, zone := range append(append([]string(nil), rule.SourceZones...), rule.DestZones...) {
+						namedZones[zone] = true
+					}
+				}
+				for _, zone := range []string{"wan", "dmz", "lan1", "lan2", "lan3", "lan4", "lan5"} {
+					if namedZones[zone] {
+						zones = append(zones, zone)
+					}
+				}
+				if len(zones) != len(namedZones) {
+					t.Fatalf("policy names zones without course subnets: %v", namedZones)
+				}
+
+				sourceIPsByZone := make(map[string][]string)
+				destinationIPsByZone := make(map[string][]string)
+				addUnique := func(ips []string, ip string) []string {
+					for _, existing := range ips {
+						if existing == ip {
+							return ips
+						}
+					}
+					return append(ips, ip)
+				}
+				for _, rule := range legacy.Firewall.Rules {
+					sourceZones, destinationZones := rule.SourceZones, rule.DestZones
+					if len(sourceZones) == 0 {
+						sourceZones = zones
+					}
+					if len(destinationZones) == 0 {
+						destinationZones = zones
+					}
+					for _, cidr := range rule.Sources {
+						ip, _, err := net.ParseCIDR(cidr)
+						if err != nil {
+							t.Fatalf("rule %s source %q: %v", rule.ID, cidr, err)
+						}
+						for _, zone := range sourceZones {
+							sourceIPsByZone[zone] = addUnique(sourceIPsByZone[zone], ip.String())
+						}
+					}
+					for _, cidr := range rule.Destinations {
+						ip, _, err := net.ParseCIDR(cidr)
+						if err != nil {
+							t.Fatalf("rule %s destination %q: %v", rule.ID, cidr, err)
+						}
+						for _, zone := range destinationZones {
+							destinationIPsByZone[zone] = addUnique(destinationIPsByZone[zone], ip.String())
+						}
+					}
+				}
+				for _, zone := range zones {
+					ip, _, err := net.ParseCIDR(zoneSubnets[zone])
+					if err != nil {
+						t.Fatal(err)
+					}
+					unnamed := append(net.IP(nil), ip.To4()...)
+					unnamed[3] = 250
+					sourceIPsByZone[zone] = addUnique(sourceIPsByZone[zone], unnamed.String())
+					destinationIPsByZone[zone] = addUnique(destinationIPsByZone[zone], unnamed.String())
+				}
+
+				var zonePairs [][2]string
+				seenPairs := make(map[[2]string]bool)
+				for _, rule := range legacy.Firewall.Rules {
+					sourceZones, destinationZones := rule.SourceZones, rule.DestZones
+					if len(sourceZones) == 0 {
+						sourceZones = zones
+					}
+					if len(destinationZones) == 0 {
+						destinationZones = zones
+					}
+					for _, sourceZone := range sourceZones {
+						for _, destinationZone := range destinationZones {
+							pair := [2]string{sourceZone, destinationZone}
+							if !seenPairs[pair] {
+								seenPairs[pair] = true
+								zonePairs = append(zonePairs, pair)
+							}
+						}
+					}
+				}
+
+				var ports []string
+				for _, rule := range legacy.Firewall.Rules {
+					for _, protocol := range rule.Protocols {
+						if protocol.Name != "tcp" {
+							t.Fatalf("EU policy %s rule %s uses non-TCP protocol %q", corpus.name, rule.ID, protocol.Name)
+						}
+						if protocol.Port != "" {
+							ports = addUnique(ports, protocol.Port)
+						}
+					}
+				}
+
+				var typeIDs []uint8
+				var ioas []uint32
+				seenTypeIDs := make(map[uint8]bool)
+				seenIOAs := make(map[uint32]bool)
+				for _, rule := range legacy.Firewall.Rules {
+					if rule.ICS.Protocol != "iec104" || rule.ICS.Mode != "monitor" {
+						continue
+					}
+					for _, id := range rule.ICS.TypeIDs {
+						typeID := uint8(id)
+						if !seenTypeIDs[typeID] {
+							seenTypeIDs[typeID] = true
+							typeIDs = append(typeIDs, typeID)
+						}
+					}
+					for _, selected := range rule.ICS.IOA {
+						for ioa := selected.Start; ioa <= selected.End; ioa++ {
+							if !seenIOAs[ioa] {
+								seenIOAs[ioa] = true
+								ioas = append(ioas, ioa)
+							}
+						}
+					}
+				}
+				otherTypeID := uint8(1)
+				for {
+					found := false
+					for _, id := range typeIDs {
+						if id == otherTypeID {
+							found = true
+							break
+						}
+					}
+					if !found {
+						break
+					}
+					otherTypeID++
+				}
+				typeIDs = append(typeIDs, otherTypeID)
+				otherIOA := uint32(1)
+				for {
+					found := false
+					for _, ioa := range ioas {
+						if ioa == otherIOA {
+							found = true
+							break
+						}
+					}
+					if !found {
+						break
+					}
+					otherIOA++
+				}
+				ioas = append(ioas, otherIOA)
+
+				count := 0
+				compare := func(ctx rules.EvalContext, iec bool) {
+					wantAction, wantID := legacyDecision(&before, ctx, iec)
+					var action rules.Action
+					var winner *rules.Entry
+					if iec {
+						action, winner = ev.EvaluateIEC104Enforcing(ctx)
+					} else {
+						action, winner = ev.EvaluateEnforcing(ctx)
+					}
+					if action != wantAction || decisionID(winner) != wantID {
+						t.Fatalf("policy %s context %+v: upgraded %s/%s, legacy %s/%s",
+							corpus.name, ctx, action, decisionID(winner), wantAction, wantID)
+					}
+					count++
+				}
+				for _, pair := range zonePairs {
+					for _, src := range sourceIPsByZone[pair[0]] {
+						for _, dst := range destinationIPsByZone[pair[1]] {
+							for _, port := range ports {
+								base := rules.EvalContext{
+									SrcIP: net.ParseIP(src), DstIP: net.ParseIP(dst),
+									SrcZone: pair[0], DstZone: pair[1], Proto: "tcp", Port: port,
+								}
+								switch port {
+								case "2404":
+									for _, typeID := range typeIDs {
+										for _, ioa := range ioas {
+											for _, direction := range []string{"request", "response"} {
+												ca := uint16(1)
+												typeID, ioa := typeID, ioa
+												ctx := base
+												ctx.ICS = &rules.ICSContext{
+													Protocol: "iec104", Direction: direction,
+													IEC104: &rules.IEC104Context{
+														APCIType: "I", TypeID: &typeID, CA: &ca, IOA: &ioa,
+													},
+												}
+												compare(ctx, false)
+												compare(ctx, true)
+											}
+										}
+									}
+								case "502":
+									for _, functionCode := range []uint8{3, 6, 16} {
+										ctx := base
+										ctx.ICS = &rules.ICSContext{
+											Protocol: "modbus", HasFunctionCode: true, FunctionCode: functionCode,
+										}
+										compare(ctx, false)
+									}
+								default:
+									compare(base, false)
+								}
+							}
+						}
+					}
+				}
+				t.Logf("%d EU zone-pair/address/port/context comparisons", count)
+				return
+			}
+
 			count := 0
 			for _, src := range []string{"10.10.10.5", "10.20.20.5", "10.30.30.20", "10.40.40.10"} {
 				for _, srcZone := range []string{"wan", "dmz", "lan1", "lan2"} {
