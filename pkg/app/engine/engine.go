@@ -256,8 +256,9 @@ func Run(ctx context.Context, opts Options) error {
 
 	logger.Infof("containd engine starting on %s", addr)
 	server := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {

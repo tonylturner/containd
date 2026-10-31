@@ -189,8 +189,8 @@ not protect direct engine requests. It must be reachable only by the management
 process or through a trusted private network, never by untrusted clients.
 
 Combined mode (`containd all`) defaults to `127.0.0.1:8081`. Split engine mode
-(`containd engine`) defaults to `:8081` so a separate management container can
-reach it. `CONTAIND_ENGINE_ADDR` overrides these defaults; a wildcard override
-in combined mode broadens exposure too. Do not publish the engine port to
+(`containd engine`) has no default listener: set `CONTAIND_ENGINE_ADDR` to an
+interface-held management-network address. Shared-namespace reserved deployments
+require loopback instead. A wildcard override in combined mode broadens exposure too. Do not publish the engine port to
 untrusted networks. An unpublished Docker port can still be reachable by peers
 on attached networks; Docker network attachment is part of this trust boundary.
