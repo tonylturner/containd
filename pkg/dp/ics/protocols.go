@@ -19,12 +19,6 @@ func Supported(name string) bool {
 	return false
 }
 
-// Learnable excludes IEC104: it stays visible in telemetry but must never
-// produce automatically learned permissive rules.
-func Learnable(name string) bool {
-	return Supported(name) && name != "iec104"
-}
-
 // Removed identifies obsolete industrial labels, including the non-emitted
 // enip label for CIP, not generic numeric ports
 // or historical telemetry. IT and generic IDS protocols remain valid.
