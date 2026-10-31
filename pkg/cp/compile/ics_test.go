@@ -146,8 +146,9 @@ func TestCompileSnapshotUsesICSPredicate(t *testing.T) {
 // object-class rule matched every class. They are now compiled and enforced.
 func TestCompileSnapshotEnforcesDirectionAndObjectClasses(t *testing.T) {
 	cfg := &config.Config{
-		System:    config.SystemConfig{Hostname: "containd"},
-		DataPlane: config.DataPlaneConfig{NFQueueGroup: 1},
+		SchemaVersion: config.SchemaVersionCurrent,
+		System:        config.SystemConfig{Hostname: "containd"},
+		DataPlane:     config.DataPlaneConfig{NFQueueGroup: 1},
 		Firewall: config.FirewallConfig{
 			DefaultAction: config.ActionAllow,
 			Rules: []config.Rule{

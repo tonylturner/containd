@@ -237,12 +237,12 @@ func TestStoreRejectsUnactivatableIEC104Enforce(t *testing.T) {
 	}
 }
 
-func TestSchemaVersion019(t *testing.T) {
-	if SchemaVersionCurrent != "0.1.9" {
-		t.Fatalf("SchemaVersionCurrent = %s, want 0.1.9", SchemaVersionCurrent)
+func TestSchemaVersion0110(t *testing.T) {
+	if SchemaVersionCurrent != "0.1.10" {
+		t.Fatalf("SchemaVersionCurrent = %s, want 0.1.10", SchemaVersionCurrent)
 	}
 	old := &Config{SchemaVersion: "0.1.0"}
-	if err := UpgradeInPlace(old); err != nil || old.SchemaVersion != "0.1.9" {
+	if err := UpgradeInPlace(old); err != nil || old.SchemaVersion != "0.1.10" {
 		t.Fatalf("0.1.0 upgrade = %s, %v", old.SchemaVersion, err)
 	}
 	current, err := parseSemver(SchemaVersionCurrent)

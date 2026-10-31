@@ -9,8 +9,8 @@ import (
 // WithStableZoneIndices compiles a detached zone allocation, retaining indices
 // for surviving names. Engine publication uses the same allocator on snapshots
 // received from management; no control-plane config is needed. Retired indices
-// remain reserved for this allocation. Before any subsequent reuse, the engine
-// must close sessions whose recorded zone has retired.
+// remain reserved for this allocation. Before subsequent reuse, the engine must
+// successfully masked-clear retired indices from gated conntrack entries.
 func (g GateSelection) WithStableZoneIndices(previous []GateZone) (GateSelection, error) {
 	used := map[uint8]bool{}
 	byName := map[string]uint8{}
@@ -39,7 +39,7 @@ func (g GateSelection) WithStableZoneIndices(previous []GateZone) (GateSelection
 			index++
 		}
 		if index > 255 {
-			return GateSelection{}, fmt.Errorf("gate zone indices exhausted; retire sessions before reusing an index")
+			return GateSelection{}, fmt.Errorf("gate zone indices exhausted; clear retired conntrack indices before reuse")
 		}
 		zone.Index = uint8(index)
 		used[uint8(index)] = true
