@@ -1,6 +1,6 @@
 "use client";
 
-import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
+import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
 import { upsertRow } from "../../lib/config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
 
@@ -35,7 +35,8 @@ import { isRuleEnabled } from "./ids-shared";
 
 export default function IDSPage() {
   const canEdit = isAdmin();
-  const draft = useConfigEditor<IDSConfig>({ enabled: false, rules: [] });
+  const { canSave, loadError, checkLoaded } = useConfigLoad();
+  const draft = useConfigEditor<IDSConfig>({ enabled: false, rules: [] }, false);
   const { editor, cfg: ids, setCfg: setIds, adoptConfig, beginSave, failSave, acceptConfig, text, setText, clearText } = draft;
   const { acceptCollection } = draft;
   const panelForm = useConfigForm<IDSPanelFields>({ name: "", filter: "", format: "", sigmaText: "" });
@@ -55,7 +56,7 @@ export default function IDSPage() {
     const [cfg, src] = await Promise.all([api.getIDS(), api.getIDSSources()]);
     // A read started before an import cannot acknowledge or undo that import.
     if (id !== refreshId.current) return;
-    if (!cfg) {
+    if (!checkLoaded(cfg)) {
       setError(importedFrom.current
         ? "Rules were imported, but could not be loaded. Refresh to reconcile them before saving."
         : "Failed to load IDS rules.");
@@ -77,14 +78,14 @@ export default function IDSPage() {
     refreshForm(cfg, keepEdits);
     setSources(src ?? []);
     if (!keepEdits) setEditing(null);
-  }, [adoptConfig, acceptCollection, refreshForm]);
+  }, [checkLoaded, adoptConfig, acceptCollection, refreshForm]);
 
   useConfigRefresh(refresh);
 
   useEffect(() => { refresh(); }, [refresh]);
 
   async function onSave() {
-    if (!canEdit || importPending) return;
+    if (!canEdit || !canSave || importPending) return;
     setError(null);
     // The modal is not submitted by the page Save button.
     const submitted = beginSave({});
@@ -185,7 +186,7 @@ export default function IDSPage() {
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} disabled={importPending} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
+            <button onClick={onSave} disabled={!canSave || importPending} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
               Save
             </button>
           )}
@@ -197,7 +198,9 @@ export default function IDSPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={editor.superseded} />
+      <fieldset disabled={!canSave} className="min-w-0">
       {error && <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>}
       {success && <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{success}</div>}
 
@@ -260,6 +263,7 @@ export default function IDSPage() {
           setEditing(null);
         }} />
       )}
+      </fieldset>
       <ConfirmDialog {...confirm.props} />
     </Shell>
   );

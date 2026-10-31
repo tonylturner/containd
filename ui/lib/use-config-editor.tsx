@@ -1,9 +1,29 @@
 "use client";
 
-import { useCallback, useState, type SetStateAction } from "react";
+import { useCallback, useRef, useState, type SetStateAction } from "react";
 import { accept, acceptCollection as acknowledge, adopt, beginSave as begin, failSave as fail, fresh, isDirty, sameConfig, type ConfigSubmission } from "./config-editor";
 
-export function useConfigEditor<T>(initial: T | (() => T)) {
+/** A missing authoritative read never authorizes a write or resets a draft.
+ * Keep availability separate from save errors and editable form defaults.
+ */
+export function useConfigLoad() {
+  const availableRef = useRef(false);
+  const [canSave, setCanSave] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const checkLoaded = useCallback(<T,>(value: T | null | undefined): value is T => {
+    const available = value != null;
+    availableRef.current = available;
+    setCanSave(available);
+    setLoadError(available ? null : "Configuration unavailable. Refresh successfully before saving.");
+    return available;
+  }, []);
+  // Confirmation dialogs can retain a callback from before a failed refresh.
+  const canSaveNow = useCallback(() => availableRef.current, []);
+  return { canSave, canSaveNow, loadError, checkLoaded };
+}
+
+export function useConfigEditor<T>(initial: T | (() => T), initialLoaded = true) {
+  const authoritative = useRef(initialLoaded);
   const [editor, setEditor] = useState(() => fresh(
     typeof initial === "function" ? (initial as () => T)() : initial,
   ));
@@ -11,7 +31,10 @@ export function useConfigEditor<T>(initial: T | (() => T)) {
     setEditor((e) => ({ ...e, cfg: typeof update === "function" ? (update as (cfg: T) => T)(e.cfg) : update }));
   }, []);
   const adoptConfig = useCallback((next: T, keepEdits = true) => {
-    setEditor((e) => adopt(e, next, keepEdits));
+    // Stand-in defaults cannot become a dirty draft's authoritative base.
+    const keep = keepEdits && authoritative.current;
+    authoritative.current = true;
+    setEditor((e) => adopt(e, next, keep));
   }, []);
   // A submission is captured before enqueueing state, never inside an updater
   // (React may replay updaters). Tokens let independent row saves overlap.

@@ -22,7 +22,9 @@ export function normalize(cfg: VPNConfig | null): {
   openvpn: OpenVPNConfig;
 } {
   return {
+    ...cfg,
     wireguard: {
+      ...cfg?.wireguard,
       enabled: cfg?.wireguard?.enabled ?? false,
       interface: cfg?.wireguard?.interface ?? "wg0",
       listenPort: cfg?.wireguard?.listenPort ?? 51820,
@@ -33,6 +35,7 @@ export function normalize(cfg: VPNConfig | null): {
       peers: cfg?.wireguard?.peers ?? [],
     },
     openvpn: {
+      ...cfg?.openvpn,
       enabled: cfg?.openvpn?.enabled ?? false,
       mode: cfg?.openvpn?.mode ?? "client",
       configPath: cfg?.openvpn?.configPath ?? "",

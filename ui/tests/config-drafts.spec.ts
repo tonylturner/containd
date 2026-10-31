@@ -625,3 +625,133 @@ test("Firewall IT decoder draft survives a refresh and acknowledges only the sub
   await expect(modal).toHaveCount(0);
   expect(server.writes[1].body).toMatchObject({ dpiProtocols: { http: true } });
 });
+
+for (const item of [
+  { name: "Zones", route: "/zones/", path: "/zones", placeholder: "name (e.g. ot)" },
+  { name: "Interfaces", route: "/interfaces/", path: "/interfaces", placeholder: "name (e.g. tunnel1)" },
+  { name: "Identities", route: "/identities/", path: "/identities", placeholder: "identities (comma-separated)" },
+]) {
+  test(`${item.name} retains disabled drafts through a failed explicit refresh`, async ({ page }) => {
+    const server = await mockAPI(page);
+    await open(page, item.route, item.path);
+    const field = page.getByPlaceholder(item.placeholder);
+    await field.fill("unfinished");
+    server.failedReads.add(item.path);
+    await Promise.all([page.waitForResponse(read(item.path)), page.getByRole("button", { name: "Refresh", exact: true }).click()]);
+    await expect(field).toBeDisabled();
+    await expect(field).toHaveValue("unfinished");
+    expect(server.writes).toEqual([]);
+    server.failedReads.clear();
+    await announce(page, item.path);
+    await expect(field).toBeEnabled();
+    await expect(field).toHaveValue("unfinished");
+  });
+}
+
+test("Routing keeps its authoritative subtree and an unfinished gateway across failed refresh and recovery", async ({ page }) => {
+  const server = await mockAPI(page);
+  const original = { gateways: [], routes: [{ dst: "198.51.100.0/24", iface: "eth0", metric: 42 }], rules: [{ table: 100, src: "192.0.2.0/24" }] };
+  server.data["/routing"] = original;
+  await open(page, "/routing/", "/routing");
+  await page.getByText("Add gateway (advanced)", { exact: true }).click();
+  const name = page.getByPlaceholder("isp1");
+  await name.fill("new-gateway");
+  await page.getByPlaceholder("192.168.240.1").fill("192.0.2.1");
+  server.failedReads.add("/routing");
+  await Promise.all([page.waitForResponse(read("/routing")), page.getByRole("button", { name: "Refresh", exact: true }).click()]);
+  await expect(name).toBeDisabled();
+  await expect(name).toHaveValue("new-gateway");
+  expect(server.writes).toEqual([]);
+  server.failedReads.clear();
+  await announce(page, "/routing");
+  await expect(name).toBeEnabled();
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect.poll(() => server.writes.length).toBe(1);
+  expect(server.writes[0]).toEqual({ path: "/routing", body: { ...original, gateways: [{ name: "new-gateway", address: "192.0.2.1" }] } });
+});
+
+for (const surface of ["Firewall", "ICS"]) {
+  test(`${surface} modal cannot save a retained draft after a failed refresh`, async ({ page }) => {
+    const server = await mockAPI(page);
+    server.data["/firewall/rules"] = [draftRule];
+    await open(page, surface === "Firewall" ? "/firewall/" : "/ics/", "/firewall/rules");
+    await page.getByRole("row").filter({ hasText: "ot-rule" }).getByRole("button", { name: "Edit", exact: true }).click();
+    const input = surface === "Firewall" ? page.getByPlaceholder("sources CIDR (csv)").last() : page.getByPlaceholder("3, 16");
+    const value = surface === "Firewall" ? "192.0.2.0/24, " : "3, ";
+    await input.fill(value);
+    server.failedReads.add("/firewall/rules");
+    await announce(page, "/firewall/rules");
+    const save = page.getByRole("button", { name: surface === "Firewall" ? "Save changes" : "Save filter", exact: true });
+    await expect(save).toBeDisabled();
+    await expect(input).toHaveValue(value);
+    expect(server.writes).toEqual([]);
+    server.failedReads.clear();
+    await announce(page, "/firewall/rules");
+    await expect(save).toBeEnabled();
+    await expect(input).toHaveValue(value);
+  });
+}
+
+test("Config JSON keeps its draft through a failed Refresh and stages the complete recovered document", async ({ page }) => {
+  const server = await mockAPI(page);
+  const original = { schemaVersion: "0.1.9", system: { hostname: "existing" }, services: { syslog: { forwarders: [{ address: "192.0.2.1", port: 514 }] } } };
+  server.data["/config/diff"] = { running: original, candidate: original, changed: false, changedSections: [] };
+  await open(page, "/config/?tab=candidate", "/config/diff");
+  const field = page.getByRole("textbox", { name: "Staged config JSON", exact: true });
+  const next = { ...original, system: { hostname: "edited" } };
+  await field.fill(JSON.stringify(next));
+  server.failedReads.add("/config/diff");
+  await Promise.all([page.waitForResponse(read("/config/diff")), page.getByRole("button", { name: "Refresh", exact: true }).click()]);
+  const save = page.getByRole("button", { name: "Save staged config", exact: true });
+  await expect(save).toBeDisabled();
+  await expect(field).toHaveValue(JSON.stringify(next));
+  expect(server.writes).toEqual([]);
+  server.failedReads.clear();
+  await announce(page, "/config/diff");
+  await expect(save).toBeEnabled();
+  await expect(field).toHaveValue(JSON.stringify(next));
+  await save.click();
+  await expect.poll(() => server.writes.length).toBe(1);
+  expect(server.writes[0]).toEqual({ path: "/config/candidate", body: next });
+});
+
+test("Wizard cannot stage NAT after a failed refresh and retains its publish draft on recovery", async ({ page }) => {
+  const server = await mockAPI(page);
+  const original = { enabled: true, egressZone: "wan", portForwards: [{ id: "existing", listenPort: 8080, destIp: "192.0.2.4", destPort: 80 }] };
+  server.data["/firewall/nat"] = original;
+  await open(page, "/wizard/", "/firewall/nat");
+  await page.getByRole("button", { name: /Publish Internal Service/ }).click();
+  await page.getByPlaceholder("e.g. 192.168.1.10").fill("192.0.2.5");
+  await page.getByPlaceholder("e.g. 443").fill("443");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("combobox").selectOption("wan");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  server.failedReads.add("/firewall/nat");
+  await announce(page, "/firewall/nat");
+  const stage = page.getByRole("button", { name: "Stage", exact: true });
+  await expect(stage).toBeDisabled();
+  expect(server.writes).toEqual([]);
+  server.failedReads.clear();
+  await announce(page, "/firewall/nat");
+  await expect(stage).toBeEnabled();
+  await stage.click();
+  await expect.poll(() => server.writes.length).toBe(2);
+  const written = server.writes.find((write) => write.path === "/firewall/nat")!;
+  expect(written.body).toEqual({ ...original, portForwards: [original.portForwards[0], {
+    id: expect.any(String), enabled: true, description: "Port forward TCP/443 to 192.0.2.5 (wizard)",
+    proto: "tcp", listenPort: 443, destIp: "192.0.2.5", destPort: 443, ingressZone: "wan",
+  }] });
+});
+
+test("a confirmation opened before a failed refresh cannot stage its stale callback", async ({ page }) => {
+  const server = await mockAPI(page);
+  await open(page, "/zones/", "/zones");
+  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "wan", exact: true }) });
+  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  server.failedReads.add("/zones");
+  await announce(page, "/zones");
+  await expect(page.getByRole("alert").filter({ hasText: "Configuration unavailable" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+  expect(server.writes).toEqual([]);
+});

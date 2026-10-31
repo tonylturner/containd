@@ -3,7 +3,7 @@
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigForm } from "../../lib/use-config-form";
-import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
+import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -31,6 +31,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function ProxiesPage() {
   const canEdit = isAdmin();
+  const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const confirm = useConfirm();
   const [status, setStatus] = useState<ServicesStatus | null>(null);
@@ -42,11 +43,11 @@ export default function ProxiesPage() {
     allowedClients: [],
     upstream: "",
     logRequests: false,
-  });
+  }, false);
   const reverseDraft = useConfigEditor<ReverseProxyConfig>({
     enabled: false,
     sites: [],
-  });
+  }, false);
   const siteDraft = useConfigForm({ site: {
     name: "",
     listenPort: 8081,
@@ -69,33 +70,20 @@ export default function ProxiesPage() {
     try {
       setStatus(await api.getServicesStatus());
       const fp = await api.getForwardProxy();
-      setError(null);
-      if (fp) {
-        adoptForward({
-          enabled: fp.enabled ?? false,
-          listenPort: fp.listenPort ?? 3128,
-          listenZones: fp.listenZones ?? [],
-          allowedDomains: fp.allowedDomains ?? [],
-          allowedClients: fp.allowedClients ?? [],
-          upstream: fp.upstream ?? "",
-          logRequests: fp.logRequests ?? false,
-        }, keepEdits);
-      }
       const rp = await api.getReverseProxy();
-      if (rp) {
-        adoptReverse({
-          enabled: rp.enabled ?? false,
-          sites: rp.sites ?? [],
-        }, keepEdits);
-      }
+      if (!checkLoaded(fp) || !checkLoaded(rp)) return;
+      setError(null);
+      adoptForward(fp, keepEdits);
+      adoptReverse(rp, keepEdits);
       refreshSite(rp, keepEdits);
       toast("Proxy status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
+      checkLoaded(null);
       setError(e instanceof Error ? e.message : "Failed to refresh proxies.");
       toast("Failed to refresh proxies", "error");
     }
-  }, [toast, adoptForward, adoptReverse, refreshSite]));
+  }, [checkLoaded, toast, adoptForward, adoptReverse, refreshSite]));
 
   useConfigRefresh(refresh);
 
@@ -116,7 +104,7 @@ export default function ProxiesPage() {
   const nginx = status?.nginx;
 
   async function onSaveForward() {
-    if (!canEdit) return;
+    if (!canEdit || !canSave || loading) return;
     setError(null);
     setSaveState("saving");
     const submitted = forwardDraft.beginSave();
@@ -138,7 +126,7 @@ export default function ProxiesPage() {
   }
 
   async function onSaveReverse() {
-    if (!canEdit) return;
+    if (!canEdit || !canSave || loading) return;
     setError(null);
     setSaveState("saving");
     const submitted = reverseDraft.beginSave();
@@ -220,7 +208,9 @@ export default function ProxiesPage() {
       }
     >
       <ConfirmDialog {...confirm.props} />
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={forwardDraft.editor.superseded || reverseDraft.editor.superseded || siteDraft.editor.superseded} />
+      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -451,7 +441,7 @@ export default function ProxiesPage() {
               {canEdit && (
                 <button
                   onClick={onSaveForward}
-                  disabled={saveState === "saving"}
+                  disabled={!canSave || loading || saveState === "saving"}
                   className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
                 >
                   {saveState === "saving" ? "Saving..." : "Save"}
@@ -577,7 +567,7 @@ export default function ProxiesPage() {
               {canEdit && (
                 <button
                   onClick={onSaveReverse}
-                  disabled={saveState === "saving"}
+                  disabled={!canSave || loading || saveState === "saving"}
                   className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
                 >
                   {saveState === "saving" ? "Saving..." : "Save"}
@@ -587,6 +577,7 @@ export default function ProxiesPage() {
           </div>
         </section>
       </div>
+      </fieldset>
     </Shell>
   );
 }

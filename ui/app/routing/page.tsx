@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigLoad } from "../../lib/use-config-editor";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigForm } from "../../lib/use-config-form";
@@ -32,6 +34,7 @@ import { inferWanGateway, WAN_GATEWAY_NAME, wanGateway, withDefaultRoute } from 
 
 export default function RoutingPage() {
   const canEdit = isAdmin();
+  const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const [cfg, setCfg] = useState<RoutingConfig>({ gateways: [], routes: [], rules: [] });
   const [osRouting, setOSRouting] = useState<OSRoutingSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,14 +78,16 @@ export default function RoutingPage() {
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [r, osr] = await Promise.all([api.getRouting(), api.getOSRouting()]);
-    setCfg({ gateways: r?.gateways ?? [], routes: r?.routes ?? [], rules: r?.rules ?? [] });
+    if (!checkLoaded(r)) return;
+    setCfg(r);
     setOSRouting(osr);
     refreshForm(r, keepEdits);
-  }, [refreshForm]));
+  }, [refreshForm, checkLoaded]));
 
   useConfigRefresh(refresh);
 
   async function save(next: RoutingConfig): Promise<{ ok: boolean; warning?: string }> {
+    if (!canEdit || !canSaveNow()) return { ok: false };
     setError(null);
     setNotice(null);
     setSaving(true);
@@ -92,11 +97,7 @@ export default function RoutingPage() {
       setError(updated.error || "Failed to save routing config.");
       return { ok: false };
     }
-    setCfg({
-      gateways: updated.data.gateways ?? [],
-      routes: updated.data.routes ?? [],
-      rules: updated.data.rules ?? [],
-    });
+    setCfg(updated.data);
     setNotice(updated.warning ? `Routing staged — commit to apply. Warning: ${updated.warning}` : "Routing staged — commit to apply.");
     return { ok: true, warning: updated.warning };
   }
@@ -120,6 +121,7 @@ export default function RoutingPage() {
       description: gwDesc.trim() || undefined,
     };
     const next: RoutingConfig = {
+      ...cfg,
       gateways: [...(cfg.gateways ?? []), nextGateway],
       routes: cfg.routes ?? [],
       rules: cfg.rules ?? [],
@@ -134,6 +136,7 @@ export default function RoutingPage() {
   async function deleteGateway(idx: number) {
     if (!canEdit) return;
     const next: RoutingConfig = {
+      ...cfg,
       gateways: (cfg.gateways ?? []).filter((_, i) => i !== idx),
       routes: cfg.routes ?? [],
       rules: cfg.rules ?? [],
@@ -151,6 +154,7 @@ export default function RoutingPage() {
       variant: "warning",
       confirmLabel: "Reconcile",
       onConfirm: async () => {
+        if (!canSaveNow()) return;
         setReconciling(true);
         const res = await api.reconcileRoutingReplace();
         setReconciling(false);
@@ -182,6 +186,7 @@ export default function RoutingPage() {
       metric: metricNum && Number.isFinite(metricNum) ? metricNum : undefined,
     };
     const next: RoutingConfig = {
+      ...cfg,
       gateways: cfg.gateways ?? [],
       routes: [...(cfg.routes ?? []), nextRoute],
       rules: cfg.rules ?? [],
@@ -196,6 +201,7 @@ export default function RoutingPage() {
   async function deleteRoute(idx: number) {
     if (!canEdit) return;
     const next: RoutingConfig = {
+      ...cfg,
       gateways: cfg.gateways ?? [],
       routes: (cfg.routes ?? []).filter((_, i) => i !== idx),
       rules: cfg.rules ?? [],
@@ -219,6 +225,7 @@ export default function RoutingPage() {
       dst: ruleDst.trim() || undefined,
     };
     const next: RoutingConfig = {
+      ...cfg,
       gateways: cfg.gateways ?? [],
       routes: cfg.routes ?? [],
       rules: [...(cfg.rules ?? []), nextRule],
@@ -233,6 +240,7 @@ export default function RoutingPage() {
   async function deleteRule(idx: number) {
     if (!canEdit) return;
     const next: RoutingConfig = {
+      ...cfg,
       gateways: cfg.gateways ?? [],
       routes: cfg.routes ?? [],
       rules: (cfg.rules ?? []).filter((_, i) => i !== idx),
@@ -290,6 +298,7 @@ export default function RoutingPage() {
         "Adopt the current OS default route into containd config (creates/updates a gateway + default route)?",
       confirmLabel: "Adopt",
       onConfirm: async () => {
+        if (!canSaveNow()) return;
         const def: OSRoute | undefined = osRouting?.defaultRoute;
         if (!def || !def.gateway) {
           setError("No OS default route with a gateway was detected.");
@@ -335,6 +344,7 @@ export default function RoutingPage() {
           {canEdit && (
             <button
               onClick={autoWanDefaultRoute}
+              disabled={!canSave}
               className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
               title="Auto-create a WAN gateway and default route based on the WAN interface OS address (best-effort)."
             >
@@ -360,6 +370,7 @@ export default function RoutingPage() {
         </div>
       }
     >
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
@@ -386,6 +397,7 @@ export default function RoutingPage() {
         </div>
       )}
 
+      <fieldset disabled={!canSave} className="min-w-0">
       <RoutingSetupCallout
         hasConfig={(cfg.gateways ?? []).length > 0 || (cfg.routes ?? []).length > 0 || (cfg.rules ?? []).length > 0}
         hasOSDefault={!!(osRouting?.defaultRoute?.gateway && osRouting?.defaultRoute?.iface)}
@@ -453,6 +465,7 @@ export default function RoutingPage() {
         />
       </div>
 
+      </fieldset>
       <ConfirmDialog {...confirm.props} />
     </Shell>
   );

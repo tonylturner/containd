@@ -5,7 +5,7 @@ import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { reconcileRows, upsertRow } from "../../lib/config-editor";
 
 import { useConfigForm } from "../../lib/use-config-form";
-import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
+import { ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -26,8 +26,9 @@ import { runtimeFor } from "../../lib/interface-addresses";
 import { zoneLabel } from "../../lib/zones";
 
 export default function InterfacesPage() {
+  const { canSave, canSaveNow, loadError: configLoadError, checkLoaded } = useConfigLoad();
   const [reservation, setReservation] = useState<ManagementReservation | null>(null);
-  const rowsDraft = useConfigEditor<Interface[]>([]);
+  const rowsDraft = useConfigEditor<Interface[]>([], false);
   const { cfg: ifaces, adoptConfig: adoptRows } = rowsDraft;
   const [runtimeStatus, setRuntimeStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [state, setState] = useState<InterfaceState[]>([]);
@@ -89,13 +90,14 @@ export default function InterfacesPage() {
       api.listInterfaceState(),
       api.getManagementReservation(),
     ]);
+    if (!checkLoaded(i)) return;
     refreshForm(i, keepEdits);
     setReservation(r);
-    adoptRows(i ?? [], keepEdits);
+    adoptRows(i, keepEdits);
     setZones(z ?? []);
     setState(s ?? []);
     setRuntimeStatus(s === null ? "unavailable" : "ready");
-  }, [refreshForm, adoptRows]));
+  }, [checkLoaded, refreshForm, adoptRows]));
 
   const boundDevices = new Set(ifaces.map((iface) => (iface.device || "").trim()).filter(Boolean));
   const unboundConfigured = {
@@ -106,6 +108,7 @@ export default function InterfacesPage() {
   useConfigRefresh(refresh);
 
   async function onAutoAssign() {
+    if (!canSaveNow()) return;
     setError(null);
     setAssigning(true);
     const before = rowsDraft.editor.server;
@@ -129,6 +132,7 @@ export default function InterfacesPage() {
       confirmLabel: "Reconcile",
       variant: "warning",
       onConfirm: async () => {
+        if (!canSaveNow()) return;
         setReconciling(true);
         const res = await api.reconcileInterfacesReplace();
         setReconciling(false);
@@ -143,6 +147,7 @@ export default function InterfacesPage() {
   }
 
   async function onCreate() {
+    if (!canSaveNow()) return;
     setError(null);
     setNotice(null);
     if (!name.trim()) {
@@ -201,6 +206,7 @@ export default function InterfacesPage() {
   }
 
   async function onDelete(ifaceName: string) {
+    if (!canSaveNow()) return;
     setError(null);
     setNotice(null);
     const result = await api.deleteInterface(ifaceName);
@@ -214,6 +220,7 @@ export default function InterfacesPage() {
   }
 
   async function onUpdate(ifaceName: string, patch: Partial<Interface>) {
+    if (!canSaveNow()) return;
     setError(null);
     setNotice(null);
     if (patch.addresses?.length) {
@@ -246,7 +253,7 @@ export default function InterfacesPage() {
             <>
               <button
                 onClick={onAutoAssign}
-                disabled={assigning}
+                disabled={assigning || !canSave}
                 className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
                 title="Auto-assign default logical interfaces (wan/dmz/lan1-6) to detected OS interfaces"
               >
@@ -305,7 +312,9 @@ export default function InterfacesPage() {
           <BootFaultStatus bootFault={reservation.bootFault} recovery={reservation.recovery} reserved={false} />
         </aside>
       )}
+      {configLoadError && <p role="alert" className="mb-4 text-sm text-red-400">{configLoadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
+      <fieldset disabled={!canSave} className="min-w-0">
       {!isAdmin() && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -441,7 +450,7 @@ export default function InterfacesPage() {
           {isAdmin() && (
             <button
               onClick={onCreate}
-              disabled={saving}
+              disabled={saving || !canSave}
               className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
             >
               {saving ? "Creating..." : "Create"}
@@ -534,6 +543,7 @@ export default function InterfacesPage() {
           </div>
         </Card>
       )}
+      </fieldset>
     </Shell>
   );
 }

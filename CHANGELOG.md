@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Service, policy, network and staged-config editors block saves until settings
+  load successfully and while reads are unavailable. Failed refreshes keep drafts
+  instead of substituting defaults or reporting success; saves preserve unrelated
+  settings, including default-route metrics and gateway metadata.
+
 ## [0.1.36] - 2026-10-31
 
 ### Upgrade notes

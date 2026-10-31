@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigLoad } from "../../lib/use-config-editor";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
@@ -45,6 +47,7 @@ export default function ConfigPageWrapper() {
 
 function ConfigPage() {
   const canEdit = isAdmin();
+  const { canSave, loadError, checkLoaded } = useConfigLoad();
   const confirm = useConfirm();
   const searchParams = useSearchParams();
   const initialTab = parseTab(searchParams.get("tab"));
@@ -53,6 +56,7 @@ function ConfigPage() {
   const running = configDiff?.running ?? null;
   const candidate = configDiff?.candidate ?? null;
   const [candidateText, setCandidateText] = useState("");
+  const candidateDraft = useRef(false);
   const [status, setStatus] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState("60");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -65,15 +69,17 @@ function ConfigPage() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const selectedRef = useRef<HTMLDivElement | null>(null);
 
-  const { refresh } = useAsyncRefresh(useCallback(async () => {
+  const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const d = await api.diffConfig();
+    if (!checkLoaded(d?.candidate ?? d?.running)) return;
     setConfigDiff(d);
-    setCandidateText(
-      JSON.stringify(d?.candidate ?? d?.running ?? {}, null, 2),
-    );
+    if (!keepEdits || !candidateDraft.current) {
+      setCandidateText(JSON.stringify(d?.candidate ?? d?.running, null, 2));
+      candidateDraft.current = false;
+    }
     if (d?.running) setRunningLoadedAt(new Date());
     if (d?.candidate) setCandidateLoadedAt(new Date());
-  }, []));
+  }, [checkLoaded]));
 
   useConfigRefresh(refresh);
 
@@ -86,7 +92,7 @@ function ConfigPage() {
   }
 
   async function saveCandidate() {
-    if (!canEdit) return;
+    if (!canEdit || !canSave) return;
     setStatus(null);
     try {
       const parsed = JSON.parse(candidateText) as ConfigBundle;
@@ -104,7 +110,7 @@ function ConfigPage() {
   }
 
   async function copyRunningToCandidate() {
-    if (!canEdit || !running) return;
+    if (!canEdit || !canSave || !running) return;
     setStatus(null);
     const res = await api.setCandidateConfig(running);
     if (!res.ok) {
@@ -349,7 +355,7 @@ function ConfigPage() {
       title="Config"
       actions={
         <button
-          onClick={refresh}
+          onClick={() => refresh({ keepEdits: false })}
           className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
         >
           Refresh
@@ -357,6 +363,7 @@ function ConfigPage() {
       }
     >
       <ConfirmDialog {...confirm.props} />
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -504,12 +511,14 @@ function ConfigPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={copyRunningToCandidate}
+                  disabled={!canSave}
                   className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
                 >
                   Copy running → staged
                 </button>
                 <button
                   onClick={saveCandidate}
+                  disabled={!canSave}
                   className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
                 >
                   Save staged config
@@ -523,8 +532,8 @@ function ConfigPage() {
           <textarea
             aria-label="Staged config JSON"
             value={candidateText}
-            onChange={(e) => setCandidateText(e.target.value)}
-            readOnly={!canEdit}
+            onChange={(e) => { candidateDraft.current = true; setCandidateText(e.target.value); }}
+            readOnly={!canEdit || !canSave}
             rows={22}
             className="w-full rounded-xs border bg-(--surface) p-3 font-mono text-xs text-(--text) transition-ui outline-hidden"
           />
