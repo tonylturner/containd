@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"syscall"
 )
 
 var errInvalidDisposition = errors.New("capture: handler returned an invalid disposition")
@@ -34,8 +35,8 @@ type generation struct {
 
 // pending is one outstanding token.
 type pending struct {
-	inCallback bool    // its handler call has not returned yet
-	staged     Verdict // Settle request received during the callback; 0 = none
+	inCallback bool       // its handler call has not returned yet
+	staged     submission // Settle request received during the callback; v=0 means none
 }
 
 // submission is one verdict to submit. notify is true when OnVerdict must
@@ -46,6 +47,7 @@ type submission struct {
 	mark   uint32
 	notify bool
 	reqs   []int // Settle request indexes it answers
+	err    error // conflicting successes are failed closed, never silently chosen
 }
 
 func newGeneration(submit func(uint32, Verdict, uint32) error, comp *completer, onError func(error)) *generation {
@@ -134,22 +136,21 @@ func (g *generation) finish(tok Token, d Decision) {
 			continue
 		}
 		if r.Token == tok {
-			p.staged = dropWins(p.staged, r.Verdict)
+			p.staged = combineSubmission(p.staged, submission{v: r.Verdict, mark: r.Mark, notify: true})
 			continue
 		}
 		if _, ok := g.outstanding[r.Token.id]; !ok {
 			rejected = append(rejected, fmt.Errorf("capture: resolve %s: %w", r.Token, ErrUnknownToken))
 			continue
 		}
-		subs = mergeSubmission(subs, index, submission{tok: r.Token, v: r.Verdict, notify: true})
+		subs = mergeSubmission(subs, index, submission{tok: r.Token, v: r.Verdict, mark: r.Mark, notify: true})
 	}
-	cur, submitCur, err := currentVerdict(d.Action, p.staged)
+	cur, submitCur, err := currentVerdict(d.Action, d.Mark, p.staged)
 	if err != nil {
 		rejected = append(rejected, fmt.Errorf("capture: %s disposition %d: %w", tok, d.Action, err))
 	}
 	if submitCur {
 		cur.notify = cur.notify || d.Notify
-		cur.mark = d.Mark
 		subs = append([]submission{cur}, subs...)
 		subs[0].tok = tok
 	}
@@ -169,7 +170,7 @@ func (g *generation) finish(tok Token, d Decision) {
 // currentVerdict combines the handler's disposition with a verdict staged
 // by Settle during the callback. Drop wins; Hold without a staged verdict
 // leaves the token outstanding.
-func currentVerdict(action Disposition, staged Verdict) (submission, bool, error) {
+func currentVerdict(action Disposition, mark uint32, staged submission) (submission, bool, error) {
 	var s submission
 	var err error
 	switch action {
@@ -178,27 +179,35 @@ func currentVerdict(action Disposition, staged Verdict) (submission, bool, error
 	case Drop:
 		s.v, s.notify = VerdictDrop, true
 	case Repeat:
-		s.v = VerdictRepeat
+		s.v, s.mark = VerdictRepeat, mark
 	case Hold:
-		if staged == 0 {
+		if staged.v == 0 {
 			return s, false, nil
 		}
-		s.v = staged
+		s = staged
 	default:
 		s.v, s.notify, err = VerdictDrop, true, errInvalidDisposition
 	}
-	if staged != 0 {
-		s.v, s.notify = dropWins(s.v, staged), true
+	if staged.v != 0 {
+		s = combineSubmission(s, staged)
 	}
 	return s, true, err
 }
 
-func dropWins(a, b Verdict) Verdict {
-	if a == VerdictDrop || b == VerdictDrop {
-		return VerdictDrop
+func combineSubmission(a, b submission) submission {
+	a.notify = a.notify || b.notify
+	a.reqs = append(a.reqs, b.reqs...)
+	if a.err == nil {
+		a.err = b.err
 	}
-	if a == 0 {
-		return b
+	switch {
+	case a.v == VerdictDrop || b.v == VerdictDrop:
+		a.v, a.mark = VerdictDrop, 0
+	case a.v == 0:
+		a.v, a.mark = b.v, b.mark
+	case b.v == 0:
+	case a.v != b.v || a.v == VerdictRepeat && a.mark != b.mark:
+		a.v, a.mark, a.err, a.notify = VerdictDrop, 0, ErrConflictingVerdicts, true
 	}
 	return a
 }
@@ -207,8 +216,7 @@ func dropWins(a, b Verdict) Verdict {
 // same token (Drop wins over an Accept not yet submitted).
 func mergeSubmission(subs []submission, index map[uint32]int, s submission) []submission {
 	if j, ok := index[s.tok.id]; ok {
-		subs[j].v = dropWins(subs[j].v, s.v)
-		subs[j].reqs = append(subs[j].reqs, s.reqs...)
+		subs[j] = combineSubmission(subs[j], s)
 		return subs
 	}
 	index[s.tok.id] = len(subs)
@@ -235,9 +243,9 @@ func (g *generation) settle(res []Resolution, idxs []int, errs []error) {
 		case !ok:
 			errs[i] = ErrUnknownToken
 		case p.inCallback:
-			p.staged = dropWins(p.staged, r.Verdict)
+			p.staged = combineSubmission(p.staged, submission{v: r.Verdict, mark: r.Mark, notify: true})
 		default:
-			subs = mergeSubmission(subs, index, submission{tok: r.Token, v: r.Verdict, notify: true, reqs: []int{i}})
+			subs = mergeSubmission(subs, index, submission{tok: r.Token, v: r.Verdict, mark: r.Mark, notify: true, reqs: []int{i}})
 		}
 	}
 	for _, s := range subs {
@@ -262,7 +270,12 @@ func (g *generation) submitAll(subs []submission, errs []error) {
 		err := g.submit(s.tok.id, s.v, s.mark)
 		if err != nil {
 			err = fmt.Errorf("capture: submit %s for %s: %w", s.v, s.tok, err)
-			g.fail(err)
+			if !errors.Is(err, syscall.ENOENT) {
+				g.fail(err)
+			}
+		} else if s.err != nil {
+			err = s.err
+			g.reportError(err)
 		}
 		for _, i := range s.reqs {
 			errs[i] = err

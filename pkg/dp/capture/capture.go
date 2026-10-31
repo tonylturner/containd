@@ -51,6 +51,9 @@ type Packet struct {
 	Token     Token  // zero unless delivered inline
 	Mark      uint32 // NFQUEUE skb mark when HasMark; opaque to capture
 	HasMark   bool
+	// Queue is nil on observational sources. Missing queue/conntrack fields
+	// stay missing; a reverse tuple is never synthesized from packet headers.
+	Queue *QueueMetadata
 	// Invalid is "" when the packet decoded. Otherwise it names the reason
 	// (see the Invalid* constants); tuple fields are then best effort.
 	Invalid string
