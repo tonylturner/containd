@@ -31,13 +31,17 @@ func newActionLab(t *testing.T) *netnsLab {
 	lab := newNetnsLab(t, "act", 130, 2*time.Minute)
 	lab.run(t, "ip", "-n", lab.client, "route", "add", "198.18.140.0/24", "via", "198.18.130.1")
 	lab.run(t, "ip", "-n", lab.target, "route", "add", "198.18.130.0/24", "via", "198.18.140.1")
-	for _, p := range []string{"/proc/sys/net/ipv6/conf/all/disable_ipv6", "/proc/sys/net/ipv6/conf/default/disable_ipv6"} {
-		if err := os.WriteFile(p, []byte("0"), 0600); err != nil {
-			t.Fatal(err)
+	// The headless container runner supplies these namespace sysctls.
+	// /proc/sys is read-only with capabilities rather than --privileged.
+	for p, want := range map[string]string{
+		"/proc/sys/net/ipv6/conf/all/disable_ipv6":     "0",
+		"/proc/sys/net/ipv6/conf/default/disable_ipv6": "0",
+		"/proc/sys/net/ipv6/conf/all/forwarding":       "1",
+	} {
+		got, err := os.ReadFile(p)
+		if err != nil || strings.TrimSpace(string(got)) != want {
+			t.Fatalf("runner must set %s=%s: got %q: %v", p, want, got, err)
 		}
-	}
-	if err := os.WriteFile("/proc/sys/net/ipv6/conf/all/forwarding", []byte("1"), 0600); err != nil {
-		t.Fatal(err)
 	}
 	for i, ns := range []string{lab.client, lab.target} {
 		net := 130 + i*10
@@ -48,9 +52,22 @@ func newActionLab(t *testing.T) *netnsLab {
 	lab.run(t, "ip", "-n", lab.target, "-6", "route", "add", "fd00:130::/64", "via", "fd00:140::1")
 	// Resolve the neighbours of both paths before any burst, while
 	// nothing filters yet: a burst queued behind neighbour discovery would
-	// arrive after the test looks.
+	// arrive after the test looks. A live UDP echo listener proves both
+	// paths without requiring ping or depending on ICMP error rate limits.
+	lab.runTarget(t, `import socket,select
+sockets=[]
+for family,addr in [(socket.AF_INET,"198.18.140.2"),(socket.AF_INET6,"fd00:140::2")]:
+ s=socket.socket(family,socket.SOCK_DGRAM); s.bind((addr,18100)); sockets.append(s)
+print("ready",flush=True)
+while True:
+ for s in select.select(sockets,[],[])[0]:
+  d,a=s.recvfrom(64); s.sendto(d,a)
+`)
 	for _, addr := range []string{actTarget4, actTarget6} {
-		lab.run(t, "ip", "netns", "exec", lab.client, "ping", "-c", "1", "-W", "5", addr)
+		lab.runClient(t, fmt.Sprintf(`import socket
+s=socket.socket(%s,socket.SOCK_DGRAM); s.settimeout(5); s.connect((%q,18100)); s.send(b"warm")
+assert s.recv(64)==b"warm"
+`, socketFamily(addr), addr))
 	}
 	return lab
 }

@@ -34,27 +34,31 @@ func TestKernelIEC104SteeringLoads(t *testing.T) {
 	if err := NewNftApplier().Apply(context.Background(), ruleset); err != nil {
 		t.Fatalf("apply: %v\n%s", err, ruleset)
 	}
+	t.Cleanup(func() {
+		if err := NewNftApplier().Apply(context.Background(), c.DeleteTables()); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+	})
 	listed := nftList(t, "forward")
-	guarded := "meta mark & 0x04000000 == 0x00000000 " + counterStmt("a-iec-allow") + " jump iec104_envelope"
 	for _, want := range []string{
-		"tcp dport 2404 ip saddr 10.60.60.0/24 ip daddr 10.70.0.5 " + guarded,
-		"tcp sport 2404 ip saddr 10.70.0.5 ip daddr 10.60.60.0/24 " + guarded,
+		`ct direction original iifname "eth1" oifname "eth2" meta l4proto tcp ct reply proto-src 2404`,
+		`ct direction reply iifname "eth2" oifname "eth1" meta l4proto tcp ct reply proto-src 2404`,
 	} {
 		if !strings.Contains(listed, want) {
 			t.Fatalf("kernel ruleset lacks %q:\n%s", want, listed)
 		}
 	}
-	if strings.Index(listed, "tcp sport 2404") > strings.Index(listed, "ct state { established, related } accept") {
-		t.Fatalf("steering must precede the established accept:\n%s", listed)
+	if strings.Index(listed, "jump iec104_envelope") > strings.Index(listed, "goto admit_clean") {
+		t.Fatal("steering follows parity")
 	}
 	// Compiled closed, the envelope drops; the switch opens and closes it
 	// in place without touching the forward chain. Open, it queues with
 	// EnvelopeMark, and HandshakeMark too for a connection conntrack has
 	// not seen complete its handshake.
 	queued := []string{
-		"ct status assured meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100",
-		"ct state != { invalid, untracked } meta mark set meta mark & 0xf3ffffff | 0x03000000 queue to 100",
-		"meta mark set meta mark & 0xf1ffffff | 0x01000000 queue to 100",
+		"ct status assured meta mark set meta mark & 0xe9ffffff | 0x09000000 queue to 100",
+		"ct state != { invalid, untracked } meta mark set meta mark & 0xebffffff | 0x0b000000 queue to 100",
+		"meta mark set meta mark & 0xe9ffffff | 0x09000000 queue to 100",
 	}
 	if env := nftList(t, IEC104EnvelopeChain); !strings.Contains(env, "drop") || strings.Contains(env, "queue") {
 		t.Fatalf("closed envelope chain:\n%s", env)

@@ -5,60 +5,36 @@ package enforce
 import (
 	"bytes"
 	"fmt"
-	"net"
-	"sort"
-	"strconv"
 	"strings"
 
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func (c *Compiler) writeDNATAccepts(buf *bytes.Buffer, snap *rules.Snapshot) error {
-	if len(snap.NAT.PortForwards) == 0 || len(snap.ZoneIfaces) == 0 {
-		return nil
-	}
-	pfs := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
-	sort.Slice(pfs, func(i, j int) bool { return pfs[i].ID < pfs[j].ID })
-	for _, pf := range pfs {
-		if len(snap.ZoneIfaces[strings.TrimSpace(pf.IngressZone)]) == 0 {
-			continue
-		}
-		line, err := compileDNATAccept(pf)
-		if err != nil {
-			return err
-		}
-		if line != "" {
-			buf.WriteString("    " + line + ";\n")
-		}
-	}
-	return nil
-}
-
+// Port forwarding translates only; ordered policy supplies every grant.
 func (c *Compiler) writePreroutingChain(buf *bytes.Buffer, snap *rules.Snapshot) error {
-	if len(snap.NAT.PortForwards) == 0 || len(snap.ZoneIfaces) == 0 {
-		return nil
-	}
-	entries := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
-	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
 	var lines []string
-	for _, pf := range entries {
-		if len(snap.ZoneIfaces[strings.TrimSpace(pf.IngressZone)]) == 0 {
+	for _, id := range forwardIDs(snap) {
+		f := snap.ForwardMatches[id]
+		if !activeForward(f) {
 			continue
 		}
-		line, err := compilePreroutingDNAT(pf)
-		if err != nil {
-			return err
-		}
-		if line != "" {
-			lines = append(lines, line)
+		for _, dev := range sortedUnique(f.IngressDevices) {
+			lit, err := ifnameLiteral(dev)
+			if err != nil {
+				return err
+			}
+			lines = append(lines, joinClauses([]string{"iifname " + lit,
+				publicDestination(f, dev, "ip daddr"), forwardSources(f, "ip saddr"),
+				fmt.Sprintf("%s dport %d counter ct mark set ct mark | 0x%08x dnat ip to %s", f.Protocol, f.ListenPort, markabi.OwnedForwardCtBit, f.Backend)}))
 		}
 	}
 	if len(lines) == 0 {
 		return nil
 	}
 	buf.WriteString("  chain prerouting {\n    type nat hook prerouting priority dstnat;\n    policy accept;\n")
-	for _, line := range lines {
-		buf.WriteString("    " + line + ";\n")
+	for _, l := range lines {
+		fmt.Fprintln(buf, "    "+l+";")
 	}
 	buf.WriteString("  }\n")
 	return nil
@@ -97,20 +73,10 @@ func (c *Compiler) writePostroutingChain(buf *bytes.Buffer, snap *rules.Snapshot
 	}
 	// The destination's egress interface is selected by routing, not by a
 	// conventional zone name. Restrict return-path SNAT to each DNAT target.
-	pfs := append([]rules.PortForward(nil), snap.NAT.PortForwards...)
-	sort.Slice(pfs, func(i, j int) bool { return pfs[i].ID < pfs[j].ID })
-	for _, pf := range pfs {
-		if len(snap.ZoneIfaces[strings.TrimSpace(pf.IngressZone)]) == 0 {
-			continue
+	for _, id := range forwardIDs(snap) {
+		for _, match := range forwardMatchClauses(snap.ForwardMatches[id], targetGateInput) {
+			fmt.Fprintln(buf, "    "+match+" masquerade;")
 		}
-		match, err := compileDNATMatch(pf)
-		if err != nil {
-			return err
-		}
-		if match == "" {
-			continue
-		}
-		fmt.Fprintf(buf, "    %s ip daddr %s masquerade;\n", match, strings.TrimSpace(pf.DestIP))
 	}
 	for _, z := range srcZones {
 		if len(snap.ZoneIfaces[z]) == 0 || len(snap.ZoneIfaces[egress]) == 0 {
@@ -122,97 +88,4 @@ func (c *Compiler) writePostroutingChain(buf *bytes.Buffer, snap *rules.Snapshot
 	}
 	buf.WriteString("  }\n")
 	return nil
-}
-
-func compileDNATAccept(pf rules.PortForward) (string, error) {
-	match, err := compileDNATMatch(pf)
-	if err != nil || match == "" {
-		return "", err
-	}
-	return match + " accept", nil
-}
-
-func compileDNATMatch(pf rules.PortForward) (string, error) {
-	if net.ParseIP(strings.TrimSpace(pf.DestIP)).To4() == nil {
-		return "", nil
-	}
-	if !pf.Enabled {
-		return "", nil
-	}
-	ingress := strings.TrimSpace(pf.IngressZone)
-	if ingress == "" {
-		return "", nil
-	}
-	proto := strings.ToLower(strings.TrimSpace(pf.Proto))
-	if proto != "tcp" && proto != "udp" {
-		return "", nil
-	}
-	if pf.ListenPort < 1 || pf.ListenPort > 65535 {
-		return "", nil
-	}
-	dstPort := pf.DestPort
-	if dstPort == 0 {
-		dstPort = pf.ListenPort
-	}
-	if dstPort < 1 || dstPort > 65535 {
-		return "", nil
-	}
-	ingSet := zoneSetName(ingress)
-	parts := []string{
-		fmt.Sprintf("iifname @%s", ingSet),
-		"ct status dnat",
-		proto + " dport " + strconv.Itoa(dstPort),
-	}
-	if len(pf.AllowedSources) > 0 {
-		validated, err := validateCIDRList(pf.AllowedSources)
-		if err != nil {
-			return "", fmt.Errorf("port forward %s: invalid AllowedSources: %w", pf.ID, err)
-		}
-		parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(validated, ", ")))
-	}
-	return strings.Join(parts, " "), nil
-}
-
-func compilePreroutingDNAT(pf rules.PortForward) (string, error) {
-	if !pf.Enabled {
-		return "", nil
-	}
-	ingress := strings.TrimSpace(pf.IngressZone)
-	if ingress == "" {
-		return "", nil
-	}
-	proto := strings.ToLower(strings.TrimSpace(pf.Proto))
-	if proto != "tcp" && proto != "udp" {
-		return "", nil
-	}
-	if pf.ListenPort <= 0 || pf.ListenPort > 65535 {
-		return "", nil
-	}
-	dstIP := strings.TrimSpace(pf.DestIP)
-	if net.ParseIP(dstIP) == nil {
-		return "", nil
-	}
-	dstPort := pf.DestPort
-	if dstPort == 0 {
-		dstPort = pf.ListenPort
-	}
-	if dstPort < 1 || dstPort > 65535 {
-		return "", nil
-	}
-	ingSet := zoneSetName(ingress)
-	parts := []string{fmt.Sprintf("iifname @%s", ingSet)}
-	if len(pf.AllowedSources) > 0 {
-		validated, err := validateCIDRList(pf.AllowedSources)
-		if err != nil {
-			return "", fmt.Errorf("port forward %s: invalid AllowedSources: %w", pf.ID, err)
-		}
-		parts = append(parts, fmt.Sprintf("ip saddr { %s }", strings.Join(validated, ", ")))
-	}
-	parts = append(parts, proto, fmt.Sprintf("dport %d", pf.ListenPort), "counter")
-	if dstPort > 0 && dstPort != pf.ListenPort {
-		parts = append(parts, fmt.Sprintf("dnat ip to %s:%d", dstIP, dstPort))
-	} else {
-		parts = append(parts, fmt.Sprintf("dnat ip to %s", dstIP))
-	}
-	return strings.Join(parts, " "), nil
 }

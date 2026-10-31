@@ -7,6 +7,38 @@ table inet containd_policy {
     type ifname;
     elements = { "eth2" }
   }
+  chain deny_clean {
+    meta mark set meta mark & 0xe0ffffff;
+    drop;
+  }
+  chain reset_tcp_clean {
+    meta mark set meta mark & 0xe0ffffff;
+    reject with tcp reset;
+  }
+  chain reset_other_clean {
+    meta mark set meta mark & 0xe0ffffff;
+    reject with icmpx admin-prohibited;
+  }
+  chain admit_clean {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    meta mark set meta mark & 0xe0ffffff;
+    accept;
+  }
+  chain related_clean {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    meta mark set meta mark & 0xe0ffffff;
+    accept;
+  }
+  chain admit_unconditional {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    ct state != { invalid, untracked } ct mark set (ct mark & 0xfffffff9) | 0x00000002;
+    goto admit_clean;
+  }
+  chain admit_conditional {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    ct state != { invalid, untracked } ct mark set ct mark & 0xfffffffd;
+    goto admit_clean;
+  }
   counter rule_7af81fe4f82a1778 { }
   counter rule_2d19aa3c132187e3 { }
   counter rule_21897721b0832ac4 { }
@@ -37,29 +69,73 @@ table inet containd_policy {
     type ipv6_addr;
     elements = { 2001:db8::5 }
   }
-  chain conditional_scope {
-    meta l4proto tcp ct reply proto-src 502 ct reply ip saddr { 10.1.0.0/24 } goto conditional_policy;
-    meta l4proto tcp ct reply proto-src 502 ct reply ip6 saddr { 2001:db8:1::/64 } goto conditional_policy;
-    meta l4proto tcp ct reply proto-src 8443 ct reply ip6 saddr { 2001:db8:2::/64 } goto conditional_policy;
+  chain ordered_s2_rule_0 {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    ct state { invalid, untracked } counter name "rule_7af81fe4f82a1778";
+    ct state != { invalid, untracked } ct mark & 0x00000001 == 0 counter name "rule_7af81fe4f82a1778";
+    ct state != { invalid, untracked } ct mark & 0x00000001 != 0 ct mark & 0x00000006 != 0x00000002 counter name "rule_7af81fe4f82a1778";
+    goto admit_unconditional;
   }
-  chain conditional_policy {
-    ct status dnat return;
-    meta l4proto tcp ct reply proto-src 502 ct reply ip saddr { 10.1.0.0/24 } ct original ip saddr @identity4_6f7073 return;
-    meta l4proto tcp ct reply proto-src 502 ct reply ip6 saddr { 2001:db8:1::/64 } ct original ip6 saddr @identity6_6f7073 return;
-    meta l4proto tcp ct reply proto-src 22 ct original ip6 saddr { 2001:db8:1::/48 } return;
-    meta l4proto tcp ct reply proto-src 8443 ct reply ip6 saddr { 2001:db8:2::/64 } ct original ip6 saddr @identity6_6f7073 return;
-    ct original ip saddr { 10.9.0.0/16 } drop;
-    ct original ip6 saddr { 2001:db8:9::/48 } drop;
-    meta l4proto udp ct reply proto-src 69 ct reply ip6 saddr { 2001:db8:2::10 } reject with icmpx admin-prohibited;
-    drop;
+  chain ordered_s2_rule_1 {
+    counter name "rule_2d19aa3c132187e3";
+    goto deny_clean;
+  }
+  chain ordered_s2_rule_2 {
+    counter name "rule_21897721b0832ac4";
+    meta l4proto tcp goto reset_tcp_clean;
+    goto reset_other_clean;
+  }
+  chain ordered_s2_rule_4 {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    ct state { invalid, untracked } counter name "rule_d34f36c7b0c5d899";
+    ct state != { invalid, untracked } ct mark & 0x00000001 == 0 counter name "rule_d34f36c7b0c5d899";
+    ct state != { invalid, untracked } ct mark & 0x00000001 != 0 ct mark & 0x00000006 != 0x00000002 counter name "rule_d34f36c7b0c5d899";
+    goto admit_conditional;
+  }
+  chain ordered_s2_rule_6 {
+    goto admit_unconditional;
+  }
+  chain ordered_s2_rule_7 {
+    goto admit_conditional;
+  }
+  chain ordered_s2_rule_8 {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    ct state { invalid, untracked } counter name "rule_42a79594de3760a7";
+    ct state != { invalid, untracked } ct mark & 0x00000001 == 0 counter name "rule_42a79594de3760a7";
+    ct state != { invalid, untracked } ct mark & 0x00000001 != 0 ct mark & 0x00000006 != 0x00000002 counter name "rule_42a79594de3760a7";
+    goto admit_unconditional;
+  }
+  chain ordered_s2 {
+    ct state != { invalid, untracked } meta l4proto tcp ct reply proto-src 22 ct original ip6 saddr { 2001:db8:1::/48 } goto ordered_s2_rule_0;
+    ct state { invalid, untracked } tcp dport 22 ip6 saddr { 2001:db8:1::/48 } goto ordered_s2_rule_0;
+    ct state != { invalid, untracked } ct original ip saddr { 10.9.0.0/16 } goto ordered_s2_rule_1;
+    ct state != { invalid, untracked } ct original ip6 saddr { 2001:db8:9::/48 } goto ordered_s2_rule_1;
+    ct state { invalid, untracked } ip saddr { 10.9.0.0/16 } goto ordered_s2_rule_1;
+    ct state { invalid, untracked } ip6 saddr { 2001:db8:9::/48 } goto ordered_s2_rule_1;
+    ct state != { invalid, untracked } meta l4proto udp ct reply proto-src 69 ct reply ip6 saddr { 2001:db8:2::10 } goto ordered_s2_rule_2;
+    ct state { invalid, untracked } udp dport 69 ip6 daddr { 2001:db8:2::10 } goto ordered_s2_rule_2;
+    ct state != { invalid, untracked } meta l4proto tcp ct reply proto-src 8443 ct reply ip6 saddr { 2001:db8:2::/64 } ct original ip6 saddr @identity6_6f7073 goto ordered_s2_rule_4;
+    ct state { invalid, untracked } ip6 saddr @identity6_6f7073 tcp dport 8443 ip6 daddr { 2001:db8:2::/64 } goto ordered_s2_rule_4;
+    ct state != { invalid, untracked } meta l4proto tcp ct reply proto-src 2404 ct original ip6 saddr { 2001:db8:3::/64 } ct reply ip6 saddr { 2001:db8:4::5/128 } goto ordered_s2_rule_6;
+    ct state { invalid, untracked } tcp dport 2404 ip6 saddr { 2001:db8:3::/64 } ip6 daddr { 2001:db8:4::5/128 } goto ordered_s2_rule_6;
+    ct state != { invalid, untracked } meta l4proto tcp ct reply proto-src 502 ct reply ip saddr { 10.1.0.0/24 } ct original ip saddr @identity4_6f7073 goto ordered_s2_rule_7;
+    ct state != { invalid, untracked } meta l4proto tcp ct reply proto-src 502 ct reply ip6 saddr { 2001:db8:1::/64 } ct original ip6 saddr @identity6_6f7073 goto ordered_s2_rule_7;
+    ct state { invalid, untracked } ip saddr @identity4_6f7073 tcp dport 502 ip daddr { 10.1.0.0/24 } goto ordered_s2_rule_7;
+    ct state { invalid, untracked } ip6 saddr @identity6_6f7073 tcp dport 502 ip6 daddr { 2001:db8:1::/64 } goto ordered_s2_rule_7;
+    goto deny_clean;
+  }
+  chain conditional_scope {
+    meta l4proto tcp ct reply proto-src 8443 ct reply ip6 saddr { 2001:db8:2::/64 } goto ordered_s2;
+    meta l4proto tcp ct reply proto-src 502 ct reply ip saddr { 10.1.0.0/24 } goto ordered_s2;
+    meta l4proto tcp ct reply proto-src 502 ct reply ip6 saddr { 2001:db8:1::/64 } goto ordered_s2;
   }
   chain iec104_envelope {
     drop;
   }
-  chain ics_queue {
-    ct status assured meta mark set meta mark and 0xf0ffffff queue num 100;
-    ct state != { invalid, untracked } meta mark set meta mark and 0xf0ffffff or 0x02000000 queue num 100;
-    meta mark set meta mark and 0xf0ffffff queue num 100;
+  chain ics_enforce_queue {
+    ct status assured meta mark set meta mark and 0xe0ffffff or 0x08000000 queue num 100;
+    ct state != { invalid, untracked } meta mark set meta mark and 0xe0ffffff or 0x0a000000 queue num 100;
+    meta mark set meta mark and 0xe0ffffff or 0x08000000 queue num 100;
   }
   chain input {
     type filter hook input priority 0;
@@ -73,24 +149,26 @@ table inet containd_policy {
   chain forward {
     type filter hook forward priority 0;
     policy drop;
-    meta mark & 0x04000000 == 0 meta nfproto ipv4 ct state { invalid, untracked } iifname { "eth1" } oifname { "eth2" } udp dport 161 ip daddr { 10.0.2.0/24 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" drop;
-    meta mark & 0x04000000 == 0 meta nfproto ipv4 ct state != { invalid, untracked } ct direction original iifname { "eth1" } oifname { "eth2" } meta l4proto udp ct reply proto-src 161 ct reply ip saddr { 10.0.2.0/24 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" drop;
-    meta mark & 0x04000000 == 0 meta nfproto ipv4 ct state != { invalid, untracked } ct direction reply iifname { "eth2" } oifname { "eth1" } meta l4proto udp ct reply proto-src 161 ct reply ip saddr { 10.0.2.0/24 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" drop;
-    meta mark & 0x04000000 == 0 meta nfproto ipv6 ct state { invalid, untracked } iifname { "eth1" } oifname { "eth2" } udp dport 161 ip6 daddr { 2001:db8:2::/64 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" drop;
-    meta mark & 0x04000000 == 0 meta nfproto ipv6 ct state != { invalid, untracked } ct direction original iifname { "eth1" } oifname { "eth2" } meta l4proto udp ct reply proto-src 161 ct reply ip6 saddr { 2001:db8:2::/64 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" drop;
-    meta mark & 0x04000000 == 0 meta nfproto ipv6 ct state != { invalid, untracked } ct direction reply iifname { "eth2" } oifname { "eth1" } meta l4proto udp ct reply proto-src 161 ct reply ip6 saddr { 2001:db8:2::/64 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" drop;
-    tcp dport 2404 ip6 saddr { 2001:db8:3::/64 } ip6 daddr { 2001:db8:4::5/128 } meta mark & 0x04000000 == 0 counter name "rule_2367fd4ab29c8cf4" jump iec104_envelope;
-    tcp sport 2404 ip6 saddr { 2001:db8:4::5/128 } ip6 daddr { 2001:db8:3::/64 } meta mark & 0x04000000 == 0 counter name "rule_2367fd4ab29c8cf4" jump iec104_envelope;
-    meta mark & 0x04000000 == 0 tcp dport 502 ip daddr { 10.1.0.0/24 } counter name "rule_422ef822fc6a32d2" jump ics_queue;
-    meta mark & 0x04000000 == 0 tcp dport 502 ip6 daddr { 2001:db8:1::/64 } counter name "rule_422ef822fc6a32d2" jump ics_queue;
+    meta mark & 0x04000000 == 0 meta nfproto ipv4 ct state { invalid, untracked } iifname { "eth1" } oifname { "eth2" } udp dport 161 ip daddr { 10.0.2.0/24 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" meta mark set meta mark & 0xe0ffffff drop;
+    meta mark & 0x04000000 == 0 meta nfproto ipv4 ct state != { invalid, untracked } ct direction original iifname { "eth1" } oifname { "eth2" } meta l4proto udp ct reply proto-src 161 ct reply ip saddr { 10.0.2.0/24 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" meta mark set meta mark & 0xe0ffffff drop;
+    meta mark & 0x04000000 == 0 meta nfproto ipv4 ct state != { invalid, untracked } ct direction reply iifname { "eth2" } oifname { "eth1" } meta l4proto udp ct reply proto-src 161 ct reply ip saddr { 10.0.2.0/24 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m4p { ip saddr . ip daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" meta mark set meta mark & 0xe0ffffff drop;
+    meta mark & 0x04000000 == 0 meta nfproto ipv6 ct state { invalid, untracked } iifname { "eth1" } oifname { "eth2" } udp dport 161 ip6 daddr { 2001:db8:2::/64 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" meta mark set meta mark & 0xe0ffffff drop;
+    meta mark & 0x04000000 == 0 meta nfproto ipv6 ct state != { invalid, untracked } ct direction original iifname { "eth1" } oifname { "eth2" } meta l4proto udp ct reply proto-src 161 ct reply ip6 saddr { 2001:db8:2::/64 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" meta mark set meta mark & 0xe0ffffff drop;
+    meta mark & 0x04000000 == 0 meta nfproto ipv6 ct state != { invalid, untracked } ct direction reply iifname { "eth2" } oifname { "eth1" } meta l4proto udp ct reply proto-src 161 ct reply ip6 saddr { 2001:db8:2::/64 } counter name "rule_66e8117c03048864" update @rule_66e8117c03048864_m6p { ip6 saddr . ip6 daddr . meta l4proto . th sport . th dport limit rate over 100/second burst 100 packets } counter name "rule_66e8117c03048864_excess" meta mark set meta mark & 0xe0ffffff drop;
+    meta mark & 0x04000000 == 0 ct state != { invalid, untracked } meta l4proto tcp ct reply proto-src 2404 ct original ip6 saddr { 2001:db8:3::/64 } ct reply ip6 saddr { 2001:db8:4::5/128 } counter name "rule_2367fd4ab29c8cf4" jump iec104_envelope;
+    meta mark & 0x04000000 == 0 ct state { invalid, untracked } tcp dport 2404 ip6 saddr { 2001:db8:3::/64 } ip6 daddr { 2001:db8:4::5/128 } counter name "rule_2367fd4ab29c8cf4" jump iec104_envelope;
+    meta mark & 0x04000000 == 0 ct state != { invalid, untracked } ct direction original meta l4proto tcp ct reply proto-src 502 ct reply ip saddr { 10.1.0.0/24 } counter name "rule_422ef822fc6a32d2" jump ics_enforce_queue;
+    meta mark & 0x04000000 == 0 ct state != { invalid, untracked } ct direction original meta l4proto tcp ct reply proto-src 502 ct reply ip6 saddr { 2001:db8:1::/64 } counter name "rule_422ef822fc6a32d2" jump ics_enforce_queue;
+    meta mark & 0x04000000 == 0 ct state { invalid, untracked } tcp dport 502 ip daddr { 10.1.0.0/24 } counter name "rule_422ef822fc6a32d2" jump ics_enforce_queue;
+    meta mark & 0x04000000 == 0 ct state { invalid, untracked } tcp dport 502 ip6 daddr { 2001:db8:1::/64 } counter name "rule_422ef822fc6a32d2" jump ics_enforce_queue;
+    ct state != established ct state != { invalid, untracked } ct direction original ct original ip saddr { 10.9.0.0/16 } counter name "rule_add44674026232fe";
+    ct state != established ct state != { invalid, untracked } ct direction original ct original ip6 saddr { 2001:db8:9::/48 } counter name "rule_add44674026232fe";
+    ct state != established ct state { invalid, untracked } ip saddr { 10.9.0.0/16 } counter name "rule_add44674026232fe";
+    ct state != established ct state { invalid, untracked } ip6 saddr { 2001:db8:9::/48 } counter name "rule_add44674026232fe";
+    meta mark & 0x10000000 != 0 goto ordered_s2;
     ct state established jump conditional_scope;
-    ct state { established, related } accept;
-    ip saddr { 10.9.0.0/16 } counter name "rule_add44674026232fe";
-    ip6 saddr { 2001:db8:9::/48 } counter name "rule_add44674026232fe";
-    tcp dport 22 ip6 saddr { 2001:db8:1::/48 } counter name "rule_7af81fe4f82a1778" accept;
-    ip6 saddr @identity6_6f7073 tcp dport 8443 ip6 daddr { 2001:db8:2::/64 } counter name "rule_d34f36c7b0c5d899" accept;
-    ip saddr { 10.9.0.0/16 } counter name "rule_2d19aa3c132187e3" drop;
-    ip6 saddr { 2001:db8:9::/48 } counter name "rule_2d19aa3c132187e3" drop;
-    udp dport 69 ip6 daddr { 2001:db8:2::10 } counter name "rule_21897721b0832ac4" reject with icmpx admin-prohibited;
+    ct state established ct mark & 0x00000007 == 0x00000002 goto admit_clean;
+    ct state != related goto ordered_s2;
+    ct state related goto related_clean;
   }
 }

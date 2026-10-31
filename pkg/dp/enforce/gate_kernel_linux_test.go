@@ -5,6 +5,7 @@ package enforce
 
 import (
 	"fmt"
+	"net/netip"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -19,11 +20,14 @@ import (
 func gateKernelSnapshot() *rules.Snapshot {
 	port := func(p int) []rules.Protocol { return []rules.Protocol{{Name: "tcp", Port: fmt.Sprint(p)}} }
 	return &rules.Snapshot{
-		Default:          rules.ActionDeny,
-		ZoneIfaces:       map[string][]string{"client": {"gs0"}, "lan": {"gsbr"}, "wan": {"gs2"}},
-		IdentityBindings: []rules.IdentityBinding{{IP: gateClientV4, Identities: []string{"ops"}}},
-		LocalInput:       []rules.LocalServiceRule{{ID: "mgmt", Zone: "client", Proto: "tcp", Port: 8080}},
+		Default:           rules.ActionDeny,
+		ForwardMatches:    map[string]rules.ForwardMatch{"web": {Enabled: true, IngressDevices: []string{"gs2"}, Protocol: "tcp", ListenPort: gateForwardPort, Backend: netip.MustParseAddrPort(gateServerV4 + ":80")}},
+		LocalIPv4ByDevice: map[string][]netip.Addr{"gs2": {netip.MustParseAddr(gateWANRouter)}},
+		ZoneIfaces:        map[string][]string{"client": {"gs0"}, "lan": {"gsbr"}, "wan": {"gs2"}},
+		IdentityBindings:  []rules.IdentityBinding{{IP: gateClientV4, Identities: []string{"ops"}}},
+		LocalInput:        []rules.LocalServiceRule{{ID: "mgmt", Zone: "client", Proto: "tcp", Port: 8080}},
 		Firewall: []rules.Entry{
+			{ID: "via-web", ViaForwards: []string{"web"}, Action: rules.ActionAllow},
 			{ID: "client-web", SourceZones: []string{"client"}, DestZones: []string{"lan"}, Protocols: port(80), Action: rules.ActionAllow},
 			{ID: "client-8082", SourceZones: []string{"client"}, DestZones: []string{"lan"}, Protocols: port(8082), Action: rules.ActionAllow},
 			{ID: "client-wan", SourceZones: []string{"client"}, DestZones: []string{"wan"}, Protocols: port(80), Action: rules.ActionAllow},
