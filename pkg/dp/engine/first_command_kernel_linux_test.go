@@ -78,8 +78,9 @@ func newFirstCommandLab(t *testing.T) context.Context {
 	}
 	fcRun(ctx, t, "ip", "-n", fcClientNS, "route", "add", "default", "via", "198.18.50.1")
 	fcRun(ctx, t, "ip", "-n", fcServerNS, "route", "add", "198.18.50.0/24", "via", "198.18.60.1")
-	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0600); err != nil {
-		t.Fatal(err)
+	forwarding, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
+	if err != nil || strings.TrimSpace(string(forwarding)) != "1" {
+		t.Fatalf("kernel lab requires net.ipv4.ip_forward=1 at container launch: %s %v", forwarding, err)
 	}
 	return ctx
 }
