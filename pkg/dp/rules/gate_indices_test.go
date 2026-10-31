@@ -38,7 +38,11 @@ func TestGateStableZoneAllocationRejectsAmbiguousInputs(t *testing.T) {
 	for i := 1; i <= 255; i++ {
 		previous = append(previous, GateZone{Name: fmt.Sprintf("old-%d", i), Index: uint8(i)})
 	}
-	if _, err := (GateSelection{Zones: []GateZone{{Name: "new"}}}).WithStableZoneIndices(previous); err == nil {
-		t.Fatal("retired index reused without session retirement")
+	_, err := (GateSelection{Zones: []GateZone{{Name: "new"}}}).WithStableZoneIndices(previous)
+	if err == nil {
+		t.Fatal("retired index reused without clearing gated conntrack indices")
+	}
+	if want := "gate zone indices exhausted; clear retired conntrack indices before reuse"; err.Error() != want {
+		t.Fatalf("exhaustion error = %q, want %q", err, want)
 	}
 }
