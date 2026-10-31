@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Published management and engine images expose their release version, revision,
+  creation time, vendor and authors as OCI labels.
 - Release promotion to `:latest`, including manual promotion, now requires
   successful CI from a push to main for the exact peeled tag commit. Pending CI
   waits for a bounded poll; missing, failed or cancelled CI fails promotion with
