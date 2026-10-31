@@ -27,6 +27,14 @@ func showHealth(api *API) Command {
 		}
 		kv := map[string]string{}
 		for k, v := range payload {
+			if k == "evidence" {
+				if evidence, ok := v.(map[string]any); ok {
+					kv["evidence.state"] = firstNonEmpty(fmtAny(evidence["state"]), "unknown")
+				} else {
+					kv["evidence.state"] = "unknown"
+				}
+				continue
+			}
 			kv[k] = fmtAny(v)
 		}
 		kvTable(out, kv)
@@ -77,6 +85,12 @@ func showAuth(api *API) Command {
 
 func showAudit(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) == 1 && args[0] == "--status" {
+			return showEvidenceStatus(api)(ctx, out, nil)
+		}
+		if len(args) != 0 {
+			return fmt.Errorf("usage: show audit [--status]")
+		}
 		var records []audit.Record
 		if err := api.getJSON(ctx, "/api/v1/audit", &records); err != nil {
 			return err

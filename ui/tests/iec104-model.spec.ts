@@ -275,7 +275,7 @@ test("an unset ICS decoder is effectively enabled", () => {
 });
 
 function ev(kind: string, attributes: Record<string, unknown>): TelemetryEvent {
-  return { id: 1, flowId: "f", proto: "iec104", kind, attributes, timestamp: "2026-11-07T09:15:02Z" };
+  return { id: "1", flowId: "f", proto: "iec104", kind, attributes, timestamp: "2026-11-07T09:15:02Z" };
 }
 
 test("evidence events decode with typed attributes", () => {

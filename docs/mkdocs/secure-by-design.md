@@ -212,16 +212,24 @@ What the design delivers by default:
 - The service syslog forwarder sends engine and service events and audit
   records over UDP or TCP, as JSON or RFC 5424. Application logs can go to a
   remote syslog sink.
-- Audit records are forwarded at least once over TCP: each forwarder keeps a
+- Audit records are retried with at-least-once attempts: each forwarder keeps a
   cursor in the audit database, so records written during a collector outage
-  or before a restart are sent later. The services status reports the backlog
-  and the last error per forwarder.
+  or before a restart are retried later. Local transport acceptance is not
+  collector acknowledgment. The services status reports the backlog and the
+  last error per forwarder.
+- Audit write failures do not block operations. The UI, `show audit --status`
+  and `GET /api/v1/evidence/status` distinguish persistence from collector
+  delivery, including current degradation and recovered history. Unauthenticated
+  health exposes only the worst evidence state, without errors or destinations.
 - `/metrics` exposes Prometheus metrics.
 
 Caveats:
 
 - Event history is bounded and in memory, and event forwarding over syslog is
-  best-effort: events produced during a collector outage are not resent.
+  best effort with retries: retained events are retried, but retention overflow
+  and serialization drops are counted as loss. Source restarts disclose unknown
+  continuity; management restart starts fresh telemetry tails. New destinations
+  start at tail without backfill.
 
 See [Logging and Evidence](logging-evidence.md).
 

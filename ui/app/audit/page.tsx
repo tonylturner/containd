@@ -4,6 +4,8 @@ import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useCallback, useState } from "react";
 
+import { getEvidenceStatus, type AuditPersistenceStatus } from "../../lib/api-evidence";
+import { EvidenceBannerAudit } from "../../components/EvidenceBannerAudit";
 import { api, type AuditRecord } from "../../lib/api";
 import { Shell } from "../../components/Shell";
 import { EmptyState } from "../../components/EmptyState";
@@ -11,11 +13,13 @@ import { useTableControls } from "../../hooks/useTableControls";
 import { SearchBar, SortableHeader, Pagination } from "../../components/TableControls";
 
 export default function AuditPage() {
+  const [persistence, setPersistence] = useState<AuditPersistenceStatus | null>(null);
   const [records, setRecords] = useState<AuditRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const { loading, refresh } = useAsyncRefresh(useCallback(async () => {
-    const list = await api.listAudit();
+    const [list, evidence] = await Promise.all([api.listAudit(), getEvidenceStatus()]);
+    setPersistence(evidence?.audit ?? null);
     setError(null);
     if (!list) {
       setError("Failed to load audit records.");
@@ -43,6 +47,7 @@ export default function AuditPage() {
         </button>
       }
     >
+      <EvidenceBannerAudit audit={persistence} loading={loading} />
       {!loading && error && (
         <div className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           {error}
@@ -55,7 +60,7 @@ export default function AuditPage() {
       {records.length === 0 && table.data.length === 0 ? (
         <EmptyState
           title="No audit records yet"
-          description="Administrative actions will appear here automatically."
+          description="Only successfully persisted actions appear here. An empty table does not prove no actions occurred; check audit persistence above."
         />
       ) : (
       <div className="rounded-xs border bg-(--surface) overflow-hidden shadow-card">

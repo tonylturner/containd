@@ -1,3 +1,4 @@
+import { evidenceState, type EvidenceState } from "./api-evidence";
 import { fetchWithSession } from "./api-core";
 import {
   normalizeICSEnforcementHealth,
@@ -61,6 +62,7 @@ export function normalizeEnforcementHealth(value: unknown): EnforcementHealth | 
 }
 
 export type HealthResponse = {
+  evidence?: { state: EvidenceState };
   status: string;
   component: string;
   build?: string;
@@ -86,6 +88,7 @@ export async function fetchHealth(
     const body = (await res.json()) as HealthResponse;
     return {
       ...body,
+      evidence: { state: evidenceState(body?.evidence?.state) },
       enforcement: normalizeEnforcementHealth(body?.enforcement),
       icsEnforcement: normalizeICSEnforcementHealth(body?.icsEnforcement),
       managementRecovery: normalizeManagementRecovery(body?.managementRecovery),

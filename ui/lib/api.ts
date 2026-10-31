@@ -82,6 +82,8 @@ export type {
 } from "./api-ics-coverage";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export { fetchHealth } from "./api-health";
+export { getEvidenceStatus } from "./api-evidence";
+export type { AuditPersistenceStatus, EvidenceStatus, EvidenceState } from "./api-evidence";
 export type {
   EnforcementHealth,
   HealthResponse,
@@ -593,7 +595,8 @@ export type PcapIdentification = {
 };
 
 export type TelemetryEvent = {
-  id: number;
+  /** Exact decimal uint64; never convert event identity to a JavaScript number. */
+  id: string;
   flowId: string;
   proto: string;
   kind: string;

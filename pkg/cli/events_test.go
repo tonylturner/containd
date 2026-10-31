@@ -32,14 +32,14 @@ func TestEventsFlags(t *testing.T) {
 		if r.URL.Query().Get("session") != "s" {
 			t.Error(r.URL)
 		}
-		return jsonHTTPResponse(200, dpevents.Page{Events: []dpevents.Event{{ID: 7, Kind: "ics.decision"}}, NextCursor: "next", HistoryTruncated: true, EngineError: "offline"}, nil), nil
+		return jsonHTTPResponse(200, dpevents.Page{Events: []dpevents.Event{{ID: 9223372036854775809, Kind: "ics.decision"}}, NextCursor: "next", HistoryTruncated: true, EngineError: "offline"}, nil), nil
 	}}}
 	api := &API{BaseURL: "http://localhost:8080", Client: client}
 	var out bytes.Buffer
 	if err := showEvents(api)(context.Background(), &out, []string{"--session", "s"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"ics.decision", "history may have gaps", "Next cursor: next", "offline"} {
+	for _, want := range []string{"9223372036854775809", "ics.decision", "history may have gaps", "Next cursor: next", "offline"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q: %s", want, out.String())
 		}

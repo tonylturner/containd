@@ -172,7 +172,7 @@ func TestShowTelemetryViews(t *testing.T) {
 			"GET /api/v1/events": func(req *http.Request) (*http.Response, error) {
 				return jsonHTTPResponse(http.StatusOK, []dpevents.Event{
 					{
-						ID:         1,
+						ID:         9223372036854775810,
 						FlowID:     "flow-1",
 						Proto:      "modbus",
 						Kind:       "modbus.read",
@@ -227,7 +227,7 @@ func TestShowTelemetryViews(t *testing.T) {
 	if err := showEvents(api)(ctx, &events, nil); err != nil {
 		t.Fatalf("showEvents: %v", err)
 	}
-	if !strings.Contains(events.String(), "modbus.read") || !strings.Contains(events.String(), "function_code=3") {
+	if !strings.Contains(events.String(), "modbus.read") || !strings.Contains(events.String(), "9223372036854775810") || !strings.Contains(events.String(), "function_code=3") {
 		t.Fatalf("unexpected events output: %q", events.String())
 	}
 

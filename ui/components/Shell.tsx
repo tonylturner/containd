@@ -8,6 +8,7 @@ import { navigateToUI, uiNavigationPath, uiRoutePath } from "../lib/ui-navigatio
 import { type User, api } from "../lib/api";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { ConfigStatusBar } from "./ConfigStatusBar";
+import { EvidenceBanner } from "./EvidenceBanner";
 import { ShellRecoveryBanner } from "./ManagementRecoveryBanner";
 import { ProfileModal } from "./ProfileModal";
 import {
@@ -616,6 +617,7 @@ export function Shell({
                   </div>
                 )}
                 <ShellRecoveryBanner />
+                <EvidenceBanner />
                 <ConfigStatusBar />
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
                   <div>
