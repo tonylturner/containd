@@ -44,7 +44,7 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 		if err != nil {
 			return nil, err
 		}
-		if !beforeRuleModes(cfg.SchemaVersion) {
+		if !beforeOrderedPolicy(cfg.SchemaVersion) {
 			continue
 		}
 		// The config row omits the separately referenced bank. Inspect that
@@ -56,7 +56,8 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 		if err := UpgradeInPlace(cfg); err != nil {
 			return nil, err
 		}
-		if cfg.scopeMigration != nil {
+		changedIDS := cfg.scopeMigration != nil
+		if changedIDS {
 			for _, id := range cfg.scopeMigration.Removed {
 				removed[id] = true
 			}
@@ -66,10 +67,14 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 		}
 		// Store open coalesces changes across all three snapshots into one record.
 		cfg.scopeMigration = nil
-		if key == configKeyRunning {
+		if key == configKeyRunning && changedIDS {
 			if err := replaceIDSRulesTx(ctx, tx, cfg.IDS.Rules); err != nil {
 				return nil, err
 			}
+		}
+		if !changedIDS {
+			// Reordering firewall rules must not replace an immutable IDS bank.
+			cfg.IDS.Rules = nil
 		}
 		if err := writeConfigTx(ctx, tx, key, cfg); err != nil {
 			return nil, err

@@ -26,7 +26,7 @@ func TestValidateRuleActions(t *testing.T) {
 		{"RESET", actionRule(func(*Rule) {}), ""},
 		{"RESET with an ics protocol", actionRule(func(r *Rule) { r.ICS = ICSPredicate{Protocol: "modbus"} }), "cannot take an ics protocol"},
 		{"RESET with iec104", actionRule(func(r *Rule) { r.ICS = ICSPredicate{Protocol: ICSProtocolIEC104} }), "cannot take an ics protocol"},
-		{"RESET with an ics mode only", actionRule(func(r *Rule) { r.ICS = ICSPredicate{Mode: "enforce"} }), ""},
+		{"RESET with an ics mode only", actionRule(func(r *Rule) { r.ICS = ICSPredicate{Mode: "enforce"} }), "ics.mode requires ics.protocol"},
 		{"RESET with rateLimit", actionRule(func(r *Rule) { r.RateLimit = rate(1, 0) }), "rateLimit is only valid with action RATE_LIMIT"},
 		{"lower-case action", actionRule(func(r *Rule) { r.Action = "reset" }), "invalid action"},
 		{"REJECT", actionRule(func(r *Rule) { r.Action = "REJECT" }), "invalid action"},

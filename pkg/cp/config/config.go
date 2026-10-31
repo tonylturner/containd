@@ -18,6 +18,7 @@ type Config struct {
 	// Pending schema-upgrade evidence is persisted with the next successful write.
 	scopeMigration *IndustrialScopeMigration
 	modeMigration  *RuleModeMigration
+	orderMigration *OrderedPolicyMigration
 
 	SchemaVersion string          `json:"schema_version,omitempty"`
 	System        SystemConfig    `json:"system"`
@@ -433,6 +434,7 @@ func DefaultConfig() *Config {
 		ifaces = append(ifaces, iface)
 	}
 	return &Config{
+		SchemaVersion: SchemaVersionCurrent,
 		Zones: []Zone{
 			{Name: "wan", Description: "Default WAN zone"},
 			{Name: "dmz", Description: "Default DMZ zone"},
