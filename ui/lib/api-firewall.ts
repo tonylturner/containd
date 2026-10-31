@@ -42,6 +42,10 @@ export type ICSPredicate = {
   negative?: boolean;
   test?: boolean;
   selectExecute?: "select" | "execute";
+  /** Types 45/58: SCS 0..1; types 46/47/59/60: DCS/RCS 1..2. */
+  commandStates?: number[];
+  /** QU bits 2..6 of SCO/DCO/RCO, 0..31; requires command Type IDs. */
+  commandQualifiers?: number[];
   masters?: number[];
   outstations?: number[];
   groups?: number[];

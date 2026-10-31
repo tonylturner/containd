@@ -90,6 +90,12 @@ test("IEC requires separate admin review and then deliberate selection", async (
     iec.getByRole("checkbox", { name: "Select iec-1", exact: true }),
   ).toBeDisabled();
   await expect(iec).toContainText("monitor, never enforce");
+  await expect(iec.getByLabel("Proposed rules")).toContainText("execute state SCS 1 (on) QU 0");
+  const dir = process.env.IEC_PRED_SCREENSHOTS;
+  if (dir) {
+    await mkdir(dir, { recursive: true });
+    await iec.screenshot({ path: `${dir}/iec104-review-card.png`, style: "nextjs-portal { display: none !important; }" });
+  }
   await iec.getByRole("button", { name: "Review and approve" }).click();
   await page
     .getByRole("dialog")
@@ -112,6 +118,7 @@ test("IEC requires separate admin review and then deliberate selection", async (
     },
   ]);
   await expect(iec).toContainText("COT 6 OA 0 P/N=0 T=0");
+  await expect(iec.getByLabel("Proposed rules")).toContainText("state SCS 1 (on) QU 0");
 });
 
 test("wire-coordinate approval cannot be replaced by selection", async ({
