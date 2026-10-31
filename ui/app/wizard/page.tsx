@@ -11,6 +11,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
+import { forwardPlacementMessage } from "../../lib/forward-placement";
 
 import {
   api,
@@ -177,7 +178,7 @@ export default function WizardPage() {
       const destIp = serverIp.trim();
       const port = Number(serverPort.trim());
 
-      // Add port forward via NAT
+      // Publish the translation and any safe matching permission atomically.
       const pf: PortForward = {
         id: genId(),
         enabled: true,
@@ -188,34 +189,14 @@ export default function WizardPage() {
         destIp,
         destPort: port,
       };
-      const updatedNat: NATConfig = {
-        ...natConfig,
-        enabled: true,
-        portForwards: [...(natConfig.portForwards ?? []), pf],
-      };
-      const natRes = await api.setNAT(updatedNat);
+      const natRes = await api.publishPortForward(pf);
       if (!natRes.ok) {
         setError(`NAT port forward failed: ${natRes.error}`);
         setApplying(false);
         return;
       }
-      setNatConfig(natRes.data);
-
-      // Create matching firewall allow rule
-      const ruleRes = await api.createFirewallRule({
-        id: genId(),
-        description: `Allow inbound ${pubProto.toUpperCase()}/${port} to ${destIp} (wizard)`,
-        sourceZones: [ingressZone],
-        destinations: [destIp],
-        protocols: [{ name: pubProto, port: String(port) }],
-        action: "ALLOW",
-      });
-      if (!ruleRes.ok) {
-        setError(`Firewall rule failed: ${ruleRes.error}`);
-        setApplying(false);
-        return;
-      }
-      setSuccess("Port forward and firewall rule staged — commit to apply.");
+      setNatConfig((nat) => ({ ...nat, portForwards: [...(nat.portForwards ?? []), natRes.data.forward] }));
+      setSuccess(forwardPlacementMessage(natRes.data) + (natRes.warning ? ` Warning: ${natRes.warning}` : ""));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error");
     }

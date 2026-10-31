@@ -6,7 +6,7 @@ import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 import {
@@ -16,6 +16,8 @@ import {
   getRulesetPreview,
   type DataPlaneConfig,
   type FirewallRule,
+  type FirewallRuleCreate,
+  type Position,
   type FirewallRulePatch,
   type RoutingConfig,
   type Zone,
@@ -66,6 +68,12 @@ export default function FirewallPage() {
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [quickStarting, setQuickStarting] = useState(false);
+  const [moving, setMoving] = useState(false);
+  // Forward links may arrive before the asynchronously loaded row exists.
+  useEffect(() => {
+    const target = rules.find((r) => `#${encodeURIComponent(`rule-${r.id}`)}` === window.location.hash);
+    if (target) document.getElementById(`rule-${target.id}`)?.scrollIntoView({ block: "center" });
+  }, [rules]);
   const confirm = useConfirm();
   const tips: Tip[] = [
     {
@@ -163,7 +171,23 @@ export default function FirewallPage() {
     refresh();
   }
 
-  async function onCreate(rule: FirewallRule) {
+  async function onMove(id: string, position: Position) {
+    if (!canSaveNow() || moving) return;
+    setMoving(true);
+    setError(null);
+    setNotice(null);
+    const result = await api.moveFirewallRule(id, position);
+    setMoving(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setRules(result.data.rules);
+    setRulesetPreview(null);
+    setNotice(`Rule moved to position ${result.data.index + 1} — commit to apply.${result.warning ? ` Warning: ${result.warning}` : ""}`);
+  }
+
+  async function onCreate(rule: FirewallRuleCreate) {
     if (!canSaveNow()) return false;
     setError(null);
     setNotice(null);
@@ -356,7 +380,7 @@ export default function FirewallPage() {
               src includes lan/mgmt
             </StatusBadge>
             <StatusBadge variant={outboundStatus.hasAllowLanWan ? "success" : "warning"} dot>
-              {"allow lan\u2192wan"}
+              {"allow lan\u2192wan present"}
             </StatusBadge>
           </div>
         </div>
@@ -367,6 +391,7 @@ export default function FirewallPage() {
             {" out WAN. Use "}
             <span className="font-semibold text-(--text)">{"Quick start (LAN\u2192WAN)"}</span>
             {" to auto-configure these (including NAT)."}
+            {" Rule presence does not guarantee delivery: an earlier enforcing rule can shadow an allow."}
           </div>
         )}
       </Card>
@@ -432,6 +457,7 @@ export default function FirewallPage() {
           key={`create-${refreshKey}`}
           context={rules}
           zones={zones}
+          forwards={nat.portForwards ?? []}
           globalMode={dpiConfig.dpiMode}
           tagsInUse={tagsInUse(rules)}
           onCreate={onCreate}
@@ -448,6 +474,8 @@ export default function FirewallPage() {
         dpiMode={dpiConfig.dpiMode}
         coverage={coverage.view}
         counters={counters}
+        onMove={onMove}
+        moving={moving}
         onEdit={setEditing}
         onDelete={(id) => {
           confirm.open({
@@ -463,6 +491,7 @@ export default function FirewallPage() {
       {editing && isAdmin() && (
         <EditRuleModal
           zones={zones}
+          forwards={nat.portForwards ?? []}
           rule={rules.find((r) => r.id === editing.id) ?? editing}
           context={rules}
           globalMode={dpiConfig.dpiMode}

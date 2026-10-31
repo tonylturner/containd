@@ -143,7 +143,7 @@ export function DetailContent({ data }: { data: TopoNodeData }) {
       {data.rules && data.rules.length > 0 && (
         <div className={s.panelSection}>
           <div className={s.panelSectionLabel}>Policy Rules</div>
-          <div className={s.ruleNote}>Any matching ALLOW wins; RATE_LIMIT and TAG are effects. Hits since the last apply.</div>
+          <div className={s.ruleNote}>The first matching enforcing terminal rule wins; RATE_LIMIT and TAG are effects. Hits since the last apply.</div>
           <div className={s.ruleList}>
             {data.rules.map((r) => (
               <div

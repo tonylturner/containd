@@ -12,7 +12,7 @@ const unbound = {
 };
 const shadowed = {
   ruleId: "block-ssh", shadowedBy: "allow-all-ssh", action: "RESET",
-  message: "shadowed by ALLOW rule allow-all-ssh, which matches all of its traffic; a matching ALLOW takes precedence over every DENY and RESET",
+  message: "rule at position 2 is shadowed by earlier ALLOW rule allow-all-ssh at position 1, which matches all of its traffic",
 };
 
 const range = { start: "2026-10-26T08:00:00Z", end: "2026-10-26T09:15:02Z" };

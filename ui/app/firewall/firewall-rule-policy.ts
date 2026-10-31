@@ -17,9 +17,9 @@ export type ActionInfo = {
 };
 
 export const RULE_ACTIONS: ActionInfo[] = [
-  { value: "ALLOW", decides: true, help: "Accepts the packet. Any matching ALLOW wins over every DENY and RESET." },
-  { value: "DENY", decides: true, help: "Drops the packet when no ALLOW matches." },
-  { value: "RESET", decides: true, help: "Rejects back to the sender when no ALLOW matches: a TCP reset for TCP, ICMP administratively prohibited otherwise." },
+  { value: "ALLOW", decides: true, help: "Accepts when this is the first matching enforcing terminal rule." },
+  { value: "DENY", decides: true, help: "Drops when this is the first matching enforcing terminal rule." },
+  { value: "RESET", decides: true, help: "Rejects back to the sender when this is the first matching enforcing terminal rule: a TCP reset for TCP, ICMP administratively prohibited otherwise." },
   { value: "RATE_LIMIT", decides: false, help: "Effect: drops the packets over the limit for each directional 5-tuple. Packets under the limit continue to the ALLOW/DENY decision." },
   { value: "TAG", decides: false, help: "Effect: labels matching connections and their events. It never admits or drops traffic." },
 ];

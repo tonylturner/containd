@@ -13,6 +13,8 @@ function warningKind(w: RuleWarning): string {
       return "zone without interfaces";
     case "addressFamily":
       return "no shared address family";
+    case "forward":
+      return "port forward";
     default:
       return "warning";
   }
@@ -37,8 +39,8 @@ const SCOPES = {
 /**
  * Rules that do not act as written: a rule matches nothing when no bound
  * address satisfies its identities, none of its zones has an interface, or
- * its sources and destinations share no address family; and a DENY or RESET
- * rule an ALLOW fully covers never decides. `scope` names the ruleset the warnings describe; a single
+ * its sources and destinations share no address family; and a rule fully
+ * covered by an earlier terminal never decides. `scope` names the ruleset the warnings describe; a single
  * previewed rule has none.
  */
 export function RuleWarningList({
