@@ -195,7 +195,7 @@ func TestSystemCommandsAndViews(t *testing.T) {
 		t: t,
 		handlers: map[string]func(*http.Request) (*http.Response, error){
 			"GET /api/v1/config/candidate": func(req *http.Request) (*http.Response, error) {
-				return jsonHTTPResponse(http.StatusInternalServerError, `{"error":"candidate missing"}`, nil), nil
+				return jsonHTTPResponse(http.StatusOK, cfg, nil), nil
 			},
 			"GET /api/v1/config": func(req *http.Request) (*http.Response, error) {
 				return jsonHTTPResponse(http.StatusOK, cfg, nil), nil
@@ -218,8 +218,8 @@ func TestSystemCommandsAndViews(t *testing.T) {
 	api := &API{BaseURL: "http://localhost:8080", Client: client}
 	ctx := context.Background()
 
-	if got, err := loadCandidateOrRunning(ctx, api); err != nil || got.System.Hostname != "containd" {
-		t.Fatalf("loadCandidateOrRunning = %#v, %v", got, err)
+	if got, err := loadCandidateConfig(ctx, api); err != nil || got.System.Hostname != "containd" {
+		t.Fatalf("loadCandidateConfig = %#v, %v", got, err)
 	}
 	if err := setSystemMgmtListenAPI(api)(ctx, nil, []string{":9090"}); err != nil {
 		t.Fatalf("setSystemMgmtListenAPI: %v", err)

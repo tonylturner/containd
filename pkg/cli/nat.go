@@ -49,7 +49,9 @@ func setNATAPI(api *API) Command {
 			return fmt.Errorf("usage: set nat on|off [egress <zone|default>] [sources <z1,z2|default>]")
 		}
 		var nat config.NATConfig
-		_ = api.getJSON(ctx, "/api/v1/firewall/nat", &nat)
+		if err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
+			return err
+		}
 
 		// First arg: on/off/enable/disable
 		switch strings.ToLower(strings.TrimSpace(args[0])) {

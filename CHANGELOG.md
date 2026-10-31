@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- CLI NAT, port-forward, proxy, interface, routing and system edits stop without
+  writing when current configuration cannot be read, rather than substituting
+  defaults or running configuration. Proxy edits preserve domains, client ACLs,
+  upstream settings, logging and reverse sites. Interface edits preserve unrelated
+  device, VLAN, bridge, addressing and access settings. Outbound quick start
+  completes all reads before staging changes and retains unrelated NAT, routing
+  and firewall rule settings.
+
 ## [0.1.36] - 2026-10-31
 
 ### Upgrade notes
