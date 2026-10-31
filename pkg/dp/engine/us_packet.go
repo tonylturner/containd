@@ -10,24 +10,25 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/verdict"
 )
 
 // Decision reasons (logs and metrics only).
 const (
-	reasonCachedDeny    = "cached_deny"
-	reasonDPIDeny       = "dpi_deny"
-	reasonInvalidMarked = "invalid_in_envelope"
+	reasonCachedDeny     = "cached_deny"
+	reasonDPIDeny        = "dpi_deny"
+	reasonInvalidMarked  = "invalid_in_envelope"
+	reasonPolicyNonAdmit = "policy_non_admit"
 )
 
 var acceptDecision = capture.Decision{Action: capture.Accept}
 
 // invalidPacketDecision decides a packet whose tuple cannot be trusted.
-// Inside an IEC104 envelope (the nft envelope mark is set) it is dropped
-// (fragments, IPv6 extension headers and truncated packets);
-// everything else passes as before.
+// An enforcing scope or IEC104 envelope vetoes an unreconstructable packet.
+// Other inline invalid packets continue to kernel admission, never NF_ACCEPT.
 func invalidPacketDecision(pkt capture.Packet) capture.Decision {
-	if envelopeMarked(pkt) {
+	if envelopeMarked(pkt) || pkt.HasMark && pkt.Mark&markabi.EnforceScopeMark != 0 {
 		return capture.Decision{Action: capture.Drop, Reason: reasonInvalidMarked + ":" + pkt.Invalid}
 	}
 	if pkt.Token.Inline() {
@@ -124,7 +125,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 	// already among them. Outside an enforce scope the packet itself passes.
 	e.RecordDPIEvents(state, &parsed, res.Events)
 	v, evalCtx, enforced := e.enforceDPIEvents(state, &parsed, res.Events, scope != nil && (deniedStream(res.Err) || isStreamFailure(res)))
-	if enforced {
+	if enforced && v.Reason != reasonPolicyNonAdmit {
 		if pkt.Proto != 17 {
 			e.verdictCache.Put(flowHash, v)
 		}
@@ -145,6 +146,9 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		reason := failClosedReason(res.Err)
 		denied := e.failClosed(pkt, state, &parsed, scope, reason, res.Proto, res.Err)
 		return denied
+	}
+	if enforced {
+		return capture.Decision{Action: capture.Repeat, Mark: markabi.Continue(pkt.Mark, true), Reason: reasonPolicyNonAdmit}
 	}
 	return acceptDecision
 }

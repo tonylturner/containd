@@ -13,6 +13,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
@@ -28,8 +29,8 @@ func TestIECAllowedAPDUPassesAndSplitAPDUIsHeld(t *testing.T) {
 		t.Fatalf("partial APDU = %+v, want Hold", d)
 	}
 	_, d = h.send(true, cmd[5:])
-	if d.Action != h.passingDisposition() || len(d.Resolved) != 1 || d.Resolved[0] != (capture.Resolution{Token: first.Token, Verdict: capture.VerdictAccept}) {
-		t.Fatalf("completing packet = %+v, want Accept releasing the held prefix", d)
+	if d.Action != h.passingDisposition() || len(d.Resolved) != 1 || d.Resolved[0] != (capture.Resolution{Token: first.Token, Verdict: capture.VerdictRepeat, Mark: markabi.Continue(first.Mark, false)}) {
+		t.Fatalf("completing packet = %+v, want Repeat releasing the held prefix", d)
 	}
 	// Coalesced: allowed APDU plus an incomplete tail holds the packet.
 	_, d = h.send(true, append(iframe(46, 1), iframe(46, 1)[:3]...))

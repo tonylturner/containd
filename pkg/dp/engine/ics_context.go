@@ -24,6 +24,10 @@ func evalContextsFromDPIEvent(snap *rules.Snapshot, state *flow.State, pkt *dpi.
 		Proto: strings.ToLower(pkt.Proto), Port: strconv.Itoa(int(servicePort(state, pkt))),
 		Identities: snap.IdentitiesOf(key.OpenerIP()),
 	}
+	if evidence := state.InlinePolicy.Load(); evidence != nil {
+		base = evidence.Context
+		base.Identities = snap.IdentitiesOf(base.SrcIP)
+	}
 	objects := icsContextsFromDPIEvent(state, ev, nil)
 	contexts := make([]rules.EvalContext, len(objects))
 	for i := range objects {

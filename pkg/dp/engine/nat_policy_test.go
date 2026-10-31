@@ -284,10 +284,16 @@ func TestNATEgressDenialDeletesOriginalAndResetsWire(t *testing.T) {
 	egress := flow.TupleKey(c.Evidence.Reply, flow.DirReverse).Reversed().Tuple()
 	deliver := func(pkt capture.Packet) capture.Decision {
 		pkt.Token = capture.NewToken(1, firstCommandTokens.Add(1))
+		pkt.Queue = &capture.QueueMetadata{IngressDevice: "eth1", EgressDevice: "eth0",
+			Conntrack: &capture.QueueConntrack{HasMark: true, HasStatus: true, DirectionKnown: true,
+				Original: capture.QueueTuple{Source: c.Evidence.Original.Source, Destination: c.Evidence.Original.Destination},
+				Reply:    capture.QueueTuple{Source: c.Evidence.Reply.Source, Destination: c.Evidence.Reply.Destination}}}
 		d := f.e.handlePacketConnection(pkt, c, nil)
 		verdict := capture.VerdictAccept
 		if d.Action == capture.Drop {
 			verdict = capture.VerdictDrop
+		} else if d.Action == capture.Repeat {
+			verdict = capture.VerdictRepeat
 		}
 		f.e.hooks.onVerdict(pkt.Token, verdict, nil)
 		return d
@@ -295,7 +301,7 @@ func TestNATEgressDenialDeletesOriginalAndResetsWire(t *testing.T) {
 	syn := transportWire(egress, time.Now(), nil)
 	syn.TCP = capture.TCPMeta{Valid: true, Seq: 100, Flags: capture.TCPFlagSYN}
 	syn.HasMark, syn.Mark = true, enforce.HandshakeMark
-	if d := deliver(syn); d.Action != capture.Accept {
+	if d := deliver(syn); d.Action != capture.Repeat {
 		t.Fatalf("SYN = %+v", d)
 	}
 	pkt := transportWire(egress, time.Now(), modbusADU(1, 6, 10, 2))

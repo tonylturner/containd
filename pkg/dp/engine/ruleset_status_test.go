@@ -19,7 +19,7 @@ func TestRulesetStatusCarriesAppliedWarnings(t *testing.T) {
 		{ID: "plain", Protocols: []rules.Protocol{{Name: "tcp", Port: "443"}}, Action: rules.ActionAllow},
 	}}
 	applier := &recordingApplier{}
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier}})
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: applier}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestRulesetStatusCarriesAppliedWarnings(t *testing.T) {
 // the next successful apply.
 func TestRulesetStatusKeepsInstalledRevisionOnFailedApply(t *testing.T) {
 	applier := &recordingApplier{}
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier}})
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: applier}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestRulesetStatusKeepsInstalledRevisionOnFailedApply(t *testing.T) {
 // never enforced reports it.
 func TestRulesetStatusAfterReleaseReportsNothingInstalled(t *testing.T) {
 	applier := &recordingApplier{}
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier}})
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: applier}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,7 +29,7 @@ func (a *scriptApplier) ReadTable(context.Context, string) (enforce.TableLayout,
 
 func TestClearBlocksHandler(t *testing.T) {
 	applier := &scriptApplier{}
-	dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{Enabled: true, TableName: "fw", Applier: applier}})
+	dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, TableName: "fw", Applier: applier}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,6 +18,7 @@ var errInvalidDisposition = errors.New("capture: handler returned an invalid dis
 // its verdict is submitted or the generation closes, and each gets at most
 // one completion.
 type generation struct {
+	fence   *sync.RWMutex
 	id      uint64
 	submit  func(id uint32, v Verdict, mark uint32) error // kernel verdict; nil = submitted
 	comp    *completer
@@ -95,6 +96,11 @@ func (g *generation) push(x completion) {
 // deliver registers packet id as outstanding, runs the handler without any
 // capture lock held, and applies its Decision.
 func (g *generation) deliver(id uint32, pkt Packet, h Handler) {
+	if g.fence != nil {
+		g.fence.RLock()
+		defer g.fence.RUnlock()
+		pkt.publicationPinned = true
+	}
 	tok := Token{gen: g.id, id: id}
 	g.mu.Lock()
 	if g.closed {
@@ -226,6 +232,36 @@ func mergeSubmission(subs []submission, index map[uint32]int, s submission) []su
 // settle handles the Settle requests res[i] for i in idxs, all routed to
 // this generation, and fills errs.
 func (g *generation) settle(res []Resolution, idxs []int, errs []error) {
+	// Stage callbacks without taking a second read lock: their owner already
+	// pins publication. Actual deferred sends acquire the lock before claiming
+	// tokens, and recheck ownership after waiting for an applying writer.
+	g.mu.Lock()
+	var deferred []int
+	for _, i := range idxs {
+		r := res[i]
+		switch p := g.outstanding[r.Token.id]; {
+		case g.closed:
+			errs[i] = ErrQueueClosed
+		case p == nil:
+			errs[i] = ErrUnknownToken
+		case p.inCallback:
+			p.staged = combineSubmission(p.staged, submission{v: r.Verdict, mark: r.Mark, notify: true})
+		default:
+			deferred = append(deferred, i)
+		}
+	}
+	g.mu.Unlock()
+	if len(deferred) == 0 {
+		return
+	}
+	if g.fence != nil {
+		g.fence.RLock()
+		defer g.fence.RUnlock()
+	}
+	g.settlePinned(res, deferred, errs)
+}
+
+func (g *generation) settlePinned(res []Resolution, idxs []int, errs []error) {
 	g.mu.Lock()
 	if g.closed {
 		g.mu.Unlock()
@@ -258,6 +294,24 @@ func (g *generation) settle(res []Resolution, idxs []int, errs []error) {
 	g.inflight.Done()
 }
 
+func (g *generation) retireFlushed() {
+	g.mu.Lock()
+	var tokens []Token
+	for id, p := range g.outstanding {
+		if p.inCallback {
+			// A caller without exclusive publication ownership is a bug.
+			g.mu.Unlock()
+			panic("capture: retiring a running packet callback")
+		}
+		tokens = append(tokens, Token{gen: g.id, id: id})
+		delete(g.outstanding, id)
+	}
+	g.mu.Unlock()
+	for _, tok := range tokens {
+		g.push(completion{tok: tok, verdict: VerdictDrop, err: ErrTokenFlushed})
+	}
+}
+
 // submitAll submits Drops before Accepts, keeping order within each class.
 // A failed submission is reported through OnVerdict and fails the source:
 // the packet may still sit in the kernel queue, and only closing the queue
@@ -270,7 +324,9 @@ func (g *generation) submitAll(subs []submission, errs []error) {
 		err := g.submit(s.tok.id, s.v, s.mark)
 		if err != nil {
 			err = fmt.Errorf("capture: submit %s for %s: %w", s.v, s.tok, err)
-			if !errors.Is(err, syscall.ENOENT) {
+			if errors.Is(err, syscall.ENOENT) {
+				err = fmt.Errorf("%w: %w", ErrTokenFlushed, err)
+			} else {
 				g.fail(err)
 			}
 		} else if s.err != nil {

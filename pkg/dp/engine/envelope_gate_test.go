@@ -77,7 +77,7 @@ func (m *nftModel) state() (string, int) {
 func gateEngine(t *testing.T, nft *nftModel, group uint16, c captureRunner) *Engine {
 	t.Helper()
 	e, err := New(Config{
-		Enforce:       EnforceConfig{Enabled: true, Applier: nft, Updater: &recordingUpdater{}},
+		Enforce:       EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: nft, Updater: &recordingUpdater{}},
 		DPIEnabled:    true,
 		DPIMode:       "enforce",
 		NFQueueGroup:  group,
@@ -235,8 +235,8 @@ func TestUSRulesetUnchangedByEnvelopeState(t *testing.T) {
 	if got := nft.scripts[len(nft.scripts)-1]; got != before || len(nft.scripts) != 2 {
 		t.Fatalf("a US-only ruleset changed with the queue state (%d scripts):\n%s", len(nft.scripts), got)
 	}
-	if !regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" jump ics_queue;`).MatchString(before) ||
-		!strings.Contains(before, "meta mark set meta mark and 0xf0ffffff queue num 101;") {
+	if !regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" jump ics_enforce_queue;`).MatchString(before) ||
+		!strings.Contains(before, "meta mark set meta mark and 0xe0ffffff or 0x08000000 queue num 101;") {
 		t.Fatalf("US Modbus steering missing:\n%s", before)
 	}
 }

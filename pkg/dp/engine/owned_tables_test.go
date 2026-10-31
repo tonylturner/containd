@@ -14,7 +14,7 @@ import (
 
 func tableEngine(t *testing.T, nft *nftModel, enabled bool, table string) *Engine {
 	t.Helper()
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: enabled, TableName: table, Applier: nft, Updater: &recordingUpdater{}}})
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: enabled, TableName: table, Applier: nft, Updater: &recordingUpdater{}}})
 	if err != nil {
 		t.Fatal(err)
 	}
