@@ -240,6 +240,10 @@ jobs:
     needs: build-and-push
     if: ${{ !cancelled() && (needs.build-and-push.result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      packages: write
     concurrency:
       group: release-latest
       cancel-in-progress: false
@@ -308,6 +312,42 @@ jobs:
             echo "Not promoting $RELEASE_TAG: $commit is not an ancestor of origin/main" >> "$GITHUB_STEP_SUMMARY"
             echo "promote=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Require successful CI for the exact release commit
+        if: steps.eligible.outputs.promote == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.eligible.outputs.commit }}
+        run: |
+          set -euo pipefail
+          # 21 observations, with at most ten minutes of sleep. Each API call
+          # also has a deadline; API errors refuse immediately, never fail open.
+          for attempt in {1..21}; do
+            if ! timeout 30s gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_COMMIT}&event=push&branch=main&per_page=100" \
+              > "$RUNNER_TEMP/release-ci-runs.json"; then
+              echo "**REFUSED:** Could not read exact-commit CI evidence from GitHub Actions." | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            args=(--commit "$RELEASE_COMMIT" --repository "$GITHUB_REPOSITORY"
+              --summary "$GITHUB_STEP_SUMMARY")
+            if (( attempt == 21 )); then
+              args+=(--final-check)
+            fi
+            if python3 scripts/release-ci-gate.py "${args[@]}" \
+              < "$RUNNER_TEMP/release-ci-runs.json"; then
+              exit 0
+            else
+              status=$?
+              if (( status != 3 )); then
+                exit "$status"
+              fi
+            fi
+            sleep 30
+          done
+          echo "**REFUSED:** Exhausted CI polling budget." | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
         if: steps.eligible.outputs.promote == 'true'

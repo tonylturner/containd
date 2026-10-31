@@ -47,18 +47,14 @@ func interfacesHandler(logger *zap.SugaredLogger, ownership *ownershipManager) h
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		if replace {
-			if err := netcfg.ApplyInterfacesReplace(ctx, ifaces); err != nil {
-				logger.Errorf("apply interfaces(replace) failed: %v", err)
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-		} else {
-			if err := netcfg.ApplyInterfaces(ctx, ifaces); err != nil {
-				logger.Errorf("apply interfaces failed: %v", err)
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
+		opts := netcfg.ApplyOptions{Replace: replace}
+		if ownership != nil {
+			opts.Reservation = ownership.reservation
+		}
+		if err := netcfg.ApplyInterfacesWithOptions(ctx, ifaces, opts); err != nil {
+			logger.Errorf("apply interfaces (replace=%t) failed: %v", replace, err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 		if ownership != nil {
 			ownership.setInterfaces(ifaces)
