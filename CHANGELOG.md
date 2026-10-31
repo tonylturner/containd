@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   successful CI from a push to main for the exact peeled tag commit. Pending CI
   waits for a bounded poll; missing, failed or cancelled CI fails promotion with
   evidence in the workflow summary.
+- IT DPI HTTP parsing reads request and header lines directly from the packet
+  payload instead of allocating a buffered reader per packet.
+- The UI drops the unused `glob` dev dependency and its override.
 
 ### Security
 
@@ -20,12 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make MFA login and enrollment challenges single-use and durable across management
   restarts, and invalidate them on password, TOTP or role changes. Pending
   challenges issued before this upgrade must be restarted.
-
-### Changed
-
-- IT DPI HTTP parsing reads request and header lines directly from the packet
-  payload instead of allocating a buffered reader per packet.
-- The UI drops the unused `glob` dev dependency and its override.
 
 ### Fixed
 
