@@ -196,7 +196,7 @@ func setInterfaceBindAPI(api *API) Command {
 			return fmt.Errorf("usage: set interface bind <name> <os_iface>")
 		}
 		payload := map[string]any{"device": args[1]}
-		return api.patchJSON(ctx, "/api/v1/interfaces/"+args[0], payload, out)
+		return patchExistingInterface(ctx, api, args[0], payload, out)
 	}
 }
 
@@ -205,8 +205,8 @@ func setInterfaceZoneAPI(api *API) Command {
 		if len(args) < 2 {
 			return fmt.Errorf("usage: set interface zone <name> <zone>")
 		}
-		payload := config.Interface{Zone: args[1]}
-		return api.patchJSON(ctx, "/api/v1/interfaces/"+args[0], payload, out)
+		payload := map[string]any{"zone": args[1]}
+		return patchExistingInterface(ctx, api, args[0], payload, out)
 	}
 }
 
@@ -225,7 +225,7 @@ func setInterfaceIPAPI(api *API) Command {
 				"addresses":   []string{},
 				"gateway":     "",
 			}
-			return api.patchJSON(ctx, "/api/v1/interfaces/"+ifaceName, payload, out)
+			return patchExistingInterface(ctx, api, ifaceName, payload, out)
 		case "static":
 			if len(args) < 3 {
 				return fmt.Errorf("usage: set interface ip %s static <cidr> [gateway]", ifaceName)
@@ -240,7 +240,7 @@ func setInterfaceIPAPI(api *API) Command {
 				"addresses":   []string{cidr},
 				"gateway":     gw,
 			}
-			return api.patchJSON(ctx, "/api/v1/interfaces/"+ifaceName, payload, out)
+			return patchExistingInterface(ctx, api, ifaceName, payload, out)
 		default:
 			addrs := args[1:]
 			if len(addrs) == 1 {
@@ -254,7 +254,7 @@ func setInterfaceIPAPI(api *API) Command {
 				"addresses":   addrs,
 				"gateway":     "",
 			}
-			return api.patchJSON(ctx, "/api/v1/interfaces/"+ifaceName, payload, out)
+			return patchExistingInterface(ctx, api, ifaceName, payload, out)
 		}
 	}
 }
@@ -308,7 +308,7 @@ func setDataPlaneAPI(api *API) Command {
 		}
 
 		var dp config.DataPlaneConfig
-		if err := api.getJSON(ctx, "/api/v1/dataplane", &dp); err != nil {
+		if err := api.getConfigJSON(ctx, "/api/v1/dataplane", &dp); err != nil {
 			return err
 		}
 		dp.Enforcement = on
@@ -372,7 +372,11 @@ func setForwardProxyAPI(api *API) Command {
 			return fmt.Errorf("usage: set proxy forward <on|off> [port] [zone...]")
 		}
 		on := args[0] == "on" || args[0] == "true" || args[0] == "1"
-		fp := config.ForwardProxyConfig{Enabled: on}
+		var fp config.ForwardProxyConfig
+		if err := api.getConfigJSON(ctx, "/api/v1/services/proxy/forward", &fp); err != nil {
+			return err
+		}
+		fp.Enabled = on
 		if len(args) > 1 {
 			port, err := strconv.Atoi(args[1])
 			if err != nil || port <= 0 || port > 65535 {
@@ -394,7 +398,11 @@ func setReverseProxyAPI(api *API) Command {
 			return fmt.Errorf("usage: set proxy reverse <on|off>")
 		}
 		on := args[0] == "on" || args[0] == "true" || args[0] == "1"
-		rp := config.ReverseProxyConfig{Enabled: on}
+		var rp config.ReverseProxyConfig
+		if err := api.getConfigJSON(ctx, "/api/v1/services/proxy/reverse", &rp); err != nil {
+			return err
+		}
+		rp.Enabled = on
 		return api.postJSON(ctx, "/api/v1/services/proxy/reverse", rp, out)
 	}
 }

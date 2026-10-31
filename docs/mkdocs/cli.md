@@ -86,6 +86,12 @@ require a restart; committing does not rebind management sockets.
   - `import config <path>`
 - Backed by the management API and config store; exposed via SSH and the in-app console.
 
+Read-modify-write commands, such as NAT, proxy, interface and system edits,
+require a successful read of the current candidate settings. If that read fails
+or returns no data, the command reports an error and sends no write; it does not
+substitute running settings or defaults. Unspecified fields are preserved.
+Outbound quick start completes all configuration reads before staging its changes.
+
 ## Learner Evidence
 
 PCAP analysis imports a dataset; it does not generate rules or change policy.

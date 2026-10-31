@@ -11,21 +11,16 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-// routingPostClient serves current as the routing config and records the
-// routing config the quick start posts.
-func routingPostClient(t *testing.T, current config.RoutingConfig, posted *config.RoutingConfig) *dispatchHTTPClient {
+// routingReadClient serves the candidate routing subtree.
+func routingReadClient(t *testing.T, current config.RoutingConfig) *dispatchHTTPClient {
 	return &dispatchHTTPClient{t: t, handlers: map[string]func(*http.Request) (*http.Response, error){
 		"GET /api/v1/routing": func(*http.Request) (*http.Response, error) {
 			return jsonHTTPResponse(200, current, nil), nil
 		},
-		"POST /api/v1/routing": func(req *http.Request) (*http.Response, error) {
-			*posted = decodeJSONRequest[config.RoutingConfig](t, req)
-			return jsonHTTPResponse(200, nil, nil), nil
-		},
 	}}
 }
 
-func TestApplyQuickstartRoutingReplacesGatewayAndDefaultRoute(t *testing.T) {
+func TestPrepareQuickstartRoutingReplacesGatewayAndDefaultRoute(t *testing.T) {
 	t.Parallel()
 
 	other := config.Gateway{Name: "lab-gw", Address: "198.51.100.1", Iface: "eth2"}
@@ -35,10 +30,10 @@ func TestApplyQuickstartRoutingReplacesGatewayAndDefaultRoute(t *testing.T) {
 		Gateways: []config.Gateway{other, {Name: quickstartGatewayName, Address: "192.0.2.254", Iface: "wan"}},
 		Routes:   []config.StaticRoute{lab, tableDefault, {Dst: "0.0.0.0/0", Gateway: "192.0.2.254"}},
 	}
-	var posted config.RoutingConfig
-	api := &API{BaseURL: "http://test", Client: routingPostClient(t, current, &posted)}
+	api := &API{BaseURL: "http://test", Client: routingReadClient(t, current)}
 
-	if err := applyQuickstartRouting(context.Background(), api, "eth0", "192.0.2.1"); err != nil {
+	posted, err := prepareQuickstartRouting(context.Background(), api, "eth0", "192.0.2.1")
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -54,13 +49,13 @@ func TestApplyQuickstartRoutingReplacesGatewayAndDefaultRoute(t *testing.T) {
 	}
 }
 
-func TestApplyQuickstartRoutingAppendsGatewayAndDefaultRoute(t *testing.T) {
+func TestPrepareQuickstartRoutingAppendsGatewayAndDefaultRoute(t *testing.T) {
 	t.Parallel()
 
-	var posted config.RoutingConfig
-	api := &API{BaseURL: "http://test", Client: routingPostClient(t, config.RoutingConfig{}, &posted)}
+	api := &API{BaseURL: "http://test", Client: routingReadClient(t, config.RoutingConfig{})}
 
-	if err := applyQuickstartRouting(context.Background(), api, "eth0", "192.0.2.1"); err != nil {
+	posted, err := prepareQuickstartRouting(context.Background(), api, "eth0", "192.0.2.1")
+	if err != nil {
 		t.Fatal(err)
 	}
 
