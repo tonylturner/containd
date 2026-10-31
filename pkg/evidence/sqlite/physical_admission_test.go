@@ -20,13 +20,17 @@ func TestPhysicalHeadroomEvictsBeforeSQLiteFull(t *testing.T) {
 			for i := range 8 {
 				p := parent(ds, fmt.Sprintf("%d-%d", batch, i))
 				p.Modbus = nil
-				p.Service.Protocol = "iec104"
-				p.Service.ServerPort = 2404
-				p.ObjectCount = 512
-				p.IEC104 = &evidence.IEC104{APCIType: "I", TypeID: pointer(uint8(45)), CA: pointer(uint16(1)), COT: pointer(uint8(6)), Originator: pointer(uint8(0)), Negative: pointer(false), Test: pointer(false)}
-				for j := range 512 {
-					p.IEC104.Objects = append(p.IEC104.Objects, evidence.IEC104Object{Index: uint32(j), IOA: pointer(uint32(j)), Select: pointer(false), Qualifier: pointer(uint8(j % 32)), ValueDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+				// A bounded indexed DNP3 read expands compact wire indexes into
+				// normalized singleton spans, including realistic JSON amplification.
+				p.Service.Protocol = "dnp3"
+				p.Service.ServerPort = 20000
+				p.ObjectCount = 1536
+				object := evidence.DNP3Object{Index: 0, Group: pointer(uint8(20)), Variation: pointer(uint8(1)), Qualifier: pointer(uint8(0x28)), Count: pointer(uint32(1536))}
+				for j := range 1536 {
+					object.Spans = append(object.Spans, evidence.Span{First: uint32(j), Last: uint32(j), Role: "target"})
 				}
+				p.DNP3 = &evidence.DNP3{Master: pointer(uint16(1)), Outstation: pointer(uint16(2)), FunctionCode: pointer(uint8(1)), Objects: []evidence.DNP3Object{object}}
+
 				parents = append(parents, p)
 			}
 			if _, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: parents}); err != nil {

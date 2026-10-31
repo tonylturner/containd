@@ -5,6 +5,7 @@ package learn_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"path/filepath"
@@ -164,61 +165,69 @@ func TestExactServiceIsolationAndIPv6(t *testing.T) {
 }
 
 func TestExactIECWholeParentAndClosedDomainCertification(t *testing.T) {
-	ctx := context.Background()
-	s, err := sqlite.Open(filepath.Join(t.TempDir(), "evidence.db"), sqlite.Options{CompatibleProof: learn.CompatibleVersions})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	ds, err := s.CreateDataset(ctx, metadata())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var serial uint64
-	state := requestState()
-	state.Key.DstPort = 2404
-	event := func(apdu string, value, qualifier uint8) dpi.Event {
-		return dpi.Event{Proto: "iec104", Kind: "request", Timestamp: request().Timestamp, Attributes: map[string]any{
-			eventfields.KeyAPDUID: apdu, eventfields.KeyAPCIType: "I", eventfields.KeyDirection: "request", eventfields.KeyTypeID: uint8(45), eventfields.KeyCA: uint16(1), eventfields.KeyCause: uint8(6),
-			eventfields.KeyOriginator: uint8(0), eventfields.KeyCOTNegative: false, eventfields.KeyCOTTest: false, eventfields.KeyObjectCount: uint32(1), eventfields.KeyObjectIndex: uint32(0),
-			eventfields.KeyIOA: uint32(7), eventfields.KeySelect: false, eventfields.KeyQualifier: qualifier, eventfields.KeyValue: value,
-		}}
-	}
-	// Use the decoder's authoritative field names, not JSON/display aliases.
-	for value := range uint8(2) {
-		for qualifier := range uint8(32) {
-			ev := event(string(rune(1+int(value)*32+int(qualifier))), value, qualifier)
-			parents, err := learn.Normalize(ds, state, []dpi.Event{ev}, &serial)
-			if err != nil || len(parents) != 1 {
-				t.Fatalf("normalize %v", err)
-			}
-			if _, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: parents}); err != nil {
+	for _, typeID := range []uint8{45, 46, 47, 58, 59, 60} {
+		t.Run(fmt.Sprint(typeID), func(t *testing.T) {
+			ctx := context.Background()
+			s, err := sqlite.Open(filepath.Join(t.TempDir(), "evidence.db"), sqlite.Options{CompatibleProof: learn.CompatibleVersions})
+			if err != nil {
 				t.Fatal(err)
 			}
-		}
-	}
-	if _, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Seal: true}); err != nil {
-		t.Fatal(err)
-	}
-	g := learn.Generator{Store: s, Certifier: &learn.CompilerCertifier{Store: s}, CountWithheld: s.CountWithheld}
-	result, err := g.Generate(ctx, learn.GenerateRequest{DatasetID: ds.ID})
-	if err != nil || len(result.Suggestions) != 1 {
-		t.Fatalf("full closed domain: %+v %v", result, err)
-	}
-	proposal, err := s.GetSuggestion(ctx, result.Suggestions[0].ID)
-	if err != nil || proposal.Proof.Positive.Total != 64 || proposal.Content.Rules[0].ICS.Mode != "monitor" {
-		t.Fatal("whole-parent proof lost", err)
-	}
-	if _, err := s.ResolveForStage(ctx, learn.ApplyRequest{RequestID: "unreviewed", Selections: result.Suggestions}); err != learn.ErrReviewRequired {
-		t.Fatalf("IEC review bypass: %v", err)
-	}
-	ev := event("incomplete", 1, 0)
-	ev.Attributes[eventfields.KeyObjectCount] = uint32(2)
-	parents, err := learn.Normalize(ds, state, []dpi.Event{ev}, &serial)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, reasons := learn.GenerateRelation(parents[0]); !slices.Contains(reasons, evidence.WithheldIncomplete) {
-		t.Fatal("incomplete parent yielded partial permission", reasons)
+			t.Cleanup(func() { _ = s.Close() })
+			ds, err := s.CreateDataset(ctx, metadata())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var serial uint64
+			state := requestState()
+			state.Key.DstPort = 2404
+			event := func(apdu string, value, qualifier uint8) dpi.Event {
+				return dpi.Event{Proto: "iec104", Kind: "request", Timestamp: request().Timestamp, Attributes: map[string]any{
+					eventfields.KeyAPDUID: apdu, eventfields.KeyAPCIType: "I", eventfields.KeyDirection: "request", eventfields.KeyTypeID: typeID, eventfields.KeyCA: uint16(1), eventfields.KeyCause: uint8(6),
+					eventfields.KeyOriginator: uint8(0), eventfields.KeyCOTNegative: false, eventfields.KeyCOTTest: false, eventfields.KeyObjectCount: uint32(1), eventfields.KeyObjectIndex: uint32(0),
+					eventfields.KeyIOA: uint32(7), eventfields.KeySelect: false, eventfields.KeyQualifier: qualifier, eventfields.KeyValue: value,
+				}}
+			}
+			// Use the decoder's authoritative field names, not JSON/display aliases.
+			for value := range uint8(2) {
+				for qualifier := range uint8(32) {
+					stateValue := value
+					if typeID != 45 && typeID != 58 {
+						stateValue++
+					}
+					ev := event(string(rune(1+int(value)*32+int(qualifier))), stateValue, qualifier)
+					parents, err := learn.Normalize(ds, state, []dpi.Event{ev}, &serial)
+					if err != nil || len(parents) != 1 {
+						t.Fatalf("normalize %v", err)
+					}
+					if _, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: parents}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if _, err := s.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Seal: true}); err != nil {
+				t.Fatal(err)
+			}
+			g := learn.Generator{Store: s, Certifier: &learn.CompilerCertifier{Store: s}, CountWithheld: s.CountWithheld}
+			result, err := g.Generate(ctx, learn.GenerateRequest{DatasetID: ds.ID})
+			if err != nil || len(result.Suggestions) != 1 {
+				t.Fatalf("full closed domain: %+v %v", result, err)
+			}
+			proposal, err := s.GetSuggestion(ctx, result.Suggestions[0].ID)
+			if err != nil || proposal.Proof.Positive.Total != 64 || proposal.Content.Rules[0].ICS.Mode != "monitor" {
+				t.Fatal("whole-parent proof lost", err)
+			}
+			if _, err := s.ResolveForStage(ctx, learn.ApplyRequest{RequestID: "unreviewed", Selections: result.Suggestions}); err != learn.ErrReviewRequired {
+				t.Fatalf("IEC review bypass: %v", err)
+			}
+			ev := event("incomplete", 1, 0)
+			ev.Attributes[eventfields.KeyObjectCount] = uint32(2)
+			parents, err := learn.Normalize(ds, state, []dpi.Event{ev}, &serial)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, reasons := learn.GenerateRelation(parents[0]); !slices.Contains(reasons, evidence.WithheldIncomplete) {
+				t.Fatal("incomplete parent yielded partial permission", reasons)
+			}
+		})
 	}
 }

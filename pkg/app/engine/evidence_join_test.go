@@ -62,6 +62,8 @@ func TestEvidenceQueueLossAndPendingBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	state := flow.NewState(flow.Key{SrcIP: net.ParseIP("192.0.2.1"), DstIP: net.ParseIP("192.0.2.2"), SrcPort: 40000, DstPort: 502, Proto: 6}, time.Now())
+	a.watch.engine.RecordDPIEvents(state, nil, []dpi.Event{{Proto: "modbus", Kind: "request", Timestamp: time.Now(), Attributes: map[string]any{"function_code": uint8(3), "unit_id": uint8(1), "address": uint16(4), "quantity": uint16(1), "is_write": false}}})
 	lease := a.watch.active.Load()
 	lease.dropped.Add(3)
 	join := newEvidenceJoin(a.watch, ctx)
@@ -86,6 +88,15 @@ func TestEvidenceQueueLossAndPendingBounds(t *testing.T) {
 	if err != nil || counts.LostBatches != 3 {
 		t.Fatalf("loss counters: %+v %v", counts, err)
 	}
+	result, err := a.generator.Generate(ctx, learn.GenerateRequest{DatasetID: watch.DatasetID})
+	if err != nil || len(result.Suggestions) != 1 {
+		t.Fatalf("queue loss voided complete parents: %+v %v", result, err)
+	}
+	suggestion, err := a.store.GetSuggestion(ctx, result.Suggestions[0].ID)
+	if err != nil || len(suggestion.Content.Limits) < 2 {
+		t.Fatal("queue loss not surfaced as a suggestion limit", err)
+	}
+
 }
 
 func TestEvidenceAutomaticDeadlineDrainsPendingParents(t *testing.T) {

@@ -84,6 +84,9 @@ func TestCoilCertificateRejectsInvalidWireValues(t *testing.T) {
 			}
 		}
 	}
+	if suggestion.Proof.Negative.Total != 32 {
+		t.Fatalf("coil invalid-value boundaries were not replayed: %+v", suggestion.Proof.Negative)
+	}
 	found := false
 	for _, c := range suggestion.Proof.Counterexamples {
 		if c.Mutation == "invalid_coil_value" {
