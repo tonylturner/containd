@@ -199,7 +199,7 @@ func (w *evidenceWatch) maintain(ctx context.Context) {
 	}
 }
 func (w *evidenceWatch) start(ctx context.Context, req evidence.StartWatchRequest) (evidence.Watch, error) {
-	if lease := w.active.Load(); lease != nil && !time.Now().Before(lease.watch.Deadline) {
+	if lease := w.active.Load(); lease != nil && !w.store.Clock().Before(lease.watch.Deadline) {
 		if _, err := w.stop(ctx, lease.watch.ID); err != nil {
 			return evidence.Watch{}, err
 		}

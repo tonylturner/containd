@@ -346,7 +346,8 @@ func (s *Store) Close() error { return s.db.Close() }
 // Clock returns the authority's lease/retention clock, never capture time.
 func (s *Store) Clock() time.Time { return s.now().UTC() }
 
-// Maintain is called by the engine worker, never implicitly starts collection.
+// Maintain expires/checkpoints evidence. The collector owns deadline disable
+// and bounded drain before StopWatch; maintenance must not seal under a join.
 func (s *Store) Maintain(ctx context.Context) error {
 	if err := s.write(ctx, func(_ *sql.Tx) error { return nil }); err != nil {
 		return err

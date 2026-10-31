@@ -193,9 +193,6 @@ func (s *Store) StartWatch(ctx context.Context, req evidence.StartWatchRequest) 
 	}
 	var w evidence.Watch
 	err = s.write(ctx, func(tx *sql.Tx) error {
-		if err := s.stopDue(ctx, tx, false); err != nil {
-			return err
-		}
 		var active int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM datasets WHERE state='collecting'`).Scan(&active); err != nil {
 			return err
@@ -285,19 +282,13 @@ func (s *Store) ListWatches(ctx context.Context, p evidence.PageRequest) (eviden
 	return evidence.WatchPage{Items: items, NextCursor: next}, err
 }
 
-func (s *Store) stopDue(ctx context.Context, tx *sql.Tx, restart bool) error {
+func (s *Store) stopRestartedWatches(ctx context.Context, tx *sql.Tx) error {
 	watches, _, err := page[evidence.Watch](ctx, tx, `SELECT w.id,w.data FROM watches w JOIN datasets d ON d.id=w.dataset WHERE d.state='collecting' AND w.id>? ORDER BY w.id LIMIT ?`, nil, evidence.PageRequest{Limit: 200})
 	if err != nil {
 		return err
 	}
 	for _, w := range watches {
-		reason := "deadline"
-		if restart {
-			reason = "restart"
-		} else if s.now().Before(w.Deadline) {
-			continue
-		}
-		if _, err := s.stop(ctx, tx, w, reason); err != nil {
+		if _, err := s.stop(ctx, tx, w, "restart"); err != nil {
 			return err
 		}
 	}
@@ -309,7 +300,7 @@ func (s *Store) recover(ctx context.Context) error {
 		if err := s.invalidateProofs(ctx, tx); err != nil {
 			return err
 		}
-		if err := s.stopDue(ctx, tx, true); err != nil {
+		if err := s.stopRestartedWatches(ctx, tx); err != nil {
 			return err
 		}
 		datasets, _, err := page[evidence.Dataset](ctx, tx, `SELECT id,data FROM datasets WHERE state='importing' AND id>? ORDER BY id LIMIT ?`, nil, evidence.PageRequest{Limit: 200})
