@@ -50,6 +50,10 @@ FROM envoyproxy/envoy:v1.31.2 AS envoy-src
 
 FROM cgr.dev/chainguard/wolfi-base:latest@sha256:360896efb0753a5701c48f860e17130c205eae5a264797aa3e7ea126ee2923a7
 
+# Image metadata is sourced from the same build args as the binary.
+ARG VERSION
+ARG COMMIT=unknown
+
 # Install runtime packages: embedded services + troubleshooting tools.
 # NTP: chrony replaces openntpd (not available in Wolfi).
 RUN apk update && apk add --no-cache \
@@ -87,7 +91,9 @@ LABEL org.opencontainers.image.title="containd" \
       org.opencontainers.image.description="ICS/OT next-generation firewall" \
       org.opencontainers.image.url="https://github.com/tonylturner/containd" \
       org.opencontainers.image.source="https://github.com/tonylturner/containd" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
 COPY --from=builder /out/containd /usr/bin/containd
 COPY --from=envoy-src /usr/local/bin/envoy /usr/bin/envoy
 COPY --from=ui-builder /ui/out /var/lib/ngfw/ui

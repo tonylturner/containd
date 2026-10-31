@@ -23,6 +23,10 @@ RUN version="${VERSION:-$(tr -d '\n' < VERSION 2>/dev/null || printf dev)}"; \
 # antivirus backend, and CA roots for FreshClam and ICAP over TLS.
 FROM cgr.dev/chainguard/wolfi-base:latest@sha256:360896efb0753a5701c48f860e17130c205eae5a264797aa3e7ea126ee2923a7
 
+# Image metadata is sourced from the same build args as the binary.
+ARG VERSION
+ARG COMMIT=unknown
+
 RUN apk update && apk add --no-cache ca-certificates-bundle clamav nftables && rm -rf /var/cache/apk/*
 
 # ClamAV runtime shared by the engine and combined images. The engine renders
@@ -36,7 +40,9 @@ LABEL org.opencontainers.image.title="containd-engine" \
       org.opencontainers.image.description="containd data plane (engine-only)" \
       org.opencontainers.image.url="https://github.com/tonylturner/containd" \
       org.opencontainers.image.source="https://github.com/tonylturner/containd" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
 
 COPY --from=builder /out/containd /usr/bin/containd
 # The engine needs CONTAIND_ENGINE_ADDR set to its address on the management
