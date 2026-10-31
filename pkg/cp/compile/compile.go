@@ -13,8 +13,18 @@ import (
 )
 
 // CompileSnapshot compiles a control-plane running config into a data-plane snapshot.
-// This currently maps only L3/L4 firewall primitives.
+// It uses no live address discovery or retained admission state. Engine callers
+// supply that evidence with CompileSnapshotWithInputs.
 func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
+	return CompileSnapshotWithInputs(cfg, SnapshotInputs{})
+}
+
+// CompileSnapshotWithInputs adds engine-owned runtime evidence to a validated
+// policy. All maps and slices are copied before immutable publication.
+func CompileSnapshotWithInputs(cfg *config.Config, inputs SnapshotInputs) (dprules.Snapshot, error) {
+	if err := inputs.validate(); err != nil {
+		return dprules.Snapshot{}, err
+	}
 	if cfg == nil {
 		return dprules.Snapshot{}, fmt.Errorf("config is nil")
 	}
@@ -23,11 +33,13 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	}
 
 	snap := dprules.Snapshot{
-		Version:    cfg.Version,
-		DPIMode:    cfg.DataPlane.DPIMode,
-		Firewall:   make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
-		LocalInput: make([]dprules.LocalServiceRule, 0, 8),
-		Default:    dprules.Action(cfg.Firewall.EffectiveDefaultAction()),
+		AdmissionParity:   inputs.AdmissionParity,
+		LocalIPv4ByDevice: copyLocalIPv4(inputs.LocalIPv4ByDevice),
+		Version:           cfg.Version,
+		DPIMode:           cfg.DataPlane.DPIMode,
+		Firewall:          make([]dprules.Entry, 0, len(cfg.Firewall.Rules)),
+		LocalInput:        make([]dprules.LocalServiceRule, 0, 8),
+		Default:           dprules.Action(cfg.Firewall.EffectiveDefaultAction()),
 		NAT: dprules.NATConfig{
 			Enabled:      cfg.Firewall.NAT.Enabled,
 			EgressZone:   cfg.Firewall.NAT.EgressZone,
@@ -58,6 +70,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			Description:    pf.Description,
 			IngressZone:    pf.IngressZone,
 			Proto:          pf.Proto,
+			ListenAddress:  pf.ListenAddress,
 			ListenPort:     pf.ListenPort,
 			DestIP:         pf.DestIP,
 			DestPort:       destPort,
@@ -88,6 +101,7 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 			Tag:          r.Tag,
 			Log:          r.Log,
 			Identities:   append([]string(nil), r.Identities...),
+			ViaForwards:  append([]string(nil), r.ViaForwards...),
 			ICS:          ICSPredicate(r.ICS),
 		}
 		entry.Schedule = r.Schedule.Predicate()
@@ -105,7 +119,12 @@ func CompileSnapshot(cfg *config.Config) (dprules.Snapshot, error) {
 	// Deterministic zone->devices mapping for nftables bindings, shared with
 	// the gate selection.
 	snap.ZoneIfaces = config.ZoneDevices(cfg.Interfaces)
-	snap.Gate = compileGate(cfg, snap.ZoneIfaces)
+	gate, err := compileGate(cfg, snap.ZoneIfaces).WithStableZoneIndices(inputs.PreviousGateZones)
+	if err != nil {
+		return dprules.Snapshot{}, err
+	}
+	snap.Gate = gate
+	snap.ForwardMatches = ResolveForwardMatches(cfg)
 
 	for _, r := range cfg.IDS.Rules {
 		dr := dprules.IDSRule{

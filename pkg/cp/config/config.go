@@ -647,14 +647,15 @@ type NATConfig struct {
 }
 
 // PortForward defines a simple DNAT rule for inbound traffic.
-// An enabled forward also admits the translated traffic in the forward chain;
-// no separate firewall allow rule is needed.
+// Translation is not permission: firewall policy must admit the connection.
+// Blank ListenAddress selects only current IPv4 addresses of its ingress device.
 type PortForward struct {
 	ID             string   `json:"id"`
 	Enabled        bool     `json:"enabled"`
 	Description    string   `json:"description,omitempty"`
 	IngressZone    string   `json:"ingressZone"` // e.g. "wan"
 	Proto          string   `json:"proto"`       // "tcp" or "udp"
+	ListenAddress  string   `json:"listenAddress,omitempty"`
 	ListenPort     int      `json:"listenPort"`
 	DestIP         string   `json:"destIp"`                   // IPv4 only for now
 	DestPort       int      `json:"destPort,omitempty"`       // 0 => same as listenPort
@@ -788,9 +789,8 @@ type IDSCondition struct {
 
 type Action string
 
-// Firewall rule actions. ALLOW, DENY and RESET are terminal; any matching
-// ALLOW takes precedence over every DENY and RESET. RATE_LIMIT and TAG are
-// effects: they never admit traffic on their own, and the packet continues
+// Firewall rule actions. ALLOW, DENY and RESET decide in configured
+// first-match order. RATE_LIMIT and TAG are effects: they never admit traffic on their own, and the packet continues
 // to the terminal decision. The default action is ALLOW or DENY only.
 const (
 	ActionAllow Action = "ALLOW"
@@ -829,6 +829,7 @@ type Rule struct {
 	Destinations []string        `json:"destinations,omitempty"` // CIDR strings
 	Protocols    []Protocol      `json:"protocols,omitempty"`
 	Identities   []string        `json:"identities,omitempty"`
+	ViaForwards  []string        `json:"viaForwards,omitempty"`
 	ICS          ICSPredicate    `json:"ics"`
 	Schedule     *ScheduleConfig `json:"schedule,omitempty"`
 	Action       Action          `json:"action"`

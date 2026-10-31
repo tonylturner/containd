@@ -50,9 +50,10 @@ func compileGate(cfg *config.Config, zoneIfaces map[string][]string) dprules.Gat
 	return gate
 }
 
-// gateZones indexes every egress zone the include entries reference, in
+// gateZones lists every egress zone the include entries reference, in
 // configuration order, whether or not it has a device yet: binding a device
-// later must not renumber the other zones. An entry without destZones
+// later must not retire its allocation. WithStableZoneIndices assigns indices.
+// An entry without destZones
 // references every zone.
 func gateZones(cfg *config.Config, include []config.ScanInclude, zoneIfaces map[string][]string) []dprules.GateZone {
 	referenced := map[string]struct{}{}
@@ -74,7 +75,6 @@ func gateZones(cfg *config.Config, include []config.ScanInclude, zoneIfaces map[
 		}
 		zones = append(zones, dprules.GateZone{
 			Name:    z.Name,
-			Index:   uint8(len(zones) + 1),
 			Devices: slices.Clone(zoneIfaces[z.Name]),
 		})
 	}
