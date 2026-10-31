@@ -234,7 +234,7 @@ export default function SecurityView() {
                   <div className={s.rowHeader}>
                     <div className={s.rowZoneInfo}>
                       <div className={s.rowZoneName} style={{ color: fromZ.color }}>{fromZ.name}</div>
-                      <div className={s.rowZoneSub} style={{ color: sc }}>SL checks:{fa} / SL-T:{fromZ.sl_t}</div>
+                      <div className={s.rowZoneSub} style={{ color: sc }}>Checks:{fa} / SL-T:{fromZ.sl_t}</div>
                     </div>
                     <div className={s.rowZoneDot} style={{ background: fromZ.color, boxShadow: `0 0 5px ${fromZ.color}60` }} />
                   </div>

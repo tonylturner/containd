@@ -80,6 +80,7 @@ test("conduit details label requirement check results without claiming a securit
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
   await loaded;
   await page.getByText("ALLOW", { exact: true }).click();
+  await expect(page.getByText("Checks:0 / SL-T:2", { exact: true })).toBeVisible();
   await expect(page.getByText("CHECK-BASED SL", { exact: true })).toHaveCount(2);
   await expect(page.getByText("Unmet checks for SL-2; check-based SL-0", { exact: true })).toBeVisible();
   await expect(page.getByText("SL-1 target checks pass", { exact: true })).toBeVisible();
