@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	SchemaVersionCurrent = "0.1.8"
+	SchemaVersionCurrent = "0.1.9"
 )
 
 // Build metadata injected at compile time via -ldflags.
@@ -78,14 +78,14 @@ func UpgradeInPlace(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")
 	}
-	if cfg.SchemaVersion == "" {
-		cfg.SchemaVersion = SchemaVersionCurrent
-		return nil
-	}
 	cur, _ := parseSemver(SchemaVersionCurrent)
-	got, err := parseSemver(cfg.SchemaVersion)
-	if err != nil {
-		return err
+	got := semver{minor: 1}
+	if cfg.SchemaVersion != "" {
+		var err error
+		got, err = parseSemver(cfg.SchemaVersion)
+		if err != nil {
+			return err
+		}
 	}
 	switch compareSemver(got, cur) {
 	case 0:
@@ -93,17 +93,21 @@ func UpgradeInPlace(cfg *Config) error {
 	case 1:
 		return fmt.Errorf("config schema_version %s is newer than supported %s", cfg.SchemaVersion, SchemaVersionCurrent)
 	default:
-		// For now, accept older patch versions of the same major/minor and bump.
-		if got.major == cur.major && got.minor == cur.minor {
-			if beforeIndustrialScope(cfg.SchemaVersion) {
-				removed, updated := upgradeIndustrialBuiltins018(cfg)
-				if len(removed)+len(updated) > 0 {
-					cfg.scopeMigration = newScopeMigration(removed, updated)
-				}
-			}
-			cfg.SchemaVersion = SchemaVersionCurrent
-			return nil
+		if got.major != cur.major || got.minor != cur.minor {
+			return fmt.Errorf("no upgrade path from schema_version %s to %s", cfg.SchemaVersion, SchemaVersionCurrent)
 		}
-		return fmt.Errorf("no upgrade path from schema_version %s to %s", cfg.SchemaVersion, SchemaVersionCurrent)
+		// The mode audit describes the imported/stored schema, not an
+		// intermediate stamp from the ordered industrial-scope upgrade.
+		originalSchema := cfg.SchemaVersion
+		if beforeIndustrialScope(cfg.SchemaVersion) {
+			removed, updated := upgradeIndustrialBuiltins018(cfg)
+			if len(removed)+len(updated) > 0 {
+				cfg.scopeMigration = newScopeMigration(removed, updated)
+			}
+			cfg.SchemaVersion = "0.1.8"
+		}
+		upgradeRuleModes019(cfg, originalSchema)
+		cfg.SchemaVersion = SchemaVersionCurrent
+		return nil
 	}
 }

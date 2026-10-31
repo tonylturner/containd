@@ -33,7 +33,7 @@ export async function openEditor(page: Page, surface: string, ics: ICSPredicate)
     if (path === "/api/v1/firewall/rules") body = [stored];
     if (path === "/api/v1/zones") body = [];
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
-    if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "learn" };
+    if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "monitor" };
     await route.fulfill({ json: body });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");

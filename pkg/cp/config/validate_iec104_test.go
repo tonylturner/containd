@@ -19,7 +19,7 @@ import (
 // iec104Config returns a config whose dataplane can activate an IEC104
 // enforce envelope, with the given rules.
 func iec104Config(rules ...Rule) *Config {
-	return &Config{
+	return &Config{SchemaVersion: SchemaVersionCurrent,
 		System: SystemConfig{Hostname: "containd"},
 		Zones:  []Zone{{Name: "lan4"}, {Name: "lan1"}},
 		DataPlane: DataPlaneConfig{
@@ -123,7 +123,7 @@ func TestValidateICSPredicateProtocolRules(t *testing.T) {
 
 	// ics: {} is a pure L3/L4 rule. mode alone stays valid: the policy
 	// templates put it on their L3/L4 rules.
-	for _, ics := range []ICSPredicate{{}, {Mode: "enforce"}, {FunctionCode: []uint8{}}} {
+	for _, ics := range []ICSPredicate{{}, {FunctionCode: []uint8{}}} {
 		cfg := iec104Config(Rule{ID: "r", ICS: ics, Action: ActionAllow})
 		if err := cfg.Validate(); err != nil {
 			t.Fatalf("predicate %+v rejected: %v", ics, err)
@@ -139,10 +139,10 @@ func TestValidateIEC104AllowTypes(t *testing.T) {
 
 	allowed := []*Config{
 		iec104Config(iecRule("deny", ActionDeny, ICSPredicate{TypeIDs: []int{104, 200}, Classes: []string{"unknown"}})),
-		iec104Config(iecRule("learn", ActionAllow, ICSPredicate{TypeIDs: []int{104}, Mode: "learn"})),
+		iec104Config(iecRule("monitor", ActionAllow, ICSPredicate{TypeIDs: []int{104}, Mode: "monitor"})),
 	}
 	globalLearn := iec104Config(iecRule("global-learn", ActionAllow, ICSPredicate{TypeIDs: []int{106}}))
-	globalLearn.DataPlane.DPIMode = "learn"
+	globalLearn.DataPlane.DPIMode = "monitor"
 	allowed = append(allowed, globalLearn)
 	for _, cfg := range allowed {
 		if err := cfg.Validate(); err != nil {
@@ -198,7 +198,7 @@ func TestValidateIEC104EnforceStaticCauses(t *testing.T) {
 	})
 
 	t.Run("learn envelope has no static requirements", func(t *testing.T) {
-		learn := iecRule("cc-rtu", ActionAllow, ICSPredicate{ReadOnly: true, Mode: "learn"})
+		learn := iecRule("cc-rtu", ActionAllow, ICSPredicate{ReadOnly: true, Mode: "monitor"})
 		cfg := iec104Config(learn)
 		cfg.DataPlane = DataPlaneConfig{DPIMode: "enforce"}
 		if err := cfg.Validate(); err != nil {
@@ -237,12 +237,12 @@ func TestStoreRejectsUnactivatableIEC104Enforce(t *testing.T) {
 	}
 }
 
-func TestSchemaVersion018(t *testing.T) {
-	if SchemaVersionCurrent != "0.1.8" {
-		t.Fatalf("SchemaVersionCurrent = %s, want 0.1.8", SchemaVersionCurrent)
+func TestSchemaVersion019(t *testing.T) {
+	if SchemaVersionCurrent != "0.1.9" {
+		t.Fatalf("SchemaVersionCurrent = %s, want 0.1.9", SchemaVersionCurrent)
 	}
 	old := &Config{SchemaVersion: "0.1.0"}
-	if err := UpgradeInPlace(old); err != nil || old.SchemaVersion != "0.1.8" {
+	if err := UpgradeInPlace(old); err != nil || old.SchemaVersion != "0.1.9" {
 		t.Fatalf("0.1.0 upgrade = %s, %v", old.SchemaVersion, err)
 	}
 	current, err := parseSemver(SchemaVersionCurrent)

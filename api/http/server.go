@@ -32,7 +32,6 @@ import (
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
-	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/netcfg"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -132,13 +131,6 @@ type InventoryClient interface {
 type AnomalyClient interface {
 	ListAnomalies(ctx context.Context, limit int) ([]anomaly.Anomaly, error)
 	ClearAnomalies(ctx context.Context) error
-}
-
-// LearnClient is an optional interface for ICS learn mode.
-type LearnClient interface {
-	ListLearnProfiles(ctx context.Context) ([]learn.LearnedProfile, error)
-	GenerateLearnRules(ctx context.Context) ([]config.Rule, error)
-	ClearLearnData(ctx context.Context) error
 }
 
 // SignaturesClient is an optional interface for ICS signature-based detection.
@@ -310,6 +302,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.DELETE("/anomalies", requireAdmin(), clearAnomaliesHandler(engine))
 		protected.GET("/conntrack", listConntrackHandler(engine))
 		protected.GET("/firewall/counters", ruleCountersHandler(engine))
+		protected.GET("/firewall/shadow-counters", shadowCountersHandler(engine))
 		protected.POST("/conntrack/kill", requireAdmin(), killConntrackHandler(engine))
 		protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
 		protected.GET("/dataplane", getDataPlaneHandler(store))
@@ -374,11 +367,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/firewall/ics-rules", listICSRulesHandler(store))
 		protected.POST("/firewall/ics-rules", requireAdmin(), createICSRuleHandler(store))
 		protected.PATCH("/firewall/ics-rules/:id", requireAdmin(), updateICSRuleHandler(store))
-		// ICS learn mode.
-		protected.GET("/learn/profiles", learnProfilesHandler(engine))
-		protected.POST("/learn/generate", requireAdmin(), learnGenerateHandler(engine))
-		protected.POST("/learn/apply", requireAdmin(), learnApplyHandler(store, engine))
-		protected.DELETE("/learn", requireAdmin(), learnClearHandler(engine))
+		registerEvidenceRoutes(protected, store, engine)
 		protected.GET("/security/conduits", securityConduitsHandler(store))
 		protected.GET("/ids/rules", getIDSHandler(store))
 		protected.POST("/ids/rules", requireAdmin(), setIDSHandler(store))

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
@@ -295,11 +296,13 @@ func (c *HTTPClient) DownloadPcap(ctx context.Context, name string) (*http.Respo
 	return resp, nil
 }
 
-func (c *HTTPClient) AnalyzePcap(ctx context.Context, filename string, r io.Reader) (*pcap.AnalysisResult, error) {
+func (c *HTTPClient) AnalyzePcap(ctx context.Context, filename string, r io.Reader) (*pcap.ImportResult, error) {
 	if c.BaseURL == "" {
 		return nil, fmt.Errorf("engine BaseURL is empty")
 	}
 	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
 	writer := multipart.NewWriter(pw)
 	go func() {
 		part, err := writer.CreateFormFile("file", filename)
@@ -322,23 +325,28 @@ func (c *HTTPClient) AnalyzePcap(ctx context.Context, filename string, r io.Read
 		return nil, err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	resp, err := c.Client.Do(req)
+	client := *c.Client
+	client.Timeout = 10 * time.Minute
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("engine pcap analyze status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return nil, err
+		}
+		return nil, &EvidenceError{Status: resp.StatusCode, Detail: strings.TrimSpace(string(b))}
 	}
-	var out pcap.AnalysisResult
+	var out pcap.ImportResult
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *HTTPClient) AnalyzePcapByName(ctx context.Context, name string) (*pcap.AnalysisResult, error) {
+func (c *HTTPClient) AnalyzePcapByName(ctx context.Context, name string) (*pcap.ImportResult, error) {
 	if c.BaseURL == "" {
 		return nil, fmt.Errorf("engine BaseURL is empty")
 	}
@@ -346,16 +354,21 @@ func (c *HTTPClient) AnalyzePcapByName(ctx context.Context, name string) (*pcap.
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.Client.Do(req)
+	client := *c.Client
+	client.Timeout = 10 * time.Minute
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("engine pcap analyze status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return nil, err
+		}
+		return nil, &EvidenceError{Status: resp.StatusCode, Detail: strings.TrimSpace(string(b))}
 	}
-	var out pcap.AnalysisResult
+	var out pcap.ImportResult
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}

@@ -27,6 +27,10 @@ import (
 type AnalysisOptions struct {
 	Rules *rules.Snapshot
 	Now   func() time.Time
+	// OnEvents receives whole decoder emissions, before bounded display retention.
+	OnEvents         func([]dpi.Event, int)
+	MaxFlows         int
+	MaxDisplayEvents int
 }
 
 // Identification retains the observer's exact event-field spellings, with an
@@ -58,10 +62,11 @@ type offlineObserver struct {
 	byTuple  map[string]*offlineConnection
 	byKey    map[identify.Key]*offlineConnection
 	decoders []dpi.Decoder
+	manager  *dpi.Manager
 	sessions *offlineSessions
 }
 
-func newOfflineObserver(sessions *offlineSessions, opts AnalysisOptions, decoders []dpi.Decoder) (*offlineObserver, error) {
+func newOfflineObserver(manager *dpi.Manager, sessions *offlineSessions, opts AnalysisOptions, decoders []dpi.Decoder) (*offlineObserver, error) {
 	// Only enabled ICS decoders get fresh observation instances. Never share a
 	// stateful decoder with the port-selected manager or a live engine.
 	factories := []dpi.StreamDecoder{modbus.NewDecoder(), dnp3.NewDecoderWithClock(opts.Now), iec104.NewDecoder(), cip.NewDecoder()}
@@ -84,7 +89,7 @@ func newOfflineObserver(sessions *offlineSessions, opts AnalysisOptions, decoder
 	if err != nil {
 		return nil, err
 	}
-	o := &offlineObserver{runID: sessions.runID, sessions: sessions, byTuple: map[string]*offlineConnection{}, byKey: map[identify.Key]*offlineConnection{}, decoders: decoders}
+	o := &offlineObserver{manager: manager, runID: sessions.runID, sessions: sessions, byTuple: map[string]*offlineConnection{}, byKey: map[identify.Key]*offlineConnection{}, decoders: decoders}
 	o.observer, err = observe.New(observe.Options{Budgets: budgets, Markers: budgets.Entries, Manager: mgr, Now: opts.Now,
 		LegacyDecodes: o.legacyDecodes,
 		Scope: func(key identify.Key, p identify.Protocol) any {
@@ -112,6 +117,10 @@ func (o *offlineObserver) legacyDecodes(key identify.Key, p identify.Protocol) b
 		if s == nil || s.dirs[1] == nil {
 			return false
 		}
+	}
+	if st.Key.Proto == ics.TCP {
+		matches, _ := o.manager.CommittedProtocol(st, string(p))
+		return matches
 	}
 	for _, d := range o.decoders {
 		sd, ok := d.(dpi.StreamDecoder)
@@ -161,7 +170,9 @@ func (o *offlineObserver) packet(pkt capture.Packet, state *flow.State, ts time.
 		o.observer.Open(c.key, c.meta) // one admission attempt per incarnation
 	}
 	c.states[dir] = state
-	state.Connection.Store(&flow.Connection{Key: string(c.key), Status: "wire"})
+	connection := &flow.Connection{Key: string(c.key), Status: "wire"}
+	connection.Coverage().Store(c.syn[0] || c.syn[1] || syn)
+	state.Connection.Store(connection)
 	if syn {
 		c.syn[dir], c.isn[dir] = true, pkt.TCP.Seq
 		if pkt.TCP.Flags&capture.TCPFlagACK == 0 {
@@ -220,14 +231,11 @@ func outsideRulePorts(snap *rules.Snapshot, p identify.Protocol, transport uint8
 	return named
 }
 
-func (o *offlineObserver) record(out observe.Output, result *AnalysisResult, flowEvents map[string]int, onEvent eventCallback) {
+func (o *offlineObserver) record(out observe.Output, result *AnalysisResult, flowEvents map[string]int) {
 	for _, id := range out.Identifications {
 		ev := id.Event
 		ev.Connection = &flow.Connection{Key: string(id.Key), Status: "wire"}
 		identification := Identification{Key: string(id.Key), FlowID: ev.FlowID, Attributes: ev.Attributes}
-		if id.Binding == observe.Observation {
-			result.observed[string(id.Key)] = true
-		}
 		hash := ev.FlowID
 		if k, ok := flow.ParseKey(hash); ok {
 			// The directional state carries SYN roles when captured. Present
@@ -241,18 +249,22 @@ func (o *offlineObserver) record(out observe.Output, result *AnalysisResult, flo
 			k.Dir = flow.DirForward
 			hash = k.Hash()
 		}
-		result.Identifications = append(result.Identifications, identification)
-		recordAnalysisEvents(result, flowEvents, hash, "", "", []dpi.Event{ev}, onEvent)
+		if result.maxDisplayEvents == 0 || len(result.Identifications) < result.maxDisplayEvents {
+			result.Identifications = append(result.Identifications, identification)
+		} else {
+			result.DisplayTruncated = true
+		}
+		recordAnalysisEvents(result, flowEvents, hash, []dpi.Event{ev})
 	}
 	for _, batch := range out.Batches {
 		if batch.State == nil {
 			continue
 		}
 		for i := range batch.Events {
-			batch.Events[i].Connection = &flow.Connection{Key: string(batch.Key), Status: "wire"}
+			batch.Events[i].Connection = batch.State.Connection.Load()
 		}
 		k := batch.State.Key
 		k.Dir = flow.DirForward
-		recordAnalysisEvents(result, flowEvents, k.Hash(), k.SrcIP.String(), k.DstIP.String(), batch.Events, onEvent)
+		recordAnalysisEvents(result, flowEvents, k.Hash(), batch.Events)
 	}
 }

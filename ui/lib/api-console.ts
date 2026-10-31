@@ -12,7 +12,7 @@ import type {
 export type EventQuery = {
   session?: string; flow?: string; kind?: string; protocol?: string;
   decision?: string; verdict?: string; since?: string; cursor?: string;
-  apdu?: string; category?: string; detections?: string;
+  apdu?: string; category?: string; detections?: string; ruleId?: string; mode?: string;
 };
 export type EventPage = {
   events: TelemetryEvent[]; nextCursor?: string;

@@ -65,7 +65,7 @@ export function IEC104Inventory({ refreshKey }: { refreshKey: number }) {
         </div>
         <p className="mb-4 text-xs text-(--text)">
           Overflow totals count truncated observations or capacity evictions since inventory clear or engine restart, not unique missing devices. Busy observations and lost outcomes include data dropped on inventory lock contention.
-          Attempted counts decoded client command APDUs; accepted requires an allow decision and successful Accept verdicts for every carrying packet in inline enforce mode only. Learn/monitor and non-inline capture never claim delivery. Lost outcomes also include delivery-ledger overflow. Counts cover retained history, not lifetime traffic.
+          Attempted counts decoded client command APDUs; accepted requires an allow decision and successful Accept verdicts for every carrying packet in inline enforce mode only. Monitor and non-inline capture never claim delivery. Lost outcomes also include delivery-ledger overflow. Counts cover retained history, not lifetime traffic.
         </p>
         {inventory.pairs.length === 0 && <EmptyState title="No IEC 104 stations observed" description="Stations and points appear here when the engine supplies decoded IEC 104 observations." />}
         {inventory.pairs.map((pair) => (

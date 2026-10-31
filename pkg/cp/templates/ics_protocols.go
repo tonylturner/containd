@@ -37,7 +37,7 @@ func init() {
 // what the deny rule would block AND what the allow rule actually passes —
 // essential for the monitor-first observation phase. ICSPredicate.Mode is
 // left blank so the rule inherits the global DPIMode (which defaults to
-// "learn"). Operators promote to enforce by setting the global mode or
+// "monitor"). Operators promote to enforce by setting the global mode or
 // re-applying via the apply-time `mode` parameter.
 func ModbusReadOnly() []config.Rule {
 	return []config.Rule{

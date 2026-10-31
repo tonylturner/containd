@@ -20,7 +20,7 @@ func TestRemovedProtocolValidation(t *testing.T) {
 			if strings.EqualFold(strings.TrimSpace(name), "enip") {
 				suffix = `: EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command`
 			}
-			err := genericICSConfig(name, "learn", "", 0).Validate()
+			err := genericICSConfig(name, "monitor", "", 0).Validate()
 			want := fmt.Sprintf("rule ics-1 ics protocol %q%s", name, suffix)
 			if err == nil || err.Error() != want {
 				t.Fatalf("firewall error=%v want=%s", err, want)

@@ -49,30 +49,32 @@ func (e *Engine) ICSParsing(proto string) ics.Parsing {
 }
 
 // conformanceScope uses the same L3/L4 scope as fail-closed inspection, but
-// includes learn/non-inline observations and only the event's protocol.
-// Any enforcing scope wins over a learn ALLOW's payload predicates.
+// includes monitor/non-inline observations. Enforcing ownership is L3/L4,
+// not narrowed by the protocol the decoder happens to find. Monitor-only
+// evidence remains local to the event's protocol.
 func (e *Engine) conformanceScope(state *flow.State, pkt *dpi.ParsedPacket, proto string) *rules.Entry {
 	p := e.ruleSnap.current.Load()
 	if p == nil || p.snapshot == nil {
 		return nil
 	}
-	ctx := rules.EvalContext{SrcIP: state.Key.OpenerIP(), DstIP: state.Key.ServerIP()}
+	key := state.ServiceKey()
+	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP()}
 	ctx.SrcZone, ctx.DstZone = e.zones.resolve(p.snapshot, ctx.SrcIP, ctx.DstIP)
-	var learn *rules.Entry
+	var monitor *rules.Entry
 	for i := range p.snapshot.Firewall {
 		entry := &p.snapshot.Firewall[i]
-		if !strings.EqualFold(entry.ICS.Protocol, proto) ||
+		if entry.ICS.Protocol == "" || strings.EqualFold(entry.ICS.Protocol, rules.ProtocolIEC104) ||
 			!shouldInspectFirewallEntry(*entry, state, pkt) || !p.evaluator.AddressScopeMatch(i, ctx) {
 			continue
 		}
 		if e.effectiveMode(entry) == "enforce" {
 			return entry
 		}
-		if learn == nil {
-			learn = entry
+		if monitor == nil && strings.EqualFold(entry.ICS.Protocol, proto) {
+			monitor = entry
 		}
 	}
-	return learn
+	return monitor
 }
 
 // recordConformanceDecision is shared with the APDU verdict path. Call only
@@ -89,9 +91,17 @@ func (e *Engine) recordConformanceDecision(state *flow.State, pkt *dpi.ParsedPac
 		}
 	}
 	if scope != nil {
-		attrs[eventfields.KeyRuleID] = scope.ID
+		if reason == reasonNonconformant {
+			attrs["scopeId"] = scope.ID
+		} else {
+			attrs[eventfields.KeyRuleID] = scope.ID
+			attrs[eventfields.KeyAction] = string(scope.Action)
+		}
 	}
-	e.eventStore.Record(state, pkt, []dpi.Event{{
+	if reason == reasonNonconformant {
+		attrs["findingCode"] = firstFinding(ev)
+	}
+	e.recordTaggedEvents(state, pkt, []dpi.Event{{
 		FlowID: conformanceFlowID(state, ev), Proto: ev.Proto, Kind: eventfields.KindDecision,
 		Timestamp: time.Now().UTC(), Attributes: attrs,
 	}})
@@ -211,7 +221,7 @@ func (e *Engine) recordConformanceAlert(state *flow.State, pkt *dpi.ParsedPacket
 			"protocol": ev.Proto, "action": action, key: fresh,
 		})
 		metrics.IDSAlertsTotal.Inc()
-		e.eventStore.Record(state, pkt, []dpi.Event{{
+		e.recordTaggedEvents(state, pkt, []dpi.Event{{
 			FlowID: conformanceFlowID(state, ev), Proto: "ids", Kind: "alert", Timestamp: time.Now().UTC(), Attributes: attrs,
 		}})
 	}
@@ -221,5 +231,14 @@ func conformanceFlowID(state *flow.State, ev dpi.Event) string {
 	if ev.FlowID != "" {
 		return ev.FlowID
 	}
-	return state.Key.Hash()
+	return state.ID()
+}
+
+func firstFinding(ev dpi.Event) string {
+	for _, key := range inspectionFindingKeys {
+		if codes, _ := eventfields.Strings(ev.Attributes, key); len(codes) > 0 {
+			return codes[0]
+		}
+	}
+	return ""
 }

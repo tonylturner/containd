@@ -9,6 +9,7 @@ import {
   buildIEC104RuleICS,
   iec104TypeInfo,
   iec104DraftFrom,
+  summarizeIEC104,
   type IEC104Draft,
 } from "../app/ics/iec104";
 import {
@@ -20,6 +21,78 @@ import { iec104HealthIndicator } from "../app/ics/iec104-health";
 // Pure model tests: no page, no server.
 
 const empty: IEC104Draft = iec104DraftFrom(undefined);
+
+test("command predicates normalize, round-trip and clear with merge-patch nulls", () => {
+  for (const typeId of [45, 46, 47, 58, 59, 60]) {
+    const states = [45, 58].includes(typeId) ? [0, 1] : [1, 2];
+    const rule = normalizeFirewallRule({
+      id: "command",
+      action: "ALLOW",
+      ics: { protocol: "iec104", typeIds: [typeId], commandStates: states, commandQualifiers: [0, 31] },
+    });
+    const draft = iec104DraftFrom(rule.ics);
+    expect(draft.commandStates).toBe(states.join(", "));
+    expect(draft.commandQualifiers).toBe("0, 31");
+    expect(buildIEC104RuleICS(draft, "", "ALLOW")).toMatchObject({ ok: true, ics: rule.ics });
+    expect(buildIEC104RuleICS({ ...draft, commandStates: "", commandQualifiers: "" }, "", "ALLOW", rule.ics))
+      .toMatchObject({ ok: true, ics: { commandStates: null, commandQualifiers: null } });
+  }
+  expect(iec104DraftFrom({ protocol: "modbus", commandStates: [1], commandQualifiers: [0] }))
+    .toMatchObject({ commandStates: "", commandQualifiers: "" });
+  expect(normalizeFirewallRule({ ics: { protocol: "iec104" } }).ics).not.toHaveProperty("commandStates");
+  expect(normalizeFirewallRule({ ics: { protocol: "iec104" } }).ics).not.toHaveProperty("commandQualifiers");
+});
+
+test("command predicates validate type domains and integer lists for every action", () => {
+  const bad: Array<[Partial<IEC104Draft>, RegExp]> = [
+    [{ typeIds: "", commandStates: "1" }, /require explicit Type IDs/],
+    [{ typeIds: "", commandQualifiers: "0" }, /require explicit Type IDs/],
+    [{ typeIds: "45, 100", commandStates: "1" }, /require explicit Type IDs/],
+    [{ typeIds: "48", commandQualifiers: "1" }, /require explicit Type IDs/],
+    [{ typeIds: "45, 46", commandStates: "1" }, /cannot mix/],
+    [{ typeIds: "58, 60", commandStates: "1" }, /cannot mix/],
+    [{ typeIds: "45", commandStates: "2" }, /must be in 0-1/],
+    [{ typeIds: "46", commandStates: "0" }, /must be in 1-2/],
+    [{ typeIds: "47", commandStates: "3" }, /integer from 0 to 2/],
+    [{ typeIds: "60", commandStates: "1.5" }, /integer/],
+    [{ typeIds: "59", commandStates: "-1" }, /integer/],
+    [{ typeIds: "45", commandStates: "null" }, /integer/],
+    [{ typeIds: "45", commandStates: "[]" }, /integer/],
+    [{ typeIds: "45", commandStates: ", " }, /at least one integer/],
+    [{ typeIds: "45", commandQualifiers: "32" }, /integer from 0 to 31/],
+    [{ typeIds: "45", commandQualifiers: "-1" }, /integer/],
+    [{ typeIds: "45", commandQualifiers: "1.5" }, /integer/],
+    [{ typeIds: "45", commandQualifiers: "1, null" }, /integer/],
+    [{ typeIds: "45", commandQualifiers: "[]" }, /integer/],
+    [{ typeIds: "45", commandQualifiers: ", " }, /at least one integer/],
+  ];
+  for (const action of ["ALLOW", "DENY", "RESET", "RATE_LIMIT", "TAG"] as const) {
+    for (const [patch, error] of bad) {
+      const result = buildIEC104RuleICS({ ...empty, ...patch }, "monitor", action);
+      expect(result.ok, JSON.stringify({ action, patch })).toBe(false);
+      if (!result.ok) expect(result.error).toMatch(error);
+    }
+  }
+  for (const [types, states] of [["45, 58", "0, 1"], ["46, 47, 59, 60", "1, 2"]]) {
+    expect(buildIEC104RuleICS({ ...empty, typeIds: types, commandStates: states, commandQualifiers: "0, 31" }, "", "ALLOW").ok).toBe(true);
+  }
+  // QU alone can span both state domains. Duplicates follow COT list semantics.
+  expect(buildIEC104RuleICS({ ...empty, typeIds: "45, 46", commandQualifiers: "0, 0, 31" }, "", "ALLOW"))
+    .toMatchObject({ ok: true, ics: { commandQualifiers: [0, 0, 31] } });
+});
+
+test("command summaries keep numeric bounds and type-specific state meanings", () => {
+  for (const [types, states, label] of [
+    [[45, 58], [0, 1], "SCS 0 (off), 1 (on)"],
+    [[46, 59], [1, 2], "DCS 1 (off), 2 (on)"],
+    [[47, 60], [1, 2], "RCS 1 (lower), 2 (higher)"],
+    [[46, 47], [1], "DCS 1 (off); RCS 1 (lower)"],
+  ] as const) {
+    const summary = summarizeIEC104({ protocol: "iec104", typeIds: [...types], commandStates: [...states], commandQualifiers: [0, 31] });
+    expect(summary.types).toContain(`state ${label}`);
+    expect(summary.types).toContain("QU 0,31");
+  }
+});
 
 test("EU breaker rule serialises to the IEC 104 rule wire shape", () => {
   const draft: IEC104Draft = {
@@ -39,27 +112,27 @@ test("EU breaker rule serialises to the IEC 104 rule wire shape", () => {
 });
 
 test("an empty draft emits no list fields and no forbidden keys", () => {
-  const res = buildIEC104RuleICS({ ...empty, readOnly: true }, "learn", "ALLOW");
+  const res = buildIEC104RuleICS({ ...empty, readOnly: true }, "monitor", "ALLOW");
   expect(res).toEqual({
     ok: true,
-    ics: { protocol: "iec104", readOnly: true, mode: "learn" },
+    ics: { protocol: "iec104", readOnly: true, mode: "monitor" },
   });
 });
 
 test("inherited mode display resolves the global mode without inventing a rule override", () => {
   expect(formatICSMode(undefined, "enforce")).toEqual({
-    label: "inherit (enforce)",
+    label: "Inherit (Enforce)",
     effectiveMode: "enforce",
     inherited: true,
   });
   expect(formatICSMode(undefined, undefined)).toEqual({
-    label: "inherit (learning)",
-    effectiveMode: "learn",
+    label: "Inherit (Monitor (safe))",
+    effectiveMode: "monitor",
     inherited: true,
   });
-  expect(formatICSMode("learn", "enforce")).toEqual({
-    label: "learning",
-    effectiveMode: "learn",
+  expect(formatICSMode("monitor", "enforce")).toEqual({
+    label: "Monitor (safe)",
+    effectiveMode: "monitor",
     inherited: false,
   });
 
@@ -132,13 +205,13 @@ test("client checks mirror the server IEC 104 field ranges", () => {
   }
 });
 
-test("allow rules may name only decoded Type IDs unless learning", () => {
+test("allow rules may name only decoded Type IDs unless monitoring", () => {
   const draft = { ...empty, typeIds: "46, 104" };
   const allow = buildIEC104RuleICS(draft, "enforce", "ALLOW");
   expect(allow.ok).toBe(false);
   if (!allow.ok) expect(allow.error).toMatch(/104 is not decoded/);
   expect(buildIEC104RuleICS(draft, "enforce", "DENY").ok).toBe(true);
-  expect(buildIEC104RuleICS(draft, "learn", "ALLOW").ok).toBe(true);
+  expect(buildIEC104RuleICS(draft, "monitor", "ALLOW").ok).toBe(true);
 });
 
 test("single-point monitor Type IDs are decoded and may be allowed", () => {

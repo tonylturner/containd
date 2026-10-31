@@ -31,7 +31,7 @@ func showTemplatesAPI(api *API) Command {
 func applyTemplateAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		if len(args) < 1 {
-			return fmt.Errorf("usage: apply template <name> [--mode <learn|enforce>]")
+			return fmt.Errorf("usage: apply template <name> [--mode <monitor|enforce>]")
 		}
 		name := args[0]
 		mode := ""

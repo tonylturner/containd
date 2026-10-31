@@ -15,6 +15,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/stats"
+	"github.com/tonylturner/containd/pkg/evidence"
 )
 
 func TestCIPReadOnlyFromWireThroughPolicyAndConsumers(t *testing.T) {
@@ -85,16 +86,15 @@ func TestCIPReadOnlyFromWireThroughPolicyAndConsumers(t *testing.T) {
 				if ps.EventCount != 1 || (ps.ReadCount == 1) != tc.read || (ps.WriteCount == 1) != tc.write {
 					t.Fatalf("%s stats=%+v", form, ps)
 				}
-				learner := learn.New()
-				learner.RecordEvent("192.0.2.1", "192.0.2.2", ev)
-				generated := learner.GenerateRules()
-				if tc.read || tc.write {
-					if len(generated) != 1 || generated[0].ICS.ReadOnly != tc.read || generated[0].ICS.WriteOnly != tc.write {
-						t.Fatalf("%s learned rules=%+v", form, generated)
-					}
-				} else if len(generated) != 0 {
-					t.Fatalf("%s unknown operation learned: %+v", form, generated)
+				var serial uint64
+				parents, err := learn.Normalize(evidence.Dataset{ID: "test", Source: evidence.SourcePCAP}, state, []dpi.Event{ev}, &serial)
+				if err != nil || len(parents) != 1 || parents[0].CIP == nil {
+					t.Fatalf("CIP evidence: %+v %v", parents, err)
 				}
+				if generated, _ := learn.GenerateRelation(parents[0]); len(generated) != 0 {
+					t.Fatal("CIP observation generated permission")
+				}
+
 			}
 		})
 	}

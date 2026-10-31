@@ -1,5 +1,7 @@
 "use client";
 
+import type { ShadowCounters } from "../../lib/api-shadow-counters";
+import { ShadowCountersCell, ShadowCountersNote } from "../ics/ics-shadow-counters";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { isAdmin, type FirewallRule, type Zone } from "../../lib/api";
@@ -20,9 +22,9 @@ import {
 export function RulePrecedenceNote() {
   return (
     <p className="mb-2 text-xs text-(--text-muted)">
-      Rule order does not decide: any matching ALLOW wins over every DENY and RESET.
+      Among enforcing rules, order does not decide: any matching ALLOW wins over every DENY and RESET.
       Otherwise the first matching DENY or RESET by rule ID decides, then the default
-      action. RATE_LIMIT and TAG are effects and never admit traffic.
+      action. Monitor ICS rules never decide. RATE_LIMIT and TAG are effects and never admit traffic.
     </p>
   );
 }
@@ -71,6 +73,7 @@ export function FirewallRuleTable({
   dpiMode,
   coverage,
   counters,
+  shadowCounters,
   onEdit,
   onDelete,
 }: {
@@ -79,13 +82,15 @@ export function FirewallRuleTable({
   dpiMode: string | undefined;
   coverage: ICSCoverageView;
   counters: CountersState;
+  shadowCounters: ShadowCounters | null;
   onEdit: (rule: FirewallRule) => void;
   onDelete: (id: string) => void;
 }) {
   return (
     <section aria-label="Firewall rules">
       <RulePrecedenceNote />
-    <RuleCountersNote counters={counters} />
+      <RuleCountersNote counters={counters} />
+      <ShadowCountersNote counters={shadowCounters} />
       <div className="overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
@@ -97,7 +102,8 @@ export function FirewallRuleTable({
               <th className="px-3 py-3">Conditions</th>
               <th className="px-3 py-3">ICS Filter</th>
               <th className="px-3 py-3">Action</th>
-            <th className="px-3 py-3">Hits</th>
+              <th className="px-3 py-3">Hits</th>
+              <th className="px-3 py-3">Shadow matches</th>
               <th className="px-3 py-3">Log</th>
               <th className="px-3 py-3 text-right">Actions</th>
             </tr>
@@ -105,7 +111,7 @@ export function FirewallRuleTable({
           <tbody>
             {rules.length === 0 && (
               <tr>
-                <td className="px-4 py-4" colSpan={10}>
+                <td className="px-4 py-4" colSpan={11}>
                   <EmptyState
                     title="No firewall rules configured"
                     description="Create rules below to control traffic between zones."
@@ -152,6 +158,9 @@ export function FirewallRuleTable({
                 </td>
                 <td className="px-3 py-3">
                   <RuleCountersCell rule={r} counters={counters} />
+                </td>
+                <td className="px-3 py-3">
+                  <ShadowCountersCell rule={r} globalMode={dpiMode} counters={shadowCounters} />
                 </td>
                 <td className="px-3 py-3">
                   {r.log ? (

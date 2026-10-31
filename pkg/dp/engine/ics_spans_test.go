@@ -118,11 +118,11 @@ func TestEvalContextCIPHasNoScalarAddressSpans(t *testing.T) {
 // cannot bound.
 func TestEnforceModbusRequestSpans(t *testing.T) {
 	unit := uint8(1)
-	allow := &rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{
+	allow := &rules.Snapshot{DPIMode: "enforce", Default: rules.ActionDeny, Firewall: []rules.Entry{{
 		ID: "allow-10-11", Action: rules.ActionAllow,
 		ICS: rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3, 16}, UnitID: &unit, Addresses: []string{"10-11"}},
 	}}}
-	deny := &rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{{
+	deny := &rules.Snapshot{DPIMode: "enforce", Default: rules.ActionAllow, Firewall: []rules.Entry{{
 		ID: "deny-12-19", Action: rules.ActionDeny,
 		ICS: rules.ICSPredicate{Protocol: "modbus", Addresses: []string{"12-19"}},
 	}}}
@@ -184,7 +184,7 @@ func assertConformanceUnknownSpanMatch(t *testing.T, action rules.Action, wantMa
 		defaultAction, wantReason = rules.ActionDeny, reasonDefault
 	}
 	e := &Engine{eventStore: events.NewStore(10), dpiMode: "enforce"}
-	e.ruleSnap.Store(&rules.Snapshot{Default: defaultAction, Firewall: []rules.Entry{entry}})
+	e.ruleSnap.Store(&rules.Snapshot{DPIMode: "enforce", Default: defaultAction, Firewall: []rules.Entry{entry}})
 	v, _, enforced := e.enforceDPIEvents(state, pkt, []dpi.Event{ev}, false)
 	if !enforced || !v.Denies() {
 		t.Fatalf("unknown address coverage passed: %+v", v)

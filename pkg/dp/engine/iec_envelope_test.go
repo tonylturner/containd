@@ -22,13 +22,14 @@ func TestIECTableNonIPv4UsesRegistryPort(t *testing.T) {
 		ICS:       rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"},
 	}}})
 	pkt := capture.Packet{SrcIP: net.ParseIP("2001:db8::10"), DstIP: net.ParseIP("2001:db8::20"),
-		SrcPort: 40000, DstPort: 2404}
+		SrcPort: 40000, DstPort: 2404, Proto: 6}
 	for _, reverse := range []bool{false, true} {
 		if reverse {
 			pkt.SrcIP, pkt.DstIP = pkt.DstIP, pkt.SrcIP
 			pkt.SrcPort, pkt.DstPort = pkt.DstPort, pkt.SrcPort
 		}
-		result, matched := tab.nonIPv4Locked(pkt)
+		state := wireServiceState(pkt)
+		result, matched := tab.nonIPv4Locked(&state)
 		if !matched || result.decision.Action != capture.Drop || result.decision.Reason != reasonIECInvalid {
 			t.Fatalf("reverse=%v matched=%v result=%+v", reverse, matched, result)
 		}
@@ -65,7 +66,7 @@ func TestIECEnvelopeAgreesWithNftSteering(t *testing.T) {
 			Protocols: c.proto, Action: rules.ActionAllow,
 			ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"},
 		}}}
-		tab := newIECTable("learn", &zoneCache{})
+		tab := newIECTable("monitor", &zoneCache{})
 		tab.setPolicy(snap)
 		matched, mode := tab.envelopeLocked(tab.sessionCtx(client, server))
 		if steers := comp.SteersIEC104(snap); steers != matched {
@@ -81,7 +82,7 @@ func TestIECEnvelopeMarkWithoutEnvelopeDrops(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.policy.matched = false
 	p := h.pkt(true, capture.TCPFlagSYN, 1, 0, nil)
-	if d := h.e.handlePacket(p); d.Action != capture.Accept {
+	if d := h.e.handlePacket(p); d.Action != h.passingDisposition() {
 		t.Fatalf("unmarked SYN outside the envelope = %+v, want the flow path", d)
 	}
 	p.HasMark, p.Mark = true, enforce.EnvelopeMark

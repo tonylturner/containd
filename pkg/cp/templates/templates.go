@@ -49,7 +49,7 @@ func Get(name string) (*Template, error) {
 // ApplyOpts customizes how a template is applied. Zero value preserves
 // the existing-and-safe behavior (rules inherit global DPI mode).
 type ApplyOpts struct {
-	// Mode, when non-empty ("learn" or "enforce"), overrides each
+	// Mode, when non-empty ("monitor" or "enforce"), overrides each
 	// generated rule's ICSPredicate.Mode. Use this to opt into immediate
 	// enforcement at apply time, or to lock rules to monitor regardless
 	// of the global mode. Blank leaves the rule's Mode field as set by
@@ -84,7 +84,7 @@ func ApplyWithOpts(name string, cfg *config.Config, opts ApplyOpts) error {
 		if _, dup := existing[r.ID]; dup {
 			continue
 		}
-		if opts.Mode != "" {
+		if opts.Mode != "" && r.ICS.Protocol != "" {
 			r.ICS.Mode = opts.Mode
 		}
 		cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)

@@ -15,7 +15,7 @@ import (
 )
 
 // DefaultDecoders returns the standard set of DPI decoders for both ICS and
-// IT protocols. Used by the engine and by offline analysis (PCAP-to-policy).
+// IT protocols. Each call creates independent decoder state.
 func DefaultDecoders() []dpi.Decoder {
 	return []dpi.Decoder{
 		modbus.NewDecoder(),
@@ -33,6 +33,26 @@ func DefaultDecoders() []dpi.Decoder {
 		itdpi.NewICSMarker(),
 		itdpi.NewPortDetector(),
 	}
+}
+
+// NewDecoders creates an offline-owned registry with exactly the captured
+// enabled decoder types. It never shares state with live inspection or silently
+// substitutes a default registry when an enabled decoder has no factory.
+func (s InspectionSnapshot) NewDecoders() ([]dpi.Decoder, error) {
+	factories := map[string]dpi.Decoder{}
+	for _, decoder := range DefaultDecoders() {
+		factories[fmt.Sprintf("%T", decoder)] = decoder
+	}
+	result := make([]dpi.Decoder, 0, len(s.Decoders))
+	for _, decoder := range s.Decoders {
+		name := fmt.Sprintf("%T", decoder)
+		fresh, ok := factories[name]
+		if !ok {
+			return nil, fmt.Errorf("offline decoder factory unavailable for %s", name)
+		}
+		result = append(result, fresh)
+	}
+	return result, nil
 }
 
 var itDecoderProto = map[string]string{

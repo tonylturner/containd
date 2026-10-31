@@ -177,6 +177,9 @@ func TestIEC104NewSelectors(t *testing.T) {
 		pred              ICSPredicate
 		positive, changed IEC104Context
 	}{
+		{"command zero state", ICSPredicate{CommandStates: []int{0}}, IEC104Context{CommandState: u8(0)}, IEC104Context{CommandState: u8(1)}},
+		{"command state", ICSPredicate{CommandStates: []int{1}}, IEC104Context{CommandState: u8(1)}, IEC104Context{CommandState: u8(2)}},
+		{"command qualifier", ICSPredicate{CommandQualifiers: []int{0}}, IEC104Context{CommandQualifier: u8(0)}, IEC104Context{CommandQualifier: u8(31)}},
 		{"cot", ICSPredicate{COT: []int{1, 63}}, IEC104Context{COT: u8(63)}, IEC104Context{COT: u8(2)}},
 		{"originator", ICSPredicate{Originators: []int{255, 0}}, IEC104Context{Originator: u8(0)}, IEC104Context{Originator: u8(1)}},
 		{"negative true", ICSPredicate{Negative: boolPtr(true)}, IEC104Context{Negative: boolPtr(true)}, IEC104Context{Negative: boolPtr(false)}},
@@ -186,7 +189,7 @@ func TestIEC104NewSelectors(t *testing.T) {
 		{"select", ICSPredicate{SelectExecute: "select"}, IEC104Context{Select: boolPtr(true)}, IEC104Context{Select: boolPtr(false)}},
 		{"execute", ICSPredicate{SelectExecute: "execute"}, IEC104Context{Select: boolPtr(false)}, IEC104Context{Select: boolPtr(true)}},
 	} {
-		for _, action := range []Action{ActionAllow, ActionDeny} {
+		for _, action := range []Action{ActionAllow, ActionDeny, ActionReset, ActionRateLimit, ActionTag} {
 			t.Run(tc.name+"/"+string(action), func(t *testing.T) {
 				entry := iecEntry("selector", action, tc.pred)
 				for name, obj := range map[string]IEC104Context{
@@ -198,11 +201,24 @@ func TestIEC104NewSelectors(t *testing.T) {
 						t.Errorf("%s match = %v", name, got)
 					}
 					_, matched := NewEvaluator(&Snapshot{Firewall: []Entry{entry}}).EvaluateIEC104(ctx)
-					if (matched != nil) != (name == "positive") {
+					if (matched != nil) != (name == "positive" && action != ActionRateLimit && action != ActionTag) {
 						t.Errorf("%s dedicated IEC evaluator match = %v", name, matched)
 					}
 				}
 			})
+		}
+	}
+}
+
+func TestIEC104UnknownObjectDoesNotInventCommandFields(t *testing.T) {
+	for _, action := range []Action{ActionAllow, ActionDeny, ActionReset, ActionRateLimit, ActionTag} {
+		for _, pred := range []ICSPredicate{{CommandStates: []int{1}}, {CommandQualifiers: []int{0}}} {
+			pred.IOA = []IOARange{{Start: 7, End: 7}}
+			ctx := sessionCtx("request", IEC104Context{})
+			ctx.ICS.ObjectUnknown = true
+			if PreviewMatch(iecEntry("unknown-command", action, pred), ctx) {
+				t.Fatalf("unknown fields matched %s", action)
+			}
 		}
 	}
 }

@@ -4,10 +4,12 @@ package engine
 
 import (
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
+	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -22,11 +24,12 @@ import (
 
 // flowTags returns the labels of the TAG rules that match the connection
 // of key, or nil.
-func (e *Engine) flowTags(key flow.Key) []string {
+func (e *Engine) flowTags(state *flow.State) []string {
 	p := e.ruleSnap.current.Load()
 	if p == nil || !p.evaluator.HasTags() {
 		return nil
 	}
+	key := state.ServiceKey()
 	port := key.DstPort
 	if key.Dir == flow.DirReverse {
 		port = key.SrcPort
@@ -38,6 +41,19 @@ func (e *Engine) flowTags(key flow.Key) []string {
 	return p.evaluator.Tags(ctx)
 }
 
+// recordTaggedEvents snapshots tags under the same lock as evidence binding.
+// Event storage still receives the untouched wire key and packet endpoints.
+func (e *Engine) recordTaggedEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event) {
+	if state == nil {
+		e.eventStore.Record(nil, pkt, evs)
+		return
+	}
+	e.flowMu.Lock()
+	snapshot := *state
+	e.flowMu.Unlock()
+	e.eventStore.Record(&snapshot, pkt, evs)
+}
+
 // nflogRuleHits appends the firewall.rule.hit events of kernel-logged
 // packets (capture.StartNFLog) to the engine's event store, with the TAG
 // labels of their connection under the applied snapshot.
@@ -45,7 +61,7 @@ type nflogRuleHits struct{ e *Engine }
 
 func (h nflogRuleHits) RuleHit(ev events.Event, key *flow.Key) {
 	if key != nil {
-		ev.Attributes = events.WithTags(ev.Attributes, h.e.flowTags(*key))
+		ev.Attributes = events.WithTags(ev.Attributes, h.e.flowTags(&flow.State{Key: *key}))
 	}
 	h.e.eventStore.Append(ev)
 }
@@ -89,26 +105,38 @@ type tagPolicy interface {
 // withSessionTags adds to IEC104 session events the TAG labels of their
 // session tuple, which is oriented client to server, under the table's
 // current policy. It runs outside the table lock.
-func (t *iecTable) withSessionTags(evs []events.Event) []events.Event {
+func (t *iecTable) withSessionTags(evs []iecTelemetry) []events.Event {
+	out := make([]events.Event, len(evs))
+	for i := range evs {
+		out[i] = evs[i].Event
+	}
 	t.mu.Lock()
 	policy, snap := t.policy, t.snap
 	t.mu.Unlock()
 	tp, ok := policy.(tagPolicy)
 	if !ok || !tp.HasTags() {
-		return evs
+		return out
 	}
 	for i, ev := range evs {
 		client, server := net.ParseIP(ev.SrcIP), net.ParseIP(ev.DstIP)
 		if client == nil || server == nil {
 			continue
 		}
-		ctx := tagContext(snap, client, server, strings.ToLower(ev.Transport), ev.DstPort)
+		port := ev.DstPort
+		if key := ev.service; key != nil {
+			client, server = key.OpenerIP(), key.ServerIP()
+			port = key.DstPort
+			if key.Dir == flow.DirReverse {
+				port = key.SrcPort
+			}
+		}
+		ctx := tagContext(snap, client, server, strings.ToLower(ev.Transport), port)
 		if tp.TagsUseZones() {
 			ctx.SrcZone, ctx.DstZone = t.zones.resolve(snap, client, server)
 		}
-		evs[i].Attributes = events.WithTags(ev.Attributes, tp.Tags(ctx))
+		out[i].Attributes = events.WithTags(ev.Attributes, tp.Tags(ctx))
 	}
-	return evs
+	return out
 }
 
 // TaggedConnection is a kernel connection with the labels of the TAG
@@ -142,9 +170,45 @@ func (e *Engine) TagConnections(entries []conntrack.Entry) []TaggedConnection {
 			continue
 		}
 		port, _ := strconv.ParseUint(c.Dport, 10, 16)
-		ctx := tagContext(p.snapshot, opener, server, strings.ToLower(c.Proto), uint16(port))
+		state := &flow.State{Key: flow.Key{SrcIP: opener, DstIP: server, DstPort: uint16(port)}}
+		// Kernel listings carry both tuples but no incarnation metadata. Parse
+		// the complete TCP/UDP record before using it as service authority.
+		if original, reply, ok := listingTuples(c); ok {
+			state.Key = flow.TupleKey(original, flow.DirForward)
+			state.Connection.Store(&flow.Connection{Status: "resolved", Evidence: &conntrack.Evidence{Original: original, Reply: reply}})
+		}
+		key := state.ServiceKey()
+		opener, server = key.OpenerIP(), key.ServerIP()
+		ctx := tagContext(p.snapshot, opener, server, strings.ToLower(c.Proto), key.DstPort)
 		ctx.SrcZone, ctx.DstZone = zones.zoneFor(opener), zones.zoneFor(server)
 		out[i].Tags = p.evaluator.Tags(ctx)
 	}
 	return out
+}
+
+func listingTuples(entry conntrack.Entry) (conntrack.Tuple, conntrack.Tuple, bool) {
+	var proto uint8
+	switch strings.ToLower(entry.Proto) {
+	case "tcp":
+		proto = 6
+	case "udp":
+		proto = 17
+	default:
+		return conntrack.Tuple{}, conntrack.Tuple{}, false
+	}
+	parse := func(src, dst, sport, dport string) (conntrack.Tuple, bool) {
+		s, errS := netip.ParseAddr(src)
+		d, errD := netip.ParseAddr(dst)
+		sp, errSP := strconv.ParseUint(sport, 10, 16)
+		dp, errDP := strconv.ParseUint(dport, 10, 16)
+		if errS != nil || errD != nil || errSP != nil || errDP != nil {
+			return conntrack.Tuple{}, false
+		}
+		key := flow.Key{SrcIP: s.AsSlice(), DstIP: d.AsSlice(), SrcPort: uint16(sp), DstPort: uint16(dp), Proto: proto}
+		tuple := key.Tuple()
+		return tuple, tuple.Validate() == nil
+	}
+	original, okO := parse(entry.Src, entry.Dst, entry.Sport, entry.Dport)
+	reply, okR := parse(entry.ReplySrc, entry.ReplyDst, entry.ReplySport, entry.ReplyDport)
+	return original, reply, okO && okR
 }

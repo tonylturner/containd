@@ -6,7 +6,8 @@ import { InfoTip } from "../../components/InfoTip";
 import type { FirewallRule, ICSPredicate, ICSPredicatePatch } from "../../lib/api";
 import { buildIEC104RuleICS, type IEC104Draft } from "../ics/iec104";
 import { IEC104Fields } from "../ics/iec104-fields";
-import { type GenericSelectorDraft, addressFilterError, buildICSRuleUpdate, selectorFieldError, formatICSMode, type ICSMode, type ICSModeSelection } from "../ics/ics-shared";
+import { type GenericSelectorDraft, addressFilterError, buildICSRuleUpdate, selectorFieldError, type ICSModeSelection } from "../ics/ics-shared";
+import { ICSModeSelect } from "../ics/ics-mode-select";
 import { ICSSelectorFields } from "../ics/ics-selector-fields";
 import { ICSAddressFields } from "../ics/ics-address-fields";
 import { ICS_PROTOCOL_KEYS, ICS_PROTOCOLS, icsProtoMeta } from "./firewall-utils";
@@ -52,14 +53,7 @@ export function ICSPredicateFields({
             {ICS_PROTOCOL_KEYS.map((k) => (<option key={k} value={k}>{ICS_PROTOCOLS[k].label} (:{ICS_PROTOCOLS[k].port})</option>))}
           </select>
         </div>
-        <div>
-          <label className="block text-[10px] font-medium text-(--text-muted) mb-1">Rule Mode</label>
-          <select aria-label="Rule Mode" value={mode} onChange={(e) => onModeChange(e.target.value as ICSModeSelection)} className="input-industrial w-full">
-            <option value="">Inherit global ({formatICSMode(undefined, globalMode).effectiveMode === "enforce" ? "enforce" : "learning"})</option>
-            <option value="learn">Learning (passive)</option>
-            <option value="enforce">Enforcement (after commit)</option>
-          </select>
-        </div>
+        {protocol && <ICSModeSelect value={mode} onChange={onModeChange} globalMode={globalMode} />}
         <div className="flex items-end">
           <button
             onClick={() => setShowHelp(!showHelp)}
@@ -148,7 +142,7 @@ type RuleICSInput = {
   readOnly: boolean;
   writeOnly: boolean;
   mode: ICSModeSelection;
-  globalMode?: ICSMode;
+  globalMode?: ICSModeSelection;
   iec: IEC104Draft;
   selectors?: GenericSelectorDraft;
   action: FirewallRule["action"];

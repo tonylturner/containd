@@ -148,7 +148,7 @@ func (d *RDPDecoder) parseConnectionRequest(state *flow.State, pkt *dpi.ParsedPa
 	}
 
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "rdp",
 		Kind:       "connection_request",
 		Attributes: attrs,
@@ -184,7 +184,7 @@ func (d *RDPDecoder) parseConnectionConfirm(state *flow.State, pkt *dpi.ParsedPa
 				}
 
 				ev := dpi.Event{
-					FlowID:     state.Key.Hash(),
+					FlowID:     state.ID(),
 					Proto:      "rdp",
 					Kind:       "negotiation",
 					Attributes: attrs,
@@ -195,7 +195,7 @@ func (d *RDPDecoder) parseConnectionConfirm(state *flow.State, pkt *dpi.ParsedPa
 	}
 
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "rdp",
 		Kind:       "connection_confirm",
 		Attributes: attrs,
@@ -212,7 +212,7 @@ func (d *RDPDecoder) parseMCSConnectInitial(state *flow.State, pkt *dpi.ParsedPa
 		"transport": pkt.Proto,
 	}
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "rdp",
 		Kind:       "mcs_connect",
 		Attributes: attrs,

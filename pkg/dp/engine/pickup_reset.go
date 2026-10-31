@@ -28,6 +28,7 @@ func (e *Engine) resetDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 	if state.Key.Dir == flow.DirReverse {
 		key = iecKey{client: dst, server: src}
 	}
+	connection := state.Connection.Load()
 	var resets connReset
 	toReceiver, toSender, hasSender := observedResets(src, dst, pkt.TCP)
 	receiver, sender := iecDirSrv, iecDirClient
@@ -62,7 +63,7 @@ func (e *Engine) resetDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 			t.pickups.record(key, resets, d, func(target int, err error) {
 				e.genericResetEvent(state, proto, reason, target, resetOutcome(err), err)
 			}, time.Now())
-			t.deleteConntrack(key.client, key.server, key.what())
+			t.deleteConntrack(key.client, key.server, connection, key.what())
 		}
 	})
 }
@@ -79,7 +80,7 @@ func (e *Engine) genericResetEvent(state *flow.State, proto, reason string, targ
 	if k.Dir == flow.DirReverse {
 		k = k.Reversed()
 	}
-	e.eventStore.Append(events.Event{FlowID: state.Key.Hash(), Proto: proto, Kind: eventfields.KindSession,
+	e.eventStore.Append(events.Event{FlowID: state.ID(), Proto: proto, Kind: eventfields.KindSession,
 		Timestamp: time.Now().UTC(), SrcIP: k.SrcIP.String(), DstIP: k.DstIP.String(), SrcPort: k.SrcPort, DstPort: k.DstPort,
 		Transport: "tcp", Attributes: attrs})
 }

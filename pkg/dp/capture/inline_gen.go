@@ -18,7 +18,7 @@ var errInvalidDisposition = errors.New("capture: handler returned an invalid dis
 // one completion.
 type generation struct {
 	id      uint64
-	submit  func(id uint32, v Verdict) error // kernel verdict; nil = submitted
+	submit  func(id uint32, v Verdict, mark uint32) error // kernel verdict; nil = submitted
 	comp    *completer
 	onError func(error)
 
@@ -43,11 +43,12 @@ type pending struct {
 type submission struct {
 	tok    Token
 	v      Verdict
+	mark   uint32
 	notify bool
 	reqs   []int // Settle request indexes it answers
 }
 
-func newGeneration(submit func(uint32, Verdict) error, comp *completer, onError func(error)) *generation {
+func newGeneration(submit func(uint32, Verdict, uint32) error, comp *completer, onError func(error)) *generation {
 	return &generation{
 		id:          nextGeneration(),
 		submit:      submit,
@@ -148,6 +149,7 @@ func (g *generation) finish(tok Token, d Decision) {
 	}
 	if submitCur {
 		cur.notify = cur.notify || d.Notify
+		cur.mark = d.Mark
 		subs = append([]submission{cur}, subs...)
 		subs[0].tok = tok
 	}
@@ -175,6 +177,8 @@ func currentVerdict(action Disposition, staged Verdict) (submission, bool, error
 		s.v = VerdictAccept
 	case Drop:
 		s.v, s.notify = VerdictDrop, true
+	case Repeat:
+		s.v = VerdictRepeat
 	case Hold:
 		if staged == 0 {
 			return s, false, nil
@@ -255,7 +259,7 @@ func (g *generation) submitAll(subs []submission, errs []error) {
 		return subs[i].v == VerdictDrop && subs[j].v != VerdictDrop
 	})
 	for _, s := range subs {
-		err := g.submit(s.tok.id, s.v)
+		err := g.submit(s.tok.id, s.v, s.mark)
 		if err != nil {
 			err = fmt.Errorf("capture: submit %s for %s: %w", s.v, s.tok, err)
 			g.fail(err)

@@ -5,7 +5,7 @@ package engine
 
 import (
 	"container/list"
-	"hash/fnv"
+	"hash/maphash"
 	"sync"
 	"time"
 
@@ -24,7 +24,8 @@ type deniedTCP struct {
 	isn     uint32
 	hasISN  bool
 	key     flow.Key
-	tuple   string
+	service flow.Key // immutable policy tuple of the denied incarnation
+	tuple   flow.MapKey
 	expires time.Time
 	order   *list.Element
 }
@@ -32,7 +33,7 @@ type deniedTCP struct {
 func (e *Engine) isDeniedTCP(state *flow.State) bool {
 	for {
 		e.flowMu.Lock()
-		d := e.deniedTCP[tcpTupleHash(state.Key)]
+		d := e.deniedTCP[tcpTupleKey(state.Key)]
 		e.flowMu.Unlock()
 		if d == nil {
 			return false
@@ -50,7 +51,7 @@ func (e *Engine) closeDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 		return
 	}
 	e.flowMu.Lock()
-	rev := e.flows[state.Key.Reversed().Hash()]
+	rev := e.flows[state.Key.Reversed().MapKey()]
 	e.flowMu.Unlock()
 	if rev != nil {
 		e.dpiMgr.FailStream(rev, &dpi.ParsedPacket{Proto: "tcp", FailClosed: true}, dpi.StreamDenied)
@@ -58,7 +59,7 @@ func (e *Engine) closeDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 	// Publish the guard only after both streams and the verdict cache have
 	// failed. An immediate capacity eviction must clear all of that state;
 	// nothing may recreate it after the guard has been retired.
-	if d := e.rememberDeniedTCP(state.Key); d != nil {
+	if d := e.rememberDeniedTCP(state.Key, state.ServiceKey()); d != nil {
 		e.resetDeniedTCP(pkt, state, proto, reason, d)
 	}
 }
@@ -71,7 +72,7 @@ func (e *Engine) reopenDeniedTCP(pkt capture.Packet) {
 	}
 	key := flow.Key{SrcIP: pkt.SrcIP, DstIP: pkt.DstIP, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort, Proto: 6}
 	e.flowMu.Lock()
-	tuple := tcpTupleHash(key)
+	tuple := tcpTupleKey(key)
 	d := e.deniedTCP[tuple]
 	e.flowMu.Unlock()
 	if d == nil || e.deniedTCPNow().Before(d.expires) && d.hasISN && d.isn == pkt.TCP.Seq {
@@ -79,6 +80,8 @@ func (e *Engine) reopenDeniedTCP(pkt capture.Packet) {
 	}
 	e.retireDeniedTCP(d, false)
 }
+
+var tcpDecisionSeed = maphash.MakeSeed()
 
 // lockGenericTCP serializes decisions in both directions of a generic TCP
 // tuple. Otherwise an already-waiting duplicate can finish DPI between the
@@ -89,22 +92,14 @@ func (e *Engine) lockGenericTCP(pkt capture.Packet) func() {
 		return func() {}
 	}
 	key := flow.Key{SrcIP: pkt.SrcIP, DstIP: pkt.DstIP, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort, Proto: 6}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(tcpTupleHash(key))) // hash writes cannot fail
-	mu := &e.tcpDecisions[h.Sum32()%uint32(len(e.tcpDecisions))]
+	h := maphash.Comparable(tcpDecisionSeed, tcpTupleKey(key))
+	mu := &e.tcpDecisions[h%uint64(len(e.tcpDecisions))]
 	mu.Lock()
 	return mu.Unlock
 }
 
-// tcpTupleHash is independent of wire direction and opener orientation. A
+// tcpTupleKey is independent of wire direction and opener orientation. A
 // late or forged handshake must not evade a tombstone by changing Key.Dir.
-func tcpTupleHash(key flow.Key) string {
-	key.Dir = flow.DirForward
-	reverse := key.Reversed()
-	reverse.Dir = flow.DirForward
-	a, b := key.Hash(), reverse.Hash()
-	if b < a {
-		return b
-	}
-	return a
+func tcpTupleKey(key flow.Key) flow.MapKey {
+	return key.MapKey().Bidirectional()
 }

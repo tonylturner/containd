@@ -7,7 +7,7 @@ function start<T>(editor: ConfigEditor<T>) {
 }
 
 test("reverting to the old server during a save survives reads before and after its acknowledgement", () => {
-  const server = { mode: "learn" };
+  const server = { mode: "monitor" };
   const { submitted, saving } = start({ ...fresh(server), cfg: { mode: "enforce" } });
   const reverted = { ...saving, cfg: server };
   expect(isDirty(reverted)).toBe(true);
@@ -21,7 +21,7 @@ test("reverting to the old server during a save survives reads before and after 
 });
 
 test("an acknowledgement before the background read also keeps an edit made while saving", () => {
-  const server = { mode: "learn" };
+  const server = { mode: "monitor" };
   const { submitted, saving } = start({ ...fresh(server), cfg: { mode: "enforce" } });
   const acknowledged = accept({ ...saving, cfg: server }, submitted, submitted.cfg);
   expect(adopt(acknowledged, submitted.cfg).cfg).toEqual(server);
@@ -48,17 +48,17 @@ test("a clean background read retains pending snapshots for a subsequent reversi
 });
 
 test("overlapping saves settle only their own snapshots, and explicit Refresh invalidates old acknowledgements", () => {
-  const first = start({ ...fresh({ mode: "learn" }), cfg: { mode: "enforce" } });
-  const second = start({ ...first.saving, cfg: { mode: "learn" } });
+  const first = start({ ...fresh({ mode: "monitor" }), cfg: { mode: "enforce" } });
+  const second = start({ ...first.saving, cfg: { mode: "monitor" } });
   const settled = accept(second.saving, second.submitted, second.submitted.cfg);
   expect(settled.pending).toEqual([first.submitted]);
   expect(isDirty(settled)).toBe(true);
   const acknowledged = accept(settled, first.submitted, first.submitted.cfg);
-  expect(acknowledged.cfg.mode).toBe("learn");
+  expect(acknowledged.cfg.mode).toBe("monitor");
   expect(acknowledged.pending).toEqual([]);
   expect(isDirty(acknowledged)).toBe(true);
   expect(failSave(second.saving, first.submitted).pending).toEqual([second.submitted]);
-  const refreshed = adopt(first.saving, { mode: "learn" }, false);
+  const refreshed = adopt(first.saving, { mode: "monitor" }, false);
   expect(accept(refreshed, first.submitted, first.submitted.cfg)).toEqual(refreshed);
 });
 

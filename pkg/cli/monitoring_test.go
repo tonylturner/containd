@@ -23,8 +23,6 @@ func TestMonitoringShowUnavailable(t *testing.T) {
 		{"protocols", "GET", "/api/v1/stats/protocols", showStatsProtocols},
 		{"top-talkers", "GET", "/api/v1/stats/top-talkers", showStatsTopTalkers},
 		{"anomalies", "GET", "/api/v1/anomalies", showAnomalies},
-		{"profiles", "GET", "/api/v1/learn/profiles", showLearnProfiles},
-		{"rules", "POST", "/api/v1/learn/generate", showLearnRules},
 		{"signatures", "GET", "/api/v1/signatures", showSignaturesAPI},
 		{"matches", "GET", "/api/v1/signatures/matches", showSignatureMatchesAPI},
 		{"interfaces", "GET", "/api/v1/interfaces/state", showInterfacesStateAPI},

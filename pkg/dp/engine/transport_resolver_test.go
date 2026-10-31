@@ -103,7 +103,7 @@ func newTransportTest(t *testing.T, f *transportCTFake) (*Engine, *transportReso
 		t.Fatal(err)
 	}
 	e.LoadRules(rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{{
-		ID: "learn", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "learn"},
+		ID: "monitor", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "monitor"},
 	}}})
 	z := &transportZoneFake{}
 	r, err := newTransportResolver(z, f)
@@ -196,9 +196,8 @@ func TestTransportResolverOrdersNATReplyAfterQueuedRequest(t *testing.T) {
 			t.Fatalf("logical role = %+v", asset)
 		}
 	}
-	profiles := e.Learner().Profiles()
-	if len(profiles) != 1 || profiles[0].SourceIP != "10.10.0.5" || profiles[0].DestIP != "10.20.0.4" {
-		t.Fatalf("logical profiles = %+v", profiles)
+	if e.learnWatch.Load() != nil {
+		t.Fatal("traffic started a live watch")
 	}
 	if len(e.Events().Flows(0)) != 2 {
 		t.Fatal("transport identity regrouped directional flows")
@@ -328,7 +327,7 @@ func TestTransportDNATCoordinatesAndConnectionConsumers(t *testing.T) {
 			for i, tuple := range []conntrack.Tuple{evidence.Original, evidence.Reply} {
 				st := flow.NewState(flow.TupleKey(tuple, flow.Direction(i)), time.Now())
 				st.Connection.Store(c)
-				e.flows[st.Key.Hash()] = st
+				e.flows[st.Key.MapKey()] = st
 				states = append(states, st)
 				ev := dpi.Event{FlowID: st.Key.Hash(), Connection: c, Proto: "modbus", Kind: "request",
 					Attributes: map[string]any{"transaction_id": uint16(1), "unit_id": uint8(1), "function_code": uint8(3), "is_write": false,
@@ -338,16 +337,14 @@ func TestTransportDNATCoordinatesAndConnectionConsumers(t *testing.T) {
 				}
 				e.RecordDPIEvents(st, &dpi.ParsedPacket{Proto: "tcp"}, []dpi.Event{ev})
 			}
-			if len(e.Inventory().GetAssets("10.20.0.2")) != 0 || len(e.Learner().Profiles()) != 1 ||
-				e.Learner().Profiles()[0].DestIP != "10.20.0.4" {
+			if len(e.Inventory().GetAssets("10.20.0.2")) != 0 || e.learnWatch.Load() != nil {
 				t.Fatal("NAT addresses became logical assets")
 			}
-			// Policy stays on the observed wire key, even though logical
-			// inventory and connection-scoped consumers use CT evidence.
+			// Policy and logical inventory share verified service coordinates.
 			pkt := &dpi.ParsedPacket{Proto: "tcp", DstPort: 1502, SrcPort: 41000}
 			ctxs := evalContextsFromDPIEvent(&rules.Snapshot{}, states[0], pkt, dpi.Event{Proto: "modbus", Kind: "request"}, "", "")
-			if len(ctxs) != 1 || ctxs[0].DstIP.String() != evidence.Original.Destination.Addr().String() || ctxs[0].Port != "1502" {
-				t.Fatalf("policy was normalized: %+v", ctxs)
+			if len(ctxs) != 1 || ctxs[0].DstIP.String() != evidence.Reply.Source.Addr().String() || ctxs[0].Port != "502" {
+				t.Fatalf("policy did not use backend: %+v", ctxs)
 			}
 			if conformanceKey(states[0]) != conformanceKey(states[1]) {
 				t.Fatal("NAT split conformance identity")

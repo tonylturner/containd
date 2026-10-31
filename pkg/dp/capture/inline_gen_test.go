@@ -66,7 +66,7 @@ func (fx *inlineFixture) newGeneration() *generation {
 	return g
 }
 
-func (fx *inlineFixture) submit(id uint32, v Verdict) error {
+func (fx *inlineFixture) submit(id uint32, v Verdict, _ uint32) error {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
 	fx.kernel = append(fx.kernel, kernelVerdict{id, v})
@@ -251,7 +251,7 @@ func TestInlineSettleInsideHandlerNeverCallsOnVerdictInline(t *testing.T) {
 	defer comp.close()
 	st := &settler{inline: true}
 	var kernel []kernelVerdict
-	g := newGeneration(func(id uint32, v Verdict) error { kernel = append(kernel, kernelVerdict{id, v}); return nil }, comp, nil)
+	g := newGeneration(func(id uint32, v Verdict, _ uint32) error { kernel = append(kernel, kernelVerdict{id, v}); return nil }, comp, nil)
 	st.publish(g)
 
 	g.deliver(1, Packet{}, func(Packet) Decision { return Decision{Action: Hold} })
@@ -469,7 +469,7 @@ func TestInlineCompletionOverflowFailsSourceWithoutLoss(t *testing.T) {
 		mu.Unlock()
 	})
 	defer comp.close()
-	g := newGeneration(func(uint32, Verdict) error { return nil }, comp, nil)
+	g := newGeneration(func(uint32, Verdict, uint32) error { return nil }, comp, nil)
 	n := completionLimit + 2
 	for i := 0; i < n; i++ {
 		g.deliver(uint32(i), Packet{}, func(Packet) Decision { return Decision{Action: Drop} })

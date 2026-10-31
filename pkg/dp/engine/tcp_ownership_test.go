@@ -25,7 +25,7 @@ func TestTCP2404LifecycleOwnership(t *testing.T) {
 					e.LoadRules(rules.Snapshot{Firewall: []rules.Entry{{
 						ID: "iec", Sources: []string{source},
 						Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}},
-						ICS:       rules.ICSPredicate{Protocol: "iec104", Mode: "learn"},
+						ICS:       rules.ICSPredicate{Protocol: "iec104", Mode: "monitor"},
 					}}})
 				}
 				pkt := recordPacket(100, 0, "")
@@ -57,17 +57,17 @@ func TestTCP2404LifecycleOwnership(t *testing.T) {
 				e.flowMu.Unlock()
 				pkt.TCP.Seq++
 				e.retireTransportIncarnation(pkt, nil)
-				if retained := e.flows[st.Key.Hash()] == st; retained != owned {
+				if retained := e.flows[st.Key.MapKey()] == st; retained != owned {
 					t.Fatalf("old incarnation retained = %v, owned = %v", retained, owned)
 				}
 
-				guard := e.rememberDeniedTCP(st.Key)
+				guard := e.rememberDeniedTCP(st.Key, st.ServiceKey())
 				if guard == nil {
 					t.Fatal("missing test tombstone")
 				}
 				markHandshake(&pkt)
 				e.reopenDeniedTCP(pkt)
-				if retained := e.deniedTCP[tcpTupleHash(st.Key)] != nil; retained != owned {
+				if retained := e.deniedTCP[tcpTupleKey(st.Key)] != nil; retained != owned {
 					t.Fatalf("tombstone retained = %v, owned = %v", retained, owned)
 				}
 			})

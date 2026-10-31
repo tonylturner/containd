@@ -6,6 +6,7 @@ package rules
 // Snapshot is an immutable rule set used by the data-plane fast path.
 // It is intended to be hot-swapped atomically by the engine.
 type Snapshot struct {
+	DPIMode  string  // inherited ICS mode for this snapshot
 	Version  string  // compiled rule version
 	Firewall []Entry // firewall rules
 	// LocalInput are rules applied to traffic destined to the appliance itself (nftables input).
@@ -134,7 +135,7 @@ type ICSPredicate struct {
 	ReadOnly      bool     // read-only class
 	WriteOnly     bool     // write-only class
 	Direction     string   // "request", "response", or "" (both)
-	Mode          string   // "learn" or "enforce"
+	Mode          string   // "monitor" or "enforce"
 
 	// IEC 60870-5-104 predicates. The Snapshot is JSON-marshalled to the
 	// engine, so TypeIDs is []int: []uint8 would encode as base64.
@@ -143,11 +144,13 @@ type ICSPredicate struct {
 	CA      []uint16   `json:"ca,omitempty"`      // 0..65534
 	IOA     []IOARange `json:"ioa,omitempty"`
 	// IEC 104 COT, originator, P/N, T and S/E predicates.
-	COT           []int  `json:"cot,omitempty"`
-	Originators   []int  `json:"originators,omitempty"`
-	Negative      *bool  `json:"negative,omitempty"`
-	Test          *bool  `json:"test,omitempty"`
-	SelectExecute string `json:"selectExecute,omitempty"`
+	COT               []int  `json:"cot,omitempty"`
+	Originators       []int  `json:"originators,omitempty"`
+	Negative          *bool  `json:"negative,omitempty"`
+	Test              *bool  `json:"test,omitempty"`
+	SelectExecute     string `json:"selectExecute,omitempty"`
+	CommandStates     []int  `json:"commandStates,omitempty"`
+	CommandQualifiers []int  `json:"commandQualifiers,omitempty"`
 
 	// DNP3 station and object predicates; Addresses are point indexes.
 	Masters     []uint16 `json:"masters,omitempty"`

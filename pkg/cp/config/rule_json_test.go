@@ -72,7 +72,7 @@ func TestRuleUnmarshalJSONAcceptsPersistedRuleKeys(t *testing.T) {
 			"destinations":["198.51.100.0/24"],
 			"protocols":[{"name":"tcp","port":"2404"}],
 			"identities":["operator"],
-			"ics":{"protocol":"modbus","functionCode":[3],"unitId":1,"addresses":["0-10"],"readOnly":true,"writeOnly":false,"direction":"request","mode":"learn"},
+			"ics":{"protocol":"modbus","functionCode":[3],"unitId":1,"addresses":["0-10"],"readOnly":true,"writeOnly":false,"direction":"request","mode":"monitor"},
 			"schedule":{"daysOfWeek":["Monday"],"startTime":"08:00","endTime":"17:00","timezone":"UTC"},
 			"action":"ALLOW",
 			"log":true

@@ -43,7 +43,8 @@ function objectText(a: { type_id?: number; ca?: number; ioa?: number }): string 
 
 const DECISION_VIEW = {
   deny: { badge: "deny", variant: "error", severity: "high", headline: "IEC 104 APDU denied" },
-  would_drop: { badge: "would drop", variant: "warning", severity: "medium", headline: "IEC 104 APDU would be dropped (learn)" },
+  would_drop: { badge: "would drop", variant: "warning", severity: "medium", headline: "IEC 104 APDU would be denied (monitor)" },
+  would_allow: { badge: "would allow", variant: "info", severity: "low", headline: "IEC 104 APDU would be allowed (monitor)" },
   allow: { badge: "allow", variant: "success", severity: "low", headline: "IEC 104 APDU allowed by rule" },
 } as const;
 
@@ -103,21 +104,24 @@ export function describeICSEvidence(ev: TelemetryEvent): EvidenceView | null {
   if (evidence.kind === "ics.decision") {
     const a = evidence.attrs;
     const v = DECISION_VIEW[a.decision];
-    const rule = a.ruleId || "envelope default";
-    const what = objectText(a) || "APDU";
+    const rule = a.ruleId || a.scopeId || "envelope default";
+    const what = objectText(a) || (ev.proto === "iec104" ? "APDU" : `${ev.proto?.toUpperCase() || "ICS"} message`);
     const reason = reasonText(a.reason);
     const findings = a.conformance.join(", ");
     return {
       ...v,
+      headline: ev.proto === "iec104" ? v.headline : `${ev.proto?.toUpperCase() || "ICS"} message: ${v.badge}${a.mode === "monitor" ? " (monitor)" : ""}`,
       message: `${v.badge}: ${what} (${reason}, ${rule}${findings ? `; ${findings}` : ""})`,
       sessionId: a.session_id,
-      alert: a.decision !== "allow",
+      alert: a.decision !== "allow" && a.decision !== "would_allow",
       rows: present([
         ["Decision", a.decision],
         ["Reason", reason],
         ["Conformance", findings],
-        ["Rule", rule],
+        ["Rule", a.ruleId || (a.scopeId ? undefined : "envelope default")],
         ["Rule action", a.action],
+        ["Scope", a.scopeId],
+        ["Finding", a.findingCode],
         ["Mode", a.mode],
         ["Type ID", a.type_id !== undefined ? typeLabel(a.type_id) : undefined],
         ["Common address", a.ca],

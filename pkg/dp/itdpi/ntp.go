@@ -106,7 +106,7 @@ func (d *NTPDecoder) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi.E
 	_ = precision // already stored in attrs
 
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "ntp",
 		Kind:       kind,
 		Attributes: attrs,

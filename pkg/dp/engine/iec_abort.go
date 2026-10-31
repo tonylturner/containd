@@ -11,7 +11,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/dp/capture"
-	"github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
@@ -25,7 +25,7 @@ var (
 // under the session lock and carried out after the lock is released.
 type iecActions struct {
 	drops             []capture.Resolution // held tokens to drop
-	events            []events.Event
+	events            []iecTelemetry
 	jobs              []func()
 	inventoryObserve  []*iecInventoryCommand
 	inventoryOutcome  []*iecInventoryCommand
@@ -62,7 +62,7 @@ var targetNames = [2]string{"client", "server"}
 // aborted before anything is released, drops every
 // held packet (returned in drops) and the current packet cur, and keeps the
 // session as a tombstone. The resets start once every drop has its
-// verdict completion. A learn envelope never aborts; callers ensure that.
+// verdict completion. A monitor envelope never aborts; callers ensure that.
 func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger string, cur *heldPacket, now time.Time) iecActions {
 	var acts iecActions
 	if s.state == iecAborted {
@@ -183,7 +183,7 @@ func (t *iecTable) finishLocked(txn *abortTxn, now time.Time) iecActions {
 		attrs[eventfields.KeyError] = strings.Join(txn.errs, "; ")
 	}
 	return iecActions{
-		events: []events.Event{txn.s.event(eventfields.KindVerdict, attrs, now)},
+		events: []iecTelemetry{txn.s.event(eventfields.KindVerdict, attrs, now)},
 		jobs:   []func(){t.resetJob(txn.s)},
 	}
 }
@@ -208,6 +208,10 @@ func (t *iecTable) completeLocked(tok capture.Token, err error, now time.Time) i
 // resetJob sends the resets of an aborted session and then deletes its
 // conntrack entry. It runs on the worker, never under the session lock.
 func (t *iecTable) resetJob(s *iecSession) func() {
+	var connection *flow.Connection
+	if s.flow != nil {
+		connection = s.flow.Connection.Load()
+	}
 	return func() {
 		for _, target := range []int{iecDirSrv, iecDirClient} {
 			t.mu.Lock()
@@ -221,7 +225,7 @@ func (t *iecTable) resetJob(s *iecSession) func() {
 		established := s.reset.targets[iecDirSrv].valid
 		t.mu.Unlock()
 		if established {
-			t.deleteConntrack(s.client, s.server, "iec104 abort "+s.id)
+			t.deleteConntrack(s.client, s.server, connection, "iec104 abort "+s.id)
 		}
 	}
 }
@@ -242,7 +246,10 @@ func (t *iecTable) sendReset(s *iecSession, target int, r session.Reset) {
 		metrics.IEC104InjectorFailuresTotal.Inc()
 		extra[eventfields.KeyError] = err.Error()
 	}
-	t.emit([]events.Event{s.sessionEvent(outcome, extra, now)})
+	t.mu.Lock()
+	ev := s.sessionEvent(outcome, extra, now)
+	t.mu.Unlock()
+	t.emit([]iecTelemetry{ev})
 }
 
 // challengeLocked answers a challenge ACK from a reset target of an aborted

@@ -42,15 +42,15 @@ func TestEvaluate(t *testing.T) {
 		codes  []Code
 	}{
 		{"inline enforce", modbusRule("r", ""), nil, "enforce", Enforcing, nil},
-		{"explicit learn", modbusRule("r", "learn"), nil, "learn", Monitoring, nil},
-		{"global learn inherited", modbusRule("r", ""), func(s *Settings) { s.DPIMode = "learn" }, "learn", Monitoring, nil},
-		{"no global mode defaults to learn", modbusRule("r", ""), func(s *Settings) { s.DPIMode = "" }, "learn", Monitoring, nil},
-		{"rule enforce over global learn", modbusRule("r", "enforce"), func(s *Settings) { s.DPIMode = "learn" }, "enforce", Enforcing, nil},
+		{"explicit learn", modbusRule("r", "monitor"), nil, "monitor", Monitoring, nil},
+		{"global learn inherited", modbusRule("r", ""), func(s *Settings) { s.DPIMode = "monitor" }, "monitor", Monitoring, nil},
+		{"no global mode defaults to learn", modbusRule("r", ""), func(s *Settings) { s.DPIMode = "" }, "monitor", Monitoring, nil},
+		{"rule enforce over global learn", modbusRule("r", "enforce"), func(s *Settings) { s.DPIMode = "monitor" }, "enforce", Enforcing, nil},
 		{"no queue", modbusRule("r", ""), func(s *Settings) { s.QueueID = 0 }, "enforce", NotEnforcing, []Code{NoInlinePath}},
-		{"no queue in learn is not a fault", modbusRule("r", "learn"), func(s *Settings) { s.QueueID = 0 }, "learn", Monitoring, nil},
+		{"no queue in learn is not a fault", modbusRule("r", "monitor"), func(s *Settings) { s.QueueID = 0 }, "monitor", Monitoring, nil},
 		{"nft enforcement off", modbusRule("r", ""), func(s *Settings) { s.Enforcement = false }, "enforce", NotEnforcing, []Code{EnforcementDisabled}},
 		{"dpi off", modbusRule("r", ""), func(s *Settings) { s.DPIEnabled = false }, "enforce", NotEnforcing, []Code{DPIDisabled}},
-		{"dpi off in learn explains the gap", modbusRule("r", "learn"), func(s *Settings) { s.DPIEnabled = false }, "learn", Monitoring, []Code{DPIDisabled}},
+		{"dpi off in learn explains the gap", modbusRule("r", "monitor"), func(s *Settings) { s.DPIEnabled = false }, "monitor", Monitoring, []Code{DPIDisabled}},
 		{"decoder off", modbusRule("r", ""), func(s *Settings) { s.ICSProtocols = map[string]bool{"modbus": false} }, "enforce", NotEnforcing, []Code{DecoderDisabled}},
 		{"absent decoder key is enabled", modbusRule("r", ""), func(s *Settings) { s.ICSProtocols = map[string]bool{"dnp3": false} }, "enforce", Enforcing, nil},
 		{"ip exclusion on the server", modbusRule("r", ""), func(s *Settings) {
@@ -111,7 +111,7 @@ func TestEvaluate(t *testing.T) {
 func TestEvaluateSkipsRulesWithoutProtocolAndSortsByID(t *testing.T) {
 	l4 := modbusRule("a-l4", "enforce")
 	l4.ICS = rules.ICSPredicate{Mode: "enforce"}
-	snap := &rules.Snapshot{Firewall: []rules.Entry{modbusRule("z", ""), l4, modbusRule("m", "learn")}}
+	snap := &rules.Snapshot{Firewall: []rules.Entry{modbusRule("z", ""), l4, modbusRule("m", "monitor")}}
 	got := Evaluate(snap, inline())
 	if len(got) != 2 || got[0].RuleID != "m" || got[1].RuleID != "z" {
 		t.Fatalf("got %+v, want rules m then z", got)

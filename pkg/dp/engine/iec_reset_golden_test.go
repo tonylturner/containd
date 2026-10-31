@@ -55,7 +55,7 @@ func TestIECResetGoldenStaleACK(t *testing.T) {
 	h.send(true, iframe(46, 1))
 	h.send(true, iframe(46, 1)) // 32 bytes forwarded; the server ACKs none
 	stale := h.pkt(false, capture.TCPFlagACK, h.sSeq, h.clientISN+1, nil)
-	if d := h.e.handlePacket(stale); d.Action != capture.Accept {
+	if d := h.e.handlePacket(stale); d.Action != h.passingDisposition() {
 		t.Fatalf("stale pure ACK = %+v", d)
 	}
 	held, _ := h.send(true, iframe(46, 1)[:8]) // withheld
@@ -87,7 +87,7 @@ func TestIECResetGoldenFINOnHeldPacket(t *testing.T) {
 	}
 	head := h.pkt(true, capture.TCPFlagACK, h.cSeq, h.sSeq, cmd[:6])
 	d := h.e.handlePacket(head)
-	if d.Action != capture.Accept || len(d.Resolved) != 1 || d.Resolved[0] != (capture.Resolution{Token: tail.Token, Verdict: capture.VerdictAccept}) {
+	if d.Action != h.passingDisposition() || len(d.Resolved) != 1 || d.Resolved[0] != (capture.Resolution{Token: tail.Token, Verdict: capture.VerdictAccept}) {
 		t.Fatalf("gap fill = %+v, want Accept releasing the tail", d)
 	}
 	h.cSeq += 16

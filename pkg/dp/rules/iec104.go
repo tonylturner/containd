@@ -28,15 +28,17 @@ type IEC104Context struct {
 	// Cause of transmission, originator, P/N and T bits of the ASDU, and
 	// Select (S/E=1) for command types that carry the qualifier; nil
 	// when the APDU does not carry the field.
-	COT        *uint8
-	Originator *uint8
-	Negative   *bool
-	Test       *bool
-	Select     *bool
+	COT              *uint8
+	Originator       *uint8
+	Negative         *bool
+	Test             *bool
+	CommandState     *uint8
+	CommandQualifier *uint8
+	Select           *bool
 }
 
 // EffectiveMode resolves an ICS rule's mode: rule mode > global DPI mode >
-// learn.
+// monitor.
 func EffectiveMode(ruleMode, globalMode string) string {
 	if m := strings.ToLower(strings.TrimSpace(ruleMode)); m != "" {
 		return m
@@ -44,7 +46,7 @@ func EffectiveMode(ruleMode, globalMode string) string {
 	if m := strings.ToLower(strings.TrimSpace(globalMode)); m != "" {
 		return m
 	}
-	return "learn"
+	return "monitor"
 }
 
 // IEC104Envelope reports whether a session falls inside the IEC104
@@ -55,20 +57,10 @@ func EffectiveMode(ruleMode, globalMode string) string {
 // and schedules do not narrow it, so it is a superset of what the rules
 // can allow and everything inside it that no rule allows is denied. The
 // mode is enforce if any matching rule's effective mode is enforce, else
-// learn. No match returns (false, "").
+// monitor. No match returns (false, "").
 func (e *Evaluator) IEC104Envelope(ctx EvalContext, globalMode string) (matched bool, mode string) {
-	for i := range e.compiled {
-		ce := &e.compiled[i]
-		if ce.iec == nil || !matchZones(&ce.Entry, ctx) || !matchCIDRs(ce, ctx) || !matchProtoCompiled(ce, ctx) {
-			continue
-		}
-		matched = true
-		if EffectiveMode(ce.ICS.Mode, globalMode) == "enforce" {
-			return true, "enforce"
-		}
-	}
-	if matched {
-		return true, "learn"
+	if scope := e.IEC104Scope(ctx, globalMode); scope != nil {
+		return true, EffectiveMode(scope.ICS.Mode, globalMode)
 	}
 	return false, ""
 }
@@ -150,10 +142,16 @@ func matchIEC104(ce *compiledEntry, ctx EvalContext) bool {
 	if len(c.ca) > 0 && (obj.CA == nil || !containsUint16(c.ca, *obj.CA)) {
 		return false
 	}
-	if !matchByteList(ce.ICS.COT, obj.COT) || !matchByteList(ce.ICS.Originators, obj.Originator) ||
+	if !matchByteList(ce.ICS.CommandStates, obj.CommandState) || !matchByteList(ce.ICS.CommandQualifiers, obj.CommandQualifier) ||
+		!matchByteList(ce.ICS.COT, obj.COT) || !matchByteList(ce.ICS.Originators, obj.Originator) ||
 		!matchBool(ce.ICS.Negative, obj.Negative) || !matchBool(ce.ICS.Test, obj.Test) ||
 		!matchSelectExecute(ce.ICS.SelectExecute, obj.Select) {
 		return false
+	}
+	// Preserve known message constraints while rejecting incomplete child
+	// coverage for a target-constrained ALLOW, as for DNP3/CIP objects.
+	if ics.ObjectUnknown && len(c.ioa) > 0 {
+		return denying(ce.Action)
 	}
 	return len(c.ioa) == 0 || (obj.IOA != nil && ioaInRanges(c.ioa, *obj.IOA))
 }
@@ -195,4 +193,17 @@ func ioaInRanges(ranges []IOARange, ioa uint32) bool {
 		}
 	}
 	return false
+}
+
+// IEC104CommandStates returns the closed SCS/DCS/RCS domain, or nil for
+// types without state and QU command predicates.
+func IEC104CommandStates(typeID uint8) []uint8 {
+	switch typeID {
+	case 45, 58:
+		return []uint8{0, 1}
+	case 46, 47, 59, 60:
+		return []uint8{1, 2}
+	default:
+		return nil
+	}
 }

@@ -51,7 +51,7 @@ async function openFirewall(
     if (path === "/api/v1/firewall/rules") body = rules;
     if (path === "/api/v1/zones") body = [{ name: "it" }, { name: "ot" }];
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
-    if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "learn", ...dataplane };
+    if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "monitor", ...dataplane };
     await route.fulfill({ json: body });
   });
   const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/firewall/rules");

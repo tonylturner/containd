@@ -45,15 +45,15 @@ var goldenADUs = []goldenADU{
 	{"fc6 reply", "00040000000601060064007b", true, map[string]any{"address": uint16(100), "value": uint16(123)}, []Span{{100, 100}}, true},
 	// FC 15 write multiple coils 20 count 10 (two data bytes); the reply
 	// echoes address and quantity.
-	{"fc15 request", "000500000009010f0014000a02cd01", false, map[string]any{"address": uint16(20), "quantity": uint16(10), "byte_count": uint8(2)}, []Span{{20, 29}}, true},
+	{"fc15 request", "000500000009010f0014000a02cd01", false, map[string]any{"address": uint16(20), "quantity": uint16(10), "byte_count": uint8(2), "values": []uint16{1, 0, 1, 1, 0, 0, 1, 1, 1, 0}}, []Span{{20, 29}}, true},
 	{"fc15 reply", "000500000006010f0014000a", true, map[string]any{"address": uint16(20), "quantity": uint16(10)}, []Span{{20, 29}}, true},
 	// FC 16 write multiple registers 30 values 123, 456; reply echoes.
-	{"fc16 request", "00060000000b0110001e000204007b01c8", false, map[string]any{"address": uint16(30), "quantity": uint16(2), "byte_count": uint8(4)}, []Span{{30, 31}}, true},
+	{"fc16 request", "00060000000b0110001e000204007b01c8", false, map[string]any{"address": uint16(30), "quantity": uint16(2), "byte_count": uint8(4), "values": []uint16{123, 456}}, []Span{{30, 31}}, true},
 	{"fc16 reply", "0006000000060110001e0002", true, map[string]any{"address": uint16(30), "quantity": uint16(2)}, []Span{{30, 31}}, true},
-	{"fc16 range-crossing request", "0001000000170110000b000810038403850386038703880389038a038b", false, map[string]any{"address": uint16(11), "quantity": uint16(8), "byte_count": uint8(16)}, []Span{{11, 18}}, true},
+	{"fc16 range-crossing request", "0001000000170110000b000810038403850386038703880389038a038b", false, map[string]any{"address": uint16(11), "quantity": uint16(8), "byte_count": uint8(16), "values": []uint16{900, 901, 902, 903, 904, 905, 906, 907}}, []Span{{11, 18}}, true},
 	// FC 23 read 40 count 2, write 50 values 7, 8; the reply carries the
 	// two read values.
-	{"fc23 request", "00070000000f011700280002003200020400070008", false, map[string]any{"read_address": uint16(40), "read_quantity": uint16(2), "write_address": uint16(50), "write_quantity": uint16(2), "byte_count": uint8(4)}, []Span{{40, 41}, {50, 51}}, true},
+	{"fc23 request", "00070000000f011700280002003200020400070008", false, map[string]any{"read_address": uint16(40), "read_quantity": uint16(2), "write_address": uint16(50), "write_quantity": uint16(2), "byte_count": uint8(4), "values": []uint16{7, 8}}, []Span{{40, 41}, {50, 51}}, true},
 	{"fc23 reply", "0007000000070117040029002a", true, map[string]any{"byte_count": uint8(4), "register_count": uint16(2)}, nil, false},
 	// Unknown function code 0x5a and a PDU of only a function code.
 	{"unknown fc request", "007000000006015a000a0002", false, map[string]any{}, nil, false},

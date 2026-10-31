@@ -23,7 +23,9 @@ and `containd engine` separately. See [Docker Compose](docker-compose.md).
    selected packets for userspace inspection; AF_PACKET capture only observes
    copies. See [Enforcement](dataplane-enforcement.md).
 3. Decoded events feed telemetry, IDS, anomaly and signature checks, and protocol
-   statistics. Generic ICS inventory and automatic learning exclude IEC 104.
+   statistics. Generic ICS inventory excludes IEC 104. Explicit live watches and
+   PCAP imports feed the shared evidence learner; IEC 104 command suggestions
+   require review.
    See [Data Plane](dataplane.md) and [ICS DPI](ics-dpi.md).
 4. Operators query bounded event history and persistent audit records through
    the management API. Service syslog forwarding and application-log syslog

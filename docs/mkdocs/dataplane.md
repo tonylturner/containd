@@ -22,8 +22,9 @@ outside its control.
    UDP denials drop only the datagram. IEC 104 retains its stateful abort/reset
    path. A native IDS alert alone is not a packet drop.
 5. Decoded events feed bounded telemetry, anomaly and signature checks, and
-   protocol statistics. Asset discovery and automatic rule learning consume
-   non-IEC-104 ICS events only.
+   protocol statistics. Generic asset discovery consumes non-IEC-104 ICS events.
+   Explicit live watches and PCAP imports feed the same evidence learner;
+   IEC 104 command suggestions require review before monitor-only staging.
 
 ## Protocol coverage
 
@@ -35,7 +36,7 @@ PCAP analysis:
 - ICS marker and port detector are additional utility registrations, not protocols.
 
 Protocol toggles select decoders; they do not create matching firewall rules.
-See [ICS DPI](ics-dpi.md) for predicates, learn-mode limits, and IEC 104 behavior.
+See [ICS DPI](ics-dpi.md) for predicates, monitor-mode limits, and IEC 104 behavior.
 
 ## Policy and runtime state
 

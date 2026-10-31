@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { ConfigDiff } from "../lib/api-config";
+import { mockLearner, openDataset, suggestion } from "./fixtures/learner";
 
 async function setup(page: Page) {
   const state = { dirty: false, offline: false, reject: false, reads: 0, writes: [] as { path: string; body: any }[], zones: [{ name: "lan" }], ids: { enabled: false, rules: [{ id: "keep-me", name: "Keep me", type: "suricata", enabled: true }] } };
@@ -132,24 +133,18 @@ test("capture cannot start when discovery reports the saved device is absent", a
   expect(state.writes).toEqual([]);
 });
 
-test("PCAP generation stages one rule per request, including partial failure feedback", async ({ page }) => {
-  const state = await setup(page);
-  const rules = [{ id: "generated-1", action: "ALLOW" }, { id: "generated-2", action: "DENY" }];
-  await page.route("**/api/v1/pcap/list", (route) => route.fulfill({ json: [{ name: "example.pcap", interface: "eth0", sizeBytes: 20, createdAt: "2026-10-25T12:00:00Z" }] }));
-  await page.route("**/api/v1/pcap/analyze/example.pcap", (route) => route.fulfill({ json: { rules, profiles: [], eventSummary: {}, stats: { packetCount: 1, duration: 1000, flows: [], protocols: {} } } }));
-  await page.route("**/api/v1/firewall/rules", async (route) => {
-    const body = route.request().postDataJSON();
-    state.writes.push({ path: "/firewall/rules", body });
-    if (body.id === "generated-2") return route.fulfill({ status: 400, json: { error: "second rule rejected" } });
-    state.dirty = true;
-    await route.fulfill({ headers: { "X-Containd-Config": "staged" }, json: body });
-  });
-  await page.goto("/pcap/");
-  await page.getByLabel("Existing PCAP Files").getByRole("button", { name: "Analyze", exact: true }).click();
-  await page.getByRole("button", { name: "Stage 2 Rule(s)", exact: true }).click();
+test("PCAP stages selected immutable revisions in one atomic request", async ({ page }) => {
+  const state = await mockLearner(page);
+  state.suggestions = [suggestion(), suggestion("modbus-2")];
+  await openDataset(page);
+  await expect(page.getByRole("button", { name: "Stage 0 selected", exact: true })).toBeDisabled();
+  await page.getByLabel("Select modbus-1", { exact: true }).check();
+  await page.getByLabel("Select modbus-2", { exact: true }).check();
+  await page.getByRole("button", { name: "Stage 2 selected", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
-  await expect(page.getByText("1 rule(s) staged — commit to apply. Remaining rules failed: second rule rejected", { exact: true })).toBeVisible();
-  expect(state.writes.map((w) => w.body)).toEqual(rules);
+  await expect(page.getByText("2 suggestion(s) staged — not active. Review the candidate diff and commit to apply monitor rules.", { exact: true })).toBeVisible();
+  expect(state.writes).toHaveLength(1);
+  expect(state.writes[0]).toEqual({ path: "/learn/apply", body: { requestId: expect.any(String), selections: [{ id: "modbus-1", revision: 2 }, { id: "modbus-2", revision: 2 }] } });
   await expect(page.getByText(pending, { exact: true })).toBeVisible();
 });
 
@@ -300,7 +295,7 @@ for (const bank of [
 
 test("Config review includes unknown sections and complete known top-level sections", async ({ page }) => {
   const running: ConfigDiff["running"] & Record<string, unknown> = {
-    firewall: { defaultAction: "ALLOW" }, dataplane: { dpiMode: "learn" }, futureSection: { mode: "before" },
+    firewall: { defaultAction: "ALLOW" }, dataplane: { dpiMode: "monitor" }, futureSection: { mode: "before" },
   };
   const candidate: ConfigDiff["candidate"] & Record<string, unknown> = {
     firewall: { defaultAction: "DENY" }, dataplane: { dpiMode: "enforce" }, futureSection: { mode: "after" },

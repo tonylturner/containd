@@ -195,7 +195,7 @@ export function ConfigSummaryCard({
         <div className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2">
           <span className="text-(--text)">DPI mode</span>
           {/* A mode is a preference, not proof of enforcement: never green. */}
-          <span className={dpiMode === "enforce" || dpiMode === "learn" ? "" : "text-(--text-muted)"}>
+          <span>
             {dpiMode}
           </span>
         </div>

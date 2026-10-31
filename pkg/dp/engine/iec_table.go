@@ -16,7 +16,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
-	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/iec104"
@@ -51,9 +50,18 @@ const (
 type iecPolicy interface {
 	IEC104Envelope(ctx rules.EvalContext, globalMode string) (bool, string)
 	EvaluateIEC104(ctx rules.EvalContext) (rules.Action, *rules.Entry)
+	MonitorMatches(rules.EvalContext) []*rules.Entry
+	IEC104Scope(rules.EvalContext, string) *rules.Entry
 }
 
-func newRulesPolicy(snap *rules.Snapshot) iecPolicy { return rules.NewEvaluator(snap) }
+type enforcingIECPolicy struct{ *rules.Evaluator }
+
+func (p enforcingIECPolicy) EvaluateIEC104(ctx rules.EvalContext) (rules.Action, *rules.Entry) {
+	return p.EvaluateIEC104Enforcing(ctx)
+}
+func newRulesPolicy(snap *rules.Snapshot) iecPolicy {
+	return enforcingIECPolicy{rules.NewEvaluator(snap)}
+}
 
 type iecKey struct{ client, server netip.AddrPort }
 
@@ -69,6 +77,7 @@ const (
 // iecSession is one IEC104 session incarnation, from its SYN.
 type iecSession struct {
 	id         string
+	flow       *flow.State // immutable service key captured at creation; client/server stay in packet space
 	client     netip.AddrPort
 	server     netip.AddrPort
 	ctx        rules.EvalContext // opener-oriented session tuple
@@ -79,7 +88,7 @@ type iecSession struct {
 	dirs       [2]*iecDir
 	held       []*heldPacket
 	heldBytes  int
-	stopParse  bool // learn envelope: parsing stopped after a stream error
+	stopParse  bool // monitor envelope: parsing stopped after a stream error
 	reconnects bool // first STARTDT con counts as a reconnect
 	reset      *connReset
 	next       *iecSession         // new incarnation whose handshake is pending
@@ -123,22 +132,24 @@ func newIECDir(isn uint32) *iecDir {
 // iecTable holds the IEC104 sessions of one engine configuration. mu is the
 // session lock: it is never held across verdict submission or I/O.
 type iecTable struct {
-	mu         sync.Mutex
-	zones      *zoneCache // the engine's
-	now        func() time.Time
-	dpi        *dpi.Manager
-	injector   session.Injector
-	health     *iecHealth
-	settler    func() capture.Settler
-	jobs       *worker
-	emit       func([]events.Event)
-	markAbort  func(sessionID string)
-	onError    func(error)
-	newPolicy  func(*rules.Snapshot) iecPolicy
-	safeRead   func(map[string]any) bool
-	newID      func() string
-	ctDelete   func(context.Context, conntrack.DeleteRequest) error // after the resets
-	globalMode string
+	mu            sync.Mutex
+	zones         *zoneCache // the engine's
+	now           func() time.Time
+	dpi           *dpi.Manager
+	injector      session.Injector
+	health        *iecHealth
+	settler       func() capture.Settler
+	jobs          *worker
+	emit          func([]iecTelemetry)
+	learnDelivery func(string)
+	shadow        func(*rules.Snapshot, *rules.Entry)
+	markAbort     func(sessionID string)
+	onError       func(error)
+	newPolicy     func(*rules.Snapshot) iecPolicy
+	safeRead      func(map[string]any) bool
+	newID         func() string
+	ctDelete      func(context.Context, conntrack.DeleteRequest) error // after the resets
+	globalMode    string
 	// parsing is the IEC104 parsing mode of the packet under decision. The
 	// engine resolves it per packet (ICSParsing) and packet stores it under
 	// mu, so a mode change applies to later decisions without retiring
@@ -202,6 +213,23 @@ func pairKey(client, server netip.AddrPort) string {
 // sessionCtx is the opener-oriented evaluation context of a session.
 func (t *iecTable) sessionCtx(client, server netip.AddrPort) rules.EvalContext {
 	return iecSessionContext(t.snap, client, server, t.zones.resolve)
+}
+
+// stateContext uses the same service authority as generic ICS policy.
+func (t *iecTable) stateContext(state *flow.State) rules.EvalContext {
+	key := state.ServiceKey()
+	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP(), Proto: "tcp",
+		Port: strconv.Itoa(int(servicePort(state, nil)))}
+	ctx.SrcZone, ctx.DstZone = t.zones.resolve(t.snap, ctx.SrcIP, ctx.DstIP)
+	ctx.Identities = t.snap.IdentitiesOf(ctx.SrcIP)
+	return ctx
+}
+
+func (t *iecTable) sessionContext(s *iecSession) rules.EvalContext {
+	if s.flow != nil {
+		return t.stateContext(s.flow)
+	}
+	return t.sessionCtx(s.client, s.server)
 }
 
 func iecSessionContext(snap *rules.Snapshot, client, server netip.AddrPort, resolve zoneResolver) rules.EvalContext {
@@ -271,9 +299,13 @@ func hasEnforceICS(snap *rules.Snapshot, globalMode string) bool {
 // envelope or mode changed are aborted; sessions of an
 // unchanged envelope continue.
 func (t *iecTable) setPolicy(snap *rules.Snapshot) {
-	hasIEC, active := hasEnforceIEC(snap, t.globalMode)
 	var acts iecActions
 	t.mu.Lock()
+	if snap != nil && snap.DPIMode != "" {
+		t.globalMode = snap.DPIMode
+	}
+	hasIEC, active := hasEnforceIEC(snap, t.globalMode)
+	hasICS := hasEnforceICS(snap, t.globalMode)
 	t.snap, t.hasIEC = snap, hasIEC
 	t.policy = t.newPolicy(snap)
 	now := t.now()
@@ -281,7 +313,7 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 		if s.state != iecSynSent && s.state != iecEstablished {
 			continue
 		}
-		ctx := t.sessionCtx(s.client, s.server)
+		ctx := t.sessionContext(s)
 		matched, mode := t.envelopeLocked(ctx)
 		switch {
 		case matched && mode == s.mode:
@@ -289,7 +321,7 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 		case s.mode == "enforce" || mode == "enforce":
 			acts.merge(t.abortLocked(s, abortPolicy, "", nil, now))
 		default:
-			// A learn session left every envelope: stop tracking it.
+			// A monitor session left every envelope: stop tracking it.
 			t.dpi.EndStream(s.id)
 			acts.merge(t.deleteLocked(key, s))
 		}
@@ -297,7 +329,7 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 	t.mu.Unlock()
 	if t.health != nil {
 		t.health.clear(faultEnvelope)
-		t.health.setICS(hasEnforceICS(snap, t.globalMode))
+		t.health.setICS(hasICS)
 		t.health.setActive(active)
 	}
 	t.apply(acts)

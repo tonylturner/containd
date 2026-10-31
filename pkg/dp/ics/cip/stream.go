@@ -49,7 +49,7 @@ func malformedEvent(state *flow.State, data []byte, err error) dpi.Event {
 	const maxRawHex = 512
 	id := ""
 	if state != nil {
-		id = state.Key.Hash()
+		id = state.ID()
 	}
 	return dpi.Event{
 		FlowID: id,

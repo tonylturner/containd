@@ -17,7 +17,7 @@ import (
 )
 
 func TestObservationTableOwnedGeneration(t *testing.T) {
-	for _, mode := range []string{"learn", "enforce"} {
+	for _, mode := range []string{"monitor", "enforce"} {
 		t.Run(mode, func(t *testing.T) {
 			e := newObservationEngine(t)
 			e.LoadRules(rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{{ICS: rules.ICSPredicate{Protocol: "iec104", Mode: mode}, Action: rules.ActionAllow}}})
@@ -59,7 +59,7 @@ func newObservationEngine(t *testing.T) *Engine {
 			e.observation.syncMetrics()
 		}
 	})
-	e.LoadRules(rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{{ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "learn"}, Action: rules.ActionAllow}}})
+	e.LoadRules(rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{{ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "monitor"}, Action: rules.ActionAllow}}})
 	return e
 }
 

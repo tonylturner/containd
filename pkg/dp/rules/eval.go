@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// EvaluatorVersion binds retained proofs to predicate semantics. Bump whenever
+// evaluation or its shared decoded-context projection changes acceptance.
+const EvaluatorVersion = "ics-3"
+
 // EvalContext represents a simplified flow context for rule evaluation.
 type EvalContext struct {
 	SrcZone string
@@ -37,6 +41,9 @@ type ICSContext struct {
 	ReadOnly        bool
 	WriteOnly       bool
 	Direction       string // "request" or "response"
+	// ValueInvalid marks a decoded reserved command encoding. Such an
+	// operation cannot match an ICS ALLOW, including monitor and enforce.
+	ValueInvalid bool
 	// Spans are the address ranges the message reads or writes, for
 	// address predicates; empty when it touches none. SpansUnknown marks a
 	// message that may touch addresses its decoder cannot bound, such as a
@@ -120,10 +127,12 @@ func (n *networks) holds(ip net.IP) bool {
 
 // Evaluator evaluates a snapshot for a given context and returns an action.
 type Evaluator struct {
-	snapshot *Snapshot
-	compiled []compiledEntry
-	decide   []int // deciding entries in DecisionOrder
-	tags     []int // TAG entries
+	snapshot  *Snapshot
+	compiled  []compiledEntry
+	decide    []int // deciding entries in DecisionOrder
+	tags      []int // TAG entries
+	enforcing []int
+	monitor   []int
 }
 
 func NewEvaluator(snap *Snapshot) *Evaluator {
@@ -143,6 +152,13 @@ func (e *Evaluator) compile() {
 	}
 	e.decide = DecisionOrder(e.snapshot.Firewall)
 	e.tags = tagIndexes(e.snapshot.Firewall)
+	for _, i := range e.decide {
+		if MonitorICS(e.compiled[i].Entry, e.snapshot.DPIMode) {
+			e.monitor = append(e.monitor, i)
+		} else {
+			e.enforcing = append(e.enforcing, i)
+		}
+	}
 }
 
 // compileEntry pre-parses a single Entry.
@@ -257,6 +273,9 @@ func matchICSCompiled(ce *compiledEntry, ctx EvalContext) bool {
 		return true
 	}
 	if ctx.ICS == nil {
+		return false
+	}
+	if ce.Action == ActionAllow && ctx.ICS.ValueInvalid {
 		return false
 	}
 	if ce.iec != nil {
@@ -377,5 +396,5 @@ func icsPredicateEmpty(p ICSPredicate) bool {
 		len(p.Originators) == 0 &&
 		p.Negative == nil &&
 		p.Test == nil &&
-		p.SelectExecute == ""
+		p.SelectExecute == "" && len(p.CommandStates) == 0 && len(p.CommandQualifiers) == 0
 }

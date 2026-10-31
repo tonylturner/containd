@@ -17,6 +17,7 @@ import (
 type Config struct {
 	// Pending schema-upgrade evidence is persisted with the next successful write.
 	scopeMigration *IndustrialScopeMigration
+	modeMigration  *RuleModeMigration
 
 	SchemaVersion string          `json:"schema_version,omitempty"`
 	System        SystemConfig    `json:"system"`
@@ -471,7 +472,7 @@ type DataPlaneConfig struct {
 
 	// DPI controls
 	DPIEnabled      bool              `json:"dpiEnabled,omitempty"`      // master DPI on/off
-	DPIMode         string            `json:"dpiMode,omitempty"`         // "learn" or "enforce" (ICS DPI global mode)
+	DPIMode         string            `json:"dpiMode,omitempty"`         // "monitor" or "enforce" (ICS DPI global mode)
 	DPIProtocols    map[string]bool   `json:"dpiProtocols,omitempty"`    // per-IT-protocol enable: "dns","tls","http","ssh","smb","ntp","snmp","rdp"
 	DPIICSProtocols map[string]bool   `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","iec104"; an absent key is enabled
 	DPIICSParsing   map[string]string `json:"dpiIcsParsing,omitempty"`   // per-ICS-protocol "tolerant" or "strict"; an absent key is tolerant (see ics.Parsing)
@@ -855,7 +856,7 @@ type ICSPredicate struct {
 	ReadOnly      bool     `json:"readOnly,omitempty"`      // read-only class
 	WriteOnly     bool     `json:"writeOnly,omitempty"`     // write-only class
 	Direction     string   `json:"direction,omitempty"`     // "request", "response", or "" (both)
-	Mode          string   `json:"mode,omitempty"`          // "learn" or "enforce"
+	Mode          string   `json:"mode,omitempty"`          // "monitor" or "enforce"
 
 	// IEC 60870-5-104 predicates (protocol "iec104").
 	TypeIDs []int      `json:"typeIds,omitempty"` // 1..255; int so JSON is a numeric array, never base64
@@ -864,11 +865,13 @@ type ICSPredicate struct {
 	IOA     []IOARange `json:"ioa,omitempty"`
 	// IEC 104 cause of transmission 1..63, originator address 0..255,
 	// P/N and T bits, and the S/E qualifier of commands.
-	COT           []int  `json:"cot,omitempty"`
-	Originators   []int  `json:"originators,omitempty"`
-	Negative      *bool  `json:"negative,omitempty"`
-	Test          *bool  `json:"test,omitempty"`
-	SelectExecute string `json:"selectExecute,omitempty"` // "select" | "execute"
+	COT               []int  `json:"cot,omitempty"`
+	Originators       []int  `json:"originators,omitempty"`
+	Negative          *bool  `json:"negative,omitempty"`
+	Test              *bool  `json:"test,omitempty"`
+	SelectExecute     string `json:"selectExecute,omitempty"` // "select" | "execute"
+	CommandStates     []int  `json:"commandStates,omitempty"`
+	CommandQualifiers []int  `json:"commandQualifiers,omitempty"`
 
 	// DNP3 predicates (protocol "dnp3"); Addresses are point indexes there.
 	Masters     []uint16 `json:"masters,omitempty"`     // master station addresses
@@ -890,7 +893,7 @@ func (p ICSPredicate) Empty() bool {
 		!p.ReadOnly && !p.WriteOnly && strings.TrimSpace(p.Direction) == "" &&
 		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0 &&
 		len(p.COT) == 0 && len(p.Originators) == 0 && p.Negative == nil && p.Test == nil &&
-		strings.TrimSpace(p.SelectExecute) == "" &&
+		strings.TrimSpace(p.SelectExecute) == "" && len(p.CommandStates) == 0 && len(p.CommandQualifiers) == 0 &&
 		len(p.Masters) == 0 && len(p.Outstations) == 0 && len(p.Groups) == 0 && len(p.Variations) == 0 &&
 		len(p.Instances) == 0 && len(p.Attributes) == 0 && len(p.Tags) == 0
 }

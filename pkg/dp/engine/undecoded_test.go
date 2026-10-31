@@ -64,7 +64,7 @@ func assertUndecodedAlerts(t *testing.T, e *Engine, ev dpi.Event, action string)
 func TestUndecodedPolicy(t *testing.T) {
 	for _, proto := range []string{"modbus", "dnp3", "cip"} {
 		for _, parsing := range []string{"tolerant", "strict"} {
-			for _, mode := range []string{"enforce", "learn"} {
+			for _, mode := range []string{"enforce", "monitor"} {
 				for _, both := range []bool{false, true} {
 					name := proto + "/" + parsing + "/" + mode
 					if both {
@@ -97,7 +97,7 @@ func TestUndecodedPolicy(t *testing.T) {
 						assertUndecodedAlerts(t, e, ev, action)
 						var decisions []events.Event
 						for _, event := range e.Events().List(0) {
-							if event.Kind == eventfields.KindDecision {
+							if event.Kind == eventfields.KindDecision && !(event.Attributes["mode"] == "monitor" && event.Attributes["reason"] == reasonRule) {
 								decisions = append(decisions, event)
 							}
 						}
@@ -134,7 +134,7 @@ func TestUndecodedPolicy(t *testing.T) {
 
 func TestIECUndecodedPolicy(t *testing.T) {
 	for _, parsing := range []ics.Parsing{ics.Tolerant, ics.Strict} {
-		for _, mode := range []string{"enforce", "learn"} {
+		for _, mode := range []string{"enforce", "monitor"} {
 			for _, both := range []bool{false, true} {
 				name := string(parsing) + "/" + mode
 				if both {
@@ -154,16 +154,28 @@ func TestIECUndecodedPolicy(t *testing.T) {
 					want, action := decisionAllow, "passed"
 					if wantDrop {
 						want, action = decisionDeny, "dropped and reset"
-					} else if parsing == ics.Strict {
+					} else if parsing == ics.Strict || mode == "monitor" {
 						want, action = decisionWouldDrop, "would drop"
 					}
-					if j.denied != wantDrop || len(j.events) != 1 || len(j.findings) != 1 ||
-						j.events[0].Attributes[eventfields.KeyDecision] != want {
-						t.Fatalf("judgement = %+v, want one %s", j, want)
+					wantCount := 1
+					if mode == "monitor" {
+						wantCount = 2
 					}
-					for _, key := range inspectionFindingKeys {
-						if !reflect.DeepEqual(j.events[0].Attributes[key], ev.Attributes[key]) {
-							t.Fatalf("decision lost %s", key)
+					if j.denied != wantDrop || len(j.events) != wantCount || len(j.findings) != 1 {
+						t.Fatalf("judgement=%+v", j)
+					}
+					for _, dec := range j.events {
+						expected := want
+						if mode == "monitor" && dec.Attributes["reason"] == reasonRule {
+							expected = decisionWouldAllow
+						}
+						if dec.Attributes["decision"] != expected {
+							t.Fatal(dec)
+						}
+						for _, key := range inspectionFindingKeys {
+							if !reflect.DeepEqual(dec.Attributes[key], ev.Attributes[key]) {
+								t.Fatalf("decision lost %s", key)
+							}
 						}
 					}
 					e, err := New(Config{})
@@ -186,7 +198,7 @@ func TestIECUndecodedPolicy(t *testing.T) {
 }
 
 func TestUndecodedDecodedDeny(t *testing.T) {
-	for _, mode := range []string{"enforce", "learn"} {
+	for _, mode := range []string{"enforce", "monitor"} {
 		t.Run(mode, func(t *testing.T) {
 			e, err := New(Config{DPIMode: "enforce", DPIICSParsing: map[string]string{"cip": "strict"}})
 			if err != nil {
@@ -204,12 +216,12 @@ func TestUndecodedDecodedDeny(t *testing.T) {
 			}
 			var decisions []events.Event
 			for _, event := range e.Events().List(0) {
-				if event.Kind == eventfields.KindDecision {
+				if event.Kind == eventfields.KindDecision && event.Attributes["reason"] == reasonNonconformant {
 					decisions = append(decisions, event)
 				}
 			}
-			if len(decisions) != 1 || decisions[0].Attributes[eventfields.KeyRuleID] != "deny" ||
-				decisions[0].Attributes[eventfields.KeyReason] != reasonRule {
+			if len(decisions) != 1 || decisions[0].Attributes["scopeId"] != "deny" || decisions[0].Attributes[eventfields.KeyRuleID] != nil ||
+				decisions[0].Attributes[eventfields.KeyReason] != reasonNonconformant {
 				t.Fatalf("decoded denial lost precedence: %+v", decisions)
 			}
 		})
