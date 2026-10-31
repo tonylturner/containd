@@ -71,8 +71,8 @@ function ConfigPage() {
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const d = await api.diffConfig();
-    if (!checkLoaded(d?.candidate ?? d?.running)) return;
     setConfigDiff(d);
+    if (!checkLoaded(d?.candidate ?? d?.running)) return;
     if (!keepEdits || !candidateDraft.current) {
       setCandidateText(JSON.stringify(d?.candidate ?? d?.running, null, 2));
       candidateDraft.current = false;
