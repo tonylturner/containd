@@ -50,10 +50,6 @@ FROM envoyproxy/envoy:v1.31.2 AS envoy-src
 
 FROM cgr.dev/chainguard/wolfi-base:latest@sha256:360896efb0753a5701c48f860e17130c205eae5a264797aa3e7ea126ee2923a7
 
-# Image metadata is sourced from the same build args as the binary.
-ARG VERSION
-ARG COMMIT=unknown
-
 # Install runtime packages: embedded services + troubleshooting tools.
 # NTP: chrony replaces openntpd (not available in Wolfi).
 RUN apk update && apk add --no-cache \
@@ -87,6 +83,10 @@ RUN addgroup -S clamav \
 # Envoy needs libstdc++ which is not pulled in by default.
 COPY --from=envoy-deps /usr/lib/libstdc++.so.6* /usr/lib/
 
+# Image metadata comes from the same build args as the binary. Declared
+# after the package RUNs, so a new commit does not invalidate those layers.
+ARG VERSION
+ARG COMMIT=unknown
 LABEL org.opencontainers.image.title="containd" \
       org.opencontainers.image.description="ICS/OT next-generation firewall" \
       org.opencontainers.image.url="https://github.com/tonylturner/containd" \
