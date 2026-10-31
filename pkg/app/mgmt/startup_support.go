@@ -149,7 +149,9 @@ func ingestDHCPLeaseAuditEvents(auditStore audit.Store, evs []dpevents.Event, la
 		if !shouldAuditDHCPLeaseEvent(ev, lastID) {
 			continue
 		}
-		_ = auditStore.Add(context.Background(), dhcpLeaseAuditRecord(ev))
+		if err := auditStore.Add(context.Background(), dhcpLeaseAuditRecord(ev)); err != nil {
+			return lastID
+		}
 		lastID = ev.ID
 	}
 	return lastID
