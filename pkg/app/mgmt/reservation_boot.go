@@ -111,7 +111,7 @@ func persistBootFault(logger *zap.SugaredLogger, stores mgmtStores, conflict err
 		Timestamp: now, Actor: "system", Source: "management",
 		Action: kind, Result: "fault", Detail: fault,
 	}); err != nil {
-		return nil, fmt.Errorf("record management boot fault event: %w", err)
+		logger.Errorw("persist management boot fault evidence", "error", err)
 	}
 	logger.Errorw(kind, "error", fault)
 	return &dpevents.Event{ID: uint64(now.UnixNano()), Timestamp: now, Proto: "system", Kind: kind,

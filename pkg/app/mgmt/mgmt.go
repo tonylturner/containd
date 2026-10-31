@@ -275,9 +275,7 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 	}
 	stores.scopeEvents, err = publishScopeMigrations(context.Background(), stores)
 	if err != nil {
-		stores.auditStore.Close()
-		stores.userStore.Close()
-		return fail(err)
+		logger.Errorw("persist industrial scope migration evidence", "error", err)
 	}
 	stores.bootEvent = event
 	return stores, cfg, nil
