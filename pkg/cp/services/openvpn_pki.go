@@ -39,10 +39,25 @@ func netmaskString(m net.IPMask) string {
 
 // EnsureOpenVPNCA ensures a local OpenVPN CA exists under pkiDir and returns cert/key paths.
 func EnsureOpenVPNCA(pkiDir string) (certPath, keyPath string, err error) {
+	openVPNAuthorityMu.Lock()
+	defer openVPNAuthorityMu.Unlock()
+	return ensureOpenVPNCA(pkiDir)
+}
+func ensureOpenVPNCA(pkiDir string) (certPath, keyPath string, err error) {
 	certPath = filepath.Join(pkiDir, "ca.crt")
 	keyPath = filepath.Join(pkiDir, "ca.key")
-	if fileExists(certPath) && fileExists(keyPath) {
+	if fileExists(certPath) || fileExists(keyPath) {
+		if _, _, err := loadCertAndKey(certPath, keyPath); err != nil {
+			return "", "", err
+		}
 		return certPath, keyPath, nil
+	}
+	entries, err := os.ReadDir(pkiDir)
+	if err != nil && !os.IsNotExist(err) {
+		return "", "", err
+	}
+	if len(entries) != 0 {
+		return "", "", errors.New("existing PKI has no CA; refusing replacement")
 	}
 	if err := os.MkdirAll(pkiDir, 0o700); err != nil {
 		return "", "", err
@@ -86,9 +101,25 @@ func EnsureOpenVPNCA(pkiDir string) (certPath, keyPath string, err error) {
 
 // EnsureOpenVPNServerCert ensures a local OpenVPN server certificate exists under pkiDir.
 func EnsureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath string) (certPath, keyPath string, err error) {
+	openVPNAuthorityMu.Lock()
+	defer openVPNAuthorityMu.Unlock()
+	return ensureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath)
+}
+func ensureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath string) (certPath, keyPath string, err error) {
 	certPath = filepath.Join(pkiDir, "server.crt")
 	keyPath = filepath.Join(pkiDir, "server.key")
-	if fileExists(certPath) && fileExists(keyPath) {
+	if fileExists(certPath) || fileExists(keyPath) {
+		cert, _, err := loadCertAndKey(certPath, keyPath)
+		if err != nil {
+			return "", "", err
+		}
+		ca, _, err := loadCertAndKey(caCertPath, caKeyPath)
+		if err != nil {
+			return "", "", err
+		}
+		if err := cert.CheckSignatureFrom(ca); err != nil {
+			return "", "", err
+		}
 		return certPath, keyPath, nil
 	}
 	caCert, caKey, err := loadCertAndKey(caCertPath, caKeyPath)
@@ -130,56 +161,32 @@ func EnsureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath string) (certPath, ke
 
 // EnsureOpenVPNClientCert ensures a local OpenVPN client certificate exists under pkiDir.
 func EnsureOpenVPNClientCert(pkiDir, caCertPath, caKeyPath, name string) (certPath, keyPath string, err error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", "", errors.New("client name is empty")
+	openVPNAuthorityMu.Lock()
+	defer openVPNAuthorityMu.Unlock()
+	if caCertPath != filepath.Join(pkiDir, "ca.crt") || caKeyPath != filepath.Join(pkiDir, "ca.key") {
+		return "", "", errors.New("issuer paths do not belong to inventory")
 	}
-	safe := sanitizeClientName(name)
-	if safe == "" {
-		return "", "", errors.New("invalid client name")
-	}
-	clientsDir := filepath.Join(pkiDir, "clients")
-	if err := os.MkdirAll(clientsDir, 0o700); err != nil {
-		return "", "", err
-	}
-	certPath = filepath.Join(clientsDir, safe+".crt")
-	keyPath = filepath.Join(clientsDir, safe+".key")
-	if fileExists(certPath) && fileExists(keyPath) {
-		return certPath, keyPath, nil
-	}
-
-	caCert, caKey, err := loadCertAndKey(caCertPath, caKeyPath)
+	inv, err := openOpenVPNInventory(pkiDir)
 	if err != nil {
 		return "", "", err
 	}
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	credential, err := inv.issue(name)
 	if err != nil {
 		return "", "", err
 	}
-	serial, err := randSerial()
+	c, err := inv.find(credential.ID)
 	if err != nil {
 		return "", "", err
 	}
-	now := time.Now().UTC()
-	tmpl := x509.Certificate{
-		SerialNumber: serial,
-		Subject: pkix.Name{
-			CommonName:   safe,
-			Organization: []string{"containd"},
-		},
-		NotBefore:   now.Add(-1 * time.Hour),
-		NotAfter:    now.Add(3 * 365 * 24 * time.Hour),
-		KeyUsage:    x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, &tmpl, caCert, &key.PublicKey, caKey)
-	if err != nil {
+	dir := filepath.Join(pkiDir, "clients")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
 	}
-	if err := atomicWritePEMCert(certPath, der); err != nil {
+	certPath, keyPath = filepath.Join(dir, name+".crt"), filepath.Join(dir, name+".key")
+	if err := atomicWriteFile(certPath, []byte(c.Certificate), 0o600); err != nil {
 		return "", "", err
 	}
-	if err := atomicWritePEMECDSAKey(keyPath, key); err != nil {
+	if err := atomicWriteFile(keyPath, []byte(c.PrivateKey), 0o600); err != nil {
 		return "", "", err
 	}
 	return certPath, keyPath, nil
@@ -223,6 +230,10 @@ func loadCertAndKey(certPath, keyPath string) (*x509.Certificate, *ecdsa.Private
 	key, err := x509.ParseECPrivateKey(keyDER)
 	if err != nil {
 		return nil, nil, err
+	}
+	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
+	if !ok || !pub.Equal(&key.PublicKey) {
+		return nil, nil, errors.New("certificate/key mismatch")
 	}
 	return cert, key, nil
 }
