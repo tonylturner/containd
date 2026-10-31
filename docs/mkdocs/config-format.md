@@ -15,6 +15,11 @@ snapshot and cannot certify nft enforcement.
 
 ## Schema
 
+The current schema is `0.1.10`. Back up before upgrading: 0.1.36 and earlier
+cannot read schema 0.1.10; restore a pre-upgrade backup to downgrade.
+See [ordered policy upgrades](#ordered-policy-upgrades) for rule-order and
+port-forward migration behavior.
+
 This complete example uses schema `0.1.10`. It defines two routed networks and a
 single TCP/80 allow rule. With enforcement enabled, other new forwarded
 connections are denied. Enforcement is off until you enable it deliberately. Replace the illustrative kernel devices and
@@ -274,6 +279,29 @@ path, unsafe changes and rollback targets are refused; see
 Exports are redacted by default. Only admins can request an unredacted export;
 store full backups securely. Keep the persistent data volume as well as exported
 JSON if you need users, audit history, or service files during recovery.
+
+## Ordered policy upgrades
+
+Loading, importing or committing a configuration below schema `0.1.10` upgrades
+it to ordered first-match policy. Potentially overlapping terminal rules are
+reordered to preserve legacy precedence (ALLOW first, then DENY/RESET, ordered
+by ID within each group); rules proven disjoint retain authored order where
+possible. Rule reordering leaves `RATE_LIMIT` and `TAG` in their slots; generated
+forward grants can shift rule positions. Running, candidate and previous banks
+record their before/after rule IDs in durable
+`config.ordered_policy.migrated` audit records.
+
+Port forwards now translate only; firewall policy decides admission. For each
+forward not already referenced by a `viaForwards` rule, migration generates a
+forward-scoped ALLOW before existing terminals only when no enforcing ICS
+transport scope overlaps. Full containment in an enforcing ICS scope generates
+no grant. Partial or uncertain overlap generates no grant for **any** of that
+forward's traffic, even outside the inspected subset, and records a warning.
+Existing inspection rules and defaults still decide delivery, so migration does
+not promise to preserve every former port-forward admission. Review rule order
+and warnings before relying on a published service. See
+[port-forward publication](policy-model.md#port-forward-publication-and-deletion)
+for placement explanations and explicit permission authoring.
 
 ## Unsupported protocols during upgrade
 
