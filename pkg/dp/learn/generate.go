@@ -187,6 +187,11 @@ func GenerateRelation(o evidence.Observation) ([]config.Rule, []evidence.Withhel
 		reasons = append(reasons, evidence.WithheldNonstandardPort)
 	}
 	s := o.Service
+	// Monitoring and system ASDUs are not command relations. Classify them
+	// before applying command direction, selector, value or qualifier checks.
+	if s.Protocol == "iec104" && o.IEC104 != nil && o.IEC104.TypeID != nil && iec104.ClassOf(*o.IEC104.TypeID) != "control" {
+		return nil, append(reasons, evidence.WithheldIECNonCommand)
+	}
 	client, e1 := netip.ParseAddr(s.ClientIP)
 	server, e2 := netip.ParseAddr(s.ServerIP)
 	if e1 != nil || e2 != nil || client.Zone() != "" || server.Zone() != "" || client.Is4() != server.Is4() {
@@ -254,7 +259,7 @@ func GenerateRelation(o evidence.Observation) ([]config.Rule, []evidence.Withhel
 		if !client.Is4() || s.Transport != "tcp" {
 			reasons = append(reasons, evidence.WithheldCoordinates)
 		}
-		if d.APCIType != "I" || iec104.ClassOf(*d.TypeID) != "control" {
+		if d.APCIType != "I" {
 			reasons = append(reasons, evidence.WithheldIECNonCommand)
 		}
 		if *d.CA == 65535 {

@@ -25,6 +25,32 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
+func TestExactIECMonitoringWithheldOnlyAsNonCommand(t *testing.T) {
+	for _, direction := range []string{"request", "response"} {
+		t.Run(direction, func(t *testing.T) {
+			o := evidence.Observation{
+				Quality:   evidence.Quality{Complete: true, Decoded: true},
+				Authority: evidence.Authority{RoleCertain: true, StandardPort: true},
+				Service: evidence.ServiceKey{
+					ClientIP: "192.0.2.1", ServerIP: "192.0.2.2",
+					ServerPort: 2404, Transport: "tcp", Direction: direction, Protocol: "iec104",
+				},
+				ObjectCount: 1,
+				IEC104: &evidence.IEC104{
+					APCIType: "I", TypeID: ptr(uint8(31)), CA: ptr(uint16(1)),
+					COT: ptr(uint8(3)), Originator: ptr(uint8(0)),
+					Negative: ptr(false), Test: ptr(false),
+					Objects: []evidence.IEC104Object{{Index: 0, IOA: ptr(uint32(1001))}},
+				},
+			}
+			bundle, reasons := learn.GenerateRelation(o)
+			if len(bundle) != 0 || !slices.Equal(reasons, []evidence.WithheldReason{evidence.WithheldIECNonCommand}) {
+				t.Fatalf("monitoring ASDU: rules=%v reasons=%v", bundle, reasons)
+			}
+		})
+	}
+}
+
 func TestExactWireAndVerifiedNATCoordinates(t *testing.T) {
 	state := requestState()
 	ct := &conntrack.Evidence{
