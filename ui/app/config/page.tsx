@@ -57,6 +57,7 @@ function ConfigPage() {
   const candidate = configDiff?.candidate ?? null;
   const [candidateText, setCandidateText] = useState("");
   const candidateDraft = useRef(false);
+  const candidateEditRevision = useRef(0);
   const [status, setStatus] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState("60");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -95,11 +96,15 @@ function ConfigPage() {
     if (!canEdit || !canSave) return;
     setStatus(null);
     try {
+      const submittedRevision = candidateEditRevision.current;
       const parsed = JSON.parse(candidateText) as ConfigBundle;
       const res = await api.setCandidateConfig(parsed);
       if (!res.ok) {
         setStatus(`Failed to save candidate: ${res.error}`);
         return;
+      }
+      if (candidateEditRevision.current === submittedRevision) {
+        candidateDraft.current = false;
       }
       setCandidateLoadedAt(new Date());
       setStatus(statusWithWarning("Candidate staged — commit to apply.", res.warning));
@@ -532,7 +537,7 @@ function ConfigPage() {
           <textarea
             aria-label="Staged config JSON"
             value={candidateText}
-            onChange={(e) => { candidateDraft.current = true; setCandidateText(e.target.value); }}
+            onChange={(e) => { candidateEditRevision.current++; candidateDraft.current = true; setCandidateText(e.target.value); }}
             readOnly={!canEdit || !canSave}
             rows={22}
             className="w-full rounded-xs border bg-(--surface) p-3 font-mono text-xs text-(--text) transition-ui outline-hidden"

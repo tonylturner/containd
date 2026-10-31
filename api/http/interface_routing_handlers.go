@@ -23,7 +23,7 @@ func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, cfg.Interfaces)
+		configCollectionJSON(c, cfg.Interfaces)
 	}
 }
 
