@@ -32,13 +32,11 @@
     "@types/react-dom": "19.3.0",
     "eslint": "10.14.0",
     "eslint-config-next": "16.4.3",
-    "glob": "^11.1.0",
     "postcss": "8.5.31",
     "tailwindcss": "4.3.3",
     "typescript": "5.4.5"
   },
   "overrides": {
-    "glob": "^11.1.0",
     "postcss": "8.5.31"
   }
 }

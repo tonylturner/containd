@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restarts, and invalidate them on password, TOTP or role changes. Pending
   challenges issued before this upgrade must be restarted.
 
+### Changed
+
+- IT DPI HTTP parsing reads request and header lines directly from the packet
+  payload instead of allocating a buffered reader per packet.
+- The UI drops the unused `glob` dev dependency and its override.
+
 ### Fixed
 
 - Direct CLI login explains when an account needs MFA, password rotation or MFA
