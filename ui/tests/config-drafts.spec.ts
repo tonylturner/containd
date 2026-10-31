@@ -55,7 +55,7 @@ async function mockAPI(page: Page) {
     if (path === "/firewall/port-forwards" && req.method() === "POST") {
       const nat = data["/firewall/nat"] as { portForwards?: unknown[] };
       data["/firewall/nat"] = { ...nat, portForwards: [...(nat.portForwards ?? []), body.forward] };
-      result = { forward: body.forward, placement: { rule: { id: "generated-allow" }, index: 0 } };
+      result = { forward: body.forward, placement: { reason: "generated", rule: { id: "generated-allow" }, index: 0 } };
     } else if (path === "/firewall/rules" && req.method() === "POST") {
       data[path] = [...data[path] as object[], body];
     } else if (path.startsWith("/firewall/rules/")) {

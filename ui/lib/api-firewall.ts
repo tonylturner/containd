@@ -72,28 +72,32 @@ export type RuleAction = "ALLOW" | "DENY" | "RESET" | "RATE_LIMIT" | "TAG";
 export type Position = "top" | "bottom" | { before: string } | { after: string };
 export type FirewallRuleCreate = FirewallRule & { position?: Position };
 
+type ForwardGrantWarning = {
+  forwardId: string;
+  ruleIds: string[];
+  message: string;
+  traffic: {
+    sources: string[];
+    ingressZone: string;
+    backendZones: string;
+    protocol: string;
+    backend: string;
+    listenAddress: string;
+    listenPort: number;
+  };
+};
+
 export type ForwardPlacement = {
   forwardId: string;
   overlap: string;
-  reason: string;
   ruleIds?: string[];
-  rule?: FirewallRule;
   index: number;
-  warning?: {
-    forwardId: string;
-    ruleIds: string[];
-    message: string;
-    traffic: {
-      sources: string[];
-      ingressZone: string;
-      backendZones: string;
-      protocol: string;
-      backend: string;
-      listenAddress: string;
-      listenPort: number;
-    };
-  };
-};
+} & (
+  | { reason: "generated"; rule: FirewallRule; warning?: never }
+  | { reason: "referenced"; rule?: never; warning?: ForwardGrantWarning }
+  | { reason: "inside"; rule?: never; warning?: never; ruleIds: string[] }
+  | { reason: "partial"; rule?: never; warning: ForwardGrantWarning }
+);
 
 export type ForwardPublishResult = { forward: PortForward; placement?: ForwardPlacement };
 export type ForwardDeleteResult = { deletedRuleIds: string[]; editedRuleIds: string[] };
@@ -173,6 +177,8 @@ export type RuleWarning = {
 
 /** Rule impact preview: the rule matched in isolation against recent events. */
 export type RulePreview = {
+  /** Why historical counting is unavailable; counts and samples must not be shown. */
+  unavailable?: string;
   match_count: number;
   /** The newest matching events, at most 50, in their original wire orientation. */
   sample_matches: TelemetryEvent[];

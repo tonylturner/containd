@@ -7,7 +7,7 @@ import { expect, test, type Page } from "@playwright/test";
 const zones = [{ name: "wan" }, { name: "lan" }];
 
 /** Mocks the wizard's API and records atomic publish requests. */
-async function mockWizardAPI(page: Page, placement: unknown = { rule: { id: "pf-allow" }, index: 0 }) {
+async function mockWizardAPI(page: Page, placement: unknown = { reason: "generated", rule: { id: "pf-allow" }, index: 0 }) {
   const staged: unknown[] = [];
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
@@ -67,7 +67,7 @@ test("the publish-service wizard rejects a non-IPv4 server address at the server
 });
 
 test("the wizard never claims an allow rule was created when existing ICS policy owns the traffic", async ({ page }) => {
-  const staged = await mockWizardAPI(page, { overlap: "inside", reason: "inside", index: 0 });
+  const staged = await mockWizardAPI(page, { overlap: "inside", reason: "inside", index: 0, ruleIds: ["inspect-modbus", "inspect-control"] });
   await openPublishService(page);
   await page.getByPlaceholder("e.g. 443").fill("502");
   await page.getByRole("button", { name: "Next", exact: true }).click();
@@ -75,7 +75,7 @@ test("the wizard never claims an allow rule was created when existing ICS policy
   await page.getByRole("combobox").selectOption("wan");
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Stage", exact: true }).click();
-  await expect(page.getByText("no allow rule generated (inside). Existing policy decides delivery", { exact: false })).toBeVisible();
+  await expect(page.getByText("Enforcing ICS rules inspect-modbus, inspect-control govern this traffic; no allow rule created.", { exact: false })).toBeVisible();
   expect(staged).toHaveLength(1);
   expect(staged[0]).toMatchObject({ allowRule: true });
 });

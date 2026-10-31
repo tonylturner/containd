@@ -86,11 +86,11 @@ export function RuleImpactSummary({ preview }: { preview: RulePreview }) {
   return (
     <div aria-label="Rule impact preview" className="mt-3">
       <p className="text-sm text-(--text)">
-        {preview.total_events === 0
+        {preview.unavailable || (preview.total_events === 0
           ? "No recent events to search: the engine has retained none yet."
-          : `${preview.match_count} of ${preview.total_events} recent events match this rule on its own.`}
+          : `${preview.match_count} of ${preview.total_events} recent events match this rule on its own.`)}
       </p>
-      <RulePreviewEvents preview={preview} />
+      {!preview.unavailable && <RulePreviewEvents preview={preview} />}
       <ICSCoverageSection coverage={preview.icsCoverage} />
       <RuleWarningList warnings={preview.warnings} />
     </div>

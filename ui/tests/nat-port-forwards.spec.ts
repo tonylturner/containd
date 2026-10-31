@@ -20,7 +20,7 @@ async function openNAT(page: Page, zones: Zone[] = [{ name: "wan" }, { name: "la
       const body = route.request().postDataJSON();
       staged.push(body);
       forwards.push(body.forward);
-      await route.fulfill({ json: { forward: body.forward, ...(body.allowRule ? { placement: { rule: { id: "allow-published" }, index: 0 } } : {}) } });
+      await route.fulfill({ json: { forward: body.forward, ...(body.allowRule ? { placement: { reason: "generated", rule: { id: "allow-published" }, index: 0 } } : {}) } });
       return;
     }
     const json = path.endsWith("/auth/me") || path.endsWith("/auth/session")
@@ -133,6 +133,24 @@ test("publish without an allow rule sends false and leaves policy untouched", as
   expect(staged).toHaveLength(1);
   expect(staged[0]).toMatchObject({ allowRule: false });
 });
+
+for (const placement of [
+  { reason: "inside", overlap: "inside", ruleIds: ["inspect-modbus"], message: "Enforcing ICS rule inspect-modbus governs this traffic; no allow rule created." },
+  { reason: "referenced", overlap: "no-overlap", ruleIds: [], message: "An existing firewall rule already references this port forward; no allow rule created." },
+]) {
+  test(`publish describes ${placement.reason} placement without claiming a generated permission`, async ({ page }) => {
+    await openNAT(page);
+    await page.route("**/api/v1/firewall/port-forwards", (route) => route.fulfill({ json: {
+      forward: route.request().postDataJSON().forward,
+      placement: { forwardId: "pf-test", index: 0, reason: placement.reason, overlap: placement.overlap, ruleIds: placement.ruleIds },
+    } }));
+    await page.getByPlaceholder("listen port").fill("1502");
+    await page.getByPlaceholder("dest ip").fill("192.0.2.5");
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: placement.message })).toBeVisible();
+    await expect(page.getByText(/inserted at position/)).toHaveCount(0);
+  });
+}
 
 test("publish displays the fail-closed warning and its traffic, not a generated grant", async ({ page }) => {
   await openNAT(page);
