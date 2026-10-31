@@ -3,7 +3,6 @@
 package engine
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -69,11 +68,12 @@ type transportResolver struct {
 	count         atomic.Int64
 	bytes         atomic.Int64
 	aliases       map[conntrack.Tuple]*transportAlias // worker-owned, O/R only
+	expiry        transportExpiry
 	epoch         string
 	serial        uint64
 	losses        chan transportPacket
-	lossFallback  bool   // unscheduled notices retained in bounded histories
-	unindexedLoss uint64 // conservative barrier for already-started unindexed streams
+	lossFallback  atomic.Bool // unscheduled notices retained in bounded histories
+	unindexedLoss uint64      // conservative barrier for already-started unindexed streams
 }
 
 func (e *Engine) initTransport(cfg Config) error {
@@ -143,7 +143,8 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 		r.unavailable(e, pkt, "queue_overflow")
 		return acceptDecision
 	}
-	pkt.Payload, pkt.SrcIP, pkt.DstIP = bytes.Clone(pkt.Payload), bytes.Clone(pkt.SrcIP), bytes.Clone(pkt.DstIP)
+	// Capture decodes payload and IPs into owned allocations before invoking
+	// admission. The queue retains those allocations, never the receive buffer.
 	select {
 	case r.queue <- transportPacket{packet: pkt, at: time.Now(), history: history}:
 		if history != nil {
@@ -267,6 +268,7 @@ func (r *transportResolver) run(ctx context.Context, e *Engine) {
 			r.authority.count("canceled")
 		}
 		r.aliases = make(map[conntrack.Tuple]*transportAlias)
+		r.expiry = transportExpiry{}
 		clear(r.indexed)
 	}()
 	for {
@@ -356,11 +358,7 @@ func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, ove
 		r.authority.count("cache_hits")
 		return old.connection
 	}
-	for t, alias := range r.aliases {
-		if now.Sub(alias.expires) > 30*time.Second || !alias.connection.Verified() && !now.Before(alias.expires) {
-			delete(r.aliases, t)
-		}
-	}
+	r.pruneAliases(now)
 	if len(r.aliases)+2 > transportAliasLimit {
 		return r.unresolvedAlias(history, "cache_capacity")
 	}
@@ -385,7 +383,7 @@ func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, ove
 			status = "lookup_timeout"
 		}
 		c := r.unresolvedAlias(history, status)
-		r.aliases[tuple] = &transportAlias{connection: c, expires: now.Add(100 * time.Millisecond), version: version}
+		r.storeAlias(tuple, &transportAlias{connection: c, expires: now.Add(100 * time.Millisecond), version: version})
 		return c
 	}
 	// A live alias cannot be silently reassigned to another kernel entry.
@@ -417,7 +415,8 @@ func (r *transportResolver) resolve(ctx context.Context, pkt capture.Packet, ove
 	if old != nil && !newSYN && old.hasSYN {
 		a.hasSYN, a.synSeq = true, old.synSeq
 	}
-	r.aliases[evidence.Original], r.aliases[evidence.Reply] = a, a
+	r.storeAlias(evidence.Original, a)
+	r.storeAlias(evidence.Reply, a)
 	r.authority.count("resolved")
 	return c
 }

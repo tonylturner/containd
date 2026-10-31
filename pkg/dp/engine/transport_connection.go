@@ -4,6 +4,7 @@ package engine
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
@@ -43,7 +44,7 @@ func (e *Engine) handleTransportPacket(pkt capture.Packet, c *flow.Connection, h
 // association does not rewrite the flow's key or require a service-port hint.
 func (e *Engine) tupleStateLocked(tuple conntrack.Tuple) *flow.State {
 	for _, dir := range []flow.Direction{flow.DirForward, flow.DirReverse} {
-		if st := e.flows[flow.TupleKey(tuple, dir).Hash()]; st != nil {
+		if st := e.flows[flow.TupleMapKey(tuple, dir)]; st != nil {
 			return st
 		}
 	}
@@ -69,13 +70,25 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 	}
 	iecOwned := e.iecOwnsPacket(pkt)
 	e.flowMu.Lock()
+	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
+	e.flowMu.Unlock()
+	for _, old := range retired {
+		e.endFlowStream(old, nil)
+	}
+}
+
+// Caller holds flowMu; IEC ownership is queried before acquiring it.
+func (e *Engine) retireTransportIncarnationLocked(pkt capture.Packet, incoming *flow.Connection, iecOwned bool) []*flow.State {
+	if pkt.Token.Inline() {
+		return nil
+	}
 	st := e.tupleStateLocked(packetKey(pkt).Tuple())
 	var retired []*flow.State
 	if st != nil {
 		old := st.Connection.Load()
 		newSYN := pkt.Proto == 6 && pkt.TCP.Valid && pkt.TCP.Flags&capture.TCPFlagSYN != 0 &&
 			pkt.TCP.Flags&capture.TCPFlagACK == 0
-		if isn, ok := e.transportISNs[st.Key.Hash()]; ok && isn == pkt.TCP.Seq {
+		if isn, ok := e.transportISNs[st.Key.MapKey()]; ok && isn == pkt.TCP.Seq {
 			newSYN = false
 		}
 		var evidence *conntrack.Evidence
@@ -111,16 +124,33 @@ func (e *Engine) retireTransportIncarnation(pkt capture.Packet, incoming *flow.C
 				peer = old.Peer(st.Key)
 			}
 			for _, candidate := range []*flow.State{st, e.tupleStateLocked(peer.Tuple())} {
-				if candidate != nil && e.flows[candidate.Key.Hash()] == candidate {
+				if candidate != nil && e.flows[candidate.Key.MapKey()] == candidate {
 					retired = append(retired, e.dropFlowLocked(candidate.Key))
 				}
 			}
 		}
 	}
-	e.flowMu.Unlock()
-	for _, old := range retired {
-		e.endFlowStream(old, nil)
+	return retired
+}
+
+// The healthy path checks incarnation retirement under the flow-tracking lock
+// it already needs. A real retirement still ends streams before creating the
+// replacement state, preserving peer lookup and close ordering.
+func (e *Engine) trackTransportFlow(pkt capture.Packet, now time.Time, incoming *flow.Connection) *flow.State {
+	iecOwned := !pkt.Token.Inline() && e.iecOwnsPacket(pkt)
+	e.flowMu.Lock()
+	retired := e.retireTransportIncarnationLocked(pkt, incoming, iecOwned)
+	if len(retired) != 0 {
+		e.flowMu.Unlock()
+		for _, old := range retired {
+			e.endFlowStream(old, nil)
+		}
+		e.flowMu.Lock()
 	}
+	state, forgotten, needsSweep := e.trackFlowLocked(pkt, now)
+	e.flowMu.Unlock()
+	e.finishFlowTracking(forgotten, needsSweep, now)
+	return state
 }
 
 // A retained IEC session owns its tuple even if its current envelope changes.
@@ -155,9 +185,9 @@ func (e *Engine) noteTransportSYNLocked(pkt capture.Packet, key flow.Key) {
 	if !pkt.Token.Inline() && pkt.Proto == 6 && pkt.TCP.Valid &&
 		pkt.TCP.Flags&capture.TCPFlagSYN != 0 && pkt.TCP.Flags&capture.TCPFlagACK == 0 {
 		if e.transportISNs == nil {
-			e.transportISNs = make(map[string]uint32)
+			e.transportISNs = make(map[flow.MapKey]uint32)
 		}
-		e.transportISNs[key.Hash()] = pkt.TCP.Seq
+		e.transportISNs[key.MapKey()] = pkt.TCP.Seq
 	}
 }
 

@@ -14,7 +14,7 @@ func (m *Manager) DiscardFlow(state *flow.State) {
 	}
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
-	key := state.Key.Hash()
+	key := state.ID()
 	if m.reassembler != nil {
 		m.reassembler.complete(key)
 	}
@@ -64,10 +64,10 @@ func (m *Manager) ResetStream(peer *flow.State, pkt *ParsedPacket) ([]Event, err
 	}
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
-	if !m.reassembler.endPeer(peer.Key.Hash(), pkt.FailClosed) {
+	if !m.reassembler.endPeer(peer.ID(), pkt.FailClosed) {
 		return nil, nil
 	}
-	m.endStream(peer.Key.Hash())
+	m.endStream(peer.ID())
 	return m.flowEnd(peer, eventTime(peer, pkt))
 }
 

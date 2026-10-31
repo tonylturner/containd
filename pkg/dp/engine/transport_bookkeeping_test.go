@@ -73,7 +73,7 @@ func TestTransportRegainedLossIndexWaitsFullRecovery(t *testing.T) {
 	// recovery deadline has elapsed, but losses since then were not indexed.
 	state := flow.NewState(flow.TupleKey(evidence.Original, flow.DirForward), time.Now())
 	state.Connection.Store(c)
-	e.flows[state.Key.Hash()] = state
+	e.flows[state.Key.MapKey()] = state
 	reply := transportWire(evidence.Reply, time.Now(), modbusReadReply(1))
 	r.admit(e, reply)
 	processTransportAdmission(t, e, r)

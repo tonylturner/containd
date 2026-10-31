@@ -203,7 +203,7 @@ func TestDenyRetentionCapacity(t *testing.T) {
 		}
 	}
 	for i := 1; i <= deniedTCPCapacity+extra; i++ {
-		d := e.deniedTCP[tcpTupleHash(retentionKey(uint16(i)))]
+		d := e.deniedTCP[tcpTupleKey(retentionKey(uint16(i)))]
 		if (d == nil) != (i <= extra) {
 			t.Fatalf("oldest-first eviction wrong for tuple %d", i)
 		}
@@ -276,7 +276,7 @@ func TestDenyRetentionConcurrentEvictionPublication(t *testing.T) {
 		defer close(finished)
 		done <- f.handle(pkt)
 	}()
-	tuple := tcpTupleHash(retentionKey(f.client))
+	tuple := tcpTupleKey(retentionKey(f.client))
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		f.e.flowMu.Lock()

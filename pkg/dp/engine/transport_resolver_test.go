@@ -328,7 +328,7 @@ func TestTransportDNATCoordinatesAndConnectionConsumers(t *testing.T) {
 			for i, tuple := range []conntrack.Tuple{evidence.Original, evidence.Reply} {
 				st := flow.NewState(flow.TupleKey(tuple, flow.Direction(i)), time.Now())
 				st.Connection.Store(c)
-				e.flows[st.Key.Hash()] = st
+				e.flows[st.Key.MapKey()] = st
 				states = append(states, st)
 				ev := dpi.Event{FlowID: st.Key.Hash(), Connection: c, Proto: "modbus", Kind: "request",
 					Attributes: map[string]any{"transaction_id": uint16(1), "unit_id": uint8(1), "function_code": uint8(3), "is_write": false,
