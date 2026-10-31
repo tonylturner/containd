@@ -15,12 +15,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mode to derive it. Generate with `openssl rand -hex 32`. No lab bypass or
   plaintext fallback exists. Rotate by changing and restarting both peers;
   replace any exported client credentials too.
+- Firewall rules now match first-match in listed order, as on other firewalls:
+  the first ALLOW or DENY rule that matches decides. Before, an overlapping
+  ALLOW won regardless of position. Configs below schema 0.1.10 are upgraded
+  on load, import or commit: overlapping rules are reordered so every existing
+  verdict stays the same, and the before/after rule order is recorded. Review
+  the order after upgrade; a DENY placed above a broader ALLOW now takes effect.
+- Port forwards only translate. Traffic to a forward needs an ALLOW rule; the
+  upgrade inserts a matching rule limited to that forward where needed and
+  warns where an existing rule only partly covers it.
 
 ### Changed
 
 - Add ordered firewall-rule placement and moves, atomic port-forward publication
   and deletion with placement explanations, and candidate-aware previews;
   via-forward rules report historical preview unavailable.
+- Published management and engine images expose their release version, revision,
+  creation time, vendor and authors as OCI labels.
 - Release promotion to `:latest`, including manual promotion, now requires
   successful CI from a push to main for the exact peeled tag commit. Pending CI
   waits for a bounded poll; missing, failed or cancelled CI fails promotion with
