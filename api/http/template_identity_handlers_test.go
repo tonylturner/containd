@@ -79,3 +79,23 @@ func TestIdentityBindingRoutesStageCandidate(t *testing.T) {
 		t.Fatalf("committed bindings = %+v, %v; want %+v", running.Firewall.IdentityBindings, err, want)
 	}
 }
+
+func TestTemplateAppendShadowWarning(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Firewall.Rules = []config.Rule{{ID: "earlier-deny", Action: config.ActionDeny}}
+	cfg.DataPlane.NFQueueGroup = 101
+	for _, path := range []string{"/templates/apply", "/templates/ics/apply"} {
+		store := &mockStore{cfg: cfg}
+		body := `{"name":"modbus-read-only","mode":"enforce"}`
+		if path == "/templates/ics/apply" {
+			body = `{"template":"modbus_read_only","mode":"enforce"}`
+		}
+		rec := httptest.NewRecorder()
+		req := authedRequest("POST", "/api/v1"+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		NewServer(store, nil).ServeHTTP(rec, req)
+		if rec.Code != 200 || !strings.Contains(strings.Join(rec.Header().Values("X-Containd-Warnings"), " "), "earlier-deny") || store.cfg.Firewall.Rules[0].ID != "earlier-deny" {
+			t.Fatalf("%s: response=%d %s headers=%v", path, rec.Code, rec.Body, rec.Header())
+		}
+	}
+}

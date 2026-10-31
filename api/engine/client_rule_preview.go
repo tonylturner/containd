@@ -10,13 +10,12 @@ import (
 	"net/http"
 
 	"github.com/tonylturner/containd/pkg/dp/engine"
-	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // PreviewRule delegates candidate matching to the engine's live context.
-func (c *HTTPClient) PreviewRule(ctx context.Context, entry rules.Entry) (engine.PreviewRuleResponse, error) {
+func (c *HTTPClient) PreviewRule(ctx context.Context, request engine.PreviewRuleRequest) (engine.PreviewRuleResponse, error) {
 	var out engine.PreviewRuleResponse
-	body, err := json.Marshal(entry)
+	body, err := json.Marshal(request)
 	if err != nil {
 		return out, err
 	}

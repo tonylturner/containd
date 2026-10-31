@@ -22,16 +22,17 @@ import (
 func TestClientPreviewRule(t *testing.T) {
 	entry := rules.Entry{ID: "candidate", SourceZones: []string{"control"}, DestZones: []string{"plant"},
 		Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104", TypeIDs: []int{46}}}
+	request := engine.PreviewRuleRequest{Entry: entry, ForwardMatches: map[string]rules.ForwardMatch{"candidate": {Enabled: true, IngressDevices: []string{"wan0"}, Protocol: "tcp", ListenPort: 1502}}}
 	want := engine.PreviewRuleResponse{MatchCount: 2, TotalEvents: 20, SampleMatches: []events.Event{{ID: 3}},
 		Warnings: []enforce.RuleWarning{{RuleID: "candidate", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow,
 			Message: "no bound address can match identities operator; the rule matches nothing until one is bound"}},
 		ICSCoverage: &coverage.Rule{RuleID: "candidate", Protocol: "iec104", Mode: "enforce", State: coverage.NotEnforcing,
 			Reasons: []coverage.Reason{{Code: coverage.QueueUnavailable, Message: "queue not held"}}}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var got rules.Entry
+		var got engine.PreviewRuleRequest
 		if r.Method != http.MethodPost || r.URL.Path != "/internal/rules/preview" ||
 			r.Header.Get("Content-Type") != "application/json" ||
-			json.NewDecoder(r.Body).Decode(&got) != nil || !reflect.DeepEqual(got, entry) {
+			json.NewDecoder(r.Body).Decode(&got) != nil || !reflect.DeepEqual(got, request) {
 			t.Errorf("request %s %s entry=%+v", r.Method, r.URL, got)
 		}
 		if err := json.NewEncoder(w).Encode(want); err != nil {
@@ -39,7 +40,7 @@ func TestClientPreviewRule(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	got, err := NewHTTPClient(server.URL).PreviewRule(context.Background(), entry)
+	got, err := NewHTTPClient(server.URL).PreviewRule(context.Background(), request)
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("preview=%+v err=%v", got, err)
 	}
@@ -60,7 +61,7 @@ func TestClientPreviewRuleFailures(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer server.Close()
-			_, err := NewHTTPClient(server.URL).PreviewRule(context.Background(), rules.Entry{})
+			_, err := NewHTTPClient(server.URL).PreviewRule(context.Background(), engine.PreviewRuleRequest{})
 			if err == nil || (tc.status != http.StatusOK && !strings.Contains(err.Error(), "offline")) {
 				t.Fatalf("err=%v", err)
 			}
@@ -68,7 +69,7 @@ func TestClientPreviewRuleFailures(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := NewHTTPClient("http://unused.invalid").PreviewRule(ctx, rules.Entry{}); err == nil {
+	if _, err := NewHTTPClient("http://unused.invalid").PreviewRule(ctx, engine.PreviewRuleRequest{}); err == nil {
 		t.Fatal("canceled request succeeded")
 	}
 }

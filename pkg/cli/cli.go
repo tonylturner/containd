@@ -259,25 +259,6 @@ func setInterfaceIPAPI(api *API) Command {
 	}
 }
 
-func setFirewallRuleAPI(api *API) Command {
-	return func(ctx context.Context, out io.Writer, args []string) error {
-		if len(args) < 2 {
-			return fmt.Errorf("usage: set firewall rule <id> <action> [src_zone] [dst_zone]")
-		}
-		rule := config.Rule{
-			ID:     args[0],
-			Action: config.Action(args[1]),
-		}
-		if len(args) > 2 {
-			rule.SourceZones = []string{args[2]}
-		}
-		if len(args) > 3 {
-			rule.DestZones = []string{args[3]}
-		}
-		return api.postJSON(ctx, "/api/v1/firewall/rules", rule, out)
-	}
-}
-
 func deleteFirewallRuleAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		if len(args) < 1 {

@@ -40,14 +40,6 @@ func init() {
 
 func purdueRules() []config.Rule {
 	return []config.Rule{
-		// ── Default deny between all zones ──────────────────────────
-		{
-			ID:          "purdue-default-deny",
-			Description: "Default deny between all Purdue zones",
-			SourceZones: []string{ZoneL0, ZoneL1, ZoneL2, ZoneL3, ZoneL35, ZoneL4, ZoneL5},
-			DestZones:   []string{ZoneL0, ZoneL1, ZoneL2, ZoneL3, ZoneL35, ZoneL4, ZoneL5},
-			Action:      config.ActionDeny,
-		},
 		// ── L1 ↔ L0: basic control to process ──────────────────────
 		{
 			ID:          "purdue-l1-to-l0",
@@ -152,6 +144,14 @@ func purdueRules() []config.Rule {
 			SourceZones: []string{ZoneL5},
 			DestZones:   []string{ZoneL0, ZoneL1, ZoneL2, ZoneL3, ZoneL35},
 			Log:         true,
+			Action:      config.ActionDeny,
+		},
+		// ── Default deny between all zones ──────────────────────────
+		{
+			ID:          "purdue-default-deny",
+			Description: "Default deny between all Purdue zones",
+			SourceZones: []string{ZoneL0, ZoneL1, ZoneL2, ZoneL3, ZoneL35, ZoneL4, ZoneL5},
+			DestZones:   []string{ZoneL0, ZoneL1, ZoneL2, ZoneL3, ZoneL35, ZoneL4, ZoneL5},
 			Action:      config.ActionDeny,
 		},
 	}

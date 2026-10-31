@@ -8,10 +8,9 @@ import (
 	"net/http"
 
 	"github.com/tonylturner/containd/pkg/dp/engine"
-	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// POST /internal/rules/preview accepts a rules.Entry and returns the public
+// POST /internal/rules/preview accepts an entry and candidate forward matches and returns the public
 // rule-impact response without mutating the live snapshot or enforcement state.
 func previewRuleHandler(dp *engine.Engine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -23,11 +22,13 @@ func previewRuleHandler(dp *engine.Engine) http.HandlerFunc {
 			http.Error(w, "engine unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		var entry rules.Entry
-		if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
+		var request engine.PreviewRuleRequest
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
 			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, dp.PreviewRule(entry))
+		writeJSON(w, dp.PreviewCandidateRule(request))
 	}
 }

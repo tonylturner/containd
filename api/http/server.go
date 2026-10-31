@@ -89,7 +89,7 @@ type EngineClient interface {
 
 // RulePreviewClient delegates impact evaluation to the engine's live policy context.
 type RulePreviewClient interface {
-	PreviewRule(ctx context.Context, entry rules.Entry) (dpengine.PreviewRuleResponse, error)
+	PreviewRule(ctx context.Context, request dpengine.PreviewRuleRequest) (dpengine.PreviewRuleResponse, error)
 }
 
 type TelemetryClient interface {
@@ -359,11 +359,14 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/routing/reconcile", requireAdmin(), routingReconcileHandler(store, engine))
 		protected.GET("/firewall/nat", getFirewallNATHandler(store))
 		protected.POST("/firewall/nat", requireAdmin(), setFirewallNATHandler(store))
+		protected.POST("/firewall/port-forwards", requireAdmin(), publishPortForwardHandler(store))
+		protected.DELETE("/firewall/port-forwards/:id", requireAdmin(), deletePortForwardHandler(store))
+		protected.POST("/firewall/rules/:id/move", requireAdmin(), moveFirewallRuleHandler(store))
 		protected.GET("/firewall/rules", listFirewallRulesHandler(store))
 		protected.POST("/firewall/rules", requireAdmin(), createFirewallRuleHandler(store))
 		protected.PATCH("/firewall/rules/:id", requireAdmin(), updateFirewallRuleHandler(store))
 		protected.DELETE("/firewall/rules/:id", requireAdmin(), deleteFirewallRuleHandler(store))
-		protected.POST("/firewall/rules/preview", requireAdmin(), previewFirewallRuleHandler(engine))
+		protected.POST("/firewall/rules/preview", requireAdmin(), previewFirewallRuleHandler(store, engine))
 		protected.GET("/firewall/ics-rules", listICSRulesHandler(store))
 		protected.POST("/firewall/ics-rules", requireAdmin(), createICSRuleHandler(store))
 		protected.PATCH("/firewall/ics-rules/:id", requireAdmin(), updateICSRuleHandler(store))
