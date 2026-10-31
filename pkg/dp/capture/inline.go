@@ -109,6 +109,7 @@ var (
 	ErrNotInline           = errors.New("capture: source is not inline")
 	ErrInvalidVerdict      = errors.New("capture: verdict is neither accept, drop nor repeat")
 	ErrConflictingVerdicts = errors.New("capture: conflicting success verdicts")
+	ErrTokenFlushed        = errors.New("capture: token dropped by policy replacement")
 )
 
 // generations numbers inline queue generations for the whole process,

@@ -204,6 +204,7 @@ func (s *nfqueueSource) run(ctx context.Context, ready func()) error {
 		}
 		return nf.SetVerdict(id, nfqueue.NfAccept)
 	}, s.comp, s.cfg.OnError)
+	gen.fence = s.cfg.PublicationFence
 	open := make(chan struct{}) // closed once the Ready event is delivered
 
 	hookFn := func(a nfqueue.Attribute) int {
