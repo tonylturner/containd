@@ -104,7 +104,7 @@ curl -fsS -b "$cookie" \
 curl -fsS -b "$cookie" \
   "$api/inventory" | jq -e 'type == "array"' >/dev/null
 curl -fsS -b "$cookie" \
-  "$api/learn/profiles" | jq -e 'type == "array"' >/dev/null
+  "$api/learn/datasets" | jq -e '.items | type == "array"' >/dev/null
 curl -fsS -b "$cookie" \
   "$api/signatures" | jq -e 'type == "array"' >/dev/null
 curl -fsS -b "$cookie" \
