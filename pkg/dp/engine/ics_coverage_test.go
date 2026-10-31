@@ -80,7 +80,7 @@ func TestICSCoverageQueueOverlay(t *testing.T) {
 // The engine accepts a snapshot that enforces without an inline path, and
 // reports it instead of claiming protection.
 func TestICSCoverageContradictorySnapshot(t *testing.T) {
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: &recordingApplier{}, Updater: &recordingUpdater{}},
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: &recordingApplier{}, Updater: &recordingUpdater{}},
 		DPIEnabled: true, DPIMode: "enforce"})
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestICSCoverageContradictorySnapshot(t *testing.T) {
 // still describes the previous rules; with no earlier success it is empty.
 func TestICSCoverageAfterFailedApply(t *testing.T) {
 	applier := &recordingApplier{err: errors.New("nft apply failed")}
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier, Updater: &recordingUpdater{}},
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: applier, Updater: &recordingUpdater{}},
 		DPIEnabled: true, DPIMode: "enforce"})
 	if err != nil {
 		t.Fatal(err)

@@ -89,6 +89,9 @@ func TestConformanceVerdictMatrix(t *testing.T) {
 							if parsing == "strict" {
 								action = "would drop"
 							}
+							if mode == "monitor" {
+								action = "non-admitting continuation"
+							}
 							for _, ev := range f.e.Events().List(0) {
 								if ev.Kind == eventfields.KindSession {
 									t.Fatalf("monitor/pass reset evidence: %+v", ev)
@@ -127,6 +130,11 @@ func TestConformanceVerdictMatrix(t *testing.T) {
 							if len(decisions) != 1 || decisions[0].Attributes[eventfields.KeyReason] != reason ||
 								decisions[0].Attributes[eventfields.KeyDecision] != decision {
 								t.Fatalf("decisions = %+v, want %s/%s", decisions, reason, decision)
+							}
+						} else if mode == "monitor" {
+							if len(decisions) != 1 || decisions[0].Attributes[eventfields.KeyReason] != "default" ||
+								got.Reason != reasonPolicyNonAdmit {
+								t.Fatalf("monitor default must not grant admission: %+v, %+v", decisions, got)
 							}
 						} else if len(decisions) != 0 {
 							t.Fatalf("tolerant allow decisions: %+v", decisions)

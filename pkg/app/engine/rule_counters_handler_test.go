@@ -37,7 +37,7 @@ func (z *zeroCounters) ReadCounters(context.Context, string) (map[string]enforce
 }
 
 func TestRuleCountersHandler(t *testing.T) {
-	dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{Enabled: true, Applier: &zeroCounters{}}})
+	dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: &zeroCounters{}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package engine
 
 import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
-	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -39,13 +38,11 @@ func (e *Engine) enforcingPacketScope(pkt capture.Packet, state *flow.State) boo
 		}
 		t.mu.Unlock()
 	}
-	scopeState := &flow.State{Key: key}
-	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP()}
-	ctx.SrcZone, ctx.DstZone = e.zones.resolve(p.snapshot, ctx.SrcIP, ctx.DstIP)
-	parsed := &dpi.ParsedPacket{Proto: pkt.Transport, SrcPort: pkt.SrcPort, DstPort: pkt.DstPort}
+	scopeState := &flow.State{Key: key, InlinePolicy: state.InlinePolicy}
+	ctx := statePolicyContext(p.snapshot, scopeState, &e.zones)
 	for i, entry := range p.snapshot.Firewall {
 		if entry.ICS.Protocol != "" && rules.EffectiveMode(entry.ICS.Mode, p.snapshot.DPIMode) == "enforce" &&
-			shouldInspectFirewallEntry(entry, scopeState, parsed) && p.evaluator.AddressScopeMatch(i, ctx) {
+			p.evaluator.TransportScopeMatch(i, ctx) {
 			return true
 		}
 	}
@@ -57,7 +54,7 @@ func observedDecision(pkt capture.Packet, decision capture.Decision) capture.Dec
 		return decision
 	}
 	decision.Action = capture.Repeat
-	decision.Mark = pkt.Mark & ^markabi.QueueMarkMask | markabi.ObservedMark
+	decision.Mark = markabi.Continue(pkt.Mark, false)
 	if decision.Reason == "" {
 		decision.Reason = "ics_observed"
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
@@ -87,8 +88,8 @@ func TestIECResetGoldenFINOnHeldPacket(t *testing.T) {
 	}
 	head := h.pkt(true, capture.TCPFlagACK, h.cSeq, h.sSeq, cmd[:6])
 	d := h.e.handlePacket(head)
-	if d.Action != h.passingDisposition() || len(d.Resolved) != 1 || d.Resolved[0] != (capture.Resolution{Token: tail.Token, Verdict: capture.VerdictAccept}) {
-		t.Fatalf("gap fill = %+v, want Accept releasing the tail", d)
+	if d.Action != h.passingDisposition() || len(d.Resolved) != 1 || d.Resolved[0] != (capture.Resolution{Token: tail.Token, Verdict: capture.VerdictRepeat, Mark: markabi.Continue(tail.Mark, false)}) {
+		t.Fatalf("gap fill = %+v, want Repeat releasing the tail", d)
 	}
 	h.cSeq += 16
 	cur, d := h.send(false, iframe(45, 1))

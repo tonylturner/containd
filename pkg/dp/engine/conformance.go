@@ -57,9 +57,7 @@ func (e *Engine) conformanceScope(state *flow.State, pkt *dpi.ParsedPacket, prot
 	if p == nil || p.snapshot == nil {
 		return nil
 	}
-	key := state.ServiceKey()
-	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP()}
-	ctx.SrcZone, ctx.DstZone = e.zones.resolve(p.snapshot, ctx.SrcIP, ctx.DstIP)
+	ctx := statePolicyContext(p.snapshot, state, &e.zones)
 	var monitor *rules.Entry
 	for i := range p.snapshot.Firewall {
 		entry := &p.snapshot.Firewall[i]

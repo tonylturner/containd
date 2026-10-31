@@ -25,7 +25,7 @@ func inventoryCounts(t *testing.T, h *iecHarness, attempted, accepted uint64) {
 }
 
 func TestIECInventoryDelivery(t *testing.T) {
-	for _, fate := range []string{"accept", "deny", "error", "drop", "queue", "monitor", "not-inline", "would-drop"} {
+	for _, fate := range []string{"accept", "repeat", "deny", "error", "drop", "queue", "monitor", "not-inline", "would-drop"} {
 		t.Run(fate, func(t *testing.T) {
 			mode := "enforce"
 			if fate == "monitor" {
@@ -49,6 +49,10 @@ func TestIECInventoryDelivery(t *testing.T) {
 			inventoryCounts(t, h, 1, 0)
 			v, err := capture.VerdictAccept, error(nil)
 			switch fate {
+			case "repeat":
+				// A successful repeat is only a kernel continuation, never
+				// proof of delivery (S2 can still deny).
+				v = capture.VerdictRepeat
 			case "error":
 				err = errors.New("sendmsg failed")
 			case "drop", "deny":
@@ -86,7 +90,7 @@ func TestIECInventorySplitCoalescedOutOfOrderAndRetransmit(t *testing.T) {
 		p := h.pkt(true, capture.TCPFlagACK, seq+uint32(r[0]), h.sSeq, payload[r[0]:r[1]])
 		packets = append(packets, p)
 		d := h.e.handlePacket(p)
-		if r[0] == 9 && d.Action != capture.Hold || r[0] == 0 && d.Action != capture.Accept {
+		if r[0] == 9 && d.Action != capture.Hold || r[0] == 0 && d.Action != capture.Repeat {
 			t.Fatalf("unexpected split disposition: %+v", d)
 		}
 	}
@@ -98,7 +102,7 @@ func TestIECInventorySplitCoalescedOutOfOrderAndRetransmit(t *testing.T) {
 	// Finish the partial U-frame so the real decision releases the tail
 	// packets; only then simulate capture's successful verdict completions.
 	release := h.e.handlePacket(h.pkt(true, capture.TCPFlagACK, seq+uint32(len(payload)), h.sSeq, startdtAct[1:]))
-	if release.Action != capture.Accept || len(release.Resolved) != 2 {
+	if release.Action != capture.Repeat || len(release.Resolved) != 2 {
 		t.Fatalf("held tails were not released: %+v", release)
 	}
 	for _, p := range packets[:len(packets)-1] {

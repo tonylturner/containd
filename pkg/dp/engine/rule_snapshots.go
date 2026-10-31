@@ -25,6 +25,15 @@ func (r *ruleSnapshots) Store(snap *rules.Snapshot) {
 	r.current.Store(&compiledRules{snapshot: snap, evaluator: rules.NewEvaluator(snap)})
 }
 
+// Update publishes resolver inputs without resetting install counters.
+func (r *ruleSnapshots) Update(snap *rules.Snapshot) {
+	next := &compiledRules{snapshot: snap, evaluator: rules.NewEvaluator(snap)}
+	if old := r.current.Load(); old != nil {
+		next.shadow = old.shadow
+	}
+	r.current.Store(next)
+}
+
 func (r *ruleSnapshots) Load() *rules.Snapshot {
 	if p := r.current.Load(); p != nil {
 		return p.snapshot

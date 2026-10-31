@@ -61,6 +61,8 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 	if snap != nil {
 		candidate.IdentityBindings = snap.IdentityBindings
 		candidate.ZoneIfaces = snap.ZoneIfaces
+		candidate.ForwardMatches = snap.ForwardMatches
+		candidate.LocalIPv4ByDevice = snap.LocalIPv4ByDevice
 	}
 	result.Warnings = (&enforce.Compiler{QueueID: e.enforcedQueueID()}).RuleWarnings(candidate)
 	if cov := e.coverageOf(candidate); len(cov) == 1 {
@@ -82,12 +84,9 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 		contexts := previewEventContexts(snap, entry, ev, resolve, parsing)
 		matches := len(contexts) > 0
 		for _, ctx := range contexts {
-			var matched *rules.Entry
-			if entry.ICS.Protocol == rules.ProtocolIEC104 {
-				_, matched = evaluator.EvaluateIEC104(ctx)
-			} else {
-				matched = evaluator.AnyMatch(ctx)
-			}
+			// This is an isolated predicate preview, not the enforcing
+			// partition: monitor rules and effects must remain previewable.
+			matched := evaluator.AnyMatch(ctx)
 			if entry.Action == rules.ActionAllow {
 				if matched == nil {
 					matches = false

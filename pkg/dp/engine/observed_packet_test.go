@@ -9,6 +9,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -59,16 +60,14 @@ func TestQueuedRuleModesVerdictMatrix(t *testing.T) {
 							d = e.HandlePacket(pkt)
 						}
 						want := capture.Repeat
-						if active == rules.ActionAllow {
-							want = capture.Accept
-						}
 						if active == rules.ActionDeny {
 							want = capture.Drop
 						}
 						if d.Action != want || len(d.Resolved) != 0 {
 							t.Fatalf("decision=%+v want %v", d, want)
 						}
-						if active == "" && d.Mark != enforce.ObservedMark|0xab {
+						wantMark := markabi.Continue(0x020000ab, active == "" && proto == "modbus")
+						if want == capture.Repeat && d.Mark != wantMark {
 							t.Fatalf("mark %#x", d.Mark)
 						}
 						counts := e.ShadowCounters()

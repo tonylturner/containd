@@ -29,7 +29,7 @@ func TestManagementStartupRejectsUnsafeEngineOptions(t *testing.T) {
 
 func TestManagementPartialAPIsRejectBeforeSideEffects(t *testing.T) {
 	r := &mgmtpath.Reservation{Device: "reserved", Local: netip.MustParsePrefix("10.99.99.2/24"), Port: 8080, Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}}
-	dp, err := dpengine.New(dpengine.Config{Enforce: dpengine.EnforceConfig{Enabled: true, ManagementReservation: r}})
+	dp, err := dpengine.New(dpengine.Config{Enforce: dpengine.EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, ManagementReservation: r}})
 	if err != nil {
 		t.Fatal(err)
 	}

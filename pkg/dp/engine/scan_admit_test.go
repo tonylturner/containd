@@ -71,7 +71,7 @@ func (m *admitModel) state() (string, int) {
 
 func admitEngine(t *testing.T, nft *admitModel, enforcing bool) *Engine {
 	t.Helper()
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: enforcing, Applier: nft, Updater: &recordingUpdater{},
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: enforcing, Applier: nft, Updater: &recordingUpdater{},
 		GatePlainPort: enforce.DefaultGatePlainPort, GateMasqPort: enforce.DefaultGateMasqPort}})
 	if err != nil {
 		t.Fatal(err)

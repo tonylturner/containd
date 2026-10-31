@@ -7,6 +7,7 @@ import (
 	"container/list"
 	"context"
 	"fmt"
+	"net/netip"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/dp/anomaly"
 	"github.com/tonylturner/containd/pkg/dp/capture"
+	"github.com/tonylturner/containd/pkg/dp/conntrack"
 	"github.com/tonylturner/containd/pkg/dp/coverage"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/enforce"
@@ -23,6 +25,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/session"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
@@ -36,6 +39,7 @@ type captureRunner interface {
 	Stop()
 	Interfaces() []string
 	Settler() capture.Settler
+	RetireFlushed()
 }
 
 // Engine coordinates capture and rule enforcement components.
@@ -49,7 +53,10 @@ type Engine struct {
 	runDone               chan struct{}
 	ruleSnap              ruleSnapshots
 	policyMu              sync.RWMutex // packet readers see snapshot and IEC policy as one generation
-	zones                 zoneCache    // outlives Reconfigure, as the namespace does
+	admission             admissionPolicy
+	clearMarks            func(context.Context, uint32, uint32, uint32) (int, error)
+	localIPv4             func(*rules.Snapshot) (map[string][]netip.Addr, error)
+	zones                 zoneCache // outlives Reconfigure, as the namespace does
 	started               atomic.Bool
 	epoch                 atomic.Uint64 // counts Reconfigure calls; ends stale start retries
 	compiler              *enforce.Compiler
@@ -102,8 +109,9 @@ type Engine struct {
 }
 
 // RulesetStatus describes the installed ruleset: its compiled text,
-// snapshot version, apply time and warnings (enforce.RuleWarnings), which a
-// failed apply leaves in place, as it leaves the ruleset installed. Error,
+// snapshot version, apply time and warnings (enforce.RuleWarnings). A failed
+// install leaves the previous policy in place; a failed sweep reports the new
+// installed policy and its recovery fault. Error,
 // FailedSnapshotVersion and FailedAt describe the last apply when it
 // failed; the next successful apply clears them. ICSCoverage is the live
 // coverage of the ICS rules in force (none before the first success, never
@@ -136,6 +144,8 @@ type EnforceConfig struct {
 	GateMasqPort  uint16
 	Applier       enforce.Applier
 	Updater       enforce.Updater
+	// ClearMark is the conntrack masked-clear transport. Nil uses ctnetlink.
+	ClearMark func(context.Context, uint32, uint32, uint32) (int, error)
 }
 
 type Config struct {
@@ -225,8 +235,15 @@ func New(cfg Config) (*Engine, error) {
 		deniedTCPNow:          time.Now,
 		verdictCache:          NewVerdictCache(30*time.Second, 65536),
 		hooks:                 hooks,
+		clearMarks:            cfg.Enforce.ClearMark,
+		localIPv4:             discoverLocalIPv4,
 	}
+	if e.clearMarks == nil {
+		e.clearMarks = conntrack.ClearMark
+	}
+	e.zones.changes = make(chan struct{}, 1)
 	e.SetICSParsing(cfg.DPIICSParsing)
+	capManager.SetPublicationFence(&e.policyMu)
 	e.inventory = inventory.New()
 	e.anomalyDetector = anomaly.New()
 	e.sigEngine = signatures.New()
@@ -294,6 +311,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 			return fmt.Errorf("remove enforcement tables: %w", err)
 		}
 		e.releaseRulesetStatus()
+		e.admission = admissionPolicy{}
 	}
 
 	prevCancel := e.runCancel
@@ -341,12 +359,17 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	}
 	e.observation = fresh.observation
 	e.capture = fresh.capture
+	if manager, ok := e.capture.(*capture.Manager); ok {
+		manager.SetPublicationFence(&e.policyMu)
+	}
 	e.compiler = fresh.compiler
 	if e.compiler != nil {
 		e.compiler.ManagementReservation = e.managementReservation
 		e.compiler.EngineAPI = e.engineAPI
 	}
 	e.applier = fresh.applier
+	e.clearMarks = fresh.clearMarks
+	e.localIPv4 = fresh.localIPv4
 	e.transport = fresh.transport
 	e.updater = fresh.updater
 	e.dpiMgr = fresh.dpiMgr
@@ -379,6 +402,12 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	// engine's installed policy, not the discarded constructor's snapshots.
 	fresh.iec.shadow = e.countShadow
 	e.iec = fresh.iec
+	if e.admission.dirty {
+		e.iec.health.fault(faultAdmission, "admission sweep requires recovery")
+	}
+	if e.admission.gateDirty {
+		e.iec.health.fault(faultGateZones, "gate zone sweep requires recovery")
+	}
 	e.flowMu.Unlock()
 	e.recordObservations(observationRecords)
 	e.epoch.Add(1)
@@ -412,6 +441,15 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 
 	if e.started.Swap(true) {
 		return group, nil
+	}
+	if e.compiler != nil {
+		e.policyMu.Lock()
+		err := e.recoverAdmission(ctx)
+		e.policyMu.Unlock()
+		if err != nil {
+			e.started.Store(false)
+			return group, err
+		}
 	}
 	runCtx, runCancel := context.WithCancel(ctx)
 	runCapture := e.capture
@@ -483,12 +521,16 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	runDone := make(chan struct{})
 	e.runDone = runDone
 	var run sync.WaitGroup
-	run.Add(5)
+	run.Add(6)
+	onError := e.onError
+	go func() {
+		defer run.Done()
+		e.runAddressUpdates(runCtx, onError)
+	}()
 	go func() {
 		defer run.Done()
 		e.hooks.blocks.run(runCtx)
 	}()
-	onError := e.onError
 	go func() {
 		defer run.Done()
 		e.runSchedulePlanner(runCtx, onError)
@@ -530,52 +572,11 @@ func (e *Engine) LoadRules(snap rules.Snapshot) {
 		snap.DPIMode = e.dpiMode
 	}
 	e.policyMu.Lock()
-	defer e.policyMu.Unlock()
 	e.ruleSnap.Store(&snap)
-	e.iec.setPolicy(&snap)
-}
-
-// ApplyRules compiles and applies a snapshot to nftables (when enabled) and atomically swaps it.
-// If enforcement is disabled, it simply swaps the snapshot.
-func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
-	if snap.DPIMode == "" {
-		snap.DPIMode = e.dpiMode
-	}
-	if err := snap.ValidateIndustrialProtocols(); err != nil {
-		return err
-	}
-	if err := snap.Gate.Validate(); err != nil {
-		return err
-	}
-	e.lifecycleMu.Lock()
-	defer e.lifecycleMu.Unlock()
-	if err := enforce.ValidateManagementSnapshot(&snap, e.managementReservation); err != nil {
-		return err
-	}
-	var compiled string
-	var warnings []enforce.RuleWarning
-
-	if e.compiler != nil {
-		start := time.Now()
-		var err error
-		e.compiler.GateAdmit = e.gateAdmit
-		if compiled, err = e.gate.apply(ctx, e.compiler, e.applier, &snap); err != nil {
-			e.recordApplyFailure(snap.Version, err)
-			return err
-		}
-		metrics.NFTablesApplyDuration.Observe(time.Since(start).Seconds())
-		warnings = e.compiler.RuleWarnings(&snap)
-	}
-
-	e.policyMu.Lock()
-	defer e.policyMu.Unlock()
-	appliedAt := time.Now().UTC()
-	e.ruleSnap.Install(&snap, appliedAt)
-	e.iec.setPolicy(&snap)
-	metrics.RulesCount.Set(float64(len(snap.Firewall)))
-	e.rulesetStatus.Store(&RulesetStatus{Ruleset: compiled, SnapshotVersion: snap.Version, AppliedAt: appliedAt, Warnings: warnings})
-	e.resetExclusionHits()
-	return nil
+	acts := e.iec.installPolicy(&snap, false)
+	e.verdictCache.Flush()
+	e.policyMu.Unlock()
+	e.iec.apply(acts)
 }
 
 func (e *Engine) CurrentRules() *rules.Snapshot {
@@ -664,8 +665,10 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	if e == nil {
 		return acceptDecision
 	}
-	e.policyMu.RLock()
-	defer e.policyMu.RUnlock()
+	if !pkt.PublicationPinned() {
+		e.policyMu.RLock()
+		defer e.policyMu.RUnlock()
+	}
 	metrics.PacketsTotal.Inc()
 	metrics.BytesTotal.Add(float64(len(pkt.Payload)))
 	if pkt.Invalid != "" {
@@ -678,12 +681,17 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	defer e.lockGenericTCP(pkt)()
 	e.reopenDeniedTCP(pkt)
 	state := e.trackTransportFlow(pkt, now, connection)
+	if pkt.Token.Inline() {
+		state.InlinePolicy.Store(inlinePolicy(pkt, e.ruleSnap.Load()))
+	}
 	e.bindTransport(state, connection)
 	observeOnly := pkt.Token.Inline() && !e.enforcingPacketScope(pkt, state)
-	if observeOnly {
-		// Only a successful observation may resume ordinary nft policy.
-		// Holds and fail-closed drops keep their token ownership intact.
+	if pkt.Token.Inline() {
+		// Every inline success continues through current kernel admission.
 		defer func() { decision = observedDecision(pkt, decision) }()
+	}
+	if pkt.Token.Inline() && pkt.Mark&markabi.EnforceScopeMark != 0 && !e.enforcingPacketScope(pkt, state) {
+		return capture.Decision{Action: capture.Drop, Reason: "missing_enforce_scope"}
 	}
 	stopped := e.prepareDecodeCoverage(state, pkt, now, connection, history)
 	if e.observation != nil && (!stopped || pkt.Token.Inline()) {

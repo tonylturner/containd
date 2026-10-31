@@ -160,7 +160,7 @@ func firstCommandEngine(t *testing.T, mode string) (*Engine, *firstCommandUpdate
 	t.Helper()
 	up := &firstCommandUpdater{mode: mode, calls: make(chan string, 16), release: make(chan struct{})}
 	e, err := New(Config{
-		Enforce:    EnforceConfig{Enabled: true, Updater: up},
+		Enforce:    EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Updater: up},
 		DPIEnabled: true,
 		DPIMode:    "enforce",
 	})
@@ -219,20 +219,17 @@ func (f *fcFlow) decide(off uint32, flags capture.TCPFlags, payload []byte) capt
 }
 
 func (f *fcFlow) passingDisposition() capture.Disposition {
-	if f.observeOnly {
-		return capture.Repeat
-	}
-	return capture.Accept
+	return capture.Repeat
 }
 
 func (f *fcFlow) syn() {
 	f.t.Helper()
 	if d := f.decide(0, capture.TCPFlagSYN, nil); d.Action != f.passingDisposition() {
-		f.t.Fatalf("SYN decision = %+v, want Accept", d)
+		f.t.Fatalf("SYN decision = %+v, want Repeat", d)
 	}
 }
 
-// accept sends payload as the next new bytes and requires Accept.
+// accept sends new payload and requires an admitting kernel continuation.
 func (f *fcFlow) accept(what string, payload []byte) {
 	f.t.Helper()
 	f.acceptAt(f.next, what, payload)
@@ -242,7 +239,7 @@ func (f *fcFlow) accept(what string, payload []byte) {
 func (f *fcFlow) acceptAt(off uint32, what string, payload []byte) {
 	f.t.Helper()
 	if d := f.decide(off, ackPsh, payload); d.Action != f.passingDisposition() {
-		f.t.Fatalf("%s at offset %d: decision = %+v, want Accept", what, off, d)
+		f.t.Fatalf("%s at offset %d: decision = %+v, want Repeat", what, off, d)
 	}
 }
 
