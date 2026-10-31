@@ -73,6 +73,13 @@ You can also import a foreground `.ovpn` profile (advanced):
 
 - Upload a `.ovpn` from the UI (VPN page) to store it under `/data/openvpn/profiles/` and automatically set `services.vpn.openvpn.configPath` (managed config is cleared).
 - The OpenVPN supervisor requires a **foreground** config (do not include the `daemon` directive).
+- Imports are limited to **1 MiB** and parsed with a bounded option/arity
+  allowlist. Certificate, key and TLS material must be inline
+  (`<ca>`, `<cert>`, `<key>`, `<tls-auth>` or `<tls-crypt>` blocks).
+  External file references, scripts/hooks, plugins, includes, management
+  directives and unknown options are rejected. Uploads and runtime reads of
+  `configPath` use the same parser and are re-rendered into containd-owned files;
+  an arbitrary profile path does not bypass these restrictions.
 
 ### Docker requirements
 
@@ -80,8 +87,6 @@ OpenVPN requires `/dev/net/tun` and network administration privileges. The
 starter maps the device and grants the required capabilities; use
 [Docker Compose onboarding](docker-compose.md) rather than an unprivileged
 `docker run`. WireGuard also needs engine-side kernel/network support.
-Uploaded OpenVPN profiles can contain script hooks that run as root; only import
-profiles you trust.
 
 ### OpenVPN (managed server)
 
@@ -90,8 +95,45 @@ To configure managed server mode:
 - Configure `services.vpn.openvpn.mode=server` and `services.vpn.openvpn.server` (listen port/proto + `tunnelCIDR`).
 - `tunnelCIDR` is the client address pool assigned by the OpenVPN server. This differs from WireGuard, where client networks are expressed via peer `AllowedIPs`.
 - mgmt renders a server config under `/data/openvpn/managed/server/` and generates a local PKI under `/data/openvpn/managed/server/pki/`.
-- Client profiles can be generated and downloaded as inline `.ovpn` files (requires setting `openvpn.server.publicEndpoint`).
+- Client credentials can be created and downloaded as inline `.ovpn` files (requires setting `openvpn.server.publicEndpoint`).
 - Enabling the OpenVPN server automatically opens the listen port on the WAN zone (nftables input) so clients can connect.
+
+#### Client credentials and revocation
+
+The VPN page lists each credential's name, issuer/serial ID, issue and expiry
+times, and revoked state. Creating a credential takes effect immediately on
+the **active managed server**, not the staged candidate. Names must be lowercase,
+filename-safe and 1–64 characters long. An active name cannot be issued again
+until its credential is revoked; reusing a name creates a new ID.
+
+Use `GET /api/v1/services/vpn/openvpn/clients` to list credentials and `POST`
+to that path with `{"name":"operator"}` to create one. Download with
+`GET /api/v1/services/vpn/openvpn/clients/{id}`. IDs are opaque issuer/serial
+identifiers, not names. Downloads are read-only: they never issue, renew or
+repair credentials. Unknown IDs return 404; duplicate names, revoked downloads
+and operations requiring an inactive managed server return 409; invalid names
+return 400.
+
+Revoke with the VPN page's confirmation dialog or
+`POST /api/v1/services/vpn/openvpn/clients/{id}/revoke`. Revocation is durable
+and irreversible; revoked entries stay in the inventory and cannot be downloaded.
+The server checks a signed certificate revocation list (CRL) and restarts after
+revocation, so **all clients reconnect once**. A 503 response containing
+`revoked:true, applied:false` means **revoked, not yet applied**, not an undone
+revocation: it is saved, but enforcement by the running server is not confirmed.
+The UI keeps that warning while the page is open and offers **Retry apply**.
+The inventory records revocation, not runtime acknowledgement; after reopening
+the page, use **Apply revocation** on the revoked credential to confirm it.
+The revoke operation is idempotent; retry it after resolving the runtime problem.
+These operations do not require a configuration commit.
+
+The CRL lasts **7 days**, renews within **24 hours of expiry**, and is checked
+**hourly** while running. Renewal is also checked across server restarts.
+
+**Back up the OpenVPN PKI volume**, including the CA keys, credential inventory,
+and revocation material under `/data/openvpn/managed/server/pki/`. Protect that
+backup as a secret. Configuration exports, even unredacted ones, exclude the PKI
+authority and are not a substitute for a PKI backup.
 
 ## AV
 

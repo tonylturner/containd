@@ -201,7 +201,7 @@ type ReverseProxySite struct {
 	Hostnames   []string `json:"hostnames,omitempty"` // SNI/Host match
 	Backends    []string `json:"backends,omitempty"`  // host:port targets
 	TLSEnabled  bool     `json:"tlsEnabled,omitempty"`
-	CertRef     string   `json:"certRef,omitempty"` // future cert store reference
+	CertRef     string   `json:"certRef,omitempty"` // proxy TLS <ref>.crt/<ref>.key pair in CONTAIND_CERTS_DIR (default /data/certs)
 	Description string   `json:"description,omitempty"`
 }
 

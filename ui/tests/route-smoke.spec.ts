@@ -332,10 +332,10 @@ function responseFor(pathname: string) {
   ) {
     return json({});
   }
-  if (
-    pathname === "/api/v1/services/av/defs" ||
-    pathname === "/api/v1/services/vpn/openvpn/clients"
-  ) {
+  if (pathname === "/api/v1/services/vpn/openvpn/clients") {
+    return json({ clients: [] });
+  }
+  if (pathname === "/api/v1/services/av/defs") {
     return json([]);
   }
   if (pathname === "/api/v1/services/vpn/wireguard/status") {

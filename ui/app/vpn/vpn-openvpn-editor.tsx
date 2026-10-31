@@ -4,6 +4,7 @@ import Image from "next/image";
 import type { Dispatch, SetStateAction } from "react";
 
 import type { VPNStatus, Zone } from "../../lib/api";
+import type { OpenVPNCredential } from "../../lib/api-vpn";
 import { staticAssetURL } from "../../lib/api-core";
 import { InfoTip } from "../../components/InfoTip";
 import {
@@ -34,12 +35,17 @@ type Props = {
   openvpnIssues: FieldIssue[];
   svcStatus: VPNStatus | null;
   uploadState: UploadState;
-  ovpnClients: string[];
+  ovpnClients: OpenVPNCredential[];
+  clientsUnavailable: boolean;
+  clientError: string | null;
+  clientBusy: boolean;
+  pendingRevocations: Record<string, string>;
   newClientName: string;
   setNewClientName: Dispatch<SetStateAction<string>>;
   uploadOpenVPNProfile: (file: File) => Promise<void>;
   createClient: () => Promise<void>;
-  downloadClient: (name: string) => Promise<void>;
+  downloadClient: (credential: OpenVPNCredential) => Promise<void>;
+  revokeClient: (credential: OpenVPNCredential) => void;
 };
 
 export function OpenVPNEditorCard({
@@ -54,11 +60,16 @@ export function OpenVPNEditorCard({
   svcStatus,
   uploadState,
   ovpnClients,
+  clientsUnavailable,
+  clientError,
+  clientBusy,
+  pendingRevocations,
   newClientName,
   setNewClientName,
   uploadOpenVPNProfile,
   createClient,
   downloadClient,
+  revokeClient,
 }: Props) {
   return (
     <div className="relative overflow-hidden rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
@@ -317,7 +328,7 @@ export function OpenVPNEditorCard({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-(--text)">
                   Import profile (advanced)
-                  <InfoTip label="Uploads a .ovpn and sets Config Path automatically (clears managed config)." />
+                  <InfoTip label="Imports a profile up to 1 MiB with inline material and allowlisted options only. Script hooks and external files are rejected. Clears managed config." />
                 </div>
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs text-(--text) transition-ui">
                   <input
@@ -550,47 +561,72 @@ export function OpenVPNEditorCard({
                 </div>
               </div>
 
-              <div className="rounded-xs border bg-(--surface) p-3">
+              {canEdit && <section aria-label="OpenVPN client credentials" className="rounded-xs border bg-(--surface) p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-(--text)">
-                    Client profiles
-                    <InfoTip label="Generates ECDSA certs and downloads inline .ovpn profiles." />
+                    Client credentials
+                    <InfoTip label="Issues credentials immediately using the active server, not staged settings. Downloads are read-only." />
                   </div>
                   <div className="flex items-center gap-2">
                     <input
                       value={newClientName}
-                      disabled={!canEdit}
+                      aria-label="Client name"
+                      disabled={clientBusy}
                       onChange={(e) => setNewClientName(e.target.value)}
                       className="w-40 input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                       placeholder="client name"
                     />
                     <button
                       onClick={() => void createClient()}
-                      disabled={!canEdit || !newClientName.trim()}
+                      disabled={clientBusy || !newClientName.trim()}
                       className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
                     >
                       Create
                     </button>
                   </div>
                 </div>
+                <p className="mt-2 text-xs text-(--text-muted)">Create and revoke take effect immediately, without a config commit. Revoking restarts the server; all clients reconnect once.</p>
+                {clientError && <p role="alert" className="mt-3 text-sm text-red-400">{clientError}</p>}
+                {clientsUnavailable && <p role="alert" className="mt-3 text-sm text-amber-400">Credential inventory unavailable. Refresh to retry; any displayed entries may be stale.</p>}
                 {ovpnClients.length ? (
                   <div className="mt-3 grid gap-2">
-                    {ovpnClients.map((n) => (
-                      <div key={n} className="flex items-center justify-between rounded-xs border bg-black/20 px-3 py-2">
-                        <div className="font-mono text-sm text-(--text)">{n}</div>
-                        <button
-                          onClick={() => void downloadClient(n)}
-                          className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
-                        >
-                          Download
-                        </button>
+                    {ovpnClients.map((credential) => (
+                      <div key={credential.id} className="min-w-0 rounded-xs border bg-black/20 px-3 py-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-mono text-sm text-(--text)">{credential.name}</div>
+                          <Badge tone={credential.revokedAt ? "warn" : "ok"}>{credential.revokedAt ? "revoked" : "active"}</Badge>
+                        </div>
+                        <dl className="mt-2 space-y-1 break-all text-xs text-(--text-muted)">
+                          <div><dt className="inline">ID: </dt><dd className="inline font-mono">{credential.id}</dd></div>
+                          <div><dt className="inline">Serial: </dt><dd className="inline font-mono">{credential.serial}</dd></div>
+                          <div><dt className="inline">Issued: </dt><dd className="inline"><time dateTime={credential.issuedAt}>{new Date(credential.issuedAt).toLocaleString()}</time></dd></div>
+                          <div><dt className="inline">Expires: </dt><dd className="inline"><time dateTime={credential.expiresAt}>{new Date(credential.expiresAt).toLocaleString()}</time></dd></div>
+                          {credential.revokedAt && <div><dt className="inline">Revoked: </dt><dd className="inline"><time dateTime={credential.revokedAt}>{new Date(credential.revokedAt).toLocaleString()}</time></dd></div>}
+                        </dl>
+                        {pendingRevocations[credential.id] && <p role="status" className="mt-2 text-sm text-amber-400">Revoked, not yet applied: {pendingRevocations[credential.id]}. Revocation is saved, but the running server has not confirmed it. Retry apply to confirm enforcement.</p>}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            onClick={() => void downloadClient(credential)}
+                            disabled={clientBusy || !!credential.revokedAt}
+                            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
+                          >
+                            Download
+                          </button>
+                          <button
+                            onClick={() => revokeClient(credential)}
+                            disabled={clientBusy}
+                            className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-red-400 transition-ui disabled:opacity-50"
+                          >
+                            {pendingRevocations[credential.id] ? "Retry apply" : credential.revokedAt ? "Apply revocation" : "Revoke"}
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="mt-3 text-xs text-(--text-muted)">No clients yet.</div>
+                  !clientsUnavailable && <div className="mt-3 text-xs text-(--text-muted)">No client credentials yet.</div>
                 )}
-              </div>
+              </section>}
             </div>
           </div>
         ) : null}
