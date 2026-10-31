@@ -4,7 +4,8 @@
 function resolveBasePath(pathname?: string): string {
   const currentPathname =
     pathname ?? (typeof window !== "undefined" ? window.location.pathname : "");
-  return currentPathname.startsWith("/containd/") ? "/containd" : "";
+  return currentPathname === "/containd" || currentPathname.startsWith("/containd/")
+    ? "/containd" : "";
 }
 
 function resolveAPIBase(pathname?: string): string {
@@ -15,8 +16,13 @@ function resolveAPIBase(pathname?: string): string {
 
 const ENV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || "";
 
+function prefixURLPath(base: string, path: string): string {
+  // Reverse proxies may already have rewritten absolute path literals.
+  return path === base || path.startsWith(`${base}/`) ? path : `${base}${path}`;
+}
+
 export function staticAssetURL(path: string, pathname?: string): string {
-  return `${resolveBasePath(pathname)}${path}`;
+  return prefixURLPath(resolveBasePath(pathname), path);
 }
 
 export function apiWebSocketURL(
@@ -26,7 +32,16 @@ export function apiWebSocketURL(
   pathname?: string,
 ): string {
   const wsProtocol = protocol === "https:" ? "wss" : "ws";
-  return `${wsProtocol}://${host}${resolveBasePath(pathname)}${path}`;
+  return `${wsProtocol}://${host}${prefixURLPath(resolveBasePath(pathname), path)}`;
+}
+
+export function cliWebSocketURL(
+  ticket: string,
+  protocol: string,
+  host: string,
+  pathname?: string,
+): string {
+  return `${apiWebSocketURL("/api/v1/cli/ws", protocol, host, pathname)}?ticket=${encodeURIComponent(ticket)}`;
 }
 
 const TOKEN_KEY = "containd.auth.token";
@@ -184,7 +199,7 @@ export async function fetchWithSession(
 }
 
 export function apiURL(path: string, pathname?: string): string {
-  return `${resolveAPIBase(pathname)}${path}`;
+  return prefixURLPath(resolveAPIBase(pathname), path);
 }
 
 export function handleUnauthorized(res: Response) {

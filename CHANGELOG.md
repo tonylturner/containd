@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The web console uses 30-second, single-use WebSocket tickets instead of
+  session JWTs in URLs. Upgrades require a ticket; `?token=` is no longer
+  accepted. Management access logs redact credential query values.
+- Console ticket issuance has no count limits, so pending-ticket counts no
+  longer deny connections for shared lab accounts. Tickets remain single-use
+  with a 30-second lifetime and lazy expiry cleanup.
 - ICS modes are now rule-local `monitor` or `enforce` (rule > global > monitor).
   Monitor rules only observe; they never admit, drop, hold or reset traffic.
   A former `learn` ALLOW inside an enforce envelope used to admit at L7 and
@@ -281,6 +287,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The web console displays its server greeting once, followed by a clean prompt.
+- Management URL builders avoid duplicate base-path prefixes when a reverse
+  proxy has already rewritten API or asset paths.
+- Console ticket upgrades work through proxies that omit the published port
+  from `Host`; ticket issuance retains cookie-authenticated origin checks.
 - Modbus write-single-coil (FC5) values other than ON (`0xFF00`) and OFF
   (`0x0000`) are invalid on the wire and no longer match an ICS ALLOW, in monitor
   or enforce mode. An enforce ALLOW for FC5 now leaves such writes to the

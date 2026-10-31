@@ -5,6 +5,7 @@ package netcfg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -77,6 +78,9 @@ func TestAddressCIDRKernelPreservesHost(t *testing.T) {
 		t.Fatalf("test device %s already exists", device)
 	}
 	if err := ensureBridge(device); err != nil {
+		if errors.Is(err, unix.EPERM) {
+			t.Skip("requires CAP_NET_ADMIN in an isolated network namespace")
+		}
 		t.Fatal(err)
 	}
 	defer func() {
