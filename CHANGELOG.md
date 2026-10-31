@@ -7,11 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Prevent concurrent deletion or demotion of the last administrator.
+- Make MFA login and enrollment challenges single-use and durable across management
+  restarts, and invalidate them on password, TOTP or role changes. Pending
+  challenges issued before this upgrade must be restarted.
+
 ### Changed
 
 - IT DPI HTTP parsing reads request and header lines directly from the packet
   payload instead of allocating a buffered reader per packet.
 - The UI drops the unused `glob` dev dependency and its override.
+
+### Fixed
+
+- Direct CLI login explains when an account needs MFA, password rotation or MFA
+  enrollment and directs users to the web UI or SSH.
+- Partial account profile updates preserve omitted fields and still allow explicit clearing.
 
 ## [0.1.36] - 2026-10-31
 
