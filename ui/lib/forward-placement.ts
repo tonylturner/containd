@@ -13,8 +13,6 @@ export function forwardPlacementMessage(result: ForwardPublishResult): string {
       return `Port forward staged; matching allow rule ${placement.rule.id} inserted at position ${placement.index + 1} — commit to apply.`;
     case "inside":
       return `Port forward staged — commit to apply. Enforcing ICS ${placement.ruleIds.length === 1 ? "rule" : "rules"} ${placement.ruleIds.join(", ")} ${placement.ruleIds.length === 1 ? "governs" : "govern"} this traffic; no allow rule created.`;
-    case "referenced":
-      return `Port forward staged — commit to apply. An existing firewall rule already references this port forward; no allow rule created.${warningText ? ` ${warningText}` : ""}`;
     case "partial":
       return `Port forward staged — commit to apply. ${warningText}`;
   }

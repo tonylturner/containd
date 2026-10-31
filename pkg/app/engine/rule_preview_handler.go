@@ -29,6 +29,6 @@ func previewRuleHandler(dp *engine.Engine) http.HandlerFunc {
 			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, dp.PreviewCandidateRule(request))
+		writeJSON(w, dp.PreviewRule(request))
 	}
 }

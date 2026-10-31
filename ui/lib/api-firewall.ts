@@ -94,7 +94,6 @@ export type ForwardPlacement = {
   index: number;
 } & (
   | { reason: "generated"; rule: FirewallRule; warning?: never }
-  | { reason: "referenced"; rule?: never; warning?: ForwardGrantWarning }
   | { reason: "inside"; rule?: never; warning?: never; ruleIds: string[] }
   | { reason: "partial"; rule?: never; warning: ForwardGrantWarning }
 );

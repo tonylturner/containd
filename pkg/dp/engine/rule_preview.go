@@ -52,21 +52,12 @@ type PreviewTimeRange struct {
 // default actions. It does not apply rules, log decisions or enforce verdicts.
 // A schedule is evaluated at each event's time. Identities are those the
 // running configuration binds to each event's opener now, not at the time
-// of the event.
-func (e *Engine) PreviewRule(entry rules.Entry) PreviewRuleResponse {
-	return e.previewRule(entry, e.zones.resolve)
+// of the event. Forward warnings use the candidate translation selectors.
+func (e *Engine) PreviewRule(request PreviewRuleRequest) PreviewRuleResponse {
+	return e.previewRule(request, e.zones.resolve)
 }
 
-// PreviewCandidateRule uses the candidate translation selectors for warnings.
-func (e *Engine) PreviewCandidateRule(request PreviewRuleRequest) PreviewRuleResponse {
-	return e.previewRuleWithForwards(request, e.zones.resolve)
-}
-
-func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRuleResponse {
-	return e.previewRuleWithForwards(PreviewRuleRequest{Entry: entry}, resolve)
-}
-
-func (e *Engine) previewRuleWithForwards(request PreviewRuleRequest, resolve zoneResolver) PreviewRuleResponse {
+func (e *Engine) previewRule(request PreviewRuleRequest, resolve zoneResolver) PreviewRuleResponse {
 	entry := request.Entry
 	const maxSamples = 50
 	result := PreviewRuleResponse{SampleMatches: []events.Event{}}

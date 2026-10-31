@@ -24,7 +24,7 @@ func TestPreviewViaUnavailableUsesCandidateForwards(t *testing.T) {
 		if present {
 			req.ForwardMatches = map[string]rules.ForwardMatch{"candidate": forward}
 		}
-		got := e.PreviewCandidateRule(req)
+		got := e.PreviewRule(req)
 		if got.MatchCount != 0 || got.SampleMatches == nil || len(got.SampleMatches) != 0 ||
 			got.TotalEvents != 1 || got.Unavailable != "Retained events do not record which connections containd translated, so a rule limited to port forwards cannot be previewed from history." ||
 			got.ICSCoverage == nil {
@@ -40,7 +40,7 @@ func TestPreviewViaUnavailableUsesCandidateForwards(t *testing.T) {
 	}
 	// A candidate removing a running forward must warn too.
 	entry.ViaForwards = []string{"running"}
-	got := e.PreviewCandidateRule(PreviewRuleRequest{Entry: entry})
+	got := e.PreviewRule(PreviewRuleRequest{Entry: entry})
 	if len(got.Warnings) != 1 || got.Warnings[0].Predicate != enforce.PredicateForward ||
 		!strings.Contains(got.Warnings[0].Message, "no referenced forward") {
 		t.Fatalf("running forward leaked into candidate: %+v", got)
