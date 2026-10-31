@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/conntrack"
 )
@@ -18,6 +19,13 @@ import (
 func TestKernelSpikeS4MaskedConntrackMarkSweep(t *testing.T) {
 	if os.Getenv("CONTAIND_NETNS_KERNEL_TEST") != "1" {
 		t.Skip("requires opt-in disposable kernel container")
+	}
+	// ClearMark deliberately scans the whole namespace. Other kernel tests
+	// leave admitted owned-forward entries (mark & 3 == 3), so sockets and
+	// nft rules alone do not isolate the expected update count.
+	if os.Getenv("CONTAIND_MARK_SWEEP_PEER") != "1" {
+		runIsolatedMarkSweep(t)
+		return
 	}
 	ctx := context.Background()
 	nft := func(script string) {
@@ -93,4 +101,36 @@ func TestKernelSpikeS4MaskedConntrackMarkSweep(t *testing.T) {
 		t.Fatalf("second sweep updated %d entries: %v", n, err)
 	}
 	t.Log("CTA_MARK=0 CTA_MARK_MASK=2 cleared only bit 1; unrelated bits and opposite-parity entry unchanged")
+}
+
+func runIsolatedMarkSweep(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	ns := fmt.Sprintf("mark-sweep-%d", os.Getpid())
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v: %s", args, err, out)
+		}
+	}
+	run("ip", "netns", "add", ns)
+	t.Cleanup(func() {
+		if out, err := exec.Command("ip", "netns", "del", ns).CombinedOutput(); err != nil {
+			t.Errorf("delete mark sweep namespace: %v: %s", err, out)
+		}
+	})
+	run("ip", "-n", ns, "link", "set", "lo", "up")
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, "ip", "netns", "exec", ns, binary,
+		"-test.run=^TestKernelSpikeS4MaskedConntrackMarkSweep$", "-test.v")
+	cmd.Env = append(os.Environ(), "CONTAIND_MARK_SWEEP_PEER=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("isolated mark sweep: %v: %s", err, out)
+	}
+	t.Logf("isolated mark sweep: %s", out)
 }
