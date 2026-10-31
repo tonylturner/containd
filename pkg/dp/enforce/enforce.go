@@ -264,10 +264,11 @@ type ruleLine struct {
 	// family is the address family the line is restricted to, or
 	// familyAny.
 	family int
-	// ct marks a line that matches packets of both directions by their
-	// connection's original tuple; its predicates must too.
-	ct   bool
-	text string
+	// ct marks a line using the connection's original-oriented tuple;
+	// its identity and via predicates must use those coordinates too.
+	ct        bool
+	direction packetDirection
+	text      string
 }
 
 // headerLines lowers only trustworthy packet-header evidence. The caller

@@ -193,7 +193,7 @@ func TestForwardLoweringAndLocalAddressUpdate(t *testing.T) {
 	}
 	assertDeclaredSets(t, text)
 	assertText(t, text, "elements = { 203.0.113.2, 203.0.113.3 }", "ct mark set ct mark | 0x00000001 dnat ip to 10.0.0.8:502",
-		"ct direction reply oifname \"wan0\"", "ct original proto-dst 1502", "ct original ip daddr @local4_77616e30",
+		"ct direction reply meta l4proto tcp ct reply proto-src 502 oifname \"wan0\"", "ct original proto-dst 1502", "ct original ip daddr @local4_77616e30",
 		"ct original ip saddr { 198.51.100.0/24 }", "ct reply ip saddr 10.0.0.8 ct reply proto-src 502")
 	if strings.Contains(text, "ct status dnat") {
 		t.Fatal("foreign DNAT accepted")

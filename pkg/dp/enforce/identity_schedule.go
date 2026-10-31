@@ -135,19 +135,21 @@ func (p *predicates) guardFor(target chainTarget, e rules.Entry, lines []ruleLin
 		if err != nil {
 			return nil, err
 		}
-		vias := []string{""}
+		vias := []directionalClause{{}}
 		if len(e.ViaForwards) != 0 {
 			if !l.ct || l.family == 1 {
 				continue
 			}
-			vias = forwardClauses(p.snap, e, target)
+			vias = forwardAlternatives(p.snap, e, target)
 		}
 		for _, alt := range inFamily(alts, l.family) {
 			if len(e.ViaForwards) != 0 && alt.family == 1 {
 				continue // owned publications are IPv4 only
 			}
 			for _, via := range vias {
-				out = append(out, joinClauses([]string{alt.clause, via, l.text}))
+				if direction, ok := l.direction.intersect(via.direction); ok {
+					out = append(out, joinClauses([]string{alt.clause, direction.clause(), via.text, l.text}))
+				}
 			}
 		}
 	}
@@ -227,7 +229,7 @@ func (p *predicates) writeRecheckChains(buf *bytes.Buffer, target chainTarget) e
 		if !e.Action.Decides() || rules.MonitorICS(e, p.snap.DPIMode) || !conditional(e) {
 			continue
 		}
-		ls, err := p.ctLines(target, e, []alternative{{family: familyAny}}, "goto "+policy)
+		ls, err := p.ctLines(target, e, []alternative{{family: familyAny}}, "goto "+policy, false)
 		if err != nil {
 			return err
 		}
@@ -252,13 +254,14 @@ func (p *predicates) writeRecheckJump(buf *bytes.Buffer, target chainTarget) {
 	}
 }
 
-// ctLines lowers e's scope for an established packet of the directions
+// ctLines lowers e's scope for a tracked packet of the directions
 // target sees: the original tuple the forward chain saw on the connection's
 // first packet, read from conntrack (opener and post-DNAT server address
 // and port), with the zones swapped on replies (zoneLowering.ctDirections).
 // Each line carries one of alts in its address family. A rule that matches
-// nothing has none.
-func (p *predicates) ctLines(target chainTarget, e rules.Entry, alts []alternative, verdict string) ([]string, error) {
+// nothing has none. Intersect originalOnly with zone and via directions
+// before rendering the single direction clause.
+func (p *predicates) ctLines(target chainTarget, e rules.Entry, alts []alternative, verdict string, originalOnly bool) ([]string, error) {
 	dirs, ok := p.lowering(target).ctDirections(e)
 	if !ok {
 		return nil, nil
@@ -273,6 +276,14 @@ func (p *predicates) ctLines(target chainTarget, e rules.Entry, alts []alternati
 	}
 	var out []string
 	for _, d := range dirs {
+		direction := d.direction
+		if originalOnly {
+			var ok bool
+			direction, ok = direction.intersect(directionOriginal)
+			if !ok {
+				continue
+			}
+		}
 		for _, proto := range protos {
 			match, err := ctProtocolMatch(proto)
 			if err != nil {
@@ -282,13 +293,15 @@ func (p *predicates) ctLines(target chainTarget, e rules.Entry, alts []alternati
 				if len(e.ViaForwards) != 0 && s.family == 1 {
 					continue
 				}
-				parts := append([]string{d.clause, d.in, d.out, match}, s.conntrack()...)
+				parts := append([]string{d.in, d.out, match}, s.conntrack()...)
 				for _, alt := range inFamily(alts, s.family) {
 					if len(e.ViaForwards) != 0 && alt.family == 1 {
 						continue
 					}
-					for _, via := range forwardClauses(p.snap, e, target) {
-						out = append(out, joinClauses(append(append([]string(nil), parts...), alt.clause, via, verdict)))
+					for _, via := range forwardAlternatives(p.snap, e, target) {
+						if merged, ok := direction.intersect(via.direction); ok {
+							out = append(out, joinClauses(append(append([]string{merged.clause()}, parts...), alt.clause, via.text, verdict)))
+						}
 					}
 				}
 			}

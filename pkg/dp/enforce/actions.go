@@ -105,8 +105,8 @@ func meterLines(e rules.Entry, p rules.Protocol, scopes []addrScope, zones zoneL
 				lines = append(lines, ruleLine{family: k.family, text: joinClauses(append(first, stmts))})
 			}
 			for _, d := range dirs {
-				both := append([]string{match, trackedState, d.clause, d.in, d.out, tracked}, s.conntrack()...)
-				lines = append(lines, ruleLine{family: k.family, ct: true, text: joinClauses(append(both, stmts))})
+				both := append([]string{match, trackedState, d.in, d.out, tracked}, s.conntrack()...)
+				lines = append(lines, ruleLine{family: k.family, ct: true, direction: d.direction, text: joinClauses(append(both, stmts))})
 			}
 		}
 	}
