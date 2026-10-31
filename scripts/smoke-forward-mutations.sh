@@ -37,7 +37,7 @@ run_mutation() {
   fi
 }
 
-run_mutation permissive deny-lan-wan-8082 deny-lan-target-wan deny-wan-lan-80 deny-wan-lan-22
+run_mutation permissive deny-lan-wan-8082 deny-lan-target-wan deny-wan-lan-80 deny-wan-lan-22 dnat-no-allow
 # The stack is up after the first run; do not rebuild it for the second.
 export SMOKE_BUILD=0
 run_mutation no-masquerade lan-wan-snat

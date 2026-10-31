@@ -74,11 +74,29 @@ probe at all, so a broken probe is never read as a drop. The compose file
 mounts the directory at `/opt/forward` in `lan_client`, `lan_target` and
 `wan_server`.
 
-`scripts/smoke-forward.sh` also reads `SMOKE_PROBE_TIMEOUT` (seconds a
-probe waits for a connection, default 3), `SMOKE_MUTATION` (`permissive` or
+The forwarding smoke saves a default-deny base policy, publishes `lan-http`
+through `/api/v1/firewall/port-forwards` with `allowRule: true`, and commits
+through management. It checks the generated rule's `viaForwards`, DNAT
+delivery and counters, and return-path masquerade. It also publishes a second
+forward without permission (translation counter increases but the probe times
+out), moves a covering DENY from bottom to top and back (delivery changes
+with first-match order), verifies that via-rule history preview reports
+`unavailable`, and deletes the forward and its generated rule. Each policy
+change is committed before a fresh connection probes the engine. If the
+packaged CLI is reachable, `show firewall rules` must print order numbers and
+the via forward; otherwise the script logs a skip reason.
+
+`scripts/smoke-forward.sh` also reads `DNAT_PORT` (default 8088),
+`NO_ALLOW_PORT` (a different listen port, default 8089),
+`SMOKE_PROBE_TIMEOUT` (seconds a probe waits for a connection, default 3),
+`SMOKE_MUTATION` (`permissive` or
 `no-masquerade`, used by `scripts/smoke-forward-mutations.sh`) and
 `SMOKE_RESULT_FILE` (a file that receives the IDs of failed checks, one per
-line).
+line). The log contains every executed check's named PASS/FAIL result.
+Unexpected check failures stop the run; expected mutation failures continue
+so the mutation driver can compare the complete set. The permissive mutation
+must fail the four direct deny checks and `dnat-no-allow`; disabling LAN
+masquerade must fail only `lan-wan-snat`.
 
 ## Scanning-gate fixtures
 
