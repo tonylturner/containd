@@ -13,27 +13,45 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ics"
 )
 
+// ValidateServiceConfigs checks all ServicesConfig sections, even if an
+// unrelated configuration error would make Config.Validate return early.
+// IDS rules and cross-service firewall/scan selection checks still belong to
+// Config.Validate: these faults can invalidate dataplane policy.
+func ValidateServiceConfigs(c *Config) error {
+	if c == nil {
+		return errors.New("config is nil")
+	}
+	return validateServices(c.Services, c.Interfaces, c.Zones)
+}
+
 func validateServices(s ServicesConfig, ifaces []Interface, zones []Zone) error {
-	if err := validateSyslogService(s.Syslog); err != nil {
-		return err
+	zoneSet, ifaceSet := vpnValidationSets(ifaces, zones)
+	var errs []error
+	check := func(service string, err error) {
+		if err != nil {
+			errs = append(errs, &ServiceConfigError{Service: service, Err: err})
+		}
 	}
-	if err := validateDNSService(s.DNS); err != nil {
-		return err
+	check(ServiceSyslog, validateSyslogService(s.Syslog))
+	check(ServiceDNS, validateDNSService(s.DNS))
+	check(ServiceNTP, validateNTPService(s.NTP))
+	check(ServiceProxy, validateProxy(s.Proxy))
+	check(ServiceProxy, validateProxyZones(s.Proxy, zoneSet))
+	check(ServiceDHCP, validateDHCP(s.DHCP))
+	if s.DHCP.Enabled {
+		check(ServiceDHCP, validateDHCPListenIfaceNames(s.DHCP.ListenIfaces, ifaces))
 	}
-	if err := validateNTPService(s.NTP); err != nil {
-		return err
-	}
-	if err := validateProxy(s.Proxy); err != nil {
-		return err
-	}
-	if err := validateDHCP(s.DHCP); err != nil {
-		return err
-	}
-	if err := validateVPN(s.VPN, ifaces, zones); err != nil {
-		return err
-	}
-	if err := validateAV(s.AV); err != nil {
-		return err
+	check(ServiceWireGuard, validateWireGuard(s.VPN.WireGuard, zoneSet, ifaceSet))
+	check(ServiceOpenVPN, validateOpenVPN(s.VPN.OpenVPN, zoneSet, ifaceSet))
+	check(ServiceAV, validateAV(s.AV))
+	return errors.Join(errs...)
+}
+
+func validateProxyZones(p ProxyConfig, zones map[string]struct{}) error {
+	for _, name := range p.Forward.ListenZones {
+		if _, ok := zones[name]; !ok {
+			return fmt.Errorf("forward proxy listenZones references unknown zone %q", name)
+		}
 	}
 	return nil
 }
@@ -63,8 +81,8 @@ func validateDNSService(cfg DNSConfig) error {
 		}
 	}
 	for _, u := range cfg.UpstreamServers {
-		if strings.TrimSpace(u) == "" {
-			return errors.New("dns upstreamServers cannot include empty")
+		if err := ValidateUnboundForwarder(u); err != nil {
+			return fmt.Errorf("dns upstreamServers: %w", err)
 		}
 	}
 	if cfg.CacheSizeMB < 0 {
@@ -75,8 +93,8 @@ func validateDNSService(cfg DNSConfig) error {
 
 func validateNTPService(cfg NTPConfig) error {
 	for _, srv := range cfg.Servers {
-		if strings.TrimSpace(srv) == "" {
-			return errors.New("ntp servers cannot include empty")
+		if err := ValidateChronyServer(srv); err != nil {
+			return fmt.Errorf("ntp servers: %w", err)
 		}
 	}
 	if cfg.IntervalSeconds < 0 {
@@ -86,6 +104,11 @@ func validateNTPService(cfg NTPConfig) error {
 }
 
 func validateAV(cfg AVConfig) error {
+	if cfg.ClamAV.SocketPath != "" {
+		if err := ValidateClamdSocketPath(cfg.ClamAV.SocketPath); err != nil {
+			return err
+		}
+	}
 	if !cfg.Enabled {
 		return nil
 	}
@@ -166,22 +189,43 @@ const (
 )
 
 func validateProxy(p ProxyConfig) error {
+	if len(p.Forward.AllowedClients) > 0 {
+		return errors.New("forward proxy allowedClients not supported yet; clear this field")
+	}
+	if p.Forward.Upstream != "" {
+		return errors.New("forward proxy upstream not supported yet; clear this field")
+	}
 	if p.Forward.ListenPort != 0 && (p.Forward.ListenPort < 1 || p.Forward.ListenPort > 65535) {
 		return fmt.Errorf("forward proxy listenPort invalid: %d", p.Forward.ListenPort)
 	}
 	for _, z := range p.Forward.ListenZones {
-		if z == "" {
-			return errors.New("forward proxy listenZones cannot include empty")
+		if err := ValidateProxyListenZone(z); err != nil {
+			return fmt.Errorf("forward proxy listenZones: %w", err)
 		}
 	}
 	for _, d := range p.Forward.AllowedDomains {
-		if d == "" {
-			return errors.New("forward proxy allowedDomains cannot include empty")
+		if err := ValidateProxyHostname(d); err != nil {
+			return fmt.Errorf("forward proxy allowedDomains: %w", err)
 		}
 	}
 	for _, s := range p.Reverse.Sites {
-		if s.Name == "" {
-			return errors.New("reverse proxy site name required")
+		if err := ValidateProxySiteID(s.Name); err != nil {
+			return fmt.Errorf("reverse proxy site name: %w", err)
+		}
+		for _, host := range s.Hostnames {
+			if err := ValidateProxyHostname(host); err != nil {
+				return fmt.Errorf("reverse proxy hostnames: %w", err)
+			}
+		}
+		for _, backend := range s.Backends {
+			if err := ValidateProxyBackend(backend); err != nil {
+				return fmt.Errorf("reverse proxy backends: %w", err)
+			}
+		}
+		if s.TLSEnabled || s.CertRef != "" {
+			if err := ValidateProxyCertRef(s.CertRef); err != nil {
+				return fmt.Errorf("reverse proxy certRef: %w", err)
+			}
 		}
 		if s.ListenPort < 1 || s.ListenPort > 65535 {
 			return fmt.Errorf("reverse proxy site %s listenPort invalid: %d", s.Name, s.ListenPort)
@@ -326,14 +370,6 @@ func ipToUint32(ip net.IP) uint32 {
 	return (uint32(ip4[0]) << 24) | (uint32(ip4[1]) << 16) | (uint32(ip4[2]) << 8) | uint32(ip4[3])
 }
 
-func validateVPN(v VPNConfig, ifaces []Interface, zones []Zone) error {
-	zoneSet, ifaceSet := vpnValidationSets(ifaces, zones)
-	if err := validateWireGuard(v.WireGuard, zoneSet, ifaceSet); err != nil {
-		return err
-	}
-	return validateOpenVPN(v.OpenVPN, zoneSet, ifaceSet)
-}
-
 func vpnValidationSets(ifaces []Interface, zones []Zone) (map[string]struct{}, map[string]struct{}) {
 	zoneSet := map[string]struct{}{}
 	for _, z := range zones {
@@ -399,7 +435,7 @@ func validateOpenVPN(vpn OpenVPNConfig, zoneSet, ifaceSet map[string]struct{}) e
 		return fmt.Errorf("vpn.openvpn mode invalid: %q", vpn.Mode)
 	}
 	if !vpn.Enabled {
-		return nil
+		return validateOpenVPNSinks(vpn)
 	}
 	mode := strings.TrimSpace(vpn.Mode)
 	if mode == "" {
@@ -425,14 +461,11 @@ func validateManagedOpenVPN(m *OpenVPNManagedClientConfig, mode string) error {
 	if mode != "client" {
 		return errors.New("vpn.openvpn managed config currently supports client mode only")
 	}
-	if strings.TrimSpace(m.Remote) == "" {
+	if err := validateOpenVPNManagedSinks(m); err != nil {
+		return err
+	}
+	if m.Remote == "" {
 		return errors.New("vpn.openvpn.managed remote is required")
-	}
-	if err := validateVPNPort("vpn.openvpn.managed port", m.Port, 1194); err != nil {
-		return err
-	}
-	if err := validateVPNProto("vpn.openvpn.managed proto", m.Proto); err != nil {
-		return err
 	}
 	if strings.TrimSpace(m.CA) == "" {
 		return errors.New("vpn.openvpn.managed ca is required")
@@ -443,7 +476,7 @@ func validateManagedOpenVPN(m *OpenVPNManagedClientConfig, mode string) error {
 	if strings.TrimSpace(m.Key) == "" {
 		return errors.New("vpn.openvpn.managed key is required")
 	}
-	if (strings.TrimSpace(m.Username) != "") != (strings.TrimSpace(m.Password) != "") {
+	if (m.Username != "") != (m.Password != "") {
 		return errors.New("vpn.openvpn.managed username and password must be set together")
 	}
 	return nil
@@ -453,35 +486,13 @@ func validateOpenVPNServer(s *OpenVPNManagedServerConfig, mode string, zoneSet, 
 	if mode != "server" {
 		return errors.New("vpn.openvpn server config requires mode=server")
 	}
-	if err := validateVPNPort("vpn.openvpn.server listenPort", s.ListenPort, 1194); err != nil {
+	if err := validateOpenVPNServerSinks(s); err != nil {
 		return err
 	}
-	if err := validateVPNProto("vpn.openvpn.server proto", s.Proto); err != nil {
-		return err
-	}
-	if strings.TrimSpace(s.TunnelCIDR) == "" {
+	if s.TunnelCIDR == "" {
 		return errors.New("vpn.openvpn.server tunnelCIDR is required")
 	}
-	if _, _, err := net.ParseCIDR(strings.TrimSpace(s.TunnelCIDR)); err != nil {
-		return fmt.Errorf("vpn.openvpn.server tunnelCIDR invalid: %q", s.TunnelCIDR)
-	}
-	if err := validateVPNListenTargets("vpn.openvpn.server", s.ListenZone, s.ListenInterfaces, zoneSet, ifaceSet); err != nil {
-		return err
-	}
-	for _, ipStr := range s.PushDNS {
-		if ip := net.ParseIP(strings.TrimSpace(ipStr)); ip == nil || ip.To4() == nil {
-			return fmt.Errorf("vpn.openvpn.server pushDNS invalid: %q", ipStr)
-		}
-	}
-	for _, cidr := range s.PushRoutes {
-		if strings.TrimSpace(cidr) == "" {
-			return errors.New("vpn.openvpn.server pushRoutes cannot include empty")
-		}
-		if _, _, err := net.ParseCIDR(strings.TrimSpace(cidr)); err != nil {
-			return fmt.Errorf("vpn.openvpn.server pushRoutes invalid: %q", cidr)
-		}
-	}
-	return nil
+	return validateVPNListenTargets("vpn.openvpn.server", s.ListenZone, s.ListenInterfaces, zoneSet, ifaceSet)
 }
 
 func validateVPNPort(label string, port, def int) error {
@@ -495,7 +506,6 @@ func validateVPNPort(label string, port, def int) error {
 }
 
 func validateVPNProto(label, proto string) error {
-	proto = strings.ToLower(strings.TrimSpace(proto))
 	if proto == "" {
 		proto = "udp"
 	}

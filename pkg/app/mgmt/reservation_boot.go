@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	httpapi "github.com/tonylturner/containd/api/http"
@@ -55,10 +57,49 @@ func validateReservedBootEnvironment(cfg *config.Config, r *mgmtpath.Reservation
 // at this boot. Without a reservation that is only its own validation, which
 // an upgrade can tighten under an existing store.
 func bootConflict(cfg *config.Config, r *mgmtpath.Reservation) error {
-	if r == nil {
-		return cfg.Validate()
+	// Config.Validate is fail-fast. Scan selection follows service validation,
+	// and must not be masked by an earlier service-only fault.
+	conflict := cfg.Validate()
+	if faults, other := splitServiceFaults(conflict); len(faults) > 0 && other == nil {
+		_, scanErr := config.ValidateScanSelection(cfg)
+		conflict = errors.Join(conflict, scanErr)
 	}
-	return errors.Join(cfg.Validate(), config.ValidateManagementReservation(cfg, r), validateReservedStartup(cfg, r))
+	if r != nil {
+		conflict = errors.Join(conflict, config.ValidateManagementReservation(cfg, r), validateReservedStartup(cfg, r))
+	}
+	if _, other := splitServiceFaults(conflict); other == nil {
+		return nil
+	}
+	return conflict
+}
+
+// Inspect every branch of a joined error, not merely the first errors.As match:
+// a mixed error must never be mistaken for a service-only failure.
+func splitServiceFaults(err error) ([]*config.ServiceConfigError, error) {
+	if err == nil {
+		return nil, nil
+	}
+	if fault, ok := err.(*config.ServiceConfigError); ok {
+		return []*config.ServiceConfigError{fault}, nil
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var faults []*config.ServiceConfigError
+		var other []error
+		for _, child := range joined.Unwrap() {
+			f, e := splitServiceFaults(child)
+			faults = append(faults, f...)
+			other = append(other, e)
+		}
+		return faults, errors.Join(other...)
+	}
+	if child := errors.Unwrap(err); child != nil {
+		faults, other := splitServiceFaults(child)
+		if other == nil {
+			return faults, nil
+		}
+		return faults, err
+	}
+	return nil, err
 }
 
 // Only listeners are replaced, and only in memory. APIs continue to expose the
@@ -78,7 +119,58 @@ func reservationSafeBootListeners(cfg *config.Config, r *mgmtpath.Reservation) *
 // gets the fail-closed recovery ruleset until a valid commit, rollback or
 // factory reset (see api/http ApplyBootConfig).
 func recordBootDecision(logger *zap.SugaredLogger, stores mgmtStores, cfg *config.Config, r *mgmtpath.Reservation) (*dpevents.Event, error) {
-	return persistBootFault(logger, stores, bootConflict(cfg, r), r)
+	event, err := persistBootFault(logger, stores, bootConflict(cfg, r), r)
+	if err != nil {
+		return nil, err
+	}
+	faults, _ := splitServiceFaults(config.ValidateServiceConfigs(cfg))
+	byService := map[string][]string{}
+	var order []string
+	for _, fault := range faults {
+		if _, exists := byService[fault.Service]; !exists {
+			order = append(order, fault.Service)
+		}
+		// Quote controls (including CR/LF/NUL) so operator input cannot forge
+		// log lines. Validators never echo auth material.
+		message := strconv.QuoteToASCII(fault.Err.Error())
+		byService[fault.Service] = append(byService[fault.Service], message[1:len(message)-1])
+	}
+	var events []dpevents.Event
+	for _, service := range order {
+		detail := strings.Join(byService[service], "; ")
+		now := time.Now().UTC()
+		const kind = "service.config_fault"
+		if err := stores.auditStore.Add(context.Background(), audit.Record{
+			Timestamp: now, Actor: "system", Source: "management", Action: kind,
+			Target: service, Result: "fault", Detail: detail,
+		}); err != nil {
+			return nil, fmt.Errorf("record service boot fault: %w", err)
+		}
+		logger.Errorw(kind, "service", service, "error", detail)
+		events = append(events, dpevents.Event{
+			ID: uint64(now.UnixNano()), Timestamp: now, Proto: "system", Kind: kind,
+			Attributes: map[string]any{"service": service, "error": detail},
+		})
+	}
+	if len(events) == 0 {
+		return event, nil
+	}
+	if event != nil {
+		events = append(events, *event)
+	}
+	// The assembly stores one boot event. Retain its primary event and carry the
+	// complete batch to the telemetry boundary, which exposes individual events.
+	primary := events[0]
+	if event != nil {
+		primary = *event
+	}
+	attrs := make(map[string]any, len(primary.Attributes)+1)
+	for key, value := range primary.Attributes {
+		attrs[key] = value
+	}
+	attrs["bootEvents"] = events
+	primary.Attributes = attrs
+	return &primary, nil
 }
 
 // persistBootFault records conflict, or its absence, as this boot's
@@ -128,10 +220,17 @@ type bootEventServices struct {
 func (s *bootEventServices) ListTelemetryEvents(limit int) []dpevents.Event {
 	out := s.Manager.ListTelemetryEvents(limit)
 	if s.event != nil {
-		out = append(out, *s.event)
+		out = append(out, bootEvents(s.event)...)
 	}
 	if limit == 0 {
 		return out
 	}
 	return dpevents.SelectTelemetry(out, limit)
+}
+
+func bootEvents(event *dpevents.Event) []dpevents.Event {
+	if events, ok := event.Attributes["bootEvents"].([]dpevents.Event); ok {
+		return events
+	}
+	return []dpevents.Event{*event}
 }
