@@ -145,6 +145,11 @@ func matchIEC104(ce *compiledEntry, ctx EvalContext) bool {
 		!matchSelectExecute(ce.ICS.SelectExecute, obj.Select) {
 		return false
 	}
+	// Preserve known message constraints while rejecting incomplete child
+	// coverage for a target-constrained ALLOW, as for DNP3/CIP objects.
+	if ics.ObjectUnknown && len(c.ioa) > 0 {
+		return denying(ce.Action)
+	}
 	return len(c.ioa) == 0 || (obj.IOA != nil && ioaInRanges(c.ioa, *obj.IOA))
 }
 

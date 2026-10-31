@@ -38,14 +38,15 @@ The non-versioned Prometheus `/metrics` endpoint is outside this API base.
 
 ## Monitoring Availability
 
-Flows, protocol/top-talker statistics, anomalies, learning profiles and rule
-generation and apply, signatures and matches, interface runtime state and simulation
+Flows, protocol/top-talker statistics, anomalies, learner evidence and suggestion
+generation/staging, signatures and matches, interface runtime state and simulation
 return HTTP `503` with an `ErrorResponse` (`{"error":"engine … unavailable"}`)
 when the required engine capability is missing or its call fails. The same
-convention applies to anomaly/learning clears, signature writes and simulation
-control: unavailable operations never report a successful clear or change.
+convention applies to anomaly clears, learner dataset deletion, signature writes
+and simulation control: unavailable operations never report a successful clear or change.
 A reachable backend with no observations still returns `200` with an empty
-array; a reachable stopped simulation returns `200` with `running: false`.
+list (learner pages use `{items: [], nextCursor?}`); a reachable stopped simulation
+returns `200` with `running: false`.
 Retry unavailable requests rather than interpreting them as empty or stopped.
 
 ## Staged Configuration
@@ -334,22 +335,86 @@ set it. Binding summaries survive eviction of their original event while
 other events of the flow remain retained; they do not resurrect expired flows.
 
 `POST /api/v1/pcap/analyze` (multipart `file`) and
-`POST /api/v1/pcap/analyze/{name}` return policy analysis. `stats.identifications`
-is an array of `{key, flowId, srcIp, dstIp, srcPort, dstPort, attributes}`:
-`key` is a run-qualified offline incarnation. The endpoints follow captured SYN
-client-to-server roles when available, otherwise the flow's orientation hint.
-`attributes` uses the same spellings above. `stats.events`
-includes identification and passive decoder events. Suggestions exclude
-observation-bound connections. The engine's internal PCAP analysis endpoints
-return the analysis directly, with `identifications` at the top level and
-scope evaluated against their rule snapshot. Policy analysis without a
-snapshot reports `outside_rule_port_scope: "unknown"`.
-The `stats.truncated` boolean indicates that a packet record was cut short or
-the final record was partial at EOF; when true, missing events or
-identifications may be due to truncated records.
+`POST /api/v1/pcap/analyze/{name}` import a sealed engine-owned dataset and return
+`{dataset, stats}`. No profiles or rules are returned. Uploads must be classic
+PCAP (not PCAPng), at most 64 MiB. The same response shape is used by the engine's
+internal import routes.
+
+`stats.identifications` is an array of
+`{key, flowId, srcIp, dstIp, srcPort, dstPort, attributes}`: `key` is a run-qualified
+offline incarnation and `attributes` uses the spellings above. Captured SYN roles
+are used when available, otherwise the flow's orientation hint.
+`stats.events` includes identification and passive decoder events. Nonstandard
+services remain observation-only. `stats.truncated` indicates a cut-short packet
+or partial final record; `stats.displayTruncated` means only the display sample
+was capped. Check `dataset.gaps` separately for evidence admission loss, which
+prevents certification.
 
 See [Content identification](ics-dpi.md#content-identification) for protocol,
 capture-mode, timing and coverage limits.
+
+## Learner Evidence and Staging
+
+All paths below are relative to `/api/v1`. Reads are available to viewers;
+imports and all learner mutations require admin. The `/pcap` UI combines imported
+captures and explicit live-watch datasets; it never commits policy.
+
+| Request | Purpose / body |
+| --- | --- |
+| `GET /learn/datasets` | Dataset page |
+| `GET /learn/datasets/{id}` | Dataset fingerprints, statistics, expiry and gaps |
+| `GET /learn/datasets/{id}/observations` | Normalized parents with service/coordinate authority and quality |
+| `DELETE /learn/datasets/{id}` | Delete evidence and invalidate dependent suggestions |
+| `POST /learn/watches` | Explicit start: `{"durationSeconds":3600}`; omitted/0 means 1 hour, maximum 86400 seconds, one active watch |
+| `GET /learn/watches` / `GET /learn/watches/{id}` | Watch page / status (never starts collection) |
+| `POST /learn/watches/{id}/stop` | Stop collection and seal its dataset |
+| `POST /learn/generate` | `{"datasetId":"<sealed-dataset>"}` → suggestion ID/revision pairs and withheld-reason counts |
+| `GET /learn/suggestions?datasetId=<id>` | Filtered suggestion page |
+| `GET /learn/suggestions/{id}` | Immutable rules, frozen replay proof, limitations, review and workflow revision |
+| `POST /learn/suggestions/{id}/review` | `{"selection":{"id":"<id>","revision":2},"approve":true,"coordinateApproved":true}` |
+| `GET /learn/counters` | Durable store-wide admission/loss/eviction/expiry and withheld totals |
+| `POST /learn/apply` | Atomic selected staging, described below |
+
+List pages use `{items, nextCursor?}` with optional `cursor` and `limit` (1–200,
+default 200). Follow `nextCursor` until absent; `items` may be null for an empty
+page. Dataset deletion/expiry/eviction invalidates dependent proof. Retention and
+protocol withholding limits are described in [Learning](ics-dpi.md#learning).
+
+Selection is not review. IEC 104 always requires explicit admin review; a wire
+suggestion also needs coordinate approval after checking pre-NAT capture scope
+against deployment. A successful review increments the revision; use the returned
+revision for staging. Every proposed rule is an explicit monitor ALLOW. CIP has
+observations but no actionable suggestions.
+
+Stage exactly the chosen immutable revisions with one request:
+
+```json
+{
+  "requestId": "operator-batch-1",
+  "selections": [{"id": "<suggestion-id>", "revision": 3}]
+}
+```
+
+`POST /learn/apply` reloads certified content and atomically stages all selected
+rules in candidate config. It accepts at most 128 unique selections / 128 total
+rules, not arbitrary rule JSON. Success returns `{requestId, selections,
+"staged":true}` and `X-Containd-Config: staged`; it does not activate policy.
+Stale/conflicting/uncertified/review-required requests return `409` with the server
+reason and no partial batch. Expired evidence returns `410`; unavailable evidence
+returns `503`. Refresh suggestions after a refusal. If persistence succeeded but
+completion failed, the candidate may already be staged: retry the same request ID
+and exact ordered selections, never silently regenerate or use a new receipt.
+
+Use the normal candidate diff and commit workflow to apply monitor rules. To
+allow traffic with a learned rule, explicitly change its candidate mode to enforce
+and commit. A staged learner status is a receipt, not live activation telemetry.
+Legacy `learned-*` overlap warnings never delete existing policy.
+
+**Removed contracts:** `GET /learn/profiles` and bulk `DELETE /learn` are gone.
+`POST /learn/generate` now takes a sealed dataset ID; `POST /learn/apply` no longer
+regenerates/applies all observations. The internal profile and bulk-rule routes
+are also removed. PCAP analysis no longer returns profiles, event summaries or
+rules. Use datasets, suggestions, review and atomic selected staging instead.
 
 ## Rule Counters and Flow Tags
 

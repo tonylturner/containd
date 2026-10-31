@@ -29,16 +29,17 @@ type iecInventoryLedger struct {
 }
 
 type iecInventoryCommand struct {
-	input       iecInventoryInput
-	observation inventory.IEC104Observation // immutable after construction
-	ref         inventory.IEC104CommandRef  // published by observed.Store
-	observed    atomic.Bool
-	final       atomic.Uint32 // 0 pending, 1 not accepted, 2 accepted
-	emitted     atomic.Bool
-	id          string
-	start, end  int64
-	pending     int
-	allowed     bool
+	input         iecInventoryInput
+	learnDelivery func(string)
+	observation   inventory.IEC104Observation // immutable after construction
+	ref           inventory.IEC104CommandRef  // published by observed.Store
+	observed      atomic.Bool
+	final         atomic.Uint32 // 0 pending, 1 not accepted, 2 accepted
+	emitted       atomic.Bool
+	id            string
+	start, end    int64
+	pending       int
+	allowed       bool
 }
 
 func (c *iecInventoryCommand) observe() {
@@ -52,6 +53,9 @@ func (c *iecInventoryCommand) observe() {
 func (c *iecInventoryCommand) flush() {
 	if c.observed.Load() && c.final.Load() != 0 && c.emitted.CompareAndSwap(false, true) {
 		c.input.IEC104CommandOutcome(inventory.IEC104Outcome{Command: c.ref, Accepted: c.final.Load() == 2})
+		if c.final.Load() == 2 && c.id != "" && c.learnDelivery != nil {
+			c.learnDelivery(c.id)
+		}
 	}
 }
 
@@ -65,7 +69,7 @@ func (t *iecTable) observeInventoryLocked(s *iecSession, dir int, f dpi.DecodedF
 	}
 	o.SessionID, o.Controlling, o.Controlled = s.id, s.client, s.server
 	o.ControlDirection, o.Time = dir == iecDirClient, now
-	c := &iecInventoryCommand{input: t.inventory, observation: o, start: f.Start, end: f.End, allowed: true}
+	c := &iecInventoryCommand{input: t.inventory, learnDelivery: t.learnDelivery, observation: o, start: f.Start, end: f.End, allowed: true}
 	acts.inventoryObserve = append(acts.inventoryObserve, c)
 	if !o.IsCommand() {
 		return

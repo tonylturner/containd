@@ -88,19 +88,7 @@ func TestIdentificationFixtures(t *testing.T) {
 			if count != tc.events {
 				t.Fatalf("decoded %d want %d: %+v", count, tc.events, result.Events)
 			}
-			policy, err := AnalyzeForPolicy(bytes.NewReader(data), modbus.NewDecoder(), dnp3.NewDecoder(), iec104.NewDecoder())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, ok := policy.EventSummary["identify"]; ok {
-				t.Fatalf("identification counted in protocol summary: %+v", policy.EventSummary)
-			}
-			if tc.binding == "observation" && (len(policy.Rules) != 0 || len(policy.Profiles) != 0) {
-				t.Fatalf("passive rules: %+v", policy)
-			}
-			if tc.binding == "legacy" && len(policy.Rules) != 1 {
-				t.Fatalf("legacy rules: %+v", policy.Rules)
-			}
+
 		})
 	}
 }

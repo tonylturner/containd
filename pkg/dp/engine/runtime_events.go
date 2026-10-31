@@ -21,7 +21,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/itdpi"
-	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 	"github.com/tonylturner/containd/pkg/dp/stats"
@@ -35,17 +34,15 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 		return
 	}
 	e.recordProtoStats(evs)
+	evs = normalizeDPIEvents(evs)
+	bindEventConnections(state, evs)
+	e.recordLearnEvents(state, evs)
 	if e.eventStore == nil {
 		return
 	}
 	metrics.DPIEventsTotal.Add(float64(len(evs)))
-	evs = normalizeDPIEvents(evs)
-	bindEventConnections(state, evs)
 	srcIP, dstIP := stateIPs(state)
 	e.recordInventoryEvents(srcIP, dstIP, evs)
-	if !e.observationBound(state) {
-		e.recordLearnEvents(srcIP, dstIP, evs)
-	}
 	e.recordAnomalyAlerts(state, pkt, srcIP, dstIP, evs)
 	e.recordSignatureAlerts(state, pkt, evs)
 	e.recordTaggedEvents(state, pkt, evs)
@@ -76,10 +73,6 @@ func (e *Engine) recordInventoryEvents(srcIP, dstIP string, evs []dpi.Event) {
 		}
 	}
 }
-
-// recordLearnEvents is intentionally inactive until an explicit live watch
-// owns collection. Rule enforcement mode never starts a learner.
-func (e *Engine) recordLearnEvents(_, _ string, _ []dpi.Event) {}
 
 func (e *Engine) recordAnomalyAlerts(state *flow.State, pkt *dpi.ParsedPacket, srcIP, dstIP string, evs []dpi.Event) {
 	if e == nil || e.anomalyDetector == nil || srcIP == "" || dstIP == "" {
@@ -231,14 +224,6 @@ func (e *Engine) Updater() enforce.Updater {
 		return nil
 	}
 	return e.updater
-}
-
-// Learner returns the ICS traffic learner.
-func (e *Engine) Learner() *learn.Learner {
-	if e == nil {
-		return nil
-	}
-	return e.learner
 }
 
 // SignatureEngine returns the ICS signature matching engine.

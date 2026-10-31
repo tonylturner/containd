@@ -1,0 +1,118 @@
+# Isolated receiver-backed Modbus and IEC 104 learner smoke stack.
+services:
+  firewall:
+    image: ${EXACT_FIREWALL_IMAGE:?set EXACT_FIREWALL_IMAGE}
+    pull_policy: never
+    user: "0"
+    cap_add: [NET_ADMIN, NET_RAW, NET_BIND_SERVICE]
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    environment:
+      CONTAIND_MODE: all
+      CONTAIND_MGMT_ADDR: :18080
+      CONTAIND_MGMT_HTTPS_ADDR: :18443
+      CONTAIND_ENGINE_URL: http://127.0.0.1:8081
+      CONTAIND_ADMIN_TOKEN: ""
+      CONTAIND_LAB_MODE: "0"
+      CONTAIND_JWT_SECRET: ${EXACT_JWT_SECRET:?set EXACT_JWT_SECRET}
+      CONTAIND_CONFIG_DB: /data/config.db
+      CONTAIND_AUDIT_DB: /data/audit.db
+      CONTAIND_USERS_DB: /data/users.db
+      CONTAIND_EVIDENCE_DB: /data/evidence.db
+    command: ["all"]
+    volumes:
+      - ${EXACT_DATA_DIR:?set EXACT_DATA_DIR}:/data
+    networks:
+      client_net:
+        ipv4_address: ${EXACT_LAN_SUBNET:?set EXACT_LAN_SUBNET}.2
+      server_net:
+        ipv4_address: ${EXACT_WAN_SUBNET:?set EXACT_WAN_SUBNET}.2
+    ports:
+      - "127.0.0.1::18080"
+    healthcheck:
+      test: ["CMD", "/usr/bin/containd", "healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  modbus_client:
+    image: python:3-alpine
+    command: ["sleep", "infinity"]
+    user: "0"
+    cap_add: [NET_ADMIN]
+    volumes:
+      - .:/opt/exact:ro
+    networks:
+      client_net:
+        ipv4_address: ${EXACT_LAN_SUBNET}.3
+    depends_on: [firewall]
+
+  modbus_server:
+    image: python:3-alpine
+    command: ["python", "/opt/exact/modbus_server.py"]
+    user: "0"
+    cap_add: [NET_ADMIN]
+    volumes:
+      - .:/opt/exact:ro
+    networks:
+      server_net:
+        ipv4_address: ${EXACT_WAN_SUBNET}.3
+    depends_on: [firewall]
+
+  iec_cc:
+    image: ${EXACT_ENDPOINT_IMAGE:?set EXACT_ENDPOINT_IMAGE}
+    pull_policy: never
+    entrypoint: ["sh", "-c", "exec tail -f /dev/null"]
+    cap_add: [NET_ADMIN]
+    network_mode: "service:modbus_client"
+    depends_on: [modbus_client]
+
+  iec_rtu:
+    image: ${EXACT_ENDPOINT_IMAGE:?set EXACT_ENDPOINT_IMAGE}
+    pull_policy: never
+    environment:
+      STATE_FILE: /state/rtu.json
+      PERIODIC_MS: "0"
+    volumes:
+      - ${EXACT_DATA_DIR}/rtu-state:/state
+    network_mode: "service:modbus_server"
+    depends_on: [modbus_server]
+
+  capture:
+    image: ${EXACT_CAPTURE_IMAGE:?set EXACT_CAPTURE_IMAGE}
+    pull_policy: never
+    cap_add: [NET_RAW]
+    environment:
+      CAPTURE_IFACE: ${EXACT_CAPTURE_IFACE:?set EXACT_CAPTURE_IFACE}
+    command:
+      - --immediate-mode
+      - -U
+      - -s
+      - "0"
+      - -i
+      - ${EXACT_CAPTURE_IFACE}
+      - -w
+      - /evidence/live-traffic.pcap
+      - tcp
+      - port
+      - "502"
+      - or
+      - tcp
+      - port
+      - "2404"
+    volumes:
+      - ${EXACT_RESULTS_DIR:?set EXACT_RESULTS_DIR}:/evidence
+    network_mode: "service:firewall"
+    depends_on:
+      firewall:
+        condition: service_healthy
+
+networks:
+  client_net:
+    ipam:
+      config:
+        - subnet: ${EXACT_LAN_SUBNET}.0/24
+  server_net:
+    ipam:
+      config:
+        - subnet: ${EXACT_WAN_SUBNET}.0/24

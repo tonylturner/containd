@@ -17,7 +17,6 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/templates"
-	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -60,13 +59,6 @@ func (e *stageEngine) ApplyRules(_ context.Context, snap rules.Snapshot) error {
 	e.snap = snap
 	return nil
 }
-func (e *stageEngine) ListLearnProfiles(context.Context) ([]learn.LearnedProfile, error) {
-	return nil, nil
-}
-func (e *stageEngine) GenerateLearnRules(context.Context) ([]config.Rule, error) {
-	return []config.Rule{{ID: "learned", Action: config.ActionAllow}}, nil
-}
-func (e *stageEngine) ClearLearnData(context.Context) error { return nil }
 
 type stageServices struct{ mutations int }
 
@@ -219,7 +211,6 @@ func candidateEndpointCases() []candidateEndpointCase {
 		{"POST", "/services/vpn/openvpn/profile", "/services/vpn", map[string]string{"name": "staged", "ovpn": "client\nremote 192.0.2.1 1194\n"}},
 		{"POST", "/templates/apply", "/firewall/rules", map[string]string{"name": templates.List()[0].Name}},
 		{"POST", "/templates/ics/apply", "/firewall/rules", map[string]string{"template": "modbus_read_only"}},
-		{"POST", "/learn/apply", "/firewall/rules", map[string]any{}},
 	}
 }
 

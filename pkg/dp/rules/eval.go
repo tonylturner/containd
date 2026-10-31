@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// EvaluatorVersion binds retained proofs to predicate semantics. Bump whenever
+// evaluation or its shared decoded-context projection changes acceptance.
+const EvaluatorVersion = "ics-2"
+
 // EvalContext represents a simplified flow context for rule evaluation.
 type EvalContext struct {
 	SrcZone string
@@ -37,6 +41,9 @@ type ICSContext struct {
 	ReadOnly        bool
 	WriteOnly       bool
 	Direction       string // "request" or "response"
+	// ValueInvalid marks a decoded reserved command encoding. Such an
+	// operation cannot match an ICS ALLOW, including monitor and enforce.
+	ValueInvalid bool
 	// Spans are the address ranges the message reads or writes, for
 	// address predicates; empty when it touches none. SpansUnknown marks a
 	// message that may touch addresses its decoder cannot bound, such as a
@@ -266,6 +273,9 @@ func matchICSCompiled(ce *compiledEntry, ctx EvalContext) bool {
 		return true
 	}
 	if ctx.ICS == nil {
+		return false
+	}
+	if ce.Action == ActionAllow && ctx.ICS.ValueInvalid {
 		return false
 	}
 	if ce.iec != nil {
