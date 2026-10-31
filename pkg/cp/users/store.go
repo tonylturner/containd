@@ -42,6 +42,14 @@ type User struct {
 	UpdatedAt          time.Time  `json:"updatedAt,omitempty"`
 }
 
+// Patch distinguishes omitted profile fields from an explicit empty string.
+type Patch struct {
+	FirstName *string `json:"firstName,omitempty"`
+	LastName  *string `json:"lastName,omitempty"`
+	Email     *string `json:"email,omitempty"`
+	Role      string  `json:"role,omitempty"`
+}
+
 type StoredUser struct {
 	User
 	PasswordHash string
@@ -53,7 +61,7 @@ type Store interface {
 	GetByUsername(ctx context.Context, username string) (*StoredUser, error)
 	GetByID(ctx context.Context, id string) (*StoredUser, error)
 	Create(ctx context.Context, u User, password string) (*User, error)
-	Update(ctx context.Context, id string, patch User) (*User, error)
+	Update(ctx context.Context, id string, patch Patch) (*User, error)
 	Delete(ctx context.Context, id string) error
 	SetPassword(ctx context.Context, id string, password string) error
 	SetTOTP(ctx context.Context, id string, secret string) error
@@ -420,20 +428,20 @@ func insertUser(ctx context.Context, db userDB, u User, password string, bootstr
 	return &u, nil
 }
 
-func (s *SQLiteStore) Update(ctx context.Context, id string, patch User) (*User, error) {
+func (s *SQLiteStore) Update(ctx context.Context, id string, patch Patch) (*User, error) {
 	existing, err := s.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	u := existing.User
-	if patch.FirstName != "" || patch.FirstName == "" {
-		u.FirstName = patch.FirstName
+	if patch.FirstName != nil {
+		u.FirstName = *patch.FirstName
 	}
-	if patch.LastName != "" || patch.LastName == "" {
-		u.LastName = patch.LastName
+	if patch.LastName != nil {
+		u.LastName = *patch.LastName
 	}
-	if patch.Email != "" || patch.Email == "" {
-		u.Email = patch.Email
+	if patch.Email != nil {
+		u.Email = *patch.Email
 	}
 	if patch.Role != "" {
 		if patch.Role != "admin" && patch.Role != "view" {

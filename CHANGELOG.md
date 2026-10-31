@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Partial account profile updates preserve omitted fields and still allow explicit clearing.
+
 ## [0.1.36] - 2026-10-31
 
 ### Upgrade notes

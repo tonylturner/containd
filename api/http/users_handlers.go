@@ -75,7 +75,7 @@ func updateUserHandler(store users.Store) gin.HandlerFunc {
 			return
 		}
 		id := c.Param("id")
-		var patch users.User
+		var patch users.Patch
 		if err := c.ShouldBindJSON(&patch); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid JSON")
 			return

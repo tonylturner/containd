@@ -81,19 +81,19 @@ func (m *mockUserStore) Create(_ context.Context, u users.User, password string)
 	return &u, nil
 }
 
-func (m *mockUserStore) Update(_ context.Context, id string, patch users.User) (*users.User, error) {
+func (m *mockUserStore) Update(_ context.Context, id string, patch users.Patch) (*users.User, error) {
 	u, ok := m.users[id]
 	if !ok {
 		return nil, users.ErrNotFound
 	}
-	if patch.FirstName != "" {
-		u.FirstName = patch.FirstName
+	if patch.FirstName != nil {
+		u.FirstName = *patch.FirstName
 	}
-	if patch.LastName != "" {
-		u.LastName = patch.LastName
+	if patch.LastName != nil {
+		u.LastName = *patch.LastName
 	}
-	if patch.Email != "" {
-		u.Email = patch.Email
+	if patch.Email != nil {
+		u.Email = *patch.Email
 	}
 	if patch.Role != "" {
 		u.Role = patch.Role
