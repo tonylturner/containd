@@ -7,7 +7,7 @@ import { upsertRow } from "../../lib/config-editor";
 import type { ConfigFields } from "../../lib/use-config-editor";
 
 import { useConfigForm } from "../../lib/use-config-form";
-import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
+import { ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -27,8 +27,9 @@ import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 
 export default function ZonesPage() {
+  const { canSave, canSaveNow, loadError: configLoadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
-  const rowsDraft = useConfigEditor<Zone[]>([]);
+  const rowsDraft = useConfigEditor<Zone[]>([], false);
   const { cfg: zones, adoptConfig: adoptRows } = rowsDraft;
   const [conduits, setConduits] = useState<ConduitMap>({});
   const form = useConfigForm({ name: "", alias: "", description: "", slTarget: 0 });
@@ -47,14 +48,16 @@ export default function ZonesPage() {
       api.listZones(),
       api.getSecurityConduits(),
     ]);
-    adoptRows(list ?? [], keepEdits);
+    if (!checkLoaded(list)) return;
+    adoptRows(list, keepEdits);
     setConduits((conds as ConduitMap) ?? {});
     refreshForm(list, keepEdits);
-  }, [refreshForm, adoptRows]));
+  }, [checkLoaded, refreshForm, adoptRows]));
 
   useConfigRefresh(refresh);
 
   async function onCreate() {
+    if (!canSaveNow()) return;
     setError(null);
     // The name is sent as typed: the server refuses surrounding whitespace
     // rather than trimming it, so the form does too.
@@ -81,12 +84,14 @@ export default function ZonesPage() {
   }
 
   async function onDelete(zoneName: string) {
+    if (!canSaveNow()) return;
     confirm.open({
       title: "Delete zone",
       message: `Delete zone "${zoneName}"? This cannot be undone.`,
       confirmLabel: "Delete",
       variant: "danger",
       onConfirm: async () => {
+        if (!canSaveNow()) return;
         setError(null);
         const result = await api.deleteZone(zoneName);
         if (!result.ok) {
@@ -101,6 +106,7 @@ export default function ZonesPage() {
   }
 
   async function onUpdate(zoneName: string, patch: Partial<Zone>) {
+    if (!canSaveNow()) return;
     setError(null);
     const submitted = rowsDraft.beginSave();
     const result = await api.updateZone(zoneName, patch);
@@ -154,7 +160,9 @@ export default function ZonesPage() {
         </button>
       }
     >
+      {configLoadError && <p role="alert" className="mb-4 text-sm text-red-400">{configLoadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
+      <fieldset disabled={!canSave} className="min-w-0">
       {!isAdmin() && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -220,7 +228,7 @@ export default function ZonesPage() {
           {isAdmin() && (
             <button
               onClick={onCreate}
-              disabled={saving}
+              disabled={saving || !canSave}
               className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
             >
               {saving ? "Creating..." : "Create"}
@@ -278,6 +286,7 @@ export default function ZonesPage() {
           </div>
         </>
       )}
+      </fieldset>
       <ConfirmDialog {...confirm.props} />
     </Shell>
   );

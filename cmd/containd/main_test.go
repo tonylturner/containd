@@ -3,8 +3,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +20,87 @@ import (
 	"github.com/tonylturner/containd/pkg/cli"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
+
+func TestCLILoopExitStatus(t *testing.T) {
+	tests := []struct {
+		name        string
+		lines       []string
+		interactive bool
+		failCommand string
+		wantStatus  int
+		wantCalls   int
+	}{
+		{
+			name:        "failed command then EOF",
+			lines:       []string{"broken", "ok"},
+			failCommand: "broken",
+			wantStatus:  1,
+			wantCalls:   2,
+		},
+		{
+			name:       "all commands succeed",
+			lines:      []string{"ok", "exit"},
+			wantStatus: 0,
+			wantCalls:  1,
+		},
+		{
+			name:        "failed command then exit",
+			lines:       []string{"broken", "exit"},
+			failCommand: "broken",
+			wantStatus:  1,
+			wantCalls:   1,
+		},
+		{
+			name:        "interactive command failure",
+			lines:       []string{"broken", "exit"},
+			interactive: true,
+			failCommand: "broken",
+			wantStatus:  0,
+			wantCalls:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			lineIndex := 0
+			readLine := func(string) (string, error) {
+				if lineIndex >= len(tt.lines) {
+					return "", io.EOF
+				}
+				line := tt.lines[lineIndex]
+				lineIndex++
+				return line, nil
+			}
+			calls := 0
+			err := runCLILoop(
+				"containd# ",
+				readLine,
+				func(string) {},
+				func(line string, output *strings.Builder) error {
+					calls++
+					if line == tt.failCommand {
+						return errors.New("authoritative config read failed")
+					}
+					output.WriteString("ok")
+					return nil
+				},
+				tt.interactive,
+				&stdout,
+				&stderr,
+			)
+			if got := exitCode(context.Background(), err); got != tt.wantStatus {
+				t.Errorf("exitCode = %d, want %d (err %v)", got, tt.wantStatus, err)
+			}
+			if calls != tt.wantCalls {
+				t.Errorf("executed %d commands, want %d", calls, tt.wantCalls)
+			}
+			if tt.failCommand != "" && !strings.Contains(stderr.String(), "authoritative config read failed") {
+				t.Errorf("stderr %q does not include command error", stderr.String())
+			}
+		})
+	}
+}
 
 // Outside an SSH shell the CLI and the container health check call the
 // listener management's runtime record names, and report management as not

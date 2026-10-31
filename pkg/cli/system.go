@@ -194,7 +194,7 @@ func setSystemHostnameAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system hostname <name>")
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -208,7 +208,7 @@ func setSystemMgmtListenAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system mgmt listen <addr>")
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -222,7 +222,7 @@ func setSystemMgmtHTTPListenAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system mgmt http listen <addr>")
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -236,7 +236,7 @@ func setSystemMgmtHTTPSListenAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system mgmt https listen <addr>")
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -254,7 +254,7 @@ func setSystemMgmtEnableHTTPAPI(api *API) Command {
 		if err != nil {
 			return err
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -272,7 +272,7 @@ func setSystemMgmtEnableHTTPSAPI(api *API) Command {
 		if err != nil {
 			return err
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -290,7 +290,7 @@ func setSystemMgmtRedirectHTTPToHTTPSAPI(api *API) Command {
 		if err != nil {
 			return err
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -314,7 +314,7 @@ func setSystemMgmtHSTSAPI(api *API) Command {
 				maxAge = v
 			}
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -331,7 +331,7 @@ func setSystemSSHListenAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system ssh listen <addr>")
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -355,7 +355,7 @@ func setSystemSSHAllowPasswordAPI(api *API) Command {
 		default:
 			return fmt.Errorf("invalid allow-password value %q", args[0])
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -369,7 +369,7 @@ func setSystemSSHAuthorizedKeysDirAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system ssh authorized-keys-dir <dir>")
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -383,7 +383,7 @@ func setSystemSSHBannerAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system ssh banner <text>")
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -401,7 +401,7 @@ func setSystemSSHHostKeyRotationAPI(api *API) Command {
 		if err != nil || days < 0 || days > config.MaxSSHHostKeyRotationDays {
 			return fmt.Errorf("invalid rotation days: %s", args[0])
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -419,7 +419,7 @@ func setSystemSSHShellModeAPI(api *API) Command {
 		if mode != "linux" && mode != "appliance" {
 			return fmt.Errorf("invalid shell-mode %q (expected linux or appliance)", args[0])
 		}
-		cfg, err := loadCandidateOrRunning(ctx, api)
+		cfg, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -470,12 +470,9 @@ func showIDSRulesAPI(api *API) Command {
 	}
 }
 
-func loadCandidateOrRunning(ctx context.Context, api *API) (*config.Config, error) {
+func loadCandidateConfig(ctx context.Context, api *API) (*config.Config, error) {
 	var cfg config.Config
-	if err := api.getJSON(ctx, "/api/v1/config/candidate", &cfg); err == nil {
-		return &cfg, nil
-	}
-	if err := api.getJSON(ctx, "/api/v1/config", &cfg); err != nil {
+	if err := api.getConfigJSON(ctx, "/api/v1/config/candidate", &cfg); err != nil {
 		return nil, err
 	}
 	return &cfg, nil

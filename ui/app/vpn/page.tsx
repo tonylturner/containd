@@ -3,7 +3,7 @@
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigForm } from "../../lib/use-config-form";
-import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
+import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -43,9 +43,10 @@ type UploadState = "idle" | "uploading" | "uploaded" | "error";
 
 export default function VPNPage() {
   const canEdit = isAdmin();
+  const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const confirm = useConfirm();
-  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, acceptCollection, text, setText } = useConfigEditor(() => normalize(null));
+  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, acceptCollection, text, setText } = useConfigEditor(() => normalize(null), false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +119,7 @@ export default function VPNPage() {
     async ({ silent = false, keepEdits = true }: { silent?: boolean; keepEdits?: boolean } = {}) => {
       try {
         const current = await api.getVPN();
+        if (!checkLoaded(current)) return;
         setError(null);
         adoptConfig(normalize(current), keepEdits);
         refreshClient(current?.openvpn, keepEdits);
@@ -154,16 +156,16 @@ export default function VPNPage() {
         } catch {
           setOvpnClients([]);
         }
+        setLastUpdated(new Date());
         if (!silent) toast("VPN status refreshed", "success");
       } catch (e) {
+        checkLoaded(null);
         const msg = e instanceof Error ? e.message : "Failed to refresh VPN status.";
         setError(msg);
         if (!silent) toast("Failed to refresh VPN status", "error");
-      } finally {
-        setLastUpdated(new Date());
       }
     },
-    [toast, adoptConfig, refreshClient],
+    [checkLoaded, toast, adoptConfig, refreshClient],
   ), { initialArgs: [{ silent: true }] });
 
   useConfigRefresh(refresh);
@@ -199,7 +201,7 @@ export default function VPNPage() {
   }, [interfaces]);
 
   async function onSave() {
-    if (!canEdit) return;
+    if (!canEdit || !canSave || loading) return;
     setError(null);
     let peers;
     try {
@@ -232,6 +234,7 @@ export default function VPNPage() {
       };
     }
     const saved = await api.setVPN({
+      ...cfg,
       wireguard: { ...cfg.wireguard, peers },
       openvpn,
     });
@@ -335,6 +338,7 @@ export default function VPNPage() {
           {canEdit && (
             <button
               onClick={onSave}
+              disabled={!canSave || loading || saveState === "saving"}
               className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
               Save
@@ -352,7 +356,9 @@ export default function VPNPage() {
         </div>
       }
     >
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={editor.superseded || clientForm.editor.superseded} />
+      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text) shadow-card">
           View-only mode: configuration changes are disabled.
@@ -594,6 +600,7 @@ export default function VPNPage() {
               : "idle"}
       </p>
       <ConfirmDialog {...confirm.props} />
+      </fieldset>
     </Shell>
   );
 }

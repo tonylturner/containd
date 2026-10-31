@@ -24,7 +24,7 @@ func listFirewallRulesHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, cfg.Firewall.Rules)
+		configCollectionJSON(c, cfg.Firewall.Rules)
 	}
 }
 

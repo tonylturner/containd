@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigLoad } from "../../lib/use-config-editor";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigForm } from "../../lib/use-config-form";
@@ -39,6 +41,7 @@ import {
 /* ── page ──────────────────────────────────────────────────────── */
 
 export default function WizardPage() {
+  const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [globalMode, setGlobalMode] = useState<ICSModeSelection>("");
   const [zones, setZones] = useState<Zone[]>([]);
   const [natConfig, setNatConfig] = useState<NATConfig>({ enabled: false });
@@ -80,11 +83,12 @@ export default function WizardPage() {
 
   const { initialLoading: loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [z, n, dp] = await Promise.all([api.listZones(), api.getNAT(), fetchDataPlane()]);
+    if (!checkLoaded(z && n && dp)) return;
     setGlobalMode(dp?.dpiMode ?? "");
     refreshForm({ zones: z, nat: n, globalMode: dp?.dpiMode }, keepEdits);
     setZones(z ?? []);
     setNatConfig(n ?? { enabled: false });
-  }, [refreshForm]));
+  }, [refreshForm, checkLoaded]));
 
   useConfigRefresh(refresh);
 
@@ -293,7 +297,7 @@ export default function WizardPage() {
   }
 
   function handleApply() {
-    if (!active) return;
+    if (!active || !canSave) return;
     switch (active) {
       case "lan-internet":
         applyLanInternet();
@@ -345,6 +349,7 @@ export default function WizardPage() {
         Refresh
       </button>
     }>
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded} />
       <p className="mb-6 text-sm text-(--text-muted)">
         Select a common connectivity scenario below. The wizard will walk you through each step and stage the necessary firewall rules and NAT configuration automatically.
@@ -469,7 +474,7 @@ export default function WizardPage() {
               <button
                 type="button"
                 onClick={handleApply}
-                disabled={applying}
+                disabled={applying || !canSave}
                 className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
               >
                 {applying ? "Staging..." : "Stage"}

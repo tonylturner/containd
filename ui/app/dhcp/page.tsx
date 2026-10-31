@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
-import { useConfigEditor } from "../../lib/use-config-editor";
+import { useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -21,6 +21,7 @@ import { Card } from "../../components/Card";
 
 function normalize(cfg: DHCPConfig | null): DHCPConfig {
   return {
+    ...cfg,
     enabled: cfg?.enabled ?? false,
     listenIfaces: cfg?.listenIfaces ?? ["lan2"],
     leaseSeconds: cfg?.leaseSeconds ?? 3600,
@@ -65,8 +66,9 @@ function textToReservations(text: string): DHCPReservation[] {
 
 export default function DHCPPage() {
   const canEdit = isAdmin();
+  const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
-  const { editor, cfg, setCfg, dirty, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor(() => normalize(null));
+  const { editor, cfg, setCfg, dirty, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor(() => normalize(null), false);
   const [status, setStatus] = useState<DHCPStatus | null>(null);
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
@@ -80,15 +82,18 @@ export default function DHCPPage() {
       const svc = await api.getServicesStatus();
       setError(null);
       setStatus(svc?.dhcp ?? null);
-      const next = normalize(await api.getDHCP());
+      const current = await api.getDHCP();
+      if (!checkLoaded(current)) return;
+      const next = normalize(current);
       adoptConfig(next, keepEdits);
       toast("DHCP status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
+      checkLoaded(null);
       setError(e instanceof Error ? e.message : "Failed to refresh DHCP status.");
       toast("Failed to refresh DHCP status", "error");
     }
-  }, [toast, adoptConfig]));
+  }, [checkLoaded, toast, adoptConfig]));
 
   const { loading: leasesLoading, refresh: refreshLeases } = useAsyncRefresh(useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     try {
@@ -126,7 +131,7 @@ export default function DHCPPage() {
   const reservationsText = text("reservations", reservationsToText(cfg.reservations ?? []));
 
   async function onSave() {
-    if (!canEdit) return;
+    if (!canEdit || !canSave || loading) return;
     setError(null);
     const submitted = beginSave();
     const payload = { ...cfg,
@@ -162,7 +167,7 @@ export default function DHCPPage() {
           {canEdit && (
             <button
               onClick={onSave}
-              disabled={save.pending !== null}
+              disabled={!canSave || loading || save.pending !== null}
               className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
               {save.pending ? "Saving…" : "Save"}
@@ -180,6 +185,8 @@ export default function DHCPPage() {
         </div>
       }
     >
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
+      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -472,6 +479,7 @@ export default function DHCPPage() {
           )}
         </div>
       </Card>
+      </fieldset>
     </Shell>
   );
 }

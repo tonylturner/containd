@@ -21,7 +21,7 @@ func listAssetsHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, cfg.Assets)
+		configCollectionJSON(c, cfg.Assets)
 	}
 }
 
@@ -124,7 +124,7 @@ func listObjectsHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, cfg.Objects)
+		configCollectionJSON(c, cfg.Objects)
 	}
 }
 
@@ -242,7 +242,7 @@ func listZonesHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, cfg.Zones)
+		configCollectionJSON(c, cfg.Zones)
 	}
 }
 

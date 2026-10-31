@@ -114,8 +114,9 @@ export function withDefaultRoute(routing: RoutingConfig | null, gateway: Gateway
   const routeIdx = routes.findIndex((r) => isDefaultDst(r.dst) && (r.table ?? 0) === 0);
   const route: StaticRoute = { dst: "default", gateway: gateway.name, iface: gateway.iface, table: 0 };
   return {
-    gateways: gwIdx >= 0 ? gateways.map((g, i) => (i === gwIdx ? gateway : g)) : [...gateways, gateway],
-    routes: routeIdx >= 0 ? routes.map((r, i) => (i === routeIdx ? route : r)) : [...routes, route],
+    ...routing,
+    gateways: gwIdx >= 0 ? gateways.map((g, i) => (i === gwIdx ? { ...g, ...gateway } : g)) : [...gateways, gateway],
+    routes: routeIdx >= 0 ? routes.map((r, i) => (i === routeIdx ? { ...r, ...route } : r)) : [...routes, route],
     rules: routing?.rules ?? [],
   };
 }

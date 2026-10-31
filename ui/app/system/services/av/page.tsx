@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
-import { useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
@@ -25,6 +25,7 @@ const emptyICAPServer = { address: "", useTls: false, service: "" };
 
 export default function AVPage() {
   const canEdit = isAdmin();
+  const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig } = useConfigEditor<AVConfig>({
     enabled: false,
@@ -32,7 +33,7 @@ export default function AVPage() {
     failPolicy: "open",
     icap: { servers: [] },
     clamav: { freshclamEnabled: true },
-  });
+  }, false);
   const [zones, setZones] = useState<Zone[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [status, setStatus] = useState<AVStatus | null>(null);
@@ -52,7 +53,8 @@ export default function AVPage() {
       setRefreshError(null);
       setStatus(svc?.av ?? null);
       const s = await api.getAV();
-      if (s) adoptConfig(s, keepEdits);
+      if (!checkLoaded(s)) return;
+      adoptConfig(s, keepEdits);
       const [zoneList, assetList] = await Promise.all([api.listZones(), api.listAssets()]);
       setZones(zoneList ?? []);
       setAssets(assetList ?? []);
@@ -62,11 +64,12 @@ export default function AVPage() {
       toast("AV status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
+      checkLoaded(null);
       const msg = e instanceof Error ? e.message : "Failed to refresh AV.";
       setRefreshError(msg);
       toast("Failed to refresh AV", "error");
     }
-  }, [toast, adoptConfig]));
+  }, [checkLoaded, toast, adoptConfig]));
 
   useConfigRefresh(refresh);
 
@@ -81,7 +84,7 @@ export default function AVPage() {
   const icapServers = useMemo(() => cfg.icap?.servers ?? [], [cfg.icap?.servers]);
 
   async function onSave() {
-    if (!canEdit) return;
+    if (!canEdit || !canSave || loading) return;
     setError(null);
     const submitted = beginSave();
     // Ensure optional booleans are explicit so Go doesn't default omitted values to false.
@@ -163,7 +166,7 @@ export default function AVPage() {
           {canEdit && (
             <button
               onClick={onSave}
-              disabled={save.pending !== null}
+              disabled={!canSave || loading || save.pending !== null}
               className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
               {save.pending ? "Saving\u2026" : "Save"}
@@ -181,7 +184,9 @@ export default function AVPage() {
         </div>
       }
     >
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={editor.superseded} />
+      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -466,6 +471,7 @@ export default function AVPage() {
       </Card>
 
       <SaveStateLine state={save.state} saved="staged — commit to apply." />
+      </fieldset>
     </Shell>
   );
 }

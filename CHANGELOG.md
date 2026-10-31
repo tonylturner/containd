@@ -6,12 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
 ### Changed
 
 - Release promotion to `:latest`, including manual promotion, now requires
   successful CI from a push to main for the exact peeled tag commit. Pending CI
   waits for a bounded poll; missing, failed or cancelled CI fails promotion with
   evidence in the workflow summary.
+- IT DPI HTTP parsing reads request and header lines directly from the packet
+  payload instead of allocating a buffered reader per packet.
+- The UI drops the unused `glob` dev dependency and its override.
 
 ### Security
 
@@ -20,20 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restarts, and invalidate them on password, TOTP or role changes. Pending
   challenges issued before this upgrade must be restarted.
 
-### Changed
-
-- IT DPI HTTP parsing reads request and header lines directly from the packet
-  payload instead of allocating a buffered reader per packet.
-- The UI drops the unused `glob` dev dependency and its override.
-
 ### Fixed
 
 - Direct CLI login explains when an account needs MFA, password rotation or MFA
   enrollment and directs users to the web UI or SSH.
 - Partial account profile updates preserve omitted fields and still allow explicit clearing.
-
-### Fixed
-
+- Interface PATCH writes preserve every omitted setting. Interface edits send
+  explicit clears for removed aliases, device bindings, zones and VLAN settings.
+- Service, policy, network, PCAP and staged-config editors block saves until settings
+  load successfully and while reads are unavailable. Failed refreshes keep drafts
+  instead of substituting defaults or reporting success; saves preserve unrelated
+  settings, including default-route metrics and gateway metadata. Saved staged
+  JSON adopts later refreshes unless it has been edited again.
+- CLI NAT, port-forward, proxy, interface, routing and system edits stop without
+  writing when current configuration cannot be read, rather than substituting
+  defaults or running configuration. Proxy edits preserve domains, client ACLs,
+  upstream settings, logging and reverse sites. Interface edits preserve unrelated
+  device, VLAN, bridge, addressing and access settings. Outbound quick start
+  completes all reads before staging changes and retains unrelated NAT, routing
+  and firewall rule settings, including when creating the first rule. Empty
+  configuration lists return JSON arrays rather than `null`.
+- Scripted `containd cli` sessions exit with status 1 if any command fails,
+  including when later commands or `exit` run.
 - Routine interface apply and reconciliation remove only stale addresses
   containd created, preserving Docker/foreign primary and secondary addresses,
   IPv6 link-local addresses and the reserved management device. Address ownership

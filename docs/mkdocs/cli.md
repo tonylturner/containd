@@ -8,6 +8,10 @@ admin SSH console expose the same commands. For the starter's default SSH port:
 ssh -p 2222 containd@localhost
 ```
 
+When commands are piped to `containd cli`, it continues after command errors
+and exits with status 1 if any command fails; interactive sessions retain
+status 0 on exit.
+
 Use `help`, `show help`, or `set help` to discover commands. Configuration
 commands stage candidate edits: review `show diff`, then `commit` or
 `commit confirmed [ttl_seconds]`. Use `confirm` to retain a confirmed commit and
@@ -85,6 +89,12 @@ require a restart; committing does not rebind management sockets.
   - `export config redacted` / `export config --redacted`
   - `import config <path>`
 - Backed by the management API and config store; exposed via SSH and the in-app console.
+
+Read-modify-write commands, such as NAT, proxy, interface and system edits,
+require a successful read of the current candidate settings. If that read fails
+or returns no data, the command reports an error and sends no write; it does not
+substitute running settings or defaults. Unspecified fields are preserved.
+Outbound quick start completes all configuration reads before staging its changes.
 
 ## Learner Evidence
 

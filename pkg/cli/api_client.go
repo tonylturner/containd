@@ -60,6 +60,22 @@ func (a *API) getJSON(ctx context.Context, path string, into any) error {
 	return json.NewDecoder(resp.Body).Decode(into)
 }
 
+// getConfigJSON requires an authoritative value before a read-modify-write.
+// In particular, JSON null must not turn a failed load into a zero-value edit.
+func (a *API) getConfigJSON(ctx context.Context, path string, into any) error {
+	var raw json.RawMessage
+	if err := a.getJSON(ctx, path, &raw); err != nil {
+		return fmt.Errorf("cannot read current config from %s: %w", path, err)
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("cannot read current config from %s: no data", path)
+	}
+	if err := json.Unmarshal(raw, into); err != nil {
+		return fmt.Errorf("cannot read current config from %s: %w", path, err)
+	}
+	return nil
+}
+
 func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Writer) error {
 	if a.Client == nil {
 		a.Client = defaultHTTPClient

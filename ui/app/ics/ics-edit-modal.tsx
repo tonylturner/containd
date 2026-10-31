@@ -48,12 +48,14 @@ function filterDraftFrom(rule: FirewallRule, rules: FirewallRule[], globalMode: 
 
 export function EditICSModal({
   context,
+  available,
   rule,
   globalMode,
   onClose,
   onSave,
 }: {
   context: FirewallRule[];
+  available: boolean;
   rule: FirewallRule;
   globalMode?: ICSModeSelection;
   onClose: () => void;
@@ -106,6 +108,7 @@ export function EditICSModal({
   }
 
   async function save() {
+    if (!available) return;
     setError(null);
     const built = buildICS();
     if (!built.ok) {
@@ -310,7 +313,7 @@ export function EditICSModal({
           </button>
           <button
             onClick={save}
-            disabled={saving}
+            disabled={saving || !available}
             className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
           >
             Save filter

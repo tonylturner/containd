@@ -3,7 +3,7 @@
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
 import { useConfigForm } from "../../../../lib/use-config-form";
-import { useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
@@ -21,8 +21,9 @@ import { SyslogAuditStatusPanel } from "./syslog-audit-status";
 
 export default function SyslogPage() {
   const canEdit = isAdmin();
+  const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
-  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 });
+  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 }, false);
   const [status, setStatus] = useState<SyslogStatus | null>(null);
   const form = useConfigForm({ forwarder: {
     address: "",
@@ -42,21 +43,18 @@ export default function SyslogPage() {
       setError(null);
       setStatus(svc?.syslog ?? null);
       const s = await api.getSyslog();
+      if (!checkLoaded(s)) return;
       refreshForm(s, keepEdits);
-      adoptConfig(
-        s ?? {
-          forwarders: [],
-          batchSize: 500,
-          flushEvery: 2,
-        }, keepEdits);
+      adoptConfig(s, keepEdits);
       toast("Syslog status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
+      checkLoaded(null);
       const msg = e instanceof Error ? e.message : "Failed to refresh syslog.";
       setError(msg);
       toast("Failed to refresh syslog", "error");
     }
-  }, [toast, adoptConfig, refreshForm]));
+  }, [checkLoaded, toast, adoptConfig, refreshForm]));
 
   useConfigRefresh(refresh);
 
@@ -97,7 +95,7 @@ export default function SyslogPage() {
   }
 
   async function onSave() {
-    if (!canEdit) return;
+    if (!canEdit || !canSave || loading) return;
     setError(null);
     const submitted = beginSave();
     const saved = await save.run("save", () => api.setSyslog(cfg), {
@@ -123,7 +121,7 @@ export default function SyslogPage() {
           {canEdit && (
             <button
               onClick={onSave}
-              disabled={save.pending !== null}
+              disabled={!canSave || loading || save.pending !== null}
               className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-60"
             >
               {save.pending ? "Saving\u2026" : "Save"}
@@ -141,7 +139,9 @@ export default function SyslogPage() {
         </div>
       }
     >
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={editor.superseded || form.editor.superseded} />
+      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -336,6 +336,7 @@ export default function SyslogPage() {
 
         <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </Card>
+      </fieldset>
     </Shell>
   );
 }

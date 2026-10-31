@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigLoad } from "../../lib/use-config-editor";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
@@ -45,6 +47,7 @@ import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 // under ui/app/firewall/ as they become non-trivial.
 
 export default function FirewallPage() {
+  const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const [rules, setRules] = useState<FirewallRule[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [nat, setNat] = useState<NATConfig>({ enabled: false });
@@ -116,6 +119,7 @@ export default function FirewallPage() {
       fetchDataPlane(),
       api.getRuleCounters(),
     ]);
+    if (!checkLoaded(r && z && n && rt && dp)) return;
     setRules(r ?? []);
     setCounters(c);
     setZones(z ?? []);
@@ -128,7 +132,7 @@ export default function FirewallPage() {
       setEditing(null);
       setRefreshKey((key) => key + 1);
     }
-  }, []));
+  }, [checkLoaded]));
 
   useConfigRefresh(refresh);
 
@@ -147,6 +151,7 @@ export default function FirewallPage() {
   }
 
   async function onDelete(id: string) {
+    if (!canSaveNow()) return;
     setError(null);
     setNotice(null);
     const result = await api.deleteFirewallRule(id);
@@ -159,6 +164,7 @@ export default function FirewallPage() {
   }
 
   async function onCreate(rule: FirewallRule) {
+    if (!canSaveNow()) return false;
     setError(null);
     setNotice(null);
     const created = await api.createFirewallRule(rule);
@@ -172,6 +178,7 @@ export default function FirewallPage() {
   }
 
   async function onUpdate(id: string, patch: FirewallRulePatch) {
+    if (!canSaveNow()) return null;
     setError(null);
     setNotice(null);
     const updated = await api.updateFirewallRule(id, patch);
@@ -226,6 +233,7 @@ export default function FirewallPage() {
   }
 
   async function doQuickStart() {
+    if (!canSaveNow()) return;
     setQuickStarting(true);
     try {
       const warnings: string[] = [];
@@ -234,6 +242,10 @@ export default function FirewallPage() {
         api.listInterfaceState(),
         api.getRouting(),
       ]);
+      if (curRouting === null) {
+        checkLoaded(null);
+        throw new Error("Routing configuration unavailable; no quick-start changes were staged.");
+      }
       if (states === null) throw new Error("Interface state unavailable — WAN address discovery failed; no quick-start changes were staged.");
       if (ifs === null) throw new Error("Interface configuration unavailable — WAN discovery failed; no quick-start changes were staged.");
       const inferred = inferWanGateway(ifs, states);
@@ -295,7 +307,7 @@ export default function FirewallPage() {
           {isAdmin() && (
             <button
               onClick={quickStartLanWanOutbound}
-              disabled={quickStarting}
+              disabled={quickStarting || !canSave}
               className="rounded-xs border px-3 py-1.5 text-sm text-(--amber) transition-ui disabled:opacity-50"
               title="Best-effort: default route + SNAT + allow rule for LAN/MGMT \u2192 WAN"
             >
@@ -358,6 +370,7 @@ export default function FirewallPage() {
           </div>
         )}
       </Card>
+      {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       {error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
@@ -411,8 +424,9 @@ export default function FirewallPage() {
         )}
       </Card>
 
-      <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} health={health} onChange={setDpiConfig} />
+      <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} available={canSave} health={health} onChange={setDpiConfig} />
 
+      <fieldset disabled={!canSave} className="min-w-0">
       {isAdmin() && (
         <CreateRuleForm
           key={`create-${refreshKey}`}
@@ -457,6 +471,7 @@ export default function FirewallPage() {
           onSave={(patch) => onUpdate(editing.id, patch)}
         />
       )}
+      </fieldset>
       <ConfirmDialog {...confirm.props} />
     </Shell>
   );

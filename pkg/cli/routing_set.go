@@ -121,7 +121,7 @@ func parseRouteAddArgs(args []string) (config.StaticRoute, error) {
 
 func addRouteConfig(ctx context.Context, api *API, rt config.StaticRoute) error {
 	var routing config.RoutingConfig
-	if err := api.getJSON(ctx, "/api/v1/routing", &routing); err != nil {
+	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
 		return err
 	}
 	for _, existing := range routing.Routes {
@@ -174,7 +174,7 @@ func parseIPRuleAddArgs(args []string) (config.PolicyRule, error) {
 
 func addIPRuleConfig(ctx context.Context, api *API, rule config.PolicyRule) error {
 	var routing config.RoutingConfig
-	if err := api.getJSON(ctx, "/api/v1/routing", &routing); err != nil {
+	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
 		return err
 	}
 	for _, existing := range routing.Rules {
@@ -275,7 +275,7 @@ func parseRouteDeleteArgs(args []string) (config.StaticRoute, routeDeleteFilters
 
 func deleteMatchingRoutes(ctx context.Context, api *API, match config.StaticRoute, filters routeDeleteFilters) error {
 	var routing config.RoutingConfig
-	if err := api.getJSON(ctx, "/api/v1/routing", &routing); err != nil {
+	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
 		return err
 	}
 	matches := 0
@@ -345,7 +345,7 @@ func parseIPRuleDeleteArgs(args []string) (int, config.PolicyRule, ipRuleDeleteF
 
 func deleteMatchingIPRules(ctx context.Context, api *API, match config.PolicyRule, filters ipRuleDeleteFilters) error {
 	var routing config.RoutingConfig
-	if err := api.getJSON(ctx, "/api/v1/routing", &routing); err != nil {
+	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
 		return err
 	}
 	matches := 0
@@ -389,7 +389,7 @@ func routingIntOption(usage string, args []string, i int, min int, max int, labe
 
 func deleteAllIPRulesForTable(ctx context.Context, out io.Writer, api *API, table int) error {
 	var routing config.RoutingConfig
-	if err := api.getJSON(ctx, "/api/v1/routing", &routing); err != nil {
+	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
 		return err
 	}
 	filtered := make([]config.PolicyRule, 0, len(routing.Rules))
