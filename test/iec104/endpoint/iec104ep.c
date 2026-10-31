@@ -724,10 +724,10 @@ waitConfirm(int timeoutMs)
 }
 
 static int
-sendDoubleCommand(CS104_Connection con, int ca, int ioa, int value, bool select)
+sendDoubleCommand(CS104_Connection con, int ca, int ioa, int value, bool select, int qualifier)
 {
     confirmSeen = false;
-    InformationObject io = (InformationObject) DoubleCommand_create(NULL, ioa, value, select, 0);
+    InformationObject io = (InformationObject) DoubleCommand_create(NULL, ioa, value, select, qualifier);
     bool sent = CS104_Connection_sendProcessCommandEx(con, CS101_COT_ACTIVATION, ca, io);
     InformationObject_destroy(io);
     if (!sent)
@@ -767,20 +767,36 @@ runCmd(const char* host, int port, int argc, char** argv)
         else
         {
             int ca = atoi(argv[1]), ioa = atoi(argv[2]), value = atoi(argv[3]);
-            int sel = sendDoubleCommand(con, ca, ioa, value, true);
+            int sel = sendDoubleCommand(con, ca, ioa, value, true, 0);
             if (sel != 0) { rc = sel; }
-            else { rc = sendDoubleCommand(con, ca, ioa, value, false); }
+            else { rc = sendDoubleCommand(con, ca, ioa, value, false, 0); }
+        }
+    }
+    else if (strcmp(scenario, "sboq") == 0)
+    {
+        /* sboq CA IOA VALUE QU: select then execute with the same QU. */
+        if (argc < 5) { rc = 2; }
+        else
+        {
+            int ca = atoi(argv[1]), ioa = atoi(argv[2]), value = atoi(argv[3]), qualifier = atoi(argv[4]);
+            if (qualifier < 0 || qualifier > 31) { rc = 2; }
+            else
+            {
+                int sel = sendDoubleCommand(con, ca, ioa, value, true, qualifier);
+                if (sel != 0) { rc = sel; }
+                else { rc = sendDoubleCommand(con, ca, ioa, value, false, qualifier); }
+            }
         }
     }
     else if (strcmp(scenario, "select") == 0)
     {
         if (argc < 4) { rc = 2; }
-        else { rc = sendDoubleCommand(con, atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), true); }
+        else { rc = sendDoubleCommand(con, atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), true, 0); }
     }
     else if (strcmp(scenario, "execute") == 0)
     {
         if (argc < 4) { rc = 2; }
-        else { rc = sendDoubleCommand(con, atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), false); }
+        else { rc = sendDoubleCommand(con, atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), false, 0); }
     }
     else if (strcmp(scenario, "single") == 0)
     {
@@ -812,7 +828,7 @@ runCmd(const char* host, int port, int argc, char** argv)
     {
         /* direct CA IOA VALUE : execute with no prior select (expected negative) */
         if (argc < 4) { rc = 2; }
-        else { rc = sendDoubleCommand(con, atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), false); }
+        else { rc = sendDoubleCommand(con, atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), false, 0); }
     }
     else
     {
@@ -832,7 +848,7 @@ usage(void)
         "usage: iec104ep rtu\n"
         "       iec104ep cc  HOST [PORT]\n"
         "       iec104ep cmd HOST PORT SCENARIO [ARGS]\n"
-        "scenarios: gi [CA] | sbo CA IOA VALUE | select CA IOA VALUE |\n"
+        "scenarios: gi [CA] | sbo CA IOA VALUE | sboq CA IOA VALUE QU | select CA IOA VALUE |\n"
         "           execute CA IOA VALUE | direct CA IOA VALUE |\n"
         "           single CA IOA VALUE | stopstart\n"
         "env: RTU STATE_FILE, IEC104_PORT (2404), PERIODIC_MS (0 disables); client IEC104_T3 seconds\n"
