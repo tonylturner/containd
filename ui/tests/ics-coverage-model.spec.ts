@@ -92,9 +92,9 @@ test("static coverage drops runtime reasons and recomputes the state", () => {
   expect(staticICSCoverage(live)).toEqual({ ...enforcing, state: "partial", reasons: [exclusion] });
   expect(staticICSCoverage({ ...live, reasons: [queue] }).state).toBe("enforcing");
   expect(staticICSCoverage({ ...live, reasons: [queue, exclusion, decoder] }).state).toBe("not_enforcing");
-  expect(staticICSCoverage({ ...live, mode: "learn", reasons: [decoder] })).toEqual({
+  expect(staticICSCoverage({ ...live, mode: "monitor", reasons: [decoder] })).toEqual({
     ...enforcing,
-    mode: "learn",
+    mode: "monitor",
     state: "monitoring",
     reasons: [decoder],
   });
@@ -105,7 +105,7 @@ test("runtime match counts do not make the candidate differ from the applied rul
   const applied = { ...candidate, reasons: [{ ...exclusion, matches: 4 }] };
   expect(sameICSCoverage(candidate, applied)).toBe(true);
   expect(sameICSCoverage(candidate, { ...candidate, reasons: [{ ...exclusion, value: "10.1.0.0/24" }] })).toBe(false);
-  expect(sameICSCoverage(candidate, { ...candidate, mode: "learn" })).toBe(false);
+  expect(sameICSCoverage(candidate, { ...candidate, mode: "monitor" })).toBe(false);
 });
 
 test("each coverage state maps to its badge and never to green unless enforcing", () => {
@@ -189,9 +189,9 @@ test("the health aggregate maps each state to its indicator", () => {
 });
 
 test("the effective mode resolves the global mode like the engine", () => {
-  expect(formatICSMode(undefined, " Enforce ").label).toBe("inherit (enforce)");
-  expect(formatICSMode(undefined, "Learn").label).toBe("inherit (learning)");
-  expect(formatICSMode(undefined, "").label).toBe("inherit (learning)");
-  expect(formatICSMode("", "enforce").label).toBe("inherit (enforce)");
-  expect(formatICSMode("enforce", "learn").label).toBe("enforce");
+  expect(formatICSMode(undefined, "enforce").label).toBe("Inherit (Enforce)");
+  expect(formatICSMode(undefined, "monitor").label).toBe("Inherit (Monitor (safe))");
+  expect(formatICSMode(undefined, "").label).toBe("Inherit (Monitor (safe))");
+  expect(formatICSMode("", "enforce").label).toBe("Inherit (Enforce)");
+  expect(formatICSMode("enforce", "monitor").label).toBe("Enforce");
 });

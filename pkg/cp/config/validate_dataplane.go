@@ -22,8 +22,11 @@ func validateDataPlane(dp DataPlaneConfig) error {
 	if err := validateDomainExclusions(dp.DPIExclusions); err != nil {
 		return err
 	}
-	if m := dp.DPIMode; m != "" && m != "learn" && m != "enforce" {
-		return fmt.Errorf("dataplane.dpiMode invalid %q (want learn or enforce)", m)
+	if dp.DPIMode == "learn" {
+		return fmt.Errorf("dataplane.dpiMode learn is no longer supported; use monitor")
+	}
+	if m := dp.DPIMode; m != "" && m != "monitor" && m != "enforce" {
+		return fmt.Errorf("dataplane.dpiMode invalid %q (want monitor or enforce)", m)
 	}
 	for _, name := range dp.CaptureInterfaces {
 		if name == "" {

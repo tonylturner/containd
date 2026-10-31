@@ -61,7 +61,7 @@ func apciAlerts(h *iecHarness) []events.Event {
 }
 
 func TestIECAPCIAlertsObservational(t *testing.T) {
-	for _, mode := range []string{"learn", "enforce"} {
+	for _, mode := range []string{"monitor", "enforce"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newAPCIHarness(t, mode)
 			emit := h.e.iec.emit
@@ -83,7 +83,7 @@ func TestIECAPCIAlertsObservational(t *testing.T) {
 				apciI(3, 0), // after STOPDT con
 				apciU(0x43),
 			} {
-				if _, d := h.send(true, payload); d.Action != capture.Accept {
+				if _, d := h.send(true, payload); d.Action != h.passingDisposition() {
 					t.Fatalf("observation changed decision: %+v", d)
 				}
 			}
@@ -113,7 +113,7 @@ func TestIECAPCIAlertsObservational(t *testing.T) {
 }
 
 func TestIECAPCIOrderedDeduplicatedFrames(t *testing.T) {
-	for _, mode := range []string{"learn", "enforce"} {
+	for _, mode := range []string{"monitor", "enforce"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newAPCIHarness(t, mode)
 			h.handshake()
@@ -151,7 +151,7 @@ func TestIECAPCIOrderedDeduplicatedFrames(t *testing.T) {
 }
 
 func TestIECAPCIMalformedControlsDoNotAdvanceState(t *testing.T) {
-	h := newAPCIHarness(t, "learn")
+	h := newAPCIHarness(t, "monitor")
 	h.handshake()
 	for _, b := range [][]byte{startdtCon, apciS(1), apciU(0x43)} {
 		b = append([]byte(nil), b...)
@@ -174,7 +174,7 @@ func TestIECAPCIMalformedControlsDoNotAdvanceState(t *testing.T) {
 func TestIECAPCIStateEndsWithObservation(t *testing.T) {
 	for _, end := range []string{"close", "abort", "delete", "policy", "parse", "reconfigure"} {
 		t.Run(end, func(t *testing.T) {
-			h := newAPCIHarness(t, "learn")
+			h := newAPCIHarness(t, "monitor")
 			h.handshake()
 			h.send(true, apciU(0x43))
 			old := h.e.iec
@@ -199,9 +199,9 @@ func TestIECAPCIStateEndsWithObservation(t *testing.T) {
 			switch end {
 			case "policy":
 				h.policy.matched = false
-				h.e.LoadRules(iecSnapshot("learn"))
+				h.e.LoadRules(iecSnapshot("monitor"))
 			case "reconfigure":
-				fresh := newAPCIHarness(t, "learn")
+				fresh := newAPCIHarness(t, "monitor")
 				h.e.Reconfigure(fresh.e)
 				if len(h.e.iec.sessions) != 0 {
 					t.Fatal("reconfigure retained old sessions")
@@ -220,7 +220,7 @@ func TestIECAPCIStateEndsWithObservation(t *testing.T) {
 }
 
 func TestIECAPCIReconnectFreshState(t *testing.T) {
-	h := newAPCIHarness(t, "learn")
+	h := newAPCIHarness(t, "monitor")
 	h.handshake()
 	h.send(false, startdtCon)
 	h.send(true, apciI(0, 0))
@@ -251,7 +251,7 @@ func TestIECAPCIReconnectFreshState(t *testing.T) {
 // packet through the live engine, preserving timestamps, handshakes and FINs.
 func TestIECAPCICleanCaptures(t *testing.T) {
 	for _, name := range []string{"session-management", "startup-gi-monitor"} {
-		for _, mode := range []string{"learn", "enforce"} {
+		for _, mode := range []string{"monitor", "enforce"} {
 			t.Run(name+"/"+mode, func(t *testing.T) {
 				h := newAPCIHarness(t, mode)
 				data, err := os.ReadFile(filepath.Join("../../../test/iec104/testdata", name+".pcap"))
@@ -286,7 +286,7 @@ func TestIECAPCICleanCaptures(t *testing.T) {
 					h.clock = time.Unix(int64(binary.LittleEndian.Uint32(hdr)), int64(binary.LittleEndian.Uint32(hdr[4:8]))*1000)
 					p.Timestamp, p.Token = h.clock, h.token()
 					h.e.iec.expire()
-					if d := h.e.handlePacket(p); d.Action != capture.Accept {
+					if d := h.e.handlePacket(p); d.Action != h.passingDisposition() {
 						t.Fatalf("packet %d: %+v", packets, d)
 					}
 					packets++

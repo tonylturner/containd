@@ -5,7 +5,7 @@ import type {
   IEC104Class,
   IOARange,
 } from "../../lib/api";
-import { parseSelectorCSV, predicatePatch, type ICSMode, type ICSModeSelection } from "./ics-shared";
+import { formatICSMode, parseSelectorCSV, predicatePatch, type ICSModeSelection } from "./ics-shared";
 
 // IEC 60870-5-104 rule model for the editors.
 // The client-side checks mirror the server validation ranges so operators see
@@ -223,7 +223,7 @@ function buildIEC104Predicate(
   draft: IEC104Draft,
   mode: ICSModeSelection,
   action: FirewallRule["action"],
-  globalMode?: ICSMode,
+  globalMode?: ICSModeSelection,
 ): { ok: true; ics: ICSPredicate } | { ok: false; error: string } {
   const typeIds = parseTypeIds(draft.typeIds);
   if (!typeIds.ok) return typeIds;
@@ -243,14 +243,14 @@ function buildIEC104Predicate(
   if (draft.selectExecute && typeIds.value.some((v) => !(v >= 45 && v <= 50 || v >= 58 && v <= 63))) {
     return { ok: false, error: "selectExecute requires omitted Type IDs or only 45-50 and 58-63 (not bitstring 51/64)." };
   }
-  const effectiveMode = mode || globalMode || "learn";
-  if (action === "ALLOW" && effectiveMode !== "learn") {
+  const { effectiveMode } = formatICSMode(mode, globalMode);
+  if (action === "ALLOW" && effectiveMode === "enforce") {
     if (draft.classes.includes("unknown")) return { ok: false, error: "Enforce ALLOW cannot include the unknown class." };
     const undecoded = typeIds.value.filter((t) => !iec104TypeInfo(t).descriptor);
     if (undecoded.length > 0) {
       return {
         ok: false,
-        error: `Allow rules can name only Type IDs that containd decodes; ${undecoded.join(", ")} is not decoded. Use a deny or learn rule.`,
+        error: `Allow rules can name only Type IDs that containd decodes; ${undecoded.join(", ")} is not decoded. Use a deny or monitor rule.`,
       };
     }
   }
@@ -279,7 +279,7 @@ export function buildIEC104RuleICS(
   mode: ICSModeSelection,
   action: FirewallRule["action"],
   existing?: ICSPredicate,
-  globalMode?: ICSMode,
+  globalMode?: ICSModeSelection,
 ): IEC104BuildResult {
   const built = buildIEC104Predicate(draft, mode, action, globalMode);
   if (!built.ok) return built;

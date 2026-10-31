@@ -24,9 +24,10 @@ const (
 
 // ics.decision values and reasons.
 const (
-	decisionAllow     = "allow"
-	decisionDeny      = "deny"
-	decisionWouldDrop = "would_drop"
+	decisionAllow      = "allow"
+	decisionDeny       = "deny"
+	decisionWouldDrop  = "would_drop"
+	decisionWouldAllow = "would_allow"
 
 	reasonRule      = "rule"
 	reasonDefault   = "default"
@@ -155,6 +156,18 @@ func (s *iecSession) decisionEvent(ev dpi.Event, d iecDecision, now time.Time) i
 		eventfields.KeyMode:     d.mode,
 		eventfields.KeyReason:   d.reason,
 	}
+	if d.ruleID == "" {
+		delete(attrs, eventfields.KeyRuleID)
+	}
+	if d.reason == reasonNonconformant {
+		delete(attrs, eventfields.KeyAction)
+		if d.scopeID != "" {
+			attrs["scopeId"] = d.scopeID
+		}
+		if code := firstFinding(ev); code != "" {
+			attrs["findingCode"] = code
+		}
+	}
 	for _, k := range decisionKeys {
 		if v, ok := ev.Attributes[k]; ok {
 			attrs[k] = v
@@ -178,7 +191,7 @@ func healthEvent(outcome, errText string, now time.Time) events.Event {
 	}
 }
 
-// untrackedEvent reports a learn-mode SYN accepted without tracking. There
+// untrackedEvent reports a monitor-mode SYN accepted without tracking. There
 // is no incarnation, so it deliberately carries no session_id or apdu_id.
 func untrackedEvent(client, server netip.AddrPort, now time.Time) iecTelemetry {
 	return iecTelemetry{Event: events.Event{
@@ -186,7 +199,7 @@ func untrackedEvent(client, server netip.AddrPort, now time.Time) iecTelemetry {
 		Kind:  eventfields.KindSession,
 		Attributes: map[string]any{
 			eventfields.KeyOutcome: outcomeUntracked,
-			eventfields.KeyMode:    "learn",
+			eventfields.KeyMode:    "monitor",
 			eventfields.KeyReason:  "bound",
 			"limit":                iecMaxSessions,
 		},

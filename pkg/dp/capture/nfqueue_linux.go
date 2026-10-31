@@ -194,9 +194,12 @@ func (s *nfqueueSource) run(ctx context.Context, ready func()) error {
 	// supervise's retry calls nfqueue.Open again. nf.Close is idempotent.
 	defer func() { _ = nf.Close() }()
 
-	gen := newGeneration(func(id uint32, v Verdict) error {
+	gen := newGeneration(func(id uint32, v Verdict, mark uint32) error {
 		if v == VerdictDrop {
 			return nf.SetVerdict(id, nfqueue.NfDrop)
+		}
+		if v == VerdictRepeat {
+			return nf.SetVerdictWithOption(id, nfqueue.NfRepeat, nfqueue.WithMark(mark))
 		}
 		return nf.SetVerdict(id, nfqueue.NfAccept)
 	}, s.comp, s.cfg.OnError)

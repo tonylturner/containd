@@ -159,7 +159,7 @@ export function isExclusionReason(reason: ICSCoverageReason): boolean {
 
 /**
  * The configuration-derived part of a coverage: runtime reasons dropped,
- * match counts cleared and the state recomputed from what remains. Learn
+ * match counts cleared and the state recomputed from what remains. Monitor
  * stays monitoring; for enforce, any non-exclusion reason means not
  * enforcing, otherwise an exclusion means partial.
  */
@@ -168,7 +168,7 @@ export function staticICSCoverage(rule: ICSCoverageRule): ICSCoverageRule {
     .filter((r) => !r.runtime)
     .map(({ code, message, value }) => (value ? { code, message, value } : { code, message }));
   let state: ICSCoverageState = rule.state;
-  if (rule.mode === "learn") state = "monitoring";
+  if (rule.mode === "monitor") state = "monitoring";
   else if (rule.mode === "enforce") {
     if (reasons.some((r) => !isExclusionReason(r))) state = "not_enforcing";
     else state = reasons.length > 0 ? "partial" : "enforcing";

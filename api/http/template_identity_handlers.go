@@ -110,7 +110,7 @@ func listTemplatesHandler() gin.HandlerFunc {
 func applyTemplateHandler(store config.Store) gin.HandlerFunc {
 	type req struct {
 		Name string `json:"name"`
-		// Mode, when set ("learn" or "enforce"), overrides the
+		// Mode, when set ("monitor" or "enforce"), overrides the
 		// per-rule ICSPredicate.Mode on every rule the template
 		// generates. Default (blank) leaves the field blank so rules
 		// inherit the global DPIMode at evaluation time.
@@ -147,10 +147,10 @@ func applyTemplateHandler(store config.Store) gin.HandlerFunc {
 // production default (monitor-first).
 func validateTemplateApplyMode(mode string) error {
 	switch mode {
-	case "", "learn", "enforce":
+	case "", "monitor", "enforce":
 		return nil
 	default:
-		return fmt.Errorf("mode must be one of: \"\" (inherit), \"learn\", or \"enforce\"; got %q", mode)
+		return fmt.Errorf("mode must be one of: \"\" (inherit), \"monitor\", or \"enforce\"; got %q", mode)
 	}
 }
 
@@ -183,9 +183,9 @@ type icsTemplateRequest struct {
 	Parameters        map[string]string `json:"parameters,omitempty"`
 	Params            icsTemplateParams `json:"params,omitempty"`
 	Preview           bool              `json:"preview,omitempty"`
-	// Mode, when set ("learn" or "enforce"), overrides each generated
+	// Mode, when set ("monitor" or "enforce"), overrides each generated
 	// rule's ICSPredicate.Mode. Empty means inherit from global DPIMode
-	// (which itself defaults to learn — the operationally-safe default
+	// (which itself defaults to monitor — the operationally-safe default
 	// for production deployments).
 	Mode string `json:"mode,omitempty"`
 }

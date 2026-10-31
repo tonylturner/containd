@@ -48,7 +48,8 @@ type Engine struct {
 	runCancel             context.CancelFunc
 	runDone               chan struct{}
 	ruleSnap              ruleSnapshots
-	zones                 zoneCache // outlives Reconfigure, as the namespace does
+	policyMu              sync.RWMutex // packet readers see snapshot and IEC policy as one generation
+	zones                 zoneCache    // outlives Reconfigure, as the namespace does
 	started               atomic.Bool
 	epoch                 atomic.Uint64 // counts Reconfigure calls; ends stale start retries
 	compiler              *enforce.Compiler
@@ -61,7 +62,7 @@ type Engine struct {
 	dpiEnabled            bool // master DPI on/off
 	icsParsing            atomic.Pointer[map[string]string]
 	conformance           conformanceAlerts
-	dpiMode               string            // "learn" or "enforce"
+	dpiMode               string            // "monitor" or "enforce"
 	dpiExclusions         []DPIExclusion    // IPs/domains excluded from DPI
 	exclusionHits         *exclusionHits    // flows each exclusion exempted since the last apply
 	coverage              coverage.Settings // static coverage inputs of this configuration
@@ -147,7 +148,7 @@ type Config struct {
 	Enforce         EnforceConfig
 	InspectAll      bool
 	DPIEnabled      bool              // master DPI toggle
-	DPIMode         string            // "learn" or "enforce"
+	DPIMode         string            // "monitor" or "enforce"
 	DPIProtocols    map[string]bool   // per-IT-protocol enable/disable
 	DPIICSProtocols map[string]bool   // per-ICS-protocol enable/disable
 	DPIICSParsing   map[string]string // per-ICS-protocol tolerant/strict policy
@@ -330,6 +331,8 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.runCapture = nil
 	e.runDone = nil
 
+	e.policyMu.Lock()
+	defer e.policyMu.Unlock()
 	e.flowMu.Lock()
 	observationRecords := e.observationPending
 	e.observationPending = nil
@@ -372,6 +375,9 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.verdictCache = fresh.verdictCache
 	e.hooks = fresh.hooks
 	fresh.iec.zones = &e.zones
+	// The replacement table's counter callback must use the surviving
+	// engine's installed policy, not the discarded constructor's snapshots.
+	fresh.iec.shadow = e.countShadow
 	e.iec = fresh.iec
 	e.flowMu.Unlock()
 	e.recordObservations(observationRecords)
@@ -520,6 +526,11 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 }
 
 func (e *Engine) LoadRules(snap rules.Snapshot) {
+	if snap.DPIMode == "" {
+		snap.DPIMode = e.dpiMode
+	}
+	e.policyMu.Lock()
+	defer e.policyMu.Unlock()
 	e.ruleSnap.Store(&snap)
 	e.iec.setPolicy(&snap)
 }
@@ -527,6 +538,9 @@ func (e *Engine) LoadRules(snap rules.Snapshot) {
 // ApplyRules compiles and applies a snapshot to nftables (when enabled) and atomically swaps it.
 // If enforcement is disabled, it simply swaps the snapshot.
 func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
+	if snap.DPIMode == "" {
+		snap.DPIMode = e.dpiMode
+	}
 	if err := snap.ValidateIndustrialProtocols(); err != nil {
 		return err
 	}
@@ -553,10 +567,13 @@ func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
 		warnings = e.compiler.RuleWarnings(&snap)
 	}
 
-	e.ruleSnap.Store(&snap)
+	e.policyMu.Lock()
+	defer e.policyMu.Unlock()
+	appliedAt := time.Now().UTC()
+	e.ruleSnap.Install(&snap, appliedAt)
 	e.iec.setPolicy(&snap)
 	metrics.RulesCount.Set(float64(len(snap.Firewall)))
-	e.rulesetStatus.Store(&RulesetStatus{Ruleset: compiled, SnapshotVersion: snap.Version, AppliedAt: time.Now().UTC(), Warnings: warnings})
+	e.rulesetStatus.Store(&RulesetStatus{Ruleset: compiled, SnapshotVersion: snap.Version, AppliedAt: appliedAt, Warnings: warnings})
 	e.resetExclusionHits()
 	return nil
 }
@@ -643,10 +660,12 @@ func (e *Engine) handlePacket(pkt capture.Packet) capture.Decision {
 	return e.handlePacketConnection(pkt, nil, nil)
 }
 
-func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Connection, history *transportAdmission) capture.Decision {
+func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Connection, history *transportAdmission) (decision capture.Decision) {
 	if e == nil {
 		return acceptDecision
 	}
+	e.policyMu.RLock()
+	defer e.policyMu.RUnlock()
 	metrics.PacketsTotal.Inc()
 	metrics.BytesTotal.Add(float64(len(pkt.Payload)))
 	if pkt.Invalid != "" {
@@ -659,10 +678,13 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	defer e.lockGenericTCP(pkt)()
 	e.reopenDeniedTCP(pkt)
 	state := e.trackTransportFlow(pkt, now, connection)
-	if state == nil {
-		return acceptDecision
-	}
 	e.bindTransport(state, connection)
+	observeOnly := pkt.Token.Inline() && !e.enforcingPacketScope(pkt, state)
+	if observeOnly {
+		// Only a successful observation may resume ordinary nft policy.
+		// Holds and fail-closed drops keep their token ownership intact.
+		defer func() { decision = observedDecision(pkt, decision) }()
+	}
 	stopped := e.prepareDecodeCoverage(state, pkt, now, connection, history)
 	if e.observation != nil && (!stopped || pkt.Token.Inline()) {
 		e.observePacket(pkt, state)
@@ -670,7 +692,7 @@ func (e *Engine) handlePacketConnection(pkt capture.Packet, connection *flow.Con
 	if d, ok := e.handleIECPacket(pkt, state); ok {
 		return d
 	}
-	return e.handleFlowPacket(pkt, state, connection != nil || e.transport == nil, stopped)
+	return e.handleFlowPacket(pkt, state, connection != nil || e.transport == nil, stopped, observeOnly)
 }
 
 // trackFlow returns the state of the packet's connection direction. Each

@@ -106,7 +106,7 @@ func (p *fakePolicy) EvaluateIEC104(ctx rules.EvalContext) (rules.Action, *rules
 	if c.APCIType != "I" || c.Class == "monitor" || (c.TypeID != nil && *c.TypeID == p.allowType) {
 		return rules.ActionAllow, &rules.Entry{ID: "allow", Action: rules.ActionAllow}
 	}
-	if p.denyRule != nil {
+	if p.denyRule != nil && !rules.MonitorICS(*p.denyRule, p.mode) {
 		return rules.ActionDeny, p.denyRule
 	}
 	return rules.ActionDeny, nil
@@ -151,7 +151,7 @@ func newIECHarness(t *testing.T, mode string) *iecHarness {
 	h := &iecHarness{t: t, policy: &fakePolicy{matched: true, mode: mode, allowType: 46}, inj: &session.Fake{}, settler: &fakeSettler{},
 		clock: time.Date(2026, 11, 7, 9, 0, 0, 0, time.UTC), deletes: make(chan conntrack.DeleteRequest, 8),
 		client: net.ParseIP("10.60.60.10"), server: net.ParseIP("10.30.30.30"), cport: 40000}
-	e, err := New(Config{DPIEnabled: true, DPIMode: "learn", ResetInjector: h.inj})
+	e, err := New(Config{DPIEnabled: true, DPIMode: "monitor", ResetInjector: h.inj})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func (h *iecHarness) handshake() {
 		h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, h.serverISN, h.cSeq, nil),
 		h.pkt(true, capture.TCPFlagACK, h.cSeq, h.sSeq, nil),
 	} {
-		if d := h.e.handlePacket(p); d.Action != capture.Accept {
+		if d := h.e.handlePacket(p); d.Action != h.passingDisposition() {
 			h.t.Fatalf("handshake packet %+v: %+v", p.TCP, d)
 		}
 	}
@@ -263,7 +263,7 @@ type rulesSnapshot = rules.Snapshot
 var (
 	testClientIP        = net.ParseIP("10.60.60.10")
 	testServerIP        = net.ParseIP("10.30.30.30")
-	rulesEntryLearnDeny = rules.Entry{ID: "deny-learn", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "learn"}}
+	rulesEntryLearnDeny = rules.Entry{ID: "deny-learn", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "monitor"}}
 )
 
 func iecSnapshot(mode string) rules.Snapshot {
@@ -279,4 +279,28 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func (h *iecHarness) passingDisposition() capture.Disposition {
+	if h.policy.mode == "monitor" {
+		return capture.Repeat
+	}
+	return capture.Accept
+}
+
+func (h *iecHarness) deniedDisposition() capture.Disposition {
+	if h.policy.mode == "monitor" {
+		return capture.Repeat
+	}
+	return capture.Drop
+}
+
+func (p *fakePolicy) IEC104Scope(rules.EvalContext, string) *rules.Entry {
+	return &rules.Entry{ID: "iec", ICS: rules.ICSPredicate{Protocol: "iec104", Mode: p.mode}}
+}
+func (p *fakePolicy) MonitorMatches(ctx rules.EvalContext) []*rules.Entry {
+	if p.denyRule != nil && rules.MonitorICS(*p.denyRule, p.mode) && ctx.ICS.IEC104.Class == "control" {
+		return []*rules.Entry{p.denyRule}
+	}
+	return nil
 }

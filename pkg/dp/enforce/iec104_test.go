@@ -24,23 +24,23 @@ func iecSnapshot() *rules.Snapshot {
 				SourceZones: []string{"lan4"}, DestZones: []string{"station"},
 				Sources: []string{"10.60.60.0/24"}, Destinations: []string{"10.70.0.5"},
 				Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}},
-				ICS:       rules.ICSPredicate{Protocol: "iec104", TypeIDs: []int{45}},
+				ICS:       rules.ICSPredicate{Mode: "enforce", Protocol: "iec104", TypeIDs: []int{45}},
 			},
 			{
 				ID: "c-iec-deny", Action: rules.ActionDeny,
 				Sources: []string{"10.60.61.7"},
-				ICS:     rules.ICSPredicate{Protocol: "iec104"},
+				ICS:     rules.ICSPredicate{Mode: "enforce", Protocol: "iec104"},
 			},
 			{
 				ID: "d-modbus", Action: rules.ActionAllow,
 				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-				ICS:       rules.ICSPredicate{Protocol: "modbus"},
+				ICS:       rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"},
 			},
 		},
 	}
 }
 
-const envelopeJump = "jump iec104_envelope"
+const envelopeJump = "meta mark & 0x04000000 == 0 jump iec104_envelope"
 
 // envelopeRules are the golden rules of the open IEC104 envelope chain: a
 // packet of a connection whose handshake conntrack has not seen complete
@@ -78,7 +78,7 @@ func TestCompileFirewallSteersIEC104EnvelopeBothDirections(t *testing.T) {
 			`    iifname { "eth2" } oifname { "eth1" } tcp sport 2404 ip saddr { 10.70.0.5 } ip daddr { 10.60.60.0/24 } ` + envelopeJump + ";\n",
 			`    tcp dport 2404 ip saddr { 10.60.61.7 } ` + envelopeJump + ";\n",
 			`    tcp sport 2404 ip daddr { 10.60.61.7 } ` + envelopeJump + ";\n",
-			"    tcp dport 502 jump ics_queue;\n",
+			"    meta mark & 0x04000000 == 0 tcp dport 502 jump ics_queue;\n",
 			"    ct state { established, related } accept;\n",
 			"    tcp dport 2404 accept;\n",
 		}
@@ -171,7 +171,7 @@ func TestCompileFirewallIEC104OutsidePortIsNotSteered(t *testing.T) {
 	snap := &rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{
 		ID: "iec-on-502", Action: rules.ActionAllow,
 		Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-		ICS:       rules.ICSPredicate{Protocol: "iec104"},
+		ICS:       rules.ICSPredicate{Mode: "enforce", Protocol: "iec104"},
 	}}}
 	ruleset, err := c.CompileFirewall(snap)
 	if err != nil {

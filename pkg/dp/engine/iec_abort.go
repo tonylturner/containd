@@ -62,7 +62,7 @@ var targetNames = [2]string{"client", "server"}
 // aborted before anything is released, drops every
 // held packet (returned in drops) and the current packet cur, and keeps the
 // session as a tombstone. The resets start once every drop has its
-// verdict completion. A learn envelope never aborts; callers ensure that.
+// verdict completion. A monitor envelope never aborts; callers ensure that.
 func (t *iecTable) abortLocked(s *iecSession, reason *iecAbortReason, trigger string, cur *heldPacket, now time.Time) iecActions {
 	var acts iecActions
 	if s.state == iecAborted {

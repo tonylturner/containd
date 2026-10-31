@@ -19,7 +19,7 @@ import (
 func TestIECAllowedAPDUPassesAndSplitAPDUIsHeld(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.handshake()
-	if _, d := h.send(true, iframe(46, 1)); d.Action != capture.Accept {
+	if _, d := h.send(true, iframe(46, 1)); d.Action != h.passingDisposition() {
 		t.Fatalf("allowed command = %+v", d)
 	}
 	cmd := iframe(46, 1)
@@ -28,7 +28,7 @@ func TestIECAllowedAPDUPassesAndSplitAPDUIsHeld(t *testing.T) {
 		t.Fatalf("partial APDU = %+v, want Hold", d)
 	}
 	_, d = h.send(true, cmd[5:])
-	if d.Action != capture.Accept || len(d.Resolved) != 1 || d.Resolved[0] != (capture.Resolution{Token: first.Token, Verdict: capture.VerdictAccept}) {
+	if d.Action != h.passingDisposition() || len(d.Resolved) != 1 || d.Resolved[0] != (capture.Resolution{Token: first.Token, Verdict: capture.VerdictAccept}) {
 		t.Fatalf("completing packet = %+v, want Accept releasing the held prefix", d)
 	}
 	// Coalesced: allowed APDU plus an incomplete tail holds the packet.
@@ -37,7 +37,7 @@ func TestIECAllowedAPDUPassesAndSplitAPDUIsHeld(t *testing.T) {
 		t.Fatalf("allowed + tail = %+v, want Hold", d)
 	}
 	// A retransmission of accepted bytes is accepted; of pending bytes held.
-	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagACK, h.clientISN+1, h.sSeq, iframe(46, 1))); d.Action != capture.Accept {
+	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagACK, h.clientISN+1, h.sSeq, iframe(46, 1))); d.Action != h.passingDisposition() {
 		t.Fatalf("retransmit of accepted bytes = %+v", d)
 	}
 	if got := h.eventsOf("ics.decision"); len(got) != 0 {
@@ -138,17 +138,17 @@ func TestIECChallengeACKRetriesAndReconnect(t *testing.T) {
 		t.Fatalf("old SYN = %+v", d)
 	}
 	// Same 5-tuple, new ISN: a new incarnation once the handshake validates.
-	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != capture.Accept {
+	if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("new SYN = %+v", d)
 	}
-	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 778, nil)); d.Action != capture.Accept {
+	if d := h.e.handlePacket(h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, 9000, 778, nil)); d.Action != h.passingDisposition() {
 		t.Fatalf("new SYN-ACK = %+v", d)
 	}
 	h.cSeq, h.sSeq = 778, 9001
-	if _, d := h.send(true, iframe(46, 1)); d.Action != capture.Accept {
+	if _, d := h.send(true, iframe(46, 1)); d.Action != h.passingDisposition() {
 		t.Fatalf("new incarnation command = %+v", d)
 	}
-	if _, d := h.send(false, startdtCon); d.Action != capture.Accept {
+	if _, d := h.send(false, startdtCon); d.Action != h.passingDisposition() {
 		t.Fatalf("STARTDT con = %+v", d)
 	}
 	got := h.outcomes()
@@ -158,34 +158,33 @@ func TestIECChallengeACKRetriesAndReconnect(t *testing.T) {
 }
 
 func TestIECLearnEnvelopeNeverHoldsOrAborts(t *testing.T) {
-	h := newIECHarness(t, "learn")
+	h := newIECHarness(t, "monitor")
 	h.handshake()
-	if _, d := h.send(true, iframe(45, 1)[:4]); d.Action != capture.Accept {
+	if _, d := h.send(true, iframe(45, 1)[:4]); d.Action != h.passingDisposition() {
 		t.Fatalf("learn partial = %+v", d)
 	}
-	if _, d := h.send(true, iframe(45, 1)[4:]); d.Action != capture.Accept {
+	if _, d := h.send(true, iframe(45, 1)[4:]); d.Action != h.passingDisposition() {
 		t.Fatalf("learn deny = %+v", d)
 	}
 	dec := h.eventsOf("ics.decision")
-	if len(dec) != 1 || dec[0].Attributes["decision"] != "would_drop" || dec[0].Attributes["mode"] != "learn" {
+	if len(dec) != 1 || dec[0].Attributes["decision"] != "would_drop" || dec[0].Attributes["mode"] != "monitor" {
 		t.Fatalf("decisions = %+v", dec)
 	}
 	if len(h.outcomes()) != 0 || len(h.inj.Resets()) != 0 {
 		t.Fatalf("learn aborted: %v", h.outcomes())
 	}
-	// A learn-mode rule inside an enforce envelope also passes.
 }
 
-func TestIECLearnRuleInEnforceEnvelopeWouldDrop(t *testing.T) {
+func TestIECMonitorRuleCannotSuppressEnvelopeDeny(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.policy.denyRule = &rulesEntryLearnDeny
 	h.handshake()
-	if _, d := h.send(true, iframe(45, 1)); d.Action != capture.Accept {
-		t.Fatalf("learn-mode deny = %+v, want Accept", d)
+	if _, d := h.send(true, iframe(45, 1)); d.Action != capture.Drop {
+		t.Fatalf("monitor suppressed envelope: %+v", d)
 	}
 	dec := h.eventsOf("ics.decision")
-	if len(dec) != 1 || dec[0].Attributes["decision"] != "would_drop" || dec[0].Attributes["ruleId"] != "deny-learn" {
-		t.Fatalf("decisions = %+v", dec)
+	if len(dec) != 2 || dec[0].Attributes["decision"] != "would_drop" || dec[0].Attributes["ruleId"] != "deny-learn" || dec[1].Attributes["decision"] != "deny" {
+		t.Fatalf("decisions=%+v", dec)
 	}
 }
 
@@ -300,8 +299,8 @@ func TestIECHealthQueueDownAndRecovery(t *testing.T) {
 func TestIECPolicyChangeResetsSession(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.handshake()
-	h.policy.mode = "learn"
-	h.e.LoadRules(iecSnapshot("learn"))
+	h.policy.mode = "monitor"
+	h.e.LoadRules(iecSnapshot("monitor"))
 	resets := h.waitResets(2)
 	if len(resets) != 2 || resets[0].Dst != netip.MustParseAddrPort("10.30.30.30:2404") ||
 		resets[1].Dst != netip.MustParseAddrPort("10.60.60.10:40000") {

@@ -155,9 +155,11 @@ The rule impact preview evaluates a schedule at each event's time. It takes
 identities from the running bindings, so it shows what the rule would match if
 today's bindings had applied to the retained events.
 
-DPI mode resolves per-rule `ics.mode` > global `dpiMode` > `learn`. Learn is not a
-global bypass: enforce-mode rules and independent kernel decisions can still
-block traffic. IEC 104 uses a dedicated inspection envelope with default-deny
+DPI mode resolves per-rule `ics.mode` > global `dpiMode` > `monitor`. Monitor
+rules never admit or block; enforcing rules, strict scopes and independent kernel
+decisions can still block traffic. See [DPI modes](ics-dpi.md#dpi-modes) for shadow
+evidence, counter lifetime and upgrade behavior. IEC 104 uses a dedicated
+inspection envelope with default-deny
 object evaluation, even if the generic firewall default is allow. See
 [ICS predicates and modes](ics-dpi.md#ics-firewall-rule-predicates) and
 [Enforcement](dataplane-enforcement.md).

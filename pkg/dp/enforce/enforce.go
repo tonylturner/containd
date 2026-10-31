@@ -78,6 +78,7 @@ func (c *Compiler) CompileFirewall(snap *rules.Snapshot) (string, error) {
 	if err := ValidateTableName(c.DynamicTable()); err != nil {
 		return "", err
 	}
+	snap = resolvedModes(snap)
 	table := c.policyTable()
 	locals, err := resolveLocalInput(snap)
 	if err != nil {
@@ -228,7 +229,7 @@ func (c *Compiler) writeDecisions(buf *bytes.Buffer, snap *rules.Snapshot, preds
 		}
 		var queued []rules.Entry
 		for _, e := range decide {
-			if isDPIEligible(e) && !isIEC104Rule(e) {
+			if queuedToEngine(e, c.QueueID) && !isIEC104Rule(e) {
 				queued = append(queued, e)
 			}
 		}
@@ -333,10 +334,17 @@ func compileEntry(e rules.Entry, zones zoneLowering, queueID int, nflogGroup int
 	}
 	var lines []ruleLine
 	for _, p := range protos {
-		if e.Action == rules.ActionRateLimit && !queued {
+		if e.Action == rules.ActionRateLimit && !queued && !rules.MonitorICS(e, "") {
 			metered, err := meterLines(e, p, scopes, zones, logStmt)
 			if err != nil {
 				return nil, err
+			}
+			if queueID > 0 {
+				// NF_REPEAT restarts this hook: the first traversal already
+				// charged its meters, so observation must not charge them twice.
+				for i := range metered {
+					metered[i].text = unobservedGuard + " " + metered[i].text
+				}
 			}
 			lines = append(lines, metered...)
 			continue

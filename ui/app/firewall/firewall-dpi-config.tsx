@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { ICSModeSelect } from "../ics/ics-mode-select";
+import { formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
 import { Card } from "../../components/Card";
 import { InfoTip } from "../../components/InfoTip";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -40,7 +42,7 @@ export function DPIConfigSection({
   const [showICSConfigModal, setShowICSConfigModal] = useState(false);
   const canEdit = isAdmin();
   const dpiOn = cfg.dpiEnabled ?? false;
-  const dpiMode = cfg.dpiMode ?? "learn";
+  const dpiMode = cfg.dpiMode ?? "";
   const protos = cfg.dpiProtocols ?? {};
   const icsProtos = cfg.dpiIcsProtocols ?? {};
   const exclusions = cfg.dpiExclusions ?? [];
@@ -76,7 +78,7 @@ export function DPIConfigSection({
     save({ ...cfg, dpiEnabled: !dpiOn });
   }
 
-  function setMode(mode: "learn" | "enforce") {
+  function setMode(mode: ICSModeSelection) {
     save({ ...cfg, dpiMode: mode });
   }
 
@@ -159,37 +161,12 @@ export function DPIConfigSection({
                   <span className="text-xs font-medium text-(--text)">
                     ICS DPI Mode
                   </span>
-                  <InfoTip label="Learning mode passively observes traffic to build a baseline. Enforcement mode actively applies DPI policy rules." />
+                  <InfoTip label="Monitor rules observe independently and never admit or block. Other enforcing rules and scopes still apply. Monitoring does not start learning." />
                 </div>
-                {canEdit && (
-                  <div className="flex items-center rounded-xs border overflow-hidden">
-                    <button
-                      onClick={() => setMode("learn")} disabled={saving}
-                      className={`px-3 py-1 text-[10px] font-medium transition-ui ${
-                        dpiMode === "learn"
-                          ? "bg-blue-500/20 text-blue-400 border-r "
-                          : "bg-(--surface) text-(--text-muted) hover:bg-white/4 border-r "
-                      }`}
-                    >
-                      Learning
-                    </button>
-                    <button
-                      onClick={() => setMode("enforce")} disabled={saving}
-                      className={`px-3 py-1 text-[10px] font-medium transition-ui ${
-                        dpiMode === "enforce"
-                          ? ""
-                          : "bg-(--surface) text-(--text-muted) hover:bg-white/4"
-                      }`}
-                    >
-                      Enforcement
-                    </button>
-                  </div>
-                )}
+                {canEdit && <ICSModeSelect label="ICS DPI Mode" value={dpiMode} onChange={setMode} disabled={saving} />}
               </div>
               <p className="mt-1 text-[10px] text-(--text-dim)">
-                {dpiMode === "learn"
-                  ? "Candidate learning mode — commit to apply. Observes traffic without blocking."
-                  : "Candidate enforcement mode — commit to apply. Decoded policy denials are blocked; parsing mode controls nonconformant frames."}
+                Candidate {formatICSMode(dpiMode, undefined).label} — commit to apply. Per-rule overrides take precedence.
               </p>
             </div>
 
@@ -330,8 +307,8 @@ export function DPIConfigSection({
             </div>
 
             <div className="text-[10px] text-(--text-dim)">
-              Use Learning mode to passively build a traffic baseline before
-              switching to Enforcement. DPI exclusions skip inspection for
+              Monitor (safe) observes rule-local matches; learning is a separate, explicit operation.
+              You can select Enforce directly. DPI exclusions skip inspection for
               specific IPs, CIDRs, or domains. TLS inspection covers handshake
               metadata only (SNI, JA3) — full interception is planned.
             </div>

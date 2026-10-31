@@ -337,7 +337,7 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 		}
 
 		rec = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"enforcement":false,"dpiMock":true,"dpiEnabled":true,"dpiMode":"learn","captureInterfaces":["wan"],"dpiProtocols":{"dns":true}}`))
+		req = httptest.NewRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"enforcement":false,"dpiMock":true,"dpiEnabled":true,"dpiMode":"monitor","captureInterfaces":["wan"],"dpiProtocols":{"dns":true}}`))
 		configHandler(logger, dp, sim).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("config valid POST status = %d body=%s", rec.Code, rec.Body.String())

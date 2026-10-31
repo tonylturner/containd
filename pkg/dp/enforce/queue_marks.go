@@ -28,6 +28,8 @@ const (
 	QueueMarkMask uint32 = 0x0f000000
 	EnvelopeMark  uint32 = 0x01000000
 	HandshakeMark uint32 = 0x02000000
+	// ObservedMark skips all ICS steering on the repeated traversal.
+	ObservedMark uint32 = 0x04000000
 )
 
 // EnvelopeMarked reports whether an NFQUEUE skb mark carries EnvelopeMark.
@@ -71,7 +73,7 @@ func (c *Compiler) queuesICS(snap *rules.Snapshot) bool {
 		return false
 	}
 	for _, e := range snap.Firewall {
-		if isDPIEligible(e) && !isIEC104Rule(e) {
+		if queuedToEngine(e, c.QueueID) && (!isIEC104Rule(e) || rules.MonitorICS(e, snap.DPIMode)) {
 			return true
 		}
 	}
@@ -86,3 +88,6 @@ func (c *Compiler) writeICSQueueChain(buf *bytes.Buffer) {
 	}
 	buf.WriteString("  }\n")
 }
+
+// unobservedGuard prevents a repeated observation from entering any ICS queue.
+const unobservedGuard = "meta mark & 0x04000000 == 0"

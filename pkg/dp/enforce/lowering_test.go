@@ -28,7 +28,7 @@ func emptyZoneSnapshot() *rules.Snapshot {
 			{ID: "police-spare", DestZones: []string{"spare"}, Action: rules.ActionRateLimit, RateLimit: &rules.RateLimit{PacketsPerSecond: 10}},
 			{ID: "ops-spare", SourceZones: []string{"spare"}, Identities: []string{"ops"}, Action: rules.ActionAllow},
 			{ID: "iec-spare", SourceZones: []string{"spare"}, Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}},
-				ICS: rules.ICSPredicate{Protocol: "iec104"}, Action: rules.ActionAllow},
+				ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "iec104"}, Action: rules.ActionAllow},
 		},
 	}
 }
@@ -75,9 +75,9 @@ func familySnapshot() *rules.Snapshot {
 			{ID: "ops-v6", Identities: []string{"ops"}, Destinations: []string{"2001:db8:2::/64"}, Protocols: []rules.Protocol{{Name: "tcp", Port: "8443"}}, Action: rules.ActionAllow},
 			{ID: "tag-mixed", Sources: []string{"10.9.0.0/16", "2001:db8:9::/48"}, Action: rules.ActionTag, Tag: "lab"},
 			{ID: "iec-mixed", Sources: []string{"2001:db8:3::/64"}, Destinations: []string{"10.0.3.5/32", "2001:db8:4::5/128"},
-				Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}}, ICS: rules.ICSPredicate{Protocol: "iec104"}, Action: rules.ActionAllow},
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}}, ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "iec104"}, Action: rules.ActionAllow},
 			{ID: "modbus-ops", Identities: []string{"ops"}, Destinations: []string{"10.1.0.0/24", "2001:db8:1::/64"},
-				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: rules.ICSPredicate{Protocol: "modbus"}, Action: rules.ActionAllow},
+				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}, Action: rules.ActionAllow},
 			{ID: "disjoint", Sources: []string{"10.0.0.0/8"}, Destinations: []string{"2001:db8::/32"}, Action: rules.ActionAllow},
 		},
 	}

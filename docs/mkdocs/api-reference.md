@@ -156,7 +156,7 @@ response carries details. There is no separate config-apply-error field.
 `icsEnforcement` summarizes the applied ICS rule coverage with `state` and the
 counts `enforcing`, `partial`, `notEnforcing` and `monitoring`; it names no rule
 or exclusion. `state` is `none` without ICS rules, the worst state among
-enforce-mode rules, `monitoring` when every ICS rule is in learn mode, or
+enforce-mode rules, `monitoring` when every ICS rule is in monitor mode, or
 `unknown` when the engine cannot be read. `enforcement` stays the nftables-level
 state. See [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
 The existing `iec104Enforcement` object is unchanged: only `active`, `healthy`
@@ -466,12 +466,15 @@ DPI mode and per-protocol settings are staged via the API or UI. Use
 `GET /api/v1/dataplane`, edit the returned settings, then `POST /api/v1/dataplane`
 and commit. POST replaces the settings rather than merging them. Fields include:
 
-- `dpiMode` -- `"learn"` (passive observation) or `"enforce"` (active policy
-  enforcement); any other value is rejected. ICS rules that resolve to enforce
-  need a nonzero `nfqueueGroup`.
+- `dpiMode` -- `"monitor"` (passive observation) or `"enforce"` (active policy
+  enforcement), or empty (defaults to monitor); any other value is rejected.
+  ICS rules that resolve to enforce need a nonzero `nfqueueGroup`.
 - `dpiIcsProtocols` -- map of protocol name to boolean (e.g., `{"modbus": true, "dnp3": true, "cip": false}`)
 
-See [ICS DPI](ics-dpi.md) for details.
+See [DPI modes](ics-dpi.md#dpi-modes) for rule inheritance,
+`GET /api/v1/firewall/shadow-counters`, migration and downgrade behavior.
+Event queries accept `ruleId` and `mode`; use
+`kind=ics.decision&ruleId=<id>&mode=monitor` for shadow evidence.
 
 
 ### Passive inventory
@@ -490,8 +493,8 @@ for these operations, never a fabricated empty list. A reachable empty inventory
 returns `[]` for the legacy list and `pairs: []` in the IEC 104 snapshot. The
 engine feeds the IEC section from decoded traffic. Accepted command counts are
 credited only in inline enforce mode, after the decision allowed the command and
-every packet that carried it completed an Accept verdict; learn and monitor
-modes record attempts and points only. The read model does not generate policy.
+every packet that carried it completed an Accept verdict; monitor mode records
+attempts and points only. The read model does not generate policy.
 
 The IEC response has this shape (a populated observation example):
 

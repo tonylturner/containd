@@ -28,7 +28,7 @@ func modbusADU(tid uint16, fc byte, a, b uint16) []byte {
 
 func newModbusInspectEngine(t *testing.T) *Engine {
 	t.Helper()
-	e, err := New(Config{Capture: capture.Config{Interfaces: []string{"eth0", "eth1"}}, DPIEnabled: true})
+	e, err := New(Config{Capture: capture.Config{Interfaces: []string{"eth0", "eth1"}}, DPIEnabled: true, DPIMode: "enforce"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}

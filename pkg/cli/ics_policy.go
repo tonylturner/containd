@@ -35,7 +35,7 @@ import (
 //	--ca <addresses>          (IEC104, comma-separated, 0..65534)
 //	--ioa <ranges>            (IEC104, comma-separated decimal addresses/ranges)
 //	--direction <request|response>
-//	--mode <learn|enforce>
+//	--mode <monitor|enforce>
 //	--masters / --outstations <stations> (DNP3, 0..65519)
 //	--groups / --variations <values>     (DNP3, 0..255)
 //	--instances / --attributes <values> (CIP, 0..65535)
@@ -55,7 +55,7 @@ func setFirewallICSRuleAPI(api *API) Command {
 
 func parseFirewallICSRuleArgs(args []string) (config.Rule, error) {
 	if len(args) < 3 {
-		return config.Rule{}, fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--object-classes <classes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--mode <learn|enforce>] [--masters <stations>] [--outstations <stations>] [--groups <groups>] [--variations <variations>] [--instances <instances>] [--attributes <attributes>] [--tags <paths>] [--cot <causes>] [--originators <addresses>] [--negative <true|false>] [--test <true|false>] [--select-execute <select|execute>]")
+		return config.Rule{}, fmt.Errorf("usage: set firewall ics-rule <id> <action> <protocol> [--src-zone <zone>] [--dst-zone <zone>] [--function-code <codes>] [--object-classes <classes>] [--unit-id <id>] [--addresses <ranges>] [--read-only] [--write-only] [--type-ids <ids>] [--classes <classes>] [--ca <addresses>] [--ioa <ranges>] [--direction <request|response>] [--mode <monitor|enforce>] [--masters <stations>] [--outstations <stations>] [--groups <groups>] [--variations <variations>] [--instances <instances>] [--attributes <attributes>] [--tags <paths>] [--cot <causes>] [--originators <addresses>] [--negative <true|false>] [--test <true|false>] [--select-execute <select|execute>]")
 	}
 
 	rule := config.Rule{
@@ -334,8 +334,8 @@ func parseFirewallICSUnitID(value string) (*uint8, error) {
 }
 
 func validateFirewallICSMode(mode string) error {
-	if mode != "learn" && mode != "enforce" {
-		return fmt.Errorf("--mode must be 'learn' or 'enforce'")
+	if mode != "monitor" && mode != "enforce" {
+		return fmt.Errorf("--mode must be 'monitor' or 'enforce'")
 	}
 	return nil
 }

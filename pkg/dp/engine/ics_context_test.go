@@ -64,7 +64,7 @@ func assertPredicateParity(t *testing.T, entry rules.Entry, ev events.Event, par
 	if entry.Action == rules.ActionAllow {
 		fallback = rules.ActionDeny
 	}
-	snap := &rules.Snapshot{Default: fallback, Firewall: []rules.Entry{entry}}
+	snap := &rules.Snapshot{DPIMode: "enforce", Default: fallback, Firewall: []rules.Entry{entry}}
 	e := &Engine{eventStore: events.NewStore(100), dpiMode: "enforce"}
 	e.ruleSnap.Store(snap)
 	e.SetICSParsing(map[string]string{ev.Proto: string(parsing)})
@@ -192,7 +192,7 @@ func TestDNP3PerHeaderDenialAndIndependentAllows(t *testing.T) {
 		entries = append(entries, rules.Entry{ID: fmt.Sprint(g), Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "dnp3", Groups: []int{g}}})
 	}
 	e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(10)}
-	e.ruleSnap.Store(&rules.Snapshot{Default: rules.ActionDeny, Firewall: entries})
+	e.ruleSnap.Store(&rules.Snapshot{DPIMode: "enforce", Default: rules.ActionDeny, Firewall: entries})
 	state := &flow.State{Key: flow.Key{SrcIP: net.ParseIP(ev.SrcIP), DstIP: net.ParseIP(ev.DstIP), SrcPort: ev.SrcPort, DstPort: ev.DstPort, Proto: 6}}
 	if v, _, drop := e.enforceDPIEvents(state, &dpi.ParsedPacket{Proto: "tcp", DstPort: ev.DstPort}, []dpi.Event{{Proto: ev.Proto, Kind: ev.Kind, Attributes: attrs}}, false); drop {
 		t.Fatalf("independent allows denied: %+v", v)
@@ -209,7 +209,7 @@ func TestICSIncompleteCoverageAsymmetry(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/%s/%v", proto, action, incomplete), func(t *testing.T) {
 					attrs := predicateAttrs(proto)
 					attrs[eventfields.KeyCoverageIncomplete] = incomplete
-					p := rules.ICSPredicate{Protocol: proto}
+					p := rules.ICSPredicate{Protocol: proto, Mode: "enforce"}
 					if proto == "dnp3" {
 						p.Groups = []int{99}
 						if action == rules.ActionAllow {
@@ -256,7 +256,7 @@ func TestCIPMSPOperationsJudgeOwnTargets(t *testing.T) {
 		}
 		entry := rules.Entry{ID: "candidate", Action: action, ICS: rules.ICSPredicate{Protocol: "cip", Instances: []uint16{instance}}}
 		e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(100)}
-		e.ruleSnap.Store(&rules.Snapshot{Default: fallback, Firewall: []rules.Entry{entry}})
+		e.ruleSnap.Store(&rules.Snapshot{DPIMode: "enforce", Default: fallback, Firewall: []rules.Entry{entry}})
 		var decoded []dpi.Event
 		for i, attrs := range []map[string]any{wrapper, first, second} {
 			ev := predicateEvent("cip", attrs)
@@ -463,7 +463,7 @@ func TestICSStrictPreviewActionAware(t *testing.T) {
 					t.Run(fmt.Sprintf("%s/%s/%s/%s", proto, key, parsing, action), func(t *testing.T) {
 						attrs := predicateAttrs(proto)
 						attrs[key] = []string{proto + ".finding"}
-						p := rules.ICSPredicate{Protocol: proto}
+						p := rules.ICSPredicate{Protocol: proto, Mode: "enforce"}
 						if proto == "dnp3" {
 							p.Groups = []int{30}
 						} else if proto == "cip" {
@@ -472,7 +472,7 @@ func TestICSStrictPreviewActionAware(t *testing.T) {
 							p.COT = []int{6}
 						}
 						entry := rules.Entry{ID: "candidate", Action: action, ICS: p}
-						matches := action == rules.ActionDeny || parsing != ics.Strict
+						matches := parsing != ics.Strict
 						assertPredicateParity(t, entry, predicateEvent(proto, attrs), parsing, matches, action == rules.ActionDeny || parsing == ics.Strict)
 					})
 				}
@@ -489,13 +489,13 @@ func TestDNP3ConformanceRecordedOnceForMultipleHeaders(t *testing.T) {
 	pkt := &dpi.ParsedPacket{Proto: "tcp", SrcPort: 40000, DstPort: 20000}
 	e := &Engine{dpiMode: "enforce", eventStore: events.NewStore(100)}
 	e.SetICSParsing(map[string]string{"dnp3": "strict"})
-	e.ruleSnap.Store(&rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{ID: "decoded-deny", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "dnp3", Groups: []int{40}}}}})
+	e.ruleSnap.Store(&rules.Snapshot{DPIMode: "enforce", Default: rules.ActionDeny, Firewall: []rules.Entry{{ID: "decoded-deny", Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "dnp3", Groups: []int{40}}}}})
 	v, ctx, drop := e.enforceDPIEvents(state, pkt, []dpi.Event{{Proto: "dnp3", Kind: "request", Attributes: maps.Clone(attrs)}}, false)
-	if !drop || v.Reason == reasonNonconformant || ctx.ICS.Group == nil || *ctx.ICS.Group != 40 {
-		t.Fatalf("strict displaced decoded denial: %+v %+v", v, ctx)
+	if !drop || v.Reason != reasonNonconformant || ctx.ICS.Group == nil {
+		t.Fatalf("strict scope failed to preempt decoded denial: %+v %+v", v, ctx)
 	}
 	decisions := findingEvents(e, eventfields.KindDecision)
-	if len(decisions) != 1 || decisions[0].Attributes[eventfields.KeyRuleID] != "decoded-deny" || decisions[0].Attributes[eventfields.KeyReason] != reasonRule {
+	if len(decisions) != 1 || decisions[0].Attributes["scopeId"] != "decoded-deny" || decisions[0].Attributes[eventfields.KeyRuleID] != nil || decisions[0].Attributes[eventfields.KeyReason] != reasonNonconformant {
 		t.Fatalf("conformance decisions=%+v", decisions)
 	}
 }

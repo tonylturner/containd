@@ -1,5 +1,7 @@
 "use client";
 
+import { ICSModeSelect } from "../ics/ics-mode-select";
+import { formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
 import type React from "react";
 
 import type { Zone } from "../../lib/api";
@@ -37,8 +39,11 @@ type WizardStepContentProps = {
   setIcsSrcZone: (value: string) => void;
   icsDstZone: string;
   setIcsDstZone: (value: string) => void;
-  icsAccess: "readonly" | "readwrite" | "monitor";
-  setIcsAccess: (value: "readonly" | "readwrite" | "monitor") => void;
+  icsMode: ICSModeSelection;
+  setIcsMode: (value: ICSModeSelection) => void;
+  globalMode: ICSModeSelection;
+  icsAccess: "readonly" | "readwrite";
+  setIcsAccess: (value: "readonly" | "readwrite") => void;
   izSrcZone: string;
   setIzSrcZone: (value: string) => void;
   izDstZone: string;
@@ -71,6 +76,7 @@ export function WizardStepContent({
   setIcsSrcZone,
   icsDstZone,
   setIcsDstZone,
+  icsMode, setIcsMode, globalMode,
   icsAccess,
   setIcsAccess,
   izSrcZone,
@@ -295,11 +301,6 @@ export function WizardStepContent({
                 label: "Read / Write",
                 desc: "Both read and write operations are allowed",
               },
-              {
-                key: "monitor" as const,
-                label: "Monitor-only (learn mode)",
-                desc: "Passively observe traffic without enforcement",
-              },
             ].map((opt) => (
               <button
                 key={opt.key}
@@ -322,6 +323,8 @@ export function WizardStepContent({
               </button>
             ))}
           </div>
+          <div className="mt-3"><ICSModeSelect value={icsMode} onChange={setIcsMode} globalMode={globalMode} /></div>
+          <p className="mt-2 text-xs text-(--text-muted)">Monitor observes only; it never admits traffic through a default deny or overrides another enforcing rule.</p>
         </div>
       );
     }
@@ -343,10 +346,11 @@ export function WizardStepContent({
             <strong>
               {icsAccess === "readonly"
                 ? "Read-only"
-                : icsAccess === "readwrite"
-                  ? "Read/Write"
-                  : "Monitor-only (learn)"}
+                : "Read/Write"}
             </strong>
+          </p>
+          <p>
+            Mode: <strong>{formatICSMode(icsMode, globalMode).label}</strong>
           </p>
           <p>
             Firewall rule: <span className="text-emerald-400">ALLOW</span> with

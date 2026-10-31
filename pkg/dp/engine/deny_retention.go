@@ -28,7 +28,7 @@ var deniedTCPEvictions = promauto.NewCounter(prometheus.CounterOpts{
 // rememberDeniedTCP inserts once, without refreshing the lifetime on duplicates.
 // Insertions and the FIFO share flowMu, so concurrent denials cannot exceed the
 // capacity. Retirement never holds flowMu while waiting for an in-flight reset.
-func (e *Engine) rememberDeniedTCP(key flow.Key) *deniedTCP {
+func (e *Engine) rememberDeniedTCP(key, service flow.Key) *deniedTCP {
 	tuple := tcpTupleKey(key)
 	for {
 		e.flowMu.Lock()
@@ -55,7 +55,7 @@ func (e *Engine) rememberDeniedTCP(key flow.Key) *deniedTCP {
 			opener = opener.Reversed()
 		}
 		isn, hasISN := e.tcpISNs[opener.MapKey()]
-		d := &deniedTCP{key: key, tuple: tuple, isn: isn, hasISN: hasISN, expires: now.Add(deniedTCPLifetime)}
+		d := &deniedTCP{key: key, service: service, tuple: tuple, isn: isn, hasISN: hasISN, expires: now.Add(deniedTCPLifetime)}
 		d.order = e.deniedTCPOrder.PushBack(d)
 		e.deniedTCP[tuple] = d
 		e.flowMu.Unlock()

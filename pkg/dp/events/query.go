@@ -16,6 +16,8 @@ import (
 // Query uses AND across filters. Kind is a comma-separated set of prefixes.
 // Cursor is an exclusive (timestamp, ID) upper bound, not a durable log offset.
 type Query struct {
+	RuleID     string
+	Mode       string
 	EventID    uint64
 	Detections bool
 	Limit      int
@@ -42,8 +44,8 @@ type Page struct {
 // ParseQuery is shared by management and engine to keep validation identical.
 // Only-limit callers retain the legacy array contract and priority selection.
 func ParseQuery(v url.Values) (q Query, filtered bool, err error) {
-	q = Query{Detections: v.Get("detections") == "1", Limit: 500, Session: v.Get("session"), Flow: v.Get("flow"), Kind: v.Get("kind"), Protocol: v.Get("protocol"), Decision: v.Get("decision"), Verdict: v.Get("verdict"), APDU: v.Get("apdu"), Category: v.Get("category"), Cursor: v.Get("cursor")}
-	for _, k := range []string{"query", "id", "detections", "session", "flow", "kind", "protocol", "decision", "verdict", "apdu", "category", "since", "cursor"} {
+	q = Query{RuleID: v.Get("ruleId"), Mode: v.Get("mode"), Detections: v.Get("detections") == "1", Limit: 500, Session: v.Get("session"), Flow: v.Get("flow"), Kind: v.Get("kind"), Protocol: v.Get("protocol"), Decision: v.Get("decision"), Verdict: v.Get("verdict"), APDU: v.Get("apdu"), Category: v.Get("category"), Cursor: v.Get("cursor")}
+	for _, k := range []string{"query", "ruleId", "mode", "id", "detections", "session", "flow", "kind", "protocol", "decision", "verdict", "apdu", "category", "since", "cursor"} {
 		if v.Has(k) {
 			filtered = true
 		}
@@ -65,6 +67,9 @@ func ParseQuery(v url.Values) (q Query, filtered bool, err error) {
 		if err != nil {
 			return q, filtered, fmt.Errorf("since must be RFC3339")
 		}
+	}
+	if q.Mode != "" && q.Mode != "monitor" && q.Mode != "enforce" {
+		return q, filtered, fmt.Errorf("mode must be monitor or enforce")
 	}
 	switch q.Category {
 	case "", "all", "service", "proxy", "dpi", "firewall", "iec104":
@@ -88,7 +93,7 @@ func (q Query) Values() url.Values {
 	if q.Limit > 0 {
 		v.Set("limit", strconv.Itoa(q.Limit))
 	}
-	for k, s := range map[string]string{"session": q.Session, "flow": q.Flow, "kind": q.Kind, "protocol": q.Protocol, "decision": q.Decision, "verdict": q.Verdict, "apdu": q.APDU, "category": q.Category, "cursor": q.Cursor} {
+	for k, s := range map[string]string{"ruleId": q.RuleID, "mode": q.Mode, "session": q.Session, "flow": q.Flow, "kind": q.Kind, "protocol": q.Protocol, "decision": q.Decision, "verdict": q.Verdict, "apdu": q.APDU, "category": q.Category, "cursor": q.Cursor} {
 		if s != "" {
 			v.Set(k, s)
 		}
@@ -103,6 +108,12 @@ func (q Query) Values() url.Values {
 }
 
 func (q Query) Matches(e Event) bool {
+	if q.RuleID != "" && e.Attributes["ruleId"] != q.RuleID {
+		return false
+	}
+	if q.Mode != "" && e.Attributes["mode"] != q.Mode {
+		return false
+	}
 	if q.EventID != 0 && q.EventID != e.ID {
 		return false
 	}

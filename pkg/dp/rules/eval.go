@@ -120,10 +120,12 @@ func (n *networks) holds(ip net.IP) bool {
 
 // Evaluator evaluates a snapshot for a given context and returns an action.
 type Evaluator struct {
-	snapshot *Snapshot
-	compiled []compiledEntry
-	decide   []int // deciding entries in DecisionOrder
-	tags     []int // TAG entries
+	snapshot  *Snapshot
+	compiled  []compiledEntry
+	decide    []int // deciding entries in DecisionOrder
+	tags      []int // TAG entries
+	enforcing []int
+	monitor   []int
 }
 
 func NewEvaluator(snap *Snapshot) *Evaluator {
@@ -143,6 +145,13 @@ func (e *Evaluator) compile() {
 	}
 	e.decide = DecisionOrder(e.snapshot.Firewall)
 	e.tags = tagIndexes(e.snapshot.Firewall)
+	for _, i := range e.decide {
+		if MonitorICS(e.compiled[i].Entry, e.snapshot.DPIMode) {
+			e.monitor = append(e.monitor, i)
+		} else {
+			e.enforcing = append(e.enforcing, i)
+		}
+	}
 }
 
 // compileEntry pre-parses a single Entry.

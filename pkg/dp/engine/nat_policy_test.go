@@ -251,7 +251,7 @@ func TestNATPolicyIdentityTagsExclusionsAndIEC(t *testing.T) {
 		if !reflect.DeepEqual(ctx.Identities, []string{"operator"}) || !reflect.DeepEqual(e.flowTags(state), []string{"backend"}) || e.addressExclusion(state) != testClient {
 			t.Fatal("a policy consumer used translated wire coordinates")
 		}
-		table := newIECTable("learn", &zoneCache{})
+		table := newIECTable("monitor", &zoneCache{})
 		table.snap, table.policy = &snap, rules.NewEvaluator(&snap)
 		iecCtx := table.stateContext(state)
 		if iecCtx.SrcIP.String() != testClient || iecCtx.DstIP.String() != testServer || iecCtx.Port != "502" {

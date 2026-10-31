@@ -22,7 +22,7 @@ var iec104Classes = []string{"monitor", "control", "system", "unknown"}
 
 // iec104DescribedTypes are the Type IDs with a decoder descriptor.
 // An enforce ALLOW rule may name only these; types without a
-// descriptor decode as unsupported and may appear in deny or learn rules.
+// descriptor decode as unsupported and may appear in deny or monitor rules.
 var iec104DescribedTypes = map[int]struct{}{
 	1: {}, 3: {}, 5: {}, 7: {}, 9: {}, 11: {}, 13: {}, 15: {}, 21: {},
 	30: {}, 31: {}, 32: {}, 33: {}, 34: {}, 35: {}, 36: {}, 37: {},
@@ -132,7 +132,7 @@ func validateIEC104Policy(c *Config) error {
 			continue
 		}
 		mode := rules.EffectiveMode(r.ICS.Mode, c.DataPlane.DPIMode)
-		if r.Action == ActionAllow && mode != "learn" {
+		if r.Action == ActionAllow && mode == "enforce" {
 			if err := validateIEC104AllowTypes(r); err != nil {
 				return err
 			}

@@ -134,7 +134,7 @@ type AnomalyClient interface {
 	ClearAnomalies(ctx context.Context) error
 }
 
-// LearnClient is an optional interface for ICS learn mode.
+// LearnClient is an optional interface for ICS learning data.
 type LearnClient interface {
 	ListLearnProfiles(ctx context.Context) ([]learn.LearnedProfile, error)
 	GenerateLearnRules(ctx context.Context) ([]config.Rule, error)
@@ -306,6 +306,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.DELETE("/anomalies", requireAdmin(), clearAnomaliesHandler(engine))
 		protected.GET("/conntrack", listConntrackHandler(engine))
 		protected.GET("/firewall/counters", ruleCountersHandler(engine))
+		protected.GET("/firewall/shadow-counters", shadowCountersHandler(engine))
 		protected.POST("/conntrack/kill", requireAdmin(), killConntrackHandler(engine))
 		protected.GET("/dhcp/leases", dhcpLeasesHandler(engine))
 		protected.GET("/dataplane", getDataPlaneHandler(store))
@@ -370,7 +371,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/firewall/ics-rules", listICSRulesHandler(store))
 		protected.POST("/firewall/ics-rules", requireAdmin(), createICSRuleHandler(store))
 		protected.PATCH("/firewall/ics-rules/:id", requireAdmin(), updateICSRuleHandler(store))
-		// ICS learn mode.
+		// ICS learning data (independent of rule enforcement mode).
 		protected.GET("/learn/profiles", learnProfilesHandler(engine))
 		protected.POST("/learn/generate", requireAdmin(), learnGenerateHandler(engine))
 		protected.POST("/learn/apply", requireAdmin(), learnApplyHandler(store, engine))

@@ -6,6 +6,7 @@ package rules
 // Snapshot is an immutable rule set used by the data-plane fast path.
 // It is intended to be hot-swapped atomically by the engine.
 type Snapshot struct {
+	DPIMode  string  // inherited ICS mode for this snapshot
 	Version  string  // compiled rule version
 	Firewall []Entry // firewall rules
 	// LocalInput are rules applied to traffic destined to the appliance itself (nftables input).
@@ -134,7 +135,7 @@ type ICSPredicate struct {
 	ReadOnly      bool     // read-only class
 	WriteOnly     bool     // write-only class
 	Direction     string   // "request", "response", or "" (both)
-	Mode          string   // "learn" or "enforce"
+	Mode          string   // "monitor" or "enforce"
 
 	// IEC 60870-5-104 predicates. The Snapshot is JSON-marshalled to the
 	// engine, so TypeIDs is []int: []uint8 would encode as base64.

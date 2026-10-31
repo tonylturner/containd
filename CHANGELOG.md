@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- ICS modes are now rule-local `monitor` or `enforce` (rule > global > monitor).
+  Monitor rules only observe; they never admit, drop, hold or reset traffic.
+  A former `learn` ALLOW inside an enforce envelope used to admit at L7 and
+  could mask an enforce DENY through ALLOW precedence. As monitor it does
+  neither, so that traffic is now denied (and reset where the envelope resets).
+  Former `learn` DENY rules no longer drop at L4 without a queue. In NFQUEUE
+  mode a former `learn` ALLOW also no longer admits its flow past the firewall's
+  default DENY; traffic it matched now needs an L4 allow or an enforcing ALLOW.
+  Review policy allowances before upgrading; other enforcing rules and strict
+  scopes still apply.
+- Schema 0.1.9 migrates exact `learn` modes to `monitor` in running, candidate
+  and previous banks and clears protocol-less modes, with durable
+  `config.rule_modes.migrated` audit records per bank. Fresh writes reject
+  `learn`. Back up before upgrading: 0.1.36 cannot read schema 0.1.9; restore a
+  pre-upgrade backup to downgrade.
+
 - Verified AF_PACKET ICS policy and decoder dispatch use the post-DNAT backend
   and pre-SNAT client on both observed legs. Conntrack deletion uses the verified
   original tuple while RST injection retains packet-space endpoints.
@@ -43,6 +59,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hash`.
 
 ### Added
+
+- Firewall and ICS tables show applied-policy shadow message matches,
+  would-allow/would-deny counts and their start time, with rule-filtered monitor
+  events. `GET /api/v1/firewall/shadow-counters` distinguishes unavailable from
+  zero; counters reset on successful apply or engine restart, not failed apply.
+- ICS editors, global DPI settings, wizard and templates offer Inherit,
+  Monitor (safe) and Enforce. Monitoring does not start learning; live collection
+  is off until the separate explicit live watch control is available. Existing
+  learner routes still return retained data.
 
 - Content identification for Modbus, DNP3, IEC 104 and EtherNet/IP on AF_PACKET
   and in PCAP analysis, with passive alternate-port decoding, content/port

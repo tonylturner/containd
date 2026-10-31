@@ -37,7 +37,7 @@ Handler grouping rule:
 
 Examples:
 - interfaces and routing in interface/routing handler files
-- IDS, signatures, learn mode in IDS-related handler files
+- IDS, signatures, learning profiles in IDS-related handler files
 - config backup/import/export in config backup handler files
 - CLI completion tables and prompt hints in `cli_completion.go`, not back in `cli_handlers.go`
 

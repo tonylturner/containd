@@ -40,7 +40,7 @@ func TestLearnedRulesLoadIntoRangerDangerPolicies(t *testing.T) {
 	if len(learned) != 1 || learned[0].ICS.Mode != "" {
 		t.Fatalf("learned rules = %+v", learned)
 	}
-	for name, wantMode := range map[string]string{"substation-weak.json": "learn", "substation-improved.json": "enforce"} {
+	for name, wantMode := range map[string]string{"substation-weak.json": "monitor", "substation-improved.json": "enforce"} {
 		t.Run(name, func(t *testing.T) {
 			cfg := loadRangerDangerPolicy(t, name)
 			cfg.Firewall.Rules = append(cfg.Firewall.Rules, learned...)

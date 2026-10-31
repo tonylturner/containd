@@ -10,7 +10,7 @@ import (
 // icsAddressConfig returns a valid config whose one rule names the ICS
 // protocol proto and the address entries specs.
 func icsAddressConfig(proto string, specs ...string) *Config {
-	cfg := genericICSConfig(proto, "learn", "", 0)
+	cfg := genericICSConfig(proto, "monitor", "", 0)
 	cfg.Firewall.Rules[0].ICS.Addresses = specs
 	return cfg
 }
@@ -60,7 +60,7 @@ func TestValidateRefusesUnsupportedICSAddresses(t *testing.T) {
 	}
 	for _, proto := range []string{"dnp3", "cip"} {
 		for _, action := range []Action{ActionAllow, ActionDeny} {
-			for _, mode := range []string{"", "learn", "enforce"} {
+			for _, mode := range []string{"", "monitor", "enforce"} {
 				t.Run(proto+"/"+string(action)+"/"+mode, func(t *testing.T) {
 					for _, addresses := range [][]string{{"1"}, {"0-10"}, {"0x0100"}, {""}, {"0x02/1/1"}} {
 						cfg := genericICSConfig(proto, mode, "enforce", 100)

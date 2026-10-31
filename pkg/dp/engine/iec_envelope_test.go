@@ -66,7 +66,7 @@ func TestIECEnvelopeAgreesWithNftSteering(t *testing.T) {
 			Protocols: c.proto, Action: rules.ActionAllow,
 			ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"},
 		}}}
-		tab := newIECTable("learn", &zoneCache{})
+		tab := newIECTable("monitor", &zoneCache{})
 		tab.setPolicy(snap)
 		matched, mode := tab.envelopeLocked(tab.sessionCtx(client, server))
 		if steers := comp.SteersIEC104(snap); steers != matched {
@@ -82,7 +82,7 @@ func TestIECEnvelopeMarkWithoutEnvelopeDrops(t *testing.T) {
 	h := newIECHarness(t, "enforce")
 	h.policy.matched = false
 	p := h.pkt(true, capture.TCPFlagSYN, 1, 0, nil)
-	if d := h.e.handlePacket(p); d.Action != capture.Accept {
+	if d := h.e.handlePacket(p); d.Action != h.passingDisposition() {
 		t.Fatalf("unmarked SYN outside the envelope = %+v, want the flow path", d)
 	}
 	p.HasMark, p.Mark = true, enforce.EnvelopeMark

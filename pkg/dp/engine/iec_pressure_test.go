@@ -226,14 +226,14 @@ func TestIECPressureReasonCatalog(t *testing.T) {
 	if len(declared) != len(iecAbortReasons) {
 		t.Fatalf("declared %d reasons, catalog has %d", len(declared), len(iecAbortReasons))
 	}
-	before := newIECTable("learn", &zoneCache{}).pressure()
+	before := newIECTable("monitor", &zoneCache{}).pressure()
 	for _, reason := range iecAbortReasons {
 		if reason == nil || !declared[reason.name] {
 			t.Fatalf("undeclared or duplicate reason: %v", reason)
 		}
 		delete(declared, reason.name)
 		countIECAbort(reason)
-		if got := newIECTable("learn", &zoneCache{}).pressure().Aborts[reason.name]; got != before.Aborts[reason.name]+1 {
+		if got := newIECTable("monitor", &zoneCache{}).pressure().Aborts[reason.name]; got != before.Aborts[reason.name]+1 {
 			t.Fatalf("%s: count = %d", reason.name, got)
 		}
 	}

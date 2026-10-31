@@ -47,6 +47,9 @@ func (e *Engine) coverageOf(snap *rules.Snapshot) []coverage.Rule {
 	e.flowMu.Lock()
 	s, hits := e.coverage, e.exclusionHits
 	e.flowMu.Unlock()
+	if snap != nil && snap.DPIMode != "" {
+		s.DPIMode = snap.DPIMode
+	}
 	out := coverage.Evaluate(snap, s)
 	if len(out) == 0 {
 		return nil
