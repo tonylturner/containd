@@ -115,7 +115,7 @@ func (l *netnsLab) serveLocal(t *testing.T, addr string, port int) {
 func (l *netnsLab) serve(t *testing.T, prefix []string, addr string, port int) {
 	t.Helper()
 	args := append(append([]string(nil), prefix...), "python3", "-u", "-c", fmt.Sprintf(`import socket
-s=socket.socket(); s.bind((%q,%d)); s.listen(); print('ready',flush=True)
+s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind((%q,%d)); s.listen(); print('ready',flush=True)
 while True:
  c,a=s.accept(); c.sendall(a[0].encode()); c.close()
 `, addr, port))
