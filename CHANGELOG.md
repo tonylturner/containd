@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
+
 ## [0.1.37] - 2026-10-31
 
 ### Upgrade notes
