@@ -34,6 +34,38 @@ set -euo pipefail
 # touches another smoke stack's containers, networks or volumes. Its containers,
 # networks and volumes are removed on exit; built images remain for reuse.
 
+# Bind cached firewall images to the current worktree, including local edits.
+firewall_source_hash() {
+  python3 - "$1" <<'PY'
+import hashlib
+import os
+import pathlib
+import subprocess
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve(strict=True)
+tracked = subprocess.check_output(
+    ["git", "-C", str(root), "ls-files", "-z"]
+).split(b"\0")
+untracked = subprocess.check_output(
+    ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "-z"]
+).split(b"\0")
+
+digest = hashlib.sha256()
+for relative in sorted(set(path for path in tracked + untracked if path)):
+    path = root / os.fsdecode(relative)
+    digest.update(relative + b"\0")
+    if path.is_symlink():
+        digest.update(b"symlink\0" + os.fsencode(os.readlink(path)))
+    elif path.is_file():
+        digest.update(b"file\0" + path.read_bytes())
+        digest.update(path.stat().st_mode.to_bytes(4, "big"))
+    else:
+        digest.update(b"missing\0")
+print(digest.hexdigest())
+PY
+}
+
 endpoint_source_hash() {
   python3 - "$ROOT/test/iec104/endpoint" <<'PY'
 import hashlib
@@ -55,7 +87,7 @@ COMPOSE_FILE="$ROOT/test/iec104/compose.yml"
 TOKEN=${IEC104_ADMIN_TOKEN:-devtoken}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 PROJECT=${IEC104_PROJECT:-iec104-smoke-${STAMP}-$$}
-FIREWALL_IMAGE=${IEC104_FIREWALL_IMAGE:-containd/containd:iec104-smoke}
+FIREWALL_IMAGE=${IEC104_FIREWALL_IMAGE:-containd/containd:iec104-smoke-$(firewall_source_hash "$ROOT")}
 ENDPOINT_IMAGE=${IEC104_ENDPOINT_IMAGE:-containd-iec104-endpoint:iec104-smoke-$(endpoint_source_hash)}
 RESULTS_DIR=${IEC104_RESULTS_DIR:-$ROOT/build/iec104-smoke}
 RESULTS_FILE="$RESULTS_DIR/results.json"
@@ -327,8 +359,10 @@ wait_cc_settled() {
 apply_config() {
   local cfg=$1 label=$2 resp code
   resp="$WORK_DIR/cfg-resp.json"
-  code=$(echo "$cfg" | $CURL -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" \
-    -X POST "${BASE}/config" --data-binary @- -o "$resp" 2>/dev/null || true)
+  : >"$resp"
+  code=$(echo "$cfg" | curl -sS --max-time 10 --connect-timeout 5 -w "%{http_code}" \
+    -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+    -X POST "${BASE}/config" --data-binary @- -o "$resp" || true)
   if [[ "$code" != "200" ]]; then
     log "config POST for $label rejected (HTTP $code): $(cat "$resp" 2>/dev/null)"
     return 1
