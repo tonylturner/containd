@@ -213,7 +213,7 @@ func TestEvaluateIEC104Predicates(t *testing.T) {
 
 func TestIEC104Envelope(t *testing.T) {
 	enforceRule := iecEntry("enforce", ActionAllow, ICSPredicate{TypeIDs: []int{46}, Mode: "enforce"})
-	learnRule := iecEntry("learn", ActionAllow, ICSPredicate{ReadOnly: true, Mode: "learn"})
+	learnRule := iecEntry("monitor", ActionAllow, ICSPredicate{ReadOnly: true, Mode: "monitor"})
 	inherit := iecEntry("inherit", ActionAllow, ICSPredicate{ReadOnly: true})
 	l4 := Entry{ID: "l4", Protocols: []Protocol{{Name: "tcp", Port: "2404"}}, Action: ActionAllow}
 	// The envelope ignores ASDU predicates: an L3/L4 session context has no
@@ -230,11 +230,11 @@ func TestIEC104Envelope(t *testing.T) {
 		wantMode string
 	}{
 		{"L4 rule alone creates no IEC104 inspection envelope", []Entry{l4}, "enforce", session, false, ""},
-		{"enforce rule", []Entry{l4, enforceRule}, "learn", session, true, "enforce"},
-		{"rule learn beats global enforce", []Entry{learnRule}, "enforce", session, true, "learn"},
+		{"enforce rule", []Entry{l4, enforceRule}, "monitor", session, true, "enforce"},
+		{"rule learn beats global enforce", []Entry{learnRule}, "enforce", session, true, "monitor"},
 		{"blank rule mode inherits global", []Entry{inherit}, "Enforce", session, true, "enforce"},
-		{"blank everywhere is learn", []Entry{inherit}, "", session, true, "learn"},
-		{"any enforce match wins", []Entry{learnRule, enforceRule}, "learn", session, true, "enforce"},
+		{"blank everywhere is learn", []Entry{inherit}, "", session, true, "monitor"},
+		{"any enforce match wins", []Entry{learnRule, enforceRule}, "monitor", session, true, "enforce"},
 		{"foreign client", []Entry{enforceRule}, "enforce", func() EvalContext {
 			c := session
 			c.SrcIP = net.ParseIP("10.60.60.99")
@@ -282,10 +282,10 @@ func TestGenericEvaluationOfIEC104Entries(t *testing.T) {
 
 func TestEffectiveMode(t *testing.T) {
 	for _, tc := range []struct{ rule, global, want string }{
-		{"enforce", "learn", "enforce"},
-		{" Learn ", "enforce", "learn"},
+		{"enforce", "monitor", "enforce"},
+		{" Monitor ", "enforce", "monitor"},
 		{"", "ENFORCE", "enforce"},
-		{"", "", "learn"},
+		{"", "", "monitor"},
 	} {
 		if got := EffectiveMode(tc.rule, tc.global); got != tc.want {
 			t.Fatalf("EffectiveMode(%q, %q) = %q, want %q", tc.rule, tc.global, got, tc.want)

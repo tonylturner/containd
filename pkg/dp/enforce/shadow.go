@@ -19,14 +19,14 @@ import (
 func shadowWarnings(snap *rules.Snapshot) []RuleWarning {
 	var allows []rules.Entry
 	for _, e := range snap.Firewall {
-		if e.Action == rules.ActionAllow && unconditional(e) {
+		if e.Action == rules.ActionAllow && !rules.MonitorICS(e, snap.DPIMode) && unconditional(e) {
 			allows = append(allows, e)
 		}
 	}
 	sort.SliceStable(allows, func(i, j int) bool { return allows[i].ID < allows[j].ID })
 	var out []RuleWarning
 	for _, d := range snap.Firewall {
-		if (d.Action != rules.ActionDeny && d.Action != rules.ActionReset) || isIEC104Rule(d) {
+		if (d.Action != rules.ActionDeny && d.Action != rules.ActionReset) || isIEC104Rule(d) || rules.MonitorICS(d, snap.DPIMode) {
 			continue
 		}
 		for _, a := range allows {

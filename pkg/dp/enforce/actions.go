@@ -68,7 +68,10 @@ func actionForms(e rules.Entry, p rules.Protocol, queued bool, counted, logStmt 
 		return out
 	}
 	if queued {
-		return []lineForm{{stmts: stmts("jump " + ICSQueueChain)}}, nil
+		return []lineForm{{match: unobservedGuard, stmts: stmts("jump " + ICSQueueChain)}}, nil
+	}
+	if rules.MonitorICS(e, "") {
+		return []lineForm{{stmts: counted}}, nil
 	}
 	switch e.Action {
 	case rules.ActionAllow:

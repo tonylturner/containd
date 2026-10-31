@@ -343,7 +343,7 @@ func TestTransportCoverageIECTable(t *testing.T) {
 	reader := &transportCTFake{evidence: ev}
 	e, r, _ := newTransportTest(t, reader)
 	e.LoadRules(rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{{
-		ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "learn"}, Action: rules.ActionAllow,
+		ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "monitor"}, Action: rules.ActionAllow,
 	}}})
 	r.authority.check(context.Background())
 	trace := observationTrace(2404, true)

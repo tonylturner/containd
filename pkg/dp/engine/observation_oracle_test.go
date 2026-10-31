@@ -39,7 +39,7 @@ func (s *oracleSpy) BlockFlowTemp(context.Context, net.IP, net.IP, string, strin
 
 type oracleState struct {
 	Cache                                                     map[string]verdict.Verdict
-	Generic                                                   map[string]time.Time
+	Generic                                                   map[flow.MapKey]time.Time
 	IEC                                                       map[string]iecState
 	CacheWrites                                               []string
 	Submissions, Followups, Deletes, Updates, TombstoneWrites int
@@ -49,7 +49,7 @@ type oracleState struct {
 }
 
 func oracleSnapshot(e *Engine, s *oracleSpy) oracleState {
-	out := oracleState{Cache: map[string]verdict.Verdict{}, Generic: map[string]time.Time{}, IEC: map[string]iecState{},
+	out := oracleState{Cache: map[string]verdict.Verdict{}, Generic: map[flow.MapKey]time.Time{}, IEC: map[string]iecState{},
 		CacheWrites: append([]string(nil), s.cache...), Verdicts: s.verdicts, Submissions: s.submissions, Followups: s.followups, Deletes: s.deletes, Updates: s.updates, TombstoneWrites: s.tombstones, Resets: s.injector.Resets(), Pending: len(e.hooks.after.pending) + len(e.hooks.blocks.jobs)}
 	for k, v := range e.verdictCache.entries {
 		out.Cache[k] = v.verdict
@@ -69,8 +69,8 @@ type oracleFlow struct {
 	Closed              bool
 }
 
-func oracleFlows(e *Engine) map[string]oracleFlow {
-	out := make(map[string]oracleFlow)
+func oracleFlows(e *Engine) map[flow.MapKey]oracleFlow {
+	out := make(map[flow.MapKey]oracleFlow)
 	for key, st := range e.flows {
 		out[key] = oracleFlow{st.FirstSeen, st.LastSeen, st.Packets, st.Bytes, st.Connection.Load().Closed().Load()}
 	}
@@ -95,9 +95,9 @@ func TestObservationVerdictOracle(t *testing.T) {
 		{"standard-unselected", 502, false, false, false, "", false, "observation", false},
 		{"standard-mismatch", 20000, false, true, false, "enforce", true, "observation", false},
 		{"2404-no-rule", 2404, true, false, false, "", false, "observation", false},
-		{"2404-learn", 2404, true, true, false, "learn", false, "legacy", false},
+		{"2404-learn", 2404, true, true, false, "monitor", false, "legacy", false},
 		{"2404-enforce", 2404, true, true, false, "enforce", false, "legacy", false},
-		{"2404-learn-reuse-open", 2404, true, true, false, "learn", false, "legacy", true},
+		{"2404-learn-reuse-open", 2404, true, true, false, "monitor", false, "legacy", true},
 		{"2404-enforce-reuse-open", 2404, true, true, false, "enforce", false, "legacy", true},
 		{"alternate-modbus", 1502, false, true, true, "enforce", true, "observation", false},
 		{"alternate-iec104", 12404, true, true, true, "enforce", true, "observation", false},

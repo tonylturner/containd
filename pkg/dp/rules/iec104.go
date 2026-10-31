@@ -36,7 +36,7 @@ type IEC104Context struct {
 }
 
 // EffectiveMode resolves an ICS rule's mode: rule mode > global DPI mode >
-// learn.
+// monitor.
 func EffectiveMode(ruleMode, globalMode string) string {
 	if m := strings.ToLower(strings.TrimSpace(ruleMode)); m != "" {
 		return m
@@ -44,7 +44,7 @@ func EffectiveMode(ruleMode, globalMode string) string {
 	if m := strings.ToLower(strings.TrimSpace(globalMode)); m != "" {
 		return m
 	}
-	return "learn"
+	return "monitor"
 }
 
 // IEC104Envelope reports whether a session falls inside the IEC104
@@ -55,20 +55,10 @@ func EffectiveMode(ruleMode, globalMode string) string {
 // and schedules do not narrow it, so it is a superset of what the rules
 // can allow and everything inside it that no rule allows is denied. The
 // mode is enforce if any matching rule's effective mode is enforce, else
-// learn. No match returns (false, "").
+// monitor. No match returns (false, "").
 func (e *Evaluator) IEC104Envelope(ctx EvalContext, globalMode string) (matched bool, mode string) {
-	for i := range e.compiled {
-		ce := &e.compiled[i]
-		if ce.iec == nil || !matchZones(&ce.Entry, ctx) || !matchCIDRs(ce, ctx) || !matchProtoCompiled(ce, ctx) {
-			continue
-		}
-		matched = true
-		if EffectiveMode(ce.ICS.Mode, globalMode) == "enforce" {
-			return true, "enforce"
-		}
-	}
-	if matched {
-		return true, "learn"
+	if scope := e.IEC104Scope(ctx, globalMode); scope != nil {
+		return true, EffectiveMode(scope.ICS.Mode, globalMode)
 	}
 	return false, ""
 }
@@ -154,6 +144,11 @@ func matchIEC104(ce *compiledEntry, ctx EvalContext) bool {
 		!matchBool(ce.ICS.Negative, obj.Negative) || !matchBool(ce.ICS.Test, obj.Test) ||
 		!matchSelectExecute(ce.ICS.SelectExecute, obj.Select) {
 		return false
+	}
+	// Preserve known message constraints while rejecting incomplete child
+	// coverage for a target-constrained ALLOW, as for DNP3/CIP objects.
+	if ics.ObjectUnknown && len(c.ioa) > 0 {
+		return denying(ce.Action)
 	}
 	return len(c.ioa) == 0 || (obj.IOA != nil && ioaInRanges(c.ioa, *obj.IOA))
 }

@@ -3,7 +3,6 @@ package pcap
 
 import (
 	"bytes"
-	"reflect"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
@@ -30,27 +29,17 @@ func (d policyScopeDecoder) OnPacket(*flow.State, *dpi.ParsedPacket) ([]dpi.Even
 }
 func (policyScopeDecoder) OnFlowEnd(*flow.State) ([]dpi.Event, error) { return nil, nil }
 
-func TestAnalyzeForPolicyIndustrialScope(t *testing.T) {
+func TestAnalysisRetainsProtocolTelemetry(t *testing.T) {
 	protocols := []string{"modbus", "dnp3", "iec104", "cip", "http", "dns", "tls", "ssh", "smb", "ntp", "snmp", "rdp",
 		"ics", "tcp", "udp", "s7comm", "s7", "mms", "iec61850", "bacnet", "opcua", "goose"}
-	result, err := AnalyzeForPolicy(bytes.NewReader(buildPCAP([][]byte{buildModbusEthernetFrame(100)})),
+	result, err := Analyze(bytes.NewReader(buildPCAP([][]byte{buildModbusEthernetFrame(100)})),
 		policyScopeDecoder{protocols: protocols})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, protocol := range protocols {
-		if result.EventSummary[protocol] != 1 {
-			t.Fatalf("scope filter hid telemetry for %s: %v", protocol, result.EventSummary)
+		if result.Protocols[protocol] != 1 {
+			t.Fatalf("scope filter hid telemetry for %s: %v", protocol, result.Protocols)
 		}
-	}
-	got := map[string]bool{}
-	for _, rule := range result.Rules {
-		got[rule.ICS.Protocol] = true
-	}
-	// IEC104 remains visible in analysis but is never auto-learned into
-	// permissive rules.
-	want := map[string]bool{"modbus": true, "dnp3": true, "cip": true}
-	if !reflect.DeepEqual(got, want) || len(result.Profiles) != len(want) {
-		t.Fatalf("non-learnable events produced policy: rules=%v profiles=%+v", got, result.Profiles)
 	}
 }

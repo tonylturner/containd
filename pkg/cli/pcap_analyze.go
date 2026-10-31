@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"sort"
+
+	"github.com/tonylturner/containd/pkg/evidence"
 )
 
 func analyzePcapAPI(api *API) Command {
@@ -50,16 +52,21 @@ func analyzePcapAPI(api *API) Command {
 			} `json:"events"`
 		}
 
-		var result analysisResult
-		if err := api.postMultipartFile(ctx, "/api/v1/pcap/analyze", filename, f, &result); err != nil {
+		var response struct {
+			Dataset evidence.Dataset `json:"dataset"`
+			Stats   analysisResult   `json:"stats"`
+		}
+		if err := api.postMultipartFile(ctx, "/api/v1/pcap/analyze", filename, f, &response); err != nil {
 			return err
 		}
+		result := response.Stats
 
 		if out == nil {
 			return nil
 		}
 
 		// Summary.
+		fmt.Fprintf(out, "Dataset:   %s (generate suggestions explicitly)\n", response.Dataset.ID)
 		fmt.Fprintf(out, "Packets:   %d\n", result.PacketCount)
 		fmt.Fprintf(out, "Bytes:     %d\n", result.ByteCount)
 		fmt.Fprintf(out, "Flows:     %d\n", len(result.Flows))

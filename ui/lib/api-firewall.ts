@@ -30,7 +30,7 @@ export type ICSPredicate = {
   writeOnly?: boolean;
   direction?: "request" | "response";
   /** Empty inherits the global mode, including in preview and PATCH bodies. */
-  mode?: "enforce" | "learn" | "";
+  mode?: "enforce" | "monitor" | "";
   // IEC 60870-5-104 fields (protocol "iec104"). A missing field is a
   // wildcard; an empty list is a validation error, so never send [].
   typeIds?: number[];

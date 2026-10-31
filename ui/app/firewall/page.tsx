@@ -36,6 +36,7 @@ import { FirewallRuleTable } from "./firewall-rule-table";
 import { tagsInUse } from "./firewall-rule-policy";
 import type { CountersState } from "./firewall-rule-counters";
 import { useICSCoverage } from "../ics/use-ics-coverage";
+import { useShadowCounters } from "../ics/ics-shadow-counters";
 import { useHealth } from "../../hooks/useHealth";
 import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 
@@ -56,6 +57,7 @@ export default function FirewallPage() {
   const [rulesetState, setRulesetState] = useState<"idle" | "loading" | "error">("idle");
   const [rulesetError, setRulesetError] = useState("");
   const coverage = useICSCoverage();
+  const shadow = useShadowCounters();
   const health = useHealth();
   const installed = useInstalledRuleset();
   const [editing, setEditing] = useState<FirewallRule | null>(null);
@@ -301,7 +303,7 @@ export default function FirewallPage() {
             </button>
           )}
           <button
-            onClick={() => refresh({ keepEdits: false })}
+            onClick={() => { void refresh({ keepEdits: false }); void shadow.reload(); }}
             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
           >
             Refresh
@@ -428,6 +430,7 @@ export default function FirewallPage() {
       <FirewallRuleTable
         rules={rules}
         zones={zones}
+        shadowCounters={shadow.counters}
         dpiMode={dpiConfig.dpiMode}
         coverage={coverage.view}
         counters={counters}

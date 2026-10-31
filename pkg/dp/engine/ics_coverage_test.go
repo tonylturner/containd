@@ -69,7 +69,7 @@ func TestICSCoverageQueueOverlay(t *testing.T) {
 	wantCoverage(t, e, "queue rebound", coverage.Enforcing)
 
 	learn := modbusEnforceSnapshot("read")
-	learn.Firewall[0].ICS.Mode = "learn"
+	learn.Firewall[0].ICS.Mode = "monitor"
 	if err := e.ApplyRules(context.Background(), learn); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestICSCoverageAfterFailedApply(t *testing.T) {
 	applier.err = nil
 	running := modbusEnforceSnapshot("running")
 	running.Version = "v2"
-	running.Firewall[0].ICS.Mode = "learn"
+	running.Firewall[0].ICS.Mode = "monitor"
 	if err := e.ApplyRules(context.Background(), running); err != nil {
 		t.Fatal(err)
 	}

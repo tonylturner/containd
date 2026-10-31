@@ -38,7 +38,7 @@ Out of scope:
 - candidate and running configuration databases
 - firewall/NAT/IDS/DPI policy state pushed into the dataplane
 - runtime service configs and generated certificates/profiles
-- event, audit, inventory, anomaly, and learn-mode evidence
+- event, audit, inventory, anomaly, and monitor-mode evidence
 - signed images, SBOMs, and CSAF/advisory outputs
 
 ## Trust Boundaries

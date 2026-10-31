@@ -28,7 +28,8 @@ func (d *Decoder) Supports(state *flow.State) bool {
 	if state.Key.Proto != 6 {
 		return false
 	}
-	return state.Key.SrcPort == ics.ModbusPort || state.Key.DstPort == ics.ModbusPort
+	key := state.ServiceKey()
+	return key.SrcPort == ics.ModbusPort || key.DstPort == ics.ModbusPort
 }
 
 // Ports implements dpi.PortHinter for port-based dispatch.
@@ -101,7 +102,7 @@ func aduEvent(state *flow.State, frame *TCPFrame, adu []byte) dpi.Event {
 		eventfields.KeyFunctionCode: fc,
 	}
 	kind := "request"
-	if state != nil && state.Key.Dir == flow.DirReverse {
+	if state != nil && state.ServiceKey().Dir == flow.DirReverse {
 		kind = "response"
 	}
 
@@ -194,7 +195,7 @@ func flowID(state *flow.State) string {
 	if state == nil {
 		return ""
 	}
-	return state.Key.Hash()
+	return state.ID()
 }
 
 func (d *Decoder) OnFlowEnd(state *flow.State) ([]dpi.Event, error) {

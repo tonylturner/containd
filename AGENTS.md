@@ -15,6 +15,7 @@ protocols, including IEC 104. The executable in `cmd/containd/main.go` supports
 - `pkg/dp/` — dataplane capture, protocol inspection, enforcement, and state.
 - `pkg/app/` — management and engine application assembly.
 - `pkg/mp/` — management-plane services, including the SSH server.
+- `pkg/evidence/` — learner evidence contracts and the engine-owned SQLite evidence store (`CONTAIND_EVIDENCE_DB`, default `/data/evidence.db`).
 - `ui/` — web application and its API client.
 - `docs/` — public documentation source, OpenAPI description, and build config.
 - `build/` — management and engine Dockerfiles.

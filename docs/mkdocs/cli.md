@@ -86,6 +86,45 @@ require a restart; committing does not rebind management sockets.
   - `import config <path>`
 - Backed by the management API and config store; exposed via SSH and the in-app console.
 
+## Learner Evidence
+
+PCAP analysis imports a dataset; it does not generate rules or change policy.
+The same learner handles explicit live watches. Viewer commands only read data;
+all collection, generation, review and staging commands require admin.
+
+```text
+analyze pcap <filename>
+show learn datasets [--limit 200] [--cursor <cursor>]
+show learn dataset <dataset-id>
+show learn observations <dataset-id> [--limit 200] [--cursor <cursor>]
+show learn watches
+show learn watch <watch-id>
+show learn counters
+start learn watch [seconds]
+stop learn watch <watch-id>
+generate learn <sealed-dataset-id>
+show learn suggestions --dataset <dataset-id>
+show learn suggestion <suggestion-id>
+review learn suggestion <id@revision> approve|reject [coordinates-approved]
+apply learn suggestions <request-id> <id@revision> [more-selections...]
+delete learn dataset <dataset-id>
+```
+
+Start defaults to one hour, with a maximum of 24 hours and only one active watch.
+Stop seals the live dataset. Follow returned cursors for complete lists. Inspect
+service authority, gaps, expiry, frozen proof, limitations and withheld counts
+before reviewing. IEC 104 requires explicit admin review; wire-coordinate evidence
+requires a deliberate `coordinates-approved` acknowledgement after NAT/scope review.
+Use the revision returned by review when staging.
+
+`apply learn suggestions` atomically stages only selected certified revisions as
+monitor rules; it never commits. A conflict rejects the whole batch. Retry the
+same request ID and ordered selections after uncertain completion, since the
+candidate may already be staged. Review `show diff`, then `commit` or `commit
+confirmed`. Monitor rules do not authorize traffic: enforcement requires a later
+explicit candidate mode edit and commit. The old profile/bulk workflow is removed.
+See [Learning](ics-dpi.md#learning) for protocol and evidence-retention limits.
+
 ## Authentication
 
 Management APIs and the in-app CLI use short-lived JWT sessions stored in a cookie by default.
@@ -291,7 +330,7 @@ For IEC 104 (`protocol` is `iec104`), use:
 - `--ioa <ranges>` — comma-separated decimal addresses or inclusive ranges, for example `0,65536-65567,16777215` (the 24-bit address space).
 - `--read-only` — restrict the rule to read-only IEC traffic.
 - `--direction <request|response>` — select the session half.
-- `--mode <learn|enforce>` — choose the rule's ICS mode.
+- `--mode <monitor|enforce>` — choose the rule's ICS mode.
 
 Additional IEC 104 selectors:
 

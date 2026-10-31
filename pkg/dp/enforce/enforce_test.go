@@ -191,7 +191,7 @@ func TestCompileFirewallQueueRulesForDPIEntries(t *testing.T) {
 				ID:        "ics1",
 				Action:    rules.ActionAllow,
 				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-				ICS:       rules.ICSPredicate{Protocol: "modbus"},
+				ICS:       rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"},
 			},
 			{
 				ID:        "web",
@@ -224,7 +224,7 @@ func TestCompileFirewallNoQueueWithoutQueueID(t *testing.T) {
 				ID:        "ics1",
 				Action:    rules.ActionAllow,
 				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-				ICS:       rules.ICSPredicate{Protocol: "modbus"},
+				ICS:       rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"},
 			},
 		},
 	}
@@ -302,7 +302,7 @@ func TestCompileFirewallSuppressesLogForDPIRules(t *testing.T) {
 				ID:        "modbus-fc-guard",
 				Action:    rules.ActionDeny,
 				Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-				ICS:       rules.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{5, 6}},
+				ICS:       rules.ICSPredicate{Mode: "enforce", Protocol: "modbus", FunctionCode: []uint8{5, 6}},
 				Log:       true,
 			},
 		},
@@ -371,12 +371,12 @@ func TestIsDPIEligible(t *testing.T) {
 	}{
 		{
 			name:     "ICS modbus entry",
-			entry:    rules.Entry{ICS: rules.ICSPredicate{Protocol: "modbus"}},
+			entry:    rules.Entry{ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}},
 			eligible: true,
 		},
 		{
 			name:     "ICS dnp3 entry",
-			entry:    rules.Entry{ICS: rules.ICSPredicate{Protocol: "dnp3"}},
+			entry:    rules.Entry{ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "dnp3"}},
 			eligible: true,
 		},
 		{

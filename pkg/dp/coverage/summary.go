@@ -24,7 +24,7 @@ type Summary struct {
 }
 
 // Summarize counts rs. The state is the worst state among enforce-mode
-// rules, monitoring when every rule is in learn mode, and none without
+// rules, monitoring when every rule is in monitor mode, and none without
 // rules.
 func Summarize(rs []Rule) Summary {
 	var s Summary

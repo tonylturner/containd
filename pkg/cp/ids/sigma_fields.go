@@ -72,7 +72,7 @@ func decoderAttribute(field string) bool {
 	// Modbus data-access keys emitted per function code and direction in
 	// pkg/dp/ics/modbus/pdu.go (address, quantity and value are listed with
 	// the other protocols' keys).
-	case "byte_count", "register_count", "and_mask", "or_mask", "read_address",
+	case "byte_count", "register_count", "values", "and_mask", "or_mask", "read_address",
 		"read_quantity", "write_address", "write_quantity":
 		return true
 	// Other keys emitted by the retained industrial decoders.

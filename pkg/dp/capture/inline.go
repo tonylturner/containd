@@ -48,6 +48,7 @@ type Verdict uint8
 const (
 	VerdictAccept Verdict = iota + 1
 	VerdictDrop
+	VerdictRepeat
 )
 
 // Disposition is a handler's decision for the current packet.
@@ -57,6 +58,7 @@ const (
 	Accept Disposition = iota
 	Drop
 	Hold
+	Repeat
 )
 
 // Resolution settles one earlier Held token.
@@ -68,6 +70,7 @@ type Resolution struct {
 // Decision is returned by a Handler for every delivered packet.
 type Decision struct {
 	Action   Disposition  // current packet
+	Mark     uint32       // replacement skb mark for immediate Repeat only
 	Reason   string       // machine reason; logs/metrics only
 	Resolved []Resolution // earlier Held tokens of the same source
 	// Notify requests OnVerdict even for a successful immediate Accept.
@@ -121,6 +124,8 @@ func (v Verdict) String() string {
 		return "accept"
 	case VerdictDrop:
 		return "drop"
+	case VerdictRepeat:
+		return "repeat"
 	default:
 		return "invalid(" + strconv.Itoa(int(v)) + ")"
 	}

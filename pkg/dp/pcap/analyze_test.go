@@ -252,25 +252,6 @@ func TestAnalyzePacketCounting(t *testing.T) {
 	}
 }
 
-func TestAnalyzeForPolicy(t *testing.T) {
-	frame := buildModbusEthernetFrame(0)
-	pcapData := buildPCAP([][]byte{frame})
-
-	result, err := AnalyzeForPolicy(bytes.NewReader(pcapData), modbus.NewDecoder())
-	if err != nil {
-		t.Fatalf("AnalyzeForPolicy() error: %v", err)
-	}
-	if result.Stats.PacketCount != 1 {
-		t.Fatalf("PacketCount = %d, want 1", result.Stats.PacketCount)
-	}
-	if result.EventSummary["modbus"] == 0 {
-		t.Fatalf("expected modbus event summary, got %#v", result.EventSummary)
-	}
-	if len(result.Profiles) == 0 {
-		t.Fatal("expected learned profiles")
-	}
-}
-
 func TestAnalyzeIPv6Packet(t *testing.T) {
 	frame := buildIPv6EthernetFrame()
 	pcapData := buildPCAP([][]byte{frame})

@@ -421,7 +421,7 @@ export function ICSDPIConfigModal({
 
         <div className="mt-4 text-[10px] text-(--text-dim)">
           Tolerant enforces what is decoded and alerts on the rest. Strict drops
-          nonconformant frames and resets the session in enforce mode; learning
+          nonconformant frames and resets the session in enforce mode; monitoring
           reports would-drop without blocking. A lost frame boundary and integrity
           faults reset the session in both parsing modes when enforcing.
         </div>

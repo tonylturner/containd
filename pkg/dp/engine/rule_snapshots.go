@@ -4,8 +4,10 @@
 package engine
 
 import (
-	"github.com/tonylturner/containd/pkg/dp/rules"
 	"sync/atomic"
+	"time"
+
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // ruleSnapshots publishes an immutable snapshot and its compiled evaluator
@@ -14,6 +16,7 @@ type ruleSnapshots struct{ current atomic.Pointer[compiledRules] }
 type compiledRules struct {
 	snapshot  *rules.Snapshot
 	evaluator *rules.Evaluator
+	shadow    *shadowState
 }
 
 var emptyRulesEvaluator = rules.NewEvaluator(nil)
@@ -34,4 +37,8 @@ func (r *ruleSnapshots) Evaluator() *rules.Evaluator {
 		return p.evaluator
 	}
 	return emptyRulesEvaluator
+}
+
+func (r *ruleSnapshots) Install(snap *rules.Snapshot, since time.Time) {
+	r.current.Store(&compiledRules{snapshot: snap, evaluator: rules.NewEvaluator(snap), shadow: newShadowState(snap, since)})
 }

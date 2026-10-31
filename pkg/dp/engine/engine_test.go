@@ -458,6 +458,7 @@ func TestShouldInspectICSHeuristics(t *testing.T) {
 	if !e.ShouldInspect(state, &dpi.ParsedPacket{Proto: "tcp", SrcPort: 12345, DstPort: 502}) {
 		t.Fatal("expected inspect for modbus port")
 	}
+	state.Key.DstPort = 80
 	if e.ShouldInspect(state, &dpi.ParsedPacket{Proto: "tcp", SrcPort: 12345, DstPort: 80}) {
 		t.Fatal("expected no inspect for non-ICS port")
 	}
@@ -466,11 +467,11 @@ func TestShouldInspectICSHeuristics(t *testing.T) {
 func TestEffectiveModePerRuleOverrideWins(t *testing.T) {
 	// Per-rule Mode beats global, no matter what global is.
 	e := &Engine{dpiMode: "enforce"}
-	entry := &rules.Entry{ICS: rules.ICSPredicate{Mode: "learn"}}
-	if got := e.effectiveMode(entry); got != "learn" {
+	entry := &rules.Entry{ICS: rules.ICSPredicate{Mode: "monitor"}}
+	if got := e.effectiveMode(entry); got != "monitor" {
 		t.Errorf("per-rule learn should win over global enforce, got %q", got)
 	}
-	e.dpiMode = "learn"
+	e.dpiMode = "monitor"
 	entry.ICS.Mode = "enforce"
 	if got := e.effectiveMode(entry); got != "enforce" {
 		t.Errorf("per-rule enforce should win over global learn, got %q", got)
@@ -483,8 +484,8 @@ func TestEffectiveModeFallsBackToGlobal(t *testing.T) {
 	if got := e.effectiveMode(entry); got != "enforce" {
 		t.Errorf("empty per-rule should fall back to global, got %q", got)
 	}
-	e.dpiMode = "learn"
-	if got := e.effectiveMode(entry); got != "learn" {
+	e.dpiMode = "monitor"
+	if got := e.effectiveMode(entry); got != "monitor" {
 		t.Errorf("empty per-rule, global learn = learn, got %q", got)
 	}
 }
@@ -494,19 +495,19 @@ func TestEffectiveModeDefaultsToLearn(t *testing.T) {
 	// operationally-safe behavior: a fresh deploy with no mode set
 	// anywhere should not silently enforce.
 	e := &Engine{}
-	if got := e.effectiveMode(nil); got != "learn" {
+	if got := e.effectiveMode(nil); got != "monitor" {
 		t.Errorf("nil matched + empty global should default to learn, got %q", got)
 	}
-	if got := e.effectiveMode(&rules.Entry{}); got != "learn" {
+	if got := e.effectiveMode(&rules.Entry{}); got != "monitor" {
 		t.Errorf("blank rule + empty global should default to learn, got %q", got)
 	}
 }
 
 func TestEffectiveModeNormalizesCase(t *testing.T) {
 	e := &Engine{dpiMode: "ENFORCE"}
-	entry := &rules.Entry{ICS: rules.ICSPredicate{Mode: "  Learn  "}}
+	entry := &rules.Entry{ICS: rules.ICSPredicate{Mode: "  Monitor  "}}
 	// Per-rule wins; case+whitespace normalized.
-	if got := e.effectiveMode(entry); got != "learn" {
+	if got := e.effectiveMode(entry); got != "monitor" {
 		t.Errorf("expected normalized learn, got %q", got)
 	}
 	entry.ICS.Mode = ""

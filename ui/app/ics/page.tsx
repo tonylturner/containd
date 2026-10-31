@@ -37,6 +37,7 @@ import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 import { InstalledRulesetUnavailable, RulesetFaults } from "../firewall/firewall-ruleset-status";
 import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
 import { ICSCoverageCell, ICSCoverageNotice, ICSEnforcementIndicator } from "./ics-coverage";
+import { ShadowCountersCell, ShadowCountersNote, useShadowCounters } from "./ics-shadow-counters";
 import { useICSCoverage } from "./use-ics-coverage";
 
 /* -- Page ----------------------------------------------------------------- */
@@ -53,6 +54,7 @@ export default function ICSPolicyPage() {
     dpiMock: false,
   });
   const coverage = useICSCoverage();
+  const shadow = useShadowCounters();
   const health = useHealth();
   const installed = useInstalledRuleset();
   const queueGroup = dpiConfig.nfqueueGroup ?? 0;
@@ -114,6 +116,7 @@ export default function ICSPolicyPage() {
           onClick={() => {
             void refresh({ keepEdits: false });
             void coverage.reload();
+            void shadow.reload();
           }}
           className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
         >
@@ -177,7 +180,7 @@ export default function ICSPolicyPage() {
           <ol className="space-y-1 text-xs text-(--text-muted)">
             <li>1. Create a firewall rule matching your PLC/RTU zone.</li>
             <li>2. Select the protocol and define criteria here.</li>
-            <li>3. Start with Safe Learning, then switch to Enforce.</li>
+            <li>3. Optionally monitor matches, or select Enforce directly.</li>
           </ol>
           <Link
             href="/firewall/"
@@ -235,7 +238,8 @@ export default function ICSPolicyPage() {
       {/* -- Rules table ------------------------------------------------- */}
       {Object.keys(protoCounts).length > 0 && <ICSCoverageNotice view={coverage.view} />}
       <RulePrecedenceNote />
-      <div className="overflow-hidden rounded-xs border bg-(--surface) shadow-card">
+      <ShadowCountersNote counters={shadow.counters} />
+      <div className="overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
@@ -255,13 +259,14 @@ export default function ICSPolicyPage() {
               <th className="px-4 py-3">R/W</th>
               <th className="px-4 py-3">Mode</th>
               <th className="px-4 py-3">Coverage</th>
+              <th className="px-4 py-3">Shadow matches</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {icsRules.length === 0 && (
               <tr>
-                <td className="px-4 py-8" colSpan={9}>
+                <td className="px-4 py-8" colSpan={10}>
                   <EmptyState
                     title={`No ICS filters${filterProto !== "all" ? ` for ${protoMeta(filterProto).label}` : ""} configured`}
                     description="Create firewall rules with ICS protocol filters to monitor and control industrial traffic."
@@ -321,6 +326,7 @@ export default function ICSPolicyPage() {
                 <td className="px-4 py-3 text-(--text)">
                   <ICSCoverageCell view={coverage.view} ruleId={r.id} />
                 </td>
+                <td className="px-4 py-3"><ShadowCountersCell rule={r} globalMode={dpiConfig.dpiMode} counters={shadow.counters} /></td>
                 <td className="px-4 py-3 text-right">
                   {canEdit && (
                     isSupportedICSProtocol(r.ics?.protocol ?? "") ? (

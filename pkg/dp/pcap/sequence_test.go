@@ -143,7 +143,7 @@ func iecFrame(fromClient bool, seq, ack uint32, flags byte, payload string) []by
 	return f
 }
 
-func TestAnalyzeTracksIEC104SessionsAndNeverLearnsThem(t *testing.T) {
+func TestAnalyzeTracksIEC104Sessions(t *testing.T) {
 	const syn, ack, psh = 0x02, 0x10, 0x08
 	frames := [][]byte{
 		iecFrame(true, 99, 0, syn, ""),
@@ -156,14 +156,12 @@ func TestAnalyzeTracksIEC104SessionsAndNeverLearnsThem(t *testing.T) {
 	mid := iecFrame(true, 7000, 9000, ack|psh, "LOST")
 	binary.BigEndian.PutUint16(mid[34:], 40001)
 	frames = append(frames, mid)
-	res, err := AnalyzeForPolicy(bytes.NewReader(buildPCAP(frames)), iecFramer{})
+	res, err := Analyze(bytes.NewReader(buildPCAP(frames)), iecFramer{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.EventSummary["iec104"] != 2 {
-		t.Fatalf("iec104 events = %d, want 2 (once each, none mid-stream)", res.EventSummary["iec104"])
+	if res.Protocols["iec104"] != 2 {
+		t.Fatalf("iec104 events = %d, want 2 (once each, none mid-stream)", res.Protocols["iec104"])
 	}
-	if len(res.Rules) != 0 || len(res.Profiles) != 0 {
-		t.Fatalf("PCAP-to-policy learned IEC104: rules=%+v profiles=%+v", res.Rules, res.Profiles)
-	}
+
 }

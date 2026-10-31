@@ -60,15 +60,17 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
   const [flowFilter, setFlowFilter] = useState(searchParams.get("flow") || "");
   const [apdu, setAPDU] = useState(searchParams.get("apdu") || "");
   const [protocol, setProtocol] = useState(searchParams.get("protocol") || "");
+  const [ruleId, setRuleId] = useState(searchParams.get("ruleId") || "");
+  const [mode, setMode] = useState(searchParams.get("mode") || "");
   const [decision, setDecision] = useState(searchParams.get("decision") || "");
   const [verdict, setVerdict] = useState(searchParams.get("verdict") || "");
   const [since, setSince] = useState(searchParams.get("since") || "");
   const [cursor, setCursor] = useState(searchParams.get("cursor") || "");
   const requestRef = useRef<AbortController | null>(null);
   const query = useMemo(() => ({
-    session: sessionFilter, flow: flowFilter, apdu, protocol, decision, verdict, since, cursor,
+    session: sessionFilter, flow: flowFilter, ruleId, mode, apdu, protocol, decision, verdict, since, cursor,
     kind: kindPrefix.trim(), category: filter, detections: onlyDetections ? "1" : "",
-  }), [sessionFilter, flowFilter, apdu, protocol, decision, verdict, since, cursor, kindPrefix, filter, onlyDetections]);
+  }), [ruleId, mode, sessionFilter, flowFilter, apdu, protocol, decision, verdict, since, cursor, kindPrefix, filter, onlyDetections]);
 
   const queryKey = JSON.stringify([query, live]);
   const [result, setResult] = useState<{
@@ -247,6 +249,7 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
         />
         {([
           ["Session ID", sessionFilter, setSessionFilter], ["Flow ID", flowFilter, setFlowFilter],
+          ["Rule ID", ruleId, setRuleId], ["Mode", mode, setMode],
           ["APDU ID", apdu, setAPDU], ["Protocol", protocol, setProtocol], ["Decision", decision, setDecision],
           ["Verdict / outcome", verdict, setVerdict], ["Since (RFC3339)", since, setSince],
           ["Cursor", cursor, setCursor],
@@ -275,13 +278,14 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
             Session {sessionFilter} ×
           </button>
         )}
-        {(filter !== "all" || kindPrefix.trim() || onlyDetections || sessionFilter || flowFilter || apdu || protocol || decision || verdict || since || cursor) && (
+        {(filter !== "all" || kindPrefix.trim() || onlyDetections || sessionFilter || flowFilter || apdu || protocol || decision || verdict || since || cursor || ruleId || mode) && (
           <button
             onClick={() => {
               setFilter("all");
               setKindPrefix("");
               setOnlyDetections(false);
               setSessionFilter("");
+              setRuleId(""); setMode("");
               setFlowFilter(""); setAPDU(""); setProtocol(""); setDecision(""); setVerdict(""); setSince(""); setCursor("");
             }}
             className="transition-ui rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs text-(--text)"

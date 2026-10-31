@@ -42,13 +42,14 @@ func (e *Engine) isExcluded(state *flow.State) bool {
 // drops the packet and resets the session after the verdict. Conformance
 // alerts and shadow/deny decisions use the existing event store. streamDenied
 // reports a pending fail-closed drop so its conformance alert names the actual
-// packet outcome. Matched Log rules still log in both learn and enforce modes.
+// packet outcome. Enforcing matches keep their Log gate; monitor evidence
+// is unconditional.
 func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs []dpi.Event, streamDenied bool) (verdict.Verdict, rules.EvalContext, bool) {
 	if e == nil || state == nil || pkt == nil || len(evs) == 0 {
 		return verdict.Verdict{}, rules.EvalContext{}, false
 	}
-	snap := e.ruleSnap.Load()
-	if snap == nil {
+	p := e.ruleSnap.current.Load()
+	if p == nil || p.snapshot == nil {
 		for _, ev := range evs {
 			if isRuleEvaluableICSEvent(ev.Proto) {
 				e.recordConformanceAlert(state, pkt, ev, "passed")
@@ -56,109 +57,72 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 		}
 		return verdict.Verdict{}, rules.EvalContext{}, false
 	}
-	// Policy describes connections from the opener to the server, so a
-	// reply is evaluated with the connection's orientation. The default
-	// action governs requests only: a reply is enforced only when a rule
-	// matches it. NFQUEUE mode behaves the same, because replies take the
-	// established conntrack path there and are never queued.
-	srcZone, dstZone := e.zones.resolve(snap, state.Key.OpenerIP(), state.Key.ServerIP())
-	applyDefault := !isReply(state)
-	// First arbitrate decoded denials across the whole packet. A later decoded
-	// deny keeps its reason even when an earlier event has strict findings.
-	type evaluated struct {
-		ev      dpi.Event
-		ctx     rules.EvalContext
-		v       verdict.Verdict
-		matched *rules.Entry
-		scope   *rules.Entry
-		strict  bool
-	}
-	var modes map[string]string
-	if p := e.icsParsing.Load(); p != nil {
-		modes = *p
-	}
-	var results []evaluated
+	snap := p.snapshot
+	key := state.ServiceKey()
+	srcZone, dstZone := e.zones.resolve(snap, key.OpenerIP(), key.ServerIP())
 	var denied verdict.Verdict
 	var deniedCtx rules.EvalContext
+	type finding struct {
+		ev     dpi.Event
+		scope  *rules.Entry
+		strict bool
+	}
+	var findings []finding
 	for _, ev := range evs {
 		contexts := evalContextsFromDPIEvent(snap, state, pkt, ev, srcZone, dstZone)
 		if len(contexts) == 0 {
 			continue
 		}
-		r := evaluated{ev: ev, ctx: contexts[0]}
-		findings := hasInspectionFindings(ev)
-		if findings {
-			r.scope = e.conformanceScope(state, pkt, ev.Proto)
-			r.strict = r.scope != nil && ics.EffectiveParsing(modes, strings.ToLower(ev.Proto)) == ics.Strict
+		e.observeMonitor(snap, p.evaluator, state, pkt, ev, contexts)
+		scope := e.conformanceScope(state, pkt, ev.Proto)
+		strict := hasInspectionFindings(ev) && scope != nil && e.ICSParsing(ev.Proto) == "strict"
+		if hasInspectionFindings(ev) {
+			findings = append(findings, finding{ev, scope, strict})
 		}
-		for i, ctx := range contexts {
-			var v verdict.Verdict
-			var matched *rules.Entry
-			if !denied.Denies() {
-				v, matched = e.evaluateVerdictMatch(ctx, applyDefault)
+		// Scope preemption is independent of any rule match, including DENY.
+		if strict && e.effectiveMode(scope) == "enforce" {
+			denied = verdict.Verdict{Action: verdict.DenyDrop, Reason: reasonNonconformant}
+			deniedCtx = contexts[0]
+			continue
+		}
+		if scope == nil || e.effectiveMode(scope) != "enforce" {
+			continue
+		}
+		var matchedDeny *rules.Entry
+		var deniedEvent bool
+		for _, ctx := range contexts {
+			v, matched := e.evaluateVerdictMatch(ctx, !isReply(state), state)
+			if v.Denies() {
+				deniedEvent = true
+				matchedDeny = matched
 			}
-			// Strict replaces defaults, but never a decoded rule denial.
-			if r.strict && matched == nil {
-				v = verdict.Verdict{Action: verdict.AllowContinue}
-			}
-			if i == 0 || (!r.v.Denies() && v.Denies()) {
-				r.ctx, r.v, r.matched = ctx, v, matched
-			}
-			if v.Denies() && e.effectiveMode(matched) == "enforce" && !denied.Denies() {
+			if v.Denies() && !denied.Denies() {
 				denied, deniedCtx = v, ctx
 			}
 		}
-		// Record findings once per event, not once per object header.
-		if findings {
-			results = append(results, r)
-		}
-	}
-
-	// Strict nonconformance overrides ALLOW, not a decoded denial. Learn
-	// scopes produce shadow decisions only, even when the global mode enforces.
-	for _, r := range results {
-		if !r.strict || denied.Denies() {
-			continue
-		}
-		if e.effectiveMode(r.scope) == "enforce" {
-			denied = verdict.Verdict{Action: verdict.DenyDrop, Reason: reasonNonconformant}
-			if r.v.Denies() {
-				denied = r.v
-			}
-			deniedCtx = r.ctx
-		}
-	}
-	for _, r := range results {
-		action := "passed"
-		scope, strict := r.scope, r.strict
-		mode := e.effectiveMode(scope)
-		if denied.Denies() || streamDenied {
-			action = "dropped and reset"
-		} else if strict || r.v.Denies() {
-			action = "would drop"
-		}
-		if r.v.Denies() {
+		if hasInspectionFindings(ev) && deniedEvent && !strict {
 			reason := "rule"
-			if r.matched == nil {
+			if matchedDeny == nil {
 				reason = "default"
 			}
-			decision := decisionWouldDrop
-			if e.effectiveMode(r.matched) == "enforce" {
-				decision = decisionDeny
-			}
-			decisionMode := e.effectiveMode(r.matched)
-			if strict && mode == "enforce" {
-				decision, decisionMode = decisionDeny, mode
-			}
-			e.recordConformanceDecision(state, pkt, r.ev, r.matched, decisionMode, decision, reason)
-		} else if strict && (!denied.Denies() || denied.Reason == reasonNonconformant) {
-			decision := decisionWouldDrop
-			if mode == "enforce" {
-				decision = decisionDeny
-			}
-			e.recordConformanceDecision(state, pkt, r.ev, scope, mode, decision, reasonNonconformant)
+			e.recordConformanceDecision(state, pkt, ev, matchedDeny, "enforce", decisionDeny, reason)
 		}
-		e.recordConformanceAlert(state, pkt, r.ev, action)
+	}
+	for _, f := range findings {
+		action := "passed"
+		if denied.Denies() || streamDenied {
+			action = "dropped and reset"
+		} else if f.strict {
+			action = "would drop"
+		}
+		if f.strict {
+			decision := decisionWouldDrop
+			if e.effectiveMode(f.scope) == "enforce" {
+				decision = decisionDeny
+			}
+			e.recordConformanceDecision(state, pkt, f.ev, f.scope, e.effectiveMode(f.scope), decision, reasonNonconformant)
+		}
+		e.recordConformanceAlert(state, pkt, f.ev, action)
 	}
 	return denied, deniedCtx, denied.Denies()
 }
@@ -248,21 +212,18 @@ func isStreamErrorEvent(ev dpi.Event) bool {
 
 // isReply is deliberately limited to the US path; IEC envelopes evaluate
 // both directions through EvaluateIEC104 and deny unmatched replies.
-func isReply(state *flow.State) bool { return state.Key.Dir == flow.DirReverse }
-
-func messageDirection(state *flow.State) string {
-	if isReply(state) {
-		return "response"
-	}
-	return "request"
-}
+func isReply(state *flow.State) bool { return state.ServiceKey().Dir == flow.DirReverse }
 
 // servicePort returns the server port of the packet's connection: the
 // destination port when the sender opened the connection, the source port
 // on its replies.
 func servicePort(state *flow.State, pkt *dpi.ParsedPacket) uint16 {
-	if state != nil && state.Key.Dir == flow.DirReverse {
-		return pkt.SrcPort
+	if state != nil {
+		key := state.ServiceKey()
+		if key.Dir == flow.DirReverse {
+			return key.SrcPort
+		}
+		return key.DstPort
 	}
 	return pkt.DstPort
 }

@@ -11,7 +11,7 @@ import (
 )
 
 func TestIECSessionTrackingBound(t *testing.T) {
-	for _, mode := range []string{"learn", "enforce"} {
+	for _, mode := range []string{"monitor", "enforce"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newIECHarness(t, mode)
 			h.handshake()
@@ -19,7 +19,7 @@ func TestIECSessionTrackingBound(t *testing.T) {
 			// Real distinct-tuple SYNs exercise allocation, not a prefilled map.
 			for i := 1; i < iecMaxSessions; i++ {
 				h.cport = trackedPort + uint16(i)
-				if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, testClientISN, 0, nil)); d.Action != capture.Accept {
+				if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, testClientISN, 0, nil)); d.Action != h.passingDisposition() {
 					t.Fatalf("SYN %d = %+v", i, d)
 				}
 			}
@@ -33,8 +33,8 @@ func TestIECSessionTrackingBound(t *testing.T) {
 			}
 			h.cport = trackedPort + iecMaxSessions
 			wantAction, wantReason := capture.Drop, reasonIECFailClose
-			if mode == "learn" {
-				wantAction, wantReason = capture.Accept, reasonIECUntracked
+			if mode == "monitor" {
+				wantAction, wantReason = capture.Repeat, reasonIECUntracked
 			}
 			for i := 0; i < 3; i++ {
 				h.cport++
@@ -58,13 +58,13 @@ func TestIECSessionTrackingBound(t *testing.T) {
 				t.Fatal("overflow traffic allocated sessions, held packets, or sent resets")
 			}
 			evs := h.eventsOf("ics.session")
-			if mode == "learn" {
+			if mode == "monitor" {
 				if len(evs) != 3 {
 					t.Fatalf("untracked events = %+v, want one per overflow SYN", evs)
 				}
 				for _, ev := range evs {
 					if ev.Attributes["outcome"] != "untracked" || ev.Attributes["reason"] != "bound" ||
-						ev.Attributes["mode"] != "learn" || ev.Attributes["limit"] != iecMaxSessions ||
+						ev.Attributes["mode"] != "monitor" || ev.Attributes["limit"] != iecMaxSessions ||
 						ev.SrcIP != h.client.String() || ev.DstIP != h.server.String() || ev.DstPort != iec104Port {
 						t.Fatalf("untracked evidence = %+v", ev)
 					}
@@ -77,7 +77,7 @@ func TestIECSessionTrackingBound(t *testing.T) {
 			}
 			// Existing sessions keep their stream and policy at capacity.
 			h.cport = trackedPort
-			if _, d := h.send(true, iframe(46, 1)); d.Action != capture.Accept {
+			if _, d := h.send(true, iframe(46, 1)); d.Action != h.passingDisposition() {
 				t.Fatalf("tracked allowed APDU at capacity = %+v", d)
 			}
 			// Expiry restores tracking; unobserved midstream packets do not
@@ -105,10 +105,10 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 		aborted bool
 	}{
 		{"aborted/enforce", "enforce", "enforce", true},
-		{"aborted/enforce_to_learn", "enforce", "learn", true},
-		{"closed/learn", "learn", "learn", false},
+		{"aborted/enforce_to_learn", "enforce", "monitor", true},
+		{"closed/learn", "monitor", "monitor", false},
 		{"closed/enforce", "enforce", "enforce", false},
-		{"closed/enforce_to_learn", "enforce", "learn", false},
+		{"closed/enforce_to_learn", "enforce", "monitor", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newIECHarness(t, tc.oldMode)
@@ -128,7 +128,7 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 				h.e.hooks.onVerdict(p.Token, capture.VerdictDrop, nil)
 				h.waitResets(2)
 				wantState = iecAborted
-			} else if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST|capture.TCPFlagACK, h.cSeq, h.sSeq, nil)); d.Action != capture.Accept {
+			} else if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagRST|capture.TCPFlagACK, h.cSeq, h.sSeq, nil)); d.Action != h.passingDisposition() {
 				t.Fatalf("close = %+v", d)
 			}
 			if prev.state != wantState || table.sessions[key] != prev {
@@ -142,7 +142,7 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 			}
 			for i := 1; i < iecMaxSessions; i++ {
 				h.cport = trackedPort + uint16(i)
-				if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, testClientISN, 0, nil)); d.Action != capture.Accept {
+				if d := h.e.handlePacket(h.pkt(true, capture.TCPFlagSYN, testClientISN, 0, nil)); d.Action != h.passingDisposition() {
 					t.Fatalf("filling SYN %d = %+v", i, d)
 				}
 			}
@@ -155,7 +155,7 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 				return d
 			}
 			h.cport = trackedPort
-			if d := handle(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != capture.Accept || d.Reason != reasonIECAccept {
+			if d := handle(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != h.passingDisposition() || d.Reason != reasonIECAccept {
 				t.Fatalf("reuse SYN = %+v", d)
 			}
 			n := table.sessions[key]
@@ -168,7 +168,7 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 					h.pkt(true, capture.TCPFlagSYN, testClientISN, 0, nil),
 					h.pkt(false, capture.TCPFlagSYN|capture.TCPFlagACK, testServerISN, testClientISN+1, nil),
 				} {
-					if d := handle(p); d.Action != capture.Drop || d.Reason != reasonIECTombstone {
+					if d := handle(p); d.Action != h.deniedDisposition() || d.Reason != reasonIECTombstone {
 						t.Fatalf("old incarnation packet = %+v", d)
 					}
 				}
@@ -181,7 +181,7 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 				h.pkt(true, capture.TCPFlagACK, 778, 9001, nil),
 				h.pkt(true, capture.TCPFlagACK|capture.TCPFlagPSH, 778, 9001, iframe(46, 1)),
 			} {
-				if d := handle(p); d.Action != capture.Accept || d.Reason != reasonIECAccept {
+				if d := handle(p); d.Action != h.passingDisposition() || d.Reason != reasonIECAccept {
 					t.Fatalf("new incarnation packet %+v = %+v", p.TCP, d)
 				}
 			}
@@ -191,8 +191,8 @@ func TestIECSessionTrackingBoundTupleReuse(t *testing.T) {
 			// Only a new tuple consumes another key and must hit the cap.
 			h.cport = trackedPort + iecMaxSessions
 			wantAction, wantReason := capture.Drop, reasonIECFailClose
-			if tc.mode == "learn" {
-				wantAction, wantReason = capture.Accept, reasonIECUntracked
+			if tc.mode == "monitor" {
+				wantAction, wantReason = capture.Repeat, reasonIECUntracked
 			}
 			if d := handle(h.pkt(true, capture.TCPFlagSYN, 777, 0, nil)); d.Action != wantAction || d.Reason != wantReason {
 				t.Fatalf("new tuple SYN = %+v, want %v/%s", d, wantAction, wantReason)

@@ -83,7 +83,7 @@ func TestICSCoverageReportsCandidateAndApplied(t *testing.T) {
 // the ruleset preview keeps refusing it.
 func TestICSCoverageWithInvalidCandidate(t *testing.T) {
 	store := &mockStore{cfg: icsCoverageConfig(0)}
-	applied := []coverage.Rule{{RuleID: "modbus-read", Protocol: "modbus", Mode: "learn", State: coverage.Monitoring}}
+	applied := []coverage.Rule{{RuleID: "modbus-read", Protocol: "modbus", Mode: "monitor", State: coverage.Monitoring}}
 	engine := &rulesetPreviewEngine{mockEngine: &mockEngine{ruleset: dpengine.RulesetStatus{AppliedAt: time.Now(), ICSCoverage: applied}}}
 	body := getICSCoverage(t, store, engine)
 	if _, ok := body["candidate"]; ok {
@@ -104,7 +104,7 @@ func TestICSCoverageWithInvalidCandidate(t *testing.T) {
 
 func TestICSCoverageWithUnreadableCandidate(t *testing.T) {
 	store := &mockStore{load: func() (*config.Config, error) { return nil, errors.New("disk gone") }}
-	applied := []coverage.Rule{{RuleID: "modbus-read", Protocol: "modbus", Mode: "learn", State: coverage.Monitoring}}
+	applied := []coverage.Rule{{RuleID: "modbus-read", Protocol: "modbus", Mode: "monitor", State: coverage.Monitoring}}
 	engine := &rulesetPreviewEngine{mockEngine: &mockEngine{ruleset: dpengine.RulesetStatus{AppliedAt: time.Now(), ICSCoverage: applied}}}
 	body := getICSCoverage(t, store, engine)
 	if _, ok := body["candidate"]; ok {
@@ -154,8 +154,9 @@ func TestViewerReadsICSCoverage(t *testing.T) {
 	tok, _ := addTestUser(us, []byte(testJWTSecret), "viewer-cov", "viewercov", "view", false)
 	s := setupJWTServer(&mockStore{cfg: icsCoverageConfig(101)}, us)
 	for path, want := range map[string]int{
-		"/api/v1/dataplane/ics-coverage": http.StatusOK,
-		"/api/v1/dataplane/ruleset":      http.StatusForbidden,
+		"/api/v1/dataplane/ics-coverage":   http.StatusOK,
+		"/api/v1/firewall/shadow-counters": http.StatusOK,
+		"/api/v1/dataplane/ruleset":        http.StatusForbidden,
 	} {
 		rec := httptest.NewRecorder()
 		s.ServeHTTP(rec, jwtAuthedRequest(http.MethodGet, path, &bytes.Buffer{}, tok))

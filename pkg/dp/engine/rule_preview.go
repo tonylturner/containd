@@ -128,6 +128,10 @@ func (e *Engine) enforcedQueueID() int {
 // verdict uses: under strict, an event with findings is denied before any
 // ALLOW, so an ALLOW candidate cannot match it.
 func previewEventContexts(snap *rules.Snapshot, entry rules.Entry, ev events.Event, resolve zoneResolver, parsing ics.Parsing) []rules.EvalContext {
+	globalMode := ""
+	if snap != nil {
+		globalMode = snap.DPIMode
+	}
 	decoded := dpi.Event{FlowID: ev.FlowID, Proto: ev.Proto, Kind: ev.Kind, Attributes: ev.Attributes, Timestamp: ev.Timestamp}
 	src, dst := net.ParseIP(ev.SrcIP), net.ParseIP(ev.DstIP)
 	if src == nil || dst == nil {
@@ -135,7 +139,7 @@ func previewEventContexts(snap *rules.Snapshot, entry rules.Entry, ev events.Eve
 	}
 	if entry.ICS.Protocol == rules.ProtocolIEC104 {
 		if ev.Proto != iecProtocol || ev.Transport != "tcp" || !iecWireEvent(ev.Kind) || iecEventDenialReason(decoded) != "" ||
-			entry.Action == rules.ActionAllow && iecStrictPreempts(decoded, parsing) {
+			!rules.MonitorICS(entry, globalMode) && iecStrictPreempts(decoded, parsing) {
 			return nil
 		}
 		from, okFrom := addrPort(src, ev.SrcPort)
@@ -186,7 +190,7 @@ func previewEventContexts(snap *rules.Snapshot, entry rules.Entry, ev events.Eve
 	state := &flow.State{Key: key}
 	srcZone, dstZone := resolve(snap, key.OpenerIP(), key.ServerIP())
 	pkt := &dpi.ParsedPacket{Proto: ev.Transport, SrcPort: ev.SrcPort, DstPort: ev.DstPort}
-	if entry.Action == rules.ActionAllow && hasInspectionFindings(decoded) && parsing == ics.Strict && shouldInspectFirewallEntry(entry, state, pkt) {
+	if !rules.MonitorICS(entry, globalMode) && hasInspectionFindings(decoded) && parsing == ics.Strict && shouldInspectFirewallEntry(entry, state, pkt) {
 		return nil
 	}
 	contexts := evalContextsFromDPIEvent(snap, state, pkt, decoded, srcZone, dstZone)

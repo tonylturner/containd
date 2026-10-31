@@ -14,6 +14,7 @@ const DECISIONS = new Set<ICSDecisionAttributes["decision"]>([
   "allow",
   "deny",
   "would_drop",
+  "would_allow",
 ]);
 const VERDICT_OUTCOMES = new Set<ICSVerdictAttributes["outcome"]>([
   "dropped",
@@ -60,7 +61,7 @@ export function iec104SessionID(ev: TelemetryEvent): string | undefined {
 
 /** Decodes an `ics.decision`, `ics.verdict` or `ics.session` event. */
 export function parseICSEvidence(ev: TelemetryEvent): ICSEvidence | null {
-  if (ev.proto !== "iec104" || !ev.attributes) return null;
+  if (!ev.attributes || (ev.proto !== "iec104" && ev.kind !== "ics.decision")) return null;
   const a = ev.attributes;
   // Session-scoped evidence carries session_id; an engine-wide health
   // change may have none, so a missing ID reads as "" rather than hiding it.
@@ -83,6 +84,8 @@ export function parseICSEvidence(ev: TelemetryEvent): ICSEvidence | null {
         ruleId: str(a, "ruleId") ?? "",
         action: str(a, "action"),
         mode: str(a, "mode"),
+        scopeId: str(a, "scopeId"),
+        findingCode: str(a, "findingCode"),
         apdu_id: str(a, "apdu_id"),
         type_id: uint(a, "type_id"),
         ca: uint(a, "ca"),

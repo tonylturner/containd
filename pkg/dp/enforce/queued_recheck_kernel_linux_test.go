@@ -51,7 +51,7 @@ func TestKernelQueuedConditionalRecheck(t *testing.T) {
 			{IP: kept, Identities: []string{"ops"}},
 		},
 		Firewall: []rules.Entry{{ID: "modbus-ops", Protocols: []rules.Protocol{{Name: "tcp", Port: strconv.Itoa(qrPort)}},
-			ICS: rules.ICSPredicate{Protocol: "modbus"}, Identities: []string{"ops"}, Action: rules.ActionAllow}},
+			ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}, Identities: []string{"ops"}, Action: rules.ActionAllow}},
 	}
 	c := NewCompiler()
 	c.QueueID = qrQueue

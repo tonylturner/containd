@@ -41,7 +41,7 @@ func retentionEvictions(t *testing.T) float64 {
 func forceRetentionEviction(t *testing.T, e *Engine) {
 	t.Helper()
 	for port := 1; port <= deniedTCPCapacity; port++ {
-		if e.rememberDeniedTCP(retentionKey(uint16(port))) == nil {
+		if e.rememberDeniedTCP(retentionKey(uint16(port)), retentionKey(uint16(port))) == nil {
 			t.Fatalf("duplicate filler tuple %d", port)
 		}
 	}
@@ -170,7 +170,7 @@ func TestDenyRetentionFixedLifetime(t *testing.T) {
 	if got := f.handle(pkt); got.Action != capture.Drop {
 		t.Fatalf("duplicate = %+v", got)
 	}
-	if d.expires != deadline || f.e.rememberDeniedTCP(d.key) != nil {
+	if d.expires != deadline || f.e.rememberDeniedTCP(d.key, d.service) != nil {
 		t.Fatal("duplicate refreshed the denial")
 	}
 	before := retentionEvictions(t)
@@ -192,18 +192,18 @@ func TestDenyRetentionCapacity(t *testing.T) {
 	before := retentionEvictions(t)
 	const extra = 512
 	for i := 1; i <= deniedTCPCapacity+extra; i++ {
-		if e.rememberDeniedTCP(retentionKey(uint16(i))) == nil {
+		if e.rememberDeniedTCP(retentionKey(uint16(i)), retentionKey(uint16(i))) == nil {
 			t.Fatalf("new denial %d was not recorded", i)
 		}
 		if len(e.deniedTCP) > deniedTCPCapacity || e.deniedTCPOrder.Len() != len(e.deniedTCP) {
 			t.Fatalf("capacity violated at denial %d: %d", i, len(e.deniedTCP))
 		}
-		if i == deniedTCPCapacity && e.rememberDeniedTCP(retentionKey(1)) != nil {
+		if i == deniedTCPCapacity && e.rememberDeniedTCP(retentionKey(1), retentionKey(1)) != nil {
 			t.Fatal("duplicate should neither insert nor move the oldest entry")
 		}
 	}
 	for i := 1; i <= deniedTCPCapacity+extra; i++ {
-		d := e.deniedTCP[tcpTupleHash(retentionKey(uint16(i)))]
+		d := e.deniedTCP[tcpTupleKey(retentionKey(uint16(i)))]
 		if (d == nil) != (i <= extra) {
 			t.Fatalf("oldest-first eviction wrong for tuple %d", i)
 		}
@@ -224,7 +224,7 @@ func TestDenyRetentionConcurrentCapacity(t *testing.T) {
 		wg.Go(func() {
 			for i := range perWorker {
 				port := uint16(worker*perWorker + i + 1)
-				if e.rememberDeniedTCP(retentionKey(port)) == nil {
+				if e.rememberDeniedTCP(retentionKey(port), retentionKey(port)) == nil {
 					t.Errorf("new denial %d was not recorded", port)
 					return
 				}
@@ -276,7 +276,7 @@ func TestDenyRetentionConcurrentEvictionPublication(t *testing.T) {
 		defer close(finished)
 		done <- f.handle(pkt)
 	}()
-	tuple := tcpTupleHash(retentionKey(f.client))
+	tuple := tcpTupleKey(retentionKey(f.client))
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		f.e.flowMu.Lock()

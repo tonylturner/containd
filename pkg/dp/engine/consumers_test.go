@@ -13,12 +13,12 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-func TestIEC104EventsNeverFeedInventoryOrLearner(t *testing.T) {
+func TestIEC104EventsPreserveSignatureAndInventoryBoundaries(t *testing.T) {
 	e, err := New(Config{DPIEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.LoadRules(rules.Snapshot{Firewall: []rules.Entry{{ID: "learn", ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "learn"}}}})
+	e.LoadRules(rules.Snapshot{Firewall: []rules.Entry{{ID: "monitor", ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "monitor"}}}})
 	state := flow.NewState(flow.Key{SrcIP: net.ParseIP("10.60.60.10"), DstIP: net.ParseIP("10.30.30.30"), SrcPort: 40000, DstPort: 2404, Proto: 6}, time.Now())
 	cmd := dpi.Event{Proto: "iec104", Kind: "request", Attributes: map[string]any{
 		"session_id": "run-1", "apdu_id": "run-1/c/0", "class": "control", "type_id": uint8(46),
@@ -28,8 +28,8 @@ func TestIEC104EventsNeverFeedInventoryOrLearner(t *testing.T) {
 	if got := e.Inventory().List(); len(got) != 0 {
 		t.Fatalf("inventory learned IEC104: %+v", got)
 	}
-	if got := e.Learner().Profiles(); len(got) != 0 {
-		t.Fatalf("learner learned IEC104: %+v", got)
+	if e.learnWatch.Load() != nil {
+		t.Fatal("traffic started a live watch")
 	}
 	var alert map[string]any
 	for _, ev := range e.Events().List(0) {

@@ -157,7 +157,7 @@ function FlowsContent() {
       {flows.length === 0 ? (
         <EmptyState
           title="No flows yet"
-          description="Enable DPI capture or learning mode to generate flow records."
+          description="Enable DPI capture to generate flow records."
         />
       ) : (
         <div className="rounded-xs border bg-(--surface) overflow-hidden">

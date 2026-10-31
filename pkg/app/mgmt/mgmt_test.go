@@ -225,7 +225,7 @@ func TestStoredBadICSAddressBootsIntoRecovery(t *testing.T) {
 	setStoredRules(t, path, []config.Rule{{
 		ID: "modbus-addr", Action: config.ActionAllow,
 		Protocols: []config.Protocol{{Name: "tcp", Port: "502"}},
-		ICS:       config.ICSPredicate{Protocol: "modbus", Mode: "learn", Addresses: []string{"0x0100", "0x01G0"}},
+		ICS:       config.ICSPredicate{Protocol: "modbus", Mode: "monitor", Addresses: []string{"0x0100", "0x01G0"}},
 	}})
 
 	stores, running, err := initMgmtStores(zap.NewNop().Sugar(), nil)

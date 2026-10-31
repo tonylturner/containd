@@ -6,6 +6,7 @@ package engineapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,9 +16,9 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
-	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
+	"github.com/tonylturner/containd/pkg/evidence"
 )
 
 func pcapConfigHandler(mgr *pcap.Manager, ownership *ownershipManager) http.HandlerFunc {
@@ -233,9 +234,17 @@ func pcapUploadHandler(mgr *pcap.Manager) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if err := r.ParseMultipartForm(64 << 20); err != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, 65<<20)
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
 			return
+		}
+		if r.MultipartForm != nil {
+			defer func() {
+				if err := r.MultipartForm.RemoveAll(); err != nil {
+					slog.Warn("multipart cleanup failed", "error", err)
+				}
+			}()
 		}
 		file, header, err := r.FormFile("file")
 		if err != nil {
@@ -362,15 +371,27 @@ func pcapReplayHandler(mgr *pcap.Manager) http.HandlerFunc {
 	}
 }
 
-func pcapAnalyzeUploadHandler(mgr *pcap.Manager, dpEngine *engine.Engine) http.HandlerFunc {
+func pcapAnalyzeUploadHandler(mgr *pcap.Manager, dpEngine *engine.Engine, store evidence.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if err := r.ParseMultipartForm(64 << 20); err != nil {
+		if dpEngine == nil || store == nil {
+			http.Error(w, "evidence unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 65<<20)
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
 			return
+		}
+		if r.MultipartForm != nil {
+			defer func() {
+				if err := r.MultipartForm.RemoveAll(); err != nil {
+					slog.Warn("multipart cleanup failed", "error", err)
+				}
+			}()
 		}
 		file, _, err := r.FormFile("file")
 		if err != nil {
@@ -379,27 +400,39 @@ func pcapAnalyzeUploadHandler(mgr *pcap.Manager, dpEngine *engine.Engine) http.H
 		}
 		defer file.Close()
 
-		var decoders []dpi.Decoder
-		if dpEngine != nil && dpEngine.DPI() != nil {
-			decoders = dpEngine.DPI().Decoders()
-		}
-		opts := pcap.AnalysisOptions{}
-		if dpEngine != nil {
-			opts.Rules = dpEngine.CurrentRules()
-		}
-		result, err := pcap.AnalyzeWithOptions(file, opts, decoders...)
+		inputs := dpEngine.InspectionSnapshot()
+		opts := pcap.AnalysisOptions{Rules: inputs.Rules}
+		metadata, err := evidenceMetadataFrom(inputs)
 		if err != nil {
-			http.Error(w, "analysis failed: "+err.Error(), http.StatusBadRequest)
+			evidenceError(w, err)
+			return
+		}
+		decoders, err := inputs.NewDecoders()
+		if err != nil {
+			evidenceError(w, err)
+			return
+		}
+		result, err := pcap.Import(r.Context(), file, store, metadata, opts, decoders...)
+		if err != nil {
+			if errors.Is(err, pcap.ErrInvalidCapture) {
+				http.Error(w, err.Error(), 400)
+			} else {
+				evidenceError(w, err)
+			}
 			return
 		}
 		writeJSON(w, result)
 	}
 }
 
-func pcapAnalyzeNameHandler(mgr *pcap.Manager, dpEngine *engine.Engine) http.HandlerFunc {
+func pcapAnalyzeNameHandler(mgr *pcap.Manager, dpEngine *engine.Engine, store evidence.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if dpEngine == nil || store == nil {
+			http.Error(w, "evidence unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		// Extract name from path: /internal/pcap/analyze/<name>
@@ -416,17 +449,25 @@ func pcapAnalyzeNameHandler(mgr *pcap.Manager, dpEngine *engine.Engine) http.Han
 		}
 		defer f.Close()
 
-		var decoders []dpi.Decoder
-		if dpEngine != nil && dpEngine.DPI() != nil {
-			decoders = dpEngine.DPI().Decoders()
-		}
-		opts := pcap.AnalysisOptions{}
-		if dpEngine != nil {
-			opts.Rules = dpEngine.CurrentRules()
-		}
-		result, err := pcap.AnalyzeWithOptions(f, opts, decoders...)
+		inputs := dpEngine.InspectionSnapshot()
+		opts := pcap.AnalysisOptions{Rules: inputs.Rules}
+		metadata, err := evidenceMetadataFrom(inputs)
 		if err != nil {
-			http.Error(w, "analysis failed: "+err.Error(), http.StatusBadRequest)
+			evidenceError(w, err)
+			return
+		}
+		decoders, err := inputs.NewDecoders()
+		if err != nil {
+			evidenceError(w, err)
+			return
+		}
+		result, err := pcap.Import(r.Context(), f, store, metadata, opts, decoders...)
+		if err != nil {
+			if errors.Is(err, pcap.ErrInvalidCapture) {
+				http.Error(w, err.Error(), 400)
+			} else {
+				evidenceError(w, err)
+			}
 			return
 		}
 		writeJSON(w, result)

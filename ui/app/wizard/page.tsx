@@ -12,12 +12,14 @@ import Link from "next/link";
 
 import {
   api,
+  fetchDataPlane,
   type Zone,
   type NATConfig,
   type PortForward,
   type ICSPredicate,
   type Protocol,
 } from "../../lib/api";
+import { type ICSModeSelection } from "../ics/ics-shared";
 import { Shell } from "../../components/Shell";
 import { Card } from "../../components/Card";
 import {
@@ -37,6 +39,7 @@ import {
 /* ── page ──────────────────────────────────────────────────────── */
 
 export default function WizardPage() {
+  const [globalMode, setGlobalMode] = useState<ICSModeSelection>("");
   const [zones, setZones] = useState<Zone[]>([]);
   const [natConfig, setNatConfig] = useState<NATConfig>({ enabled: false });
 
@@ -52,7 +55,7 @@ export default function WizardPage() {
     lanZone: "", wanZone: "",
     serverIp: "", serverPort: "", pubProto: "tcp" as "tcp" | "udp", ingressZone: "",
     icsProto: "modbus", icsSrcZone: "", icsDstZone: "",
-    icsAccess: "readonly" as "readonly" | "readwrite" | "monitor",
+    icsAccess: "readonly" as "readonly" | "readwrite", icsMode: "" as ICSModeSelection,
     izSrcZone: "", izDstZone: "", izAny: true, izSelected: new Set<string>(),
   });
   const { refreshForm } = form;
@@ -67,6 +70,7 @@ export default function WizardPage() {
   const [icsProto, setIcsProto] = form.field("icsProto");
   const [icsSrcZone, setIcsSrcZone] = form.field("icsSrcZone");
   const [icsDstZone, setIcsDstZone] = form.field("icsDstZone");
+  const [icsMode, setIcsMode] = form.field("icsMode");
   const [icsAccess, setIcsAccess] = form.field("icsAccess");
 
   const [izSrcZone, setIzSrcZone] = form.field("izSrcZone");
@@ -75,8 +79,9 @@ export default function WizardPage() {
   const [izSelected, setIzSelected] = form.field("izSelected");
 
   const { initialLoading: loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [z, n] = await Promise.all([api.listZones(), api.getNAT()]);
-    refreshForm({ zones: z, nat: n }, keepEdits);
+    const [z, n, dp] = await Promise.all([api.listZones(), api.getNAT(), fetchDataPlane()]);
+    setGlobalMode(dp?.dpiMode ?? "");
+    refreshForm({ zones: z, nat: n, globalMode: dp?.dpiMode }, keepEdits);
     setZones(z ?? []);
     setNatConfig(n ?? { enabled: false });
   }, [refreshForm]));
@@ -99,6 +104,7 @@ export default function WizardPage() {
     setIcsSrcZone("");
     setIcsDstZone("");
     setIcsAccess("readonly");
+    setIcsMode("");
     setIzSrcZone("");
     setIzDstZone("");
     setIzAny(true);
@@ -218,7 +224,7 @@ export default function WizardPage() {
     try {
       const ics: ICSPredicate = {
         protocol: icsProto,
-        mode: icsAccess === "monitor" ? "learn" : "enforce",
+        ...(icsMode ? { mode: icsMode } : {}),
         readOnly: icsAccess === "readonly",
       };
 
@@ -417,6 +423,9 @@ export default function WizardPage() {
               setIcsSrcZone={setIcsSrcZone}
               icsDstZone={icsDstZone}
               setIcsDstZone={setIcsDstZone}
+              icsMode={icsMode}
+              setIcsMode={setIcsMode}
+              globalMode={globalMode}
               icsAccess={icsAccess}
               setIcsAccess={setIcsAccess}
               izSrcZone={izSrcZone}

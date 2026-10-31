@@ -359,7 +359,7 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("pcap analyze upload: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var uploadAnalysis pcap.PolicyAnalysis
+	var uploadAnalysis pcap.ImportResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &uploadAnalysis); err != nil {
 		t.Fatalf("decode upload analysis: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("pcap analyze by name: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var namedAnalysis pcap.PolicyAnalysis
+	var namedAnalysis pcap.ImportResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &namedAnalysis); err != nil {
 		t.Fatalf("decode named analysis: %v", err)
 	}
@@ -753,4 +753,14 @@ func TestVPNServiceReadWritePreservesRedactedSecrets(t *testing.T) {
 	if store.cfg.Services.VPN.OpenVPN.Managed.Remote != "vpn2.example.com" {
 		t.Fatalf("expected updated managed remote, got %#v", store.cfg.Services.VPN.OpenVPN.Managed)
 	}
+}
+
+func (m *runtimeMockEngine) AnalyzePcap(ctx context.Context, name string, r io.Reader) (*pcap.ImportResult, error) {
+	if _, err := io.Copy(io.Discard, r); err != nil {
+		return nil, err
+	}
+	return &pcap.ImportResult{Stats: pcap.AnalysisResult{PacketCount: 1}}, nil
+}
+func (m *runtimeMockEngine) AnalyzePcapByName(context.Context, string) (*pcap.ImportResult, error) {
+	return &pcap.ImportResult{Stats: pcap.AnalysisResult{PacketCount: 1}}, nil
 }

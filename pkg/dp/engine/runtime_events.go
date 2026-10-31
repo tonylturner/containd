@@ -18,11 +18,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
-	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/ids"
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 	"github.com/tonylturner/containd/pkg/dp/itdpi"
-	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 	"github.com/tonylturner/containd/pkg/dp/stats"
@@ -36,20 +34,18 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 		return
 	}
 	e.recordProtoStats(evs)
+	evs = normalizeDPIEvents(evs)
+	bindEventConnections(state, evs)
+	e.recordLearnEvents(state, evs)
 	if e.eventStore == nil {
 		return
 	}
 	metrics.DPIEventsTotal.Add(float64(len(evs)))
-	evs = normalizeDPIEvents(evs)
-	bindEventConnections(state, evs)
 	srcIP, dstIP := stateIPs(state)
 	e.recordInventoryEvents(srcIP, dstIP, evs)
-	if !e.observationBound(state) {
-		e.recordLearnEvents(srcIP, dstIP, evs)
-	}
 	e.recordAnomalyAlerts(state, pkt, srcIP, dstIP, evs)
 	e.recordSignatureAlerts(state, pkt, evs)
-	e.eventStore.Record(state, pkt, evs)
+	e.recordTaggedEvents(state, pkt, evs)
 	e.recordEvaluatedIDSAlerts(state, pkt, evs)
 }
 
@@ -78,22 +74,6 @@ func (e *Engine) recordInventoryEvents(srcIP, dstIP string, evs []dpi.Event) {
 	}
 }
 
-func (e *Engine) recordLearnEvents(srcIP, dstIP string, evs []dpi.Event) {
-	if e == nil || e.learner == nil || srcIP == "" || dstIP == "" || !e.hasLearnMode() {
-		return
-	}
-	for _, ev := range evs {
-		// The envelope remains authoritative even after incarnation retirement
-		// or a configuration drain removes the live binding marker.
-		if passive, _ := ev.Attributes[eventfields.KeyObservationOnly].(bool); passive {
-			continue
-		}
-		if learnableICSEvent(ev) && !hasInspectionFindings(ev) {
-			e.learner.RecordEvent(srcIP, dstIP, ev)
-		}
-	}
-}
-
 func (e *Engine) recordAnomalyAlerts(state *flow.State, pkt *dpi.ParsedPacket, srcIP, dstIP string, evs []dpi.Event) {
 	if e == nil || e.anomalyDetector == nil || srcIP == "" || dstIP == "" {
 		return
@@ -106,7 +86,7 @@ func (e *Engine) recordAnomalyAlerts(state *flow.State, pkt *dpi.ParsedPacket, s
 			if a.Type == "correlation_unavailable" && e.transport != nil {
 				e.transport.authority.count("correlation_unavailable")
 			}
-			e.eventStore.Record(state, pkt, []dpi.Event{anomalyAlertFromEvent(ev, a)})
+			e.recordTaggedEvents(state, pkt, []dpi.Event{anomalyAlertFromEvent(ev, a)})
 		}
 	}
 }
@@ -142,7 +122,7 @@ func (e *Engine) recordSignatureAlerts(state *flow.State, pkt *dpi.ParsedPacket,
 			continue
 		}
 		for _, m := range e.sigEngine.Match(ev) {
-			e.eventStore.Record(state, pkt, []dpi.Event{signatureAlertFromMatch(ev, m)})
+			e.recordTaggedEvents(state, pkt, []dpi.Event{signatureAlertFromMatch(ev, m)})
 		}
 	}
 }
@@ -190,7 +170,7 @@ func (e *Engine) recordEvaluatedIDSAlerts(state *flow.State, pkt *dpi.ParsedPack
 		return
 	}
 	metrics.IDSAlertsTotal.Add(float64(len(alerts)))
-	e.eventStore.Record(state, pkt, alerts)
+	e.recordTaggedEvents(state, pkt, alerts)
 }
 
 // VerdictCache returns the flow verdict cache.
@@ -246,34 +226,12 @@ func (e *Engine) Updater() enforce.Updater {
 	return e.updater
 }
 
-// Learner returns the ICS traffic learner.
-func (e *Engine) Learner() *learn.Learner {
-	if e == nil {
-		return nil
-	}
-	return e.learner
-}
-
 // SignatureEngine returns the ICS signature matching engine.
 func (e *Engine) SignatureEngine() *signatures.Engine {
 	if e == nil {
 		return nil
 	}
 	return e.sigEngine
-}
-
-// hasLearnMode returns true if any firewall entry has Mode == "learn".
-func (e *Engine) hasLearnMode() bool {
-	snap := e.ruleSnap.Load()
-	if snap == nil {
-		return false
-	}
-	for _, entry := range snap.Firewall {
-		if strings.EqualFold(entry.ICS.Mode, "learn") {
-			return true
-		}
-	}
-	return false
 }
 
 func isICSEvent(proto, _ string) bool {
@@ -284,7 +242,8 @@ func isICSEvent(proto, _ string) bool {
 // Evaluate applies the current rule snapshot to a simple context.
 func (e *Engine) Evaluate(ctx rules.EvalContext) rules.Action {
 	ev := e.ruleSnap.Evaluator()
-	return ev.Evaluate(ctx)
+	action, _ := ev.EvaluateEnforcing(ctx)
+	return action
 }
 
 // EvaluateVerdict returns a baseline verdict for the current snapshot.
@@ -300,16 +259,16 @@ func (e *Engine) EvaluateVerdict(ctx rules.EvalContext) verdict.Verdict {
 // Side-effect: appends a firewall.rule.hit event to the event store when
 // the matched rule has Log:true.
 func (e *Engine) EvaluateVerdictMatch(ctx rules.EvalContext) (verdict.Verdict, *rules.Entry) {
-	return e.evaluateVerdictMatch(ctx, true)
+	return e.evaluateVerdictMatch(ctx, true, nil)
 }
 
 // evaluateVerdictMatch is EvaluateVerdictMatch with the default action
 // optional: when applyDefault is false, a context that matches no rule
 // gets AllowContinue instead of the snapshot's default.
-func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) (verdict.Verdict, *rules.Entry) {
+func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool, state *flow.State) (verdict.Verdict, *rules.Entry) {
 	start := time.Now()
 	ev := e.ruleSnap.Evaluator()
-	action, matched := ev.EvaluateMatch(ctx)
+	action, matched := ev.EvaluateEnforcing(ctx)
 	if matched == nil && !applyDefault {
 		action = rules.ActionAllow
 	}
@@ -353,6 +312,16 @@ func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) 
 				logEvent.DstPort = uint16(p)
 			}
 		}
+		if state != nil {
+			// Match in service space but retain the historical wire endpoints
+			// of the rule-hit event, just like decoded events and flow IDs.
+			key := state.Key
+			logEvent.SrcIP, logEvent.DstIP = key.OpenerIP().String(), key.ServerIP().String()
+			logEvent.DstPort = key.DstPort
+			if key.Dir == flow.DirReverse {
+				logEvent.DstPort = key.SrcPort
+			}
+		}
 		e.eventStore.Append(logEvent)
 	}
 	return v, matched
@@ -361,7 +330,7 @@ func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) 
 // effectiveMode returns the mode that should govern verdict application
 // for the matched rule, following the 3-tier resolution:
 //
-//	per-rule ICSPredicate.Mode > global Engine.dpiMode > "learn" (safe default)
+//	per-rule ICSPredicate.Mode > installed global DPI mode > "monitor" (safe default)
 //
 // The safe default makes new deployments operate in monitor-only mode
 // unless an operator explicitly opts into enforce — a real OT environment
@@ -374,6 +343,9 @@ func (e *Engine) effectiveMode(matched *rules.Entry) string {
 	}
 	if e != nil {
 		globalMode = e.dpiMode
+		if snap := e.CurrentRules(); snap != nil && snap.DPIMode != "" {
+			globalMode = snap.DPIMode
+		}
 	}
 	return rules.EffectiveMode(ruleMode, globalMode)
 }

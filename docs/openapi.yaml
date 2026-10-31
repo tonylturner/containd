@@ -567,7 +567,7 @@ components:
           not the `unknown` class. Broadcast (CA 65535) and malformed
           objects never match an ALLOW.
         - IEC104 enforce (effective mode: rule `mode`, else
-          `dataplane.dpiMode`, else learn) is rejected on save, candidate,
+          `dataplane.dpiMode`, else monitor) is rejected on save, candidate,
           commit and import unless `dataplane.dpiEnabled` is true,
           `dataplane.dpiIcsProtocols.iec104` is not false,
           `dataplane.nfqueueGroup` is non-zero (NFQUEUE capture), and no
@@ -604,7 +604,7 @@ components:
             only".
         writeOnly: {type: boolean, description: Match positively classified writes and controls (not iec104)}
         direction: {type: string, enum: [request, response]}
-        mode: {type: string, enum: ["", learn, enforce], description: "Overrides dataplane.dpiMode for this rule. Empty or absent inherits the global mode; in a merge patch, null or an empty string clears a stored mode."}
+        mode: {type: string, enum: ["", monitor, enforce], description: "Requires ics.protocol. Monitor observes every match without admitting, dropping or holding traffic; enforcing rules and strict scopes remain independent. Empty or absent inherits dataplane.dpiMode (default monitor); null or empty clears a stored override. learn is rejected; use monitor."}
         typeIds:
           type: array
           minItems: 1
@@ -701,31 +701,893 @@ components:
         result: {type: string}
         detail: {type: string}
 
-    PolicyAnalysis:
+    LearnApplyRequest:
+      additionalProperties: false
       properties:
-        eventSummary: {additionalProperties: {type: integer}, type: object}
-        profiles: {items: {$ref: '#/components/schemas/LearnedProfile'}, type: array}
-        rules: {items: {$ref: '#/components/schemas/FirewallRule'}, type: array}
-        stats: {$ref: '#/components/schemas/PcapAnalysisResult'}
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        selections:
+          items:
+            $ref: '#/components/schemas/LearnSelection'
+          nullable: false
+          type: array
+          minItems: 1
+          maxItems: 128
+          description: Unique suggestion IDs with exact nonzero revisions. One atomic candidate mutation; any conflict
+            rejects the entire batch.
+      required:
+      - requestId
+      - selections
       type: object
-      description: Offline analysis and suggested rules only; does not save rules, update live inventory or change live learn state.
-
-    LearnedProfile:
+      description: Recoverable staging request, never activation. Request ID binds exact ordered selections. Retry the
+        same request after uncertain completion; identical content-derived rule IDs are no-ops, conflicting bytes return
+        409. A failed completion may leave candidate staged; commit remains separate.
+    LearnAuthority:
+      additionalProperties: false
       properties:
-        addresses: {additionalProperties: {type: boolean}, type: object}
-        destIP: {type: string}
-        firstSeen: {format: date-time, type: string}
-        functionCodes: {additionalProperties: {type: boolean}, type: object}
-        lastSeen: {format: date-time, type: string}
-        objectClasses: {additionalProperties: {type: boolean}, type: object}
-        packetCount: {type: integer}
-        protocol: {type: string}
-        readSeen: {type: boolean}
-        serviceCodes: {additionalProperties: {type: boolean}, type: object}
-        sourceIP: {type: string}
-        unitIDs: {additionalProperties: {type: boolean}, type: object}
-        writeSeen: {type: boolean}
+        correlation:
+          type: string
+        logical:
+          $ref: '#/components/schemas/LearnTuple'
+        mappingFingerprint:
+          type: string
+        roleCertain:
+          type: boolean
+        roleEvidence:
+          type: string
+        standardPort:
+          type: boolean
+        wire:
+          $ref: '#/components/schemas/LearnTuple'
+      required:
+      - wire
+      - correlation
+      - roleCertain
+      - roleEvidence
+      - standardPort
       type: object
+    LearnCIP:
+      additionalProperties: false
+      properties:
+        attribute:
+          type: integer
+        class:
+          type: integer
+        instance:
+          type: integer
+        service:
+          type: integer
+        symbol:
+          type: string
+        targetDigest:
+          type: string
+      required: []
+      type: object
+    LearnCertification:
+      additionalProperties: false
+      properties:
+        certifiedAt:
+          format: date-time
+          type: string
+        contentId:
+          type: string
+        counterexamples:
+          items:
+            $ref: '#/components/schemas/LearnCounterexample'
+          nullable: true
+          type: array
+          maxItems: 50
+        evidenceDigest:
+          type: string
+        negative:
+          $ref: '#/components/schemas/LearnReplayTotals'
+        parentRefs:
+          items:
+            $ref: '#/components/schemas/LearnEvidenceRef'
+          nullable: true
+          type: array
+          minItems: 1
+          maxItems: 10000
+        positive:
+          $ref: '#/components/schemas/LearnReplayTotals'
+        versions:
+          $ref: '#/components/schemas/LearnVersions'
+      required:
+      - contentId
+      - evidenceDigest
+      - versions
+      - certifiedAt
+      - parentRefs
+      - positive
+      - negative
+      - counterexamples
+      type: object
+    LearnCounterexample:
+      additionalProperties: false
+      properties:
+        actual:
+          type: string
+        contextDigest:
+          type: string
+        expected:
+          type: string
+        mutation:
+          type: string
+        parent:
+          $ref: '#/components/schemas/LearnEvidenceRef'
+      required:
+      - parent
+      - mutation
+      - expected
+      - actual
+      - contextDigest
+      type: object
+    LearnCounters:
+      additionalProperties: false
+      properties:
+        bytes:
+          type: integer
+        evictedBytes:
+          type: integer
+        evictedRecords:
+          type: integer
+        expiredRecords:
+          type: integer
+        lostBatches:
+          type: integer
+        records:
+          type: integer
+        rejectedParents:
+          type: integer
+        withheld:
+          additionalProperties:
+            type: integer
+          nullable: true
+          type: object
+      required:
+      - records
+      - bytes
+      - evictedRecords
+      - evictedBytes
+      - expiredRecords
+      - lostBatches
+      - rejectedParents
+      - withheld
+      type: object
+    LearnDNP3:
+      additionalProperties: false
+      properties:
+        functionCode:
+          type: integer
+        master:
+          type: integer
+        objects:
+          items:
+            $ref: '#/components/schemas/LearnDNP3Object'
+          nullable: true
+          type: array
+        outstation:
+          type: integer
+      required:
+      - objects
+      type: object
+    LearnDNP3Object:
+      additionalProperties: false
+      properties:
+        allObjects:
+          type: boolean
+        count:
+          type: integer
+        dataDigest:
+          type: string
+        group:
+          type: integer
+        index:
+          type: integer
+        qualifier:
+          type: integer
+        spans:
+          items:
+            $ref: '#/components/schemas/LearnSpan'
+          nullable: true
+          type: array
+        variation:
+          type: integer
+      required:
+      - index
+      - allObjects
+      - spans
+      type: object
+    LearnDataset:
+      additionalProperties: false
+      properties:
+        bytes:
+          type: integer
+        captureSha256:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        decoderVersion:
+          type: string
+        evidenceDigest:
+          type: string
+        expiresAt:
+          format: date-time
+          type: string
+        gaps:
+          items:
+            type: string
+          nullable: true
+          type: array
+          maxItems: 32
+        id:
+          type: string
+        profileFingerprint:
+          type: string
+        records:
+          type: integer
+        schemaVersion:
+          type: string
+        sealedAt:
+          format: date-time
+          type: string
+        snapshotFingerprint:
+          type: string
+        source:
+          type: string
+          enum:
+          - pcap
+          - live
+        state:
+          type: string
+          enum:
+          - importing
+          - collecting
+          - sealed
+          - expired
+      required:
+      - schemaVersion
+      - id
+      - source
+      - state
+      - createdAt
+      - expiresAt
+      - decoderVersion
+      - profileFingerprint
+      - snapshotFingerprint
+      - evidenceDigest
+      - records
+      - bytes
+      - gaps
+      type: object
+      description: Engine-owned immutable evidence window. PCAP stays private until sealed; retention is seven days
+        by store clock. Eviction/deletion invalidates dependent proofs. Wire scope requires coordinate review.
+    LearnDatasetPage:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/LearnDataset'
+          nullable: true
+          type: array
+        nextCursor:
+          type: string
+      required:
+      - items
+      type: object
+    LearnDecision:
+      additionalProperties: false
+      properties:
+        decision:
+          type: string
+        mode:
+          type: string
+        reason:
+          type: string
+        ruleId:
+          type: string
+        scopeId:
+          type: string
+      required:
+      - decision
+      - mode
+      - reason
+      type: object
+    LearnEndpoint:
+      additionalProperties: false
+      properties:
+        ip:
+          type: string
+        port:
+          type: integer
+      required:
+      - ip
+      - port
+      type: object
+    LearnEvidenceRef:
+      additionalProperties: false
+      properties:
+        byteLength:
+          type: integer
+        byteOffset:
+          type: integer
+        captureSha256:
+          type: string
+        datasetId:
+          type: string
+        observationId:
+          type: string
+        packetFirst:
+          type: integer
+        packetLast:
+          type: integer
+        runId:
+          type: string
+      required:
+      - datasetId
+      - observationId
+      type: object
+    LearnGenerateRequest:
+      additionalProperties: false
+      properties:
+        datasetId:
+          type: string
+      required:
+      - datasetId
+      type: object
+    LearnGenerateResult:
+      additionalProperties: false
+      properties:
+        suggestions:
+          items:
+            $ref: '#/components/schemas/LearnSelection'
+          nullable: true
+          type: array
+        withheld:
+          additionalProperties:
+            type: integer
+          nullable: true
+          type: object
+      required:
+      - suggestions
+      - withheld
+      type: object
+    LearnIEC104:
+      additionalProperties: false
+      properties:
+        apciType:
+          type: string
+        ca:
+          type: integer
+        cot:
+          type: integer
+        negative:
+          type: boolean
+        objects:
+          items:
+            $ref: '#/components/schemas/LearnIEC104Object'
+          nullable: true
+          type: array
+        originator:
+          type: integer
+        test:
+          type: boolean
+        typeId:
+          type: integer
+      required:
+      - apciType
+      - objects
+      type: object
+    LearnIEC104Object:
+      additionalProperties: false
+      properties:
+        index:
+          type: integer
+        ioa:
+          type: integer
+        qualifier:
+          type: integer
+        select:
+          type: boolean
+        valueDigest:
+          type: string
+      required:
+      - index
+      type: object
+    LearnLegacyOverlap:
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+        ruleId:
+          type: string
+      required:
+      - ruleId
+      - reason
+      type: object
+    LearnModbus:
+      additionalProperties: false
+      properties:
+        andMask:
+          type: integer
+        functionCode:
+          type: integer
+        meiType:
+          type: integer
+        orMask:
+          type: integer
+        spans:
+          items:
+            $ref: '#/components/schemas/LearnSpan'
+          nullable: true
+          type: array
+        subfunction:
+          type: integer
+        unitId:
+          type: integer
+        values:
+          items:
+            type: integer
+          nullable: true
+          type: array
+      required:
+      - spans
+      - values
+      type: object
+    LearnObservation:
+      additionalProperties: false
+      properties:
+        authority:
+          $ref: '#/components/schemas/LearnAuthority'
+        capturedAt:
+          format: date-time
+          type: string
+        cip:
+          $ref: '#/components/schemas/LearnCIP'
+        connectionId:
+          type: string
+        datasetId:
+          type: string
+        decoderVersion:
+          type: string
+        dnp3:
+          $ref: '#/components/schemas/LearnDNP3'
+        evidence:
+          items:
+            $ref: '#/components/schemas/LearnEvidenceRef'
+          nullable: true
+          type: array
+        id:
+          type: string
+        iec104:
+          $ref: '#/components/schemas/LearnIEC104'
+        ingestedAt:
+          format: date-time
+          type: string
+        modbus:
+          $ref: '#/components/schemas/LearnModbus'
+        objectCount:
+          type: integer
+          maximum: 4096
+        outcome:
+          $ref: '#/components/schemas/LearnOutcome'
+        parentDigest:
+          type: string
+        parentId:
+          type: string
+        profileFingerprint:
+          type: string
+        quality:
+          $ref: '#/components/schemas/LearnQuality'
+        schemaVersion:
+          type: string
+        service:
+          $ref: '#/components/schemas/LearnServiceKey'
+        snapshotFingerprint:
+          type: string
+        source:
+          type: string
+      required:
+      - schemaVersion
+      - id
+      - datasetId
+      - source
+      - capturedAt
+      - ingestedAt
+      - connectionId
+      - parentId
+      - parentDigest
+      - objectCount
+      - authority
+      - service
+      - decoderVersion
+      - profileFingerprint
+      - snapshotFingerprint
+      - quality
+      - outcome
+      - evidence
+      type: object
+    LearnObservationPage:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/LearnObservation'
+          nullable: true
+          type: array
+        nextCursor:
+          type: string
+      required:
+      - items
+      type: object
+    LearnOutcome:
+      additionalProperties: false
+      properties:
+        decisions:
+          items:
+            $ref: '#/components/schemas/LearnDecision'
+          nullable: true
+          type: array
+        delivery:
+          type: string
+        evidence:
+          items:
+            $ref: '#/components/schemas/LearnEvidenceRef'
+          nullable: true
+          type: array
+      required:
+      - decisions
+      - delivery
+      - evidence
+      type: object
+    LearnQuality:
+      additionalProperties: false
+      properties:
+        complete:
+          type: boolean
+        conformance:
+          items:
+            type: string
+          nullable: true
+          type: array
+        decoded:
+          type: boolean
+        loss:
+          items:
+            type: string
+          nullable: true
+          type: array
+        undecoded:
+          items:
+            type: string
+          nullable: true
+          type: array
+      required:
+      - complete
+      - decoded
+      - conformance
+      - undecoded
+      - loss
+      type: object
+    LearnReplayTotals:
+      additionalProperties: false
+      properties:
+        failed:
+          type: integer
+        passed:
+          type: integer
+        total:
+          type: integer
+      required:
+      - total
+      - passed
+      - failed
+      type: object
+    LearnReview:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        at:
+          format: date-time
+          type: string
+        coordinateApproved:
+          type: boolean
+        revision:
+          type: integer
+      required:
+      - actor
+      - at
+      - revision
+      - coordinateApproved
+      type: object
+    LearnReviewRequest:
+      additionalProperties: false
+      properties:
+        approve:
+          type: boolean
+        coordinateApproved:
+          type: boolean
+        selection:
+          $ref: '#/components/schemas/LearnSelection'
+      required:
+      - selection
+      - approve
+      - coordinateApproved
+      type: object
+    LearnSelection:
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+      required:
+      - id
+      - revision
+      type: object
+    LearnServiceKey:
+      additionalProperties: false
+      properties:
+        clientIp:
+          type: string
+        coordinates:
+          type: string
+        direction:
+          type: string
+        protocol:
+          type: string
+        serverIp:
+          type: string
+        serverPort:
+          type: integer
+        transport:
+          type: string
+      required:
+      - clientIp
+      - serverIp
+      - serverPort
+      - transport
+      - direction
+      - protocol
+      - coordinates
+      type: object
+    LearnSpan:
+      additionalProperties: false
+      properties:
+        first:
+          type: integer
+        last:
+          type: integer
+        role:
+          type: string
+      required:
+      - first
+      - last
+      - role
+      type: object
+    LearnStartWatchRequest:
+      additionalProperties: false
+      properties:
+        durationSeconds:
+          type: integer
+          minimum: 0
+          maximum: 86400
+          default: 0
+          description: 0 selects the one-hour default; maximum 24 hours. Explicit start only; restart never resumes
+            collection.
+      type: object
+    LearnSuggestion:
+      additionalProperties: false
+      properties:
+        content:
+          $ref: '#/components/schemas/LearnSuggestionContent'
+        createdAt:
+          format: date-time
+          type: string
+        datasetId:
+          type: string
+        expiresAt:
+          format: date-time
+          type: string
+        id:
+          type: string
+        legacyOverlaps:
+          items:
+            $ref: '#/components/schemas/LearnLegacyOverlap'
+          nullable: true
+          type: array
+          description: Warning-only heuristic over running learned-* protocol scope. Never removes legacy rules or changes
+            certified content.
+        proof:
+          $ref: '#/components/schemas/LearnCertification'
+        review:
+          $ref: '#/components/schemas/LearnReview'
+        revision:
+          type: integer
+        status:
+          type: string
+          enum:
+          - draft
+          - certified
+          - reviewed
+          - staged
+          - rejected
+          - expired
+      required:
+      - id
+      - revision
+      - datasetId
+      - content
+      - status
+      - createdAt
+      - expiresAt
+      - legacyOverlaps
+      type: object
+      description: Immutable content and compiler replay proof, with CAS workflow revision. Every proposed rule is an
+        explicit monitor ALLOW. IEC104 always needs authenticated admin review. CIP never produces actionable rules.
+    LearnSuggestionContent:
+      additionalProperties: false
+      properties:
+        evidenceDigest:
+          type: string
+        limits:
+          items:
+            type: string
+          nullable: true
+          type: array
+        requiresCoordinateReview:
+          type: boolean
+        rules:
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+          nullable: false
+          type: array
+          minItems: 1
+          maxItems: 128
+        versions:
+          $ref: '#/components/schemas/LearnVersions'
+        withheld:
+          items:
+            type: string
+          nullable: true
+          type: array
+      required:
+      - versions
+      - evidenceDigest
+      - rules
+      - limits
+      - withheld
+      - requiresCoordinateReview
+      type: object
+    LearnSuggestionPage:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/LearnSuggestion'
+          nullable: true
+          type: array
+        nextCursor:
+          type: string
+      required:
+      - items
+      type: object
+    LearnTuple:
+      additionalProperties: false
+      properties:
+        destination:
+          $ref: '#/components/schemas/LearnEndpoint'
+        source:
+          $ref: '#/components/schemas/LearnEndpoint'
+        transport:
+          type: string
+      required:
+      - source
+      - destination
+      - transport
+      type: object
+    LearnVersions:
+      additionalProperties: false
+      properties:
+        decoder:
+          type: string
+        evaluator:
+          type: string
+        generator:
+          type: string
+        observation:
+          type: string
+        profile:
+          type: string
+        schema:
+          type: string
+        snapshot:
+          type: string
+      required:
+      - schema
+      - observation
+      - generator
+      - evaluator
+      - decoder
+      - profile
+      - snapshot
+      type: object
+    LearnWatch:
+      additionalProperties: false
+      properties:
+        datasetId:
+          type: string
+        deadline:
+          format: date-time
+          type: string
+        id:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        stopReason:
+          description: operator, deadline, restart, budget or policy_changed. Policy changes stop collection before accepting new-snapshot parents.
+          type: string
+        stoppedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - datasetId
+      - startedAt
+      - deadline
+      type: object
+    LearnWatchPage:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/LearnWatch'
+          nullable: true
+          type: array
+        nextCursor:
+          type: string
+      required:
+      - items
+      type: object
+    LearnApplyResult:
+      type: object
+      required:
+      - requestId
+      - selections
+      - staged
+      properties:
+        requestId:
+          type: string
+        selections:
+          items:
+            $ref: '#/components/schemas/LearnSelection'
+          type: array
+          minItems: 1
+          maxItems: 128
+          description: Unique suggestion IDs with exact nonzero revisions. One atomic candidate mutation; any conflict
+            rejects the entire batch.
+        staged:
+          type: boolean
+          enum:
+          - true
+    PcapImportResult:
+      type: object
+      required:
+      - dataset
+      - stats
+      properties:
+        dataset:
+          $ref: '#/components/schemas/LearnDataset'
+        stats:
+          $ref: '#/components/schemas/PcapAnalysisResult'
+      description: Engine-owned normalized dataset import. No rules are generated or staged; generate explicitly after
+        sealing. Nonstandard services remain observation-only. Statistics retain a bounded event sample.
 
     ICSTemplateInfo:
       type: object
@@ -765,7 +1627,7 @@ components:
             ranges: {type: array, items: {type: string}, description: Register address ranges (legacy modbus_register_guard shape)}
         mode:
           type: string
-          enum: ['', learn, enforce]
+          enum: ['', monitor, enforce]
           description: Empty inherits global DPI mode.
 
     RulePreviewResponse:
@@ -1077,7 +1939,7 @@ components:
             Per-protocol parsing. Omitted map or keys mean tolerant; the API also accepts an empty
             string as the default. Unknown protocols or other values return 400.
             Tolerant evaluates decoded fields and alerts on nonconformance inside known-length frames.
-            Strict drops nonconformant frames and resets the session in enforce scope; learn scope
+            Strict drops nonconformant frames and resets the session in enforce scope; monitor scope
             reports would_drop without blocking. Lost frame boundaries and integrity faults fail
             closed in enforce scope in both parsing modes.
         dpiIcsProtocols:
@@ -1090,7 +1952,7 @@ components:
             cip: {type: boolean}
           description: 'Unknown keys (true or false) return 400: dataplane.dpiIcsProtocols: protocol "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
         dpiMock: {type: boolean}
-        dpiMode: {type: string, enum: ['', learn, enforce], description: Empty inherits learn mode. Other values are rejected.}
+        dpiMode: {type: string, enum: ['', monitor, enforce], description: Empty inherits monitor mode. Other values are rejected.}
         dpiProtocols: {additionalProperties: {type: boolean}, type: object}
         enforceTable:
           type: string
@@ -1266,7 +2128,7 @@ components:
         firstSeen: {type: string, format: date-time}
         lastSeen: {type: string, format: date-time}
         attemptedCommands: {type: integer, minimum: 0, description: Decoded control-direction command APDUs.}
-        acceptedCommands: {type: integer, minimum: 0, description: Commands allowed in inline enforce mode whose carrying packets all completed an Accept verdict. Always 0 in learn and monitor modes.}
+        acceptedCommands: {type: integer, minimum: 0, description: Commands allowed in inline enforce mode whose carrying packets all completed an Accept verdict. Always 0 in monitor mode.}
         points:
           type: array
           maxItems: 256
@@ -1471,6 +2333,9 @@ components:
         attributes: {$ref: '#/components/schemas/IdentificationAttributes'}
     PcapAnalysisResult:
       properties:
+        displayTruncated:
+          type: boolean
+          description: The event/identification display sample was capped; normalized evidence is not sampled.
         truncated:
           type: boolean
           description: True when any packet record was truncated or the final record was incomplete at end of file.
@@ -2189,7 +3054,7 @@ components:
       properties:
         ruleId: {type: string}
         protocol: {type: string}
-        mode: {type: string, enum: [learn, enforce], description: Effective mode (rule mode, then dataplane.dpiMode, then learn).}
+        mode: {type: string, enum: [monitor, enforce], description: Effective mode (rule mode, then dataplane.dpiMode, then monitor).}
         state: {type: string, enum: [monitoring, enforcing, partial, not_enforcing]}
         reasons:
           type: array
@@ -2213,7 +3078,7 @@ components:
         state:
           type: string
           enum: [none, monitoring, enforcing, partial, not_enforcing, unknown]
-          description: none without ICS rules, the worst state among enforce rules, monitoring when all are learn, unknown when the engine cannot be read.
+          description: none without ICS rules, the worst state among enforce rules, monitoring when all are monitor, unknown when the engine cannot be read.
         enforcing: {type: integer}
         partial: {type: integer}
         notEnforcing: {type: integer}
@@ -3462,9 +4327,17 @@ paths:
         in: query
         description: Case-insensitive proto equality.
         schema: {type: string}
+      - name: ruleId
+        in: query
+        description: Exact case-sensitive rule identifier.
+        schema: {type: string}
+      - name: mode
+        in: query
+        description: Effective decision mode.
+        schema: {type: string, enum: [monitor, enforce]}
       - name: decision
         in: query
-        description: Case-insensitive attributes.decision equality (allow, deny, would_drop).
+        description: Case-insensitive attributes.decision equality (allow, deny, would_allow, would_drop).
         schema: {type: string}
       - name: verdict
         in: query
@@ -3637,49 +4510,108 @@ paths:
 
   /pcap/analyze:
     post:
-      summary: Upload a PCAP file for DPI analysis and policy generation (admin)
-      tags: [PCAP]
+      summary: Import a PCAP into the engine evidence authority (admin)
+      tags:
+      - PCAP
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [file]
+              required:
+              - file
               properties:
                 file:
                   type: string
                   format: binary
-                  description: PCAP or PCAPng file
+                  description: Classic PCAP file; PCAPng is not supported
       responses:
-        "200":
-          description: Analysis results with generated rules
+        '200':
+          description: Sealed normalized dataset and bounded analysis statistics
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/PolicyAnalysis"}
-        "400": {description: Invalid or non-PCAP file, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
-      description: Offline analysis returns suggested rules only; does not stage or apply policy, populate live inventory or update live
-        learn profiles.
-
+              schema:
+                $ref: '#/components/schemas/PcapImportResult'
+        '400':
+          description: Invalid or unsupported capture
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Import conflict or budget exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Prior capture evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      description: Imports normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly
+        generate suggestions after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import
+        has bounded flow and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
   /pcap/analyze/{name}:
     post:
       summary: Analyze a previously uploaded PCAP by name (admin)
-      tags: [PCAP]
+      tags:
+      - PCAP
       parameters:
       - name: name
         in: path
         required: true
-        schema: {type: string}
+        schema:
+          type: string
         description: Name of an uploaded PCAP file
       responses:
-        "200":
-          description: Analysis results with generated rules
+        '200':
+          description: Sealed normalized dataset and bounded analysis statistics
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/PolicyAnalysis"}
-        "404": {description: PCAP not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
-      description: Offline analysis returns suggested rules only; does not stage or apply policy, populate live inventory or update live
-        learn profiles.
+              schema:
+                $ref: '#/components/schemas/PcapImportResult'
+        '404':
+          description: PCAP not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          description: Invalid or unsupported capture
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Import conflict or budget exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Prior capture evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      description: Imports normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly
+        generate suggestions after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import
+        has bounded flow and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
 
   # ── ICS Rule Templates ──────────────────────────────────────────
   /templates/ics:
@@ -3751,68 +4683,712 @@ paths:
         "502": {description: The engine failed to evaluate the preview, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "503": {description: No engine rule preview is available, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
-  # ── Learn Mode ──────────────────────────────────────────────────
-  /learn/profiles:
-    get:
-      summary: List learned ICS traffic profiles
-      tags: [Learn]
+  /learn/watches:
+    post:
+      summary: Start an explicit live watch (admin)
+      tags:
+      - Learn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnStartWatchRequest'
       responses:
-        "503":
-          description: Engine capability missing or unavailable; not an empty or stopped state.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "200":
-          description: Array of learned traffic profiles
+        '200':
+          description: Success
           content:
             application/json:
               schema:
-                type: array
-                items: {$ref: "#/components/schemas/LearnedProfile"}
-
+                $ref: '#/components/schemas/LearnWatch'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      summary: List explicit watch leases
+      tags:
+      - Learn
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 200
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnWatchPage'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /learn/watches/{id}:
+    get:
+      summary: Inspect a watch
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnWatch'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /learn/watches/{id}/stop:
+    post:
+      summary: Stop and seal a watch (admin)
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnWatch'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /learn/datasets:
+    get:
+      summary: List sealed evidence datasets
+      tags:
+      - Learn
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 200
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnDatasetPage'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /learn/datasets/{id}:
+    get:
+      summary: Inspect an evidence dataset
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnDataset'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete evidence and invalidate dependent suggestions (admin)
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Evidence invalidated and deleted
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /learn/datasets/{id}/observations:
+    get:
+      summary: List bounded normalized whole parents
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 200
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnObservationPage'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /learn/generate:
     post:
-      summary: Generate suggested firewall rules (admin)
-      tags: [Learn]
+      summary: Generate and certify exact suggestions (admin)
+      tags:
+      - Learn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnGenerateRequest'
       responses:
-        "503":
-          description: Engine capability missing or unavailable; not an empty or stopped state.
+        '200':
+          description: Success
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "200":
-          description: Generated allowlist rules
+              schema:
+                $ref: '#/components/schemas/LearnGenerateResult'
+        '400':
+          description: Invalid request
           content:
             application/json:
-              schema: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}
-
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /learn/suggestions:
+    get:
+      summary: List server-owned suggestions
+      tags:
+      - Learn
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 200
+      - name: datasetId
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnSuggestionPage'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /learn/suggestions/{id}:
+    get:
+      summary: Inspect suggestion content, proof and limitations
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnSuggestion'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /learn/suggestions/{id}/review:
+    post:
+      summary: Review an exact suggestion revision (admin)
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnReviewRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnSuggestion'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /learn/counters:
+    get:
+      summary: Inspect durable admission and withholding counters
+      tags:
+      - Learn
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnCounters'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /learn/apply:
     post:
-      summary: Stage learned rules (admin)
-      tags: [Learn]
+      summary: Stage selected certified suggestion revisions (admin)
+      tags:
+      - Learn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnApplyRequest'
+      description: Stages the entire server-resolved bundle atomically through the shared candidate; does not commit.
+        IEC104 requires admin review; wire coordinates require explicit NAT acknowledgement. Idempotent request retries
+        converge by content-derived rule ID. A completion error after persistence does not roll back the candidate;
+        retry the same request ID.
       responses:
-        "503":
-          description: Engine capability missing or unavailable; no rules staged.
+        '200':
+          description: Success
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "200": {description: 'Rules staged, or no rules to apply (no staging header for the no-op).', content: {application/json: {schema: {
-                  type: object, properties: {status: {type: string}, count: {type: integer}, rules: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}}}}},
-          headers: {X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
-        "400": {description: Generated rules or candidate configuration failed validation, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
-      description: Stages the shared candidate; commit to apply.
-
-  /learn:
-    delete:
-      summary: Clear all learned traffic profiles (admin)
-      tags: [Learn]
-      responses:
-        "503":
-          description: Engine capability missing or unavailable; not an empty or stopped state.
+              schema:
+                $ref: '#/components/schemas/LearnApplyResult'
+          headers:
+            X-Containd-Config:
+              $ref: '#/components/headers/Staged'
+        '400':
+          description: Invalid request
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "200": {description: Learned data cleared, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Evidence expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   # ── ICS Inventory ──────────────────────────────────────────────
   /inventory:
@@ -4881,6 +6457,45 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/TlsInfoResponse'}
+  /firewall/shadow-counters:
+    get:
+      summary: Applied-policy monitor message counters
+      description: >-
+        View-role access. Independent of nftables. Every effective-monitor ICS rule of the installed
+        snapshot is listed, including zero counts. One match per rule per decoded message, not per
+        object. Memory counters reset on successful policy install or restart; failed applies retain
+        the installed snapshot and counts. Before first apply or on engine unavailability returns available false, never zeros.
+        NFQUEUE observations repeat into the ordinary firewall; queues have no bypass when the engine is down.
+      tags: [Firewall]
+      responses:
+        '200':
+          description: Counters or an explicit unavailability reason
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  required: [available, snapshotVersion, since, unit, rules]
+                  properties:
+                    available: {type: boolean, enum: [true]}
+                    snapshotVersion: {type: string}
+                    since: {type: string, format: date-time}
+                    unit: {type: string, enum: [messages]}
+                    rules:
+                      type: array
+                      items:
+                        type: object
+                        required: [ruleId, shadowMatches, wouldAllow, wouldDeny]
+                        properties:
+                          ruleId: {type: string}
+                          shadowMatches: {type: integer, minimum: 0}
+                          wouldAllow: {type: integer, minimum: 0}
+                          wouldDeny: {type: integer, minimum: 0}
+                - type: object
+                  required: [available, reason]
+                  properties:
+                    available: {type: boolean, enum: [false]}
+                    reason: {type: string}
   /firewall/counters:
     get:
       summary: Per-rule counters of the applied ruleset
@@ -5474,7 +7089,7 @@ paths:
               type: object
               properties:
                 name: {type: string}
-                mode: {type: string, enum: ['', learn, enforce]}
+                mode: {type: string, enum: ['', monitor, enforce]}
               required: [name]
       responses:
         '200':
@@ -5861,3 +7476,938 @@ paths:
                 additionalProperties: true
                 properties:
                   av: {$ref: '#/components/schemas/AVStatus'}
+
+# Trusted engine operations, on the engine listener only; not public API paths.
+x-internal-paths:
+  /internal/pcap/analyze:
+    post:
+      summary: Import a PCAP into the engine evidence authority (admin)
+      tags:
+      - PCAP
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Classic PCAP file; PCAPng is not supported
+      responses:
+        '200':
+          description: Sealed normalized dataset and bounded analysis statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PcapImportResult'
+        '400':
+          description: Invalid or unsupported capture
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Import conflict or budget exceeded
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Prior capture evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      description: Engine-internal trusted management boundary; never exposed as a public management route. Imports
+        normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly generate suggestions
+        after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import has bounded flow
+        and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
+      security: []
+  /internal/pcap/analyze/{name}:
+    post:
+      summary: Analyze a previously uploaded PCAP by name (admin)
+      tags:
+      - PCAP
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Name of an uploaded PCAP file
+      responses:
+        '200':
+          description: Sealed normalized dataset and bounded analysis statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PcapImportResult'
+        '404':
+          description: PCAP not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Invalid or unsupported capture
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Import conflict or budget exceeded
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Prior capture evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      description: Engine-internal trusted management boundary; never exposed as a public management route. Imports
+        normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly generate suggestions
+        after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import has bounded flow
+        and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
+      security: []
+  /internal/learn/watches:
+    post:
+      summary: Start an explicit live watch (admin)
+      tags:
+      - Learn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnStartWatchRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnWatch'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+    get:
+      summary: List explicit watch leases
+      tags:
+      - Learn
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 200
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnWatchPage'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/watches/{id}:
+    get:
+      summary: Inspect a watch
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnWatch'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/watches/{id}/stop:
+    post:
+      summary: Stop and seal a watch (admin)
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnWatch'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/datasets:
+    get:
+      summary: List sealed evidence datasets
+      tags:
+      - Learn
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 200
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnDatasetPage'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/datasets/{id}:
+    get:
+      summary: Inspect an evidence dataset
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnDataset'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+    delete:
+      summary: Delete evidence and invalidate dependent suggestions (admin)
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Evidence invalidated and deleted
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/datasets/{id}/observations:
+    get:
+      summary: List bounded normalized whole parents
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 200
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnObservationPage'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/generate:
+    post:
+      summary: Generate and certify exact suggestions (admin)
+      tags:
+      - Learn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnGenerateRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnGenerateResult'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/suggestions:
+    get:
+      summary: List server-owned suggestions
+      tags:
+      - Learn
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 200
+      - name: datasetId
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnSuggestionPage'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/suggestions/{id}:
+    get:
+      summary: Inspect suggestion content, proof and limitations
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnSuggestion'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/suggestions/{id}/review:
+    post:
+      summary: Review an exact suggestion revision (admin)
+      tags:
+      - Learn
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Containd-Review-Actor
+        in: header
+        required: true
+        schema:
+          type: string
+        description: Authenticated actor set by management, not a caller-provided public header.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnReviewRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnSuggestion'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/counters:
+    get:
+      summary: Inspect durable admission and withholding counters
+      tags:
+      - Learn
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearnCounters'
+        '400':
+          description: Invalid request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Unknown ID
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Stale, conflicting, uncertified, or review required
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Evidence expired
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Engine evidence authority unavailable
+          content:
+            text/plain:
+              schema:
+                type: string
+      security: []
+      description: 'Engine-internal trusted management boundary; never exposed as a public management route. '
+  /internal/learn/stage/resolve:
+    post:
+      summary: Freeze exact eligible revisions at eligibility linearization point
+      security: []
+      tags:
+      - Learn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnApplyRequest'
+      responses:
+        '200':
+          description: All frozen eligible suggestions, in selection order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LearnSuggestion'
+        '400':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+  /internal/learn/stage/complete:
+    post:
+      summary: Complete a recoverable stage receipt after candidate persistence
+      security: []
+      tags:
+      - Learn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnApplyRequest'
+      responses:
+        '204':
+          description: Idempotent durable stage receipt recorded
+        '400':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+  /internal/learn/stage/release:
+    post:
+      summary: Release a reservation after a known failed candidate mutation
+      security: []
+      tags:
+      - Learn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearnApplyRequest'
+      responses:
+        '204':
+          description: Uncompleted reservation released; completed receipts remain intact
+        '400':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '410':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Invalid, unknown, conflicting, expired or unavailable evidence
+          content:
+            text/plain:
+              schema:
+                type: string

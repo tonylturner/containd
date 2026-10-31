@@ -223,7 +223,7 @@ const defaultConfig = {
   dataplane: {
     captureInterfaces: ["wan"],
     dpiEnabled: true,
-    dpiMode: "learn",
+    dpiMode: "monitor",
     dpiProtocols: {},
     dpiIcsProtocols: {},
   },
@@ -287,7 +287,7 @@ function responseFor(pathname: string) {
     return json({
       captureInterfaces: ["wan"],
       dpiEnabled: true,
-      dpiMode: "learn",
+      dpiMode: "monitor",
       dpiProtocols: {},
       dpiIcsProtocols: {},
     });

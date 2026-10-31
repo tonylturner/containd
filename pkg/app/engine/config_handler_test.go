@@ -138,13 +138,13 @@ func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 	dp := newCountingDP(t)
 	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
 	h := configHandler(zap.NewNop().Sugar(), dp, sim)
-	learn := `{"dpiEnabled":true,"dpiMode":"learn","dpiIcsProtocols":{"iec104":true}}`
+	learn := `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true}}`
 	if out := postConfig(t, h, learn); out["unchanged"] != false || dp.reconfigs.Load() != 1 {
 		t.Fatalf("first POST must rebuild: %v reconfigs=%d", out, dp.reconfigs.Load())
 	}
 	dp.waitStart(t)
 	dp.LoadRules(rules.Snapshot{Firewall: []rules.Entry{{ID: "iec-learn", Action: rules.ActionAllow,
-		ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "learn"}}}})
+		ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "monitor"}}}})
 
 	// Engine state: a stored event, an inventory entry, a live IEC104 session.
 	dp.Events().Append(dpevents.Event{Proto: "dns", Kind: "query", Timestamp: time.Now().UTC(), FlowID: "marker"})
@@ -198,7 +198,7 @@ func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 	// but preserves the process event ring. Old session data is not parsed.
 	store := dp.Events()
 	before := iecSessionIDs(dp.Engine)[session]
-	out = postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"learn","dpiIcsProtocols":{"iec104":true},"dpiProtocols":{"dns":false}}`)
+	out = postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true},"dpiProtocols":{"dns":false}}`)
 	if out["unchanged"] != false || dp.reconfigs.Load() != 2 {
 		t.Fatalf("changed POST did not rebuild: %v reconfigs=%d", out, dp.reconfigs.Load())
 	}
@@ -217,13 +217,13 @@ func TestConfigChangedKeepsEventsAndRecordsNewIECSession(t *testing.T) {
 	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
 	h := configHandler(zap.NewNop().Sugar(), dp, sim)
 	store := dp.Events()
-	postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"learn","dpiIcsProtocols":{"iec104":true}}`)
+	postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true}}`)
 	dp.waitStart(t)
 	dp.LoadRules(rules.Snapshot{Firewall: []rules.Entry{{ID: "iec-learn", Action: rules.ActionAllow,
-		ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "learn"}}}})
+		ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "monitor"}}}})
 	marker := store.Append(dpevents.Event{Kind: "firewall.rule.hit", Timestamp: time.Now().UTC(),
 		Attributes: map[string]any{"action": "DENY"}, FlowID: "before-rebuild"})
-	postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"learn","dpiIcsProtocols":{"iec104":true},"dpiProtocols":{"dns":false}}`)
+	postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true},"dpiProtocols":{"dns":false}}`)
 	dp.waitStart(t)
 	if dp.Events() != store {
 		t.Fatal("rebuild replaced the store")
@@ -342,12 +342,12 @@ func TestConfigUnchangedKeepsTheSimulationRunning(t *testing.T) {
 	if run() != first {
 		t.Fatal("an unchanged POST restarted the simulation")
 	}
-	postConfig(t, h, `{"dpiMock":true,"dpiMode":"learn"}`)
+	postConfig(t, h, `{"dpiMock":true,"dpiMode":"monitor"}`)
 	dp.waitStart(t)
 	if now := run(); now == "" || now == first {
 		t.Fatal("a changed POST must restart the simulation")
 	}
-	postConfig(t, h, `{"dpiMode":"learn"}`)
+	postConfig(t, h, `{"dpiMode":"monitor"}`)
 	dp.waitStart(t)
 	if run() != "" {
 		t.Fatal("turning the DPI mock off must stop the simulation")
@@ -362,7 +362,7 @@ func TestConfigConcurrentGetAndPost(t *testing.T) {
 		}
 	}()
 	var wg sync.WaitGroup
-	bodies := []string{`{"dpiMode":"learn"}`, `{"dpiMode":"enforce"}`}
+	bodies := []string{`{"dpiMode":"monitor"}`, `{"dpiMode":"enforce"}`}
 	for i := 0; i < 4; i++ {
 		wg.Add(2)
 		go func(i int) {

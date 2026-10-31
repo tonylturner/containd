@@ -7,28 +7,96 @@ not make it an enforceable firewall predicate.
 
 ## DPI Modes
 
-DPI mode resolves **per-rule `ics.mode` > global `dpiMode` > `learn`**. Both
-fields accept only `learn`, `enforce` or empty.
+DPI mode resolves **per-rule `ics.mode` > global `dataplane.dpiMode` > `monitor`**.
+Both fields accept `monitor`, `enforce` or empty. Empty means inherit; a mode
+without an ICS protocol is invalid. Editors show **Inherit (effective mode)**,
+**Monitor (safe)** and **Enforce**. Staging a change does not apply it: commit
+candidate configuration to activate it. You can enforce directly; monitoring
+and learning are optional, not prerequisites.
 
-- **Learn** records would-deny decisions without applying that DPI denial.
-- **Enforce** drops a prohibited command inline, before it reaches the device.
-  That needs NFQUEUE: AF_PACKET capture only observes copies and cannot stop
-  the first command. Validation therefore rejects a rule that names an ICS
-  protocol and resolves to enforce while `dataplane.nfqueueGroup` is 0, at
-  candidate save, import and commit; set a nonzero queue or put the rule in
-  learn mode. A global `dpiMode: "enforce"` without such rules, and `mode` on a
-  rule without an ICS protocol, need no queue.
+- **Monitor (safe)** observes every matching rule independently. A monitor rule
+  never admits, drops, holds or resets traffic, including an `ALLOW` rule. It
+  opens no fail-closed envelope. Other enforcing rules, firewall defaults and
+  strict enforce scopes can still deny that traffic.
+- **Enforce** applies policy inline. ICS rules resolving to enforce require a
+  nonzero `dataplane.nfqueueGroup`; AF_PACKET capture only observes copies and
+  cannot stop the first command. Candidate save, import and commit validate this.
+  A global enforce setting with no enforcing ICS rules needs no queue.
 
-Enforce mode alone does not prove protection: DPI switched off, a disabled
-decoder, nftables enforcement off or an overlapping exclusion each leave a rule
-unprotected or partly protected. Each ICS rule reports its actual coverage; see
-[ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
+Monitor-only traffic needs DPI, its decoder and capture:
 
-Global learn mode is **not a no-block switch**: explicit enforce-mode rules and
-independent nftables firewall decisions can still block traffic. Automatic
-profile collection additionally requires at least one committed firewall entry
-with explicit `ics.mode: "learn"`; setting the global mode alone is insufficient.
-This gate does not limit collection to only events matching that entry.
+- With `dataplane.nfqueueGroup: 0`, AF_PACKET observes packet copies passively.
+  Monitor rules add no packet steering.
+- With a nonzero queue group, monitor-only ICS traffic still passes through the
+  engine's single NFQUEUE capture source. The engine feeds the decoder once,
+  then immediately releases the packet back to the ruleset without a monitor
+  hold. An observation mark prevents repeat queueing through any ICS queue rule.
+  Later L4 rules, established-connection handling and the default policy decide
+  its outcome as if no ICS rules applied. Monitoring therefore adds engine
+  traversal and processing latency, but does not change that outcome. No queue
+  bypass is enabled: engine-down queue behavior is unchanged, and monitoring
+  does not guarantee forwarding when the engine is unavailable.
+
+When an enforcing ICS rule or scope also applies at L3/L4, its enforcing policy
+still decides the packet; monitor matches remain independent observations.
+Disabled DPI/decoders, exclusions and capture loss limit observations. Enforce
+mode alone does not prove protection either:
+see [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
+
+### Shadow evidence and applied-policy counters
+
+Each matching monitor rule emits `ics.decision` with `decision: would_allow` or
+`would_drop`, `mode: monitor`, `ruleId`, configured `action` and `reason: rule`,
+even when rule logging is off. These are **rule-local matches, not predictions
+of the full policy**: monitor ALLOW cannot mask an enforcing DENY, and monitor
+DENY does not override an enforcing ALLOW. Enforcing decisions keep their usual
+logging behavior. Events use bounded retention, not an all-hit durable journal.
+
+Strict nonconformance is decided on the enforcing scope/envelope before rule
+arbitration. A scope drop has reason `nonconformant`, `scopeId` and `findingCode`,
+not a monitor rule's ID or configured action. A matching monitor rule additionally
+records its own shadow decision. A monitor-only strict scope never drops or resets.
+
+Firewall and ICS tables show shadow matches, would-allow and would-deny for the
+**applied policy**, with a start timestamp and links to
+`/events/?kind=ics.decision&ruleId=<id>&mode=monitor`. Authenticated viewers can
+read `GET /api/v1/firewall/shadow-counters` independently of nftables counters:
+
+```json
+{"available":true,"snapshotVersion":"policy-id","since":"2026-10-30T12:00:00Z","unit":"messages","rules":[{"ruleId":"trial","shadowMatches":12,"wouldAllow":10,"wouldDeny":2}]}
+```
+
+One hit is **one matching monitor rule × one decoded message**, not one object
+in a multi-object message. Every effective-monitor ICS rule in the installed
+snapshot is listed, including zero counts; enforce rules are omitted. A
+candidate monitor rule absent from that list is **not applied yet**, not zero.
+Editing predicates under an existing rule ID leaves its applied counts unchanged
+until installation. Counters reset on successful snapshot installation, remain
+on failed apply, and are lost on engine restart. The snapshot ID and `since`
+identify the applied counter lifetime. Before first apply or when the engine is
+unreachable the endpoint returns HTTP 200 with
+`{"available":false,"reason":"..."}`; unavailable never means zero.
+
+### Upgrade and downgrade
+
+Schema 0.1.9 rewrites exact legacy `learn` modes to `monitor` in running,
+candidate and previous banks; meaningless protocol-less modes are cleared.
+Upgrade records one durable `config.rule_modes.migrated` audit record per bank,
+with `changes[]` entries containing `path`, `ruleId`, `action`, `old` and `new`.
+Repeated boots do not create duplicate records. Legacy versionless input is
+upgraded before validation; new rule writes and configurations stamped 0.1.9 or
+newer reject `learn` rather than accepting an alias.
+
+**Traffic behavior changes:** a former learn ALLOW inside an enforce envelope
+could admit at L7 and mask an enforce DENY through ALLOW precedence. As monitor
+it does neither: that traffic is now denied (and reset where the envelope resets).
+A former learn DENY no longer drops at L4 without a queue. Audit existing rules
+and arrange separate enforcing/L4 allowances where observation needs traffic.
+Back up before upgrading: 0.1.36 cannot read schema 0.1.9; restore a pre-upgrade
+backup to downgrade.
+
+Monitoring is observation, **not learning**. It never starts evidence collection.
+See [Learning](#learning) for the separate explicit workflow.
 
 If the AF_PACKET NAT resolver loses a packet to queue or byte pressure, passive
 DPI and identification decoding stop for that connection incarnation, including
@@ -54,7 +122,7 @@ replacement request:
 ```json
 {
   "dpiEnabled": true,
-  "dpiMode": "learn",
+  "dpiMode": "monitor",
   "dpiIcsProtocols": {
     "modbus": true,
     "dnp3": true,
@@ -102,18 +170,19 @@ event's `undecoded` codes (`<proto>.<reason>`), not as a conformance violation.
 Policy handles these findings like conformance findings: tolerant parsing
 leaves delivery to normal rule and default-action evaluation; the finding itself
 does not cause a drop. Strict parsing in an enforce scope drops and resets the
-message, while strict learn scope records a would-drop decision without
+message, while strict monitor scope records a would-drop decision without
 affecting delivery. Either finding type raises a medium-severity IDS alert
 (`ics-conformance` or `ics-undecoded`), deduplicated per connection and code. If
 an event has both keys, it can produce both alerts, while policy still decides
-delivery once. Events with either finding are excluded from learned profiles.
+delivery once. Events with either finding are excluded from actionable learner
+suggestions.
 
 | Effective rule mode | Tolerant parsing | Strict parsing |
 | --- | --- | --- |
 | Enforce scope | Evaluate decoded fields as usual; pass unless policy denies | Drop the packet and reset the session; decision reason `nonconformant` |
-| Learn (monitor) scope | Rules observe; no on-wire effect | Report `would_drop`; no on-wire effect |
+| Monitor scope | Rules observe; no on-wire effect | Report `would_drop`; no on-wire effect |
 
-A decoded policy denial takes precedence and retains its own reason. Strict nonconformance is decided before ALLOW rules. Tolerant is not a policy bypass:
+Strict nonconformance in an enforcing scope preempts rule decisions and is attributed to that scope. Tolerant is not a policy bypass:
 under an allowlist, an unreadable field cannot satisfy an ALLOW that names that
 field, so the message falls to the default action. A broader ALLOW using only
 readable fields can still match.
@@ -124,8 +193,8 @@ Every event with findings carries sorted, unique `conformance` codes such as
 `iec104.unsupported_type`. Both modes raise an `ids` / `alert` with rule ID
 `ics-conformance`, severity `medium`, flow identity, codes and the action taken
 (`passed`, `dropped and reset` or `would drop`). Alerts are bounded to one per
-connection per code; repeats only count. Events with findings never feed the
-learner, but inventory and telemetry still record them.
+connection per code; repeats only count. Events with findings never produce
+actionable learner suggestions, but inventory and telemetry still record them.
 
 **Both modes fail closed in enforce scope** when a frame boundary is lost:
 Modbus length outside 2–254, bad DNP3 start or header CRC, invalid IEC 104 start
@@ -165,9 +234,33 @@ key. A history without a public ID can adopt verified identity, including its
 pending requests; previously published events are not rewritten. PCAP and
 NFQUEUE report `wire`: they retain wire-connection pairing without claiming
 live conntrack evidence or querying it.
-Policy evaluation, protocol dispatch, wire resets and kernel deletion
-coordinates keep their existing address semantics. Arbitrary public-port
-DNAT does not enable decoding on that port.
+With `correlationStatus: resolved`, ICS policy uses the pre-SNAT client
+(`Original.Source`) and post-DNAT backend (`Reply.Source`), including their
+ports. Zones, identities, TAG labels and DPI exclusions use these same
+coordinates, matching nftables forward-chain rules after DNAT and before SNAT.
+For example, a rule for client → backend TCP/502 governs both observed legs
+of public TCP/1502 → backend TCP/502, and verified service ports select Modbus.
+Inventory and learning use that same client/backend authority.
+
+Without verified evidence, policy and legacy decoder selection use the wire
+coordinates. This includes PCAP, NFQUEUE and unresolved or downgraded live
+connections; inspect the event's `correlationStatus` above. A NAT egress leg
+that exposes a supported service port can decode and reach rule/default
+policy in wire coordinates before verification. An unverified public TCP/1502
+leg does not select the legacy Modbus decoder. Passive protocol identification
+is independent of that port selection.
+
+Newly verified evidence can select a decoder on a flow that has not selected
+one yet. An already selected decoder/stream is not switched midstream; policy
+uses the evidence available for the current packet, but previously emitted
+events and decisions are not rewritten. A new connection starts selection
+afresh. Retained-event rule preview remains wire-based because retained events
+do not carry the kernel evidence used for live policy.
+
+RST injection always uses the observed packet-space addresses and ports.
+When verified evidence is available, conntrack deletion uses the kernel's
+`Original` tuple, not the translated egress tuple. Without verification it
+uses the packet tuple as before. Only the default conntrack zone is supported.
 
 Modbus pending requests are keyed by connection incarnation, request
 direction, transaction ID and unit ID. Coverage requires observing the
@@ -561,7 +654,7 @@ than IEC 104 are:
 | `tags` | CIP symbolic tag-path list; cannot combine with logical target selectors |
 | `readOnly`, `writeOnly` | Read/write class from an explicitly present `is_write`; not both true |
 | `direction` | `request` or `response`; omit for both |
-| `mode` | `learn` or `enforce`; omit to inherit global mode |
+| `mode` | `monitor` or `enforce`; omit to inherit global mode |
 
 Modbus and DNP3 access classification uses explicit known operations. Unknown
 operations omit `is_write` and `is_control`, so they match neither `readOnly`
@@ -631,8 +724,9 @@ with `quantity` (function codes 1–4, 15, 16, plus `byte_count` for 15 and 16),
 replies have `byte_count` and, for registers, `register_count`; write replies
 have the fields they echo.
 
-Example: a firewall rule that allows Modbus reads of holding registers 0–99
-(function code 3) on unit 1, over TCP 502 from the `lan` zone to the `dmz` zone:
+Example: a monitor rule observing Modbus reads of holding registers 0–99
+(function code 3) on unit 1, over TCP 502 from the `lan` zone to the `dmz` zone.
+Its `ALLOW` action records would-allow matches, not admission:
 
 ```json
 {
@@ -646,7 +740,7 @@ Example: a firewall rule that allows Modbus reads of holding registers 0–99
     "unitId": 1,
     "addresses": ["0-99"],
     "direction": "request",
-    "mode": "learn"
+    "mode": "monitor"
   },
   "action": "ALLOW"
 }
@@ -770,65 +864,125 @@ IEC 104 conformance codes: `iec104.apci_length`, `iec104.body_length`,
 `iec104.u_function`, `iec104.unsupported_type`, `iec104.zero_objects`.
 Nonconformant content is never safe-read, so a `readOnly` ALLOW does not admit
 it. A malformed event without a code is a lost frame boundary or stream fault
-and is denied in both modes.
+and is denied in enforce scopes; monitor-only scopes remain observational.
 
 Safe-read includes S/U frames, response-direction monitoring, general
 interrogation (100), request-direction read (102), and end of initialization (70).
 It excludes control commands/confirmations, counter interrogation, clock sync,
 reset process, timed test, malformed/unsupported events, and broadcast CA.
 
-IEC 104 rules define an L3/L4 inspection envelope. Any matching enforce-mode rule
-makes the envelope enforce-mode. Object evaluation uses only IEC 104 rules: any
-matching IEC 104 `ALLOW` admits the object, otherwise the first matching IEC 104
-`DENY` by rule ID denies it, and no match is denied. A broad TCP/2404 allow rule
+Enforcing IEC 104 rules define an L3/L4 inspection envelope. Monitor-only rules
+open no fail-closed envelope. Inside an enforce envelope, object decisions use
+only enforcing IEC 104 rules: any matching enforce `ALLOW` admits the object,
+otherwise the first matching enforce `DENY` by rule ID denies it, and no match
+is denied. Matching monitor rules additionally record shadow evidence without
+changing this decision. A broad TCP/2404 allow rule
 or a generic allow default cannot bypass it. In tolerant mode, malformed or
 profile-violating content with a known length can match an `ALLOW` on fields
 that were decoded; absent fields never satisfy a predicate. Strict rejects
 nonconformance before ALLOW matching. Broadcast objects cannot match an
 `ALLOW`. ASDU predicates, identity, and schedules do not narrow the envelope itself.
 
-## Learn Mode
+## Learning
 
-The generic learner records supported **request** events for Modbus, DNP3 and
-CIP. DNP3 restart/control messages are request messages even though their event
-kinds identify the command. Replies, exceptions, events with conformance or
-undecoded findings, and IEC 104 do not produce learned rules. IEC 104 is excluded from both
-automatic learning and asset discovery. Review learned rules before use:
-observation is not authorization.
+Learning records observations and offers certified suggestions; it never changes
+running policy. The **PCAP Analysis** page (`/pcap`) is the single review surface
+for imported captures and explicit live watches. Monitoring alone does not start
+collection. Observation is not authorization, even when the traffic was delivered.
 
-1. Commit an explicit learn-mode firewall entry and configure capture/DPI.
-2. Inspect `GET /api/v1/learn/profiles`. Profiles summarize observed IP pairs;
-   Modbus addresses are the full observed spans (`10-11`, `100`).
-3. Use `POST /api/v1/learn/generate` to return proposed rules for review.
-   Generation separates each `(source, destination, protocol, unit, function
-   code)` tuple. Modbus rules carry only that tuple's unit, function code and
-   observed address spans, and every learned rule matches request direction
-   only. DNP3 rules carry their function code; CIP rules carry their service
-   code and observed object classes, including a class-less request where
-   applicable. Neither protocol gets an `addresses` filter. The learner does
-   not generate DNP3 station/group/point or CIP instance/attribute/tag
-   selectors; add them to a staged rule by hand where needed.
-4. `POST /api/v1/learn/apply` stages generated rules in candidate configuration
-   (`status: staged`); it does not activate them. Generated rules leave
-   `ics.mode` empty, so they inherit the global `dpiMode`: they enforce only
-   when the global mode is `enforce`, and staging them is then refused while
-   `dataplane.nfqueueGroup` is 0. Set a per-rule mode in candidate to override.
-   Rules generated by older versions may have merged units, function codes and
-   addresses into one wider rule. Generation does not remove or replace those
-   existing rules; review and remove any legacy learned rules before relying
-   on the narrower proposals.
-5. Review scope and per-rule modes in candidate, then commit with
-   `POST /api/v1/config/commit`. Rule order does not matter: a learned `ALLOW`
-   admits its traffic even past a `DENY` listed before it, and any `DENY` it
-   overlaps is shadowed (see
-   [Actions and precedence](policy-model.md#actions-and-precedence)). Changing
-   only global mode does not override an explicit per-rule learn mode.
-6. `DELETE /api/v1/learn` clears the profiles when no longer needed.
+### Collect, generate, review, stage
 
-IEC 104 tracking shares a **4,096-entry session table** across learn and enforce
+1. Import a classic PCAP with **Analyze**, or start a **Live watch** after configuring
+   capture/DPI. Analyze returns a dataset, not generated rules. Live watch defaults
+   to one hour, is capped at 24 hours, and allows only one active watch. **Stop**
+   seals its dataset; engine restart stops collection and never resumes a watch.
+2. Open the dataset. Inspect source, capture hash, decoder/profile/snapshot
+   fingerprints, record/byte counts, expiry and gaps. Both sources use the same
+   engine-owned evidence store. **Inspect service authority** shows service
+   endpoints, direction, wire/logical coordinates, role certainty and coverage.
+3. For a sealed dataset, explicitly **Generate suggestions**. Review the proposed
+   endpoint/service and protocol selectors, withheld-reason counts, limitations,
+   and **Certified evidence (frozen)**: positive replay, negative boundary tests,
+   evidence digest and evaluator/generator versions. A rule's **Preview live recent
+   evidence** is a separate isolated impact check against recent retained events;
+   it does not recertify the frozen suggestion or simulate the whole policy.
+4. IEC 104 requires an explicit authenticated administrator **Review** before
+   selection. Wire-coordinate PCAP suggestions also require acknowledgement that
+   the captured pre-NAT addresses and service match the intended deployment.
+   Review records approval of the exact revision; it does not select or stage it.
+   Selection starts empty and is never approval. Viewers can inspect evidence but
+   cannot import, collect, generate, review, select or stage.
+5. **Stage selected** sends one `POST /api/v1/learn/apply` containing a request ID
+   and selected suggestion IDs/revisions, not editable rule payloads. The server
+   reloads certified content and stages the entire bundle atomically. Stale,
+   expired, conflicting, uncertified or unreviewed selections are refused; a
+   `409` rejects the whole batch, displays the server reason and refreshes the
+   suggestions. The maximum is 128 suggestions and 128 total rules per request.
+   If completion is uncertain after a network/engine error, retry the **same
+   request ID and ordered selections**: the candidate may already be staged.
+   Retries use the resolved snapshot for seven days from resolution, even after dataset deletion, eviction or expiry; after that, the request ID is unknown.
+   Completion failures after candidate persistence return a retryable `503`
+   naming the request ID, not a rejection.
+6. Reviewed suggestions stage as explicit `ics.mode: "monitor"` ALLOW rules,
+   including IEC 104. Review the candidate diff and use the normal **Commit** or
+   **Commit-confirmed** bar to apply them. Committed monitor rules do not authorize
+   traffic. Enforcing a learned rule requires a deliberate candidate mode edit
+   and another commit; a global mode change cannot override explicit monitor.
+   The staged receipt is not evidence that the rule is active.
+
+Existing `learned-*` rules may overlap a suggestion. Warnings are heuristic only:
+the learner never deletes or replaces policy by an ID prefix. Review and remove
+unwanted legacy rules yourself, through candidate edits and commit.
+
+### Exactness and limits
+
+Exact means exact within the supported selector relations, not byte-for-byte
+transaction equality. Generation retains correlated endpoint/service, direction,
+unit/station, operation and span/object constraints. The certifier evaluates
+referenced parents and negative boundary mutations against the shared rule
+evaluator, without transmitting packets. Finite replay is evidence, not a proof
+of universal protocol correctness. Malformed, incomplete, undecoded,
+nonconformant or authority-less parents cannot yield actionable suggestions.
+
+- **Modbus:** supported bounded request spans keep their unit and function code.
+  FC23 read/write roles, unbound diagnostic subtypes and unexpressible write
+  values/masks are withheld rather than broadened.
+- **DNP3:** supported master/outstation, function, group/variation and bounded
+  point relations are certified together as needed. All-objects, count-only,
+  wildcard variation, indexless controls and unexpressible values are withheld.
+- **IEC 104:** supported commands only, always admin-reviewed and staged as
+  monitor. Unsupported values, qualifiers and select-before-operate sequences
+  are withheld; where the complete closed value domain was observed, no value
+  predicate is needed. Monitoring ASDUs, APCI/startup behavior and broadcast CAs
+  do not become command ALLOWs. Use deliberate policy/templates for startup.
+- **CIP:** observations are retained, but no actionable CIP rules are offered.
+  Content identified on nonstandard service ports remains observation-only.
+
+Evidence persists in the engine's sibling SQLite store (`/data/evidence.db`,
+override with `CONTAIND_EVIDENCE_DB`) across restarts and expires after seven days
+by the store clock. Ceilings are 32 datasets, 100,000 records and 128 MiB of
+normalized evidence; each parent is limited to 256 KiB and 4,096 objects. Loss,
+rejection, eviction, expiry and withheld reasons are exposed, not silently
+interpreted as complete coverage. Dataset gaps are collection limitations, not a
+blanket certification blocker: Generate can certify retained complete parents;
+the backend decides which parents are eligible. Deletion or eviction invalidates
+dependent proofs for new stage requests.
+Resolved staging snapshots and completed receipts count toward the storage
+budget and are purged when their retry window expires. Dataset review shows the
+last generation's per-dataset withheld counts; store-wide counters are durable totals.
+
+`GET /api/v1/learn/datasets`, `/learn/watches`, `/learn/suggestions` and dataset
+`/observations` reads use bounded pages (`items`, `nextCursor`, maximum `limit`
+200). The UI offers **Load more** rather than implying the first page is complete.
+Delete a dataset with `DELETE /api/v1/learn/datasets/{id}` when it is no longer
+needed. The removed profile/bulk workflow (`GET /learn/profiles`,
+`DELETE /learn`, and the old generate/apply bodies) is not supported. See [API Reference](api-reference.md#learner-evidence-and-staging)
+and [CLI](cli.md#learner-evidence) for the replacement requests and commands.
+
+IEC 104 tracking shares a **4,096-entry session table** across monitor and enforce
 envelopes, including retained closed sessions and abort tombstones. At capacity,
-new learn-mode connections are accepted **without stream inspection**. Each
-untracked SYN emits `ics.session` with `outcome: untracked`, `mode: learn`,
+new monitor-mode connections are accepted **without stream inspection**. Each
+untracked SYN emits `ics.session` with `outcome: untracked`, `mode: monitor`,
 `reason: bound`, and `limit: 4096`, on the client/server tuple without a session
 or APDU ID. Midstream traffic stays untracked; existing sessions remain inspected.
 New SYNs can be tracked when entries expire. Enforce envelopes remain fail closed
@@ -842,7 +996,7 @@ is dropped and reset at both endpoints, so the client reconnects at once.
 ## Live IEC 104 APCI anomalies
 
 Tracked IEC 104 sessions produce observational `ids` / `anomaly` events in
-both learn and enforce mode:
+both monitor and enforce mode:
 
 | `anomaly_type` | Observation |
 | --- | --- |
@@ -981,17 +1135,22 @@ The engine keeps the 4,096 newest matches. Each match has `signature`,
 
 ## PCAP Offline Analysis
 
-The public management endpoints `POST /api/v1/pcap/analyze` (multipart `file`) and
-`POST /api/v1/pcap/analyze/:name` call `AnalyzeForPolicy`. They return analysis
-statistics, event summaries, profiles, and generated rules for review. IEC 104
-is summarized but never generates permissive learned rules. Results **do not
-update live inventory, stage candidate rules, or commit policy**.
+`POST /api/v1/pcap/analyze` (multipart `file`) and
+`POST /api/v1/pcap/analyze/{name}` import normalized evidence through the engine.
+They return `{dataset, stats}`; neither endpoint returns profiles or rules.
+Only classic PCAP is supported, with a 64 MiB upload ceiling; PCAPng is rejected.
 
-The engine's separate `/internal/pcap/analyze` endpoints call `AnalyzeWithOptions`,
-returning events, flows, content identifications, protocol/count statistics,
-duration and a `truncated` flag for partial or snap-length-cut records. These internal
-endpoints are not the public policy-generation interface. See
-[API Reference](api-reference.md) for public requests.
+`stats` contains bounded events, flows, content identifications, protocol/count
+statistics and capture duration. `stats.truncated` identifies partial or
+snap-length-cut records. `stats.displayTruncated` means the display sample was
+capped, not that normalized evidence was sampled. Inspect dataset gaps separately:
+evidence admission loss prevents certification.
+
+The internal engine `/internal/pcap/analyze` endpoints use the same import
+contract, not a second policy generator. Imports do not update live inventory,
+stage candidate rules or commit policy. Use the dataset's explicit **Generate**
+and review workflow above. Raw PCAP replay transmits packets and is never used
+for certification. See [API Reference](api-reference.md#learner-evidence-and-staging).
 
 ## Events and templates
 
@@ -1067,14 +1226,14 @@ station/session/IP/CA/IOA labels; only the abort counter has a fixed `reason` la
 ## Passive IEC 104 inventory
 
 The **Assets** page has a read-only IEC 104 section, separate from configured
-assets and learned profiles. It groups controlling stations (clients) with
-controlled stations (servers, normally port 2404). Expand a pair to see observed
+assets and learner evidence datasets. It groups controlling stations (clients)
+with controlled stations (servers, normally port 2404). Expand a pair to see observed
 common addresses (CAs), then expand a CA to see each (IOA, type ID) point and its
 first/last observation times. Pair and CA command counters distinguish decoded
 client command attempts from accepted commands. Accepted means the IEC decision
 allowed the APDU **and every packet carrying its bytes completed an Accept
 verdict without error**; an allow decision alone is not delivery evidence.
-Acceptance is recorded only in inline enforce envelopes. Learn/monitor and
+Acceptance is recorded only in inline enforce envelopes. Monitor and
 non-inline capture record attempts and points, but never claim delivery.
 Server echoes and monitoring ASDUs do not count as command attempts.
 

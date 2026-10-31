@@ -196,14 +196,14 @@ func TestResyncSYNOnLiveStream(t *testing.T) {
 			f.dropCachedAt(8, "crafted segment", crafted)
 		})
 		t.Run(tc.name+"/learn", func(t *testing.T) {
-			f := newModeFlow(t, "learn", tc.port)
+			f := newModeFlow(t, "monitor", tc.port)
 			f.syn()
 			f.accept("read head", tc.read[:8])
-			if d := f.decide(8, capture.TCPFlagSYN, nil); d.Action != capture.Accept {
+			if d := f.decide(8, capture.TCPFlagSYN, nil); d.Action != capture.Repeat {
 				t.Fatalf("SYN under learn rules = %+v, want Accept", d)
 			}
 			f.acceptAt(8, "crafted segment", crafted)
-			f.noBlock("learn")
+			f.noBlock("monitor")
 		})
 		t.Run(tc.name+"/retransmitted SYN", func(t *testing.T) {
 			f := newModeFlow(t, "enforce", tc.port)
@@ -312,13 +312,13 @@ func TestResyncMidStreamPickupDropped(t *testing.T) {
 			}
 		}
 		t.Run(p.name+"/learn", func(t *testing.T) {
-			f := newModeFlow(t, "learn", p.port)
-			hits := ruleHits(f.e, p.name+"-read")
+			f := newModeFlow(t, "monitor", p.port)
+			hits := shadowHits(f.e, p.name+"-read")
 			f.accept("read without a handshake", p.read(1))
-			if got := ruleHits(f.e, p.name+"-read"); got != hits+1 {
+			if got := shadowHits(f.e, p.name+"-read"); got != hits+1 {
 				t.Fatalf("read rule hits %d -> %d, want the read decoded", hits, got)
 			}
-			f.noBlock("learn")
+			f.noBlock("monitor")
 		})
 	}
 }

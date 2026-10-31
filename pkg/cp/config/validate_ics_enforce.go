@@ -11,7 +11,7 @@ import (
 // validateICSEnforcePath rejects a rule that names an ICS protocol and is in
 // effective enforce mode while no inline path exists. Without NFQUEUE the
 // engine only observes copies of packets, so the first prohibited command
-// would reach the device. Rules without a protocol and explicit learn rules
+// would reach the device. Rules without a protocol and explicit monitor rules
 // are unaffected, and a global enforce mode alone needs no queue.
 func validateICSEnforcePath(c *Config) error {
 	if c.DataPlane.NFQueueGroup != 0 {
@@ -22,7 +22,7 @@ func validateICSEnforcePath(c *Config) error {
 			continue
 		}
 		return fmt.Errorf("rule %s: %s enforce needs an inline path to stop a prohibited command; "+
-			"set dataplane.nfqueueGroup to a non-zero queue, or set the rule's ics.mode to learn", r.ID, r.ICS.Protocol)
+			"set dataplane.nfqueueGroup to a non-zero queue, or set the rule's ics.mode to monitor", r.ID, r.ICS.Protocol)
 	}
 	return nil
 }

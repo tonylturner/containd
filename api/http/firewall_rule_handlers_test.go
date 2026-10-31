@@ -192,7 +192,7 @@ func TestICSRuleListAndDashboardUseAllPredicateFields(t *testing.T) {
 	}
 	store.cfg.Firewall.Rules = append(store.cfg.Firewall.Rules,
 		config.Rule{ID: "plain", Action: config.ActionAllow},
-		config.Rule{ID: "mode-only", Action: config.ActionAllow, ICS: config.ICSPredicate{Mode: "learn"}})
+		config.Rule{ID: "mode-only", Action: config.ActionAllow, ICS: config.ICSPredicate{Mode: "monitor"}})
 	if got := countICSRules(store.cfg.Firewall.Rules); got != len(predicates) {
 		t.Fatalf("dashboard ICS count = %d, want %d", got, len(predicates))
 	}

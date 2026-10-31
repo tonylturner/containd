@@ -48,7 +48,7 @@ func assertAccounting(t *testing.T, e *Engine, proto string, packets, bytes, eve
 
 func realAccountingIEC(t *testing.T) *iecHarness {
 	t.Helper()
-	h := newIECHarness(t, "learn")
+	h := newIECHarness(t, "monitor")
 	h.e.dpiMgr = dpi.NewManager(DefaultDecoders()...)
 	h.e.iec.dpi = h.e.dpiMgr
 	h.handshake()
@@ -72,7 +72,7 @@ func TestAccountingIECMultiObjectAndMultiAPDU(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := realAccountingIEC(t)
-			if _, d := h.send(false, tc.payload); d.Action != capture.Accept {
+			if _, d := h.send(false, tc.payload); d.Action != capture.Repeat {
 				t.Fatalf("decision = %+v", d)
 			}
 			assertAccounting(t, h.e, "iec104", 4, int64(len(tc.payload)), tc.events, tc.events, 0, 0)

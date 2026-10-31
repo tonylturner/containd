@@ -25,18 +25,19 @@ func inventoryCounts(t *testing.T, h *iecHarness, attempted, accepted uint64) {
 }
 
 func TestIECInventoryDelivery(t *testing.T) {
-	for _, fate := range []string{"accept", "deny", "error", "drop", "queue", "learn", "not-inline", "would-drop"} {
+	for _, fate := range []string{"accept", "deny", "error", "drop", "queue", "monitor", "not-inline", "would-drop"} {
 		t.Run(fate, func(t *testing.T) {
 			mode := "enforce"
-			if fate == "learn" {
-				mode = "learn"
+			if fate == "monitor" {
+				mode = "monitor"
 			}
 			h := newAPCIHarness(t, mode)
 			if fate == "deny" || fate == "would-drop" {
 				h.e.iec.policy = h.policy
 				h.policy.allowType = 100 // deny command type 46
 				if fate == "would-drop" {
-					h.policy.mode = "learn"
+					h.policy.mode = "monitor"
+					h.e.LoadRules(iecSnapshot("monitor"))
 				}
 			}
 			h.handshake()
@@ -297,7 +298,7 @@ func TestIECInventoryConcurrentObservationOutcomeExactlyOnce(t *testing.T) {
 }
 
 func TestIECInventoryStartupCapture(t *testing.T) {
-	for _, mode := range []string{"learn", "enforce"} {
+	for _, mode := range []string{"monitor", "enforce"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newAPCIHarness(t, mode)
 			data, err := os.ReadFile("../../../test/iec104/testdata/startup-gi-monitor.pcap")

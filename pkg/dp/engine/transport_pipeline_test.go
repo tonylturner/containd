@@ -92,7 +92,7 @@ func TestTransportSuccessfulRefreshDuringEventPipeline(t *testing.T) {
 	c := r.resolve(ctx, p, false)
 	st := flow.NewState(flow.TupleKey(ev.Original, flow.DirForward), time.Now())
 	st.Connection.Store(c)
-	e.flows[st.Key.Hash()] = st
+	e.flows[st.Key.MapKey()] = st
 	c.Coverage().Store(true) // The opener SYN was captured earlier.
 	events := []dpi.Event{{FlowID: st.Key.Hash(), Proto: "modbus", Kind: "request", Timestamp: time.Now(), Attributes: map[string]any{"transaction_id": uint16(7), "unit_id": uint8(1), "function_code": uint8(3)}}}
 	bindEventConnections(st, events)
@@ -102,7 +102,7 @@ func TestTransportSuccessfulRefreshDuringEventPipeline(t *testing.T) {
 	e.RecordDPIEvents(st, &dpi.ParsedPacket{Proto: "tcp"}, events)
 	p = transportWire(ev.Reply, time.Now(), nil)
 	replyState := flow.NewState(flow.TupleKey(ev.Reply, flow.DirReverse), time.Now())
-	e.flows[replyState.Key.Hash()] = replyState
+	e.flows[replyState.Key.MapKey()] = replyState
 	e.bindTransport(replyState, r.resolve(ctx, p, false))
 	reply := events[0]
 	reply.FlowID, reply.Kind, reply.Connection = replyState.Key.Hash(), "response", nil
@@ -126,7 +126,7 @@ func TestTransportCannotMergeIssuedHistories(t *testing.T) {
 		c := &flow.Connection{ID: id, Key: string(id), Status: "resolved", Evidence: &evidence}
 		c.Published().Store(true)
 		st.Connection.Store(c)
-		e.flows[st.Key.Hash()] = st
+		e.flows[st.Key.MapKey()] = st
 	}
 	r.authority.check(context.Background())
 	e.bindTransport(reply, r.resolve(context.Background(), transportWire(evidence.Reply, time.Now(), nil), false))

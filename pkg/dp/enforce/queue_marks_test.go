@@ -18,9 +18,9 @@ import (
 // ruleset that queues a generic ICS rule.
 func TestICSQueueChainMarksHandshakes(t *testing.T) {
 	modbus := rules.Entry{ID: "modbus", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-		ICS: rules.ICSPredicate{Protocol: "modbus"}, Action: rules.ActionAllow}
+		ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}, Action: rules.ActionAllow}
 	iec := rules.Entry{ID: "iec", Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}},
-		ICS: rules.ICSPredicate{Protocol: "iec104"}, Action: rules.ActionAllow}
+		ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "iec104"}, Action: rules.ActionAllow}
 	const chain = "  chain ics_queue {\n" +
 		"    ct status assured meta mark set meta mark and 0xf0ffffff queue num 100;\n" +
 		"    ct state != { invalid, untracked } meta mark set meta mark and 0xf0ffffff or 0x02000000 queue num 100;\n" +
@@ -55,7 +55,7 @@ func TestICSQueueChainMarksHandshakes(t *testing.T) {
 			if i := strings.Index(text, chain); i < 0 || i > strings.Index(text, "chain forward") {
 				t.Fatalf("chain missing or after forward, want:\n%s\nin:\n%s", chain, text)
 			}
-			if !strings.Contains(text, "    tcp dport 502 jump ics_queue;\n") {
+			if !strings.Contains(text, "    meta mark & 0x04000000 == 0 tcp dport 502 jump ics_queue;\n") {
 				t.Fatalf("the modbus line does not jump to %s:\n%s", ICSQueueChain, text)
 			}
 		})

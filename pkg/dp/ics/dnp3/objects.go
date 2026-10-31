@@ -4,12 +4,15 @@
 package dnp3
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 )
 
 // ObjectHeader represents a parsed DNP3 object group header.
 type ObjectHeader struct {
+	DataDigest   string  `json:"data_digest,omitempty"`
 	HasQualifier bool    `json:"has_qualifier"`
 	HasVariation bool    `json:"has_variation"`
 	HasCount     bool    `json:"has_count"`
@@ -152,6 +155,21 @@ func parseObjectHeaders(data []byte, offset int, fc uint8) ([]ObjectHeader, obje
 			return headers, stop
 		}
 		attachPoints(&headers[len(headers)-1], data[pos:pos+n], fc)
+		if !headerOnlyFunction(fc) && n > 0 {
+			body := data[pos : pos+n]
+			canonical := body
+			if bits, ok := packedObjectBits[uint16(oh.Group)<<8|uint16(oh.Variation)]; ok {
+				values := make([]int, int(oh.Count))
+				for i := range values {
+					bit := i * int(bits)
+					values[i] = int(body[bit/8]>>uint(bit%8)) & ((1 << bits) - 1)
+				}
+				canonical, _ = json.Marshal(values)
+			}
+			hash := sha256.Sum256(canonical)
+			headers[len(headers)-1].DataDigest = "sha256:" + hex.EncodeToString(hash[:])
+		}
+
 		pointCount += len(headers[len(headers)-1].Points)
 		headers[len(headers)-1].Covered += n
 		pos += n

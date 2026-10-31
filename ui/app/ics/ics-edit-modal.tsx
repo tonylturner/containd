@@ -17,7 +17,6 @@ import {
   effectivePredicate,
   selectorFieldError,
   icsAddressDraftFrom,
-  type ICSMode,
   type ICSModeSelection,
   PROTOCOL_KEYS,
   PROTOCOLS,
@@ -25,11 +24,12 @@ import {
 } from "./ics-shared";
 import { iec104DraftFrom } from "./iec104";
 import { buildRuleICS } from "../firewall/firewall-ics-fields";
+import { ICSModeSelect } from "./ics-mode-select";
 import { ICSSelectorFields } from "./ics-selector-fields";
 import { IEC104Fields } from "./iec104-fields";
 import { ICSAddressFields } from "./ics-address-fields";
 
-function filterDraftFrom(rule: FirewallRule, rules: FirewallRule[], globalMode: ICSMode | undefined) {
+function filterDraftFrom(rule: FirewallRule, rules: FirewallRule[], globalMode: ICSModeSelection | undefined) {
   return {
     context: { rules, globalMode },
     enabled: !!rule.ics?.protocol,
@@ -55,7 +55,7 @@ export function EditICSModal({
 }: {
   context: FirewallRule[];
   rule: FirewallRule;
-  globalMode?: ICSMode;
+  globalMode?: ICSModeSelection;
   onClose: () => void;
   /** The predicate to stage; undefined removes it. */
   onSave: (ics: ICSPredicatePatch | undefined) => Promise<FirewallRule | null>;
@@ -188,25 +188,7 @@ export function EditICSModal({
                 ))}
               </select>
             </div>
-            <div>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text)">
-                Safety mode
-                <InfoTip label="Safe learning only alerts; enforce will block on match." />
-              </label>
-              <select
-                aria-label="Safety mode"
-                value={mode}
-                onChange={(e) => setMode(e.target.value as ICSModeSelection)}
-                disabled={!enabled}
-                className="mt-1 w-full input-industrial disabled:opacity-60"
-              >
-                <option value="">
-                  Inherit global ({globalMode === "enforce" ? "enforce" : "learning"})
-                </option>
-                <option value="learn">Safe learning (alert-only)</option>
-                <option value="enforce">Enforce (block)</option>
-              </select>
-            </div>
+            {enabled && protocol && <ICSModeSelect value={mode} onChange={setMode} globalMode={globalMode} label="Safety mode" />}
           </div>
 
           {selectorError && <p role="alert" className="text-sm text-red-400">{selectorError}</p>}

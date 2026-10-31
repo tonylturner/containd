@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- ICS modes are now rule-local `monitor` or `enforce` (rule > global > monitor).
+  Monitor rules only observe; they never admit, drop, hold or reset traffic.
+  A former `learn` ALLOW inside an enforce envelope used to admit at L7 and
+  could mask an enforce DENY through ALLOW precedence. As monitor it does
+  neither, so that traffic is now denied (and reset where the envelope resets).
+  Former `learn` DENY rules no longer drop at L4 without a queue. In NFQUEUE
+  mode a former `learn` ALLOW also no longer admits its flow past the firewall's
+  default DENY; traffic it matched now needs an L4 allow or an enforcing ALLOW.
+  Review policy allowances before upgrading; other enforcing rules and strict
+  scopes still apply.
+- Schema 0.1.9 migrates exact `learn` modes to `monitor` in running, candidate
+  and previous banks and clears protocol-less modes, with durable
+  `config.rule_modes.migrated` audit records per bank. Fresh writes reject
+  `learn`. Back up before upgrading: 0.1.36 cannot read schema 0.1.9; restore a
+  pre-upgrade backup to downgrade.
+
+- Verified AF_PACKET ICS policy and decoder dispatch use the post-DNAT backend
+  and pre-SNAT client on both observed legs. Conntrack deletion uses the verified
+  original tuple while RST injection retains packet-space endpoints.
+
 - ICS decoder events expose CIP request targets (logical, symbolic or unknown;
   responses carry none) and mark
   incomplete CIP MSP/CPF and DNP3 object coverage for per-object policy checks.
@@ -39,6 +59,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hash`.
 
 ### Added
+
+- PCAP Analysis now brings imported captures and bounded live watches into one
+  evidence review workflow: explicitly generate certified suggestions, inspect
+  replay proof and withheld reasons, review IEC 104 and wire/NAT scope, then
+  atomically stage selected revisions as monitor rules. Learning never changes
+  running policy; candidate commit and a deliberate mode edit remain required
+  to enforce. Unsupported relations are withheld, and CIP is observation-only.
+- Firewall and ICS tables show applied-policy shadow message matches,
+  would-allow/would-deny counts and their start time, with rule-filtered monitor
+  events. `GET /api/v1/firewall/shadow-counters` distinguishes unavailable from
+  zero; counters reset on successful apply or engine restart, not failed apply.
+- ICS editors, global DPI settings, wizard and templates offer Inherit,
+  Monitor (safe) and Enforce. Monitoring does not start learning; live collection
+  is off until an administrator starts an explicit bounded live watch.
 
 - Content identification for Modbus, DNP3, IEC 104 and EtherNet/IP on AF_PACKET
   and in PCAP analysis, with passive alternate-port decoding, content/port
@@ -142,6 +176,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   topology canvas uses `@xyflow/react` 12, the maintained successor of `reactflow`.
 - Topology keeps dragged node positions across its periodic refresh, and its zoom
   controls sit top-left, clear of the legend.
+- PCAP analyze responses are now `{dataset, stats}`, without profiles or generated
+  rules. `POST /learn/generate` requires a sealed dataset ID; `POST /learn/apply`
+  requires a request ID and selected suggestion IDs/revisions, stages all or none,
+  and never commits. Profile reads (`GET /learn/profiles`), bulk clear
+  (`DELETE /learn`), and the internal profile/bulk-rule endpoints are removed.
+  Evidence is bounded, persists across restarts and expires after seven days;
+  old `learned-*` rules are only flagged for overlap, never removed automatically.
 - `GET /api/v1/inventory/{ip}` returns an array with every protocol and role
   observed for the address, and 404 when there is none.
 - Apply ICS parsing policy to framed but undecoded content and exclude it from learned allowances.
@@ -243,6 +284,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   logout and forbidden redirects stay under the mount instead of leaving it.
   The breadcrumb no longer shows the mount as a page, and the active navigation
   item is highlighted.
+- Modbus write-single-coil (FC5) values other than ON (`0xFF00`) and OFF
+  (`0x0000`) are invalid on the wire and no longer match an ICS ALLOW, in monitor
+  or enforce mode. An enforce ALLOW for FC5 now leaves such writes to the
+  default verdict; DENY and RESET rules still match them.
+- TCP flows pin one stream framer for both directions, preferring the server
+  port when endpoints use different ICS ports, in live and PCAP inspection.
+
 - AF_PACKET resolver queue or byte overflow stops passive DPI and identification
   decoding for the affected connection incarnation, without changing forwarding.
   A `dpi.coverage.loss` event and `containd_dpi_coverage_losses_total` counter expose

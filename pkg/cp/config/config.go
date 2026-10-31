@@ -17,6 +17,7 @@ import (
 type Config struct {
 	// Pending schema-upgrade evidence is persisted with the next successful write.
 	scopeMigration *IndustrialScopeMigration
+	modeMigration  *RuleModeMigration
 
 	SchemaVersion string          `json:"schema_version,omitempty"`
 	System        SystemConfig    `json:"system"`
@@ -471,7 +472,7 @@ type DataPlaneConfig struct {
 
 	// DPI controls
 	DPIEnabled      bool              `json:"dpiEnabled,omitempty"`      // master DPI on/off
-	DPIMode         string            `json:"dpiMode,omitempty"`         // "learn" or "enforce" (ICS DPI global mode)
+	DPIMode         string            `json:"dpiMode,omitempty"`         // "monitor" or "enforce" (ICS DPI global mode)
 	DPIProtocols    map[string]bool   `json:"dpiProtocols,omitempty"`    // per-IT-protocol enable: "dns","tls","http","ssh","smb","ntp","snmp","rdp"
 	DPIICSProtocols map[string]bool   `json:"dpiIcsProtocols,omitempty"` // per-ICS-protocol enable: "modbus","dnp3","cip","iec104"; an absent key is enabled
 	DPIICSParsing   map[string]string `json:"dpiIcsParsing,omitempty"`   // per-ICS-protocol "tolerant" or "strict"; an absent key is tolerant (see ics.Parsing)
@@ -855,7 +856,7 @@ type ICSPredicate struct {
 	ReadOnly      bool     `json:"readOnly,omitempty"`      // read-only class
 	WriteOnly     bool     `json:"writeOnly,omitempty"`     // write-only class
 	Direction     string   `json:"direction,omitempty"`     // "request", "response", or "" (both)
-	Mode          string   `json:"mode,omitempty"`          // "learn" or "enforce"
+	Mode          string   `json:"mode,omitempty"`          // "monitor" or "enforce"
 
 	// IEC 60870-5-104 predicates (protocol "iec104").
 	TypeIDs []int      `json:"typeIds,omitempty"` // 1..255; int so JSON is a numeric array, never base64

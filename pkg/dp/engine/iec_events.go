@@ -12,6 +12,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/events"
+	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 )
 
@@ -23,9 +24,10 @@ const (
 
 // ics.decision values and reasons.
 const (
-	decisionAllow     = "allow"
-	decisionDeny      = "deny"
-	decisionWouldDrop = "would_drop"
+	decisionAllow      = "allow"
+	decisionDeny       = "deny"
+	decisionWouldDrop  = "would_drop"
+	decisionWouldAllow = "would_allow"
 
 	reasonRule      = "rule"
 	reasonDefault   = "default"
@@ -96,10 +98,28 @@ func nextLiveSessionID() string {
 	return eventfields.SessionID(liveRunID, liveSessionSeq.Add(1))
 }
 
-// iecEvent builds an engine IEC104 event on the session tuple.
-func (s *iecSession) event(kind string, attrs map[string]any, now time.Time) events.Event {
+// iecTelemetry carries private policy coordinates until tagging, including after
+// the owning session has been removed. Only Event is published.
+type iecTelemetry struct {
+	events.Event
+	service *flow.Key
+}
+
+func (s *iecSession) telemetry(event events.Event) iecTelemetry {
+	var service *flow.Key
+	if s.flow != nil {
+		key := s.flow.ServiceKey()
+		service = &key
+	}
+	return iecTelemetry{service: service, Event: event}
+}
+
+// event builds IEC104 telemetry on the wire session tuple. Callers hold the
+// table lock while snapshotting its private service coordinates.
+func (s *iecSession) event(kind string, attrs map[string]any, now time.Time) iecTelemetry {
 	attrs[eventfields.KeySessionID] = s.id
-	return events.Event{
+
+	return s.telemetry(events.Event{
 		Proto:      eventfields.ProtoIEC104,
 		Kind:       kind,
 		Attributes: attrs,
@@ -109,10 +129,10 @@ func (s *iecSession) event(kind string, attrs map[string]any, now time.Time) eve
 		SrcPort:    s.client.Port(),
 		DstPort:    s.server.Port(),
 		Transport:  "tcp",
-	}
+	})
 }
 
-func (s *iecSession) sessionEvent(outcome string, extra map[string]any, now time.Time) events.Event {
+func (s *iecSession) sessionEvent(outcome string, extra map[string]any, now time.Time) iecTelemetry {
 	attrs := map[string]any{eventfields.KeyOutcome: outcome}
 	for k, v := range extra {
 		attrs[k] = v
@@ -128,13 +148,25 @@ var decisionKeys = []string{
 	eventfields.KeyUndecoded,
 }
 
-func (s *iecSession) decisionEvent(ev dpi.Event, d iecDecision, now time.Time) events.Event {
+func (s *iecSession) decisionEvent(ev dpi.Event, d iecDecision, now time.Time) iecTelemetry {
 	attrs := map[string]any{
 		eventfields.KeyDecision: d.decision,
 		eventfields.KeyRuleID:   d.ruleID,
 		eventfields.KeyAction:   d.action,
 		eventfields.KeyMode:     d.mode,
 		eventfields.KeyReason:   d.reason,
+	}
+	if d.ruleID == "" {
+		delete(attrs, eventfields.KeyRuleID)
+	}
+	if d.reason == reasonNonconformant {
+		delete(attrs, eventfields.KeyAction)
+		if d.scopeID != "" {
+			attrs["scopeId"] = d.scopeID
+		}
+		if code := firstFinding(ev); code != "" {
+			attrs["findingCode"] = code
+		}
 	}
 	for _, k := range decisionKeys {
 		if v, ok := ev.Attributes[k]; ok {
@@ -159,15 +191,15 @@ func healthEvent(outcome, errText string, now time.Time) events.Event {
 	}
 }
 
-// untrackedEvent reports a learn-mode SYN accepted without tracking. There
+// untrackedEvent reports a monitor-mode SYN accepted without tracking. There
 // is no incarnation, so it deliberately carries no session_id or apdu_id.
-func untrackedEvent(client, server netip.AddrPort, now time.Time) events.Event {
-	return events.Event{
+func untrackedEvent(client, server netip.AddrPort, now time.Time) iecTelemetry {
+	return iecTelemetry{Event: events.Event{
 		Proto: eventfields.ProtoIEC104,
 		Kind:  eventfields.KindSession,
 		Attributes: map[string]any{
 			eventfields.KeyOutcome: outcomeUntracked,
-			eventfields.KeyMode:    "learn",
+			eventfields.KeyMode:    "monitor",
 			eventfields.KeyReason:  "bound",
 			"limit":                iecMaxSessions,
 		},
@@ -177,5 +209,5 @@ func untrackedEvent(client, server netip.AddrPort, now time.Time) events.Event {
 		SrcPort:   client.Port(),
 		DstPort:   server.Port(),
 		Transport: "tcp",
-	}
+	}}
 }

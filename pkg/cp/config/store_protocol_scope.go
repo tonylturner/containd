@@ -44,7 +44,7 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 		if err != nil {
 			return nil, err
 		}
-		if !beforeIndustrialScope(cfg.SchemaVersion) {
+		if !beforeRuleModes(cfg.SchemaVersion) {
 			continue
 		}
 		// The config row omits the separately referenced bank. Inspect that
@@ -56,14 +56,13 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 		if err := UpgradeInPlace(cfg); err != nil {
 			return nil, err
 		}
-		if cfg.scopeMigration == nil {
-			continue
-		}
-		for _, id := range cfg.scopeMigration.Removed {
-			removed[id] = true
-		}
-		for _, id := range cfg.scopeMigration.Updated {
-			updated[id] = true
+		if cfg.scopeMigration != nil {
+			for _, id := range cfg.scopeMigration.Removed {
+				removed[id] = true
+			}
+			for _, id := range cfg.scopeMigration.Updated {
+				updated[id] = true
+			}
 		}
 		// Store open coalesces changes across all three snapshots into one record.
 		cfg.scopeMigration = nil
@@ -77,7 +76,7 @@ func (s *SQLiteStore) MigrateIndustrialScope(ctx context.Context) (*IndustrialSc
 		}
 	}
 	if len(removed)+len(updated) == 0 {
-		return nil, nil
+		return nil, s.commitStateTx(ctx, tx)
 	}
 	ids := make([]string, 0, len(removed))
 	for id := range removed {

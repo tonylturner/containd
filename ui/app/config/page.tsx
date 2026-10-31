@@ -9,6 +9,7 @@ import { useSearchParams } from "next/navigation";
 
 import { api, isAdmin, type ConfigBackup, type ConfigBundle } from "../../lib/api";
 import type { ConfigDiff } from "../../lib/api-config";
+import { formatICSMode } from "../ics/ics-shared";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { Card } from "../../components/Card";
@@ -315,7 +316,7 @@ function ConfigPage() {
   const assetCount = running?.assets?.length ?? 0;
   const idsRuleCount = configDiff?.idsBank?.running.count ?? 0;
   const objectCount = running?.objects?.length ?? 0;
-  const dpiMode = (running as any)?.dataplane?.dpiMode ?? "off";
+  const dpiMode = formatICSMode(running?.dataplane?.dpiMode, undefined).label;
   const tips: Tip[] = [
     {
       id: "config:backup",
