@@ -206,7 +206,7 @@ func parseSNMPCommunity(msg []byte, off int, attrs map[string]any) (int, bool) {
 
 func newSNMPEvent(state *flow.State, kind string, attrs map[string]any) dpi.Event {
 	return dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      "snmp",
 		Kind:       kind,
 		Attributes: attrs,

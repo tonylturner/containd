@@ -165,9 +165,33 @@ key. A history without a public ID can adopt verified identity, including its
 pending requests; previously published events are not rewritten. PCAP and
 NFQUEUE report `wire`: they retain wire-connection pairing without claiming
 live conntrack evidence or querying it.
-Policy evaluation, protocol dispatch, wire resets and kernel deletion
-coordinates keep their existing address semantics. Arbitrary public-port
-DNAT does not enable decoding on that port.
+With `correlationStatus: resolved`, ICS policy uses the pre-SNAT client
+(`Original.Source`) and post-DNAT backend (`Reply.Source`), including their
+ports. Zones, identities, TAG labels and DPI exclusions use these same
+coordinates, matching nftables forward-chain rules after DNAT and before SNAT.
+For example, a rule for client → backend TCP/502 governs both observed legs
+of public TCP/1502 → backend TCP/502, and verified service ports select Modbus.
+Inventory and learning use that same client/backend authority.
+
+Without verified evidence, policy and legacy decoder selection use the wire
+coordinates. This includes PCAP, NFQUEUE and unresolved or downgraded live
+connections; inspect the event's `correlationStatus` above. A NAT egress leg
+that exposes a supported service port can decode and reach rule/default
+policy in wire coordinates before verification. An unverified public TCP/1502
+leg does not select the legacy Modbus decoder. Passive protocol identification
+is independent of that port selection.
+
+Newly verified evidence can select a decoder on a flow that has not selected
+one yet. An already selected decoder/stream is not switched midstream; policy
+uses the evidence available for the current packet, but previously emitted
+events and decisions are not rewritten. A new connection starts selection
+afresh. Retained-event rule preview remains wire-based because retained events
+do not carry the kernel evidence used for live policy.
+
+RST injection always uses the observed packet-space addresses and ports.
+When verified evidence is available, conntrack deletion uses the kernel's
+`Original` tuple, not the translated egress tuple. Without verification it
+uses the packet tuple as before. Only the default conntrack zone is supported.
 
 Modbus pending requests are keyed by connection incarnation, request
 direction, transaction ID and unit ID. Coverage requires observing the

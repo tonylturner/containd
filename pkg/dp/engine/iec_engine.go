@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
-	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
 
@@ -21,7 +20,7 @@ var newInjector = session.NewInjector
 func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
 	store := e.eventStore
 	var t *iecTable
-	emit := func(evs []events.Event) {
+	emit := func(evs []iecTelemetry) {
 		for _, ev := range t.withSessionTags(evs) {
 			store.Append(ev)
 		}

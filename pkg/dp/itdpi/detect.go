@@ -32,7 +32,7 @@ func (d *PortDetector) OnPacket(state *flow.State, pkt *dpi.ParsedPacket) ([]dpi
 		"transport": pkt.Proto,
 	}
 	ev := dpi.Event{
-		FlowID:     state.Key.Hash(),
+		FlowID:     state.ID(),
 		Proto:      proto,
 		Kind:       "detect",
 		Attributes: attrs,

@@ -24,10 +24,7 @@ func (e *Engine) domainRule(name string) string {
 }
 
 func (e *Engine) domainClientState(state *flow.State) *flow.State {
-	direction := state.Key.Dir
-	if c := state.Connection.Load(); c != nil {
-		direction = c.Direction(state.Key)
-	}
+	direction := state.ServiceKey().Dir
 	if direction == flow.DirForward {
 		return state
 	}
@@ -60,7 +57,7 @@ func (e *Engine) observeDomain(state *flow.State, pkt *dpi.ParsedPacket, discove
 		e.pruneDomainDecisionsLocked()
 		d.lastPrune = now
 	}
-	if pkt.TCPSyn && state.Key.Dir == flow.DirForward {
+	if pkt.TCPSyn && state.ServiceKey().Dir == flow.DirForward {
 		delete(decisions, state)
 	}
 	if len(pkt.Payload) == 0 {
@@ -77,7 +74,7 @@ func (e *Engine) observeDomain(state *flow.State, pkt *dpi.ParsedPacket, discove
 			e.recordDomainCounter("dpi_domain_cache_eviction")
 		}
 	}
-	if state.Key.Dir != flow.DirForward {
+	if state.ServiceKey().Dir != flow.DirForward {
 		return
 	}
 	if _, decided := decisions[state]; decided {
@@ -89,7 +86,7 @@ func (e *Engine) observeDomain(state *flow.State, pkt *dpi.ParsedPacket, discove
 	}
 	if name != "" {
 		reason = "sni"
-	} else if ip, ok := netip.AddrFromSlice(state.Key.ServerIP()); ok {
+	} else if ip, ok := netip.AddrFromSlice(state.ServiceKey().ServerIP()); ok {
 		name = d.lookup(ip)
 	}
 	rule := e.domainRule(name)

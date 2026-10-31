@@ -143,16 +143,17 @@ func (e *Engine) countDomainExclusion(value string) {
 // addressExclusion returns the first IP or CIDR exclusion that matches
 // either endpoint of the flow, or "".
 func (e *Engine) addressExclusion(state *flow.State) string {
+	key := state.ServiceKey()
 	for _, excl := range e.dpiExclusions {
 		switch excl.Type {
 		case "ip":
 			ip := net.ParseIP(excl.Value)
-			if ip != nil && (state.Key.SrcIP.Equal(ip) || state.Key.DstIP.Equal(ip)) {
+			if ip != nil && (key.SrcIP.Equal(ip) || key.DstIP.Equal(ip)) {
 				return excl.Value
 			}
 		case "cidr":
 			_, cidr, err := net.ParseCIDR(excl.Value)
-			if err == nil && (cidr.Contains(state.Key.SrcIP) || cidr.Contains(state.Key.DstIP)) {
+			if err == nil && (cidr.Contains(key.SrcIP) || cidr.Contains(key.DstIP)) {
 				return excl.Value
 			}
 		}
@@ -163,5 +164,6 @@ func (e *Engine) addressExclusion(state *flow.State) string {
 // isIECFlow reports a TCP flow on the IEC 104 port, which domain and
 // address exclusions never exempt.
 func isIECFlow(state *flow.State) bool {
-	return state.Key.Proto == 6 && (state.Key.SrcPort == iec104Port || state.Key.DstPort == iec104Port)
+	key := state.ServiceKey()
+	return key.Proto == 6 && (key.SrcPort == iec104Port || key.DstPort == iec104Port)
 }

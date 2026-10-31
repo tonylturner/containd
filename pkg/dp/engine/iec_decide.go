@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
-	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/ics"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -163,7 +162,7 @@ type iecFinding struct {
 type iecJudgement struct {
 	denied   bool
 	trigger  string
-	events   []events.Event
+	events   []iecTelemetry
 	findings []iecFinding
 }
 

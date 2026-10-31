@@ -93,7 +93,7 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		e.verdictCache.Put(flowHash, verdict.Verdict{Action: verdict.AllowContinue})
 		return acceptDecision
 	}
-	if isIECPort(pkt) {
+	if isIECFlow(state) {
 		// IEC104 is parsed only on a session tracked from its SYN
 		// (HasOffset); outside every envelope it passes
 		// unparsed, as before.

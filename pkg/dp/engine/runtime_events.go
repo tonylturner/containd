@@ -49,7 +49,7 @@ func (e *Engine) RecordDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs [
 	}
 	e.recordAnomalyAlerts(state, pkt, srcIP, dstIP, evs)
 	e.recordSignatureAlerts(state, pkt, evs)
-	e.eventStore.Record(state, pkt, evs)
+	e.recordTaggedEvents(state, pkt, evs)
 	e.recordEvaluatedIDSAlerts(state, pkt, evs)
 }
 
@@ -106,7 +106,7 @@ func (e *Engine) recordAnomalyAlerts(state *flow.State, pkt *dpi.ParsedPacket, s
 			if a.Type == "correlation_unavailable" && e.transport != nil {
 				e.transport.authority.count("correlation_unavailable")
 			}
-			e.eventStore.Record(state, pkt, []dpi.Event{anomalyAlertFromEvent(ev, a)})
+			e.recordTaggedEvents(state, pkt, []dpi.Event{anomalyAlertFromEvent(ev, a)})
 		}
 	}
 }
@@ -142,7 +142,7 @@ func (e *Engine) recordSignatureAlerts(state *flow.State, pkt *dpi.ParsedPacket,
 			continue
 		}
 		for _, m := range e.sigEngine.Match(ev) {
-			e.eventStore.Record(state, pkt, []dpi.Event{signatureAlertFromMatch(ev, m)})
+			e.recordTaggedEvents(state, pkt, []dpi.Event{signatureAlertFromMatch(ev, m)})
 		}
 	}
 }
@@ -190,7 +190,7 @@ func (e *Engine) recordEvaluatedIDSAlerts(state *flow.State, pkt *dpi.ParsedPack
 		return
 	}
 	metrics.IDSAlertsTotal.Add(float64(len(alerts)))
-	e.eventStore.Record(state, pkt, alerts)
+	e.recordTaggedEvents(state, pkt, alerts)
 }
 
 // VerdictCache returns the flow verdict cache.
@@ -300,13 +300,13 @@ func (e *Engine) EvaluateVerdict(ctx rules.EvalContext) verdict.Verdict {
 // Side-effect: appends a firewall.rule.hit event to the event store when
 // the matched rule has Log:true.
 func (e *Engine) EvaluateVerdictMatch(ctx rules.EvalContext) (verdict.Verdict, *rules.Entry) {
-	return e.evaluateVerdictMatch(ctx, true)
+	return e.evaluateVerdictMatch(ctx, true, nil)
 }
 
 // evaluateVerdictMatch is EvaluateVerdictMatch with the default action
 // optional: when applyDefault is false, a context that matches no rule
 // gets AllowContinue instead of the snapshot's default.
-func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) (verdict.Verdict, *rules.Entry) {
+func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool, state *flow.State) (verdict.Verdict, *rules.Entry) {
 	start := time.Now()
 	ev := e.ruleSnap.Evaluator()
 	action, matched := ev.EvaluateMatch(ctx)
@@ -351,6 +351,16 @@ func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool) 
 			p, err := strconv.ParseUint(ctx.Port, 10, 16)
 			if err == nil {
 				logEvent.DstPort = uint16(p)
+			}
+		}
+		if state != nil {
+			// Match in service space but retain the historical wire endpoints
+			// of the rule-hit event, just like decoded events and flow IDs.
+			key := state.Key
+			logEvent.SrcIP, logEvent.DstIP = key.OpenerIP().String(), key.ServerIP().String()
+			logEvent.DstPort = key.DstPort
+			if key.Dir == flow.DirReverse {
+				logEvent.DstPort = key.SrcPort
 			}
 		}
 		e.eventStore.Append(logEvent)

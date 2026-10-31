@@ -81,9 +81,9 @@ func (s *iecSession) appendAPCIFindingsLocked(findings []anomaly.IEC104APCIFindi
 		for k, v := range f.Attributes {
 			a.Attributes[k] = v
 		}
-		acts.events = append(acts.events, events.Event{
+		acts.events = append(acts.events, s.telemetry(events.Event{
 			FlowID: a.FlowID, Proto: a.Proto, Kind: a.Kind, Attributes: a.Attributes, Timestamp: a.Timestamp,
 			SrcIP: src.Addr().String(), DstIP: dst.Addr().String(), SrcPort: src.Port(), DstPort: dst.Port(), Transport: "tcp",
-		})
+		}))
 	}
 }

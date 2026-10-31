@@ -81,10 +81,12 @@ func (l *Learner) RecordEvent(srcIP, dstIP string, ev dpi.Event) {
 		return
 	}
 	if key, ok := flow.ParseKey(ev.FlowID); ok && ev.Connection.Verified() {
-		if ev.Connection.Direction(key) != flow.DirForward {
+		state := &flow.State{Key: key}
+		state.Connection.Store(ev.Connection)
+		if state.ServiceKey().Dir != flow.DirForward {
 			return
 		}
-		src, dst, verified := ev.Connection.LogicalIPs(key)
+		src, dst, verified := state.LogicalIPs()
 		if !verified {
 			return
 		}

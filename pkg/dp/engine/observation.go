@@ -28,6 +28,7 @@ type liveObserver struct {
 
 type observationContext struct {
 	states   [2]*flow.State
+	legacy   *dpi.Manager
 	selected bool
 	iecOwned bool
 	snapshot *rules.Snapshot
@@ -80,14 +81,27 @@ func legacyDecodes(c *observationContext, protocol identify.Protocol) bool {
 		return false
 	}
 	for _, st := range c.states {
+		if st == nil {
+			continue
+		}
+		key := st.ServiceKey()
 		// UDP/2222 selects legacy implicit I/O, never the confirmed ENIP layer.
 		if protocol == identify.ENIP && cip.UsesImplicitIO(st) {
 			return false
 		}
-		if st != nil && st.Key.Proto == 6 && (st.Key.SrcPort == iec104Port || st.Key.DstPort == iec104Port) {
+		if key.Proto == 6 && (key.SrcPort == iec104Port || key.DstPort == iec104Port) {
 			return false
 		}
-		if st != nil && (ics.IsProtocolPortOn(string(protocol), st.Key.Proto, st.Key.SrcPort) || ics.IsProtocolPortOn(string(protocol), st.Key.Proto, st.Key.DstPort)) {
+		if c.legacy != nil {
+			name := string(protocol)
+			if protocol == identify.ENIP {
+				name = "cip"
+			}
+			if matches, committed := c.legacy.CommittedProtocol(st, name); committed {
+				return matches
+			}
+		}
+		if ics.IsProtocolPortOn(string(protocol), key.Proto, key.SrcPort) || ics.IsProtocolPortOn(string(protocol), key.Proto, key.DstPort) {
 			// The generic legacy path never decodes IEC104 without a table owner.
 			return protocol != identify.IEC104
 		}
@@ -139,7 +153,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 	parsed := observationPacket(st)
 	selected := e.ShouldInspect(st, parsed)
 	snapshot := e.ruleSnap.Load()
-	iecOwned := e.iecOwnsPacket(pkt)
+	iecOwned := e.iecOwnsState(pkt, st)
 	e.flowMu.Lock()
 	live := e.observation
 	if live == nil {
@@ -161,7 +175,7 @@ func (e *Engine) observePacket(pkt capture.Packet, st *flow.State) {
 			e.flowMu.Unlock()
 			return
 		}
-		ctx = &observationContext{generation: connection.Evidence}
+		ctx = &observationContext{generation: connection.Evidence, legacy: e.dpiMgr}
 		live.entries[key] = ctx
 		ports := [2]uint16{pkt.SrcPort, pkt.DstPort}
 		if connection.Direction(st.Key) == flow.DirReverse {
@@ -232,8 +246,11 @@ func (e *Engine) settleObservationsLocked(output observe.Output) {
 	for _, id := range output.Identifications {
 		if ctx := e.observation.entries[id.Key]; ctx != nil {
 			for _, state := range ctx.states {
-				if state != nil && !ics.IsDecoderPortOn(state.Key.Proto, state.Key.SrcPort) && !ics.IsDecoderPortOn(state.Key.Proto, state.Key.DstPort) {
-					e.transport.settleObservation(state)
+				if state != nil {
+					key := state.ServiceKey()
+					if !ics.IsDecoderPortOn(key.Proto, key.SrcPort) && !ics.IsDecoderPortOn(key.Proto, key.DstPort) {
+						e.transport.settleObservation(state)
+					}
 				}
 			}
 		}
