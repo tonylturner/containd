@@ -3,6 +3,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -28,6 +29,8 @@ func TestStageSnapshotSurvivesEvidenceLifecycle(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				// Resolve near evidence expiry to exercise the independent retry window.
+				*now = d.ExpiresAt.Add(-time.Hour)
 				req := learn.ApplyRequest{RequestID: "lifecycle", Selections: []learn.Selection{{ID: v.ID, Revision: v.Revision}}}
 				frozen, err := s.ResolveForStage(ctx, req)
 				if err != nil {
@@ -37,7 +40,7 @@ func TestStageSnapshotSurvivesEvidenceLifecycle(t *testing.T) {
 				case "delete":
 					err = s.DeleteDataset(ctx, d.ID)
 				case "expire":
-					*now = now.Add(2 * evidence.Retention)
+					*now = d.ExpiresAt
 					err = s.Maintain(ctx)
 				case "evict":
 					*now = now.Add(time.Second)
@@ -70,7 +73,7 @@ func TestStageSnapshotSurvivesEvidenceLifecycle(t *testing.T) {
 					if err := s.MarkStaged(ctx, req); err != nil {
 						t.Fatal("complete", err)
 					}
-					*now = now.Add(2 * evidence.Retention)
+					*now = now.Add(time.Hour)
 					if err := s.Maintain(ctx); err != nil {
 						t.Fatal(err)
 					}
@@ -88,5 +91,99 @@ func TestStageSnapshotSurvivesEvidenceLifecycle(t *testing.T) {
 				assertGauges(t, s)
 			})
 		}
+	}
+}
+
+func TestExpiredStageRequestFreesAdmissionBudget(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		name := "pending"
+		if complete {
+			name = "completed"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			s, now, _ := newStore(t, evidence.Budgets{})
+			d := create(t, s, "receipt")
+			ingest(t, s, d, "one", true)
+			v := certified(t, s, d)
+			v, err := s.ReviewSuggestion(ctx, "admin", learn.ReviewRequest{Selection: learn.Selection{ID: v.ID, Revision: v.Revision}, Approve: true, CoordinateApproved: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			*now = d.ExpiresAt.Add(-time.Hour)
+			req := learn.ApplyRequest{RequestID: "expires", Selections: []learn.Selection{{ID: v.ID, Revision: v.Revision}}}
+			frozen, err := s.ResolveForStage(ctx, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expires := now.Add(evidence.Retention)
+			var storedExpiry int64
+			if err := s.db.QueryRowContext(ctx, `SELECT expires FROM stage_requests WHERE id=?`, req.RequestID).Scan(&storedExpiry); err != nil {
+				t.Fatal(err)
+			}
+			if storedExpiry != expires.UnixNano() {
+				t.Fatal("retry window did not start at resolve")
+			}
+			if complete {
+				if err := s.MarkStaged(ctx, req); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Delete before evidence expiry, but after resolution so tombstones
+			// outlive the receipt and do not affect measured budget reclamation.
+			*now = now.Add(30 * time.Minute)
+			if err := s.DeleteDataset(ctx, d.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Maintain(ctx); err != nil {
+				t.Fatal(err)
+			}
+			before, err := s.Counters(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var receiptBytes uint64
+			if err := s.db.QueryRowContext(ctx, `SELECT length(request)+length(resolved) FROM stage_requests WHERE id=?`, req.RequestID).Scan(&receiptBytes); err != nil {
+				t.Fatal(err)
+			}
+			// Reserve admission's metadata headroom, but not another dataset's
+			// bytes until the receipt is freed. No dataset remains to evict.
+			s.limits.MaxBytes = before.Bytes + 2048
+			next := metadata()
+			next.CaptureSHA256, err = evidence.Digest("next-capture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			*now = expires.Add(-time.Nanosecond)
+			got, err := s.ResolveForStage(ctx, req)
+			if err != nil || !reflect.DeepEqual(got, frozen) {
+				t.Fatalf("retry inside window: %v %+v", err, got)
+			}
+			if _, err := s.CreateDataset(ctx, next); !errors.Is(err, ErrBudget) {
+				t.Fatalf("receipt did not consume admission budget: %v", err)
+			}
+			*now = expires
+			if err := s.Maintain(ctx); err != nil {
+				t.Fatal(err)
+			}
+			var requests, selections int
+			if err := s.db.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM stage_requests), (SELECT count(*) FROM stage_selections)`).Scan(&requests, &selections); err != nil {
+				t.Fatal(err)
+			}
+			if requests != 0 || selections != 0 {
+				t.Fatalf("expired reservation retained: %d requests, %d selections", requests, selections)
+			}
+			after, err := s.Counters(ctx)
+			if err != nil || before.Bytes-after.Bytes != receiptBytes {
+				t.Fatalf("receipt bytes not freed: before=%d after=%d receipt=%d err=%v", before.Bytes, after.Bytes, receiptBytes, err)
+			}
+			if err := s.MarkStaged(ctx, req); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("expired request still known: %v", err)
+			}
+			if _, err := s.CreateDataset(ctx, next); err != nil {
+				t.Fatal("receipt expiry did not restore admission", err)
+			}
+			assertGauges(t, s)
+		})
 	}
 }

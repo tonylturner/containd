@@ -337,13 +337,14 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				now = d.ExpiresAt.Add(-time.Hour)
 				e := &lifecycleStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, evidence: es, loseCompletion: true}
 				e.beforeFinish = func() {
 					switch event {
 					case "delete":
 						err = es.DeleteDataset(ctx, d.ID)
 					case "expire":
-						now = now.Add(2 * evidence.Retention)
+						now = d.ExpiresAt
 						err = es.Maintain(ctx)
 					case "evict":
 						now = now.Add(time.Second)

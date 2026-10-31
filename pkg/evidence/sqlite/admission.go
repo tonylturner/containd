@@ -105,11 +105,8 @@ func (s *Store) expire(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM tombstones WHERE expires<=?`, now); err != nil {
 		return err
 	}
-	// Stage snapshots are recovery records, not evidence leases. Retain them
-	// (including completed receipts) so every admitted request can converge.
-	// Their bytes remain charged to admission; only explicit release removes
-	// a known failed mutation's reservation.
-	return nil
+	_, err = tx.ExecContext(ctx, `DELETE FROM stage_requests WHERE expires<=?`, now)
+	return err
 }
 
 func (s *Store) fit(ctx context.Context, tx *sql.Tx, protected string, addBytes, addRecords, addDatasets uint64) error {

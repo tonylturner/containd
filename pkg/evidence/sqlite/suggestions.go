@@ -289,9 +289,6 @@ func (s *Store) ResolveForStage(ctx context.Context, req learn.ApplyRequest) ([]
 			if rules > 128 {
 				return ErrBudget
 			}
-			if v.ExpiresAt.Before(expires) {
-				expires = v.ExpiresAt
-			}
 			out = append(out, v)
 		}
 		resolved, err = encode(out)
