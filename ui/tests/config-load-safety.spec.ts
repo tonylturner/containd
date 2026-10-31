@@ -13,6 +13,9 @@ const data: Record<string, unknown> = {
   "/firewall/nat": { enabled: false, portForwards: [{ id: "existing", externalPort: 8443 }] },
   "/routing": { gateways: [], routes: [{ dst: "198.51.100.0/24", iface: "eth0" }], rules: [] },
   "/dataplane": { captureInterfaces: [], dpiMock: false, dpiEnabled: true },
+  "/pcap/config": { enabled: false, interfaces: ["wan"], zones: [], snaplen: 4096, maxSizeMB: 32, maxFiles: 5, mode: "once", promisc: false, bufferMB: 8, rotateSeconds: 120, filePrefix: "existing", filter: { src: "192.0.2.10", dst: "198.51.100.10", proto: "tcp", port: "443" }, forwardTargets: [{ interface: "eth0", enabled: true, host: "192.0.2.20", port: 9001, proto: "tcp" }] },
+  "/pcap/status": { running: false },
+  "/pcap/list": [],
   "/ids/rules": { enabled: false, rules: [{ id: "existing", title: "Existing", enabled: true }], ruleGroups: [{ id: "group", name: "Group", enabled: true }] },
   "/ids/sources": [],
   "/services/status": {},
@@ -145,3 +148,56 @@ test("stand-in DNS defaults remain disabled until the authoritative subtree load
   await expect.poll(() => server.writes.length).toBe(1);
   expect(server.writes[0]).toEqual({ path: "/services/dns", body: data["/services/dns"] });
 });
+
+for (const failure of ["HTTP", "null"] as const) {
+  test(`PCAP: ${failure} reads block default saves, preserve drafts, and recover losslessly`, async ({ page }) => {
+    const server = await mockAPI(page);
+    const failed = failure === "HTTP" ? server.failed : server.nullReads;
+    failed.add("/pcap/config");
+    await page.clock.setFixedTime(new Date("2026-10-31T12:00:00Z"));
+    await Promise.all([page.waitForResponse(read("/pcap/config")), page.goto("/dataplane/")]);
+    const save = page.getByRole("button", { name: "Save PCAP defaults", exact: true });
+    const error = page.getByRole("alert").filter({ hasText: "Configuration unavailable" });
+    const refreshed = page.getByText("Last refreshed:", { exact: false });
+    const refresh = page.getByRole("button", { name: "Refresh", exact: true });
+    await expect(error).toBeVisible();
+    await expect(save).toBeDisabled();
+    await expect(refreshed).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Upload PCAP", exact: true })).toBeEnabled();
+    expect(server.writes).toEqual([]);
+
+    failed.clear();
+    await Promise.all([page.waitForResponse(read("/pcap/config")), refresh.click()]);
+    await expect(save).toBeEnabled();
+    await expect(error).toHaveCount(0);
+    await expect(refreshed).toBeVisible();
+    const lastRefresh = await refreshed.textContent();
+    await page.getByText("Advanced capture options", { exact: true }).click();
+    // The file-prefix input follows its visible label in the advanced section.
+    const prefixField = page.locator("label").filter({ hasText: "File prefix" }).locator("..").locator("input");
+    await expect(prefixField).toHaveValue("existing");
+    await prefixField.fill("draft");
+    failed.add("/pcap/config");
+    await page.clock.setFixedTime(new Date("2026-10-31T12:01:00Z"));
+    await Promise.all([page.waitForResponse(read("/pcap/config")), refresh.click()]);
+    await expect(error).toBeVisible();
+    await expect(save).toBeDisabled();
+    await expect(prefixField).toHaveValue("draft");
+    await expect(refreshed).toHaveText(lastRefresh!);
+    await expect(page.getByText("PCAP defaults staged", { exact: false })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Start capture now", exact: true })).toBeEnabled();
+    expect(server.writes).toEqual([]);
+
+    failed.clear();
+    await Promise.all([page.waitForResponse(read("/pcap/config")), page.evaluate((event) => window.dispatchEvent(new CustomEvent(event)), CONFIG_COMMITTED)]);
+    await expect(save).toBeEnabled();
+    await expect(error).toHaveCount(0);
+    await expect(prefixField).toHaveValue("draft");
+    await save.click();
+    await expect.poll(() => server.writes.length).toBe(1);
+    expect(server.writes[0]).toEqual({
+      path: "/pcap/config",
+      body: { ...data["/pcap/config"] as object, filePrefix: "draft" },
+    });
+  });
+}

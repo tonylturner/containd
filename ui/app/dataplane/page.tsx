@@ -1,8 +1,9 @@
 "use client";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
+import { useConfigLoad } from "../../lib/use-config-editor";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   api,
@@ -42,6 +43,7 @@ type PcapForwardRow = PcapForwardTarget & { interface: string };
 
 export default function PcapPage() {
   const canEdit = isAdmin();
+  const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const confirm = useConfirm();
   const [ifaces, setIfaces] = useState<Interface[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
@@ -94,26 +96,26 @@ export default function PcapPage() {
     dirtyRef.current = isDirty;
   }, [isDirty]);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setRefreshing(true);
     const [cfg, st, list] = await Promise.all([
       getPcapConfig(),
       getPcapStatus(),
       listPcaps(),
     ]);
-    if (cfg) {
+    if (checkLoaded(cfg)) {
       const normalized = normalizeConfig(cfg);
       const nextJson = JSON.stringify(normalized);
       if (!dirtyRef.current) {
         setSettings(normalized);
       }
       setSavedConfigJson(nextJson);
+      setLastRefresh(new Date());
     }
     setStatus(st);
     setPcaps(list);
-    setLastRefresh(new Date());
     setRefreshing(false);
-  }
+  }, [checkLoaded]);
 
   useEffect(() => {
     api.listInterfaces().then((list) => setIfaces(list ?? []));
@@ -122,14 +124,14 @@ export default function PcapPage() {
   }, []);
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     const timer = setInterval(() => {
       refresh();
     }, 8000);
     return () => clearInterval(timer);
-  }, []);
+  }, [refresh]);
 
   async function refreshInterfaceState() {
     const list = await api.listInterfaceState();
@@ -414,7 +416,7 @@ export default function PcapPage() {
   }
 
   async function saveSettings() {
-    if (!canEdit) return;
+    if (!canEdit || !canSaveNow() || refreshing) return;
     if (configIssues.length > 0) {
       setNotice("Fix capture settings before saving.");
       return;
@@ -459,7 +461,7 @@ export default function PcapPage() {
             <>
               <button
                 onClick={saveSettings}
-                disabled={state !== "idle"}
+                disabled={!canSave || refreshing || state !== "idle"}
                 className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
               >
                 Save PCAP defaults
@@ -486,6 +488,11 @@ export default function PcapPage() {
       }
     >
       <ConfirmDialog {...confirm.props} />
+      {loadError && (
+        <p role="alert" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {loadError}
+        </p>
+      )}
       {ifaceStateStatus === "unavailable" && (
         <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           <p>Interface runtime state unavailable — the engine could not be reached. Device discovery is unknown; saved capture settings are unchanged.</p>
