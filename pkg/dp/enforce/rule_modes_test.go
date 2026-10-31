@@ -22,7 +22,7 @@ func TestMonitorRulesCounterOnly(t *testing.T) {
 				if c.SteersIEC104(snap) || strings.Contains(text, "chain iec104_envelope") {
 					t.Fatalf("monitor opens envelope:\n%s", text)
 				}
-				if c.queuesICS(snap) != (queue > 0) || strings.Contains(text, "queue num") != (queue > 0) {
+				if strings.Contains(text, "queue num") != (queue > 0) {
 					t.Fatalf("observation steering:\n%s", text)
 				}
 				counted := false
@@ -35,14 +35,14 @@ func TestMonitorRulesCounterOnly(t *testing.T) {
 						t.Fatalf("terminal monitor line: %s", line)
 					}
 					if queue > 0 {
-						if !strings.Contains(line, unobservedGuard) || !strings.Contains(line, "jump ics_queue") {
+						if !strings.Contains(line, unobservedGuard) || !(strings.Contains(line, "jump "+ICSQueueChain) || strings.Contains(line, "jump "+monitorIECChain)) {
 							t.Fatalf("unguarded observation: %s", line)
 						}
 					} else if strings.Contains(line, "jump") {
 						t.Fatal(line)
 					}
 				}
-				if !counted {
+				if counted != (queue > 0) {
 					t.Fatal("no monitor counter line")
 				}
 				if _, err := RuleCounts(snap, map[string]CounterValue{ruleCounterName("trial"): {}}); err != nil {
@@ -64,7 +64,7 @@ func TestConditionalMonitorNeverRechecksOrAdmits(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := snap.Firewall[0]
-	if p.kernelDecided(entry) || p.rechecksQueued(entry) || p.kernelGuarded(entry) {
+	if p.kernelGuarded(entry) {
 		t.Fatal("conditional monitor participates in kernel decisions")
 	}
 	c := goldenCompiler()
@@ -75,7 +75,7 @@ func TestConditionalMonitorNeverRechecksOrAdmits(t *testing.T) {
 	if strings.Contains(text, "chain conditional_policy") || strings.Contains(text, "chain conditional_scope") {
 		t.Fatalf("monitor installed decision recheck chains:\n%s", text)
 	}
-	if !strings.Contains(text, unobservedGuard+" tcp dport 502 "+counterStmt(entry.ID)+" jump "+ICSQueueChain) {
+	if !strings.Contains(text, unobservedGuard+" "+untrackedState+" tcp dport 502 "+counterStmt(entry.ID)+" jump "+ICSQueueChain) {
 		t.Fatalf("monitor observation was narrowed by unresolved identity:\n%s", text)
 	}
 }

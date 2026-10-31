@@ -3,7 +3,6 @@
 package enforce
 
 import (
-	"bytes"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -207,8 +206,8 @@ func TestIdentityLowering(t *testing.T) {
 	for _, want := range []string{
 		"set identity4_6f7073 {\n    type ipv4_addr;\n    elements = { 10.0.0.5 }\n  }",
 		"set identity6_6f7073 {\n    type ipv6_addr;\n    elements = { 2001:db8::6 }\n  }",
-		"    ip saddr @identity4_6f7073 ip saddr { 10.0.0.0/24 } accept;\n",
-		"    ip saddr @identity4_6f7073 udp dport 161 drop;\n    ip6 saddr @identity6_6f7073 udp dport 161 drop;\n",
+		"    ct state { invalid, untracked } ip saddr @identity4_6f7073 ip saddr { 10.0.0.0/24 } goto ordered_s2_rule_0;\n",
+		"    ct state { invalid, untracked } ip saddr @identity4_6f7073 udp dport 161 goto ordered_s2_rule_4;\n    ct state { invalid, untracked } ip6 saddr @identity6_6f7073 udp dport 161 goto ordered_s2_rule_4;\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q:\n%s", want, out)
@@ -229,92 +228,57 @@ func TestIdentityLowering(t *testing.T) {
 	assertDeclaredSets(t, out)
 }
 
-// TestPredicatesOnlyWhereNftablesDecides: without a queue an ICS rule is
-// decided by nftables and guarded. With one it keeps its unguarded queue
-// line, and the engine decides the predicates of the client's messages; the
-// kernel rechecks the rest of its connections against them, while a queued
-// DENY or an unconditional queued ALLOW leaves its connections to the
-// engine.
+// Steering ignores current predicates; the ordered admission body always
+// retains identity and schedule, including an inspecting DENY terminal.
 func TestPredicatesOnlyWhereNftablesDecides(t *testing.T) {
-	entry := rules.Entry{ID: "modbus", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-		ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}, Identities: []string{"ops"}, Action: rules.ActionAllow, Schedule: maintenanceWindow}
+	entry := rules.Entry{ID: "modbus", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}}, ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}, Identities: []string{"ops"}, Schedule: maintenanceWindow, Action: rules.ActionDeny}
 	snap := &rules.Snapshot{Firewall: []rules.Entry{entry}, IdentityBindings: []rules.IdentityBinding{{IP: "10.0.0.5", Identities: []string{"ops"}}}}
-	c := goldenCompiler()
-	queued, err := compileWithoutCounters(c, snap)
-	if err != nil {
-		t.Fatal(err)
-	}
-	set := "@schedule_allow_41_0120_0360_416d65726963612f4e65775f596f726b"
-	for _, want := range []string{
-		"    meta mark & 0x04000000 == 0 tcp dport 502 jump ics_queue;\n    ct state established jump conditional_scope;\n",
-		"  chain conditional_scope {\n    meta l4proto tcp ct reply proto-src 502 goto conditional_policy;\n  }\n",
-		"    ct status dnat return;\n    meta l4proto tcp ct reply proto-src 502 ct original ip saddr @identity4_6f7073 meta time " + set + " return;\n    drop;\n",
-	} {
-		if !strings.Contains(queued, want) {
-			t.Fatalf("missing %q:\n%s", want, queued)
-		}
-	}
-	for _, a := range []rules.Action{rules.ActionDeny, rules.ActionAllow} {
-		other := entry
-		other.Action = a
-		if a == rules.ActionAllow {
-			other.Identities, other.Schedule = nil, rules.SchedulePredicate{}
-		}
-		text, err := compileWithoutCounters(c, &rules.Snapshot{Firewall: []rules.Entry{other}, IdentityBindings: snap.IdentityBindings})
+	for _, q := range []int{0, 100} {
+		c := goldenCompiler()
+		c.QueueID = q
+		text, err := c.CompileFirewall(snap)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(text, "    meta mark & 0x04000000 == 0 tcp dport 502 jump ics_queue;\n") || strings.Contains(text, "identity4_") ||
-			strings.Contains(text, "schedule_") || strings.Contains(text, conditionalScopeChain) {
-			t.Fatalf("queued %s rule was guarded:\n%s", a, text)
+		assertDeclaredSets(t, text)
+		ordered := strings.Join(chainBody(t, text, conditionalPolicyChain), "\n")
+		polarity := "deny"
+		if q > 0 {
+			polarity = "allow"
 		}
-	}
-	c.QueueID = 0
-	plain, err := compileWithoutCounters(c, snap)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"    ip saddr @identity4_6f7073 meta time " + set + " tcp dport 502 accept;\n",
-		"    ct state established jump conditional_scope;\n    ct state { established, related } accept;\n",
-	} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("missing %q:\n%s", want, plain)
+		assertText(t, ordered, "ct original ip saddr @identity4_6f7073", "meta time @schedule_"+polarity+"_", "goto ordered_s2_rule_0")
+		scope := strings.Join(chainBody(t, text, conditionalScopeChain), "\n")
+		assertText(t, scope, "ct reply proto-src 502 goto ordered_s2")
+		if strings.Contains(scope, "@identity") || strings.Contains(scope, "meta time") {
+			t.Fatal("conditional dispatch was guarded")
+		}
+		if q > 0 {
+			forward := strings.Join(chainBody(t, text, "forward"), "\n")
+			assertText(t, forward, "jump "+enforceQueueChain)
+			if strings.Contains(forward, "@identity") || strings.Contains(forward, "meta time") {
+				t.Fatal("steering was guarded")
+			}
+			assertText(t, strings.Join(chainBody(t, text, "ordered_s2_rule_0"), "\n"), "goto admit_conditional")
+		} else {
+			assertText(t, strings.Join(chainBody(t, text, "ordered_s2_rule_0"), "\n"), "goto deny_clean")
 		}
 	}
 }
 
-// TestRecheckVerdicts covers the policy chain's verdicts: a RESET rejects
-// per protocol, and an ALLOW default returns.
 func TestRecheckVerdicts(t *testing.T) {
-	snap := &rules.Snapshot{
-		Default: rules.ActionAllow,
-		Firewall: []rules.Entry{
-			{ID: "reset-any", Action: rules.ActionReset, Schedule: maintenanceWindow},
-			{ID: "reset-udp", Protocols: []rules.Protocol{{Name: "udp", Port: "53"}}, Action: rules.ActionReset},
-		},
-	}
-	p, err := newPredicates(snap, 0)
+	snap := &rules.Snapshot{Default: rules.ActionAllow, Firewall: []rules.Entry{{ID: "reset-any", Action: rules.ActionReset, Schedule: maintenanceWindow}, {ID: "reset-udp", Protocols: []rules.Protocol{{Name: "udp", Port: "53"}}, Action: rules.ActionReset}}}
+	text, err := goldenCompiler().CompileFirewall(snap)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var b bytes.Buffer
-	if err := p.writeRecheckChains(&b, targetForward); err != nil {
-		t.Fatal(err)
+	assertText(t, strings.Join(chainBody(t, text, "ordered_s2"), "\n"), "goto admit_unconditional")
+	for _, name := range []string{"ordered_s2_rule_0", "ordered_s2_rule_1"} {
+		assertText(t, strings.Join(chainBody(t, text, name), "\n"), "meta l4proto tcp goto reset_tcp_clean", "goto reset_other_clean")
 	}
-	set := "@schedule_deny_41_0120_0360_416d65726963612f4e65775f596f726b"
-	want := "  chain conditional_scope {\n    goto conditional_policy;\n  }\n" +
-		"  chain conditional_policy {\n    ct status dnat return;\n" +
-		"    meta time " + set + " meta l4proto tcp reject with tcp reset;\n" +
-		"    meta time " + set + " reject with icmpx admin-prohibited;\n" +
-		"    meta l4proto udp ct reply proto-src 53 reject with icmpx admin-prohibited;\n" +
-		"    return;\n  }\n"
-	if b.String() != want {
-		t.Fatalf("recheck chains:\n%s\nwant:\n%s", b.String(), want)
-	}
+	assertText(t, strings.Join(chainBody(t, text, "reset_tcp_clean"), "\n"), "meta mark set meta mark & 0xe0ffffff", rejectTCP)
+	assertText(t, strings.Join(chainBody(t, text, "reset_other_clean"), "\n"), rejectOther)
 }
 
-// TestScheduleRefresh refills each time set in one transaction.
 func TestScheduleRefresh(t *testing.T) {
 	c := goldenCompiler()
 	c.ScheduleFrom = c.ScheduleFrom.Add(24 * time.Hour)
@@ -375,7 +339,7 @@ func TestPredicatesOnEveryAction(t *testing.T) {
 	}{
 		{"reset", rules.Entry{ID: "r", Action: rules.ActionReset, Identities: []string{"ops"}, Schedule: window,
 			Protocols: []rules.Protocol{{Name: "tcp", Port: "23"}}},
-			[]string{ops + " " + set + " tcp dport 23 reject with tcp reset", ops6 + " " + set + " tcp dport 23 reject with tcp reset"}},
+			[]string{ops + " " + set + " tcp dport 23 goto ordered_s2_rule_0", ops6 + " " + set + " tcp dport 23 goto ordered_s2_rule_0"}},
 		{"tag", rules.Entry{ID: "t", Action: rules.ActionTag, Tag: "ops", Identities: []string{"ops"},
 			Protocols: []rules.Protocol{{Name: "tcp", Port: "23"}}},
 			[]string{ops + " tcp dport 23", ops6 + " tcp dport 23"}},
@@ -392,22 +356,21 @@ func TestPredicatesOnEveryAction(t *testing.T) {
 			Identities: []string{"nobody"}}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p, err := newPredicates(&rules.Snapshot{IdentityBindings: bindings, Firewall: []rules.Entry{tc.entry}}, 0)
+			snap := &rules.Snapshot{IdentityBindings: bindings, Firewall: []rules.Entry{tc.entry}}
+			text, err := NewCompiler().CompileFirewall(snap)
 			if err != nil {
 				t.Fatal(err)
 			}
-			lines, err := guardedWithoutCounters(p, tc.entry)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(lines) != len(tc.want) {
-				t.Fatalf("lines = %q, want prefixes %q", lines, tc.want)
-			}
-			for i, want := range tc.want {
-				if !strings.HasPrefix(lines[i], want) {
-					t.Fatalf("line %d = %q, want prefix %q", i, lines[i], want)
+			if len(tc.want) == 0 {
+				if strings.Contains(strings.Join(chainBody(t, text, "forward"), "\n"), counterStmt(tc.entry.ID)) {
+					t.Fatal("unbound effect matched")
+				}
+			} else {
+				for _, want := range tc.want {
+					assertText(t, text, want)
 				}
 			}
+
 		})
 	}
 }

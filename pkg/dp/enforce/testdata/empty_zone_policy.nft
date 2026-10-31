@@ -3,6 +3,38 @@ table inet containd_policy {
     type ifname;
     elements = { "eth2" }
   }
+  chain deny_clean {
+    meta mark set meta mark & 0xe0ffffff;
+    drop;
+  }
+  chain reset_tcp_clean {
+    meta mark set meta mark & 0xe0ffffff;
+    reject with tcp reset;
+  }
+  chain reset_other_clean {
+    meta mark set meta mark & 0xe0ffffff;
+    reject with icmpx admin-prohibited;
+  }
+  chain admit_clean {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    meta mark set meta mark & 0xe0ffffff;
+    accept;
+  }
+  chain related_clean {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    meta mark set meta mark & 0xe0ffffff;
+    accept;
+  }
+  chain admit_unconditional {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    ct state != { invalid, untracked } ct mark set (ct mark & 0xfffffff9) | 0x00000002;
+    goto admit_clean;
+  }
+  chain admit_conditional {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    ct state != { invalid, untracked } ct mark set ct mark & 0xfffffffd;
+    goto admit_clean;
+  }
   counter rule_546aa40bea1ed29d { }
   counter rule_aa354d7643a8dae8 { }
   counter rule_ee45a0648c6a0187 { }
@@ -38,6 +70,40 @@ table inet containd_policy {
     type ipv4_addr;
     elements = { 10.0.0.5 }
   }
+  chain ordered_s2_rule_0 {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    ct state { invalid, untracked } counter name "rule_546aa40bea1ed29d";
+    ct state != { invalid, untracked } ct mark & 0x00000001 == 0 counter name "rule_546aa40bea1ed29d";
+    ct state != { invalid, untracked } ct mark & 0x00000001 != 0 ct mark & 0x00000006 != 0x00000002 counter name "rule_546aa40bea1ed29d";
+    goto admit_unconditional;
+  }
+  chain ordered_s2_rule_1 {
+    counter name "rule_aa354d7643a8dae8";
+    goto deny_clean;
+  }
+  chain ordered_s2_rule_2 {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    ct state { invalid, untracked } counter name "rule_ee45a0648c6a0187";
+    ct state != { invalid, untracked } ct mark & 0x00000001 == 0 counter name "rule_ee45a0648c6a0187";
+    ct state != { invalid, untracked } ct mark & 0x00000001 != 0 ct mark & 0x00000006 != 0x00000002 counter name "rule_ee45a0648c6a0187";
+    goto admit_unconditional;
+  }
+  chain ordered_s2_rule_4 {
+    meta mark & 0x10000000 != 0 goto deny_clean;
+    ct state { invalid, untracked } counter name "rule_4efae95b767df54d";
+    ct state != { invalid, untracked } ct mark & 0x00000001 == 0 counter name "rule_4efae95b767df54d";
+    ct state != { invalid, untracked } ct mark & 0x00000001 != 0 ct mark & 0x00000006 != 0x00000002 counter name "rule_4efae95b767df54d";
+    goto admit_conditional;
+  }
+  chain ordered_s2_rule_5 {
+    goto admit_unconditional;
+  }
+  chain ordered_s2 {
+    ct state != { invalid, untracked } ct direction original iifname { "eth2" } meta l4proto tcp ct reply proto-src 443 goto ordered_s2_rule_2;
+    ct state != { invalid, untracked } ct direction reply oifname { "eth2" } meta l4proto tcp ct reply proto-src 443 goto ordered_s2_rule_2;
+    ct state { invalid, untracked } iifname { "eth2" } tcp dport 443 goto ordered_s2_rule_2;
+    goto deny_clean;
+  }
   chain iec104_envelope {
     drop;
   }
@@ -53,7 +119,9 @@ table inet containd_policy {
   chain forward {
     type filter hook forward priority 0;
     policy drop;
-    ct state { established, related } accept;
-    iifname { "eth2" } tcp dport 443 counter name "rule_ee45a0648c6a0187" accept;
+    meta mark & 0x10000000 != 0 goto ordered_s2;
+    ct state established ct mark & 0x00000007 == 0x00000002 goto admit_clean;
+    ct state != related goto ordered_s2;
+    ct state related goto related_clean;
   }
 }

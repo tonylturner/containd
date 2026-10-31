@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -29,7 +30,7 @@ import (
 //     of the flow in both directions, each direction in its own bucket
 //     (meterLines).
 //   - TAG has no kernel effect: its line only counts the connection
-//     openers it matches, after the established accept, and continues.
+//     non-established original-direction packets it matches, after steering.
 
 // rejectTCP and rejectOther are RESET's reject statements.
 const (
@@ -43,56 +44,6 @@ const (
 	meterSetSize        = 65536
 	meterMinIdleSeconds = 10
 )
-
-// lineForm is one nft line of a rule protocol: match clauses that go before
-// the rule's own predicates, and the statements that follow them.
-type lineForm struct {
-	match string
-	stmts string
-}
-
-// actionForms lowers e's action for protocol p. counted is the rule's
-// counter statement; logStmt, when set, logs the packets the action
-// applies to. A queued rule's traffic goes to the engine's queue through
-// ICSQueueChain whatever its action. RATE_LIMIT, which needs lines per
-// direction, is meterLines'.
-func actionForms(e rules.Entry, p rules.Protocol, queued bool, counted, logStmt string) ([]lineForm, error) {
-	stmts := func(verdict string) string {
-		out := counted
-		if logStmt != "" {
-			out += " " + logStmt
-		}
-		if verdict != "" {
-			out += " " + verdict
-		}
-		return out
-	}
-	if queued {
-		return []lineForm{{match: unobservedGuard, stmts: stmts("jump " + ICSQueueChain)}}, nil
-	}
-	if rules.MonitorICS(e, "") {
-		return []lineForm{{stmts: counted}}, nil
-	}
-	switch e.Action {
-	case rules.ActionAllow:
-		return []lineForm{{stmts: stmts("accept")}}, nil
-	case rules.ActionDeny:
-		return []lineForm{{stmts: stmts("drop")}}, nil
-	case rules.ActionReset:
-		switch protocolName(p) {
-		case "tcp":
-			return []lineForm{{stmts: stmts(rejectTCP)}}, nil
-		case "":
-			return []lineForm{{match: "meta l4proto tcp", stmts: stmts(rejectTCP)}, {stmts: stmts(rejectOther)}}, nil
-		default:
-			return []lineForm{{stmts: stmts(rejectOther)}}, nil
-		}
-	case rules.ActionTag:
-		return []lineForm{{stmts: stmts("")}}, nil
-	default:
-		return nil, fmt.Errorf("unknown action %q in entry %s", e.Action, e.ID)
-	}
-}
 
 // Meter line selection of the packets with and without a usable conntrack
 // entry: every packet takes exactly one of them.
@@ -148,7 +99,7 @@ func meterLines(e rules.Entry, p rules.Protocol, scopes []addrScope, zones zoneL
 					match += " meta l4proto != { tcp, udp }"
 				}
 			}
-			stmts := fmt.Sprintf("%s update @%s { %s %s } %s drop", counterStmt(e.ID), k.set(e.ID), k.key(), limit, tail)
+			stmts := fmt.Sprintf("%s update @%s { %s %s } %s meta mark set meta mark & 0x%08x drop", counterStmt(e.ID), k.set(e.ID), k.key(), limit, tail, ^markabi.ContinuationSkbMask)
 			if zones.target == targetForward {
 				first := append([]string{match, untrackedState, in, out, header}, s.header(false)...)
 				lines = append(lines, ruleLine{family: k.family, text: joinClauses(append(first, stmts))})
@@ -273,9 +224,9 @@ func protocolName(p rules.Protocol) string {
 }
 
 // forwardSections splits the firewall entries into the forward chain's
-// sections: the RATE_LIMIT meters by rule ID, the TAG lines by rule ID,
-// and the deciding entries in rules.DecisionOrder.
-func forwardSections(entries []rules.Entry) (meters, tags, decide []rules.Entry) {
+// effects: RATE_LIMIT meters and TAG lines, each by rule ID.
+// Ordered terminal traversal is owned by writeOrderedChains.
+func forwardSections(entries []rules.Entry) (meters, tags []rules.Entry) {
 	for _, e := range entries {
 		switch e.Action {
 		case rules.ActionRateLimit:
@@ -289,8 +240,5 @@ func forwardSections(entries []rules.Entry) (meters, tags, decide []rules.Entry)
 	}
 	byID(meters)
 	byID(tags)
-	for _, i := range rules.DecisionOrder(entries) {
-		decide = append(decide, entries[i])
-	}
-	return meters, tags, decide
+	return meters, tags
 }

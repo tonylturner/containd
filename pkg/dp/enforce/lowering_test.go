@@ -41,8 +41,9 @@ var longestZone = strings.Repeat("z", MaxZoneNameBytes)
 // local input and NAT rules.
 func zoneNamesSnapshot() *rules.Snapshot {
 	return &rules.Snapshot{
-		Default:    rules.ActionDeny,
-		ZoneIfaces: map[string][]string{"a-b": {"eth1"}, "a_b": {"eth2"}, "A B": {"eth3"}, "ab": {"eth4"}, longestZone: {"eth5"}},
+		Default:        rules.ActionDeny,
+		ForwardMatches: map[string]rules.ForwardMatch{"web": {Enabled: true, IngressDevices: []string{"eth2"}, Protocol: "tcp", ListenPort: 8443, Backend: netip.MustParseAddrPort("192.0.2.10:443")}},
+		ZoneIfaces:     map[string][]string{"a-b": {"eth1"}, "a_b": {"eth2"}, "A B": {"eth3"}, "ab": {"eth4"}, longestZone: {"eth5"}},
 		LocalInput: []rules.LocalServiceRule{
 			{ID: "ssh-a-b", Zone: "a-b", Proto: "tcp", Port: 22},
 			{ID: "ssh-a_b", Zone: "a_b", Proto: "tcp", Port: 22},
@@ -95,6 +96,8 @@ var loweringGoldens = []struct {
 	{"testdata/address_family_policy.nft", familySnapshot, goldenCompiler},
 	{"testdata/zone_names_policy.nft", zoneNamesSnapshot, goldenCompiler},
 	{"testdata/gate_policy.nft", gateSnapshot, gateCompiler},
+	{"testdata/packet_policy.nft", packetPolicySnapshot, goldenCompiler},
+	{"testdata/actions_policy.nft", actionsSnapshot, func() *Compiler { c := NewCompiler(); c.QueueID, c.NFLogGroup = 100, 7; return c }},
 }
 
 // policyTable cuts the policy table out of a compiled script.
@@ -156,6 +159,9 @@ func TestRulesThatMatchNothingWarn(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var got []warning
 			for _, w := range NewCompiler().RuleWarnings(tc.snap) {
+				if w.ShadowedBy != "" {
+					continue
+				}
 				got = append(got, warning{w.RuleID, w.Predicate, strings.Join(w.Zones, ",")})
 			}
 			if !reflect.DeepEqual(got, tc.want) {
@@ -219,8 +225,8 @@ func TestAddressesAreParsed(t *testing.T) {
 			t.Fatalf("%q compiled:\n%s", addr, out)
 		}
 	}
-	lines, err := compileEntryWithoutCounters(rules.Entry{ID: "r", Sources: []string{" 10.1.0.0/16", "2001:db8::/32 ", "::ffff:10.2.0.1"}, Action: rules.ActionDeny}, nil, 0, 0)
-	if want := []string{"ip saddr { 10.1.0.0/16 } drop", "ip6 saddr { 2001:db8::/32, ::ffff:10.2.0.1 } drop"}; err != nil || !reflect.DeepEqual(lines, want) {
+	lines, err := headerLinesText(rules.Entry{ID: "r", Sources: []string{" 10.1.0.0/16", "2001:db8::/32 ", "::ffff:10.2.0.1"}, Action: rules.ActionDeny}, "goto deny_clean")
+	if want := []string{"ip saddr { 10.1.0.0/16 } goto deny_clean", "ip6 saddr { 2001:db8::/32, ::ffff:10.2.0.1 } goto deny_clean"}; err != nil || !reflect.DeepEqual(lines, want) {
 		t.Fatalf("lines = %q, %v; want %q", lines, err, want)
 	}
 }
