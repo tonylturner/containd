@@ -28,8 +28,10 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockUserStore struct {
-	users    map[string]*users.StoredUser // keyed by ID
-	sessions map[string]*users.Session    // keyed by session ID
+	challenges    map[string]mockMFAChallenge
+	nextChallenge int
+	users         map[string]*users.StoredUser // keyed by ID
+	sessions      map[string]*users.Session    // keyed by session ID
 }
 
 func newMockUserStore() *mockUserStore {

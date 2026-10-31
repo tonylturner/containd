@@ -83,7 +83,7 @@ func loginHandler(userStore users.Store) gin.HandlerFunc {
 		}
 		loginLimiter.Success(key)
 		if u.MFAEnabled && strings.TrimSpace(u.TOTPSecret) != "" {
-			challengeToken, err := signMFAChallenge(jwtSecret(), mfaChallengePurposeLogin, u.ID, "")
+			challengeToken, err := signMFAChallenge(c.Request.Context(), userStore, jwtSecret(), mfaChallengePurposeLogin, u, "")
 			if err != nil {
 				apiError(c, http.StatusInternalServerError, "failed to create MFA challenge")
 				return

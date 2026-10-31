@@ -24,7 +24,7 @@ import (
 var (
 	ErrNotFound      = errors.New("user not found")
 	ErrUsernameTaken = errors.New("username already exists")
-	ErrLastAdmin     = errors.New("cannot delete last admin")
+	ErrLastAdmin     = errors.New("cannot remove last admin")
 )
 
 type User struct {
@@ -52,8 +52,9 @@ type Patch struct {
 
 type StoredUser struct {
 	User
-	PasswordHash string
-	TOTPSecret   string
+	PasswordHash      string
+	TOTPSecret        string
+	CredentialVersion int64 `json:"-"`
 }
 
 type Store interface {
@@ -67,6 +68,9 @@ type Store interface {
 	SetTOTP(ctx context.Context, id string, secret string) error
 	DisableTOTP(ctx context.Context, id string) error
 	AcceptTOTP(ctx context.Context, id string, code string, now time.Time) error
+	CreateMFAChallenge(ctx context.Context, u *StoredUser, purpose string, expires time.Time) (string, error)
+	RedeemLoginMFA(ctx context.Context, challengeID, userID, code string, now time.Time) error
+	RedeemEnrollMFA(ctx context.Context, challengeID, userID, secret, code string, now time.Time) error
 	CheckCurrentPassword(ctx context.Context, id string, password string, now time.Time) error
 	SetMFARequirement(ctx context.Context, id string, required bool, graceUntil *time.Time) error
 	EnsureDefaultAdmin(ctx context.Context) error
@@ -165,6 +169,7 @@ CREATE TABLE IF NOT EXISTS users (
   mfa_required INTEGER NOT NULL DEFAULT 0,
   mfa_grace_until INTEGER NOT NULL DEFAULT 0,
   mfa_totp_last_step INTEGER NOT NULL DEFAULT 0,
+  credential_version INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -177,6 +182,14 @@ CREATE TABLE IF NOT EXISTS sessions (
   revoked INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY(user_id) REFERENCES users(id)
 );
+CREATE TABLE IF NOT EXISTS mfa_challenges (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  purpose TEXT NOT NULL,
+  credential_version INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mfa_challenges_expiry ON mfa_challenges(expires_at);
 CREATE TABLE IF NOT EXISTS factor_failures (
   user_id TEXT NOT NULL,
   factor TEXT NOT NULL,
@@ -197,6 +210,15 @@ CREATE TABLE IF NOT EXISTS factor_failures (
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_required INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_grace_until INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN mfa_totp_last_step INTEGER NOT NULL DEFAULT 0`)
+	var versionColumn int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name='credential_version'`).Scan(&versionColumn); err != nil {
+		return fmt.Errorf("inspect credential version: %w", err)
+	}
+	if versionColumn == 0 {
+		if _, err := db.Exec(`ALTER TABLE users ADD COLUMN credential_version INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("migrate credential version: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -309,10 +331,10 @@ func (s *SQLiteStore) List(ctx context.Context) ([]User, error) {
 
 func (s *SQLiteStore) GetByUsername(ctx context.Context, username string) (*StoredUser, error) {
 	username = strings.TrimSpace(username)
-	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, mfa_totp_secret, mfa_totp_enabled, mfa_required, mfa_grace_until, created_at, updated_at FROM users WHERE username = ?`, username)
+	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, mfa_totp_secret, mfa_totp_enabled, mfa_required, mfa_grace_until, credential_version, created_at, updated_at FROM users WHERE username = ?`, username)
 	var u StoredUser
 	var cAt, uAt, graceUntil int64
-	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &u.TOTPSecret, &u.MFAEnabled, &u.MFARequired, &graceUntil, &cAt, &uAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &u.TOTPSecret, &u.MFAEnabled, &u.MFARequired, &graceUntil, &u.CredentialVersion, &cAt, &uAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -325,10 +347,14 @@ func (s *SQLiteStore) GetByUsername(ctx context.Context, username string) (*Stor
 }
 
 func (s *SQLiteStore) GetByID(ctx context.Context, id string) (*StoredUser, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, mfa_totp_secret, mfa_totp_enabled, mfa_required, mfa_grace_until, created_at, updated_at FROM users WHERE id = ?`, id)
+	return getByID(ctx, s.db, id)
+}
+
+func getByID(ctx context.Context, db userDB, id string) (*StoredUser, error) {
+	row := db.QueryRowContext(ctx, `SELECT id, username, first_name, last_name, email, role, password_hash, must_change_password, mfa_totp_secret, mfa_totp_enabled, mfa_required, mfa_grace_until, credential_version, created_at, updated_at FROM users WHERE id = ?`, id)
 	var u StoredUser
 	var cAt, uAt, graceUntil int64
-	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &u.TOTPSecret, &u.MFAEnabled, &u.MFARequired, &graceUntil, &cAt, &uAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.PasswordHash, &u.MustChangePassword, &u.TOTPSecret, &u.MFAEnabled, &u.MFARequired, &graceUntil, &u.CredentialVersion, &cAt, &uAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -428,82 +454,6 @@ func insertUser(ctx context.Context, db userDB, u User, password string, bootstr
 	return &u, nil
 }
 
-func (s *SQLiteStore) Update(ctx context.Context, id string, patch Patch) (*User, error) {
-	existing, err := s.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	u := existing.User
-	if patch.FirstName != nil {
-		u.FirstName = *patch.FirstName
-	}
-	if patch.LastName != nil {
-		u.LastName = *patch.LastName
-	}
-	if patch.Email != nil {
-		u.Email = *patch.Email
-	}
-	if patch.Role != "" {
-		if patch.Role != "admin" && patch.Role != "view" {
-			return nil, fmt.Errorf("invalid role %q", patch.Role)
-		}
-		u.Role = patch.Role
-	}
-	u.UpdatedAt = time.Now().UTC()
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE users SET first_name=?, last_name=?, email=?, role=?, updated_at=? WHERE id=?`,
-		u.FirstName, u.LastName, u.Email, u.Role, u.UpdatedAt.Unix(), id)
-	if err != nil {
-		return nil, fmt.Errorf("update user: %w", err)
-	}
-	return &u, nil
-}
-
-func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
-	existing, err := s.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if existing.Role == "admin" {
-		var adminCount int
-		row := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users WHERE role = 'admin'`)
-		if err := row.Scan(&adminCount); err != nil {
-			return fmt.Errorf("count admins: %w", err)
-		}
-		if adminCount <= 1 {
-			return ErrLastAdmin
-		}
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin delete: %w", err)
-	}
-	removed, err := activeSessionIDs(ctx, tx, id, "")
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("delete sessions: %w", err)
-	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
-	if err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("delete user: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		_ = tx.Rollback()
-		return ErrNotFound
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit delete: %w", err)
-	}
-	s.revocations.publish(removed)
-	return nil
-}
-
 // SetPassword replaces a user's password, revokes the account's other
 // sessions and clears its TOTP and current-password failure counts. It is the
 // single entry point for password changes: it returns ErrPasswordChangeLabMode
@@ -558,22 +508,7 @@ func (s *SQLiteStore) updateCredential(ctx context.Context, op, id string, facto
 		return fmt.Errorf("begin %s: %w", op, err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	if factor == "" {
-		_, err = tx.ExecContext(ctx, `DELETE FROM factor_failures WHERE user_id = ?`, id)
-	} else {
-		err = clearFactor(ctx, tx, id, factor)
-	}
-	if err != nil {
-		return fmt.Errorf("%s: clear failures: %w", op, err)
-	}
-	revoked, err := revokeOtherSessions(ctx, tx, id)
+	revoked, err := updateCredentialTx(ctx, tx, op, id, factor, query, args...)
 	if err != nil {
 		return err
 	}
@@ -582,6 +517,32 @@ func (s *SQLiteStore) updateCredential(ctx context.Context, op, id string, facto
 	}
 	s.revocations.publish(revoked)
 	return nil
+}
+
+func updateCredentialTx(ctx context.Context, tx *sql.Tx, op, id string, factor Factor, query string, args ...any) ([]string, error) {
+	res, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrNotFound
+	}
+	if factor == "" {
+		_, err = tx.ExecContext(ctx, `DELETE FROM factor_failures WHERE user_id = ?`, id)
+	} else {
+		err = clearFactor(ctx, tx, id, factor)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: clear failures: %w", op, err)
+	}
+	if err := invalidateChallenges(ctx, tx, id); err != nil {
+		return nil, err
+	}
+	revoked, err := revokeOtherSessions(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	return revoked, nil
 }
 
 func (s *SQLiteStore) SetMFARequirement(ctx context.Context, id string, required bool, graceUntil *time.Time) error {

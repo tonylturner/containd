@@ -83,8 +83,10 @@ func updateUserHandler(store users.Store) gin.HandlerFunc {
 		updated, err := store.Update(c.Request.Context(), id, patch)
 		if err != nil {
 			code := http.StatusBadRequest
-			if err == users.ErrNotFound {
+			if errors.Is(err, users.ErrNotFound) {
 				code = http.StatusNotFound
+			} else if errors.Is(err, users.ErrLastAdmin) {
+				code = http.StatusConflict
 			}
 			apiError(c, code, err.Error())
 			return

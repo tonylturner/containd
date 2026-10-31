@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -19,8 +20,8 @@ import (
 )
 
 const (
-	mfaChallengePurposeLogin  = "mfa_login"
-	mfaChallengePurposeEnroll = "mfa_enroll"
+	mfaChallengePurposeLogin  = users.MFAChallengeLogin
+	mfaChallengePurposeEnroll = users.MFAChallengeEnroll
 	mfaChallengeTTL           = 5 * time.Minute
 )
 
@@ -92,13 +93,19 @@ func loginAuditDetail(mfa bool) string {
 	return "local password"
 }
 
-func signMFAChallenge(secret []byte, purpose string, userID string, secretValue string) (string, error) {
+func signMFAChallenge(ctx context.Context, store users.Store, secret []byte, purpose string, u *users.StoredUser, secretValue string) (string, error) {
+	expires := time.Now().UTC().Add(mfaChallengeTTL)
+	id, err := store.CreateMFAChallenge(ctx, u, purpose, expires)
+	if err != nil {
+		return "", err
+	}
 	claims := mfaChallengeClaims{
 		Purpose: purpose,
 		Secret:  secretValue,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   userID,
-			ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(mfaChallengeTTL)),
+			ID:        id,
+			Subject:   u.ID,
+			ExpiresAt: jwt.NewNumericDate(expires),
 			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
 		},
 	}
@@ -117,7 +124,7 @@ func parseMFAChallenge(raw string, purpose string) (*mfaChallengeClaims, error) 
 	if err != nil || !parsed.Valid {
 		return nil, errors.New("invalid or expired challenge token")
 	}
-	if claims.Subject == "" || claims.Purpose != purpose {
+	if claims.ID == "" || claims.Subject == "" || claims.Purpose != purpose {
 		return nil, errors.New("invalid or expired challenge token")
 	}
 	return claims, nil
@@ -148,7 +155,11 @@ func loginMFAHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "MFA is not enabled for this account")
 			return
 		}
-		if err := userStore.AcceptTOTP(c.Request.Context(), u.ID, req.Code, time.Now()); err != nil {
+		if err := userStore.RedeemLoginMFA(c.Request.Context(), claims.ID, u.ID, req.Code, time.Now()); err != nil {
+			if errors.Is(err, users.ErrMFAChallenge) {
+				apiError(c, http.StatusUnauthorized, err.Error())
+				return
+			}
 			refuseFactor(c, err, func(detail string) {
 				auditLog(c, audit.Record{
 					Actor:  u.Username,
@@ -184,7 +195,7 @@ func enrollMyMFAHandler(userStore users.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		challengeToken, err := signMFAChallenge(jwtSecret(), mfaChallengePurposeEnroll, u.ID, enrollment.Secret)
+		challengeToken, err := signMFAChallenge(c.Request.Context(), userStore, jwtSecret(), mfaChallengePurposeEnroll, u, enrollment.Secret)
 		if err != nil {
 			apiError(c, http.StatusInternalServerError, "failed to create MFA enrollment")
 			return
@@ -228,14 +239,12 @@ func enableMyMFAHandler(userStore users.Store) gin.HandlerFunc {
 			apiError(c, http.StatusConflict, "MFA is already enabled for this account")
 			return
 		}
-		// The secret is not stored yet, so there is no accepted step to track.
-		if !users.ValidateTOTP(claims.Secret, req.Code, time.Now()) {
-			auditMFADenied(c, lab, "auth.mfa.enable", u.Username, "invalid totp code")
-			apiError(c, http.StatusUnauthorized, users.ErrInvalidTOTP.Error())
-			return
-		}
-		if err := userStore.SetTOTP(c.Request.Context(), u.ID, claims.Secret); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
+		if err := userStore.RedeemEnrollMFA(c.Request.Context(), claims.ID, u.ID, claims.Secret, req.Code, time.Now()); err != nil {
+			if errors.Is(err, users.ErrMFAChallenge) {
+				apiError(c, http.StatusUnauthorized, err.Error())
+				return
+			}
+			refuseFactor(c, err, func(detail string) { auditMFADenied(c, lab, "auth.mfa.enable", u.Username, detail) })
 			return
 		}
 		auditLog(c, audit.Record{
