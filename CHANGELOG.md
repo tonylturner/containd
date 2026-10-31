@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Upgrade notes
+
+- Off-loopback deployments (split, or combined with a wildcard/interface
+  `CONTAIND_ENGINE_ADDR`) must set the same dedicated `CONTAIND_ENGINE_SECRET`
+  on both peers and use `https://`, or leave the engine URL empty in combined
+  mode to derive it. Generate with `openssl rand -hex 32`. No lab bypass or
+  plaintext fallback exists. Rotate by changing and restarting both peers;
+  replace any exported client credentials too.
+
 ### Changed
 
 - Release promotion to `:latest`, including manual promotion, now requires
@@ -19,36 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make MFA login and enrollment challenges single-use and durable across management
   restarts, and invalidate them on password, TOTP or role changes. Pending
   challenges issued before this upgrade must be restarted.
+- Require secret-derived TLS 1.3 mutual authentication for every non-loopback
+  engine API listener and route. Numeric loopback HTTP remains unchanged.
+  Export scraper/curl credentials with `containd enginecredentials DIRECTORY`.
 
 ### Fixed
 
 - Direct CLI login explains when an account needs MFA, password rotation or MFA
   enrollment and directs users to the web UI or SSH.
 - Partial account profile updates preserve omitted fields and still allow explicit clearing.
-
-### Fixed
-
 - Routine interface apply and reconciliation remove only stale addresses
   containd created, preserving Docker/foreign primary and secondary addresses,
   IPv6 link-local addresses and the reserved management device. Address ownership
   persists across engine process restarts; unmarked addresses from 0.1.36 and
   earlier remain unowned on upgrade. Destructive replacement remains an explicit
   administrator operation. See [address ownership and upgrades](docs/mkdocs/dataplane.md#interface-address-ownership-and-upgrades).
-
-### Security
-
-- Require secret-derived TLS 1.3 mutual authentication for every non-loopback
-  engine API listener and route. Numeric loopback HTTP remains unchanged.
-  Export scraper/curl credentials with `containd enginecredentials DIRECTORY`.
-
-### Upgrade notes
-
-- Off-loopback deployments (split, or combined with a wildcard/interface
-  `CONTAIND_ENGINE_ADDR`) must set the same dedicated `CONTAIND_ENGINE_SECRET`
-  on both peers and use `https://`, or leave the engine URL empty in combined
-  mode to derive it. Generate with `openssl rand -hex 32`. No lab bypass or
-  plaintext fallback exists. Rotate by changing and restarting both peers;
-  replace any exported client credentials too.
 
 ## [0.1.36] - 2026-10-31
 
