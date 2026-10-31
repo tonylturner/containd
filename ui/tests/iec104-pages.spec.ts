@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
+import type { FirewallRule } from "../lib/api";
 
 // Headless page tests for the IEC 104 UI against a mocked management API.
 
@@ -17,6 +19,8 @@ const iecRules = [
       direction: "request",
       ca: [1],
       ioa: [{ start: 2001, end: 2001 }],
+      commandStates: [1],
+      commandQualifiers: [0],
       mode: "enforce",
     },
     action: "ALLOW",
@@ -160,11 +164,17 @@ async function mockAPI(
   writes: Array<{ method: string; path: string; body: unknown }>,
   writeError?: string,
 ) {
+  const rules = structuredClone(iecRules) as FirewallRule[];
   await page.route("**/api/v1/**", async (route) => {
     const req = route.request();
     const url = new URL(req.url());
     if (req.method() !== "GET") {
       writes.push({ method: req.method(), path: url.pathname, body: req.postDataJSON() });
+      if (!writeError && req.method() === "PATCH" && url.pathname.endsWith("/cc-rtu-breaker-command")) {
+        rules[0].ics = Object.fromEntries(
+          Object.entries({ ...rules[0].ics, ...req.postDataJSON().ics }).filter(([, value]) => value != null),
+        );
+      }
       await route.fulfill(
         writeError
           ? { status: 400, contentType: "application/json", body: JSON.stringify({ error: writeError }) }
@@ -172,7 +182,7 @@ async function mockAPI(
       );
       return;
     }
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(url.pathname === "/api/v1/events" && url.searchParams.has("query") ? { events: evidenceEvents, historyTruncated: true } : body(url.pathname)) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(url.pathname === "/api/v1/firewall/rules" ? rules : url.pathname === "/api/v1/events" && url.searchParams.has("query") ? { events: evidenceEvents, historyTruncated: true } : body(url.pathname)) });
   });
 }
 
@@ -186,13 +196,16 @@ function trackErrors(page: Page): string[] {
 }
 
 test("ICS page shows IEC rules, amber health with reason, and saves the wire shape", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
   const writes: Array<{ method: string; path: string; body: unknown }> = [];
   await mockAPI(page, writes);
   const errors = trackErrors(page);
+  const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
   await page.goto("/ics");
+  await loaded;
   await expect(page.getByText("IEC 104 enforcement unhealthy").first()).toBeVisible();
   await expect(page.getByText("queue bind failed").first()).toBeVisible();
-  await expect(page.getByText("type 46 control request")).toBeVisible();
+  await expect(page.getByText("type 46 control request state DCS 1 (off) QU 0")).toBeVisible();
   await expect(page.getByText("CA 1 IOA 2001")).toBeVisible();
 
   await page.getByRole("button", { name: "Edit" }).click();
@@ -200,6 +213,16 @@ test("ICS page shows IEC rules, amber health with reason, and saves the wire sha
   await expect(page.getByPlaceholder("3, 16")).toHaveCount(0);
   await expect(page.getByPlaceholder("2001, 65536-65567")).toHaveValue("2001");
   await page.getByPlaceholder("1", { exact: true }).fill("1, 2");
+  await expect(page.getByLabel("Command states", { exact: true })).toHaveValue("1");
+  await expect(page.getByLabel("Command qualifiers (QU)", { exact: true })).toHaveValue("0");
+  await expect(page.getByText("DCS 1 (off), 2 (on)", { exact: true })).toBeVisible();
+  await page.getByLabel("Command states", { exact: true }).fill("2");
+  await page.getByLabel("Command qualifiers (QU)", { exact: true }).fill("31");
+  const dir = process.env.IEC_PRED_SCREENSHOTS;
+  if (dir) {
+    await mkdir(dir, { recursive: true });
+    await page.screenshot({ path: `${dir}/iec104-editor.png`, fullPage: true, animations: "disabled", style: "nextjs-portal { display: none !important; }" });
+  }
   await page.getByRole("button", { name: "Save filter" }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0].method).toBe("PATCH");
@@ -212,11 +235,53 @@ test("ICS page shows IEC rules, amber health with reason, and saves the wire sha
       direction: "request",
       ca: [1, 2],
       ioa: [{ start: 2001, end: 2001 }],
+      commandStates: [2],
+      commandQualifiers: [31],
       readOnly: false,
       mode: "enforce",
     },
   });
+  await page.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByLabel("Command states", { exact: true })).toHaveValue("2");
+  await expect(page.getByLabel("Command qualifiers (QU)", { exact: true })).toHaveValue("31");
+  await page.getByLabel("Command states", { exact: true }).fill("");
+  await page.getByLabel("Command qualifiers (QU)", { exact: true }).fill("");
+  await page.getByRole("button", { name: "Save filter" }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1].body).toMatchObject({ ics: { commandStates: null, commandQualifiers: null } });
+  await page.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByLabel("Command states", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("Command qualifiers (QU)", { exact: true })).toHaveValue("");
   expect(errors).toEqual([]);
+});
+
+test("IEC editor rejects command predicate domains before saving and explains state meanings", async ({ page }) => {
+  const writes: Array<{ method: string; path: string; body: unknown }> = [];
+  await mockAPI(page, writes);
+  const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
+  await page.goto("/ics");
+  await loaded;
+  await page.getByRole("button", { name: "Edit" }).click();
+  for (const [types, state, qualifier, error] of [
+    ["", "1", "0", "require explicit Type IDs"],
+    ["48", "", "0", "require explicit Type IDs"],
+    ["45, 46", "1", "0", "cannot mix SCS"],
+    ["45", "2", "0", "must be in 0-1"],
+    ["46", "0", "0", "must be in 1-2"],
+    ["46", "1", "32", "integer from 0 to 31"],
+    ["46", "1.5", "0", "integer from 0 to 2"],
+  ]) {
+    await page.getByPlaceholder("46, 100").fill(types);
+    await page.getByLabel("Command states", { exact: true }).fill(state);
+    await page.getByLabel("Command qualifiers (QU)", { exact: true }).fill(qualifier);
+    await page.getByRole("button", { name: "Save filter" }).click();
+    await expect(page.locator("p.text-red-400").filter({ hasText: error })).toBeVisible();
+    expect(writes).toEqual([]);
+  }
+  for (const [types, help] of [["45, 58", "SCS 0 (off), 1 (on)"], ["47, 60", "RCS 1 (lower), 2 (higher)"]]) {
+    await page.getByPlaceholder("46, 100").fill(types);
+    await expect(page.getByText(help, { exact: true })).toBeVisible();
+  }
 });
 
 test("client navigation keeps verified page content visible while revalidating the session", async ({ page }) => {
@@ -336,26 +401,33 @@ test("Firewall DPI section lists the IEC 104 decoder as enabled when unset", asy
   expect(errors).toEqual([]);
 });
 
-test("Firewall create form sends only IEC keys for an iec104 rule", async ({ page }) => {
-  const writes: Array<{ method: string; path: string; body: unknown }> = [];
-  await mockAPI(page, writes);
-  await page.goto("/firewall");
-  await page.getByPlaceholder("id (e.g. mb-allow)").fill("cc-rtu-gi");
-  await page.getByRole("checkbox", { name: /ICS Protocol Filter/ }).check();
-  await page.locator("select").filter({ has: page.locator('option[value="iec104"]') }).selectOption("iec104");
-  await expect(page.getByPlaceholder("0x02, 0x04, 0x66")).toHaveCount(0);
-  await page.getByPlaceholder("46, 100").fill("100");
-  await page.getByRole("button", { name: "system", exact: true }).click();
-  await page.getByRole("button", { name: "Create rule" }).click();
-  await expect.poll(() => writes.length).toBe(1);
-  expect(writes[0].method).toBe("POST");
-  expect((writes[0].body as { ics: unknown }).ics).toEqual({
-    protocol: "iec104",
-    typeIds: [100],
-    classes: ["system"],
-    readOnly: false,
+for (const command of [false, true]) {
+  test(`Firewall create form sends only IEC keys for an iec104 ${command ? "command" : "system"} rule`, async ({ page }) => {
+    const writes: Array<{ method: string; path: string; body: unknown }> = [];
+    await mockAPI(page, writes);
+    await page.goto("/firewall");
+    await page.getByPlaceholder("id (e.g. mb-allow)").fill(command ? "cc-rtu-command" : "cc-rtu-gi");
+    await page.getByRole("checkbox", { name: /ICS Protocol Filter/ }).check();
+    await page.locator("select").filter({ has: page.locator('option[value="iec104"]') }).selectOption("iec104");
+    await expect(page.getByPlaceholder("0x02, 0x04, 0x66")).toHaveCount(0);
+    await page.getByPlaceholder("46, 100").fill(command ? "45" : "100");
+    await page.getByRole("button", { name: command ? "control" : "system", exact: true }).click();
+    if (command) {
+      await page.getByLabel("Command states", { exact: true }).fill("0");
+      await page.getByLabel("Command qualifiers (QU)", { exact: true }).fill("0");
+    }
+    await page.getByRole("button", { name: "Create rule" }).click();
+    await expect.poll(() => writes.length).toBe(1);
+    expect(writes[0].method).toBe("POST");
+    expect((writes[0].body as { ics: unknown }).ics).toEqual({
+      protocol: "iec104",
+      typeIds: [command ? 45 : 100],
+      classes: [command ? "control" : "system"],
+      ...(command ? { commandStates: [0], commandQualifiers: [0] } : {}),
+      readOnly: false,
+    });
   });
-});
+}
 
 test("Turning the IEC 104 decoder off saves an explicit false", async ({ page }) => {
   const writes: Array<{ method: string; path: string; body: unknown }> = [];

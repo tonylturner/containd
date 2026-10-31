@@ -99,6 +99,8 @@ export type IEC104Draft = {
   negative: "" | "true" | "false";
   test: "" | "true" | "false";
   selectExecute: "" | "select" | "execute";
+  commandStates: string;
+  commandQualifiers: string;
 };
 
 export function formatIOARanges(ranges: IOARange[] | undefined): string {
@@ -121,6 +123,8 @@ export function iec104DraftFrom(ics: ICSPredicate | undefined): IEC104Draft {
     negative: own?.negative == null ? "" : String(own.negative) as "true" | "false",
     test: own?.test == null ? "" : String(own.test) as "true" | "false",
     selectExecute: own?.selectExecute ?? "",
+    commandStates: (own?.commandStates ?? []).join(", "),
+    commandQualifiers: (own?.commandQualifiers ?? []).join(", "),
   };
 }
 
@@ -214,6 +218,36 @@ export type IEC104BuildResult =
   | { ok: true; ics: ICSPredicatePatch }
   | { ok: false; error: string };
 
+const SINGLE_COMMAND_TYPES = [45, 58];
+const DOUBLE_COMMAND_TYPES = [46, 59];
+const STEP_COMMAND_TYPES = [47, 60];
+const COMMAND_TYPES = [...SINGLE_COMMAND_TYPES, ...DOUBLE_COMMAND_TYPES, ...STEP_COMMAND_TYPES];
+
+/** Numeric wire states with their type-specific operator meaning. */
+export function formatCommandStates(states: number[], typeIds: number[] = []): string {
+  const groups = [
+    { types: SINGLE_COMMAND_TYPES, name: "SCS", labels: ["off", "on"], min: 0 },
+    { types: DOUBLE_COMMAND_TYPES, name: "DCS", labels: ["off", "on"], min: 1 },
+    { types: STEP_COMMAND_TYPES, name: "RCS", labels: ["lower", "higher"], min: 1 },
+  ].filter((group) => typeIds.some((t) => group.types.includes(t)));
+  if (!groups.length) return states.join(", ");
+  return groups.map((group) =>
+    `${group.name} ${states.map((state) =>
+      group.labels[state - group.min] ? `${state} (${group.labels[state - group.min]})` : String(state),
+    ).join(", ")}`,
+  ).join("; ");
+}
+
+export function commandStateHelp(typeIds: number[]): string {
+  if (!typeIds.length || typeIds.some((t) => !COMMAND_TYPES.includes(t))) {
+    return "Choose Type IDs 45/58 for SCS (0 = off, 1 = on), 46/59 for DCS (1 = off, 2 = on), or 47/60 for RCS (1 = lower, 2 = higher).";
+  }
+  if (typeIds.some((t) => SINGLE_COMMAND_TYPES.includes(t)) && typeIds.some((t) => !SINGLE_COMMAND_TYPES.includes(t))) {
+    return "Command states cannot mix SCS Type IDs 45/58 with DCS/RCS Type IDs 46/47/59/60.";
+  }
+  return formatCommandStates(SINGLE_COMMAND_TYPES.includes(typeIds[0]) ? [0, 1] : [1, 2], typeIds);
+}
+
 /**
  * Builds the wire predicate. Only IEC104 keys are emitted: functionCode,
  * unitId, addresses, objectClasses and writeOnly are forbidden for iec104 by
@@ -232,16 +266,40 @@ function buildIEC104Predicate(
   const ioa = parseIOARanges(draft.ioa);
   if (!ioa.ok) return ioa;
 
-  let cot: number[], originators: number[];
+  let cot: number[], originators: number[], commandStates: number[], commandQualifiers: number[];
   try {
     cot = parseSelectorCSV(draft.cot, "COT", 63);
     if (cot.includes(0)) throw new Error("COT must be in 1-63.");
     originators = parseSelectorCSV(draft.originators, "Originators", 255);
+    commandStates = parseSelectorCSV(draft.commandStates, "Command states", 2);
+    commandQualifiers = parseSelectorCSV(draft.commandQualifiers, "Command qualifiers (QU)", 31);
+    for (const [text, values, label] of [
+      [draft.commandStates, commandStates, "Command states"],
+      [draft.commandQualifiers, commandQualifiers, "Command qualifiers (QU)"],
+    ] as const) {
+      if (text.trim() && !values.length) throw new Error(`${label}: enter at least one integer or leave empty for any.`);
+    }
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
   if (draft.selectExecute && typeIds.value.some((v) => !(v >= 45 && v <= 50 || v >= 58 && v <= 63))) {
     return { ok: false, error: "selectExecute requires omitted Type IDs or only 45-50 and 58-63 (not bitstring 51/64)." };
+  }
+  if (commandStates.length || commandQualifiers.length) {
+    if (!typeIds.value.length || typeIds.value.some((t) => !COMMAND_TYPES.includes(t))) {
+      return { ok: false, error: "Command states and command qualifiers require explicit Type IDs containing only 45, 46, 47, 58, 59, 60." };
+    }
+  }
+  if (commandStates.length) {
+    const single = typeIds.value.some((t) => SINGLE_COMMAND_TYPES.includes(t));
+    if (single && typeIds.value.some((t) => !SINGLE_COMMAND_TYPES.includes(t))) {
+      return { ok: false, error: "Command states cannot mix SCS Type IDs 45/58 with DCS/RCS Type IDs 46/47/59/60." };
+    }
+    const min = single ? 0 : 1;
+    const max = single ? 1 : 2;
+    if (commandStates.some((s) => s < min || s > max)) {
+      return { ok: false, error: `Command states must be in ${min}-${max} for the selected Type IDs.` };
+    }
   }
   const { effectiveMode } = formatICSMode(mode, globalMode);
   if (action === "ALLOW" && effectiveMode === "enforce") {
@@ -268,6 +326,8 @@ function buildIEC104Predicate(
   if (draft.negative !== "") ics.negative = draft.negative === "true";
   if (draft.test !== "") ics.test = draft.test === "true";
   if (draft.selectExecute) ics.selectExecute = draft.selectExecute;
+  if (commandStates.length) ics.commandStates = commandStates;
+  if (commandQualifiers.length) ics.commandQualifiers = commandQualifiers;
   ics.readOnly = draft.readOnly;
   if (mode) ics.mode = mode;
   return { ok: true, ics };
@@ -300,6 +360,8 @@ export function summarizeIEC104(ics: ICSPredicate): {
     ics.negative != null ? `P/N=${ics.negative ? 1 : 0}` : "",
     ics.test != null ? `T=${ics.test ? 1 : 0}` : "",
     ics.selectExecute ?? "",
+    ics.commandStates?.length ? `state ${formatCommandStates(ics.commandStates, ics.typeIds)}` : "",
+    ics.commandQualifiers?.length ? `QU ${ics.commandQualifiers.join(",")}` : "",
   ]
     .filter(Boolean)
     .join(" ");

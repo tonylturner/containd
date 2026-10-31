@@ -11,7 +11,7 @@ import (
 
 // EvaluatorVersion binds retained proofs to predicate semantics. Bump whenever
 // evaluation or its shared decoded-context projection changes acceptance.
-const EvaluatorVersion = "ics-2"
+const EvaluatorVersion = "ics-3"
 
 // EvalContext represents a simplified flow context for rule evaluation.
 type EvalContext struct {
@@ -396,5 +396,5 @@ func icsPredicateEmpty(p ICSPredicate) bool {
 		len(p.Originators) == 0 &&
 		p.Negative == nil &&
 		p.Test == nil &&
-		p.SelectExecute == ""
+		p.SelectExecute == "" && len(p.CommandStates) == 0 && len(p.CommandQualifiers) == 0
 }

@@ -60,12 +60,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- IEC 104 `commandStates` (SCS/DCS/RCS) and `commandQualifiers` (QU)
+  predicates constrain single, double and regulating-step commands; exact
+  learner suggestions bind the observed state/qualifier tuple.
 - PCAP Analysis now brings imported captures and bounded live watches into one
   evidence review workflow: explicitly generate certified suggestions, inspect
   replay proof and withheld reasons, review IEC 104 and wire/NAT scope, then
   atomically stage selected revisions as monitor rules. Learning never changes
   running policy; candidate commit and a deliberate mode edit remain required
-  to enforce. Unsupported relations are withheld, and CIP is observation-only.
+  to enforce. IEC state/QU command subsets can certify; setpoint values/QL,
+  bitstrings and select-before-operate sequences remain withheld. Other
+  unsupported relations are withheld, and CIP is observation-only.
 - Firewall and ICS tables show applied-policy shadow message matches,
   would-allow/would-deny counts and their start time, with rule-filtered monitor
   events. `GET /api/v1/firewall/shadow-counters` distinguishes unavailable from

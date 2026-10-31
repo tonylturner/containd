@@ -18,37 +18,21 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-func TestIECClosedValueDomain(t *testing.T) {
-	for _, tc := range []struct {
-		typeID uint8
-		values []uint8
-	}{{45, []uint8{0, 1}}, {46, []uint8{1, 2}}} {
-		var parents []evidence.Observation
-		ioa := uint32(7)
-		for _, value := range tc.values {
-			digest, _ := evidence.Digest(value)
-			parents = append(parents, evidence.Observation{IEC104: &evidence.IEC104{TypeID: &tc.typeID, Objects: []evidence.IEC104Object{{IOA: &ioa, ValueDigest: digest}}}})
-		}
-		if reasons := closedDomains(parents[:1]); !slices.Contains(reasons, evidence.WithheldIECValue) {
-			t.Fatalf("strict subset accepted: %+v", reasons)
-		}
-		if reasons := closedDomains(parents); slices.Contains(reasons, evidence.WithheldIECValue) {
-			t.Fatalf("whole closed domain withheld: %+v", reasons)
+func TestIECCommandRequirementsBoundByPredicates(t *testing.T) {
+	for _, typeID := range []uint8{45, 46, 47, 58, 59, 60} {
+		ioa, state, q := uint32(7), uint8(1), uint8(0)
+		p := evidence.Observation{IEC104: &evidence.IEC104{TypeID: &typeID, Objects: []evidence.IEC104Object{{IOA: &ioa, CommandState: &state, Qualifier: &q}}}}
+		if reasons := closedDomains([]evidence.Observation{p}); len(reasons) != 0 {
+			t.Fatalf("partial command %d withheld: %v", typeID, reasons)
 		}
 	}
-}
-
-func TestIECFullMarginalsDoNotLoseCorrelation(t *testing.T) {
-	typeID, ioa := uint8(45), uint32(7)
-	var parents []evidence.Observation
-	for qualifier := range uint8(32) {
-		value, _ := evidence.Digest(qualifier % 2)
-		q := qualifier
-		parents = append(parents, evidence.Observation{IEC104: &evidence.IEC104{TypeID: &typeID, Objects: []evidence.IEC104Object{{IOA: &ioa, Qualifier: &q, ValueDigest: value}}}})
-	}
-	reasons := closedDomains(parents)
-	if slices.Contains(reasons, evidence.WithheldIECValue) || slices.Contains(reasons, evidence.WithheldIECQualifier) || !slices.Contains(reasons, evidence.WithheldCorrelation) {
-		t.Fatalf("full marginal domains must remove their reasons without permitting unobserved combinations: %v", reasons)
+	for _, typeID := range []uint8{48, 49, 50, 51, 61, 62, 63, 64} {
+		ioa, q := uint32(7), uint8(0)
+		p := evidence.Observation{IEC104: &evidence.IEC104{TypeID: &typeID, Objects: []evidence.IEC104Object{{IOA: &ioa, Qualifier: &q, ValueDigest: "unbounded"}}}}
+		reasons := closedDomains([]evidence.Observation{p})
+		if !slices.Contains(reasons, evidence.WithheldIECValue) || !slices.Contains(reasons, evidence.WithheldIECQualifier) {
+			t.Fatalf("setpoint/bitstring %d not withheld: %v", typeID, reasons)
+		}
 	}
 }
 func TestModbusClosedCoilDomain(t *testing.T) {

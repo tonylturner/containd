@@ -140,7 +140,7 @@ function normalizeICSPredicate(value: unknown): ICSPredicate | undefined {
   if (normalized.unitId == null) delete normalized.unitId;
   if (!normalized.protocol) delete normalized.protocol;
 
-  for (const key of ["cot", "originators", "masters", "outstations", "groups", "variations", "instances", "attributes"] as const) {
+  for (const key of ["cot", "originators", "commandStates", "commandQualifiers", "masters", "outstations", "groups", "variations", "instances", "attributes"] as const) {
     if (record[key] !== undefined) normalized[key] = toIntegerList(record[key]);
   }
   if (record.tags !== undefined) normalized.tags = toStringList(record.tags);
