@@ -158,7 +158,8 @@ export function DatasetReview({
       </details>
       {!!dataset.gaps?.length && (
         <p role="status" className="mt-3 break-words text-sm text-(--amber)">
-          Evidence gaps (certification blocked): {dataset.gaps.join(", ")}
+          Collection limitations: {dataset.gaps.join(", ")}. The backend determines
+          which complete parents can be certified.
         </p>
       )}
       <p className="mt-3 text-xs text-(--text-muted)">
@@ -200,7 +201,6 @@ export function DatasetReview({
                 busy ||
                 !!receipt ||
                 dataset.state !== "sealed" ||
-                !!dataset.gaps?.length ||
                 Date.parse(dataset.expiresAt) <= Date.now()
               }
               onClick={() =>

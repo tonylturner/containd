@@ -963,8 +963,10 @@ override with `CONTAIND_EVIDENCE_DB`) across restarts and expires after seven da
 by the store clock. Ceilings are 32 datasets, 100,000 records and 128 MiB of
 normalized evidence; each parent is limited to 256 KiB and 4,096 objects. Loss,
 rejection, eviction, expiry and withheld reasons are exposed, not silently
-interpreted as complete coverage. Evidence admission gaps prevent certification;
-deletion or eviction invalidates dependent proofs for new stage requests.
+interpreted as complete coverage. Dataset gaps are collection limitations, not a
+blanket certification blocker: Generate can certify retained complete parents;
+the backend decides which parents are eligible. Deletion or eviction invalidates
+dependent proofs for new stage requests.
 Resolved staging snapshots and completed receipts survive evidence retention and
 remain charged to the storage budget, so recovery never needs deleted evidence.
 Only a known failed candidate mutation releases its snapshot; when retained
