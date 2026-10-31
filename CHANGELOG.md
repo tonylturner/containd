@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine API listener and route. Numeric loopback HTTP remains unchanged.
   Export scraper/curl credentials with `containd enginecredentials DIRECTORY`.
 
+### Changed
+
+- IT DPI HTTP parsing reads request and header lines directly from the packet
+  payload instead of allocating a buffered reader per packet.
+- The UI drops the unused `glob` dev dependency and its override.
+
 ### Fixed
 
 - Direct CLI login explains when an account needs MFA, password rotation or MFA
