@@ -291,6 +291,40 @@ test("expired and uncertified suggestions cannot be selected", async ({
   await expect(page.getByLabel("Select iec-1", { exact: true })).toBeDisabled();
 });
 
+test("the evidence poll expires selected suggestions and generation together", async ({
+  page,
+}) => {
+  const now = Date.now();
+  await page.clock.install({ time: now });
+  const state = await mockLearner(page);
+  const expiresAt = new Date(now + 5000).toISOString();
+  state.datasets[0].expiresAt = expiresAt;
+  state.suggestions[0].expiresAt = expiresAt;
+  await openDataset(page);
+  const select = page.getByLabel("Select modbus-1", { exact: true });
+  const generate = page.getByRole("button", {
+    name: "Generate suggestions",
+    exact: true,
+  });
+  await select.check();
+  await expect(generate).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "Stage 1 selected", exact: true }),
+  ).toBeEnabled();
+
+  const refreshed = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/v1/learn/datasets",
+  );
+  await page.clock.fastForward(10000);
+  await refreshed;
+  await expect(select).toBeDisabled();
+  await expect(generate).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Stage 0 selected", exact: true }),
+  ).toBeDisabled();
+  expect(state.writes).toEqual([]);
+});
+
 test("collapsed certification keeps failures and every limitation visible", async ({
   page,
 }) => {

@@ -1,11 +1,13 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useState, type SetStateAction } from "react";
 import Link from "next/link";
 
 import {
@@ -32,7 +34,6 @@ export default function NATPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [nat, setNat] = useState<NATConfig>({ enabled: false });
   // Until the first answer the settings are unknown, not disabled or empty.
-  const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -68,7 +69,7 @@ export default function NATPage() {
     },
   ];
 
-  async function refresh({ keepEdits = true }: { keepEdits?: boolean } = {}) {
+  const { initialLoading: loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [z, n] = await Promise.all([api.listZones(), api.getNAT()]);
     // Never save stand-in settings. After the first success, keep drafts
     // mounted but disabled while the current server copy is unavailable.
@@ -81,14 +82,9 @@ export default function NATPage() {
     } else {
       setLoadError(UNAVAILABLE);
     }
-    setLoading(false);
-  }
+  }, []));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, []);
 
   return (
     <Shell
@@ -380,7 +376,7 @@ function PortForwardsCard({
   const newIngress = ingressChoice || (hasZone("wan") ? "wan" : "");
 
   // One banner serves the whole row, so each message names its field.
-  async function add() {
+  function addPortForward() {
     setError(null);
     if (!newIngress) {
       setError("Ingress zone is required.");
@@ -415,7 +411,10 @@ function PortForwardsCard({
     }
     const lp = Number(newListen.trim());
     const dp = newDestPort.trim() ? Number(newDestPort.trim()) : undefined;
-    const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `pf-${Date.now()}`;
+    // getRandomValues also works on HTTP appliances, where randomUUID requires
+    // a secure context. Never fall back to collision-prone millisecond IDs.
+    const id = `pf-${Array.from(crypto.getRandomValues(new Uint32Array(4)),
+      (part) => part.toString(16).padStart(8, "0")).join("")}`;
     const pf: PortForward = {
       id,
       enabled: true,
@@ -550,7 +549,7 @@ function PortForwardsCard({
               className="input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
             />
             <button
-              onClick={add}
+              onClick={addPortForward}
               className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui"
             >
               Add

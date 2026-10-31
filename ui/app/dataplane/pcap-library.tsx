@@ -16,7 +16,7 @@ type SavedPcapsCardProps = {
   onRefresh: () => void;
   refreshing: boolean;
   uploading: boolean;
-  uploadInputRef: RefObject<HTMLInputElement>;
+  uploadInputRef: RefObject<HTMLInputElement | null>;
   onUpload: (file: File | null) => void;
   lastRefresh: Date | null;
   pcaps: PcapItem[];

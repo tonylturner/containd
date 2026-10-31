@@ -1,8 +1,10 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { api, isAdmin, type ConfigBackup, type ConfigBundle } from "../../lib/api";
@@ -63,7 +65,7 @@ function ConfigPage() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const selectedRef = useRef<HTMLDivElement | null>(null);
 
-  async function refresh() {
+  const { refresh } = useAsyncRefresh(useCallback(async () => {
     const d = await api.diffConfig();
     setConfigDiff(d);
     setCandidateText(
@@ -71,12 +73,11 @@ function ConfigPage() {
     );
     if (d?.running) setRunningLoadedAt(new Date());
     if (d?.candidate) setCandidateLoadedAt(new Date());
-  }
+  }, []));
 
   useConfigRefresh(refresh);
 
   useEffect(() => {
-    refresh();
     refreshBackups();
   }, []);
 

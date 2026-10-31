@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
@@ -70,16 +72,13 @@ export default function DHCPPage() {
   const [error, setError] = useState<string | null>(null);
   const [leases, setLeases] = useState<DHCPLease[]>([]);
   const [leaseError, setLeaseError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [leasesLoading, setLeasesLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    setLoading(true);
-    setError(null);
+  const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     try {
       const svc = await api.getServicesStatus();
+      setError(null);
       setStatus(svc?.dhcp ?? null);
       const next = normalize(await api.getDHCP());
       adoptConfig(next, keepEdits);
@@ -88,35 +87,25 @@ export default function DHCPPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to refresh DHCP status.");
       toast("Failed to refresh DHCP status", "error");
-    } finally {
-      setLoading(false);
     }
-  }, [toast, adoptConfig]);
+  }, [toast, adoptConfig]));
 
-  const refreshLeases = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    setLeaseError(null);
-    setLeasesLoading(true);
+  const { loading: leasesLoading, refresh: refreshLeases } = useAsyncRefresh(useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     try {
       const r = await api.listDHCPLeases();
+      setLeaseError(null);
       setLeases(r?.leases ?? []);
       if (!silent) toast("Leases updated", "success");
     } catch (e) {
       setLeaseError(e instanceof Error ? e.message : "Failed to load DHCP leases.");
       setLeases([]);
       if (!silent) toast("Failed to load leases", "error");
-    } finally {
-      setLeasesLoading(false);
     }
-  }, [toast]);
+  }, [toast]));
 
   useConfigRefresh(refresh);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    refreshLeases();
     const t = window.setInterval(() => {
       refreshLeases({ silent: true });
     }, 10_000);
@@ -196,7 +185,7 @@ export default function DHCPPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
-      {error && (
+      {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
@@ -436,7 +425,7 @@ export default function DHCPPage() {
           </div>
         </div>
 
-        {leaseError && (
+        {!leasesLoading && leaseError && (
           <div className="mt-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
             {leaseError}
           </div>

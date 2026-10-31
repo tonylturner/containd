@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../../hooks/useAsyncRefresh";
+
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -24,7 +26,6 @@ function meterOf(status: ServicesStatus | null, svc: MeteredService): ServiceMet
 export default function ServicesOverviewPage() {
   const toast = useToast();
   const [status, setStatus] = useState<ServicesStatus | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -49,26 +50,19 @@ export default function ServicesOverviewPage() {
     [status],
   );
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const { loading, refresh } = useAsyncRefresh(useCallback(async () => {
     try {
       const s = await api.getServicesStatus();
+      setError(null);
       setStatus(s);
-       setLastUpdated(new Date());
+      setLastUpdated(new Date());
       toast("Service status refreshed", "success");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load services.";
       setError(msg);
       toast("Failed to load services", "error");
-    } finally {
-      setLoading(false);
     }
-  }, [toast]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  }, [toast]));
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -106,7 +100,7 @@ export default function ServicesOverviewPage() {
         </div>
       }
     >
-      {error && (
+      {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>

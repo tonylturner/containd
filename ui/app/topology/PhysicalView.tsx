@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
@@ -192,10 +194,9 @@ export default function PhysicalView() {
   const [selectedLayer, setSelectedLayer] = useState<LayerId | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [zoom, setZoom] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = useCallback(async (signal?: AbortSignal) => {
+  const { initialLoading: loading, refresh: fetchData } = useAsyncRefresh(useCallback(async (signal?: AbortSignal) => {
     try {
       const [stats, inspection, running, ifaceState, flows, services] =
         await Promise.all([
@@ -210,9 +211,9 @@ export default function PhysicalView() {
       if (ifaceState === null || flows === null) {
         setData(null);
         setError("Physical topology unavailable — interface runtime state or flows could not be read from the engine.");
-        setLoading(false);
         return;
       }
+      setError(null);
       setData({
         stats: stats as SystemStats | null,
         inspection: inspection as SystemInspection | null,
@@ -221,15 +222,12 @@ export default function PhysicalView() {
         flows,
         services: services as ServicesStatus | null,
       });
-      setError(null);
-      setLoading(false);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setData(null);
       setError("Failed to load physical view data.");
-      setLoading(false);
     }
-  }, []);
+  }, []), { initialArgs: (signal): [AbortSignal] => [signal] });
 
   useEffect(() => {
     const refresh = () => { void fetchData(); };
@@ -239,7 +237,6 @@ export default function PhysicalView() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchData(controller.signal);
     const iv = setInterval(() => fetchData(controller.signal), 30000);
     return () => {
       controller.abort();

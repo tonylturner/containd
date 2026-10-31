@@ -22,10 +22,15 @@ function shortSessionID(id: string): string {
 }
 
 function FlowsInner() {
+  const searchParams = useSearchParams();
+  return <FlowsContent key={searchParams.toString()} />;
+}
+
+function FlowsContent() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [showAVOnly, setShowAVOnly] = useState(false);
   const searchParams = useSearchParams();
+  const [showAVOnly, setShowAVOnly] = useState(searchParams.get("av") === "1");
   // Until the first answer the list is unknown, not empty; polls keep the
   // current rows while they run.
   const [loading, setLoading] = useState(true);
@@ -80,8 +85,6 @@ function FlowsInner() {
   }, []);
 
   useEffect(() => {
-    const avOnly = searchParams.get("av") === "1";
-    if (avOnly) setShowAVOnly(true);
     const controller = new AbortController();
     const refresh = () => load(controller.signal);
 

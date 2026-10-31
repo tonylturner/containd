@@ -14,6 +14,7 @@ export default function MonitoringOverviewPage() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [flowStatus, setFlowStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
+  const [activityNow, setActivityNow] = useState(0);
   const [services, setServices] = useState<ServicesStatus | null>(null);
 
   useEffect(() => {
@@ -29,6 +30,7 @@ export default function MonitoringOverviewPage() {
         setFlows(f ?? []);
         setFlowStatus(f === null ? "unavailable" : "ready");
         setEvents(e ?? []);
+        setActivityNow(Date.now());
         setServices(s);
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
@@ -92,7 +94,7 @@ export default function MonitoringOverviewPage() {
   const activitySeries = useMemo(() => {
     const buckets = 12;
     const windowMs = 60 * 60 * 1000;
-    const now = Date.now();
+    const now = activityNow;
     const start = now - windowMs;
     const bucketMs = windowMs / buckets;
     const values = Array.from({ length: buckets }, () => 0);
@@ -103,7 +105,7 @@ export default function MonitoringOverviewPage() {
       values[idx] += 1;
     }
     return values;
-  }, [events]);
+  }, [events, activityNow]);
   const appSeries = useMemo(() => {
     const counts = new Map<string, number>();
     for (const flow of flows) {

@@ -3,7 +3,8 @@
 import * as React from "react";
 import { ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { navigateToUI, uiNavigationPath, uiRoutePath } from "../lib/ui-navigation";
 import { type User, api } from "../lib/api";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { ConfigStatusBar } from "./ConfigStatusBar";
@@ -20,6 +21,19 @@ import {
 // Shell owns high-level layout, session orchestration, and page chrome.
 // Self-contained subflows such as nav metadata and profile/account UI belong
 // in sibling modules instead of growing this file again.
+
+const NAV_STORAGE_KEY = "containd.nav.collapsed";
+function subscribeNavigation(notify: () => void) {
+  window.addEventListener("storage", notify);
+  window.addEventListener("containd:nav", notify);
+  return () => {
+    window.removeEventListener("storage", notify);
+    window.removeEventListener("containd:nav", notify);
+  };
+}
+function navigationSnapshot() {
+  try { return localStorage.getItem(NAV_STORAGE_KEY) ?? "{}"; } catch { return "{}"; }
+}
 
 const REDIRECT_TRACE_KEY = "containd.auth.redirect_trace";
 
@@ -54,12 +68,17 @@ export function Shell({
   actions?: ReactNode;
 }) {
   const pathname = usePathname() || "/";
-  const [collapsed, setCollapsed] = React.useState<Record<string, boolean>>({});
+  const routePath = uiRoutePath(pathname);
+  const router = useRouter();
+  const [initialPath] = React.useState(routePath);
+  const storedNavigation = React.useSyncExternalStore(subscribeNavigation, navigationSnapshot, () => "{}");
+  const [navigationChoice, setNavigationChoice] = React.useState<{ path: string; groups: Record<string, boolean> } | null>(null);
   const [authChecked, setAuthChecked] = React.useState(() => !!verifiedSession);
   const [authError, setAuthError] = React.useState<string | null>(null);
   const [me, setMe] = React.useState<User | null>(() => verifiedSession);
   const [menuOpen, setMenuOpen] = React.useState(false);
-  const [navigationOpen, setNavigationOpen] = React.useState(false);
+  const [navigationPath, setNavigationPath] = React.useState<string | null>(null);
+  const navigationOpen = navigationPath === pathname;
   const navigationToggleRef = React.useRef<HTMLButtonElement>(null);
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [profileTab, setProfileTab] = React.useState<
@@ -68,34 +87,28 @@ export function Shell({
   const redirectingRef = React.useRef(false);
 
   const isAdmin = (me?.role ?? "") === "admin";
-  const navGroups = React.useMemo(() => buildNavGroups(isAdmin), [isAdmin]);
-  const docsHref = React.useMemo(() => docsHrefForPath(pathname), [pathname]);
+  const navGroups = React.useMemo(() => buildNavGroups(isAdmin).map((group) => ({
+    ...group, items: group.items.map((item) => ({ ...item, href: uiRoutePath(item.href) })),
+  })), [isAdmin]);
+  const docsHref = React.useMemo(() => uiNavigationPath(docsHrefForPath(routePath), pathname), [routePath, pathname]);
   const pendingMFA = !!me?.mfaRequired && !me?.mfaEnabled;
   const forceMFA = pendingMFA && isMFAGraceExpired(me?.mfaGraceUntil);
   const mfaGraceDisplay = formatOptionalDate(me?.mfaGraceUntil);
 
-  React.useEffect(() => {
-    setNavigationOpen(false);
-  }, [pathname]);
-
   function closeNavigation() {
-    setNavigationOpen(false);
+    setNavigationPath(null);
     navigationToggleRef.current?.focus();
   }
 
-  // Auto-expand nav group containing the active page
-  React.useEffect(() => {
-    if (!pathname || pathname === "/") return;
-    for (const g of navGroups) {
-      if (g.items.some((item) => pathname.startsWith(item.href))) {
-        setCollapsed((prev) => {
-          if (prev[g.label] === false) return prev;
-          return { ...prev, [g.label]: false };
-        });
-        break;
-      }
-    }
-  }, [pathname, navGroups]);
+  const collapsed = React.useMemo(() => {
+    if (navigationChoice?.path === routePath) return navigationChoice.groups;
+    let saved: Record<string, boolean> = {};
+    try { saved = JSON.parse(storedNavigation); } catch { /* Use group defaults for invalid storage. */ }
+    return Object.fromEntries(navGroups.map((group) => [group.label,
+      routePath !== initialPath && group.items.some((item) => routePath !== "/" && routePath.startsWith(item.href))
+        ? false : saved?.[group.label] ?? group.defaultCollapsed ?? true,
+    ]));
+  }, [navGroups, routePath, initialPath, navigationChoice, storedNavigation]);
 
   const redirectToLogin = React.useCallback(
     (
@@ -106,11 +119,12 @@ export function Shell({
         | "unauthenticated" = "unauthenticated",
     ) => {
       if (typeof window === "undefined") return;
-      if (pathname.startsWith("/login")) return;
+      if (pathname.startsWith("/login") || pathname.startsWith("/containd/login")) return;
       if (redirectingRef.current) return;
       redirectingRef.current = true;
       const next = pathname.startsWith("/") ? pathname : "/";
-      const url = `/login?reason=${encodeURIComponent(reason)}&next=${encodeURIComponent(next)}`;
+      const login = `/login?reason=${encodeURIComponent(reason)}&next=${encodeURIComponent(next)}`;
+      const url = uiNavigationPath(login, window.location.pathname);
       appendRedirectTrace({
         ts: new Date().toISOString(),
         from: pathname,
@@ -118,23 +132,10 @@ export function Shell({
         reason,
         stack: new Error("redirectToLogin").stack || undefined,
       });
-      window.location.href = url;
+      navigateToUI(router, login);
     },
-    [pathname],
+    [pathname, router],
   );
-
-  React.useEffect(() => {
-    try {
-      const raw = localStorage.getItem("containd.nav.collapsed");
-      if (raw) {
-        setCollapsed(JSON.parse(raw));
-        return;
-      }
-    } catch {}
-    const init: Record<string, boolean> = {};
-    for (const g of navGroups) init[g.label] = g.defaultCollapsed ?? true;
-    setCollapsed(init);
-  }, [navGroups]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -199,12 +200,9 @@ export function Shell({
 
   React.useEffect(() => {
     if (pathname.startsWith("/login")) {
-      setAuthChecked(true);
-      setAuthError(null);
       return;
     }
     let canceled = false;
-    setAuthError(null);
     api.meStatus().then(({ status, data }) => {
       if (canceled) return;
       if (status === 401) {
@@ -216,6 +214,7 @@ export function Shell({
         setAuthError("Unable to verify session (API unavailable).");
         return;
       }
+      setAuthError(null);
       verifiedSession = data;
       setMe(data);
       if (data?.mustChangePassword) {
@@ -234,7 +233,7 @@ export function Shell({
         pathname.startsWith("/system/") &&
         typeof window !== "undefined"
       ) {
-        window.location.href = "/forbidden";
+        navigateToUI(router, "/forbidden");
         return;
       }
       setAuthChecked(true);
@@ -242,7 +241,7 @@ export function Shell({
     return () => {
       canceled = true;
     };
-  }, [pathname, redirectToLogin]);
+  }, [pathname, redirectToLogin, router]);
 
   // Session keepalive: periodically touch the session so the JWT and cookie
   // stay fresh while the user is actively viewing any page.
@@ -260,13 +259,12 @@ export function Shell({
   }, [pathname, redirectToLogin]);
 
   function toggle(label: string) {
-    setCollapsed((prev) => {
-      const next = { ...prev, [label]: !prev[label] };
-      try {
-        localStorage.setItem("containd.nav.collapsed", JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+    const next = { ...collapsed, [label]: !collapsed[label] };
+    setNavigationChoice({ path: routePath, groups: next });
+    try {
+      localStorage.setItem(NAV_STORAGE_KEY, JSON.stringify(next));
+      window.dispatchEvent(new Event("containd:nav"));
+    } catch { /* Navigation still works without persistent storage. */ }
   }
 
   return (
@@ -287,7 +285,7 @@ export function Shell({
       </a>
 
       <div className="flex h-14 items-center justify-between border-b bg-[#0a0d0a]/90 px-4 md:hidden">
-        <Link href="/" className="text-sm font-bold tracking-[2px] uppercase">
+        <Link href={uiNavigationPath("/", pathname)} className="text-sm font-bold tracking-[2px] uppercase">
           containd
         </Link>
         <button
@@ -296,7 +294,7 @@ export function Shell({
           aria-label="Navigation"
           aria-controls="shell-sidebar"
           aria-expanded={navigationOpen}
-          onClick={() => setNavigationOpen((open) => !open)}
+          onClick={() => setNavigationPath(navigationOpen ? null : pathname)}
           className="inline-flex items-center gap-2 rounded-lg border border-white/8 bg-white/4 px-3 py-2 text-sm text-slate-200 transition-ui hover:bg-white/8 focus-visible:shadow-focus-ring"
         >
           <svg
@@ -332,7 +330,7 @@ export function Shell({
         >
           {/* Brand */}
           <Link
-            href="/"
+            href={uiNavigationPath("/", pathname)}
             className="hidden items-center gap-3 px-4 py-4 border-b transition-ui md:flex"
           >
             <div
@@ -367,10 +365,10 @@ export function Shell({
             {/* Dashboard link */}
             <div className="mb-1 px-1">
               <Link
-                href="/"
-                aria-current={pathname === "/" ? "page" : undefined}
+                href={uiNavigationPath("/", pathname)}
+                aria-current={routePath === "/" ? "page" : undefined}
                 className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-ui ${
-                  pathname === "/"
+                  routePath === "/"
                     ? "font-medium border-l-2 "
                     : "text-slate-400 hover:bg-white/4 hover:text-slate-200 border-l-2 border-transparent"
                 }`}
@@ -394,8 +392,8 @@ export function Shell({
             {navGroups.map((group) => {
               const isGroupActive = group.items.some((item) =>
                 item.href === "/"
-                  ? pathname === "/"
-                  : pathname.startsWith(item.href),
+                  ? routePath === "/"
+                  : routePath.startsWith(item.href),
               );
               const IconFn = NAV_ICONS[group.label];
 
@@ -432,12 +430,12 @@ export function Shell({
                       {group.items.map((item) => {
                         const active =
                           item.href === "/"
-                            ? pathname === "/"
-                            : pathname.startsWith(item.href);
+                            ? routePath === "/"
+                            : routePath.startsWith(item.href);
                         return (
                           <Link
                             key={item.href}
-                            href={item.href}
+                            href={uiNavigationPath(item.href, pathname)}
                             aria-current={active ? "page" : undefined}
                             className={`block rounded-lg px-2.5 py-1.5 transition-ui border-l-2 ${
                               active
@@ -514,8 +512,9 @@ export function Shell({
                     type="button"
                     onClick={async () => {
                       await api.logout();
+                      verifiedSession = null;
                       if (typeof window !== "undefined")
-                        window.location.href = "/login?reason=logout";
+                        navigateToUI(router, "/login?reason=logout");
                     }}
                     className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-red-400 transition-ui hover:bg-red-500/10"
                   >

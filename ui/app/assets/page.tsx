@@ -1,9 +1,11 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { IEC104Inventory } from "./IEC104Inventory";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { api, isAdmin, type Asset, type Zone } from "../../lib/api";
 import { useToast } from "../../components/ToastProvider";
@@ -38,18 +40,14 @@ export default function AssetsPage() {
   const [ips, setIps] = useState("");
   const [criticality, setCriticality] = useState("HIGH");
 
-  async function refresh() {
-    setInventoryRefresh((key) => key + 1);
+  const { refresh } = useAsyncRefresh(useCallback(async () => {
     const [a, z] = await Promise.all([api.listAssets(), api.listZones()]);
+    setInventoryRefresh((key) => key + 1);
     setAssets(a ?? []);
     setZones(z ?? []);
-  }
+  }, []));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, []);
 
   async function onCreate() {
     setError(null);

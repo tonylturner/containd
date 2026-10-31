@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { type ApiResult } from "../../lib/api";
@@ -52,14 +53,16 @@ export function ReasonCounts({
 
 export function DatasetReview({
   dataset,
+  now,
   canEdit,
   onChanged,
 }: {
   dataset: LearnDataset;
+  now: number;
   canEdit: boolean;
   onChanged: () => Promise<void>;
 }) {
-  const [suggestions, setSuggestions] =
+  const [loadedSuggestions, setSuggestions] =
     useState<LearnPage<LearnSuggestion> | null>(null);
   const [observations, setObservations] =
     useState<LearnPage<LearnObservation> | null>(null);
@@ -71,18 +74,17 @@ export function DatasetReview({
   const [receipt, setReceipt] = useState<LearnApplyRequest | null>(null);
   const confirm = useConfirm();
 
-  const refresh = useCallback(async () => {
-    setSelected(new Map());
-    setSuggestions(null);
+  const { loading, refresh } = useAsyncRefresh(useCallback(async () => {
     try {
       setSuggestions(dataOf(await learner.suggestions(dataset.id)));
     } catch (e) {
+      setSuggestions(null);
       setError(String(e));
+    } finally {
+      setSelected(new Map());
     }
-  }, [dataset.id]);
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  }, [dataset.id]));
+  const suggestions = loading ? null : loadedSuggestions;
   useConfigRefresh(refresh);
 
   async function run(action: () => Promise<void>) {
@@ -113,7 +115,7 @@ export function DatasetReview({
     await onChanged();
   }
   const eligible = (suggestions?.items ?? []).filter(
-    (s) => selected.get(s.id) === s.revision && selectable(s),
+    (s) => selected.get(s.id) === s.revision && selectable(s, now),
   );
   const ruleCount = eligible.reduce((n, s) => n + s.content.rules.length, 0);
   return (
@@ -201,7 +203,7 @@ export function DatasetReview({
                 busy ||
                 !!receipt ||
                 dataset.state !== "sealed" ||
-                Date.parse(dataset.expiresAt) <= Date.now()
+                Date.parse(dataset.expiresAt) <= now
               }
               onClick={() =>
                 void run(async () => {
@@ -377,6 +379,7 @@ export function DatasetReview({
       )}
       {(suggestions?.items ?? []).map((s) => (
         <SuggestionReview
+          now={now}
           key={`${s.id}:${s.revision}`}
           suggestion={s}
           checked={selected.get(s.id) === s.revision}

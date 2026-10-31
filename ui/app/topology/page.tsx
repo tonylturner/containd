@@ -7,26 +7,27 @@ import {
   Edge,
   Node,
   NodeChange,
+  useNodesInitialized,
   useReactFlow,
   ReactFlowProvider,
-} from "reactflow";
-import type { BackgroundProps, ControlProps, MiniMapProps } from "reactflow";
-import "reactflow/dist/style.css";
+} from "@xyflow/react";
+import type { BackgroundProps, ControlProps, MiniMapProps } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 
 const ReactFlow = dynamic(
-  () => import("reactflow").then((m) => m.default),
+  () => import("@xyflow/react").then((m) => m.ReactFlow<Node<TopoNodeData>>),
   { ssr: false, loading: () => <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: 11 }}>Loading topology...</div> },
 );
 const Background = dynamic(
-  () => import("reactflow").then((m) => m.Background as React.ComponentType<BackgroundProps>),
+  () => import("@xyflow/react").then((m) => m.Background as React.ComponentType<BackgroundProps>),
   { ssr: false },
 );
 const Controls = dynamic(
-  () => import("reactflow").then((m) => m.Controls as React.ComponentType<ControlProps>),
+  () => import("@xyflow/react").then((m) => m.Controls as React.ComponentType<ControlProps>),
   { ssr: false },
 );
 const MiniMap = dynamic(
-  () => import("reactflow").then((m) => m.MiniMap as React.ComponentType<MiniMapProps>),
+  () => import("@xyflow/react").then((m) => m.MiniMap as React.ComponentType<MiniMapProps>),
   { ssr: false },
 );
 const PhysicalView = dynamic(() => import("./PhysicalView"), {
@@ -39,6 +40,7 @@ const SecurityView = dynamic(() => import("./SecurityView"), {
 });
 import { Shell } from "../../components/Shell";
 import { CONFIG_COMMITTED } from "../../lib/config-events";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { useHealth } from "../../hooks/useHealth";
 import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 import s from "./topology.module.css";
@@ -63,15 +65,17 @@ function TopologyInner() {
   const [syncTime, setSyncTime] = useState("\u2014");
   const [currentView, setCurrentView] = useState("logical");
   const [topoError, setTopoError] = useState<string | null>(null);
-  const nodeDataRef = useRef<Record<string, TopoNodeData>>({});
+  const [nodeData, setNodeData] = useState<Record<string, TopoNodeData>>({});
   const health = useHealth();
   const installed = useInstalledRuleset();
   const { fitView } = useReactFlow();
+  const nodesInitialized = useNodesInitialized();
 
   // ── Fetch & build ──
-  const fetchData = useCallback(async () => {
+  const { refresh: fetchData } = useAsyncRefresh(useCallback(async (signal?: AbortSignal) => {
     try {
       const result = await buildTopology();
+      if (signal?.aborted) return;
       if (!result) {
         setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
         return;
@@ -79,15 +83,24 @@ function TopologyInner() {
 
       setTopoError(null);
 
-      nodeDataRef.current = result.nodeDataMap;
-      setNodes(result.nodes);
+      setNodeData(result.nodeDataMap);
+      setNodes((previous) => {
+        const byId = new Map(previous.map((node) => [node.id, node]));
+        return result.nodes.map((node) => {
+          const existing = byId.get(node.id);
+          // Update data without resetting ReactFlow's measured dimensions,
+          // selection or the operator's dragged position on every poll.
+          return existing && existing.type === node.type ? { ...existing, data: node.data } : node;
+        });
+      });
       setEdges(result.edges);
       setSyncTime(new Date().toLocaleTimeString("en-US", { hour12: false }));
     } catch (e) {
+      if (signal?.aborted) return;
       if (e instanceof DOMException && e.name === "AbortError") return;
       setTopoError("Logical topology unavailable — running configuration, interface runtime state or flows could not be read.");
     }
-  }, []);
+  }, []), { initialArgs: (signal): [AbortSignal] => [signal] });
 
   useEffect(() => {
     const refresh = () => { void fetchData(); };
@@ -97,28 +110,20 @@ function TopologyInner() {
 
   const initialFitDone = useRef(false);
   useEffect(() => {
-    const controller = new AbortController();
-    fetchData().then(() => {
-      // Delay fitView to let ReactFlow measure nodes
-      setTimeout(() => { fitView({ padding: 0.15, duration: 400 }); initialFitDone.current = true; }, 200);
-    });
-    const wrappedFetch = () => { if (!document.hidden) fetchData(); };
-    const iv = setInterval(wrappedFetch, 30000);
-    const onVisible = () => { if (!document.hidden) fetchData(); };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      controller.abort();
-      clearInterval(iv);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [fetchData, fitView]);
+    if (!nodesInitialized || initialFitDone.current) return;
+    void fitView({ padding: 0.15, duration: 400 });
+    initialFitDone.current = true;
+  }, [nodesInitialized, fitView]);
 
-  // ── Update selection highlight on nodes ──
   useEffect(() => {
-    setNodes((prev) =>
-      prev.map((n) => (n.data.selected !== (n.id === selectedId) ? { ...n, data: { ...n.data, selected: n.id === selectedId } } : n)),
-    );
-  }, [selectedId]);
+    const wrappedFetch = () => { if (!document.hidden) void fetchData(); };
+    const iv = setInterval(wrappedFetch, 30000);
+    document.addEventListener("visibilitychange", wrappedFetch);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", wrappedFetch);
+    };
+  }, [fetchData]);
 
   // ── Handle node click ──
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -131,11 +136,11 @@ function TopologyInner() {
   }, []);
 
   // ── Handle all node changes (position, dimensions, selection, etc.) ──
-  const onNodesChange = useCallback((changes: NodeChange[]) => {
+  const onNodesChange = useCallback((changes: NodeChange<Node<TopoNodeData>>[]) => {
     setNodes((prev) => applyNodeChanges(changes, prev));
   }, []);
 
-  const selected = selectedId ? nodeDataRef.current[selectedId] : null;
+  const selected = selectedId ? nodeData[selectedId] : null;
   const selectedData = selected ? withHealth(selected, health) : null;
   const status = topologyStatus(health, installed);
   const statusColor = TONE_COLORS[status.tone];
@@ -204,6 +209,7 @@ function TopologyInner() {
             >
               <Background color="rgba(245,158,11,0.06)" gap={28} size={1} />
               <Controls
+                position="top-left"
                 showInteractive={false}
                 style={{ background: "#0e130e", border: "1px solid rgba(245,158,11,0.14)", borderRadius: 0 }}
               />

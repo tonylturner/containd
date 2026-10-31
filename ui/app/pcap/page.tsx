@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { isAdmin, listPcaps, type PcapItem } from "../../lib/api";
 import {
   analyzeUpload,
@@ -33,8 +34,9 @@ export default function PcapAnalysisPage() {
   const [duration, setDuration] = useState("3600");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [now, setNow] = useState(() => Date.now());
 
-  const refresh = useCallback(async () => {
+  const { refresh } = useAsyncRefresh(useCallback(async () => {
     try {
       const [ds, ws, cs, ps] = await Promise.all([
         learner.datasets(),
@@ -47,6 +49,7 @@ export default function PcapAnalysisPage() {
       setWatches(dataOf(ws));
       setCounters(dataOf(cs));
       setPcaps(ps);
+      setNow(Date.now());
       setChosen((prev) =>
         prev
           ? ((fresh.items ?? []).find((d) => d.id === prev.id) ?? null)
@@ -58,9 +61,8 @@ export default function PcapAnalysisPage() {
       setWatches(null);
       setCounters(null);
     }
-  }, []);
+  }, []));
   useEffect(() => {
-    void refresh();
     const timer = setInterval(() => void refresh(), 10000);
     return () => clearInterval(timer);
   }, [refresh]);
@@ -75,6 +77,7 @@ export default function PcapAnalysisPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+      setNow(Date.now());
     }
   }
   async function showImport(result: PcapImportResult) {
@@ -83,7 +86,7 @@ export default function PcapAnalysisPage() {
     setChosen(result.dataset);
   }
   const active = (watches?.items ?? []).filter(
-    (w) => !w.stoppedAt && Date.parse(w.deadline) > Date.now(),
+    (w) => !w.stoppedAt && Date.parse(w.deadline) > now,
   );
   const seconds = Number(duration);
   return (
@@ -207,7 +210,7 @@ export default function PcapAnalysisPage() {
         )}
         <ul className="space-y-2">
           {(watches?.items ?? []).map((w) => {
-            const running = !w.stoppedAt && Date.parse(w.deadline) > Date.now();
+            const running = !w.stoppedAt && Date.parse(w.deadline) > now;
             return (
               <li
                 key={w.id}
@@ -389,6 +392,7 @@ export default function PcapAnalysisPage() {
       )}
       {chosen && (
         <DatasetReview
+          now={now}
           key={chosen.id}
           dataset={chosen}
           canEdit={canEdit}

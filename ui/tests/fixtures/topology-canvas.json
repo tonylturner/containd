@@ -1,0 +1,188 @@
+{
+  "/api/v1/auth/me": {
+    "id": "admin",
+    "username": "containd",
+    "role": "admin"
+  },
+  "/api/v1/auth/session": {
+    "id": "admin",
+    "username": "containd",
+    "role": "admin"
+  },
+  "/api/v1/config": {
+    "zones": [
+      {
+        "name": "it",
+        "description": "Enterprise network",
+        "slTarget": 1
+      },
+      {
+        "name": "ot",
+        "description": "Control network",
+        "slTarget": 2
+      },
+      {
+        "name": "wan",
+        "description": "External uplink",
+        "slTarget": 0
+      }
+    ],
+    "interfaces": [
+      {
+        "name": "lan",
+        "device": "eth0",
+        "zone": "it",
+        "addresses": [
+          "192.0.2.1/24"
+        ]
+      },
+      {
+        "name": "plant",
+        "device": "eth1",
+        "zone": "ot",
+        "addresses": [
+          "198.51.100.1/24"
+        ],
+        "vlanId": 104
+      },
+      {
+        "name": "uplink",
+        "device": "eth2",
+        "zone": "wan",
+        "addresses": [
+          "203.0.113.2/24"
+        ]
+      }
+    ],
+    "routing": {
+      "gateways": [
+        {
+          "name": "isp-gw",
+          "address": "203.0.113.1"
+        }
+      ],
+      "routes": [
+        {
+          "dst": "default",
+          "gateway": "isp-gw",
+          "iface": "uplink",
+          "metric": 10
+        }
+      ],
+      "rules": []
+    },
+    "firewall": {
+      "rules": [
+        {
+          "id": "allow-scada",
+          "action": "ALLOW",
+          "sourceZones": [
+            "it"
+          ],
+          "destZones": [
+            "ot"
+          ],
+          "protocols": [
+            {
+              "name": "tcp",
+              "port": "502"
+            }
+          ]
+        },
+        {
+          "id": "deny-wan",
+          "action": "DENY",
+          "sourceZones": [
+            "wan"
+          ],
+          "destZones": [
+            "ot"
+          ]
+        }
+      ]
+    }
+  },
+  "/api/v1/config/diff": {
+    "changed": false,
+    "changedSections": []
+  },
+  "/api/v1/interfaces/state": [
+    {
+      "name": "eth0",
+      "up": true,
+      "addrs": [
+        "192.0.2.1/24"
+      ]
+    },
+    {
+      "name": "eth1",
+      "up": true,
+      "addrs": [
+        "198.51.100.1/24"
+      ]
+    },
+    {
+      "name": "eth2",
+      "up": true,
+      "addrs": [
+        "203.0.113.2/24"
+      ]
+    }
+  ],
+  "/api/v1/routing/os": {
+    "defaultRoute": {
+      "gateway": "203.0.113.1",
+      "iface": "eth2"
+    }
+  },
+  "/api/v1/flows": [],
+  "/api/v1/events": [],
+  "/api/v1/health": {
+    "status": "ok",
+    "component": "fw-lab",
+    "build": "0.1.35",
+    "time": "2026-10-30T09:00:00Z",
+    "enforcement": {
+      "state": "enforcing"
+    }
+  },
+  "/api/v1/dataplane/ruleset/status": {
+    "installed": true
+  },
+  "/api/v1/firewall/counters": {
+    "snapshotVersion": "v1",
+    "since": "2026-10-30T09:00:00Z",
+    "rules": [
+      {
+        "ruleId": "allow-scada",
+        "action": "ALLOW",
+        "packets": 1500,
+        "bytes": 90000
+      },
+      {
+        "ruleId": "deny-wan",
+        "action": "DENY",
+        "packets": 12,
+        "bytes": 720
+      }
+    ]
+  },
+  "/api/v1/zones": [
+    {
+      "name": "it",
+      "description": "Enterprise network",
+      "slTarget": 1
+    },
+    {
+      "name": "ot",
+      "description": "Control network",
+      "slTarget": 2
+    },
+    {
+      "name": "wan",
+      "description": "External uplink",
+      "slTarget": 0
+    }
+  ],
+  "/api/v1/security/conduits": {}
+}

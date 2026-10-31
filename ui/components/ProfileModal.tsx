@@ -30,7 +30,7 @@ export function ProfileModal({
   const [email, setEmail] = React.useState(me.email ?? "");
   const [currentPassword, setCurrentPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
-  const [mfaEnabled, setMfaEnabled] = React.useState(!!me.mfaEnabled);
+  const mfaEnabled = !!me.mfaEnabled;
   const [mfaEnrollment, setMfaEnrollment] =
     React.useState<MFAEnrollResponse | null>(null);
   const [mfaCode, setMfaCode] = React.useState("");
@@ -42,10 +42,6 @@ export function ProfileModal({
   const mustStayOpen = !!forcePassword || !!forceMFA;
   const mfaRequired = !!me.mfaRequired;
   const mfaGraceDisplay = formatOptionalDate(me.mfaGraceUntil);
-
-  React.useEffect(() => {
-    setMfaEnabled(!!me.mfaEnabled);
-  }, [me.mfaEnabled]);
 
   React.useEffect(() => {
     if (initialTab === "password") {
@@ -132,7 +128,6 @@ export function ProfileModal({
       setError(res.error || "Failed to enable MFA.");
       return;
     }
-    setMfaEnabled(true);
     setMfaEnrollment(null);
     setMfaCode("");
     setState("idle");
@@ -156,7 +151,6 @@ export function ProfileModal({
       setError(withRetryTime(res.error || "Failed to disable MFA.", res.retryAfter));
       return;
     }
-    setMfaEnabled(false);
     setMfaEnrollment(null);
     setMfaCode("");
     setMfaDisablePassword("");

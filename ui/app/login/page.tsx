@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 import { api, clearLocalAuth, getLastAuthError, type ApiFailure } from "../../lib/api";
 import { withRetryTime } from "../../lib/utils";
+import { navigateToUI } from "../../lib/ui-navigation";
 
 type State = "idle" | "logging_in" | "verifying_mfa" | "error";
 
@@ -26,13 +27,17 @@ export default function LoginPage() {
 }
 
 function LoginInner() {
+  const router = useRouter();
   const params = useSearchParams();
   const paramsKey = params?.toString() ?? "";
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [state, setState] = useState<State>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
+  const [loginInfo, setInfo] = useState<string | null>(null);
+  const reason = (params.get("reason") ?? "").toLowerCase();
+  const info = loginInfo ?? (reason === "expired" ? "Session expired. Please log in again."
+    : reason === "logout" ? "You have been logged out." : null);
   const [detail, setDetail] = useState<string | null>(null);
   const [alreadyLoggedIn, setAlreadyLoggedIn] = useState(false);
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
@@ -42,13 +47,6 @@ function LoginInner() {
     const sp = new URLSearchParams(paramsKey);
     const reason = (sp.get("reason") ?? "").toLowerCase();
     const shouldClearLocal = reason === "expired" || reason === "logout";
-    if (reason === "expired") {
-      setInfo("Session expired. Please log in again.");
-    } else if (reason === "logout") {
-      setInfo("You have been logged out.");
-    } else {
-      setInfo(null);
-    }
     (async () => {
       // Clear local token/role so stale localStorage auth can't override a valid cookie session.
       if (shouldClearLocal) clearLocalAuth();
@@ -79,7 +77,7 @@ function LoginInner() {
     }
     if (typeof window !== "undefined") {
       const next = params?.get("next");
-      window.location.href = next && next.startsWith("/") ? next : "/";
+      navigateToUI(router, next ?? "/");
     }
   }
 
@@ -156,7 +154,7 @@ function LoginInner() {
               <button
                 type="button"
                 onClick={() => {
-                  if (typeof window !== "undefined") window.location.href = "/";
+                  if (typeof window !== "undefined") navigateToUI(router, "/");
                 }}
                 className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
               >

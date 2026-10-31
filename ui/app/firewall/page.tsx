@@ -1,8 +1,10 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 
 import {
@@ -105,7 +107,7 @@ export default function FirewallPage() {
     },
   ];
 
-  async function refresh({ keepEdits = true }: { keepEdits?: boolean } = {}) {
+  const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [r, z, n, rt, dp, c] = await Promise.all([
       api.listFirewallRules(),
       api.listZones(),
@@ -126,13 +128,9 @@ export default function FirewallPage() {
       setEditing(null);
       setRefreshKey((key) => key + 1);
     }
-  }
+  }, []));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, []);
 
   async function loadRulesetPreview() {
     if (!isAdmin()) return;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
 import { sameConfig } from "../../lib/config-editor";
@@ -34,7 +34,7 @@ export function DPIProtocolModal({
     ...c, protocols: typeof update === "function" ? update(c.protocols) : update,
   }));
   const latest = useRef(editor.editor);
-  latest.current = editor.editor;
+  useLayoutEffect(() => { latest.current = editor.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { adoptConfig({ protocols, context }); }, [adoptConfig, protocols, context]);
@@ -187,7 +187,7 @@ export function ICSDPIConfigModal({
     ...c, parsing: typeof update === "function" ? update(c.parsing) : update,
   }));
   const latest = useRef(editor.editor);
-  latest.current = editor.editor;
+  useLayoutEffect(() => { latest.current = editor.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { adoptConfig({ protocols: icsProtocols, parsing, context }); }, [adoptConfig, icsProtocols, parsing, context]);
@@ -476,7 +476,7 @@ export function DPIExclusionModal({
   const [newType, setNewType] = form.field("newType");
   const [newReason, setNewReason] = form.field("newReason");
   const latest = useRef({ editor: editor.editor, fields: form.editor.cfg.fields });
-  latest.current = { editor: editor.editor, fields: form.editor.cfg.fields };
+  useLayoutEffect(() => { latest.current = { editor: editor.editor, fields: form.editor.cfg.fields }; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { adoptConfig({ rows: exclusions, context }); refreshForm(context); }, [adoptConfig, refreshForm, exclusions, context]);

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/topology-test";
 
 import { summarizeTargets, targetSummaryText } from "../app/topology/security-summary";
 import { mapZone, SR_DEFS } from "../lib/security-scoring";

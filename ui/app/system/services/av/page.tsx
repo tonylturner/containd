@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
+
 import { useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
@@ -40,16 +42,14 @@ export default function AVPage() {
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const [defs, setDefs] = useState<string[]>([]);
   const [defsPath, setDefsPath] = useState<string>("");
-  const [loading, setLoading] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    setLoading(true);
-    setRefreshError(null);
+  const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     try {
       const svc = await api.getServicesStatus();
+      setRefreshError(null);
       setStatus(svc?.av ?? null);
       const s = await api.getAV();
       if (s) adoptConfig(s, keepEdits);
@@ -65,16 +65,10 @@ export default function AVPage() {
       const msg = e instanceof Error ? e.message : "Failed to refresh AV.";
       setRefreshError(msg);
       toast("Failed to refresh AV", "error");
-    } finally {
-      setLoading(false);
     }
-  }, [toast, adoptConfig]);
+  }, [toast, adoptConfig]));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -193,7 +187,7 @@ export default function AVPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
-      {refreshError && (
+      {!loading && refreshError && (
         <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {refreshError}
         </div>

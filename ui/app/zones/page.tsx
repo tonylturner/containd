@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { upsertRow } from "../../lib/config-editor";
 
 import type { ConfigFields } from "../../lib/use-config-editor";
@@ -9,7 +11,7 @@ import { ConfigEditNotice, useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 
 import { api, isAdmin, type Zone, type ConduitMap } from "../../lib/api";
@@ -40,7 +42,7 @@ export default function ZonesPage() {
   const [saving, setSaving] = useState(false);
   const confirm = useConfirm();
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
+  const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [list, conds] = await Promise.all([
       api.listZones(),
       api.getSecurityConduits(),
@@ -48,13 +50,9 @@ export default function ZonesPage() {
     adoptRows(list ?? [], keepEdits);
     setConduits((conds as ConduitMap) ?? {});
     refreshForm(list, keepEdits);
-  }, [refreshForm, adoptRows]);
+  }, [refreshForm, adoptRows]));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   async function onCreate() {
     setError(null);

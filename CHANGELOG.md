@@ -183,6 +183,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The management UI builds with Next.js 16 and ESLint 10 (flat config). The
+  topology canvas uses `@xyflow/react` 12, the maintained successor of `reactflow`.
+- Topology keeps dragged node positions across its periodic refresh, and its zoom
+  controls sit top-left, clear of the legend.
 - PCAP analyze responses are now `{dataset, stats}`, without profiles or generated
   rules. `POST /learn/generate` requires a sealed dataset ID; `POST /learn/apply`
   requires a request ID and selected suggestion IDs/revisions, stages all or none,
@@ -287,6 +291,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Behind a reverse proxy that mounts the UI under `/containd/`, login,
+  logout and forbidden redirects stay under the mount instead of leaving it.
+  The breadcrumb no longer shows the mount as a page, and the active navigation
+  item is highlighted.
 - The web console displays its server greeting once, followed by a clean prompt.
 - Management URL builders avoid duplicate base-path prefixes when a reverse
   proxy has already rewritten API or asset paths.

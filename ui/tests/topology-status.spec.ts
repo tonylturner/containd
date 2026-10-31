@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/topology-test";
 
 import { topologyStatus } from "../app/topology/topology-status";
 import type { HealthResponse, InstalledRulesetStatus } from "../lib/api";

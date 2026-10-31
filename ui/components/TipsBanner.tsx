@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 
-import { clearDismissedTips, dismissTip, getDismissedTips, getShowTips } from "../lib/prefs";
+import { clearDismissedTips, dismissTip, getDismissedTips, getShowTips, subscribePrefs } from "../lib/prefs";
 
 export type Tip = {
   id: string;
@@ -12,22 +12,11 @@ export type Tip = {
 };
 
 export function TipsBanner({ tips, className = "" }: { tips: Tip[]; className?: string }) {
-  const [showTips, setShowTips] = useState(true);
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const showTips = useSyncExternalStore(subscribePrefs, getShowTips, () => true);
+  const dismissedJSON = useSyncExternalStore(subscribePrefs,
+    () => JSON.stringify([...getDismissedTips()]), () => "[]");
+  const dismissed = useMemo(() => new Set<string>(JSON.parse(dismissedJSON)), [dismissedJSON]);
   const [index, setIndex] = useState(0);
-
-  useEffect(() => {
-    const refresh = () => {
-      setShowTips(getShowTips());
-      setDismissed(getDismissedTips());
-    };
-    refresh();
-    const onPrefs = () => refresh();
-    window.addEventListener("containd:prefs", onPrefs);
-    return () => {
-      window.removeEventListener("containd:prefs", onPrefs);
-    };
-  }, []);
 
   const activeTips = useMemo(() => {
     return tips.filter((t) => {
@@ -37,36 +26,30 @@ export function TipsBanner({ tips, className = "" }: { tips: Tip[]; className?: 
     });
   }, [dismissed, tips]);
 
-  useEffect(() => {
-    if (index >= activeTips.length) {
-      setIndex(0);
-    }
-  }, [activeTips.length, index]);
+  const visibleIndex = index < activeTips.length ? index : 0;
 
   if (!showTips || activeTips.length === 0) return null;
 
-  const tip = activeTips[index] ?? activeTips[0];
+  const tip = activeTips[visibleIndex] ?? activeTips[0];
   const count = activeTips.length;
 
   function next() {
     if (count <= 1) return;
-    setIndex((i) => (i + 1) % count);
+    setIndex(() => (visibleIndex + 1) % count);
   }
 
   function prev() {
     if (count <= 1) return;
-    setIndex((i) => (i - 1 + count) % count);
+    setIndex(() => (visibleIndex - 1 + count) % count);
   }
 
   function dismiss() {
     if (!tip) return;
     dismissTip(tip.id);
-    setDismissed(getDismissedTips());
   }
 
   function clearAll() {
     clearDismissedTips();
-    setDismissed(new Set());
   }
 
   return (
@@ -87,7 +70,7 @@ export function TipsBanner({ tips, className = "" }: { tips: Tip[]; className?: 
               <button onClick={prev} className="rounded-xs px-2 py-1 text-(--text-dim) transition-ui hover:text-(--text)">
                 Prev
               </button>
-              <span className="tabular-nums text-(--text-dim)">{index + 1}/{count}</span>
+              <span className="tabular-nums text-(--text-dim)">{visibleIndex + 1}/{count}</span>
               <button onClick={next} className="rounded-xs px-2 py-1 text-(--text-dim) transition-ui hover:text-(--text)">
                 Next
               </button>

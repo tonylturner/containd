@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
+
 import { useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
@@ -27,12 +29,10 @@ export default function DNSPage() {
   });
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    setLoading(true);
+  const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const svc = await api.getServicesStatus();
     setStatus(svc?.dns ?? null);
     const s = await api.getDNS();
@@ -44,14 +44,9 @@ export default function DNSPage() {
       cacheSizeMB: s?.cacheSizeMB ?? 0,
     }, keepEdits);
     setLastUpdated(new Date());
-    setLoading(false);
-  }, [adoptConfig]);
+  }, [adoptConfig]));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   useEffect(() => {
     if (!autoRefresh) return;

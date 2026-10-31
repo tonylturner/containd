@@ -1,11 +1,13 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useConfigForm } from "../../lib/use-config-form";
 import { ConfigEditNotice } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import {
   api,
@@ -71,18 +73,14 @@ export default function RoutingPage() {
     return match.alias ? `${match.alias} (${match.name})` : match.name;
   };
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
+  const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [r, osr] = await Promise.all([api.getRouting(), api.getOSRouting()]);
     setCfg({ gateways: r?.gateways ?? [], routes: r?.routes ?? [], rules: r?.rules ?? [] });
     setOSRouting(osr);
     refreshForm(r, keepEdits);
-  }, [refreshForm]);
+  }, [refreshForm]));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   async function save(next: RoutingConfig): Promise<{ ok: boolean; warning?: string }> {
     setError(null);

@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
+import { useCallback, useMemo, useState } from "react";
 
 import { api, isAdmin, type ConntrackEntry } from "../../lib/api";
 import type { ConntrackKillResult, ConntrackKillRequest, ConntrackKillTuple } from "../../lib/api-console";
@@ -71,7 +73,6 @@ export default function SessionsPage() {
   const confirm = useConfirm();
   const [entries, setEntries] = useState<ConntrackEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [available, setAvailable] = useState(false);
   const [filter, setFilter] = useState<Filter>({ q: "" });
   const [limit, setLimit] = useState(500);
@@ -80,25 +81,18 @@ export default function SessionsPage() {
   const [killResult, setKillResult] = useState<ConntrackKillResult | null>(null);
   const [killing, setKilling] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const { loading, refresh } = useAsyncRefresh(useCallback(async () => {
     const data = await api.listConntrack(limit);
+    setError(null);
     if (!data.ok) {
       setError(`Connections unavailable: ${data.error}`);
       setEntries([]);
       setAvailable(false);
-      setLoading(false);
       return;
     }
     setEntries(data.data);
     setAvailable(true);
-    setLoading(false);
-  }, [limit]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  }, [limit]));
 
   const filtered = useMemo(() => {
     const q = filter.q.trim().toLowerCase();
@@ -212,7 +206,7 @@ export default function SessionsPage() {
           <p>{killResult.closure}</p>
         </div>
       )}
-      {error && (
+      {!loading && error && (
         <div role="alert" aria-label="Connections error" className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { IDSRule } from "../../lib/api";
 import { EmptyState } from "../../components/EmptyState";
@@ -99,10 +99,6 @@ export function RulesTable({
     (clampedPage + 1) * pageSize,
   );
 
-  useEffect(() => {
-    setPage(0);
-  }, [search, adv, pageSize]);
-
   const allOnPageSelected =
     pageData.length > 0 && pageData.every((r) => selected.has(r.id));
   const someSelected = selected.size > 0;
@@ -157,7 +153,7 @@ export function RulesTable({
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <SearchBar value={search} onChange={setSearch} placeholder="Search rules..." className="min-w-[200px] max-w-lg flex-1" />
+        <SearchBar value={search} onChange={(value) => { setSearch(value); setPage(0); }} placeholder="Search rules..." className="min-w-[200px] max-w-lg flex-1" />
         <button
           onClick={() => setAdvOpen(!advOpen)}
           className={`rounded-xs border px-3 py-1.5 text-xs transition-ui ${
@@ -170,7 +166,7 @@ export function RulesTable({
         </button>
         {hasAdvFilters && (
           <button
-            onClick={() => setAdv(EMPTY_FILTERS)}
+            onClick={() => { setAdv(EMPTY_FILTERS); setPage(0); }}
             className="text-xs text-(--text-muted) transition-ui hover:text-(--text)"
           >
             Clear
@@ -186,7 +182,7 @@ export function RulesTable({
             </label>
             <select
               value={adv.format}
-              onChange={(e) => setAdv({ ...adv, format: e.target.value })}
+              onChange={(e) => { setAdv({ ...adv, format: e.target.value }); setPage(0); }}
               className="input-industrial w-full text-xs"
             >
               <option value="">All</option>
@@ -203,7 +199,7 @@ export function RulesTable({
             </label>
             <select
               value={adv.severity}
-              onChange={(e) => setAdv({ ...adv, severity: e.target.value })}
+              onChange={(e) => { setAdv({ ...adv, severity: e.target.value }); setPage(0); }}
               className="input-industrial w-full text-xs"
             >
               <option value="">All</option>
@@ -219,7 +215,7 @@ export function RulesTable({
             </label>
             <select
               value={adv.proto}
-              onChange={(e) => setAdv({ ...adv, proto: e.target.value })}
+              onChange={(e) => { setAdv({ ...adv, proto: e.target.value }); setPage(0); }}
               className="input-industrial w-full text-xs"
             >
               <option value="">All</option>
@@ -236,7 +232,7 @@ export function RulesTable({
             </label>
             <select
               value={adv.status}
-              onChange={(e) => setAdv({ ...adv, status: e.target.value })}
+              onChange={(e) => { setAdv({ ...adv, status: e.target.value }); setPage(0); }}
               className="input-industrial w-full text-xs"
             >
               <option value="">All</option>

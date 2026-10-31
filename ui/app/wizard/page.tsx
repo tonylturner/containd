@@ -1,11 +1,13 @@
 "use client";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
 import { useConfigForm } from "../../lib/use-config-form";
 import { ConfigEditNotice } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
 
 import {
@@ -40,7 +42,6 @@ export default function WizardPage() {
   const [globalMode, setGlobalMode] = useState<ICSModeSelection>("");
   const [zones, setZones] = useState<Zone[]>([]);
   const [natConfig, setNatConfig] = useState<NATConfig>({ enabled: false });
-  const [loading, setLoading] = useState(true);
 
   /* active wizard state */
   const [active, setActive] = useState<WizardId | null>(null);
@@ -77,20 +78,15 @@ export default function WizardPage() {
   const [izAny, setIzAny] = form.field("izAny");
   const [izSelected, setIzSelected] = form.field("izSelected");
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
+  const { initialLoading: loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [z, n, dp] = await Promise.all([api.listZones(), api.getNAT(), fetchDataPlane()]);
     setGlobalMode(dp?.dpiMode ?? "");
     refreshForm({ zones: z, nat: n, globalMode: dp?.dpiMode }, keepEdits);
     setZones(z ?? []);
     setNatConfig(n ?? { enabled: false });
-    setLoading(false);
-  }, [refreshForm]);
+  }, [refreshForm]));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   function reset() {
     setActive(null);

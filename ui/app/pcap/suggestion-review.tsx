@@ -88,6 +88,7 @@ function RuleScope({
 
 export function SuggestionReview({
   suggestion: s,
+  now,
   checked,
   canEdit,
   busy,
@@ -95,6 +96,7 @@ export function SuggestionReview({
   onReview,
 }: {
   suggestion: LearnSuggestion;
+  now: number;
   checked: boolean;
   canEdit: boolean;
   busy: boolean;
@@ -103,7 +105,7 @@ export function SuggestionReview({
 }) {
   const [coordinates, setCoordinates] = useState(false);
   const iec = s.content.rules.some((r) => r.ics?.protocol === "iec104");
-  const expired = Date.parse(s.expiresAt) <= Date.now();
+  const expired = Date.parse(s.expiresAt) <= now;
   const reviewable =
     !expired && !!s.proof && ["certified", "reviewed"].includes(s.status);
   const failures = s.proof
@@ -149,7 +151,7 @@ export function SuggestionReview({
               type="checkbox"
               aria-label={`Select ${s.id}`}
               checked={checked}
-              disabled={busy || !selectable(s)}
+              disabled={busy || !selectable(s, now)}
               onChange={onToggle}
             />
             Select

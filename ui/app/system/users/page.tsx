@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+
+import { useAsyncRefresh } from "../../../hooks/useAsyncRefresh";
 
 import { Shell } from "../../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../../components/ConfirmDialog";
@@ -20,8 +22,8 @@ export default function UsersPage() {
   const confirm = useConfirm();
   const save = useSaveAction<Exclude<PendingAction, null>>();
   const pending = save.pending;
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadedUsers, setUsers] = useState<User[]>([]);
+  const users = isAdmin() ? loadedUsers : [];
   const [error, setError] = useState<string | null>(null);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<{
@@ -53,21 +55,12 @@ export default function UsersPage() {
   const [resetPwUserId, setResetPwUserId] = useState<string | null>(null);
   const [resetPwValue, setResetPwValue] = useState("");
 
-  async function refresh() {
-    if (!isAdmin()) {
-      setUsers([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+  const { loading: usersLoading, refresh } = useAsyncRefresh(useCallback(async () => {
+    if (!isAdmin()) return;
     const list = await api.listUsers();
     setUsers(list ?? []);
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    refresh();
-  }, []);
+  }, []));
+  const loading = isAdmin() && usersLoading;
 
   /**
    * Runs one user action at a time through the shared save hook: the acting

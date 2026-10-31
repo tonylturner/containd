@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
+
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useToast } from "../../components/ToastProvider";
 import { api, Conduit, ConduitMap } from "../../lib/api";
@@ -24,34 +26,30 @@ export default function SecurityView() {
   const [selected, setSelected] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [zoom, setZoom] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const fetchData = useCallback(async () => {
+  const { initialLoading: loading, loading: refreshing, refresh: fetchData } = useAsyncRefresh(useCallback(async () => {
     try {
-      setError(null);
       const [zones, conds] = await Promise.all([
         api.listZones(),
         api.getSecurityConduits(),
       ]);
+      setError(null);
       if (!zones || !conds) throw new Error("Failed to load security data");
       zoneNames.current = new Map(zones.map((z) => [mapZone(z).id, z.name]));
       const zv = zones.map(mapZone);
       setAllZones(zv);
       setConduits((conds as ConduitMap) || {});
       setActiveIds((prev) => prev.length ? prev : zv.slice(0, Math.min(MAX_ZONES, zv.length)).map((z) => z.id));
-      setLoading(false);
     } catch (e) {
       setError(String(e));
-      setLoading(false);
     }
-  }, []);
+  }, []));
 
   useConfigRefresh(fetchData);
-  useEffect(() => { fetchData(); }, [fetchData]);
 
   const activeZones = useMemo(() => allZones.filter((z) => activeIds.includes(z.id)), [allZones, activeIds]);
   const targets = useMemo(() => summarizeTargets(allZones, conduits), [allZones, conduits]);
@@ -126,7 +124,7 @@ export default function SecurityView() {
     );
   }
 
-  if (error) {
+  if (error && !refreshing) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
         <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--topo-red)" }}>{error}</div>

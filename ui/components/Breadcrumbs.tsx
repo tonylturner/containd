@@ -2,18 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { uiNavigationPath, uiRoutePath } from "../lib/ui-navigation";
 
 export function Breadcrumbs() {
   const pathname = usePathname() || "/";
 
-  const segments = pathname.split("/").filter(Boolean);
+  const segments = uiRoutePath(pathname).split("/").filter(Boolean);
 
   if (segments.length === 0) {
     return null;
   }
 
   const crumbs = segments.map((seg, i) => {
-    const href = "/" + segments.slice(0, i + 1).join("/");
+    const href = uiNavigationPath("/" + segments.slice(0, i + 1).join("/"), pathname);
     const label = seg
       .replace(/-/g, " ")
       .replace(/\b\w/g, (c) => c.toUpperCase());
@@ -24,7 +25,7 @@ export function Breadcrumbs() {
     <nav aria-label="Breadcrumb" className="mb-4 font-mono text-[10px] tracking-wider text-(--text-dim)">
       <ol className="flex items-center gap-1.5">
         <li>
-          <Link href="/" className="transition-ui hover:text-(--amber)">
+          <Link href={uiNavigationPath("/", pathname)} className="transition-ui hover:text-(--amber)">
             Home
           </Link>
         </li>

@@ -1,5 +1,7 @@
 "use client";
 
+import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
+
 import { useConfigForm } from "../../../../lib/use-config-form";
 import { useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
@@ -31,15 +33,13 @@ export default function SyslogPage() {
   const { refreshForm } = form;
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    setLoading(true);
-    setError(null);
+  const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     try {
       const svc = await api.getServicesStatus();
+      setError(null);
       setStatus(svc?.syslog ?? null);
       const s = await api.getSyslog();
       refreshForm(s, keepEdits);
@@ -55,16 +55,10 @@ export default function SyslogPage() {
       const msg = e instanceof Error ? e.message : "Failed to refresh syslog.";
       setError(msg);
       toast("Failed to refresh syslog", "error");
-    } finally {
-      setLoading(false);
     }
-  }, [toast, adoptConfig, refreshForm]);
+  }, [toast, adoptConfig, refreshForm]));
 
   useConfigRefresh(refresh);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -153,7 +147,7 @@ export default function SyslogPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
-      {error && (
+      {!loading && error && (
         <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>

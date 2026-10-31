@@ -189,21 +189,16 @@ export default function PcapPage() {
     }));
   }, [ifaces, zones]);
 
-  useEffect(() => {
-    if (ifaceStateStatus !== "ready") return;
-    setSettings((prev) => {
-      // Discovery adds choices; it must never delete saved forwarding targets.
-      const existing = new Set((prev.forwardTargets ?? []).map((target) => target.interface));
-      const added = ifaceOptions.filter((iface) => !existing.has(iface.value)).map((iface) => ({
-        interface: iface.value,
-        enabled: false,
-        host: "",
-        port: 9000,
-        proto: "udp" as const,
-      }));
-      return { ...prev, forwardTargets: [...(prev.forwardTargets ?? []), ...added] };
-    });
-  }, [ifaceOptions, ifaceStateStatus]);
+  // Unconfigured discovery rows are display defaults, not persisted settings.
+  const forwardTargets = useMemo(() => {
+    const saved = settings.forwardTargets ?? [];
+    if (ifaceStateStatus !== "ready") return saved;
+    const existing = new Set(saved.map((target) => target.interface));
+    const discovered = ifaceOptions.filter((iface) => !existing.has(iface.value)).map((iface) => ({
+      interface: iface.value, enabled: false, host: "", port: 9000, proto: "udp" as const,
+    }));
+    return [...saved, ...discovered];
+  }, [settings.forwardTargets, ifaceOptions, ifaceStateStatus]);
 
   const bpfPreview = useMemo(() => {
     const clauses: string[] = [];
@@ -372,12 +367,14 @@ export default function PcapPage() {
   }
 
   function updateForwardTarget(iface: string, patch: Partial<PcapForwardRow>) {
-    setSettings((prev) => ({
-      ...prev,
-      forwardTargets: (prev.forwardTargets ?? []).map((t) =>
-        t.interface === iface ? { ...t, ...patch } : t,
-      ),
-    }));
+    setSettings((prev) => {
+      const saved = prev.forwardTargets ?? [];
+      const row = saved.find((target) => target.interface === iface) ?? forwardTargets.find((target) => target.interface === iface);
+      if (!row) return prev;
+      const next = { ...row, ...patch };
+      return { ...prev, forwardTargets: saved.some((target) => target.interface === iface)
+        ? saved.map((target) => target.interface === iface ? next : target) : [...saved, next] };
+    });
   }
 
   async function startCapture() {
@@ -510,7 +507,7 @@ export default function PcapPage() {
       />
       <CaptureSetupCard
         canEdit={canEdit}
-        settings={settings}
+        settings={{ ...settings, forwardTargets }}
         setSettings={setSettings}
         configIssues={configIssues}
         captureIfaceOptions={captureIfaceOptions}

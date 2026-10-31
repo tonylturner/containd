@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/topology-test";
 import { routes } from "./fixtures/routes";
 import { snapshot } from "./fixtures/iec104-inventory";
 import { pressure } from "./fixtures/iec104-pressure";

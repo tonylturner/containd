@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useAsyncRefresh } from "../hooks/useAsyncRefresh";
 import { api, isAdmin } from "../lib/api";
 import { CONFIG_COMMITTED } from "../lib/config-events";
 import { useConfigRefresh } from "../lib/use-config-refresh";
@@ -17,7 +18,7 @@ export function ConfigStatusBar() {
   const request = React.useRef(0);
   const confirm = useConfirm();
 
-  const check = React.useCallback(async () => {
+  const { refresh: check } = useAsyncRefresh(React.useCallback(async () => {
     // A mutation arriving during a poll must start a new read, not be dropped.
     const id = ++request.current;
     try {
@@ -27,7 +28,7 @@ export function ConfigStatusBar() {
     } catch {
       if (id === request.current) setStatus("unknown");
     }
-  }, []);
+  }, []));
 
   const invalidateCheck = React.useCallback(() => { ++request.current; }, []);
   useConfigRefresh(check);
@@ -37,7 +38,6 @@ export function ConfigStatusBar() {
     return () => window.removeEventListener(CONFIG_COMMITTED, clearNotice);
   }, []);
   React.useEffect(() => {
-    void check();
     const timer = setInterval(check, 30_000);
     return () => { clearInterval(timer); invalidateCheck(); };
   }, [check, invalidateCheck]);
