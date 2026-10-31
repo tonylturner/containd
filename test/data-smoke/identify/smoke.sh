@@ -14,8 +14,8 @@ run_identification_probes() {
 
   # Add L4 delivery permissions only. ICS rules retain their registered ports.
   UPDATED_CFG=$(jq --argjson clients "$CLIENT_SOURCES" --arg server "${WAN_NET}.4/32" '
-    .dataPlane.dpiIcsProtocols.iec104 = true
-    | .dataPlane.dpiIcsParsing.modbus = "tolerant"
+    .dataplane.dpiIcsProtocols.iec104 = true
+    | .dataplane.dpiIcsParsing.modbus = "tolerant"
     | .firewall.rules += [
       {id:"smoke-identify-delivery", sources:$clients, destinations:[$server],
        protocols:[{name:"tcp",port:"1502"},{name:"tcp",port:"12404"}], action:"ALLOW"},
@@ -27,7 +27,7 @@ run_identification_probes() {
     -H "$AUTH_HEADER" -H 'Content-Type: application/json' -X POST "${BASE}/config" --data-binary @- <<<"$UPDATED_CFG")
   [[ "$code" == 200 ]] || { log "identification config save failed: $(cat "$WORK_DIR/identify-save.json")"; exit 1; }
   # shellcheck disable=SC2034 # apply_snapshot consumes this caller-owned value.
-  DATAPLANE_CFG=$(jq '.dataPlane' <<<"$UPDATED_CFG")
+  DATAPLANE_CFG=$(jq '.dataplane' <<<"$UPDATED_CFG")
   apply_snapshot
 
   # Always rebuild the listener from current sources, including when the

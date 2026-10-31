@@ -29,7 +29,7 @@ server_pid_fc3_requests() {
 push_parsing() {
   local label=$1 filter=$2 code
   UPDATED_CFG=$(jq "$filter" <<<"$UPDATED_CFG")
-  DATAPLANE_CFG=$(jq '.dataPlane' <<<"$UPDATED_CFG")
+  DATAPLANE_CFG=$(jq '.dataplane' <<<"$UPDATED_CFG")
   code=$(echo "$UPDATED_CFG" | curl -s --max-time 10 --connect-timeout 5 -w "%{http_code}" -H "$AUTH_HEADER" \
     -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$WORK_DIR/parsing-config.out" || true)
   if [[ "$code" != "200" ]]; then
@@ -204,14 +204,14 @@ probe_bad_length() {
 # parsing pushed through the API, and restores the default.
 run_parsing_probes() {
   log "Testing tolerant and strict Modbus parsing..."
-  if $CURL -H "$AUTH_HEADER" "${BASE}/config" | jq -e '.dataPlane.dpiIcsParsing == null' >/dev/null 2>&1; then
+  if $CURL -H "$AUTH_HEADER" "${BASE}/config" | jq -e '.dataplane.dpiIcsParsing == null' >/dev/null 2>&1; then
     pass "Tolerant parsing is the default: the saved config has no dpiIcsParsing"
   else
-    check_fail "the saved config already sets dpiIcsParsing: $($CURL -H "$AUTH_HEADER" "${BASE}/config" | jq -c '.dataPlane.dpiIcsParsing')"
+    check_fail "the saved config already sets dpiIcsParsing: $($CURL -H "$AUTH_HEADER" "${BASE}/config" | jq -c '.dataplane.dpiIcsParsing')"
   fi
   probe_pid_nonzero tolerant
   probe_bad_length tolerant
-  push_parsing "Strict Modbus parsing saved and pushed to the engine" '.dataPlane.dpiIcsParsing = {"modbus": "strict"}' || true
+  push_parsing "Strict Modbus parsing saved and pushed to the engine" '.dataplane.dpiIcsParsing = {"modbus": "strict"}' || true
   probe_pid_nonzero strict
   if compose exec -T ot_client python /opt/modbus/client.py read "$MODBUS_DST" 502 >"$WORK_DIR/strict-read.out" 2>"$WORK_DIR/strict-read.err" &&
     grep -q '^READ_OK' "$WORK_DIR/strict-read.out"; then
@@ -220,5 +220,5 @@ run_parsing_probes() {
     check_fail "Strict: a conformant read failed: $(tr -d '\r' <"$WORK_DIR/strict-read.err" | tr '\n' ' ')"
   fi
   probe_bad_length strict
-  push_parsing "Tolerant parsing restored" 'del(.dataPlane.dpiIcsParsing)' || true
+  push_parsing "Tolerant parsing restored" 'del(.dataplane.dpiIcsParsing)' || true
 }
