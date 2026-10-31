@@ -5,9 +5,7 @@ package services
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"text/template" // nosemgrep: go.lang.security.audit.xss.import-text-template.import-text-template -- renders Envoy/Nginx config, not HTML.
 	"time"
 
 	commonlog "github.com/tonylturner/containd/pkg/common/logging"
@@ -50,6 +47,7 @@ type ProxyManager struct {
 
 	OnEvent func(kind string, attrs map[string]any)
 
+	applyMu        sync.Mutex
 	mu             sync.Mutex
 	lastCfg        config.ProxyConfig
 	envoyCmd       *exec.Cmd
@@ -146,30 +144,23 @@ func NewProxyManager(opts ProxyOptions) *ProxyManager {
 }
 
 func (m *ProxyManager) Apply(ctx context.Context, cfg config.ProxyConfig) error {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+	if err := m.checkProxyConfig(cfg); err != nil {
+		return serviceConfigError(config.ServiceProxy, err)
+	}
+	if err := m.prepareRenderDirs(); err != nil {
+		return err
+	}
+	files, err := m.proxyFiles(cfg)
+	if err != nil {
+		return serviceConfigError(config.ServiceProxy, err)
+	}
+	if err := publishDaemonFiles(ctx, files...); err != nil {
+		return serviceConfigError(config.ServiceProxy, err)
+	}
 	m.mu.Lock()
 	m.lastCfg = cfg
-	m.mu.Unlock()
-
-	if err := os.MkdirAll(m.BaseDir, 0o755); err != nil {
-		return err
-	}
-	logDir := filepath.Join(filepath.Dir(m.BaseDir), "logs")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		return err
-	}
-	if err := m.renderForward(cfg.Forward); err != nil {
-		return err
-	}
-	if err := m.renderReverse(cfg.Reverse); err != nil {
-		return err
-	}
-	if err := m.validateForward(ctx, cfg.Forward); err != nil {
-		return err
-	}
-	if err := m.validateReverse(ctx, cfg.Reverse); err != nil {
-		return err
-	}
-	m.mu.Lock()
 	m.lastRender = time.Now().UTC()
 	m.mu.Unlock()
 	if m.Supervise {
@@ -181,180 +172,39 @@ func (m *ProxyManager) Apply(ctx context.Context, cfg config.ProxyConfig) error 
 	return nil
 }
 
-func (m *ProxyManager) renderForward(cfg config.ForwardProxyConfig) error {
-	path := filepath.Join(m.BaseDir, "envoy-forward.yaml")
-	if !cfg.Enabled {
-		_ = os.Remove(path)
-		return nil
-	}
-	port := cfg.ListenPort
-	if port == 0 {
-		port = 3128
-	}
-	domains := cfg.AllowedDomains
-	if len(domains) == 0 {
-		domains = []string{"*"}
-	}
-	domainsJSON, err := json.Marshal(domains)
-	if err != nil {
-		return err
-	}
-
-	tpl := template.Must(template.New("envoyForward").Parse(envoyForwardTemplate))
-	var buf bytes.Buffer
-	if err := tpl.Execute(&buf, map[string]any{
-		"ListenPort":     port,
-		"Domains":        string(domainsJSON),
-		"LogRequests":    cfg.LogRequests,
-		"AccessLogPath":  filepath.Join(filepath.Dir(m.BaseDir), "logs", "envoy-access.log"),
-		"Upstream":       cfg.Upstream,
-		"HasUpstream":    cfg.Upstream != "",
-		"ListenZones":    cfg.ListenZones,
-		"HasListenZones": len(cfg.ListenZones) > 0,
-	}); err != nil {
-		return err
-	}
-	return os.WriteFile(path, buf.Bytes(), 0o644)
-}
-
-func (m *ProxyManager) renderReverse(cfg config.ReverseProxyConfig) error {
-	path := filepath.Join(m.BaseDir, "nginx-reverse.conf")
-	if !cfg.Enabled || len(cfg.Sites) == 0 {
-		_ = os.Remove(path)
-		return nil
-	}
-	tpl := template.Must(template.New("nginxReverse").Funcs(template.FuncMap{
-		"join": func(ss []string, sep string) string {
-			if len(ss) == 0 {
-				return ""
-			}
-			out := ss[0]
-			for _, s := range ss[1:] {
-				out += sep + s
-			}
-			return out
-		},
-		"hasCert": func(ref string) bool { return ref != "" },
-	}).Parse(nginxReverseTemplate))
-
-	type tmplData struct {
-		config.ReverseProxyConfig
-		CertsDir      string
-		AccessLogPath string
-		PidPath       string
-		TempDir       string
-	}
-
-	logDir := filepath.Join(filepath.Dir(m.BaseDir), "logs")
-	tempDir := filepath.Join(m.BaseDir, "nginx-tmp")
-	for _, sub := range []string{"body", "proxy", "fastcgi", "uwsgi", "scgi"} {
-		if err := os.MkdirAll(filepath.Join(tempDir, sub), 0o755); err != nil {
-			return err
-		}
-	}
-	var buf bytes.Buffer
-	if err := tpl.Execute(&buf, tmplData{
-		ReverseProxyConfig: cfg,
-		CertsDir:           m.CertsDir,
-		AccessLogPath:      filepath.Join(logDir, "nginx-access.log"),
-		PidPath:            filepath.Join(m.BaseDir, "nginx.pid"),
-		TempDir:            tempDir,
-	}); err != nil {
-		return err
-	}
-	return os.WriteFile(path, buf.Bytes(), 0o644)
-}
-
-func (m *ProxyManager) validateForward(ctx context.Context, cfg config.ForwardProxyConfig) error {
-	if !cfg.Enabled {
-		return nil
-	}
-	configPath := filepath.Join(m.BaseDir, "envoy-forward.yaml")
-	if _, err := os.Stat(configPath); err != nil {
-		return fmt.Errorf("envoy config missing: %w", err)
-	}
-	if _, err := os.Stat(m.EnvoyPath); err != nil {
-		// Do not fail hard when binary is missing; supervision will log a clearer error.
-		return nil
-	}
-	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	testCmd := exec.CommandContext(testCtx, m.EnvoyPath, "--mode", "validate", "-c", configPath)
-	if out, err := testCmd.CombinedOutput(); err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg != "" {
-			err = fmt.Errorf("%w: %s", err, msg)
-		}
-		m.mu.Lock()
-		m.lastEnvoyError = err.Error()
-		m.mu.Unlock()
-		m.emit("service.envoy.validate_failed", map[string]any{"error": err.Error(), "error_count": 1})
-		return err
-	}
-	return nil
-}
-
-func (m *ProxyManager) validateReverse(ctx context.Context, cfg config.ReverseProxyConfig) error {
-	if !cfg.Enabled || len(cfg.Sites) == 0 {
-		return nil
-	}
-	configPath := filepath.Join(m.BaseDir, "nginx-reverse.conf")
-	if _, err := os.Stat(configPath); err != nil {
-		return fmt.Errorf("nginx config missing: %w", err)
-	}
-	if _, err := os.Stat(m.NginxPath); err != nil {
-		return nil
-	}
-	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	testCmd := exec.CommandContext(ctx, m.NginxPath, "-t", "-c", configPath)
-	if out, err := testCmd.CombinedOutput(); err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg != "" {
-			err = fmt.Errorf("%w: %s", err, msg)
-		}
-		m.mu.Lock()
-		m.lastNginxError = err.Error()
-		m.mu.Unlock()
-		m.emit("service.nginx.validate_failed", map[string]any{"error": err.Error(), "error_count": 1})
-		return err
-	}
-	return nil
-}
-
 func (m *ProxyManager) ensureProcesses(ctx context.Context, cfg config.ProxyConfig) error {
 	var errs []error
 	if cfg.Forward.Enabled {
-		m.startOrRestartEnvoy(ctx)
+		errs = append(errs, m.startOrRestartEnvoy(ctx))
 	} else {
 		errs = append(errs, m.stopEnvoy())
 	}
-	if cfg.Reverse.Enabled {
-		m.startOrRestartNginx(ctx)
+	if cfg.Reverse.Enabled && len(cfg.Reverse.Sites) > 0 {
+		errs = append(errs, m.startOrRestartNginx(ctx))
 	} else {
 		errs = append(errs, m.stopNginx())
 	}
 	return errors.Join(errs...)
 }
 
-func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
+func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, err := os.Stat(m.EnvoyPath); err != nil {
 		m.lastEnvoyError = fmt.Sprintf("envoy binary not found at %s", m.EnvoyPath)
 		m.log.Warnw("envoy binary not found; supervision skipped", "path", m.EnvoyPath)
-		return
+		return errors.New(m.lastEnvoyError)
 	}
 	configPath := filepath.Join(m.BaseDir, "envoy-forward.yaml")
 	if info, err := os.Stat(configPath); err != nil || info.Size() == 0 {
 		m.lastEnvoyError = fmt.Sprintf("envoy config missing or empty at %s", configPath)
 		m.log.Warnw("envoy config missing; skipping start", "config", configPath)
-		return
+		return errors.New(m.lastEnvoyError)
 	}
 	if m.envoyCmd != nil && m.envoyCmd.Process != nil {
 		if err := stopManagedProcess(m.envoyCmd.Process, m.envoyDone); err != nil {
 			m.lastEnvoyError = err.Error()
-			return
+			return err
 		}
 	}
 	// Use background context so envoy outlives the API request that triggered it.
@@ -366,7 +216,7 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 		m.lastEnvoyError = err.Error()
 		m.log.Errorw("failed to start envoy", "error", err)
 		m.emit("service.envoy.start_failed", map[string]any{"error": err.Error(), "error_count": 1})
-		return
+		return errors.New(m.lastEnvoyError)
 	}
 	m.envoyCmd = cmd
 	done := make(chan struct{})
@@ -392,6 +242,7 @@ func (m *ProxyManager) startOrRestartEnvoy(ctx context.Context) {
 		m.mu.Unlock()
 		m.emit("service.envoy.exited", map[string]any{"pid": pid, "exit": exit, "error_count": 1})
 	}(cmd, pid)
+	return nil
 }
 
 func (m *ProxyManager) stopEnvoy() error {
@@ -409,28 +260,24 @@ func (m *ProxyManager) stopEnvoy() error {
 	return nil
 }
 
-func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
+func (m *ProxyManager) startOrRestartNginx(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, err := os.Stat(m.NginxPath); err != nil {
 		m.lastNginxError = fmt.Sprintf("nginx binary not found at %s", m.NginxPath)
 		m.log.Warnw("nginx binary missing; supervision skipped", "path", m.NginxPath)
-		return
+		return errors.New(m.lastNginxError)
 	}
 	configPath := filepath.Join(m.BaseDir, "nginx-reverse.conf")
 	if info, err := os.Stat(configPath); err != nil || info.Size() == 0 {
 		m.lastNginxError = fmt.Sprintf("nginx config missing or empty at %s", configPath)
 		m.log.Warnw("nginx config missing; skipping start", "config", configPath)
-		return
-	}
-	// Validate config before restart.
-	if err := m.validateReverse(ctx, m.lastCfg.Reverse); err != nil {
-		return
+		return errors.New(m.lastNginxError)
 	}
 	if m.nginxCmd != nil && m.nginxCmd.Process != nil {
 		if err := stopManagedProcess(m.nginxCmd.Process, m.nginxDone); err != nil {
 			m.lastNginxError = err.Error()
-			return
+			return err
 		}
 	}
 	// Use background context so nginx outlives the API request that triggered it.
@@ -442,7 +289,7 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 		m.lastNginxError = err.Error()
 		m.log.Errorw("failed to start nginx", "error", err)
 		m.emit("service.nginx.start_failed", map[string]any{"error": err.Error(), "error_count": 1})
-		return
+		return errors.New(m.lastNginxError)
 	}
 	m.nginxCmd = cmd
 	done := make(chan struct{})
@@ -468,6 +315,7 @@ func (m *ProxyManager) startOrRestartNginx(ctx context.Context) {
 		m.mu.Unlock()
 		m.emit("service.nginx.exited", map[string]any{"pid": pid, "exit": exit, "error_count": 1})
 	}(cmd, pid)
+	return nil
 }
 
 func (m *ProxyManager) stopNginx() error {
@@ -680,120 +528,3 @@ func (m *ProxyManager) DescribeRendered() []string {
 		fmt.Sprintf("%s/nginx-reverse.conf", m.BaseDir),
 	}
 }
-
-const envoyForwardTemplate = `
-static_resources:
-  listeners:
-  - name: forward_proxy
-    address:
-      socket_address:
-        address: 0.0.0.0
-        port_value: {{.ListenPort}}
-    filter_chains:
-    - filters:
-      - name: envoy.filters.network.http_connection_manager
-        typed_config:
-          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
-          stat_prefix: forward_proxy
-          {{- if .LogRequests }}
-          access_log:
-          - name: envoy.access_loggers.file
-            typed_config:
-              "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
-              path: {{.AccessLogPath}}
-              log_format:
-                text_format_source:
-                  inline_string: "status=%RESPONSE_CODE%\n"
-          {{- end }}
-          route_config:
-            name: local_route
-            virtual_hosts:
-            - name: forward_proxy
-              domains: {{.Domains}}
-              routes:
-              - match: { prefix: "/" }
-                route:
-                  cluster: dynamic_forward_proxy_cluster
-          {{- if .HasUpstream }}
-          # upstream proxy chaining is not yet implemented; Upstream={{.Upstream}}
-          {{- end }}
-          {{- if .HasListenZones }}
-          # listenZones are recorded in config but not yet enforced at L3 binding; listenZones={{.ListenZones}}
-          {{- end }}
-          http_filters:
-          - name: envoy.filters.http.dynamic_forward_proxy
-            typed_config:
-              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
-              dns_cache_config:
-                name: dynamic_forward_proxy_cache
-                dns_lookup_family: V4_ONLY
-          - name: envoy.filters.http.router
-            typed_config:
-              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
-  clusters:
-  - name: dynamic_forward_proxy_cluster
-    connect_timeout: 5s
-    lb_policy: CLUSTER_PROVIDED
-    cluster_type:
-      name: envoy.clusters.dynamic_forward_proxy
-      typed_config:
-        "@type": type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig
-        dns_cache_config:
-          name: dynamic_forward_proxy_cache
-          dns_lookup_family: V4_ONLY
-admin:
-  access_log_path: /tmp/admin_access.log
-  address:
-    socket_address:
-      address: 127.0.0.1
-      port_value: 9901
-`
-
-const nginxReverseTemplate = `
-pid {{ .PidPath }};
-events {}
-
-http {
-  log_format containd_status "status=$status";
-  access_log {{ .AccessLogPath }} containd_status;
-  client_body_temp_path {{ .TempDir }}/body;
-  proxy_temp_path {{ .TempDir }}/proxy;
-  fastcgi_temp_path {{ .TempDir }}/fastcgi;
-  uwsgi_temp_path {{ .TempDir }}/uwsgi;
-  scgi_temp_path {{ .TempDir }}/scgi;
-{{- range .Sites }}
-{{- $site := . }}
-upstream {{$site.Name}}_upstream {
-{{- range $site.Backends }}
-  server {{ . }};
-{{- end }}
-}
-
-server {
-  {{- if $site.TLSEnabled }}
-    {{- if hasCert $site.CertRef }}
-  listen {{ $site.ListenPort }} ssl;
-  ssl_certificate {{ $.CertsDir }}/{{ $site.CertRef }}.crt;
-  ssl_certificate_key {{ $.CertsDir }}/{{ $site.CertRef }}.key;
-    {{- else }}
-  # TLS enabled but certRef not set; serving plaintext until certificates are configured.
-  listen {{ $site.ListenPort }};
-    {{- end }}
-  {{- else }}
-  listen {{ $site.ListenPort }};
-  {{- end }}
-  {{- if $site.Hostnames }}
-  server_name {{ join $site.Hostnames " " }};
-  {{- else }}
-  server_name _;
-  {{- end }}
-
-  location / {
-    proxy_pass http://{{$site.Name}}_upstream;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-  }
-}
-{{ end -}}
-}
-`

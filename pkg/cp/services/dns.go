@@ -4,7 +4,6 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -33,6 +32,7 @@ type DNSManager struct {
 	ControlPath   string
 	OnEvent       func(kind string, attrs map[string]any)
 
+	applyMu    sync.Mutex
 	mu         sync.Mutex
 	lastCfg    config.DNSConfig
 	lastRender time.Time
@@ -113,10 +113,11 @@ func newDNSLogger() *zap.SugaredLogger {
 }
 
 func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
-	_ = ctx
-	m.mu.Lock()
-	m.lastCfg = cfg
-	m.mu.Unlock()
+	if err := validateDaemonService(config.ServicesConfig{DNS: cfg}); err != nil {
+		return err
+	}
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
 
 	if err := os.MkdirAll(m.BaseDir, 0o755); err != nil {
 		return err
@@ -129,62 +130,22 @@ func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
 		m.emit("service.dns.disabled", map[string]any{})
 		_ = os.Remove(path)
 		m.mu.Lock()
+		m.lastCfg = cfg
 		m.lastRender = time.Now().UTC()
 		m.lastError = ""
 		m.mu.Unlock()
 		return nil
 	}
-	if m.UnboundPath == "" {
+	if m.Supervise && m.UnboundPath == "" {
 		m.log.Warnw("unbound binary not found; skipping enable", "path", m.UnboundPath)
 		return fmt.Errorf("unbound binary not found; set CONTAIND_UNBOUND_PATH or install unbound")
 	}
 
-	port := cfg.ListenPort
-	if port == 0 {
-		port = 53
-	}
-	var b strings.Builder
-	b.WriteString("server:\n")
-	b.WriteString("  verbosity: 1\n")
-	// Ensure Unbound works as a non-root embedded process in containers:
-	// - no chroot
-	// - no user switching
-	// - no pidfile
-	// - no syslog (distroless doesn't include it)
-	b.WriteString("  username: \"\"\n")
-	b.WriteString("  chroot: \"\"\n")
-	b.WriteString("  directory: \"/tmp\"\n")
-	b.WriteString("  pidfile: \"\"\n")
-	b.WriteString("  use-syslog: no\n")
-	b.WriteString("  logfile: \"\"\n")
-	// Forward-only by default; avoid requiring root trust anchors in early phases.
-	b.WriteString("  auto-trust-anchor-file: \"\"\n")
-	b.WriteString(fmt.Sprintf("  interface: 0.0.0.0@%d\n", port))
-	b.WriteString("  access-control: 0.0.0.0/0 allow\n")
-	if cfg.CacheSizeMB > 0 {
-		b.WriteString(fmt.Sprintf("  msg-cache-size: %dm\n", cfg.CacheSizeMB))
-		b.WriteString(fmt.Sprintf("  rrset-cache-size: %dm\n", cfg.CacheSizeMB))
-	}
-	if len(cfg.UpstreamServers) > 0 {
-		b.WriteString("\nforward-zone:\n")
-		b.WriteString("  name: \".\"\n")
-		for _, u := range cfg.UpstreamServers {
-			u = strings.TrimSpace(u)
-			if u == "" {
-				continue
-			}
-			b.WriteString(fmt.Sprintf("  forward-addr: %s\n", u))
-		}
-	}
-
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		m.mu.Lock()
-		m.lastError = err.Error()
-		m.mu.Unlock()
-		m.emit("service.dns.render_failed", map[string]any{"error": err.Error(), "error_count": 1})
-		return err
+	if err := publishDaemonFiles(ctx, daemonFile{path: path, body: []byte(renderUnbound(cfg)), check: m.checkConfig}); err != nil {
+		return serviceConfigError(config.ServiceDNS, err)
 	}
 	m.mu.Lock()
+	m.lastCfg = cfg
 	m.lastRender = time.Now().UTC()
 	m.lastError = ""
 	m.lastConf = path
@@ -205,81 +166,22 @@ func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
 }
 
 func (m *DNSManager) Validate(ctx context.Context, cfg config.DNSConfig) error {
-	_ = ctx
+	if err := validateDaemonService(config.ServicesConfig{DNS: cfg}); err != nil {
+		return err
+	}
 	if !cfg.Enabled {
 		return nil
 	}
-	port := cfg.ListenPort
-	if port == 0 {
-		port = 53
-	}
-	if port < 1 || port > 65535 {
-		return fmt.Errorf("dns listenPort invalid: %d", port)
-	}
-	// If upstreams are present, ensure they are non-empty and trimmed.
-	for _, u := range cfg.UpstreamServers {
-		if strings.TrimSpace(u) == "" {
-			return fmt.Errorf("dns upstreamServers contains empty entry")
-		}
-	}
-	if m.CheckConfPath == "" {
-		// No validator binary available; best-effort checks above.
-		return nil
-	}
-
-	tmpDir, err := os.MkdirTemp("", "containd-unbound-validate-*")
+	dir, err := os.MkdirTemp("", "containd-unbound-validate-*")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmpDir)
-	path := filepath.Join(tmpDir, "unbound.conf")
+	defer os.RemoveAll(dir)
+	return serviceConfigError(config.ServiceDNS, publishDaemonFiles(ctx, daemonFile{path: filepath.Join(dir, "unbound.conf"), body: []byte(renderUnbound(cfg)), check: m.checkConfig}))
+}
 
-	// Render a minimal config identical to Apply(), but without starting processes.
-	var b strings.Builder
-	b.WriteString("server:\n")
-	b.WriteString("  verbosity: 1\n")
-	b.WriteString("  username: \"\"\n")
-	b.WriteString("  chroot: \"\"\n")
-	b.WriteString("  directory: \"/tmp\"\n")
-	b.WriteString("  pidfile: \"\"\n")
-	b.WriteString("  use-syslog: no\n")
-	b.WriteString("  logfile: \"\"\n")
-	b.WriteString("  auto-trust-anchor-file: \"\"\n")
-	b.WriteString(fmt.Sprintf("  interface: 0.0.0.0@%d\n", port))
-	b.WriteString("  access-control: 0.0.0.0/0 allow\n")
-	if cfg.CacheSizeMB > 0 {
-		b.WriteString(fmt.Sprintf("  msg-cache-size: %dm\n", cfg.CacheSizeMB))
-		b.WriteString(fmt.Sprintf("  rrset-cache-size: %dm\n", cfg.CacheSizeMB))
-	}
-	if len(cfg.UpstreamServers) > 0 {
-		b.WriteString("\nforward-zone:\n")
-		b.WriteString("  name: \".\"\n")
-		for _, u := range cfg.UpstreamServers {
-			u = strings.TrimSpace(u)
-			if u == "" {
-				continue
-			}
-			b.WriteString(fmt.Sprintf("  forward-addr: %s\n", u))
-		}
-	}
-
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		return err
-	}
-
-	var out bytes.Buffer
-	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	testCmd := exec.Command(m.CheckConfPath, path)
-	testCmd.Stdout = &out
-	testCmd.Stderr = &out
-	if err := testCmd.Run(); err != nil {
-		msg := strings.TrimSpace(out.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return fmt.Errorf("unbound-checkconf failed: %s", msg)
-	}
-	return nil
+func (m *DNSManager) checkConfig(ctx context.Context, path string) error {
+	return checkDaemon(ctx, m.CheckConfPath, path)
 }
 
 func (m *DNSManager) Current() config.DNSConfig {
@@ -314,22 +216,6 @@ func (m *DNSManager) Status() map[string]any {
 func (m *DNSManager) startOrReload(configPath string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if m.CheckConfPath != "" {
-		var out bytes.Buffer
-		// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-		testCmd := exec.Command(m.CheckConfPath, configPath)
-		testCmd.Stdout = &out
-		testCmd.Stderr = &out
-		if err := testCmd.Run(); err != nil {
-			msg := strings.TrimSpace(out.String())
-			if msg == "" {
-				msg = err.Error()
-			}
-			go m.emit("service.dns.validate_failed", map[string]any{"error": msg, "error_count": 1})
-			return fmt.Errorf("unbound-checkconf failed: %s", msg)
-		}
-	}
 
 	if m.running && m.cmd != nil && m.cmd.Process != nil {
 		// Best-effort reload (SIGHUP). If it fails, restart.
