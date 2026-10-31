@@ -86,9 +86,9 @@ func spikeNext[T any](t *testing.T, ch <-chan T) T {
 
 // Deleting any base hook flushes queued skbs. The verdict send itself succeeds;
 // the kernel's ENOENT arrives on the go-nfqueue receive/error callback instead.
-// The current Manager treats that callback as fatal and rebinds. Keep this
-// regression separate from any future change to its recovery policy.
-func TestKernelSpikeS1DeleteTableDropsHeldAndManagerRebinds(t *testing.T) {
+// That is token loss, not source failure: a replacement table must keep using
+// the same bound queue generation.
+func TestKernelApplyDropsHeldAndKeepsQueueUsable(t *testing.T) {
 	spikeKernel(t)
 	const queue = 4721
 	ln, conn, port := spikeUDP(t)
@@ -138,15 +138,17 @@ func TestKernelSpikeS1DeleteTableDropsHeldAndManagerRebinds(t *testing.T) {
 	if !errors.Is(receiveErr, unix.ENOENT) {
 		t.Fatalf("want asynchronous ENOENT, got %v", receiveErr)
 	}
-	down, ready := spikeNext(t, sources), spikeNext(t, sources)
-	t.Logf("Manager source transitions: %+v -> %+v -> %+v", first, down, ready)
-	if !first.Ready || down.Ready || down.Generation != first.Generation ||
-		!ready.Ready || ready.Generation <= first.Generation {
-		t.Fatal("expected a down event followed by a fresh queue generation")
+	if !first.Ready {
+		t.Fatal("queue was not ready")
 	}
 	spikeReceive(t, ln, "")
 	spikeSend(t, conn, "fresh")
 	spikeReceive(t, ln, "fresh")
+	select {
+	case ev := <-sources:
+		t.Fatalf("flushed token changed source generation: %+v", ev)
+	default:
+	}
 }
 
 func spikeCounter(table, name string) (uint64, error) {
