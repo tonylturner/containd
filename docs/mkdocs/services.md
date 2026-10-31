@@ -122,8 +122,9 @@ revocation, so **all clients reconnect once**. A 503 response containing
 `revoked:true, applied:false` means **revoked, not yet applied**, not an undone
 revocation: it is saved, but enforcement by the running server is not confirmed.
 The UI keeps that warning while the page is open and offers **Retry apply**.
-The inventory records revocation, not runtime acknowledgement; after reopening
-the page, use **Apply revocation** on the revoked credential to confirm it.
+The list response reports `revocationsApplied`: true if no credentials are revoked
+or the running managed server has loaded the current CRL, otherwise false; the
+VPN page offers **Apply revocation** only while unapplied.
 The revoke operation is idempotent; retry it after resolving the runtime problem.
 These operations do not require a configuration commit.
 

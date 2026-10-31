@@ -301,3 +301,77 @@ func TestOpenVPNCRLRenewsAfterReopen(t *testing.T) {
 		t.Fatal("reboot unrevoked credential")
 	}
 }
+
+func assertOpenVPNRevocationsApplied(t *testing.T, m *VPNManager, want bool) {
+	t.Helper()
+	listing, err := m.ListOpenVPNClients(context.Background())
+	if err != nil || listing.RevocationsApplied != want {
+		t.Fatalf("revocationsApplied want %t: %+v %v", want, listing, err)
+	}
+}
+
+func TestOpenVPNRevocationsAppliedLifecycle(t *testing.T) {
+	m, starts := openVPNFakeManager(t)
+	assertOpenVPNRevocationsApplied(t, m, true)
+	cfg := openVPNServerConfig()
+	openVPNApply(t, m, cfg)
+	alice, err := m.CreateOpenVPNClient(context.Background(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := m.CreateOpenVPNClient(context.Background(), "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOpenVPNRevocationsApplied(t, m, true)
+	openVPNApply(t, m, config.VPNConfig{})
+	assertOpenVPNRevocationsApplied(t, m, true) // inactive with no revoked credentials
+	openVPNApply(t, m, cfg)
+	if result, err := m.RevokeOpenVPNClient(context.Background(), alice.ID); err != nil || !result.Applied {
+		t.Fatalf("revoke: %+v %v", result, err)
+	}
+	assertOpenVPNRevocationsApplied(t, m, true)
+	// Saving another revocation without applying leaves the older server alive.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if result, err := m.RevokeOpenVPNClient(ctx, bob.ID); err == nil || !result.Revoked || result.Applied {
+		t.Fatalf("canceled revoke: %+v %v", result, err)
+	}
+	if !m.Status()["openvpn_running"].(bool) || openVPNStarts(t, starts) != 3 {
+		t.Fatal("canceled revoke stopped the existing server")
+	}
+	assertOpenVPNRevocationsApplied(t, m, false)
+	// Applying any revoked credential loads the cumulative list.
+	if _, err := m.RevokeOpenVPNClient(context.Background(), alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertOpenVPNRevocationsApplied(t, m, true)
+	openVPNApply(t, m, cfg) // no-op apply retains the loaded CRL number
+	assertOpenVPNRevocationsApplied(t, m, true)
+	openVPNApply(t, m, config.VPNConfig{})
+	assertOpenVPNRevocationsApplied(t, m, false)
+	good := m.OpenVPNPath
+	m.OpenVPNPath = filepath.Join(t.TempDir(), "missing-openvpn")
+	if err := m.Apply(context.Background(), cfg); err == nil {
+		t.Fatal("missing binary reported ready")
+	}
+	assertOpenVPNRevocationsApplied(t, m, false)
+	m.OpenVPNPath = good
+	reopened := NewVPNManager(t.TempDir())
+	assertOpenVPNRevocationsApplied(t, reopened, false)
+	openVPNApply(t, m, cfg)
+	assertOpenVPNRevocationsApplied(t, m, true)
+	// An unexpected daemon exit clears acknowledgement just like disable does.
+	m.mu.Lock()
+	cmd, done := m.ovpnCmd, m.ovpnWaitCh
+	m.mu.Unlock()
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	assertOpenVPNRevocationsApplied(t, m, false)
+	openVPNApply(t, m, cfg)
+	client := config.VPNConfig{OpenVPN: config.OpenVPNConfig{Enabled: true, Managed: &config.OpenVPNManagedClientConfig{Remote: "vpn.example.test", CA: "ca", Cert: "cert", Key: "key"}}}
+	openVPNApply(t, m, client)
+	assertOpenVPNRevocationsApplied(t, m, false)
+}

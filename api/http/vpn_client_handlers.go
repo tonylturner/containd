@@ -41,12 +41,12 @@ func listOpenVPNClientsHandler(services ServicesApplier) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		credentials, err := clients.ListOpenVPNClients(c.Request.Context())
+		listing, err := clients.ListOpenVPNClients(c.Request.Context())
 		if err != nil {
 			openVPNClientError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"clients": credentials})
+		c.JSON(http.StatusOK, listing)
 	}
 }
 

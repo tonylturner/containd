@@ -20,6 +20,7 @@ const vpnTestID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 type vpnClientServices struct {
 	credentials []cpservices.OpenVPNCredential
+	applied     bool
 	names       []string
 	downloads   []string
 	revokes     []string
@@ -28,8 +29,8 @@ type vpnClientServices struct {
 }
 
 func (*vpnClientServices) Apply(context.Context, config.ServicesConfig) error { return nil }
-func (s *vpnClientServices) ListOpenVPNClients(context.Context) ([]cpservices.OpenVPNCredential, error) {
-	return s.credentials, s.err
+func (s *vpnClientServices) ListOpenVPNClients(context.Context) (cpservices.OpenVPNClientList, error) {
+	return cpservices.OpenVPNClientList{Clients: s.credentials, RevocationsApplied: s.applied}, s.err
 }
 func (s *vpnClientServices) CreateOpenVPNClient(_ context.Context, name string) (cpservices.OpenVPNCredential, error) {
 	s.names = append(s.names, name)
@@ -184,6 +185,21 @@ func TestVPNClientAuthorizationAndUnavailable(t *testing.T) {
 		rec := vpnRequest(unavailable, route.method, route.path, `{"name":"alice"}`)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("missing capability: %d %s", rec.Code, rec.Body)
+		}
+	}
+}
+
+func TestVPNClientListRevocationsApplied(t *testing.T) {
+	for _, applied := range []bool{false, true} {
+		svc := &vpnClientServices{credentials: []cpservices.OpenVPNCredential{}, applied: applied}
+		server := NewServerWithEngineAndServices(&mockStore{}, nil, nil, svc, nil)
+		rec := vpnRequest(server, "GET", "/clients", "")
+		var listing struct {
+			Clients []cpservices.OpenVPNCredential `json:"clients"`
+			Applied *bool                          `json:"revocationsApplied"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &listing); err != nil || rec.Code != http.StatusOK || listing.Applied == nil || *listing.Applied != applied || listing.Clients == nil {
+			t.Fatalf("list applied=%t: %d %s %v", applied, rec.Code, rec.Body, err)
 		}
 	}
 }

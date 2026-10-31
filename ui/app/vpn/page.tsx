@@ -59,6 +59,7 @@ export default function VPNPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [interfaces, setInterfaces] = useState<Interface[]>([]);
   const [ovpnClients, setOvpnClients] = useState<OpenVPNCredential[]>([]);
+  const [revocationsApplied, setRevocationsApplied] = useState(true);
   const [clientsUnavailable, setClientsUnavailable] = useState(false);
   const [clientError, setClientError] = useState<string | null>(null);
   const [clientBusy, setClientBusy] = useState(false);
@@ -156,7 +157,11 @@ export default function VPNPage() {
           if (mode === "server" && canEdit) {
             const res = await api.listOpenVPNClients();
             setClientsUnavailable(res === null);
-            if (res) setOvpnClients(res.clients);
+            if (res) {
+              setOvpnClients(res.clients);
+              setRevocationsApplied(res.revocationsApplied);
+              if (res.revocationsApplied) setPendingRevocations({});
+            }
           } else {
             setOvpnClients([]);
             setClientsUnavailable(false);
@@ -338,7 +343,7 @@ export default function VPNPage() {
   }
 
   function revokeClient(credential: OpenVPNCredential) {
-    if (!canEdit || clientBusy) return;
+    if (!canEdit || clientBusy || (credential.revokedAt && revocationsApplied)) return;
     confirm.open({
       title: credential.revokedAt ? "Apply revocation?" : "Revoke client credential?",
       message: <>Revoke {credential.name} (serial {credential.serial}) and restart the managed server? All clients will reconnect once. Revocation cannot be undone.</>,
@@ -355,12 +360,12 @@ export default function VPNPage() {
     const revocation = result.ok ? result.data : result.revocation;
     if (revocation?.revoked) {
       setOvpnClients((current) => current.map((c) => c.id === credential.id ? revocation.credential : c));
-      setPendingRevocations((current) => {
-        const next = { ...current };
-        if (revocation.applied) delete next[credential.id];
-        else next[credential.id] = revocation.error || "Runtime not confirmed";
-        return next;
-      });
+      setRevocationsApplied(revocation.applied);
+      // A successful restart loads the cumulative CRL, confirming every retry.
+      if (revocation.applied) setPendingRevocations({});
+      else setPendingRevocations((current) => ({
+        ...current, [credential.id]: revocation.error || "Runtime not confirmed",
+      }));
       if (revocation.applied) toast("Client revoked and applied", "success");
     } else {
       const msg = result.ok ? "Revocation not confirmed." : result.error;
@@ -627,6 +632,7 @@ export default function VPNPage() {
           svcStatus={svcStatus}
           uploadState={uploadState}
           ovpnClients={ovpnClients}
+          revocationsApplied={revocationsApplied}
           clientsUnavailable={clientsUnavailable}
           clientError={clientError}
           clientBusy={clientBusy}

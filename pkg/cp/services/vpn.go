@@ -38,6 +38,7 @@ type VPNManager struct {
 
 	ovpnCmd        *exec.Cmd
 	ovpnWaitCh     chan struct{}
+	ovpnCRLNumber  int64 // CRL loaded by the ready managed server; zero when not confirmed.
 	ovpnRunning    bool
 	ovpnConfigPath string
 	ovpnLastStart  time.Time
@@ -210,6 +211,7 @@ func (m *VPNManager) waitOpenVPN(cmd *exec.Cmd, waitCh chan struct{}) {
 	m.mu.Lock()
 	if m.ovpnCmd == cmd {
 		m.ovpnRunning = false
+		m.ovpnCRLNumber = 0
 		m.ovpnCmd = nil
 		m.ovpnWaitCh = nil
 		m.ovpnLastStop = time.Now().UTC()
@@ -249,10 +251,10 @@ func (m *VPNManager) renderOpenVPNManagedClient(mc *config.OpenVPNManagedClientC
 	return confPath, nil
 }
 
-func (m *VPNManager) renderOpenVPNManagedServer(sc *config.OpenVPNManagedServerConfig) (string, error) {
+func (m *VPNManager) renderOpenVPNManagedServer(sc *config.OpenVPNManagedServerConfig) (string, int64, error) {
 	opts, err := validateOpenVPNManagedServer(sc)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
 	dir := openVPNManagedServerDir()
@@ -260,10 +262,10 @@ func (m *VPNManager) renderOpenVPNManagedServer(sc *config.OpenVPNManagedServerC
 	defer openVPNAuthorityMu.Unlock()
 	authority, err := openOpenVPNInventory(filepath.Join(dir, "pki"))
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if err := authority.ensureCRL(time.Now().UTC()); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	caCertPath := "pki/ca.crt"
 	serverCertPath := "pki/server.crt"
@@ -271,9 +273,9 @@ func (m *VPNManager) renderOpenVPNManagedServer(sc *config.OpenVPNManagedServerC
 
 	confPath := filepath.Join(dir, "openvpn.conf")
 	if err := atomicWriteFile(confPath, []byte(renderOpenVPNManagedServerConfig(opts, caCertPath, serverCertPath, serverKeyPath)), 0o600); err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return confPath, nil
+	return confPath, authority.CRLNumber, nil
 }
 
 func prepareOpenVPNManagedDir() (string, error) {
@@ -449,6 +451,7 @@ func (m *VPNManager) stopOpenVPN() error {
 	m.mu.Lock()
 	if !m.ovpnRunning || m.ovpnCmd == nil || m.ovpnCmd.Process == nil {
 		m.ovpnRunning = false
+		m.ovpnCRLNumber = 0
 		m.ovpnCmd = nil
 		m.ovpnWaitCh = nil
 		m.mu.Unlock()

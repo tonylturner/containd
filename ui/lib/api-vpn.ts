@@ -135,7 +135,7 @@ export const vpnAPI = {
       { name, ovpn },
     ),
   listOpenVPNClients: () =>
-    getJSONShaped<{ clients: OpenVPNCredential[] }>("/api/v1/services/vpn/openvpn/clients", { lists: ["clients"] }),
+    getJSONShaped<{ clients: OpenVPNCredential[]; revocationsApplied: boolean }>("/api/v1/services/vpn/openvpn/clients", { lists: ["clients"] }),
   createOpenVPNClient: (name: string) =>
     postJSONResult<OpenVPNCredential>("/api/v1/services/vpn/openvpn/clients", {
       name,

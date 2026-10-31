@@ -196,7 +196,7 @@ func TestOpenVPNInventoryUnknownDownloadIsReadOnly(t *testing.T) {
 	if _, err := m.CreateOpenVPNClient(context.Background(), "alice"); !errors.Is(err, ErrOpenVPNServerNotActive) {
 		t.Fatalf("inactive create: %v", err)
 	}
-	if got, err := m.ListOpenVPNClients(context.Background()); err != nil || len(got) != 0 {
+	if got, err := m.ListOpenVPNClients(context.Background()); err != nil || len(got.Clients) != 0 || !got.RevocationsApplied {
 		t.Fatalf("empty list: %v %v", got, err)
 	}
 	entries, err := os.ReadDir(root)

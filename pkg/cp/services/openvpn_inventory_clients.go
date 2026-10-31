@@ -12,20 +12,37 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-func (m *VPNManager) ListOpenVPNClients(ctx context.Context) ([]OpenVPNCredential, error) {
+// OpenVPNClientList separates durable credentials from runtime CRL acknowledgement.
+type OpenVPNClientList struct {
+	Clients            []OpenVPNCredential `json:"clients"`
+	RevocationsApplied bool                `json:"revocationsApplied"`
+}
+
+func (m *VPNManager) ListOpenVPNClients(ctx context.Context) (OpenVPNClientList, error) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return OpenVPNClientList{}, err
 	}
 	openVPNAuthorityMu.Lock()
 	defer openVPNAuthorityMu.Unlock()
 	inv, err := readOpenVPNInventory(filepath.Join(openVPNManagedServerDir(), "pki"))
 	if os.IsNotExist(err) {
-		return []OpenVPNCredential{}, nil
+		return OpenVPNClientList{Clients: []OpenVPNCredential{}, RevocationsApplied: true}, nil
 	}
 	if err != nil {
-		return nil, err
+		return OpenVPNClientList{}, err
 	}
-	return inv.list(), nil
+	m.mu.Lock()
+	applied := m.ovpnRunning && m.ovpnCRLNumber > 0 && m.ovpnCRLNumber == inv.CRLNumber
+	m.mu.Unlock()
+	clients := inv.list()
+	for _, c := range clients {
+		if c.RevokedAt != nil {
+			return OpenVPNClientList{Clients: clients, RevocationsApplied: applied}, nil
+		}
+	}
+	return OpenVPNClientList{Clients: clients, RevocationsApplied: true}, nil
 }
 func (m *VPNManager) CreateOpenVPNClient(ctx context.Context, name string) (OpenVPNCredential, error) {
 	m.applyMu.Lock()

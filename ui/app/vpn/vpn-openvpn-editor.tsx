@@ -36,6 +36,7 @@ type Props = {
   svcStatus: VPNStatus | null;
   uploadState: UploadState;
   ovpnClients: OpenVPNCredential[];
+  revocationsApplied: boolean;
   clientsUnavailable: boolean;
   clientError: string | null;
   clientBusy: boolean;
@@ -60,6 +61,7 @@ export function OpenVPNEditorCard({
   svcStatus,
   uploadState,
   ovpnClients,
+  revocationsApplied,
   clientsUnavailable,
   clientError,
   clientBusy,
@@ -585,9 +587,10 @@ export function OpenVPNEditorCard({
                     </button>
                   </div>
                 </div>
-                <p className="mt-2 text-xs text-(--text-muted)">Create and revoke take effect immediately, without a config commit. Revoking restarts the server; all clients reconnect once.</p>
+                <p className="mt-2 text-xs text-(--text-muted)">Credentials are created and revocations are saved immediately, without a config commit. Applying revocation restarts the server; all clients reconnect once.</p>
                 {clientError && <p role="alert" className="mt-3 text-sm text-red-400">{clientError}</p>}
                 {clientsUnavailable && <p role="alert" className="mt-3 text-sm text-amber-400">Credential inventory unavailable. Refresh to retry; any displayed entries may be stale.</p>}
+                {!revocationsApplied && ovpnClients.some((c) => c.revokedAt) && <p role="status" className="mt-3 text-sm text-amber-400">Revoked, but the running server has not reloaded the revocation list.</p>}
                 {ovpnClients.length ? (
                   <div className="mt-3 grid gap-2">
                     {ovpnClients.map((credential) => (
@@ -603,7 +606,7 @@ export function OpenVPNEditorCard({
                           <div><dt className="inline">Expires: </dt><dd className="inline"><time dateTime={credential.expiresAt}>{new Date(credential.expiresAt).toLocaleString()}</time></dd></div>
                           {credential.revokedAt && <div><dt className="inline">Revoked: </dt><dd className="inline"><time dateTime={credential.revokedAt}>{new Date(credential.revokedAt).toLocaleString()}</time></dd></div>}
                         </dl>
-                        {pendingRevocations[credential.id] && <p role="status" className="mt-2 text-sm text-amber-400">Revoked, not yet applied: {pendingRevocations[credential.id]}. Revocation is saved, but the running server has not confirmed it. Retry apply to confirm enforcement.</p>}
+                        {pendingRevocations[credential.id] && <p role="status" className="mt-2 text-sm text-amber-400">Revoked, not yet applied: {pendingRevocations[credential.id]}. Retry apply to confirm enforcement.</p>}
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button
                             onClick={() => void downloadClient(credential)}
@@ -612,13 +615,13 @@ export function OpenVPNEditorCard({
                           >
                             Download
                           </button>
-                          <button
+                          {(!credential.revokedAt || !revocationsApplied) && <button
                             onClick={() => revokeClient(credential)}
                             disabled={clientBusy}
                             className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-red-400 transition-ui disabled:opacity-50"
                           >
                             {pendingRevocations[credential.id] ? "Retry apply" : credential.revokedAt ? "Apply revocation" : "Revoke"}
-                          </button>
+                          </button>}
                         </div>
                       </div>
                     ))}

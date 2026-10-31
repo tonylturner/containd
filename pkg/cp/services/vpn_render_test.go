@@ -79,7 +79,7 @@ func TestOpenVPNManagedServerRenderAndPaths(t *testing.T) {
 	t.Setenv("CONTAIND_OPENVPN_DIR", filepath.Join(root, "profiles"))
 
 	mgr := NewVPNManager(t.TempDir())
-	confPath, err := mgr.renderOpenVPNManagedServer(&config.OpenVPNManagedServerConfig{
+	confPath, _, err := mgr.renderOpenVPNManagedServer(&config.OpenVPNManagedServerConfig{
 		ListenPort:     443,
 		Proto:          "tcp",
 		TunnelCIDR:     "10.9.0.0/24",

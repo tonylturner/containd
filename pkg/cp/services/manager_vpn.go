@@ -20,13 +20,13 @@ import (
 // select credentials; config/candidate rollback cannot alter this authority.
 // Download is read-only. RevokeResult distinguishes persistence from runtime.
 type OpenVPNClients interface {
-	ListOpenVPNClients(context.Context) ([]OpenVPNCredential, error)
+	ListOpenVPNClients(context.Context) (OpenVPNClientList, error)
 	CreateOpenVPNClient(context.Context, string) (OpenVPNCredential, error)
 	DownloadOpenVPNClient(context.Context, string) ([]byte, error)
 	RevokeOpenVPNClient(context.Context, string) (OpenVPNRevokeResult, error)
 }
 
-func (m *Manager) ListOpenVPNClients(ctx context.Context) ([]OpenVPNCredential, error) {
+func (m *Manager) ListOpenVPNClients(ctx context.Context) (OpenVPNClientList, error) {
 	return m.VPN.ListOpenVPNClients(ctx)
 }
 func (m *Manager) CreateOpenVPNClient(ctx context.Context, name string) (OpenVPNCredential, error) {
@@ -150,9 +150,10 @@ func (m *VPNManager) applyVPNLocked(ctx context.Context, cfg config.VPNConfig) (
 	}
 	if cfg.OpenVPN.Enabled {
 		var configPath string
+		var crlNumber int64
 		switch {
 		case cfg.OpenVPN.Mode == "server":
-			configPath, err = m.renderOpenVPNManagedServer(cfg.OpenVPN.Server)
+			configPath, crlNumber, err = m.renderOpenVPNManagedServer(cfg.OpenVPN.Server)
 		case cfg.OpenVPN.Managed != nil:
 			configPath, err = m.renderOpenVPNManagedClient(cfg.OpenVPN.Managed)
 		default:
@@ -164,6 +165,11 @@ func (m *VPNManager) applyVPNLocked(ctx context.Context, cfg config.VPNConfig) (
 		if err = m.startOpenVPN(ctx, configPath); err != nil {
 			return err
 		}
+		m.mu.Lock()
+		if m.ovpnRunning {
+			m.ovpnCRLNumber = crlNumber
+		}
+		m.mu.Unlock()
 	} else {
 		if err = m.stopOpenVPN(); err != nil {
 			return err

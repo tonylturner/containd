@@ -86,6 +86,13 @@ func (m *VPNManager) RevokeOpenVPNClient(ctx context.Context, id string) (OpenVP
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
 	result, err := revokeOpenVPNCredential(filepath.Join(openVPNManagedServerDir(), "pki"), id)
+	if err != nil && result.Revoked {
+		// A durable tombstone may precede a failed CRL signature/publication,
+		// leaving the inventory number unchanged. Never acknowledge that gap.
+		m.mu.Lock()
+		m.ovpnCRLNumber = 0
+		m.mu.Unlock()
+	}
 	if err != nil {
 		return result, err
 	}

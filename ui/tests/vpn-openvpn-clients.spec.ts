@@ -15,9 +15,10 @@ const revoked: OpenVPNCredential = {
   revokedAt: "2026-10-31T09:00:00Z",
 };
 
-async function openClients(page: Page) {
+async function openClients(page: Page, revocationsApplied = false) {
   const server = {
     clients: structuredClone([active, revoked]),
+    revocationsApplied,
     writes: [] as { path: string; body: unknown }[],
     downloads: [] as string[],
     createStatus: 200,
@@ -32,7 +33,7 @@ async function openClients(page: Page) {
     const path = new URL(req.url()).pathname;
     if (path === prefix) {
       if (req.method() === "GET") {
-        return route.fulfill({ status: server.listStatus, json: server.listStatus === 200 ? { clients: server.clients } : { error: "authority unavailable" } });
+        return route.fulfill({ status: server.listStatus, json: server.listStatus === 200 ? { clients: server.clients, revocationsApplied: server.revocationsApplied } : { error: "authority unavailable" } });
       }
       const body = req.postDataJSON();
       server.writes.push({ path, body });
@@ -62,6 +63,7 @@ async function openClients(page: Page) {
       }
       const credential = { ...server.clients.find((c) => c.id === id)!, revokedAt: revoked.revokedAt };
       server.clients = server.clients.map((c) => c.id === id ? credential : c);
+      server.revocationsApplied = server.revokeStatus === 200;
       return route.fulfill({
         status: server.revokeStatus,
         json: { credential, revoked: true, applied: server.revokeStatus === 200, ...(server.revokeStatus === 503 ? { error: "revoked, runtime not confirmed" } : {}) },
@@ -216,4 +218,42 @@ test("failed inventory refresh preserves entries without claiming an empty list"
   await expect(page.getByRole("alert").filter({ hasText: "Credential inventory unavailable" })).toBeVisible();
   await expect(row(page)).toContainText(active.id);
   await expect(page.getByText("No client credentials yet.")).toHaveCount(0);
+});
+
+for (const applied of [false, true]) {
+  test(`reload reports revocationsApplied=${applied} without inventing pending state`, async ({ page }) => {
+    const server = await openClients(page, applied);
+    await page.reload();
+    const region = page.getByRole("region", { name: "OpenVPN client credentials" });
+    await expect(row(page, revoked.name)).toContainText("revoked");
+    await expect(region.getByText("Revoked, but the running server has not reloaded the revocation list.", { exact: true })).toHaveCount(applied ? 0 : 1);
+    await expect(row(page, revoked.name).getByRole("button", { name: "Apply revocation", exact: true })).toHaveCount(applied ? 0 : 1);
+    expect(server.writes).toEqual([]);
+  });
+}
+
+test("a cumulative restart clears all pending retries and remains applied after reload", async ({ page }) => {
+  const server = await openClients(page);
+  server.revokeStatus = 503;
+  await confirmRevoke(page);
+  await expect(row(page).getByRole("button", { name: "Retry apply", exact: true })).toBeVisible();
+  server.revokeStatus = 200;
+  await row(page, revoked.name).getByRole("button", { name: "Apply revocation", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Apply revocation", exact: true }).click();
+  await expect(row(page).getByRole("status")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^(Retry apply|Apply revocation)$/ })).toHaveCount(0);
+  await page.reload();
+  await expect(row(page)).toContainText("revoked");
+  await expect(page.getByRole("button", { name: /^(Retry apply|Apply revocation)$/ })).toHaveCount(0);
+});
+
+test("refresh clears pending retries when another apply has loaded the CRL", async ({ page }) => {
+  const server = await openClients(page);
+  server.revokeStatus = 503;
+  await confirmRevoke(page);
+  await expect(row(page).getByRole("button", { name: "Retry apply", exact: true })).toBeVisible();
+  server.revocationsApplied = true;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(row(page).getByRole("status")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^(Retry apply|Apply revocation)$/ })).toHaveCount(0);
 });
