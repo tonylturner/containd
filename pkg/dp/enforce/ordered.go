@@ -49,16 +49,12 @@ func (p *predicates) transportLines(target chainTarget, e rules.Entry, scope boo
 			return nil, err
 		}
 	}
-	lines, err := p.ctLines(target, e, alts, tail)
+	lines, err := p.ctLines(target, e, alts, tail, originalOnly)
 	if err != nil {
 		return nil, err
 	}
 	for i := range lines {
-		prefix := trackedState
-		if originalOnly {
-			prefix += " ct direction original"
-		}
-		lines[i] = prefix + " " + lines[i]
+		lines[i] = trackedState + " " + lines[i]
 	}
 	if target != targetForward || len(e.ViaForwards) != 0 {
 		return lines, nil

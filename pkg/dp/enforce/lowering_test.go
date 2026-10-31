@@ -138,6 +138,22 @@ func TestLoweringGoldens(t *testing.T) {
 	}
 }
 
+func TestLoweringSingleDirectionClause(t *testing.T) {
+	for _, g := range loweringGoldens {
+		t.Run(g.file, func(t *testing.T) {
+			out, err := g.compiler().CompileFirewall(g.snapshot())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range strings.Split(out, "\n") {
+				if strings.Count(line, "ct direction ") > 1 {
+					t.Errorf("repeated or contradictory direction: %s", line)
+				}
+			}
+		})
+	}
+}
+
 // TestRulesThatMatchNothingWarn: a rule whose zones have no interfaces or
 // whose addresses share no family has no lines and a warning naming why.
 func TestRulesThatMatchNothingWarn(t *testing.T) {

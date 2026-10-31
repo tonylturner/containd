@@ -118,10 +118,23 @@ func forwardSources(f rules.ForwardMatch, keyword string) string {
 // forwardMatchClauses is the one expansion used by via, return SNAT and
 // gate masquerade. Reply packets expose the original ingress as oifname.
 func forwardMatchClauses(f rules.ForwardMatch, target chainTarget) []string {
+	var out []string
+	for _, alt := range forwardMatchAlternatives(f, target) {
+		out = append(out, joinClauses([]string{alt.direction.clause(), alt.text}))
+	}
+	return out
+}
+
+type directionalClause struct {
+	direction packetDirection
+	text      string
+}
+
+func forwardMatchAlternatives(f rules.ForwardMatch, target chainTarget) []directionalClause {
 	if !activeForward(f) {
 		return nil
 	}
-	var out []string
+	var out []directionalClause
 	for _, dev := range sortedUnique(f.IngressDevices) {
 		// All devices were validated while declaring their address sets.
 		lit := strconv.Quote(dev)
@@ -135,22 +148,22 @@ func forwardMatchClauses(f rules.ForwardMatch, target chainTarget) []string {
 			fmt.Sprintf("ct reply proto-src %d", f.Backend.Port()),
 		})
 		if target != targetGateReply {
-			out = append(out, "ct direction original iifname "+lit+" "+tuple)
+			out = append(out, directionalClause{directionOriginal, "iifname " + lit + " " + tuple})
 		}
 		if target != targetGateInput {
-			out = append(out, "ct direction reply oifname "+lit+" "+tuple)
+			out = append(out, directionalClause{directionReply, "oifname " + lit + " " + tuple})
 		}
 	}
 	return out
 }
 
-func forwardClauses(snap *rules.Snapshot, e rules.Entry, target chainTarget) []string {
+func forwardAlternatives(snap *rules.Snapshot, e rules.Entry, target chainTarget) []directionalClause {
 	if len(e.ViaForwards) == 0 {
-		return []string{""}
+		return []directionalClause{{}}
 	}
-	var out []string
+	var out []directionalClause
 	for _, id := range sortedUnique(e.ViaForwards) {
-		out = append(out, forwardMatchClauses(snap.ForwardMatches[id], target)...)
+		out = append(out, forwardMatchAlternatives(snap.ForwardMatches[id], target)...)
 	}
 	return out
 }
