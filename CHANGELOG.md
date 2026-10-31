@@ -7,8 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Prevent concurrent deletion or demotion of the last administrator.
+- Make MFA login and enrollment challenges single-use and durable across management
+  restarts, and invalidate them on password, TOTP or role changes. Pending
+  challenges issued before this upgrade must be restarted.
+
 ### Fixed
 
+- Direct CLI login explains when an account needs MFA, password rotation or MFA
+  enrollment and directs users to the web UI or SSH.
+- Partial account profile updates preserve omitted fields and still allow explicit clearing.
 - Interface PATCH writes preserve every omitted setting. Interface edits send
   explicit clears for removed aliases, device bindings, zones and VLAN settings.
 - Service, policy, network, PCAP and staged-config editors block saves until settings

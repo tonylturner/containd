@@ -256,6 +256,13 @@ serves. It follows no redirect. It logs in as `CONTAIND_CLI_USER` with
 CLI stops with `management is not running`. The container health check
 (`containd healthcheck`) uses the same file.
 
+Direct CLI login does not prompt for MFA or a replacement password. It stops
+with a specific message if the account needs MFA, a password change or MFA
+enrollment. Use the web UI for enrollment, and the web console or SSH for an
+MFA-enabled account. A required password change can be completed through the
+web UI or SSH. Inside an authenticated SSH shell, `containd cli` continues to
+use that SSH login rather than logging in again.
+
 The SSH CLI, and `containd cli` in an SSH shell, stay authorized while the
 connection is open. With a JWT secret, the login's session also ends after 4
 hours; reconnect after that. Lab mode without a JWT secret has no session
