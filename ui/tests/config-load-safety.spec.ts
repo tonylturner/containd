@@ -110,7 +110,7 @@ const services = [
   { name: "NTP", route: "/system/services/ntp/", path: "/services/ntp", label: "Enable NTP client" },
   { name: "AV", route: "/system/services/av/", path: "/services/av", label: "Enable AV/ICAP scanning" },
   { name: "DHCP", route: "/dhcp/", path: "/services/dhcp", label: "Enable DHCP server" },
-  { name: "IDS", route: "/ids/", path: "/ids/rules", label: "Enable IDS engine" },
+  { name: "IDS", route: "/ids/", path: "/ids/rules", label: "Enable intrusion detection" },
   { name: "VPN", route: "/vpn/", path: "/services/vpn", label: "Enable WireGuard" },
   { name: "Forward proxy", route: "/proxies/", path: "/services/proxy/forward", label: "Enabled", index: 0 },
   { name: "Reverse proxy", route: "/proxies/", path: "/services/proxy/reverse", label: "Enabled", index: 1 },

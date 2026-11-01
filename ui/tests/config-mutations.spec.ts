@@ -197,7 +197,7 @@ test("IDS import and group creation forms never dirty the configuration or block
     page.waitForResponse(read("/ids/rules")),
     page.evaluate((event) => window.dispatchEvent(new CustomEvent(event)), CONFIG_STAGED),
   ]);
-  await expect(page.getByRole("checkbox", { name: "Enable IDS engine" })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Enable intrusion detection" })).not.toBeChecked();
   await expect(page.getByRole("status", { name: "Unsaved edits" })).toHaveCount(0);
   await expect(page.locator("select")).toHaveValue("suricata");
   await expect(page.locator("textarea")).toHaveValue("unfinished sigma");
@@ -268,8 +268,10 @@ test("Sigma conversion adds a local rule without acknowledging unrelated rule ed
 test("VPN profile import acknowledges its path while retaining unrelated WireGuard text", async ({ page }) => {
   const server = await mockAPI(page);
   await Promise.all([page.waitForResponse(read("/services/vpn")), page.goto("/vpn/")]);
-  const peers = page.locator("textarea").first();
+  await page.getByText("Advanced peer settings", { exact: true }).click();
+  const peers = page.getByRole("textbox", { name: /^Peers \(JSON\)/ });
   await peers.fill('[{"publicKey":"pending","allowedIPs":["192.0.2.0/24"]}] ');
+  await page.getByText("Advanced profile import", { exact: true }).click();
   await page.locator('input[type="file"]').setInputFiles({
     name: "imported.ovpn", mimeType: "text/plain", buffer: Buffer.from("client\nremote vpn.example\n"),
   });

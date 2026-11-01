@@ -24,7 +24,7 @@ async function setup(page: Page) {
     return route.fulfill({ json, headers: { "X-Containd-Revision": token(state.counter) } });
   });
   await page.goto("/config/");
-  await expect(page.getByText("Running IDS bank:", { exact: false })).toBeVisible();
+  await expect(page.getByText("0 committed detection rules. Restored rules are saved for review; commit applies them with the configuration.", { exact: true })).toBeVisible();
   return state;
 }
 
