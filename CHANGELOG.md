@@ -75,6 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- IEC 104 learner suggestions from normal TCP/2404 captures without an existing
+  IEC rule; content/port contradictions still exclude the whole connection.
+
 - Isolate live learner intake from SQLite stalls with byte-bounded persistence
   and group commits. Small decoded batches use the full intake byte budget
   instead of overflowing a short count limit on busy hosts; Stop still drains

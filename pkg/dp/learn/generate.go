@@ -14,7 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-const GeneratorVersion = "exact-8"
+const GeneratorVersion = "exact-9"
 
 // Frozen proofs include every positive reference. Keep repeated relations below
 // the store's per-suggestion byte ceiling instead of constructing oversized rows.

@@ -511,8 +511,10 @@ Passive decoder events carry `observation_only: true` and
 `binding_source: "observation"`. They are evidence, not verdicts. The Events
 page marks them **Observation only**.
 
-Offline and live suggestion generation excludes their entire connection
-incarnation, including port-decoded events emitted before content confirmation.
+Offline and live suggestion generation can certify content-confirmed passive
+observations on registered service ports, with sufficient role and capture
+authority. Nonstandard service-port observations exclude their entire connection
+incarnation, including earlier port-decoded events.
 Confirmed content/port mismatches also exclude the connection even if no passive
 decoder emits an event. Generate exposes these exclusions as
 `withheld.observation_binding`; suggestion limitations retain the exclusion.
