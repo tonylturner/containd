@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visible degradation rather than an audit fail-closed policy.
 - Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
 
+### Fixed
+
+- Make admin MFA disable atomic with the required account's new enrollment grace
+  period, so a failed operation leaves the account unchanged.
+
 ## [0.1.37] - 2026-10-31
 
 ### Upgrade notes

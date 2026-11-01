@@ -67,6 +67,7 @@ type Store interface {
 	SetPassword(ctx context.Context, id string, password string) error
 	SetTOTP(ctx context.Context, id string, secret string) error
 	DisableTOTP(ctx context.Context, id string) error
+	DisableTOTPWithGrace(ctx context.Context, id string, now time.Time) error
 	AcceptTOTP(ctx context.Context, id string, code string, now time.Time) error
 	CreateMFAChallenge(ctx context.Context, u *StoredUser, purpose string, expires time.Time) (string, error)
 	RedeemLoginMFA(ctx context.Context, challengeID, userID, code string, now time.Time) error
@@ -496,7 +497,19 @@ func (s *SQLiteStore) SetTOTP(ctx context.Context, id string, secret string) err
 // sessions.
 func (s *SQLiteStore) DisableTOTP(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	return s.updateCredential(ctx, "disable totp", id, FactorTOTP, `UPDATE users SET mfa_totp_secret='', mfa_totp_enabled=0, mfa_totp_last_step=0, mfa_grace_until=0, updated_at=? WHERE id=?`, now.Unix(), id)
+	return s.disableTOTP(ctx, id, now, 0)
+}
+
+// DisableTOTPWithGrace removes TOTP and grants a fresh enrollment grace period
+// if MFA is required. The requirement is read by the update itself, not from a
+// caller's snapshot. Credential cleanup and session revocation are atomic with
+// both changes; subscribers are notified only after commit.
+func (s *SQLiteStore) DisableTOTPWithGrace(ctx context.Context, id string, now time.Time) error {
+	return s.disableTOTP(ctx, id, now, MFAGraceDeadline(now).Unix())
+}
+
+func (s *SQLiteStore) disableTOTP(ctx context.Context, id string, now time.Time, graceUnix int64) error {
+	return s.updateCredential(ctx, "disable totp", id, FactorTOTP, `UPDATE users SET mfa_totp_secret='', mfa_totp_enabled=0, mfa_totp_last_step=0, mfa_grace_until=CASE WHEN mfa_required=1 THEN ? ELSE 0 END, updated_at=? WHERE id=?`, graceUnix, now.Unix(), id)
 }
 
 // updateCredential applies one credential update, clears the failure count
