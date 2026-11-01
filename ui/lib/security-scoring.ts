@@ -1,6 +1,6 @@
 // IEC 62443-3-3 requirement checks and check-based SL — shared between SecurityView and Zones page.
 
-import type { Conduit, Zone } from "./api";
+import type { CheckEvidence, Conduit, ConduitControl, Zone } from "./api";
 
 /* ── Types ── */
 
@@ -22,7 +22,7 @@ export interface SRDef {
   check: (z: ZoneView, cs: Conduit[]) => boolean;
 }
 
-export interface SRCheck extends SRDef {
+export interface SRCheck extends SRDef, CheckEvidence {
   met: boolean;
   auto: boolean;
   overridden: boolean;
@@ -34,13 +34,13 @@ export const SR_DEFS: SRDef[] = [
   // SL-0: No requirement checks (baseline for unprotected zones)
 
   // SL-1
-  { id: "SR-1.1",  sl: 1, label: "Human interface identification & authentication",            source: "zone",    check: (z) => z.id.toLowerCase() !== "internet" },
-  { id: "SR-3.3",  sl: 1, label: "Security functionality verification",                         source: "zone",    check: () => true },
+  { id: "SR-1.1",  sl: 1, label: "Human interface identification & authentication",            source: "zone",    check: () => false },
+  { id: "SR-3.3",  sl: 1, label: "Security functionality verification",                         source: "zone",    check: () => false },
   { id: "SR-5.1",  sl: 1, label: "Network segmentation — zone has explicit policy",             source: "zone",    check: (_, cs) => cs.some((c) => c.defaultDeny || c.state === "block") },
   { id: "SR-2.8",  sl: 1, label: "Auditable events — conduit traffic logged",                    source: "conduit", check: (_, cs) => cs.every((c) => c.auditLogged) },
 
   // SL-2
-  { id: "SR-1.2",  sl: 2, label: "Software process & device identification (IDS)",               source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.ids === "full" || c.ids === "partial") },
+  { id: "SR-1.2",  sl: 2, label: "Software process & device identification (IDS)",               source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.ids === "enabled") },
   { id: "SR-3.1",  sl: 2, label: "Communication integrity — TLS on active conduits",             source: "conduit", check: (_, cs) => cs.filter((c) => c.state === "allow" || c.state === "partial").every((c) => c.tlsEnforced) },
   { id: "SR-5.2",  sl: 2, label: "Zone boundary protection — explicit default deny",             source: "zone",    check: (_, cs) => cs.some((c) => c.defaultDeny) },
   { id: "SR-5.4",  sl: 2, label: "Application partitioning — protocol whitelisting",             source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.protoWhitelist) },
@@ -49,7 +49,7 @@ export const SR_DEFS: SRDef[] = [
   { id: "SR-1.13", sl: 3, label: "Access via untrusted networks requires MFA",                   source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.mfaRequired) },
   { id: "SR-2.12", sl: 3, label: "Non-repudiation — signed/tamper-evident audit log",            source: "zone",    check: () => false },
   { id: "SR-3.2",  sl: 3, label: "Malicious code protection — AV scanning on conduit",           source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.avEnabled) },
-  { id: "SR-5.4b", sl: 3, label: "Full DPI + protocol whitelist on all active conduits",         source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.protoWhitelist && c.ids === "full") },
+  { id: "SR-5.4b", sl: 3, label: "Full DPI + protocol whitelist on all active conduits",         source: "conduit", check: (_, cs) => cs.filter((c) => c.state !== "block").every((c) => c.protoWhitelist && c.ids === "enabled") },
 
   // SL-4
   { id: "SR-1.14", sl: 4, label: "Mutual device-level certificate authentication",               source: "conduit", check: () => false },
@@ -96,13 +96,41 @@ export function mapZone(z: Zone): ZoneView {
 
 /* ── Score a zone against its outbound conduits ── */
 
+const SR_CONTROLS: Record<string, ConduitControl[]> = {
+  "SR-5.1": ["defaultDeny"], "SR-2.8": ["auditLogged"],
+  "SR-1.2": ["ids"], "SR-3.1": ["tlsEnforced"],
+  "SR-5.2": ["defaultDeny"], "SR-5.4": ["protoWhitelist"],
+  "SR-1.13": ["mfaRequired"], "SR-3.2": ["avEnabled"],
+  "SR-5.4b": ["protoWhitelist", "ids"],
+};
+
+function evidenceFor(sr: SRDef, cs: Conduit[]): CheckEvidence {
+  if (sr.id === "SR-1.1") return { provenance: "unknown", reason: "Zone names provide no evidence of human authentication." };
+  if (sr.id === "SR-3.3") return { provenance: "unknown", reason: "No security-function verification results are available." };
+  const controls = SR_CONTROLS[sr.id];
+  if (!controls) return { provenance: "unknown", reason: "No evidence is collected for this requirement." };
+  // Only boundary-policy checks include blocked conduits. An empty active
+  // set supplies no evidence, rather than vacuously passing an every() check.
+  const relevant = ["SR-5.1", "SR-5.2", "SR-2.8"].includes(sr.id)
+    ? cs : cs.filter(c => c.state !== "block");
+  if (relevant.length === 0) return { provenance: "unknown", reason: "No applicable outbound conduit evidence is available." };
+  const evidence = relevant.flatMap(c => controls.map(key => c.checks[key]));
+  const provenance = evidence.some(e => e.provenance === "unknown") ? "unknown"
+    : evidence.some(e => e.provenance === "heuristic") ? "heuristic" : "configured";
+  return { provenance, reason: [...new Set(evidence.map(e => e.reason))].join(" ") };
+}
+
 export function scoreZone(zone: ZoneView, conduits: Conduit[]): { sl_a: number; checks: SRCheck[] } {
   const cs = conduits.filter((c) => c.from === zone.id);
   const checks: SRCheck[] = SR_DEFS.map((sr) => {
-    const auto = sr.check(zone, cs);
+    const evidence = evidenceFor(sr, cs);
+    const auto = evidence.provenance !== "unknown" && sr.check(zone, cs);
     const overridden = Object.prototype.hasOwnProperty.call(zone.overrides, sr.id);
-    const met = overridden ? zone.overrides[sr.id] : auto;
-    return { ...sr, met, auto, overridden };
+    const met = overridden ? zone.overrides[sr.id] : auto && evidence.provenance === "configured";
+    return {
+      ...sr, ...evidence, met, auto, overridden,
+      ...(overridden ? { provenance: "configured" as const, reason: `Operator override: marked ${met ? "pass" : "fail"}; not independently verified. Automatic evidence: ${evidence.reason}` } : {}),
+    };
   });
   let sl_a = 0;
   for (let lvl = 1; lvl <= MAX_SL; lvl++) {

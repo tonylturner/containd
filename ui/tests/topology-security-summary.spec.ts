@@ -4,6 +4,7 @@ import { expect, test } from "./fixtures/topology-test";
 import { summarizeTargets, targetSummaryText } from "../app/topology/security-summary";
 import type { Conduit, Zone } from "../lib/api";
 import { mapZone, SR_DEFS } from "../lib/security-scoring";
+import { securityChecks } from "./fixtures/security";
 
 // The security view's overview counts every zone below its SL target, not
 // only the zones shown in the matrix, scored as the matrix scores them.
@@ -76,7 +77,7 @@ test("the security view summarizes zones below target, including zones outside t
   await expect(summary).toContainText("OT SL0/2");
   await expect(summary).toContainText("SCADA SL1/3");
   await expect(summary).toContainText("VENDOR SL0/1");
-  await expect(page.getByText("Automated checks tag requirements from observed policy; not a standards assessment.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Configured checks and operator overrides can count toward SL; heuristics and unknowns cannot.", { exact: false })).toBeVisible();
   await expect(page.getByText("Click any conduit cell", { exact: false })).toContainText("IEC 62443 SR requirement checks");
   await expect(page.locator("body")).not.toContainText(/compliance|achieved/i);
   expect(errors).toEqual([]);
@@ -85,7 +86,7 @@ test("the security view summarizes zones below target, including zones outside t
 test("conduit details label requirement check results without claiming a security level", async ({ page }) => {
   await serveSecurity(page, [zones[1], zones[2]], [{
     from: "ot", to: "dmz",
-    state: "allow", ids: "none", proto: [], traffic: 0,
+    state: "allow", ids: "disabled", proto: [], traffic: null, checks: securityChecks,
     rules: [], gaps: [], mitre: [], defaultDeny: false,
     tlsEnforced: false, protoWhitelist: false, mfaRequired: false,
     auditLogged: true, avEnabled: false,
@@ -99,9 +100,14 @@ test("conduit details label requirement check results without claiming a securit
   await expect(page.getByText("CHECK-BASED SL", { exact: true })).toHaveCount(2);
   await expect(page.getByText("Unmet checks for SL-2; check-based SL-0", { exact: true })).toBeVisible();
   await expect(page.getByText("SL-1 target checks pass", { exact: true })).toBeVisible();
-  await expect(page.getByText("5 unmet SR checks for target", { exact: true })).toBeVisible();
-  await expect(page.getByText("CHECK PASS", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("CHECK FAIL", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("8 unmet SR checks for target", { exact: true })).toBeVisible();
+  await expect(page.getByText("UNKNOWN", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("HEURISTIC", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("CONFIGURED FAIL", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("not measured", { exact: true })).toBeVisible();
+  await expect(page.getByText("0% of baseline", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("CHECK PASS", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Zone names provide no evidence", { exact: false }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "MARK PASS", exact: true }).first()).toBeVisible();
   await expect(page.getByText("OVERRIDE", { exact: true })).toHaveCount(4);
   await expect(page.locator("body")).not.toContainText(/compliance|achieved/i);
@@ -120,9 +126,9 @@ test("zones label the computed level as check-based SL", async ({ page }) => {
 test("colliding zone slugs keep separate scores, conduits and staging targets", async ({ page }) => {
   const zoneList = [{ name: "OT-1", slTarget: 1 }, { name: "ot_1", slTarget: 1 }];
   const admitted = {
-    state: "allow" as const, ids: "full" as const, proto: [], traffic: 0,
+    state: "allow" as const, ids: "enabled" as const, proto: [], traffic: null, checks: securityChecks,
     rules: [], gaps: [], mitre: [], defaultDeny: true,
-    tlsEnforced: true, protoWhitelist: true, mfaRequired: false,
+    tlsEnforced: false, protoWhitelist: true, mfaRequired: false,
     auditLogged: true, avEnabled: false,
   };
   const updates = await serveSecurity(page, zoneList, [
@@ -134,13 +140,13 @@ test("colliding zone slugs keep separate scores, conduits and staging targets", 
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
   await loaded;
   const summary = page.getByRole("status", { name: "Zones below target" });
-  await expect(summary).toContainText("1 of 2 zones have unmet SL target checks:");
+  await expect(summary).toContainText("2 of 2 zones have unmet SL target checks:");
   await expect(summary).toContainText("OT_1 SL0/1");
-  await expect(summary).not.toContainText("OT-1 SL");
+  await expect(summary).toContainText("OT-1 SL0/1");
   await page.getByText("ALLOW", { exact: true }).click();
   await expect(page.getByText("OT-1 → OT_1", { exact: true })).toBeVisible();
-  await expect(page.getByText("Checks:2 / SL-T:1", { exact: true })).toBeVisible();
-  await expect(page.getByText("Checks:0 / SL-T:1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Checks:0 / SL-T:1", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("CONFIGURED PASS", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Stage OT-1 target SL 2", exact: true }).click();
   await expect.poll(() => updates.length).toBe(1);
   expect(updates[0]).toEqual({ name: "OT-1", body: { slTarget: 2 } });
@@ -152,16 +158,16 @@ test("colliding zone slugs keep separate scores, conduits and staging targets", 
   await page.goto("/zones/");
   await zoneScoresLoaded;
   const rowFor = (name: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
-  await expect(rowFor("OT-1").getByRole("cell").nth(4)).toHaveText("2");
+  await expect(rowFor("OT-1").getByRole("cell").nth(4)).toHaveText("—");
   await expect(rowFor("ot_1").getByRole("cell").nth(4)).toHaveText("—");
 });
 
 test("arrow-containing endpoints keep distinct matrix selection and zone scores", async ({ page }) => {
   const zoneList = ["a→b", "a", "b", "b→a"].map((name) => ({ name, slTarget: 1 }));
   const admitted = {
-    state: "allow" as const, ids: "full" as const, proto: [], traffic: 0,
+    state: "allow" as const, ids: "enabled" as const, proto: [], traffic: null, checks: securityChecks,
     rules: [], gaps: [], mitre: [], defaultDeny: true,
-    tlsEnforced: true, protoWhitelist: true, mfaRequired: false,
+    tlsEnforced: false, protoWhitelist: true, mfaRequired: false,
     auditLogged: true, avEnabled: false,
   };
   // These pairs used to share the same joined key.
@@ -191,7 +197,7 @@ test("arrow-containing endpoints keep distinct matrix selection and zone scores"
   await page.goto("/zones/");
   await scoresLoaded;
   const rowFor = (name: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
-  await expect(rowFor("a→b").getByRole("cell").nth(4)).toHaveText("2");
+  await expect(rowFor("a→b").getByRole("cell").nth(4)).toHaveText("—");
   await expect(rowFor("a").getByRole("cell").nth(4)).toHaveText("—");
   await expect(rowFor("b").getByRole("cell").nth(4)).toHaveText("—");
 });

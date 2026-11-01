@@ -3007,23 +3007,41 @@ components:
       required: [srcIp, dstIp, proto, dstPort]
     ConduitResult:
       type: object
-      required: [from, to]
+      required: [from, to, traffic, checks]
       properties:
         from: {type: string, description: Exact source zone name}
         to: {type: string, description: Exact destination zone name}
         state: {type: string}
-        ids: {type: string}
+        ids: {type: string, enum: [enabled, disabled], description: Global IDS setting only; per-conduit inspection and coverage are unknown.}
         proto: {type: array, items: {$ref: '#/components/schemas/ProtoEntry'}}
-        traffic: {type: number}
+        traffic: {type: number, nullable: true, description: 'Traffic relative to baseline, or null when not measured. Currently always null; never infer zero traffic from unavailable data.'}
         rules: {type: array, items: {type: string}}
         gaps: {type: array, items: {type: string}}
         mitre: {type: array, items: {type: string}}
         defaultDeny: {type: boolean}
-        tlsEnforced: {type: boolean}
+        tlsEnforced: {type: boolean, description: Always false; conventional service ports do not enforce or verify TLS.}
         protoWhitelist: {type: boolean}
         mfaRequired: {type: boolean}
         auditLogged: {type: boolean}
         avEnabled: {type: boolean}
+        checks:
+          type: object
+          description: Provenance and explanation for every control flag and the IDS setting. Configured is running configuration, not runtime verification; heuristic is an assumption and unknown lacks evidence.
+          required: [defaultDeny, tlsEnforced, protoWhitelist, mfaRequired, auditLogged, avEnabled, ids]
+          properties:
+            defaultDeny: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            tlsEnforced: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            protoWhitelist: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            mfaRequired: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            auditLogged: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            avEnabled: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+            ids: {$ref: '#/components/schemas/ConduitCheckEvidence'}
+    ConduitCheckEvidence:
+      type: object
+      required: [provenance, reason]
+      properties:
+        provenance: {type: string, enum: [configured, heuristic, unknown]}
+        reason: {type: string}
     ProtoEntry:
       type: object
       properties:

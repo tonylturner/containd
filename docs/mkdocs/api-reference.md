@@ -74,6 +74,22 @@ control flags documented in OpenAPI. Every ordered pair of distinct zones is
 included, in configured zone order (source-major, then destination).
 With fewer than two zones, the response is `[]`.
 
+`checks` gives each control's `provenance` (`configured`, `heuristic`, or `unknown`)
+and a human-readable `reason`. Configured means derived from running policy, not
+verified enforcement. IDS is `enabled` or `disabled` globally, not full or partial
+conduit coverage. Syslog and AV settings likewise do not establish per-conduit
+logging or scanning. Conventional encrypted-service ports are a heuristic only;
+`tlsEnforced` is false because this summary cannot enforce or verify TLS.
+`traffic` is nullable and currently always `null`: it is **not measured**, not
+zero percent of any baseline.
+
+The topology's requirement checks show this provenance and explanation.
+Authentication is not inferred from zone names, and security-function verification
+has no automatic evidence. Heuristic and unknown checks never count as passes,
+including when no applicable conduits exist. Only configured checks and explicit
+operator overrides count toward check-based SL. Overrides are operator assertions,
+not independent verification. The check-based level is not a standards assessment.
+
 Zone names are exact, case-sensitive identities and may contain arrows or other
 punctuation. Use the `from` and `to` fields directly; do not split a joined name.
 Clients expecting the former map keyed by joined zone names must switch to

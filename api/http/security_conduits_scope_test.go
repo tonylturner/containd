@@ -106,8 +106,14 @@ func TestConduitProtocolPortChecks(t *testing.T) {
 			cfg.Firewall.Rules[0].ICS.Protocol = "modbus"
 			cfg.Firewall.Rules[0].ICS.Mode = "enforce"
 			result := buildConduitResult(cfg, computeConduitGlobals(cfg), "lan", "wan")
-			if result.TLSEnforced != tc.encrypted {
-				t.Errorf("TLS enforced=%t want=%t", result.TLSEnforced, tc.encrypted)
+			if result.TLSEnforced {
+				t.Fatal("port membership must not claim TLS enforcement")
+			}
+			if got := conduitEncryptedPortHint(mapPorts(tc.protocols)); got != tc.encrypted {
+				t.Errorf("encrypted port hint=%t want=%t", got, tc.encrypted)
+			}
+			if result.Checks["tlsEnforced"].Provenance != "heuristic" {
+				t.Fatalf("missing TLS heuristic provenance: %+v", result.Checks)
 			}
 			if got := slices.Contains(result.Gaps, "ICS traffic mixed with plaintext IT protocols"); got != tc.plaintext {
 				t.Errorf("plaintext gap=%t want=%t (%v)", got, tc.plaintext, result.Gaps)
@@ -117,4 +123,12 @@ func TestConduitProtocolPortChecks(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mapPorts(protocols []config.Protocol) map[int]bool {
+	ports := map[int]bool{}
+	for _, p := range protocols {
+		ports[parsePort(p.Port)] = true
+	}
+	return ports
 }

@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Distinguish configured topology checks from heuristics and unknown evidence;
+  remove assumed authentication and verification passes. Show global IDS settings
+  without claiming conduit coverage, and unmeasured conduit traffic as unavailable
+  (`null` in the API), not zero percent of baseline.
 - Label non-evaluable IDS imports as storage-only, show conversion notes per rule
   and in import results, and clarify that YARA imports do not execute or detect threats.
 - Reject unsupported IPv6 WireGuard tunnel addresses, AllowedIPs and endpoints
