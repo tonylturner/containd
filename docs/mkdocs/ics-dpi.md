@@ -192,9 +192,11 @@ readable fields can still match.
 TCP resets are best effort and connection-scoped; UDP denials drop only the
 datagram, without a session reset.
 
-Every event with findings carries sorted, unique `conformance` codes such as
-`iec104.unsupported_type`. Both modes raise an `ids` / `alert` with rule ID
-`ics-conformance`, severity `medium`, flow identity, codes and the action taken
+Conformance findings carry sorted, unique `conformance` codes such as
+`iec104.unsupported_type`; uninspected content uses `undecoded` instead.
+Both modes raise an `ids` / `alert` with rule ID
+`ics-conformance` or `ics-undecoded`, respectively, severity `medium`,
+flow identity, codes and the action taken
 (`passed`, `dropped and reset` or `would drop`). Alerts are bounded to one per
 connection per code; repeats only count. Events with findings never produce
 actionable learner suggestions, but inventory and telemetry still record them.
@@ -443,12 +445,12 @@ specific attribute map. Inspect emitted events before authoring attribute-based
 
 ### Decoded event fields
 
-`GET /api/v1/events` returns decoded events. A Modbus read of ten holding
-registers looks like this:
+`GET /api/v1/events` returns decoded events with IDs encoded as decimal JSON
+strings. A Modbus read of ten holding registers looks like this:
 
 ```json
 {
-  "id": 1,
+  "id": "1",
   "flowId": "192.168.10.20|192.168.20.5|49152|502|006|0",
   "proto": "modbus",
   "kind": "request",
@@ -558,7 +560,7 @@ UDP port 44818 carries encapsulation commands such as ListIdentity, decoded like
 | --- | --- |
 | Encapsulation | `enip_command` (name), `enip_command_code`, `enip_session_handle`, `enip_status`, `enip_sender_context`, `enip_options` |
 | Implicit I/O (UDP 2222) | `connection_id`, `sequence`, `data_length` (whole connected data item), `cpf_item_types` |
-| Common Packet Format (CPF) | `cpf_item_types`: item types in packet order as one comma-joined lowercase hex string with no spaces; plus selected item `cpf_item_index`, `cpf_data_item_type`, and, when available, `connection_id`, `connected_sequence` |
+| Common Packet Format (CPF) | `cpf_item_count` (declared item count); `cpf_item_types` (item types in packet order as one comma-joined lowercase hex string with no spaces); plus selected item `cpf_item_index`, `cpf_data_item_type`, and, when available, `connection_id`, `connected_sequence` |
 | CIP | `service_code`, `service_name`, `function_code`, `is_write`, `is_control`, `cip_path`, `cip_target` (requests: `logical`, `symbolic` or `unknown`), `cip_symbol` (symbolic targets only, an array of symbol-name segments), `object_class`, `object_class_name`, `instance_id`, `attribute_id`, `address`; responses retain `response_reserved`, `general_status`, `additional_status_count` and `additional_status` when present; MSP parents carry `multi_service_count` and `multi_service_decoded_count`; each child carries `msp: true`, `msp_index` and `msp_index_path`; incomplete wrappers and roots with uninspected extra CPF data items carry `coverage_incomplete: true` |
 
 Every CIP request operation, including MSP children, carries `cip_target`. Supported logical paths name a class, optionally an instance,
@@ -577,8 +579,8 @@ writes and controls carry `is_write: true`, with controls also carrying
 `is_control: true`. Unknown operations, structural wrappers and uncorrelated
 responses carry neither flag. They match neither `readOnly` nor `writeOnly`.
 Protocol statistics count them as events but not reads or writes; event totals
-need not equal the sum of reads, writes and alerts. Learning accepts CIP
-requests only with a known target-aware service name and access category.
+need not equal the sum of reads, writes and alerts. Learning retains CIP
+observations but offers no actionable CIP suggestions.
 
 Common reads `0x01`, `0x0E` and `0x18` require empty bodies. `0x03` requires
 a nonempty, exact-length list of attribute IDs. `0x0D` is Apply Attributes
@@ -723,9 +725,11 @@ fails and an address-qualified DENY matches those unknown indexes.
 Modbus events carry only fields present on the wire: requests have `address`
 with `quantity` (function codes 1–4, 15, 16, plus `byte_count` for 15 and 16),
 `value` (5, 6), `and_mask` and `or_mask` (22), or `read_address`,
-`read_quantity`, `write_address`, `write_quantity` and `byte_count` (23). Read
-replies have `byte_count` and, for registers, `register_count`; write replies
-have the fields they echo.
+`read_quantity`, `write_address`, `write_quantity` and `byte_count` (23).
+Requests for function codes 15, 16 and 23 also carry a `values` array when all
+declared write values are available: coil bits for 15, register words for 16
+and 23. Read replies have `byte_count` and, for registers, `register_count`;
+write replies have the fields they echo.
 
 Example: a monitor rule observing Modbus reads of holding registers 0–99
 (function code 3) on unit 1, over TCP 502 from the `lan` zone to the `dmz` zone.
@@ -1156,7 +1160,7 @@ Only classic PCAP is supported, with a 64 MiB upload ceiling; PCAPng is rejected
 statistics and capture duration. `stats.truncated` identifies partial or
 snap-length-cut records. `stats.displayTruncated` means the display sample was
 capped, not that normalized evidence was sampled. Inspect dataset gaps separately:
-evidence admission loss prevents certification.
+certification covers only retained complete parents, not lost observations.
 
 The internal engine `/internal/pcap/analyze` endpoints use the same import
 contract, not a second policy generator. Imports do not update live inventory,
@@ -1259,8 +1263,10 @@ their SYN within IEC 104 envelopes. Untracked, midstream and uninspected traffic
 does not populate it. Retransmissions are not new attempts; retransmissions
 received while delivery is pending also need successful Accept verdicts.
 Acceptance is not a station acknowledgement or proof of physical execution.
-Inventory never feeds the learner,
-auto-ALLOW, or enforcement decisions. Engine unavailability displays an explicit
+Inventory summaries never generate ALLOW rules or enforcement decisions.
+During an explicit live watch, the delivery ledger also reports accepted
+APDUs to learner evidence; inventory counters are not its input.
+Engine unavailability displays an explicit
 unavailable state, not an empty inventory or zero counters; **Refresh** retries.
 
 Memory is bounded to 128 endpoint pairs, 32 CAs per pair and 256 (IOA, type ID)
@@ -1295,8 +1301,9 @@ existing port-selected decoder runs immediately. A confirmed protocol gets a
 separate passive decoder only when the legacy path does not already decode
 that protocol. These events carry `observation_only: true` and
 `binding_source: observation`; they do not enforce rules or generate automatic
-ALLOW suggestions. Observation-bound connections are excluded from offline
-policy suggestions, including legacy events emitted before confirmation.
+ALLOW suggestions. The learner withholds suggestions for nonstandard service-port
+observations. Content confirmation does not invalidate earlier port-decoded evidence
+from that connection; inspect protocol mismatches before staging suggestions.
 
 Flows show the bound application, whether identification is by **content** or
 only **port**, and a **Mismatch** badge when content differs from a registry

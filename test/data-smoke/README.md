@@ -3,16 +3,17 @@
 This directory is mounted as `/data` inside the smoke-test container
 (see `deploy/docker-compose.smoke.yml`).
 
-All fixture files (keys, certificates, databases) are **generated at
-runtime** by the containd binary itself:
+Runtime keys, certificates and databases are **generated at runtime** by the
+containd binary itself. The tracked protocol and HTTP fixture programs in this
+directory are separate test inputs.
 
 - `ssh/host_key` -- auto-generated Ed25519 key on first SSH listen
 - `tls/server.crt`, `tls/server.key` -- auto-generated ECDSA P-256
   self-signed certificate on first HTTPS listen
 - `*.db` -- SQLite databases created with `CREATE TABLE IF NOT EXISTS`
 
-If you want to pre-populate the directory before starting the container,
-run the helper script:
+To pre-populate the keys, certificate and service directories before starting
+the container, run the helper script. It does not create databases:
 
 ```sh
 bash test/data-smoke/generate.sh
@@ -134,8 +135,9 @@ image to `/tmp/modbus-state.json` (`{"writes": N, "registers": [...]}`)
 inside the `modbus_server` container. It answers a request whose protocol
 identifier is not 0 like any other, so a test can prove whether the firewall
 delivered it. `modbus/client.py` modes: `read`, `write`, `readwrite` (a read,
-then a write on one connection), `read-split` (one read whose MBAP header and
-PDU go out as two TCP segments), `read-coalesced` (two reads in one segment),
+then a write on one connection), `persistent` (read, write, read on one
+connection, stopping at the first failed exchange), `read-split` (one read whose
+MBAP header and PDU go out as two TCP segments), `read-coalesced` (two reads in one segment),
 `diag` (FC 8), `pid-nonzero` (two reads with protocol identifier 1 on one
 connection) and `bad-length` (one MBAP header whose length field is 1,
 outside 2..254), with `--source IP` and `--value N`. Exit 3 means the connection was
@@ -146,7 +148,7 @@ Both capture variants end with the ICS parsing checks
 (`scripts/smoke-dpi-lib-parsing.sh`): tolerant parsing, the default, delivers
 the `pid-nonzero` reads with one `ics-conformance` alert per connection;
 `dataplane.dpiIcsParsing.modbus = "strict"`, pushed through the API, drops
-the read and resets the session when inline (`would_drop` in learn mode); a
+the read and resets the session when inline (`would_drop` in monitor mode); a
 `bad-length` read resets in both modes when inline. The checks read the
 connection's events by client port, which both modes print first.
 
@@ -168,6 +170,6 @@ server. Each probe has its own source address, so the 10-minute dynamic
 block from an earlier deny cannot stand in for the inline drop.
 
 The default `afpacket` variant has no inline path. It asserts that saving the
-ICS rules in enforce mode is refused, then runs the traffic in learn mode,
+ICS rules in enforce mode is refused, then runs the traffic in monitor mode,
 where denied writes reach the server and no dynamic block is installed. Both
 variants check the ICS coverage that `/dataplane/ruleset` and `/health` report.

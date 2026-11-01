@@ -42,7 +42,8 @@ What the design delivers by default:
 
 - Every local web/API account can enroll app-based TOTP MFA.
 - Admins can require MFA for an account. After a seven-day enrollment grace
-  period, that account can reach only MFA setup until it enrolls.
+  period, that account can reach only MFA setup, its own profile and session,
+  logout and health until it enrolls.
 - Sessions are server-side records behind signed JWTs, with a 30-minute idle
   limit and a 4-hour maximum. Logout revokes the session. Outside lab mode,
   management refuses to start with an empty or example `CONTAIND_JWT_SECRET`.
@@ -53,8 +54,10 @@ What the design delivers by default:
   whose MFA enrollment grace period has ended cannot log in over SSH either.
 - A password or MFA change ends the account's other sessions, including its SSH
   connections. The session that made the change stays signed in.
-- A TOTP code works once. Web/API and SSH refuse a code whose time step is not
-  later than the account's last accepted one, including after a restart.
+- Web/API and SSH record the time step of an accepted TOTP login or
+  MFA-disable code and refuse earlier or equal steps, including after a restart.
+  Enrollment confirmation does not record that step, so its code can still
+  authenticate once after enrollment.
 - Each MFA login or enrollment challenge works once and expires after five
   minutes. Pending and consumed state survives management restarts. A password,
   TOTP or role change invalidates pending challenges; start login or setup again.
@@ -65,12 +68,13 @@ What the design delivers by default:
   the signed-in account's password, so a session opened with a key cannot set it.
 - Web/API login and SSH login, including TOTP codes, are rate-limited. SSH
   password, key and TOTP failures share one limit per client address and account.
-- Five wrong TOTP codes, or ten wrong current passwords at a password or MFA
-  change, lock that check for the account for 15 minutes, from every client
-  address on web/API and SSH. Each lock is audited once. Password login is never
-  locked, so someone without the password cannot lock an account out.
-- Lab mode skips the SSH account checks and the per-account limits, and accepts
-  a reused TOTP code.
+- Five wrong login or MFA-disable TOTP codes, or ten wrong current passwords at
+  a password or MFA change, lock that check for the account for 15 minutes, from
+  every client address on web/API and SSH. Each lock is audited once. Password
+  login is never locked, so someone without the password cannot lock an account out.
+- Lab mode skips SSH account assurance (forced change and MFA), the per-account
+  factor limits and TOTP reuse checks. SSH still checks the account, admin role
+  and password or authorized key.
 
 Caveats:
 
@@ -84,17 +88,19 @@ Caveats:
 
 What the design delivers by default:
 
-- A fresh install seeds one admin account, `containd` / `containd`, and marks it
-  for a forced password change.
-- Until that change, a web/API session can reach only its own session, logout
-  and the password-change endpoint.
+- With default bootstrap settings, a fresh install seeds one admin account,
+  `containd` / `containd`, and marks it for a forced password change.
+  `CONTAIND_DEFAULT_ADMIN_USERNAME` and `CONTAIND_DEFAULT_ADMIN_PASSWORD`
+  override the seed; a non-default seed password is not marked for change.
+- Until that change, a web/API session can reach only its own profile and
+  session, logout, health and the password-change endpoint.
 - SSH asks for the change at login, for password and key logins alike, before
   the CLI, menu or shell opens. It applies the same password rules.
-- A new password needs at least 8 characters with an uppercase letter, a
-  lowercase letter and a digit, and must differ from the current one, so the
-  bootstrap value cannot be kept.
+- A new password needs at least 8 bytes with an ASCII uppercase letter,
+  lowercase letter and digit, and must differ from the current one, so the
+  bootstrap value cannot be kept. The length check counts bytes, not characters.
 
-Design note: the bootstrap credential is the same on every instance, and the
+Design note: the default bootstrap credential is the same on every instance, and the
 forced change at first login is what retires it, as the pledge describes.
 containd often runs in offline labs and classrooms that have no channel to
 distribute a per-instance secret. Bind management to a trusted network until
@@ -103,9 +109,10 @@ the first login; see [Deployment hardening](#deployment-hardening).
 #### Lab-mode credential pinning
 
 `CONTAIND_LAB_MODE=1` is an opt-in weakening for reproducible, isolated workshops.
-It is off by default and in the supplied Compose file. It pins
-`containd` / `containd` and refuses every password change for every user, on
-every path, with the same reason:
+It is off by default and in the supplied production Compose file. With default
+bootstrap settings, a fresh lab uses `containd` / `containd`. Lab mode does not
+reset existing accounts or override custom bootstrap credentials. It refuses
+every password change for every user, on every path, with the same reason:
 
 - `GET /api/v1/auth/me` does not advertise `mustChangePassword: true`.
 - `POST /api/v1/auth/me/password` and `POST /api/v1/users/:id/password` return
@@ -116,10 +123,11 @@ every path, with the same reason:
 - Seeding the default admin at first boot and after a factory reset is not a
   password change and is unaffected.
 
-Lab mode also relaxes web/API authentication. Every request gets admin access.
-With a JWT secret, any validly signed, unexpired token passes without a session
-lookup. Without a secret, any nonempty token passes. Factory reset does not
-revoke lab tokens. SSH password login is on by default, uses the same pinned
+Lab mode also relaxes web/API authentication. Every accepted token gets admin
+access. With a JWT secret, a valid HS256 JWT passes without a session lookup.
+Expiry is checked when present, with 30 seconds of leeway; an `exp` claim is
+not required. Without a secret, any nonempty token passes. Factory reset does not
+revoke lab tokens. SSH password login is on by default, uses the same stored
 credential, and skips the forced change and MFA checks.
 
 Use lab mode only for single-tenant, isolated or offline training environments,
@@ -147,14 +155,15 @@ What the design delivers by default:
 - **Fail closed, without lockout.** Every boot validates the stored running
   configuration. If it is invalid, management enters recovery: new transit is
   dropped and management stays reachable where it was. A reserved management
-  path, when declared, compiles into every firewall as an independent allow, so
-  policy cannot lock out the management network. See
+  path, when declared, compiles into every firewall as an independent allow for
+  its exact reserved sources and listener, so policy cannot lock out that path.
+  See
   [Reserved Management Path](management-reservation.md).
 - **Authenticated remote engine API.** Numeric loopback retains credential-free
   HTTP; every non-loopback listener requires TLS 1.3 mutual authentication from
-  one dedicated engine secret. Combined mode binds `127.0.0.1:8081`. Split engine
-  mode refuses to start without `CONTAIND_ENGINE_ADDR` and refuses loopback or
-  wildcard listeners, except on a reserved management path, where both processes
+  one dedicated engine secret. Combined mode defaults to `127.0.0.1:8081`.
+  Split engine mode refuses to start without `CONTAIND_ENGINE_ADDR` and refuses
+  loopback or wildcard listeners, except on a reserved management path, where both processes
   share one network namespace. While enforcing, the firewall admits the API from loopback
   and on that address's interface only. See
   [Threat Model](threat-model.md#management-plane-to-dataplane).
