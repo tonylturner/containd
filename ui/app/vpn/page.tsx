@@ -26,6 +26,7 @@ import { authHeaders, fetchWithSession, handleUnauthorized, staticAssetURL } fro
 import { parseErrorBody } from "../../lib/api-request";
 import type { OpenVPNCredential } from "../../lib/api-vpn";
 import { ServiceFaultBanner } from "../../components/ServiceFaultBanner";
+import { ServiceStatusStrip } from "../system/services/service-presentation";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -408,6 +409,8 @@ export default function VPNPage() {
       <ServiceFaultBanner status={servicesStatus} loading={loading} only={["wireguard", "openvpn"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded || clientForm.editor.superseded} />
+      <ServiceStatusStrip label="WireGuard status" configured={canSave ? cfg.wireguard.enabled : undefined} attention={wireguardFaulted ? servicesStatus?.wireguard?.fault?.message || "WireGuard faulted" : !wgStatus || interfaceStateStatus !== "ready" ? "Live tunnel status unavailable — use Refresh to retry" : undefined} updated={svcStatus?.last_render} />
+      <ServiceStatusStrip label="OpenVPN status" configured={canSave ? cfg.openvpn.enabled : undefined} running={svcStatus?.openvpn_running} attention={servicesStatus?.openvpn?.fault?.message || svcStatus?.openvpn_last_error || (!svcStatus ? "Live VPN status unavailable — use Refresh to retry" : undefined)} updated={svcStatus?.last_render} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text) shadow-card">
@@ -417,7 +420,6 @@ export default function VPNPage() {
       <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <VPNRuntimeStatusCard loading={loading} servicesStatus={servicesStatus} />
       {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
@@ -596,7 +598,7 @@ export default function VPNPage() {
             </div>
 
             <details className="rounded-xs border p-3" open={(cfg.wireguard.peers?.length ?? 0) > 0}>
-              <summary className="cursor-pointer text-sm">Advanced peer settings</summary>
+              <summary className="cursor-pointer text-sm"><span>Advanced peer settings</span>{((cfg.wireguard.peers?.length ?? 0) > 0) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
               <label htmlFor="wireguard-peers" className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                 Peers (JSON)
                 <InfoTip label="JSON array with name, publicKey, and allowedIPs for each peer." />
@@ -612,16 +614,6 @@ export default function VPNPage() {
             </details>
           </div>
         </div>
-
-        <WireGuardRuntimeCard
-          cfgInterface={cfg.wireguard.interface ?? "wg0"}
-          peerCount={(cfg.wireguard.peers ?? []).length}
-          peerNameByKey={peerNameByKey}
-          runtime={runtime}
-          interfaceStateStatus={interfaceStateStatus}
-          onRetry={() => { void refresh({ silent: true }); }}
-          wgStatus={wgStatus}
-        />
 
         <OpenVPNEditorCard
           canEdit={canEdit}
@@ -649,6 +641,18 @@ export default function VPNPage() {
           revokeClient={revokeClient}
         />
       </div>
+
+      <h2 className="mt-6 text-lg font-semibold">Activity</h2>
+      <VPNRuntimeStatusCard loading={loading} servicesStatus={servicesStatus} />
+        <WireGuardRuntimeCard
+          cfgInterface={cfg.wireguard.interface ?? "wg0"}
+          peerCount={(cfg.wireguard.peers ?? []).length}
+          peerNameByKey={peerNameByKey}
+          runtime={runtime}
+          interfaceStateStatus={interfaceStateStatus}
+          onRetry={() => { void refresh({ silent: true }); }}
+          wgStatus={wgStatus}
+        />
 
       <p className="mt-3 text-xs text-(--text-muted)">
         State:{" "}

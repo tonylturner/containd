@@ -107,3 +107,12 @@ test("native rule format is inline and advanced group syntax remains reachable",
     await expect(matching.getByText(expression, { exact: true })).toBeVisible();
   }
 });
+
+test("an export failure stays visible when inspecting Sources", async ({ page }) => {
+  await openExport(page);
+  await page.route("**/api/v1/ids/export?**", (route) => route.fulfill({ status: 503, json: { error: "export unavailable" } }));
+  await page.getByRole("button", { name: /Snort/ }).click();
+  await expect(page.getByText("export unavailable", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: /^Sources/ }).click();
+  await expect(page.getByText("export unavailable", { exact: false })).toBeVisible();
+});

@@ -127,19 +127,19 @@ export default function ServicesOverviewPage() {
           <div className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2 text-sm">
             <span className="text-(--text)">DNS</span>
             <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsFaulted ? "text-amber" : dnsRunning ? "bg-emerald-400/20 text-emerald-400" : "text-(--text)"}`}>
-              {!status ? "unavailable" : dnsFaulted ? "faulted" : dnsRunning ? "running" : "stopped"}
+              {typeof status?.dns?.running !== "boolean" ? "Unknown" : dnsFaulted ? "faulted" : dnsRunning ? "running" : "stopped"}
             </span>
           </div>
           <div className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2 text-sm">
             <span className="text-(--text)">DHCP</span>
             <span className={`rounded-full px-2 py-0.5 text-[11px] ${dhcpFaulted ? "text-amber" : dhcpEnabled ? "bg-emerald-400/20 text-emerald-400" : "text-(--text)"}`}>
-              {!status ? "unavailable" : dhcpFaulted ? "faulted" : dhcpEnabled ? "enabled" : "off"}
+              {typeof status?.dhcp?.enabled !== "boolean" ? "Unknown" : dhcpFaulted ? "faulted" : dhcpEnabled ? "enabled" : "off"}
             </span>
           </div>
           <div className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2 text-sm">
             <span className="text-(--text)">VPN</span>
             <span className={`rounded-full px-2 py-0.5 text-[11px] ${vpnFaulted ? "text-amber" : vpnActive ? "bg-emerald-400/20 text-emerald-400" : "text-(--text)"}`}>
-              {!status ? "unavailable" : vpnFaulted ? "faulted" : vpnActive ? "active" : "off"}
+              {!status?.vpn || typeof status.vpn.wireguard_enabled !== "boolean" || typeof status.vpn.openvpn_running !== "boolean" ? "Unknown" : vpnFaulted ? "faulted" : vpnActive ? "active" : "off"}
             </span>
           </div>
         </div>
@@ -155,33 +155,108 @@ export default function ServicesOverviewPage() {
           </Link>
         </div>
       </BaseCard>
+      <section aria-label="Connectivity" className="mt-6"><h2 className="mb-3 text-lg font-semibold">Connectivity</h2>
       <div className="grid gap-4 md:grid-cols-2">
         <ServiceCard
-          title="Syslog"
+          title="DNS"
           loading={loading}
           spark={spark(
-            "syslog",
-            "Syslog events per minute",
+            "dns",
+            "DNS events per minute",
             "var(--primary)",
-            "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.05))",
+            "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))",
           )}
-          rate={rate("syslog")}
-          errorsRate={errRate("syslog")}
+          rate={rate("dns")}
+          errorsRate={errRate("dns")}
         >
-          <p className="text-sm text-(--text)">
-            Forward unified events to external collectors.
-          </p>
+          <div className="flex items-center gap-2 text-sm text-(--text)">
+            <span>DNS resolver</span><span className="text-xs text-(--text-muted)">Software: Unbound</span>
+            <InfoTip label="Embedded resolver with upstream forwarding and caching." />
+          </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Forwarders: {status?.syslog?.configured_forwarders ?? "Unknown"}
-            {rate("syslog") !== null && (
-              <> · Rate: {(rate("syslog") ?? 0).toFixed(1)} /min</>
+            Enabled: {typeof status?.dns?.enabled === "boolean" ? (status.dns.enabled ? "yes" : "no") : "Unknown"}, running:{" "}
+            {typeof status?.dns?.running === "boolean" ? (status.dns.running ? "yes" : "no") : "Unknown"}
+            <br />
+            Upstreams: {status?.dns?.configured_upstreams ?? "Unknown"}{" "}
+            {status?.dns?.last_error && `(error=${status?.dns?.last_error})`}
+            {rate("dns") !== null && (
+              <>
+                <br />
+                Rate: {(rate("dns") ?? 0).toFixed(1)} /min
+              </>
             )}
           </p>
-          <Link href="/system/services/syslog/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
+          <Link href="/system/services/dns/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
             Configure →
           </Link>
         </ServiceCard>
-
+        <ServiceCard
+          title="NTP"
+          loading={loading}
+          spark={spark(
+            "ntp",
+            "NTP events per minute",
+            "var(--teal)",
+            "linear-gradient(180deg, rgba(6,182,212,0.08), rgba(37,99,235,0.04))",
+          )}
+          rate={rate("ntp")}
+          errorsRate={errRate("ntp")}
+        >
+          <div className="flex items-center gap-2 text-sm text-(--text)">
+            <span>Time synchronization</span><span className="text-xs text-(--text-muted)">Software: chrony</span>
+            <InfoTip label="Keeps system time in sync using configured NTP servers." />
+          </div>
+          <p className="mt-2 text-xs text-(--text-muted)">
+            Enabled: {typeof status?.ntp?.enabled === "boolean" ? (status.ntp.enabled ? "yes" : "no") : "Unknown"}, running:{" "}
+            {typeof status?.ntp?.running === "boolean" ? (status.ntp.running ? "yes" : "no") : "Unknown"}
+            <br />
+            Servers: {status?.ntp?.servers_count ?? "Unknown"}{" "}
+            {status?.ntp?.last_error && `(error=${status?.ntp?.last_error})`}
+            {rate("ntp") !== null && (
+              <>
+                <br />
+                Rate: {(rate("ntp") ?? 0).toFixed(1)} /min
+              </>
+            )}
+          </p>
+          <Link href="/system/services/ntp/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
+            Configure →
+          </Link>
+        </ServiceCard>
+        <ServiceCard
+          title="DHCP"
+          loading={loading}
+          spark={spark(
+            "dhcp",
+            "DHCP events per minute",
+            "var(--teal)",
+            "linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))",
+          )}
+          rate={rate("dhcp")}
+          errorsRate={errRate("dhcp")}
+        >
+          <div className="flex items-center gap-2 text-sm text-(--text)">
+            <span>LAN DHCP server</span>
+            <InfoTip label="Assigns IPs to LAN clients and tracks leases." />
+          </div>
+          <p className="mt-2 text-xs text-(--text-muted)">
+            Enabled: {typeof status?.dhcp?.enabled === "boolean" ? (status.dhcp.enabled ? "yes" : "no") : "Unknown"}{" "}
+            {(status?.dhcp?.listen_ifaces ?? 0) > 0 &&
+              `(ifaces=${status?.dhcp?.listen_ifaces ?? 0})`}
+            {rate("dhcp") !== null && (
+              <>
+                <br />
+                Rate: {(rate("dhcp") ?? 0).toFixed(1)} /min
+              </>
+            )}
+          </p>
+          <Link href="/dhcp/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
+            Configure →
+          </Link>
+        </ServiceCard>
+      </div></section>
+      <section aria-label="Access" className="mt-6"><h2 className="mb-3 text-lg font-semibold">Access</h2>
+      <div className="grid gap-4 md:grid-cols-2">
         <ServiceCard
           title="Proxies"
           loading={loading}
@@ -236,107 +311,6 @@ export default function ServicesOverviewPage() {
             Configure →
           </Link>
         </ServiceCard>
-
-        <ServiceCard
-          title="DNS"
-          loading={loading}
-          spark={spark(
-            "dns",
-            "DNS events per minute",
-            "var(--primary)",
-            "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(139,92,246,0.05))",
-          )}
-          rate={rate("dns")}
-          errorsRate={errRate("dns")}
-        >
-          <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>DNS resolver</span><span className="text-xs text-(--text-muted)">Software: Unbound</span>
-            <InfoTip label="Embedded resolver with upstream forwarding and caching." />
-          </div>
-          <p className="mt-2 text-xs text-(--text-muted)">
-            Enabled: {typeof status?.dns?.enabled === "boolean" ? (status.dns.enabled ? "yes" : "no") : "Unknown"}, running:{" "}
-            {typeof status?.dns?.running === "boolean" ? (status.dns.running ? "yes" : "no") : "Unknown"}
-            <br />
-            Upstreams: {status?.dns?.configured_upstreams ?? "Unknown"}{" "}
-            {status?.dns?.last_error && `(error=${status?.dns?.last_error})`}
-            {rate("dns") !== null && (
-              <>
-                <br />
-                Rate: {(rate("dns") ?? 0).toFixed(1)} /min
-              </>
-            )}
-          </p>
-          <Link href="/system/services/dns/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
-            Configure →
-          </Link>
-        </ServiceCard>
-
-        <ServiceCard
-          title="NTP"
-          loading={loading}
-          spark={spark(
-            "ntp",
-            "NTP events per minute",
-            "var(--teal)",
-            "linear-gradient(180deg, rgba(6,182,212,0.08), rgba(37,99,235,0.04))",
-          )}
-          rate={rate("ntp")}
-          errorsRate={errRate("ntp")}
-        >
-          <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>Time synchronization</span><span className="text-xs text-(--text-muted)">Software: chrony</span>
-            <InfoTip label="Keeps system time in sync using configured NTP servers." />
-          </div>
-          <p className="mt-2 text-xs text-(--text-muted)">
-            Enabled: {typeof status?.ntp?.enabled === "boolean" ? (status.ntp.enabled ? "yes" : "no") : "Unknown"}, running:{" "}
-            {typeof status?.ntp?.running === "boolean" ? (status.ntp.running ? "yes" : "no") : "Unknown"}
-            <br />
-            Servers: {status?.ntp?.servers_count ?? "Unknown"}{" "}
-            {status?.ntp?.last_error && `(error=${status?.ntp?.last_error})`}
-            {rate("ntp") !== null && (
-              <>
-                <br />
-                Rate: {(rate("ntp") ?? 0).toFixed(1)} /min
-              </>
-            )}
-          </p>
-          <Link href="/system/services/ntp/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
-            Configure →
-          </Link>
-        </ServiceCard>
-
-        <ServiceCard
-          title="DHCP"
-          loading={loading}
-          spark={spark(
-            "dhcp",
-            "DHCP events per minute",
-            "var(--teal)",
-            "linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))",
-          )}
-          rate={rate("dhcp")}
-          errorsRate={errRate("dhcp")}
-        >
-          <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>LAN DHCP server</span>
-            <InfoTip label="Assigns IPs to LAN clients and tracks leases." />
-          </div>
-          <p className="mt-2 text-xs text-(--text-muted)">
-            Enabled: {typeof status?.dhcp?.enabled === "boolean" ? (status.dhcp.enabled ? "yes" : "no") : "Unknown"}{" "}
-            {(status?.dhcp?.listen_ifaces ?? 0) > 0 &&
-              `(ifaces=${status?.dhcp?.listen_ifaces ?? 0})`}
-            {rate("dhcp") !== null && (
-              <>
-                <br />
-                Rate: {(rate("dhcp") ?? 0).toFixed(1)} /min
-              </>
-            )}
-          </p>
-          <Link href="/dhcp/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
-            Configure →
-          </Link>
-        </ServiceCard>
-
         <ServiceCard
           title="VPN"
           loading={loading}
@@ -370,7 +344,9 @@ export default function ServicesOverviewPage() {
             Configure →
           </Link>
         </ServiceCard>
-
+      </div></section>
+      <section aria-label="Inspection" className="mt-6"><h2 className="mb-3 text-lg font-semibold">Inspection</h2>
+      <div className="grid gap-4 md:grid-cols-2">
         <ServiceCard
           title="Antivirus / ICAP"
           loading={loading}
@@ -423,7 +399,36 @@ export default function ServicesOverviewPage() {
             Configure →
           </Link>
         </ServiceCard>
-      </div>
+      </div></section>
+      <section aria-label="Logs" className="mt-6"><h2 className="mb-3 text-lg font-semibold">Logs</h2>
+      <div className="grid gap-4 md:grid-cols-2">
+        <ServiceCard
+          title="Syslog"
+          loading={loading}
+          spark={spark(
+            "syslog",
+            "Syslog events per minute",
+            "var(--primary)",
+            "linear-gradient(180deg, rgba(37,99,235,0.08), rgba(6,182,212,0.05))",
+          )}
+          rate={rate("syslog")}
+          errorsRate={errRate("syslog")}
+        >
+          <p className="text-sm text-(--text)">
+            Forward unified events to external collectors.
+          </p>
+          <p className="mt-2 text-xs text-(--text-muted)">
+            Forwarders: {status?.syslog?.configured_forwarders ?? "Unknown"}
+            {rate("syslog") !== null && (
+              <> · Rate: {(rate("syslog") ?? 0).toFixed(1)} /min</>
+            )}
+          </p>
+          <Link href="/system/services/syslog/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
+            Configure →
+          </Link>
+        </ServiceCard>
+      </div></section>
+
     </Shell>
   );
 }
