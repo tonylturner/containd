@@ -116,6 +116,12 @@ export default function SystemSettingsPage() {
             </button>
           </div>
 
+          {view.reloadError && (
+            <div role="alert" aria-label="Certificate reload failed" className="mt-4 break-words rounded-xs border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {view.reloadError}
+            </div>
+          )}
+
           <div className="mt-4 space-y-1 text-sm">
             {view.rows.map((row) => (
               <Row key={row.label} label={row.label} value={row.value} />

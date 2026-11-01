@@ -469,6 +469,8 @@ export type TLSInfo = {
   servedCertNotAfter?: string;
   servedCertDnsNames?: string[];
   servedCertIps?: string[];
+  /** Latest identity reload failure; the listener retains its last valid certificate. */
+  reloadError?: string;
 };
 
 /** Result of a management certificate upload: status "updated" when the
