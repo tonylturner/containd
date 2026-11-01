@@ -48,7 +48,7 @@ const losslessConfig = `{
 			{"dst":"198.18.0.0/15","gateway":"192.0.2.2","table":100,"metric":7}],
 		"rules":[{"table":100,"src":"198.18.0.0/15","dst":"203.0.113.0/24","priority":11},
 			{"table":200,"src":"192.0.2.0/24","priority":12}]},
-	"dataPlane":{"enforcement":true,"enforceTable":"keep","captureInterfaces":["eth0"],
+	"dataplane":{"enforcement":true,"enforceTable":"keep","captureInterfaces":["eth0"],
 		"dpiEnabled":true,"dpiMode":"monitor","dpiMock":true,
 		"dpiProtocols":{"dns":true},"dpiIcsProtocols":{"modbus":false},
 		"dpiIcsParsing":{"iec104":"strict"},"nflogGroup":12,"nfqueueGroup":13,

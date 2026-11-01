@@ -3,6 +3,12 @@
 Canonical JSON configuration for export/import and persistent state. The config
 schema version is independent of the containd release version.
 
+Full-config writes and validation reject unknown or duplicate top-level keys.
+Names are case-sensitive: use `dataplane` and `schema_version`, not `dataPlane`
+or `schemaVersion`. HTTP 400 responses name the offending key and suggest the
+canonical spelling when it differs only by case. Nested-section compatibility
+is unchanged.
+
 Imports stage a candidate; commit is required to activate it. Failed commit,
 commit-confirmed or rollback attempts to restore and reapply the pre-request
 running document and IDS bank while retaining the candidate. Inspect the error body's
@@ -300,6 +306,14 @@ path, unsafe changes and rollback targets are refused; see
 Exports are redacted by default. Only admins can request an unredacted export;
 store full backups securely. Keep the persistent data volume as well as exported
 JSON if you need users, audit history, or service files during recovery.
+
+Restore old JSON backups with `POST /api/v1/config/import`. Only this endpoint
+accepts the retired top-level `export` section for schemas `0.1.0`–`0.1.7`
+(a missing schema means `0.1.0`), discarding it during migration. Other unknown
+or duplicate top-level keys are rejected, as is `export` on newer schemas.
+Ordinary config saves and validation do not accept `export`, even for old
+schemas. Correct rejected keys and retry; a rejected import leaves the
+candidate and running configuration unchanged.
 
 ## Ordered policy upgrades
 
