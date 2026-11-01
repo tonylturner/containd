@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -103,8 +104,19 @@ type AVManager struct {
 	cache      map[string]cachedVerdict
 	maxCache   int
 
-	slots        chan struct{}
-	backendReady bool
+	slots           chan struct{}
+	backendReady    bool
+	backendError    string
+	backendEpoch    uint64
+	probeSeq        uint64
+	capabilitySeq   uint64
+	directions      map[avscan.Direction]avDirectionHealth
+	capabilityError string
+	nextOptions     time.Time
+	observeWake     chan struct{}
+	// Observer ownership is serialized by op, never by mu.
+	observeCancel context.CancelFunc
+	observeDone   chan struct{}
 	// reload is the database activation awaiting clamd's proof, if any;
 	// reloadError records the last activation failure until a retry
 	// succeeds; reloadAttempt grows the retry backoff; retrySeq lets a newer
@@ -178,6 +190,7 @@ func (m *AVManager) Stop() error {
 	m.cancel()
 	m.op <- struct{}{}
 	defer m.unlock()
+	m.stopObserver()
 	m.stopFreshclam()
 	err := m.stopClamd()
 	m.mu.Lock()
@@ -209,8 +222,24 @@ func (m *AVManager) applyLocked(ctx context.Context, cfg config.AVConfig) error 
 		return err
 	}
 	defer m.unlock()
+	m.stopObserver()
+	// Own the server list: callers may reuse their candidate after Apply.
+	cfg.ICAP.Servers = slices.Clone(cfg.ICAP.Servers)
 	m.mu.Lock()
+	if !sameAVBackend(m.lastCfg, cfg) {
+		// The epoch identifies the backend, not the Apply call. Retained
+		// proof must still accept failures from scans already in flight.
+		m.backendEpoch++
+		m.directions = nil
+		m.backendReady = false
+		m.backendError = "backend apply in progress"
+		m.capabilityError = m.backendError
+		m.nextOptions = time.Time{}
+	}
+	epoch := m.backendEpoch
+	m.configureDirectionsLocked(cfg)
 	m.lastCfg = cfg
+	m.refreshBackendLocked()
 	if !cfg.Enabled || avMode(cfg) != "clamav" {
 		m.reloadError = ""
 		m.reloadAttempt = 0
@@ -218,15 +247,33 @@ func (m *AVManager) applyLocked(ctx context.Context, cfg config.AVConfig) error 
 	m.lastRender = time.Now().UTC()
 	m.mu.Unlock()
 	err := m.applyBackend(ctx, cfg)
+	if err == nil {
+		_, _, why := m.observeBackend(ctx, cfg, epoch, true, true)
+		if cfg.Enabled && why != "" {
+			err = errors.New(why)
+		}
+	} else {
+		m.mu.Lock()
+		m.capabilityError = err.Error()
+		m.refreshBackendLocked()
+		m.mu.Unlock()
+	}
 	m.mu.Lock()
+	m.lastError = ""
 	if err != nil {
 		m.lastError = err.Error()
-		m.backendReady = false
-	} else {
-		m.lastError = ""
-		m.backendReady = cfg.Enabled
 	}
 	m.mu.Unlock()
+	if cfg.Enabled && avMode(cfg) == "icap" {
+		attrs := map[string]any{"address": firstICAPServer(cfg).Address}
+		if err != nil {
+			attrs["error"] = err.Error()
+			m.emit("service.av.icap_probe_failed", attrs)
+		} else {
+			m.emit("service.av.icap_probe_ok", attrs)
+		}
+	}
+	m.startObserver(cfg, epoch)
 	ready := 0.0
 	if cfg.Enabled && err == nil {
 		ready = 1
@@ -252,26 +299,12 @@ func (m *AVManager) applyBackend(ctx context.Context, cfg config.AVConfig) error
 	}
 	switch mode {
 	case "icap":
-		return m.probeICAP(ctx, cfg)
+		return nil
 	case "clamav":
 		return m.applyClamAV(ctx, cfg)
 	default:
 		return fmt.Errorf("%w: unsupported av mode %q", ErrAVInvalid, mode)
 	}
-}
-
-func (m *AVManager) probeICAP(ctx context.Context, cfg config.AVConfig) error {
-	srv := firstICAPServer(cfg)
-	err := m.icapClient(cfg).Probe(ctx, srv, icapMethods(cfg)...)
-	m.mu.Lock()
-	m.lastTest = time.Now().UTC()
-	m.mu.Unlock()
-	if err != nil {
-		m.emit("service.av.icap_probe_failed", map[string]any{"address": srv.Address, "error": err.Error()})
-		return fmt.Errorf("icap server %s: %w", srv.Address, err)
-	}
-	m.emit("service.av.icap_probe_ok", map[string]any{"address": srv.Address})
-	return nil
 }
 
 func (m *AVManager) icapClient(cfg config.AVConfig) *ICAPClient {
@@ -282,13 +315,16 @@ func (m *AVManager) icapClient(cfg config.AVConfig) *ICAPClient {
 func (m *AVManager) Current() config.AVConfig {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.lastCfg
+	cfg := m.lastCfg
+	cfg.ICAP.Servers = slices.Clone(cfg.ICAP.Servers)
+	return cfg
 }
 
 // Status reports the applied settings, live backend readiness and counters.
 func (m *AVManager) Status(ctx context.Context) map[string]any {
 	m.mu.Lock()
 	cfg := m.lastCfg
+	epoch := m.backendEpoch
 	out := meterStatus(&m.scans, &m.scanErrs)
 	out["enabled"] = cfg.Enabled
 	out["mode"] = avMode(cfg)
@@ -325,9 +361,9 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	out["trust_revision"] = trustRevision(m.trust.bundle)
 	m.mu.Unlock()
 
-	ready, version, readyErr := m.readiness(ctx, cfg)
+	ready, version, readyErr := m.observeBackend(ctx, cfg, epoch, true, false)
 	m.mu.Lock()
-	if m.reloadError != "" {
+	if m.reloadError != "" && ctx.Err() == nil {
 		ready, readyErr = false, m.reloadError
 	}
 	m.mu.Unlock()
@@ -335,34 +371,6 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	out["db_version"] = version
 	out["ready_error"] = readyErr
 	return out
-}
-
-// readiness checks the backend live: clamd must answer PING and VERSION, an
-// ICAP server must answer OPTIONS for the scanned directions.
-func (m *AVManager) readiness(ctx context.Context, cfg config.AVConfig) (bool, string, string) {
-	if !cfg.Enabled {
-		return false, "", "disabled"
-	}
-	ctx, cancel := context.WithTimeout(ctx, min(avTimeout(cfg), avStatusProbeTimeout))
-	defer cancel()
-	switch avMode(cfg) {
-	case "clamav":
-		client := &ClamAVClient{Timeout: avStatusProbeTimeout, Socket: clamdSocket(cfg)}
-		if err := client.Ping(ctx); err != nil {
-			return false, "", err.Error()
-		}
-		version, err := client.Version(ctx)
-		if err != nil {
-			return false, "", err.Error()
-		}
-		return true, version, ""
-	case "icap":
-		if err := m.icapClient(cfg).Probe(ctx, firstICAPServer(cfg), icapMethods(cfg)...); err != nil {
-			return false, "", err.Error()
-		}
-		return true, "", ""
-	}
-	return false, "", "unsupported mode"
 }
 
 func (m *AVManager) emit(kind string, attrs map[string]any) {
