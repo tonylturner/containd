@@ -45,7 +45,7 @@ export const CARDS: CardDef[] = [
     description:
       "Enable internal hosts to reach the Internet via SNAT masquerade.",
     color: "bg-(--amber)",
-    steps: ["Select LAN zone", "Select WAN zone", "Review & Apply"],
+    steps: ["Select LAN zone", "Select WAN zone", "Review & Stage"],
   },
   {
     id: "publish-service",
@@ -57,7 +57,7 @@ export const CARDS: CardDef[] = [
       "Server details",
       "Select protocol",
       "Select ingress zone",
-      "Review & Apply",
+      "Review & Stage",
     ],
   },
   {
@@ -70,7 +70,7 @@ export const CARDS: CardDef[] = [
       "Select ICS protocol",
       "Select zones",
       "Access level",
-      "Review & Apply",
+      "Review & Stage",
     ],
   },
   {
@@ -83,7 +83,7 @@ export const CARDS: CardDef[] = [
       "Source zone",
       "Destination zone",
       "Protocols & ports",
-      "Review & Apply",
+      "Review & Stage",
     ],
   },
 ];
