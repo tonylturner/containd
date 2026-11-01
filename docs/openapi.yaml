@@ -3586,6 +3586,12 @@ components:
       required: true
       description: Exact revision of the snapshot this write is based on. Missing is 428; stale is 412. Wildcards are not supported.
       schema: {$ref: '#/components/schemas/ConfigRevision'}
+    TemplateIfRevision:
+      name: X-Containd-If-Revision
+      in: header
+      required: false
+      description: Required unless preview is true. Preview ignores this header; apply requires an exact revision (missing 428, stale 412).
+      schema: {$ref: '#/components/schemas/ConfigRevision'}
     pathId:
       name: id
       in: path
@@ -3661,8 +3667,6 @@ paths:
       tags: [System]
       responses:
         "200":
-          headers:
-            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Liveness response; inspect enforcement and IEC104 health separately
           content:
             application/json:
@@ -4073,7 +4077,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [changed, changedSections, running, candidate, idsBank]
+                required: [changed, changedSections, running, candidate, idsBank, pendingConfirm]
                 properties:
                   changed: {type: boolean}
                   changedSections: {type: array, items: {type: string}}
@@ -4085,6 +4089,13 @@ paths:
                     allOf:
                     - {$ref: '#/components/schemas/Config'}
                     nullable: true
+                  pendingConfirm:
+                    type: object
+                    nullable: true
+                    description: Commit-confirmed deadline from the same snapshot as running, candidate and the revision; null when none is pending.
+                    required: [deadline]
+                    properties:
+                      deadline: {type: string, format: date-time, description: RFC3339 UTC deadline}
                   idsBank:
                     type: object
                     required: [running, candidate]
@@ -5019,7 +5030,7 @@ paths:
   /templates/ics/apply:
     post:
       parameters:
-      - $ref: '#/components/parameters/IfRevision'
+      - $ref: '#/components/parameters/TemplateIfRevision'
       summary: Apply an ICS template to generate firewall rules (admin)
       tags: [Templates]
       requestBody:
@@ -5049,7 +5060,7 @@ paths:
             X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400": {description: Unknown template or missing params, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
-      description: Preview returns generated rules without staging. Otherwise upserts candidate rules by ID; commit to apply.
+      description: Preview returns generated rules without staging and needs no revision header; any supplied precondition is ignored. Otherwise upserts candidate rules by ID; commit to apply.
 
   # ── Rule Impact Preview ─────────────────────────────────────────
   /firewall/rules/preview:
@@ -5784,8 +5795,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
-          headers:
-            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Engine evidence authority unavailable
           content:
             application/json:

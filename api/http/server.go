@@ -247,12 +247,12 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/system/tls", getTLSHandler(store))
 		protected.POST("/system/tls/cert", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), setTLSCertHandler(store))
 		protected.POST("/system/tls/trusted-ca", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), setTrustedCAHandler(store, engine))
-		protected.POST("/system/factory-reset", requireAdmin(), requireConfigRevision(), rateLimitSensitive(), factoryResetHandler(store, userStore, engine, services, resetSessions))
+		protected.POST("/system/factory-reset", requireAdmin(), rateLimitSensitive(), requireConfigRevision(), factoryResetHandler(store, userStore, engine, services, resetSessions))
 		protected.GET("/config", getConfigHandler(store))
 		protected.POST("/config", requireAdmin(), requireConfigRevision(), saveConfigHandler(store))
 		protected.POST("/config/validate", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), validateConfigHandler(store))
 		protected.GET("/config/export", exportConfigHandler(store))
-		protected.POST("/config/import", requireAdmin(), requireConfigRevision(), rateLimitSensitive(), importConfigHandler(store))
+		protected.POST("/config/import", requireAdmin(), rateLimitSensitive(), requireConfigRevision(), importConfigHandler(store))
 		protected.GET("/config/candidate", getCandidateConfigHandler(store))
 		protected.POST("/config/candidate", requireAdmin(), requireConfigRevision(), saveCandidateConfigHandler(store))
 		protected.GET("/config/diff", diffConfigHandler(store))
@@ -402,7 +402,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/templates/apply", requireAdmin(), requireConfigRevision(), applyTemplateHandler(store))
 		// ICS protocol templates.
 		protected.GET("/templates/ics", listICSTemplatesHandler())
-		protected.POST("/templates/ics/apply", requireAdmin(), requireConfigRevision(), applyICSTemplateHandler(store))
+		protected.POST("/templates/ics/apply", requireAdmin(), requireICSTemplateRevision(), applyICSTemplateHandler(store))
 		// Identity bindings (candidate firewall.identityBindings).
 		protected.GET("/identities", listIdentitiesHandler(store))
 		protected.POST("/identities", requireAdmin(), requireConfigRevision(), setIdentityHandler(store))

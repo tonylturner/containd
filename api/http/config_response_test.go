@@ -17,7 +17,10 @@ func assertConfigResponseHeader(t *testing.T, rec *httptest.ResponseRecorder, wa
 	t.Helper()
 	// Inspect the headers actually sent, not the mutable writer's late headers.
 	got := rec.Result().Header.Values("X-Containd-Config")
-	if want != "" && !config.Revision(rec.Result().Header.Get(revisionHeader)).Valid() {
+	if rec.Code >= 400 && rec.Result().Header.Get(revisionHeader) != "" {
+		t.Fatalf("error response exposed revision: %v", rec.Result().Header)
+	}
+	if rec.Code < 400 && want != "" && !config.Revision(rec.Result().Header.Get(revisionHeader)).Valid() {
 		t.Fatalf("missing revision: %v", rec.Result().Header)
 	}
 	if want == "" {

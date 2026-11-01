@@ -2,12 +2,33 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
+
+// Preview is the sole branch of the ICS template route that is not a writer.
+// Inspect a bounded copy without reporting decode errors: apply requests must
+// still pass precondition syntax checks before handler body validation.
+func requireICSTemplateRevision() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, defaultJSONBodyLimit+1))
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
+		var envelope struct {
+			Preview bool `json:"preview"`
+		}
+		if err == nil && json.Unmarshal(body, &envelope) == nil && envelope.Preview {
+			limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit)(c)
+			return
+		}
+		requireConfigRevision()(c)
+	}
+}
 
 const revisionHeader = "X-Containd-Revision"
 const ifRevisionHeader = "X-Containd-If-Revision"
@@ -48,6 +69,7 @@ func revisionMismatchResponse(c *gin.Context, err error) bool {
 	if !errors.As(err, &mismatch) {
 		return false
 	}
+	c.Header(revisionHeader, "")
 	c.JSON(http.StatusPreconditionFailed, gin.H{
 		"error":           mismatch.Error(),
 		"code":            "config_revision_mismatch",

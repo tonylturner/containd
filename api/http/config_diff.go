@@ -107,6 +107,7 @@ func diffConfigHandler(store config.Store) gin.HandlerFunc {
 			"changedSections": changed,
 			"running":         configReadCopy(running),
 			"candidate":       configReadCopy(candidate),
+			"pendingConfirm":  snapshot.PendingConfirm,
 			"idsBank": gin.H{
 				"running": runningBank, "candidate": candidateBank,
 			},

@@ -71,6 +71,10 @@ func TestStoreReservationPersistenceBoundaries(t *testing.T) {
 	if testBaseRevision(store, ctx) != base {
 		t.Fatal("rollback refusal allocated a revision")
 	}
+	// Confirmation only validates when it actually removes pending state.
+	if err := testCommitConfirmed(store, ctx, time.Hour); err != nil {
+		t.Fatal(err)
+	}
 	putSnapshot(configKeyRunning, invalid)
 	requireReservationError(t, testConfirmCommit(store, ctx))
 	putSnapshot(configKeyRunning, valid)

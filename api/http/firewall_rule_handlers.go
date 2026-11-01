@@ -144,7 +144,7 @@ func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 		delete(patch, "ics")
 		// Decode supplied types before CAS; only merging with existing state
 		// and protocol-dependent validation belong inside the mutation.
-		if _, err := mergeRulePatch(config.Rule{}, patch); err != nil {
+		if _, err := mergeRulePatch(config.Rule{ID: id}, patch); err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid rule payload", err.Error())
 			return
 		}

@@ -4,8 +4,10 @@ package config
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
+	"time"
 )
 
 // Revision is an opaque identity of the entire persisted configuration state.
@@ -39,6 +41,12 @@ type ConfigSnapshot struct {
 	Running, Candidate *Config
 	Revision           Revision
 	IDSRules           []IDSRule
+	PendingConfirm     *PendingConfirm
+}
+
+// PendingConfirm is server-owned commit-confirmed state.
+type PendingConfirm struct {
+	Deadline time.Time `json:"deadline"`
 }
 
 func readRevision(ctx context.Context, db configReader) (Revision, error) {
@@ -106,6 +114,15 @@ func (s *SQLiteStore) ReadSnapshot(ctx context.Context, kind SnapshotKind, withB
 		result.Candidate, err = loadCandidateFrom(ctx, tx, withBank)
 		if err != nil && err != ErrNotFound {
 			return result, err
+		}
+	}
+	if kind == SnapshotPair {
+		pending, pendingErr := loadPendingFrom(ctx, tx)
+		if pendingErr != nil && !errors.Is(pendingErr, ErrNotFound) {
+			return result, pendingErr
+		}
+		if pending != nil {
+			result.PendingConfirm = &PendingConfirm{Deadline: time.Unix(0, pending.DeadlineUnix).UTC()}
 		}
 	}
 	if kind == SnapshotIDS {

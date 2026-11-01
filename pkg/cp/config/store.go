@@ -337,14 +337,22 @@ func (s *SQLiteStore) ConfirmCommit(ctx context.Context, expected Revision) (Rev
 		return "", err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	result, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyPending)
+	if err != nil {
+		return "", err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if n == 0 {
+		return expected, tx.Commit()
+	}
 	cfg, err := loadRunningFrom(ctx, tx)
 	if err != nil {
 		return "", err
 	}
 	if err := s.ValidateConfig(cfg); err != nil {
-		return "", err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyPending); err != nil {
 		return "", err
 	}
 	revision, err := s.commitRevisionTx(ctx, tx)

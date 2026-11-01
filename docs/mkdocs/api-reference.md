@@ -119,8 +119,9 @@ Operational, read, preview-only and failed responses carry neither header value.
 Configuration reads also return `X-Containd-Revision`; successful configuration
 writes return the revision produced by that write, alongside the staged or
 committed header. The revision is header-only, including on `/config/diff`.
-A learner response reporting durable staging carries both staged and revision
-headers even if completing its engine receipt fails with HTTP 503.
+Unauthenticated `/health` and all error responses omit the revision header.
+A learner HTTP 503 reporting durable staging still requires a fresh candidate
+read and operator review before retrying the receipt.
 
 ## Orchestrator Client Contract
 
@@ -128,8 +129,8 @@ Every configuration writer requires `X-Containd-If-Revision` with the revision
 of the snapshot it is based on. This includes full documents, section edits,
 imports, IDS uploads, learner staging, commits, confirmation, rollback and
 factory reset. There are no client or lab-mode exemptions. The ICS template
-apply route requires a syntactically valid precondition for preview requests
-too, but preview does not compare or change configuration state.
+apply route with `preview: true` needs no revision header and ignores one if
+sent; preview does not compare or change configuration state.
 
 The revision covers running, candidate (including absence), previous,
 confirmed-commit state and IDS bank references together. Treat it as an opaque
@@ -258,8 +259,13 @@ the submitted document must keep the reserved interface's `device` binding and
 set `dataplane.enforcement: true`. Copy the binding from `GET /config`.
 Otherwise staging is rejected with HTTP 400 and running remains unchanged.
 
+`GET /config/diff` includes `pendingConfirm: {"deadline":"<RFC3339 UTC>"}`
+or `pendingConfirm: null`, read in the same snapshot as the documents and
+revision. This is server state, including after navigation or a restart.
+
 `POST /config/confirm` only cancels the pending rollback deadline; its
-`committed` header acknowledges confirmation, not a new runtime apply.
+`committed` header acknowledges confirmation, not a new runtime apply. When
+nothing is pending it returns the current revision without invalidating drafts.
 
 ### Factory reset
 

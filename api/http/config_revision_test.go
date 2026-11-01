@@ -230,8 +230,8 @@ func TestConfigRevisionLearnUncertainPersistence(t *testing.T) {
 			engine.completeError = errors.New("completion lost")
 			staged := casRequest(t, server, "POST", "/learn/apply", request, string(base))
 			persisted := testBaseRevision(store, ctx)
-			if staged.Code != 503 || staged.Header().Get(revisionHeader) != string(persisted) || persisted == base {
-				t.Fatalf("durable stage lost revision: %d %s %v", staged.Code, staged.Body, staged.Header())
+			if staged.Code != 503 || staged.Header().Get(revisionHeader) != "" || persisted == base {
+				t.Fatalf("durable-stage error exposed revision or lost persistence: %d %s %v", staged.Code, staged.Body, staged.Header())
 			}
 			engine.completeError = nil
 			if releaseFails {
@@ -358,7 +358,7 @@ func TestOpenAPIConfigRevisions(t *testing.T) {
 		op := spec.Paths[path][strings.ToLower(method)]
 		found := false
 		for _, param := range op.Parameters {
-			found = found || param.Ref == "#/components/parameters/IfRevision"
+			found = found || param.Ref == "#/components/parameters/IfRevision" || route == "POST /api/v1/templates/ics/apply" && param.Ref == "#/components/parameters/TemplateIfRevision"
 		}
 		if !found {
 			t.Errorf("%s lacks the precondition parameter", route)

@@ -46,11 +46,13 @@ func rateLimitSensitive() gin.HandlerFunc {
 
 // apiError sends a standardized JSON error response.
 func apiError(c *gin.Context, status int, msg string) {
+	c.Header(revisionHeader, "")
 	c.JSON(status, gin.H{"error": msg})
 }
 
 // apiErrorDetail sends a standardized JSON error response with detail.
 func apiErrorDetail(c *gin.Context, status int, msg string, detail string) {
+	c.Header(revisionHeader, "")
 	c.JSON(status, gin.H{"error": msg, "detail": detail})
 }
 
