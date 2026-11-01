@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   focus retained after moves. A read-only Default row always shows the
   candidate policy's fallback action, warning when unmatched traffic is allowed
   and showing unknown when that action cannot be read coherently.
+- Operator-facing text uses plain language instead of backend terms such as
+  NFQUEUE, nftables, conntrack, engine and daemon names. Exact values, IDs,
+  paths and raw diagnostics stay available under technical details. Button,
+  tab and column names are unchanged.
+
+### Fixed
+
+- Editing a firewall rule with several zones or protocols no longer keeps only
+  the first of each.
+- DNS, NTP, DHCP, proxy and VPN pages show unavailable status as unknown
+  instead of not installed, stopped or zero.
+- The dashboard no longer reports "all systems nominal" from alert counts
+  alone, no longer shows IPS as always active, and no longer draws synthetic
+  usage bars for rule counts or missing container memory.
+- Diagnostics names the real enforcement setting and states that temporary
+  blocks match any source port.
+- Deleting a reverse-proxy site says it stages on save and applies on commit.
+- The interfaces page no longer names another product in its management
+  access notice.
+- Unreadable ICS inspection settings stay unknown instead of looking disabled.
 
 ## [0.1.37] - 2026-11-01
 

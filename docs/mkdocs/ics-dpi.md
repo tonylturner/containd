@@ -932,8 +932,8 @@ collection. Observation is not authorization, even when the traffic was delivere
    endpoints, direction, wire/logical coordinates, role certainty and coverage.
 3. For a sealed dataset, explicitly **Generate suggestions**. Review the proposed
    endpoint/service and protocol selectors, withheld-reason counts, limitations,
-   and **Certified evidence (frozen)**: positive replay, negative boundary tests,
-   evidence digest and evaluator/generator versions. A rule's **Preview live recent
+   and **Checks on saved evidence**: recorded-traffic tests, boundary tests,
+   evidence checksum and evaluator/generator versions. A rule's **Preview live recent
    evidence** is a separate isolated impact check against recent retained events;
    it does not recertify the frozen suggestion or simulate the whole policy.
 4. IEC 104 requires an explicit authenticated administrator **Review** before
