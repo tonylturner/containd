@@ -364,6 +364,15 @@ Passive decoder events carry `observation_only: true` and
 `binding_source: "observation"`. They are evidence, not verdicts. The Events
 page marks them **Observation only**.
 
+Offline and live suggestion generation excludes their entire connection
+incarnation, including port-decoded events emitted before content confirmation.
+Confirmed content/port mismatches also exclude the connection even if no passive
+decoder emits an event. Generate exposes these exclusions as
+`withheld.observation_binding`; suggestion limitations retain the exclusion.
+Historical datasets lacking retained binding authority are withheld as
+`missing_authority`. Collect new evidence; reuploading the same retained capture
+does not replace its dataset.
+
 `GET /api/v1/flows` includes an optional `identification` object with these
 attributes. `application` is the confirmed bound protocol when available,
 otherwise the legacy application's decoder protocol. Utility markers do not

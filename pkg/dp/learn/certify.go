@@ -130,6 +130,7 @@ func (c *CompilerCertifier) Certify(ctx context.Context, content SuggestionConte
 
 func loadParents(ctx context.Context, store evidence.Store, refs []evidence.EvidenceRef) ([]evidence.Observation, error) {
 	byDataset := map[string]map[string]evidence.Observation{}
+	excluded := map[string]map[string]evidence.WithheldReason{}
 	seen := map[string]bool{}
 	for _, ref := range refs {
 		key := ref.DatasetID + "/" + ref.ObservationID
@@ -148,6 +149,7 @@ func loadParents(ctx context.Context, store evidence.Store, refs []evidence.Evid
 			return nil, ErrNotCertified
 		}
 		found := map[string]evidence.Observation{}
+		excluded[ds.ID] = map[string]evidence.WithheldReason{}
 		cursor := ""
 		for {
 			page, err := store.ListObservations(ctx, ds.ID, evidence.PageRequest{Limit: 200, Cursor: cursor})
@@ -156,6 +158,7 @@ func loadParents(ctx context.Context, store evidence.Store, refs []evidence.Evid
 			}
 			for _, o := range page.Items {
 				found[o.ID] = o
+				recordConnectionExclusion(excluded[ds.ID], o)
 			}
 			cursor = page.NextCursor
 			if cursor == "" {
@@ -169,6 +172,9 @@ func loadParents(ctx context.Context, store evidence.Store, refs []evidence.Evid
 		o, ok := byDataset[ref.DatasetID][ref.ObservationID]
 		if !ok {
 			return nil, ErrExpired
+		}
+		if excluded[ref.DatasetID][o.ConnectionID] != "" {
+			return nil, ErrNotCertified
 		}
 		out = append(out, o)
 	}

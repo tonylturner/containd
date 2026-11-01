@@ -14,7 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-const GeneratorVersion = "exact-2"
+const GeneratorVersion = "exact-3"
 
 // EvaluatorVersion follows the runtime ordered predicate contract; retained
 // proofs from another evaluator must be recertified, never reinterpreted.
@@ -46,6 +46,10 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 	if ds.State != evidence.DatasetSealed {
 		return result, ErrNotCertified
 	}
+	excluded, err := connectionExclusions(ctx, g.Store, ds.ID)
+	if err != nil {
+		return result, err
+	}
 	groups := map[string]*relationGroup{}
 	withheld := func(o evidence.Observation, reasons []evidence.WithheldReason) error {
 		seen := map[evidence.WithheldReason]bool{}
@@ -70,6 +74,12 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 			return result, err
 		}
 		for _, o := range page.Items {
+			if reason := excluded[o.ConnectionID]; reason != "" {
+				if err := withheld(o, []evidence.WithheldReason{reason}); err != nil {
+					return result, err
+				}
+				continue
+			}
 			bundle, reasons := GenerateRelation(o)
 			if len(reasons) > 0 {
 				if err := withheld(o, reasons); err != nil {
@@ -116,7 +126,7 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 		if err != nil {
 			return result, err
 		}
-		content := SuggestionContent{Versions: Versions{Schema: SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: GeneratorVersion, Evaluator: EvaluatorVersion, Decoder: ds.DecoderVersion, Profile: ds.ProfileFingerprint, Snapshot: ds.SnapshotFingerprint}, EvidenceDigest: digest, Rules: group.rules, Limits: []string{"Finite boundary replay; selector relations, not transaction or delivery guarantees."}, RequiresCoordinateReview: needsCoordinateReview(group.parents)}
+		content := SuggestionContent{Versions: Versions{Schema: SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: GeneratorVersion, Evaluator: EvaluatorVersion, Decoder: ds.DecoderVersion, Profile: ds.ProfileFingerprint, Snapshot: ds.SnapshotFingerprint}, EvidenceDigest: digest, Rules: group.rules, Limits: []string{"Finite boundary replay; selector relations, not transaction or delivery guarantees.", observationBindingLimit}, RequiresCoordinateReview: needsCoordinateReview(group.parents)}
 		gaps := append([]string(nil), ds.Gaps...)
 		sort.Strings(gaps)
 		for _, gap := range gaps {
@@ -173,6 +183,9 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 // GenerateRelation emits the narrow selector relation for a complete parent.
 // It never unions targets from different parents or invents missing selectors.
 func GenerateRelation(o evidence.Observation) ([]config.Rule, []evidence.WithheldReason) {
+	if reason := connectionExclusion(o); reason != "" {
+		return nil, []evidence.WithheldReason{reason}
+	}
 	var reasons []evidence.WithheldReason
 	if !parentComplete(o) || len(o.Quality.Loss) > 0 {
 		reasons = append(reasons, evidence.WithheldIncomplete)

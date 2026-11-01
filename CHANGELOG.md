@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Exclude observation-bound and content/port-mismatched connections from offline
+  and live policy suggestions, including port-decoded events emitted before
+  content confirmation; retain the exclusion in withheld counts and limitations.
+  Previously certified suggestions require regeneration; historical datasets
+  without retained binding authority require new evidence.
+
 ### Upgrade notes
 
 - Telemetry event IDs are JSON strings. API clients that parse event IDs as

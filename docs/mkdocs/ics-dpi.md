@@ -1302,8 +1302,16 @@ separate passive decoder only when the legacy path does not already decode
 that protocol. These events carry `observation_only: true` and
 `binding_source: observation`; they do not enforce rules or generate automatic
 ALLOW suggestions. The learner withholds suggestions for nonstandard service-port
-observations. Content confirmation does not invalidate earlier port-decoded evidence
-from that connection; inspect protocol mismatches before staging suggestions.
+observations. Observation-bound connections are excluded from offline and live
+policy suggestions, including legacy events emitted before confirmation. A
+confirmed content/port mismatch excludes the entire connection incarnation, not
+just the passive decoder's events. Generate reports `observation_binding` withheld
+counts, and suggestion limitations state this exclusion.
+
+Historical datasets whose adapter discarded binding authority are withheld as
+`missing_authority`; collect a new live watch or import a new capture. Reuploading
+the same retained capture reuses its existing dataset. Previously certified
+suggestions require regeneration under the current generator.
 
 Flows show the bound application, whether identification is by **content** or
 only **port**, and a **Mismatch** badge when content differs from a registry
