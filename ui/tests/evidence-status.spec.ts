@@ -39,7 +39,22 @@ for (const state of ["degraded", "unknown", "recovered", "ok"]) {
     } else {
       await expect(banner).toContainText(state === "degraded" ? "Evidence degraded"
         : state === "recovered" ? "Evidence recovered" : "Evidence state unknown");
-      await expect(banner).toHaveClass(state === "degraded" ? /text-rose-300/ : /text-amber/);
+      await expect(banner).toHaveClass(state === "degraded" ? /text-\(--red\)/ : /text-amber/);
+    }
+    if (state === "degraded") {
+      for (const surface of [banner, persistence]) {
+        await expect(surface).toHaveCSS("color", "rgb(239, 68, 68)");
+      }
+      const fills = await Promise.all([banner, persistence].map((surface) => surface.evaluate((el) => ({
+        background: getComputedStyle(el).backgroundColor,
+        border: getComputedStyle(el).borderTopColor,
+      }))));
+      await page.evaluate(() => document.documentElement.style.setProperty("--red", "rgb(255, 120, 100)"));
+      for (const [i, surface] of [banner, persistence].entries()) {
+        await expect(surface).toHaveCSS("color", "rgb(255, 120, 100)");
+        await expect(surface).not.toHaveCSS("background-color", fills[i].background);
+        await expect(surface).not.toHaveCSS("border-top-color", fills[i].border);
+      }
     }
     if (state === "recovered") await expect(persistence).toContainText("previously missing records are not restored");
   });

@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Use the theme's failure color for degraded evidence and audit persistence
+  banners.
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
 - Make admin MFA disable atomic with the required account's new enrollment grace
