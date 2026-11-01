@@ -125,6 +125,14 @@ A store preflight/validation failure before promotion is HTTP 400 without
 recovery fields and does not promote running. A disconnected request is not
 proof of success or failure; read running, candidate and health before retrying.
 
+Internal runtime apply requests carry an opaque `X-Containd-Apply-Id`.
+The engine rejects a superseded ID with HTTP 409, code `apply_superseded`,
+for five minutes after supersession. Older history is evicted on admission;
+IDs are not ordered by their contents or by the management clock. Management
+serializes applies and uses a five-second engine request timeout. A request
+canceled or waiting five minutes for admission is rejected with HTTP 408,
+code `apply_expired`, without side effects. The current ID does not expire.
+
 `GET /health` remains HTTP 200 liveness and uses one observation budget of
 one second. General firewall health is a top-level `enforcement` object with
 exactly `state` and `reason`:

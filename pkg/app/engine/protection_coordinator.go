@@ -8,12 +8,17 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"go.uber.org/zap"
 )
 
 const applyIDHeader = "X-Containd-Apply-Id"
+
+// applyReplayWindow exceeds the management client and engine read deadlines.
+// IDs remain opaque; only the local monotonic supersession time is compared.
+const applyReplayWindow = 5 * time.Minute
 
 type protectionPlane interface {
 	SetProtectionBootID(string)
@@ -32,7 +37,8 @@ type protectionCoordinator struct {
 	cancel       context.CancelFunc
 	dp           protectionPlane
 	logger       *zap.SugaredLogger
-	seen         map[string]bool
+	seen         map[string]time.Time // superseded IDs only
+	now          func() time.Time
 	current      string
 	workerCancel context.CancelFunc
 	workerDone   chan struct{}
@@ -42,7 +48,7 @@ type protectionCoordinator struct {
 func newProtectionCoordinator(ctx context.Context, dp protectionPlane, logger *zap.SugaredLogger) *protectionCoordinator {
 	ctx, cancel := context.WithCancel(ctx)
 	dp.SetProtectionBootID(engineBootID)
-	return &protectionCoordinator{ctx: ctx, cancel: cancel, dp: dp, logger: logger, seen: map[string]bool{}}
+	return &protectionCoordinator{ctx: ctx, cancel: cancel, dp: dp, logger: logger, seen: map[string]time.Time{}, now: time.Now}
 }
 
 func applyID(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -70,13 +76,26 @@ func (c *protectionCoordinator) admit(next http.HandlerFunc) http.HandlerFunc {
 		if !ok {
 			return
 		}
+		arrived := c.now()
 		c.mu.Lock()
 		defer c.mu.Unlock()
+		now := c.now()
+		// Client timeouts do not bound time spent waiting for this lock.
+		// Never admit a queued request after its replay protection expires.
+		if r.Context().Err() != nil || now.Sub(arrived) >= applyReplayWindow {
+			protectionError(w, http.StatusRequestTimeout, "apply_expired", "application request expired before admission")
+			return
+		}
 		if c.closed {
 			protectionError(w, http.StatusServiceUnavailable, "engine_stopping", "engine stopping")
 			return
 		}
-		if c.seen[id] && id != c.current {
+		for old, superseded := range c.seen {
+			if now.Sub(superseded) >= applyReplayWindow {
+				delete(c.seen, old)
+			}
+		}
+		if _, superseded := c.seen[id]; superseded {
 			protectionError(w, http.StatusConflict, "apply_superseded", "application was superseded")
 			return
 		}
@@ -84,8 +103,10 @@ func (c *protectionCoordinator) admit(next http.HandlerFunc) http.HandlerFunc {
 		// request cannot reuse an earlier rules acknowledgement for this ID.
 		c.dp.BeginProtection(engineBootID, id)
 		if id != c.current {
+			if c.current != "" {
+				c.seen[c.current] = now
+			}
 			c.current = id
-			c.seen[id] = true
 		}
 		next(w, r)
 	}
