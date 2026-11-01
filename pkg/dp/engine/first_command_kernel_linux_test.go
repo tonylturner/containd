@@ -27,12 +27,13 @@ import (
 // The kernel oracle routes a client namespace through this namespace's
 // forward chain to a recording Modbus server namespace. containd's engine
 // installs its nft ruleset here and decides the queued packets on NFQUEUE.
-// It replaces containd's nft tables and enables forwarding in this
+// It replaces containd's nft tables and requires forwarding enabled in this
 // namespace, so it runs only when CONTAIND_NETNS_KERNEL_TEST=1 inside a
 // disposable privileged Linux container with nft and iproute2:
 //
 //	GOOS=linux CGO_ENABLED=0 go test -c -o build/engine.test ./pkg/dp/engine
-//	docker run --rm --privileged -e CONTAIND_NETNS_KERNEL_TEST=1 -v "$PWD/build:/w" alpine:3.21 \
+//	docker run --rm --privileged --sysctl net.ipv4.ip_forward=1 \
+//	  -e CONTAIND_NETNS_KERNEL_TEST=1 -v "$PWD/build:/w" alpine:3.21 \
 //	  sh -c 'apk add -q nftables iproute2 && /w/engine.test -test.run FirstCommandKernel -test.v'
 const (
 	fcClientNS   = "fcclient"

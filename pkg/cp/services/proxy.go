@@ -126,14 +126,11 @@ func NewProxyManager(opts ProxyOptions) *ProxyManager {
 	if nginxPath == "" {
 		nginxPath = "/usr/sbin/nginx"
 	}
-	lg, err := commonlog.NewZap("proxy", "proxy", commonlog.Options{
+	lg := commonlog.NewServiceWithOptions("proxy", "proxy", commonlog.Options{
 		FilePath: "/data/logs/proxy.log",
 		JSON:     true,
 		Level:    "info",
 	})
-	if err != nil {
-		lg = zap.NewNop().Sugar()
-	}
 	return &ProxyManager{
 		BaseDir:   baseDir,
 		Supervise: opts.Supervise,
