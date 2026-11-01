@@ -137,8 +137,9 @@ your environment rather than relying only on appliance-local data.
 
 - Set a unique, non-empty `CONTAIND_JWT_SECRET` for every deployment.
 - Rotate the bootstrap password immediately through the web UI or management API.
-- Keep `CONTAIND_LAB_MODE=0`; lab mode pins predictable credentials and prevents
-  password rotation. Use it only in disposable, isolated labs.
+- Keep `CONTAIND_LAB_MODE=0`; lab mode prevents password rotation and fresh
+  default-seeded labs use predictable credentials. Use it only in disposable,
+  isolated labs.
 - Prefer HTTPS, replace the generated self-signed certificate for trusted remote
   access, and restrict management ports to authorized operators.
 - Enable TOTP MFA for administrative accounts. SSH password login then asks for
@@ -162,7 +163,10 @@ password-change flow, and both support optional TOTP MFA for local accounts:
 - An account whose MFA enrollment grace period has ended cannot log in over SSH
   until it enrolls through the web UI.
 - A password or MFA change ends the account's other sessions and SSH connections.
-- A TOTP code is accepted once per account, on web/API and SSH.
+- A TOTP code is accepted once per account, on web/API and SSH, including the
+  enrollment confirmation code: it cannot also sign in.
+- New passwords require at least 8 characters (Unicode code points), with ASCII
+  uppercase, lowercase and digit characters.
 - The SSH menu and setup wizard ask for the current password before changing it.
 - Refused SSH logins are audited. SSH password, key and TOTP failures share one
   rate limit per client address and account, so many addresses or account
@@ -177,9 +181,17 @@ password-change flow, and both support optional TOTP MFA for local accounts:
   right password. Resetting the password or MFA lifts the locks.
 
 Lab mode (`CONTAIND_LAB_MODE=1`) skips SSH password-change and MFA assurance,
-the per-account factor limits, and TOTP replay protection. It pins the bootstrap
-credential. SSH still requires an admin account and a valid password or authorized
-key; SSH password attempts remain rate-limited.
+the per-account factor limits, and TOTP replay protection. It refuses password
+changes but does not reset existing or custom-seeded credentials. SSH still
+requires an admin account and a valid password or authorized key; SSH password
+attempts remain rate-limited.
+With `CONTAIND_JWT_SECRET` set, lab API tokens must be signed with HS256 and
+include a valid `exp` claim (30 seconds of leeway). No session lookup or `jti`
+is required; session-less automation tokens still get admin access. Local user
+context comes from the token's subject ID, including custom bootstrap accounts.
+Non-user subjects use `CONTAIND_DEFAULT_ADMIN_USERNAME` (default `containd`) for
+profile operations. Without a secret, any nonempty token passes and uses that
+same bootstrap account.
 An authenticated SSH PTY can reach the appliance's Linux shell, not
 just a restricted configuration CLI. The supplied appliance runs as root inside
 its container; treat SSH access as privileged appliance access. Keep it

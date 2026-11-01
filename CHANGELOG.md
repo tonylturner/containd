@@ -71,6 +71,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   syslog initialization fails, and report the failure once to stderr.
 - Use the repository-root `.env` in `scripts/containd-connect` and surface
   Compose interpolation errors instead of reporting a running service as stopped.
+- Consume the TOTP enrollment confirmation time step so its code cannot also
+  authenticate on web/API or SSH outside lab mode.
+- Count Unicode characters, not UTF-8 bytes, toward the eight-character password
+  minimum; ASCII uppercase, lowercase and digit requirements are unchanged.
+- Require `exp` on lab-mode JWTs when `CONTAIND_JWT_SECRET` is set. API callers
+  must include an expiration; session-less tokens without `jti` still work,
+  with the existing 30-second leeway.
+- Resolve lab-mode local-account context from the token subject, including custom
+  bootstrap usernames, rather than assuming `containd`. Non-user automation
+  subjects retain admin access and the configured bootstrap profile.
+- Report the effective caller role consistently in auth and dashboard responses,
+  including admin for lab tokens whose subject is a local view account, without
+  changing stored account roles.
 - Omit unknown DHCP and WireGuard runtime gauge series instead of reporting
   them stopped. Publish the VPN aggregate only when a VPN is observed running;
   service faults no longer manufacture stopped runtime observations.
