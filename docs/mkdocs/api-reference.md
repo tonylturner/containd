@@ -402,7 +402,23 @@ connections whose observed lifetimes overlap it. Loss without either identity
 or interval, including legacy unlocalized gaps, excludes the entire dataset.
 Connections fully outside localized loss remain eligible. Dataset `losses`
 retains each loss code with its connection identity or inclusive `start`/`end`
-capture-time interval when known; `gaps` retains the summary codes.
+capture-time interval when known; `gaps` retains certification-related summary
+codes.
+
+Loss scopes depend on the available authority:
+
+| Code | Scope |
+| --- | --- |
+| `capture_loss` | Live transport overflow or IP truncation: authoritative connection incarnation when known; capture-time instant otherwise. |
+| `capture_truncated` | Each offline cut record or IP-length truncation: offline connection incarnation, or its capture-time instant if headers do not decode. A partial final record header has no trustworthy time or tuple and excludes the dataset. |
+| `watch_collection_loss`, `budget_exceeded` | Rejected decoded batch or parent: known connection incarnation; timestamp-only decoded drops use an inclusive capture-time instant. Missing identity and time exclude the dataset. |
+| `watch_restart`, `policy_changed` | Dataset-wide: wall-clock watch bounds cannot delimit packet timestamps after clock skew or capture lag. |
+| `watch_storage_loss`, `import_failed`, `ingest_failed`, `interrupted_import`, `collection_loss` | Dataset-wide, including legacy unlocalized gaps and exhausted loss-localization capacity. |
+| `outcome_loss` | Counted in `losses` and lost-batch counters, not `gaps`: decision/delivery annotations are not certification inputs and do not exclude connections. |
+
+A dataset retains at most 1,024 loss entries. Beyond that bound, localization
+collapses to one dataset-wide `collection_loss`, rather than dropping exclusions.
+Malformed but fully captured traffic is not a capture-loss signal.
 
 See [Content identification](ics-dpi.md#content-identification) for protocol,
 capture-mode, timing and coverage limits.
@@ -458,6 +474,9 @@ reason and no partial batch. Expired evidence returns `410`; unavailable evidenc
 returns `503`. Refresh suggestions after a refusal. If persistence succeeded but
 completion failed, the candidate may already be staged: retry the same request ID
 and exact ordered selections, never silently regenerate or use a new receipt.
+After a proof-version upgrade, a frozen retry can reconcile only byte-identical
+rules already in candidate; it cannot introduce missing rules, even from a
+completed receipt. Regenerate under the current generator to stage new rules.
 
 Use the normal candidate diff and commit workflow to apply monitor rules. To
 allow traffic with a learned rule, explicitly change its candidate mode to enforce

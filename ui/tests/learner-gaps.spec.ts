@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { mockLearner, openDataset } from "./fixtures/learner";
 
-for (const gap of ["watch_restart", "admission_loss"]) {
+for (const gap of ["watch_collection_loss", "budget_exceeded"]) {
   test(`connections outside localized ${gap} can generate certified suggestions`, async ({
     page,
   }) => {

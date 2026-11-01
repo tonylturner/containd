@@ -979,7 +979,8 @@ components:
           maxItems: 32
         losses:
           type: array
-          description: Durable loss scope. Known connections are excluded in full; otherwise inclusive capture-time intervals exclude overlapping observed connection lifetimes. Missing scope and legacy gaps exclude the entire dataset.
+          maxItems: 1024
+          description: Durable loss scope. Known connections are excluded in full; otherwise inclusive capture-time intervals exclude overlapping observed connection lifetimes. Missing scope and legacy gaps exclude the entire dataset. outcome_loss counts annotation loss without excluding certification inputs. Localization exhaustion collapses to one dataset-wide collection_loss.
           items:
             type: object
             additionalProperties: false

@@ -954,8 +954,15 @@ Exact means exact within the supported selector relations, not byte-for-byte
 transaction equality. Generation retains correlated endpoint/service, direction,
 unit/station, operation and span/object constraints. The certifier evaluates
 referenced parents and negative boundary mutations against the shared rule
-evaluator, without transmitting packets. Finite replay is evidence, not a proof
-of universal protocol correctness. Malformed, incomplete, undecoded,
+evaluator, without transmitting packets. Large repeated relations are split into
+proofs of at most 512 positive parents, keeping each frozen suggestion within
+storage and replay budgets while retaining normalized evidence and the same
+selectors. Relations requiring aggregate closed-domain coverage carry their
+selector witnesses into every fragment; oversized witness sets are withheld for
+budget limits, never split into unjustified rules.
+Every positive is replayed; equivalent negative boundary inputs are replayed once
+per proof. Capture time remains part of boundary identity for scheduled rules.
+Finite replay is evidence, not a proof of universal protocol correctness. Malformed, incomplete, undecoded,
 nonconformant or authority-less parents cannot yield actionable suggestions.
 
 - **Modbus:** supported bounded request spans keep their unit and function code.
@@ -985,8 +992,12 @@ Known-connection loss excludes that incarnation; interval-only loss excludes
 connections whose observed lifetimes overlap the interval. Legacy gaps and loss
 with neither identity nor interval exclude the entire dataset. Excluded retained
 parents count toward the durable `collection_loss` withheld reason. Connections
-fully outside localized loss remain eligible. Restart loss spans the entire watch
-up to recovery because there is no durable collector checkpoint. Deletion or eviction invalidates
+fully outside localized loss remain eligible. Restart and policy-change loss
+exclude the dataset: store-clock lease bounds cannot safely delimit packet times.
+Loss localization is capped at 1,024 entries per dataset; exhaustion collapses to
+one dataset-wide loss. Live collection batches SQLite persistence and uses a
+256-batch queue with a 64 MiB decoded-copy budget to absorb flush bursts without
+blocking packet verdicts. Deletion or eviction invalidates
 dependent proofs for new stage requests.
 Resolved staging snapshots and completed receipts count toward the storage
 budget and are purged when their retry window expires. Dataset review shows the
@@ -1162,12 +1173,19 @@ They return `{dataset, stats}`; neither endpoint returns profiles or rules.
 Only classic PCAP is supported, with a 64 MiB upload ceiling; PCAPng is rejected.
 
 `stats` contains bounded events, flows, content identifications, protocol/count
-statistics and capture duration. `stats.truncated` identifies partial or
-snap-length-cut records. `stats.displayTruncated` means the display sample was
+statistics and capture duration. `stats.truncated` identifies partial,
+snap-length-cut or IP-length-truncated records. `stats.displayTruncated` means the display sample was
 capped, not that normalized evidence was sampled. Inspect dataset gaps separately:
 collection and admission loss exclude every connection they could have touched.
 Loss with neither a connection identity nor a time interval excludes the entire
-dataset, including legacy unlocalized gaps.
+dataset, including legacy unlocalized gaps. Offline `capture_truncated` is
+connection-local when transport headers decode, otherwise a capture-time instant;
+only a header-less final record is dataset-wide. Live `capture_loss` preserves
+the transport incarnation. `watch_collection_loss` and `budget_exceeded` retain
+known rejected connections; `watch_restart`, `policy_changed` and storage/import
+failures are dataset-wide. Dropped decision/delivery annotations (`outcome_loss`)
+are counted but do not exclude certification inputs. See the
+[loss-code scope table](api-reference.md#content-identification-results) for fallbacks.
 
 The internal engine `/internal/pcap/analyze` endpoints use the same import
 contract, not a second policy generator. Imports do not update live inventory,
