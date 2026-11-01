@@ -1,6 +1,7 @@
 "use client";
 
 import type { RefObject, SetStateAction, Dispatch } from "react";
+import Link from "next/link";
 
 import { downloadPcapURL, type PcapItem } from "../../lib/api";
 import { Card } from "../../components/Card";
@@ -63,7 +64,7 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
       <p className="mt-2 text-sm text-(--amber)">
         Replay transmits traffic onto the selected network immediately. It is not offline analysis.
       </p>
-      <a href="/pcap/" className="mt-2 inline-block text-sm underline">Analyze captures offline</a>
+      <Link href="/pcap/" className="mt-2 inline-block text-sm underline">Analyze captures offline</Link>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <input
           value={pcapQuery}

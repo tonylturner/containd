@@ -220,7 +220,8 @@ test("uncertain completion retries identical request ID and ordered revisions", 
     page.getByRole("button", { name: "Retry same staging request" }),
   ).toBeVisible();
   const steps = page.getByRole("navigation", { name: "Learner steps" });
-  await expect(steps.getByRole("button", { name: "4 Stage", exact: true })).toBeDisabled();
+  await expect(steps.getByRole("button", { name: "4 Stage", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /^Stage \d+ selected$/ })).toBeDisabled();
   await expect(steps).toContainText("Resolve the retained staging receipt; retry uses the identical request.");
   await expect(page.getByRole("button", { name: "Generate suggestions", exact: true })).toBeDisabled();
   state.uncertain = false;
@@ -257,6 +258,18 @@ test("viewer reads proof and authority but has no mutation or selection actions"
   ])
     await expect(page.getByRole("button", { name })).toHaveCount(0);
   await expect(page.getByRole("checkbox")).toHaveCount(0);
+  const steps = page.getByRole("navigation", { name: "Learner steps" });
+  for (const [name, section] of [
+    ["2 Generate", "Generate from collection"],
+    ["3 Review", "Review suggestions"],
+    ["4 Stage", "Stage reviewed suggestions"],
+  ]) {
+    const step = steps.getByRole("button", { name, exact: true });
+    await expect(step).toBeEnabled();
+    await step.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("region", { name: section, exact: true })).toBeFocused();
+  }
   await page.getByRole("button", { name: "Inspect service authority" }).click();
   await expect(page.getByLabel("Service authority")).toContainText(
     "logical · verified",
@@ -498,7 +511,7 @@ test("uncertain network staging keeps a receipt until explicit discard, without 
 });
 
 
-test("learner steps explain disabled collection, review and stage without running actions", async ({ page }) => {
+test("learner steps explain action prerequisites without disabling inspection or running actions", async ({ page }) => {
   const state = await mockLearner(page);
   state.suggestions = [];
   await page.goto("/pcap/");
@@ -508,9 +521,10 @@ test("learner steps explain disabled collection, review and stage without runnin
   await page.getByRole("button", { name: "Open capture-1", exact: true }).click();
   await expect(page.getByText("No retained suggestions.", { exact: false })).toBeVisible();
   await expect(steps.getByRole("button", { name: "2 Generate", exact: true })).toBeEnabled();
-  await expect(steps.getByRole("button", { name: "3 Review", exact: true })).toBeDisabled();
+  await expect(steps.getByRole("button", { name: "3 Review", exact: true })).toBeEnabled();
   await expect(steps).toContainText("Generate suggestions explicitly after collection finishes.");
-  await expect(steps.getByRole("button", { name: "4 Stage", exact: true })).toBeDisabled();
+  await expect(steps.getByRole("button", { name: "4 Stage", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /^Stage \d+ selected$/ })).toBeDisabled();
   await expect(steps).toContainText("Review and select eligible suggestions first.");
   await steps.getByRole("button", { name: "2 Generate", exact: true }).focus();
   await page.keyboard.press("Enter");
@@ -523,7 +537,7 @@ test("expired dataset explains why Generate is disabled and preserves inspection
   state.datasets[0].expiresAt = new Date(Date.now() - 1000).toISOString();
   await openDataset(page);
   const steps = page.getByRole("navigation", { name: "Learner steps" });
-  await expect(steps.getByRole("button", { name: "2 Generate", exact: true })).toBeDisabled();
+  await expect(steps.getByRole("button", { name: "2 Generate", exact: true })).toBeEnabled();
   await expect(steps).toContainText("Dataset expired. Collect new evidence.");
   await expect(page.getByRole("button", { name: "Generate suggestions", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Inspect service authority" })).toBeEnabled();
@@ -560,4 +574,115 @@ test("collapsed store counts still indicate removed and rejected evidence", asyn
   for (const text of ["lost batches 4", "rejected parents 5", "evicted records 2", "expired records 3"]) {
     await expect(disclosure.locator("summary")).toContainText(text);
   }
+});
+
+
+for (const stopReason of ["restart", "budget", "policy_changed", "future_stop_reason", "operator", "deadline"]) {
+  test(`Import capture surfaces ${stopReason} watch stop without selecting a dataset`, async ({ page }) => {
+    const state = await mockLearner(page);
+    const stoppedAt = new Date().toISOString();
+    state.watches = [{
+      id: "stopped-watch", datasetId: "capture-1", stopReason,
+      startedAt: new Date(Date.now() - 60000).toISOString(),
+      deadline: new Date(Date.now() + 60000).toISOString(), stoppedAt,
+    }];
+    await page.goto("/pcap/");
+    await expect(page.getByRole("tab", { name: "Import capture", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByLabel("Dataset review", { exact: true })).toHaveCount(0);
+    const notice = page.getByRole("status", { name: "Abnormally stopped watches" });
+    if (["operator", "deadline"].includes(stopReason)) {
+      await expect(notice).toHaveCount(0);
+    } else {
+      await expect(notice).toBeVisible();
+      await expect(notice).toContainText(stopReason);
+      const link = notice.getByRole("link", { name: "Inspect watch stopped-watch", exact: true });
+      await expect(link).toHaveAttribute("href", "#watch-stopped-watch");
+      await link.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("tab", { name: "Watch live", exact: true })).toHaveAttribute("aria-selected", "true");
+      await expect(page.locator("#watch-stopped-watch")).toBeFocused();
+      await expect(page.locator("#watch-stopped-watch")).toContainText(stopReason);
+      await expect(page.locator("#watch-stopped-watch")).toContainText("Dataset capture-1");
+    }
+    expect(state.writes).toEqual([]);
+  });
+}
+
+test("service authority inspection stays available during staging without releasing mutation guards", async ({ page }) => {
+  await mockLearner(page);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const attempts: unknown[] = [];
+  await page.route("**/api/v1/learn/apply", async (route) => {
+    attempts.push(route.request().postDataJSON());
+    await held;
+    await route.fulfill({ status: 503, json: { error: "completion unavailable" } });
+  });
+  try {
+    await openDataset(page);
+    await page.getByLabel("Select modbus-1", { exact: true }).check();
+    const stage = page.getByRole("button", { name: "Stage 1 selected", exact: true });
+    await stage.click();
+    await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
+    await expect.poll(() => attempts.length).toBe(1);
+    const inspect = page.getByRole("button", { name: "Inspect service authority", exact: true });
+    await expect(inspect).toBeEnabled();
+    await inspect.click();
+    await expect(page.getByLabel("Service authority", { exact: true })).toContainText("logical · verified");
+    await expect(stage).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Generate suggestions", exact: true })).toBeDisabled();
+    await expect(page.getByLabel("Select modbus-1", { exact: true })).toBeDisabled();
+    expect(attempts).toEqual([{ requestId: expect.any(String), selections: [{ id: "modbus-1", revision: 2 }] }]);
+    release();
+    await expect(page.getByText("completion unavailable", { exact: true })).toBeVisible();
+    await inspect.click();
+    await expect(page.getByLabel("Service authority", { exact: true })).toContainText("logical · verified");
+    await expect(page.getByText("completion unavailable", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry same staging request", exact: true })).toBeDisabled();
+  } finally {
+    release();
+  }
+});
+
+test("authority errors and pagination preserve an uncertain staging receipt", async ({ page }) => {
+  const state = await mockLearner(page);
+  state.uncertain = true;
+  let authorityFails = true;
+  await page.route("**/api/v1/learn/datasets/capture-1/observations?*", async (route) => {
+    if (authorityFails) {
+      await route.fulfill({ status: 503, json: { error: "authority unavailable" } });
+      return;
+    }
+    const more = !!new URL(route.request().url()).searchParams.get("cursor");
+    await route.fulfill({ json: {
+      items: [{
+        id: more ? "second" : "first",
+        service: { clientIp: more ? "192.0.2.12" : "192.0.2.11", serverIp: "192.0.2.20", serverPort: 502, transport: "tcp", protocol: "modbus", direction: "request", coordinates: "logical" },
+        authority: { roleCertain: true, standardPort: true, correlation: "verified" },
+        quality: { complete: true, decoded: true },
+      }],
+      ...(!more ? { nextCursor: "second-page" } : {}),
+    } });
+  });
+  await openDataset(page);
+  await page.getByLabel("Select modbus-1", { exact: true }).check();
+  await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
+  await expect(page.getByText("completion unavailable", { exact: true })).toBeVisible();
+  const inspect = page.getByRole("button", { name: "Inspect service authority", exact: true });
+  await inspect.click();
+  await expect(page.getByText("authority unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("completion unavailable", { exact: true })).toBeVisible();
+  authorityFails = false;
+  await inspect.click();
+  const authority = page.getByLabel("Service authority", { exact: true });
+  await expect(authority).toContainText("192.0.2.11");
+  await expect(page.getByText("authority unavailable", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Load more observations", exact: true }).click();
+  await expect(authority.locator("tbody tr")).toHaveCount(2);
+  await expect(authority).toContainText("192.0.2.11");
+  await expect(authority).toContainText("192.0.2.12");
+  await expect(page.getByText("completion unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry same staging request", exact: true })).toBeDisabled();
+  expect(state.writes).toHaveLength(1);
 });

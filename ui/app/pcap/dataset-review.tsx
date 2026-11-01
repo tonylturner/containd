@@ -77,6 +77,8 @@ export function DatasetReview({
     useState<LearnPage<LearnSuggestion> | null>(null);
   const [observations, setObservations] =
     useState<LearnPage<LearnObservation> | null>(null);
+  const [authorityLoading, setAuthorityLoading] = useState(false);
+  const [authorityError, setAuthorityError] = useState("");
   const [selected, setSelected] = useState<Map<string, number>>(new Map());
   const [withheld, setWithheld] = useState<Record<string, number> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -116,6 +118,21 @@ export function DatasetReview({
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  }
+  async function inspectAuthority(cursor?: string) {
+    setAuthorityLoading(true);
+    setAuthorityError("");
+    try {
+      const next = dataOf(await learner.observations(dataset.id, cursor));
+      setObservations((previous) => cursor ? {
+        ...next,
+        items: [...(previous?.items ?? []), ...(next.items ?? [])],
+      } : next);
+    } catch (e) {
+      setAuthorityError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAuthorityLoading(false);
     }
   }
   async function stage(payload: LearnApplyRequest) {
@@ -283,15 +300,12 @@ export function DatasetReview({
         {reviewReason && <p className="mb-2 text-xs text-(--text-muted)">{reviewReason}</p>}
         <button
           className={secondaryButton}
-          disabled={busy}
-          onClick={() =>
-            void run(async () =>
-              setObservations(dataOf(await learner.observations(dataset.id))),
-            )
-          }
+          disabled={authorityLoading}
+          onClick={() => void inspectAuthority()}
         >
           Inspect service authority
         </button>
+        {authorityError && <p role="alert" className="mt-2 break-words text-sm text-(--red)">{authorityError}</p>}
         {(eligible.length > 128 || ruleCount > 128) && (
           <p role="alert" className="mt-2 text-sm text-(--amber)">
             Select at most 128 suggestions and 128 total rules to save together.
@@ -377,24 +391,8 @@ export function DatasetReview({
             {observations.nextCursor && (
               <button
                 className={`${secondaryButton} mt-2`}
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    const next = dataOf(
-                      await learner.observations(
-                        dataset.id,
-                        observations.nextCursor,
-                      ),
-                    );
-                    setObservations({
-                      ...next,
-                      items: [
-                        ...(observations.items ?? []),
-                        ...(next.items ?? []),
-                      ],
-                    });
-                  })
-                }
+                disabled={authorityLoading}
+                onClick={() => void inspectAuthority(observations.nextCursor)}
               >
                 Load more observations
               </button>

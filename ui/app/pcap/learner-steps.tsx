@@ -3,10 +3,12 @@
 import { secondaryButton } from "./suggestion-review";
 
 export function LearnerSteps({
+  hasDataset = true,
   generateReason,
   reviewReason,
   stageReason,
 }: {
+  hasDataset?: boolean;
   generateReason: string;
   reviewReason: string;
   stageReason: string;
@@ -26,7 +28,7 @@ export function LearnerSteps({
               className={secondaryButton}
               aria-controls={target}
               aria-describedby={`${target}-reason`}
-              disabled={!!reason}
+              disabled={!hasDataset && target !== "learner-collect"}
               onClick={() => {
                 const section = document.getElementById(target);
                 section?.focus({ preventScroll: true });
