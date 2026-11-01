@@ -20,6 +20,7 @@ export async function mockProtection(page: Page, status: ProtectionStatus = obse
 export async function protectionAPI(page: Page, initial: ProtectionStatus, options: {
   role?: "admin" | "view";
   enforcement?: "enforcing" | "degraded" | "disabled" | "unavailable" | "unknown";
+  enforcementReason?: string;
 } = {}) {
   const mock = {
     status: initial as unknown, readStatus: 200, reads: 0,
@@ -53,7 +54,7 @@ export async function protectionAPI(page: Page, initial: ProtectionStatus, optio
       "/api/v1/auth/session": { id: "operator", username: "operator", role },
       "/api/v1/health": {
         status: "ok", component: "mgmt", evidence: { state: "ok" },
-        enforcement: { state: options.enforcement ?? "unavailable", reason: "protection pending" },
+        enforcement: { state: options.enforcement ?? "unavailable", reason: options.enforcementReason ?? "protection pending" },
         protection: { state: initial.state, applyId: initial.applyId },
       },
       "/api/v1/config": { zones: [{ name: "it" }], interfaces: [{ name: "lan1", device: "eth0", zone: "it" }], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] } },

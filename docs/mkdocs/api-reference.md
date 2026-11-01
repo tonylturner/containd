@@ -208,7 +208,9 @@ that the installed policy does not require cannot by itself prevent
 and unreadable or stale observations to `unknown`. Persisted apply faults and
 management recovery still override protection; schedule planner degradation
 still overrides enforcing. Neither raw kernel errors nor private policy text
-appear in health reasons.
+appear in health reasons. Topology and firewall/ICS indicators retain the health
+reason when a health-only override applies while datapath protection is healthy,
+rather than explaining a degraded state as "Protecting".
 
 ## Orchestrator Client Contract
 

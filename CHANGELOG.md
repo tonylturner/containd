@@ -72,6 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Show the enforcement health reason for topology and firewall/ICS health-only
+  degradation instead of the contradictory explanation "Protecting".
 - Start rule-hit logging independently of capture so an optional NFQUEUE bind
   failure cannot leave protection pending without an advancing consumer.
 - Keep antivirus capability, scan-proof invalidation and recovery canaries

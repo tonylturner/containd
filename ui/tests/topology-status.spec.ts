@@ -27,6 +27,32 @@ test("a non-enforcing chip takes reason and action from protection", () => {
   expect(topologyStatus(health("unavailable")).reason).toBe("Protection unknown");
 });
 
+test("health-only overrides retain their reason when protection is healthy", () => {
+  for (const state of ["degraded", "unavailable", "unknown", "disabled"] as const) {
+    expect(topologyStatus(health(state, "schedule horizon exhausted"), observation())).toMatchObject({
+      reason: "schedule horizon exhausted", action: "",
+    });
+  }
+});
+
+for (const path of ["/topology/", "/firewall/", "/ics/"]) {
+  test(`${path} explains health-only degradation without claiming a protection failure`, async ({ page }) => {
+    await protectionAPI(page, observation(), {
+      enforcement: "degraded", enforcementReason: "schedule horizon exhausted",
+    });
+    await openProtection(page, path);
+    const indicator = page.getByRole("status", {
+      name: path === "/topology/" ? "Firewall enforcement" : "Firewall enforcement degraded: degraded",
+      exact: true,
+    });
+    await expect(indicator).toContainText(path === "/topology/" ? "DEGRADED" : "Firewall enforcement degraded");
+    await expect(indicator).toContainText("schedule horizon exhausted");
+    await expect(indicator).not.toContainText("Protecting");
+    await expect(page.getByRole("status", { name: "Dataplane protection" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Retry protection" })).toHaveCount(0);
+  });
+}
+
 test("the topology chip reads effects without joining old ruleset detail", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(String(err)));

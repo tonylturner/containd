@@ -1,6 +1,6 @@
 import { useProtection } from "../hooks/useProtection";
 import { isAdmin, type EnforcementHealth } from "../lib/api";
-import { protectionView } from "../lib/protection-view";
+import { enforcementDetail } from "./enforcement-detail";
 import { ProtectionRetry } from "./ProtectionNotice";
 import { StatusIndicator } from "./StatusBadge";
 
@@ -19,7 +19,7 @@ export function EnforcementHealthIndicator({ health }: { health: EnforcementHeal
   if (!health) return <StatusIndicator status="unknown" label="Firewall enforcement" sublabel="status unavailable" />;
   const view = VIEWS[health.state];
   if (health.state === "enforcing") return <StatusIndicator status={view.status} label={view.label} />;
-  const protection = protectionView(status);
+  const protection = enforcementDetail(health, status);
   return <div className="flex flex-wrap items-center gap-3">
     <StatusIndicator status={view.status} label={view.label} sublabel={protection.title} />
     {protection.action && <p className="text-xs text-(--text-dim)">{protection.action}</p>}
