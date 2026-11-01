@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - An authoritative `managed` boolean in TLS status identifies the next-start
   identity's upload policy without ambiguous file-path inference.
+- System settings show management TLS reload failures while the last valid
+  certificate keeps serving, and offer certificate upload only for the managed
+  identity; external identities show how to rotate them at their source.
 - Evidence health in the UI shell, Audit persistence view and `show audit --status`,
   with per-destination/source syslog backlog, retry, loss and continuity counters.
 - Authenticated `GET /api/v1/evidence/status` and sanitized `evidence.state` in health.
