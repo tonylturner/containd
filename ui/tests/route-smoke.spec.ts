@@ -543,18 +543,26 @@ test("Interfaces shows configured, external OS/Docker, and DHCP addresses", asyn
   const row = (name: string) => page.getByRole("row").filter({
     has: page.getByRole("cell", { name, exact: true }),
   });
-  const configured = row("wan").getByRole("cell").nth(7);
+  const configured = row("wan").getByRole("cell").nth(5);
   await expect(configured).toHaveText("192.0.2.1/24");
   await expect(configured.getByRole("img")).toHaveCount(0);
-  await expect(row("wan").getByRole("cell").nth(6)).toHaveText("static");
+  const inspectWAN = row("wan").getByRole("button", { name: "Inspect", exact: true });
+  await inspectWAN.click();
+  await expect(inspectWAN).toHaveAttribute("aria-expanded", "true");
+  const wanDetails = page.locator(`[id="${await inspectWAN.getAttribute("aria-controls")}"]`);
+  await expect(wanDetails.getByText("Mode", { exact: true }).locator("..")).toHaveText(/^Mode\s*static$/);
 
-  const fallback = row("lan1").getByRole("cell").nth(7);
+  const fallback = row("lan1").getByRole("cell").nth(5);
   await expect(fallback).toHaveText("192.168.242.2/24, 2001:db8::1/64");
   await expect(fallback.getByRole("img", { name: "Detected address" })).toBeVisible();
   await expect(fallback.getByTitle(OS_ADDRESS_HINT)).toBeVisible();
   await expect(fallback.locator("[title]").first()).toHaveAttribute("title", interfaceState[1].addrs.join(", "));
-  await expect(row("lan1").getByRole("cell").nth(6)).toHaveText("external");
-  const dhcp = row("ot1").getByRole("cell").nth(7);
+  const inspectLAN = row("lan1").getByRole("button", { name: "Inspect", exact: true });
+  await inspectLAN.click();
+  await expect(inspectLAN).toHaveAttribute("aria-expanded", "true");
+  const lanDetails = page.locator(`[id="${await inspectLAN.getAttribute("aria-controls")}"]`);
+  await expect(lanDetails.getByText("Mode", { exact: true }).locator("..")).toHaveText(/^Mode\s*external$/);
+  const dhcp = row("ot1").getByRole("cell").nth(5);
   await expect(dhcp).toHaveText("dhcp (192.168.243.2/24)");
   await expect(dhcp.getByRole("img")).toHaveCount(0);
   expect(writes).toEqual([]);
@@ -576,7 +584,7 @@ for (const stored of [
       has: page.getByRole("cell", { name: "external-test", exact: true }),
     });
     await row.getByRole("button", { name: "Edit", exact: true }).click();
-    const addresses = row.getByRole("cell").nth(7).locator("input").first();
+    const addresses = row.getByRole("cell").nth(5).locator("input").first();
     await expect(addresses).toHaveValue(stored.addresses?.join(", ") || "");
     if (!stored.addresses?.length && stored.addressMode !== "dhcp") {
       await expect(addresses).toHaveAttribute("placeholder", "192.168.242.2/24, 2001:db8::1/64");
@@ -615,7 +623,10 @@ test("Interfaces sends explicit clears when removing an alias and leaving VLAN",
   });
   await row.getByRole("button", { name: "Edit", exact: true }).click();
   await row.getByPlaceholder("alias (optional)").fill("");
-  await row.getByRole("combobox").first().selectOption("physical");
+  const inspect = row.getByRole("button", { name: "Inspect", exact: true });
+  await expect(inspect).toHaveAttribute("aria-expanded", "true");
+  const details = page.locator(`[id="${await inspect.getAttribute("aria-controls")}"]`);
+  await details.getByRole("combobox").first().selectOption("physical");
   await row.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Interface staged — commit to apply.", { exact: true })).toBeVisible();
   expect(writes).toEqual([{
@@ -627,7 +638,7 @@ test("Interfaces sends explicit clears when removing an alias and leaving VLAN",
 
   await row.getByRole("button", { name: "Edit", exact: true }).click();
   await row.getByPlaceholder("Network device (e.g. eth0)").fill("");
-  await row.getByRole("cell").nth(5).getByRole("combobox").selectOption("");
+  await row.getByRole("cell").nth(4).getByRole("combobox").selectOption("");
   await row.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => writes.length).toBe(2);
   expect(writes[1]).toEqual({ ...writes[0], device: "", zone: "" });
@@ -648,7 +659,9 @@ test("topology uses OS/Docker fallback in zone subnets, interface details and ph
   await expect(detail).toContainText("192.168.242.2/24");
   await expect(detail.getByRole("img", { name: "Detected address" })).toBeVisible();
   await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
-  await page.getByText("Application runtime details", { exact: true }).click();
+  const process = page.getByRole("button", { name: "Application runtime details", exact: true });
+  await process.click();
+  await expect(process).toHaveAttribute("aria-expanded", "true");
   const pills = page.locator('[class*="layerSectionFull"]').filter({ hasText: "Bound Interfaces (in-process)" });
   const pill = pills.locator("div").filter({ has: page.getByText("eth0", { exact: true }) }).last();
   await expect(pill).toContainText("192.168.242.2/24");
@@ -675,6 +688,9 @@ test("topology pairs live data with running config and refreshes both views on c
   const zone = page.locator('.react-flow__node[data-id="zone-wan"]');
   await expect(zone).toContainText(address);
   await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
+  const process = page.getByRole("button", { name: "Application runtime details", exact: true });
+  await process.click();
+  await expect(process).toHaveAttribute("aria-expanded", "true");
   const pills = page.locator('[class*="layerSectionFull"]').filter({ hasText: "Bound Interfaces (in-process)" });
   await expect(pills).toContainText(address);
   const before = configReads;
