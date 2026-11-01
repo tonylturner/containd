@@ -174,7 +174,7 @@ export default function ProxiesPage() {
     if (!canEdit) return;
     confirm.open({
       title: "Delete site",
-      message: `Remove reverse proxy site "${name}"? This change takes effect when you save.`,
+      message: `Remove reverse proxy site "${name}"? This removes it from local edits only. Save to stage the removal, then commit to apply.`,
       confirmLabel: "Delete",
       variant: "danger",
       onConfirm: () => {
