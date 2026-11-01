@@ -4,6 +4,8 @@ import Link from "next/link";
 
 import type {
   DashboardData,
+  Interface,
+  InterfaceState,
   SystemStats,
   TelemetryEvent,
 } from "../lib/api";
@@ -11,6 +13,12 @@ import type {
 import { Skeleton } from "../components/Skeleton";
 import { formatEndpoint } from "../lib/endpoint";
 import { formatBytes } from "../lib/utils";
+import { runtimeFor } from "../lib/interface-addresses";
+
+export type InterfaceBindings = {
+  configured: Interface[];
+  runtime: InterfaceState[];
+};
 
 export type ServiceInfo = {
   name: string;
@@ -23,13 +31,17 @@ export type ServiceInfo = {
 
 export function SetupChecklist({
   counts,
+  interfaceBindings,
   configDirty,
   isAdmin,
 }: {
   counts: DashboardData["counts"] | null | undefined;
+  interfaceBindings: InterfaceBindings | null;
   configDirty: boolean | null;
   isAdmin: boolean;
 }) {
+  const interfaceCount = interfaceBindings?.configured.length ?? 0;
+  const missingBindings = interfaceBindings?.configured.filter((iface) => !runtimeFor(iface, interfaceBindings.runtime)).length ?? 0;
   const steps = [
     {
       title: "Create zones",
@@ -40,8 +52,14 @@ export function SetupChecklist({
     },
     {
       title: "Bind interfaces",
-      detail: counts && counts.interfaces > 0 ? `${counts.interfaces} configured` : "Assign zones to interfaces so policy can attach to ports.",
-      complete: !!counts && counts.interfaces > 0,
+      detail: interfaceBindings === null
+        ? "Interface bindings unknown. Check configured interfaces and live devices."
+        : interfaceCount === 0
+          ? "Assign zones to interfaces so policy can attach to ports."
+          : missingBindings > 0
+            ? `${missingBindings} of ${interfaceCount} configured interfaces not connected to network devices.`
+            : `${interfaceCount} of ${interfaceCount} bound to network devices.`,
+      complete: interfaceBindings === null ? null : interfaceCount > 0 && missingBindings === 0,
       href: "/interfaces/",
       cta: (counts?.interfaces ?? 0) > 0 ? "Review interfaces" : "Bind interfaces",
     },
@@ -100,7 +118,7 @@ export function SetupChecklist({
                     : ""
                 }`}
               >
-                {step.complete ? "Ready" : "Action"}
+                {step.complete === null ? "Unknown" : step.complete ? "Ready" : "Action"}
               </span>
             </div>
             <p className="mb-3 text-xs text-slate-500">{step.detail}</p>

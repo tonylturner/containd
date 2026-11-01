@@ -20,6 +20,7 @@ import {
   SetupChecklist,
   SystemHealthPanel,
   TrafficCounter,
+  type InterfaceBindings,
 } from "./dashboard-panels";
 import {
   buildZoneSparklines,
@@ -47,6 +48,7 @@ export default function Home() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const [configDirty, setConfigDirty] = useState<boolean | null>(null);
+  const [interfaceBindings, setInterfaceBindings] = useState<InterfaceBindings | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [now, setNow] = useState<number | null>(null);
   const clock = now === null ? "" : new Date(now).toLocaleTimeString("en-US", { hour12: false });
@@ -70,6 +72,9 @@ export default function Home() {
     const load = () => {
       api.getDashboard(signal).then((r) => r && setData(r)).catch(() => {});
       api.listZones(signal).then(snapshot => (snapshot?.data ?? null)).then((r) => r && setZones(r)).catch(() => {});
+      Promise.all([api.listInterfaces(signal), api.listInterfaceState(signal)]).then(([configured, runtime]) => {
+        setInterfaceBindings(configured?.data && runtime ? { configured: configured.data, runtime } : null);
+      }).catch(() => { if (!signal.aborted) setInterfaceBindings(null); });
       api.listEvents(50, signal).then((r) => r && setEvents(r)).catch(() => {});
       api.listFlows(100, signal).then((r) => { setFlowsUnavailable(r === null); setFlows(r ?? []); }).catch(() => { if (!signal.aborted) setFlowsUnavailable(true); });
       api.getSystemStats(signal).then((r) => r && setStats(r)).catch(() => {});
@@ -200,6 +205,7 @@ export default function Home() {
 
       <SetupChecklist
         counts={data?.counts}
+        interfaceBindings={interfaceBindings}
         configDirty={configDirty}
         isAdmin={data?.user?.role === "admin"}
       />

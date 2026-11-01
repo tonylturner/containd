@@ -25,7 +25,8 @@ retain scanner paths, update scheduling and ICAP protocol settings. VPN keeps
 peer JSON and profile import under **Advanced peer settings** and
 **Advanced profile import**; opening a disclosure does not change saved settings.
 Saved peers and customized scanner settings open automatically. Remote scanner
-settings also open whenever ICAP mode requires them.
+settings also open whenever ICAP mode requires them. **Advanced profile path**
+opens for a saved OpenVPN path or when an enabled path-based client needs one.
 
 Dashboard's **No recent IDS/AV alerts** describes only the reported alert counts,
 not overall appliance health or protection. The dashboard does not observe live
@@ -33,6 +34,11 @@ IPS protection state, so its IPS card always shows **Unknown**. Unknown service
 cards are visually distinct from disabled services. Rule counts are counts, not
 measured utilization; container memory bars require a reported positive memory
 limit and percentage. An unlimited container has no memory utilization gauge.
+The **Bind interfaces** checklist item is ready only when at least one interface
+is configured and every configured interface matches a reported network device,
+using its Device field or matching interface name. Logical interface counts alone
+do not establish readiness. Missing configuration or live device information
+leaves binding readiness **Unknown**.
 
 Syslog **Last check** records the latest forwarding check, including empty or
 failed batches, not successful delivery. Per-forwarder **Last sent** advances

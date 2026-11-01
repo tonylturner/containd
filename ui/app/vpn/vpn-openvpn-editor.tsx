@@ -312,7 +312,7 @@ export function OpenVPNEditorCard({
                 </div>
               </div>
             ) : (
-              <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3">
+              <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3" open={Boolean(cfg.openvpn.configPath) || cfg.openvpn.enabled}>
                 <summary className="cursor-pointer text-sm text-(--text)">Advanced profile path</summary>
                 <div className="mt-3">
                   <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">

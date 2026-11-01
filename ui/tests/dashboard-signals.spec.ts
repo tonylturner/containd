@@ -36,7 +36,20 @@ const flows = Array.from({ length: 60 }, (_, i) => ({
   eventCount: 1,
 }));
 
-type Mocks = { events: unknown[]; services: unknown; health?: unknown; eventStats?: unknown; stats?: unknown; ruleCount?: number; ids?: unknown };
+type Mocks = {
+  events: unknown[];
+  services: unknown;
+  health?: unknown;
+  eventStats?: unknown;
+  stats?: unknown;
+  ruleCount?: number;
+  ids?: unknown;
+  interfaces?: unknown;
+  interfaceState?: unknown;
+  interfaceCount?: number;
+  interfacesStatus?: number;
+  interfaceStateStatus?: number;
+};
 
 async function openDashboard(page: Page, mocks: Mocks) {
   await page.addInitScript(() => {
@@ -46,12 +59,13 @@ async function openDashboard(page: Page, mocks: Mocks) {
   await page.route("**/api/v1/**", async (route) => {
     const p = new URL(route.request().url()).pathname;
     let body: unknown = {};
+    let status = 200;
     if (p === "/api/v1/auth/me" || p === "/api/v1/auth/session") body = user;
     if (p === "/api/v1/dashboard") {
       body = {
         user,
         health: mocks.health ?? { status: "ok", hostname: "test" },
-        counts: { assets: 0, zones: zones.length, interfaces: 0, rules: mocks.ruleCount ?? 0, icsRules: 0 },
+        counts: { assets: 0, zones: zones.length, interfaces: mocks.interfaceCount ?? 0, rules: mocks.ruleCount ?? 0, icsRules: 0 },
         eventStats: "eventStats" in mocks ? mocks.eventStats : { total: mocks.events.length, idsAlerts: 0, modbusWrites: 0, avDetections: 0, avBlocks: 0 },
         services: null,
         lastActivity: null,
@@ -64,6 +78,14 @@ async function openDashboard(page: Page, mocks: Mocks) {
         runtime: { uptime: "1m", goroutines: 1 },
       };
     }
+    if (p === "/api/v1/interfaces") {
+      body = "interfaces" in mocks ? mocks.interfaces : [];
+      status = mocks.interfacesStatus ?? 200;
+    }
+    if (p === "/api/v1/interfaces/state") {
+      body = "interfaceState" in mocks ? mocks.interfaceState : [];
+      status = mocks.interfaceStateStatus ?? 200;
+    }
     if (p === "/api/v1/zones") body = zones;
     if (p === "/api/v1/ids/rules") body = mocks.ids ?? { enabled: false, rules: [] };
     if (p === "/api/v1/events") body = mocks.events;
@@ -71,7 +93,7 @@ async function openDashboard(page: Page, mocks: Mocks) {
     if (p === "/api/v1/simulation") body = { running: false };
     if (p === "/api/v1/config/diff") body = { running: {}, candidate: {} };
     if (p === "/api/v1/services/status") body = mocks.services;
-    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    await route.fulfill({ status, json: status === 200 ? body : { error: "interface read unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = Promise.all(["/api/v1/events", "/api/v1/zones", "/api/v1/flows", "/api/v1/system/stats"].map(
     (path) => page.waitForResponse((r) => new URL(r.url()).pathname === path),
@@ -210,3 +232,57 @@ for (const forward_enabled of [false, true]) {
     await expect(proxy).toHaveClass(/opacity-50/);
   });
 }
+
+const bindStep = (page: Page) => page.getByText("Bind interfaces", { exact: true }).locator("../..");
+const device = (name: string) => ({ name, index: 1, up: true, mtu: 1500, mac: "02:00:00:00:00:01", addrs: [] });
+
+for (const scenario of [
+  { name: "unbound logical records", interfaces: [{ name: "lo" }, { name: "lan" }], interfaceState: [device("lo"), device("eth0")], ready: false },
+  { name: "partially bound records", interfaces: [{ name: "lan", device: "eth0" }, { name: "wan" }], interfaceState: [device("eth0"), device("eth1")], ready: false },
+  { name: "missing device with no spare device", interfaces: [{ name: "lan", device: "absent0" }], interfaceState: [device("lo")], ready: false },
+  { name: "explicit device binding", interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")], ready: true },
+  { name: "bound device with its link down", interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [{ ...device("eth0"), up: false }], ready: true },
+  { name: "matching logical and device name", interfaces: [{ name: "eth0" }], interfaceState: [device("eth0")], ready: true },
+  { name: "no reported network devices", interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [], ready: false },
+  { name: "no configured interfaces", interfaces: [], interfaceState: [device("eth0")], ready: false },
+]) {
+  test(`Bind interfaces readiness follows Interfaces device matching: ${scenario.name}`, async ({ page }) => {
+    await openDashboard(page, { events: [], services, interfaceCount: scenario.interfaces.length, ...scenario });
+    await expect(bindStep(page).getByText(scenario.ready ? "Ready" : "Action", { exact: true })).toBeVisible();
+    await expect(bindStep(page).getByText(scenario.ready ? "Action" : "Ready", { exact: true })).toHaveCount(0);
+    if (scenario.ready) await expect(bindStep(page)).toContainText("1 of 1 bound to network devices");
+    else if (scenario.interfaces.length) await expect(bindStep(page)).toContainText("not connected to network devices");
+  });
+}
+
+for (const failure of [
+  { name: "configuration HTTP failure", interfacesStatus: 503 },
+  { name: "runtime HTTP failure", interfaceStateStatus: 503 },
+  { name: "configuration null", interfaces: null },
+  { name: "runtime null", interfaceState: null },
+]) {
+  test(`Bind interfaces stays unknown with ${failure.name}`, async ({ page }) => {
+    await openDashboard(page, { events: [], services, interfaceCount: 1,
+      interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")], ...failure,
+    });
+    await expect(bindStep(page).getByText("Unknown", { exact: true })).toBeVisible();
+    await expect(bindStep(page).getByText("Ready", { exact: true })).toHaveCount(0);
+    await expect(bindStep(page)).toContainText("Interface bindings unknown");
+  });
+}
+
+test("Bind interfaces discards stale readiness on a failed refresh and recovers", async ({ page }) => {
+  await page.clock.install();
+  const mocks: Mocks = { events: [], services, interfaceCount: 1,
+    interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")],
+  };
+  await openDashboard(page, mocks);
+  await expect(bindStep(page).getByText("Ready", { exact: true })).toBeVisible();
+  mocks.interfaceStateStatus = 503;
+  await page.clock.fastForward(10_000);
+  await expect(bindStep(page).getByText("Unknown", { exact: true })).toBeVisible();
+  await expect(bindStep(page).getByText("Ready", { exact: true })).toHaveCount(0);
+  mocks.interfaceStateStatus = 200;
+  await page.clock.fastForward(10_000);
+  await expect(bindStep(page).getByText("Ready", { exact: true })).toBeVisible();
+});

@@ -275,7 +275,7 @@ test("VPN profile import acknowledges its path while retaining unrelated WireGua
   await page.locator('input[type="file"]').setInputFiles({
     name: "imported.ovpn", mimeType: "text/plain", buffer: Buffer.from("client\nremote vpn.example\n"),
   });
-  await page.getByText("Advanced profile path", { exact: true }).last().click();
+  await expect(page.getByPlaceholder("/data/openvpn/profiles/client.ovpn")).toBeVisible();
   await expect(page.getByPlaceholder("/data/openvpn/profiles/client.ovpn")).toHaveValue("/data/openvpn/profiles/imported.ovpn");
   await expect(peers).toHaveValue('[{"publicKey":"pending","allowedIPs":["192.0.2.0/24"]}] ');
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -284,3 +284,27 @@ test("VPN profile import acknowledges its path while retaining unrelated WireGua
     openvpn: { configPath: "/data/openvpn/profiles/imported.ovpn" },
   });
 });
+
+for (const scenario of [
+  { name: "saved disabled OpenVPN profile path opens by default", enabled: false, configPath: "/data/openvpn/profiles/saved.ovpn", open: true },
+  { name: "enabled path-based OpenVPN client reveals its required path", enabled: true, configPath: "", open: true },
+  { name: "unused empty OpenVPN profile path stays available in its disclosure", enabled: false, configPath: "", open: false },
+]) {
+  test(scenario.name, async ({ page }) => {
+    const server = await mockAPI(page);
+    server.vpn.openvpn = { enabled: scenario.enabled, mode: "client", configPath: scenario.configPath };
+    await Promise.all([page.waitForResponse(read("/services/vpn")), page.goto("/vpn/")]);
+    const path = page.getByPlaceholder("/data/openvpn/profiles/client.ovpn");
+    const disclosure = page.locator("details").filter({ has: path });
+    if (scenario.open) {
+      await expect(disclosure).toHaveAttribute("open", "");
+      await expect(path).toBeVisible();
+    } else {
+      await expect(path).not.toBeVisible();
+      await disclosure.locator("summary").click();
+      await expect(path).toBeVisible();
+    }
+    await expect(path).toHaveValue(scenario.configPath);
+    expect(server.savedVPN).toBeNull();
+  });
+}
