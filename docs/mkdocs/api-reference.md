@@ -679,10 +679,9 @@ All inventory reads require management authentication:
 An unavailable engine returns **503** with `{"error":"engine inventory unavailable"}`
 for these operations, never a fabricated empty list. A reachable empty inventory
 returns `[]` for the legacy list and `pairs: []` in the IEC 104 snapshot. The
-engine feeds the IEC section from decoded traffic. Accepted command counts are
-credited only in inline enforce mode, after the decision allowed the command and
-every packet that carried it completed an Accept verdict; monitor mode records
-attempts and points only. The read model does not generate policy.
+engine feeds the IEC section from decoded traffic. Inventory counts attempted
+commands and observed points, not delivery or physical execution. The read model
+does not generate policy.
 
 The IEC response has this shape (a populated observation example):
 
@@ -691,31 +690,29 @@ The IEC response has this shape (a populated observation example):
   "pairs": [{
     "controlling": "192.0.2.10:50000", "controlled": "192.0.2.20:2404",
     "firstSeen": "2026-10-26T12:00:00Z", "lastSeen": "2026-10-26T12:01:00Z",
-    "attemptedCommands": 2, "acceptedCommands": 1,
+    "attemptedCommands": 2,
     "cas": [{
       "ca": 1, "firstSeen": "2026-10-26T12:00:00Z", "lastSeen": "2026-10-26T12:01:00Z",
-      "attemptedCommands": 2, "acceptedCommands": 1,
+      "attemptedCommands": 2,
       "points": [{"ioa": 100, "typeId": 45, "firstSeen": "2026-10-26T12:00:00Z", "lastSeen": "2026-10-26T12:01:00Z"}]
     }]
   }],
   "limits": {"pairs": 128, "casPerPair": 32, "pointsPerCA": 256, "assets": 1024, "peersPerAsset": 128, "stationAddressesPerAsset": 256, "maxIdleSeconds": 86400},
-  "overflow": {"observations": 0, "pairs": 0, "cas": 0, "points": 0, "assets": 0, "peers": 0, "stationAddresses": 0, "outcomes": 0}
+  "overflow": {"observations": 0, "pairs": 0, "cas": 0, "points": 0, "assets": 0, "peers": 0, "stationAddresses": 0}
 }
 ```
 
 Pair identity includes both endpoint ports; reconnects using different client
 ports are separate pairs. Point identity is `(IOA, typeId)` within a CA. Times
 are first/last observations, not delivery times. Attempted counts decoded
-control-direction command APDUs (type IDs 45–51 and 58–64); accepted additionally
-requires successful delivery verdicts for all carrying packets. A pending or
-failed command is not accepted. Pair totals may exceed the sum of retained CA
+control-direction command APDUs (type IDs 45–51 and 58–64), regardless of their
+subsequent delivery. Pair totals may exceed the sum of retained CA
 totals after CA eviction. Counts do not represent lifetime traffic.
 
 Entries use least-recently-observed eviction and 24-hour idle expiry. Overflow
 counts capacity evictions or truncated observations, not unique devices;
-`observations` counts observations dropped on inventory lock contention;
-`outcomes` counts final outcomes dropped on contention or for expired/evicted
-observations. Input calls never wait for readers or other writers.
+`observations` counts observations dropped on inventory lock contention.
+Input calls never wait for readers or other writers.
 Counters survive evictions and reset on clear/restart. Reads do not extend
 retention. The internal engine read is
 `GET /internal/inventory?section=iec104`; it uses the existing inventory handler.

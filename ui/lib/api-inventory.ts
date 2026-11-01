@@ -11,7 +11,6 @@ export type IEC104CA = {
   firstSeen: string;
   lastSeen: string;
   attemptedCommands: number;
-  acceptedCommands: number;
   points: IEC104Point[];
 };
 export type IEC104Inventory = {
@@ -21,7 +20,6 @@ export type IEC104Inventory = {
     firstSeen: string;
     lastSeen: string;
     attemptedCommands: number;
-    acceptedCommands: number;
     cas: IEC104CA[];
   }[];
   limits: {
@@ -41,7 +39,6 @@ export type IEC104Inventory = {
     assets: number;
     peers: number;
     stationAddresses: number;
-    outcomes: number;
   };
 };
 

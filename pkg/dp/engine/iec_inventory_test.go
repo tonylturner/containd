@@ -16,11 +16,26 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/inventory"
 )
 
-func inventoryCounts(t *testing.T, h *iecHarness, attempted, accepted uint64) {
+type inventoryHarness struct {
+	*iecHarness
+	delivered atomic.Uint64
+}
+
+func newInventoryHarness(t *testing.T, mode string) *inventoryHarness {
+	h := &inventoryHarness{iecHarness: newAPCIHarness(t, mode)}
+	learn := h.e.iec.learnDelivery
+	h.e.iec.learnDelivery = func(id string) {
+		h.delivered.Add(1)
+		learn(id)
+	}
+	return h
+}
+
+func inventoryCounts(t *testing.T, h *inventoryHarness, attempted, delivered uint64) {
 	t.Helper()
 	s := h.e.Inventory().SnapshotIEC104()
-	if len(s.Pairs) != 1 || s.Pairs[0].AttemptedCommands != attempted || s.Pairs[0].AcceptedCommands != accepted {
-		t.Fatalf("want %d/%d: %+v", attempted, accepted, s)
+	if len(s.Pairs) != 1 || s.Pairs[0].AttemptedCommands != attempted || h.delivered.Load() != delivered {
+		t.Fatalf("want %d attempts/%d learner deliveries, got %d deliveries: %+v", attempted, delivered, h.delivered.Load(), s)
 	}
 }
 
@@ -31,7 +46,7 @@ func TestIECInventoryDelivery(t *testing.T) {
 			if fate == "monitor" {
 				mode = "monitor"
 			}
-			h := newAPCIHarness(t, mode)
+			h := newInventoryHarness(t, mode)
 			if fate == "deny" || fate == "would-drop" {
 				h.e.iec.policy = h.policy
 				h.policy.allowType = 100 // deny command type 46
@@ -79,7 +94,7 @@ func TestIECInventoryDelivery(t *testing.T) {
 }
 
 func TestIECInventorySplitCoalescedOutOfOrderAndRetransmit(t *testing.T) {
-	h := newAPCIHarness(t, "enforce")
+	h := newInventoryHarness(t, "enforce")
 	h.handshake()
 	// Two commands plus a partial next APDU keep even decoded commands held.
 	cmd := apdu(46, 6, 1, 101, 2)
@@ -116,7 +131,7 @@ func TestIECInventorySplitCoalescedOutOfOrderAndRetransmit(t *testing.T) {
 }
 
 func TestIECInventoryAbortWhileCommandHeld(t *testing.T) {
-	h := newAPCIHarness(t, "enforce")
+	h := newInventoryHarness(t, "enforce")
 	h.handshake()
 	cmd := apdu(46, 6, 1, 101, 2)
 	p, d := h.send(true, append(cmd, 0x68))
@@ -133,7 +148,7 @@ func TestIECInventoryAbortWhileCommandHeld(t *testing.T) {
 }
 
 func TestIECInventoryDroppedRetransmissionBeforeCompletion(t *testing.T) {
-	h := newAPCIHarness(t, "enforce")
+	h := newInventoryHarness(t, "enforce")
 	h.handshake()
 	p, _ := h.send(true, apdu(46, 6, 1, 101, 2))
 	original := p.Token
@@ -152,7 +167,7 @@ func TestIECInventoryDroppedRetransmissionBeforeCompletion(t *testing.T) {
 func TestIECInventoryBoundsAndAgeOut(t *testing.T) {
 	for _, bound := range []string{"commands", "tokens"} {
 		t.Run(bound, func(t *testing.T) {
-			h := newAPCIHarness(t, "enforce")
+			h := newInventoryHarness(t, "enforce")
 			h.handshake()
 			cmd := apdu(46, 6, 1, 101, 2)
 			if bound == "commands" {
@@ -167,12 +182,16 @@ func TestIECInventoryBoundsAndAgeOut(t *testing.T) {
 				}
 			}
 			snap := h.e.Inventory().SnapshotIEC104()
-			if snap.Overflow.Outcomes != 1 || snap.Pairs[0].AcceptedCommands != 0 {
-				t.Fatalf("overflow: %+v", snap)
+			attempts, pending := uint64(1), 0
+			if bound == "commands" {
+				attempts, pending = iecInventoryCap+1, iecInventoryCap
+			}
+			if snap.Pairs[0].AttemptedCommands != attempts || h.delivered.Load() != 0 {
+				t.Fatalf("bounded learner evidence changed: %+v", snap)
 			}
 			for _, s := range h.e.iec.sessions {
-				if len(s.inventory.commands) > iecInventoryCap || len(s.inventory.tokens) > iecInventoryCap {
-					t.Fatal("unbounded ledger")
+				if len(s.inventory.commands) != pending || len(s.inventory.tokens) != pending {
+					t.Fatalf("want %d pending commands/tokens; got %d/%d", pending, len(s.inventory.commands), len(s.inventory.tokens))
 				}
 			}
 			h.clock = h.clock.Add(iecPendingTimeout + time.Nanosecond)
@@ -187,7 +206,7 @@ func TestIECInventoryBoundsAndAgeOut(t *testing.T) {
 func TestIECInventorySessionEnds(t *testing.T) {
 	for _, end := range []string{"close", "abort", "delete", "policy", "idle", "stop", "reconfigure"} {
 		t.Run(end, func(t *testing.T) {
-			h := newAPCIHarness(t, "enforce")
+			h := newInventoryHarness(t, "enforce")
 			h.handshake()
 			p, _ := h.send(true, apdu(46, 6, 1, 101, 2))
 			old := h.e.iec
@@ -234,34 +253,31 @@ func TestIECInventorySessionEnds(t *testing.T) {
 type pausedInventory struct {
 	*inventory.Inventory
 	entered, release chan struct{}
-	outcomes         atomic.Uint32
 	observed         atomic.Bool
-	early            atomic.Bool
 }
 
-func (p *pausedInventory) ObserveIEC104(o inventory.IEC104Observation) inventory.IEC104CommandRef {
+func (p *pausedInventory) ObserveIEC104(o inventory.IEC104Observation) {
 	close(p.entered)
 	<-p.release
-	ref := p.Inventory.ObserveIEC104(o)
+	p.Inventory.ObserveIEC104(o)
 	p.observed.Store(true)
-	return ref
-}
-
-func (p *pausedInventory) IEC104CommandOutcome(o inventory.IEC104Outcome) {
-	if !p.observed.Load() {
-		p.early.Store(true)
-	}
-	p.outcomes.Add(1)
-	p.Inventory.IEC104CommandOutcome(o)
 }
 
 func TestIECInventoryConcurrentObservationOutcomeExactlyOnce(t *testing.T) {
 	for _, fate := range []string{"accept", "abort", "close"} {
 		t.Run(fate, func(t *testing.T) {
-			h := newAPCIHarness(t, "enforce")
+			h := newInventoryHarness(t, "enforce")
 			h.handshake()
 			input := &pausedInventory{Inventory: h.e.Inventory(), entered: make(chan struct{}), release: make(chan struct{})}
 			h.e.iec.inventory = input
+			var early atomic.Bool
+			learn := h.e.iec.learnDelivery
+			h.e.iec.learnDelivery = func(id string) {
+				if !input.observed.Load() {
+					early.Store(true)
+				}
+				learn(id)
+			}
 			p := h.pkt(true, capture.TCPFlagACK, h.cSeq, h.sSeq, apdu(46, 6, 1, 101, 2))
 			var wg sync.WaitGroup
 			wg.Go(func() { h.e.handlePacket(p) })
@@ -284,13 +300,13 @@ func TestIECInventoryConcurrentObservationOutcomeExactlyOnce(t *testing.T) {
 			}
 			// A completion must return while observation is paused.
 			h.e.hooks.onVerdict(p.Token, capture.VerdictAccept, nil)
-			if input.outcomes.Load() != 0 {
+			if h.delivered.Load() != 0 {
 				t.Fatal("outcome preceded observation")
 			}
 			close(input.release)
 			wg.Wait()
-			if input.early.Load() || input.outcomes.Load() != 1 {
-				t.Fatalf("early=%v outcomes=%d", input.early.Load(), input.outcomes.Load())
+			if early.Load() {
+				t.Fatal("learner delivery preceded observation")
 			}
 			want := uint64(0)
 			if fate == "accept" {
@@ -304,7 +320,7 @@ func TestIECInventoryConcurrentObservationOutcomeExactlyOnce(t *testing.T) {
 func TestIECInventoryStartupCapture(t *testing.T) {
 	for _, mode := range []string{"monitor", "enforce"} {
 		t.Run(mode, func(t *testing.T) {
-			h := newAPCIHarness(t, mode)
+			h := newInventoryHarness(t, mode)
 			data, err := os.ReadFile("../../../test/iec104/testdata/startup-gi-monitor.pcap")
 			if err != nil {
 				t.Fatal(err)
@@ -340,13 +356,12 @@ func TestIECInventoryStartupCapture(t *testing.T) {
 				t.Fatalf("no station/CA: %+v", s)
 			}
 			points := 0
-			var attempted, accepted uint64
+			var attempted uint64
 			for _, pair := range s.Pairs {
 				if len(pair.CAs) != 1 || pair.CAs[0].CA != 1 {
 					t.Fatalf("wrong CAs: %+v", pair)
 				}
 				attempted += pair.AttemptedCommands
-				accepted += pair.AcceptedCommands
 				points += len(pair.CAs[0].Points)
 			}
 			if points != 13 || attempted != 4 {
@@ -356,10 +371,10 @@ func TestIECInventoryStartupCapture(t *testing.T) {
 			if mode == "enforce" {
 				want = 4
 			}
-			if accepted != want {
-				t.Fatalf("accepted %d, want %d", accepted, want)
+			if h.delivered.Load() != want {
+				t.Fatalf("learner deliveries %d, want %d", h.delivered.Load(), want)
 			}
-			t.Logf("%s: 3 pairs, 3 CAs, %d points, %d attempted / %d accepted", mode, points, attempted, accepted)
+			t.Logf("%s: 3 pairs, 3 CAs, %d points, %d attempted / %d learner deliveries", mode, points, attempted, h.delivered.Load())
 		})
 	}
 }

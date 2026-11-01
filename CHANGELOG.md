@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Remove IEC 104 inventory `acceptedCommands` and `overflow.outcomes`; inventory
+  reports decoded attempts and points, never delivery. Learner delivery evidence
+  is unchanged.
 - Document established-session re-evaluation after policy changes and why a
   blocked connection can remain visible in Sessions until conntrack timeout.
 - Reject unknown, case-mismatched or duplicate top-level keys in full-config

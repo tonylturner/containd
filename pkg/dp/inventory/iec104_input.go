@@ -35,10 +35,3 @@ func IEC104ObservationFromEvents(evs []dpi.Event) (IEC104Observation, bool) {
 func (o IEC104Observation) IsCommand() bool {
 	return o.ControlDirection && commandType(o.TypeID)
 }
-
-// RecordIEC104DeliveryOverflow counts commands whose delivery evidence could
-// not fit the engine's bounded ledger. Such commands are never credited as
-// accepted. Call outside the IEC table lock, like the other input methods.
-func (inv *Inventory) RecordIEC104DeliveryOverflow(n uint64) {
-	inv.iec104.busyOutcomes.Add(n)
-}
