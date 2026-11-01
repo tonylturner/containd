@@ -68,15 +68,11 @@ func NewSyslogManager() *SyslogManager {
 }
 
 func newSyslogLogger() *zap.SugaredLogger {
-	lg, err := commonlog.NewZap("syslog", "syslog", commonlog.Options{
+	return commonlog.NewServiceWithOptions("syslog", "syslog", commonlog.Options{
 		FilePath: "/data/logs/syslog-forwarder.log",
 		JSON:     true,
 		Level:    "info",
 	})
-	if err != nil {
-		return zap.NewNop().Sugar()
-	}
-	return lg
 }
 
 // Apply updates the syslog forwarding configuration and restarts the forwarder

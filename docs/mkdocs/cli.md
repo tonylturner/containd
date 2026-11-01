@@ -79,6 +79,8 @@ require a restart; committing does not rebind management sockets.
   - `set dataplane enforcement <on|off> [table] [iface...]`
   - `set system hostname <name>` (candidate)
   - `set system mgmt http listen <addr>` (candidate)
+  - `set system mgmt listen <addr>` (alias for the HTTP listener command; both
+    set `httpListenAddr` and clear the legacy `listenAddr` in the candidate)
   - `set system ssh listen <addr>` (candidate)
   - `set system ssh allow-password <true|false>` (candidate)
   - `set system ssh authorized-keys-dir <dir>` (candidate)

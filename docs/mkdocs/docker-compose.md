@@ -37,6 +37,10 @@ bash scripts/containd-connect
 
 Tip: `bash scripts/containd up` wraps `docker compose --env-file .env -f deploy/docker-compose.yml up -d` and prints connection info automatically when a repo-root `.env` exists.
 
+`scripts/containd-connect` also passes the repository-root `.env` when present.
+Compose interpolation errors are reported directly and stop the helper, rather
+than being reported as a stopped service.
+
 The starter compose enables nftables enforcement by default so a fresh lab behaves like a firewall once you bind zones and commit policy. It also runs the appliance as `root` inside the container because nftables, routing, and TUN operations need that privilege across Linux, Docker Desktop, and WSL-backed lab environments. Set `CONTAIND_ENFORCE_ENABLED=0` only when you intentionally want an observe-only/demo mode.
 
 ## Configuration via `.env`
