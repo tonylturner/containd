@@ -81,15 +81,8 @@ func (c *Config) validateCore() error {
 
 // validateCoreServices checks policy on desired state, before service projection.
 func (c *Config) validateCoreServices() error {
-	if _, err := ValidateScanSelection(c); err != nil {
-		return err
-	}
-	if c.Services.DHCP.Enabled {
-		if err := validateDHCPListenIfaceNames(c.Services.DHCP.ListenIfaces, c.Interfaces); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := ValidateScanSelection(c)
+	return err
 }
 
 func validateHostname(h string) error {

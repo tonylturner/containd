@@ -54,8 +54,9 @@ func TestEffectiveIndependentFaultsAndPurity(t *testing.T) {
 	cfg.Services.AV.Scan = ScanSelection{}
 	cfg.Services.DHCP.Enabled = true
 	cfg.Services.DHCP.ListenIfaces = []string{"bad\niface"}
-	if _, _, err := Effective(cfg, nil); err == nil {
-		t.Fatal("masked unprojected DHCP listen invariant")
+	effective, faults, err = Effective(cfg, nil)
+	if err != nil || len(faults) != 5 || faults[0].Service != ServiceDHCP || effective.Services.DHCP.Enabled {
+		t.Fatalf("DHCP listen fault was not quarantined independently: %v %+v", err, faults)
 	}
 }
 

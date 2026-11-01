@@ -43,6 +43,8 @@ func TestBootServiceFaultDecision(t *testing.T) {
 					cfg.DataPlane.Enforcement = true
 				}
 				if mode != "clean" {
+					cfg.Services.DHCP.Enabled = true
+					cfg.Services.DHCP.ListenIfaces = []string{"bad/iface"}
 					cfg.Services.DNS.UpstreamServers = []string{"1.1.1.1\nserver:"}
 					cfg.Services.Proxy.Forward.Upstream = "legacy-upstream"
 					cfg.Services.Proxy.Forward.ListenZones = []string{"bad\nzone"}
@@ -80,7 +82,7 @@ func TestBootServiceFaultDecision(t *testing.T) {
 				}
 				services := &bootEventServices{event: event, events: serviceEvents}
 				events := services.ListTelemetryEvents(0)
-				want := 3
+				want := 4
 				if mixed {
 					want++
 				}
@@ -99,7 +101,7 @@ func TestBootServiceFaultDecision(t *testing.T) {
 					}
 					seen[service] = true
 				}
-				for _, service := range []string{config.ServiceDNS, config.ServiceProxy, config.ServiceOpenVPN} {
+				for _, service := range []string{config.ServiceDHCP, config.ServiceDNS, config.ServiceProxy, config.ServiceOpenVPN} {
 					if !seen[service] {
 						t.Errorf("missing service fault for %s", service)
 					}
