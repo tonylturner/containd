@@ -2866,6 +2866,7 @@ components:
         cgroupPIDsLimit: {type: string}
     TlsInfoResponse:
       type: object
+      required: [managed]
       description: >-
         The listen addresses and enabled flags are those management binds when it
         starts with the saved configuration: CONTAIND_MGMT_ADDR and
@@ -2880,7 +2881,11 @@ components:
         certificate fields, are the files the HTTPS listener serves at the next
         start: CONTAIND_TLS_CERT_FILE and CONTAIND_TLS_KEY_FILE, then the saved
         paths, then the defaults. When both resolve to the legacy defaults, both
-        identity file fields name /data/tls/server.pem instead. servedCertFile and servedKeyFile, and the
+        identity file fields name /data/tls/server.pem instead. managed reports
+        this next-start identity mode, not the bound listener's mode, using the
+        same predicate as the certificate upload policy. Explicitly selecting
+        /data/tls/server.pem as both source paths is external mode despite the
+        identical file fields. servedCertFile and servedKeyFile, and the
         servedCert fields, are the files and certificate the bound HTTPS
         listener serves now, which a listener fallback to the defaults or a
         path saved after boot makes differ. All file paths are cleaned, so
@@ -2895,6 +2900,7 @@ components:
         boundHttpsListenAddr: {type: string, description: 'Address of the bound HTTPS listener; absent when none is bound'}
         httpListenChanges: {type: boolean, description: 'True when the next start binds another HTTP listener than the bound one, or binds one where none is bound, or none where one is'}
         httpsListenChanges: {type: boolean, description: 'True when the next start binds another HTTPS listener than the bound one, or binds one where none is bound, or none where one is'}
+        managed: {type: boolean, description: 'Always present. True when the next-start configuration and environment resolve both source paths to the legacy defaults, permitting managed uploads; false for external read-only identities, for which certificate upload returns 409. Not the bound listener mode or a guarantee that an upload succeeds.'}
         certFile: {type: string}
         keyFile: {type: string}
         certSubject: {type: string}

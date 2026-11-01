@@ -379,7 +379,12 @@ memory. With no valid pair at start, HTTPS is disabled and the reason is logged;
 containd never self-signs external paths. Changing source paths requires restart.
 
 `GET /api/v1/system/tls` describes configured and bound files (both file fields
-name `server.pem` in managed mode). Served certificate metadata, SSH/console
+name `server.pem` in managed mode). Its always-present boolean `managed` uses
+the upload policy's identity-mode predicate for the next-start configuration
+and environment, not the bound listener; `false` means external read-only mode.
+Do not infer mode from paths: explicitly selecting `server.pem` as both source
+paths is external mode even at `/data/tls/server.pem`.
+Served certificate metadata, SSH/console
 pins and the local CLI runtime record use the listener's validated public-leaf
 snapshot, not an independently read certificate. `reloadError` reports an invalid
 rotation while the last-good identity remains served. Private keys are never

@@ -43,6 +43,10 @@ type tlsInfoResponse struct {
 	HTTPListenChanges  bool `json:"httpListenChanges"`
 	HTTPSListenChanges bool `json:"httpsListenChanges"`
 
+	// Managed uses the same identity-mode predicate as uploads for the
+	// next-start configuration and environment, not the bound listener.
+	Managed bool `json:"managed"`
+
 	// CertFile and KeyFile are the files the HTTPS listener serves when
 	// management next starts with this configuration, and the Cert fields
 	// describe that certificate.
@@ -95,6 +99,7 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			BoundHTTPSListenAddr: boundAddr(bound.HTTPS),
 			HTTPListenChanges:    listenerChanges(bound.HTTP, listeners.HTTP),
 			HTTPSListenChanges:   listenerChanges(bound.HTTPS, listeners.HTTPS),
+			Managed:              mgmttls.Managed(cfg),
 			CertFile:             cleanFilePath(certFile),
 			KeyFile:              cleanFilePath(keyFile),
 			ServedCertFile:       cleanFilePath(served.CertFile),
