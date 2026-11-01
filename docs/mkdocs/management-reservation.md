@@ -59,20 +59,22 @@ other peers retain ordinary policy-controlled access.
 
 Replies use priority-1 policy rules, immediately after the kernel local rule,
 one exact local/source pair each. Table **104000**, outside user table IDs 1–252,
-holds source /32 on-link routes through the reserved device with the reserved
-local address. Route protocol **99** is distinct from managed protocol 98.
+holds destination /32 on-link routes to those peers through the reserved device,
+with the reserved local address as preferred source. Route protocol **99** is
+distinct from managed protocol 98.
 Routing REPLACE and ownership reconciliation preserve these pins.
 
 The engine subscribes to netlink before services start. If a VPN or other runtime
 actor assigns a reserved source locally, the guard removes that address and any
 matching /32 route in kernel table 255. The VPN intentionally loses the address.
 Repair is event-driven, with a full scan on startup, ownership reconciliation,
-and resubscription. Subscription errors/overflow are faulted and retried rather
-than silently disabling protection. A transient takeover can interrupt traffic
+and resubscription. After startup, subscription errors/overflow are faulted and
+retried rather than silently disabling protection. An initial subscription or
+reconciliation failure is fatal. A transient takeover can interrupt traffic
 until repair; this is not an atomic prevention mechanism.
 
-`/health` and `/internal/ownership` expose `managementReservation` guard status,
-including a sticky fault counter and last fault. `management.reservation.fault`
+The engine's `/health` and `/internal/ownership` expose `managementReservation`
+guard status, including a sticky fault counter and last fault. `management.reservation.fault`
 events name the address and interface. Service attribution is `unknown` when the
 kernel cannot establish an owner. Current errors/subscription unavailability are
 visible even when the last successful repair has cleared its immediate error.
@@ -241,8 +243,8 @@ rollback. Without a reservation it returns `{"active":false}`, plus `bootFault`
 and `recovery` while a boot fault holds. Interfaces displays a read-only explanatory
 note; neither the view nor config imports can change the authority.
 
-Unauthenticated `/health` reports `managementRecovery` with a `state`
-(`inactive`, `active`, `pending`, `failed` or `unknown`) and a generic `reason`
+Unauthenticated management `GET /api/v1/health` reports `managementRecovery` with
+a `state` (`inactive`, `active`, `pending`, `failed` or `unknown`) and a generic `reason`
 that does not name stored rules. While a boot fault holds, `enforcement` reports
 `unavailable`, because the stored policy is not applied.
 
@@ -268,7 +270,9 @@ source loses it to the guard.
 Guard history is process-local; the last refused rollback survives a restart.
 The guard repairs address takeovers after they occur, so brief interruptions are
 possible. A reservation does not replace backups, authentication, or isolation
-of the unauthenticated engine API.
+of the engine API. The reservation requires a loopback engine listener, which
+uses unauthenticated HTTP. Non-loopback engine listeners use mutual TLS derived
+from `CONTAIND_ENGINE_SECRET` and cannot be used with a reservation.
 
 For opt-in Linux kernel and isolated Compose verification, see
 [test/mgmt-reservation/README.md](https://github.com/tonylturner/containd/blob/main/test/mgmt-reservation/README.md).

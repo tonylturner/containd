@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Document established-session re-evaluation after policy changes and why a
+  blocked connection can remain visible in Sessions until conntrack timeout.
 - Serialize telemetry event IDs as decimal JSON strings across API, UI, CLI,
   previews and syslog; audit record IDs remain numeric.
 - Forward engine and management syslog streams independently, retry failed
@@ -32,14 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visible degradation rather than an audit fail-closed policy.
 - Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
 
-### Security
-
-- Reject unsafe daemon configuration fields and require valid proxy TLS certificate/key pairs before publishing configuration.
-- Restrict OpenVPN profile imports to the shared bounded parser; manage client credentials by issuer/serial ID with read-only downloads and durable revocation.
-- OpenVPN credential lists report whether a running managed server has loaded the current revocation list; the VPN page offers Apply revocation only while it has not.
-
 ### Fixed
 
+- Keep zone security scores, topology conduit selection and staged zone updates
+  separate for names that differ by case or punctuation.
 - Omit unknown DHCP and WireGuard runtime gauge series instead of reporting
   them stopped. Publish the VPN aggregate only when a VPN is observed running;
   service faults no longer manufacture stopped runtime observations.
@@ -53,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   faults. WireGuard teardown removes only containd-created links, including
   custom names and old names after rename. Engine runtime failures are attributed
   per service without blocking other services or firewall application.
+
+### Security
+
+- Reject unsafe daemon configuration fields and require valid proxy TLS certificate/key pairs before publishing configuration.
+- Restrict OpenVPN profile imports to the shared bounded parser; manage client credentials by issuer/serial ID with read-only downloads and durable revocation.
+- OpenVPN credential lists report whether a running managed server has loaded the current revocation list; the VPN page offers Apply revocation only while it has not.
 
 ## [0.1.37] - 2026-10-31
 
