@@ -23,7 +23,7 @@ curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/
 sh quickstart.sh
 ```
 
-`quickstart.sh` downloads the starter compose, creates `.env` from `.env.example`, generates a real `CONTAIND_JWT_SECRET`, auto-adjusts the starter subnets if they would overlap with existing Docker networks, and starts the combined appliance (`containd all`) for you.
+`quickstart.sh` downloads the starter compose, creates `.env` from `.env.example`, generates a real `CONTAIND_JWT_SECRET`, and starts the combined appliance (`containd all`) for you. With Python 3 available, it can auto-adjust fresh default subnets to avoid existing Docker networks.
 
 The published starter compose wires the management plane to the local engine automatically, enables enforcement by default, and gives containd a stable Docker-managed lab topology: `wan`, `dmz`, and `lan1` through `lan6`, matched to interfaces by subnet.
 
@@ -38,7 +38,7 @@ curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/
 sh bootstrap-starter.sh --dir containd-lab --no-start
 ```
 
-That writes `docker-compose.yml`, `.env.example`, and `.env`, auto-adjusts conflicting default starter subnets on fresh setup, lets you customize `.env`, and then you can start with `docker compose up -d`.
+That writes `docker-compose.yml`, `.env.example`, and `.env`, can auto-adjust conflicting default starter subnets on fresh setup when Python 3 is available, lets you customize `.env`, and then you can start with `docker compose up -d`.
 
 | Service | URL |
 |---------|-----|
@@ -77,7 +77,7 @@ Traditional IT firewalls don't understand ICS protocols. They can't distinguish 
 
 ## What It Does
 
-**Firewall** -- Zone-based with nftables enforcement, NAT (SNAT + DNAT), and default-deny posture.
+**Firewall** -- Zone-based with first-match ordered rules, nftables enforcement, NAT (SNAT + DNAT), and default-deny posture. Port forwards translate traffic; they need an explicit allow rule.
 
 **ICS/OT Deep Packet Inspection** -- Native Go decoders for Modbus, DNP3, CIP/EtherNet/IP, IEC 60870-5-104, plus DNS, TLS (SNI, partial JA3), HTTP, SSH, RDP, SMB, SNMP, NTP. Per-protocol enable/disable, independent monitor/enforce mode per ICS rule, function code and register-level visibility. IEC 104 evidence identifies types outside containd's supported type set.
 
@@ -101,7 +101,7 @@ Run modes: `containd all` (combined), `containd mgmt`, `containd engine`.
 
 ## Lab Topology
 
-The published starter compose (`deploy/docker-compose.yml`) and the source-build dev compose (`deploy/docker-compose.dev.yml`) both create 8 isolated Docker networks:
+The published starter compose (`deploy/docker-compose.yml`) and the source-build dev compose (`deploy/docker-compose.dev.yml`) both create 8 Docker bridge networks:
 
 | Network | Subnet | containd IP |
 |---------|--------|-------------|
@@ -136,6 +136,9 @@ Combined mode auto-connects the management plane to the local dataplane engine. 
 ## From Source
 
 Needs Go, Node.js, and Python with MkDocs: the UI build embeds the documentation. See [CONTRIBUTING.md](CONTRIBUTING.md) for versions.
+Running the source-built appliance requires writable storage under `/data` and
+the external binaries for enabled services. Firewall enforcement requires Linux;
+use the container on Docker Desktop.
 
 ```bash
 python3 -m venv build/docs-venv && . build/docs-venv/bin/activate
@@ -154,7 +157,7 @@ CONTAIND_JWT_SECRET=$(openssl rand -hex 32) CONTAIND_UI_DIR=ui/out ./containd al
 - CORS wildcard rejection, same-origin protection for cookie-authenticated browser writes, SameSite=Strict cookies, request body limits, path traversal protection
 - Rate limiting on auth endpoints, nftables injection prevention
 - Cosign-signed container images with CycloneDX SBOM attestation
-- Trivy vulnerability scanning in CI (zero HIGH/CRITICAL)
+- Trivy vulnerability scanning in CI with a HIGH/CRITICAL gate
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting and hardening guidance, [Secure by Design](docs/mkdocs/secure-by-design.md) for CISA alignment, and [Advisories and CSAF](docs/mkdocs/advisories.md) for the public advisory process.
 
