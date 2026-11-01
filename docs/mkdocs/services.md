@@ -5,10 +5,11 @@ configuration; review the diff and commit to apply it. Rollback reapplies the
 previous running configuration. See [Config Format](config-format.md#configuration-lifecycle)
 for the lifecycle and [API Reference](api-reference.md) for endpoint details.
 
-`containd mgmt` configures services and supervises DNS, NTP, OpenVPN, proxies,
-and optional AV daemons. The engine owns the DHCP server and kernel WireGuard
-interfaces. In split deployments these run in the engine's network namespace;
-management and engine need the intended network reachability and privileges.
+`containd mgmt` configures services and supervises DNS, NTP, OpenVPN and proxies.
+The engine owns the DHCP server, kernel WireGuard interfaces and AV runtime.
+In split deployments, management-supervised daemons run in management's network
+namespace; engine-owned services run in the engine's namespace. Both processes
+need the intended network reachability and privileges.
 Check runtime status after commit, not just whether saving succeeded.
 
 ## Syslog
@@ -91,7 +92,9 @@ To configure managed server mode:
 - `tunnelCIDR` is the client address pool assigned by the OpenVPN server. This differs from WireGuard, where client networks are expressed via peer `AllowedIPs`.
 - mgmt renders a server config under `/data/openvpn/managed/server/` and generates a local PKI under `/data/openvpn/managed/server/pki/`.
 - Client profiles can be generated and downloaded as inline `.ovpn` files (requires setting `openvpn.server.publicEndpoint`).
-- Enabling the OpenVPN server automatically opens the listen port on the WAN zone (nftables input) so clients can connect.
+- Enabling the managed OpenVPN server automatically opens its listen port in
+  nftables INPUT on `listenInterfaces`, or `listenZone` when no interfaces are
+  specified. The default zone is `wan`.
 
 ## AV
 
@@ -111,9 +114,9 @@ FreshClam schedule, stores custom definitions and runs the scanning gate.
 Antivirus backends scan complete HTTP objects; whether delivery is held or
 streamed depends on the download mode below. Nothing is scanned from packet
 previews. Management delegates status, updates and definitions to the engine
-over its internal API. When the engine is unreachable, these routes return
-`503` and the status `av` entry reports
-`"available": false`.
+over its internal API. When the engine is unreachable, update and definition
+operations return `503`, and the status `av` entry reports `"available": false`.
+Reading or staging AV configuration does not require a reachable engine.
 
 ### Scanning gate
 
@@ -189,9 +192,10 @@ either fail policy, with the scanner unavailable and for ICS endpoints.
 
 Fail policy and ICS endpoints:
 
-- `failPolicy` is `open` (default) or `closed` and decides every unscanned
-  outcome: scanner not ready, timeout, scanner error, oversized, unsupported
-  and gate capacity reached.
+- `failPolicy` is `open` (default) or `closed` and decides unscanned
+  outcomes: scanner not ready, timeout, scanner error, oversized, unsupported
+  and held-object capacity reached. The connection limit is a hard cap:
+  excess connections close immediately under either policy.
 - `scan.icsZones` and `scan.icsAssets` mark ICS endpoints: the zones'
   interfaces and subnets, and the assets' IP addresses. A connection with
   an ICS endpoint on either side passes unscanned outcomes under `closed`
@@ -245,9 +249,10 @@ ClamAV mode:
 - clamd needs at least one signature database before it starts. With
   `freshclamEnabled`, FreshClam runs once when enabled and then every
   `updateSchedule` (a positive Go duration such as `4h`; default `6h`).
-  Staging rejects any other value, including cron syntax. A successful download reloads clamd, or starts it if it was
+  While AV is enabled, staging rejects any other value, including cron syntax.
+  A successful download reloads clamd, or starts it if it was
   waiting for a database. Exit status "already up to date" is not an error.
-- `POST /services/av/update` queues an immediate run on the same schedule and
+- `POST /api/v1/services/av/update` queues an immediate run on the same schedule and
   returns `202`; the result appears as `freshclam_last`/`freshclam_error`.
 - Custom definitions are ClamAV database files (`.ndb`, `.hdb`, `.ldb`,
   `.yar` and the other ClamAV database types), at most 64 MiB. The engine
@@ -279,11 +284,14 @@ longer to load, and the status `ready` field turns true once it answers.
 
 Scanning:
 
-- `timeoutSec` bounds connecting to the backend and every probe (default
-  5 s, at most 300); the gate's own deadline bounds each scan.
+- `timeoutSec` bounds connecting to the backend and scan probes (default
+  5 s, at most 300); live status probes use at most 2 s. The gate's own
+  deadline bounds each scan.
   `maxSizeBytes` rejects larger payloads before they are sent (0 = no limit,
   at most 104857600, clamd's default stream limit of 100 MiB). Both apply to
-  ClamAV and ICAP, and resetting either to 0 restores the default. Staging
+  ClamAV and ICAP. Setting `timeoutSec` to 0 restores the default; setting
+  `maxSizeBytes` to 0 removes the scanner-side size check, but the gate's
+  1 GiB bound and backend limits still apply. While AV is enabled, staging
   rejects negative or larger values.
 - Every result records the backend that produced it. Native ClamAV verdicts
   are cached by content hash, clamd socket, definitions generation and size
@@ -300,14 +308,17 @@ Scanning:
   `X-Infection-Found`, `X-Violations-Found`, `X-Virus-ID` or an
   `X-ICAP-Status` containing `VirusFound`; `204 No Content` is clean; any
   other reply, including `200` with adapted content, is a scan error.
-  `OPTIONS` must list `REQMOD` when uploads are scanned and `RESPMOD` when
-  downloads are. `useTls` connects with verified TLS 1.2 or
+  An `OPTIONS` response must return `200`. If it includes `Methods`, that
+  list must include `REQMOD` when uploads are scanned and `RESPMOD` when
+  downloads are; the current probe also accepts an absent `Methods` header.
+  `useTls` connects with verified TLS 1.2 or
   newer, using the configured host as the server name and the system roots
   plus the [additional CA bundle](config-format.md#additional-ca-bundle);
   there is no plaintext fallback.
 
-Status (`av` entry) reports the applied settings, `ready` and `db_version`
-from a live clamd `PING`/`VERSION` (or ICAP `OPTIONS`), scan, error and
+Status (`av` entry) reports the applied settings and `ready` from a live clamd
+`PING`/`VERSION` or ICAP `OPTIONS` check. `db_version` holds clamd's version
+response and is empty for ICAP. Status also includes scan, error and
 detection counters, the clamd process, the FreshClam schedule, the pending
 reload, the applied additional CA bundle revision (`trust_revision`) and
 the `gate` object above.

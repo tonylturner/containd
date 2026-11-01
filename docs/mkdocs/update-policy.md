@@ -47,8 +47,8 @@ its latest attempt take precedence; an older successful attempt cannot override
 a newer pending or failed attempt.
 
 Pending CI is checked up to 21 times, with 30 seconds between checks (at most ten
-minutes of sleeps). Each paginated API request is also limited to 30 seconds,
-bounding API time to another ten and a half minutes. A timeout fails promotion;
+minutes of sleeps). Each API invocation, including all its pages, is limited
+to 30 seconds, bounding API time to another ten and a half minutes. A timeout fails promotion;
 after CI succeeds, re-run the **Release** workflow manually with the same tag.
 Missing, failed or cancelled CI, or an API error, fails promotion immediately.
 The workflow summary records the run ID, link, attempt and conclusion when a

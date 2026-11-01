@@ -49,8 +49,9 @@ That complements the other validation workflows:
 - `bash scripts/dev-verify.sh --with-route-smoke`
 - `bash scripts/smoketest`
 - `bash scripts/perf-baseline.sh`
-- `bash scripts/verify-published-images.sh signature|sbom|vulnerabilities`, the
-  scheduled checks of the published images (see
+- `bash scripts/verify-published-images.sh` with one mode argument:
+  `signature`, `sbom`, or `vulnerabilities`, for the scheduled checks of
+  published images (see
   [SBOM](sbom.md#scheduled-checks-of-published-images))
 
 ## Release CI Gate
@@ -120,6 +121,8 @@ example `containd/containd:dev`; Compose uses its default image otherwise.
 quickstart ports (8080, 8443 and 2222 by default); move them with the
 `CONTAIND_PUBLISH_*_PORT` variables. The script removes the project and its
 volumes on exit.
+Use a fresh, disposable data directory: the starter bind-mounts `deploy/data`,
+which `down -v` does not remove, and the script changes the admin password.
 
 ## Forwarding Smoke
 
@@ -173,13 +176,14 @@ objects served by `test/data-smoke/av/`, that:
 - under fail-open and fail-closed with the scanner ready, the EICAR
   download and upload are refused with `403` and no EICAR byte reaches the
   client or the origin, clean objects pass whole, the origin sees the
-  engine's WAN address, a detection event names the client, the inbound
-  port forward is gated the same way with the target seeing the engine's
-  LAN address, and an unselected port passes EICAR without a gate event;
+  engine's WAN address;
+- under fail-open with the scanner ready, a detection event names the client,
+  the inbound port forward is gated the same way with the target seeing the
+  engine's LAN address, and an unselected port passes EICAR without a gate event;
 - with the backend switched to an ICAP server that refuses connections,
-  fail-open passes everything unscanned, fail-closed refuses downloads and
-  uploads while management stays reachable, and a client marked as an ICS
-  asset passes under fail-closed;
+  fail-open passes the tested downloads unscanned, fail-closed refuses downloads
+  and uploads while management stays reachable, and a client marked as an ICS
+  asset passes the tested downloads under fail-closed;
 - an exclude entry wins over the include entry: EICAR passes and the gate
   records no event for it.
 
@@ -208,7 +212,7 @@ and IEC104 scenarios in
 
 ## Kernel Tests
 
-`CONTAIND_NETNS_KERNEL_TEST=1` is the one gate of the dataplane kernel tests
+`CONTAIND_NETNS_KERNEL_TEST=1` opts into most dataplane kernel tests
 in `pkg/dp/engine`, `pkg/dp/enforce`, `pkg/dp/capture`, `pkg/dp/session`,
 `pkg/dp/conntrack`, `pkg/dp/dhcpd`, `pkg/dp/netcfg` and `pkg/app/engine`.
 Most of them replace containd's nft tables, routes or links, or create
@@ -262,7 +266,8 @@ a privileged Linux container:
 
 ```sh
 GOOS=linux CGO_ENABLED=0 go test -c -o build/engine.test ./pkg/dp/engine
-docker run --rm --privileged -e CONTAIND_NETNS_KERNEL_TEST=1 \
+docker run --rm --privileged --sysctl net.ipv4.ip_forward=1 \
+  -e CONTAIND_NETNS_KERNEL_TEST=1 \
   -v "$PWD/build:/w" alpine:3.21 sh -c \
   "apk add -q nftables iproute2 && /w/engine.test -test.run FirstCommandKernel -test.v"
 ```

@@ -15,6 +15,12 @@ scenarios come from the pure-Go `test/iec104/malformer` client (marked
 test/iec104/capture/capture.sh            # writes into test/iec104/testdata/
 ```
 
+This regenerates pcaps and TShark tables, not a complete corpus manifest or
+frame labels. It requires existing `*.expectations.json` files and rewrites
+`SHA256SUMS` using them without updating their labels. Review and update the
+expectations and `manifest.json` against the new captures before using the
+result as a regression corpus.
+
 - Run on 2026-10-09, Docker Desktop 29.8.0, kernel `7.0.12-linuxkit`, arm64.
 - Endpoints: lib60870-C **v2.4.1** (tarball SHA256
   `d5708b9885c2c068ac9d9bae4696a624bd1d1d6645a1b1a9261c00274bc36c3a`), built
@@ -35,9 +41,9 @@ test/iec104/capture/capture.sh            # writes into test/iec104/testdata/
   cross-check for the containd decoder. Its header and selected capture frames
   are declared in `manifest.json`; hashes cover the pcaps, oracle tables and
   expectation files.
-- Timestamps, ports, ISNs and the SHA256 sums change on every regeneration;
-  the APDU bytes do not, apart from CP56Time2a values and the drifting feeder
-  current.
+- Regeneration is not byte-identical: timestamps, ports, ISNs, packetization
+  and SHA256 sums can change. The current endpoint also has monitoring points
+  added since these captures were recorded, so its APDU inventory differs.
 
 ## Recorded corpus RTU point map
 

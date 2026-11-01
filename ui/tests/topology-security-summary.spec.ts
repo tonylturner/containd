@@ -101,3 +101,51 @@ test("zones label the computed level as check-based SL", async ({ page }) => {
   await expect(page.getByRole("columnheader", { name: "SL-T", exact: true })).toBeVisible();
   await expect(page.locator("body")).not.toContainText(/compliance|achieved|SL-A/i);
 });
+
+test("colliding zone slugs keep separate scores, conduits and staging targets", async ({ page }) => {
+  const zoneList = [{ name: "OT-1", slTarget: 1 }, { name: "ot_1", slTarget: 1 }];
+  const admitted = {
+    state: "allow" as const, ids: "full" as const, proto: [], traffic: 0,
+    rules: [], gaps: [], mitre: [], defaultDeny: true,
+    tlsEnforced: true, protoWhitelist: true, mfaRequired: false,
+    auditLogged: true, avEnabled: false,
+  };
+  await serveSecurity(page, zoneList, {
+    "OT-1→ot_1": admitted,
+    "ot_1→OT-1": { ...admitted, state: "block", defaultDeny: false, auditLogged: false },
+  });
+  const updates: { name: string; body: unknown }[] = [];
+  await page.route("**/api/v1/zones/*", async (route) => {
+    const name = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop()!);
+    const body = route.request().postDataJSON();
+    updates.push({ name, body });
+    const zone = zoneList.find((z) => z.name === name)!;
+    Object.assign(zone, body);
+    await route.fulfill({ json: zone });
+  });
+  const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/security/conduits");
+  await page.goto("/topology/");
+  await page.getByRole("button", { name: "SECURITY", exact: true }).click();
+  await loaded;
+  const summary = page.getByRole("status", { name: "Zones below target" });
+  await expect(summary).toContainText("1 of 2 zones have unmet SL target checks:");
+  await expect(summary).toContainText("OT_1 SL0/1");
+  await expect(summary).not.toContainText("OT-1 SL");
+  await page.getByText("ALLOW", { exact: true }).click();
+  await expect(page.getByText("OT-1 → OT_1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Checks:2 / SL-T:1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Checks:0 / SL-T:1", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Stage OT-1 target SL 2", exact: true }).click();
+  await expect.poll(() => updates.length).toBe(1);
+  expect(updates[0]).toEqual({ name: "OT-1", body: { slTarget: 2 } });
+  await page.getByRole("button", { name: "Stage OT_1 target SL 2", exact: true }).click();
+  await expect.poll(() => updates.length).toBe(2);
+  expect(updates[1]).toEqual({ name: "ot_1", body: { slTarget: 2 } });
+
+  const zoneScoresLoaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/security/conduits");
+  await page.goto("/zones/");
+  await zoneScoresLoaded;
+  const rowFor = (name: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
+  await expect(rowFor("OT-1").getByRole("cell").nth(4)).toHaveText("2");
+  await expect(rowFor("ot_1").getByRole("cell").nth(4)).toHaveText("—");
+});
