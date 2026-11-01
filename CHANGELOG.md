@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and live policy suggestions, including port-decoded events emitted before
   content confirmation; retain the exclusion in withheld counts and limitations.
   Previously certified suggestions require regeneration; historical datasets
-  without retained binding authority require new evidence.
+  without retained binding authority remain readable but fail closed. Reimporting
+  the same capture after an adapter-normalization change creates a separate
+  dataset using the current normalization, without rewriting historical evidence.
 
 ### Upgrade notes
 

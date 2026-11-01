@@ -10,7 +10,13 @@ import (
 	"sort"
 )
 
-// ImportID binds a capture to the semantic authorities used to decode it.
+// NormalizationVersion versions the live/PCAP event-to-observation adapter,
+// independently of decoder and storage schemas. Bump when retained authority or
+// normalized semantics change so an import never reuses obsolete observations.
+const NormalizationVersion = "binding-1"
+
+// ImportID binds a capture to the semantic authorities used to decode and
+// normalize it. Historical IDs remain readable but are never reused here.
 // Reimporting the same capture under the same authorities cannot renew a lease.
 func ImportID(d Dataset) (string, error) {
 	if len(d.CaptureSHA256) != 71 || d.CaptureSHA256[:7] != "sha256:" {
@@ -20,7 +26,7 @@ func ImportID(d Dataset) (string, error) {
 	if err != nil || hex.EncodeToString(raw) != d.CaptureSHA256[7:] || d.DecoderVersion == "" || d.ProfileFingerprint == "" || d.SnapshotFingerprint == "" {
 		return "", fmt.Errorf("missing or invalid capture identity")
 	}
-	return Digest([]string{SchemaVersion, d.CaptureSHA256, d.DecoderVersion, d.ProfileFingerprint, d.SnapshotFingerprint})
+	return Digest([]string{SchemaVersion, d.CaptureSHA256, d.DecoderVersion, d.ProfileFingerprint, d.SnapshotFingerprint, NormalizationVersion})
 }
 
 // Digest hashes canonical JSON. Struct field and slice order are significant.

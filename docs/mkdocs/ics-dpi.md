@@ -1309,9 +1309,12 @@ just the passive decoder's events. Generate reports `observation_binding` withhe
 counts, and suggestion limitations state this exclusion.
 
 Historical datasets whose adapter discarded binding authority are withheld as
-`missing_authority`; collect a new live watch or import a new capture. Reuploading
-the same retained capture reuses its existing dataset. Previously certified
-suggestions require regeneration under the current generator.
+`missing_authority`. Reimporting the same capture after an adapter-normalization
+change creates a separate dataset using the current normalization; it does not
+rewrite the old, still-readable dataset. With unchanged normalization and
+decoding authorities, reimports reuse the existing dataset without extending
+retention. Previously certified suggestions require regeneration under the
+current generator.
 
 Flows show the bound application, whether identification is by **content** or
 only **port**, and a **Mismatch** badge when content differs from a registry

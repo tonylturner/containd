@@ -28,8 +28,9 @@ const (
 
 // Dataset is an evidence window. PCAP import seals atomically; no append/edit API
 // exists for a sealed dataset. Expiry/eviction can remove it but cannot rewrite it.
-// PCAP ID binds capture SHA + decoder/profile/snapshot fingerprints; live ID is
-// assigned at explicit start. Incomplete retention is visible through Gaps.
+// PCAP ID binds capture SHA + decoder/profile/snapshot fingerprints and adapter
+// normalization version; live ID is assigned at explicit start.
+// Incomplete retention is visible through Gaps.
 type Dataset struct {
 	SchemaVersion       string       `json:"schemaVersion"`
 	ID                  string       `json:"id"`

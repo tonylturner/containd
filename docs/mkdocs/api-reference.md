@@ -370,8 +370,10 @@ Confirmed content/port mismatches also exclude the connection even if no passive
 decoder emits an event. Generate exposes these exclusions as
 `withheld.observation_binding`; suggestion limitations retain the exclusion.
 Historical datasets lacking retained binding authority are withheld as
-`missing_authority`. Collect new evidence; reuploading the same retained capture
-does not replace its dataset.
+`missing_authority`. Reimporting the same capture after an adapter-normalization
+change creates a separate dataset under the current normalization. Old datasets
+remain readable and fail closed; unchanged normalization and decoding authorities
+reuse the existing dataset without extending retention.
 
 `GET /api/v1/flows` includes an optional `identification` object with these
 attributes. `application` is the confirmed bound protocol when available,
