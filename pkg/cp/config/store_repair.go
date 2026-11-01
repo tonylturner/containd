@@ -44,10 +44,14 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 		if cfg == nil {
 			continue
 		}
+		before := cloneDesiredValue(reflect.ValueOf(cfg.Services)).Interface().(ServicesConfig)
 		if err := edit(cfg); err != nil {
 			return nil, err
 		}
-		if err := cfg.Validate(); err != nil {
+		if !reflect.DeepEqual(before, cfg.Services) {
+			return nil, errors.New("boot repair must preserve services")
+		}
+		if _, _, err := Effective(cfg, nil); err != nil {
 			return nil, fmt.Errorf("repaired config validation failed: %w", err)
 		}
 	}

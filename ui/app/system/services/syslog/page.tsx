@@ -9,7 +9,8 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type SyslogConfig, type SyslogForwarder, type SyslogStatus } from "../../../../lib/api";
+import { api, isAdmin, type SyslogConfig, type SyslogForwarder, type ServicesStatus } from "../../../../lib/api";
+import { ServiceFaultBanner } from "../../../../components/ServiceFaultBanner";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { SaveStateLine } from "../../../../components/SaveStateLine";
@@ -25,7 +26,8 @@ export default function SyslogPage() {
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 }, false);
-  const [status, setStatus] = useState<SyslogStatus | null>(null);
+  const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
+  const status = servicesStatus?.syslog ?? null;
   const form = useConfigForm({ forwarder: {
     address: "",
     port: 514,
@@ -42,7 +44,7 @@ export default function SyslogPage() {
     try {
       const svc = await api.getServicesStatus();
       setError(null);
-      setStatus(svc?.syslog ?? null);
+      setServicesStatus(svc);
       const s = await api.getSyslog();
       if (!checkLoaded(s)) return;
       refreshForm(s, keepEdits);
@@ -140,6 +142,7 @@ export default function SyslogPage() {
         </div>
       }
     >
+      <ServiceFaultBanner status={servicesStatus} loading={loading} only={["syslog"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={editor.superseded || form.editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
@@ -242,7 +245,7 @@ export default function SyslogPage() {
               <Skeleton className="h-14 w-full" />
               <Skeleton className="h-14 w-full" />
             </div>
-          ) : status?.sparkline.length ? (
+          ) : status?.sparkline?.length ? (
             <Sparkline
               values={status.sparkline}
               color="var(--primary)"

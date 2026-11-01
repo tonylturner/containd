@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -75,15 +76,12 @@ func TestRenderChronyConfigNoInterval(t *testing.T) {
 	}
 }
 
-func TestRenderChronyConfigSkipsEmptyServers(t *testing.T) {
-	m := &NTPManager{NTPDName: "chrony"}
-	cfg := config.NTPConfig{
-		Enabled: true,
-		Servers: []string{"pool.ntp.org", "", "  ", "time.google.com"},
-	}
-	out := m.renderChronyConfig(cfg)
-	if contains(out, "server  ") || contains(out, "server \n") {
-		t.Error("config should not contain empty server directives")
+func TestNTPConfigRejectsEmptyServers(t *testing.T) {
+	m := &NTPManager{BaseDir: t.TempDir()}
+	for _, server := range []string{"", "  "} {
+		if err := m.Apply(context.Background(), config.NTPConfig{Enabled: true, Servers: []string{server}}); err == nil {
+			t.Fatal("accepted empty server")
+		}
 	}
 }
 
@@ -195,8 +193,8 @@ func TestApplyValidatesWithDetectedChronyd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("chronyd was not run: %v", err)
 	}
-	if want := "-p\n-f\n" + m.configPath() + "\n"; string(args) != want {
-		t.Errorf("chronyd args = %q, want %q", args, want)
+	if !strings.HasPrefix(string(args), "-p\n-f\n"+filepath.Join(m.BaseDir, ".chrony.conf-")) {
+		t.Errorf("chronyd must validate a staged config, args = %q", args)
 	}
 	if status := m.Status(); status["enabled"] != true || status["ntpd_path"] != chronyd || status["last_error"] != "" {
 		t.Errorf("status = %v", status)

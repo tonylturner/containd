@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/v1/pcap/status") body = { running: false, interfaces: [] };
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
     if (path === "/api/v1/routing/os") body = { routes: [] };
-    if (path === "/api/v1/services/status") body = { av: { available: false, error: "engine unavailable" } };
+    if (path === "/api/v1/services/status") body = { faults: [], av: { available: false, error: "engine unavailable" } };
     if (path === "/api/v1/config/diff") body = { changed: false, running: {}, candidate: {} };
     if (path === "/api/v1/dashboard") body = { user, counts: { rules: 0, icsRules: 0 }, health: { hostname: "test" } };
     if (path === "/api/v1/system/stats") body = {

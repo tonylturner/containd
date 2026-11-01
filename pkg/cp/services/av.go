@@ -195,6 +195,9 @@ func (m *AVManager) Stop() error {
 // Apply waits for the proof only until ctx ends, and Status reports the
 // activation as pending until then.
 func (m *AVManager) Apply(ctx context.Context, cfg config.AVConfig) error {
+	if err := m.Validate(ctx, cfg); err != nil {
+		return fmt.Errorf("%w: %w", ErrAVInvalid, err)
+	}
 	if err := m.applyLocked(ctx, cfg); err != nil {
 		return err
 	}

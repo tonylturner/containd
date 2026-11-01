@@ -5,7 +5,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"maps"
 	"os"
 	"strings"
@@ -28,7 +27,8 @@ type ManagerOptions struct {
 }
 
 // Manager applies and renders all control-plane managed services.
-// It is intentionally lightweight in early phases: no process lifecycle yet.
+// Sub-managers own rendering and daemon supervision; engine-owned services
+// share the same independent fault identities.
 type Manager struct {
 	Syslog *SyslogManager
 	DNS    *DNSManager
@@ -37,10 +37,16 @@ type Manager struct {
 	DHCP   *DHCPManager
 	VPN    *VPNManager
 
-	telemetry *dpevents.Store
-	sparkMu   sync.Mutex
-	primary   map[string]*meter // primary metric per service (events/traffic)
-	errs      map[string]*meter // error metric per service
+	applyMu      sync.Mutex
+	faultMu      sync.Mutex
+	faults       []ServiceFault
+	localFaults  []ServiceFault // guarded by applyMu
+	engineFaults []ServiceFault // guarded by applyMu
+	faultAudit   audit.Store
+	telemetry    *dpevents.Store
+	sparkMu      sync.Mutex
+	primary      map[string]*meter // primary metric per service (events/traffic)
+	errs         map[string]*meter // error metric per service
 }
 
 func NewManager(opts ManagerOptions) *Manager {
@@ -121,6 +127,12 @@ func (m *Manager) recordServiceEvent(kind string, attrs map[string]any) {
 		}
 	}
 	services, isErr := canonicalServicesFromKind(kind)
+	if strings.HasPrefix(kind, "service.config_fault") || strings.HasPrefix(kind, "service.runtime_fault") {
+		if service, ok := attrs["service"].(string); ok {
+			services = []string{service}
+		}
+		isErr = !strings.HasSuffix(kind, ".cleared")
+	}
 	if len(services) > 0 {
 		for _, svc := range services {
 			m.incrementServiceMetric(svc, delta, false)
@@ -236,58 +248,42 @@ func (m *Manager) Validate(ctx context.Context, cfg config.ServicesConfig) error
 	return nil
 }
 
-// Apply updates in-memory configs and renders service config files.
-func (m *Manager) Apply(ctx context.Context, cfg config.ServicesConfig) error {
-	var errs []error
-	apply := func(fn func() error) {
-		if err := fn(); err != nil {
-			errs = append(errs, err)
+func (m *Manager) updateServiceGauges() {
+	set := func(name string, running, known bool) {
+		if !known {
+			metrics.ServicesRunning.DeleteLabelValues(name)
+			return
 		}
-	}
-	if m.Syslog != nil {
-		apply(func() error { return m.Syslog.Apply(ctx, cfg.Syslog) })
-	}
-	if m.DNS != nil {
-		apply(func() error { return m.DNS.Apply(ctx, cfg.DNS) })
-	}
-	if m.NTP != nil {
-		apply(func() error { return m.NTP.Apply(ctx, cfg.NTP) })
-	}
-	if m.Proxy != nil {
-		apply(func() error { return m.Proxy.Apply(ctx, cfg.Proxy) })
-	}
-	if m.DHCP != nil {
-		apply(func() error { return m.DHCP.Apply(ctx, cfg.DHCP) })
-	}
-	if m.VPN != nil {
-		apply(func() error { return m.VPN.Apply(ctx, cfg.VPN) })
-	}
-	m.updateServiceGauges(cfg)
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	return nil
-}
-
-func (m *Manager) updateServiceGauges(cfg config.ServicesConfig) {
-	set := func(name string, enabled bool) {
 		v := 0.0
-		if enabled {
+		if running {
 			v = 1.0
 		}
 		metrics.ServicesRunning.WithLabelValues(name).Set(v)
 	}
-	set("dns", cfg.DNS.Enabled)
-	set("ntp", cfg.NTP.Enabled)
-	set("syslog", len(cfg.Syslog.Forwarders) > 0)
-	set("proxy", cfg.Proxy.Forward.Enabled || cfg.Proxy.Reverse.Enabled)
-	set("dhcp", cfg.DHCP.Enabled)
-	set("vpn", cfg.VPN.WireGuard.Enabled || cfg.VPN.OpenVPN.Enabled)
+	set("dns", m.DNS != nil && m.DNS.Status()["running"] == true, m.DNS != nil)
+	set("ntp", m.NTP != nil && m.NTP.Status()["running"] == true, m.NTP != nil)
+	set("syslog", m.Syslog != nil && m.Syslog.Status()["configured_forwarders"].(int) > 0, m.Syslog != nil)
+	proxyRunning := false
+	if m.Proxy != nil {
+		st := m.Proxy.Status()
+		proxyRunning = st["envoy_running"] == true || st["nginx_running"] == true
+	}
+	set("proxy", proxyRunning, m.Proxy != nil)
+	// Engine apply results and DHCP lease records are not live observations.
+	// WireGuard's on-demand status endpoint does not feed this manager.
+	set("dhcp", false, false)
+	set("wireguard", false, false)
+	ovpn := m.VPN != nil && m.VPN.Status()["openvpn_running"] == true
+	set("openvpn", ovpn, m.VPN != nil)
+	// One running member proves the aggregate is running. Without a WireGuard
+	// observation, a stopped OpenVPN daemon cannot prove all VPNs are stopped.
+	set("vpn", ovpn, ovpn)
 }
 
 // Status returns a basic status bundle for UI/CLI.
 func (m *Manager) Status() any {
-	out := map[string]any{}
+	faults := m.Faults()
+	out := map[string]any{"faults": faults}
 	if m.Syslog != nil {
 		out["syslog"] = m.decorateStatus("syslog", m.Syslog.Status())
 	}
@@ -315,6 +311,14 @@ func (m *Manager) Status() any {
 	}
 	if m.VPN != nil {
 		out["vpn"] = m.decorateStatus("vpn", m.VPN.Status())
+	}
+	for _, name := range []string{config.ServiceAV, config.ServiceWireGuard, config.ServiceOpenVPN} {
+		out[name] = m.decorateStatus(name, map[string]any{})
+	}
+	for name, base := range out {
+		if name != "faults" {
+			out[name] = faultStatus(name, base, faults)
+		}
 	}
 	return out
 }
