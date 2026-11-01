@@ -137,7 +137,15 @@ export function SuggestionReview({
       {changedSinceSelected && <p role="status" className="mb-2 text-sm text-(--amber)">Changed since selected — review this revision and select it again.</p>}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="break-all font-mono text-sm">{s.id}</h3>
+          <h3 className="break-words text-sm font-semibold">
+            {s.content.rules[0]?.description || "Proposed service rules"}
+          </h3>
+          <p className="break-all font-mono text-xs">Suggestion ID: {s.id}</p>
+          <p className="text-sm">
+            {selectable(s, now) ? "Checks passed"
+              : reviewable && !failures ? "Needs review"
+              : "Not eligible"}
+          </p>
           <p className="text-xs text-(--text-muted)">
             Suggestion version {s.revision} · {expired ? "expired" : s.status} ·{" "}
             {s.status === "staged"
@@ -161,6 +169,16 @@ export function SuggestionReview({
           </label>
         )}
       </div>
+      {!selectable(s, now) && (
+        <p className="text-xs text-(--amber)">
+          Selection unavailable: {expired ? "evidence expired; collect new evidence."
+            : !s.proof ? "no certification available."
+            : failures || counterexamples ? "saved-evidence checks reported failures or counterexamples."
+            : s.status === "staged" ? "this version is already staged."
+            : s.status === "rejected" ? "this suggestion was rejected."
+            : "explicit review and any required address approval must be completed for this version."}
+        </p>
+      )}
       <p className="text-sm">
         Address basis:{" "}
         {s.content.requiresCoordinateReview

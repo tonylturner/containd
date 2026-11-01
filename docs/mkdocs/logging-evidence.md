@@ -22,6 +22,37 @@ so these variables do not override their levels. CLI queries include
 `show audit` and `show events`; see
 [API Reference](api-reference.md) for wire contracts.
 
+## Collect and review learner evidence
+
+**PCAP Analysis** (`/pcap/`) offers **Import capture** and **Watch live** tabs.
+Import capture contains Upload & Analyze PCAP and Existing PCAP Files; Watch live
+contains duration, Start watch, watch status, Stop watch and pagination. An active
+watch or unavailable watch status remains indicated when viewing Import capture.
+Switching tabs does not start, stop or discard a collection.
+
+The learner steps are explicit: **1 Collect → 2 Generate → 3 Review → 4 Stage**.
+Disabled steps explain their prerequisites. Opening a step only navigates to its
+controls: it does not generate, approve, select or stage anything. Expired
+datasets cannot generate new suggestions; collect new evidence instead.
+
+The selected Dataset review stays above the retained Evidence datasets list.
+Collection details retains its full ID, checksums and reader/configuration
+versions. Review leads with service descriptions, proposed rule scopes and
+**Checks passed**, **Needs review** or **Not eligible**; these are bounded checks,
+not proof that traffic is safe. Checks on saved evidence retains replay and
+boundary results, limitations, raw versions, digests and counterexamples.
+Collection gaps, failure causes, overlaps, expiry and selection restrictions stay
+visible. Import statistics and content identifications remain available below.
+
+**Stage N selected** stays separate from approval and selection. IEC 104 review,
+address/NAT approval where required, the 128-suggestion/128-rule cap, destination
+diff review and atomic monitor-only staging remain required. A failed or
+uncertain staging attempt retains its receipt when retry is permitted:
+**Retry same staging request** sends the identical request. **Discard receipt**
+does not undo any rules already saved. Staged rules are not activated until
+Configuration review and commit. Store-wide counts and saved evidence limits
+remain in their disclosures; they are not per-dataset completeness guarantees.
+
 ## Account and credential audit records
 
 Account and credential changes attempt to persist an audit record with their actor

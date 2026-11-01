@@ -39,6 +39,28 @@ PCAP analysis:
 Protocol toggles select decoders; they do not create matching firewall rules.
 See [ICS DPI](ics-dpi.md) for predicates, monitor-mode limits, and IEC 104 behavior.
 
+## Capture workspace
+
+The **PCAP** page (`/dataplane/`) separates **Capture now**, **Saved captures**
+and **Replay to a network**:
+
+- **Start capture now** uses the edited form immediately. **Save PCAP defaults**
+  only stages defaults for commit; **Stop** acts immediately. Live Capture Status
+  shows the active interfaces and start time independently of Form settings
+  (not live), so editing the next capture does not change the active one.
+- Capture setup keeps interface and zone selection, filters, file size/count and
+  mode together. **Advanced capture options** retains snaplen, file prefix,
+  rotation, buffer and promiscuous capture; saved non-default settings open it
+  automatically and remain indicated when collapsed.
+- **PCAP Forwarding (Remote Sensor)** is optional. Its expander opens for saved
+  non-default targets and keeps a configured-forwarding summary when closed.
+- **Saved PCAPs** retains upload, search, interface filtering, tagging, download,
+  delete and inline Replay. **Analyze captures offline** links to PCAP Analysis;
+  choose the retained file there explicitly.
+- Both replay paths transmit packets onto a network immediately, not into
+  offline analysis. Verify the destination and authorization first. The Replay
+  form retains file, interface and rate selection.
+
 ## Policy and runtime state
 
 Rules match zones, CIDRs, transport/port ranges, identity bindings, schedules

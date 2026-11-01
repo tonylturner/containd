@@ -219,6 +219,10 @@ test("uncertain completion retries identical request ID and ordered revisions", 
   await expect(
     page.getByRole("button", { name: "Retry same staging request" }),
   ).toBeVisible();
+  const steps = page.getByRole("navigation", { name: "Learner steps" });
+  await expect(steps.getByRole("button", { name: "4 Stage", exact: true })).toBeDisabled();
+  await expect(steps).toContainText("Resolve the retained staging receipt; retry uses the identical request.");
+  await expect(page.getByRole("button", { name: "Generate suggestions", exact: true })).toBeDisabled();
   state.uncertain = false;
   await page.getByRole("button", { name: "Keep my edits", exact: true }).click();
   await page
@@ -243,7 +247,7 @@ test("viewer reads proof and authority but has no mutation or selection actions"
   ).toBeVisible();
   for (const name of [
     /Analyze/,
-    /Generate/,
+    /^Generate suggestions$/,
     /Start watch/,
     /Stop watch/,
     /Review and approve/,
@@ -265,6 +269,9 @@ test("bounded live watch start and stop seal a dataset in the same list", async 
 }) => {
   const state = await mockLearner(page);
   await page.goto("/pcap/");
+  await page.getByRole("tab", { name: "Import capture", exact: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("tab", { name: "Watch live", exact: true })).toBeFocused();
   await page.getByRole("button", { name: "Start watch", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Start watch", exact: true }),
@@ -488,4 +495,69 @@ test("uncertain network staging keeps a receipt until explicit discard, without 
   await expect(page.getByRole("button", { name: "Retry same staging request" })).toHaveCount(0);
   await expect(select).toBeEnabled();
   await expect(page.getByText(/Receipt discarded. This does not undo any rules already staged/)).toBeVisible();
+});
+
+
+test("learner steps explain disabled collection, review and stage without running actions", async ({ page }) => {
+  const state = await mockLearner(page);
+  state.suggestions = [];
+  await page.goto("/pcap/");
+  const steps = page.getByRole("navigation", { name: "Learner steps" });
+  await expect(steps.getByRole("button", { name: "2 Generate", exact: true })).toBeDisabled();
+  await expect(steps).toContainText("Open a dataset after collecting evidence.");
+  await page.getByRole("button", { name: "Open capture-1", exact: true }).click();
+  await expect(page.getByText("No retained suggestions.", { exact: false })).toBeVisible();
+  await expect(steps.getByRole("button", { name: "2 Generate", exact: true })).toBeEnabled();
+  await expect(steps.getByRole("button", { name: "3 Review", exact: true })).toBeDisabled();
+  await expect(steps).toContainText("Generate suggestions explicitly after collection finishes.");
+  await expect(steps.getByRole("button", { name: "4 Stage", exact: true })).toBeDisabled();
+  await expect(steps).toContainText("Review and select eligible suggestions first.");
+  await steps.getByRole("button", { name: "2 Generate", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("region", { name: "Generate from collection" })).toBeFocused();
+  expect(state.writes).toEqual([]);
+});
+
+test("expired dataset explains why Generate is disabled and preserves inspection", async ({ page }) => {
+  const state = await mockLearner(page);
+  state.datasets[0].expiresAt = new Date(Date.now() - 1000).toISOString();
+  await openDataset(page);
+  const steps = page.getByRole("navigation", { name: "Learner steps" });
+  await expect(steps.getByRole("button", { name: "2 Generate", exact: true })).toBeDisabled();
+  await expect(steps).toContainText("Dataset expired. Collect new evidence.");
+  await expect(page.getByRole("button", { name: "Generate suggestions", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Inspect service authority" })).toBeEnabled();
+  expect(state.writes).toEqual([]);
+});
+
+test("collection tabs retain drafts and surface an active watch while importing", async ({ page }) => {
+  const state = await mockLearner(page);
+  await page.goto("/pcap/");
+  await page.getByRole("tab", { name: "Watch live", exact: true }).click();
+  const duration = page.getByLabel("Duration (seconds)", { exact: true });
+  await duration.fill("120");
+  await page.getByRole("button", { name: "Start watch", exact: true }).click();
+  await expect(page.getByLabel("Dataset review")).toContainText("live · collecting");
+  await expect(page.getByRole("navigation", { name: "Learner steps" })).toContainText("Collection must finish before generation.");
+  await page.getByRole("tab", { name: "Import capture", exact: true }).click();
+  await expect(page.getByText("Live watch collecting · 1 active. Open Watch live to inspect or stop collection.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stop watch", exact: true })).not.toBeVisible();
+  await page.getByRole("tab", { name: "Watch live", exact: true }).click();
+  await expect(duration).toHaveValue("120");
+  await expect(page.getByRole("button", { name: "Stop watch", exact: true })).toBeEnabled();
+  expect(state.writes).toEqual([{ path: "/learn/watches", body: { durationSeconds: 120 } }]);
+});
+
+test("collapsed store counts still indicate removed and rejected evidence", async ({ page }) => {
+  await mockLearner(page);
+  await page.route("**/api/v1/learn/counters", route => route.fulfill({ json: {
+    records: 24, bytes: 8192, evictedRecords: 2, evictedBytes: 100,
+    expiredRecords: 3, lostBatches: 4, rejectedParents: 5, withheld: {},
+  } }));
+  await page.goto("/pcap/");
+  const disclosure = page.locator("details").filter({ has: page.locator("summary").filter({ hasText: "Store-wide admission and withheld counts" }) });
+  await expect(disclosure).toHaveJSProperty("open", false);
+  for (const text of ["lost batches 4", "rejected parents 5", "evicted records 2", "expired records 3"]) {
+    await expect(disclosure.locator("summary")).toContainText(text);
+  }
 });
