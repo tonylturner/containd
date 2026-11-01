@@ -69,7 +69,7 @@ convert sigma /path/to/sigma-rule.yml
 
 That command reads files in the appliance process's filesystem and writes a
 native YAML conversion result. It is not a top-level binary subcommand, and its
-native YAML output is **not** accepted by `/ids/import`. For programmatic use,
+native YAML output is **not** accepted by `/api/v1/ids/import`. For programmatic use,
 `pkg/cp/ids.ConvertSigmaYAML` returns a normalized rule and
 `WriteConvertedSigma` writes the CLI's YAML bundle.
 
@@ -139,8 +139,8 @@ Sigma and YARA use the same preserve-or-refuse policy:
   Protocol and kind quick filters use `containd.proto.<proto>` and
   `containd.kind.<kind>` tags, which containd's importer enforces. These tags
   **do not enforce filters in arbitrary third-party Sigma consumers**.
-  Severity, `logsource` and preserved `sigma.*` metadata are retained; current
-  quick filters replace stale protocol/kind metadata tags.
+  Severity, `logsource`, status, references and tags are retained; current quick
+  filters replace stale protocol/kind metadata tags.
   Byte matches, network address/port quick filters, fields outside the decoder
   vocabulary, unmapped operations, and value shapes that would import
   differently are refused. A native empty `when` is also refused: the importer
@@ -151,8 +151,7 @@ Sigma and YARA use the same preserve-or-refuse policy:
   UTF-16 imports are re-encoded to independent UTF-8 documents: later source
   slices lack the stream's encoding BOM, and non-UTF-8 bytes cannot survive
   native rules' JSON storage.
-  A single retained UTF-16 source can be exported alone, but is refused in a
-  multi-rule export that would mix encodings.
+  Exports of these imports therefore use UTF-8, not the original UTF-16 bytes.
   Original source is returned unchanged while its matching predicates and
   severity agree with the normalized rule. Edited rules use the native inverse
   when their cached source is stale or corrupt; predicates without an inverse

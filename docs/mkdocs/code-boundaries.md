@@ -215,7 +215,7 @@ Current supporting modules:
 - `ui/app/firewall/firewall-utils.ts`
 - `ui/app/firewall/firewall-rule-forms.tsx`
 - `ui/app/firewall/firewall-dpi-config.tsx`
-- `ui/app/routing/routing-utils.ts`
+- `ui/lib/wan-gateway.ts`
 - `ui/app/routing/routing-sections.tsx`
 - `ui/app/vpn/vpn-openvpn-editor.tsx`
 - `ui/app/config/config-block-explorer.tsx`

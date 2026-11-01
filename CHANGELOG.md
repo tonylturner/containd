@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Document established-session re-evaluation after policy changes and why a
+  blocked connection can remain visible in Sessions until conntrack timeout.
 - Serialize telemetry event IDs as decimal JSON strings across API, UI, CLI,
   previews and syslog; audit record IDs remain numeric.
 - Forward engine and management syslog streams independently, retry failed
@@ -31,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep zone security scores, topology conduit selection and staged zone updates
+  separate for names that differ by case or punctuation.
 - Make admin MFA disable atomic with the required account's new enrollment grace
   period, so a failed operation leaves the account unchanged.
 
