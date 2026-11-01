@@ -20,6 +20,20 @@ shows the intentionally disabled mode, which updates the engine's in-memory
 snapshot without installing firewall rules. Interface and service configuration
 can still change.
 
+Stored-state replay, rollback and commit confirmation tolerate service-only
+faults by applying an in-memory effective configuration. They still refuse
+invalid firewall, scan-selection or management-path policy. The stored document
+is preserved, including quarantined service settings.
+
+Candidate saves, imports and commits reject new service faults. They permit a
+fault only when the running document already faults that service and its section
+is unchanged. This lets an operator repair firewall policy without first fixing
+an unrelated service. New defaults and factory resets require fault-free
+configuration. Validation previews use the same write rule. Schema migrations
+preserve historical service content; boot repairs may change interface bindings
+and management defaults but may not change service sections.
+See [Service faults](services.md#service-faults) for status and protection effects.
+
 ## Schema
 
 The current schema is `0.1.10`. Back up before upgrading: 0.1.36 and earlier
@@ -345,6 +359,67 @@ signature <id> protocol "<name>" is not supported; supported: modbus, dnp3, iec1
 The saved configuration is not silently rewritten beyond the unchanged
 built-in IDS rules above. Correct other unsupported references and commit the
 valid configuration to leave management recovery.
+
+## Management HTTPS identity
+
+When `system.mgmt.tlsCertFile` and `tlsKeyFile` are empty or resolve to the
+legacy defaults `/data/tls/server.crt` and `/data/tls/server.key`, containd owns
+one bundle: `/data/tls/server.pem` (mode 0600). The example above selects this
+managed mode; no new configuration field is needed. The bundle contains the
+certificate chain, leaf first, followed by its matching private key.
+
+At first start without a bundle, containd imports a valid default-path legacy
+pair. Missing or mismatched legacy files cause a fresh self-signed bundle to be
+generated, with a log message. The legacy files remain untouched for downgrade.
+Once a bundle exists, legacy files are ignored; an unreadable or invalid bundle
+refuses HTTPS rather than overwriting the identity. Factory reset preserves both
+TLS bytes and the saved managed/external choice.
+
+Admins replace the managed identity with
+`POST /api/v1/system/tls/cert`, sending `{"certPEM":"...","keyPEM":"..."}`.
+The pair is validated and published with one durable atomic rename; the listener
+reads the bundle once at each reload. Failures before rename preserve the old
+bundle. A failure to sync the directory after rename returns HTTP 500 with
+**commit uncertain**: the new bundle is visible but its crash durability is not
+confirmed. Inspect status before retrying; containd does not roll it back.
+A successful upload reports `updated` when the bound HTTPS listener serves the
+bundle, or `stored` with a warning when it takes effect at the next start.
+Uploads never change saved paths.
+
+Handshakes check each file's device/inode, size and modification time. Unchanged
+files are not reread or reparsed, including invalid replacements: status keeps
+the remembered error and last-good public leaf until another identity change.
+An in-progress reload does not block other handshakes from using the last-good
+snapshot. Use atomic replacement for rotation; edits preserving all of those
+metadata fields are not detected.
+
+`CONTAIND_TLS_CERT_FILE` and `CONTAIND_TLS_KEY_FILE` override the corresponding
+saved paths independently. Any resolved nondefault path selects **external,
+read-only mode**, even under `/data`: containd never writes, chmods or generates
+these files. Upload returns HTTP 409 naming the override and how to return to
+managed mode. Unset both environment overrides and clear both saved paths (or
+restore their legacy defaults) to enable managed uploads again.
+
+For atomic external rotation, set **both paths to the same PEM bundle**. Mount
+its containing directory read-only into containd, not the replaceable file inode,
+and have the operator replace the bundle atomically in that directory. Separate
+certificate and key files are also accepted, but cannot guarantee atomic
+rotation: a mismatched or unreadable replacement keeps the last-good pair in
+memory. With no valid pair at start, HTTPS is disabled and the reason is logged;
+containd never self-signs external paths. Changing source paths requires restart.
+
+`GET /api/v1/system/tls` describes configured and bound files (both file fields
+name `server.pem` in managed mode). Its always-present boolean `managed` uses
+the upload policy's identity-mode predicate for the next-start configuration
+and environment, not the bound listener; `false` means external read-only mode.
+Do not infer mode from paths: explicitly selecting `server.pem` as both source
+paths is external mode even at `/data/tls/server.pem`.
+Served certificate metadata, SSH/console
+pins and the local CLI runtime record use the listener's validated public-leaf
+snapshot, not an independently read certificate. `reloadError` reports an invalid
+rotation while the last-good identity remains served. Private keys are never
+returned. A pin/rotation race fails verification; retry the operation rather than
+disabling certificate verification.
 
 ## Additional CA bundle
 

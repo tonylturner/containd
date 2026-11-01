@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { api, type ServiceMeter, type ServicesStatus } from "../../../lib/api";
 import { staticAssetURL } from "../../../lib/api-core";
+import { ServiceFaultBanner } from "../../../components/ServiceFaultBanner";
 import { Shell } from "../../../components/Shell";
 import { Card as BaseCard } from "../../../components/Card";
 import { Skeleton } from "../../../components/Skeleton";
@@ -72,9 +73,12 @@ export default function ServicesOverviewPage() {
     return () => window.clearInterval(t);
   }, [autoRefresh, refresh]);
 
-  const dnsRunning = status?.dns?.running;
-  const dhcpEnabled = status?.dhcp?.enabled;
-  const vpnActive = status?.vpn?.wireguard_enabled || status?.vpn?.openvpn_running;
+  const dnsFaulted = status?.dns?.state === "faulted";
+  const dhcpFaulted = status?.dhcp?.state === "faulted";
+  const vpnFaulted = status?.wireguard?.state === "faulted" || status?.openvpn?.state === "faulted";
+  const dnsRunning = !dnsFaulted && status?.dns?.running;
+  const dhcpEnabled = !dhcpFaulted && status?.dhcp?.enabled;
+  const vpnActive = !vpnFaulted && (status?.vpn?.wireguard_enabled || status?.vpn?.openvpn_running);
   const av = status?.av;
 
   return (
@@ -100,6 +104,7 @@ export default function ServicesOverviewPage() {
         </div>
       }
     >
+      <ServiceFaultBanner status={status} loading={loading} repairLinks />
       {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
@@ -121,20 +126,20 @@ export default function ServicesOverviewPage() {
         <div className="mt-3 grid gap-2 md:grid-cols-3">
           <div className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2 text-sm">
             <span className="text-(--text)">DNS</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsRunning ? "bg-emerald-400/20 text-emerald-400" : "text-(--text)"}`}>
-              {dnsRunning ? "running" : "stopped"}
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dnsFaulted ? "text-amber" : dnsRunning ? "bg-emerald-400/20 text-emerald-400" : "text-(--text)"}`}>
+              {!status ? "unavailable" : dnsFaulted ? "faulted" : dnsRunning ? "running" : "stopped"}
             </span>
           </div>
           <div className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2 text-sm">
             <span className="text-(--text)">DHCP</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dhcpEnabled ? "bg-emerald-400/20 text-emerald-400" : "text-(--text)"}`}>
-              {dhcpEnabled ? "enabled" : "off"}
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${dhcpFaulted ? "text-amber" : dhcpEnabled ? "bg-emerald-400/20 text-emerald-400" : "text-(--text)"}`}>
+              {!status ? "unavailable" : dhcpFaulted ? "faulted" : dhcpEnabled ? "enabled" : "off"}
             </span>
           </div>
           <div className="flex items-center justify-between rounded-xs border bg-(--surface) px-3 py-2 text-sm">
             <span className="text-(--text)">VPN</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${vpnActive ? "bg-emerald-400/20 text-emerald-400" : "text-(--text)"}`}>
-              {vpnActive ? "active" : "off"}
+            <span className={`rounded-full px-2 py-0.5 text-[11px] ${vpnFaulted ? "text-amber" : vpnActive ? "bg-emerald-400/20 text-emerald-400" : "text-(--text)"}`}>
+              {!status ? "unavailable" : vpnFaulted ? "faulted" : vpnActive ? "active" : "off"}
             </span>
           </div>
         </div>
@@ -347,9 +352,6 @@ export default function ServicesOverviewPage() {
           <div className="flex items-center gap-2 text-xs text-(--text)">
             <Image src={staticAssetURL("/icons/wireguard.svg")} alt="" width={16} height={16} className="h-4 w-4" />
             <Image src={staticAssetURL("/icons/openvpn.svg")} alt="" width={16} height={16} className="h-4 w-4" />
-            <span>WireGuard + OpenVPN</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-(--text)">
             <span>WireGuard + OpenVPN</span>
             <InfoTip label="Secure remote access tunnels (WireGuard preferred; OpenVPN optional)." />
           </div>

@@ -136,7 +136,7 @@ func (m *AVManager) confirmReload(ctx context.Context, p *pendingReload, cfg con
 			}
 			m.reloadError = ""
 			m.reloadAttempt = 0
-			m.backendReady = true
+			m.refreshBackendLocked()
 		}
 	}
 	gen := m.defsGen

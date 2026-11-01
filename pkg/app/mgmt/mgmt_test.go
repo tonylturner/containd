@@ -248,11 +248,11 @@ func TestStoredBadICSAddressBootsIntoRecovery(t *testing.T) {
 }
 
 // The certificate and key recorded for the console and SSH are the files the
-// HTTPS listener serves: environment overrides, generated when missing,
+// HTTPS listener serves: read-only environment overrides,
 // rather than the saved settings; none when HTTPS is not served.
 func TestServedCertificateIsTheListenerCertificate(t *testing.T) {
 	dir := t.TempDir()
-	envCert, envKey := filepath.Join(dir, "env.crt"), filepath.Join(dir, "env.key")
+	envCert, envKey, _ := sshTestKeyPair(t, dir, "env")
 	t.Setenv("CONTAIND_TLS_CERT_FILE", envCert)
 	t.Setenv("CONTAIND_TLS_KEY_FILE", envKey)
 	cfg := config.DefaultConfig()
@@ -267,7 +267,7 @@ func TestServedCertificateIsTheListenerCertificate(t *testing.T) {
 		t.Fatalf("served = %+v, want %q and %q", got, envCert, envKey)
 	}
 	if _, err := os.Stat(envCert); err != nil {
-		t.Fatalf("served certificate not generated: %v", err)
+		t.Fatalf("served certificate missing: %v", err)
 	}
 	cfg.System.Mgmt.EnableHTTPS = boolPtr(false)
 	cfg.System.Mgmt.EnableHTTP = boolPtr(true)

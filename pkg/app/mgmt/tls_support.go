@@ -7,19 +7,15 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"errors"
 	"math/big"
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/common/mgmttls"
@@ -147,76 +143,34 @@ func redirectToHTTPSHandler(httpsAddr string, next http.Handler) http.Handler {
 	})
 }
 
-type certReloader struct {
-	certFile string
-	keyFile  string
-
-	mu      sync.Mutex
-	cert    *tls.Certificate
-	certM   time.Time
-	keyM    time.Time
-	lastErr error
-}
+// certReloader shares its immutable identity with status and loopback pins.
+type certReloader = mgmttls.Loader
 
 func newCertReloader(certFile, keyFile string) *certReloader {
-	return &certReloader{certFile: certFile, keyFile: keyFile}
+	return mgmttls.NewLoader(certFile, keyFile)
 }
 
-func (r *certReloader) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	cm := modTime(r.certFile)
-	km := modTime(r.keyFile)
-	if r.cert == nil || !cm.Equal(r.certM) || !km.Equal(r.keyM) {
-		c, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
-		if err != nil {
-			r.lastErr = err
-			return nil, err
-		}
-		r.cert = &c
-		r.certM = cm
-		r.keyM = km
-		r.lastErr = nil
+func ensureTLSIdentity(cfg *config.Config, extraIPs []string, logf func(string, ...any)) (string, string, error) {
+	cert, key := mgmttls.IdentityFiles(cfg)
+	if mgmttls.Managed(cfg) {
+		err := mgmttls.EnsureManaged(cert, mgmttls.DefaultCertFile, mgmttls.DefaultKeyFile,
+			func() ([]byte, []byte, error) { return selfSignedTLS(extraIPs) }, logf)
+		return cert, key, err
 	}
-	return r.cert, nil
+	_, err := mgmttls.ReadPair(cert, key)
+	return cert, key, err
 }
 
-func modTime(path string) time.Time {
-	if path == "" {
-		return time.Time{}
-	}
-	if st, err := os.Stat(path); err == nil {
-		return st.ModTime()
-	}
-	return time.Time{}
-}
-
-func ensureSelfSignedTLSFiles(certFile, keyFile string, extraIPs []string) (string, string, error) {
-	if certFile == "" || keyFile == "" {
-		return "", "", errors.New("tls cert/key file required")
-	}
-	if _, err := os.Stat(certFile); err == nil {
-		if _, err := os.Stat(keyFile); err == nil {
-			return certFile, keyFile, nil
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(certFile), 0o755); err != nil {
-		return "", "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(keyFile), 0o755); err != nil {
-		return "", "", err
-	}
-
+func selfSignedTLS(extraIPs []string) ([]byte, []byte, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return "", "", err
+		return nil, nil, err
 	}
 
 	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serial, err := rand.Int(rand.Reader, serialLimit)
 	if err != nil {
-		return "", "", err
+		return nil, nil, err
 	}
 
 	now := time.Now().UTC()
@@ -244,20 +198,14 @@ func ensureSelfSignedTLSFiles(certFile, keyFile string, extraIPs []string) (stri
 
 	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
 	if err != nil {
-		return "", "", err
+		return nil, nil, err
 	}
 	certOut := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	keyDER, err := x509.MarshalECPrivateKey(priv)
 	if err != nil {
-		return "", "", err
+		return nil, nil, err
 	}
 	keyOut := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 
-	if err := os.WriteFile(certFile, certOut, 0o644); err != nil {
-		return "", "", err
-	}
-	if err := os.WriteFile(keyFile, keyOut, 0o600); err != nil {
-		return "", "", err
-	}
-	return certFile, keyFile, nil
+	return certOut, keyOut, nil
 }

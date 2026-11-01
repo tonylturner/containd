@@ -45,15 +45,13 @@ type ValidationError struct{ Err error }
 func (e *ValidationError) Error() string { return e.Err.Error() }
 func (e *ValidationError) Unwrap() error { return e.Err }
 
-// ValidateConfig is also used by API previews and replay preflight.
+// ValidateConfig checks strict new content, including defaults and reset.
+// Stored-state decisions use EffectiveForStore instead.
 func (s *SQLiteStore) ValidateConfig(cfg *Config) error {
-	if err := ValidateManagementReservation(cfg, s.options.reservation); err != nil {
+	if err := UpgradeInPlace(cfg); err != nil {
 		return &ValidationError{err}
 	}
-	if cfg == nil {
-		return &ValidationError{errors.New("config is nil")}
-	}
-	if err := cfg.Validate(); err != nil {
+	if err := CheckWrite(nil, cfg, s.options.reservation); err != nil {
 		return &ValidationError{err}
 	}
 	return nil
@@ -108,6 +106,27 @@ func (s *SQLiteStore) timedRollbackLocked(ctx context.Context) (bool, error) {
 func ReservationForStore(store Store) *mgmtpath.Reservation {
 	if authority, ok := store.(interface{ ManagementReservation() *mgmtpath.Reservation }); ok {
 		return authority.ManagementReservation()
+	}
+	return nil
+}
+
+// EffectiveForStore shares immutable authority without acquiring the store lock.
+func EffectiveForStore(store Store, cfg *Config) (*Config, []ServiceConfigError, error) {
+	return Effective(cfg, ReservationForStore(store))
+}
+
+func (s *SQLiteStore) checkWrite(baseline, next *Config) error {
+	if err := UpgradeInPlace(next); err != nil {
+		return &ValidationError{err}
+	}
+	if err := CheckWrite(baseline, next, s.options.reservation); err != nil {
+		return &ValidationError{err}
+	}
+	return nil
+}
+func (s *SQLiteStore) checkStored(cfg *Config) error {
+	if _, _, err := Effective(cfg, s.options.reservation); err != nil {
+		return &ValidationError{err}
 	}
 	return nil
 }
