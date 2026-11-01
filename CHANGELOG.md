@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Firewall rule reorder arrows now sit beside each order number, with keyboard
   focus retained after moves. A read-only Default row always shows the
-  candidate policy's fallback action, warning when unmatched traffic is allowed
-  and showing unknown when that action cannot be read coherently.
+  candidate policy's fallback action for traffic no allow, deny or reject rule
+  decides. It warns when that action is ALLOW and shows unknown when the action
+  cannot be read coherently.
 - Operator-facing text uses plain language instead of backend terms such as
   NFQUEUE, nftables, conntrack, engine and daemon names. Exact values, IDs,
   paths and raw diagnostics stay available under technical details. Button,
@@ -33,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The interfaces page no longer names another product in its management
   access notice.
 - Unreadable ICS inspection settings stay unknown instead of looking disabled.
+- Collapsed sections open automatically when they hold saved non-default
+  values or settings the selected mode needs (ICS selectors, IEC 104 options,
+  WireGuard peers, ICAP and local scanner settings, capture options). Fault
+  causes and reported errors always show without expanding.
+- Audit log rows show source, action and result inline again.
+- Syslog shows the last forwarding check as "Last check"; only the
+  per-forwarder "Last sent" claims delivery.
+- Strict protocol parsing describes unrecognized messages as violations rather
+  than promising a block in monitor mode.
 
 ## [0.1.37] - 2026-11-01
 
