@@ -22,6 +22,7 @@ test("server-owned commit-confirmed reminder follows navigation and clears only 
   await page.goto("/config/");
   await expect(reminder).toHaveText(`Commit-confirmed pending: confirm before ${deadline.slice(11, 19)}`);
   await expect(reminder).toHaveAttribute("href", "/config/?tab=diff");
+  await expect(page.getByRole("link", { name: "Review diff", exact: true })).toHaveCount(0);
   await expect(page.getByText("Uncommitted changes — not active until you commit.", { exact: true })).toHaveCount(0);
   await page.goto("/zones/");
   await expect(reminder).toBeVisible();
