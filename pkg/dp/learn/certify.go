@@ -150,6 +150,7 @@ func loadParents(ctx context.Context, store evidence.Store, refs []evidence.Evid
 		}
 		found := map[string]evidence.Observation{}
 		excluded[ds.ID] = map[string]evidence.WithheldReason{}
+		lifetimes := map[string]connectionLifetime{}
 		cursor := ""
 		for {
 			page, err := store.ListObservations(ctx, ds.ID, evidence.PageRequest{Limit: 200, Cursor: cursor})
@@ -159,12 +160,14 @@ func loadParents(ctx context.Context, store evidence.Store, refs []evidence.Evid
 			for _, o := range page.Items {
 				found[o.ID] = o
 				recordConnectionExclusion(excluded[ds.ID], o)
+				recordLifetime(lifetimes, o)
 			}
 			cursor = page.NextCursor
 			if cursor == "" {
 				break
 			}
 		}
+		excludeLoss(ds, lifetimes, excluded[ds.ID])
 		byDataset[ds.ID] = found
 	}
 	out := make([]evidence.Observation, 0, len(refs))

@@ -4,6 +4,7 @@ package learn
 
 import (
 	"context"
+	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
@@ -51,20 +52,51 @@ func connectionExclusion(o evidence.Observation) evidence.WithheldReason {
 // Scan the entire sealed dataset before grouping any relations. The decision
 // belongs to the connection incarnation, not a protocol, direction, page or
 // message timestamp; confirmation may follow every usable legacy parent.
-func connectionExclusions(ctx context.Context, store evidence.Store, dataset string) (map[string]evidence.WithheldReason, error) {
+func connectionExclusions(ctx context.Context, store evidence.Store, dataset evidence.Dataset) (map[string]evidence.WithheldReason, error) {
 	excluded := map[string]evidence.WithheldReason{}
+	lifetimes := map[string]connectionLifetime{}
 	cursor := ""
 	for {
-		page, err := store.ListObservations(ctx, dataset, evidence.PageRequest{Limit: 200, Cursor: cursor})
+		page, err := store.ListObservations(ctx, dataset.ID, evidence.PageRequest{Limit: 200, Cursor: cursor})
 		if err != nil {
 			return nil, err
 		}
 		for _, o := range page.Items {
 			recordConnectionExclusion(excluded, o)
+			recordLifetime(lifetimes, o)
 		}
 		cursor = page.NextCursor
 		if cursor == "" {
+			excludeLoss(dataset, lifetimes, excluded)
 			return excluded, nil
+		}
+	}
+}
+
+type connectionLifetime struct {
+	first, last time.Time
+	unknown     bool
+}
+
+func recordLifetime(lifetimes map[string]connectionLifetime, o evidence.Observation) {
+	life, found := lifetimes[o.ConnectionID]
+	life.unknown = life.unknown || o.CapturedAt.IsZero()
+	if !found || o.CapturedAt.Before(life.first) {
+		life.first = o.CapturedAt
+	}
+	if !found || o.CapturedAt.After(life.last) {
+		life.last = o.CapturedAt
+	}
+	lifetimes[o.ConnectionID] = life
+}
+
+func excludeLoss(ds evidence.Dataset, lifetimes map[string]connectionLifetime, excluded map[string]evidence.WithheldReason) {
+	for connection, life := range lifetimes {
+		if life.unknown {
+			life.first = time.Time{}
+		}
+		if ds.LossTouches(connection, life.first, life.last) {
+			excluded[connection] = evidence.WithheldCollectionLoss
 		}
 	}
 }

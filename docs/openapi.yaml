@@ -977,6 +977,18 @@ components:
           nullable: true
           type: array
           maxItems: 32
+        losses:
+          type: array
+          description: Durable loss scope. Known connections are excluded in full; otherwise inclusive capture-time intervals exclude overlapping observed connection lifetimes. Missing scope and legacy gaps exclude the entire dataset.
+          items:
+            type: object
+            additionalProperties: false
+            required: [code]
+            properties:
+              code: {type: string}
+              connectionId: {type: string}
+              start: {type: string, format: date-time}
+              end: {type: string, format: date-time}
         id:
           type: string
         profileFingerprint:
@@ -4827,7 +4839,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       description: Imports normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly
         generate suggestions after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import
-        has bounded flow and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
+        has bounded flow and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; interval-only loss excludes overlapping observed connection lifetimes. Loss without either identity or interval, including legacy gaps, excludes the entire dataset; connections fully outside localized loss remain eligible.
   /pcap/analyze/{name}:
     post:
       summary: Analyze a previously uploaded PCAP by name (admin)
@@ -4879,7 +4891,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       description: Imports normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly
         generate suggestions after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import
-        has bounded flow and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
+        has bounded flow and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; interval-only loss excludes overlapping observed connection lifetimes. Loss without either identity or interval, including legacy gaps, excludes the entire dataset; connections fully outside localized loss remain eligible.
 
   # ── ICS Rule Templates ──────────────────────────────────────────
   /templates/ics:
@@ -7855,7 +7867,7 @@ x-internal-paths:
       description: Engine-internal trusted management boundary; never exposed as a public management route. Imports
         normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly generate suggestions
         after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import has bounded flow
-        and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
+        and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; interval-only loss excludes overlapping observed connection lifetimes. Loss without either identity or interval, including legacy gaps, excludes the entire dataset; connections fully outside localized loss remain eligible.
       security: []
   /internal/pcap/analyze/{name}:
     post:
@@ -7909,7 +7921,7 @@ x-internal-paths:
       description: Engine-internal trusted management boundary; never exposed as a public management route. Imports
         normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly generate suggestions
         after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import has bounded flow
-        and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
+        and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; interval-only loss excludes overlapping observed connection lifetimes. Loss without either identity or interval, including legacy gaps, excludes the entire dataset; connections fully outside localized loss remain eligible.
       security: []
   /internal/learn/watches:
     post:

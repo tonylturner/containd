@@ -73,13 +73,7 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 		if k.Proto == 17 {
 			transport = "udp"
 		}
-		connection := ev.FlowID
-		if c := state.Connection.Load(); c != nil && c.Key != "" {
-			connection = c.Key
-		}
-		if connection == "" {
-			connection = wire.Hash()
-		}
+		connection := EvidenceConnectionID(state, ev)
 		*serial++
 		parentID := strconv.FormatUint(*serial, 10)
 		apdu, _ := eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
@@ -237,6 +231,23 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 		}
 	}
 	return parents, nil
+}
+
+// EvidenceConnectionID is shared with the collector's rejection path so dropped
+// events exclude exactly the identity Normalize would have retained.
+func EvidenceConnectionID(state *flow.State, ev dpi.Event) string {
+	if state != nil {
+		if c := state.Connection.Load(); c != nil && c.Key != "" {
+			return c.Key
+		}
+	}
+	if ev.FlowID != "" {
+		return ev.FlowID
+	}
+	if state != nil {
+		return state.Key.Hash()
+	}
+	return ""
 }
 
 func tuple(k flow.Key) evidence.Tuple {

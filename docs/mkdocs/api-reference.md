@@ -395,8 +395,14 @@ are used when available, otherwise the flow's orientation hint.
 services remain observation-only. `stats.truncated` indicates a cut-short packet
 or partial final record; `stats.displayTruncated` means only the display sample
 was capped. Check `dataset.gaps` separately for collection and admission loss.
-Gaps appear in suggestion limitations; certification covers retained complete
-parents, not missing traffic.
+Recorded loss excludes every connection it could have touched from generation
+and direct certification, with durable `collection_loss` withheld counts.
+Known-connection loss excludes that incarnation; interval-only loss excludes
+connections whose observed lifetimes overlap it. Loss without either identity
+or interval, including legacy unlocalized gaps, excludes the entire dataset.
+Connections fully outside localized loss remain eligible. Dataset `losses`
+retains each loss code with its connection identity or inclusive `start`/`end`
+capture-time interval when known; `gaps` retains the summary codes.
 
 See [Content identification](ics-dpi.md#content-identification) for protocol,
 capture-mode, timing and coverage limits.

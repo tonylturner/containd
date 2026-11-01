@@ -54,6 +54,7 @@ func (s *Store) create(ctx context.Context, tx *sql.Tx, d evidence.Dataset) (evi
 	d.SchemaVersion, d.CreatedAt = evidence.SchemaVersion, s.now().UTC()
 	d.ExpiresAt, d.Records, d.Bytes = d.CreatedAt.Add(evidence.Retention), 0, 0
 	d.SealedAt, d.Gaps = nil, []string{}
+	d.Losses = nil
 	d.State = evidence.DatasetImporting
 	if d.Source == evidence.SourceLive {
 		d.State = evidence.DatasetCollecting
@@ -227,9 +228,11 @@ func (s *Store) stop(ctx context.Context, tx *sql.Tx, w evidence.Watch, reason s
 		return w, err
 	}
 	if reason == "restart" {
-		d.Gaps = appendUnique(d.Gaps, "watch_restart")
+		// No durable collector checkpoint exists. The entire lease up to
+		// recovery is the narrowest safe crash-loss interval.
+		d.RecordLoss(evidence.CollectionLoss{Code: "watch_restart", Start: w.StartedAt, End: now})
 	} else if reason == "policy_changed" {
-		d.Gaps = appendUnique(d.Gaps, "policy_changed")
+		d.RecordLoss(evidence.CollectionLoss{Code: "policy_changed", Start: w.StartedAt, End: now})
 	}
 	return w, s.seal(ctx, tx, d)
 }
@@ -308,7 +311,7 @@ func (s *Store) recover(ctx context.Context) error {
 			return err
 		}
 		for _, d := range datasets {
-			d.Gaps = appendUnique(d.Gaps, "interrupted_import")
+			d.RecordLoss(evidence.CollectionLoss{Code: "interrupted_import"})
 			if err := s.seal(ctx, tx, d); err != nil {
 				return err
 			}

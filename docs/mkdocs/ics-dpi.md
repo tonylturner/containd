@@ -979,9 +979,14 @@ override with `CONTAIND_EVIDENCE_DB`) across restarts and expires after seven da
 by the store clock. Ceilings are 32 datasets, 100,000 records and 128 MiB of
 normalized evidence; each parent is limited to 256 KiB and 4,096 objects. Loss,
 rejection, eviction, expiry and withheld reasons are exposed, not silently
-interpreted as complete coverage. Dataset gaps are collection limitations, not a
-blanket certification blocker: Generate can certify retained complete parents;
-the backend decides which parents are eligible. Deletion or eviction invalidates
+interpreted as complete coverage. Recorded collection or admission loss excludes
+every connection it could have touched from generation and direct certification.
+Known-connection loss excludes that incarnation; interval-only loss excludes
+connections whose observed lifetimes overlap the interval. Legacy gaps and loss
+with neither identity nor interval exclude the entire dataset. Excluded retained
+parents count toward the durable `collection_loss` withheld reason. Connections
+fully outside localized loss remain eligible. Restart loss spans the entire watch
+up to recovery because there is no durable collector checkpoint. Deletion or eviction invalidates
 dependent proofs for new stage requests.
 Resolved staging snapshots and completed receipts count toward the storage
 budget and are purged when their retry window expires. Dataset review shows the
@@ -1160,7 +1165,9 @@ Only classic PCAP is supported, with a 64 MiB upload ceiling; PCAPng is rejected
 statistics and capture duration. `stats.truncated` identifies partial or
 snap-length-cut records. `stats.displayTruncated` means the display sample was
 capped, not that normalized evidence was sampled. Inspect dataset gaps separately:
-certification covers only retained complete parents, not lost observations.
+collection and admission loss exclude every connection they could have touched.
+Loss with neither a connection identity nor a time interval excludes the entire
+dataset, including legacy unlocalized gaps.
 
 The internal engine `/internal/pcap/analyze` endpoints use the same import
 contract, not a second policy generator. Imports do not update live inventory,

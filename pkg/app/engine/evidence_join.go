@@ -35,12 +35,11 @@ func newEvidenceJoin(w *evidenceWatch, ctx context.Context) *evidenceJoin {
 	return &evidenceJoin{watch: w, ctx: ctx, entries: map[string]*pendingEvidence{}}
 }
 func (j *evidenceJoin) write(lease *watchLease, parents []evidence.Observation, collectedAt time.Time) {
-	lost := lease.dropped.Swap(0)
-	gaps := []string{}
-	if lost > 0 {
-		gaps = append(gaps, "watch_collection_loss")
+	if err := j.watch.flushLosses(j.ctx, lease); err != nil {
+		j.watch.fail(err)
+		return
 	}
-	_, err := j.watch.store.Ingest(j.ctx, evidence.IngestRequest{DatasetID: lease.dataset.ID, Parents: parents, Gaps: gaps, LostBatches: lost, CollectedAt: collectedAt})
+	_, err := j.watch.store.Ingest(j.ctx, evidence.IngestRequest{DatasetID: lease.dataset.ID, Parents: parents, CollectedAt: collectedAt})
 	j.watch.fail(err)
 }
 func (j *evidenceJoin) finish(key string) {

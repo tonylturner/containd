@@ -14,7 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-const GeneratorVersion = "exact-3"
+const GeneratorVersion = "exact-4"
 
 // EvaluatorVersion follows the runtime ordered predicate contract; retained
 // proofs from another evaluator must be recertified, never reinterpreted.
@@ -46,7 +46,7 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 	if ds.State != evidence.DatasetSealed {
 		return result, ErrNotCertified
 	}
-	excluded, err := connectionExclusions(ctx, g.Store, ds.ID)
+	excluded, err := connectionExclusions(ctx, g.Store, ds)
 	if err != nil {
 		return result, err
 	}
@@ -130,7 +130,7 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 		gaps := append([]string(nil), ds.Gaps...)
 		sort.Strings(gaps)
 		for _, gap := range gaps {
-			content.Limits = append(content.Limits, "Dataset collection limit: "+gap+"; proof covers retained complete parents only.")
+			content.Limits = append(content.Limits, "Dataset collection limit: "+gap+"; all connections that recorded loss could have touched are excluded. Unlocalized loss excludes the entire dataset.")
 		}
 		draft, err := g.Store.PutDraft(ctx, Suggestion{DatasetID: ds.ID, Content: content})
 		if err != nil {

@@ -177,6 +177,11 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 			return result, ErrBudget
 		}
 	}
+	for _, loss := range req.Losses {
+		if loss.Code == "" || len(loss.Code) > 128 || len(loss.ConnectionID) > 4096 {
+			return result, ErrBudget
+		}
+	}
 	err = s.write(ctx, func(tx *sql.Tx) error {
 		d, err := s.dataset(ctx, tx, req.DatasetID)
 		if err != nil {
@@ -200,7 +205,19 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 			deadline = w.Deadline.UnixNano()
 		}
 		for _, gap := range req.Gaps {
-			d.Gaps = appendUnique(d.Gaps, gap)
+			localized := false
+			for _, loss := range req.Losses {
+				localized = localized || loss.Code == gap
+			}
+			if !localized {
+				d.RecordLoss(evidence.CollectionLoss{Code: gap})
+			}
+		}
+		for _, loss := range req.Losses {
+			d.RecordLoss(loss)
+		}
+		if req.LostBatches > 0 && len(req.Gaps) == 0 && len(req.Losses) == 0 {
+			d.RecordLoss(evidence.CollectionLoss{Code: "collection_loss"})
 		}
 		if len(d.Gaps) > 32 {
 			return ErrBudget
@@ -270,7 +287,7 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 				c.RejectedParents++
 				result.Reasons[evidence.WithheldBudget]++
 				c.Withheld[evidence.WithheldBudget]++
-				d.Gaps = appendUnique(d.Gaps, "budget_exceeded")
+				d.RecordLoss(evidence.CollectionLoss{Code: "budget_exceeded", ConnectionID: parent.ConnectionID})
 				continue
 			}
 			if err := s.fit(ctx, tx, d.ID, uint64(len(b))+2048, 1, 0); err != nil {
@@ -281,7 +298,7 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 				c.RejectedParents++
 				result.Reasons[evidence.WithheldBudget]++
 				c.Withheld[evidence.WithheldBudget]++
-				d.Gaps = appendUnique(d.Gaps, "budget_exceeded")
+				d.RecordLoss(evidence.CollectionLoss{Code: "budget_exceeded", ConnectionID: parent.ConnectionID})
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO parents(id,dataset,expires,data) VALUES(?,?,?,?)`, parent.ID, d.ID, parent.IngestedAt.Add(evidence.Retention).UnixNano(), b); err != nil {
@@ -336,15 +353,6 @@ func childCount(o evidence.Observation) uint32 {
 		return 4097
 	}
 	return uint32(count)
-}
-
-func appendUnique(items []string, value string) []string {
-	for _, v := range items {
-		if v == value {
-			return items
-		}
-	}
-	return append(items, value)
 }
 
 // CountWithheld is idempotent per parent, generator version and reason.

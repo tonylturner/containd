@@ -204,7 +204,7 @@ func TestWatchDeadlineRejectsLateParentsWithoutVoidingDataset(t *testing.T) {
 		t.Fatal(err)
 	}
 	ds, err = s.GetDataset(ctx, ds.ID)
-	if err != nil || ds.Records != 0 || len(ds.Gaps) != 0 {
+	if err != nil || ds.Records != 0 || len(ds.Gaps) != 1 || ds.Gaps[0] != "collection_loss" {
 		t.Fatal("late parent loss hidden", err)
 	}
 	counts, err := s.Counters(ctx)

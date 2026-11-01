@@ -23,7 +23,9 @@ const decoderVersion = "ics-1"
 type watchLease struct {
 	dataset  evidence.Dataset
 	watch    evidence.Watch
-	dropped  atomic.Uint64
+	lossMu   sync.Mutex
+	dropped  uint64
+	losses   map[evidence.CollectionLoss]bool
 	inflight atomic.Int64
 	changed  atomic.Bool
 	token    engine.InspectionToken
@@ -113,7 +115,7 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 	}
 	owned, ok := ownEvidenceEvents(events)
 	if !ok {
-		lease.dropped.Add(1)
+		lease.drop(state, events)
 		return
 	}
 	var snapshot *flow.State
@@ -129,7 +131,7 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 	select {
 	case w.queue <- evidenceBatch{lease: lease, state: snapshot, events: owned, collectedAt: collectedAt}:
 	default:
-		lease.dropped.Add(1)
+		lease.drop(state, events)
 	}
 }
 func (w *evidenceWatch) run(ctx context.Context) {
@@ -150,13 +152,13 @@ func (w *evidenceWatch) run(ctx context.Context) {
 					serial := w.serial.Add(uint64(len(batch.events))) - uint64(len(batch.events))
 					parents, err := learn.Normalize(batch.lease.dataset, batch.state, batch.events, &serial)
 					if err != nil {
-						batch.lease.dropped.Add(1)
+						batch.lease.drop(batch.state, batch.events)
 						continue
 					}
 					batch.parents = parents
 					data, err := json.Marshal(parents)
 					if err != nil || len(parents) > 128 || len(data) > (1<<20)-4096 {
-						batch.lease.dropped.Add(1)
+						batch.lease.drop(batch.state, batch.events)
 						continue
 					}
 				}
@@ -169,6 +171,9 @@ func (w *evidenceWatch) run(ctx context.Context) {
 			}
 		case <-ticker.C:
 			join.expire(time.Now())
+			if lease := w.active.Load(); lease != nil {
+				w.fail(w.flushLosses(ctx, lease))
+			}
 		}
 	}
 }
@@ -286,6 +291,8 @@ func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch
 		if err != nil {
 			// Persist the loss and seal even after an earlier ingestion error.
 			// A healthy cleanup write must remain possible.
+			// A failed write may itself contain loss metadata. Wall-clock
+			// lease bounds cannot localize missing capture-time authority.
 			if _, writeErr := w.store.Ingest(ctx, evidence.IngestRequest{DatasetID: lease.dataset.ID, Gaps: []string{"watch_storage_loss"}}); writeErr != nil {
 				return watch, writeErr
 			}
@@ -293,13 +300,69 @@ func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch
 	case <-ctx.Done():
 		return watch, ctx.Err()
 	}
-	if dropped := lease.dropped.Swap(0); dropped > 0 {
-		if _, err := w.store.Ingest(ctx, evidence.IngestRequest{DatasetID: lease.dataset.ID, Gaps: []string{"watch_collection_loss"}, LostBatches: dropped}); err != nil {
-			return watch, err
-		}
+	if err := w.flushLosses(ctx, lease); err != nil {
+		return watch, err
 	}
 	if lease.changed.Load() {
 		return w.store.StopWatchReason(ctx, id, "policy_changed")
 	}
 	return w.store.StopWatch(ctx, id)
+}
+
+// Rejection must retain identity before decoded metadata is discarded. This
+// small critical section owns only identity/time metadata, never packet data.
+func (lease *watchLease) drop(state *flow.State, events []dpi.Event) {
+	lease.lossMu.Lock()
+	defer lease.lossMu.Unlock()
+	lease.dropped++
+	if lease.losses == nil {
+		lease.losses = map[evidence.CollectionLoss]bool{}
+	}
+	if len(events) == 0 {
+		lease.losses[droppedEventLoss(state, dpi.Event{})] = true
+	}
+	for _, event := range events {
+		lease.losses[droppedEventLoss(state, event)] = true
+	}
+}
+
+func droppedEventLoss(state *flow.State, event dpi.Event) evidence.CollectionLoss {
+	loss := evidence.CollectionLoss{Code: "watch_collection_loss", ConnectionID: learn.EvidenceConnectionID(state, event)}
+	if loss.ConnectionID == "" {
+		// A timestamp without an identity still excludes every connection
+		// whose observed lifetime covers that instant. Zero remains unknown.
+		loss.Start, loss.End = event.Timestamp, event.Timestamp
+	}
+	return loss
+}
+
+func (w *evidenceWatch) flushLosses(ctx context.Context, lease *watchLease) error {
+	lease.lossMu.Lock()
+	losses, lost := lease.losses, lease.dropped
+	lease.losses, lease.dropped = nil, 0
+	lease.lossMu.Unlock()
+	// Bound individual ingestion requests even if many connections lost data
+	// between worker ticks. Preserve identities and counters across failed writes;
+	// stop/recovery also records the uncertainty of the storage failure itself.
+	for loss := range losses {
+		_, err := w.store.Ingest(ctx, evidence.IngestRequest{
+			DatasetID: lease.dataset.ID, LostBatches: lost,
+			Losses: []evidence.CollectionLoss{loss},
+		})
+		if err != nil {
+			lease.lossMu.Lock()
+			if lease.losses == nil {
+				lease.losses = map[evidence.CollectionLoss]bool{}
+			}
+			for pending := range losses {
+				lease.losses[pending] = true
+			}
+			lease.dropped += lost
+			lease.lossMu.Unlock()
+			return err
+		}
+		delete(losses, loss)
+		lost = 0
+	}
+	return nil
 }
