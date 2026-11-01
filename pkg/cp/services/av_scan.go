@@ -19,8 +19,8 @@ import (
 
 var _ avscan.Scanner = (*AVManager)(nil)
 
-// Ready returns the last applied backend state without network I/O. Live
-// diagnostics, including PING/VERSION or OPTIONS, are available via Status.
+// Ready returns the observed backend state without network I/O. The
+// lifecycle observer, live Status probes and scans keep it current.
 func (m *AVManager) Ready() (bool, string) {
 	if m == nil {
 		return false, "av manager nil"
@@ -35,7 +35,7 @@ func (m *AVManager) Ready() (bool, string) {
 	case m.reloadError != "":
 		return false, m.reloadError
 	case !m.backendReady:
-		return false, firstNonEmpty(m.lastError, "backend not ready")
+		return false, firstNonEmpty(m.backendError, "backend not ready")
 	case avMode(m.lastCfg) == "clamav" && !m.clamd.running():
 		return false, "clamd not running"
 	}
@@ -56,6 +56,7 @@ func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 	}
 	m.mu.Lock()
 	cfg := m.lastCfg
+	epoch := m.backendEpoch
 	m.mu.Unlock()
 	backend := avBackend(cfg)
 	unscanned := func(reason avscan.Reason, detail string) avscan.Result {
@@ -128,15 +129,20 @@ func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 		reason := avscan.ReasonScannerError
 		var ne net.Error
 		switch {
-		case errors.Is(err, errClamdOversized):
+		case errors.Is(err, errClamdOversized) || errors.Is(err, errICAPOversized):
 			reason = avscan.ReasonOversized
 		case errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ne) && ne.Timeout() || errors.Is(ctx.Err(), context.DeadlineExceeded):
 			reason = avscan.ReasonTimeout
 		}
 		m.mu.Lock()
 		m.scanErrs.add(time.Now(), 1)
-		m.lastError = err.Error()
+		if epoch == m.backendEpoch {
+			m.lastError = err.Error()
+		}
 		m.mu.Unlock()
+		if backendScanFailure(ctx, err) {
+			m.publishBackend(epoch, false, err.Error())
+		}
 		return unscanned(reason, err.Error())
 	}
 	res := avscan.Result{Backend: backend, Signature: signature}
@@ -150,12 +156,24 @@ func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 		m.detections++
 		m.mu.Unlock()
 	default:
+		m.publishBackend(epoch, false, "unrecognized backend verdict")
 		return unscanned(avscan.ReasonScannerError, "unrecognized backend verdict")
 	}
+	m.publishBackend(epoch, true, "")
 	if key != "" {
 		m.recordVerdict(key, avCacheTTL(cfg), res)
 	}
 	return res
+}
+
+// Object rejections and caller cancellation say nothing about backend
+// availability. Transport and protocol failures do, including timeouts.
+func backendScanFailure(ctx context.Context, err error) bool {
+	return !errors.Is(ctx.Err(), context.Canceled) &&
+		!errors.Is(err, errClamdOversized) &&
+		!errors.Is(err, errClamdObjectError) &&
+		!errors.Is(err, errICAPOversized) &&
+		!errors.Is(err, errObjectSource)
 }
 
 func avBackend(cfg config.AVConfig) string {

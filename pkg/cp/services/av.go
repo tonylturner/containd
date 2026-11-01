@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -105,6 +106,11 @@ type AVManager struct {
 
 	slots        chan struct{}
 	backendReady bool
+	backendError string
+	backendEpoch uint64
+	// Observer ownership is serialized by op, never by mu.
+	observeCancel context.CancelFunc
+	observeDone   chan struct{}
 	// reload is the database activation awaiting clamd's proof, if any;
 	// reloadError records the last activation failure until a retry
 	// succeeds; reloadAttempt grows the retry backoff; retrySeq lets a newer
@@ -182,6 +188,7 @@ func (m *AVManager) Stop() error {
 	m.cancel()
 	m.op <- struct{}{}
 	defer m.unlock()
+	m.stopObserver()
 	m.stopFreshclam()
 	err := m.stopClamd()
 	m.mu.Lock()
@@ -210,7 +217,14 @@ func (m *AVManager) applyLocked(ctx context.Context, cfg config.AVConfig) error 
 		return err
 	}
 	defer m.unlock()
+	m.stopObserver()
+	// Own the server list: callers may reuse their candidate after Apply.
+	cfg.ICAP.Servers = slices.Clone(cfg.ICAP.Servers)
 	m.mu.Lock()
+	m.backendEpoch++
+	epoch := m.backendEpoch
+	m.backendReady = false
+	m.backendError = "backend apply in progress"
 	m.lastCfg = cfg
 	if !cfg.Enabled || avMode(cfg) != "clamav" {
 		m.reloadError = ""
@@ -222,12 +236,15 @@ func (m *AVManager) applyLocked(ctx context.Context, cfg config.AVConfig) error 
 	m.mu.Lock()
 	if err != nil {
 		m.lastError = err.Error()
+		m.backendError = err.Error()
 		m.backendReady = false
 	} else {
 		m.lastError = ""
+		m.backendError = ""
 		m.backendReady = cfg.Enabled
 	}
 	m.mu.Unlock()
+	m.startObserver(cfg, epoch)
 	ready := 0.0
 	if cfg.Enabled && err == nil {
 		ready = 1
@@ -283,13 +300,16 @@ func (m *AVManager) icapClient(cfg config.AVConfig) *ICAPClient {
 func (m *AVManager) Current() config.AVConfig {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.lastCfg
+	cfg := m.lastCfg
+	cfg.ICAP.Servers = slices.Clone(cfg.ICAP.Servers)
+	return cfg
 }
 
 // Status reports the applied settings, live backend readiness and counters.
 func (m *AVManager) Status(ctx context.Context) map[string]any {
 	m.mu.Lock()
 	cfg := m.lastCfg
+	epoch := m.backendEpoch
 	out := meterStatus(&m.scans, &m.scanErrs)
 	out["enabled"] = cfg.Enabled
 	out["mode"] = avMode(cfg)
@@ -327,6 +347,7 @@ func (m *AVManager) Status(ctx context.Context) map[string]any {
 	m.mu.Unlock()
 
 	ready, version, readyErr := m.readiness(ctx, cfg)
+	m.publishBackend(epoch, ready, readyErr)
 	m.mu.Lock()
 	if m.reloadError != "" {
 		ready, readyErr = false, m.reloadError
@@ -346,6 +367,8 @@ func (m *AVManager) readiness(ctx context.Context, cfg config.AVConfig) (bool, s
 	}
 	ctx, cancel := context.WithTimeout(ctx, min(avTimeout(cfg), avStatusProbeTimeout))
 	defer cancel()
+	stop := context.AfterFunc(m.ctx, cancel)
+	defer stop()
 	switch avMode(cfg) {
 	case "clamav":
 		client := &ClamAVClient{Timeout: avStatusProbeTimeout, Socket: clamdSocket(cfg)}

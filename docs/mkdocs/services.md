@@ -217,6 +217,16 @@ Gate status, the `gate` object of the `av` status entry:
   `services:` warning `AV backend is still starting … scanning is pending
   until it is ready`, records `service.av.pending`, and the gate shows
   `pending` until clamd answers. The AV page shows the same state.
+- Scanner readiness also follows backend loss and recovery without a
+  commit or status request. The engine probes clamd (`PING`/`VERSION`) or
+  ICAP (`OPTIONS`) once per second after each completed probe, with a
+  two-second cap per probe (or `timeoutSec` if shorter). Allow up to five
+  seconds for an in-flight probe plus the next observation; the gate
+  samples this readiness every 200 ms. Backend connection and protocol
+  failures during a scan mark it unavailable immediately; successful
+  probes or scans restore it. Detections and object-level rejections do
+  not make the backend unavailable. An active scan selection cannot be
+  reported as protecting while its scanner is unavailable.
 
 Gate runtime: the listeners bind `127.0.0.1` and `::1` on ports 18100
 (plain) and 18101 (masqueraded upstream); the gate's replies reach it over
@@ -306,12 +316,11 @@ Scanning:
   transferred (chunked framing removed, content coding kept), with
   `X-Client-IP` and `X-Server-IP`. A reply is infected when it carries
   `X-Infection-Found`, `X-Violations-Found`, `X-Virus-ID` or an
-  `X-ICAP-Status` containing `VirusFound`; `204 No Content` is clean; any
-  other reply, including `200` with adapted content, is a scan error.
-  An `OPTIONS` response must return `200`. If it includes `Methods`, that
-  list must include `REQMOD` when uploads are scanned and `RESPMOD` when
-  downloads are; the current probe also accepts an absent `Methods` header.
-  `useTls` connects with verified TLS 1.2 or
+  `X-ICAP-Status` containing `VirusFound`; `204 No Content` is clean;
+  `413` rejects an oversized object. Any other reply, including `200`
+  with adapted content, is a scan error.
+  `OPTIONS` must list `REQMOD` when uploads are scanned and `RESPMOD` when
+  downloads are. `useTls` connects with verified TLS 1.2 or
   newer, using the configured host as the server name and the system roots
   plus the [additional CA bundle](config-format.md#additional-ca-bundle);
   there is no plaintext fallback.

@@ -33,6 +33,8 @@ const (
 	icapRESPMOD   = "RESPMOD"
 )
 
+var errICAPOversized = errors.New("icap object size limit exceeded")
+
 // ICAPClient is a generic RFC 3507 client: OPTIONS probes, REQMOD for
 // uploads and RESPMOD for downloads. It sends no Preview, so the server
 // answers only once it holds the complete object, and it never accepts
@@ -202,7 +204,7 @@ func (c *ICAPClient) Scan(ctx context.Context, srv config.ICAPServer, obj avscan
 	}
 	req, err := encapsulate(t, obj)
 	if err != nil {
-		return ICAPVerdict{}, err
+		return ICAPVerdict{}, fmt.Errorf("%w: %w", errObjectSource, err)
 	}
 	conn, stop, err := c.dial(ctx, srv, t, c.scanDeadline(ctx))
 	if err != nil {
@@ -413,6 +415,8 @@ func icapVerdict(code int, hdr textproto.MIMEHeader) (ICAPVerdict, error) {
 	switch code {
 	case 204:
 		return ICAPVerdict{Verdict: "clean"}, nil
+	case 413:
+		return ICAPVerdict{}, errICAPOversized
 	case 200:
 		return ICAPVerdict{}, errors.New("server returned modified content without an infection header")
 	default:
