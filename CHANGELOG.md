@@ -63,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The interfaces page no longer names another product in its management
   access notice.
 - Unreadable ICS inspection settings stay unknown instead of looking disabled.
+- The topology Physical view describes only what it observes. It no longer
+  flags an unused CONTAIND_AUTH setting, and it no longer claims host
+  networking is expected for a firewall; it notes that the container then
+  shares the host's interfaces and loopback.
 - Collapsed sections open automatically when they hold saved non-default
   values or settings the selected mode needs (ICS selectors, IEC 104 options,
   WireGuard peers, ICAP and local scanner settings, capture options). Fault
