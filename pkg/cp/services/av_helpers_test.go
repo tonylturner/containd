@@ -142,7 +142,12 @@ func TestAVManagerICAPProbeRequiresScannedMethods(t *testing.T) {
 			if tc.methods != "" {
 				lines = append(lines, tc.methods)
 			}
-			icapAddr, _ := startFakeICAP(t, nil, icapReply(lines...))
+			icapAddr, _ := startFakeICAP(t, nil, func(req icapRequest) string {
+				if req.Method == "OPTIONS" {
+					return icapReply(lines...)(req)
+				}
+				return healthyReadinessReply(req)
+			})
 			mgr := newTestAVManager(t, AVOptions{})
 			cfg := config.AVConfig{
 				Enabled: true, Mode: "icap",

@@ -152,7 +152,11 @@ func (c *ClamAVClient) Scan(ctx context.Context, payload io.Reader, size int64) 
 	if err != nil {
 		return ClamdVerdict{}, err
 	}
-	return parseClamdScanReply(reply)
+	verdict, err := parseClamdScanReply(reply)
+	if err != nil {
+		err = fmt.Errorf("%w: %w", errScanProtocol, err)
+	}
+	return verdict, err
 }
 
 // writeClamd rejects short writes even when a writer returns no error.

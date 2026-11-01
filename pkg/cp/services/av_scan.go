@@ -107,6 +107,9 @@ func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 	}
 	stop := context.AfterFunc(m.ctx, cancel)
 	defer func() { stop(); cancel() }()
+	m.mu.Lock()
+	seq := m.nextProbeLocked()
+	m.mu.Unlock()
 	var verdict, signature string
 	var err error
 	switch avMode(cfg) {
@@ -141,7 +144,7 @@ func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 		}
 		m.mu.Unlock()
 		if backendScanFailure(ctx, err) {
-			m.publishBackend(epoch, false, err.Error())
+			m.publishScan(epoch, seq, obj.Direction, false, !errors.Is(err, errScanProtocol), err.Error())
 		}
 		return unscanned(reason, err.Error())
 	}
@@ -156,10 +159,10 @@ func (m *AVManager) Scan(ctx context.Context, obj avscan.Object) avscan.Result {
 		m.detections++
 		m.mu.Unlock()
 	default:
-		m.publishBackend(epoch, false, "unrecognized backend verdict")
+		m.publishScan(epoch, seq, obj.Direction, false, false, "unrecognized backend verdict")
 		return unscanned(avscan.ReasonScannerError, "unrecognized backend verdict")
 	}
-	m.publishBackend(epoch, true, "")
+	m.publishScan(epoch, seq, obj.Direction, true, false, "")
 	if key != "" {
 		m.recordVerdict(key, avCacheTTL(cfg), res)
 	}
@@ -220,19 +223,6 @@ func firstICAPServer(cfg config.AVConfig) config.ICAPServer {
 		return config.ICAPServer{}
 	}
 	return cfg.ICAP.Servers[0]
-}
-
-// icapMethods lists the ICAP methods the configured scan directions need:
-// REQMOD for uploads and RESPMOD for downloads.
-func icapMethods(cfg config.AVConfig) []string {
-	var methods []string
-	if cfg.HTTPUpload {
-		methods = append(methods, icapREQMOD)
-	}
-	if cfg.HTTPDownload {
-		methods = append(methods, icapRESPMOD)
-	}
-	return methods
 }
 
 func clamdSocket(cfg config.AVConfig) string {

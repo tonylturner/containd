@@ -141,43 +141,60 @@ func (c *ICAPClient) dial(ctx context.Context, srv config.ICAPServer, t icapTarg
 	return conn, stop, nil
 }
 
+type icapOptions struct {
+	methods string
+	ttl     time.Duration
+}
+
 // Probe sends OPTIONS and requires a 200 reply with the mandatory Methods
 // header, including every method in required (REQMOD, RESPMOD).
 func (c *ICAPClient) Probe(ctx context.Context, srv config.ICAPServer, required ...string) error {
+	options, err := c.options(ctx, srv)
+	if err != nil {
+		return err
+	}
+	for _, method := range required {
+		if !listsMethod(options.methods, method) {
+			return fmt.Errorf("icap service %q does not support %s (methods %q)", srv.Service, method, options.methods)
+		}
+	}
+	return nil
+}
+
+func (c *ICAPClient) options(ctx context.Context, srv config.ICAPServer) (icapOptions, error) {
 	if c == nil {
-		return errors.New("icap client nil")
+		return icapOptions{}, errors.New("icap client nil")
 	}
 	t, err := parseICAPTarget(srv)
 	if err != nil {
-		return err
+		return icapOptions{}, err
 	}
 	conn, stop, err := c.dial(ctx, srv, t, c.probeDeadline(ctx))
 	if err != nil {
-		return err
+		return icapOptions{}, err
 	}
 	defer stop()
 	defer conn.Close()
 	req := "OPTIONS " + t.uri() + " ICAP/1.0\r\nHost: " + t.addr + "\r\nEncapsulated: null-body=0\r\n\r\n"
 	if _, err := io.WriteString(conn, req); err != nil {
-		return err
+		return icapOptions{}, err
 	}
 	code, hdr, err := readICAPResponse(conn)
 	if err != nil {
-		return fmt.Errorf("icap options: %w", err)
+		return icapOptions{}, fmt.Errorf("icap options: %w", err)
 	}
 	if code != 200 {
-		return fmt.Errorf("icap options: unexpected status %d", code)
+		return icapOptions{}, fmt.Errorf("icap options: unexpected status %d", code)
 	}
 	methods := strings.TrimSpace(hdr.Get("Methods"))
 	if methods == "" {
-		return fmt.Errorf("icap service %q: OPTIONS response missing or empty Methods header", t.service)
+		return icapOptions{}, fmt.Errorf("icap service %q: OPTIONS response missing or empty Methods header", t.service)
 	}
-	for _, m := range required {
-		if !listsMethod(methods, m) {
-			return fmt.Errorf("icap service %q does not support %s (methods %q)", t.service, m, methods)
-		}
+	ttl := avObserveInterval
+	if seconds, err := strconv.ParseUint(strings.TrimSpace(hdr.Get("Options-Ttl")), 10, 32); err == nil {
+		ttl = max(avObserveInterval, min(time.Duration(seconds)*time.Second, avOptionsTTLCap))
 	}
-	return nil
+	return icapOptions{methods: methods, ttl: ttl}, nil
 }
 
 func listsMethod(methods, want string) bool {
@@ -220,7 +237,13 @@ func (c *ICAPClient) Scan(ctx context.Context, srv config.ICAPServer, obj avscan
 	code, hdr, rerr := readICAPResponse(conn)
 	var verdict ICAPVerdict
 	if rerr == nil {
+		if werr != nil {
+			werr = fmt.Errorf("%w: %w", errScanProtocol, werr)
+		}
 		verdict, rerr = icapVerdict(code, hdr)
+		if rerr != nil {
+			rerr = fmt.Errorf("%w: %w", errScanProtocol, rerr)
+		}
 	}
 	switch {
 	case rerr == nil && verdict.Verdict == "malware":

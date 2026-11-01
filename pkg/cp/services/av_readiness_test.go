@@ -5,6 +5,7 @@ package services
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -19,9 +20,10 @@ import (
 )
 
 const (
-	icapReadyReply = "ICAP/1.0 200 OK\r\nMethods: REQMOD, RESPMOD\r\nEncapsulated: null-body=0\r\n\r\n"
-	icapCleanReply = "ICAP/1.0 204 No Content\r\n\r\n"
-	icapErrorReply = "ICAP/1.0 500 Server Error\r\n\r\n"
+	icapReadyReply    = "ICAP/1.0 200 OK\r\nMethods: REQMOD, RESPMOD\r\nEncapsulated: null-body=0\r\n\r\n"
+	icapCleanReply    = "ICAP/1.0 204 No Content\r\n\r\n"
+	icapInfectedReply = "ICAP/1.0 200 OK\r\nX-Virus-ID: Eicar-Test\r\n\r\n"
+	icapErrorReply    = "ICAP/1.0 500 Server Error\r\n\r\n"
 	// Include one in-flight probe and scheduling tolerance on loaded runners.
 	readinessTestBound = avObserveInterval + 2*avStatusProbeTimeout + time.Second
 )
@@ -98,6 +100,18 @@ func (s *readinessICAP) stop() {
 	})
 }
 
+// healthyReadinessReply models an antivirus service, not an OPTIONS-only
+// endpoint. Canaries are recognized by their complete, exact body.
+func healthyReadinessReply(req icapRequest) string {
+	if req.Method == "OPTIONS" {
+		return icapReadyReply
+	}
+	if bytes.Equal(req.Body, []byte(avCanaryPayload)) {
+		return icapInfectedReply
+	}
+	return icapCleanReply
+}
+
 func readinessICAPConfig(s *readinessICAP) config.AVConfig {
 	return config.AVConfig{
 		Enabled: true, Mode: "icap", HTTPDownload: true, HTTPUpload: true,
@@ -118,7 +132,7 @@ func waitAVReady(t *testing.T, m *AVManager, want bool) {
 }
 
 func TestAVReadinessICAPLossAndRecovery(t *testing.T) {
-	s := startReadinessICAP(t, "127.0.0.1:0", func(icapRequest) string { return icapReadyReply })
+	s := startReadinessICAP(t, "127.0.0.1:0", healthyReadinessReply)
 	m := newTestAVManager(t, AVOptions{})
 	if err := m.Apply(applyCtx(t), readinessICAPConfig(s)); err != nil {
 		t.Fatal(err)
@@ -128,7 +142,7 @@ func TestAVReadinessICAPLossAndRecovery(t *testing.T) {
 	s.stop()
 	// No scans, Status calls or reapply drive either transition.
 	waitAVReady(t, m, false)
-	startReadinessICAP(t, addr, func(icapRequest) string { return icapReadyReply })
+	startReadinessICAP(t, addr, healthyReadinessReply)
 	waitAVReady(t, m, true)
 }
 
@@ -201,6 +215,8 @@ func TestAVReadinessClamdScanResultClassification(t *testing.T) {
 			socket := startFakeClamd(t, func(string, []byte) []byte { return []byte(tc.reply) })
 			m := newTestAVManager(t, AVOptions{})
 			m.lastCfg = clamavConfig(socket)
+			m.lastCfg.HTTPDownload = true
+			m.directions = map[avscan.Direction]avDirectionHealth{avscan.Download: {capable: true, healthy: true}}
 			m.backendReady = true
 			m.Scan(context.Background(), scanObject([]byte("object")))
 			m.mu.Lock()
@@ -221,8 +237,8 @@ func TestAVReadinessScanAndStatusPublish(t *testing.T) {
 		if failed.Load() {
 			return icapErrorReply
 		}
-		if req.Method == "OPTIONS" {
-			return icapReadyReply
+		if req.Method == "OPTIONS" || bytes.Equal(req.Body, []byte(avCanaryPayload)) {
+			return healthyReadinessReply(req)
 		}
 		return objectReply.Load().(string)
 	})
@@ -240,11 +256,16 @@ func TestAVReadinessScanAndStatusPublish(t *testing.T) {
 	bad.ResponseHead = nil
 	m.Scan(context.Background(), bad)
 	assertAVReady(t, m, false)
+	// Keep background recovery from racing the ordinary-scan assertion.
+	m.stopObserver()
 	failed.Store(false)
 	if res := m.Scan(context.Background(), scanObject([]byte("object"))); res.Verdict != avscan.Clean {
 		t.Fatal(res)
 	}
-	assertAVReady(t, m, true)
+	// An ordinary clean result is insufficient to clear a scan-path failure.
+	assertAVReady(t, m, false)
+	m.startObserver(m.Current(), m.backendEpoch)
+	waitAVReady(t, m, true)
 	objectReply.Store("ICAP/1.0 413 Request Entity Too Large\r\n\r\n")
 	if res := m.Scan(context.Background(), scanObject([]byte("object"))); res.Reason != avscan.ReasonOversized {
 		t.Fatal(res)
@@ -277,11 +298,11 @@ func TestAVReadinessScanAndStatusPublish(t *testing.T) {
 func TestAVReadinessFailedApplyRecoversAndDisableJoins(t *testing.T) {
 	var failed atomic.Bool
 	failed.Store(true)
-	s := startReadinessICAP(t, "127.0.0.1:0", func(icapRequest) string {
+	s := startReadinessICAP(t, "127.0.0.1:0", func(req icapRequest) string {
 		if failed.Load() {
 			return icapErrorReply
 		}
-		return icapReadyReply
+		return healthyReadinessReply(req)
 	})
 	m := newTestAVManager(t, AVOptions{})
 	if err := m.Apply(applyCtx(t), readinessICAPConfig(s)); err == nil {
@@ -308,14 +329,14 @@ func TestAVReadinessFailedApplyRecoversAndDisableJoins(t *testing.T) {
 func TestAVReadinessObserverReplacementAndStopJoin(t *testing.T) {
 	var stall atomic.Bool
 	entered := make(chan struct{}, 4)
-	s := startReadinessICAP(t, "127.0.0.1:0", func(icapRequest) string {
+	s := startReadinessICAP(t, "127.0.0.1:0", func(req icapRequest) string {
 		if stall.Load() {
 			entered <- struct{}{}
 			return ""
 		}
-		return icapReadyReply
+		return healthyReadinessReply(req)
 	})
-	healthy := startReadinessICAP(t, "127.0.0.1:0", func(icapRequest) string { return icapReadyReply })
+	healthy := startReadinessICAP(t, "127.0.0.1:0", healthyReadinessReply)
 	m := newTestAVManager(t, AVOptions{})
 	for i := range 2 {
 		stall.Store(false)
@@ -366,7 +387,7 @@ func TestAVReadinessSupersededResults(t *testing.T) {
 					<-release
 					return icapErrorReply
 				}
-				return icapReadyReply
+				return healthyReadinessReply(req)
 			})
 			m := newTestAVManager(t, AVOptions{})
 			if err := m.Apply(applyCtx(t), readinessICAPConfig(s)); err != nil {
@@ -391,7 +412,7 @@ func TestAVReadinessSupersededResults(t *testing.T) {
 				close(release)
 				t.Fatal("request never arrived")
 			}
-			healthy := startReadinessICAP(t, "127.0.0.1:0", func(icapRequest) string { return icapReadyReply })
+			healthy := startReadinessICAP(t, "127.0.0.1:0", healthyReadinessReply)
 			if err := m.Apply(applyCtx(t), readinessICAPConfig(healthy)); err != nil {
 				close(release)
 				t.Fatal(err)
