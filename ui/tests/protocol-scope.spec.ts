@@ -97,6 +97,7 @@ test("firewall rule form offers only the four supported industrial protocols", a
     "/api/v1/zones",
   ]);
 
+  await page.getByRole("button", { name: "Create rule", exact: true }).click();
   const createForm = page.locator("section").filter({
     has: page.getByRole("heading", { name: "Create rule" }),
   });

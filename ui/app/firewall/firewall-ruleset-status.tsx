@@ -19,7 +19,7 @@ const amber = "rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-ambe
 export function AppliedRulesetStatus({ status }: { status: InstalledRulesetStatus }) {
   const appliedAt = status.installed ? formatStatusTime(status.appliedAt) : null;
   return (
-    <section aria-label="Applied ruleset" className="mt-3 space-y-2 text-xs">
+    <section aria-label="Applied ruleset" className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
       <p className="text-(--text-muted)">
         {status.installed
           ? <>Applied ruleset: in force{appliedAt && <> since {appliedAt}</>}.</>
@@ -48,9 +48,9 @@ export function RulesetFaults({ status }: { status: InstalledRulesetStatus }) {
             Last apply failed{failedAt && <> at {failedAt}</>}
           </p>
           <p>{status.installed ? "The ruleset applied before it stays in force until an apply succeeds." : "No ruleset is in force."}</p>
+          <p className="break-words">{status.error}</p>
           <TechnicalDetails>
             {status.failedSnapshotVersion && <p>Failed configuration ID: <span className="font-mono">{status.failedSnapshotVersion}</span></p>}
-            <p>{status.error}</p>
           </TechnicalDetails>
         </div>
       )}
@@ -65,7 +65,7 @@ export function InstalledRulesetUnavailable({ view }: { view: InstalledRulesetVi
   return (
     <div role="status" aria-label="Installed ruleset status" className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
       Installed ruleset status unavailable. Check appliance health.
-      <TechnicalDetails>{view.error}</TechnicalDetails>
+      <p className="break-words">{view.error}</p>
     </div>
   );
 }
@@ -87,10 +87,10 @@ function SchedulePlanner({ planner }: { planner: NonNullable<InstalledRulesetSta
     <div role="status" aria-label="Schedule planner" className={amber}>
       <p className="font-semibold">Schedules need attention.</p>
       <p>Past the scheduled coverage end, a scheduled ALLOW stops matching and a scheduled DENY applies.</p>
+      {planner.reason && <p>{planner.reason}</p>}
+      {planner.lastError && <p>Last update error{errorAt && <> at {errorAt}</>}: {planner.lastError}</p>}
       <TechnicalDetails>
         <p>{window}</p>
-        {planner.reason && <p>{planner.reason}</p>}
-        {planner.lastError && <p>Last update error{errorAt && <> at {errorAt}</>}: {planner.lastError}</p>}
       </TechnicalDetails>
     </div>
   );

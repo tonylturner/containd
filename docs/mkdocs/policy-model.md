@@ -45,6 +45,24 @@ cannot shadow decisions. The check is conservative: coverage by several rules
 together is not reported, and IEC 104 rules are checked only against earlier
 IEC 104 rules.
 
+The Firewall Rules page leads with enforcement and outbound status, then the
+rule table. Its seven columns are **Order**, **Description**, **Zones**,
+**Protocols**, **Action**, **Hits**, and **Actions**. The exact **ID** appears
+below the description. **Details for** each rule opens its **Conditions**
+(CIDRs, identities, forwards and schedule), **ICS Filter** and exact selectors,
+full **Hits** counters, **Shadow matches**, **Log**, and exact matching values.
+Conditions, ICS mode, enabled logging and positive shadow counts have compact
+indicators even when details are closed. Coverage reasons, unsupported-rule
+warnings and counter-read failures stay visible without opening details.
+
+**Create rule** below the table reveals the creation form; closing and reopening
+it preserves unsaved edits. **Deep Packet Inspection** follows the form, with
+**DPI settings** open automatically for saved non-default settings, including
+exclusions or parsing overrides even when DPI is disabled. The generated
+configuration preview follows DPI; its warnings and errors remain visible,
+while **Advanced → Generated ruleset** exposes the low-level text on demand.
+Saving rules or DPI settings still stages candidate changes, not live protection.
+
 The firewall table displays configured order, with ↑/↓ controls beside each
 position number for admins. The arrows are disabled at the ends and during a
 move. Keyboard focus follows the moved rule; at an end it switches to the
@@ -202,8 +220,8 @@ as a warning with its rule ID, the predicate (`identity`, `zone` with the
 
 - The firewall page's **Generated firewall configuration (nftables)** preview,
   which lists the candidate's warnings. Expand **Generated ruleset** for the
-  full low-level configuration; **Technical details** retains runtime reasons
-  and queue-ownership caveats.
+  full low-level configuration. Runtime reasons and queue-ownership caveats
+  appear beside the preview.
 - `GET /api/v1/dataplane/ruleset`: `warnings` for the candidate and
   `engineStatus.warnings` for the last applied ruleset; any authenticated user
   reads the applied `warnings` through `GET /api/v1/dataplane/ruleset/status`.
