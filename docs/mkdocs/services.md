@@ -219,10 +219,11 @@ Gate status, the `gate` object of the `av` status entry:
   `pending` until clamd answers. The AV page shows the same state.
 - Scanner readiness also follows backend loss and recovery without a
   commit or status request. The engine probes clamd (`PING`/`VERSION`) or
-  ICAP (`OPTIONS`) once per second after each completed probe, with a
-  two-second cap per probe (or `timeoutSec` if shorter). Allow up to five
-  seconds for an in-flight probe plus the next observation; the gate
-  samples this readiness every 200 ms. Backend connection and protocol
+  ICAP (`OPTIONS` with the required `Methods`) once per second after each
+  completed probe, with a two-second cap per probe (or `timeoutSec` if
+  shorter). Allow up to five seconds for an in-flight probe plus the next
+  observation; the gate samples this readiness every 200 ms.
+  Backend connection and protocol
   failures during a scan mark it unavailable immediately; successful
   probes or scans restore it. Detections and object-level rejections do
   not make the backend unavailable. An active scan selection cannot be
@@ -287,9 +288,11 @@ ClamAV mode:
 
 Applying AV fails, and the commit reports a `services:` warning, when the
 backend is missing, clamd exits, or the ICAP server does not answer
-`OPTIONS` with the needed methods. A clamd that is still starting when the
-three-second apply budget ends is pending, not failed (see the gate status
-above); a freshly started clamd with the full official database can take
+`OPTIONS` with a non-empty `Methods` header declaring the needed methods.
+A missing, empty or incomplete declaration reports the scanner as not
+ready, with the reason in AV and gate status. A clamd that is still starting
+when the three-second apply budget ends is pending, not failed (see the gate
+status above); a freshly started clamd with the full official database can take
 longer to load, and the status `ready` field turns true once it answers.
 
 Scanning:
@@ -319,8 +322,10 @@ Scanning:
   `X-ICAP-Status` containing `VirusFound`; `204 No Content` is clean;
   `413` rejects an oversized object. Any other reply, including `200`
   with adapted content, is a scan error.
-  `OPTIONS` must list `REQMOD` when uploads are scanned and `RESPMOD` when
-  downloads are. `useTls` connects with verified TLS 1.2 or
+  An `OPTIONS` response must include a non-empty `Methods` header, listing
+  `REQMOD` when uploads are scanned and `RESPMOD` when downloads are.
+  A `200` response without that declaration is not ready.
+  `useTls` connects with verified TLS 1.2 or
   newer, using the configured host as the server name and the system roots
   plus the [additional CA bundle](config-format.md#additional-ca-bundle);
   there is no plaintext fallback.

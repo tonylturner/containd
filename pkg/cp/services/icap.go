@@ -141,8 +141,8 @@ func (c *ICAPClient) dial(ctx context.Context, srv config.ICAPServer, t icapTarg
 	return conn, stop, nil
 }
 
-// Probe sends OPTIONS and requires a 200 reply that, when it lists Methods,
-// includes every method in required (REQMOD, RESPMOD).
+// Probe sends OPTIONS and requires a 200 reply with the mandatory Methods
+// header, including every method in required (REQMOD, RESPMOD).
 func (c *ICAPClient) Probe(ctx context.Context, srv config.ICAPServer, required ...string) error {
 	if c == nil {
 		return errors.New("icap client nil")
@@ -168,9 +168,9 @@ func (c *ICAPClient) Probe(ctx context.Context, srv config.ICAPServer, required 
 	if code != 200 {
 		return fmt.Errorf("icap options: unexpected status %d", code)
 	}
-	methods := hdr.Get("Methods")
+	methods := strings.TrimSpace(hdr.Get("Methods"))
 	if methods == "" {
-		return nil
+		return fmt.Errorf("icap service %q: OPTIONS response missing or empty Methods header", t.service)
 	}
 	for _, m := range required {
 		if !listsMethod(methods, m) {
