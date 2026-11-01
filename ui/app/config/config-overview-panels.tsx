@@ -67,7 +67,7 @@ export function ConfigBackupRecoveryCard({
           className="rounded-xs border bg-(--surface) px-3 py-2 text-sm text-(--text) transition-ui outline-hidden"
         />
         <div className="text-xs text-(--text-muted)">
-          Restore replaces the candidate config. Use redacted backups for sharing.
+          Restore replaces saved changes, not active settings. Use redacted backups for sharing.
         </div>
         {canEdit && (
           <button
@@ -233,7 +233,7 @@ export function IDSRulesCard({
         <div>
           <div className="text-xs uppercase tracking-[0.2em] text-(--text-muted)">IDS Rules</div>
           <div className="text-sm text-(--text)">
-            Running IDS bank: {idsRuleCount} committed rules. Restores stage the candidate bank; commit promotes both.
+            {idsRuleCount} committed detection rules. Restored rules are saved for review; commit applies them with the configuration.
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -273,6 +273,10 @@ export function ConfigActionBar({
 }) {
   return (
     <Card className="mt-6" padding="md">
+      <p className="mb-3 text-xs text-(--text-muted)">
+        Commit applies reviewed changes. Commit-confirmed applies them temporarily and automatically rolls back unless you Confirm before the deadline.
+        Rollback restores the previous committed configuration while keeping newer saved changes.
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         {canEdit && (
           <button

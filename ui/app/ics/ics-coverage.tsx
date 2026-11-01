@@ -1,6 +1,7 @@
 "use client";
 
 import { StatusBadge, StatusIndicator } from "../../components/StatusBadge";
+import { TechnicalDetails } from "../../components/TechnicalDetails";
 import type { ICSCoverageReason, ICSCoverageRule, ICSEnforcementHealth } from "../../lib/api";
 import {
   coverageStateLabel,
@@ -14,11 +15,13 @@ import {
 function ReasonList({ reasons }: { reasons: ICSCoverageReason[] }) {
   if (reasons.length === 0) return null;
   return (
+    <TechnicalDetails summary="Inspection details">
     <ul className="mt-1 space-y-0.5 text-xs text-(--text-muted)">
       {reasons.map((r) => (
         <li key={`${r.code}:${r.value ?? ""}`}>{formatReason(r)}</li>
       ))}
     </ul>
+    </TechnicalDetails>
   );
 }
 
@@ -43,27 +46,28 @@ function formatTime(value: string): string {
   return Number.isNaN(t.getTime()) ? value : t.toLocaleString();
 }
 
-const MODE_ALONE = "A configured mode alone does not show that a rule is enforced.";
+const MODE_ALONE = "Choosing Enforce does not guarantee blocking is active.";
 
 /** Why coverage is missing or stale; nothing when both sides are known. */
 export function ICSCoverageNotice({ view }: { view: ICSCoverageView }) {
-  const warnings: string[] = [];
+  const warnings: { message: string; detail: string }[] = [];
   if (view.status === "unavailable") {
-    warnings.push(`ICS coverage unavailable: ${view.error}. ${MODE_ALONE}`);
+    warnings.push({ message: `ICS coverage unavailable. ${MODE_ALONE}`, detail: view.error });
   } else if (view.status === "loaded") {
     if (view.candidateError) {
-      warnings.push(`Candidate ICS coverage unavailable: ${view.candidateError}`);
+      warnings.push({ message: "Saved ICS inspection coverage unavailable.", detail: view.candidateError });
     }
     if (view.appliedError) {
-      warnings.push(`Applied ICS coverage unknown: ${view.appliedError}. ${MODE_ALONE}`);
+      warnings.push({ message: `Active ICS inspection coverage unknown. ${MODE_ALONE}`, detail: view.appliedError });
     }
   }
   const loaded = view.status === "loaded" ? view : null;
   return (
     <>
       {warnings.map((w) => (
-        <div key={w} role="status" className="mb-3 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-xs text-amber">
-          {w}
+        <div key={w.message} role="status" className="mb-3 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-xs text-amber">
+          {w.message}
+          <TechnicalDetails>{w.detail}</TechnicalDetails>
         </div>
       ))}
       {loaded?.applyError && (
@@ -72,7 +76,7 @@ export function ICSCoverageNotice({ view }: { view: ICSCoverageView }) {
         </div>
       )}
       {loaded?.appliedAt && (
-        <p className="mb-3 text-xs text-(--text-muted)">Last apply attempt: {formatTime(loaded.appliedAt)}</p>
+        <p className="mb-3 text-xs text-(--text-muted)">Last activation attempt: {formatTime(loaded.appliedAt)}</p>
       )}
     </>
   );
@@ -84,11 +88,11 @@ export function ICSCoverageSection({ coverage }: { coverage?: ICSCoverageRule })
   return (
     <div aria-label="ICS coverage" className="mt-3 rounded-xs border bg-(--surface) px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-semibold text-(--text)">ICS coverage under the running settings</span>
+        <span className="text-xs font-semibold text-(--text)">What this rule would inspect with the running settings</span>
         <StatusBadge variant={coverageVariant(coverage.state)} dot>
           {coverageStateLabel(coverage.state)}
         </StatusBadge>
-        {coverage.mode && <span className="text-xs text-(--text-muted)">effective mode: {coverage.mode}</span>}
+        {coverage.mode && <span className="text-xs text-(--text-muted)">mode in use: {coverage.mode}</span>}
       </div>
       <ReasonList reasons={coverage.reasons} />
     </div>

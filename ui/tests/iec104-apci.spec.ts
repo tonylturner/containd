@@ -39,7 +39,7 @@ async function mockAlert(page: Page, alert: TelemetryEvent) {
 }
 
 async function detailFitsViewport(page: Page, headline: string, screenshot: string) {
-  await expect(page.getByRole("status", { name: "Dataplane protection" })).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(0);
   const panel = page.getByRole("heading", { name: headline, exact: true }).locator("xpath=../../..");
   const bounds = await panel.boundingBox();
   expect(bounds).not.toBeNull();

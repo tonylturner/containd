@@ -42,7 +42,7 @@ import { RulePositionSelect } from "./firewall-rule-position";
 import { RuleForwardFields } from "./firewall-rule-forwards";
 
 const LOG_HELP =
-  "Logs matching traffic as firewall.rule.hit events. A RATE_LIMIT rule logs the packets it drops over the limit; a TAG rule logs the connections it labels.";
+  "Records rule matches in Events. A RATE_LIMIT rule logs the packets it drops over the limit; a TAG rule logs the connections it labels.";
 
 type ICSDraft = {
   enabled: boolean;
@@ -103,10 +103,10 @@ function ICSToggle({ draft, onChange }: { draft: ICSDraft; onChange: (d: ICSDraf
       <label className="flex items-center gap-2 text-sm text-(--text)">
         <input type="checkbox" checked={draft.enabled} onChange={(e) => onChange({ ...draft, enabled: e.target.checked })} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
         ICS Protocol Filter
-        <InfoTip label="Adds OT/ICS-aware matching to an ALLOW or DENY rule." />
+        <InfoTip label="Matches industrial protocol operations in an ALLOW or DENY rule." />
       </label>
-      <span className="text-xs text-(--text-muted) md:col-span-4">ICS filters let you allow or block specific protocol actions beyond basic L3/L4 rules.</span>
-      <span className="text-xs text-(--text-muted) md:col-span-4">Requires DPI capture to see ICS traffic (configure in <a href="/dataplane/" className="text-(--amber) hover:text-(--amber)">PCAP Capture</a>).</span>
+      <span className="text-xs text-(--text-muted) md:col-span-4">Industrial filters match specific protocol actions, in addition to addresses and ports.</span>
+      <span className="text-xs text-(--text-muted) md:col-span-4">Requires traffic inspection to see industrial traffic. Capture interfaces only observe; blocking requires inline inspection. See <a href="/dataplane/" className="text-(--amber) hover:text-(--amber)">PCAP Capture</a> for capture settings.</span>
     </>
   );
 }
@@ -333,6 +333,10 @@ export function EditRuleModal({
             Log hits
             <InfoTip label={LOG_HELP} />
           </label>
+          <details className="text-xs text-(--text-muted) md:col-span-3">
+            <summary className="cursor-pointer">Technical details</summary>
+            Rule-match event kind: <code>firewall.rule.hit</code>
+          </details>
         </div>
 
         <RulePolicyFields draft={policy} onChange={setPolicy} />
@@ -480,6 +484,10 @@ export function CreateRuleForm({
         </label>
       </div>
 
+      <details className="mt-2 text-xs text-(--text-muted)">
+        <summary className="cursor-pointer">Technical details</summary>
+        Rule-match event kind: <code>firewall.rule.hit</code>
+      </details>
       <RulePolicyFields draft={policy} onChange={setPolicy} />
       <RuleForwardFields forwards={forwards} value={viaForwards} onChange={setViaForwards} />
 

@@ -286,7 +286,7 @@ test("the rule list tells deciding actions from effects and states precedence", 
     { id: "pps-cap", action: "RATE_LIMIT", rateLimit: { packetsPerSecond: 100, burst: 20 } },
     { id: "label-eng", action: "TAG", tag: "eng-access", identities: ["engineering", "vendor"] },
   ]);
-  await expect(page.getByText(/Among enforcing rules, the first matching terminal rule in list order decides/)).toBeVisible();
+  await expect(page.getByText(/Among enforcing rules, the first matching rule that allows or blocks traffic decides/)).toBeVisible();
   await expect(page.getByText(/Monitor ICS rules never decide/)).toBeVisible();
   const row = (id: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name: id, exact: true }) });
   await expect(row("reset-ssh").getByText("RESET", { exact: true })).toHaveClass(/badge-critical/);

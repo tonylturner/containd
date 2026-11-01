@@ -43,7 +43,7 @@ export const CARDS: CardDef[] = [
     id: "lan-internet",
     title: "Allow LAN Internet Access",
     description:
-      "Enable internal hosts to reach the Internet via SNAT masquerade.",
+      "Prepare Internet access for internal hosts using outbound address sharing (SNAT).",
     color: "bg-(--amber)",
     steps: ["Select LAN zone", "Select WAN zone", "Review & Stage"],
   },
@@ -51,7 +51,7 @@ export const CARDS: CardDef[] = [
     id: "publish-service",
     title: "Publish Internal Service",
     description:
-      "Expose an internal server to external traffic with DNAT port forwarding.",
+      "Prepare external access to an internal server using port forwarding (DNAT).",
     color: "bg-amber",
     steps: [
       "Server details",
@@ -64,7 +64,7 @@ export const CARDS: CardDef[] = [
     id: "ics-comm",
     title: "Allow ICS Communication",
     description:
-      "Permit industrial protocol traffic between zones with DPI enforcement.",
+      "Prepare industrial protocol rules between zones, with a separate inspection mode.",
     color: "",
     steps: [
       "Select ICS protocol",

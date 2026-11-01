@@ -193,8 +193,10 @@ nothing if none of its referenced candidate forwards can match. It is reported
 as a warning with its rule ID, the predicate (`identity`, `zone` with the
 `zones` concerned, `addressFamily`, or `forward`), the action and the effect, in:
 
-- The firewall page's nftables ruleset preview, which lists the candidate's
-  warnings.
+- The firewall page's **Generated firewall configuration (nftables)** preview,
+  which lists the candidate's warnings. Expand **Generated ruleset** for the
+  full low-level configuration; **Technical details** retains runtime reasons
+  and queue-ownership caveats.
 - `GET /api/v1/dataplane/ruleset`: `warnings` for the candidate and
   `engineStatus.warnings` for the last applied ruleset; any authenticated user
   reads the applied `warnings` through `GET /api/v1/dataplane/ruleset/status`.

@@ -294,7 +294,7 @@ export function EditICSModal({
             {protocol === "cip" &&
               "Common: 0x4C(76)=Read Tag, 0x4D(77)=Write Tag, 0x0E(14)=Get Attribute, 0x10(16)=Set Attribute."}
             {isIEC104 &&
-              "First course types: 1, 3, 13, 30, 31 (monitor), 46 (double command), 100 (general interrogation). Unmatched IEC 104 traffic inside an enforce envelope is denied and the session is reset."}
+              "First course types: 1, 3, 13, 30, 31 (monitor), 46 (double command), 100 (general interrogation). When blocking is active for this industrial connection, messages that match no industrial rule are blocked and the connection is reset."}
           </div>
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>

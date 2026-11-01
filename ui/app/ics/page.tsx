@@ -143,8 +143,8 @@ export default function ICSPolicyPage() {
       <Card title="Candidate DPI Settings" className="mb-4">
         <div className="flex items-center justify-between">
           <div className="text-sm text-(--text)">
-            ICS protocol filters need DPI enabled. Enforce needs an NFQUEUE group, which inspects
-            routed traffic inline and needs no capture interface; capture interfaces only observe.
+            Industrial protocol filters need traffic inspection enabled. Blocking also requires
+            inline inspection of routed traffic and needs no capture interface; capture interfaces only observe.
           </div>
           <StatusBadge variant={(dpiConfig.dpiEnabled ?? false) ? "success" : "neutral"} dot>
             {(dpiConfig.dpiEnabled ?? false) ? "DPI Enabled" : "DPI Disabled"}
@@ -152,14 +152,18 @@ export default function ICSPolicyPage() {
         </div>
         <div className="mt-2 text-xs text-(--text-muted)">
           {queueGroup > 0
-            ? `Inline inspection: NFQUEUE group ${queueGroup}`
-            : "Inline inspection: off \u2014 no NFQUEUE group, so ICS rules can only monitor"}
+            ? "Inline inspection configured"
+            : "Monitor only \u2014 inline inspection is not configured"}
         </div>
-        {(dpiConfig.captureInterfaces ?? []).length > 0 && (
-          <div className="mt-2 text-xs text-(--text-muted)">
+        <details className="mt-2 text-xs text-(--text-muted)">
+          <summary className="cursor-pointer">Technical details</summary>
+          <p>Inline inspection queue (NFQUEUE): {queueGroup}</p>
+          {(dpiConfig.captureInterfaces ?? []).length > 0 && (
+          <div>
             Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
           </div>
-        )}
+          )}
+        </details>
         <div className="mt-3 space-y-2">
           <EnforcementHealthIndicator health={health?.enforcement} />
           <ICSEnforcementIndicator health={health?.icsEnforcement} />

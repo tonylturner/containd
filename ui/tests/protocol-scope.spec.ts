@@ -140,6 +140,11 @@ test("decoder toggles list only supported protocols and preserve unsupported key
   for (const name of retired) await expect(supportedRows).not.toContainText(name);
   await expect(modal).toContainText("s7comm");
   await expect(modal).toContainText("unsupported");
+  await expect(modal.getByText("s7comm", { exact: true })).not.toBeVisible();
+  const unsupported = modal.locator("details").filter({ hasText: "Stored value: false" });
+  await unsupported.locator("summary").click();
+  await expect(modal.getByText("s7comm", { exact: true })).toBeVisible();
+  await expect(unsupported).toContainText("Stored value: false");
 
   await modal.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(`Not saved: ${unsupportedMapError}`)).toBeVisible();

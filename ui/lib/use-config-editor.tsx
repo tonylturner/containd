@@ -68,12 +68,12 @@ export function ConfigEditNotice({ superseded, conflictRevision, olderView, revi
 }) {
   return stale ? (
     <div role="alert" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
-      <p>Changes staged, but the updated configuration is unavailable. Reload before saving.</p>
+      <p>Changes saved, but the latest settings could not be loaded. Reload before saving again.</p>
       <button className="mt-2 rounded-xs border px-3 py-1.5" onClick={onReload}>Reload</button>
     </div>
   ) : revisionRequired ? (
     <div role="alert" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-sm text-amber">
-      <p>Configuration revision unavailable. Reload before saving.</p>
+      <p>The current configuration version could not be checked. Reload before saving.</p>
       <button className="mt-2 rounded-xs border px-3 py-1.5" onClick={onReload}>Reload</button>
     </div>
   ) : conflictRevision ? (

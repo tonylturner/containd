@@ -53,7 +53,7 @@ async function openEditor(
 }
 
 async function configure(page: Page) {
-  await page.getByText("ICS Protocol Decoders", { exact: true })
+  await page.getByText("Industrial protocols", { exact: true })
     .locator("xpath=../..")
     .getByRole("button", { name: "Configure", exact: true }).click();
 }
@@ -69,7 +69,7 @@ test("missing parsing displays tolerant and saves without synthesizing defaults"
   for (const [, label] of protocols) {
     await expect(modal(page).getByLabel(`${label} parsing`)).toHaveValue("tolerant");
   }
-  await expect(modal(page)).toContainText("Tolerant enforces what is decoded");
+  await expect(modal(page)).toContainText("Inspect supported messages to apply rules");
   await modal(page).getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => saves.length).toBe(1);
   expect(saves[0]).toEqual(dataplane);

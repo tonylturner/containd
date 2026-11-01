@@ -6,6 +6,7 @@ for (const surface of ["ics", "firewall"]) {
     await page.setViewportSize({ width: 1440, height: 1600 });
     await openEditor(page, surface, { protocol: "dnp3", functionCode: [0, 1], masters: [1], groups: [50], addresses: ["0-10"] });
     await expect(page.locator("div.fixed.inset-0")).toBeVisible();
+    await page.getByText("Advanced selectors (saved values still apply)", { exact: true }).click();
     await expect(page.getByLabel("Masters (0-65519)")).toHaveValue("1");
     await expect(page.getByLabel("Point indexes", { exact: true })).toHaveValue("0-10");
     await page.screenshot({ path: testInfo.outputPath(`${surface}-editor.png`), fullPage: true, animations: "disabled" });
@@ -23,6 +24,7 @@ for (const surface of ["ics", "firewall"]) {
   ] satisfies [string, import("../lib/api").ICSPredicate, [string, string][], string[]][]) {
     test(`${surface}: ${protocol} preserves all fields and clears ${cleared}`, async ({ page }) => {
       const seen = await openEditor(page, surface, { protocol, ...ics });
+      await form(page).getByText("Advanced selectors (saved values still apply)", { exact: true }).click();
       for (const [label, value] of changes) await form(page).getByLabel(label, { exact: true }).fill(value);
       await form(page).getByRole("button", { name: "Preview impact" }).click();
       await expect.poll(() => seen.previews.length).toBe(1);
@@ -40,7 +42,7 @@ for (const surface of ["ics", "firewall"]) {
   for (const protocol of ["dnp3", "cip"]) {
     test(`${surface}: ${protocol} legacy unitId removal is explicit`, async ({ page }) => {
       const seen = await openEditor(page, surface, { protocol, unitId: 0 });
-      await expect(form(page).getByRole("alert")).toContainText("unitId");
+      await expect(form(page).getByRole("alert")).toContainText("Unit ID filtering is unavailable");
       await form(page).getByRole("button", { name: "Preview impact" }).click();
       await form(page).getByRole("button", { name: save }).click();
       expect(seen.previews).toHaveLength(0);
@@ -56,6 +58,7 @@ for (const surface of ["ics", "firewall"]) {
   }
   test(`${surface}: invalid new field blocks save and preview`, async ({ page }) => {
     const seen = await openEditor(page, surface, { protocol: "dnp3", groups: [50] });
+    await form(page).getByText("Advanced selectors (saved values still apply)", { exact: true }).click();
     await form(page).getByLabel("Masters (0-65519)").fill("65520");
     await form(page).getByRole("button", { name: "Preview impact" }).click();
     await form(page).getByRole("button", { name: save }).click();

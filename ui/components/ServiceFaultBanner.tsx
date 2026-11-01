@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { ServiceName, ServicesStatus } from "../lib/api-service-status";
+import { TechnicalDetails } from "./TechnicalDetails";
 
 const services: Record<ServiceName, { label: string; href: string }> = {
   syslog: { label: "Syslog", href: "/system/services/syslog/" },
@@ -39,22 +40,22 @@ export function ServiceFaultBanner({ status, loading, only, repairLinks = false 
           return (
             <li key={fault.service} className="break-words">
               <div className="flex flex-wrap items-baseline gap-x-3">
-                <h2 className="font-semibold text-amber">{service.label} — {quarantined ? "Config fault" : "Runtime fault"}</h2>
+                <h2 className="font-semibold text-amber">{service.label} — {quarantined ? "Settings need attention" : "Service could not run"}</h2>
                 {repairLinks && <Link href={service.href} className="text-xs underline">Configure {service.label}</Link>}
               </div>
-              <p className="mt-1 whitespace-pre-wrap">{fault.message}</p>
+              <TechnicalDetails>{fault.message}</TechnicalDetails>
               <p className="mt-1 text-xs">
                 {quarantined
-                  ? "Stored section quarantined. Edit or clear that section, then commit to apply. Unrelated edits can still be saved."
-                  : "Retries on the next apply. Check the service runtime, then commit to apply again."}
+                  ? "These saved settings were rejected. Edit or clear them, then commit to apply. Unrelated edits can still be saved."
+                  : "Applying configuration again retries this service. Check the service, then commit to apply again."}
               </p>
               {quarantined && fault.service !== "av" && <p className="mt-1 text-xs">
-                No automatic input allow rule is added for this service.
+                Remote clients cannot connect unless access is explicitly allowed.
                 {(fault.service === "wireguard" || fault.service === "openvpn") &&
-                  ` ${service.label} tunnel quarantined: its CIDR tokens match nothing.`}
+                  ` ${service.label} tunnel settings were rejected: rules targeting this tunnel do not match traffic.`}
               </p>}
               {quarantined && fault.service === "av" && <p className="mt-1 text-xs">
-                Scanner backend off; scan selection and fail policy still apply.{" "}
+                Scanner unavailable; scan selection and fail policy still apply.{" "}
                 {avPolicy === "closed"
                   ? "Closed policy still blocks unscanned selected traffic except the configured ICS bypass."
                   : avPolicy === "open"

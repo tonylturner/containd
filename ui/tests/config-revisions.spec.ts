@@ -203,7 +203,7 @@ test("428 keeps the draft and requires Reload rather than inventing a revision",
   const raw = '{"system":{"hostname":"mine"}}';
   await editor.fill(raw);
   await page.getByRole("button", { name: "Save staged config", exact: true }).click();
-  await expect(page.getByText("Configuration revision unavailable. Reload before saving.", { exact: true })).toBeVisible();
+  await expect(page.getByText("The current configuration version could not be checked. Reload before saving.", { exact: true })).toBeVisible();
   await expect(editor).toHaveValue(raw);
   await expect(page.getByRole("button", { name: "Keep my edits", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Reload", exact: true }).click();

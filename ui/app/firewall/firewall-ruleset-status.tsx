@@ -1,5 +1,6 @@
 import type { InstalledRulesetStatus } from "../../lib/api";
 import type { InstalledRulesetView } from "../../hooks/useInstalledRuleset";
+import { TechnicalDetails } from "../../components/TechnicalDetails";
 
 /** A readable local time; Go's zero time and blanks read as absent. */
 export function formatStatusTime(value: string | undefined): string | null {
@@ -21,9 +22,10 @@ export function AppliedRulesetStatus({ status }: { status: InstalledRulesetStatu
     <section aria-label="Applied ruleset" className="mt-3 space-y-2 text-xs">
       <p className="text-(--text-muted)">
         {status.installed
-          ? <>Applied ruleset: in force{appliedAt && <> since {appliedAt}</>}{status.snapshotVersion && <> (snapshot <span className="font-mono">{status.snapshotVersion}</span>)</>}.</>
+          ? <>Applied ruleset: in force{appliedAt && <> since {appliedAt}</>}.</>
           : "Applied ruleset: none in force."}
       </p>
+      {status.installed && status.snapshotVersion && <TechnicalDetails>Configuration ID: <span className="font-mono">{status.snapshotVersion}</span></TechnicalDetails>}
       <RulesetFaults status={status} />
       {status.schedulePlanner && status.schedulePlanner.state !== "degraded" && <SchedulePlanner planner={status.schedulePlanner} />}
     </section>
@@ -44,10 +46,12 @@ export function RulesetFaults({ status }: { status: InstalledRulesetStatus }) {
         <div role="status" aria-label="Failed apply" className={amber}>
           <p className="font-semibold">
             Last apply failed{failedAt && <> at {failedAt}</>}
-            {status.failedSnapshotVersion && <> (snapshot <span className="font-mono">{status.failedSnapshotVersion}</span>)</>}
           </p>
-          <p className="wrap-break-word">{status.error}</p>
           <p>{status.installed ? "The ruleset applied before it stays in force until an apply succeeds." : "No ruleset is in force."}</p>
+          <TechnicalDetails>
+            {status.failedSnapshotVersion && <p>Failed configuration ID: <span className="font-mono">{status.failedSnapshotVersion}</span></p>}
+            <p>{status.error}</p>
+          </TechnicalDetails>
         </div>
       )}
       {planner && <SchedulePlanner planner={planner} />}
@@ -59,9 +63,10 @@ export function RulesetFaults({ status }: { status: InstalledRulesetStatus }) {
 export function InstalledRulesetUnavailable({ view }: { view: InstalledRulesetView }) {
   if (view.state !== "unavailable") return null;
   return (
-    <p role="status" aria-label="Installed ruleset status" className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-      Installed ruleset status unavailable: {view.error}
-    </p>
+    <div role="status" aria-label="Installed ruleset status" className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+      Installed ruleset status unavailable. Check appliance health.
+      <TechnicalDetails>{view.error}</TechnicalDetails>
+    </div>
   );
 }
 
@@ -69,19 +74,24 @@ function SchedulePlanner({ planner }: { planner: NonNullable<InstalledRulesetSta
   const horizon = formatStatusTime(planner.horizonEnd);
   const refill = formatStatusTime(planner.lastRefill);
   const errorAt = formatStatusTime(planner.lastErrorAt);
-  const window = <>Schedule windows planned until {horizon ?? "—"} (last refill {refill ?? "—"}).</>;
+  const window = <>Schedules ready until {horizon ?? "—"} (last updated {refill ?? "—"}).</>;
   if (planner.state !== "degraded") {
     return (
-      <p role="status" aria-label="Schedule planner" className="text-(--text-muted)">
-        Schedule planner: ok. {window}
-      </p>
+      <div role="status" aria-label="Schedule planner" className="text-(--text-muted)">
+        Scheduled-rule coverage ready.
+        <TechnicalDetails>{window}</TechnicalDetails>
+      </div>
     );
   }
   return (
     <div role="status" aria-label="Schedule planner" className={amber}>
-      <p className="font-semibold">Schedule planner degraded{planner.reason && <>: {planner.reason}</>}</p>
-      <p>{window} Past that time a scheduled ALLOW stops matching and a scheduled DENY applies.</p>
-      {planner.lastError && <p className="wrap-break-word">Last refill error{errorAt && <> at {errorAt}</>}: {planner.lastError}</p>}
+      <p className="font-semibold">Schedules need attention.</p>
+      <p>Past the scheduled coverage end, a scheduled ALLOW stops matching and a scheduled DENY applies.</p>
+      <TechnicalDetails>
+        <p>{window}</p>
+        {planner.reason && <p>{planner.reason}</p>}
+        {planner.lastError && <p>Last update error{errorAt && <> at {errorAt}</>}: {planner.lastError}</p>}
+      </TechnicalDetails>
     </div>
   );
 }
