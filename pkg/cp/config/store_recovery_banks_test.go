@@ -26,6 +26,10 @@ func TestRevisionRecoveryBanksAcrossHandles(t *testing.T) {
 			}
 			replaceGCTestBank(t, first, "candidate-bank")
 			before := revisionSnapshot(t, first)
+			recoveryBank, err := bankReference(ctx, first.db, configKeyCandidate)
+			if err != nil || recoveryBank == 0 {
+				t.Fatalf("candidate bank: %d, %v", recoveryBank, err)
+			}
 			var second *SQLiteStore
 			if mode == "rejected CAS" {
 				second, err = NewSQLiteStore(path)
@@ -39,12 +43,25 @@ func TestRevisionRecoveryBanksAcrossHandles(t *testing.T) {
 					return nil
 				}
 				if mode == "open handle" {
+					var count int
+					if err := first.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ids_banks WHERE id = ?`, recoveryBank).Scan(&count); err != nil {
+						t.Fatal(err)
+					}
+					if count != 1 {
+						t.Fatal("recovery bank was not held before opening the second handle")
+					}
 					opened, err := NewSQLiteStore(path)
 					if err != nil {
 						t.Fatal(err)
 					}
 					defer opened.Close()
 					second = opened
+					if err := second.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ids_banks WHERE id = ?`, recoveryBank).Scan(&count); err != nil {
+						t.Fatal(err)
+					}
+					if count != 0 {
+						t.Fatal("opening the second handle did not sweep the recovery bank")
+					}
 				} else {
 					_, rejection := second.ApplyChange(ctx, before.Revision, ChangeCommit, 0, func(context.Context, *Config, *Config) error {
 						t.Fatal("stale apply ran")
