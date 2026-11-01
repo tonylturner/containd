@@ -72,14 +72,14 @@ export function GateStatus({ gate }: { gate: AVGateStatus | undefined }) {
           <summary className="cursor-pointer">Scan-path details</summary>
           <div>Listeners up: <span className="text-(--text)">{up}/{gate.listeners.length}</span></div>
           <div>Admission applied: <span className="text-(--text)">{gate.admit}</span></div>
-          {down.map((l) => (
-            <div key={l.address} className="md:col-span-3 text-xs text-(--amber)">
-              Listener {l.address}{l.masquerade ? " (masquerade)" : ""}: {l.unavailable ? "unavailable on this host" : "down"}{l.error ? ` — ${l.error}` : ""}
-            </div>
-          ))}
-          {gate.routing_error && <div className="md:col-span-3 text-xs text-red-400">Routing: {gate.routing_error}</div>}
-          {gate.admit_error && <div className="md:col-span-3 text-xs text-red-400">Admission: {gate.admit_error}</div>}
         </details>
+        {down.map((l) => (
+          <div key={l.address} className="md:col-span-3 text-xs text-(--amber)">
+            Listener {l.address}{l.masquerade ? " (masquerade)" : ""}: {l.unavailable ? "unavailable on this host" : "down"}{l.error ? ` — ${l.error}` : ""}
+          </div>
+        ))}
+        {gate.routing_error && <div className="md:col-span-3 text-xs text-red-400">Routing: {gate.routing_error}</div>}
+        {gate.admit_error && <div className="md:col-span-3 text-xs text-red-400">Admission: {gate.admit_error}</div>}
         {gate.warning && <div className="md:col-span-3 text-xs text-(--amber)">{gate.warning}</div>}
       </div>
     </div>

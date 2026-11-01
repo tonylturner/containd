@@ -4,6 +4,14 @@ import type { FirewallRule } from "../lib/api";
 
 // Headless page tests for the IEC 104 UI against a mocked management API.
 
+async function showAdvancedSelectors(page: Page) {
+  const details = page.locator("details").filter({ has: page.getByText("Advanced selectors (saved values still apply)", { exact: true }) });
+  if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) {
+    await details.locator("summary").click();
+  }
+  await expect(details).toHaveJSProperty("open", true);
+}
+
 const adminUser = { id: "admin-1", username: "containd", role: "admin" };
 
 const iecRules = [
@@ -209,7 +217,7 @@ test("ICS page shows IEC rules, amber health with reason, and saves the wire sha
   await expect(page.getByText("CA 1 IOA 2001")).toBeVisible();
 
   await page.getByRole("button", { name: "Edit" }).click();
-  await page.getByText("Advanced selectors (saved values still apply)", { exact: true }).click();
+  await showAdvancedSelectors(page);
   await expect(page.getByText("Write-only", { exact: true })).toHaveCount(0);
   await expect(page.getByPlaceholder("3, 16")).toHaveCount(0);
   await expect(page.getByPlaceholder("2001, 65536-65567")).toHaveValue("2001");
@@ -243,7 +251,7 @@ test("ICS page shows IEC rules, amber health with reason, and saves the wire sha
     },
   });
   await page.getByRole("button", { name: "Edit" }).click();
-  await page.getByText("Advanced selectors (saved values still apply)", { exact: true }).click();
+  await showAdvancedSelectors(page);
   await expect(page.getByLabel("Command states", { exact: true })).toHaveValue("2");
   await expect(page.getByLabel("Command qualifiers (QU)", { exact: true })).toHaveValue("31");
   await page.getByLabel("Command states", { exact: true }).fill("");
@@ -252,7 +260,7 @@ test("ICS page shows IEC rules, amber health with reason, and saves the wire sha
   await expect.poll(() => writes.length).toBe(2);
   expect(writes[1].body).toMatchObject({ ics: { commandStates: null, commandQualifiers: null } });
   await page.getByRole("button", { name: "Edit" }).click();
-  await page.getByText("Advanced selectors (saved values still apply)", { exact: true }).click();
+  await showAdvancedSelectors(page);
   await expect(page.getByLabel("Command states", { exact: true })).toHaveValue("");
   await expect(page.getByLabel("Command qualifiers (QU)", { exact: true })).toHaveValue("");
   expect(errors).toEqual([]);
@@ -265,7 +273,7 @@ test("IEC editor rejects command predicate domains before saving and explains st
   await page.goto("/ics");
   await loaded;
   await page.getByRole("button", { name: "Edit" }).click();
-  await page.getByText("Advanced selectors (saved values still apply)", { exact: true }).click();
+  await showAdvancedSelectors(page);
   for (const [types, state, qualifier, error] of [
     ["", "1", "0", "require explicit Type IDs"],
     ["48", "", "0", "require explicit Type IDs"],
@@ -339,7 +347,7 @@ test("ICS editor refuses a broadcast CA before saving", async ({ page }) => {
   await mockAPI(page, writes);
   await page.goto("/ics");
   await page.getByRole("button", { name: "Edit" }).click();
-  await page.getByText("Advanced selectors (saved values still apply)", { exact: true }).click();
+  await showAdvancedSelectors(page);
   await page.getByPlaceholder("1", { exact: true }).fill("65535");
   await page.getByRole("button", { name: "Save filter" }).click();
   await expect(page.getByText("CA 65535 is the broadcast address")).toBeVisible();
@@ -422,7 +430,7 @@ for (const command of [false, true]) {
     await page.getByPlaceholder("46, 100").fill(command ? "45" : "100");
     await page.getByRole("button", { name: command ? "control" : "system", exact: true }).click();
     if (command) {
-      await page.getByText("Advanced selectors (saved values still apply)", { exact: true }).click();
+      await showAdvancedSelectors(page);
       await page.getByLabel("Command states", { exact: true }).fill("0");
       await page.getByLabel("Command qualifiers (QU)", { exact: true }).fill("0");
     }
@@ -445,7 +453,7 @@ test("Turning the IEC 104 decoder off saves an explicit false", async ({ page })
   await page.goto("/firewall");
   const decoders = page.getByText("Industrial protocols").locator("xpath=../../..");
   await decoders.getByRole("button", { name: "Configure" }).click();
-  await page.getByRole("switch", { name: "Inspect IEC 60870-5-104" }).click();
+  await page.getByRole("switch", { name: "IEC 60870-5-104 decoder" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0].path).toBe("/api/v1/dataplane");
@@ -463,7 +471,7 @@ test("A rejected decoder change is reverted and its reason shown", async ({ page
   await page.goto("/firewall");
   const decoders = page.getByText("Industrial protocols").locator("xpath=../../..");
   await decoders.getByRole("button", { name: "Configure" }).click();
-  await page.getByRole("switch", { name: "Inspect IEC 60870-5-104" }).click();
+  await page.getByRole("switch", { name: "IEC 60870-5-104 decoder" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(`Not saved: ${reason}`)).toBeVisible();
   await expect(decoders.getByText("4/4 enabled")).toBeVisible();

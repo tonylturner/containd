@@ -16,18 +16,28 @@ Service panels show **Unknown** when live status is unavailable; missing reading
 are not stopped services or zero activity. Use **Refresh** or the panel's **Retry**
 to request a new observation. **Service details** keeps process IDs, generated
 settings files and scanner metadata available without crowding the status summary.
-Antivirus **Scan-path details** retains listener and routing diagnostics; the
-scanning outcome and fail policy remain visible. Syslog **Delivery details** and
-per-stream **Technical details** expose batching and exact stream positions.
+Antivirus **Scan-path details** retains listener counts and admission metadata;
+fault causes, the scanning outcome and fail policy remain visible. Syslog
+**Delivery details** and per-stream **Technical details** expose batching and exact
+stream positions.
 **Advanced local scanner settings** and **Advanced remote scanner settings**
 retain scanner paths, update scheduling and ICAP protocol settings. VPN keeps
 peer JSON and profile import under **Advanced peer settings** and
 **Advanced profile import**; opening a disclosure does not change saved settings.
+Saved peers and customized scanner settings open automatically. Remote scanner
+settings also open whenever ICAP mode requires them.
 
 Dashboard's **No recent IDS/AV alerts** describes only the reported alert counts,
-not overall appliance health or protection. Its IPS card shows unknown when no
-live protection observation is available. Rule counts are counts, not measured
-utilization; container memory bars appear only for reported percentages.
+not overall appliance health or protection. The dashboard does not observe live
+IPS protection state, so its IPS card always shows **Unknown**. Unknown service
+cards are visually distinct from disabled services. Rule counts are counts, not
+measured utilization; container memory bars require a reported positive memory
+limit and percentage. An unlimited container has no memory utilization gauge.
+
+Syslog **Last check** records the latest forwarding check, including empty or
+failed batches, not successful delivery. Per-forwarder **Last sent** advances
+only when records are sent. NTP binary details distinguish **not found** (discovery
+reported no binary) from **Unknown** (no discovery result was reported).
 
 Deleting a reverse proxy site first changes local edits. **Save** stages the
 removal; review and **Commit** apply it. Saving alone does not remove a live site.

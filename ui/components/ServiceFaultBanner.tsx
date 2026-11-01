@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import type { ServiceName, ServicesStatus } from "../lib/api-service-status";
-import { TechnicalDetails } from "./TechnicalDetails";
 
 const services: Record<ServiceName, { label: string; href: string }> = {
   syslog: { label: "Syslog", href: "/system/services/syslog/" },
@@ -43,7 +42,7 @@ export function ServiceFaultBanner({ status, loading, only, repairLinks = false 
                 <h2 className="font-semibold text-amber">{service.label} — {quarantined ? "Settings need attention" : "Service could not run"}</h2>
                 {repairLinks && <Link href={service.href} className="text-xs underline">Configure {service.label}</Link>}
               </div>
-              <TechnicalDetails>{fault.message}</TechnicalDetails>
+              <p className="mt-1 whitespace-pre-wrap">{fault.message}</p>
               <p className="mt-1 text-xs">
                 {quarantined
                   ? "These saved settings were rejected. Edit or clear them, then commit to apply. Unrelated edits can still be saved."

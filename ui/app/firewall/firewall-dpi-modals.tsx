@@ -310,13 +310,13 @@ export function ICSDPIConfigModal({
                       className="rounded-xs border bg-(--surface2) px-2 py-1.5 text-xs text-(--text) outline-hidden focus-visible:ring-2 focus-visible:ring-(--amber)"
                     >
                       <option value="tolerant">Inspect supported messages (tolerant)</option>
-                      <option value="strict">Block unrecognized messages (strict)</option>
+                      <option value="strict">Treat unrecognized messages as violations (strict)</option>
                     </select>
                   </label>
                   <button
                     type="button"
                     role="switch"
-                    aria-label={`Inspect ${p.label}`}
+                    aria-label={`${p.label} decoder`}
                     aria-checked={on}
                     onClick={() => toggle(p.key)}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer shrink-0 ${on ? "bg-emerald-500" : "bg-white/10"}`}
@@ -425,8 +425,8 @@ export function ICSDPIConfigModal({
 
         <div className="mt-4 text-[10px] text-(--text-dim)">
           Inspect supported messages to apply rules to recognized content and alert on the rest.
-          Block unrecognized messages to drop nonconformant messages and reset the connection in
-          Enforce mode; Monitor reports what would be dropped without blocking.
+          Strict parsing treats unrecognized or nonconformant messages as violations.
+          Enforce blocks these violations; Monitor reports what would be dropped without blocking.
           Lost message boundaries and integrity faults reset the connection in both modes when enforcing.
           <details className="mt-2">
             <summary className="cursor-pointer">Technical details</summary>

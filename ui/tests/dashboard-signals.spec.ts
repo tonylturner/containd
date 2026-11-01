@@ -60,7 +60,7 @@ async function openDashboard(page: Page, mocks: Mocks) {
     if (p === "/api/v1/system/stats") {
       body = mocks.stats ?? {
         ruleEval: {}, cpu: { usagePercent: 0 }, memory: { totalBytes: 0, usagePercent: 0 },
-        disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true },
+        disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true, memUsedBytes: 1024, memLimitBytes: 0, memPercent: 0 },
         runtime: { uptime: "1m", goroutines: 1 },
       };
     }
@@ -180,7 +180,7 @@ test("rule counts and unknown container memory do not fabricate utilization bars
 test("a measured zero container memory stays zero, not a synthetic minimum", async ({ page }) => {
   await openDashboard(page, { events: [], services, stats: {
     ruleEval: {}, cpu: { usagePercent: 0 }, memory: { totalBytes: 0, usagePercent: 0 },
-    disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true, memPercent: 0 },
+    disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true, memUsedBytes: 0, memLimitBytes: 1048576, memPercent: 0 },
     runtime: { uptime: "1m", goroutines: 1 },
   } });
   const containerRow = page.getByText("Container", { exact: true }).locator("../..");
@@ -194,5 +194,19 @@ for (const ids of [{ enabled: false, rules: [] }, { enabled: true, rules: [] }])
     await expect(ips).toContainText("Unknown");
     await expect(ips).not.toContainText("Active");
     await expect(ips).not.toHaveClass(/border-emerald/);
+  });
+}
+
+for (const forward_enabled of [false, true]) {
+  test(`proxy distinguishes disabled from stopped with forward enabled=${forward_enabled}`, async ({ page }) => {
+    await openDashboard(page, { events: [], services: { ...services,
+      proxy: { forward_enabled, reverse_enabled: false, envoy_running: false, nginx_running: false },
+    } });
+    const proxy = page.locator("a.rounded-lg").filter({ has: page.getByText("Proxy", { exact: true }) });
+    await expect(proxy).toContainText(forward_enabled ? "Stopped" : "Disabled");
+    const unknown = page.locator("a.rounded-lg").filter({ has: page.getByText("IPS", { exact: true }) });
+    await expect(unknown).toContainText("Unknown");
+    await expect(unknown).not.toHaveClass(/opacity-50|border-emerald/);
+    await expect(proxy).toHaveClass(/opacity-50/);
   });
 }

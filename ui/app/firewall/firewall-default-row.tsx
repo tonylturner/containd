@@ -18,7 +18,7 @@ export function FirewallDefaultRow({ action }: { action: DefaultAction }) {
       <th scope="row" className="px-3 py-3 text-left font-semibold">Default</th>
       <td className="px-3 py-3 text-xs text-(--text-muted)">—</td>
       <td className="px-3 py-3 text-xs text-(--text-muted)">
-        Applies to traffic no rule above matched.
+        Applies when no enforcing rule allows, blocks or rejects traffic.
       </td>
       <td className="whitespace-nowrap px-3 py-3">any → any</td>
       <td className="px-3 py-3">any</td>

@@ -141,10 +141,15 @@ export function IECPressurePanel() {
             </div>
             <div className="flex justify-between gap-4">
               <dt>
-                Packet-blocking failures{" "}
+                <span>Packet-decision failures</span>{" "}
                 <span className="text-(--text-muted)">
                   (excludes queue closure)
                 </span>
+                <details className="mt-1 text-xs">
+                  <summary className="cursor-pointer">Technical details</summary>
+                  <p>Inline verdict failures (verdictFailures)</p>
+                  <p>Includes failures to apply allow or block decisions.</p>
+                </details>
               </dt>
               <dd className="tabular-nums">{data.verdictFailures}</dd>
             </div>

@@ -197,7 +197,7 @@ export default function ServicesOverviewPage() {
           <div className="flex items-center gap-2 text-xs text-(--text)">
             <Image src={staticAssetURL("/icons/envoyproxy.svg")} alt="" width={16} height={16} className="h-4 w-4" />
             <Image src={staticAssetURL("/icons/nginx.svg")} alt="" width={16} height={16} className="h-4 w-4" />
-            <span>Web proxies</span><details className="text-xs"><summary className="cursor-pointer">Service details</summary>Software: Envoy + Nginx</details>
+            <span>Web proxies</span><span className="text-xs text-(--text-muted)">Software: Envoy + Nginx</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-(--text)">
             <span>Outbound and published web apps</span>
@@ -250,7 +250,7 @@ export default function ServicesOverviewPage() {
           errorsRate={errRate("dns")}
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>DNS resolver</span><details className="text-xs"><summary className="cursor-pointer">Service details</summary>Software: Unbound</details>
+            <span>DNS resolver</span><span className="text-xs text-(--text-muted)">Software: Unbound</span>
             <InfoTip label="Embedded resolver with upstream forwarding and caching." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
@@ -284,7 +284,7 @@ export default function ServicesOverviewPage() {
           errorsRate={errRate("ntp")}
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>Time synchronization</span><details className="text-xs"><summary className="cursor-pointer">Service details</summary>Software: chrony</details>
+            <span>Time synchronization</span><span className="text-xs text-(--text-muted)">Software: chrony</span>
             <InfoTip label="Keeps system time in sync using configured NTP servers." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">

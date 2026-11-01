@@ -308,18 +308,18 @@ export function EditRuleModal({
         <div className="grid gap-3 md:grid-cols-3">
           <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-3" />
           <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
-            <option value="">Source zone (any)</option>
+            <option value="">{cfg.originalSourceZones.length > 1 ? "Remove first source zone (keep remaining)" : "Source zone (any)"}</option>
             {srcZone && !zones.some((z) => z.name === srcZone) && <option value={srcZone}>{srcZone} (no longer on server)</option>}
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
           <NoZonesHint zones={zones} />
           <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
-            <option value="">Dest zone (any)</option>
+            <option value="">{cfg.originalDestZones.length > 1 ? "Remove first destination zone (keep remaining)" : "Dest zone (any)"}</option>
             {dstZone && !zones.some((z) => z.name === dstZone) && <option value={dstZone}>{dstZone} (no longer on server)</option>}
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
           <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
-            <option value="">Any protocol</option>
+            <option value="">{cfg.originalProtocols.length > 1 ? "Remove first protocol (keep remaining)" : "Any protocol"}</option>
             {proto && !["tcp", "udp", "icmp"].includes(proto) && <option value={proto}>{proto}</option>}
             <option value="tcp">tcp</option>
             <option value="udp">udp</option>

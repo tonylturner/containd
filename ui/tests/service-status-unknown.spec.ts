@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { CONFIG_COMMITTED } from "../lib/config-events";
 
 const meter = { sparkline: [], count: 0, rate_per_min: 0, errors_sparkline: [], errors_count: 0, errors_rate_per_min: 0 };
 
@@ -73,3 +74,50 @@ for (const [path, heading, entry] of [
     await expect(panel).not.toContainText(/(?:Rate|Errors):\s*0.0/);
   });
 }
+
+for (const ntpd_path of ["", undefined, "/usr/sbin/chronyd"]) {
+  test(`NTP binary reports ${ntpd_path === "" ? "not found" : ntpd_path ?? "unknown"} without inventing discovery`, async ({ page }) => {
+    await page.route("**/api/v1/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const body = path.endsWith("/services/status") ? { faults: [], av: { available: false, error: "scanner offline" }, ntp: { ...meter, running: false, ntpd_path } }
+        : path.endsWith("/services/ntp") ? { enabled: true, servers: [] }
+          : path.endsWith("/auth/me") || path.endsWith("/auth/session") ? { id: "admin", username: "containd", role: "admin" } : {};
+      await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    });
+    const loaded = page.waitForResponse("**/api/v1/services/status");
+    await page.goto("/system/services/ntp/");
+    await loaded;
+    await page.getByText("Service details", { exact: true }).click();
+    await expect(page.getByText(`Binary: ${ntpd_path === "" ? "not found" : ntpd_path ?? "Unknown"}`, { exact: true })).toBeVisible();
+  });
+}
+
+test("saved WireGuard peers are visible by default without dirtying configuration", async ({ page }) => {
+  let peers = [{ name: "operator", publicKey: "test-key", allowedIPs: ["10.8.0.2/32"] }];
+  let revision = 1;
+  const writes: string[] = [];
+  await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() !== "GET") writes.push(request.postData() ?? "");
+    const body = path.endsWith("/services/vpn") ? { wireguard: { enabled: false, peers }, openvpn: { enabled: false } }
+      : ["/interfaces", "/interfaces/state", "/zones"].some((p) => path.endsWith(p)) ? []
+        : path.endsWith("/auth/me") || path.endsWith("/auth/session") ? { id: "admin", username: "containd", role: "admin" } : {};
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": `0123456789abcdef.${revision}` } });
+  });
+  const loaded = page.waitForResponse("**/api/v1/services/vpn");
+  await page.goto("/vpn/");
+  await loaded;
+  await expect(page.getByRole("textbox", { name: /^Peers \(JSON\)/ })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: /^Peers \(JSON\)/ })).toHaveValue(JSON.stringify(peers, null, 2));
+  peers = [...peers, { name: "engineer", publicKey: "new-key", allowedIPs: ["10.8.0.3/32"] }];
+  revision++;
+  await Promise.all([
+    page.waitForResponse("**/api/v1/services/vpn"),
+    page.evaluate((event) => window.dispatchEvent(new CustomEvent(event)), CONFIG_COMMITTED),
+  ]);
+  await expect(page.getByRole("textbox", { name: /^Peers \(JSON\)/ })).toHaveValue(JSON.stringify(peers, null, 2));
+  await expect(page.getByRole("status", { name: "Unsaved edits" })).toHaveCount(0);
+  expect(writes).toEqual([]);
+});

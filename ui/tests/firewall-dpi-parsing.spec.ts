@@ -11,10 +11,11 @@ async function openEditor(
   page: Page,
   parsing?: Record<string, "tolerant" | "strict">,
   rejectSave = false,
+  dpiMode: "enforce" | "monitor" = "enforce",
 ) {
   const dataplane = {
     dpiEnabled: true,
-    dpiMode: "enforce",
+    dpiMode,
     dpiIcsProtocols: { dnp3: false },
     dpiProtocols: { http: false },
     nfqueueGroup: 101,
@@ -61,6 +62,18 @@ async function configure(page: Page) {
 function modal(page: Page) {
   return page.locator("div.fixed").filter({
     has: page.getByRole("heading", { name: "ICS Protocol DPI Configuration" }),
+  });
+}
+
+for (const mode of ["enforce", "monitor"] as const) {
+  test(`${mode}: decoder switches keep their names and strict parsing does not promise monitoring blocks`, async ({ page }) => {
+    await openEditor(page, undefined, false, mode);
+    for (const [, label] of protocols) {
+      await expect(modal(page).getByRole("switch", { name: `${label} decoder`, exact: true })).toBeVisible();
+      await expect(modal(page).getByLabel(`${label} parsing`).locator('option[value="strict"]'))
+        .toHaveText("Treat unrecognized messages as violations (strict)");
+    }
+    await expect(modal(page)).toContainText("Enforce blocks these violations; Monitor reports what would be dropped without blocking.");
   });
 }
 

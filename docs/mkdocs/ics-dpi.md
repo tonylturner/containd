@@ -153,8 +153,10 @@ Industrial protocols → Configure**, or POST the full candidate dataplane
 document to `/api/v1/dataplane`, then commit to apply.
 
 The **Unrecognized messages** control offers **Inspect supported messages
-(tolerant)** and **Block unrecognized messages (strict)**. These labels do not
-change the stored `tolerant`/`strict` values or enable blocking by themselves.
+(tolerant)** and **Treat unrecognized messages as violations (strict)**. Strict
+violations are blocked in Enforce mode; Monitor reports what would be dropped
+without blocking. These labels do not change the stored `tolerant`/`strict`
+values or enable blocking by themselves.
 The ICS page shows whether inline inspection is configured; its **Technical
 details** retains the NFQUEUE number and capture interfaces. Live protection
 and per-rule coverage remain separate from these saved settings.
@@ -163,10 +165,12 @@ after a failed refresh; the page does not imply inspection is disabled or show
 previous queue and interface values as current.
 
 Rule editors keep uncommon station, object, direction and message selectors
-under **Advanced selectors (saved values still apply)**. IEC 104 message
-types, station address (CA) and point addresses (IOA) remain directly visible.
-Closing the disclosure never clears its values. Per-rule **Inspection details**
-retains the exact reported reasons when coverage is limited or unavailable.
+under **Advanced selectors (saved values still apply)**. This section opens
+automatically when any of its selectors has a saved restriction, including an
+explicit zero or false value. IEC 104 message types, station address (CA) and
+point addresses (IOA) remain directly visible. Closing the disclosure never
+clears its values. Reasons for limited or unavailable coverage are shown inline,
+including the exact reported fault text.
 
 For example, this fragment selects strict IEC 104 parsing and leaves the other
 protocols tolerant (merge it into the full dataplane document before posting;

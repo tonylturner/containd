@@ -93,6 +93,30 @@ test("editing a rule with any protocol does not add a TCP restriction", async ({
   expect(seen.patches[0]).toMatchObject({ protocols: [] });
 });
 
+test("multi-value controls describe removing the first match rather than selecting Any", async ({ page }) => {
+  const multi = {
+    ...rule, ics: undefined,
+    sourceZones: ["it", "engineering"],
+    destZones: ["ot", "safety"],
+    protocols: [{ name: "tcp", port: "502" }, { name: "udp", port: "20000" }],
+  };
+  const seen = await openFirewall(page, [multi]);
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const form = editor(page, multi.id);
+  for (const label of ["Remove first source zone (keep remaining)", "Remove first destination zone (keep remaining)", "Remove first protocol (keep remaining)"]) {
+    const control = form.locator("select").filter({ hasText: label });
+    await expect(control).toHaveCount(1);
+    await control.selectOption("");
+    await expect(control.locator("option:checked")).toHaveText(label);
+  }
+  await form.getByRole("button", { name: "Save changes" }).click();
+  await expect.poll(() => seen.patches.length).toBe(1);
+  expect(seen.patches[0]).toMatchObject({
+    sourceZones: ["engineering"], destZones: ["safety"],
+    protocols: [{ name: "udp", port: "20000" }],
+  });
+});
+
 test("clearing rule fields in the editor clears them", async ({ page }) => {
   const seen = await openFirewall(page, [rule]);
   await page.getByRole("button", { name: "Edit", exact: true }).click();

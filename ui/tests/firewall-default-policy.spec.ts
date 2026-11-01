@@ -51,7 +51,7 @@ for (const count of [0, 3]) {
       await expect(region.locator("tbody tr[id]")).toHaveCount(count);
       await expect(fallback).toContainText("any → any");
       await expect(fallback.getByRole("cell", { name: "any", exact: true })).toHaveCount(1);
-      await expect(fallback).toContainText("traffic no rule above matched");
+      await expect(fallback).toContainText("no enforcing rule allows, blocks or rejects traffic");
       await expect(fallback.getByRole("button")).toHaveCount(0);
       await expect(fallback.getByRole("link")).toHaveCount(0);
       await expect(fallback.getByText("Unmatched traffic allowed", { exact: true })).toHaveCount(expected === "ALLOW" ? 1 : 0);

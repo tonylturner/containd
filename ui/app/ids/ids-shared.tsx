@@ -115,7 +115,6 @@ export function groupFilterMatch(r: IDSRule, filter: string): boolean {
 export function FormatBadge({ format }: { format?: string }) {
   const f = format || "native";
   const color = FORMAT_BADGE_COLOR[f] ?? FORMAT_BADGE_COLOR.native;
-  if (f === "native") return <details className="text-xs"><summary className="cursor-pointer">Built-in format</summary><code>{f}</code></details>;
   return (
     <span
       className={`inline-block rounded-xs border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${color}`}

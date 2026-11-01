@@ -152,7 +152,7 @@ export default function NTPPage() {
               <div className="md:col-span-2">
                 Binary:{" "}
                 <span className="text-(--text)">
-                  {status?.ntpd_path || "Unknown"}{status?.ntpd_name ? ` (${status.ntpd_name})` : ""}
+                  {status.ntpd_path === "" ? "not found" : status.ntpd_path ?? "Unknown"}{status.ntpd_name ? ` (${status.ntpd_name})` : ""}
                 </span>
               </div>
             </details>

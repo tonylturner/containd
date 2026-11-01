@@ -87,6 +87,12 @@ export default function AVPage() {
   }, [autoRefresh, refresh]);
 
   const icapServers = useMemo(() => cfg.icap?.servers ?? [], [cfg.icap?.servers]);
+  const localScannerCustomized = Boolean(
+    (cfg.clamav?.socketPath && cfg.clamav.socketPath !== "/run/clamav/clamd.sock") ||
+    (cfg.clamav?.customDefsPath && cfg.clamav.customDefsPath !== "/data/clamav/custom") ||
+    cfg.clamav?.updateSchedule ||
+    cfg.clamav?.freshclamEnabled === false
+  );
 
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
@@ -328,8 +334,8 @@ export default function AVPage() {
               onChange={(e) => setCfg((c) => ({ ...c, failPolicy: e.target.value as AVConfig["failPolicy"] }))}
               className="mt-1 w-full input-industrial"
             >
-              <option value="open">Allow unscanned traffic</option>
-              <option value="closed">Block selected traffic</option>
+              <option value="open">Allow unscanned traffic when the scanner is unavailable</option>
+              <option value="closed">Block selected traffic when the scanner is unavailable</option>
             </select>
           </div>
           <div>
@@ -353,7 +359,7 @@ export default function AVPage() {
             />
           </div>
         </div>
-        <details className="mt-6 rounded-xs border p-3">
+        <details className="mt-6 rounded-xs border p-3" open={cfg.mode === "icap" || icapServers.length > 0}>
           <summary className="cursor-pointer text-sm">Advanced remote scanner settings</summary>
           <h3 className="text-sm font-semibold text-(--text)">ICAP servers</h3>
           <p className="text-xs text-(--text-muted)">Used when mode is ICAP: one RFC 3507 server (REQMOD for uploads, RESPMOD for downloads).</p>
@@ -405,7 +411,7 @@ export default function AVPage() {
           </div>
         </details>
 
-        <details className="mt-6 rounded-xs border p-3">
+        <details className="mt-6 rounded-xs border p-3" open={localScannerCustomized}>
           <summary className="cursor-pointer text-sm">Advanced local scanner settings</summary>
           <h3 className="text-sm font-semibold text-(--text)">ClamAV</h3>
           <p className="text-xs text-(--text-muted)">Used with the local scanner (ClamAV, the default).</p>

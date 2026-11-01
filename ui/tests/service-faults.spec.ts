@@ -92,7 +92,7 @@ test("config faults explain quarantine and repair, regardless of message wording
   await mockAPI(page, statusWith([configFault]));
   await open(page);
   await expect(banner(page)).toContainText("DNS — Settings need attention");
-  await expect(banner(page)).toContainText(configFault.message);
+  await expect(banner(page).getByText(configFault.message, { exact: true })).toBeVisible();
   await expect(banner(page)).toContainText("Edit or clear them");
   await expect(banner(page)).toContainText("Unrelated edits can still be saved");
   await expect(banner(page)).toContainText("Remote clients cannot connect unless access is explicitly allowed");
@@ -104,7 +104,7 @@ test("runtime faults explain retry, not stored quarantine", async ({ page }) => 
   await mockAPI(page, statusWith([runtimeFault]));
   await open(page);
   await expect(banner(page)).toContainText("NTP — Service could not run");
-  await expect(banner(page)).toContainText(runtimeFault.message);
+  await expect(banner(page).getByText(runtimeFault.message, { exact: true })).toBeVisible();
   await expect(banner(page)).toContainText("Applying configuration again retries this service");
   await expect(banner(page)).not.toContainText("These saved settings were rejected");
   await screenshot(page, "runtime-fault");
