@@ -13,6 +13,16 @@ export function revisionFrom(baseRevision?: string): ConfigRevision {
   return { baseRevision, serverRevision: baseRevision, conflictRevision: undefined, olderView: false, revisionRequired: false, reviewOnRead: false };
 }
 
+/** Even a clean view stays pinned after Keep: a background read is not consent
+ * to overwrite a second operator's intervening change. An extra 412 is safer. */
+export function retainRevision(state: ConfigRevision, keep: boolean, dirty: boolean): boolean {
+  return keep && !!state.baseRevision && (dirty || !!state.conflictRevision || !!state.olderView || !!state.revisionRequired);
+}
+
+export function revisionError(failure: ApiFailure): string | null {
+  return isRevisionConflict(failure) || isRevisionRequired(failure) ? null : failure.error;
+}
+
 export function isRevisionConflict(failure: ApiFailure): boolean {
   return failure.status === 412 && failure.code === "config_revision_mismatch";
 }

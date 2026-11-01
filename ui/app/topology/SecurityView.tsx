@@ -1,6 +1,8 @@
 "use client";
 
-import { useConfigRevision } from "../../lib/use-config-revision";
+import { revisionError } from "../../lib/config-revision";
+
+import { useConfigView } from "../../lib/use-config-revision";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
@@ -20,10 +22,9 @@ const MAX_ZONES = 6;
    ════════════════════════════════════════════════════════════════════ */
 
 export default function SecurityView() {
-  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
+  const { readConfig, write, data: allZones, revisionNotice } = useConfigView<ZoneView[]>([]);
   const toast = useToast();
   const zoneNames = useRef(new Map<string, string>());
-  const [allZones, setAllZones] = useState<ZoneView[]>([]);
   const [conduits, setConduits] = useState<ConduitMap>({});
   const [activeIds, setActiveIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -37,14 +38,14 @@ export default function SecurityView() {
   const { initialLoading: loading, loading: refreshing, refresh: fetchData } = useAsyncRefresh(useCallback(async () => {
     try {
       const [zones, conds] = await Promise.all([
-        api.listZones().then(snapshot => readConfig(snapshot)),
+        api.listZones(),
         api.getSecurityConduits(),
       ]);
       setError(null);
       if (!zones || !conds) throw new Error("Failed to load security data");
-      zoneNames.current = new Map(zones.map((z) => [mapZone(z).id, z.name]));
-      const zv = zones.map(mapZone);
-      setAllZones(zv);
+      zoneNames.current = new Map(zones.data.map((z) => [mapZone(z).id, z.name]));
+      const zv = zones.data.map(mapZone);
+      readConfig({ data: zv, revision: zones.revision });
       setConduits((conds as ConduitMap) || {});
       setActiveIds((prev) => prev.length ? prev : zv.slice(0, Math.min(MAX_ZONES, zv.length)).map((z) => z.id));
     } catch (e) {
@@ -90,24 +91,27 @@ export default function SecurityView() {
   const setSLTarget = useCallback(async (zoneId: string, lvl: number) => {
     const name = zoneNames.current.get(zoneId);
     if (!name) return;
-    const result = await api.updateZone(expectedRevision(), name, { slTarget: lvl }).then(handleRevision(expectedRevision()));
-    if (!result.ok) { toast(result.error || "Failed to stage zone target", "error"); return; }
+    const result = await write(base => api.updateZone(base, name, { slTarget: lvl }), { patch: (rows, saved) => rows.map(row => row.id === zoneId ? mapZone(saved) : row) });
+    if (!result.ok) { revisionError(result) !== null && toast(result.error, "error"); return; }
     toast("Zone target staged — commit to apply.", "success");
     await fetchData();
-  }, [fetchData, toast, expectedRevision, handleRevision]);
+  }, [fetchData, toast, write]);
 
   const toggleOverride = useCallback(async (zoneId: string, srId: string, newVal: boolean) => {
     const zone = allZones.find((z) => z.id === zoneId);
     const name = zoneNames.current.get(zoneId);
     if (!zone || !name) return;
-    const ov = { ...zone.overrides };
-    if (Object.prototype.hasOwnProperty.call(ov, srId)) delete ov[srId];
-    else ov[srId] = newVal;
-    const result = await api.updateZone(expectedRevision(), name, { slOverrides: ov }).then(handleRevision(expectedRevision()));
-    if (!result.ok) { toast(result.error || "Failed to stage zone override", "error"); return; }
+    const result = await write((base, rows) => {
+      const current = rows.find(row => row.id === zoneId);
+      const ov = { ...current?.overrides };
+      if (Object.prototype.hasOwnProperty.call(ov, srId)) delete ov[srId];
+      else ov[srId] = newVal;
+      return api.updateZone(base, name, { slOverrides: ov });
+    }, { patch: (rows, saved) => rows.map(row => row.id === zoneId ? mapZone(saved) : row) });
+    if (!result.ok) { revisionError(result) !== null && toast(result.error, "error"); return; }
     toast("Zone override staged — commit to apply.", "success");
     await fetchData();
-  }, [allZones, fetchData, toast, expectedRevision, handleRevision]);
+  }, [allZones, fetchData, toast, write]);
 
   // ── Cell selection ──
   const selectCell = useCallback((key: string) => {

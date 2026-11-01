@@ -1,14 +1,16 @@
 "use client";
 
+import { revisionError } from "../../lib/config-revision";
+
 import { useCallback, useState } from "react";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-import { api, type ApiResult, type ConfigSnapshot } from "../../lib/api";
+import { api, type ApiResult } from "../../lib/api";
 import { ConfigDiffBlocks } from "../config/config-diff-blocks";
 import { buildDiffBlocks } from "../config/config-utils";
 import type { ConfigDiff } from "../../lib/api-config";
-import { useConfigRevision } from "../../lib/use-config-revision";
+import { useConfigView } from "../../lib/use-config-revision";
 import {
   learner,
   selectable,
@@ -76,8 +78,8 @@ export function DatasetReview({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [receipt, setReceipt] = useState<LearnApplyRequest | null>(null);
-  const [destination, setDestination] = useState<ConfigSnapshot<ConfigDiff> | null>(null);
-  const revision = useConfigRevision();
+  const revision = useConfigView<ConfigDiff | null>(null);
+  const destination = revision.available ? revision.data : null;
   const { readConfig, requireReview } = revision;
   const baseRevision = revision.state.baseRevision;
   const [uncertain, setUncertain] = useState(false);
@@ -93,7 +95,6 @@ export function DatasetReview({
     }
     // Destination refresh is comparison context, not permission to rebase a receipt.
     const snapshot = await api.diffConfig();
-    setDestination(snapshot);
     readConfig(snapshot, !discard, true);
     if (snapshot && discard) { setReceipt(null); setSelected(new Map()); setUncertain(false); }
   }, [dataset.id, readConfig]));
@@ -113,10 +114,9 @@ export function DatasetReview({
     }
   }
   async function stage(payload: LearnApplyRequest) {
-    if (!baseRevision || needsReview || !destination) return;
+    if (!baseRevision || needsReview || !destination || !revision.writable) return;
     setReceipt(payload);
-    const submittedBase = revision.expectedRevision();
-    const res = await stageSuggestions(payload, submittedBase).then(revision.handleRevision(submittedBase));
+    const res = await revision.writeRefresh(base => stageSuggestions(payload, base), api.diffConfig);
     if (res.ok) {
       setReceipt(null);
       if (res.adopted) setSelected(new Map());
@@ -130,7 +130,7 @@ export function DatasetReview({
       setReceipt(res.status === 412 || uncertain ? payload : null);
       setUncertain(uncertain);
       if (uncertain) requireReview();
-      setError(res.error);
+      setError(revisionError(res) ?? "");
     }
     await refresh();
     await onChanged();
@@ -207,7 +207,7 @@ export function DatasetReview({
           </p>
           <button
             className={secondaryButton}
-            disabled={busy || needsReview || !baseRevision || !destination}
+            disabled={busy || needsReview || !baseRevision || !destination || !revision.writable}
             onClick={() => void run(() => stage(receipt))}
           >
             Retry same staging request
@@ -219,9 +219,9 @@ export function DatasetReview({
         </div>
       )}
       <section aria-label="Staging destination" className="mt-3 rounded-xs border px-3 py-2 text-sm">
-        <p>Destination candidate: {destination?.revision ?? "unavailable"}</p>
-        {destination && <p className="text-xs">Pending sections: {destination.data.changedSections.join(", ") || "none"}. <a href="/config/?tab=diff" target="_blank" rel="noreferrer" className="underline">Review full diff</a></p>}
-        {needsReview && destination && <div className="mt-3 grid gap-3"><ConfigDiffBlocks blocks={buildDiffBlocks(destination.data)} /></div>}
+        <p>Destination candidate: {destination ? revision.state.serverRevision : "unavailable"}</p>
+        {destination && <p className="text-xs">Pending sections: {destination.changedSections.join(", ") || "none"}. <a href="/config/?tab=diff" target="_blank" rel="noreferrer" className="underline">Review full diff</a></p>}
+        {needsReview && destination && <div className="mt-3 grid gap-3"><ConfigDiffBlocks blocks={buildDiffBlocks(destination)} /></div>}
         {revision.revisionNotice(() => refresh({ discard: true }))}
       </section>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -256,6 +256,7 @@ export function DatasetReview({
                 needsReview ||
                 !baseRevision ||
                 !destination ||
+                !revision.writable ||
                 !!receipt ||
                 !eligible.length ||
                 eligible.length > 128 ||

@@ -11,6 +11,7 @@ export function ConfigBackupRecoveryCard({
   backupName,
   backups,
   canEdit,
+  canRestore,
   onBackupNameChange,
   onCreateBackup,
   onDeleteBackup,
@@ -22,6 +23,7 @@ export function ConfigBackupRecoveryCard({
   backupName: string;
   backups: ConfigBackup[];
   canEdit: boolean;
+  canRestore: boolean;
   onBackupNameChange: (value: string) => void;
   onCreateBackup: (redacted: boolean) => void;
   onDeleteBackup: (backup: ConfigBackup) => void;
@@ -70,7 +72,8 @@ export function ConfigBackupRecoveryCard({
         {canEdit && (
           <button
             onClick={onRestoreConfig}
-            className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui"
+            disabled={!canRestore}
+            className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
           >
             Restore
           </button>
@@ -310,7 +313,7 @@ export function ConfigActionBar({
             <button
               onClick={onRollback}
               disabled={!canMutate}
-              className="rounded-xs bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
+              className="rounded-xs bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Rollback
             </button>

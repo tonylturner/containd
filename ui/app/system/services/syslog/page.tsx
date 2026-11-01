@@ -3,7 +3,7 @@
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
 import { useConfigForm } from "../../../../lib/use-config-form";
-import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
@@ -24,7 +24,7 @@ export default function SyslogPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
-  const { conflictProps, editor, cfg, getBaseRevision, setCfg, adoptConfig, beginSave, failSave, acceptConfig } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 }, false);
+  const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 }, false);
   const [status, setStatus] = useState<SyslogStatus | null>(null);
   const form = useConfigForm({ forwarder: {
     address: "",
@@ -32,7 +32,7 @@ export default function SyslogPage() {
     proto: "udp",
   } as SyslogForwarder });
   const [newFwd, setNewFwd] = form.field("forwarder");
-  const { refreshForm } = form;
+  const { readConfig: refreshForm } = form;
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -46,8 +46,8 @@ export default function SyslogPage() {
       const sSnapshot = await api.getSyslog();
       const s = (sSnapshot?.data ?? null);
       if (!checkLoaded(s)) return;
-      refreshForm(s, keepEdits, sSnapshot?.revision);
-      adoptConfig(s, keepEdits, sSnapshot?.revision);
+      refreshForm({ data: s, revision: sSnapshot?.revision ?? "" }, keepEdits);
+      adoptConfig({ data: s, revision: sSnapshot?.revision ?? "" }, keepEdits);
       toast("Syslog status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -81,8 +81,8 @@ export default function SyslogPage() {
       setError("Port must be valid.");
       return;
     }
-    if (form.editor.baseRevision !== getBaseRevision()) {
-      form.requireReview(getBaseRevision() ?? "");
+    if (form.editor.baseRevision !== editor.baseRevision) {
+      form.requireReview(editor.baseRevision ?? "");
       return;
     }
     setCfg((c) => ({
@@ -103,14 +103,12 @@ export default function SyslogPage() {
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
-    const submitted = beginSave();
-    const saved = await save.run("save", () => api.setSyslog(submitted.baseRevision ?? "", cfg), {
+    const saved = await save.run("save", () => write((base, submitted) => api.setSyslog(base, submitted), { replace: data => data }), {
       success: "Syslog staged — commit to apply.",
       failure: "Failed to save syslog settings.",
     });
-    if (!saved) { failSave(submitted); return; }
-    if (saved.ok) acceptConfig(submitted, saved.data, saved.revision);
-    else { failSave(submitted, saved); setError(saved.error); }
+    if (!saved) return;
+    if (!saved.ok) setError(revisionError(saved));
   }
 
   return (

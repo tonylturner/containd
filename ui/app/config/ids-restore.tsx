@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useEffectEvent, useState } from "react";
+import { revisionError } from "../../lib/config-revision";
 import { api } from "../../lib/api";
-import { useConfigRevision } from "../../lib/use-config-revision";
+import { useConfigView } from "../../lib/use-config-revision";
 
 /** An upload owns its destination base until acknowledgement or explicit
  * discard. Background diff refreshes never rebase the selected file. */
@@ -11,7 +12,7 @@ export function IDSRestore({ revision, onStatus, onChanged }: {
   onStatus: (status: string) => void;
   onChanged: () => unknown;
 }) {
-  const draft = useConfigRevision();
+  const draft = useConfigView<unknown>(null);
   const { readConfig } = draft;
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -21,19 +22,17 @@ export function IDSRestore({ revision, onStatus, onChanged }: {
   }, [revision]);
 
   async function restore(selected: File) {
-    const base = draft.expectedRevision();
-    if (busy || !revision || !base) return;
+    if (busy || !revision || !draft.writable) return;
     setBusy(true);
+    onStatus("");
     try {
-      const rules = JSON.parse(await selected.text());
-      if (!Array.isArray(rules)) {
-        onStatus("Invalid IDS rules file (expected JSON array).");
-        return;
-      }
-      const result = await api.restoreIDSRules(base, rules).then(draft.handleRevision(base));
-      onStatus(result.ok
-        ? `IDS restore staged (${result.data.count} rules) — commit to apply.`
-        : `Restore failed: ${result.error}`);
+      const result = await draft.writeRefresh(async base => {
+        const rules = JSON.parse(await selected.text());
+        if (!Array.isArray(rules)) throw new Error("Invalid IDS rules file (expected JSON array).");
+        return api.restoreIDSRules(base, rules);
+      }, api.diffConfig);
+      if (result.ok) onStatus(`IDS restore staged (${result.data.count} rules) — commit to apply.`);
+      else if (revisionError(result) !== null) onStatus(`Restore failed: ${result.error}`);
       if (result.ok && result.adopted) setFile(current => current === selected ? null : current);
       void onChanged();
     } catch {
@@ -55,7 +54,7 @@ export function IDSRestore({ revision, onStatus, onChanged }: {
       <div className="flex flex-wrap items-center gap-2">
         <label className="cursor-pointer rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui">
           Select rule backup
-          <input type="file" accept=".json" className="hidden" disabled={busy || !revision}
+          <input type="file" accept=".json" className="hidden" disabled={busy || !revision || !draft.writable}
             onChange={(event) => {
               const selected = event.target.files?.[0];
               event.target.value = "";
@@ -66,7 +65,7 @@ export function IDSRestore({ revision, onStatus, onChanged }: {
         </label>
         {file && <>
           <span className="break-all text-xs">{file.name}</span>
-          <button disabled={busy || !revision} onClick={() => void restore(file)}
+          <button disabled={busy || !revision || !draft.writable} onClick={() => void restore(file)}
             className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui disabled:opacity-50">
             Stage rule restore
           </button>

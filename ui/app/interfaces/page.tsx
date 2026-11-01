@@ -1,13 +1,11 @@
 "use client";
 
-import { useConfigRevision } from "../../lib/use-config-revision";
-
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { reconcileRows, upsertRow } from "../../lib/config-editor";
 
 import { useConfigForm } from "../../lib/use-config-form";
-import { ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
+import { revisionError, ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -28,11 +26,10 @@ import { runtimeFor } from "../../lib/interface-addresses";
 import { zoneLabel } from "../../lib/zones";
 
 export default function InterfacesPage() {
-  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
   const { canSave, canSaveNow, loadError: configLoadError, checkLoaded } = useConfigLoad();
   const [reservation, setReservation] = useState<ManagementReservation | null>(null);
   const rowsDraft = useConfigEditor<Interface[]>([], false);
-  const { cfg: ifaces, adoptConfig: adoptRows } = rowsDraft;
+  const { cfg: ifaces, readConfig: adoptRows } = rowsDraft;
   const [runtimeStatus, setRuntimeStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [state, setState] = useState<InterfaceState[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
@@ -40,7 +37,7 @@ export default function InterfacesPage() {
     name: "", alias: "", zone: "", ifaceType: "physical" as "physical" | "bridge" | "vlan",
     members: "", parent: "", vlanId: "10", addresses: "",
   });
-  const { refreshForm } = form;
+  const { readConfig: refreshForm } = form;
   const [name, setName] = form.field("name");
   const [alias, setAlias] = form.field("alias");
   const [zone, setZone] = form.field("zone");
@@ -88,16 +85,16 @@ export default function InterfacesPage() {
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [iSnapshot, zSnapshot, s, r] = await Promise.all([api.listInterfaces(), api.listZones(), api.listInterfaceState(), api.getManagementReservation()]);
-    const i = readConfig(iSnapshot, keepEdits);
+    const i = iSnapshot?.data ?? null;
     const z = zSnapshot?.data ?? null;
     if (!checkLoaded(i)) return;
-    refreshForm(i, keepEdits, iSnapshot?.revision);
+    refreshForm({ data: i, revision: iSnapshot?.revision ?? "" }, keepEdits);
     setReservation(r);
-    adoptRows(i, keepEdits, iSnapshot?.revision);
+    adoptRows({ data: i, revision: iSnapshot?.revision ?? "" }, keepEdits);
     setZones(z ?? []);
     setState(s ?? []);
     setRuntimeStatus(s === null ? "unavailable" : "ready");
-  }, [checkLoaded, refreshForm, adoptRows, readConfig]));
+  }, [checkLoaded, refreshForm, adoptRows]));
 
   const boundDevices = new Set(ifaces.map((iface) => (iface.device || "").trim()).filter(Boolean));
   const unboundConfigured = {
@@ -111,15 +108,14 @@ export default function InterfacesPage() {
     if (!canSaveNow()) return;
     setError(null);
     setAssigning(true);
-    const before = rowsDraft.editor.server;
-    const submittedBase = expectedRevision();
-    const res = await api.assignInterfaces(submittedBase, "auto").then(handleRevision(submittedBase));
+    const res = await rowsDraft.write(base => api.assignInterfaces(base, "auto"), {
+      patch: (rows, data, submitted) => reconcileRows(rows, submitted, data.interfaces, row => row.name),
+    });
     setAssigning(false);
     if (!res.ok) {
-      setError(res.error || "Failed to auto-assign interfaces.");
+      setError(revisionError(res));
       return;
     }
-    rowsDraft.acceptCollection(submittedBase, (rows) => reconcileRows(rows, before, res.data.interfaces, (row) => row.name), [], res.revision);
     await refresh();
     setNotice(res.warning ? `Interface assignments staged — commit to apply. Warning: ${res.warning}` : "Interface assignments staged — commit to apply.");
   }
@@ -135,10 +131,10 @@ export default function InterfacesPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setReconciling(true);
-        const res = await api.reconcileInterfacesReplace(expectedRevision()).then(handleRevision(expectedRevision()));
+        const res = await rowsDraft.write(base => api.reconcileInterfacesReplace(base), { patch: rows => rows });
         setReconciling(false);
         if (!res.ok) {
-          setError(res.error || "Failed to reconcile interfaces.");
+          setError(revisionError(res));
           return;
         }
         await refresh();
@@ -193,32 +189,26 @@ export default function InterfacesPage() {
               type: "physical",
               addresses: addrs,
             };
-    const submitted = form.editor;
-    const created = await api.createInterface(form.editor.baseRevision ?? "", payload);
+    const created = await form.write(base => api.createInterface(base, payload), ["name", "alias", "zone", "ifaceType", "members", "parent", "vlanId", "addresses"], { targets: [rowsDraft.collection((rows, data: Interface) => upsertRow(rows, data, row => row.name))] });
     setSaving(false);
     if (!created.ok) {
-      form.fail(created);
-      setError(created.error || "Failed to create interface.");
+      setError(revisionError(created));
       return;
     }
-    rowsDraft.acceptCollection(submitted.baseRevision, (rows) => upsertRow(rows, created.data, (row) => row.name), [], created.revision);
     await refresh();
     setNotice(created.warning ? `Interface staged — commit to apply. Warning: ${created.warning}` : "Interface staged — commit to apply.");
-    form.acceptFields(submitted, ["name", "alias", "zone", "ifaceType", "members", "parent", "vlanId", "addresses"], created.revision);
   }
 
   async function onDelete(ifaceName: string) {
     if (!canSaveNow()) return;
     setError(null);
     setNotice(null);
-    const submittedBase = rowsDraft.editor.baseRevision;
-    const result = await api.deleteInterface(submittedBase ?? "", ifaceName);
+
+    const result = await rowsDraft.write(base => api.deleteInterface(base, ifaceName), { patch: rows => rows.filter(row => row.name !== ifaceName), prefixes: [`${JSON.stringify(ifaceName)}.`] });
     if (!result.ok) {
-      rowsDraft.reportFailure(result);
-      setError(result.error || "Failed to delete interface.");
+      setError(revisionError(result));
       return;
     }
-    rowsDraft.acceptCollection(submittedBase, (rows) => rows.filter((row) => row.name !== ifaceName), [`${JSON.stringify(ifaceName)}.`], result.revision);
     await refresh();
     setNotice(result.warning ? `Interface staged — commit to apply. Warning: ${result.warning}` : "Interface staged — commit to apply.");
   }
@@ -235,15 +225,12 @@ export default function InterfacesPage() {
       const gwErr = validateIP(patch.gateway);
       if (gwErr) { setError(gwErr); return; }
     }
-    const submitted = rowsDraft.beginSave();
-    const updated = await api.updateInterface(submitted.baseRevision ?? "", ifaceName, patch);
+    const updated = await rowsDraft.write(base => api.updateInterface(base, ifaceName, patch), { patch: (rows, data) => upsertRow(rows, data, row => row.name), prefixes: [`${JSON.stringify(ifaceName)}.`] });
     if (!updated.ok) {
-      rowsDraft.failSave(submitted, updated);
-      setError(updated.error || "Failed to update interface.");
+      setError(revisionError(updated));
       return;
     }
     // Reflect candidate state; the separate OS state remains live until commit.
-    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, updated.data, (row) => row.name), `${JSON.stringify(ifaceName)}.`, updated.revision);
     await refresh();
     setNotice(updated.warning ? `Interface staged — commit to apply. Warning: ${updated.warning}` : "Interface staged — commit to apply.");
   }
@@ -282,7 +269,6 @@ export default function InterfacesPage() {
         </div>
       }
     >
-      {revisionNotice(() => refresh({ keepEdits: false }))}
       <ConfirmDialog {...confirm.props} />
       {reservation?.active && (
         <aside aria-label="Reserved management path" className="mb-4 rounded-xs border border-(--border) bg-(--surface) px-4 py-3 text-sm text-(--text)">

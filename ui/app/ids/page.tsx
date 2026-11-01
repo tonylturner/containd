@@ -1,14 +1,13 @@
 "use client";
 
-import { useConfigRevision } from "../../lib/use-config-revision";
-
-import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
+import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
 import { upsertRow } from "../../lib/config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
 
+import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { Shell } from "../../components/Shell";
 import {
@@ -36,15 +35,12 @@ import { isRuleEnabled } from "./ids-shared";
 /* ── Page ── */
 
 export default function IDSPage() {
-  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const draft = useConfigEditor<IDSConfig>({ enabled: false, rules: [] }, false);
-  const { conflictProps, editor, cfg: ids, setCfg: setIds, adoptConfig, beginSave, failSave, acceptConfig, text, setText, clearText } = draft;
-  const { acceptCollection } = draft;
+  const { conflictProps, editor, cfg: ids, setCfg: setIds, readConfig: adoptConfig, write, writeRefresh, text, setText, clearText } = draft;
   const panelForm = useConfigForm<IDSPanelFields>({ name: "", filter: "", format: "", sigmaText: "" });
-  const { refreshForm } = panelForm;
-  const importedFrom = useRef<{ rules: IDSRule[]; base: string; revision?: string } | null>(null);
+  const { readConfig: refreshForm } = panelForm;
   const refreshId = useRef(0);
   const [importPending, setImportPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,66 +50,52 @@ export default function IDSPage() {
   const [activeTab, setActiveTab] = useState<"rules" | "import" | "export" | "sources" | "groups">("rules");
   const confirm = useConfirm();
 
-  const refresh = useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
+  const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const id = ++refreshId.current;
     const [cfgSnapshot, src] = await Promise.all([api.getIDS(), api.getIDSSources()]);
-    const cfg = readConfig(cfgSnapshot, keepEdits);
+    const cfg = cfgSnapshot?.data;
     // A read started before an import cannot acknowledge or undo that import.
     if (id !== refreshId.current) return;
     if (!checkLoaded(cfg)) {
-      setError(importedFrom.current
-        ? "Rules were imported, but could not be loaded. Refresh to reconcile them before saving."
-        : "Failed to load IDS rules.");
+      setError("Failed to load IDS rules.");
       return;
     }
     setError(null);
-    if (importedFrom.current) {
-      // File import only appends new IDs. Other changes in this read are
-      // background changes, not acknowledgement of the user's local edits.
-      const before = new Set(importedFrom.current.rules.map((rule) => rule.id));
-      const added = (cfg.rules ?? []).filter((rule) => !before.has(rule.id));
-      if (cfgSnapshot?.revision === importedFrom.current.revision) acceptCollection(importedFrom.current.base, (current) => ({
-        ...current, rules: added.reduce((rules, rule) => upsertRow(rules, rule, (r) => r.id), current.rules ?? []),
-      }), [], importedFrom.current.revision);
-      importedFrom.current = null;
-      setImportPending(false);
-    }
-    adoptConfig(cfg, keepEdits, cfgSnapshot?.revision);
-    refreshForm(cfg, keepEdits, cfgSnapshot?.revision);
+    adoptConfig({ data: cfg, revision: cfgSnapshot?.revision ?? "" }, keepEdits);
+    refreshForm({ data: cfg, revision: cfgSnapshot?.revision ?? "" }, keepEdits);
+    setImportPending(false);
     setSources(src ?? []);
     if (!keepEdits) setEditing(null);
-  }, [checkLoaded, adoptConfig, acceptCollection, refreshForm, readConfig]);
+  }, [checkLoaded, adoptConfig, refreshForm]));
 
   useConfigRefresh(refresh);
 
-  useEffect(() => { refresh(); }, [refresh]);
-
   async function onSave() {
-    if (!canEdit || !canSave || importPending) return;
+    if (!canEdit || !canSave || importPending || draft.stale) return;
     setError(null);
     // The modal is not submitted by the page Save button.
-    const submitted = beginSave({});
-    const saved = await api.setIDS(submitted.baseRevision ?? "", ids);
-    if (!saved.ok) { failSave(submitted, saved); setError(saved.error || "Failed to save IDS rules."); return; }
-    acceptConfig(submitted, saved.data, saved.revision);
+    const saved = await write((base, submitted) => api.setIDS(base, submitted), { replace: data => data, raw: {} });
+    if (!saved.ok) { setError(revisionError(saved)); return; }
     flashSuccess("IDS rules staged — commit to apply.");
   }
 
   async function onImport(file: File, format: string) {
     if (importPending) return false;
-    const before = editor.server.rules ?? [];
     setImportPending(true);
     setError(null);
-    const submittedBase = expectedRevision();
-    const result = await api.importIDSRules(submittedBase, file, format || undefined).then(handleRevision(submittedBase));
+    const result = await writeRefresh(base => api.importIDSRules(base, file, format || undefined), api.getIDS,
+      (view, before, next) => {
+        const known = new Set((before.rules ?? []).map(rule => rule.id));
+        const added = (next.rules ?? []).filter(rule => !known.has(rule.id));
+        return { ...view, rules: added.reduce((rows, rule) => upsertRow(rows, rule, row => row.id), view.rules ?? []) };
+      });
     if (!result.ok) {
       setImportPending(false);
-      setError(result.error || "Import failed. Check the file format and try again.");
+      setError(revisionError(result));
       return false;
     }
     // The import response contains counts, not rules. Keep Save blocked until
     // a successful read has acknowledged the additions, even if that read fails.
-    importedFrom.current = { rules: before, base: submittedBase, revision: result.revision };
     await refresh();
     const { imported, skipped, format: detected, total } = result.data;
     flashSuccess(`IDS rules staged — commit to apply. Imported ${imported} rule${imported !== 1 ? "s" : ""} (${skipped} skipped). Format: ${detected}. Total: ${total}.`);
@@ -166,7 +148,7 @@ export default function IDSPage() {
   }
 
   function canCombinePanel(sourceRevision = panelForm.editor.baseRevision): boolean {
-    const destinationRevision = draft.getBaseRevision();
+    const destinationRevision = draft.editor.baseRevision;
     if (sourceRevision === destinationRevision) return true;
     panelForm.requireReview(destinationRevision ?? "");
     return false;
@@ -198,14 +180,13 @@ export default function IDSPage() {
             Refresh
           </button>
           {canEdit && (
-            <button onClick={onSave} disabled={!canSave || importPending} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
+            <button onClick={onSave} disabled={!canSave || importPending || draft.stale} className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
               Save
             </button>
           )}
         </div>
       }
     >
-      {revisionNotice(() => refresh({ keepEdits: false }))}
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.

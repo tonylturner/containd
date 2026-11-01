@@ -1,6 +1,6 @@
 "use client";
 
-import { useConfigRevision } from "../../lib/use-config-revision";
+import { ConfigEditNotice, useConfigEditor, revisionError } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useConfigLoad } from "../../lib/use-config-editor";
@@ -44,7 +44,6 @@ type SaveState = "idle" | "starting" | "stopping";
 type PcapForwardRow = PcapForwardTarget & { interface: string };
 
 export default function PcapPage() {
-  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
   const canEdit = isAdmin();
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const confirm = useConfirm();
@@ -66,10 +65,7 @@ export default function PcapPage() {
   const [replayRate, setReplayRate] = useState("");
   const [uploading, setUploading] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
-  const [savedConfigJson, setSavedConfigJson] = useState<string | null>(null);
-  const dirtyRef = useRef(false);
-  const latestSettings = useRef("");
-  const [settings, setSettings] = useState<PcapConfig>({
+  const draft = useConfigEditor<PcapConfig>({
     enabled: false,
     interfaces: [],
     zones: [],
@@ -85,33 +81,19 @@ export default function PcapPage() {
     forwardTargets: [],
   });
 
-  const settingsSnapshot = useMemo(
-    () => JSON.stringify(normalizeConfig(settings)),
-    [settings],
-  );
-  const isDirty = savedConfigJson ? settingsSnapshot !== savedConfigJson : false;
+  const { cfg: settings, setCfg: setSettings, readConfig } = draft;
   useConfigRefresh(() => {
     void refresh();
     void api.listInterfaces().then(snapshot => snapshot?.data ?? null).then((list) => setIfaces(list ?? []));
     void api.listZones().then(snapshot => snapshot?.data ?? null).then((list) => setZones(list ?? []));
   });
 
-  useEffect(() => {
-    dirtyRef.current = isDirty;
-    latestSettings.current = settingsSnapshot;
-  }, [isDirty, settingsSnapshot]);
-
   const refresh = useCallback(async () => {
     setRefreshing(true);
     const [cfgSnapshot, st, list] = await Promise.all([getPcapConfig(), getPcapStatus(), listPcaps()]);
-    const cfg = readConfig(cfgSnapshot, true, dirtyRef.current);
-    if (checkLoaded(cfg)) {
-      const normalized = normalizeConfig(cfg);
-      const nextJson = JSON.stringify(normalized);
-      if (!dirtyRef.current) {
-        setSettings(normalized);
-      }
-      setSavedConfigJson(nextJson);
+    const cfg = cfgSnapshot?.data;
+    if (checkLoaded(cfg) && cfgSnapshot) {
+      readConfig({ ...cfgSnapshot, data: normalizeConfig(cfg) });
       setLastRefresh(new Date());
     }
     setStatus(st);
@@ -423,17 +405,8 @@ export default function PcapPage() {
       setNotice("Fix capture settings before saving.");
       return;
     }
-    const submittedBase = expectedRevision();
-    const submittedSettings = settingsSnapshot;
-    const saved = await setPcapConfig(submittedBase, settings).then(handleRevision(submittedBase));
-    if (!saved.ok) {
-      setNotice(saved.error || "Failed to save capture settings.");
-      return;
-    }
-    if (saved.adopted && latestSettings.current === submittedSettings) {
-      setSettings(normalizeConfig(saved.data));
-    }
-    if (saved.adopted) setSavedConfigJson(JSON.stringify(normalizeConfig(saved.data)));
+    const saved = await draft.write((base, submitted) => setPcapConfig(base, submitted), { replace: data => normalizeConfig(data) });
+    if (!saved.ok) { setNotice(revisionError(saved)); return; }
     setNotice(saved.warning ? `PCAP defaults staged — commit to apply. Warning: ${saved.warning}` : "PCAP defaults staged — commit to apply.");
     await refresh();
   }
@@ -493,7 +466,7 @@ export default function PcapPage() {
         </div>
       }
     >
-      {revisionNotice(() => window.location.reload())}
+      <ConfigEditNotice superseded={draft.editor.superseded} {...draft.conflictProps} onReload={() => window.location.reload()} />
       <ConfirmDialog {...confirm.props} />
       {loadError && (
         <p role="alert" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">

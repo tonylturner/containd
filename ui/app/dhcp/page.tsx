@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
-import { ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
+import { revisionError, ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -68,7 +68,7 @@ export default function DHCPPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
-  const { conflictProps, editor, cfg, setCfg, dirty, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor(() => normalize(null), false);
+  const { conflictProps, editor, cfg, setCfg, dirty, readConfig: adoptConfig, write, text, setText } = useConfigEditor(() => normalize(null), false);
   const [status, setStatus] = useState<DHCPStatus | null>(null);
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +86,7 @@ export default function DHCPPage() {
       const current = (currentSnapshot?.data ?? null);
       if (!checkLoaded(current)) return;
       const next = normalize(current);
-      adoptConfig(next, keepEdits, currentSnapshot?.revision);
+      adoptConfig({ data: next, revision: currentSnapshot?.revision ?? "" }, keepEdits);
       toast("DHCP status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -134,24 +134,20 @@ export default function DHCPPage() {
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
-    const submitted = beginSave();
     const payload = { ...cfg,
       listenIfaces: listenIfacesText.split(",").map((s) => s.trim()).filter(Boolean),
       dnsServers: dnsServersText.split(",").map((s) => s.trim()).filter(Boolean),
       pools: textToPools(poolsText), reservations: textToReservations(reservationsText),
     };
-    const saved = await save.run("save", () => api.setDHCP(submitted.baseRevision ?? "", payload), {
+    const saved = await save.run("save", () => write(base => api.setDHCP(base, payload), { replace: data => normalize(data) }), {
       success: "DHCP staged — commit to apply.",
       failure: "Failed to save DHCP settings.",
     });
-    if (!saved) { failSave(submitted); return; }
+    if (!saved) return;
     if (!saved.ok) {
-      failSave(submitted, saved);
-      setError(saved.error);
+      setError(revisionError(saved));
       return;
     }
-    const next = normalize(saved.data);
-    acceptConfig(submitted, next, saved.revision);
   }
 
   return (

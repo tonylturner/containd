@@ -7,7 +7,7 @@ import { upsertRow } from "../../lib/config-editor";
 import type { ConfigFields } from "../../lib/use-config-editor";
 
 import { useConfigForm } from "../../lib/use-config-form";
-import { ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
+import { revisionError, ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
 
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
@@ -54,12 +54,12 @@ export default function IdentitiesPage() {
   const confirm = useConfirm();
   const canEdit = isAdmin();
   const rowsDraft = useConfigEditor<IdentityBinding[]>([], false);
-  const { cfg: bindings, adoptConfig: adoptRows } = rowsDraft;
+  const { cfg: bindings, readConfig: adoptRows } = rowsDraft;
   const [rules, setRules] = useState<FirewallRule[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const form = useConfigForm({ ip: "", labels: "" });
-  const { refreshForm } = form;
+  const { readConfig: refreshForm } = form;
   const [ip, setIp] = form.field("ip");
   const [labels, setLabels] = form.field("labels");
   const [saving, setSaving] = useState(false);
@@ -74,25 +74,24 @@ export default function IdentitiesPage() {
       return;
     }
     setLoadError(null);
-    adoptRows(res.data, keepEdits, res.revision);
-    refreshForm(res.data, keepEdits, res.revision);
+    adoptRows({ data: res.data, revision: res.revision ?? "" }, keepEdits);
+    refreshForm({ data: res.data, revision: res.revision ?? "" }, keepEdits);
   }, [checkLoaded, refreshForm, adoptRows]));
 
   useConfigRefresh(refresh);
 
-  async function stage(binding: IdentityBinding, creationRevision?: string): Promise<boolean> {
+  async function stage(binding: IdentityBinding, creating = false): Promise<boolean> {
     if (!canSaveNow()) return false;
     setError(null);
-    const submitted = rowsDraft.beginSave();
-    const res = await api.setIdentityBinding(creationRevision ?? submitted.baseRevision ?? "", binding);
-    if (!res.ok) {
-      rowsDraft.failSave(submitted, creationRevision === undefined ? res : undefined);
-      if (creationRevision !== undefined) form.fail(res);
-      setError(res.error);
-      return false;
-    }
-    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, res.data, (row) => row.ip), `${JSON.stringify(binding.ip)}.`, res.revision);
-    if (creationRevision !== undefined) form.acceptFields(form.editor, ["ip", "labels"], res.revision);
+    const patch = (rows: IdentityBinding[], saved: IdentityBinding) => upsertRow(rows, saved, row => row.ip);
+    const res = creating
+      ? await form.write(base => api.setIdentityBinding(base, binding), ["ip", "labels"], {
+        targets: [rowsDraft.collection(patch)],
+      })
+      : await rowsDraft.write(base => api.setIdentityBinding(base, binding), {
+        patch, prefixes: [`${JSON.stringify(binding.ip)}.`],
+      });
+    if (!res.ok) { setError(revisionError(res)); return false; }
     toast(res.warning ? `Binding staged — commit to apply. Warning: ${res.warning}` : "Binding staged — commit to apply.", "success");
     await refresh();
     return true;
@@ -106,8 +105,7 @@ export default function IdentitiesPage() {
       return;
     }
     setSaving(true);
-    const submitted = form.editor;
-    await stage(checked.binding, submitted.baseRevision ?? "");
+    await stage(checked.binding, true);
     setSaving(false);
   }
 
@@ -120,14 +118,10 @@ export default function IdentitiesPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setError(null);
-        const submittedBase = rowsDraft.editor.baseRevision;
-        const res = await api.deleteIdentityBinding(submittedBase ?? "", address);
-        if (!res.ok) {
-          rowsDraft.reportFailure(res);
-          setError(res.error);
-          return;
-        }
-        rowsDraft.acceptCollection(submittedBase, (rows) => rows.filter((row) => row.ip !== address), [`${JSON.stringify(address)}.`], res.revision);
+        const res = await rowsDraft.write(base => api.deleteIdentityBinding(base, address), {
+          patch: rows => rows.filter(row => row.ip !== address), prefixes: [`${JSON.stringify(address)}.`],
+        });
+        if (!res.ok) { setError(revisionError(res)); return; }
         toast("Binding removal staged — commit to apply.", "success");
         refresh();
       },
