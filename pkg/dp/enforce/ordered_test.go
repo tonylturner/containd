@@ -43,7 +43,12 @@ func TestOrderedTransportPairs(t *testing.T) {
 								t.Fatal(err)
 							}
 							body := strings.Join(chainBody(t, text, "ordered_s2"), "\n")
-							if strings.Index(body, "goto ordered_s2_rule_0") > strings.Index(body, "goto ordered_s2_rule_1") {
+							first := strings.Index(body, "goto ordered_s2_rule_0")
+							second := strings.Index(body, "goto ordered_s2_rule_1")
+							if first < 0 || second < 0 {
+								t.Fatalf("terminal chains are unreachable:\n%s", body)
+							}
+							if first >= second {
 								t.Fatal("configured order lost")
 							}
 							for i, e := range snap.Firewall {
@@ -198,10 +203,16 @@ func TestForwardLoweringAndLocalAddressUpdate(t *testing.T) {
 	if strings.Contains(text, "ct status dnat") {
 		t.Fatal("foreign DNAT accepted")
 	}
+	viaDispatches := 0
 	for _, l := range chainBody(t, text, "ordered_s2") {
 		if strings.Contains(l, "goto ordered_s2_rule_0") {
+			viaDispatches++
 			assertText(t, l, trackedState, "ct mark & 0x00000001 != 0")
 		}
+	}
+	// Two ingress devices, each with original and reply alternatives.
+	if viaDispatches != 4 {
+		t.Fatalf("via dispatches = %d, want 4", viaDispatches)
 	}
 	masq, err := gateMasqueradeLines(snap, nil)
 	if err != nil {
@@ -248,13 +259,18 @@ func TestUntrackedAdmissionAndMonitorDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	untrackedDispatches := 0
 	for _, line := range chainBody(t, text, "ordered_s2") {
 		if strings.Contains(line, untrackedState) {
+			untrackedDispatches++
 			assertText(t, line, "tcp dport 502 goto ordered_s2_rule_1")
 			if strings.Contains(line, "ct mark") || strings.Contains(line, "ct original") || strings.Contains(line, "ct reply") {
 				t.Fatal("untrusted tuple fabricated conntrack evidence")
 			}
 		}
+	}
+	if untrackedDispatches != 1 {
+		t.Fatalf("untracked dispatches = %d, want 1", untrackedDispatches)
 	}
 	snap.Firewall = []rules.Entry{{ID: "monitor", Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "modbus", Mode: "monitor"}}}
 	for _, q := range []int{0, 100} {

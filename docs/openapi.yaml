@@ -827,10 +827,22 @@ components:
     LearnAuthority:
       additionalProperties: false
       properties:
+        captureHook:
+          type: string
+          enum: [nfqueue, afpacket]
+          description: Live receive-time capture provenance, independent of conntrack verification. Absent for PCAP and unknown historical authority.
         correlation:
           type: string
         logical:
           $ref: '#/components/schemas/LearnTuple'
+        aliases:
+          type: object
+          additionalProperties: false
+          required: [original, reply]
+          description: Complete verified live conntrack wire faces. Loss scope matches either face across every incarnation; a reverse tuple is not invented.
+          properties:
+            original: {$ref: '#/components/schemas/LearnTuple'}
+            reply: {$ref: '#/components/schemas/LearnTuple'}
         mappingFingerprint:
           type: string
         roleCertain:
@@ -1000,6 +1012,13 @@ components:
       - allObjects
       - spans
       type: object
+    LearnLossEndpoint:
+      type: object
+      additionalProperties: false
+      required: [ip, port]
+      properties:
+        ip: {type: string}
+        port: {type: integer, minimum: 0, maximum: 65535}
     LearnDataset:
       additionalProperties: false
       properties:
@@ -1023,6 +1042,29 @@ components:
           nullable: true
           type: array
           maxItems: 32
+        losses:
+          type: array
+          maxItems: 1024
+          description: Durable loss scope. Known incarnations are excluded in full. connectionId and scope are additive when both are present. Coordinate scope matches both verified original/reply NAT aliases across every incarnation, using ports when authoritative and otherwise host pair plus transport. When both live parent and loss carry captureHook nfqueue, wire-only matching is sound at the common forward-hook face without verified aliases. Other live parents lacking complete verified aliases cannot prove same-transport endpoint disjointness and are excluded. PCAP retains wire coordinates only. Observation timestamps never delimit connection lifetime. Missing scope, legacy timestamp-only losses and legacy gaps exclude the dataset. outcome_loss and capture_unrelated do not exclude certification inputs. Localization exhaustion collapses to dataset-wide collection_loss.
+          items:
+            type: object
+            additionalProperties: false
+            required: [code]
+            properties:
+              code: {type: string}
+              captureHook: {type: string, enum: [nfqueue, afpacket], description: Receive-time capture provenance when known. NFQUEUE wire-only disjointness requires this authority on both parent and loss.}
+              connectionId: {type: string}
+              scope:
+                type: object
+                additionalProperties: false
+                required: [source, destination, transport, ports]
+                properties:
+                  source: {$ref: '#/components/schemas/LearnLossEndpoint'}
+                  destination: {$ref: '#/components/schemas/LearnLossEndpoint'}
+                  transport: {type: string, enum: [tcp, udp]}
+                  ports: {type: boolean, description: Whether both endpoint ports are authoritative.}
+              start: {type: string, format: date-time, deprecated: true, description: Historical capture time; not a lifecycle bound.}
+              end: {type: string, format: date-time, deprecated: true, description: Historical capture time; not a lifecycle bound.}
         id:
           type: string
         profileFingerprint:
@@ -2323,27 +2365,25 @@ components:
         lastSeen: {type: string, format: date-time}
     IEC104InventoryCA:
       type: object
-      required: [ca, firstSeen, lastSeen, attemptedCommands, acceptedCommands, points]
+      required: [ca, firstSeen, lastSeen, attemptedCommands, points]
       properties:
         ca: {type: integer, minimum: 0, maximum: 65535}
         firstSeen: {type: string, format: date-time}
         lastSeen: {type: string, format: date-time}
         attemptedCommands: {type: integer, minimum: 0, description: Decoded control-direction command APDUs.}
-        acceptedCommands: {type: integer, minimum: 0, description: Commands allowed in inline enforce mode whose carrying packets all completed an Accept verdict. Always 0 in monitor mode.}
         points:
           type: array
           maxItems: 256
           items: {$ref: '#/components/schemas/IEC104InventoryPoint'}
     IEC104InventoryPair:
       type: object
-      required: [controlling, controlled, firstSeen, lastSeen, attemptedCommands, acceptedCommands, cas]
+      required: [controlling, controlled, firstSeen, lastSeen, attemptedCommands, cas]
       properties:
         controlling: {type: string, description: 'Controlling client IP:port (IPv6 bracketed).'}
         controlled: {type: string, description: 'Controlled server IP:port (normally port 2404; IPv6 bracketed).'}
         firstSeen: {type: string, format: date-time}
         lastSeen: {type: string, format: date-time}
         attemptedCommands: {type: integer, minimum: 0}
-        acceptedCommands: {type: integer, minimum: 0}
         cas:
           type: array
           maxItems: 32
@@ -2370,7 +2410,7 @@ components:
         overflow:
           type: object
           description: Capacity evictions or truncated observations since clear/restart; expiry is not overflow. Not unique missing devices.
-          required: [observations, pairs, cas, points, assets, peers, stationAddresses, outcomes]
+          required: [observations, pairs, cas, points, assets, peers, stationAddresses]
           properties:
             observations: {type: integer, minimum: 0, description: Observations dropped because the inventory mutex was busy.}
             pairs: {type: integer, minimum: 0}
@@ -2379,7 +2419,6 @@ components:
             assets: {type: integer, minimum: 0}
             peers: {type: integer, minimum: 0}
             stationAddresses: {type: integer, minimum: 0}
-            outcomes: {type: integer, minimum: 0, description: Command outcomes not credited because the inventory was busy, the pair or CA was evicted, or the per-session delivery ledger was full.}
     InventoryDiscoveredAsset:
       properties:
         firstSeen: {format: date-time, type: string}
@@ -5061,7 +5100,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       description: Imports normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly
         generate suggestions after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import
-        has bounded flow and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
+        has bounded flow and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; coordinate-scoped loss excludes matching wire tuples or host pairs across every incarnation, in either direction. Missing scope and legacy timestamp-only loss exclude the dataset; retained message times are not lifecycle bounds. capture_unrelated counts cut non-IP or known non-TCP/UDP traffic without excluding inputs.
   /pcap/analyze/{name}:
     post:
       summary: Analyze a previously uploaded PCAP by name (admin)
@@ -5113,7 +5152,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       description: Imports normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly
         generate suggestions after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import
-        has bounded flow and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
+        has bounded flow and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; coordinate-scoped loss excludes matching wire tuples or host pairs across every incarnation, in either direction. Missing scope and legacy timestamp-only loss exclude the dataset; retained message times are not lifecycle bounds. capture_unrelated counts cut non-IP or known non-TCP/UDP traffic without excluding inputs.
 
   # ── ICS Rule Templates ──────────────────────────────────────────
   /templates/ics:
@@ -8473,7 +8512,7 @@ x-internal-paths:
       description: Engine-internal trusted management boundary; never exposed as a public management route. Imports
         normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly generate suggestions
         after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import has bounded flow
-        and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
+        and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; coordinate-scoped loss excludes matching wire tuples or host pairs across every incarnation, in either direction. Missing scope and legacy timestamp-only loss exclude the dataset; retained message times are not lifecycle bounds. capture_unrelated counts cut non-IP or known non-TCP/UDP traffic without excluding inputs.
       security: []
   /internal/pcap/analyze/{name}:
     post:
@@ -8527,7 +8566,7 @@ x-internal-paths:
       description: Engine-internal trusted management boundary; never exposed as a public management route. Imports
         normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly generate suggestions
         after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import has bounded flow
-        and display resources. Evidence admission loss is visible in dataset gaps and suggestion limits; certification covers retained complete parents only.
+        and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; coordinate-scoped loss excludes matching wire tuples or host pairs across every incarnation, in either direction. Missing scope and legacy timestamp-only loss exclude the dataset; retained message times are not lifecycle bounds. capture_unrelated counts cut non-IP or known non-TCP/UDP traffic without excluding inputs.
       security: []
   /internal/learn/watches:
     post:

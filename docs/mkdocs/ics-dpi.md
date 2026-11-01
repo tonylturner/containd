@@ -954,8 +954,15 @@ Exact means exact within the supported selector relations, not byte-for-byte
 transaction equality. Generation retains correlated endpoint/service, direction,
 unit/station, operation and span/object constraints. The certifier evaluates
 referenced parents and negative boundary mutations against the shared rule
-evaluator, without transmitting packets. Finite replay is evidence, not a proof
-of universal protocol correctness. Malformed, incomplete, undecoded,
+evaluator, without transmitting packets. Large repeated relations are split into
+proofs of at most 512 positive parents, keeping each frozen suggestion within
+storage and replay budgets while retaining normalized evidence and the same
+selectors. Relations requiring aggregate closed-domain coverage carry their
+selector witnesses into every fragment; oversized witness sets are withheld for
+budget limits, never split into unjustified rules.
+Every positive is replayed; equivalent negative boundary inputs are replayed once
+per proof. Capture time remains part of boundary identity for scheduled rules.
+Finite replay is evidence, not a proof of universal protocol correctness. Malformed, incomplete, undecoded,
 nonconformant or authority-less parents cannot yield actionable suggestions.
 
 - **Modbus:** supported bounded request spans keep their unit and function code.
@@ -979,9 +986,37 @@ override with `CONTAIND_EVIDENCE_DB`) across restarts and expires after seven da
 by the store clock. Ceilings are 32 datasets, 100,000 records and 128 MiB of
 normalized evidence; each parent is limited to 256 KiB and 4,096 objects. Loss,
 rejection, eviction, expiry and withheld reasons are exposed, not silently
-interpreted as complete coverage. Dataset gaps are collection limitations, not a
-blanket certification blocker: Generate can certify retained complete parents;
-the backend decides which parents are eligible. Deletion or eviction invalidates
+interpreted as complete coverage. Recorded collection or admission loss excludes
+every connection it could have touched from generation and direct certification.
+Known-connection loss excludes that incarnation; coordinate-scoped loss excludes
+matching wire tuples or host pairs across every incarnation, in either direction.
+Live observations retain both verified original/reply NAT aliases, so loss on
+the opposite wire face still excludes request-only or response-only evidence.
+Identity and scope are additive. Parents and losses retain `captureHook`
+(`nfqueue` or `afpacket`) when known. NFQUEUE's forward hook observes one
+post-DNAT/pre-SNAT face in both directions, so NFQUEUE parents and losses use
+wire-only matching even without conntrack verification. An unrelated malformed
+frame no longer erases the watch's suggestions; same-tuple loss still excludes
+every matching incarnation, and missing ports widen to host pair/transport.
+Unverified AF_PACKET parents still cannot prove that their unknown opposite
+NAT face escaped a same-transport loss. Missing capture authority remains
+conservative unless a complete verified alias pair proves disjointness.
+PCAP retains only its observed wire authority.
+Retained message times do not prove lifecycle bounds. Legacy timestamp-only loss
+and missing scope exclude the dataset. Excluded retained parents count toward
+the durable `collection_loss` withheld reason. Connections
+fully outside localized loss remain eligible. Restart and policy-change loss
+exclude the dataset: store-clock lease bounds cannot safely delimit packet times.
+Loss localization is capped at 1,024 entries per dataset; exhaustion collapses to
+one dataset-wide loss. Live collection normalizes and joins decoded events
+separately from SQLite persistence. The intake queue has a 64 MiB decoded-copy
+budget, charging at least 1 KiB per batch including queue/snapshot overhead;
+its count limit follows that byte budget. A separate 32 MiB serialized-write
+budget includes queued and in-progress groups. Group commits contain up to 128
+parents or just under 1 MiB, flushing partial groups every 100 ms. Database
+stalls do not stop intake until the write budget is exhausted, and packet
+verdicts never wait for evidence. Real admission overflow still records loss.
+Stop drains both stages before sealing the dataset. Deletion or eviction invalidates
 dependent proofs for new stage requests.
 Resolved staging snapshots and completed receipts count toward the storage
 budget and are purged when their retry window expires. Dataset review shows the
@@ -1157,10 +1192,34 @@ They return `{dataset, stats}`; neither endpoint returns profiles or rules.
 Only classic PCAP is supported, with a 64 MiB upload ceiling; PCAPng is rejected.
 
 `stats` contains bounded events, flows, content identifications, protocol/count
-statistics and capture duration. `stats.truncated` identifies partial or
-snap-length-cut records. `stats.displayTruncated` means the display sample was
+statistics and capture duration. `stats.truncated` identifies partial,
+snap-length-cut or IP-length-truncated records. `stats.displayTruncated` means the display sample was
 capped, not that normalized evidence was sampled. Inspect dataset gaps separately:
-certification covers only retained complete parents, not lost observations.
+collection and admission loss exclude every connection they could have touched.
+Known loss excludes the authoritative incarnation, or every matching wire
+five-tuple incarnation when ports are captured. Without ports, host-pair and
+transport scope excludes all matching connections in either direction. First
+and last retained messages are not connection lifecycle bounds; timestamp-only
+historical loss and missing coordinates exclude the dataset. A short IP/TCP
+header therefore cannot leave an earlier parent eligible for certification.
+A cut non-IP record with readable EtherType (including VLAN tags), or a known
+non-TCP/UDP IP protocol, records non-excluding `capture_unrelated` loss. Opaque
+IPv6 extension chains are not proof of unrelated traffic; their IP family comes
+from the decoded header, never IPv4-mapped address spelling. A cut opaque chain
+(including MLD-style traffic) still excludes the dataset. Ordinary unrelated
+ARP/LLDP/ICMP truncation does not erase workshop suggestions. A header-less final
+record remains dataset-wide.
+
+Live `capture_loss` is retained at transport admission, before worker processing,
+and delivered through AF_PACKET and NFQUEUE even with incomplete TCP headers.
+Stop, deadline and policy-change cleanup close parent admission before detaching
+loss callbacks and fence those callbacks before sealing;
+failed automatic stops retry the retained lease. `watch_collection_loss` and
+`budget_exceeded` retain known rejected connections; `watch_restart`,
+`policy_changed` and storage/import failures are dataset-wide. Dropped
+decision/delivery annotations (`outcome_loss`) are counted but do not exclude
+certification inputs. See the
+[loss-code scope table](api-reference.md#content-identification-results) for fallbacks.
 
 The internal engine `/internal/pcap/analyze` endpoints use the same import
 contract, not a second policy generator. Imports do not update live inventory,
@@ -1250,43 +1309,32 @@ The **Assets** page has a read-only IEC 104 section, separate from configured
 assets and learner evidence datasets. It groups controlling stations (clients)
 with controlled stations (servers, normally port 2404). Expand a pair to see observed
 common addresses (CAs), then expand a CA to see each (IOA, type ID) point and its
-first/last observation times. Pair and CA command counters distinguish decoded
-client command attempts from accepted commands. Accepted means the IEC decision
-allowed the APDU **and every packet carrying its bytes completed an Accept
-verdict without error**; an allow decision alone is not delivery evidence.
-Acceptance is recorded only in inline enforce envelopes. Monitor and
-non-inline capture record attempts and points, but never claim delivery.
+first/last observation times. Pair and CA command counters count decoded
+client command attempts in both enforce and monitor modes, not accepted commands.
 Server echoes and monitoring ASDUs do not count as command attempts.
 
 The live feed observes ordered, TCP-deduplicated ASDUs in sessions tracked from
 their SYN within IEC 104 envelopes. Untracked, midstream and uninspected traffic
-does not populate it. Retransmissions are not new attempts; retransmissions
-received while delivery is pending also need successful Accept verdicts.
-Acceptance is not a station acknowledgement or proof of physical execution.
+does not populate it. Retransmissions are not new attempts. Inventory counts
+attempted commands and observed points, not delivery or physical execution.
 Inventory summaries never generate ALLOW rules or enforcement decisions.
-During an explicit live watch, the delivery ledger also reports accepted
-APDUs to learner evidence; inventory counters are not its input.
-Engine unavailability displays an explicit
-unavailable state, not an empty inventory or zero counters; **Refresh** retries.
+The separate delivery ledger still reports provable userspace delivery to learner
+evidence during an explicit live watch; inventory counters are not its input.
+Engine unavailability displays an explicit unavailable state, not an empty
+inventory or zero counters; **Refresh** retries.
 
 Memory is bounded to 128 endpoint pairs, 32 CAs per pair and 256 (IOA, type ID)
 points per CA. The least recently observed entry is evicted at each cap; idle
 entries expire after 24 hours on the next observation or read. Reads do not
 extend retention. The legacy Modbus/DNP3/CIP inventory is bounded to 1,024 assets,
 128 peers and 256 station addresses per asset, with the same asset LRU/expiry.
-Overflow counters show capacity evictions, truncated metadata observations and
-late command outcomes whose observation has expired or been evicted. Input calls
-never wait for the inventory lock: observations or outcomes dropped on contention
-have visible overflow counters. Per-session delivery evidence is capped at 128
-commands and 128 carrying packet tokens. Ledger overflow records a not-accepted
-outcome and increments **Lost outcomes**. Pending evidence expires after one
-second, and is freed on session end, abort, queue close, policy removal,
-reconfiguration or stop; incomplete evidence never credits acceptance. Counts
-are therefore conservative when evidence is unavailable. Oversized
-ASDU input is truncated to 127 IOAs and counted as point overflow. Expiry is not
-overflow. Counts are retained-history totals, not lifetime traffic or unique
-missing-device counts. Clearing inventory or restarting the engine resets data
-and overflow totals. See [API Reference](api-reference.md#passive-inventory).
+Overflow counters show capacity evictions and truncated metadata observations.
+Input calls never wait for the inventory lock: observations dropped on contention
+have a visible overflow counter. Oversized ASDU input is truncated to 127 IOAs
+and counted as point overflow. Expiry is not overflow. Counts are retained-history
+totals, not lifetime traffic or unique missing-device counts. Clearing inventory
+or restarting the engine resets data and overflow totals. See
+[API Reference](api-reference.md#passive-inventory).
 
 ## Content identification
 
@@ -1302,8 +1350,19 @@ separate passive decoder only when the legacy path does not already decode
 that protocol. These events carry `observation_only: true` and
 `binding_source: observation`; they do not enforce rules or generate automatic
 ALLOW suggestions. The learner withholds suggestions for nonstandard service-port
-observations. Content confirmation does not invalidate earlier port-decoded evidence
-from that connection; inspect protocol mismatches before staging suggestions.
+observations. Observation-bound connections are excluded from offline and live
+policy suggestions, including legacy events emitted before confirmation. A
+confirmed content/port mismatch excludes the entire connection incarnation, not
+just the passive decoder's events. Generate reports `observation_binding` withheld
+counts, and suggestion limitations state this exclusion.
+
+Historical datasets whose adapter discarded binding authority are withheld as
+`missing_authority`. Reimporting the same capture after an adapter-normalization
+change creates a separate dataset using the current normalization; it does not
+rewrite the old, still-readable dataset. With unchanged normalization and
+decoding authorities, reimports reuse the existing dataset without extending
+retention. Previously certified suggestions require regeneration under the
+current generator.
 
 Flows show the bound application, whether identification is by **content** or
 only **port**, and a **Mismatch** badge when content differs from a registry

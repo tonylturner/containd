@@ -132,11 +132,13 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 			return
 		}
 		var rules []config.Rule
+		reconcileOnly := false
 		for i, s := range suggestions {
 			if s.ID != req.Selections[i].ID || s.Revision != req.Selections[i].Revision || s.Proof == nil || s.Proof.ValidateBinding(s.Content) != nil {
 				apiError(c, 503, "invalid engine stage resolution")
 				return
 			}
+			reconcileOnly = reconcileOnly || s.StageReconcileOnly || !learn.CompatibleVersions(s.Proof.Versions)
 			rules = append(rules, s.Content.Rules...)
 		}
 		if len(rules) > 128 {
@@ -167,12 +169,22 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 					}
 					continue
 				}
+				if reconcileOnly {
+					return learn.ErrStale
+				}
 				cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
 				existing[r.ID] = r
 			}
 			return nil
 		})
 		if err != nil {
+			if reconcileOnly {
+				if revisionMismatchResponse(c, err) {
+					return
+				}
+				apiError(c, 409, "incompatible proof; only identical already-staged rules may be reconciled")
+				return
+			}
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
 			_, releaseErr := client.Learn(cleanup, http.MethodPost, "/learn/stage/release", c.GetString("actor"), body)
 			cancel()

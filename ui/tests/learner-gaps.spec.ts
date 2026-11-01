@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { mockLearner, openDataset } from "./fixtures/learner";
 
-for (const gap of ["watch_restart", "admission_loss"]) {
-  test(`sealed evidence with ${gap} can generate certified suggestions`, async ({
+for (const gap of ["watch_collection_loss", "budget_exceeded"]) {
+  test(`connections outside localized ${gap} can generate certified suggestions`, async ({
     page,
   }) => {
     const state = await mockLearner(page);
@@ -18,7 +18,9 @@ for (const gap of ["watch_restart", "admission_loss"]) {
     await expect(review.getByRole("status")).toContainText(
       `Collection limitations: ${gap}`,
     );
-    await expect(review.getByText(/certification blocked/)).toHaveCount(0);
+    await expect(review.getByRole("status")).toContainText(
+      "Localized loss excludes only connections it could have touched",
+    );
     const generate = review.getByRole("button", {
       name: "Generate suggestions",
       exact: true,
@@ -52,6 +54,42 @@ for (const gap of ["watch_restart", "admission_loss"]) {
     ).toBeDisabled();
   });
 }
+
+test("unlocalized loss yields no suggestions and explains withheld parents", async ({
+  page,
+}) => {
+  const state = await mockLearner(page);
+  state.datasets[0].gaps = ["legacy_collection_loss"];
+  await page.route("**/api/v1/learn/generate", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({
+      datasetId: state.datasets[0].id,
+    });
+    state.suggestions = [];
+    await route.fulfill({
+      json: { suggestions: [], withheld: { collection_loss: 24 } },
+    });
+  });
+  await openDataset(page);
+  const review = page.getByLabel("Dataset review");
+  await expect(review.getByRole("status")).toContainText(
+    "Timestamp-only loss, missing scope, restart and policy-change loss exclude the entire dataset",
+  );
+  const generated = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/v1/learn/generate" &&
+      response.request().method() === "POST",
+  );
+  await review.getByRole("button", { name: "Generate suggestions", exact: true }).click();
+  await generated;
+  await expect(review.getByRole("status").filter({ hasText: "Generation complete:" }))
+    .toContainText("0 certified suggestion(s). Nothing selected.");
+  await expect(review.getByText("collection_loss: 24", { exact: false }))
+    .toContainText("Connection excluded: collection loss may hide observations");
+  await expect(page.getByRole("article", { name: "Suggestion modbus-1", exact: true }))
+    .toHaveCount(0);
+  await expect(review.getByRole("button", { name: "Stage 0 selected", exact: true }))
+    .toBeDisabled();
+});
 
 test("gaps do not bypass collection state, expiry or backend certification", async ({
   page,

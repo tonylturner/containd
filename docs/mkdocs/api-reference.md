@@ -511,6 +511,17 @@ Passive decoder events carry `observation_only: true` and
 `binding_source: "observation"`. They are evidence, not verdicts. The Events
 page marks them **Observation only**.
 
+Offline and live suggestion generation excludes their entire connection
+incarnation, including port-decoded events emitted before content confirmation.
+Confirmed content/port mismatches also exclude the connection even if no passive
+decoder emits an event. Generate exposes these exclusions as
+`withheld.observation_binding`; suggestion limitations retain the exclusion.
+Historical datasets lacking retained binding authority are withheld as
+`missing_authority`. Reimporting the same capture after an adapter-normalization
+change creates a separate dataset under the current normalization. Old datasets
+remain readable and fail closed; unchanged normalization and decoding authorities
+reuse the existing dataset without extending retention.
+
 `GET /api/v1/flows` includes an optional `identification` object with these
 attributes. `application` is the confirmed bound protocol when available,
 otherwise the legacy application's decoder protocol. Utility markers do not
@@ -531,8 +542,51 @@ are used when available, otherwise the flow's orientation hint.
 services remain observation-only. `stats.truncated` indicates a cut-short packet
 or partial final record; `stats.displayTruncated` means only the display sample
 was capped. Check `dataset.gaps` separately for collection and admission loss.
-Gaps appear in suggestion limitations; certification covers retained complete
-parents, not missing traffic.
+Recorded loss excludes every connection it could have touched from generation
+and direct certification, with durable `collection_loss` withheld counts.
+Known-connection loss excludes that incarnation. Coordinate-scoped loss excludes
+all matching wire connections in either direction, across every incarnation:
+with ports, the five-tuple; without ports, the host pair and transport protocol.
+There is no observation-time bound: the first and last retained messages do not
+prove when a connection opened or closed. Missing scope, including legacy
+unlocalized gaps and timestamp-only losses, excludes the entire dataset.
+Dataset `losses` retains each code with `connectionId` and/or `scope` (source and
+destination endpoints, `transport`, and `ports`, which indicates whether ports
+are authoritative), plus `captureHook` when known (`nfqueue` or `afpacket`).
+Historical `start`/`end` fields remain readable but cannot
+prove a connection disjoint. `gaps` retains certification-related summary codes.
+
+Live observation `authority.aliases` retains the verified conntrack `original`
+and `reply` wire tuples, even when only requests or only responses were retained.
+Scope matches either alias across every incarnation; NAT reply tuples need not
+be the endpoint reversal of the original. A known `connectionId` adds exclusion,
+never replaces or narrows a coordinate scope. Live `authority.captureHook` records
+receive-time capture provenance, independently of correlation success.
+When both parent and loss are from the NFQUEUE forward hook (`nfqueue`), wire-only
+matching is sufficient: both directions cross the same post-DNAT/pre-SNAT face.
+Unrelated-host truncation therefore preserves NFQUEUE suggestions without
+inventing NAT authority. Same-tuple loss still excludes every matching incarnation;
+missing ports widen to host pair/transport. Other live parents need a complete
+verified alias pair to prove same-transport endpoint disjointness, including
+AF_PACKET (`afpacket`) lookup failures and cases with missing capture authority.
+PCAP remains wire-coordinate evidence and never invents NAT mapping authority.
+Full ports preserve unrelated verified mappings; host-pair loss can exclude
+several mappings sharing translated hosts.
+
+Loss scopes depend on the available authority:
+
+| Code | Scope |
+| --- | --- |
+| `capture_loss` | Live transport overflow is retained synchronously at admission, even if Stop, deadline or policy change precedes worker processing. Overflow and IP truncation use wire five-tuple scope when ports are captured, otherwise host-pair/transport scope, matched against both verified NAT aliases or the common NFQUEUE forward-hook face. An already-indexed incarnation is retained as additional authority without waiting for a worker. |
+| `capture_truncated` | Offline cut record or IP-length truncation: wire five-tuple when ports are captured, otherwise host-pair/transport. Missing IP coordinates, an unreadable EtherType or a header-less final record excludes the dataset. Opaque IPv6 extension chains remain conservative, not unrelated. |
+| `watch_collection_loss`, `budget_exceeded` | Rejected decoded batch or parent: known connection incarnation; missing identity excludes the dataset, never just an observation-time interval. |
+| `watch_restart`, `policy_changed` | Dataset-wide: wall-clock watch bounds cannot delimit packet timestamps after clock skew or capture lag. |
+| `watch_storage_loss`, `import_failed`, `ingest_failed`, `interrupted_import`, `collection_loss` | Dataset-wide, including collector initialization/storage failure, legacy unlocalized gaps and exhausted loss-localization capacity. Failed automatic stops retry with their retained loss authority. |
+| `outcome_loss`, `capture_unrelated` | Counted in `losses`, not `gaps`, without excluding certification inputs. Decision/delivery annotations, cut frames with a readable non-IP EtherType (including VLAN tags), and known non-TCP/UDP IP protocols cannot carry learner parents. |
+
+A dataset retains at most 1,024 loss entries. Beyond that bound, localization
+collapses to one dataset-wide `collection_loss`, rather than dropping exclusions.
+Malformed but fully captured traffic is not a capture-loss signal.
 
 See [Content identification](ics-dpi.md#content-identification) for protocol,
 capture-mode, timing and coverage limits.
@@ -588,6 +642,9 @@ reason and no partial batch. Expired evidence returns `410`; unavailable evidenc
 returns `503`. Refresh suggestions after a refusal. If persistence succeeded but
 completion failed, the candidate may already be staged: retry the same request ID
 and exact ordered selections, never silently regenerate or use a new receipt.
+After a proof-version upgrade, a frozen retry can reconcile only byte-identical
+rules already in candidate; it cannot introduce missing rules, even from a
+completed receipt. Regenerate under the current generator to stage new rules.
 
 Use the normal candidate diff and commit workflow to apply monitor rules. To
 allow traffic with a learned rule, explicitly change its candidate mode to enforce
@@ -742,10 +799,9 @@ All inventory reads require management authentication:
 An unavailable engine returns **503** with `{"error":"engine inventory unavailable"}`
 for these operations, never a fabricated empty list. A reachable empty inventory
 returns `[]` for the legacy list and `pairs: []` in the IEC 104 snapshot. The
-engine feeds the IEC section from decoded traffic. Accepted command counts are
-credited only in inline enforce mode, after the decision allowed the command and
-every packet that carried it completed an Accept verdict; monitor mode records
-attempts and points only. The read model does not generate policy.
+engine feeds the IEC section from decoded traffic. Inventory counts attempted
+commands and observed points, not delivery or physical execution. The read model
+does not generate policy.
 
 The IEC response has this shape (a populated observation example):
 
@@ -754,31 +810,29 @@ The IEC response has this shape (a populated observation example):
   "pairs": [{
     "controlling": "192.0.2.10:50000", "controlled": "192.0.2.20:2404",
     "firstSeen": "2026-10-26T12:00:00Z", "lastSeen": "2026-10-26T12:01:00Z",
-    "attemptedCommands": 2, "acceptedCommands": 1,
+    "attemptedCommands": 2,
     "cas": [{
       "ca": 1, "firstSeen": "2026-10-26T12:00:00Z", "lastSeen": "2026-10-26T12:01:00Z",
-      "attemptedCommands": 2, "acceptedCommands": 1,
+      "attemptedCommands": 2,
       "points": [{"ioa": 100, "typeId": 45, "firstSeen": "2026-10-26T12:00:00Z", "lastSeen": "2026-10-26T12:01:00Z"}]
     }]
   }],
   "limits": {"pairs": 128, "casPerPair": 32, "pointsPerCA": 256, "assets": 1024, "peersPerAsset": 128, "stationAddressesPerAsset": 256, "maxIdleSeconds": 86400},
-  "overflow": {"observations": 0, "pairs": 0, "cas": 0, "points": 0, "assets": 0, "peers": 0, "stationAddresses": 0, "outcomes": 0}
+  "overflow": {"observations": 0, "pairs": 0, "cas": 0, "points": 0, "assets": 0, "peers": 0, "stationAddresses": 0}
 }
 ```
 
 Pair identity includes both endpoint ports; reconnects using different client
 ports are separate pairs. Point identity is `(IOA, typeId)` within a CA. Times
 are first/last observations, not delivery times. Attempted counts decoded
-control-direction command APDUs (type IDs 45–51 and 58–64); accepted additionally
-requires successful delivery verdicts for all carrying packets. A pending or
-failed command is not accepted. Pair totals may exceed the sum of retained CA
+control-direction command APDUs (type IDs 45–51 and 58–64), regardless of their
+subsequent delivery. Pair totals may exceed the sum of retained CA
 totals after CA eviction. Counts do not represent lifetime traffic.
 
 Entries use least-recently-observed eviction and 24-hour idle expiry. Overflow
 counts capacity evictions or truncated observations, not unique devices;
-`observations` counts observations dropped on inventory lock contention;
-`outcomes` counts final outcomes dropped on contention or for expired/evicted
-observations. Input calls never wait for readers or other writers.
+`observations` counts observations dropped on inventory lock contention.
+Input calls never wait for readers or other writers.
 Counters survive evictions and reset on clear/restart. Reads do not extend
 retention. The internal engine read is
 `GET /internal/inventory?section=iec104`; it uses the existing inventory handler.
