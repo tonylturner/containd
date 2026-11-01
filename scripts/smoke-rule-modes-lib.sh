@@ -86,7 +86,9 @@ run_rule_modes_matrix() {
   done
   # DNAT: selectors name backend:502, not the public listen port 1502.
   cfg=$(jq --arg backend "${WAN_NET}.4" --arg capture "$SMOKE_DPI_CAPTURE" '
-    .dataplane.dpiMode="monitor" | .firewall.rules=[{id:"dnat-monitor",destinations:[($backend+"/32")],protocols:[{name:"tcp",port:"502"}],ics:{protocol:"modbus",mode:"monitor",direction:"request",functionCode:[6]},action:"DENY"}]
+    .dataplane.dpiMode="monitor" | .firewall.rules=[
+      {id:"dnat-monitor",destinations:[($backend+"/32")],protocols:[{name:"tcp",port:"502"}],ics:{protocol:"modbus",mode:"monitor",direction:"request",functionCode:[6]},action:"DENY"},
+      {id:"allow-modbus-forward",viaForwards:["modbus"],action:"ALLOW"}]
     | .firewall.nat.portForwards=[{id:"modbus",enabled:true,ingressZone:"lan",proto:"tcp",listenPort:1502,destIp:$backend,destPort:502}]
     ' <<<"$policy_base")
   modes_apply "$cfg" || return 1
@@ -95,5 +97,5 @@ run_rule_modes_matrix() {
   sleep 0.5
   [[ $(server_fc6_requests) == $((before+1)) ]] || { modes_fail "$SMOKE_DPI_CAPTURE DNAT: expected FC6=$((before+1)); observed=$(server_fc6_requests)"; return 1; }
   modes_evidence dnat-monitor would_drop wouldDeny || return 1
-  pass "$SMOKE_DPI_CAPTURE DNAT monitor matches backend coordinates; receiver admitted by DNAT"
+  pass "$SMOKE_DPI_CAPTURE DNAT monitor matches backend coordinates; receiver admitted by explicit viaForwards ALLOW"
 }
