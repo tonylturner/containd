@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separate for names that differ by case or punctuation.
 - Make admin MFA disable atomic with the required account's new enrollment grace
   period, so a failed operation leaves the account unchanged.
+- Keep topology security matrix columns visible at 1024 px and horizontally
+  scrollable for larger zone selections.
 - CLI configuration edits and repository smoke scripts carry snapshot revisions
   through saves and staged sequences; `show diff` displays a revision and
   `commit revision <token>` commits only that reviewed revision.
