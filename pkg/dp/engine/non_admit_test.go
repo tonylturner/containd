@@ -13,15 +13,13 @@ import (
 )
 
 func TestNonAdmitStreamRetries(t *testing.T) {
-	protocols := append(firstCommandProtocols(), firstCommandProtocol{
-		name: "cip", port: 44818, read: func(uint16) []byte { return cipStreamRead() },
-	})
-	for _, proto := range protocols {
+	for _, proto := range resetProtocols() {
 		for _, action := range []rules.Action{"", rules.ActionDeny, rules.ActionReset} {
 			t.Run(fmt.Sprint(proto.name, "/", action), func(t *testing.T) {
 				f := newFCFlow(t, "ok", proto.port)
+				readCode := map[string]uint8{"modbus": 3, "dnp3": 1, "cip": 0x0e}[proto.name]
 				scope := rules.Entry{ID: "inspect", Action: rules.ActionAllow,
-					ICS: rules.ICSPredicate{Protocol: proto.name, Mode: "enforce", FunctionCode: []uint8{99}}}
+					ICS: rules.ICSPredicate{Protocol: proto.name, Mode: "enforce", FunctionCode: []uint8{readCode}}}
 				snap := rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{scope}}
 				if action != "" {
 					snap.Default = rules.ActionAllow
@@ -29,7 +27,7 @@ func TestNonAdmitStreamRetries(t *testing.T) {
 				}
 				f.e.LoadRules(snap)
 				f.syn()
-				payload := proto.read(1)
+				payload := proto.denied[0].frame
 				check := func(d capture.Decision) {
 					t.Helper()
 					if d.Action != capture.Repeat || d.Mark&markabi.NonAdmitMark == 0 || d.Reason != reasonPolicyNonAdmit {
@@ -37,12 +35,22 @@ func TestNonAdmitStreamRetries(t *testing.T) {
 					}
 				}
 				check(f.decide(0, ackPsh, payload))
+				if f.e.verdictCache.Len() != 0 {
+					t.Fatal("initial kernel denial entered the userspace verdict cache")
+				}
+				drainResetWorker(t, f.e)
 				before := protoEvents(f.e, proto.name)
 				f.e.verdictCache = NewVerdictCache(time.Nanosecond, 1)
 				check(f.decide(0, ackPsh, payload))
 				check(f.decide(1, ackPsh, payload[1:])) // resegmented retry
 				check(f.establishedSyn(uint32(len(payload))))
+				// Reads would be admitted by this policy. Retain the failed
+				// stream even after the original plain denial is removed.
+				f.e.LoadRules(rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{scope}})
 				check(f.decide(uint32(len(payload)), ackPsh, proto.read(2)))
+				check(f.decide(uint32(len(payload)), capture.TCPFlagFIN, nil))
+				check(f.decide(uint32(len(payload)), capture.TCPFlagRST, nil))
+				drainResetWorker(t, f.e)
 				if got := protoEvents(f.e, proto.name); got != before {
 					t.Fatalf("denied bytes decoded again: %d -> %d", before, got)
 				}
@@ -52,8 +60,6 @@ func TestNonAdmitStreamRetries(t *testing.T) {
 				// A genuinely new handshake retires the failed stream; an
 				// allowed message on the new incarnation can pass.
 				f.isn += 100000
-				scope.ICS.FunctionCode = nil
-				f.e.LoadRules(rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{scope}})
 				f.syn()
 				d := f.decide(0, ackPsh, proto.read(3))
 				if d.Action != capture.Repeat || d.Mark&markabi.NonAdmitMark != 0 {

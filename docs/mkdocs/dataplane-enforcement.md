@@ -133,8 +133,15 @@ inspection immediately. A fresh handshake also retires a still-live tombstone.
 
 Decoded messages denied by the firewall default or a plain transport rule
 continue through ordered kernel admission with a non-admitting packet mark,
-rather than a userspace reset. Within an enforcing generic ICS scope, their
-consumed stream bytes remain non-admitting on TCP retransmissions and later
+not a userspace DROP. Within an enforcing generic ICS scope, the first TCP
+non-admission schedules best-effort resets toward both peers and exact
+conntrack deletion after the continuation verdict completes. Its packet still
+receives the kernel's ordered verdict. Retries and later segments do not
+schedule another initial reset job; challenge-ACK reset retries remain bounded
+as for explicit denials. A generation guard cancels old reset jobs when the
+tuple reconnects and has the same lifetime and capacity bounds as an explicit
+denial tombstone, without turning non-admission into a cached userspace DROP.
+Consumed stream bytes remain non-admitting on TCP retransmissions and later
 segments, independently of the verdict cache. A new kernel-tracked handshake
 with a different initial sequence number starts inspection again. Removing
 the enforcing scope leaves admission entirely to the current kernel policy.
@@ -144,8 +151,9 @@ The engine uses the denied packet's SEQ for its receiver and ACK for its
 sender; without an ACK the sender's reset sequence is unavailable. Generic
 NFQUEUE rules do not automatically steer reverse traffic, so server-side RFC
 5961 challenge ACKs may not be observed. There is no IPv6 reset injector:
-IPv6 denies, and TCP denies when the injector is not ready, drop only. An
-`ics.session` event per peer records `reset_sent`, `reset_failed`, or
+IPv6 denies, and TCP denies when the injector is not ready, enforce the
+denial without injecting resets. An `ics.session` event per peer records
+`reset_sent`, `reset_failed`, or
 `unavailable`, with `target` set to `client` or `server`. Send failures retain
 the existing enforcement health fault. These events are visible in the generic
 event list; they do not assert confirmed closure. Manual blocks, AV blocks

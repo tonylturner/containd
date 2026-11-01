@@ -155,8 +155,8 @@ func seqDiff(a, b uint32) int32 {
 // as picked up mid-connection: the engine closes that connection, so a
 // handshake SYN starts the client's next one on the tuple.
 // A non-admitting stream also restarts at a kernel-tracked handshake with
-// a different ISN; unlike an explicit denial it has no reset tombstone to
-// retire its state. Replaying its original SYN must not clear the denial.
+// a different ISN, even when its owner has not retired its state already.
+// Replaying its original SYN must not clear the denial.
 //
 // A SYN with a new sequence number on a live fail-closed stream (one that
 // no in-window FIN or RST ended) carries no payload and anchors nothing.
