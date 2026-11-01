@@ -51,7 +51,7 @@ async function setup(page: Page) {
   return state;
 }
 
-const pending = "Uncommitted changes — not active until you commit.";
+const pending = "Saved changes are not active yet.";
 
 test("successful zone mutation immediately refreshes global status; commit refreshes editors", async ({ page }) => {
   const state = await setup(page);

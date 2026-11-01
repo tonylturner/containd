@@ -181,7 +181,7 @@ export default function TemplatesPage() {
       ) : templates.length === 0 ? (
         <Card>
           <p className="text-sm text-(--text-muted)">
-            No templates available. Check that the backend has ICS templates
+            No templates available. Check that the appliance has industrial templates
             configured.
           </p>
         </Card>

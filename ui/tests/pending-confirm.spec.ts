@@ -22,8 +22,9 @@ test("server-owned commit-confirmed reminder follows navigation and clears only 
   await page.goto("/config/");
   await expect(reminder).toHaveText(`Commit-confirmed pending: confirm before ${deadline.slice(11, 19)}`);
   await expect(reminder).toHaveAttribute("href", "/config/?tab=diff");
+  await expect(page.getByText("Confirm before this deadline to keep these changes; otherwise they will be undone automatically.", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Review diff", exact: true })).toHaveCount(0);
-  await expect(page.getByText("Uncommitted changes — not active until you commit.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Saved changes are not active yet.", { exact: true })).toHaveCount(0);
   await page.goto("/zones/");
   await expect(reminder).toBeVisible();
   await mkdir(shots, { recursive: true });
@@ -40,12 +41,12 @@ test("server-owned commit-confirmed reminder follows navigation and clears only 
   let refreshed = page.waitForResponse("**/api/v1/config/diff");
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
   await (await refreshed).finished();
-  await expect(page.getByText("Uncommitted changes — not active until you commit.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Saved changes are not active yet.", { exact: true })).toBeVisible();
   await expect(reminder).toBeVisible();
   state.pendingConfirm = null;
   refreshed = page.waitForResponse("**/api/v1/config/diff");
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:committed")));
   await (await refreshed).finished();
   await expect(reminder).toHaveCount(0);
-  await expect(page.getByText("Uncommitted changes — not active until you commit.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Saved changes are not active yet.", { exact: true })).toBeVisible();
 });

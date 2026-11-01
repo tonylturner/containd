@@ -386,7 +386,7 @@ export default function FirewallPage() {
               egress=wan
             </StatusBadge>
             <StatusBadge variant={outboundStatus.natHasLan ? "success" : "warning"} dot>
-              src includes lan/mgmt
+              Source zones include lan/mgmt
             </StatusBadge>
             <StatusBadge variant={outboundStatus.hasAllowLanWan ? "success" : "warning"} dot>
               {"allow lan\u2192wan present"}
