@@ -156,7 +156,13 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 
 			req := routeProbeRequest(t, route.Method, path)
 			rec := httptest.NewRecorder()
+			// Simulate an earlier config read, even for routes that reject
+			// the request before reaching their handler.
+			rec.Header().Set(revisionHeader, string(testBaseRevision(store, context.Background())))
 			s.ServeHTTP(rec, req)
+			if rec.Code >= http.StatusBadRequest && rec.Result().Header.Get(revisionHeader) != "" {
+				t.Fatalf("error response leaked a revision: status %d", rec.Code)
+			}
 
 			if route.Method == "POST" || route.Method == "PATCH" || route.Method == "PUT" || route.Method == "DELETE" {
 				class, classified := mutationRouteClass[route.Method+" "+route.Path]

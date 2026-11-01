@@ -181,7 +181,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		}
 	}
 	r := gin.New()
-	r.Use(accessLogger(), gin.Recovery())
+	r.Use(accessLogger(), revisionResponseHeaders(), gin.Recovery())
 	r.Use(func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "DENY")

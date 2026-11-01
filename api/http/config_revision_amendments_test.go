@@ -107,6 +107,7 @@ func TestConfigRevisionHealthAndErrorsHaveNoHeader(t *testing.T) {
 	}
 	for _, detail := range []bool{false, true} {
 		router := gin.New()
+		router.Use(revisionResponseHeaders(), gin.Recovery())
 		router.GET("/", func(c *gin.Context) {
 			if _, err := readCandidate(c, store); err != nil {
 				t.Fatal(err)

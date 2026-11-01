@@ -69,7 +69,6 @@ func revisionMismatchResponse(c *gin.Context, err error) bool {
 	if !errors.As(err, &mismatch) {
 		return false
 	}
-	c.Header(revisionHeader, "")
 	c.JSON(http.StatusPreconditionFailed, gin.H{
 		"error":           mismatch.Error(),
 		"code":            "config_revision_mismatch",
