@@ -69,7 +69,7 @@ jobs:
       - name: Install MkDocs deps
         run: pip install -r docs/requirements-mkdocs.txt
       - name: Build docs
-        run: mkdocs build -f docs/mkdocs.yml -d /tmp/containd-docs
+        run: mkdocs build --strict -f docs/mkdocs.yml -d /tmp/containd-docs
 
   ui:
     runs-on: ubuntu-latest
