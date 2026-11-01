@@ -18,6 +18,7 @@ import { api, isAdmin, type Zone, type Conduit } from "../../lib/api";
 import { mapZone, scoreZone, slColor } from "../../lib/security-scoring";
 import { validateZoneName } from "../../lib/validate";
 import { useToast } from "../../components/ToastProvider";
+import { NetworkSetup } from "../interfaces/network-setup";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { useTableControls } from "../../hooks/useTableControls";
@@ -152,6 +153,7 @@ export default function ZonesPage() {
         </button>
       }
     >
+      <NetworkSetup current="/zones/" />
       {configLoadError && <p role="alert" className="mb-4 text-sm text-red-400">{configLoadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
       <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} />
@@ -243,7 +245,7 @@ export default function ZonesPage() {
             <SearchBar value={table.search} onChange={table.setSearch} placeholder="Search zones..." />
           </div>
 
-          <div className="mt-3 overflow-hidden rounded-xs border bg-(--surface) shadow-card">
+          <div className="mt-3 overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
             <table className="w-full text-sm">
               <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
                 <tr>

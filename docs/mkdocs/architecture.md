@@ -62,3 +62,29 @@ in the image. See [Services](services.md) and [Third-Party Licenses](SPDX.md).
   analysis.
 
 See [Code Boundaries](code-boundaries.md) for contributor guidance.
+
+## Network setup and topology in the UI
+
+Zones, Interfaces, Routing and NAT share a **Zones → Network devices →
+Connectivity → Review** navigation strip, with a separate NAT link. Navigation
+never adopts devices or stages settings. In Interfaces, the logical interface
+list comes before Create interface. Each row keeps its device, zone, link and
+addresses together. **Inspect** reveals Type, Mode, Network and Access, including
+MAC, MTU, detected versus configured addresses and gateway. Edit opens inspection;
+Save still stages the same candidate settings. Saved bridge/VLAN, gateway or
+customized access settings open inspection by default. Detected network devices
+also show their associated logical interface and zone.
+
+**Auto-assign** stages bindings; **Reconcile live** is a separate, immediate action
+that replaces live static addresses from running settings. Management reservation,
+safeguard and boot-fault messages remain above the interface workspace, including
+when inspection is collapsed. Review and commit staged settings in Configuration.
+
+Topology opens on **Logical**. **Live** identifies running network, traffic and
+conduit observations; **Saved target** identifies candidate zone targets, not live
+protection. Security leads with target gaps and offers direct conduit inspection.
+Its automated requirement checks are not a standards assessment. **Physical**
+keeps deployment security attention visible independently of its inspector; select
+Host, Runtime, Container or Process to inspect the corresponding OS, resources,
+paths, environment and runtime details. Layer and conduit selection support the
+keyboard; graph navigation, zoom and detail-panel controls remain available.

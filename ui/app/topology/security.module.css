@@ -32,7 +32,8 @@
 
 /* GRID */
 /* Auto margins center a fitting grid without putting overflow before the scroll origin. */
-.gridWrap { flex: none; width: max-content; margin: auto; }
+/* Keep a trailing gutter inside the transformed scroll extent, including at fractional zoom. */
+.gridWrap { flex: none; width: max-content; margin: auto; padding-right: 12px; }
 .gridColHeaders { display: flex; padding-left: 160px; margin-bottom: 6px; gap: 6px; }
 .colHeader { width: 96px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 4px; border: 1px solid transparent; transition: border-color .15s; }
 .colHeader:hover { border-color: var(--topo-border); }
@@ -146,3 +147,5 @@
   .workspaceWithSelection { grid-template-rows: minmax(0, 1fr) 200px; }
   .workspaceWithSelection .detailPanel { display: flex; border-left: none; border-top: 1px solid var(--topo-border); }
 }
+
+.cell:focus-visible { outline: 2px solid var(--amber); outline-offset: -3px; }

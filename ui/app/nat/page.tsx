@@ -24,6 +24,7 @@ import {
   type Zone,
   type FirewallRule,
 } from "../../lib/api";
+import { NetworkSetup } from "../interfaces/network-setup";
 import { Shell } from "../../components/Shell";
 import { TipsBanner, type Tip } from "../../components/TipsBanner";
 import { Card } from "../../components/Card";
@@ -114,6 +115,7 @@ export default function NATPage() {
         </button>
       }
     >
+      <NetworkSetup current="/nat/" />
       {!isAdmin() && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -266,7 +268,7 @@ function NATCard({
   zoneOptions.sort((a, b) => a.label.localeCompare(b.label));
 
   return (
-    <div className="mb-6 overflow-hidden rounded-xs border bg-(--surface) shadow-card backdrop-blur-sm">
+    <div className="mb-6 overflow-x-auto rounded-xs border bg-(--surface) shadow-card backdrop-blur-sm">
       <ConfigEditNotice {...conflictProps} onReload={() => window.location.reload()} superseded={editor.superseded} />
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div>
@@ -542,7 +544,7 @@ function PortForwardsCard({
   }
 
   return (
-    <div className="mb-6 overflow-hidden rounded-xs border bg-(--surface) shadow-card backdrop-blur-sm">
+    <div className="mb-6 overflow-x-auto rounded-xs border bg-(--surface) shadow-card backdrop-blur-sm">
       <ConfigEditNotice {...conflictProps} onReload={() => window.location.reload()} superseded={editor.superseded || form.editor.superseded} />
       <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => window.location.reload()} />
       <ConfirmDialog {...confirm.props} />
@@ -657,7 +659,7 @@ function PortForwardsCard({
           </div>
         )}
 
-        <div className="mt-4 overflow-hidden rounded-xs border">
+        <div className="mt-4 overflow-x-auto rounded-xs border">
           <table className="w-full text-sm">
             <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
               <tr>
