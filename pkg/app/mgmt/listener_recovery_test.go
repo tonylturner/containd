@@ -43,6 +43,7 @@ func (b *listenerBuilds) build(lc mgmtListenerConfig) (mgmtBinds, error) {
 func bootStores(t *testing.T, httpListen string) (mgmtStores, *config.Config) {
 	t.Helper()
 	dir := t.TempDir()
+	sshTestKeyPair(t, dir, "server")
 	path := filepath.Join(dir, "config.db")
 	t.Setenv("CONTAIND_CONFIG_DB", path)
 	t.Setenv("CONTAIND_AUDIT_DB", filepath.Join(dir, "audit.db"))

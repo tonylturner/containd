@@ -11,7 +11,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
-	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -24,6 +23,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -75,9 +75,8 @@ func TestTLSUploadPathRefusal(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 				t.Fatal(err)
 			}
-			want := fmt.Sprintf("TLS %s path %q (source: %s) must be under /data", tc.kind, path, tc.source)
-			if rec.Code != http.StatusConflict || resp.Error != want {
-				t.Fatalf("got %d %s; want 409 %q", rec.Code, rec.Body.String(), want)
+			if rec.Code != http.StatusConflict || !strings.Contains(resp.Error, tc.source) || !strings.Contains(resp.Error, path) || !strings.Contains(resp.Error, "managed bundle") {
+				t.Fatalf("got %d %s; want actionable 409 naming %s", rec.Code, rec.Body.String(), tc.source)
 			}
 			got, err := os.ReadFile(path)
 			if err != nil || string(got) != original {
@@ -112,27 +111,22 @@ func TestTLSUploadSaysWhenItTakesEffect(t *testing.T) {
 		status, warns string
 	}{
 		{"served files", func(dir string) ServedManagement {
-			return ServedManagement{CertFile: filepath.Join(dir, "tls", "saved.crt"), KeyFile: filepath.Join(dir, "tls", "saved.key")}
+			return ServedManagement{CertFile: filepath.Join(dir, "tls", "server.pem"), KeyFile: filepath.Join(dir, "tls", "server.pem")}
 		}, http.StatusOK, "updated", ""},
 		{"fallback files", func(dir string) ServedManagement {
 			return ServedManagement{CertFile: filepath.Join(dir, "tls", "server.crt"), KeyFile: filepath.Join(dir, "tls", "server.key")}
 		}, http.StatusOK, "stored", "the certificate is served from the next management start"},
 		{"no HTTPS listener", func(string) ServedManagement { return ServedManagement{} },
 			http.StatusOK, "stored", "no HTTPS listener is bound"},
-		{"served certificate with another key", func(dir string) ServedManagement {
-			return ServedManagement{CertFile: filepath.Join(dir, "tls", "saved.crt"), KeyFile: filepath.Join(dir, "tls", "server.key")}
-		}, http.StatusConflict, "", ""},
-		{"served key with another certificate", func(dir string) ServedManagement {
-			return ServedManagement{CertFile: filepath.Join(dir, "tls", "server.crt"), KeyFile: filepath.Join(dir, "tls", "saved.key")}
-		}, http.StatusConflict, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			served := tc.served(dir)
 			recordServed(t, served)
 			cfg := config.DefaultConfig()
-			cfg.System.Mgmt.TLSCertFile = filepath.Join(dir, "tls", "saved.crt")
-			cfg.System.Mgmt.TLSKeyFile = filepath.Join(dir, "tls", "saved.key")
+			bundle := filepath.Join(dir, "tls", "server.pem")
+			cfg.System.Mgmt.TLSCertFile = mgmttls.DefaultCertFile
+			cfg.System.Mgmt.TLSKeyFile = mgmttls.DefaultKeyFile
 			router := gin.New()
 			router.POST("/upload", tlsCertUploadHandler(&mockStore{cfg: cfg}, dir))
 			rec := httptest.NewRecorder()
@@ -140,16 +134,11 @@ func TestTLSUploadSaysWhenItTakesEffect(t *testing.T) {
 			if rec.Code != tc.code {
 				t.Fatalf("status %d, body %s", rec.Code, rec.Body)
 			}
-			written, err := os.ReadFile(cfg.System.Mgmt.TLSCertFile)
-			if tc.code == http.StatusConflict {
-				if err == nil || !strings.Contains(rec.Body.String(), "would pair a new file with a served one") {
-					t.Fatalf("refused upload wrote %q (%v): %s", written, err, rec.Body)
-				}
-				return
+			pair, err := mgmttls.ReadPair(bundle, bundle)
+			if err != nil || pair.Leaf == nil {
+				t.Fatalf("bundle not published: %v", err)
 			}
-			if err != nil || strings.TrimSpace(string(written)) != strings.TrimSpace(certPEM) {
-				t.Fatalf("certificate not written: %v", err)
-			}
+
 			var resp struct {
 				Status   string   `json:"status"`
 				Warnings []string `json:"warnings"`
@@ -164,7 +153,7 @@ func TestTLSUploadSaysWhenItTakesEffect(t *testing.T) {
 			if tc.warns != "" && (!strings.Contains(resp.Warnings[0], tc.warns) || served.CertFile != "" && !strings.Contains(resp.Warnings[0], served.CertFile)) {
 				t.Fatalf("warning %q does not say when the upload is served", resp.Warnings[0])
 			}
-			if served.CertFile != "" && served.CertFile != cfg.System.Mgmt.TLSCertFile {
+			if served.CertFile != "" && served.CertFile != bundle {
 				if _, err := os.Stat(served.CertFile); !os.IsNotExist(err) {
 					t.Fatalf("upload touched the served fallback certificate: %v", err)
 				}
@@ -175,7 +164,7 @@ func TestTLSUploadSaysWhenItTakesEffect(t *testing.T) {
 
 // sanTestCertPEM is a self-signed PEM certificate for commonName with the
 // given DNS and IP subject alternative names.
-func sanTestCertPEM(t *testing.T, commonName string, dnsNames []string, ips []net.IP) []byte {
+func sanTestCertPEM(t *testing.T, commonName string, dnsNames []string, ips []net.IP) ([]byte, []byte) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -193,7 +182,11 @@ func sanTestCertPEM(t *testing.T, commonName string, dnsNames []string, ips []ne
 	if err != nil {
 		t.Fatal(err)
 	}
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 }
 
 // The readout names the files and certificate the bound HTTPS listener
@@ -210,14 +203,20 @@ func TestTLSInfoShowsServedCertificate(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "tls"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	savedPEM, _ := generateTestCertPEM(t)
-	servedPEM := sanTestCertPEM(t, "appliance.example", []string{"appliance.example"},
+	savedPEM, savedKey := generateTestCertPEM(t)
+	servedPEM, servedKey := sanTestCertPEM(t, "appliance.example", []string{"appliance.example"},
 		[]net.IP{net.ParseIP("192.0.2.10"), net.ParseIP("2001:db8::10")})
 	savedCert, servedCert := filepath.Join(dir, "tls", "saved.crt"), filepath.Join(dir, "tls", "server.crt")
 	if err := os.WriteFile(savedCert, []byte(savedPEM), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(servedCert, servedPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tls", "saved.key"), []byte(savedKey), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tls", "server.key"), servedKey, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()

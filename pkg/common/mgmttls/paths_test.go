@@ -3,6 +3,7 @@
 package mgmttls
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -45,5 +46,63 @@ func TestResolveFiles(t *testing.T) {
 				t.Fatalf("key = %+v; want path %q, source %q", keyInfo, tt.wantKey, tt.wantKeySource)
 			}
 		})
+	}
+}
+
+func TestManagedIdentitySelection(t *testing.T) {
+	for _, tc := range []struct {
+		name, cert, key string
+		managed         bool
+	}{
+		{"implicit defaults", "", "", true},
+		{"explicit defaults", DefaultCertFile, DefaultKeyFile, true},
+		{"cleaned defaults", "/data/tls/./server.crt", "/data/tls/../tls/server.key", true},
+		{"external certificate", "/custom/cert", DefaultKeyFile, false},
+		{"external bundle", "/custom/bundle", "/custom/bundle", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+			t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+			cfg := &config.Config{}
+			cfg.System.Mgmt.TLSCertFile = tc.cert
+			cfg.System.Mgmt.TLSKeyFile = tc.key
+			if Managed(cfg) != tc.managed {
+				t.Fatal("wrong identity mode")
+			}
+			c, k := IdentityFiles(cfg)
+			if tc.managed && (c != DefaultBundleFile || k != c) {
+				t.Fatal("not using bundle")
+			}
+			dataDir := t.TempDir()
+			c, k = IdentityFilesIn(cfg, dataDir)
+			if tc.managed {
+				want := filepath.Join(dataDir, "tls", "server.pem")
+				if c != want || k != want {
+					t.Fatalf("managed identity = %q, %q; want %q", c, k, want)
+				}
+			} else if c != tc.cert || k != tc.key {
+				t.Fatal("external paths were rebased")
+			}
+		})
+	}
+}
+
+func TestIdentityFilesInDefaultsAndOverrides(t *testing.T) {
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+	c, k := IdentityFiles(nil)
+	if c != DefaultBundleFile || k != c {
+		t.Fatal("default identity and bundle constant disagree")
+	}
+	dataDir := t.TempDir()
+	c, k = IdentityFilesIn(nil, dataDir)
+	if c != filepath.Join(dataDir, "tls", "server.pem") || k != c {
+		t.Fatal("nil configuration did not select the managed bundle")
+	}
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "/external/bundle")
+	t.Setenv("CONTAIND_TLS_KEY_FILE", "/external/bundle")
+	c, k = IdentityFilesIn(nil, dataDir)
+	if c != "/external/bundle" || k != c {
+		t.Fatal("external environment overrides were rebased")
 	}
 }
