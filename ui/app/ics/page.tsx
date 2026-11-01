@@ -40,7 +40,7 @@ import { ICSRuleDetails } from "./ics-rule-details";
 import { useHealth } from "../../hooks/useHealth";
 import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 import { ICSCoverageCell } from "./ics-coverage";
-import { ICSDisclosure } from "./ics-disclosure";
+import { Disclosure } from "../../components/Disclosure";
 import { ICSInspectionStatus } from "./ics-inspection-status";
 import { ShadowCountersCell, ShadowCountersNote, useShadowCounters } from "./ics-shadow-counters";
 import { useICSCoverage } from "./use-ics-coverage";
@@ -295,16 +295,16 @@ export default function ICSPolicyPage() {
             : "Monitor only \u2014 inline inspection is not configured"}
         </div>
         {canSave && <div className="mt-2">
-          <ICSDisclosure title="Technical details"
+          <Disclosure title="Technical details"
             defaultOpen={queueGroup > 0 || (dpiConfig.captureInterfaces ?? []).length > 0}
-            attention={queueGroup > 0 || (dpiConfig.captureInterfaces ?? []).length > 0 ? "Inline queue or capture interfaces configured" : undefined}>
+            indicator={queueGroup > 0 || (dpiConfig.captureInterfaces ?? []).length > 0 ? "Inline queue or capture interfaces configured" : undefined}>
             <p>Inline inspection queue (NFQUEUE): {queueGroup}</p>
             {(dpiConfig.captureInterfaces ?? []).length > 0 && (
               <div>
                 Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
               </div>
             )}
-          </ICSDisclosure>
+          </Disclosure>
         </div>}
         <div className="mt-2">
           <Link href="/firewall/" className="text-xs font-semibold text-(--amber) hover:text-(--amber)">
@@ -314,7 +314,7 @@ export default function ICSPolicyPage() {
       </Card>
 
       <div className="mt-4 rounded-xs border bg-(--surface) p-4">
-        <ICSDisclosure title="Inspection setup" defaultOpen={canSave && Object.keys(protoCounts).length === 0}>
+        <Disclosure title="Inspection setup" defaultOpen={canSave && Object.keys(protoCounts).length === 0}>
           <section aria-label="Supported Protocols"><h2 className="mb-2 text-sm font-medium text-(--text)">Supported Protocols</h2>
             <div className="flex flex-wrap gap-2">
               {PROTOCOL_KEYS.map((k) => (
@@ -338,7 +338,7 @@ export default function ICSPolicyPage() {
             </Link>
           </section>
 
-        </ICSDisclosure>
+        </Disclosure>
       </div>
 
       {editing && canEdit && (

@@ -48,6 +48,12 @@ Protection causes stay inline, while **Technical details** contains the
 observation time and identifiers. A successful configuration operation does not
 clear an independent protection or activity-record failure.
 
+Shared button disclosures open when saved non-default values arrive after the
+page loads. Clearing the last such value does not close an editor the operator
+is using, and an unchanged default does not override an explicit open/close
+choice. In Configuration, **Advanced** and **Recovery** remain inspectable
+when configuration reads fail; configuration mutation actions stay disabled.
+
 ## Concurrent edits
 
 Configuration revisions are transport metadata, not JSON fields or schema

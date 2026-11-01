@@ -16,7 +16,8 @@ import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
-import { ServiceDisclosure, ServiceStatusStrip } from "../service-presentation";
+import { ServiceStatusStrip } from "../service-presentation";
+import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
 import { CustomDefinitions } from "./custom-defs";
 import { GateStatus } from "./gate-status";
@@ -481,7 +482,7 @@ export default function AVPage() {
             </div>
             <div className="md:col-span-3">
               <h3 className="text-sm">Troubleshooting</h3>
-              <ServiceDisclosure title="Service details" indicator={!status.trust_revision || status.clamav_pid === undefined ? "Some details unknown" : undefined}>
+              <Disclosure title="Service details" indicator={!status.trust_revision || status.clamav_pid === undefined ? "Some details unknown" : undefined}>
               <div>Additional CA: <span className="text-(--text)">{status?.trust_revision || "Unknown"}</span></div>
               <div>Definitions: <span className="text-(--text)">{status?.db_version || "n/a"}</span></div>
               <div>ICAP servers: <span className="text-(--text)">{status?.icap_servers ?? "Unknown"}</span></div>
@@ -494,7 +495,7 @@ export default function AVPage() {
               <div>Definition updater last: <span className="text-(--text)">{status?.freshclam_last || "Unknown"}</span></div>
               <div>Definition updater interval: <span className="text-(--text)">{status?.freshclam_interval || "Unknown"}</span></div>
               <div>Custom definition folder: <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
-            </ServiceDisclosure>
+            </Disclosure>
             </div>
           </div>
         )}

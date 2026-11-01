@@ -21,7 +21,7 @@ import {
   ConfirmDialog,
   useConfirm,
 } from "../../components/ConfirmDialog";
-import { ServiceDisclosure } from "../system/services/service-presentation";
+import { Disclosure } from "../../components/Disclosure";
 import { RulesTable } from "./ids-rules-table";
 import {
   EditRuleModal,
@@ -231,14 +231,14 @@ export default function IDSPage() {
       )}
       </div>
       <h2 className="mt-6 text-base font-semibold">Manage groups</h2>
-      <ServiceDisclosure title="Groups" defaultOpen={groups.length > 0} indicator={`${groups.length} group${groups.length !== 1 ? "s" : ""}${groups.length ? " · non-default settings" : ""}`}>
+      <Disclosure title="Groups" defaultOpen={groups.length > 0} indicator={`${groups.length} group${groups.length !== 1 ? "s" : ""}${groups.length ? " · non-default settings" : ""}`}>
         <GroupsPanel form={panelForm} groups={groups} rules={rules} canEdit={canEdit}
           onUpdate={(g) => {
             if (!canCombinePanel()) return false;
             setIds((prev) => ({ ...prev, ruleGroups: g }));
             return true;
           }} />
-      </ServiceDisclosure>
+      </Disclosure>
 
       <h2 className="mt-6 text-base font-semibold">Export and sources</h2>
       <p className="mt-1 text-xs text-(--text-muted)">Export uses active committed rules.</p>

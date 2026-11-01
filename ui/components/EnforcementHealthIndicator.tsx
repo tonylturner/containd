@@ -3,7 +3,6 @@ import { isAdmin, type EnforcementHealth } from "../lib/api";
 import { enforcementDetail } from "./enforcement-detail";
 import { ProtectionRetry } from "./ProtectionNotice";
 import { StatusIndicator } from "./StatusBadge";
-import { TechnicalDetails } from "./TechnicalDetails";
 
 const VIEWS: Record<EnforcementHealth["state"], { status: "healthy" | "degraded" | "error" | "unknown"; label: string }> = {
   enforcing: { status: "healthy", label: "Firewall enforcing" },
@@ -25,7 +24,7 @@ export function EnforcementHealthIndicator({ health }: { health: EnforcementHeal
     <StatusIndicator status={view.status} label={view.label}
       sublabel={status?.state === "protecting" ? "Protection needs attention" : protection.title} />
     {protection.action && <p className="text-xs text-(--text-dim)">{protection.action}</p>}
-    {health.reason && <TechnicalDetails summary="Why protection needs attention">{health.reason}</TechnicalDetails>}
+    {health.reason && <p className="break-words text-xs text-amber">{health.reason}</p>}
     <ProtectionRetry isAdmin={isAdmin()} />
   </div>;
 }
