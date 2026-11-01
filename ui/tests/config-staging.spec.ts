@@ -240,6 +240,7 @@ function configDiff(overrides: Partial<WireConfigDiff> = {}): WireConfigDiff {
   return {
     changed: false,
     changedSections: [],
+    pendingConfirm: null,
     running: {},
     candidate: {},
     idsBank: { running: unchangedBank, candidate: unchangedBank },

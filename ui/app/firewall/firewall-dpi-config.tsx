@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { useConfigRevision } from "../../lib/use-config-revision";
+import type { useConfigRevision } from "../../lib/use-config-revision";
 
 import { ICSModeSelect } from "../ics/ics-mode-select";
 import { formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
@@ -27,19 +27,20 @@ import {
 export function DPIConfigSection({
   config: cfg,
   revision,
+  revisionState,
   health,
   available,
   onChange,
 }: {
   config: DataPlaneConfig;
   revision: string;
+  revisionState: Pick<ReturnType<typeof useConfigRevision>, "expectedRevision" | "handleRevision">;
   available: boolean;
   /** Runtime health; undefined while unknown. */
   health: HealthResponse | undefined;
-  onChange: (c: DataPlaneConfig) => void;
+  onChange: (c: DataPlaneConfig, revision: string) => void;
 }) {
-  const { readConfig, expectedRevision: directRevision, handleRevision, revisionNotice } = useConfigRevision();
-  useEffect(() => { readConfig({ data: cfg, revision }); }, [cfg, revision, readConfig]);
+  const { expectedRevision: directRevision, handleRevision } = revisionState;
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saved" | "error">(
     "idle",
@@ -71,15 +72,16 @@ export function DPIConfigSection({
     if (!canEdit || !available || saving) return null;
     setSaving(true);
     setSaveError(null);
-    const response = await setDataPlane(expectedRevision ?? directRevision(), updated);
-    const result = expectedRevision === undefined ? handleRevision(response) : response;
+    const submittedBase = expectedRevision ?? directRevision();
+    const response = await setDataPlane(submittedBase, updated);
+    const result = response.ok || expectedRevision === undefined ? handleRevision(submittedBase)(response) : response;
     setSaving(false);
     setSaveState(result.ok ? "saved" : "error");
     if (!result.ok) {
       setSaveError(result.error);
       return result;
     }
-    onChange(result.data);
+    if ("adopted" in result && result.adopted && result.revision) onChange(result.data, result.revision);
     return result;
   }
 
@@ -114,7 +116,6 @@ export function DPIConfigSection({
   return (
     <>
       <Card padding="md" className="mt-6">
-        {revisionNotice(() => window.location.reload())}
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-(--text)">

@@ -2,15 +2,10 @@
 
 import { useCallback, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
 import { accept, acceptCollection as acknowledge, adopt, beginSave as begin, failSave as fail, fresh, isDirty, keepEdits, sameConfig, type ConfigSubmission } from "./config-editor";
+import { revisionFailure } from "./config-revision";
 import type { ApiFailure } from "./api";
 
-export function isRevisionConflict(failure: ApiFailure): boolean {
-  return failure.status === 412 && failure.code === "config_revision_mismatch";
-}
-
-export function isRevisionRequired(failure: ApiFailure): boolean {
-  return failure.status === 428 && failure.code === "config_revision_required";
-}
+export { isRevisionConflict, isRevisionRequired } from "./config-revision";
 
 /** A missing authoritative read never authorizes a write or resets a draft.
  * Keep availability separate from save errors and editable form defaults.
@@ -56,17 +51,11 @@ export function useConfigEditor<T>(initial: T | (() => T), initialLoaded = true,
     return submitted;
   };
   const failSave = useCallback((submitted: ConfigSubmission<T>, failure?: ApiFailure) => {
-    setEditor((e) => !e.pending.some(entry => entry.id === submitted.id) ? e : ({
-      ...fail(e, submitted),
-      ...(failure && isRevisionConflict(failure) ? { conflictRevision: failure.currentRevision } : {}),
-      ...(failure && isRevisionRequired(failure) ? { revisionRequired: true } : {}),
-    }));
+    setEditor((e) => !e.pending.some(entry => entry.id === submitted.id) ? e :
+      failure ? revisionFailure(fail(e, submitted), failure) : fail(e, submitted));
   }, []);
   const reportFailure = useCallback((failure: ApiFailure) => {
-    setEditor((e) => ({ ...e,
-      ...(isRevisionConflict(failure) ? { conflictRevision: failure.currentRevision } : {}),
-      ...(isRevisionRequired(failure) ? { revisionRequired: true } : {}),
-    }));
+    setEditor((e) => revisionFailure(e, failure));
   }, []);
   const acceptConfig = useCallback((submitted: ConfigSubmission<T>, next: T, revision?: string) => {
     setEditor((e) => accept(e, submitted, next, revision));
@@ -77,8 +66,8 @@ export function useConfigEditor<T>(initial: T | (() => T), initialLoaded = true,
   const clearText = useCallback((prefix: string) => {
     setEditor((e) => ({ ...e, raw: Object.fromEntries(Object.entries(e.raw).filter(([key]) => !key.startsWith(prefix))) }));
   }, []);
-  const acceptCollection = useCallback((update: (cfg: T) => T, prefixes: string[] = [], revision?: string) => {
-    setEditor((e) => acknowledge(e, update, prefixes, undefined, revision));
+  const acceptCollection = useCallback((submittedBase: string | undefined, update: (cfg: T) => T, prefixes: string[] = [], revision?: string) => {
+    setEditor((e) => acknowledge(e, update, prefixes, undefined, revision, submittedBase));
   }, []);
   // Row saves acknowledge only that row. Other drafts, and typing after the
   // request started, are not part of the acknowledgement.
@@ -106,7 +95,6 @@ export function useConfigEditor<T>(initial: T | (() => T), initialLoaded = true,
     conflictProps: {
       conflictRevision: editor.conflictRevision, olderView: editor.olderView, revisionRequired: editor.revisionRequired,
       onKeep: () => setEditor(keepEdits),
-      onReload: () => setEditor((e) => fresh(e.server, e.serverRevision)),
     },
   };
 }

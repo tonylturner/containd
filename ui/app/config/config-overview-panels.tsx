@@ -1,5 +1,7 @@
 "use client";
 
+import { IDSRestore } from "./ids-restore";
+
 import type { ConfigBackup } from "../../lib/api";
 
 import { Card } from "../../components/Card";
@@ -211,12 +213,16 @@ export function IDSRulesCard({
   canEdit,
   idsRuleCount,
   onDownloadRules,
-  onRestoreRules,
+  revision,
+  onStatus,
+  onChanged,
 }: {
   canEdit: boolean;
   idsRuleCount: number;
   onDownloadRules: () => void;
-  onRestoreRules: (file: File | null) => void;
+  revision?: string;
+  onStatus: (status: string) => void;
+  onChanged: () => unknown;
 }) {
   return (
     <Card padding="md">
@@ -234,20 +240,7 @@ export function IDSRulesCard({
           >
             Download rule backup
           </button>
-          {canEdit && (
-            <label className="cursor-pointer rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui">
-              Stage rule restore
-              <input
-                type="file"
-                accept=".json"
-                className="hidden"
-                onChange={(e) => {
-                  onRestoreRules(e.target.files?.[0] ?? null);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-          )}
+          {canEdit && <IDSRestore revision={revision} onStatus={onStatus} onChanged={onChanged} />}
         </div>
       </div>
     </Card>
@@ -257,6 +250,7 @@ export function IDSRulesCard({
 export function ConfigActionBar({
   canEdit,
   canCommit,
+  canMutate,
   ttlSeconds,
   onTtlChange,
   onCommit,
@@ -266,6 +260,7 @@ export function ConfigActionBar({
 }: {
   canEdit: boolean;
   canCommit: boolean;
+  canMutate: boolean;
   ttlSeconds: string;
   onTtlChange: (value: string) => void;
   onCommit: () => void;
@@ -307,12 +302,14 @@ export function ConfigActionBar({
           <>
             <button
               onClick={onConfirmCommit}
+              disabled={!canMutate}
               className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
             >
               Confirm
             </button>
             <button
               onClick={onRollback}
+              disabled={!canMutate}
               className="rounded-xs bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
             >
               Rollback

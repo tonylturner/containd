@@ -212,7 +212,7 @@ export async function mockLearner(page: Page, role = "admin") {
       "/auth/me": { id: "admin-1", username: "containd", role },
       "/auth/session": { id: "admin-1", username: "containd", role },
       "/config/diff": {
-        changed: state.dirty,
+        pendingConfirm: null, changed: state.dirty,
         changedSections: state.dirty ? ["firewall"] : [],
         running: {},
         candidate: state.dirty ? { firewall: {} } : {},

@@ -1,3 +1,5 @@
+import { acknowledgeRevision, canAcknowledge, keepRevision, readRevision, revisionFrom, type ConfigRevision } from "./config-revision";
+
 export type ConfigSubmission<T> = {
   readonly id: symbol;
   readonly cfg: T;
@@ -5,17 +7,12 @@ export type ConfigSubmission<T> = {
   readonly baseRevision?: string;
 };
 
-export type ConfigEditor<T> = {
+export type ConfigEditor<T> = ConfigRevision & {
   cfg: T;
   server: T;
   raw: Record<string, string>;
   superseded: boolean;
   pending: ConfigSubmission<T>[];
-  baseRevision?: string;
-  serverRevision?: string;
-  conflictRevision?: string;
-  olderView?: boolean;
-  revisionRequired?: boolean;
 };
 
 export function sameConfig(a: unknown, b: unknown): boolean {
@@ -25,7 +22,7 @@ export function sameConfig(a: unknown, b: unknown): boolean {
 }
 
 export function fresh<T>(cfg: T, revision?: string): ConfigEditor<T> {
-  return { cfg, server: cfg, raw: {}, superseded: false, pending: [], baseRevision: revision, serverRevision: revision };
+  return { cfg, server: cfg, raw: {}, superseded: false, pending: [], ...revisionFrom(revision) };
 }
 
 export function isDirty<T>(editor: ConfigEditor<T>): boolean {
@@ -45,17 +42,18 @@ export function failSave<T>(editor: ConfigEditor<T>, submitted: ConfigSubmission
 /** Background reads never discard either structured or unfinished text edits. */
 export function adopt<T>(editor: ConfigEditor<T>, next: T, keepEdits = true, revision?: string): ConfigEditor<T> {
   if (!keepEdits) return fresh(next, revision);
-  if (!isDirty(editor) && !editor.conflictRevision && !editor.olderView) return { ...fresh(next, revision), pending: editor.pending };
-  return { ...editor, server: next, serverRevision: revision, superseded: editor.superseded || revision !== editor.baseRevision || !sameConfig(next, editor.server) };
+  if (!isDirty(editor)) return { ...readRevision(editor, revision, !!editor.conflictRevision || !!editor.olderView), cfg: next, server: next, superseded: false };
+  return { ...readRevision(editor, revision, true), server: next, superseded: editor.superseded || revision !== editor.baseRevision || !sameConfig(next, editor.server) };
 }
 
 /** Compare the entire submitted draft, not a parsed/normalized wire payload. */
 export function accept<T>(editor: ConfigEditor<T>, submitted: ConfigSubmission<T>, next: T, revision?: string): ConfigEditor<T> {
   if (!editor.pending.some((entry) => entry.id === submitted.id)) return editor;
   const settled = failSave(editor, submitted);
+  if (!canAcknowledge(editor.baseRevision, submitted.baseRevision, revision)) return settled;
   return sameConfig(editor.cfg, submitted.cfg) && sameConfig(editor.raw, submitted.raw)
     ? { ...fresh(next, revision), pending: settled.pending }
-    : { ...settled, server: next, superseded: false };
+    : { ...acknowledgeRevision(settled, submitted.baseRevision, revision), server: next, superseded: false };
 }
 
 /** Apply only an acknowledged mutation, to both copies, not a background snapshot.
@@ -67,20 +65,21 @@ export function acceptCollection<T>(
   prefixes: string[] = [],
   submitted?: ConfigSubmission<T>,
   revision?: string,
+  submittedBase = submitted?.baseRevision,
 ): ConfigEditor<T> {
   if (submitted && !editor.pending.some((entry) => entry.id === submitted.id)) return editor;
+  const settled = submitted ? failSave(editor, submitted) : editor;
+  if (!canAcknowledge(editor.baseRevision, submittedBase, revision)) return settled;
   const raw = Object.fromEntries(Object.entries(editor.raw).filter(([key, value]) =>
     !prefixes.some((prefix) => key.startsWith(prefix)) || (submitted && value !== submitted.raw[key])));
-  const settled = submitted ? failSave(editor, submitted) : editor;
   const next = { ...settled, cfg: update(editor.cfg), server: update(editor.server), raw };
-  return { ...next, baseRevision: isDirty(next) ? editor.baseRevision : revision ?? editor.baseRevision,
-    serverRevision: revision ?? editor.serverRevision, superseded: isDirty(next) && editor.superseded };
+  return { ...acknowledgeRevision(next, submittedBase, revision), superseded: false };
 }
 
 /** Explicit operator consent only; never called by refresh or save failure. */
 export function keepEdits<T>(editor: ConfigEditor<T>): ConfigEditor<T> {
   if (!editor.conflictRevision) return editor;
-  return { ...editor, baseRevision: editor.conflictRevision, conflictRevision: undefined, olderView: true, superseded: true, pending: [] };
+  return { ...keepRevision(editor), superseded: true };
 }
 
 /** Reconcile a collection read after a mutation without replacing unchanged rows'

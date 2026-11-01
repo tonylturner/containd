@@ -1,5 +1,7 @@
 "use client";
 
+import { canAcknowledge } from "../../lib/config-revision";
+
 import { matchingRevisions } from "../../lib/use-config-revision";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
@@ -38,8 +40,14 @@ const UNAVAILABLE = "NAT settings unavailable — the server did not return the 
 
 export default function NATPage() {
   const [zones, setZones] = useState<Zone[]>([]);
-  const [nat, setNat] = useState<NATConfig>({ enabled: false });
-  const [natRevision, setNatRevision] = useState("");
+  const [natSnapshot, setNatSnapshot] = useState({ data: { enabled: false } as NATConfig, revision: "" });
+  const { data: nat, revision: natRevision } = natSnapshot;
+  const currentRevision = useRef("");
+  const acknowledgeNAT = (submittedBase: string, data: NATConfig, revision?: string) => {
+    if (!canAcknowledge(currentRevision.current, submittedBase, revision)) return;
+    currentRevision.current = revision!;
+    setNatSnapshot({ data, revision: revision! });
+  };
   const [rules, setRules] = useState<FirewallRule[] | null>(null);
   // Until the first answer the settings are unknown, not disabled or empty.
   const [loaded, setLoaded] = useState(false);
@@ -92,8 +100,8 @@ export default function NATPage() {
     if (z && n) {
       setLoadError(null);
       setZones(z);
-      setNat(n);
-      setNatRevision(nSnapshot?.revision ?? "");
+      currentRevision.current = nSnapshot!.revision;
+      setNatSnapshot({ data: n, revision: nSnapshot!.revision });
       setLoaded(true);
       if (!keepEdits) setReloadKey((n) => n + 1);
     } else {
@@ -153,7 +161,7 @@ export default function NATPage() {
             setError(saved.error || "Failed to update NAT (check zones).");
             return saved;
           }
-          setNat(saved.data);
+          acknowledgeNAT(revision, saved.data, saved.revision);
           setNotice(
             saved.warning
               ? `NAT configuration staged — commit to apply. Warning: ${saved.warning}`
@@ -208,7 +216,7 @@ export default function NATPage() {
             setError(saved.error || "Failed to update port forwards (check zones/ports).");
             return saved;
           }
-          setNat(saved.data);
+          acknowledgeNAT(revision, saved.data, saved.revision);
           setNotice(
             saved.warning
               ? `Port forwarding configuration staged — commit to apply. Warning: ${saved.warning}`

@@ -7,7 +7,7 @@ import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { IEC104Inventory } from "./IEC104Inventory";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import { api, isAdmin, type Asset, type Zone } from "../../lib/api";
 import { useToast } from "../../components/ToastProvider";
@@ -43,10 +43,15 @@ export default function AssetsPage() {
   const [ips, setIps] = useState("");
   const [criticality, setCriticality] = useState("HIGH");
 
+  const retainedDraft = useRef(false);
+  useLayoutEffect(() => {
+    retainedDraft.current = !!(id || name || alias || zone || ips || type !== "PLC" || criticality !== "HIGH" || editing);
+  }, [id, name, alias, zone, ips, type, criticality, editing]);
+
   const { refresh } = useAsyncRefresh(useCallback(async () => {
     const [aSnapshot, zSnapshot] = await Promise.all([api.listAssets(), api.listZones()]);
-    const a = readConfig(aSnapshot);
-    const z = readConfig(zSnapshot);
+    const a = readConfig(aSnapshot, true, retainedDraft.current);
+    const z = zSnapshot?.data ?? null;
     setInventoryRefresh((key) => key + 1);
     setAssets(a ?? []);
     setZones(z ?? []);
@@ -75,7 +80,7 @@ export default function AssetsPage() {
         .map((s) => s.trim())
         .filter(Boolean),
       criticality,
-    }).then(handleRevision);
+    }).then(handleRevision(expectedRevision()));
     if (!result.ok) {
       setError(result.error);
       return;
@@ -90,7 +95,7 @@ export default function AssetsPage() {
 
   async function onDelete(assetID: string) {
     setError(null);
-    const result = await api.deleteAsset(expectedRevision(), assetID).then(handleRevision);
+    const result = await api.deleteAsset(expectedRevision(), assetID).then(handleRevision(expectedRevision()));
     if (!result.ok) {
       setError(result.error);
       return;
@@ -101,7 +106,7 @@ export default function AssetsPage() {
 
   async function onUpdate(assetID: string, patch: Partial<Asset>) {
     setError(null);
-    const result = await api.updateAsset(expectedRevision(), assetID, patch).then(handleRevision);
+    const result = await api.updateAsset(expectedRevision(), assetID, patch).then(handleRevision(expectedRevision()));
     if (!result.ok) {
       setError(result.error);
       return;

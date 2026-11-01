@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState, type SetStateAction } from "react";
 import { adopt, fresh, keepEdits, sameConfig, type ConfigEditor } from "./config-editor";
-import { isRevisionConflict, isRevisionRequired } from "./use-config-editor";
+import { acknowledgeRevision, canAcknowledge, revisionFailure } from "./config-revision";
 import type { ApiFailure } from "./api";
 
 /** Creation/row forms keep raw fields separately from their server context. */
@@ -17,15 +17,13 @@ export function useConfigForm<F extends object>(initial: F, context: unknown = n
   }, []);
   const acceptFields = useCallback((submitted: ConfigEditor<{ fields: F; context: unknown }>, keys: (keyof F)[], revision?: string) => {
     setEditor((e) => {
+      if (!canAcknowledge(e.baseRevision, submitted.baseRevision, revision)) return e;
       const fields = { ...e.cfg.fields };
       for (const key of keys) {
         if (sameConfig(fields[key], submitted.cfg.fields[key])) fields[key] = defaults.current[key];
       }
-      return { ...e, cfg: { ...e.cfg, fields },
-        superseded: !sameConfig(fields, defaults.current) && e.superseded,
-        ...(!sameConfig(fields, defaults.current) || !revision ? {} : {
-          baseRevision: revision, serverRevision: revision, conflictRevision: undefined, olderView: false, revisionRequired: false,
-        }) };
+      return { ...acknowledgeRevision(e, submitted.baseRevision, revision), cfg: { ...e.cfg, fields },
+        superseded: false };
     });
   }, []);
   function field<K extends keyof F>(key: K): [F[K], (value: SetStateAction<F[K]>) => void] {
@@ -39,13 +37,11 @@ export function useConfigForm<F extends object>(initial: F, context: unknown = n
     // Combining local drafts from different snapshots also requires explicit review.
     requireReview: (revision: string) => setEditor((e) => ({ ...e, conflictRevision: revision })),
     fail: (failure: ApiFailure) => {
-      if (isRevisionConflict(failure)) setEditor((e) => ({ ...e, conflictRevision: failure.currentRevision }));
-      if (isRevisionRequired(failure)) setEditor((e) => ({ ...e, revisionRequired: true }));
+      setEditor((e) => revisionFailure(e, failure));
     },
     conflictProps: {
       conflictRevision: editor.conflictRevision, olderView: editor.olderView, revisionRequired: editor.revisionRequired,
       onKeep: () => setEditor(keepEdits),
-      onReload: () => setEditor((e) => fresh(e.server, e.serverRevision)),
     },
   };
 }

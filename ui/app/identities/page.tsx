@@ -120,13 +120,14 @@ export default function IdentitiesPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setError(null);
-        const res = await api.deleteIdentityBinding(rowsDraft.editor.baseRevision ?? "", address);
+        const submittedBase = rowsDraft.editor.baseRevision;
+        const res = await api.deleteIdentityBinding(submittedBase ?? "", address);
         if (!res.ok) {
           rowsDraft.reportFailure(res);
           setError(res.error);
           return;
         }
-        rowsDraft.acceptCollection((rows) => rows.filter((row) => row.ip !== address), [`${JSON.stringify(address)}.`], res.revision);
+        rowsDraft.acceptCollection(submittedBase, (rows) => rows.filter((row) => row.ip !== address), [`${JSON.stringify(address)}.`], res.revision);
         toast("Binding removal staged — commit to apply.", "success");
         refresh();
       },

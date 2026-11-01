@@ -125,20 +125,21 @@ function ConfigPage() {
   async function copyRunningToCandidate() {
     if (!canEdit || !canSave || !running) return;
     setStatus(null);
-    const res = await api.setCandidateConfig(draft.editor.baseRevision ?? "", running);
+    const submitted = draft.beginSave();
+    const res = await api.setCandidateConfig(submitted.baseRevision ?? "", running);
     if (!res.ok) {
-      draft.reportFailure(res);
+      draft.failSave(submitted, res);
       setStatus(`Failed to copy running to candidate: ${res.error}`);
       return;
     }
-    adoptConfig(JSON.stringify(running, null, 2), false, res.revision);
+    draft.acceptConfig(submitted, JSON.stringify(running, null, 2), res.revision);
     setCandidateLoadedAt(new Date());
     setStatus(statusWithWarning("Candidate replaced with running and staged — commit to apply.", res.warning));
     refresh();
   }
 
   function doCommit() {
-    if (!canEdit || tab !== "diff" || !canSave || !configDiff || !diffRevision) { setTab("diff"); return; }
+    if (!canEdit || tab !== "diff" || !canSave || !configDiff || !diffRevision) return;
     const reviewedRevision = diffRevision;
     dialogOpen.current = true;
     const changedCount = diffBlocks.length;
@@ -164,7 +165,7 @@ function ConfigPage() {
   }
 
   function doCommitConfirmed() {
-    if (!canEdit || tab !== "diff" || !canSave || !configDiff || !diffRevision) { setTab("diff"); return; }
+    if (!canEdit || tab !== "diff" || !canSave || !configDiff || !diffRevision) return;
     const reviewedRevision = diffRevision;
     dialogOpen.current = true;
     const ttl = Number(ttlSeconds);
@@ -185,16 +186,17 @@ function ConfigPage() {
   }
 
   async function doConfirm() {
-    if (!canEdit) return;
+    if (!canEdit || !canSaveNow() || !diffRevision) return;
     setStatus(null);
-    const result = await api.confirmCommit(diffRevision ?? "");
+    const result = await api.confirmCommit(diffRevision);
     setStatus(result.ok ? statusWithWarning("Commit confirmed.", result.warning) : `Confirm failed: ${result.error}`);
     refresh();
   }
 
   function doRollback() {
-    if (!canEdit) return;
-    const reviewedRevision = diffRevision ?? "";
+    if (!canEdit || !canSaveNow() || !diffRevision) return;
+    const reviewedRevision = diffRevision;
+    dialogOpen.current = true;
     confirm.open({
       title: "Rollback configuration",
       message:
@@ -203,6 +205,7 @@ function ConfigPage() {
       variant: "danger",
       onConfirm: async () => {
         setStatus(null);
+        if (!canSaveNow()) { setStatus("Rollback failed: configuration diff unavailable. Refresh and review again."); return; }
         const result = await api.rollback(reviewedRevision);
         if (result.ok) {
           setStatus(statusWithWarning("Rolled back.", result.warning));
@@ -245,7 +248,7 @@ function ConfigPage() {
       const submittedBase = importRevision.expectedRevision();
       const text = await submittedFile.text();
       const parsed = JSON.parse(text) as ConfigBundle;
-      const res = await api.importConfig(submittedBase, parsed).then(importRevision.handleRevision);
+      const res = await api.importConfig(submittedBase, parsed).then(importRevision.handleRevision(submittedBase));
       setStatus(res.ok ? statusWithWarning("Config import staged — commit to apply.", res.warning) : `Restore failed: ${res.error}`);
       if (res.ok) setUploadFile((current) => current === submittedFile ? null : current);
       refresh();
@@ -478,23 +481,9 @@ function ConfigPage() {
               URL.revokeObjectURL(url);
               setStatus("IDS rules downloaded.");
             }}
-            onRestoreRules={async (file) => {
-              if (!file) return;
-              setStatus(null);
-              try {
-                const text = await file.text();
-                const rules = JSON.parse(text);
-                if (!Array.isArray(rules)) {
-                  setStatus("Invalid IDS rules file (expected JSON array).");
-                  return;
-                }
-                const res = await api.restoreIDSRules(diffRevision ?? "", rules);
-                setStatus(res.ok ? `IDS restore staged (${res.data.count} rules) — commit to apply.` : `Restore failed: ${res.error}`);
-                refresh();
-              } catch {
-                setStatus("Invalid JSON file.");
-              }
-            }}
+            revision={diffRevision}
+            onStatus={setStatus}
+            onChanged={refresh}
           />
 
           <ConfigBlockExplorer
@@ -516,6 +505,7 @@ function ConfigPage() {
 
           <ConfigActionBar
             canEdit={canEdit}
+            canMutate={canSave && !!diffRevision}
             canCommit={false}
             ttlSeconds={ttlSeconds}
             onTtlChange={setTtlSeconds}
@@ -616,6 +606,7 @@ function ConfigPage() {
       {tab !== "overview" && (
         <ConfigActionBar
           canEdit={canEdit}
+          canMutate={canSave && !!diffRevision}
           canCommit={tab === "diff" && canSave && !!configDiff && !!diffRevision}
           ttlSeconds={ttlSeconds}
           onTtlChange={setTtlSeconds}

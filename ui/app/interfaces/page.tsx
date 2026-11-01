@@ -89,7 +89,7 @@ export default function InterfacesPage() {
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const [iSnapshot, zSnapshot, s, r] = await Promise.all([api.listInterfaces(), api.listZones(), api.listInterfaceState(), api.getManagementReservation()]);
     const i = readConfig(iSnapshot, keepEdits);
-    const z = readConfig(zSnapshot, keepEdits);
+    const z = zSnapshot?.data ?? null;
     if (!checkLoaded(i)) return;
     refreshForm(i, keepEdits, iSnapshot?.revision);
     setReservation(r);
@@ -112,13 +112,14 @@ export default function InterfacesPage() {
     setError(null);
     setAssigning(true);
     const before = rowsDraft.editor.server;
-    const res = await api.assignInterfaces(expectedRevision(), "auto").then(handleRevision);
+    const submittedBase = expectedRevision();
+    const res = await api.assignInterfaces(submittedBase, "auto").then(handleRevision(submittedBase));
     setAssigning(false);
     if (!res.ok) {
       setError(res.error || "Failed to auto-assign interfaces.");
       return;
     }
-    rowsDraft.acceptCollection((rows) => reconcileRows(rows, before, res.data.interfaces, (row) => row.name));
+    rowsDraft.acceptCollection(submittedBase, (rows) => reconcileRows(rows, before, res.data.interfaces, (row) => row.name), [], res.revision);
     await refresh();
     setNotice(res.warning ? `Interface assignments staged — commit to apply. Warning: ${res.warning}` : "Interface assignments staged — commit to apply.");
   }
@@ -134,7 +135,7 @@ export default function InterfacesPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setReconciling(true);
-        const res = await api.reconcileInterfacesReplace(expectedRevision()).then(handleRevision);
+        const res = await api.reconcileInterfacesReplace(expectedRevision()).then(handleRevision(expectedRevision()));
         setReconciling(false);
         if (!res.ok) {
           setError(res.error || "Failed to reconcile interfaces.");
@@ -200,7 +201,7 @@ export default function InterfacesPage() {
       setError(created.error || "Failed to create interface.");
       return;
     }
-    rowsDraft.acceptCollection((rows) => upsertRow(rows, created.data, (row) => row.name));
+    rowsDraft.acceptCollection(submitted.baseRevision, (rows) => upsertRow(rows, created.data, (row) => row.name), [], created.revision);
     await refresh();
     setNotice(created.warning ? `Interface staged — commit to apply. Warning: ${created.warning}` : "Interface staged — commit to apply.");
     form.acceptFields(submitted, ["name", "alias", "zone", "ifaceType", "members", "parent", "vlanId", "addresses"], created.revision);
@@ -210,13 +211,14 @@ export default function InterfacesPage() {
     if (!canSaveNow()) return;
     setError(null);
     setNotice(null);
-    const result = await api.deleteInterface(rowsDraft.editor.baseRevision ?? "", ifaceName);
+    const submittedBase = rowsDraft.editor.baseRevision;
+    const result = await api.deleteInterface(submittedBase ?? "", ifaceName);
     if (!result.ok) {
       rowsDraft.reportFailure(result);
       setError(result.error || "Failed to delete interface.");
       return;
     }
-    rowsDraft.acceptCollection((rows) => rows.filter((row) => row.name !== ifaceName), [`${JSON.stringify(ifaceName)}.`], result.revision);
+    rowsDraft.acceptCollection(submittedBase, (rows) => rows.filter((row) => row.name !== ifaceName), [`${JSON.stringify(ifaceName)}.`], result.revision);
     await refresh();
     setNotice(result.warning ? `Interface staged — commit to apply. Warning: ${result.warning}` : "Interface staged — commit to apply.");
   }

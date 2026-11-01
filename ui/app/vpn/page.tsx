@@ -128,8 +128,8 @@ export default function VPNPage() {
         adoptConfig(normalize(current), keepEdits, currentSnapshot?.revision);
         refreshClient(current?.openvpn, keepEdits);
         const [states, zonesRespSnapshot, ifacesRespSnapshot] = await Promise.all([api.listInterfaceState(), api.listZones(), api.listInterfaces()]);
-        const zonesResp = readConfig(zonesRespSnapshot, keepEdits);
-        const ifacesResp = readConfig(ifacesRespSnapshot, keepEdits);
+        const zonesResp = zonesRespSnapshot?.data ?? null;
+        const ifacesResp = ifacesRespSnapshot?.data ?? null;
         setZones(zonesResp ?? []);
         setInterfaces(ifacesResp ?? []);
         const ifName = (current?.wireguard?.interface ?? "wg0").trim() || "wg0";
@@ -260,7 +260,8 @@ export default function VPNPage() {
     try {
       const text = await file.text();
       const base = file.name.replace(/\.(ovpn|conf|txt)$/i, "");
-      const res = await api.uploadOpenVPNProfile(expectedRevision(), base || "client", text).then(handleRevision);
+      const submittedBase = expectedRevision();
+      const res = await api.uploadOpenVPNProfile(submittedBase, base || "client", text).then(handleRevision(submittedBase));
       if (!res.ok) {
         setUploadState("error");
         setError(res.error || "Failed to upload OpenVPN profile.");
@@ -270,10 +271,10 @@ export default function VPNPage() {
       setUploadState("uploaded");
       toast(res.warning ? `Profile staged — commit to apply. Warning: ${res.warning}` : "Profile staged — commit to apply.", "success");
       // Uploading a profile switches OpenVPN to "configPath" mode (advanced) and clears managed config.
-      acceptCollection((current) => ({
+      acceptCollection(submittedBase, (current) => ({
         ...current,
         openvpn: { ...current.openvpn, configPath: res.data.configPath, managed: undefined },
-      }));
+      }), [], res.revision);
       setTimeout(() => setUploadState("idle"), 1500);
       // Refresh runtime badges (installed/running/last error) after upload.
       refresh({ silent: true });

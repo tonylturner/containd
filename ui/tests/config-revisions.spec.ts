@@ -21,7 +21,7 @@ async function mockConfig(page: Page, state = { counter: 1, hostname: "initial",
       if (state.offline) return route.fulfill({ status: 503, json: { error: "offline" } });
       const config = { system: { hostname: state.hostname } };
       return route.fulfill({ headers, json: path === "/config/diff" ? {
-        changed: true, changedSections: ["system"], running: { system: { hostname: "running" } }, candidate: config,
+        pendingConfirm: null, changed: true, changedSections: ["system"], running: { system: { hostname: "running" } }, candidate: config,
       } : path === "/config/backups" ? [] : {} });
     }
     const body = req.postDataJSON(); // Read before recording or unblocking tests.
@@ -106,7 +106,7 @@ test("status bar only opens review; commit dialog freezes displayed diff and rev
 
 test("unavailable revision or diff never enables commit", async ({ page }) => {
   await mockConfig(page);
-  await page.route("**/api/v1/config/diff", route => route.fulfill({ json: { changed: true, changedSections: [], running: {}, candidate: {} } }));
+  await page.route("**/api/v1/config/diff", route => route.fulfill({ json: { pendingConfirm: null, changed: true, changedSections: [], running: {}, candidate: {} } }));
   await page.goto("/config/?tab=diff");
   await expect(page.getByText("Unable to load configuration changes. Use Refresh to try again.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Commit", exact: true })).toBeDisabled();
@@ -118,7 +118,7 @@ test("learner preserves selections and original receipt through conflict and rev
   let counter = 1;
   const attempts: { revision?: string; body: unknown }[] = [];
   await page.route("**/api/v1/config/diff", route => route.fulfill({ headers: { "X-Containd-Revision": token(counter) }, json: {
-    changed: true, changedSections: ["firewall"], running: {}, candidate: {},
+    pendingConfirm: null, changed: true, changedSections: ["firewall"], running: {}, candidate: {},
   } }));
   await page.route("**/api/v1/learn/apply", async route => {
     const body = route.request().postDataJSON();
@@ -134,7 +134,7 @@ test("learner preserves selections and original receipt through conflict and rev
   counter++;
   await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
-  await expect(page.getByText("Configuration changed since you loaded it. Selections and the original receipt are kept.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Select modbus-1", { exact: true })).toBeChecked();
   await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeDisabled();
   await page.getByRole("button", { name: "Keep my edits", exact: true }).click();
@@ -204,7 +204,7 @@ for (const persisted of [false, true]) {
     let counter = 1;
     const attempts: { revision?: string; body: unknown }[] = [];
     await page.route("**/api/v1/config/diff", route => route.fulfill({ headers: { "X-Containd-Revision": token(counter) }, json: {
-      changed: persisted && counter > 1, changedSections: persisted && counter > 1 ? ["firewall"] : [], running: {}, candidate: {},
+      pendingConfirm: null, changed: persisted && counter > 1, changedSections: persisted && counter > 1 ? ["firewall"] : [], running: {}, candidate: {},
     } }));
     await page.route("**/api/v1/learn/apply", async route => {
       const body = route.request().postDataJSON();
@@ -247,4 +247,72 @@ test("copy running cannot discard candidate changes hidden behind a retained JSO
   expect(writes[0].revision).toBe(token(1));
   expect(state.hostname).toBe("unseen");
   await expect(editor).toHaveValue('{"system":{"hostname":"mine"}}');
+});
+
+test("412 Reload discards JSON edits and adopts a fresh server snapshot", async ({ page }) => {
+  const { state, writes } = await mockConfig(page);
+  await page.goto("/config/?tab=candidate");
+  const editor = page.getByRole("textbox", { name: "Staged config JSON" });
+  await expect(editor).toContainText("initial");
+  await editor.fill('{"system":{"hostname":"mine"}}');
+  state.hostname = "theirs";
+  state.counter++;
+  await page.getByRole("button", { name: "Save staged config", exact: true }).click();
+  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Reload", exact: true }).click();
+  await expect(editor).toContainText("theirs");
+  expect(writes).toHaveLength(1);
+  await editor.fill('{"system":{"hostname":"reviewed"}}');
+  await page.getByRole("button", { name: "Save staged config", exact: true }).click();
+  await expect.poll(() => state.counter).toBe(3);
+  expect(writes[1].revision).toBe(token(2));
+});
+
+test("Confirm and Rollback are disabled without a diff revision", async ({ page }) => {
+  await mockConfig(page);
+  await page.route("**/api/v1/config/diff", route => route.fulfill({ json: { pendingConfirm: null, changed: true, changedSections: [], running: {}, candidate: {} } }));
+  await page.goto("/config/?tab=diff");
+  await expect(page.getByRole("button", { name: "Confirm", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Rollback", exact: true })).toBeDisabled();
+});
+
+test("rollback holds the displayed diff and the revision captured when its dialog opens", async ({ page }) => {
+  const { state, writes } = await mockConfig(page);
+  await page.goto("/config/?tab=diff");
+  await expect(page.getByRole("region", { name: "System changes" })).toContainText("initial");
+  await page.getByRole("button", { name: "Rollback", exact: true }).click();
+  state.counter++;
+  state.hostname = "not-reviewed";
+  const response = page.waitForResponse("**/api/v1/config/diff");
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
+  await (await response).finished();
+  await expect(page.getByRole("region", { name: "System changes" })).not.toContainText("not-reviewed");
+  await page.getByRole("dialog").getByRole("button", { name: "Rollback", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toMatchObject({ path: "/config/rollback", revision: token(1) });
+});
+
+test("an uncertain learner request still requires review after an unavailable destination recovers", async ({ page }) => {
+  await mockLearner(page);
+  let offline = false;
+  await page.route("**/api/v1/config/diff", route => offline
+    ? route.fulfill({ status: 503, json: { error: "unavailable" } })
+    : route.fulfill({ headers: { "X-Containd-Revision": token(1) }, json: { pendingConfirm: null, changed: false, changedSections: [], running: {}, candidate: {} } }));
+  await page.route("**/api/v1/learn/apply", async route => {
+    route.request().postDataJSON();
+    offline = true;
+    await route.fulfill({ status: 503, json: { error: "completion uncertain" } });
+  });
+  await openDataset(page);
+  await page.getByLabel("Select modbus-1", { exact: true }).check();
+  await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
+  await expect(page.getByText("Destination candidate: unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeDisabled();
+  offline = false;
+  await page.getByRole("button", { name: "Refresh suggestions", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Keep my edits", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeDisabled();
+  await page.getByRole("button", { name: "Keep my edits", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeEnabled();
 });

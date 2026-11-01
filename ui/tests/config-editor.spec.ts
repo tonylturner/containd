@@ -1,8 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { accept, acceptCollection, adopt, beginSave, failSave, fresh, isDirty, keepEdits, reconcileRows, sameConfig, upsertRow, type ConfigEditor } from "../lib/config-editor";
+import { accept as acceptDraft, acceptCollection as acceptRows, adopt as adoptDraft, beginSave, failSave, fresh as freshDraft, isDirty, keepEdits, reconcileRows, sameConfig, upsertRow, type ConfigEditor } from "../lib/config-editor";
+
+const revision = "0123456789abcdef.1";
+const fresh = <T,>(cfg: T, base = revision) => freshDraft(cfg, base);
+const adopt = <T,>(e: ConfigEditor<T>, next: T, keep = true, base = revision) => adoptDraft(e, next, keep, base);
+const accept = <T,>(e: ConfigEditor<T>, submitted: Parameters<typeof acceptDraft<T>>[1], next: T, base = revision) => acceptDraft(e, submitted, next, base);
+const acceptCollection = <T,>(e: ConfigEditor<T>, update: (cfg: T) => T, prefixes: string[] = [], submitted?: Parameters<typeof acceptDraft<T>>[1], base = revision) => acceptRows(e, update, prefixes, submitted, base, submitted?.baseRevision ?? e.baseRevision);
 
 function start<T>(editor: ConfigEditor<T>) {
-  const submitted = { id: Symbol("test-save"), cfg: editor.cfg, raw: editor.raw };
+  const submitted = { id: Symbol("test-save"), cfg: editor.cfg, raw: editor.raw, baseRevision: editor.baseRevision };
   return { submitted, saving: beginSave(editor, submitted) };
 }
 
@@ -109,7 +115,7 @@ test("collection acknowledgements update both copies and retain unrelated struct
   const added = acceptCollection(removed, (rows) => upsertRow(rows, { name: "dmz", alias: "" }, (r) => r.name));
   expect(added.server.map((r) => r.name)).toEqual(["lan", "dmz"]);
   expect(added.cfg).toEqual([{ name: "lan", alias: "pending" }, { name: "dmz", alias: "" }]);
-  expect(added.superseded).toBe(true);
+  expect(added.superseded).toBe(false);
 });
 
 test("row saves share collection acknowledgement but cannot clear later typing or dotted siblings", () => {
@@ -153,7 +159,7 @@ test("dirty refresh retains its immutable revision; consent and acknowledgements
   expect(rebased.raw).toEqual(dirty.raw);
 });
 
-test("acknowledging one row never advances a different draft's base revision", () => {
+test("acknowledging one row advances the base while retaining other drafts", () => {
   const initialRevision = "0123456789abcdef.7";
   const resultingRevision = initialRevision.replace(/.$/, "8");
   const initial = fresh([{ name: "one" }, { name: "two" }], initialRevision);
@@ -161,7 +167,7 @@ test("acknowledging one row never advances a different draft's base revision", (
   const submitted = { id: Symbol("first"), cfg: dirty.cfg, raw: dirty.raw, baseRevision: initialRevision };
   const saving = beginSave(dirty, submitted);
   const accepted = acceptCollection(saving, rows => rows, ['"one".'], submitted, resultingRevision);
-  expect(accepted.baseRevision).toBe(initialRevision);
+  expect(accepted.baseRevision).toBe(resultingRevision);
   expect(accepted.raw).toEqual({ '"two".alias': '"second"' });
   expect(accepted.serverRevision).toBe(resultingRevision);
 });
@@ -175,5 +181,43 @@ test("deleting a row acknowledges only the deletion, not another row's structure
   const result = acceptCollection(beginSave(dirty, submitted), rows => rows.filter(row => row.id !== "one"), [], submitted, revision);
   expect(result.cfg).toEqual([{ id: "two", enabled: false }]);
   expect(result.server).toEqual([{ id: "two", enabled: true }]);
-  expect(result.baseRevision).toBe(baseRevision);
+  expect(result.baseRevision).toBe(revision);
+});
+
+test("typing during a JSON save retains text but adopts the acknowledged base", () => {
+  const initial = fresh("original");
+  const { submitted, saving } = start({ ...initial, cfg: "submitted" });
+  const result = accept({ ...saving, cfg: "later" }, submitted, "submitted", "0123456789abcdef.2");
+  expect(result.cfg).toBe("later");
+  expect(result.server).toBe("submitted");
+  expect(result.baseRevision).toBe("0123456789abcdef.2");
+});
+
+test("412 Keep retains another in-flight row submission; its superseded acknowledgement only settles pending state", () => {
+  const initial = fresh([{ name: "one" }, { name: "two" }]);
+  const { submitted, saving } = start({ ...initial, raw: { '"two".alias': '"later"' } });
+  const kept = keepEdits({ ...saving, conflictRevision: "0123456789abcdef.2" });
+  expect(kept.pending).toEqual([submitted]);
+  const result = acceptCollection(kept, rows => rows, ['"two".'], submitted, "0123456789abcdef.2");
+  expect(result.raw).toEqual(saving.raw);
+  expect(result.pending).toEqual([]);
+  expect(result.baseRevision).toBe("0123456789abcdef.2");
+  expect(result.olderView).toBe(true);
+});
+
+test("a superseded acknowledgement never installs payload or revision", () => {
+  const { submitted, saving } = start(fresh("old"));
+  const refreshed = adopt(saving, "new", true, "0123456789abcdef.3");
+  const result = accept(refreshed, submitted, "ack", "0123456789abcdef.2");
+  expect(result.cfg).toBe("new");
+  expect(result.server).toBe("new");
+  expect(result.baseRevision).toBe("0123456789abcdef.3");
+});
+
+test("a malformed 412 remains actionable with Reload but cannot invent a Keep base", async () => {
+  const { revisionFailure } = await import("../lib/config-revision");
+  const state = revisionFailure(fresh("draft"), { ok: false, status: 412, code: "config_revision_mismatch", error: "changed" });
+  expect(state.revisionRequired).toBe(true);
+  expect(state.conflictRevision).toBeUndefined();
+  expect(keepEdits(state).baseRevision).toBe(revision);
 });

@@ -90,6 +90,7 @@ export function SuggestionReview({
   suggestion: s,
   now,
   checked,
+  changedSinceSelected,
   canEdit,
   busy,
   onToggle,
@@ -98,6 +99,7 @@ export function SuggestionReview({
   suggestion: LearnSuggestion;
   now: number;
   checked: boolean;
+  changedSinceSelected?: boolean;
   canEdit: boolean;
   busy: boolean;
   onToggle: () => void;
@@ -132,6 +134,7 @@ export function SuggestionReview({
       aria-label={`Suggestion ${s.id}`}
       className="min-w-0 space-y-3 border-t py-4"
     >
+      {changedSinceSelected && <p role="status" className="mb-2 text-sm text-(--amber)">Changed since selected — review this revision and select it again.</p>}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="break-all font-mono text-sm">{s.id}</h3>
