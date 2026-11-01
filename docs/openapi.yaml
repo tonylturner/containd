@@ -3958,7 +3958,7 @@ paths:
             schema: {$ref: '#/components/schemas/Config'}
       responses:
         "200": {description: Configuration valid, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
-        "400": {description: Invalid configuration or reserved management path conflict, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: 'Invalid configuration or reserved management path conflict; unknown, case-mismatched or duplicate top-level keys are rejected with the key named in detail', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /config:
@@ -3981,6 +3981,7 @@ paths:
       responses:
         "200": {description: 'Configuration staged, not activated', content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}},
           headers: {X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+        "400": {description: 'Invalid JSON or configuration; unknown, case-mismatched or duplicate top-level keys are rejected with the key named in detail', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Stages the shared candidate; commit to apply.
 
@@ -4010,7 +4011,7 @@ paths:
         "200": {description: Candidate saved, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}, headers: {
             X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
         "400":
-          description: Invalid JSON or configuration; unsupported industrial references are rejected atomically with the rule or decoder key named
+          description: Invalid JSON or configuration; unknown, case-mismatched or duplicate top-level keys are rejected with the key named in detail; unsupported industrial references are rejected atomically with the rule or decoder key named
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -4101,6 +4102,9 @@ paths:
         as for a candidate, including the immutable reserved management path.
         Reservation conflicts are 400 errors naming the field; running and
         candidate are unchanged. Success sets `X-Containd-Config: staged`.
+        Top-level keys must be exact and unique. Only imports accept the retired
+        export key for schemas 0.1.0 through 0.1.7 (missing means 0.1.0),
+        discarding it during migration. Newer schemas with export are rejected.
       tags: [Config]
       requestBody:
         required: true
@@ -4116,7 +4120,7 @@ paths:
           headers:
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400":
-          description: Invalid JSON or configuration; unsupported industrial references are rejected atomically with the rule or decoder key named
+          description: Invalid JSON or configuration; unknown, case-mismatched or duplicate top-level keys are rejected with the key named in detail; export is accepted only for schemas 0.1.0 through 0.1.7; unsupported industrial references are rejected atomically with the rule or decoder key named
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
