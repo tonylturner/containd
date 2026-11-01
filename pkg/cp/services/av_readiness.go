@@ -221,8 +221,8 @@ func (m *AVManager) observeBackend(caller context.Context, cfg config.AVConfig, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	diagnostic := ""
-	if caller.Err() != nil {
-		diagnostic = caller.Err().Error()
+	if err := callerEnded(caller); err != nil {
+		diagnostic = err.Error()
 	} else if m.currentProbeLocked(epoch) {
 		wasReady, next := m.backendReady, m.nextOptions
 		publishCapability := capability && seq >= m.capabilitySeq
@@ -315,4 +315,17 @@ func (m *AVManager) stopObserver() {
 		m.observeWake = nil
 		m.mu.Unlock()
 	}
+}
+
+// callerEnded reports the caller's end. A probe bounded by the caller's
+// deadline can fail with an I/O timeout before the context timer marks the
+// context done; that failure is the caller's, not the backend's.
+func callerEnded(caller context.Context) error {
+	if err := caller.Err(); err != nil {
+		return err
+	}
+	if d, ok := caller.Deadline(); ok && !time.Now().Before(d) {
+		return context.DeadlineExceeded
+	}
+	return nil
 }
