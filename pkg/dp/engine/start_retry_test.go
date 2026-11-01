@@ -44,7 +44,7 @@ func fastRetry(t *testing.T, attempts int) {
 	t.Cleanup(func() { startRetryInitial, startRetryMax, startRetryAttempts = i, m, a })
 }
 
-func inlineEngine(t *testing.T, c captureRunner) *Engine {
+func inlineEngine(t *testing.T, c CaptureRunner) *Engine {
 	t.Helper()
 	e := engineWithCapture(t, c)
 	e.nfqueueGroup = 101

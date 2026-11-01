@@ -34,7 +34,9 @@ import (
 
 var startNFLog = capture.StartNFLog
 
-type captureRunner interface {
+// CaptureRunner is a capture consumer and its inline verdict settlement surface.
+// Stop must join the consumer and deliver all pending source completions.
+type CaptureRunner interface {
 	Start(context.Context, capture.Handler) error
 	Stop()
 	Interfaces() []string
@@ -48,9 +50,10 @@ type Engine struct {
 	managementReservation *mgmtpath.Reservation
 	engineAPI             *enforce.EngineAPIPath
 	captureConfig         capture.Config
+	captureFactory        func(capture.Config) (CaptureRunner, error)
 	protection            *protectionState
-	capture               captureRunner
-	runCapture            captureRunner
+	capture               CaptureRunner
+	runCapture            CaptureRunner
 	runCancel             context.CancelFunc
 	runDone               chan struct{}
 	ruleSnap              ruleSnapshots
@@ -152,6 +155,9 @@ type EnforceConfig struct {
 
 type Config struct {
 	Capture capture.Config
+	// NewCapture supplies capture consumers. Nil uses capture.NewManager.
+	// A replacement run uses the same factory with new, epoch-fenced callbacks.
+	NewCapture func(capture.Config) (CaptureRunner, error)
 	// Events is shared by every configuration of a live engine. Nil allocates
 	// a private 4096-event store for a standalone engine.
 	Events *events.Store
@@ -212,18 +218,11 @@ func New(cfg Config) (*Engine, error) {
 		cfg.Capture.Mode = "nfqueue"
 		cfg.Capture.QueueID = int(cfg.NFQueueGroup)
 	}
-	hooks := newInlineHooks(cfg.OnError)
-	cfg.Capture.OnVerdict = hooks.onVerdict
-	cfg.Capture.OnSource = hooks.onSource
-	capManager, err := capture.NewManager(cfg.Capture)
-	if err != nil {
-		return nil, err
-	}
 	e := &Engine{
 		managementReservation: cfg.Enforce.ManagementReservation,
 		engineAPI:             cfg.Enforce.EngineAPI,
-		capture:               capManager,
 		captureConfig:         cfg.Capture,
+		captureFactory:        cfg.NewCapture,
 		onError:               cfg.OnError,
 		inspectAll:            cfg.InspectAll,
 		dpiEnabled:            cfg.DPIEnabled,
@@ -237,7 +236,6 @@ func New(cfg Config) (*Engine, error) {
 		flows:                 make(map[flow.MapKey]*flow.State),
 		deniedTCPNow:          time.Now,
 		verdictCache:          NewVerdictCache(30*time.Second, 65536),
-		hooks:                 hooks,
 		clearMarks:            cfg.Enforce.ClearMark,
 		localIPv4:             discoverLocalIPv4,
 	}
@@ -246,7 +244,6 @@ func New(cfg Config) (*Engine, error) {
 	}
 	e.zones.changes = make(chan struct{}, 1)
 	e.SetICSParsing(cfg.DPIICSParsing)
-	capManager.SetPublicationFence(&e.policyMu)
 	e.inventory = inventory.New()
 	e.anomalyDetector = anomaly.New()
 	e.sigEngine = signatures.New()
@@ -258,7 +255,11 @@ func New(cfg Config) (*Engine, error) {
 	}
 	e.protection = newProtection(e.eventStore)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
-	e.initIEC(cfg, capManager)
+	e.initIEC(cfg)
+	if err := e.newRun(); err != nil {
+		e.Close()
+		return nil, err
+	}
 	e.gate = &envelopeGate{}
 	e.bindGate()
 	if cfg.Enforce.Enabled {
@@ -284,10 +285,11 @@ func New(cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	if e.transport != nil {
-		e.observation, err = newLiveObserver(cfg)
+		observation, err := newLiveObserver(cfg)
 		if err != nil {
 			return nil, err
 		}
+		e.observation = observation
 	}
 	return e, nil
 }
@@ -339,6 +341,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	e.observation = fresh.observation
 	e.capture = fresh.capture
 	e.captureConfig = fresh.captureConfig
+	e.captureFactory = fresh.captureFactory
 	if manager, ok := e.capture.(*capture.Manager); ok {
 		manager.SetPublicationFence(&e.policyMu)
 	}

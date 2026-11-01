@@ -199,19 +199,9 @@ func (e *Engine) RetryProtection(ctx context.Context) error {
 		e.policyMu.Lock()
 		defer e.policyMu.Unlock()
 		e.epoch.Add(1)
-		hooks := newInlineHooks(e.onError)
-		hooks.iec = e.iec
-		e.hooks = hooks
-		cfg := e.captureConfig
-		cfg.OnSource, cfg.OnVerdict = hooks.onSource, hooks.onVerdict
-		manager, err := capture.NewManager(cfg)
-		if err != nil {
+		if err := e.newRun(); err != nil {
 			return err
 		}
-		manager.SetPublicationFence(&e.policyMu)
-		e.capture = manager
-		e.iec.settler = manager.Settler
-		e.iec.jobs = hooks.blocks
 		e.bindGate()
 		e.bindProtection(false)
 	}
