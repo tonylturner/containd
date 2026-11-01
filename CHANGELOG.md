@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Document established-session re-evaluation after policy changes and why a
+  blocked connection can remain visible in Sessions until conntrack timeout.
 - Serialize telemetry event IDs as decimal JSON strings across API, UI, CLI,
   previews and syslog; audit record IDs remain numeric.
 - Forward engine and management syslog streams independently, retry failed
