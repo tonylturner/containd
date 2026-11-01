@@ -33,6 +33,8 @@ const (
 	icapRESPMOD   = "RESPMOD"
 )
 
+var errICAPOversized = errors.New("icap object size limit exceeded")
+
 // ICAPClient is a generic RFC 3507 client: OPTIONS probes, REQMOD for
 // uploads and RESPMOD for downloads. It sends no Preview, so the server
 // answers only once it holds the complete object, and it never accepts
@@ -139,43 +141,60 @@ func (c *ICAPClient) dial(ctx context.Context, srv config.ICAPServer, t icapTarg
 	return conn, stop, nil
 }
 
-// Probe sends OPTIONS and requires a 200 reply that, when it lists Methods,
-// includes every method in required (REQMOD, RESPMOD).
+type icapOptions struct {
+	methods string
+	ttl     time.Duration
+}
+
+// Probe sends OPTIONS and requires a 200 reply with the mandatory Methods
+// header, including every method in required (REQMOD, RESPMOD).
 func (c *ICAPClient) Probe(ctx context.Context, srv config.ICAPServer, required ...string) error {
+	options, err := c.options(ctx, srv)
+	if err != nil {
+		return err
+	}
+	for _, method := range required {
+		if !listsMethod(options.methods, method) {
+			return fmt.Errorf("icap service %q does not support %s (methods %q)", srv.Service, method, options.methods)
+		}
+	}
+	return nil
+}
+
+func (c *ICAPClient) options(ctx context.Context, srv config.ICAPServer) (icapOptions, error) {
 	if c == nil {
-		return errors.New("icap client nil")
+		return icapOptions{}, errors.New("icap client nil")
 	}
 	t, err := parseICAPTarget(srv)
 	if err != nil {
-		return err
+		return icapOptions{}, err
 	}
 	conn, stop, err := c.dial(ctx, srv, t, c.probeDeadline(ctx))
 	if err != nil {
-		return err
+		return icapOptions{}, err
 	}
 	defer stop()
 	defer conn.Close()
 	req := "OPTIONS " + t.uri() + " ICAP/1.0\r\nHost: " + t.addr + "\r\nEncapsulated: null-body=0\r\n\r\n"
 	if _, err := io.WriteString(conn, req); err != nil {
-		return err
+		return icapOptions{}, err
 	}
 	code, hdr, err := readICAPResponse(conn)
 	if err != nil {
-		return fmt.Errorf("icap options: %w", err)
+		return icapOptions{}, fmt.Errorf("icap options: %w", err)
 	}
 	if code != 200 {
-		return fmt.Errorf("icap options: unexpected status %d", code)
+		return icapOptions{}, fmt.Errorf("icap options: unexpected status %d", code)
 	}
-	methods := hdr.Get("Methods")
+	methods := strings.TrimSpace(hdr.Get("Methods"))
 	if methods == "" {
-		return nil
+		return icapOptions{}, fmt.Errorf("icap service %q: OPTIONS response missing or empty Methods header", t.service)
 	}
-	for _, m := range required {
-		if !listsMethod(methods, m) {
-			return fmt.Errorf("icap service %q does not support %s (methods %q)", t.service, m, methods)
-		}
+	ttl := avObserveInterval
+	if seconds, err := strconv.ParseUint(strings.TrimSpace(hdr.Get("Options-Ttl")), 10, 32); err == nil {
+		ttl = max(avObserveInterval, min(time.Duration(seconds)*time.Second, avOptionsTTLCap))
 	}
-	return nil
+	return icapOptions{methods: methods, ttl: ttl}, nil
 }
 
 func listsMethod(methods, want string) bool {
@@ -202,7 +221,7 @@ func (c *ICAPClient) Scan(ctx context.Context, srv config.ICAPServer, obj avscan
 	}
 	req, err := encapsulate(t, obj)
 	if err != nil {
-		return ICAPVerdict{}, err
+		return ICAPVerdict{}, fmt.Errorf("%w: %w", errObjectSource, err)
 	}
 	conn, stop, err := c.dial(ctx, srv, t, c.scanDeadline(ctx))
 	if err != nil {
@@ -218,7 +237,13 @@ func (c *ICAPClient) Scan(ctx context.Context, srv config.ICAPServer, obj avscan
 	code, hdr, rerr := readICAPResponse(conn)
 	var verdict ICAPVerdict
 	if rerr == nil {
+		if werr != nil {
+			werr = fmt.Errorf("%w: %w", errScanProtocol, werr)
+		}
 		verdict, rerr = icapVerdict(code, hdr)
+		if rerr != nil {
+			rerr = fmt.Errorf("%w: %w", errScanProtocol, rerr)
+		}
 	}
 	switch {
 	case rerr == nil && verdict.Verdict == "malware":
@@ -413,6 +438,8 @@ func icapVerdict(code int, hdr textproto.MIMEHeader) (ICAPVerdict, error) {
 	switch code {
 	case 204:
 		return ICAPVerdict{Verdict: "clean"}, nil
+	case 413:
+		return ICAPVerdict{}, errICAPOversized
 	case 200:
 		return ICAPVerdict{}, errors.New("server returned modified content without an infection header")
 	default:
