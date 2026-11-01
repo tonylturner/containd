@@ -68,7 +68,7 @@ func TestEvidenceQueueLossAndPendingBounds(t *testing.T) {
 	for range 3 {
 		lease.drop(nil, nil)
 	}
-	join := newEvidenceJoin(a.watch, ctx)
+	join := newEvidenceJoin(a.watch, newEvidenceWatchWriter(a.watch, ctx))
 	for i := range joinRecords + 1 {
 		join.entry(string(rune(i+1)), lease)
 	}

@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Isolate live learner intake from SQLite stalls with byte-bounded persistence
+  and group commits. Small decoded batches use the full intake byte budget
+  instead of overflowing a short count limit on busy hosts; Stop still drains
+  all accepted evidence before sealing, and real overflow retains its loss scope.
 - Keep decoded NFQUEUE default denials non-admitting across TCP
   retransmissions, including reserved Modbus FC5 coil values, without
   bypassing ordered kernel admission. The first scoped TCP non-admission

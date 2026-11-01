@@ -1008,9 +1008,15 @@ the durable `collection_loss` withheld reason. Connections
 fully outside localized loss remain eligible. Restart and policy-change loss
 exclude the dataset: store-clock lease bounds cannot safely delimit packet times.
 Loss localization is capped at 1,024 entries per dataset; exhaustion collapses to
-one dataset-wide loss. Live collection batches parent rows in bounded SQLite
-statements and uses a 256-batch queue with a 64 MiB decoded-copy budget to absorb
-flush bursts without blocking packet verdicts. Deletion or eviction invalidates
+one dataset-wide loss. Live collection normalizes and joins decoded events
+separately from SQLite persistence. The intake queue has a 64 MiB decoded-copy
+budget, charging at least 1 KiB per batch including queue/snapshot overhead;
+its count limit follows that byte budget. A separate 32 MiB serialized-write
+budget includes queued and in-progress groups. Group commits contain up to 128
+parents or just under 1 MiB, flushing partial groups every 100 ms. Database
+stalls do not stop intake until the write budget is exhausted, and packet
+verdicts never wait for evidence. Real admission overflow still records loss.
+Stop drains both stages before sealing the dataset. Deletion or eviction invalidates
 dependent proofs for new stage requests.
 Resolved staging snapshots and completed receipts count toward the storage
 budget and are purged when their retry window expires. Dataset review shows the
