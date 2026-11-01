@@ -128,6 +128,16 @@ test("certificate upload notices follow the upload status", () => {
   expect(certUploadNotice({ ok: false, error: "conflict" })).toEqual({ kind: "error", text: "conflict" });
 });
 
+test("reload failures preserve the served certificate readout", () => {
+  const info = { ...saved, ...bound, ...served, servedCertFile: saved.certFile, servedKeyFile: saved.keyFile };
+  const healthy = tlsView(info, iso);
+  const failed = tlsView({ ...info, reloadError: "tls: private key does not match public key" }, iso);
+  expect(failed.rows).toEqual(healthy.rows);
+  expect(failed.reloadError).toBe("Certificate reload failed. The listener still serves the last valid certificate. tls: private key does not match public key");
+  expect(healthy.reloadError).toBeUndefined();
+  expect(tlsView({ ...info, reloadError: "" }, iso).reloadError).toBeUndefined();
+});
+
 // Page tests.
 
 const user = { id: "admin-1", username: "containd", role: "admin", mfaRequired: false };
@@ -179,6 +189,45 @@ test("settings page marks saved files that differ from the served ones", async (
   await expect(card.getByText(/listen \(next start\)/)).toHaveCount(0);
 });
 
+for (const width of [1280, 390]) {
+  test(`reload failure is visible and clears after recovery at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const identity = {
+      ...saved, ...bound, ...served,
+      certFile: "/data/tls/server.pem", keyFile: "/data/tls/server.pem",
+      servedCertFile: "/data/tls/server.pem", servedKeyFile: "/data/tls/server.pem",
+    };
+    await mockAPI(page, { "/api/v1/system/tls": { json: identity } });
+    const card = await openSettings(page);
+    const notice = card.getByRole("alert", { name: "Certificate reload failed" });
+    await expect(card.getByText("CN=served")).toBeVisible();
+    await expect(notice).toHaveCount(0);
+
+    await page.route("**/api/v1/system/tls", (route) => route.fulfill({
+      json: { ...identity, reloadError: "read /data/tls/server.pem: tls: private key does not match public key" },
+    }));
+    await card.getByRole("button", { name: "Refresh" }).click();
+    await expect(notice).toContainText("The listener still serves the last valid certificate.");
+    await expect(notice).toContainText("read /data/tls/server.pem: tls: private key does not match public key");
+    await expect(notice).toHaveCSS("color", "rgb(254, 205, 211)");
+    await expect(notice).toHaveCSS("border-color", "oklab(0.645039 0.206618 0.0609754 / 0.3)");
+    await expect(card.getByText("CN=served")).toBeVisible();
+    await notice.scrollIntoViewIfNeeded();
+    const bounds = await notice.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    if (process.env.TLS_UI_SCREENSHOTS) {
+      await page.screenshot({ path: `${process.env.TLS_UI_SCREENSHOTS}/reload-failure-${width}.png`, fullPage: true });
+    }
+
+    await page.route("**/api/v1/system/tls", (route) => route.fulfill({ json: identity }));
+    await card.getByRole("button", { name: "Refresh" }).click();
+    await expect(notice).toHaveCount(0);
+    await expect(card.getByText("CN=served")).toBeVisible();
+  });
+}
+
 test("stored certificate upload is a warning, not an update", async ({ page }) => {
   const warning = "the HTTPS listener serves \"/data/tls/default.crt\"; the certificate is served from the next management start";
   await mockAPI(page, {
@@ -193,16 +242,26 @@ test("stored certificate upload is a warning, not an update", async ({ page }) =
   await expect(page.getByText(/Certificate updated/)).toHaveCount(0);
 });
 
-test("a certificate upload that would split the served pair shows the conflict", async ({ page }) => {
-  const conflict = "the HTTPS listener serves certificate \"/data/tls/server.crt\" with key \"/data/tls/default.key\"; writing certificate \"/data/tls/server.crt\" (source: system.mgmt.tlsCertFile) and key \"/data/tls/server.key\" (source: system.mgmt.tlsKeyFile) would pair a new file with a served one";
-  await mockAPI(page, {
-    "/api/v1/system/tls": { json: { ...saved, servedCertFile: "/data/tls/server.crt", servedKeyFile: "/data/tls/default.key" } },
-    "/api/v1/system/tls/cert": { status: 409, json: { error: conflict } },
+for (const width of [1280, 390]) {
+  test(`an external read-only upload shows the server's recovery instructions at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const conflict = "external TLS paths are read-only: certificate \"/etc/tls/server.crt\" (source: CONTAIND_TLS_CERT_FILE), key \"/etc/tls/server.key\" (source: CONTAIND_TLS_KEY_FILE); unset CONTAIND_TLS_CERT_FILE/CONTAIND_TLS_KEY_FILE and clear system.mgmt.tlsCertFile/tlsKeyFile or restore their default paths to use the managed bundle";
+    await mockAPI(page, {
+      "/api/v1/system/tls": { json: {
+        ...saved, ...bound, ...served,
+        certFile: "/etc/tls/server.crt", keyFile: "/etc/tls/server.key",
+        servedCertFile: "/etc/tls/server.crt", servedKeyFile: "/etc/tls/server.key",
+      } },
+      "/api/v1/system/tls/cert": { status: 409, json: { error: conflict } },
+    });
+    await uploadCert(page);
+    await expect(page.getByText(conflict)).toBeVisible();
+    await expect(page.getByText(/Certificate (updated|stored)/)).toHaveCount(0);
+    if (process.env.TLS_UI_SCREENSHOTS) {
+      await page.screenshot({ path: `${process.env.TLS_UI_SCREENSHOTS}/external-upload-conflict-${width}.png`, fullPage: true });
+    }
   });
-  await uploadCert(page);
-  await expect(page.getByText(conflict)).toBeVisible();
-  await expect(page.getByText(/Certificate (updated|stored)/)).toHaveCount(0);
-});
+}
 
 test("a rejected certificate shows the server's reason", async ({ page }) => {
   await mockAPI(page, {

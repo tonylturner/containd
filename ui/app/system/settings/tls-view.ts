@@ -9,7 +9,7 @@ export type TLSRow = { label: string; value: string };
  * certificate files differ. The API cleans file paths, so equal strings name
  * the same file.
  */
-export type TLSView = { rows: TLSRow[]; note?: string };
+export type TLSView = { rows: TLSRow[]; note?: string; reloadError?: string };
 
 const noListener = "no HTTPS listener bound";
 
@@ -73,7 +73,11 @@ export function tlsView(info: TLSInfo | null, formatTime = formatTLSTime): TLSVi
       { label: "Cert expires (next start)", value: formatTime(info.certNotAfter) },
     );
   }
-  return note ? { rows, note } : { rows };
+  const view: TLSView = note ? { rows, note } : { rows };
+  if (info.reloadError) {
+    view.reloadError = `Certificate reload failed. The listener still serves the last valid certificate. ${info.reloadError}`;
+  }
+  return view;
 }
 
 export type Notice = { kind: "error" | "warning" | "status"; text: string };
@@ -81,8 +85,7 @@ export type Notice = { kind: "error" | "warning" | "status"; text: string };
 /**
  * The page notice for a certificate upload. Status "stored" wrote the
  * files without the listener serving them yet; a refused upload, such as a
- * 409 for replacing only one of the served files, shows the server's
- * message.
+ * 409 for external read-only paths, shows the server's message.
  */
 export function certUploadNotice(res: ApiResult<TLSCertUpload>): Notice {
   if (!res.ok) return { kind: "error", text: res.error || "Failed to upload certificate." };
