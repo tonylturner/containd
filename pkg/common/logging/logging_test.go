@@ -165,3 +165,51 @@ func TestNewServiceSyslogFailureKeepsStdout(t *testing.T) {
 		t.Errorf("expected one syslog failure diagnostic: %s", diagnostic)
 	}
 }
+
+func TestNewServiceWithOptionsSyslogFailureKeepsFile(t *testing.T) {
+	t.Setenv("CONTAIND_LOG_FILE", "1")
+	logPath := filepath.Join(t.TempDir(), "service.log")
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldErr := os.Stderr
+	os.Stderr = stderr
+	t.Cleanup(func() {
+		os.Stderr = oldErr
+		_ = stderr.Close()
+	})
+
+	logger := NewServiceWithOptions("filesvc", "local3", Options{
+		FilePath:       logPath,
+		Level:          "error",
+		SyslogAddr:     "unused",
+		SyslogProtocol: "invalid-transport",
+	})
+	logger.Error("file survives syslog failure")
+	logger.Error("file still works")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"msg":"file survives syslog failure"`,
+		`"msg":"file still works"`,
+		`"service":"filesvc"`,
+		`"facility":"local3"`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("file missing %q: %s", want, data)
+		}
+	}
+	diagnostic, err := os.ReadFile(stderr.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(diagnostic), "\n") != 1 ||
+		!strings.Contains(string(diagnostic), "syslog") ||
+		!strings.Contains(string(diagnostic), "filesvc") ||
+		!strings.Contains(string(diagnostic), "invalid-transport") {
+		t.Errorf("expected one syslog failure diagnostic: %s", diagnostic)
+	}
+}
