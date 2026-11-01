@@ -1,19 +1,45 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package mgmttls resolves the management listener's certificate and key paths.
+// Package mgmttls publishes and loads management TLS identities atomically.
 package mgmttls
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 const (
-	DefaultCertFile = "/data/tls/server.crt"
-	DefaultKeyFile  = "/data/tls/server.key"
+	DefaultDataDir    = "/data"
+	bundleRelative    = "tls/server.pem"
+	DefaultCertFile   = DefaultDataDir + "/tls/server.crt"
+	DefaultKeyFile    = DefaultDataDir + "/tls/server.key"
+	DefaultBundleFile = DefaultDataDir + "/" + bundleRelative
 )
+
+// Managed reports whether both resolved paths select containd's default identity.
+func Managed(cfg *config.Config) bool {
+	cert, key := ResolveFiles(cfg)
+	return filepath.Clean(cert) == DefaultCertFile && filepath.Clean(key) == DefaultKeyFile
+}
+
+// IdentityFiles selects the single managed bundle or the read-only external files.
+func IdentityFiles(cfg *config.Config) (string, string) {
+	return IdentityFilesIn(cfg, DefaultDataDir)
+}
+
+// IdentityFilesIn resolves the listener and upload paths with a supplied
+// appliance data root. Only the managed bundle is rebased; external paths
+// always retain their resolved locations.
+func IdentityFilesIn(cfg *config.Config, dataDir string) (string, string) {
+	if Managed(cfg) {
+		bundle := filepath.Join(dataDir, bundleRelative)
+		return bundle, bundle
+	}
+	return ResolveFiles(cfg)
+}
 
 // ResolvedFile identifies a listener file and the setting that selected it.
 type ResolvedFile struct {

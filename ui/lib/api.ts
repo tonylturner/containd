@@ -439,6 +439,9 @@ export type MFAEnrollResponse = {
 };
 
 export type TLSInfo = {
+  /** Whether the next-start configuration permits managed identity uploads;
+   * not the bound listener's mode. */
+  managed: boolean;
   /** Listeners management binds at the next start. */
   httpListenAddr?: string;
   httpsListenAddr?: string;
@@ -469,6 +472,8 @@ export type TLSInfo = {
   servedCertNotAfter?: string;
   servedCertDnsNames?: string[];
   servedCertIps?: string[];
+  /** Latest identity reload failure; the listener retains its last valid certificate. */
+  reloadError?: string;
 };
 
 /** Result of a management certificate upload: status "updated" when the

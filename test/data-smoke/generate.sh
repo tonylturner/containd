@@ -17,17 +17,23 @@ else
   echo "ssh/host_key already exists, skipping"
 fi
 
-# --- TLS certificate + key ---
+# --- Management TLS bundle (offline only; stop the smoke stack first) ---
+# Never rewrite the legacy server.crt/server.key files retained for downgrade.
 mkdir -p "$DIR/tls"
-if [ ! -f "$DIR/tls/server.key" ] || [ ! -f "$DIR/tls/server.crt" ]; then
-  openssl ecparam -genkey -name prime256v1 -noout -out "$DIR/tls/server.key" 2>/dev/null
-  openssl req -new -x509 -key "$DIR/tls/server.key" \
-    -out "$DIR/tls/server.crt" \
-    -days 365 -subj "/CN=containd" \
-    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
-  echo "Generated tls/server.{key,crt}"
+if [ ! -f "$DIR/tls/server.pem" ]; then
+  (
+    umask 077
+    key="$(openssl ecparam -genkey -name prime256v1 -noout 2>/dev/null)"
+    cert="$(printf '%s\n' "$key" | openssl req -new -x509 -key /dev/stdin \
+      -days 365 -subj "/CN=containd" \
+      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null)"
+    bundle="$(mktemp "$DIR/tls/.server.XXXXXX")"
+    printf '%s\n%s\n' "$cert" "$key" > "$bundle"
+    mv "$bundle" "$DIR/tls/server.pem"
+  )
+  echo "Generated tls/server.pem"
 else
-  echo "tls/server.{key,crt} already exist, skipping"
+  echo "tls/server.pem already exists, skipping"
 fi
 
 # --- Directories the app expects ---
