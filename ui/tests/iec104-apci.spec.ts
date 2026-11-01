@@ -13,7 +13,7 @@ const types = {
 
 function event(anomalyType: string): TelemetryEvent {
   return {
-    id: 1, flowId: "iec-flow", proto: "ids", kind: "anomaly",
+    id: "1", flowId: "iec-flow", proto: "ids", kind: "anomaly",
     timestamp: "2026-10-26T12:00:00Z",
     srcIp: "10.0.0.1", dstIp: "10.0.0.2", srcPort: 40000, dstPort: 2404, transport: "tcp",
     attributes: {

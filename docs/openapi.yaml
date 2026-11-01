@@ -187,9 +187,51 @@ components:
         error: {type: string, description: Human-readable error message}
         detail: {type: string, description: Optional additional context}
 
+    EvidenceState:
+      type: string
+      enum: [ok, degraded, recovered, unknown]
+      description: Current failure is degraded; recovered retains historical failure or loss; unknown cannot certify completeness.
+
+    EvidenceStatus:
+      type: object
+      required: [audit, forwarding]
+      properties:
+        audit:
+          type: object
+          description: Local persistence since process start, independent of syslog delivery. Failure does not block operations.
+          required: [state, failures]
+          properties:
+            state: {$ref: '#/components/schemas/EvidenceState'}
+            failures: {type: integer, minimum: 0}
+            lastFailureAt: {type: string, format: date-time}
+            lastSuccessAt: {type: string, format: date-time}
+            lastError: {type: string, description: Sanitized error without record details or secrets}
+        forwarding:
+          type: array
+          description: Independent destination/source progress; empty when no forwarding streams are reported.
+          items:
+            type: object
+            required: [destination, source, state, backlog, lost]
+            properties:
+              destination: {type: string, description: 'proto://host:port'}
+              source: {type: string, enum: [engine, services, audit]}
+              state: {$ref: '#/components/schemas/EvidenceState'}
+              sentThrough: {type: string, pattern: '^[0-9]+$', description: Opaque source offset as an exact decimal string}
+              backlog: {type: integer, minimum: 0, description: Retained records awaiting delivery}
+              lost: {type: integer, minimum: 0, description: Known retention or serialization loss; not an estimate of unknown continuity gaps}
+              lastError: {type: string, description: Sanitized current error}
+              lastSuccessAt: {type: string, format: date-time}
+
     HealthResponse:
       type: object
       properties:
+        evidence:
+          type: object
+          required: [state]
+          additionalProperties: false
+          description: Worst evidence state (degraded > unknown > recovered > ok); no errors or destinations.
+          properties:
+            state: {$ref: '#/components/schemas/EvidenceState'}
         status: {type: string, example: ok}
         component: {type: string, example: mgmt}
         build: {type: string}
@@ -382,7 +424,7 @@ components:
     Event:
       type: object
       properties:
-        id: {type: integer, format: uint64}
+        id: {type: string, pattern: '^[0-9]+$', example: '9223372036854775809', description: Exact decimal uint64 event identity}
         flowId: {type: string}
         transportConnectionId:
           type: string
@@ -3591,6 +3633,18 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /evidence/status:
+    get:
+      summary: Read audit persistence and syslog delivery status
+      description: Authenticated readers including view-role users. Local audit failure does not block operations. Counters describe observed history, not guaranteed collector receipt.
+      tags: [Telemetry]
+      responses:
+        "200":
+          description: Evidence state with sanitized details; unavailable audit observation is unknown, never healthy.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidenceStatus'}
+
   # ── Health (unauthenticated) ──────────────────────────────────────
   /health:
     get:
@@ -3601,7 +3655,8 @@ paths:
         from IEC104 queue/reset readiness; both share one one-second observation
         budget with running metadata and fault reads. `ipv4Forwarding` reports the
         forwarding sysctl state observed in the engine's network namespace,
-        or `unknown` if that state cannot be read.
+        or `unknown` if that state cannot be read. `evidence` exposes only the
+        worst audit/forwarding state, without destinations or errors.
       security: []
       tags: [System]
       responses:
@@ -4602,7 +4657,8 @@ paths:
         With no filters (only limit), returns the legacy bare array: DENYs
         and IEC incident outcomes take slots before ordinary telemetry, then
         the selected page is sorted newest-first by timestamp and ID. An engine
-        telemetry error always reserves a slot. IDs and flow rollups are unchanged.
+        telemetry error always reserves a slot. Event IDs are exact decimal JSON
+        strings (including detail and preview samples); audit IDs remain numeric.
 
         Passing any filter, since/cursor, or query=1 returns EventPage instead.
         Filters apply before limit, across retained general/incident/DENY rows
@@ -4632,7 +4688,7 @@ paths:
       - name: id
         in: query
         description: Exact event ID; event-detail lookup uses this before limiting.
-        schema: {type: integer, format: uint64, minimum: 1}
+        schema: {type: string, pattern: '^[1-9][0-9]*$'}
       - name: session
         in: query
         description: Exact attributes.session_id (IEC incarnation).
@@ -7111,7 +7167,7 @@ paths:
       - name: id
         in: path
         required: true
-        schema: {type: integer, minimum: 1}
+        schema: {type: string, pattern: '^[1-9][0-9]*$'}
   /dhcp/leases:
     get:
       summary: List live DHCP leases
@@ -8071,6 +8127,11 @@ paths:
         syslog.audit reports audit-record forwarding: enabled, sent_total,
         failed_total, last_error, last_flush, backlog, and forwarders, a list
         of {forwarder, last_id, backlog, last_error, last_sent}.
+        syslog.events reports independent engine/service telemetry streams:
+        destination, source, epoch, decimal-string offset, backlog, sent, failed,
+        lost, continuity_unknown, last_error and last_success. Sent is local
+        transport acceptance, not collector acknowledgment. Known loss and
+        unknown continuity are distinct; new destinations start at tail.
       responses:
         '200':
           description: Success

@@ -32,7 +32,7 @@ const session = "0123456789abcdef0123456789abcdef-1f";
 
 const evidenceEvents = [
   {
-    id: 3,
+    id: "3",
     flowId: "flow-a",
     proto: "iec104",
     kind: "ics.session",
@@ -45,7 +45,7 @@ const evidenceEvents = [
     transport: "tcp",
   },
   {
-    id: 2,
+    id: "2",
     flowId: "flow-a",
     proto: "iec104",
     kind: "ics.verdict",
@@ -63,7 +63,7 @@ const evidenceEvents = [
     transport: "tcp",
   },
   {
-    id: 1,
+    id: "1",
     flowId: "flow-a",
     proto: "iec104",
     kind: "ics.decision",

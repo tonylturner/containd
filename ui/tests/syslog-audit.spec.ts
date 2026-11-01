@@ -9,6 +9,12 @@ const meter = { sparkline: [], count: 0, rate_per_min: 0, errors_sparkline: [], 
 const syslog = {
   ...meter, configured_forwarders: 2, format: "rfc5424", protos: ["udp", "tcp"], sent_total: 40, failed_total: 0,
   last_flush: "2026-10-26T08:00:00Z", last_error: "", last_batch: 4, batch_limit: 500, hit_limit: false, flush_interval_sec: 2,
+  events: [
+    { destination: "tcp://192.0.2.11:6514", source: "engine", epoch: "run-1", offset: "9223372036854775809",
+      backlog: 13, sent: 21, failed: 3, lost: 7, continuity_unknown: 2, last_error: "source offline", last_success: "" },
+    { destination: "udp://192.0.2.10:514", source: "services", epoch: "run-2", offset: "4",
+      backlog: 0, sent: 4, failed: 0, lost: 0, continuity_unknown: 0, last_error: "", last_success: "" },
+  ],
 };
 
 async function open(page: Page, audit: unknown) {
@@ -65,4 +71,29 @@ test("a status without audit forwarding shows no audit panel", async ({ page }) 
   await open(page, undefined);
   await expect(page.getByText("Sent: 40")).toBeVisible();
   await expect(page.getByRole("region", { name: "Audit forwarding" })).toHaveCount(0);
+});
+
+test("telemetry source loss and continuity are independent of audit forwarding and preserve drafts", async ({ page }) => {
+  await page.clock.install();
+  await open(page, { enabled: false, sent_total: 0, failed_total: 0, last_error: "", last_flush: "", backlog: 0, forwarders: [] });
+  const panel = page.getByRole("region", { name: "Telemetry forwarding" });
+  const engine = panel.getByRole("row").filter({ hasText: "tcp://192.0.2.11:6514" });
+  await expect(engine).toContainText("engine");
+  for (const [index, value] of [[1, "13"], [2, "21"], [3, "3"], [4, "7"], [5, "2"]] as const) {
+    await expect(engine.getByRole("cell").nth(index)).toHaveText(value);
+  }
+  await expect(engine).toContainText("9223372036854775809");
+  await expect(engine).toContainText("source offline");
+  await expect(engine.getByRole("cell").nth(4)).toHaveClass(/text-rose-300/);
+  await expect(panel).toContainText("additional loss is unknown");
+  const services = panel.getByRole("row").filter({ hasText: "udp://192.0.2.10:514" });
+  await expect(services).toContainText("services");
+  await expect(services.getByRole("cell").nth(4)).toHaveText("0");
+  const batch = page.locator('input[max="5000"]');
+  await batch.fill("123");
+  await page.getByLabel("Auto", { exact: true }).check();
+  const refreshed = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/syslog");
+  await page.clock.fastForward(15_000);
+  await refreshed;
+  await expect(batch).toHaveValue("123");
 });

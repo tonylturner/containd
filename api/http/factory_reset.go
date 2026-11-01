@@ -104,10 +104,13 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 		// Wipe audit log (after the reset) and then write a completion record.
 		if storeVal, ok := c.Get("auditStore"); ok && storeVal != nil {
 			if a, ok := storeVal.(audit.Store); ok && a != nil {
-				if sqlite, ok := a.(*audit.SQLiteStore); ok {
-					if err := sqlite.WipeAll(ctx); err != nil {
-						warnings = append(warnings, fmt.Sprintf("audit reset: %v", err))
-					}
+				wiper, ok := a.(interface {
+					WipeAll(context.Context) error
+				})
+				if !ok {
+					warnings = append(warnings, "audit reset: store does not support wiping")
+				} else if err := wiper.WipeAll(ctx); err != nil {
+					warnings = append(warnings, fmt.Sprintf("audit reset: %v", err))
 				}
 			}
 		}

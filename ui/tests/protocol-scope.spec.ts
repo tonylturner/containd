@@ -243,7 +243,7 @@ test("templates use only the four supported protocol names", async ({ page }) =>
 test("legacy alert attributes keep generic raw rendering instead of retired detail blocks", async ({ page }) => {
   await mockAPI(page, {
     events: [{
-      id: 1,
+      id: "1",
       flowId: "old-flow",
       proto: "ids",
       kind: "alert",

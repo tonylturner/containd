@@ -49,6 +49,34 @@ list (learner pages use `{items: [], nextCursor?}`); a reachable stopped simulat
 returns `200` with `running: false`.
 Retry unavailable requests rather than interpreting them as empty or stopped.
 
+## Evidence Status
+
+`GET /api/v1/evidence/status` is authenticated, including for view-role readers.
+It returns `audit` (local persistence state, failed-write count since process
+start, optional failure/success times and sanitized error) and `forwarding`
+(per-destination/source state, decimal-string `sentThrough`, retained `backlog`,
+known `lost`, optional error and success time). No collectors is a valid empty
+forwarding list, not a reason to omit audit persistence. `GET /audit` stays a bare
+array of records with numeric audit IDs.
+
+States are `ok`, `degraded`, `recovered` (history retained), or `unknown` (cannot
+verify). Unauthenticated `GET /health` exposes only `evidence: {state}`, taking
+the worst of audit and forwarding (degraded > unknown > recovered > ok), without
+errors or destinations. HTTP 200 remains liveness. Audit write failure does not
+block an operation. UI banners and `show audit --status` expose this independently
+of visiting Syslog or configuring collectors.
+
+`GET /services/status` includes independent `syslog.events` progress for every
+telemetry destination/source: backlog, sent, failed, lost and continuity gaps,
+with source epoch and exact decimal-string offset. `syslog.audit` remains the
+separate durable audit forwarding view. See [Logging and Evidence](logging-evidence.md)
+for retry, restart, new-destination and loss semantics.
+
+Telemetry event `id` fields are decimal JSON strings end to end, including
+`GET /events`, `GET /events/{id}`, query pages, preview samples and syslog JSON.
+Send the same exact decimal string in detail paths or the `id` query parameter;
+never round it through a JavaScript number. Audit record IDs remain numeric.
+
 ## Staged Configuration
 
 All persisted configuration edits stage into one shared candidate, including

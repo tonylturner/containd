@@ -34,7 +34,7 @@ var engineUnreachable = dpengine.IEC104Enforcement{Active: false, Healthy: false
 // healthHandler is unauthenticated liveness and always returns 200.
 // IEC104 queue/reset health remains separate from general ruleset state, and
 // semantic ICS rule coverage (icsEnforcement) from the nft-level state.
-func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
+func healthHandler(store config.Store, engine EngineClient, evidenceProviders ...any) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// One budget for all observations, not a fresh timeout per dependency.
 		ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
@@ -86,6 +86,7 @@ func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":             "ok",
+			"evidence":           gin.H{"state": evidenceHealth(readEvidence(evidenceProviders...))},
 			"component":          "mgmt",
 			"build":              config.BuildVersion,
 			"time":               time.Now().UTC().Format(time.RFC3339Nano),

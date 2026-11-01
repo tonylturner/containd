@@ -8,6 +8,8 @@ import "sort"
 const denyCapacity = 1024
 
 func (s *Store) appendEvent(ev Event) {
+	s.feedTail++
+	s.feed.push(ev)
 	if isDeny(ev) {
 		if _, overflow := s.denies.push(ev); overflow {
 			s.historyTruncated = true

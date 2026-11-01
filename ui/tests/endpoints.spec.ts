@@ -46,15 +46,15 @@ async function open(page: Page, url: string, dataPath: string) {
 
 const events = [
   {
-    id: 1, flowId: "icmp-flow", proto: "firewall", kind: "firewall.rule.hit", timestamp: "2026-10-26T08:00:00Z",
+    id: "1", flowId: "icmp-flow", proto: "firewall", kind: "firewall.rule.hit", timestamp: "2026-10-26T08:00:00Z",
     srcIp: "192.0.2.10", dstIp: "192.0.2.20", transport: "icmp", attributes: { action: "DENY" },
   },
   {
-    id: 2, flowId: "icmpv6-flow", proto: "firewall", kind: "firewall.rule.hit", timestamp: "2026-10-26T08:00:01Z",
+    id: "2", flowId: "icmpv6-flow", proto: "firewall", kind: "firewall.rule.hit", timestamp: "2026-10-26T08:00:01Z",
     srcIp: "2001:db8::10", dstIp: "2001:db8::20", transport: "icmpv6", attributes: { action: "DENY" },
   },
   {
-    id: 3, flowId: "tcp6-flow", proto: "firewall", kind: "firewall.rule.hit", timestamp: "2026-10-26T08:00:02Z",
+    id: "3", flowId: "tcp6-flow", proto: "firewall", kind: "firewall.rule.hit", timestamp: "2026-10-26T08:00:02Z",
     srcIp: "2001:db8::10", srcPort: 51000, dstIp: "2001:db8::20", dstPort: 2404, transport: "tcp", attributes: { action: "ALLOW" },
   },
 ];

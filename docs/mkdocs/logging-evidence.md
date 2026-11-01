@@ -22,9 +22,10 @@ levels. CLI queries include `show audit` and `show events`; see
 
 ## Account and credential audit records
 
-Every account and credential change writes an audit record with its actor and
-source (`api` or `ssh`). Refused logins, own password changes with a wrong
-current password and refused MFA changes are recorded with result `denied`.
+Account and credential changes attempt to persist an audit record with their actor
+and source (`api` or `ssh`). Audit persistence failure does not block the operation;
+check the persistence status below for missing evidence. Refused logins, own
+password changes with a wrong current password and refused MFA changes are recorded with result `denied`.
 Records never hold the password or code that was tried.
 
 | Action | Change |
@@ -54,9 +55,10 @@ Two working syslog paths are distinct:
 - **Service syslog forwarder**: `services.syslog.forwarders` sends polled engine
   and service telemetry over UDP or TCP. `services.syslog.format` selects JSON or
   RFC5424 output. Retries/backoff and status counters expose failures; event
-  forwarding is best-effort, not a durable acknowledged stream. Bounded polling,
-  mixed event-source IDs, and failures can leave gaps. The same forwarders also
-  carry audit records; see [Audit records over syslog](#audit-records-over-syslog).
+  forwarding is best effort with retries, not a durable acknowledged stream.
+  Each source (engine, services, audit) has independent progress per destination;
+  one failed collector does not suppress another collector or source. The same
+  forwarders also carry audit records; see [Audit records over syslog](#audit-records-over-syslog).
 - **Application logger sink**: `CONTAIND_LOG_SYSLOG_ADDR` and
   `CONTAIND_LOG_SYSLOG_PROTO` add a remote sink to shared structured loggers.
   The default protocol is UDP; TCP and Unix sockets are also supported. These
@@ -81,23 +83,79 @@ in the configured format:
 - Each forwarder keeps a cursor, the last audit ID it delivered, in the audit
   database. A forwarder is identified by protocol, address and port. Failed
   delivery keeps the cursor and the next flush retries, so records sent during
-  a collector outage or before a restart are delivered later. A batch holds at
+  a collector outage or before a restart are retried later. A batch holds at
   most `services.syslog.batchSize` records per forwarder and flush.
-- Delivery is at least once: after a crash a collector can receive a record
-  twice. Use `id` to deduplicate; IDs keep increasing, also across a factory
+- Forwarding attempts are at least once: after a crash a collector can receive
+  a record twice. Use `id` to deduplicate; IDs keep increasing, also across a factory
   reset. TCP delivery means the local TCP stack accepted the message; UDP has
   no delivery signal.
 - A newly configured forwarder starts after the newest record and does not
   replay history. Removing a forwarder deletes its cursor. A factory reset
   wipes the records and rewinds the cursors, so records written afterwards are
-  forwarded.
+  forwarded. Changing format alone retains progress.
 
 `GET /api/v1/services/status` reports `syslog.audit`: `enabled`, `sent_total`,
 `failed_total`, `last_error`, `last_flush`, total `backlog`, and per forwarder
 `forwarder`, `last_id`, `backlog` (records not yet delivered), `last_error`
 and `last_sent`. A growing backlog or a set `last_error` means the collector is
-not receiving audit records. The CLI command `show syslog status` prints the
+not accepting audit records locally. The CLI command `show syslog status` prints the
 same fields.
+
+### Telemetry retries and visible loss
+
+New destinations start at each source's current tail: **no backfill**. Retained
+telemetry is retried after transport failures. If a record leaves the bounded
+source feed before delivery, it counts as `lost`; serialization drops also count.
+The forwarding feed is append-ordered, separate from the priority incident banks
+used for event browsing. Keeping an incident in the UI does not guarantee it
+remains in the forwarding feed.
+
+Engine and service telemetry progress is in memory. Management restart starts
+fresh telemetry tails, not a durable replay. A source epoch change resumes from
+its earliest retained records and records a continuity gap. Known pending losses
+are counted, but activity across unobserved downtime cannot be counted exactly.
+Do not interpret `lost: 0` as proof of uninterrupted history.
+
+`GET /api/v1/services/status` reports `syslog.events`, one row per destination and
+engine/service source: `backlog`, `sent`, `failed`, `lost`, `continuity_unknown`,
+`epoch`, decimal-string `offset`, `last_error` and `last_success`. Syslog in the UI
+and `show syslog status` display these counters. Failed attempts and loss remain
+visible after delivery recovers. Audit forwarding has its separate durable
+cursor and backlog, not a bounded telemetry-loss counter.
+
+Telemetry event IDs are exact decimal **JSON strings**, including event lists,
+detail, preview samples and syslog JSON. Preserve them as strings in consumers:
+`"9223372036854775809"` and `"9223372036854775810"` are distinct IDs. Audit record
+IDs remain numeric. RFC 5424 telemetry includes ID, source, epoch and offset in
+escaped structured data. Local transport acceptance does not prove collector
+receipt, including over TCP; verify reception off-box.
+
+## Audit persistence and evidence health
+
+`GET /api/v1/evidence/status` is available to authenticated readers, even with no
+syslog collectors. `audit` reports local SQLite persistence: `state`, `failures`
+since process start, optional `lastFailureAt`, `lastSuccessAt` and sanitized
+`lastError`. `forwarding` reports per-destination/source state, decimal-string
+`sentThrough`, retained `backlog`, known `lost`, and optional last error/success.
+This is separate from the learner-evidence dataset API.
+
+- `ok`: the observed path works, without recorded failure or loss.
+- `degraded`: the most recent attempt failed.
+- `recovered`: it works again after a failure or known loss; history still needs
+  review. Recovery does not recreate missing records.
+- `unknown`: observation is unavailable; completeness cannot be certified.
+
+Unauthenticated `GET /api/v1/health` adds only `evidence: {state}` (no errors or
+destinations), taking the worst state: degraded, unknown, recovered, then ok.
+HTTP 200 remains liveness, not evidence completeness. The shell banner points to
+Audit persistence and Syslog delivery when attention is needed. The Audit page
+shows persistence separately from its records; an empty table is not proof that
+no administrative actions occurred. `show audit --status` exposes persistence
+and forwarding state in the CLI; `show audit` retains the bare record view.
+
+Operations continue if an audit write fails. Neither a successful operation nor
+recovered persistence certifies that its audit record was stored. Monitor the
+status and preserve the database; there is no audit fail-closed mode.
 
 ## Retention checklist
 

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,19 +45,7 @@ func TestSyslogManagerConcurrentFlushAndStatus(t *testing.T) {
 	mgr := NewSyslogManager()
 	mgr.log = zap.NewNop().Sugar()
 
-	var nextID atomic.Uint64
-	mgr.SetEventLister(func(limit int) []dpevents.Event {
-		id := nextID.Add(1)
-		return []dpevents.Event{{
-			ID:        id,
-			Proto:     "modbus",
-			Kind:      "service.modbus.read",
-			Timestamp: time.Now().UTC(),
-			Attributes: map[string]any{
-				"count": 1,
-			},
-		}}
-	})
+	store := dpevents.NewStore(128)
 	mgr.mu.Lock()
 	mgr.config = config.SyslogConfig{
 		Forwarders: []config.SyslogForwarder{{
@@ -72,6 +59,8 @@ func TestSyslogManagerConcurrentFlushAndStatus(t *testing.T) {
 	mgr.batchSize = 8
 	mgr.flushEvery = 5 * time.Millisecond
 	mgr.mu.Unlock()
+	mgr.SetEventFeeds(testEventFeeds(store))
+	defer mgr.Stop()
 
 	testCtx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
@@ -81,6 +70,7 @@ func TestSyslogManagerConcurrentFlushAndStatus(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for testCtx.Err() == nil {
+			store.Append(dpevents.Event{Proto: "modbus", Kind: "service.modbus.read", Timestamp: time.Now()})
 			mgr.flushEvents(testCtx)
 		}
 	}()

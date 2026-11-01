@@ -266,7 +266,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		connCtx = users.WithActingSession(connCtx, sessionID)
 	}
 	if s.opts.AuditStore != nil {
-		_ = s.opts.AuditStore.Add(connCtx, audit.Record{
+		s.audit(username, audit.Record{
 			Actor:  username,
 			Source: "ssh",
 			Action: "ssh.login",
@@ -302,7 +302,7 @@ func (s *Server) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		_ = s.opts.UserStore.RevokeSession(context.Background(), sessionID)
 	}
 	if s.opts.AuditStore != nil {
-		_ = s.opts.AuditStore.Add(context.Background(), audit.Record{
+		s.audit(username, audit.Record{
 			Actor:  username,
 			Source: "ssh",
 			Action: "ssh.logout",
@@ -392,7 +392,7 @@ func (s *Server) handleSession(ctx context.Context, username, remote string, reg
 					rec.Result = "failure"
 					rec.Detail = err.Error()
 				}
-				_ = s.opts.AuditStore.Add(ctx, rec)
+				s.audit(username, rec)
 			}
 			if buf.Len() > 0 {
 				writeTTY(ch, buf.String())
@@ -478,7 +478,7 @@ func (s *Server) repl(ctx context.Context, username, remote string, reg *cli.Reg
 				rec.Result = "failure"
 				rec.Detail = err.Error()
 			}
-			_ = s.opts.AuditStore.Add(ctx, rec)
+			s.audit(username, rec)
 		}
 		if buf.Len() > 0 {
 			writeTTY(rw, buf.String())

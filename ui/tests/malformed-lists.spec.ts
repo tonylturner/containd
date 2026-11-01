@@ -120,7 +120,7 @@ async function openHealthy(page: Page, path: string, endpoint: string) {
 
 const committed = (page: Page) => page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:committed")));
 
-const alert = { id: 7, flowId: "f-7", proto: "ids", kind: "alert", timestamp: "2026-10-26T08:00:00Z", attributes: { severity: "high", message: "healthy alert marker" } };
+const alert = { id: "7", flowId: "f-7", proto: "ids", kind: "alert", timestamp: "2026-10-26T08:00:00Z", attributes: { severity: "high", message: "healthy alert marker" } };
 const flow = {
   flowId: "flow-healthy-0001", firstSeen: "2026-10-26T08:00:00Z", lastSeen: "2026-10-26T08:05:00Z",
   srcIp: "10.10.0.22", srcPort: 40110, dstIp: "10.20.0.5", dstPort: 502, transport: "tcp", application: "modbus", eventCount: 3,

@@ -51,11 +51,5 @@ func reloadRunningConfig(ctx context.Context, logger *zap.SugaredLogger, store c
 		}
 		logger.Infow("SIGHUP running configuration reapplied; environment and flags require restart", "warnings", warnings)
 	}
-	if audits != nil {
-		auditCtx, auditCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-		defer auditCancel()
-		if err := audits.Add(auditCtx, record); err != nil {
-			logger.Errorw("failed to audit SIGHUP reload", "error", err)
-		}
-	}
+	audit.Write(ctx, audits, record)
 }

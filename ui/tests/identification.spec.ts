@@ -25,8 +25,8 @@ async function mockAPI(page: Page) {
       ? { id: "admin", username: "containd", role: "admin" }
       : path === "/api/v1/flows" ? [flow, { ...flow, flowId: "port-control", identification: undefined, application: "dnp3" }]
       : path === "/api/v1/events" ? { events: [
-          { id: 1, flowId: flow.flowId, proto: "identify", kind: "identification", timestamp: flow.firstSeen, attributes: identification },
-          { id: 2, flowId: flow.flowId, proto: "modbus", kind: "request", timestamp: flow.lastSeen, attributes: { observation_only: true, binding_source: "observation", function_code: 3 } },
+          { id: "1", flowId: flow.flowId, proto: "identify", kind: "identification", timestamp: flow.firstSeen, attributes: identification },
+          { id: "2", flowId: flow.flowId, proto: "modbus", kind: "request", timestamp: flow.lastSeen, attributes: { observation_only: true, binding_source: "observation", function_code: 3 } },
         ], historyTruncated: false }
       : path === "/api/v1/pcap/list" ? [{ name: "alternate.pcap", sizeBytes: 400, createdAt: flow.firstSeen }]
       : path === "/api/v1/pcap/analyze/alternate.pcap" ? {

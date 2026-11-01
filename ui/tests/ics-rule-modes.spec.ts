@@ -41,7 +41,7 @@ test("shadow counter normalization preserves zero and never fabricates availabil
 test("generic and IEC shadow evidence never claims delivery; would-allow is not an alert", () => {
   for (const proto of ["modbus", "iec104", "dnp3", "cip"]) {
     for (const decision of ["would_allow", "would_drop"]) {
-      const evidence = describeICSEvidence({ id: 1, flowId: "flow-1", timestamp: since, kind: "ics.decision", proto,
+      const evidence = describeICSEvidence({ id: "1", flowId: "flow-1", timestamp: since, kind: "ics.decision", proto,
         attributes: { decision, mode: "monitor", ruleId: "trial", action: "ALLOW", reason: "rule" } });
       expect(evidence?.headline).toContain("monitor");
       expect(evidence?.badge).toBe(decision === "would_allow" ? "would allow" : "would drop");
@@ -52,7 +52,7 @@ test("generic and IEC shadow evidence never claims delivery; would-allow is not 
 });
 
 test("strict scope evidence does not attribute the drop to a monitor rule", () => {
-  const evidence = describeICSEvidence({ id: 1, flowId: "flow-1", timestamp: since, proto: "iec104", kind: "ics.decision",
+  const evidence = describeICSEvidence({ id: "1", flowId: "flow-1", timestamp: since, proto: "iec104", kind: "ics.decision",
     attributes: { decision: "deny", reason: "nonconformant", scopeId: "scope-1", findingCode: "iec104.role", mode: "enforce" } });
   expect(evidence?.rows).toContainEqual({ label: "Scope", value: "scope-1" });
   expect(evidence?.rows).toContainEqual({ label: "Finding", value: "iec104.role" });
