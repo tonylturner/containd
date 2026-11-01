@@ -71,6 +71,21 @@ func TestMFALoginRefusesReusedCode(t *testing.T) {
 	requireAuditDetail(t, f, "auth.mfa.disable", "totp code reused")
 }
 
+func TestMFALoginRefusesEnrollmentCode(t *testing.T) {
+	f := newAccountFixture(t)
+	token, _ := f.session(t, f.adminID)
+	var enrollment mfaEnrollResponse
+	if err := json.Unmarshal(f.mustDo(t, http.MethodPost, "/api/v1/auth/me/mfa/enroll", token, map[string]string{}), &enrollment); err != nil {
+		t.Fatal(err)
+	}
+	code := fixtureCode(t, enrollment.Secret)
+	f.mustDo(t, http.MethodPost, "/api/v1/auth/me/mfa/enable", token, map[string]string{"challengeToken": enrollment.ChallengeToken, "code": code})
+	if status, body := mfaLogin(t, f, code); status != http.StatusUnauthorized {
+		t.Fatalf("enrollment code login = %d %s", status, body)
+	}
+	requireAuditDetail(t, f, "auth.login", "totp code reused")
+}
+
 func TestMFASelfServiceDenialsAreAudited(t *testing.T) {
 	f := newAccountFixture(t)
 	token, _ := f.session(t, f.adminID)

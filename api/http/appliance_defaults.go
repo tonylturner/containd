@@ -23,6 +23,8 @@ func WithApplianceListeners(cfg *config.Config, r *mgmtpath.Reservation) *config
 	defaults := applianceDefaults(r, func(*config.Config, *mgmtpath.Reservation) bool { return false })
 	out := *cfg
 	out.System.Mgmt = defaults.System.Mgmt
+	out.System.Mgmt.TLSCertFile = cfg.System.Mgmt.TLSCertFile
+	out.System.Mgmt.TLSKeyFile = cfg.System.Mgmt.TLSKeyFile
 	out.System.SSH.ListenAddr = defaults.System.SSH.ListenAddr
 	return &out
 }

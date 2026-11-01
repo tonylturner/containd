@@ -23,10 +23,11 @@ func getICSCoverageHandler(store config.Store, engine EngineClient) gin.HandlerF
 		resp := gin.H{}
 		if cfg, err := store.LoadCandidate(ctx); err != nil {
 			resp["candidateError"] = "candidate config unavailable"
-		} else if candidate, err := candidateCoverage(store, cfg); err != nil {
+		} else if candidate, faults, err := candidateCoverage(store, cfg); err != nil {
 			resp["candidateError"] = err.Error()
 		} else {
 			resp["candidate"] = candidate
+			resp["serviceFaults"] = serviceFaultResponse(faults)
 		}
 		ruleset := observeRuleset(ctx, engine)
 		if ruleset.err != nil {
@@ -47,15 +48,16 @@ func getICSCoverageHandler(store config.Store, engine EngineClient) gin.HandlerF
 
 // candidateCoverage is the static coverage of a candidate that passes the
 // store's validation, as the ruleset preview and commit would compile it.
-func candidateCoverage(store config.Store, cfg *config.Config) ([]coverage.Rule, error) {
-	if err := config.ValidateForStore(store, cfg); err != nil {
-		return nil, err
-	}
-	snap, err := compile.CompileSnapshot(cfg)
+func candidateCoverage(store config.Store, cfg *config.Config) ([]coverage.Rule, []config.ServiceConfigError, error) {
+	effective, faults, err := config.EffectiveForStore(store, cfg)
 	if err != nil {
-		return nil, err
+		return nil, faults, err
 	}
-	return nonNilCoverage(coverage.Evaluate(&snap, cfg.DataPlane.CoverageSettings())), nil
+	snap, err := compile.CompileSnapshot(effective)
+	if err != nil {
+		return nil, faults, err
+	}
+	return nonNilCoverage(coverage.Evaluate(&snap, effective.DataPlane.CoverageSettings())), faults, nil
 }
 
 // nonNilCoverage keeps an empty list an empty JSON array, not null.

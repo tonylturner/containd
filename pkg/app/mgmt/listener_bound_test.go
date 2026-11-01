@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -167,11 +166,12 @@ func TestBoundLoopbackSocketIsCalled(t *testing.T) {
 func TestFailedHTTPSBindIsNotRecorded(t *testing.T) {
 	occupied, _, accepted := occupiedLoopback(t)
 	dir := t.TempDir()
+	cert, key, _ := sshTestKeyPair(t, dir, "server")
 	faults := &bootListenerFaults{logger: zap.NewNop().Sugar()}
 	lc := mgmtListenerConfig{
 		enableHTTP: true, httpAddr: "127.0.0.1:0",
 		enableHTTPS: true, httpsAddr: occupied.Addr().String(), redirectHTTPToHTTPS: true,
-		tlsCert: filepath.Join(dir, "server.crt"), tlsKey: filepath.Join(dir, "server.key"),
+		tlsCert: cert, tlsKey: key, tlsLoader: newCertReloader(cert, key),
 		optionalFault: faults.record,
 	}
 	binds, err := buildMgmtServers(http.NewServeMux(), lc)
@@ -200,10 +200,11 @@ func TestFailedHTTPSBindIsNotRecorded(t *testing.T) {
 // HTTP redirects to HTTPS only when HTTPS bound its own socket.
 func TestHTTPRedirectFollowsHTTPSBind(t *testing.T) {
 	dir := t.TempDir()
+	cert, key, _ := sshTestKeyPair(t, dir, "server")
 	lc := mgmtListenerConfig{
 		enableHTTP: true, httpAddr: "127.0.0.1:0",
 		enableHTTPS: true, httpsAddr: "127.0.0.1:0", redirectHTTPToHTTPS: true,
-		tlsCert: filepath.Join(dir, "server.crt"), tlsKey: filepath.Join(dir, "server.key"),
+		tlsCert: cert, tlsKey: key, tlsLoader: newCertReloader(cert, key),
 	}
 	binds, err := buildMgmtServers(http.NewServeMux(), lc)
 	defer binds.close()

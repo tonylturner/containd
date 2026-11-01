@@ -157,15 +157,11 @@ func NewAVManager(ctx context.Context, opts AVOptions) *AVManager {
 }
 
 func newAVLogger() *zap.SugaredLogger {
-	lg, err := commonlog.NewZap("av", "av", commonlog.Options{
+	return commonlog.NewServiceWithOptions("av", "av", commonlog.Options{
 		FilePath: "/data/logs/av.log",
 		JSON:     true,
 		Level:    "info",
 	})
-	if err != nil {
-		return zap.NewNop().Sugar()
-	}
-	return lg
 }
 
 // lock acquires the operation lock unless ctx or the manager ends first.
@@ -212,6 +208,9 @@ func (m *AVManager) Stop() error {
 // Apply waits for the proof only until ctx ends, and Status reports the
 // activation as pending until then.
 func (m *AVManager) Apply(ctx context.Context, cfg config.AVConfig) error {
+	if err := m.Validate(ctx, cfg); err != nil {
+		return fmt.Errorf("%w: %w", ErrAVInvalid, err)
+	}
 	if err := m.applyLocked(ctx, cfg); err != nil {
 		return err
 	}

@@ -258,7 +258,7 @@ func TestManagementRecoveryWithoutReservation(t *testing.T) {
 	if body := health(); body.Recovery.State != "inactive" || body.Recovery.Reason != "" || body.Enforcement.State != "enforcing" {
 		t.Fatalf("health after commit = %+v", body)
 	}
-	if rec := requestStage(t, server, "GET", "/system/management-reservation", nil); strings.TrimSpace(rec.Body.String()) != `{"active":false}` {
+	if rec := requestStage(t, server, "GET", "/system/management-reservation", nil); strings.TrimSpace(rec.Body.String()) != `{"active":false,"bootServiceFaults":[]}` {
 		t.Fatalf("reservation view after commit = %s", rec.Body)
 	}
 }
