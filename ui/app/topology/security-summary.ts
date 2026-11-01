@@ -1,10 +1,10 @@
 import type { ConduitMap } from "../../lib/api";
 import { type ZoneView, scoreZone } from "../../lib/security-scoring";
 
-/** A zone whose achieved security level is below its target. */
+/** A zone whose check-based security level is below its target. */
 export type ZoneBelowTarget = { id: string; name: string; sl_a: number; sl_t: number };
 
-/** Every zone's achieved level against its target, not only the zones in the matrix. */
+/** Every zone's check-based level against its target, not only the zones in the matrix. */
 export type TargetSummary = { total: number; below: ZoneBelowTarget[] };
 
 /** Zones below their SL target, in zone order, scored as the matrix scores them. */
@@ -20,6 +20,6 @@ export function summarizeTargets(zones: ZoneView[], conduits: ConduitMap): Targe
 /** The overview line: how many of all zones fall short of their target. */
 export function targetSummaryText({ total, below }: TargetSummary): string {
   if (total === 0) return "No zones configured.";
-  if (below.length === 0) return total === 1 ? "The zone meets its SL target." : `All ${total} zones meet their SL targets.`;
-  return `${below.length} of ${total} zone${total === 1 ? "" : "s"} below SL target:`;
+  if (below.length === 0) return total === 1 ? "The zone passes its SL target checks." : `All ${total} zones pass SL target checks.`;
+  return `${below.length} of ${total} zone${total === 1 ? " has" : "s have"} unmet SL target checks:`;
 }

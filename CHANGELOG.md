@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   current tails without backfill; audit resumes its durable cursor after restart.
 - Keep operations and management available when audit persistence fails, with
   visible degradation rather than an audit fail-closed policy.
+- Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
 
 ## [0.1.37] - 2026-10-31
 
@@ -83,6 +84,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The engine keeps watching kernel interface, address and route changes after
+  an interrupted system call instead of stopping until restart; drift was
+  otherwise repaired only by the 10-second periodic reconcile.
 - Direct CLI login directs accounts needing MFA or password rotation to the
   web UI or SSH, and accounts needing MFA enrollment to the web UI.
 - Partial account profile updates preserve omitted fields and still allow explicit clearing.
