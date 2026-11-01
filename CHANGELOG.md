@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- WireGuard configuration is applied to the kernel. The netlink attribute numbers
+  did not match the kernel interface, so enabling WireGuard failed.
 - Project stored service faults for firewall replay and report per-service
   status. Retain AV fail policy and allow unrelated edits carrying unchanged
   faults. Custom-named WireGuard tunnel teardown remains unsupported by quarantine.

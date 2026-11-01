@@ -37,30 +37,29 @@ const (
 )
 
 const (
-	wgDeviceAUnspec            = 0
-	wgDeviceAIfindex           = 1
-	wgDeviceAIfname            = 2
-	wgDeviceAPrivateKey        = 3
-	wgDeviceAPublicKey         = 4
-	wgDeviceAListenPort        = 5
-	wgDeviceAFwmark            = 6
-	wgDeviceAPeers             = 7
-	wgDeviceAFlags             = 8
-	wgDeviceALastHandshakeTime = 9
+	wgDeviceAUnspec = iota
+	wgDeviceAIfindex
+	wgDeviceAIfname
+	wgDeviceAPrivateKey
+	wgDeviceAPublicKey
+	wgDeviceAFlags
+	wgDeviceAListenPort
+	wgDeviceAFwmark
+	wgDeviceAPeers
 )
 
 const (
-	wgPeerAUnspec              = 0
-	wgPeerAPublicKey           = 1
-	wgPeerAPresharedKey        = 2
-	wgPeerAEndpoint            = 3
-	wgPeerAPersistentKeepalive = 4
-	wgPeerALastHandshakeTime   = 5
-	wgPeerARxBytes             = 6
-	wgPeerATxBytes             = 7
-	wgPeerAAllowedIPs          = 8
-	wgPeerAProtocolVersion     = 9
-	wgPeerAFlags               = 10
+	wgPeerAUnspec = iota
+	wgPeerAPublicKey
+	wgPeerAPresharedKey
+	wgPeerAFlags
+	wgPeerAEndpoint
+	wgPeerAPersistentKeepalive
+	wgPeerALastHandshakeTime
+	wgPeerARxBytes
+	wgPeerATxBytes
+	wgPeerAAllowedIPs
+	wgPeerAProtocolVersion
 )
 
 const (
@@ -333,13 +332,18 @@ func readRouteAck(fd int, seq uint32) error {
 }
 
 func wgSetDevice(ctx context.Context, ifIndex int, cfg config.WireGuardConfig) error {
-	for _, peer := range cfg.Peers {
-		pk := strings.TrimSpace(peer.PublicKey)
-		if pk == "" {
-			return fmt.Errorf("wireguard: peer publicKey is required")
-		}
-		if _, err := decodeKey32(pk); err != nil {
-			return fmt.Errorf("wireguard: peer publicKey: %w", err)
+	if cfg.ListenPort < 0 || cfg.ListenPort > 65535 {
+		return fmt.Errorf("wireguard: listenPort must be in 0..65535")
+	}
+	peers, err := encodeWireGuardPeers(cfg.Peers)
+	if err != nil {
+		return err
+	}
+	var private []byte
+	if pk := strings.TrimSpace(cfg.PrivateKey); pk != "" {
+		private, err = decodeKey32(pk)
+		if err != nil {
+			return fmt.Errorf("wireguard: privateKey: %w", err)
 		}
 	}
 
@@ -377,13 +381,10 @@ func wgSetDevice(ctx context.Context, ifIndex int, cfg config.WireGuardConfig) e
 	binary.NativeEndian.PutUint32(flags, wgDeviceFReplacePeers)
 	addNLAttr(&req, wgDeviceAFlags, flags)
 
-	if pk := strings.TrimSpace(cfg.PrivateKey); pk != "" {
-		b, err := decodeKey32(pk)
-		if err != nil {
-			return fmt.Errorf("wireguard: privateKey: %w", err)
-		}
-		addNLAttr(&req, wgDeviceAPrivateKey, b)
+	if private != nil {
+		addNLAttr(&req, wgDeviceAPrivateKey, private)
 	}
+
 	if cfg.ListenPort > 0 {
 		lp := make([]byte, 2)
 		binary.NativeEndian.PutUint16(lp, uint16(cfg.ListenPort))
@@ -391,45 +392,26 @@ func wgSetDevice(ctx context.Context, ifIndex int, cfg config.WireGuardConfig) e
 	}
 
 	addNestedNLAttr(&req, wgDeviceAPeers, func(peersBuf *bytes.Buffer) {
-		for i, peer := range cfg.Peers {
-			idx := uint16(i + 1)
-			addNestedNLAttr(peersBuf, idx, func(pbuf *bytes.Buffer) {
-				pk := strings.TrimSpace(peer.PublicKey)
-				b, _ := decodeKey32(pk)
-				addNLAttr(pbuf, wgPeerAPublicKey, b)
-				// Replace allowed IPs.
+		for _, peer := range peers {
+			addNestedNLAttr(peersBuf, 0, func(pbuf *bytes.Buffer) {
+				addNLAttr(pbuf, wgPeerAPublicKey, peer.key)
 				pflags := make([]byte, 4)
 				binary.NativeEndian.PutUint32(pflags, wgPeerFReplaceAllowedIPs)
 				addNLAttr(pbuf, wgPeerAFlags, pflags)
-
-				if ka := peer.PersistentKeepalive; ka > 0 {
-					v := make([]byte, 2)
-					binary.NativeEndian.PutUint16(v, uint16(ka))
-					addNLAttr(pbuf, wgPeerAPersistentKeepalive, v)
-				}
-				if ep := strings.TrimSpace(peer.Endpoint); ep != "" {
-					raw, err := encodeSockaddr(ep)
-					if err == nil {
-						addNLAttr(pbuf, wgPeerAEndpoint, raw)
-					}
+				v := make([]byte, 2)
+				binary.NativeEndian.PutUint16(v, peer.keepalive)
+				addNLAttr(pbuf, wgPeerAPersistentKeepalive, v)
+				if len(peer.endpoint) != 0 {
+					addNLAttr(pbuf, wgPeerAEndpoint, peer.endpoint)
 				}
 				addNestedNLAttr(pbuf, wgPeerAAllowedIPs, func(aips *bytes.Buffer) {
-					for j, cidr := range peer.AllowedIPs {
-						cidr = strings.TrimSpace(cidr)
-						if cidr == "" {
-							continue
-						}
-						idx2 := uint16(j + 1)
-						addNestedNLAttr(aips, idx2, func(ab *bytes.Buffer) {
-							family, ipBytes, mask, ok := parseCIDRForWG(cidr)
-							if !ok {
-								return
-							}
+					for _, ip := range peer.allowed {
+						addNestedNLAttr(aips, 0, func(ab *bytes.Buffer) {
 							fb := make([]byte, 2)
-							binary.NativeEndian.PutUint16(fb, family)
+							binary.NativeEndian.PutUint16(fb, ip.family)
 							addNLAttr(ab, wgAllowedipAFamily, fb)
-							addNLAttr(ab, wgAllowedipAIpaddr, ipBytes)
-							addNLAttr(ab, wgAllowedipACidrMask, []byte{mask})
+							addNLAttr(ab, wgAllowedipAIpaddr, ip.ip)
+							addNLAttr(ab, wgAllowedipACidrMask, []byte{ip.mask})
 						})
 					}
 				})
