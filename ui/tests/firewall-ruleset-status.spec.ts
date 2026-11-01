@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { normalizeEnforcementHealth } from "../lib/api-health";
 import { formatStatusTime } from "../app/firewall/firewall-ruleset-status";
+import type { ProtectionStatus } from "../lib/api-protection";
+import { observation } from "./fixtures/protection-api";
 
 // Health's enforcement state is degraded while a ruleset is in force but the
 // last apply failed or the schedule planner is degraded. The installed
@@ -14,6 +16,7 @@ const viewer = { id: "viewer-1", username: "viewer", role: "view", mfaRequired: 
 type Mocks = {
   user?: typeof admin;
   enforcement?: unknown;
+  protection?: ProtectionStatus;
   installed?: { status: number; json: unknown };
 };
 
@@ -33,6 +36,7 @@ async function mockAPI(page: Page, mocks: Mocks): Promise<{ previewRequests: num
     let body: unknown = {};
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") body = user;
     if (path === "/api/v1/health") body = { status: "ok", component: "mgmt", enforcement: mocks.enforcement };
+    if (path === "/api/v1/dataplane/protection") body = mocks.protection ?? observation({ state: "unknown" });
     if (path === "/api/v1/firewall/rules" || path === "/api/v1/zones") body = [];
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false };
@@ -66,11 +70,15 @@ const degradedStatus = {
 };
 
 for (const path of ["/firewall/", "/ics/"]) {
-  test(`${path} shows degraded enforcement in amber with its reason`, async ({ page }) => {
-    await mockAPI(page, { enforcement: { state: "degraded", reason: "last ruleset apply failed; previous ruleset in force" } });
+  test(`${path} shows degraded enforcement in amber with protection's reason`, async ({ page }) => {
+    await mockAPI(page, {
+      enforcement: { state: "degraded", reason: "health summary without component detail" },
+      protection: observation({ state: "degraded", retryable: true }),
+    });
     await open(page, path);
     const indicator = page.getByRole("status", { name: "Firewall enforcement degraded: degraded" });
-    await expect(indicator).toContainText("last ruleset apply failed; previous ruleset in force");
+    await expect(indicator).toContainText("Rule-hit logging unavailable");
+    await expect(indicator).not.toContainText("health summary without component detail");
     await expect(indicator.locator("span[aria-hidden]")).toHaveClass(/bg-\(--amber\)/);
   });
 }

@@ -9,6 +9,7 @@ import { type User, api } from "../lib/api";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { ConfigStatusBar } from "./ConfigStatusBar";
 import { EvidenceBanner } from "./EvidenceBanner";
+import { ProtectionNotice } from "./ProtectionNotice";
 import { ShellRecoveryBanner } from "./ManagementRecoveryBanner";
 import { ProfileModal } from "./ProfileModal";
 import {
@@ -619,6 +620,7 @@ export function Shell({
                 <ShellRecoveryBanner />
                 <EvidenceBanner />
                 <ConfigStatusBar />
+                <ProtectionNotice isAdmin={isAdmin} />
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <h1 className="text-lg font-semibold tracking-wide text-white">
