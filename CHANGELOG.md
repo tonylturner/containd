@@ -123,6 +123,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reject unsafe daemon configuration fields and require valid proxy TLS certificate/key pairs before publishing configuration.
 - Restrict OpenVPN profile imports to the shared bounded parser; manage client credentials by issuer/serial ID with read-only downloads and durable revocation.
 - OpenVPN credential lists report whether a running managed server has loaded the current revocation list; the VPN page offers Apply revocation only while it has not.
+- Preserve NFQUEUE learner suggestions after scoped loss between unrelated hosts.
+  Parents and losses retain capture-hook authority, allowing wire-only matching
+  at the common forward-hook face without conntrack verification. Same-tuple
+  loss still excludes every incarnation; unverified AF_PACKET and unknown
+  capture authority remain conservative. Reimport or recollect older evidence
+  and regenerate proofs to use the corrected authority.
+- Preserve learner loss across both verified NAT wire aliases, including
+  request-only SNAT and response-only DNAT evidence. Known incarnation identity
+  adds to coordinate scope without narrowing it; unproved AF_PACKET alias
+  disjointness fails closed. Stop closes parent admission before detaching the
+  loss fence. IPv6 truncation classification uses decoded header family, not
+  IPv4-mapped address spelling, and empty connection placeholders retain scope.
+- Keep zone security scores, topology conduit selection and staged zone updates
+  separate for names that differ by case or punctuation.
+- Recorded collection or admission loss excludes every connection it could have
+  touched from suggestion generation and direct certification, with durable
+  `collection_loss` withholding. Live transport overflow is retained before Stop
+  or deadline cleanup; failed automatic stops retry safely. Short captured headers
+  exclude matching wire tuples or host pairs across all incarnations, never just
+  observed message times. Unrelated cut ARP/LLDP/ICMP records preserve workshop
+  suggestions. Missing scope, restart/policy uncertainty and exhausted localization
+  capacity exclude the dataset. Previously collected captures must be reimported
+  or watches recollected under the corrected loss authority. Previously certified
+  suggestions require regeneration; frozen historical stage retries can only
+  reconcile identical rules already saved to candidate.
+- Batch live learner persistence in bounded multi-row SQLite statements so IEC
+  104 command watches keep up with normal captures; outcome-only drops do not
+  exclude certification inputs. Large repeated relations use bounded proofs
+  instead of overflowing suggestion storage budgets.
+- Exclude observation-bound and content/port-mismatched connections from offline
+  and live policy suggestions, including port-decoded events emitted before
+  content confirmation; retain the exclusion in withheld counts and limitations.
+  Previously certified suggestions require regeneration; historical datasets
+  without retained binding authority remain readable but fail closed. Reimporting
+  the same capture after an adapter-normalization change creates a separate
+  dataset using the current normalization, without rewriting historical evidence.
 
 ## [0.1.37] - 2026-10-31
 

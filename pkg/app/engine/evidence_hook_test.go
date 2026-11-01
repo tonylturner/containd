@@ -69,8 +69,8 @@ func BenchmarkEvidenceHook(b *testing.B) {
 func TestEvidenceEventCopyOwnsNestedValuesAndBoundsCycles(t *testing.T) {
 	value := uint16(7)
 	attrs := map[string]any{"nested": []any{&value, map[string]any{"points": []uint16{1, 2}}}}
-	owned, ok := ownEvidenceEvents([]dpi.Event{{Attributes: attrs}})
-	if !ok {
+	owned, size, ok := ownEvidenceEvents([]dpi.Event{{Attributes: attrs}})
+	if !ok || size <= 0 {
 		t.Fatal("valid decoded fields rejected")
 	}
 	value = 9
@@ -81,10 +81,10 @@ func TestEvidenceEventCopyOwnsNestedValuesAndBoundsCycles(t *testing.T) {
 	}
 	cycle := map[string]any{}
 	cycle["self"] = cycle
-	if _, ok := ownEvidenceEvents([]dpi.Event{{Attributes: cycle}}); ok {
+	if _, _, ok := ownEvidenceEvents([]dpi.Event{{Attributes: cycle}}); ok {
 		t.Fatal("cyclic input bypassed copy bounds")
 	}
-	if _, ok := ownEvidenceEvents([]dpi.Event{{Attributes: map[string]any{"large": make([]byte, 1<<21)}}}); ok {
+	if _, _, ok := ownEvidenceEvents([]dpi.Event{{Attributes: map[string]any{"large": make([]byte, 1<<21)}}}); ok {
 		t.Fatal("oversized input bypassed copy bounds")
 	}
 }

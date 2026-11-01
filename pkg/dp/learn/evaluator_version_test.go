@@ -17,3 +17,14 @@ func TestProofRequiresCurrentOrderedEvaluator(t *testing.T) {
 		t.Fatal("proof from another evaluator accepted")
 	}
 }
+
+func TestProofRequiresCurrentGenerator(t *testing.T) {
+	v := Versions{Schema: SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: GeneratorVersion, Evaluator: rules.EvaluatorVersion}
+	if !CompatibleVersions(v) {
+		t.Fatal("current proof rejected")
+	}
+	v.Generator = GeneratorVersion + "-different"
+	if CompatibleVersions(v) {
+		t.Fatal("proof from another generator accepted")
+	}
+}

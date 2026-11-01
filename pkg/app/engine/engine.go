@@ -189,23 +189,16 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("evidence authority unavailable: %w", err)
 	}
 	defer func() { _ = evidenceStore.Close() }()
-	watchCtx, stopWatchWorker := context.WithCancel(ctx)
-	evidenceCollector := newEvidenceWatch(watchCtx, evidenceStore, dpEngine)
-	defer func() {
-		dpEngine.SetLearnWatchHook(nil)
-		stopWatchWorker()
-		<-evidenceCollector.done
-		<-evidenceCollector.maintained
-	}()
-	learnerAPI := &evidenceAPI{store: evidenceStore, watch: evidenceCollector, generator: &learn.Generator{Store: evidenceStore, Certifier: &learn.CompilerCertifier{Store: evidenceStore}, CountWithheld: evidenceStore.CountWithheld}}
+	learnerAPI := NewEvidenceAPI(ctx, evidenceStore, dpEngine)
+	defer learnerAPI.Close()
 	mux := http.NewServeMux()
-	learnerAPI.register(mux)
+	learnerAPI.Register(mux)
 	pcapMgr := pcap.NewManager(common.Env("CONTAIND_PCAP_DIR", "/data/pcaps"))
 	// Captures outlive their start request; close their files on shutdown.
 	defer func() { _ = pcapMgr.Stop() }()
 	mux.HandleFunc("/health", healthHandler(dpEngine, guard))
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if dpEngine == nil || evidenceCollector.err() != nil {
+		if dpEngine == nil || learnerAPI.watch.err() != nil {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		}

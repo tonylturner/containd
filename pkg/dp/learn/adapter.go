@@ -26,10 +26,20 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 	var parents []evidence.Observation
 	apdus := map[string]int{}
 	for _, ev := range events {
+		identification := ev.Proto == eventfields.ProtoIdentify && ev.Kind == eventfields.KindIdentification
+		observationBound := observationBoundEvent(ev)
+		if identification {
+			if !observationBound {
+				continue
+			}
+			// Retain binding authority even if the passive decoder emits no
+			// parent. This is undecoded evidence, not a fabricated ICS message.
+			ev.Proto, _ = eventfields.String(ev.Attributes, eventfields.KeyProtocol)
+		}
 		if !ics.Supported(ev.Proto) {
 			continue
 		}
-		if ev.Kind != "request" && ev.Kind != "response" && ev.Kind != "apci" && ev.Kind != "malformed" && ev.Kind != "unsupported" && ev.Kind != "exception" && ev.Kind != "session" {
+		if !identification && ev.Kind != "request" && ev.Kind != "response" && ev.Kind != "apci" && ev.Kind != "malformed" && ev.Kind != "unsupported" && ev.Kind != "exception" && ev.Kind != "session" {
 			continue
 		}
 		wire := state.Key
@@ -38,12 +48,19 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 			k = state.ServiceKey()
 		}
 		coordinates := evidence.CoordinatesWire
-		authority := evidence.Authority{Wire: tuple(wire), Correlation: "wire", RoleCertain: roleCertain(state, ev), RoleEvidence: "decoder_and_connection", StandardPort: ics.IsProtocolPortOn(ev.Proto, k.Proto, serverPort(k))}
+		authority := evidence.Authority{Wire: tuple(wire), Correlation: "wire", RoleCertain: roleCertain(state, ev), RoleEvidence: PortDecoderAuthority, StandardPort: ics.IsProtocolPortOn(ev.Proto, k.Proto, serverPort(k))}
+		if ds.Source == evidence.SourceLive {
+			authority.CaptureHook = state.CaptureHook
+		}
 		if ds.Source == evidence.SourceLive && state.Connection.Load().Verified() {
 			logical := tuple(k)
 			authority.Logical = &logical
 			authority.Correlation = "verified"
 			ct := state.Connection.Load().Evidence
+			authority.Aliases = &evidence.WireAliases{
+				Original: tuple(flow.TupleKey(ct.Original, flow.DirForward)),
+				Reply:    tuple(flow.TupleKey(ct.Reply, flow.DirReverse)),
+			}
 			authority.MappingFingerprint, _ = evidence.Digest(struct {
 				Original, Reply any
 				Zone            uint16
@@ -63,13 +80,7 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 		if k.Proto == 17 {
 			transport = "udp"
 		}
-		connection := ev.FlowID
-		if c := state.Connection.Load(); c != nil && c.Key != "" {
-			connection = c.Key
-		}
-		if connection == "" {
-			connection = wire.Hash()
-		}
+		connection := EvidenceConnectionID(state, ev)
 		*serial++
 		parentID := strconv.FormatUint(*serial, 10)
 		apdu, _ := eventfields.String(ev.Attributes, eventfields.KeyAPDUID)
@@ -77,6 +88,15 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 			parentID = apdu
 		}
 		o := evidence.Observation{SchemaVersion: evidence.SchemaVersion, DatasetID: ds.ID, Source: ds.Source, CapturedAt: ev.Timestamp, ConnectionID: connection, ParentID: parentID, Authority: authority, Service: evidence.ServiceKey{ClientIP: k.OpenerIP().String(), ServerIP: k.ServerIP().String(), ServerPort: serverPort(k), Transport: transport, Direction: direction, Protocol: ev.Proto, Coordinates: coordinates}, DecoderVersion: ds.DecoderVersion, ProfileFingerprint: ds.ProfileFingerprint, SnapshotFingerprint: ds.SnapshotFingerprint, Quality: evidence.Quality{Complete: true, Decoded: true}, Outcome: evidence.Outcome{Delivery: "unknown"}, Evidence: []evidence.EvidenceRef{{DatasetID: ds.ID, CaptureSHA256: ds.CaptureSHA256}}}
+		if observationBound {
+			o.Authority.RoleCertain = false
+			o.Authority.RoleEvidence = observationBindingAuthority
+		}
+		if identification {
+			o.Quality.Decoded = false
+			parents = append(parents, o)
+			continue
+		}
 		a := ev.Attributes
 		o.Quality.Conformance, _ = eventfields.Strings(a, eventfields.KeyConformance)
 		o.Quality.Undecoded, _ = eventfields.Strings(a, eventfields.KeyUndecoded)
@@ -171,6 +191,10 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 			key := connection + "/" + parentID
 			if i, ok := apdus[key]; ok {
 				p := &parents[i]
+				if observationBound {
+					p.Authority.RoleCertain = false
+					p.Authority.RoleEvidence = observationBindingAuthority
+				}
 				left, _ := evidence.Digest(struct {
 					Type  *uint8
 					CA    *uint16
@@ -214,6 +238,26 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 		}
 	}
 	return parents, nil
+}
+
+// EvidenceConnectionID is shared with the collector's rejection path so dropped
+// events exclude exactly the identity Normalize would have retained.
+func EvidenceConnectionID(state *flow.State, ev dpi.Event) string {
+	if ev.Connection != nil && ev.Connection.Key != "" {
+		return ev.Connection.Key
+	}
+	if state != nil {
+		if c := state.Connection.Load(); c != nil && c.Key != "" {
+			return c.Key
+		}
+	}
+	if ev.FlowID != "" {
+		return ev.FlowID
+	}
+	if state != nil {
+		return state.Key.Hash()
+	}
+	return ""
 }
 
 func tuple(k flow.Key) evidence.Tuple {

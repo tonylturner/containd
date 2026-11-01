@@ -391,3 +391,54 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 		}
 	}
 }
+
+func TestEvidenceStageUpgradeOnlyReconcilesExistingRules(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "not saved", true: "already saved"}[existing], func(t *testing.T) {
+			ctx := context.Background()
+			store := stageStore(t)
+			s := stageProposal(t)
+			// Rebind a genuine historical snapshot: binding remains valid, but the
+			// generator is guaranteed different from the currently accepted authority.
+			s.Content.Versions.Generator = learn.GeneratorVersion + "-historical"
+			var err error
+			s.ID, err = s.Content.ContentID()
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.Proof.ContentID, s.Proof.Versions = s.ID, s.Content.Versions
+			s.StageReconcileOnly = true
+			if existing {
+				if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+					cfg.Firewall.Rules = append(cfg.Firewall.Rules, s.Content.Rules...)
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := store.LoadCandidate(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, frozen: []learn.Suggestion{s}}
+			server := NewServerWithEngine(store, nil, e)
+			req := learn.ApplyRequest{RequestID: "upgraded-request", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}}
+			for range 2 {
+				rec := requestStage(t, server, "POST", "/learn/apply", req)
+				if existing && rec.Code != 200 || !existing && rec.Code != 409 {
+					t.Fatalf("upgrade status: %d %s", rec.Code, rec.Body)
+				}
+			}
+			after, err := store.LoadCandidate(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before.Firewall.Rules, after.Firewall.Rules) {
+				t.Fatal("upgrade mutated candidate")
+			}
+			if e.releases != 0 {
+				t.Fatal("lost historical receipt needed for reconciliation")
+			}
+		})
+	}
+}

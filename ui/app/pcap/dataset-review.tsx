@@ -38,6 +38,7 @@ export function ReasonCounts({
     cip_observation_only: "CIP observations only; no actionable rules",
     nonstandard_port: "Nonstandard service: observation only",
     replay_failed: "Certification replay failed",
+    collection_loss: "Connection excluded: collection loss may hide observations",
   };
   return (
     <ul className="mt-2 space-y-1 break-words text-xs">
@@ -160,8 +161,9 @@ export function DatasetReview({
       </details>
       {!!dataset.gaps?.length && (
         <p role="status" className="mt-3 break-words text-sm text-(--amber)">
-          Collection limitations: {dataset.gaps.join(", ")}. The backend determines
-          which complete parents can be certified.
+          Collection limitations: {dataset.gaps.join(", ")}. Connections that loss
+          could have touched are excluded. Loss without a connection or time
+          interval excludes the entire dataset.
         </p>
       )}
       <p className="mt-3 text-xs text-(--text-muted)">
