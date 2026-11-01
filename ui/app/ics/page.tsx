@@ -146,16 +146,16 @@ export default function ICSPolicyPage() {
             Industrial protocol filters need traffic inspection enabled. Blocking also requires
             inline inspection of routed traffic and needs no capture interface; capture interfaces only observe.
           </div>
-          <StatusBadge variant={(dpiConfig.dpiEnabled ?? false) ? "success" : "neutral"} dot>
-            {(dpiConfig.dpiEnabled ?? false) ? "DPI Enabled" : "DPI Disabled"}
+          <StatusBadge variant={canSave && dpiConfig.dpiEnabled ? "success" : "neutral"} dot>
+            {!canSave ? "DPI status unknown" : dpiConfig.dpiEnabled ? "DPI Enabled" : "DPI Disabled"}
           </StatusBadge>
         </div>
         <div className="mt-2 text-xs text-(--text-muted)">
-          {queueGroup > 0
+          {!canSave ? "Inline inspection status unknown" : queueGroup > 0
             ? "Inline inspection configured"
             : "Monitor only \u2014 inline inspection is not configured"}
         </div>
-        <details className="mt-2 text-xs text-(--text-muted)">
+        {canSave && <details className="mt-2 text-xs text-(--text-muted)">
           <summary className="cursor-pointer">Technical details</summary>
           <p>Inline inspection queue (NFQUEUE): {queueGroup}</p>
           {(dpiConfig.captureInterfaces ?? []).length > 0 && (
@@ -163,7 +163,7 @@ export default function ICSPolicyPage() {
             Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
           </div>
           )}
-        </details>
+        </details>}
         <div className="mt-3 space-y-2">
           <EnforcementHealthIndicator health={health?.enforcement} />
           <ICSEnforcementIndicator health={health?.icsEnforcement} />

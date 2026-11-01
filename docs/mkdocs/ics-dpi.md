@@ -158,6 +158,9 @@ change the stored `tolerant`/`strict` values or enable blocking by themselves.
 The ICS page shows whether inline inspection is configured; its **Technical
 details** retains the NFQUEUE number and capture interfaces. Live protection
 and per-rule coverage remain separate from these saved settings.
+If the saved settings cannot be read, their status is **unknown**, including
+after a failed refresh; the page does not imply inspection is disabled or show
+previous queue and interface values as current.
 
 Rule editors keep uncommon station, object, direction and message selectors
 under **Advanced selectors (saved values still apply)**. IEC 104 message
