@@ -16,6 +16,21 @@ type mockMFAChallenge struct {
 	expires         time.Time
 }
 
+func (m *mockUserStore) DisableTOTPWithGrace(_ context.Context, id string, now time.Time) error {
+	u, ok := m.users[id]
+	if !ok {
+		return users.ErrNotFound
+	}
+	u.TOTPSecret = ""
+	u.MFAEnabled = false
+	u.MFAGraceUntil = nil
+	if u.MFARequired {
+		deadline := users.MFAGraceDeadline(now)
+		u.MFAGraceUntil = &deadline
+	}
+	return nil
+}
+
 func (m *mockUserStore) CreateMFAChallenge(_ context.Context, u *users.StoredUser, purpose string, expires time.Time) (string, error) {
 	if m.challenges == nil {
 		m.challenges = make(map[string]mockMFAChallenge)

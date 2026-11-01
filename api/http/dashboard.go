@@ -164,7 +164,7 @@ func dashboardCurrentUser(c *gin.Context, userStore users.Store) any {
 		return nil
 	}
 	if u, err := userStore.GetByID(c.Request.Context(), uid); err == nil {
-		return u.User
+		return callerProfile(c, u.User)
 	}
 	return nil
 }

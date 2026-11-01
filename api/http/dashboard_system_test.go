@@ -34,8 +34,8 @@ type dashboardServices struct {
 	events []dpevents.Event
 }
 
-func (m *dashboardServices) Apply(ctx context.Context, cfg config.ServicesConfig) error {
-	return nil
+func (m *dashboardServices) ApplyEffective(ctx context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+	return cfg, nil
 }
 
 func (m *dashboardServices) Status() any {
@@ -372,3 +372,5 @@ func TestSystemInspectionAndFactoryResetHandlers(t *testing.T) {
 		t.Fatalf("unexpected post-reset audit records: %#v", records)
 	}
 }
+
+func (*dashboardServices) RecordEngineFaults([]config.ServiceFault) {}

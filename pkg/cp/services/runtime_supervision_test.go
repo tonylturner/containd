@@ -199,7 +199,7 @@ func TestSyslogManagerForwardLoopAndRun(t *testing.T) {
 func TestVPNManagerApplyAndSupervisionLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	openvpnScript := filepath.Join(dir, "openvpn-test.sh")
-	if err := os.WriteFile(openvpnScript, []byte("#!/bin/sh\ntrap 'exit 0' TERM INT\nwhile true; do sleep 1; done\n"), 0o755); err != nil {
+	if err := os.WriteFile(openvpnScript, []byte("#!/bin/sh\ntrap 'exit 0' TERM INT\necho 'Initialization Sequence Completed'\nwhile true; do sleep 1; done\n"), 0o755); err != nil {
 		t.Fatalf("WriteFile(openvpnScript): %v", err)
 	}
 	clientConfig := filepath.Join(dir, "client.ovpn")

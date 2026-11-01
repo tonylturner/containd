@@ -8,7 +8,8 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api, isAdmin, type Asset, type AVConfig, type AVStatus, type Zone } from "../../../../lib/api";
+import { api, isAdmin, type Asset, type AVConfig, type ServicesStatus, type Zone } from "../../../../lib/api";
+import { ServiceFaultBanner } from "../../../../components/ServiceFaultBanner";
 import { Shell } from "../../../../components/Shell";
 import { useToast } from "../../../../components/ToastProvider";
 import { SaveStateLine } from "../../../../components/SaveStateLine";
@@ -36,7 +37,8 @@ export default function AVPage() {
   }, false);
   const [zones, setZones] = useState<Zone[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [status, setStatus] = useState<AVStatus | null>(null);
+  const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
+  const status = servicesStatus?.av ?? null;
   const save = useSaveAction();
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -51,7 +53,7 @@ export default function AVPage() {
     try {
       const svc = await api.getServicesStatus();
       setRefreshError(null);
-      setStatus(svc?.av ?? null);
+      setServicesStatus(svc);
       const s = await api.getAV();
       if (!checkLoaded(s)) return;
       adoptConfig(s, keepEdits);
@@ -184,6 +186,7 @@ export default function AVPage() {
         </div>
       }
     >
+      <ServiceFaultBanner status={servicesStatus} loading={loading} only={["av"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
@@ -216,19 +219,19 @@ export default function AVPage() {
           Engine antivirus unavailable: {status.error || "no response"}
         </div>
       )}
-      {status?.available && cfg.enabled !== status.enabled && (
+      {status?.available && status.state !== "faulted" && cfg.enabled !== status.enabled && (
         <div className="mb-4 rounded-lg border px-3 py-2 text-sm">
           Settings show AV {cfg.enabled ? "enabled" : "disabled"} but runtime reports {status.enabled ? "enabled" : "disabled"}. Save to stage your changes, then commit to apply.
         </div>
       )}
       <Card className="mb-4">
         <h2 className="text-sm font-semibold text-(--text)">Live runtime status</h2>
-        {loading || !status ? (
+        {loading ? (
           <div className="mt-3 space-y-2">
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-10 w-1/2" />
           </div>
-        ) : !status.available ? (
+        ) : !status || !status.available ? (
           <p className="mt-3 text-sm text-(--text-muted)">The engine did not report its runtime status.</p>
         ) : (
           <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-3">
@@ -254,7 +257,7 @@ export default function AVPage() {
             <div>Freshclam last: <span className="text-(--text)">{status?.freshclam_last || "never"}</span></div>
             <div>Freshclam interval: <span className="text-(--text)">{status?.freshclam_interval || "6h"}</span></div>
             <div>Custom defs path (engine): <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
-            {status.sparkline.length ? (
+            {status.sparkline?.length ? (
               <div className="md:col-span-3">
                 <Sparkline
                   values={status.sparkline}

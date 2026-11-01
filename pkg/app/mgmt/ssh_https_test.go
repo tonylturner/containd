@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -29,8 +30,15 @@ import (
 // and 127.0.0.1 under dir and loads it.
 func sshTestKeyPair(t *testing.T, dir, name string) (string, string, *tls.Certificate) {
 	t.Helper()
-	certFile, keyFile, err := ensureSelfSignedTLSFiles(filepath.Join(dir, name+".crt"), filepath.Join(dir, name+".key"), nil)
+	certFile, keyFile := filepath.Join(dir, name+".crt"), filepath.Join(dir, name+".key")
+	cert, key, err := selfSignedTLS(nil)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(certFile, cert, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, key, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)

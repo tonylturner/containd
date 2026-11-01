@@ -24,6 +24,11 @@ func managementReservationHandler(store config.Store, health ManagementGuardHeal
 			internalError(c, err)
 			return
 		}
+		bootServiceFaults, err := config.ServiceBootFaultsForStore(c.Request.Context(), store)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
 		recovery := ""
 		if bootFault != "" {
 			ctx, cancel := context.WithTimeout(c.Request.Context(), engineHealthTimeout)
@@ -34,7 +39,7 @@ func managementReservationHandler(store config.Store, health ManagementGuardHeal
 		if r == nil {
 			// Boot recovery does not need a reservation: an invalid stored
 			// configuration is refused the same way, and its cause shows here.
-			body := gin.H{"active": false}
+			body := gin.H{"active": false, "bootServiceFaults": bootServiceFaults}
 			if bootFault != "" {
 				body["bootFault"], body["recovery"] = bootFault, recovery
 			}
@@ -71,8 +76,9 @@ func managementReservationHandler(store config.Store, health ManagementGuardHeal
 			listenerFaults = listeners()
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"bootFault": bootFault,
-			"recovery":  recovery, "listenerFaults": listenerFaults,
+			"bootFault":         bootFault,
+			"bootServiceFaults": bootServiceFaults,
+			"recovery":          recovery, "listenerFaults": listenerFaults,
 			"active": true, "device": r.Device, "local": r.Local.String(),
 			"sources": sources, "port": r.Port, "guard": guard, "rollbackFault": fault,
 		})

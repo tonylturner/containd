@@ -7,8 +7,13 @@ info:
     Normal authentication is a session-backed JWT from POST /auth/login (or
     POST /auth/login/mfa). Send Authorization: Bearer <token> or the HttpOnly
     containd_token cookie. Cookie-authenticated writes enforce same-origin checks.
-    Lab mode grants admin access to a supplied token (a JWT is verified when a
-    signing secret is configured). Static admin/auditor bearer tokens are a
+    Lab mode grants admin access to a supplied token. With a signing secret the
+    token must be an HS256 JWT with exp (30 seconds of leeway); no session or
+    jti is required. Caller profiles in auth, session and dashboard responses
+    report the effective role (admin in lab mode), with the subject's local
+    profile or the configured bootstrap profile for non-user subjects.
+    User-management responses report stored account roles.
+    Static admin/auditor bearer tokens are a
     fallback only when the user store or JWT secret is unavailable.
     Persisted configuration edits stage a shared candidate. Reads of editable
     settings use that candidate; commit promotes and applies it. Operational
@@ -1818,6 +1823,7 @@ components:
         scan.icsAssets replace it. The scanning gate intercepts traffic only with enabled, at least
         one scan.include entry and httpDownload or httpUpload set.
       properties:
+        backendDisabled: {type: boolean, readOnly: true, description: Runtime-only quarantine projection; disables the scanner backend without disabling scan policy. Rejected in desired configuration writes}
         cacheTtl: {type: integer, format: int64, minimum: 0, description: Native ClamAV verdict cache lifetime in nanoseconds; 0 selects 10 minutes. ICAP verdicts are never cached}
         clamav: {$ref: '#/components/schemas/ClamAVConfig'}
         enabled: {type: boolean}
@@ -1861,12 +1867,31 @@ components:
         destinations: {items: {type: string}, type: array, description: Effective destination CIDRs}
         destPorts: {items: {type: string}, type: array, description: Decimal ports or N-M ranges}
       type: object
+    ServiceFault:
+      type: object
+      additionalProperties: false
+      required: [service, kind, message]
+      properties:
+        service:
+          type: string
+          enum: [syslog, dns, ntp, av, proxy, dhcp, wireguard, openvpn]
+        kind: {type: string, enum: [config, runtime]}
+        message: {type: string, description: Sanitized diagnostic; contains no credentials}
+    ServiceFaultStatus:
+      type: object
+      additionalProperties: true
+      description: Existing service runtime fields with optional quarantine diagnostics; absence of a fault does not assert runtime readiness.
+      properties:
+        state: {type: string, enum: [faulted], description: Present while faulted}
+        fault: {$ref: '#/components/schemas/ServiceFault'}
     AVStatus:
       description: The engine's live antivirus status; the keys beside gate are the applied settings, readiness, counters and the clamd and FreshClam state.
       type: object
       additionalProperties: true
       properties:
-        available: {type: boolean, description: false when the engine cannot be reached; the entry then carries only error}
+        available: {type: boolean, description: false when the engine cannot be reached; management-known state and fault remain visible alongside error}
+        state: {type: string, enum: [faulted], description: Management-known service fault; independent of engine availability}
+        fault: {$ref: '#/components/schemas/ServiceFault'}
         error: {type: string}
         ready: {type: boolean}
         db_version: {type: string}
@@ -2379,8 +2404,8 @@ components:
         httpsListenAddr: {type: string}
         listenAddr: {type: string}
         redirectHTTPToHTTPS: {type: boolean}
-        tlsCertFile: {type: string}
-        tlsKeyFile: {type: string}
+        tlsCertFile: {type: string, description: 'Legacy default selects managed /data/tls/server.pem; nondefault paths are read-only. Same cert/key path selects an external bundle.'}
+        tlsKeyFile: {type: string, description: 'Legacy default selects managed /data/tls/server.pem; nondefault paths are read-only.'}
         trustedCAFile: {type: string}
       type: object
     NATConfig:
@@ -2425,6 +2450,26 @@ components:
         type: {type: string, enum: [HOST, SUBNET, GROUP, SERVICE]}
       type: object
       description: PATCH retains omitted/empty id, name and type and nil list fields; other supplied fields replace.
+    OpenVPNCredential:
+      type: object
+      description: One issued certificate, identified by issuer SHA-256 and serial. Revoked entries remain in the inventory.
+      required: [id, issuer, serial, name, issuedAt, expiresAt]
+      properties:
+        id: {type: string, description: Opaque issuer and serial credential ID}
+        issuer: {type: string}
+        serial: {type: string}
+        name: {type: string}
+        issuedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        revokedAt: {type: string, format: date-time}
+    OpenVPNRevokeResult:
+      type: object
+      required: [credential, revoked, applied]
+      properties:
+        credential: {$ref: '#/components/schemas/OpenVPNCredential'}
+        revoked: {type: boolean, description: Revocation is durable and is never rolled back on runtime failure}
+        applied: {type: boolean, description: The active server has restarted with the signed CRL}
+        error: {type: string, description: Present when revocation is durable but runtime is not confirmed}
     OpenVPNConfig:
       properties:
         configPath: {type: string}
@@ -2908,6 +2953,7 @@ components:
         cgroupPIDsLimit: {type: string}
     TlsInfoResponse:
       type: object
+      required: [managed]
       description: >-
         The listen addresses and enabled flags are those management binds when it
         starts with the saved configuration: CONTAIND_MGMT_ADDR and
@@ -2921,11 +2967,17 @@ components:
         is the same listener. certFile and keyFile, and the
         certificate fields, are the files the HTTPS listener serves at the next
         start: CONTAIND_TLS_CERT_FILE and CONTAIND_TLS_KEY_FILE, then the saved
-        paths, then the defaults. servedCertFile and servedKeyFile, and the
+        paths, then the defaults. When both resolve to the legacy defaults, both
+        identity file fields name /data/tls/server.pem instead. managed reports
+        this next-start identity mode, not the bound listener's mode, using the
+        same predicate as the certificate upload policy. Explicitly selecting
+        /data/tls/server.pem as both source paths is external mode despite the
+        identical file fields. servedCertFile and servedKeyFile, and the
         servedCert fields, are the files and certificate the bound HTTPS
         listener serves now, which a listener fallback to the defaults or a
         path saved after boot makes differ. All file paths are cleaned, so
-        equal strings name the same file.
+        equal strings name the same file. Served metadata uses the validated in-memory
+        public leaf; reloadError reports an invalid rotation retained as last-good.
       properties:
         httpListenAddr: {type: string}
         httpsListenAddr: {type: string}
@@ -2935,6 +2987,7 @@ components:
         boundHttpsListenAddr: {type: string, description: 'Address of the bound HTTPS listener; absent when none is bound'}
         httpListenChanges: {type: boolean, description: 'True when the next start binds another HTTP listener than the bound one, or binds one where none is bound, or none where one is'}
         httpsListenChanges: {type: boolean, description: 'True when the next start binds another HTTPS listener than the bound one, or binds one where none is bound, or none where one is'}
+        managed: {type: boolean, description: 'Always present. True when the next-start configuration and environment resolve both source paths to the legacy defaults, permitting managed uploads; false for external read-only identities, for which certificate upload returns 409. Not the bound listener mode or a guarantee that an upload succeeds.'}
         certFile: {type: string}
         keyFile: {type: string}
         certSubject: {type: string}
@@ -2942,6 +2995,7 @@ components:
         certNotAfter: {type: string}
         certDnsNames: {type: array, items: {type: string}, description: 'DNS subject alternative names of the certificate the HTTPS listener serves at the next start'}
         certIps: {type: array, items: {type: string}, description: 'IP address subject alternative names of the certificate the HTTPS listener serves at the next start'}
+        reloadError: {type: string, description: 'Latest bound identity reload error; last-good certificate remains served'}
         servedCertFile: {type: string, description: 'Certificate file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedKeyFile: {type: string, description: 'Key file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedCertSubject: {type: string, description: 'Subject of the certificate the bound HTTPS listener serves; absent when none is bound or its file holds no certificate'}
@@ -3884,6 +3938,10 @@ paths:
                       default-deny recovery ruleset instead. Without a reservation
                       that ruleset keeps the stored management listener access.
                       A safe commit, rollback or factory reset clears it.
+                  bootServiceFaults:
+                    type: array
+                    items: {$ref: '#/components/schemas/ServiceFault'}
+                    description: Service quarantine recorded at the most recent boot; never activates management recovery.
                   recovery:
                     type: string
                     description: >
@@ -4000,7 +4058,7 @@ paths:
             schema: {$ref: '#/components/schemas/Config'}
       responses:
         "200": {description: Configuration valid, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}}
-        "400": {description: Invalid configuration or reserved management path conflict, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: 'Invalid configuration or reserved management path conflict; unknown, case-mismatched or duplicate top-level keys are rejected with the key named in detail', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
 
   /config:
@@ -4023,6 +4081,7 @@ paths:
       responses:
         "200": {description: 'Configuration staged, not activated', content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}},
           headers: {X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+        "400": {description: 'Invalid JSON or configuration; unknown, case-mismatched or duplicate top-level keys are rejected with the key named in detail', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Stages the shared candidate; commit to apply.
 
@@ -4052,7 +4111,7 @@ paths:
         "200": {description: Candidate saved, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}, headers: {
             X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
         "400":
-          description: Invalid JSON or configuration; unsupported industrial references are rejected atomically with the rule or decoder key named
+          description: Invalid JSON or configuration; unknown, case-mismatched or duplicate top-level keys are rejected with the key named in detail; unsupported industrial references are rejected atomically with the rule or decoder key named
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -4143,6 +4202,9 @@ paths:
         as for a candidate, including the immutable reserved management path.
         Reservation conflicts are 400 errors naming the field; running and
         candidate are unchanged. Success sets `X-Containd-Config: staged`.
+        Top-level keys must be exact and unique. Only imports accept the retired
+        export key for schemas 0.1.0 through 0.1.7 (missing means 0.1.0),
+        discarding it during migration. Newer schemas with export are rejected.
       tags: [Config]
       requestBody:
         required: true
@@ -4158,7 +4220,7 @@ paths:
           headers:
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400":
-          description: Invalid JSON or configuration; unsupported industrial references are rejected atomically with the rule or decoder key named
+          description: Invalid JSON or configuration; unknown, case-mismatched or duplicate top-level keys are rejected with the key named in detail; export is accepted only for schemas 0.1.0 through 0.1.7; unsupported industrial references are rejected atomically with the rule or decoder key named
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -6980,6 +7042,10 @@ paths:
                     items: {$ref: '#/components/schemas/ICSCoverageRule'}
                     description: Static coverage of the candidate, in rule ID order; empty without ICS rules.
                   candidateError: {type: string, description: Why the candidate does not validate.}
+                  serviceFaults:
+                    type: array
+                    items: {$ref: '#/components/schemas/ServiceFault'}
+                    description: Quarantined candidate services omitted from the effective coverage projection.
                   applied:
                     type: array
                     items: {$ref: '#/components/schemas/ICSCoverageRule'}
@@ -7063,6 +7129,10 @@ paths:
                     description: Static coverage of the candidate's ICS rules, in rule ID order; omitted when there are none.
                   engineStatus: {$ref: '#/components/schemas/EngineRulesetStatus'}
                   engineStatusError: {type: string}
+                  serviceFaults:
+                    type: array
+                    items: {$ref: '#/components/schemas/ServiceFault'}
+                    description: Quarantined services omitted from the effective candidate ruleset; empty when none.
         '400':
           description: Invalid candidate configuration
         '502':
@@ -7112,13 +7182,15 @@ paths:
               schema: {type: object, additionalProperties: {$ref: '#/components/schemas/ConduitResult'}}
   /system/tls/cert:
     post:
-      summary: Replace TLS certificate and key files (admin)
+      summary: Atomically replace the managed TLS bundle (admin)
       tags: [System]
       description: >-
-        Writes a validated PEM certificate and key to the files the HTTPS listener
-        serves at the next start (certFile and keyFile of GET /system/tls), under
-        /data; does not change saved listener paths. The bound HTTPS listener
-        reloads the files it serves at its next TLS handshake after they change.
+        Validates the certificate chain and matching key, then atomically publishes
+        /data/tls/server.pem (0600) with one durable rename. Both resolved paths
+        must select the legacy defaults; nondefault external paths are read-only.
+        Does not change saved listener paths. The bound listener reads the bundle
+        once on reload. A pre-rename failure preserves the old bundle; a parent
+        directory sync failure returns 500 with commit uncertain, without rollback.
       requestBody:
         required: true
         content:
@@ -7127,8 +7199,8 @@ paths:
       responses:
         '200':
           description: >-
-            Files written. Status updated means the bound HTTPS listener serves
-            these files and presents the new certificate from its next handshake.
+            Bundle published. Status updated means the bound HTTPS listener serves
+            this bundle and presents the new certificate from its next handshake.
             Status stored means it serves other files, or no HTTPS listener is
             bound, and the new certificate is served from the next management
             start; the warnings array and X-Containd-Warnings say so.
@@ -7139,10 +7211,10 @@ paths:
               schema: {$ref: '#/components/schemas/StatusResponse'}
         '409':
           description: >-
-            Nothing written. The resolved certificate or key path is outside /data
-            (the error names the path and its selecting environment variable,
-            config field, or default), or only one of the two is a file the bound
-            HTTPS listener serves, which would pair the new file with the served one.
+            Nothing written. A resolved nondefault certificate or key path selects
+            read-only external mode, including paths under /data. The error names
+            the paths and their selecting overrides, and explains how to return
+            to the managed bundle.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -7636,9 +7708,13 @@ paths:
           description: Account restricted
   /services/vpn/openvpn/profile:
     post:
-      summary: Upload foreground OpenVPN profile and stage its path (admin)
+      summary: Upload bounded OpenVPN client profile and stage its path (admin)
       tags: [Services]
-      description: Stages the shared candidate; commit to apply.
+      description: >-
+        Stages the shared candidate; commit to apply. Uses the runtime's bounded
+        option and arity allowlist with inline CA, certificate, private key and
+        TLS key material only (maximum 1 MiB). Scripts, hooks, includes, plugins,
+        management directives, external file references and unknown options are rejected.
       requestBody:
         required: true
         content:
@@ -7661,10 +7737,17 @@ paths:
                   vpn: {$ref: '#/components/schemas/VPNConfig'}
           headers:
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
+        '400':
+          description: Invalid or unsupported profile
+        '401':
+          description: Authentication required
+        '403':
+          description: Administrator required
   /services/vpn/openvpn/clients:
     get:
       summary: List issued OpenVPN clients (admin)
       tags: [Services]
+      description: Reads the service-owned inventory, including revoked credentials; never issues credentials or consults the candidate.
       responses:
         '200':
           description: Success
@@ -7672,12 +7755,25 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [clients, revocationsApplied]
                 properties:
-                  clients: {type: array, items: {type: string}}
+                  clients: {type: array, items: {$ref: '#/components/schemas/OpenVPNCredential'}}
+                  revocationsApplied:
+                    type: boolean
+                    description: False only when revoked credentials exist and a managed server is running with a loaded CRL number different from the current inventory CRL number (including an unconfirmed loaded number after failed publication); true otherwise, including when no managed server is running. The next managed-server start loads the current CRL.
+        '401':
+          description: Authentication required
+        '403':
+          description: Administrator required
+        '503':
+          description: Credential authority unavailable
     post:
       summary: Issue OpenVPN client credentials (admin)
       tags: [Services]
-      description: Uses running managed-server settings; creates credential artifacts immediately.
+      description: >-
+        Uses the active managed-server authority, not the candidate. Creates a
+        credential immediately. Names must be exact lowercase filename-safe
+        names (1-64 characters); an active name cannot be issued again until revoked.
       requestBody:
         required: true
         content:
@@ -7685,32 +7781,89 @@ paths:
             schema:
               type: object
               properties:
-                name: {type: string}
+                name: {type: string, minLength: 1, maxLength: 64}
               required: [name]
       responses:
         '200':
           description: Success
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  name: {type: string}
-  /services/vpn/openvpn/clients/{name}:
+              schema: {$ref: '#/components/schemas/OpenVPNCredential'}
+        '400':
+          description: Invalid JSON or client name
+        '401':
+          description: Authentication required
+        '403':
+          description: Administrator required
+        '409':
+          description: Client name already issued or managed server not active
+        '500':
+          description: Authority or certificate failure
+        '503':
+          description: Credential authority unavailable
+  /services/vpn/openvpn/clients/{id}:
     get:
       summary: Download OpenVPN client profile (admin)
       tags: [Services]
+      description: Read-only download by credential ID. Never issues, repairs or renews credentials. Names are not aliases for IDs.
       responses:
         '200':
           description: Client profile with inline credentials
           content:
             application/x-openvpn-profile:
               schema: {type: string}
+        '401':
+          description: Authentication required
+        '403':
+          description: Administrator required
+        '404':
+          description: Unknown credential ID
+        '409':
+          description: Credential revoked or managed server not active
+        '503':
+          description: Credential authority unavailable
       parameters:
-      - name: name
+      - name: id
         in: path
         required: true
         schema: {type: string}
+  /services/vpn/openvpn/clients/{id}/revoke:
+    post:
+      summary: Revoke OpenVPN client credential (admin)
+      tags: [Services]
+      description: >-
+        Idempotently persists revocation and a signed CRL, then restarts the
+        active managed server. All clients reconnect once. Candidate settings
+        cannot select the issuer. Runtime failure never undoes revocation:
+        a non-2xx response with revoked=true and applied=false means durable
+        revocation but runtime not confirmed.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: Revoked and runtime confirmed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OpenVPNRevokeResult'}
+        '401':
+          description: Authentication required
+        '403':
+          description: Administrator required
+        '404':
+          description: Unknown credential ID
+        '500':
+          description: Authority failed before durable revocation
+        '503':
+          description: Credential authority unavailable, or revoked but runtime not confirmed
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/OpenVPNRevokeResult'}
+                - {$ref: '#/components/schemas/ErrorResponse'}
   /services/av/update:
     post:
       summary: Start AV definition update (admin)
@@ -7824,6 +7977,13 @@ paths:
         engine's live antivirus status (ready, db_version, counters) with the
         scanning gate under gate; when the engine cannot be reached it is
         {"available": false, "error": ...}.
+        faults is a sorted array of per-service diagnostics, empty when none.
+        Each faulted service also has state=faulted and fault. WireGuard and
+        OpenVPN have independent entries; vpn is retained as an aggregate.
+        The vpn entry includes openvpn_running (supervised process)
+        and openvpn_connected (initialization completed, cleared on soft restart
+        or exit). A running client may still be connecting; this is not a fault.
+        AV fault fields are merged without replacing engine-observed status.
         syslog.audit reports audit-record forwarding: enabled, sent_total,
         failed_total, last_error, last_flush, backlog, and forwarders, a list
         of {forwarder, last_id, backlog, last_error, last_sent}.
@@ -7840,7 +8000,19 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+                required: [faults]
                 properties:
+                  faults:
+                    type: array
+                    items: {$ref: '#/components/schemas/ServiceFault'}
+                  syslog: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  dns: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  ntp: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  proxy: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  dhcp: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  vpn: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  wireguard: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  openvpn: {$ref: '#/components/schemas/ServiceFaultStatus'}
                   av: {$ref: '#/components/schemas/AVStatus'}
 
 # Trusted engine operations, on the engine listener only; not public API paths.

@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -19,13 +20,23 @@ func managementConflict(field string) error {
 // reads. Call before persistence and before replay side effects. Config.Validate
 // remains the ordinary structural validator and must also be called.
 func ValidateManagementReservation(c *Config, r *mgmtpath.Reservation) error {
+	if err := validateManagementCore(c, r); err != nil {
+		return err
+	}
+	if c == nil {
+		return nil
+	}
+	return ValidateManagementServices(c.Services, r)
+}
+
+func validateManagementCore(c *Config, r *mgmtpath.Reservation) error {
 	if r == nil {
 		return nil
 	}
 	if c == nil {
 		return managementConflict("config")
 	}
-	checks := []error{ValidateManagementInterfaces(c.Interfaces, r), ValidateManagementRouting(c.Routing, r), ValidateManagementServices(c.Services, r), ValidateManagementNAT(c.Firewall.NAT, c.Interfaces, r), ValidateManagementListeners(c.System, r), ValidateManagementDataPlane(c.DataPlane, r)}
+	checks := []error{ValidateManagementInterfaces(c.Interfaces, r), ValidateManagementRouting(c.Routing, r), ValidateManagementNAT(c.Firewall.NAT, c.Interfaces, r), ValidateManagementListeners(c.System, r), ValidateManagementDataPlane(c.DataPlane, r)}
 	for _, err := range checks {
 		if err != nil {
 			return err
@@ -173,51 +184,73 @@ func ValidateManagementServices(s ServicesConfig, r *mgmtpath.Reservation) error
 	if r == nil {
 		return nil
 	}
-	if err := ValidateManagementWireGuard(s.VPN.WireGuard, r); err != nil {
-		return err
-	}
-	if o := s.VPN.OpenVPN; o.Server != nil {
-		p, err := netip.ParsePrefix(strings.TrimSpace(o.Server.TunnelCIDR))
-		// OpenVPN's `server network mask` assigns network+1, not the supplied host bits.
-		if err == nil && (p.Contains(r.Local.Addr()) || r.IsSource(p.Masked().Addr().Next())) {
-			return managementConflict("services.vpn.openvpn.server.tunnelCIDR")
-		}
-		if o.Enabled && strings.EqualFold(o.Server.Proto, "tcp") && managementPort(o.Server.ListenPort, 1194) == int(r.Port) {
-			return managementConflict("services.vpn.openvpn.server.listenPort")
+	var errs []error
+	for _, name := range ServiceNames() {
+		if err := validateManagementService(s, name, r); err != nil {
+			errs = append(errs, &ServiceConfigError{Service: name, Err: err})
 		}
 	}
-	if s.Proxy.Forward.Enabled && managementPort(s.Proxy.Forward.ListenPort, 3128) == int(r.Port) {
-		return managementConflict("services.proxy.forward.listenPort")
+	return errors.Join(errs...)
+}
+
+func validateManagementService(s ServicesConfig, name string, r *mgmtpath.Reservation) error {
+	if r == nil {
+		return nil
 	}
-	if s.Proxy.Reverse.Enabled {
-		for i, v := range s.Proxy.Reverse.Sites {
-			if v.ListenPort == int(r.Port) {
-				return managementConflict(fmt.Sprintf("services.proxy.reverse.sites[%d].listenPort", i))
+	switch name {
+	case ServiceWireGuard:
+		return ValidateManagementWireGuard(s.VPN.WireGuard, r)
+	case ServiceOpenVPN:
+		if o := s.VPN.OpenVPN; o.Server != nil {
+			p, err := netip.ParsePrefix(strings.TrimSpace(o.Server.TunnelCIDR))
+			// OpenVPN's `server network mask` assigns network+1, not the supplied host bits.
+			if err == nil && (p.Contains(r.Local.Addr()) || r.IsSource(p.Masked().Addr().Next())) {
+				return managementConflict("services.vpn.openvpn.server.tunnelCIDR")
+			}
+			if o.Enabled && strings.EqualFold(o.Server.Proto, "tcp") && managementPort(o.Server.ListenPort, 1194) == int(r.Port) {
+				return managementConflict("services.vpn.openvpn.server.listenPort")
 			}
 		}
-	}
-	if s.DNS.Enabled && managementPort(s.DNS.ListenPort, 53) == int(r.Port) {
-		return managementConflict("services.dns.listenPort")
-	}
-	if s.DHCP.Enabled {
-		protected := append([]netip.Addr{r.Local.Addr()}, r.Sources...)
-		for i, p := range s.DHCP.Pools {
-			lo, e1 := netip.ParseAddr(p.Start)
-			hi, e2 := netip.ParseAddr(p.End)
-			if e1 == nil && e2 == nil {
-				for _, a := range protected {
-					if lo.Compare(a) <= 0 && hi.Compare(a) >= 0 {
-						return managementConflict(fmt.Sprintf("services.dhcp.pools[%d]", i))
-					}
+
+	case ServiceProxy:
+		if s.Proxy.Forward.Enabled && managementPort(s.Proxy.Forward.ListenPort, 3128) == int(r.Port) {
+			return managementConflict("services.proxy.forward.listenPort")
+		}
+		if s.Proxy.Reverse.Enabled {
+			for i, v := range s.Proxy.Reverse.Sites {
+				if v.ListenPort == int(r.Port) {
+					return managementConflict(fmt.Sprintf("services.proxy.reverse.sites[%d].listenPort", i))
 				}
 			}
 		}
-		for i, v := range s.DHCP.Reservations {
-			a, err := netip.ParseAddr(v.IP)
-			if err == nil && (a == r.Local.Addr() || r.IsSource(a)) {
-				return managementConflict(fmt.Sprintf("services.dhcp.reservations[%d].ip", i))
+
+	case ServiceDNS:
+		if s.DNS.Enabled && managementPort(s.DNS.ListenPort, 53) == int(r.Port) {
+			return managementConflict("services.dns.listenPort")
+		}
+
+	case ServiceDHCP:
+		if s.DHCP.Enabled {
+			protected := append([]netip.Addr{r.Local.Addr()}, r.Sources...)
+			for i, p := range s.DHCP.Pools {
+				lo, e1 := netip.ParseAddr(p.Start)
+				hi, e2 := netip.ParseAddr(p.End)
+				if e1 == nil && e2 == nil {
+					for _, a := range protected {
+						if lo.Compare(a) <= 0 && hi.Compare(a) >= 0 {
+							return managementConflict(fmt.Sprintf("services.dhcp.pools[%d]", i))
+						}
+					}
+				}
+			}
+			for i, v := range s.DHCP.Reservations {
+				a, err := netip.ParseAddr(v.IP)
+				if err == nil && (a == r.Local.Addr() || r.IsSource(a)) {
+					return managementConflict(fmt.Sprintf("services.dhcp.reservations[%d].ip", i))
+				}
 			}
 		}
+
 	}
 	return nil
 }

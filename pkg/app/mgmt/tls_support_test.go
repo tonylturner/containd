@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"go.uber.org/zap"
 )
 
 func TestResolveTLSFiles(t *testing.T) {
@@ -112,9 +113,7 @@ func TestCertReloaderServesReplacedFiles(t *testing.T) {
 		}
 		return cert.Certificate[0]
 	}
-	if _, _, err := ensureSelfSignedTLSFiles(certFile, keyFile, nil); err != nil {
-		t.Fatal(err)
-	}
+	sshTestKeyPair(t, dir, "server")
 	first := served()
 	_, _, next := sshTestKeyPair(t, dir, "next")
 	for _, name := range []string{"next.crt", "next.key"} {
@@ -137,5 +136,79 @@ func TestCertReloaderServesReplacedFiles(t *testing.T) {
 	}
 	if got := served(); bytes.Equal(got, first) || !bytes.Equal(got, next.Certificate[0]) {
 		t.Fatal("reloader kept serving the replaced certificate")
+	}
+}
+
+// Startup never repairs or creates external identities, even under /data.
+func TestTLSExternalStartupIsReadOnly(t *testing.T) {
+	for _, kind := range []string{"bundle", "split", "mismatch", "missing"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			cert, key, err := selfSignedTLS(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, k := filepath.Join(dir, "server.crt"), filepath.Join(dir, "server.key")
+			if kind == "bundle" {
+				c = filepath.Join(dir, "server.pem")
+				k = c
+				cert = append(cert, key...)
+			}
+			if kind == "mismatch" {
+				_, key, err = selfSignedTLS(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if kind != "missing" {
+				if err := os.WriteFile(c, cert, 0o640); err != nil {
+					t.Fatal(err)
+				}
+				if k != c {
+					if err := os.WriteFile(k, key, 0o640); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			t.Setenv("CONTAIND_TLS_CERT_FILE", c)
+			t.Setenv("CONTAIND_TLS_KEY_FILE", k)
+			cfg := config.DefaultConfig()
+			cfg.System.Mgmt.EnableHTTPS = boolPtr(true)
+			lc, err := resolveMgmtListenerConfig(zap.NewNop().Sugar(), cfg, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			valid := kind == "bundle" || kind == "split"
+			if lc.enableHTTPS != valid {
+				t.Fatalf("HTTPS enabled=%v for %s", lc.enableHTTPS, kind)
+			}
+			if kind == "missing" {
+				entries, err := os.ReadDir(dir)
+				if err != nil || len(entries) != 0 {
+					t.Fatal("created external identity")
+				}
+				return
+			}
+			for path, want := range map[string][]byte{c: cert} {
+				got, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(got, want) {
+					t.Fatal("external bytes changed")
+				}
+				st, err := os.Stat(path)
+				if err != nil || st.Mode().Perm() != 0o640 {
+					t.Fatal("external permissions changed")
+				}
+			}
+			if c != k {
+				got, err := os.ReadFile(k)
+				if err != nil || !bytes.Equal(got, key) {
+					t.Fatal("external key changed")
+				}
+				st, err := os.Stat(k)
+				if err != nil || st.Mode().Perm() != 0o640 {
+					t.Fatal("external key permissions changed")
+				}
+			}
+		})
 	}
 }

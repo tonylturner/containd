@@ -114,10 +114,11 @@ func (s *SQLiteStore) RedeemEnrollMFA(ctx context.Context, id, userID, secret, c
 	if u.MFAEnabled {
 		return ErrMFAChallenge
 	}
-	if !ValidateTOTP(secret, code, now) {
+	step, ok := matchTOTPStep(secret, code, now)
+	if !ok {
 		return ErrInvalidTOTP
 	}
-	revoked, err := updateCredentialTx(ctx, tx, "enable totp", userID, FactorTOTP, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_totp_last_step=0, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, now.Unix(), userID)
+	revoked, err := updateCredentialTx(ctx, tx, "enable totp", userID, FactorTOTP, `UPDATE users SET mfa_totp_secret=?, mfa_totp_enabled=1, mfa_totp_last_step=?, mfa_grace_until=0, updated_at=? WHERE id=?`, secret, step, now.Unix(), userID)
 	if err != nil {
 		return err
 	}

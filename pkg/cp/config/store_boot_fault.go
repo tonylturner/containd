@@ -4,6 +4,7 @@ package config
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -59,4 +60,41 @@ func CheckManagementBootFault(ctx context.Context, store Store) error {
 		return fmt.Errorf("%w: %s", ErrManagementBootFault, fault)
 	}
 	return nil
+}
+
+// SetServiceBootFaults records service quarantine separately from the boot gate.
+// Faults never make management recovery active.
+func (s *SQLiteStore) SetServiceBootFaults(ctx context.Context, faults []ServiceFault) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := json.Marshal(faults)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `REPLACE INTO configs (key,data,updated_at) VALUES (?,?,?)`, "service_boot_faults", string(data), time.Now().Unix())
+	return err
+}
+
+// ServiceBootFaultsForStore returns the most recent boot's quarantine record.
+func ServiceBootFaultsForStore(ctx context.Context, store Store) ([]ServiceFault, error) {
+	out := []ServiceFault{}
+	s, ok := store.(*SQLiteStore)
+	if !ok {
+		return out, nil
+	}
+	var data string
+	err := s.db.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, "service_boot_faults").Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(data), &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []ServiceFault{}
+	}
+	return out, nil
 }

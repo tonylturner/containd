@@ -67,6 +67,9 @@ Two working syslog paths are distinct:
   `CONTAIND_LOG_SYSLOG_PROTO` add a remote sink to shared structured loggers.
   The default protocol is UDP; TCP and Unix sockets are also supported. These
   logs are not the complete DPI event stream. Verify reception at the collector.
+  If syslog initialization fails, application loggers keep stdout logging and
+  report the failure once per logger initialization to stderr, even when the
+  configured log level would suppress a warning.
 
 ### Audit records over syslog
 

@@ -41,8 +41,11 @@ func newEvidenceStore(t *testing.T) (*audit.ObservedStore, *evidenceFailingStore
 
 type evidenceServices struct{ statuses []evidence.ForwardStatus }
 
-func (s evidenceServices) Apply(context.Context, config.ServicesConfig) error { return nil }
-func (s evidenceServices) ForwardStatus() []evidence.ForwardStatus            { return s.statuses }
+func (s evidenceServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+	return cfg, nil
+}
+func (s evidenceServices) RecordEngineFaults([]config.ServiceFault) {}
+func (s evidenceServices) ForwardStatus() []evidence.ForwardStatus  { return s.statuses }
 
 func TestEvidenceStatusAuthenticationAndNoCollector(t *testing.T) {
 	t.Setenv("CONTAIND_LAB_MODE", "0")

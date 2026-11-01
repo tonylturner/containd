@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	httpapi "github.com/tonylturner/containd/api/http"
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -307,4 +309,85 @@ func otherCertificate(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return der
+}
+
+func TestRuntimeRecordTracksPublicBundleSnapshot(t *testing.T) {
+	dir := isolateRuntimeRecord(t)
+	bundle := filepath.Join(dir, "server.pem")
+	cert, key, err := selfSignedTLS(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgmttls.Publish(bundle, cert, key); err != nil {
+		t.Fatal(err)
+	}
+	loader := mgmttls.NewLoader(bundle, bundle)
+	if _, err := loader.GetCertificate(nil); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	srv.TLS = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: loader.GetCertificate}
+	srv.StartTLS()
+	defer srv.Close()
+	config.SetBoundManagementListeners(config.ManagementListeners{HTTPS: listener(srv)})
+	p := &runtimeRecordPublisher{path: RuntimeRecordPath(), served: httpapi.ServedManagement{CertFile: bundle, KeyFile: bundle, TLS: loader}}
+	if err := p.publish(); err != nil {
+		t.Fatal(err)
+	}
+	loader.OnChange(func() {
+		if err := p.publish(); err != nil {
+			t.Error(err)
+		}
+	})
+	defer loader.OnChange(nil)
+	base, client, err := LocalManagementAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func() {
+		t.Helper()
+		resp, err := client.Get(base + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatal(resp.Status)
+		}
+	}
+	request()
+	first, err := readRuntimeRecord(p.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, key, err = selfSignedTLS(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgmttls.Publish(bundle, cert, key); err != nil {
+		t.Fatal(err)
+	}
+	// The listener and record adopt the same snapshot before the local CLI dials.
+	if _, err := loader.GetCertificate(nil); err != nil {
+		t.Fatal(err)
+	}
+	second, err := readRuntimeRecord(p.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Served.LeafPEM == "" || second.Served.LeafPEM == first.Served.LeafPEM {
+		t.Fatal("record did not track rotation")
+	}
+	request()
+	if err := os.WriteFile(bundle, []byte("invalid external rotation"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request() // pins the retained public snapshot rather than rereading invalid files
+	data, err := os.ReadFile(p.path)
+	if err != nil || strings.Contains(string(data), "PRIVATE KEY") {
+		t.Fatal("runtime record exposed a key")
+	}
+	if err := p.remove(); err != nil {
+		t.Fatal(err)
+	}
 }
