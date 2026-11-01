@@ -422,18 +422,24 @@ for (const command of [false, true]) {
     const writes: Array<{ method: string; path: string; body: unknown }> = [];
     await mockAPI(page, writes);
     await page.goto("/firewall");
-    await page.getByPlaceholder("id (e.g. mb-allow)").fill(command ? "cc-rtu-command" : "cc-rtu-gi");
-    await page.getByRole("checkbox", { name: /ICS Protocol Filter/ }).check();
-    await page.locator("select").filter({ has: page.locator('option[value="iec104"]') }).selectOption("iec104");
-    await expect(page.getByPlaceholder("0x02, 0x04, 0x66")).toHaveCount(0);
-    await page.getByPlaceholder("46, 100").fill(command ? "45" : "100");
-    await page.getByRole("button", { name: command ? "control" : "system", exact: true }).click();
+    const disclosure = page.getByRole("button", { name: "Create rule", exact: true })
+      .and(page.locator('[aria-controls="create-rule-panel"]'));
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    const form = page.locator("#create-rule-panel");
+    await form.getByPlaceholder("id (e.g. mb-allow)").fill(command ? "cc-rtu-command" : "cc-rtu-gi");
+    await form.getByRole("checkbox", { name: /ICS Protocol Filter/ }).check();
+    await form.locator("select").filter({ has: page.locator('option[value="iec104"]') }).selectOption("iec104");
+    await expect(form.getByPlaceholder("0x02, 0x04, 0x66")).toHaveCount(0);
+    await form.getByPlaceholder("46, 100").fill(command ? "45" : "100");
+    await form.getByRole("button", { name: command ? "control" : "system", exact: true }).click();
     if (command) {
       await showAdvancedSelectors(page);
-      await page.getByLabel("Command states", { exact: true }).fill("0");
-      await page.getByLabel("Command qualifiers (QU)", { exact: true }).fill("0");
+      await form.getByLabel("Command states", { exact: true }).fill("0");
+      await form.getByLabel("Command qualifiers (QU)", { exact: true }).fill("0");
     }
-    await page.getByRole("button", { name: "Create rule" }).click();
+    await form.getByRole("button", { name: "Create rule", exact: true }).click();
     await expect.poll(() => writes.length).toBe(1);
     expect(writes[0].method).toBe("POST");
     expect((writes[0].body as { ics: unknown }).ics).toEqual({
