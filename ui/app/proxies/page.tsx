@@ -233,17 +233,22 @@ export default function ProxiesPage() {
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-6 w-1/2" />
             </div>
+          ) : !proxy ? (
+            <div role="status" className="mt-3 text-sm text-(--text-muted)">
+              Unknown — live proxy status unavailable.
+              <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+            </div>
           ) : (
             <>
               <p className="mt-2 text-xs text-(--text-muted)">
-                Live running: {proxy?.envoy_running ? "yes" : "no"}{" "}
+                Live running: {typeof proxy?.envoy_running === "boolean" ? (proxy.envoy_running ? "yes" : "no") : "Unknown"}{" "}
                 {proxy?.envoy_pid ? `(pid ${proxy.envoy_pid})` : ""}
               </p>
               <p className="text-xs text-(--text-muted)">
-                Rate: {(envoy?.rate_per_min ?? 0).toFixed(1)} / min
+                Rate: {typeof envoy?.rate_per_min === "number" ? envoy.rate_per_min.toFixed(1) : "Unknown"} / min
               </p>
               <p className="text-xs">
-                Errors: {(envoy?.errors_rate_per_min ?? 0).toFixed(1)} / min
+                Errors: {typeof envoy?.errors_rate_per_min === "number" ? envoy.errors_rate_per_min.toFixed(1) : "Unknown"} / min
               </p>
               <p className="text-xs text-(--text-dim)">
                 Telemetry: access logs when enabled.
@@ -280,17 +285,22 @@ export default function ProxiesPage() {
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-6 w-1/2" />
             </div>
+          ) : !proxy ? (
+            <div role="status" className="mt-3 text-sm text-(--text-muted)">
+              Unknown — live proxy status unavailable.
+              <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+            </div>
           ) : (
             <>
               <p className="mt-2 text-xs text-(--text-muted)">
-                Live running: {proxy?.nginx_running ? "yes" : "no"}{" "}
+                Live running: {typeof proxy?.nginx_running === "boolean" ? (proxy.nginx_running ? "yes" : "no") : "Unknown"}{" "}
                 {proxy?.nginx_pid ? `(pid ${proxy.nginx_pid})` : ""}
               </p>
               <p className="text-xs text-(--text-muted)">
-                Rate: {(nginx?.rate_per_min ?? 0).toFixed(1)} / min
+                Rate: {typeof nginx?.rate_per_min === "number" ? nginx.rate_per_min.toFixed(1) : "Unknown"} / min
               </p>
               <p className="text-xs">
-                Errors: {(nginx?.errors_rate_per_min ?? 0).toFixed(1)} / min
+                Errors: {typeof nginx?.errors_rate_per_min === "number" ? nginx.errors_rate_per_min.toFixed(1) : "Unknown"} / min
               </p>
               <p className="text-xs text-(--text-dim)">
                 Telemetry: access logs from published apps.

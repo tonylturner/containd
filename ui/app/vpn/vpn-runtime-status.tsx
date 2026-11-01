@@ -25,16 +25,17 @@ export function VPNRuntimeStatusCard({
         </div>
       ) : (
         <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
+          {!svcStatus && <p role="status" className="md:col-span-2">Unknown — live VPN status unavailable. Use Refresh to retry.</p>}
           <div>
             WireGuard:{" "}
             <span className={wireguardFaulted ? "text-amber" : "text-(--text)"}>
-              {wireguardFaulted ? "faulted" : !svcStatus ? "unavailable" : svcStatus.wireguard_enabled ? "enabled" : "disabled"}
+              {wireguardFaulted ? "faulted" : typeof svcStatus?.wireguard_enabled !== "boolean" ? "Unknown" : svcStatus.wireguard_enabled ? "enabled" : "disabled"}
             </span>
           </div>
           <div>
             OpenVPN:{" "}
             <span className={openvpnFaulted ? "text-amber" : "text-(--text)"}>
-              {openvpnFaulted ? "faulted" : !svcStatus ? "unavailable" : svcStatus.openvpn_running ? "running" : "stopped"}
+              {openvpnFaulted ? "faulted" : typeof svcStatus?.openvpn_running !== "boolean" ? "Unknown" : svcStatus.openvpn_running ? "running" : "stopped"}
             </span>
             {svcStatus?.openvpn_pid ? <span className="text-(--text-muted)"> (pid {svcStatus.openvpn_pid})</span> : null}
           </div>
@@ -50,10 +51,10 @@ export function VPNRuntimeStatusCard({
             </>
           ) : null}
           <div className="md:col-span-2">
-            Rate: <span className="text-(--text)">{(svcStatus?.rate_per_min ?? 0).toFixed(1)} / min</span>
+            Rate: <span className="text-(--text)">{typeof svcStatus?.rate_per_min === "number" ? svcStatus.rate_per_min.toFixed(1) : "Unknown"} / min</span>
           </div>
           <div className="md:col-span-2">
-            Errors: <span>{(svcStatus?.errors_rate_per_min ?? 0).toFixed(1)} / min</span>
+            Errors: <span>{typeof svcStatus?.errors_rate_per_min === "number" ? svcStatus.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
           </div>
           <div className="md:col-span-2">
             OpenVPN config: <span className="text-(--text)">{svcStatus?.openvpn_config_path || "n/a"}</span>

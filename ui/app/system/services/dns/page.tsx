@@ -133,24 +133,29 @@ export default function DNSPage() {
           <div className="mt-3">
             <Skeleton className="h-20 w-full" />
           </div>
+        ) : !status ? (
+          <div role="status" className="mt-3 text-sm text-(--text-muted)">
+            Unknown — live service status unavailable.
+            <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+          </div>
         ) : (
           <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
             <div>
               Installed:{" "}
               <span className="text-(--text)">
-                {status?.installed ? "yes" : "no"}
+                {typeof status?.installed === "boolean" ? (status.installed ? "yes" : "no") : "Unknown"}
               </span>
             </div>
             <div>
               Running:{" "}
-              <span className="text-(--text)">{status?.running ? "yes" : "no"}</span>
+              <span className="text-(--text)">{typeof status?.running === "boolean" ? (status.running ? "yes" : "no") : "Unknown"}</span>
               {status?.pid ? <span className="text-(--text-muted)"> (pid {status.pid})</span> : null}
             </div>
             <div>
-              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
             </div>
             <div>
-              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
             </div>
             <div className="md:col-span-2">
               Config:{" "}

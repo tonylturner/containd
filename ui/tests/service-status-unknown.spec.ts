@@ -1,0 +1,55 @@
+import { expect, test } from "@playwright/test";
+
+const meter = { sparkline: [], count: 0, rate_per_min: 0, errors_sparkline: [], errors_count: 0, errors_rate_per_min: 0 };
+
+for (const [path, heading, entry] of [
+  ["/system/services/dns/", "Live runtime status", "dns"],
+  ["/system/services/ntp/", "Live runtime status", "ntp"],
+  ["/dhcp/", "Live runtime status", "dhcp"],
+  ["/proxies/", "Forward proxy (Envoy)", "proxy"],
+  ["/proxies/", "Reverse proxy (Nginx)", "proxy"],
+  ["/vpn/", "Runtime status", "vpn"],
+] as const) {
+  test(`${heading} on ${path} keeps unavailable telemetry unknown and refresh recovers`, async ({ page }) => {
+    let available = false;
+    await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
+    await page.route("**/api/v1/**", async (route) => {
+      const p = new URL(route.request().url()).pathname.replace("/api/v1", "");
+      const user = { id: "admin", username: "containd", role: "admin" };
+      let body: unknown = {};
+      if (["/auth/me", "/auth/session"].includes(p)) body = user;
+      if (["/zones", "/interfaces", "/interfaces/state", "/assets"].includes(p)) body = [];
+      if (p === "/config/diff") body = { changed: false };
+      if (p === "/services/status") {
+        if (!available) return route.fulfill({ status: 503, json: { error: "service status offline" } });
+        body = {
+          faults: [], av: { available: false, error: "scanner offline" },
+          [entry]: { ...meter, installed: false, running: false, enabled: false, pools: 0, reservations: 0, listen_ifaces: 0,
+            envoy_running: false, nginx_running: false, wireguard_enabled: false, openvpn_running: false },
+          envoy: { ...meter }, nginx: { ...meter },
+        };
+      }
+      if (p === "/services/dns") body = { enabled: true, upstreamServers: [] };
+      if (p === "/services/ntp") body = { enabled: true, servers: [] };
+      if (p === "/services/dhcp") body = { enabled: true, pools: [], reservations: [] };
+      if (p === "/services/vpn") body = { wireguard: { enabled: false }, openvpn: { enabled: false } };
+      if (p === "/services/proxy/forward") body = { enabled: true };
+      if (p === "/services/proxy/reverse") body = { enabled: true, sites: [] };
+      await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    });
+    const loaded = page.waitForResponse((r) => r.url().includes("/api/v1/services/status"));
+    await page.goto(path);
+    await loaded;
+    const panel = page.getByRole("heading", { name: heading, exact: true }).locator("xpath=ancestor::section[1]");
+    await expect(panel).toContainText("Unknown");
+    await expect(panel).not.toContainText(/(?:Running|Enabled|Live running):\s*no|(?:Rate|Errors|Pools|Reservations|Listen ifaces):\s*0/);
+    available = true;
+    await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
+    await expect(panel).toContainText(/(?:Rate|Errors):\s*0.0/);
+    await expect(panel).not.toContainText("status unavailable");
+    available = false;
+    await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
+    await expect(panel).toContainText("Unknown");
+    await expect(panel).not.toContainText(/(?:Rate|Errors):\s*0.0/);
+  });
+}
