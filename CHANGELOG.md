@@ -7,8 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.37] - 2026-11-01
+
 ### Upgrade notes
 
+- Back up before upgrading. The configuration schema advances from 0.1.9 to
+  0.1.10. 0.1.36 and earlier cannot read schema 0.1.10; restore a pre-upgrade
+  backup to downgrade.
+- Off-loopback deployments (split, or combined with a wildcard/interface
+  `CONTAIND_ENGINE_ADDR`) must set the same dedicated `CONTAIND_ENGINE_SECRET`
+  on both peers and use `https://`, or leave the engine URL empty in combined
+  mode to derive it. Generate with `openssl rand -hex 32`. No lab bypass or
+  plaintext fallback exists. Rotate by changing and restarting both peers;
+  replace any exported client credentials too.
+- Firewall rules now use first-match in listed order: the first matching
+  enforcing ALLOW, DENY or RESET decides; monitor rules never decide. Before,
+  an overlapping ALLOW won regardless of position. Configs below schema
+  0.1.10 are upgraded on load, import or commit: potentially overlapping
+  terminals are reordered to preserve legacy rule precedence, and the
+  before/after rule order is recorded. Review the order after upgrade;
+  a DENY placed above a broader ALLOW now takes effect.
+- Port forwards only translate; firewall policy decides admission. Unless a
+  rule already references the forward, the upgrade inserts a matching
+  `viaForwards` ALLOW only when no enforcing ICS scope overlaps. Full
+  containment in an enforcing ICS scope generates no grant; partial or
+  uncertain overlap generates no grant for any of the forward's traffic and
+  produces a warning. Existing rules and defaults still decide delivery;
+  some previously admitted traffic may now be denied.
 - Commit, commit-confirmed, rollback and factory reset responses add `applyId`
   and `protection`. Success acknowledges synchronous apply, not readiness; health
   reports `unavailable` while protection is pending or failed.
@@ -21,6 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ICAP servers must answer `OPTIONS` with a non-empty `Methods` header that
   declares `REQMOD` for scanned uploads and `RESPMOD` for scanned downloads.
   A server without that declaration reports the scanner as not ready.
+- A commit re-decides established connections on their next packet. A
+  connection that the new policy no longer admits stops passing traffic,
+  although its conntrack entry can stay visible in Sessions until it times out.
+- Full-config API writes reject unknown, case-mismatched or duplicate
+  top-level keys with HTTP 400. Lab-mode JWTs must carry `exp` when
+  `CONTAIND_JWT_SECRET` is set.
+- `GET /api/v1/security/conduits` returns an ordered array of conduits with
+  explicit `from` and `to` zone names instead of a map keyed by joined names.
+- The IEC 104 inventory API no longer returns `acceptedCommands` or
+  `overflow.outcomes`. The inventory reports decoded attempts and points; it
+  never reports delivery.
 
 ### Added
 
@@ -49,6 +85,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Add ordered firewall-rule placement and moves, atomic port-forward publication
+  and deletion with placement explanations, and candidate-aware previews;
+  via-forward rules report historical preview unavailable.
+- Published management and engine images expose their release version, revision,
+  creation time, vendor and authors as OCI labels.
+- Release promotion to `:latest`, including manual promotion, now requires
+  successful CI from a push to main for the exact peeled tag commit. Pending CI
+  waits for a bounded poll; missing, failed or cancelled CI fails promotion with
+  evidence in the workflow summary.
+- IT DPI HTTP parsing reads request and header lines directly from the packet
+  payload instead of allocating a buffered reader per packet.
+- The UI drops the unused `glob` dev dependency and its override.
 - Return `GET /api/v1/security/conduits` as an ordered array with explicit `from`
   and `to` zone names instead of a map keyed by joined names. API clients must
   consume the array; zone names containing arrows remain distinct in topology
@@ -73,8 +121,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visible degradation rather than an audit fail-closed policy.
 - Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
 
+### Security
+
+- Prevent concurrent deletion or demotion of the last administrator.
+- Make MFA login and enrollment challenges single-use and durable across management
+  restarts, and invalidate them on password, TOTP or role changes. Pending
+  challenges issued before this upgrade must be restarted.
+- Require secret-derived TLS 1.3 mutual authentication for every non-loopback
+  engine API listener and route. Numeric loopback HTTP remains unchanged.
+  Export scraper/curl credentials with `containd enginecredentials DIRECTORY`.
+- Reject unsafe daemon configuration fields and require valid proxy TLS certificate/key pairs before publishing configuration.
+- Restrict OpenVPN profile imports to the shared bounded parser; manage client credentials by issuer/serial ID with read-only downloads and durable revocation.
+- OpenVPN credential lists report whether a running managed server has loaded the current revocation list; the VPN page offers Apply revocation only while it has not.
+- CLI configuration edits and repository smoke scripts carry snapshot revisions
+  through saves and staged sequences; `show diff` displays a revision and
+  `commit revision <token>` commits only that reviewed revision.
+- Web configuration saves and commits reject stale revisions, keep the conflicting draft, and commit only a reviewed diff.
+- Reject stale configuration saves, section edits and lifecycle actions using
+  a durable whole-state revision, including IDS banks and secret-only edits.
+- `PATCH /zones/:name` rejects wrongly typed fields with 400 instead of ignoring
+  them.
+- Preserve NFQUEUE learner suggestions after scoped loss between unrelated hosts.
+  Parents and losses retain capture-hook authority, allowing wire-only matching
+  at the common forward-hook face without conntrack verification. Same-tuple
+  loss still excludes every incarnation; unverified AF_PACKET and unknown
+  capture authority remain conservative. Reimport or recollect older evidence
+  and regenerate proofs to use the corrected authority.
+- Preserve learner loss across both verified NAT wire aliases, including
+  request-only SNAT and response-only DNAT evidence. Known incarnation identity
+  adds to coordinate scope without narrowing it; unproved AF_PACKET alias
+  disjointness fails closed. Stop closes parent admission before detaching the
+  loss fence. IPv6 truncation classification uses decoded header family, not
+  IPv4-mapped address spelling, and empty connection placeholders retain scope.
+- Recorded collection or admission loss excludes every connection it could have
+  touched from suggestion generation and direct certification, with durable
+  `collection_loss` withholding. Live transport overflow is retained before Stop
+  or deadline cleanup; failed automatic stops retry safely. Short captured headers
+  exclude matching wire tuples or host pairs across all incarnations, never just
+  observed message times. Unrelated cut ARP/LLDP/ICMP records preserve workshop
+  suggestions. Missing scope, restart/policy uncertainty and exhausted localization
+  capacity exclude the dataset. Previously collected captures must be reimported
+  or watches recollected under the corrected loss authority. Previously certified
+  suggestions require regeneration; frozen historical stage retries can only
+  reconcile identical rules already saved to candidate.
+- Batch live learner persistence in bounded multi-row SQLite statements so IEC
+  104 command watches keep up with normal captures; outcome-only drops do not
+  exclude certification inputs. Large repeated relations use bounded proofs
+  instead of overflowing suggestion storage budgets.
+- Exclude observation-bound and content/port-mismatched connections from offline
+  and live policy suggestions, including port-decoded events emitted before
+  content confirmation; retain the exclusion in withheld counts and limitations.
+  Previously certified suggestions require regeneration; historical datasets
+  without retained binding authority remain readable but fail closed. Reimporting
+  the same capture after an adapter-normalization change creates a separate
+  dataset using the current normalization, without rewriting historical evidence.
+
 ### Fixed
 
+- The engine keeps watching kernel interface, address and route changes after
+  an interrupted system call instead of stopping until restart; drift was
+  otherwise repaired only by the 10-second periodic reconcile.
+- Direct CLI login directs accounts needing MFA or password rotation to the
+  web UI or SSH, and accounts needing MFA enrollment to the web UI.
+- Partial account profile updates preserve omitted fields and still allow explicit clearing.
+- Interface PATCH writes preserve omitted top-level fields; a supplied `access`
+  object replaces that object. Interface edits send explicit clears for removed
+  aliases, device bindings, zones and VLAN settings.
+- Service, policy, network, PCAP and staged-config editors block saves until settings
+  load successfully and while reads are unavailable. Failed refreshes keep drafts
+  instead of substituting defaults or reporting success; saves preserve unrelated
+  settings, including default-route metrics and gateway metadata. Saved staged
+  JSON adopts later refreshes unless it has been edited again.
+- CLI read-modify-write edits for NAT, port forwards, proxies, interfaces,
+  routing and system settings stop without writing when current configuration
+  cannot be read, rather than substituting defaults or running configuration.
+  Proxy edits preserve domains, client ACLs, upstream settings, logging and
+  reverse sites. Interface edits preserve unrelated device, VLAN, bridge,
+  addressing and access settings. Outbound quick start
+  completes all reads before staging changes and retains unrelated NAT, routing
+  and firewall rule settings, including when creating the first rule. Empty
+  interface, firewall-rule, asset, object and zone lists return JSON arrays
+  rather than `null`.
+- Scripted `containd cli` sessions exit with status 1 if any command fails,
+  including when later commands or `exit` run.
+- Routine interface apply and reconciliation remove only stale addresses
+  containd created, preserving Docker/foreign primary and secondary addresses,
+  IPv6 link-local addresses and the reserved management device. Address ownership
+  persists across engine process restarts; unmarked addresses from 0.1.36 and
+  earlier remain unowned on upgrade. Destructive replacement remains an explicit
+  administrator operation. See [address ownership and upgrades](docs/mkdocs/dataplane.md#interface-address-ownership-and-upgrades).
 - Isolate live learner intake from SQLite stalls with byte-bounded persistence
   and group commits. Small decoded batches use the full intake byte budget
   instead of overflowing a short count limit on busy hosts; Stop still drains
@@ -154,142 +289,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   faults. WireGuard teardown removes only containd-created links, including
   custom names and old names after rename. Engine runtime failures are attributed
   per service without blocking other services or firewall application.
-
-### Security
-
-- Reject unsafe daemon configuration fields and require valid proxy TLS certificate/key pairs before publishing configuration.
-- Restrict OpenVPN profile imports to the shared bounded parser; manage client credentials by issuer/serial ID with read-only downloads and durable revocation.
-- OpenVPN credential lists report whether a running managed server has loaded the current revocation list; the VPN page offers Apply revocation only while it has not.
-- CLI configuration edits and repository smoke scripts carry snapshot revisions
-  through saves and staged sequences; `show diff` displays a revision and
-  `commit revision <token>` commits only that reviewed revision.
-- Web configuration saves and commits reject stale revisions, keep the conflicting draft, and commit only a reviewed diff.
-- Reject stale configuration saves, section edits and lifecycle actions using
-  a durable whole-state revision, including IDS banks and secret-only edits.
-- `PATCH /zones/:name` rejects wrongly typed fields with 400 instead of ignoring
-  them.
-- Preserve NFQUEUE learner suggestions after scoped loss between unrelated hosts.
-  Parents and losses retain capture-hook authority, allowing wire-only matching
-  at the common forward-hook face without conntrack verification. Same-tuple
-  loss still excludes every incarnation; unverified AF_PACKET and unknown
-  capture authority remain conservative. Reimport or recollect older evidence
-  and regenerate proofs to use the corrected authority.
-- Preserve learner loss across both verified NAT wire aliases, including
-  request-only SNAT and response-only DNAT evidence. Known incarnation identity
-  adds to coordinate scope without narrowing it; unproved AF_PACKET alias
-  disjointness fails closed. Stop closes parent admission before detaching the
-  loss fence. IPv6 truncation classification uses decoded header family, not
-  IPv4-mapped address spelling, and empty connection placeholders retain scope.
-- Recorded collection or admission loss excludes every connection it could have
-  touched from suggestion generation and direct certification, with durable
-  `collection_loss` withholding. Live transport overflow is retained before Stop
-  or deadline cleanup; failed automatic stops retry safely. Short captured headers
-  exclude matching wire tuples or host pairs across all incarnations, never just
-  observed message times. Unrelated cut ARP/LLDP/ICMP records preserve workshop
-  suggestions. Missing scope, restart/policy uncertainty and exhausted localization
-  capacity exclude the dataset. Previously collected captures must be reimported
-  or watches recollected under the corrected loss authority. Previously certified
-  suggestions require regeneration; frozen historical stage retries can only
-  reconcile identical rules already saved to candidate.
-- Batch live learner persistence in bounded multi-row SQLite statements so IEC
-  104 command watches keep up with normal captures; outcome-only drops do not
-  exclude certification inputs. Large repeated relations use bounded proofs
-  instead of overflowing suggestion storage budgets.
-- Exclude observation-bound and content/port-mismatched connections from offline
-  and live policy suggestions, including port-decoded events emitted before
-  content confirmation; retain the exclusion in withheld counts and limitations.
-  Previously certified suggestions require regeneration; historical datasets
-  without retained binding authority remain readable but fail closed. Reimporting
-  the same capture after an adapter-normalization change creates a separate
-  dataset using the current normalization, without rewriting historical evidence.
-
-## [0.1.37] - 2026-10-31
-
-### Upgrade notes
-
-- Back up before upgrading. The configuration schema advances from 0.1.9 to
-  0.1.10. 0.1.36 and earlier cannot read schema 0.1.10; restore a pre-upgrade
-  backup to downgrade.
-- Off-loopback deployments (split, or combined with a wildcard/interface
-  `CONTAIND_ENGINE_ADDR`) must set the same dedicated `CONTAIND_ENGINE_SECRET`
-  on both peers and use `https://`, or leave the engine URL empty in combined
-  mode to derive it. Generate with `openssl rand -hex 32`. No lab bypass or
-  plaintext fallback exists. Rotate by changing and restarting both peers;
-  replace any exported client credentials too.
-- Firewall rules now use first-match in listed order: the first matching
-  enforcing ALLOW, DENY or RESET decides; monitor rules never decide. Before,
-  an overlapping ALLOW won regardless of position. Configs below schema
-  0.1.10 are upgraded on load, import or commit: potentially overlapping
-  terminals are reordered to preserve legacy rule precedence, and the
-  before/after rule order is recorded. Review the order after upgrade;
-  a DENY placed above a broader ALLOW now takes effect.
-- Port forwards only translate; firewall policy decides admission. Unless a
-  rule already references the forward, the upgrade inserts a matching
-  `viaForwards` ALLOW only when no enforcing ICS scope overlaps. Full
-  containment in an enforcing ICS scope generates no grant; partial or
-  uncertain overlap generates no grant for any of the forward's traffic and
-  produces a warning. Existing rules and defaults still decide delivery;
-  some previously admitted traffic may now be denied.
-
-### Changed
-
-- Add ordered firewall-rule placement and moves, atomic port-forward publication
-  and deletion with placement explanations, and candidate-aware previews;
-  via-forward rules report historical preview unavailable.
-- Published management and engine images expose their release version, revision,
-  creation time, vendor and authors as OCI labels.
-- Release promotion to `:latest`, including manual promotion, now requires
-  successful CI from a push to main for the exact peeled tag commit. Pending CI
-  waits for a bounded poll; missing, failed or cancelled CI fails promotion with
-  evidence in the workflow summary.
-- IT DPI HTTP parsing reads request and header lines directly from the packet
-  payload instead of allocating a buffered reader per packet.
-- The UI drops the unused `glob` dev dependency and its override.
-
-### Security
-
-- Prevent concurrent deletion or demotion of the last administrator.
-- Make MFA login and enrollment challenges single-use and durable across management
-  restarts, and invalidate them on password, TOTP or role changes. Pending
-  challenges issued before this upgrade must be restarted.
-- Require secret-derived TLS 1.3 mutual authentication for every non-loopback
-  engine API listener and route. Numeric loopback HTTP remains unchanged.
-  Export scraper/curl credentials with `containd enginecredentials DIRECTORY`.
-
-### Fixed
-
-- The engine keeps watching kernel interface, address and route changes after
-  an interrupted system call instead of stopping until restart; drift was
-  otherwise repaired only by the 10-second periodic reconcile.
-- Direct CLI login directs accounts needing MFA or password rotation to the
-  web UI or SSH, and accounts needing MFA enrollment to the web UI.
-- Partial account profile updates preserve omitted fields and still allow explicit clearing.
-- Interface PATCH writes preserve omitted top-level fields; a supplied `access`
-  object replaces that object. Interface edits send explicit clears for removed
-  aliases, device bindings, zones and VLAN settings.
-- Service, policy, network, PCAP and staged-config editors block saves until settings
-  load successfully and while reads are unavailable. Failed refreshes keep drafts
-  instead of substituting defaults or reporting success; saves preserve unrelated
-  settings, including default-route metrics and gateway metadata. Saved staged
-  JSON adopts later refreshes unless it has been edited again.
-- CLI read-modify-write edits for NAT, port forwards, proxies, interfaces,
-  routing and system settings stop without writing when current configuration
-  cannot be read, rather than substituting defaults or running configuration.
-  Proxy edits preserve domains, client ACLs, upstream settings, logging and
-  reverse sites. Interface edits preserve unrelated device, VLAN, bridge,
-  addressing and access settings. Outbound quick start
-  completes all reads before staging changes and retains unrelated NAT, routing
-  and firewall rule settings, including when creating the first rule. Empty
-  interface, firewall-rule, asset, object and zone lists return JSON arrays
-  rather than `null`.
-- Scripted `containd cli` sessions exit with status 1 if any command fails,
-  including when later commands or `exit` run.
-- Routine interface apply and reconciliation remove only stale addresses
-  containd created, preserving Docker/foreign primary and secondary addresses,
-  IPv6 link-local addresses and the reserved management device. Address ownership
-  persists across engine process restarts; unmarked addresses from 0.1.36 and
-  earlier remain unowned on upgrade. Destructive replacement remains an explicit
-  administrator operation. See [address ownership and upgrades](docs/mkdocs/dataplane.md#interface-address-ownership-and-upgrades).
 
 ## [0.1.36] - 2026-10-31
 
