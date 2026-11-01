@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Card } from "../../components/Card";
 import { InfoTip } from "../../components/InfoTip";
 import type {
@@ -95,6 +96,11 @@ export function CaptureSetupCard({
   updateForwardTarget: (iface: string, patch: Partial<PcapForwardRow>) => void;
   enabledForwarding: string[];
 }) {
+  const [forwardingOpen, setForwardingOpen] = useState<boolean | null>(null);
+  const hasForwarding = (settings.forwardTargets ?? []).some(
+    (target) => target.enabled || !!target.host || target.port !== 9000 || target.proto !== "udp",
+  );
+  const showForwarding = forwardingOpen ?? hasForwarding;
   return (
     <Card padding="lg">
       <h2 className="text-lg font-semibold text-(--text)">
@@ -325,7 +331,10 @@ export function CaptureSetupCard({
           className="rounded-xs border bg-(--surface) px-4 py-3"
         >
           <summary className="cursor-pointer text-sm text-(--text)">
-            Advanced capture options
+            <span>Advanced capture options</span>
+            {(settings.snaplen !== 262144 || settings.filePrefix !== "capture"
+              || settings.rotateSeconds !== 300 || settings.bufferMB !== 4 || settings.promisc !== true)
+              && <span className="ml-2 text-xs text-(--amber)">Non-default settings</span>}
           </summary>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div>
@@ -419,93 +428,104 @@ export function CaptureSetupCard({
         </details>
 
         <div className="rounded-xs border bg-(--surface) p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-[0.2em] text-(--text-muted)">
-                PCAP Forwarding (Remote Sensor)
+          <button
+            className="text-left text-sm font-semibold"
+            aria-expanded={showForwarding}
+            aria-controls="capture-forwarding"
+            onClick={() => setForwardingOpen(!showForwarding)}
+          >
+            PCAP Forwarding (Remote Sensor)
+          </button>
+          <p className="mt-1 text-xs text-(--text-muted)">
+            {hasForwarding ? "Non-default forwarding settings" : "Optional · no forwarding configured"}
+            {enabledForwarding.length > 0 && ` · Configured forwarding: ${enabledForwarding.join(", ")}`}
+          </p>
+          <div id="capture-forwarding" hidden={!showForwarding}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="mt-1 text-sm text-(--text)">
+                  Send a separate captured-traffic stream for each interface to a remote sensor.
+                </p>
               </div>
-              <p className="mt-1 text-sm text-(--text)">
-                Send a separate captured-traffic stream for each interface to a remote sensor.
-              </p>
             </div>
-          </div>
-          <div className="mt-3 grid gap-2 text-[11px] uppercase tracking-wide text-(--text-dim) md:grid-cols-[120px_1fr_120px_120px]">
-            <span>Interface</span>
-            <span>Sensor Host</span>
-            <span>Port</span>
-            <span>Proto</span>
-          </div>
-          <div className="mt-3 grid gap-2">
-            {(settings.forwardTargets ?? []).map((target) => {
-              if (!target.interface) {
-                return null;
-              }
-              const iface = target.interface;
-              return (
-                <div
-                  key={iface}
-                  className="grid gap-2 rounded-xs border bg-(--surface) p-3 md:grid-cols-[120px_1fr_120px_120px]"
-                >
-                  <label className="flex items-center gap-2 text-sm text-(--text)">
+            <div className="mt-3 grid gap-2 text-[11px] uppercase tracking-wide text-(--text-dim) md:grid-cols-[120px_1fr_120px_120px]">
+              <span>Interface</span>
+              <span>Sensor Host</span>
+              <span>Port</span>
+              <span>Proto</span>
+            </div>
+            <div className="mt-3 grid gap-2">
+              {(settings.forwardTargets ?? []).map((target) => {
+                if (!target.interface) {
+                  return null;
+                }
+                const iface = target.interface;
+                return (
+                  <div
+                    key={iface}
+                    className="grid gap-2 rounded-xs border bg-(--surface) p-3 md:grid-cols-[120px_1fr_120px_120px]"
+                  >
+                    <label className="flex items-center gap-2 text-sm text-(--text)">
+                      <input
+                        type="checkbox"
+                        checked={target.enabled}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          updateForwardTarget(iface, {
+                            enabled: e.target.checked,
+                          })
+                        }
+                        className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)"
+                      />
+                      {iface}
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={target.enabled}
-                      disabled={!canEdit}
+                      value={target.host}
+                      disabled={!canEdit || !target.enabled}
+                      onChange={(e) =>
+                        updateForwardTarget(iface, { host: e.target.value })
+                      }
+                      placeholder="sensor.example.local"
+                      className="input-industrial w-full transition-ui outline-hidden focus-visible:shadow-focus-ring disabled:opacity-60"
+                    />
+                    <input
+                      type="number"
+                      value={target.port}
+                      disabled={!canEdit || !target.enabled}
                       onChange={(e) =>
                         updateForwardTarget(iface, {
-                          enabled: e.target.checked,
+                          port: Number(e.target.value) || 0,
                         })
                       }
-                      className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)"
+                      className="input-industrial w-full transition-ui outline-hidden focus-visible:shadow-focus-ring disabled:opacity-60"
                     />
-                    {iface}
-                  </label>
-                  <input
-                    value={target.host}
-                    disabled={!canEdit || !target.enabled}
-                    onChange={(e) =>
-                      updateForwardTarget(iface, { host: e.target.value })
-                    }
-                    placeholder="sensor.example.local"
-                    className="input-industrial w-full transition-ui outline-hidden focus-visible:shadow-focus-ring disabled:opacity-60"
-                  />
-                  <input
-                    type="number"
-                    value={target.port}
-                    disabled={!canEdit || !target.enabled}
-                    onChange={(e) =>
-                      updateForwardTarget(iface, {
-                        port: Number(e.target.value) || 0,
-                      })
-                    }
-                    className="input-industrial w-full transition-ui outline-hidden focus-visible:shadow-focus-ring disabled:opacity-60"
-                  />
-                  <select
-                    value={target.proto}
-                    disabled={!canEdit || !target.enabled}
-                    onChange={(e) =>
-                      updateForwardTarget(iface, {
-                        proto: e.target.value as "tcp" | "udp",
-                      })
-                    }
-                    className="input-industrial w-full transition-ui outline-hidden focus-visible:shadow-focus-ring disabled:opacity-60"
-                  />
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-2 text-xs text-(--text-muted)">
-            Streams PCAP data to remote collectors; configure one target per
-            interface.
-          </div>
-          {enabledForwarding.length > 0 ? (
-            <div className="mt-2 text-xs text-(--text-muted)">
-              Active forwarding:{" "}
-              <span className="text-(--text)">
-                {enabledForwarding.join(", ")}
-              </span>
+                    <select
+                      value={target.proto}
+                      disabled={!canEdit || !target.enabled}
+                      onChange={(e) =>
+                        updateForwardTarget(iface, {
+                          proto: e.target.value as "tcp" | "udp",
+                        })
+                      }
+                      className="input-industrial w-full transition-ui outline-hidden focus-visible:shadow-focus-ring disabled:opacity-60"
+                    />
+                  </div>
+                );
+              })}
             </div>
-          ) : null}
+            <div className="mt-2 text-xs text-(--text-muted)">
+              Streams PCAP data to remote collectors; configure one target per
+              interface.
+            </div>
+            {enabledForwarding.length > 0 ? (
+              <div className="mt-2 text-xs text-(--text-muted)">
+                Active forwarding:{" "}
+                <span className="text-(--text)">
+                  {enabledForwarding.join(", ")}
+                </span>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </Card>

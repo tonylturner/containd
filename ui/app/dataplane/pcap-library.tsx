@@ -60,6 +60,10 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
     <Card padding="lg">
       <h2 className="text-lg font-semibold text-(--text)">Saved PCAPs</h2>
       <p className="mt-1 text-sm text-(--text)">Download or replay captures from storage.</p>
+      <p className="mt-2 text-sm text-(--amber)">
+        Replay transmits traffic onto the selected network immediately. It is not offline analysis.
+      </p>
+      <a href="/pcap/" className="mt-2 inline-block text-sm underline">Analyze captures offline</a>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <input
           value={pcapQuery}
@@ -128,7 +132,7 @@ export function SavedPcapsCard(props: SavedPcapsCardProps) {
           ))}
         </div>
       ) : null}
-      <div className="mt-4 overflow-hidden rounded-xs border">
+      <div className="mt-4 overflow-x-auto rounded-xs border">
         <table className="w-full text-left text-sm text-(--text)">
           <thead className="bg-(--surface) text-xs uppercase tracking-wide text-(--text-muted)">
             <tr>
@@ -248,6 +252,10 @@ export function ReplayCard({
     <Card padding="lg">
       <h2 className="text-lg font-semibold text-(--text)">Replay</h2>
       <p className="mt-1 text-sm text-(--text)">Replay a saved PCAP back onto an interface.</p>
+      <p className="mt-2 text-sm text-(--amber)">
+        Replay transmits traffic onto the selected network immediately. It is not offline analysis.
+        Verify the destination interface and authorization before starting.
+      </p>
       <div className="mt-4 grid gap-3">
         <select
           disabled={!canEdit}
