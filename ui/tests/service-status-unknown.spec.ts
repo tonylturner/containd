@@ -25,7 +25,8 @@ for (const [path, heading, entry] of [
         body = {
           faults: [], av: { available: false, error: "scanner offline" },
           [entry]: { ...meter, installed: false, running: false, enabled: false, pools: 0, reservations: 0, listen_ifaces: 0,
-            envoy_running: false, nginx_running: false, wireguard_enabled: false, openvpn_running: false },
+            envoy_running: false, nginx_running: false, wireguard_enabled: false, openvpn_running: false,
+            pid: 123, envoy_pid: 123, nginx_pid: 123, openvpn_pid: 123, config_path: "/data/generated.conf", ntpd_path: "/usr/sbin/chronyd" },
           envoy: { ...meter }, nginx: { ...meter },
         };
       }
@@ -40,6 +41,20 @@ for (const [path, heading, entry] of [
     const loaded = page.waitForResponse((r) => r.url().includes("/api/v1/services/status"));
     await page.goto(path);
     await loaded;
+    if (entry === "ntp") {
+      const timing = page.getByText("Advanced timing", { exact: true });
+      await expect(timing).toBeVisible();
+      await expect(page.getByText("Requested polling interval (seconds)", { exact: true })).not.toBeVisible();
+      await timing.click();
+      await expect(page.getByText("Requested polling interval (seconds)", { exact: true })).toBeVisible();
+      await expect(page.getByText(/Zero uses adaptive polling/)).toBeVisible();
+    }
+    if (entry === "vpn") {
+      await page.getByText("Advanced peer settings", { exact: true }).click();
+      await expect(page.getByRole("textbox", { name: /^Peers \(JSON\)/ })).toBeVisible();
+      await page.getByText("Advanced profile import", { exact: true }).click();
+      await expect(page.getByText("Choose file", { exact: true })).toBeVisible();
+    }
     const panel = page.getByRole("heading", { name: heading, exact: true }).locator("xpath=ancestor::section[1]");
     await expect(panel).toContainText("Unknown");
     await expect(panel).not.toContainText(/(?:Running|Enabled|Live running):\s*no|(?:Rate|Errors|Pools|Reservations|Listen ifaces):\s*0/);
@@ -47,6 +62,11 @@ for (const [path, heading, entry] of [
     await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
     await expect(panel).toContainText(/(?:Rate|Errors):\s*0.0/);
     await expect(panel).not.toContainText("status unavailable");
+    if (entry !== "dhcp") {
+      await expect(panel.getByText("Process ID: 123", { exact: true })).not.toBeVisible();
+      await panel.getByText("Service details", { exact: true }).click();
+      await expect(panel.getByText("Process ID: 123", { exact: true })).toBeVisible();
+    }
     available = false;
     await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
     await expect(panel).toContainText("Unknown");

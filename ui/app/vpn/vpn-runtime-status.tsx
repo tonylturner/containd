@@ -37,7 +37,7 @@ export function VPNRuntimeStatusCard({
             <span className={openvpnFaulted ? "text-amber" : "text-(--text)"}>
               {openvpnFaulted ? "faulted" : typeof svcStatus?.openvpn_running !== "boolean" ? "Unknown" : svcStatus.openvpn_running ? "running" : "stopped"}
             </span>
-            {svcStatus?.openvpn_pid ? <span className="text-(--text-muted)"> (pid {svcStatus.openvpn_pid})</span> : null}
+
           </div>
           {svcStatus?.openvpn_mode === "server" ? (
             <>
@@ -56,9 +56,11 @@ export function VPNRuntimeStatusCard({
           <div className="md:col-span-2">
             Errors: <span>{typeof svcStatus?.errors_rate_per_min === "number" ? svcStatus.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
           </div>
-          <div className="md:col-span-2">
-            OpenVPN config: <span className="text-(--text)">{svcStatus?.openvpn_config_path || "n/a"}</span>
-          </div>
+          <details className="md:col-span-2 rounded-xs border p-3">
+            <summary className="cursor-pointer">Service details</summary>
+            <p>Process ID: {svcStatus?.openvpn_pid ?? "Unknown"}</p>
+            <p>OpenVPN config: <span className="text-(--text)">{svcStatus?.openvpn_config_path || "n/a"}</span></p>
+          </details>
           {svcStatus?.openvpn_last_error ? (
             <div className="md:col-span-2 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
               {svcStatus.openvpn_last_error}

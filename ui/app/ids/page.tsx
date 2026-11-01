@@ -204,7 +204,7 @@ export default function IDSPage() {
           <input type="checkbox" checked={!!ids.enabled} disabled={!canEdit}
             onChange={(e) => setIds({ ...ids, enabled: e.target.checked })}
             className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
-          Enable IDS engine
+          Enable intrusion detection
         </label>
         <span className="ml-auto text-xs text-(--text-muted) tabular-nums">
           {enabledCount.toLocaleString()} / {rules.length.toLocaleString()} rules enabled

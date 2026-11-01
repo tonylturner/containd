@@ -138,8 +138,19 @@ test("service cards read the services status, antivirus included", async ({ page
 
   await page.unrouteAll({ behavior: "wait" });
   await openDashboard(page, { events: [], services: { faults: [], av: { available: false, error: "engine unavailable" } } });
-  await expect(card("AV")).toContainText("Engine unavailable");
-  await expect(card("DNS")).toContainText("Disabled");
+  await expect(card("AV")).toContainText("Scanner unavailable");
+  await expect(card("DNS")).toContainText("Unknown");
+});
+
+test("partially reported service entries do not claim stopped or disabled", async ({ page }) => {
+  await openDashboard(page, { events: [], services: {
+    faults: [], av: { available: true }, vpn: { wireguard_enabled: false }, proxy: { envoy_running: false },
+  } });
+  for (const name of ["AV", "DNS", "VPN", "Syslog", "Proxy"]) {
+    const card = page.locator("a.rounded-lg").filter({ has: page.getByText(name, { exact: true }) });
+    await expect(card).toContainText("Unknown");
+    await expect(card).not.toContainText(/Disabled|Stopped|No tunnels/);
+  }
 });
 
 

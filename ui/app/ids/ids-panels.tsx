@@ -73,13 +73,11 @@ export function GroupsPanel({
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-(--text-muted)">
-        Organize rules into groups by protocol, vendor, or use case. Groups use
-        filter expressions to match rules (e.g.{" "}
-        <code>proto:modbus</code>,{" "}
-        <code>format:suricata</code>,{" "}
-        <code>severity:critical</code>).
-      </p>
+      <p className="text-xs text-(--text-muted)">Organize rules into groups by protocol, vendor, or use case.</p>
+      <details className="rounded-xs border p-3 text-xs">
+        <summary className="cursor-pointer">Advanced group matching</summary>
+        <p>Groups use matching expressions such as <code>proto:modbus</code>, <code>format:suricata</code> and <code>severity:critical</code>.</p>
+      </details>
 
       {canEdit && (
         <Card title="Create group">

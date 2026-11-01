@@ -261,6 +261,7 @@ test("legacy alert attributes keep generic raw rendering instead of retired deta
   await openAndWait(page, "/alerts/", ["/api/v1/events"]);
   await page.getByText("Historical event", { exact: true }).click();
   const detail = page.locator("div.sticky").filter({ hasText: "Historical event" });
+  await detail.getByText("Technical event details", { exact: true }).click();
   await expect(detail).toContainText("Event Attributes");
   await expect(detail).toContainText("function_code:");
   await expect(detail.getByText("marker:", { exact: true })).toBeVisible();

@@ -185,7 +185,7 @@ test("AV faults remain visible when the engine is unreachable without guessing i
   await expect(banner(page)).toContainText("invalid scanner");
   await expect(banner(page)).toContainText("Closed policy still blocks");
   await expect(banner(page)).toContainText("open policy permits it");
-  await expect(page.getByText("Engine antivirus unavailable: engine unreachable")).toBeVisible();
+  await expect(page.getByText("Antivirus status unavailable: engine unreachable")).toBeVisible();
 });
 
 test("VPN keeps WireGuard and OpenVPN fault identities independent", async ({ page }) => {

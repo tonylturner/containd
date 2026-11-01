@@ -34,7 +34,9 @@ test("trusted CA upload reports the revision the engine applied", async ({ page 
     "/api/v1/system/tls/trusted-ca": { json: { status: "updated", revision: "sha256:abc123" } },
   });
   await uploadCA(page);
-  await expect(page.getByText("Trusted CA bundle applied by the engine (revision sha256:abc123).")).toBeVisible();
+  await expect(page.getByText("Trust certificates are active.")).toBeVisible();
+  await page.getByText("Trust update details", { exact: true }).click();
+  await expect(page.getByText("Revision: sha256:abc123", { exact: true })).toBeVisible();
 });
 
 test("trusted CA stored but not applied is not reported as applied", async ({ page }) => {
@@ -47,10 +49,12 @@ test("trusted CA stored but not applied is not reported as applied", async ({ pa
   await uploadCA(page);
   await expect(
     page.getByRole("status").filter({
-      hasText: "stored (revision sha256:abc123), but the engine did not apply it: trust: engine unavailable",
+      hasText: "Trust certificates saved but not active. Applying configuration retries activation.",
     }),
   ).toBeVisible();
-  await expect(page.getByText(/applied by the engine \(revision/)).toHaveCount(0);
+  await page.getByText("Trust update details", { exact: true }).click();
+  await expect(page.getByText("Revision: sha256:abc123: trust: engine unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("Trust certificates are active.", { exact: true })).toHaveCount(0);
 });
 
 test("trusted CA upload without a config store is an error, not stored", async ({ page }) => {

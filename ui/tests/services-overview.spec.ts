@@ -67,9 +67,9 @@ test("services without a reported series show no chart", async ({ page }) => {
   await expect(page.locator("[title*='per minute']")).toHaveCount(1);
   await expect(page.locator("[title*='simulated']")).toHaveCount(0);
 
-  await expect(page.getByText("Engine status unavailable: engine unavailable")).toBeVisible();
+  await expect(page.getByText("Scanner status unavailable: engine unavailable")).toBeVisible();
   await expect(page.getByText("Mode: icap")).toHaveCount(0);
-  await expect(page.getByText("Envoy rate:")).toHaveCount(0);
+  await expect(page.getByText("Forward proxy activity:")).toHaveCount(0);
 });
 
 test("antivirus charts the scans the engine reports", async ({ page }) => {
@@ -85,4 +85,13 @@ test("antivirus charts the scans the engine reports", async ({ page }) => {
   await expect(av).toBeVisible();
   await expect(av.locator(":scope > div")).toHaveCount(2);
   await expect(page.getByText("Mode: clamav, Enabled: yes")).toBeVisible();
+});
+
+test("missing service entries stay unknown on the overview", async ({ page }) => {
+  await openServices(page, { faults: [], av: { available: false, error: "offline" } });
+  for (const name of ["DNS", "NTP", "DHCP", "VPN", "Proxies", "Syslog"]) {
+    const card = page.locator("p").filter({ hasText: new RegExp(`^${name}$`) }).locator("..");
+    await expect(card).toContainText("Unknown");
+    await expect(card).not.toContainText(/Enabled:\s*no|running:\s*no|Forwarders:\s*0/);
+  }
 });

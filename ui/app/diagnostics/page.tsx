@@ -418,7 +418,7 @@ export default function DiagnosticsPage() {
           </div>
           {!interfaceStateLoading && state === null && (
             <div role="status" className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-              <p>Interface runtime state unavailable — the engine could not be reached. Runtime addresses are unknown; saved interface choices remain available.</p>
+              <p>Interface runtime state unavailable — live interface information could not be reached. Runtime addresses are unknown; saved interface choices remain available.</p>
               <button onClick={refreshInterfaceState} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
             </div>
           )}

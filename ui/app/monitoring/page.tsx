@@ -163,28 +163,28 @@ export default function MonitoringOverviewPage() {
           key: "dns",
           label: "DNS",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: services.dns?.running ? "running" : "stopped",
-          hint: "Unbound resolver",
+          status: typeof services.dns?.running === "boolean" ? (services.dns.running ? "running" : "stopped") : "Unknown",
+          hint: "DNS resolution",
         },
         {
           key: "ntp",
           label: "NTP",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: services.ntp?.running ? "running" : "stopped",
-          hint: "chrony NTP client",
+          status: typeof services.ntp?.running === "boolean" ? (services.ntp.running ? "running" : "stopped") : "Unknown",
+          hint: "Time synchronization",
         },
         {
           key: "dhcp",
           label: "DHCP",
           icon: staticAssetURL("/icons/envoyproxy.svg"),
-          status: services.dhcp?.enabled ? "enabled" : "off",
+          status: typeof services.dhcp?.enabled === "boolean" ? (services.dhcp.enabled ? "enabled" : "off") : "Unknown",
           hint: "LAN leases",
         },
         {
           key: "vpn",
           label: "VPN",
           icon: staticAssetURL("/icons/wireguard.svg"),
-          status: services.vpn?.wireguard_enabled || services.vpn?.openvpn_running ? "active" : "off",
+          status: services.vpn?.wireguard_enabled || services.vpn?.openvpn_running ? "enabled" : typeof services.vpn?.wireguard_enabled === "boolean" && typeof services.vpn?.openvpn_running === "boolean" ? "off" : "Unknown",
           hint: "WireGuard/OpenVPN",
         },
         {
@@ -207,7 +207,7 @@ export default function MonitoringOverviewPage() {
   return (
     <Shell title="Monitoring Overview">
       <div className="mb-4 rounded-xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-(--text-muted)">
-        Live telemetry and service activity.
+        Live traffic records and service activity.
         {" "}
         <Link href="/" className="text-(--text) hover:text-white">
           Use Dashboard
@@ -216,7 +216,7 @@ export default function MonitoringOverviewPage() {
         for setup, policy workflow, and config state.
       </div>
       {flowStatus === "unavailable" && <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
-        Flows unavailable — the engine could not be reached.
+        Flows unavailable — live traffic monitoring could not be reached.
         <button onClick={retryFlows} className="ml-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
       </div>}
       <div className="grid gap-4 md:grid-cols-3">
@@ -249,9 +249,9 @@ export default function MonitoringOverviewPage() {
                 Proxies
               </span>
               <span>
-                {envoyRate !== null ? envoyRate.toFixed(1) : "0.0"} /min
+                {envoyRate !== null ? envoyRate.toFixed(1) : "Unknown"} /min
                 {nginxRate !== null && (
-                  <span className="text-(--text-dim)"> · nginx {nginxRate.toFixed(1)}/min</span>
+                  <span className="text-(--text-dim)"> · reverse proxy {nginxRate.toFixed(1)}/min</span>
                 )}
                 {envoyErrors !== null && (
                   <span> · {envoyErrors.toFixed(1)} err/min</span>
@@ -281,7 +281,7 @@ export default function MonitoringOverviewPage() {
         </Card>
         <Card title="Top Protocols">
           {protoSeries.length === 0 && (
-            <div className="text-sm text-(--text-muted)">No telemetry yet.</div>
+            <div className="text-sm text-(--text-muted)">No traffic records yet.</div>
           )}
           {protoSeries.length > 0 && (
             <div className="space-y-2 text-xs text-(--text)">

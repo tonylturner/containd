@@ -89,7 +89,7 @@ test("monitoring overview does not fabricate zero flow counters", async ({ page 
   await page.goto("/monitoring/");
   await expect(page.getByRole("status").filter({ hasText: "Flows unavailable" })).toBeVisible();
   await expect(page.getByText("No flow apps yet.", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Unknown", { exact: true })).toHaveCount(2);
+  await expect(page.getByRole("region", { name: "Endpoints", exact: true }).getByText("Unknown", { exact: true })).toHaveCount(2);
 });
 
 test("PCAP discovery distinguishes unavailable, empty and populated state without deleting saved forwarding", async ({ page }) => {

@@ -10,15 +10,15 @@ import {
 const reasons: Record<string, string> = {
   deny: "Denied command",
   timeout: "Pending timeout",
-  bound: "Bound / saturation",
-  midstream: "Midstream",
-  fail_close: "Fail-closed steering",
-  injector: "Injector unavailable",
-  stream: "Stream error",
-  framing: "Framing error",
-  transport: "Transport error",
+  bound: "Capacity reached",
+  midstream: "Connection first seen after it started",
+  fail_close: "Traffic blocked by the safety fallback",
+  injector: "Connection-reset sender unavailable",
+  stream: "Connection read error",
+  framing: "Message framing error",
+  transport: "Network transport error",
   policy: "Policy change",
-  queue: "Queue closed",
+  queue: "Inspection queue stopped",
   unhealthy: "Unhealthy enforcement",
 };
 
@@ -55,7 +55,7 @@ export function IECPressurePanel() {
     <Card title="IEC 104 holdback pressure" padding="lg">
       <p className="text-xs text-(--text-muted)">
         Incomplete APDUs wait for a decision. Queue pressure is not a denied
-        command. Limits are fixed; totals last until the engine process
+        command. Limits are fixed; totals last until the inspection service
         restarts.
       </p>
       {loading ? (
@@ -64,7 +64,7 @@ export function IECPressurePanel() {
         </p>
       ) : !data ? (
         <p role="status" className="mt-4 text-sm">
-          IEC 104 diagnostics unavailable. The engine could not be reached;
+          IEC 104 diagnostics unavailable. Live inspection information could not be reached;
           retrying automatically.
         </p>
       ) : (
@@ -104,7 +104,7 @@ export function IECPressurePanel() {
                     `${data.limits.sessions} tuple slots`,
                   ],
                   [
-                    "Tracked tuple slots",
+                    "Tracked connections",
                     data.trackedSessions,
                     `${data.limits.sessions} (includes closed / aborted)`,
                   ],
@@ -132,7 +132,7 @@ export function IECPressurePanel() {
           <dl className="mt-4 space-y-2 border-t pt-3 text-sm">
             <div className="flex justify-between gap-4">
               <dt>
-                Reset-worker rejections{" "}
+                Reset tasks rejected{" "}
                 <span className="text-(--text-muted)">
                   (shared queue cap: {data.limits.resetWorkerJobs})
                 </span>
@@ -141,7 +141,7 @@ export function IECPressurePanel() {
             </div>
             <div className="flex justify-between gap-4">
               <dt>
-                Inline verdict failures{" "}
+                Packet-blocking failures{" "}
                 <span className="text-(--text-muted)">
                   (excludes queue closure)
                 </span>
@@ -149,7 +149,7 @@ export function IECPressurePanel() {
               <dd className="tabular-nums">{data.verdictFailures}</dd>
             </div>
             <div className="flex justify-between gap-4">
-              <dt>Reset injection failures</dt>
+              <dt>Connection-reset failures</dt>
               <dd className="tabular-nums">{data.injectorFailures}</dd>
             </div>
           </dl>

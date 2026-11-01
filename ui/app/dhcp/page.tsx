@@ -261,7 +261,7 @@ export default function DHCPPage() {
       <Card>
         <h2 className="text-lg font-semibold text-(--text)">DHCPv4 Server</h2>
         <p className="mt-1 text-sm text-(--text)">
-          Configure LAN-side DHCP. The engine runs a minimal DHCPv4 server (IPv4 only) when enabled and committed.
+          Assign IPv4 addresses to LAN clients after saving and applying these settings.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -417,7 +417,7 @@ export default function DHCPPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-(--text)">Active Leases</h2>
-            <p className="mt-1 text-sm text-(--text)">Leases issued by the embedded DHCP server (best-effort).</p>
+            <p className="mt-1 text-sm text-(--text)">Leases issued by the DHCP service on this appliance (best-effort).</p>
           </div>
           <div className="flex items-center gap-2">
             <a

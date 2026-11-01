@@ -201,7 +201,7 @@ export default function SessionsPage() {
       )}
       {killResult && (
         <div role="status" aria-label="Connection revocation result" className="mb-4 rounded-xs border bg-(--surface2) px-4 py-3 text-sm">
-          <p>Conntrack deleted: {killResult.conntrackDeleted ? "yes" : "no"} ({killResult.deleted}/{killResult.matched}){killResult.deleteError ? ` — ${killResult.deleteError}` : ""}</p>
+          <p>Connection entries removed: {killResult.conntrackDeleted ? "yes" : "no"} ({killResult.deleted}/{killResult.matched}){killResult.deleteError ? ` — ${killResult.deleteError}` : ""}</p>
           <p>Revocation installed: {killResult.revocationInstalled ? `yes, until ${killResult.blockedUntil}` : `no — ${killResult.revocationError}`}</p>
           <p>{killResult.closure}</p>
         </div>
@@ -225,7 +225,7 @@ export default function SessionsPage() {
                 {loading ? "Loading…" : `${filtered.length} shown / ${entries.length} total`}
               </div>
               <div className="text-xs text-(--text-muted)">
-                Kernel conntrack, IPv4 and IPv6. Tags are the labels of the running TAG rules that match each connection as opened. ICMP rows show the identifier and query type in place of ports. Kill supports TCP, UDP, ICMP and ICMPv6; TCP resets are sent in response to matching packets, and other matching packets are dropped.
+                Live IPv4 and IPv6 connections. Tags are the labels of the running connection-label rules that match each connection as opened. ICMP rows show the identifier and query type in place of ports. Kill supports TCP, UDP, ICMP and ICMPv6; TCP resets are sent in response to matching packets, and other matching packets are dropped.
               </div>
             </div>
           </div>

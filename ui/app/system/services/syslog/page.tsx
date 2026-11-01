@@ -165,14 +165,17 @@ export default function SyslogPage() {
       </p>
       {status && (
         <div className="mb-4 grid gap-2 rounded-xs border bg-(--surface) p-3 text-xs text-(--text) md:grid-cols-4">
-          <div>Forwarders: {status?.configured_forwarders ?? 0}</div>
-          <div>Sent: {status?.sent_total ?? 0}</div>
-          <div>Failed: {status?.failed_total ?? 0}</div>
-          <div>Last flush: {status?.last_flush || "\u2014"}</div>
-          <div>Last batch: {status?.last_batch ?? 0}</div>
-          <div>Batch limit: {status?.batch_limit ?? 0}</div>
-          <div>Hit limit: {status?.hit_limit ? "yes" : "no"}</div>
-          <div>Flush interval: {status?.flush_interval_sec ?? cfg.flushEvery ?? 0}s</div>
+          <div>Forwarders: {status?.configured_forwarders ?? "Unknown"}</div>
+          <div>Sent: {status?.sent_total ?? "Unknown"}</div>
+          <div>Failed: {status?.failed_total ?? "Unknown"}</div>
+          <div>Last send: {status?.last_flush || "\u2014"}</div>
+          <details className="md:col-span-4 rounded-xs border p-3">
+            <summary className="cursor-pointer">Delivery details</summary>
+            <div>Last batch: {status?.last_batch ?? "Unknown"}</div>
+            <div>Batch limit: {status?.batch_limit ?? "Unknown"}</div>
+            <div>Hit limit: {typeof status?.hit_limit === "boolean" ? (status.hit_limit ? "yes" : "no") : "Unknown"}</div>
+            <div>Flush interval: {status?.flush_interval_sec ?? "Unknown"}s</div>
+          </details>
           {status?.last_error ? (
             <div className="md:col-span-4">Last error: {status.last_error}</div>
           ) : null}
@@ -225,7 +228,7 @@ export default function SyslogPage() {
             />
           </div>
           <div>
-            Flush every (s):
+            Send interval (s):
             <input
               type="number"
               min={1}

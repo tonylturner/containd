@@ -132,13 +132,6 @@ export default function NTPPage() {
             <div>
               Running:{" "}
               <span className="text-(--text)">{typeof status?.running === "boolean" ? (status.running ? "yes" : "no") : "Unknown"}</span>
-              {status?.pid ? <span className="text-(--text-muted)"> (pid {status.pid})</span> : null}
-            </div>
-            <div>
-              Last start:{" "}
-              <span className="text-(--text)">
-                {status?.last_start || "never"}
-              </span>
             </div>
             <div>
               Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
@@ -146,12 +139,23 @@ export default function NTPPage() {
             <div>
               Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
             </div>
-            <div className="md:col-span-2">
-              Binary:{" "}
-              <span className="text-(--text)">
-                {status?.ntpd_path || "not found"}{status?.ntpd_name ? ` (${status.ntpd_name})` : ""}
-              </span>
-            </div>
+            <details className="md:col-span-2 rounded-xs border p-3">
+              <summary className="cursor-pointer text-sm">Service details</summary>
+              <p>Software: chrony</p>
+              <p>Process ID: {status.pid ?? "Unknown"}</p>
+              <div>
+                Last start:{" "}
+                <span className="text-(--text)">
+                  {status?.last_start || "Unknown"}
+                </span>
+              </div>
+              <div className="md:col-span-2">
+                Binary:{" "}
+                <span className="text-(--text)">
+                  {status?.ntpd_path || "Unknown"}{status?.ntpd_name ? ` (${status.ntpd_name})` : ""}
+                </span>
+              </div>
+            </details>
             {status?.last_error ? (
               <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
                 {status.last_error}
@@ -174,7 +178,7 @@ export default function NTPPage() {
       <Card>
         <h2 className="text-lg font-semibold text-(--text)">Client</h2>
         <p className="mt-1 text-sm text-(--text)">
-          Configure the embedded chrony NTP client.
+          Synchronize appliance time using the configured NTP servers.
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -191,9 +195,10 @@ export default function NTPPage() {
             Enable NTP client
           </label>
 
-          <div>
+          <details className="rounded-xs border p-3" open={(cfg.intervalSeconds ?? 0) > 0}>
+            <summary className="cursor-pointer text-sm">Advanced timing</summary>
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">
-              Interval Seconds (hint)
+              Requested polling interval (seconds)
             </label>
             <input
               type="number"
@@ -207,7 +212,8 @@ export default function NTPPage() {
               }
               className="mt-1 w-full input-industrial"
             />
-          </div>
+            <p className="mt-2 text-xs text-(--text-muted)">Zero uses adaptive polling. Positive requests are rounded up to a power of two and limited to 16–131072 seconds; this is not a measured synchronization interval.</p>
+          </details>
 
           <div className="md:col-span-2">
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">

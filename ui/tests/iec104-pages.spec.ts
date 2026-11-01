@@ -322,7 +322,7 @@ test("client navigation keeps verified page content visible while revalidating t
     await expect(
       page
         .getByRole("main", { name: "Events" })
-        .getByText(/Use Events for raw telemetry and service activity/),
+        .getByText(/Use Events for activity records and service activity/),
     ).toBeVisible();
     await expect(page.getByText("Checking session...")).toHaveCount(0);
   } finally {
@@ -355,6 +355,14 @@ test("Events shows decision, verdict and reset evidence and filters by session",
   await expect(page.getByText("IEC 104 packets dropped")).toBeVisible();
   await expect(page.getByText("IEC 104 reset sent to client")).toBeVisible();
   await expect(page.getByText(`Session ${session} ×`)).toBeVisible();
+  const message = page.locator("details").filter({ has: page.getByText("Message and session details", { exact: true }) }).first();
+  await message.locator("summary").click();
+  await expect(message.getByText(session, { exact: true })).toBeVisible();
+  const attributes = page.locator("details").filter({ has: page.getByText("Event attributes (JSON)", { exact: true }) }).first();
+  await expect(attributes.locator("pre")).not.toBeVisible();
+  await attributes.locator("summary").click();
+  await expect(attributes.locator("pre")).toBeVisible();
+  await expect(attributes.locator("pre")).toContainText(session);
   expect(errors).toEqual([]);
 });
 
@@ -478,6 +486,8 @@ test("Events sends edited filters before limiting and loads older evidence with 
   expect(requests[requests.length - 1]?.searchParams.get("cursor")).toBe("older");
   expect(requests[requests.length - 1]?.searchParams.get("verdict")).toBe("drop_failed");
   await page.getByLabel("Session ID", { exact: true }).fill("unavailable");
+  await expect(page.getByText("Traffic records unavailable. Check filters and retry with Refresh.")).toBeVisible();
+  await page.getByText("Technical details", { exact: true }).click();
   await expect(page.getByText(/Failed to load events/)).toBeVisible();
   await expect(page.getByText("IEC 104 APDU denied")).not.toBeVisible();
   await expect(page.getByText("IEC 104 reset sent to client")).not.toBeVisible();

@@ -48,6 +48,8 @@ test("a failing forwarder's audit backlog and error are shown in amber", async (
   await expect(panel.getByText("Backlog: 57")).toHaveClass(/text-amber/);
   await expect(panel.getByRole("status", { name: "Audit forwarding error" })).toContainText("tcp://192.0.2.11:6514: connection refused");
   const row = (f: string) => panel.getByRole("row").filter({ has: page.getByRole("cell", { name: f, exact: true }) });
+  await row("tcp://192.0.2.11:6514").getByText("Record position", { exact: true }).click();
+  await expect(row("tcp://192.0.2.11:6514").getByText("856", { exact: true })).toBeVisible();
   await expect(row("tcp://192.0.2.11:6514")).toContainText("856");
   await expect(row("tcp://192.0.2.11:6514").getByRole("cell").nth(2)).toHaveClass(/text-amber/);
   await expect(row("tcp://192.0.2.11:6514").getByRole("cell").nth(3)).toHaveText("—");
@@ -61,10 +63,10 @@ test("healthy audit forwarding reads quietly", async ({ page }) => {
     forwarders: [{ forwarder: "udp://192.0.2.10:514", last_id: 9, backlog: 0, last_error: "", last_sent: "2026-10-26T08:00:00Z" }],
   });
   const panel = page.getByRole("region", { name: "Audit forwarding" });
-  await expect(panel).toContainText("each forwarder resumes from its own cursor");
+  await expect(panel).toContainText("each forwarder resumes where it left off");
   await expect(panel.getByText("Backlog: 0")).not.toHaveClass(/text-amber/);
   await expect(panel.getByRole("status", { name: "Audit forwarding error" })).toHaveCount(0);
-  await expect(panel).toContainText("Last flush: —");
+  await expect(panel).toContainText("Last send: —");
 });
 
 test("a status without audit forwarding shows no audit panel", async ({ page }) => {
