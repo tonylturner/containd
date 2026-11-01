@@ -30,7 +30,7 @@ const data: Record<string, unknown> = {
   "/services/vpn": { wireguard: { enabled: false, interface: "wg0", listenPort: 51820, listenZone: "lan", listenInterfaces: [], addressCIDR: "10.8.0.1/24", privateKey: "private", peers: [{ publicKey: "peer", allowedIPs: ["10.8.0.2/32"] }] }, openvpn: { enabled: false, mode: "client", configPath: "/data/client.ovpn" } },
   "/identities": { mappings: [{ ip: "192.0.2.5", identities: ["operator"] }] },
   "/assets": [],
-  "/config/diff": { running: { schemaVersion: "0.1.9", system: { hostname: "existing" } }, candidate: { schemaVersion: "0.1.9", system: { hostname: "existing" } }, changed: false, changedSections: [] },
+  "/config/diff": { running: { schema_version: "0.1.9", system: { hostname: "existing" } }, candidate: { schema_version: "0.1.9", system: { hostname: "existing" } }, changed: false, changedSections: [] },
 };
 
 async function mockAPI(page: Page) {
@@ -53,6 +53,42 @@ async function mockAPI(page: Page) {
     return route.fulfill({ json: body, headers: { "X-Containd-Config": "staged" } });
   });
   return server;
+}
+
+for (const surface of ["raw editor", "restore"] as const) {
+  test(`Config ${surface} preserves user keys and displays the full rejection detail`, async ({ page }) => {
+    const server = await mockAPI(page);
+    server.data["/config/backups"] = [];
+    const path = surface === "raw editor" ? "/config/candidate" : "/config/import";
+    const detail = 'unknown top-level key "dataPlane" (did you mean "dataplane"?)';
+    const document = { schema_version: "0.1.10", dataPlane: { enforcement: true } };
+    let submitted: unknown;
+    await page.route(`**/api/v1${path}`, async (route) => {
+      submitted = route.request().postDataJSON();
+      await route.fulfill({ status: 400, json: { error: "invalid JSON", detail } });
+    });
+    await Promise.all([
+      page.waitForResponse(read("/config/diff")),
+      page.goto(surface === "raw editor" ? "/config/?tab=candidate" : "/config/"),
+    ]);
+    if (surface === "raw editor") {
+      const editor = page.getByRole("textbox", { name: "Staged config JSON", exact: true });
+      await expect(editor).toBeEnabled();
+      await editor.fill(JSON.stringify(document));
+      await page.getByRole("button", { name: "Save staged config", exact: true }).click();
+      await expect(editor).toHaveValue(JSON.stringify(document));
+    } else {
+      await page.locator('input[type="file"][accept=".json"]:visible').setInputFiles({
+        name: "config.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify(document)),
+      });
+      await page.getByRole("button", { name: "Restore", exact: true }).click();
+    }
+    const prefix = surface === "raw editor" ? "Failed to save candidate" : "Restore failed";
+    await expect(page.getByText(`${prefix}: invalid JSON: ${detail}`, { exact: true })).toBeVisible();
+    expect(submitted).toEqual(document);
+  });
 }
 
 const services = [
