@@ -13,7 +13,7 @@ curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/
 sh quickstart.sh
 ```
 
-`quickstart.sh` downloads the starter compose into the current directory, writes `.env` from `.env.example`, generates a real `CONTAIND_JWT_SECRET`, auto-adjusts the starter subnets if they would overlap with existing Docker networks, and starts the stack.
+`quickstart.sh` prepares the starter compose and `.env` in the current directory, generates `CONTAIND_JWT_SECRET` when blank, and starts the stack. It reuses existing files unless `--force` is set; explicit option overrides still update `.env`. On a fresh setup, it can adjust the default subnets to avoid existing Docker networks when Python 3 is available.
 
 If you want a customized starter directory before first boot, use the advanced bootstrap script instead:
 
@@ -29,7 +29,7 @@ If you cloned the repo locally, you can still use the same starter compose direc
 
 ```bash
 # Create .env with a generated signing key (do not overwrite an existing .env).
-sed "s/^CONTAIND_JWT_SECRET=.*/CONTAIND_JWT_SECRET=$(openssl rand -hex 32)/" .env.example > .env
+(set -C; sed "s/^CONTAIND_JWT_SECRET=.*/CONTAIND_JWT_SECRET=$(openssl rand -hex 32)/" .env.example > .env)
 # Optionally edit .env for ports or lab subnets before starting.
 docker compose --env-file .env -f deploy/docker-compose.yml up -d
 bash scripts/containd-connect
@@ -255,6 +255,11 @@ All default DB paths are under `/data`:
 - `CONTAIND_CONFIG_DB` (default `/data/config.db`)
 - `CONTAIND_AUDIT_DB` (default `/data/audit.db`)
 - `CONTAIND_USERS_DB` (default `/data/users.db`)
+- `CONTAIND_EVIDENCE_DB` (engine-owned evidence, default `/data/evidence.db`)
+
+The starter and dev Compose files pass through the first three variables.
+To override the evidence path, add `CONTAIND_EVIDENCE_DB` to the service's
+`environment` as well; setting it only in `.env` does not pass it into the container.
 
 The bind-mount source depends on the Compose file location:
 

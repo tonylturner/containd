@@ -1,6 +1,8 @@
 # API Reference
 
 containd exposes a REST API under `/api/v1`.
+API paths below are relative to that base unless they include `/api/v1` or explicitly
+name an engine or metrics endpoint.
 
 ## Authentication
 
@@ -115,7 +117,11 @@ See [Config Format](config-format.md) for the configuration lifecycle and JSON.
 
 Successful staged edits return `X-Containd-Config: staged`. Successful commit,
 commit-confirmed, confirm and rollback return `X-Containd-Config: committed`.
-Operational, read, preview-only and failed responses carry neither header value.
+Operational, read and preview-only responses carry neither header value.
+Failed responses normally omit it too. One exception is `POST /learn/apply`:
+if candidate persistence succeeds but receipt completion fails, HTTP `503`
+still carries `X-Containd-Config: staged`. Retry that request ID and ordered
+selections; the header does not mean the entire request completed.
 
 ## Orchestrator Client Contract
 
@@ -129,7 +135,9 @@ the following steps (paths below are relative to `/api/v1`):
    ruleset has been installed; nft errors, including missing `NET_ADMIN`, are
    failures, never ruleset warnings. Keep enforcement enabled for a firewall.
 3. Optionally, `GET /config` and compare running with what was submitted
-   (secrets are redacted). Check `GET /health` for continuing runtime health.
+   (secrets are redacted and the IDS rule bank is omitted). Use
+   `GET /config/export` to include the running IDS rules. Check `GET /health`
+   for continuing runtime health.
 
 Commit, commit-confirmed and rollback restore the pre-request running document
 and IDS bank on apply failure, then reapply them. The failed candidate stays
@@ -205,11 +213,9 @@ firewall snapshot, not every network or service side effect.
 
 Do not fall back to `POST /config/import` when commit fails. Import only
 stages: its 200 with `X-Containd-Config: staged` does not change running or
-the live firewall. Older clients, including RangerDanger 0.1.36, fall back on
-any commit error and can report that staged import as success. This existing
-client quirk is not an activation guarantee. Nft failures now trigger that
-fallback instead of returning a misleading 200 + ruleset warning; operators
-must fix enforcement availability and explicitly commit again.
+the live firewall. A client that treats a staged import as successful activation
+can leave its requested policy unapplied. Fix enforcement availability and
+explicitly commit again.
 
 On an appliance with a [reserved management path](management-reservation.md),
 the submitted document must keep the reserved interface's `device` binding and
@@ -309,8 +315,8 @@ mode, although its reported paths match the managed bundle.
 
 Use `GET /api/v1/events?query=1` for an `EventPage` envelope containing `events`,
 optional `nextCursor`, `historyTruncated`, and optional `engineError`.
-Filters (`id`, `session`, `flow`, `apdu`, `kind`, `protocol`, `decision`,
-`verdict`, `since`, `category`, `detections`) or `cursor` also select this mode.
+Filters (`id`, `ruleId`, `mode`, `session`, `flow`, `apdu`, `kind`, `protocol`,
+`decision`, `verdict`, `since`, `category`, `detections`) or `cursor` also select this mode.
 Filters apply **before** the limit, with matches sorted newest-first by timestamp
 and ID, without evidence priority. Filters combine with AND; comma-separated
 `kind` prefixes combine with OR. `since` is inclusive RFC3339.
@@ -389,8 +395,9 @@ are used when available, otherwise the flow's orientation hint.
 `stats.events` includes identification and passive decoder events. Nonstandard
 services remain observation-only. `stats.truncated` indicates a cut-short packet
 or partial final record; `stats.displayTruncated` means only the display sample
-was capped. Check `dataset.gaps` separately for evidence admission loss, which
-prevents certification.
+was capped. Check `dataset.gaps` separately for collection and admission loss.
+Gaps appear in suggestion limitations; certification covers retained complete
+parents, not missing traffic.
 
 See [Content identification](ics-dpi.md#content-identification) for protocol,
 capture-mode, timing and coverage limits.
@@ -418,8 +425,8 @@ captures and explicit live-watch datasets; it never commits policy.
 | `POST /learn/apply` | Atomic selected staging, described below |
 
 List pages use `{items, nextCursor?}` with optional `cursor` and `limit` (1–200,
-default 200). Follow `nextCursor` until absent; `items` may be null for an empty
-page. Dataset deletion/expiry/eviction invalidates dependent proof. Retention and
+default 200). Follow `nextCursor` until absent; an empty page has `items: []`.
+Dataset deletion/expiry/eviction invalidates dependent proof. Retention and
 protocol withholding limits are described in [Learning](ics-dpi.md#learning).
 
 Selection is not review. IEC 104 always requires explicit admin review; a wire
@@ -588,7 +595,7 @@ Event queries accept `ruleId` and `mode`; use
 
 ### Passive inventory
 
-All inventory reads require an authenticated management session:
+All inventory reads require management authentication:
 
 | Method | Path | Result |
 |---|---|---|
