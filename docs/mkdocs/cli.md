@@ -286,7 +286,10 @@ the configuration store (`CONTAIND_CONFIG_DB`, default `/data/config.db` in
 the image), readable only by its own user. It removes the file when it stops.
 The CLI calls the HTTP listener on `127.0.0.1` unless it redirects to HTTPS,
 and otherwise the HTTPS listener, trusting only the certificate management
-serves. It follows no redirect. It logs in as `CONTAIND_CLI_USER` with
+serves, using the public-leaf snapshot in the runtime record; no private key is
+recorded. The record follows valid [management TLS rotations](config-format.md#management-https-identity),
+including retention of the last-good identity after an invalid external rotation.
+It follows no redirect. It logs in as `CONTAIND_CLI_USER` with
 `CONTAIND_CLI_PASSWORD`; both default to `containd`. Without the file, the
 CLI stops with `management is not running`. The container health check
 (`containd healthcheck`) uses the same file.
