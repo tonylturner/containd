@@ -14,7 +14,7 @@ import { formatBytes } from "../lib/utils";
 
 export type ServiceInfo = {
   name: string;
-  active: boolean;
+  active: boolean | null;
   detail: string;
   href: string;
   sparkline?: number[];

@@ -409,7 +409,7 @@ export function deriveServices(
 
   if (!status) {
     return [
-      { name: "IPS", active: false, detail: "Loading...", href: "/ids/", sparkline: ips },
+      { name: "IPS", active: null, detail: "Unknown — protection not reported", href: "/ids/", sparkline: ips },
       { name: "AV", active: false, detail: "Loading...", href: "/system/services/av/" },
       { name: "DNS", active: false, detail: "Loading...", href: "/system/services/dns/" },
       { name: "VPN", active: false, detail: "Loading...", href: "/vpn/" },
@@ -429,8 +429,8 @@ export function deriveServices(
   return [
     {
       name: "IPS",
-      active: true,
-      detail: "Active",
+      active: null,
+      detail: "Unknown — protection not reported",
       href: "/ids/",
       sparkline: ips,
     },

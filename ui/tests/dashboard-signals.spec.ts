@@ -175,3 +175,13 @@ test("a measured zero container memory stays zero, not a synthetic minimum", asy
   const containerRow = page.getByText("Container", { exact: true }).locator("../..");
   await expect(containerRow.locator("[style*='width']")).toHaveAttribute("style", /width: 0%;/);
 });
+
+for (const ids of [{ enabled: false, rules: [] }, { enabled: true, rules: [] }]) {
+  test(`IPS is unknown without a live protection observation, even with IDS enabled=${ids.enabled}`, async ({ page }) => {
+    await openDashboard(page, { events: [], services, ids });
+    const ips = page.locator("a.rounded-lg").filter({ has: page.getByText("IPS", { exact: true }) });
+    await expect(ips).toContainText("Unknown");
+    await expect(ips).not.toContainText("Active");
+    await expect(ips).not.toHaveClass(/border-emerald/);
+  });
+}
