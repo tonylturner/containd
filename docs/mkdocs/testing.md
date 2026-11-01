@@ -198,9 +198,10 @@ the port forward's WAN-to-LAN tcp/80. It checks, with the EICAR and clean
 objects served by `test/data-smoke/av/`, that:
 
 - under fail-open and fail-closed with the scanner ready, the EICAR
-  download and upload are refused with `403` and no EICAR byte reaches the
-  client or the origin, clean objects pass whole, the origin sees the
-  engine's WAN address;
+  download and upload return a complete generated `403` refusal that contains
+  no 16-byte EICAR fragment, infected uploads never reach the origin, clean
+  downloads match the expected body, clean uploads match the receiver's size
+  and MD5, and the origin sees the engine's WAN address;
 - under fail-open with the scanner ready, a detection event names the client,
   the inbound port forward is gated the same way with the target seeing the
   engine's LAN address, and an unselected port passes EICAR without a gate event;
