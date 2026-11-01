@@ -154,6 +154,9 @@ func seqDiff(a, b uint32) int32 {
 // starts. A failed fail-closed stream stays failed, except one that failed
 // as picked up mid-connection: the engine closes that connection, so a
 // handshake SYN starts the client's next one on the tuple.
+// A non-admitting stream also restarts at a kernel-tracked handshake with
+// a different ISN; unlike an explicit denial it has no reset tombstone to
+// retire its state. Replaying its original SYN must not clear the denial.
 //
 // A SYN with a new sequence number on a live fail-closed stream (one that
 // no in-window FIN or RST ended) carries no payload and anchors nothing.
@@ -177,7 +180,9 @@ func (r *reassembler) open(key string, seq uint32, now time.Time, failClosed, ha
 			return false, false
 		}
 	case failClosed && s.failed != nil:
-		if !midStream(s.failed) || !handshake {
+		var se *StreamError
+		nonAdmit := errors.As(s.failed, &se) && se.Kind == StreamNonAdmit && s.synSeen && s.synSeq != seq
+		if !handshake || !midStream(s.failed) && !nonAdmit {
 			return false, false
 		}
 	case s.synSeen && s.synSeq == seq && !s.closed:

@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep decoded NFQUEUE default denials non-admitting across TCP
+  retransmissions, including reserved Modbus FC5 coil values, without
+  bypassing ordered kernel admission.
 - Cache accepted and rejected management TLS file identities so unchanged
   handshakes do not read or parse PEM, and a reload does not block other
   handshakes from serving the last-good identity.

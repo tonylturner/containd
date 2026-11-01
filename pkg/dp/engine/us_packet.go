@@ -4,6 +4,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
@@ -121,6 +122,10 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		e.dpiMgr.FailStream(state, &parsed, dpi.StreamDecoderPanic)
 		return e.failClosed(pkt, state, &parsed, scope, failClosedPanic, "", panicErr)
 	}
+	var streamErr *dpi.StreamError
+	if scope != nil && errors.As(res.Err, &streamErr) && streamErr.Kind == dpi.StreamNonAdmit {
+		return nonAdmitDecision(pkt)
+	}
 	// Events come before the error: a stream error's malformed event is
 	// already among them. Outside an enforce scope the packet itself passes.
 	e.RecordDPIEvents(state, &parsed, res.Events)
@@ -148,9 +153,20 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		return denied
 	}
 	if enforced {
-		return capture.Decision{Action: capture.Repeat, Mark: markabi.Continue(pkt.Mark, true), Reason: reasonPolicyNonAdmit}
+		if scope != nil {
+			// DPI has consumed these bytes, not delivered them. Preserve the
+			// denial in stream state so a TCP retry cannot become an admitting
+			// duplicate, including after verdict-cache expiry. Kernel admission
+			// still owns DROP versus RESET on every repeated traversal.
+			e.dpiMgr.FailStream(state, &parsed, dpi.StreamNonAdmit)
+		}
+		return nonAdmitDecision(pkt)
 	}
 	return acceptDecision
+}
+
+func nonAdmitDecision(pkt capture.Packet) capture.Decision {
+	return capture.Decision{Action: capture.Repeat, Mark: markabi.Continue(pkt.Mark, true), Reason: reasonPolicyNonAdmit}
 }
 
 // afterDrop runs job once the drop verdict of tok is submitted. A packet that

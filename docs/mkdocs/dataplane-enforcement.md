@@ -119,7 +119,7 @@ closed when its stream cannot be inspected: a conflicting overlap, a
 retransmission that differs from or predates the bytes the engine kept,
 malformed framing, reassembly limits, a decoder fault, or a SYN with payload
 that does not start the connection's stream (reason `stream_resync`). The
-packet is dropped and only that session is reset, like a decoded denial,
+packet is dropped and only that session is reset, like an explicit ICS denial,
 without restarting inspection of its old bytes. A tuple tombstone keeps the
 denied incarnation dropping independently of verdict-cache expiry for a fixed
 10 seconds; duplicates do not refresh it. At most 16,384 tombstones are kept,
@@ -130,6 +130,14 @@ duplicate. Expiry and eviction clear only the guarded tuple's verdicts, flow
 state and failed streams: later payload fails closed as a mid-stream pickup
 and triggers another reset, while a fresh kernel-tracked handshake can start
 inspection immediately. A fresh handshake also retires a still-live tombstone.
+
+Decoded messages denied by the firewall default or a plain transport rule
+continue through ordered kernel admission with a non-admitting packet mark,
+rather than a userspace reset. Within an enforcing generic ICS scope, their
+consumed stream bytes remain non-admitting on TCP retransmissions and later
+segments, independently of the verdict cache. A new kernel-tracked handshake
+with a different initial sequence number starts inspection again. Removing
+the enforcing scope leaves admission entirely to the current kernel policy.
 
 Generic resets are **best-effort**, not confirmation that either peer closed.
 The engine uses the denied packet's SEQ for its receiver and ACK for its
