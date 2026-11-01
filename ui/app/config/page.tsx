@@ -481,23 +481,9 @@ function ConfigPage() {
               URL.revokeObjectURL(url);
               setStatus("IDS rules downloaded.");
             }}
-            onRestoreRules={async (file) => {
-              if (!file) return;
-              setStatus(null);
-              try {
-                const text = await file.text();
-                const rules = JSON.parse(text);
-                if (!Array.isArray(rules)) {
-                  setStatus("Invalid IDS rules file (expected JSON array).");
-                  return;
-                }
-                const res = await api.restoreIDSRules(diffRevision ?? "", rules);
-                setStatus(res.ok ? `IDS restore staged (${res.data.count} rules) — commit to apply.` : `Restore failed: ${res.error}`);
-                refresh();
-              } catch {
-                setStatus("Invalid JSON file.");
-              }
-            }}
+            revision={diffRevision}
+            onStatus={setStatus}
+            onChanged={refresh}
           />
 
           <ConfigBlockExplorer
