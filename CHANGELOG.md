@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Return `GET /api/v1/security/conduits` as an ordered array with explicit `from`
+  and `to` zone names instead of a map keyed by joined names. API clients must
+  consume the array; zone names containing arrows remain distinct in topology
+  selection and security scores.
 - Document established-session re-evaluation after policy changes and why a
   blocked connection can remain visible in Sessions until conntrack timeout.
 - Reject unknown, case-mismatched or duplicate top-level keys in full-config
@@ -71,6 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preserve in-flight AV scan failures across unchanged backend reapplies so
   readiness requires scan-canary recovery.
+- Use the theme's failure color for degraded evidence and audit persistence
+  banners.
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
 - An ICAP `413` reply counts as an oversized object, not a scanner error.
