@@ -77,3 +77,29 @@ func TestSecurityConduitsResetIsDenial(t *testing.T) {
 		})
 	}
 }
+
+func TestSecurityConduitsOrderedDecisions(t *testing.T) {
+	for _, tc := range []struct {
+		name, state   string
+		list          []config.Rule
+		defaultAction config.Action
+		protoCount    int
+	}{
+		{"deny first", "block", []config.Rule{{ID: "deny", Action: config.ActionDeny}, {ID: "allow", Action: config.ActionAllow, Protocols: []config.Protocol{{Name: "tcp", Port: "443"}}}}, config.ActionDeny, 0},
+		{"reset first", "block", []config.Rule{{ID: "reset", Action: config.ActionReset}, {ID: "allow", Action: config.ActionAllow}}, config.ActionDeny, 0},
+		{"allow first", "allow", []config.Rule{{ID: "allow", Action: config.ActionAllow}, {ID: "deny", Action: config.ActionDeny}}, config.ActionDeny, 0},
+		{"service exception", "partial", []config.Rule{{ID: "allow", Action: config.ActionAllow, Protocols: []config.Protocol{{Name: "tcp", Port: "443"}}}, {ID: "deny", Action: config.ActionDeny}}, config.ActionDeny, 1},
+		{"same service denied first", "block", []config.Rule{{ID: "deny", Action: config.ActionDeny, Protocols: []config.Protocol{{Name: "tcp", Port: "443"}}}, {ID: "allow", Action: config.ActionAllow, Protocols: []config.Protocol{{Name: "tcp", Port: "443"}}}}, config.ActionDeny, 0},
+		{"conditional refusal", "partial", []config.Rule{{ID: "deny", Action: config.ActionDeny, Sources: []string{"192.0.2.0/24"}}, {ID: "allow", Action: config.ActionAllow}}, config.ActionAllow, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Firewall.Rules = tc.list
+			cfg.Firewall.DefaultAction = tc.defaultAction
+			got := buildConduitResult(cfg, computeConduitGlobals(cfg), "lan", "wan")
+			if got.State != tc.state || len(got.Proto) != tc.protoCount {
+				t.Fatalf("result=%+v", got)
+			}
+		})
+	}
+}

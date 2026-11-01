@@ -223,5 +223,5 @@ func (s *Server) audit(actor string, rec audit.Record) {
 	if rec.Result == "" {
 		rec.Result = "success"
 	}
-	_ = s.opts.AuditStore.Add(context.Background(), rec)
+	audit.Write(context.Background(), s.opts.AuditStore, rec)
 }

@@ -142,7 +142,7 @@ export default function SecurityView() {
       <div className={s.matrixPane}>
         <div className={s.matrixHeader}>
           <div className={s.matrixTitle}>ZONE &middot; CONDUIT MATRIX</div>
-          <div className={s.matrixSubtitle}>Zone targets are candidate settings; conduit observations are live. Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR compliance. SL-A/T shown on zone headers.</div>
+          <div className={s.matrixSubtitle}>Zone targets are candidate settings; conduit observations are live. Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR requirement checks. Check-based SL / SL-T shown on zone headers. Automated checks tag requirements from observed policy; not a standards assessment.</div>
           <div role="status" aria-label="Zones below target" className={s.targetSummary}>
             <span style={{ color: targets.below.length > 0 ? "var(--amber)" : targets.total > 0 ? "var(--topo-green)" : "var(--text-dim)" }}>{targetSummaryText(targets)}</span>
             {targets.below.map((z) => (
@@ -234,7 +234,7 @@ export default function SecurityView() {
                   <div className={s.rowHeader}>
                     <div className={s.rowZoneInfo}>
                       <div className={s.rowZoneName} style={{ color: fromZ.color }}>{fromZ.name}</div>
-                      <div className={s.rowZoneSub} style={{ color: sc }}>SL-A:{fa} / SL-T:{fromZ.sl_t}</div>
+                      <div className={s.rowZoneSub} style={{ color: sc }}>Checks:{fa} / SL-T:{fromZ.sl_t}</div>
                     </div>
                     <div className={s.rowZoneDot} style={{ background: fromZ.color, boxShadow: `0 0 5px ${fromZ.color}60` }} />
                   </div>
@@ -297,7 +297,7 @@ export default function SecurityView() {
           <div className={s.legendItem}><div className={s.lDot} style={{ background: "var(--amber)" }} />IDS partial</div>
           <div className={s.legendItem}><div className={s.lDot} style={{ background: "var(--topo-red)" }} />No IDS</div>
           <div style={{ width: 1, height: 12, background: "var(--topo-border)", margin: "0 4px" }} />
-          <div className={s.legendItem}><span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--amber)" }}>SL-A/T</span> = achieved / target</div>
+          <div className={s.legendItem}><span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--amber)" }}>SL/T</span> = check-based / target</div>
         </div>
         {!panelOpen && <button className={ts.panelToggle} onClick={() => setPanelOpen(true)} title="Show detail panel">&#x25C0;</button>}
         <div className={ts.zoomControls}>
@@ -330,7 +330,7 @@ export default function SecurityView() {
             ) : (
               <div className={s.empty}>
                 <div className={s.emptyIcon}>&#x2B21;</div>
-                <div className={s.emptyText}>Click any conduit cell to inspect its policy, IDS coverage, and IEC 62443 SR compliance.<br /><br />SL-T is editable per zone. SR checks are auto-computed but can be manually overridden.</div>
+                <div className={s.emptyText}>Click any conduit cell to inspect its policy, IDS coverage, and IEC 62443 SR requirement checks.<br /><br />SL-T is editable per zone. SR checks are automated but can be manually overridden.</div>
               </div>
             )}
           </div>
@@ -449,14 +449,14 @@ function SLSection({ zone, label, conduits, setSLTarget, toggleOverride }: {
       </div>
       <div className={s.slAchievedBadge}>
         <div>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)", letterSpacing: 1, marginBottom: 2 }}>SL ACHIEVED</div>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)", letterSpacing: 1, marginBottom: 2 }}>CHECK-BASED SL</div>
           <div className={s.slAchievedVal} style={{ color: sc }}>SL-{sl_a}</div>
         </div>
         <div style={{ flex: 1, paddingLeft: 10 }}>
           <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-mid)" }}>
-            {sl_a >= zone.sl_t ? `Meets SL-${zone.sl_t} target` : `Gap: target SL-${zone.sl_t}, achieved SL-${sl_a}`}
+            {sl_a >= zone.sl_t ? `SL-${zone.sl_t} target checks pass` : `Unmet checks for SL-${zone.sl_t}; check-based SL-${sl_a}`}
           </div>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)", marginTop: 2 }}>{blocking} blocking SR{blocking !== 1 ? "s" : ""} not met</div>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)", marginTop: 2 }}>{blocking} unmet SR check{blocking !== 1 ? "s" : ""} for target</div>
         </div>
       </div>
       <div style={{ marginTop: 10 }}>
@@ -472,14 +472,14 @@ function SLSection({ zone, label, conduits, setSLTarget, toggleOverride }: {
                     : <span style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)" }}>OPT SL-{c.sl}</span>}
                 </div>
                 <span className={s.srName}>{c.label}</span>
-                <span className={s.srSource}>{c.source} &middot; {c.overridden ? "manually overridden" : "auto-detected"}</span>
+                <span className={s.srSource}>{c.source} &middot; {c.overridden ? "manually overridden" : "automated check"}</span>
               </div>
               <div className={s.srRight}>
                 <span className={`${s.srStatus} ${c.overridden ? s.srManual : c.met ? s.srMet : s.srNotMet}`}>
-                  {c.overridden ? "OVERRIDE" : c.met ? "MET" : "NOT MET"}
+                  {c.overridden ? "OVERRIDE" : c.met ? "CHECK PASS" : "CHECK FAIL"}
                 </span>
                 <button className={`${s.srOverrideBtn} ${c.overridden ? s.srOverrideBtnActive : ""}`} onClick={() => toggleOverride(zone.id, c.id, !c.met)}>
-                  {c.overridden ? "REVERT" : c.met ? "MARK FAIL" : "MARK MET"}
+                  {c.overridden ? "REVERT" : c.met ? "MARK FAIL" : "MARK PASS"}
                 </button>
               </div>
             </div>

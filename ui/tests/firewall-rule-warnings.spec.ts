@@ -12,7 +12,7 @@ const unbound = {
 };
 const shadowed = {
   ruleId: "block-ssh", shadowedBy: "allow-all-ssh", action: "RESET",
-  message: "shadowed by ALLOW rule allow-all-ssh, which matches all of its traffic; a matching ALLOW takes precedence over every DENY and RESET",
+  message: "rule at position 2 is shadowed by earlier ALLOW rule allow-all-ssh at position 1, which matches all of its traffic",
 };
 
 const range = { start: "2026-10-26T08:00:00Z", end: "2026-10-26T09:15:02Z" };
@@ -23,6 +23,7 @@ async function openFirewall(
   previews: unknown[],
   installed: unknown = { installed: true, appliedAt: "2026-10-26T06:00:00Z" },
   preview: unknown = noMatch,
+  candidate: unknown = contractor,
 ) {
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
@@ -33,7 +34,7 @@ async function openFirewall(
     const path = new URL(request.url()).pathname;
     let body: unknown = {};
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") body = user;
-    if (path === "/api/v1/firewall/rules") body = [contractor, blockSSH];
+    if (path === "/api/v1/firewall/rules") body = [candidate, blockSSH];
     if (path === "/api/v1/zones") body = [];
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false };
@@ -82,17 +83,17 @@ async function previewContractor(page: Page, preview: unknown) {
 
 test("rule impact preview lists the time range and collapsed sample events", async ({ page }) => {
   const modbus = {
-    id: 41, flowId: "flow-1", proto: "modbus", kind: "request", timestamp: "2026-10-26T09:15:02Z",
+    id: "41", flowId: "flow-1", proto: "modbus", kind: "request", timestamp: "2026-10-26T09:15:02Z",
     attributes: { function_code: 3, unit_id: 1 },
     srcIp: "10.10.0.5", dstIp: "10.20.0.7", srcPort: 40100, dstPort: 502, transport: "tcp",
   };
   const iec = {
-    id: 40, flowId: "flow-2", proto: "iec104", kind: "request", timestamp: "2026-10-26T09:10:00Z",
+    id: "40", flowId: "flow-2", proto: "iec104", kind: "request", timestamp: "2026-10-26T09:10:00Z",
     attributes: { type_id: 45, direction: "request" },
     srcIp: "2001:db8::5", dstIp: "2001:db8::7", srcPort: 40200, dstPort: 2404, transport: "tcp",
   };
   const ping = {
-    id: 39, flowId: "flow-3", proto: "firewall", kind: "flow.allow", timestamp: "2026-10-26T08:00:00Z",
+    id: "39", flowId: "flow-3", proto: "firewall", kind: "flow.allow", timestamp: "2026-10-26T08:00:00Z",
     srcIp: "10.10.0.6", dstIp: "10.20.0.8", transport: "icmp",
   };
   const summary = await previewContractor(page, {
@@ -128,6 +129,38 @@ test("rule impact preview says when there were no events to search", async ({ pa
   await expect(summary).not.toContainText("of 0 recent events");
   await expect(summary).not.toContainText("Events searched");
   await expect(summary.getByText(/sample event/)).toHaveCount(0);
+});
+
+test("a via rule explains unavailable historical counting while retaining warnings and ICS coverage", async ({ page }) => {
+  const unavailable = "Retained events do not record which connections containd translated, so a rule limited to port forwards cannot be previewed from history.";
+  const warning = {
+    ruleId: contractor.id, predicate: "forward", action: "ALLOW",
+    message: "Referenced port forward modbus-pf is disabled.",
+  };
+  const previews: unknown[] = [];
+  await openFirewall(page, previews, undefined, {
+    unavailable, match_count: 0, sample_matches: [], time_range: range, total_events: 12,
+    warnings: [warning],
+    icsCoverage: {
+      ruleId: contractor.id, protocol: "modbus", mode: "enforce", state: "not_enforcing",
+      reasons: [{ code: "no-inline-path", message: "No inline capture path available." }],
+    },
+  }, { ...contractor, viaForwards: ["modbus-pf"], ics: { protocol: "modbus", mode: "enforce" } });
+  await page.getByRole("row").filter({ hasText: contractor.id }).getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("button", { name: "Preview impact" }).click();
+  const summary = page.getByLabel("Rule impact preview");
+  await expect(summary.getByText(unavailable, { exact: true })).toBeVisible();
+  await expect(summary).not.toContainText("recent events match");
+  await expect(summary).not.toContainText("No recent events to search");
+  await expect(summary).not.toContainText("Events searched");
+  await expect(summary.getByRole("list", { name: "Sample matching events" })).toHaveCount(0);
+  await expect(summary.getByText(/sample event/)).toHaveCount(0);
+  await expect(summary.getByRole("status").filter({ hasText: "Rules that do not act as written" })).toContainText(warning.message);
+  const coverage = summary.getByLabel("ICS coverage", { exact: true });
+  await expect(coverage).toContainText("effective mode: enforce");
+  await expect(coverage).toContainText("No inline capture path available.");
+  expect(previews).toHaveLength(1);
+  expect(previews[0]).toMatchObject({ viaForwards: ["modbus-pf"], ics: { protocol: "modbus" } });
 });
 
 test("ruleset preview lists unbound identities and shadowed rules", async ({ page }) => {

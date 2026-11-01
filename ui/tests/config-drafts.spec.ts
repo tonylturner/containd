@@ -52,7 +52,11 @@ async function mockAPI(page: Page) {
     if (path === "/templates/ics/apply") {
       return route.fulfill({ json: { rules: [], created: 0 }, headers: body.preview ? {} : { "X-Containd-Config": "staged" } });
     }
-    if (path === "/firewall/rules" && req.method() === "POST") {
+    if (path === "/firewall/port-forwards" && req.method() === "POST") {
+      const nat = data["/firewall/nat"] as { portForwards?: unknown[] };
+      data["/firewall/nat"] = { ...nat, portForwards: [...(nat.portForwards ?? []), body.forward] };
+      result = { forward: body.forward, placement: { reason: "generated", rule: { id: "generated-allow" }, index: 0 } };
+    } else if (path === "/firewall/rules" && req.method() === "POST") {
       data[path] = [...data[path] as object[], body];
     } else if (path.startsWith("/firewall/rules/")) {
       const id = decodeURIComponent(path.slice("/firewall/rules/".length));
@@ -736,12 +740,13 @@ test("Wizard cannot stage NAT after a failed refresh and retains its publish dra
   await announce(page, "/firewall/nat");
   await expect(stage).toBeEnabled();
   await stage.click();
-  await expect.poll(() => server.writes.length).toBe(2);
-  const written = server.writes.find((write) => write.path === "/firewall/nat")!;
-  expect(written.body).toEqual({ ...original, portForwards: [original.portForwards[0], {
+  await expect.poll(() => server.writes.length).toBe(1);
+  const written = server.writes.find((write) => write.path === "/firewall/port-forwards")!;
+  expect(written.body).toEqual({ allowRule: true, forward: {
     id: expect.any(String), enabled: true, description: "Port forward TCP/443 to 192.0.2.5 (wizard)",
     proto: "tcp", listenPort: 443, destIp: "192.0.2.5", destPort: 443, ingressZone: "wan",
-  }] });
+  } });
+  expect(server.data["/firewall/nat"]).toMatchObject({ ...original, portForwards: [original.portForwards[0], expect.objectContaining({ destIp: "192.0.2.5" })] });
 });
 
 test("a confirmation opened before a failed refresh cannot stage its stale callback", async ({ page }) => {

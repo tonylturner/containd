@@ -57,7 +57,7 @@ func TestPreviewRuleZones(t *testing.T) {
 			t.Run(string(action)+"/"+tc.name, func(t *testing.T) {
 				entry := rules.Entry{Action: action, SourceZones: tc.src, DestZones: tc.dst,
 					ICS: rules.ICSPredicate{Protocol: "iec104"}}
-				got := e.previewRule(entry, previewZoneResolver)
+				got := e.previewRule(PreviewRuleRequest{Entry: entry}, previewZoneResolver)
 				if got.MatchCount != tc.want || got.TotalEvents != 2 {
 					t.Fatalf("preview = %+v, want %d", got, tc.want)
 				}
@@ -67,7 +67,7 @@ func TestPreviewRuleZones(t *testing.T) {
 	entry := rules.Entry{SourceZones: []string{"control"}, DestZones: []string{"plant"},
 		Action: rules.ActionAllow, ICS: rules.ICSPredicate{Protocol: "iec104"}}
 	e.ruleSnap.Store(&rules.Snapshot{ZoneIfaces: map[string][]string{"control": {"missing"}}})
-	if got := e.previewRule(entry, previewZoneResolver); got.MatchCount != 0 {
+	if got := e.previewRule(PreviewRuleRequest{Entry: entry}, previewZoneResolver); got.MatchCount != 0 {
 		t.Fatalf("preview ignored current snapshot: %+v", got)
 	}
 }
@@ -121,7 +121,7 @@ func TestPreviewRuleIEC104RuntimeParity(t *testing.T) {
 					}
 					// A strict ALLOW naming only the unsupported type matches nothing.
 					nothing := parsing == ics.Strict && reflect.DeepEqual(predicate.TypeIDs, []int{2})
-					got := e.previewRule(entry, previewZoneResolver)
+					got := e.previewRule(PreviewRuleRequest{Entry: entry}, previewZoneResolver)
 					if got.MatchCount != want || (want == 0) != nothing {
 						t.Fatalf("preview=%d runtime=%d", got.MatchCount, want)
 					}
@@ -167,8 +167,8 @@ func TestPreviewRuleIEC104EqualPorts(t *testing.T) {
 	ev.DstPort = iec104Port // client and server both use 2404
 	e := &Engine{eventStore: events.NewStore(10)}
 	e.eventStore.Append(ev)
-	got := e.PreviewRule(rules.Entry{Action: rules.ActionAllow, Sources: []string{ev.DstIP + "/32"},
-		Destinations: []string{ev.SrcIP + "/32"}, ICS: rules.ICSPredicate{Protocol: "iec104", ReadOnly: true}})
+	got := e.PreviewRule(PreviewRuleRequest{Entry: rules.Entry{Action: rules.ActionAllow, Sources: []string{ev.DstIP + "/32"},
+		Destinations: []string{ev.SrcIP + "/32"}, ICS: rules.ICSPredicate{Protocol: "iec104", ReadOnly: true}}})
 	if got.MatchCount != 1 {
 		t.Fatalf("lost session orientation with equal ports: %+v", got)
 	}
@@ -208,7 +208,7 @@ func TestPreviewRuleEnvelopeDenialsNeverMatch(t *testing.T) {
 						}
 					}
 					e.eventStore.Append(iecEvent(0, kind, true, attrs))
-					got := e.PreviewRule(rules.Entry{Action: action, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"}})
+					got := e.PreviewRule(PreviewRuleRequest{Entry: rules.Entry{Action: action, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"}}})
 					if got.MatchCount != want {
 						t.Fatalf("matches = %d, want %d: %+v", got.MatchCount, want, got)
 					}
@@ -227,7 +227,7 @@ func TestPreviewRuleWindowAndSamples(t *testing.T) {
 			Transport: "tcp", DstPort: 502, Timestamp: time.Unix(int64(i), 0)})
 	}
 	e.ruleSnap.Store(&rules.Snapshot{ZoneIfaces: map[string][]string{"control": {"cc0"}, "plant": {"rtu0"}}})
-	got := e.previewRule(entry, previewZoneResolver)
+	got := e.previewRule(PreviewRuleRequest{Entry: entry}, previewZoneResolver)
 	if got.MatchCount != 5000 || got.TotalEvents != 5000 || len(got.SampleMatches) != 50 ||
 		!got.TimeRange.Start.Equal(time.Unix(101, 0)) || !got.TimeRange.End.Equal(time.Unix(5100, 0)) {
 		t.Fatalf("preview = %+v", got)
@@ -239,7 +239,7 @@ func TestPreviewRuleWindowAndSamples(t *testing.T) {
 
 func TestPreviewRuleEmpty(t *testing.T) {
 	e := &Engine{eventStore: events.NewStore(10)}
-	got := e.PreviewRule(rules.Entry{})
+	got := e.PreviewRule(PreviewRuleRequest{Entry: rules.Entry{}})
 	if got.MatchCount != 0 || got.TotalEvents != 0 || got.TimeRange != nil || got.SampleMatches == nil {
 		t.Fatalf("empty preview = %+v", got)
 	}
@@ -251,11 +251,11 @@ func TestPreviewRuleZoneWarnings(t *testing.T) {
 	e := &Engine{eventStore: events.NewStore(10)}
 	e.ruleSnap.Store(&rules.Snapshot{ZoneIfaces: map[string][]string{"control": {"cc0"}, "plant": {"rtu0"}}})
 	bound := rules.Entry{ID: "bound", Action: rules.ActionAllow, SourceZones: []string{"control"}, DestZones: []string{"plant"}}
-	if got := e.previewRule(bound, previewZoneResolver).Warnings; len(got) != 0 {
+	if got := e.previewRule(PreviewRuleRequest{Entry: bound}, previewZoneResolver).Warnings; len(got) != 0 {
 		t.Fatalf("bound zones warned: %+v", got)
 	}
 	empty := rules.Entry{ID: "empty", Action: rules.ActionAllow, SourceZones: []string{"control"}, DestZones: []string{"dmz"}}
-	got := e.previewRule(empty, previewZoneResolver).Warnings
+	got := e.previewRule(PreviewRuleRequest{Entry: empty}, previewZoneResolver).Warnings
 	if len(got) != 1 || got[0].Predicate != enforce.PredicateZone || !reflect.DeepEqual(got[0].Zones, []string{"dmz"}) {
 		t.Fatalf("empty zone warnings = %+v, want one zone warning for dmz", got)
 	}

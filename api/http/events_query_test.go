@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	dpevents "github.com/tonylturner/containd/pkg/dp/events"
 )
 
@@ -92,5 +94,27 @@ func TestEventsDetailBeyondLegacyPage(t *testing.T) {
 	var event dpevents.Event
 	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &event) != nil || event.ID != oldest.ID {
 		t.Fatalf("detail lost retained row: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEventsStringIDsListDetailQueryAndPreview(t *testing.T) {
+	const id = uint64(1<<63 + 1)
+	store := dpevents.NewStore(8)
+	store.Append(dpevents.Event{ID: id, Kind: "request", Timestamp: time.Unix(1, 0)})
+	server := NewServerWithEngineAndServices(&mockStore{}, nil, retentionEngine{newRuntimeMockEngine(), store}, nil, nil)
+	for _, path := range []string{"/api/v1/events", "/api/v1/events/9223372036854775809", "/api/v1/events?id=9223372036854775809"} {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, authedRequest(http.MethodGet, path, nil))
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"9223372036854775809"`) {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	preview := &previewMockEngine{result: dpengine.PreviewRuleResponse{SampleMatches: []dpevents.Event{{ID: id}}}}
+	rec := httptest.NewRecorder()
+	req := authedRequest(http.MethodPost, "/api/v1/firewall/rules/preview", strings.NewReader(`{"id":"candidate","action":"ALLOW"}`))
+	req.Header.Set("Content-Type", "application/json")
+	NewServerWithEngine(&mockStore{}, nil, preview).ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"9223372036854775809"`) {
+		t.Fatalf("preview: %d %s", rec.Code, rec.Body.String())
 	}
 }

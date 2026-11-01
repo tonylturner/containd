@@ -16,8 +16,7 @@ func tcpEntry(id string, action Action, port string) Entry {
 	return Entry{ID: id, Protocols: []Protocol{{Name: "tcp", Port: port}}, Action: action}
 }
 
-// The configured order does not matter: any matching ALLOW wins, then the
-// first DENY or RESET by rule ID, then the default. Effects never decide.
+// The configured terminal order decides; effects never decide.
 func TestEvaluateMatchPrecedence(t *testing.T) {
 	plc := tcpEntry("z-allow-plc", ActionAllow, "502")
 	plc.Sources = []string{"10.0.0.5/32"}
@@ -43,11 +42,11 @@ func TestEvaluateMatchPrecedence(t *testing.T) {
 		action Action
 		rule   string
 	}{
-		{"ALLOW listed after a broader DENY wins", l4Ctx("10.0.0.5", "10.0.1.1", "tcp", "502"), ActionAllow, "z-allow-plc"},
+		{"earlier broader DENY wins", l4Ctx("10.0.0.5", "10.0.1.1", "tcp", "502"), ActionDeny, "a-deny-502"},
 		{"DENY when no ALLOW matches; RATE_LIMIT does not decide", l4Ctx("10.0.0.6", "10.0.1.1", "tcp", "502"), ActionDeny, "a-deny-502"},
-		{"DENY and RESET by rule ID: DENY first", l4Ctx("10.0.0.6", "10.0.1.1", "tcp", "23"), ActionDeny, "b-deny-telnet"},
-		{"DENY and RESET by rule ID: RESET first", l4Ctx("10.0.0.6", "10.0.1.1", "tcp", "22"), ActionReset, "a-reset-ssh"},
-		{"ALLOW beats RESET", l4Ctx("10.0.0.9", "10.0.1.1", "tcp", "22"), ActionAllow, "y-allow-ssh-admin"},
+		{"RESET listed before DENY", l4Ctx("10.0.0.6", "10.0.1.1", "tcp", "23"), ActionReset, "m-reset-telnet"},
+		{"DENY listed before RESET", l4Ctx("10.0.0.6", "10.0.1.1", "tcp", "22"), ActionDeny, "b-deny-ssh"},
+		{"earlier DENY beats ALLOW", l4Ctx("10.0.0.9", "10.0.1.1", "tcp", "22"), ActionDeny, "b-deny-ssh"},
 		{"TAG does not admit: default", l4Ctx("10.0.0.6", "10.0.1.1", "tcp", "80"), ActionDeny, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,16 +74,15 @@ func TestEffectsAloneAdmitNothing(t *testing.T) {
 	}
 }
 
-// An ICS DENY overlapping an ALLOW is shadowed: the ALLOW wins whatever
-// the order.
-func TestGenericICSDenyShadowedByAllow(t *testing.T) {
+// An earlier enforcing ICS DENY beats a later broad plain ALLOW.
+func TestGenericICSDenyBeforeAllow(t *testing.T) {
 	write := Entry{ID: "a-deny-write", Protocols: []Protocol{{Name: "tcp", Port: "502"}}, Action: ActionDeny,
-		ICS: ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{6}}}
+		ICS: ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{6}, Mode: "enforce"}}
 	ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{write, tcpEntry("z-allow-502", ActionAllow, "502")}})
 	ctx := l4Ctx("10.0.0.1", "10.0.0.2", "tcp", "502")
 	ctx.ICS = &ICSContext{Protocol: "modbus", HasFunctionCode: true, FunctionCode: 6}
-	if action, entry := ev.EvaluateMatch(ctx); action != ActionAllow || ruleID(entry) != "z-allow-502" {
-		t.Fatalf("FC6 = %s by %q, want ALLOW by z-allow-502", action, ruleID(entry))
+	if action, entry := ev.EvaluateMatch(ctx); action != ActionDeny || ruleID(entry) != "a-deny-write" {
+		t.Fatalf("FC6 = %s by %q, want DENY by a-deny-write", action, ruleID(entry))
 	}
 }
 
@@ -104,8 +102,8 @@ func TestEvaluateIEC104Precedence(t *testing.T) {
 		action Action
 		rule   string
 	}{
-		{"ALLOW after the DENYs wins", iFrame(100, "system", 1, 0, true), ActionAllow, "z-allow-gi"},
-		{"first DENY by rule ID", iFrame(46, "control", 1, 2001, false), ActionDeny, "a-deny-control"},
+		{"earlier DENY beats later ALLOW", iFrame(100, "system", 1, 0, true), ActionDeny, "b-deny-iec"},
+		{"first DENY by position", iFrame(46, "control", 1, 2001, false), ActionDeny, "b-deny-iec"},
 		{"other DENY", iFrame(103, "system", 1, 0, false), ActionDeny, "b-deny-iec"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

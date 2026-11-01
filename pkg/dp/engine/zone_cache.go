@@ -30,6 +30,9 @@ type zoneCache struct {
 	// addrsFor reads an interface's addresses; nil is the OS lookup
 	// (interfaceAddrs).
 	addrsFor func(string) ([]net.Addr, error)
+	// changes coalesces resolver updates for the engine's address-set worker.
+	// Initialized before Start and retained across Reconfigure.
+	changes chan struct{}
 
 	gen     atomic.Uint64
 	watched atomic.Bool
@@ -77,7 +80,7 @@ func (c *zoneCache) build(snap *rules.Snapshot) zoneIndex {
 // before it reads any notification: indexes built from now on are current
 // until it reports a change.
 func (c *zoneCache) subscribed() {
-	c.gen.Add(1)
+	c.changed()
 	c.watched.Store(true)
 }
 
@@ -85,11 +88,15 @@ func (c *zoneCache) subscribed() {
 // when notifications were lost.
 func (c *zoneCache) changed() {
 	c.gen.Add(1)
+	select {
+	case c.changes <- struct{}{}:
+	default:
+	}
 }
 
 // unsubscribed is called by the watcher when it stops receiving
 // notifications.
 func (c *zoneCache) unsubscribed() {
 	c.watched.Store(false)
-	c.gen.Add(1)
+	c.changed()
 }

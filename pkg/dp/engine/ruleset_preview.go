@@ -4,6 +4,7 @@ package engine
 
 import (
 	"github.com/tonylturner/containd/pkg/dp/enforce"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -36,13 +37,37 @@ type RulesetPreview struct {
 // subsequent bind, reconfiguration or admission switch, or a later apply
 // time, can change the eventual apply.
 func (e *Engine) PreviewRuleset(snap rules.Snapshot, settings enforce.CompilerSettings) (RulesetPreview, error) {
+	e.lifecycleMu.Lock()
+	defer e.lifecycleMu.Unlock()
+	if snap.DPIMode == "" {
+		snap.DPIMode = e.dpiMode
+	}
 	if err := enforce.ValidateManagementSnapshot(&snap, e.managementReservation); err != nil {
 		return RulesetPreview{}, err
+	}
+	var previous []rules.GateZone
+	if old := e.ruleSnap.Load(); e.admission.installed && old != nil {
+		previous = old.Gate.Zones
+	}
+	var err error
+	if snap.Gate, err = snap.Gate.WithStableZoneIndices(previous); err != nil {
+		return RulesetPreview{}, err
+	}
+	if snap.LocalIPv4ByDevice, err = e.localIPv4(&snap); err != nil {
+		return RulesetPreview{}, err
+	}
+	signature, err := e.policySignatureForQueue(snap, settings.NFQueueGroup)
+	if err != nil {
+		return RulesetPreview{}, err
+	}
+	snap.AdmissionParity = e.admission.parity
+	if e.admission.installed && signature != e.admission.signature {
+		snap.AdmissionParity ^= markabi.ParityBit
 	}
 	comp := enforce.NewCompilerWithSettings(settings, e.managementReservation)
 	comp.EngineAPI = e.engineAPI
 	comp.IEC104EnvelopeOpen = e.gate.sampleOpen(comp.QueueID)
-	comp.GateAdmit = e.GateAdmit()
+	comp.GateAdmit = e.gateAdmit
 	comp.ScheduleFrom = e.gate.now()
 	runtime := RulesetPreviewRuntime{IEC104EnvelopeOpen: comp.IEC104EnvelopeOpen, GateAdmit: comp.GateAdmit.String()}
 	switch {

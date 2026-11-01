@@ -10,12 +10,9 @@ func (a Action) Decides() bool {
 	return a == ActionAllow || a == ActionDeny || a == ActionReset
 }
 
-// DecisionOrder returns the indexes of the deciding entries in the order
-// the dataplane decides them: every ALLOW by rule ID, then every DENY and
-// RESET by rule ID. A packet is allowed if any ALLOW matches; otherwise
-// the first matching DENY or RESET decides it; otherwise the default
-// applies. The first match in this order is the reported rule, in nftables
-// and in the engine alike.
+// DecisionOrder returns legacy ALLOW-by-ID then DENY/RESET-by-ID order.
+// It exists only for migrating historical configurations; live evaluators
+// use configured order. Effects never occupy decision slots.
 func DecisionOrder(entries []Entry) []int {
 	out := make([]int, 0, len(entries))
 	for i, e := range entries {
@@ -36,7 +33,7 @@ func DecisionOrder(entries []Entry) []int {
 // matches reports whether every predicate of the entry holds for ctx.
 func (ce *compiledEntry) matches(ctx EvalContext) bool {
 	return matchZones(&ce.Entry, ctx) && matchCIDRs(ce, ctx) && matchProtoCompiled(ce, ctx) &&
-		matchIdentities(ce.Entry, ctx) && matchICSCompiled(ce, ctx) && matchSchedule(ce, ctx)
+		matchIdentities(ce.Entry, ctx) && matchICSCompiled(ce, ctx) && matchSchedule(ce, ctx) && ce.matchVia(ctx)
 }
 
 // AnyMatch returns the first entry, in snapshot order and whatever its

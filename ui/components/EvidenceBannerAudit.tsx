@@ -1,0 +1,24 @@
+import type { AuditPersistenceStatus } from "../lib/api-evidence";
+import { formatTimestamp } from "../lib/utils";
+
+export function EvidenceBannerAudit({ audit, loading }: { audit: AuditPersistenceStatus | null; loading: boolean }) {
+  const state = audit?.state ?? "unknown";
+  return (
+    <section aria-label="Audit persistence" className={`mb-4 rounded-xs border p-4 text-sm ${
+      state === "degraded" ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+        : state !== "ok" ? "border-amber/30 bg-amber/10 text-amber" : "bg-(--surface) text-(--text)"}`}>
+      <h2 className="font-semibold">Audit persistence: {loading ? "checking" : state}</h2>
+      <p className="mt-1 text-xs">Local SQLite writes, not syslog delivery. Operations continue even when audit writes fail.</p>
+      {audit && !loading && (
+        <div className="mt-2 space-y-1 text-xs">
+          <p>Failed writes since process start: {audit.failures}</p>
+          <p>Last failure: {audit.lastFailureAt ? formatTimestamp(audit.lastFailureAt) : "—"}</p>
+          <p>Last success: {audit.lastSuccessAt ? formatTimestamp(audit.lastSuccessAt) : "—"}</p>
+          {audit.lastError && <p>Last error: {audit.lastError}</p>}
+          {state === "recovered" && <p>Writes have resumed; previously missing records are not restored.</p>}
+        </div>
+      )}
+      {!loading && state === "unknown" && <p className="mt-2 text-xs">Persistence could not be verified. Do not treat an empty audit log as proof that no actions occurred.</p>}
+    </section>
+  );
+}

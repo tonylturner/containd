@@ -178,31 +178,64 @@ func (z zoneLowering) egress(zones []string) (clause string, matches bool) {
 	return gateZoneClause(indices), true
 }
 
-// ctDirection is the zone match of a connection's packets in one
-// direction.
-type ctDirection struct{ clause, in, out string }
+// packetDirection stays structured until all zone, hook and via
+// restrictions have been intersected. Render it once, not in each predicate.
+type packetDirection uint8
+
+const (
+	directionAny packetDirection = iota
+	directionOriginal
+	directionReply
+)
+
+func (d packetDirection) intersect(other packetDirection) (packetDirection, bool) {
+	if d == directionAny {
+		return other, true
+	}
+	if other == directionAny || d == other {
+		return d, true
+	}
+	return directionAny, false
+}
+
+func (d packetDirection) clause() string {
+	switch d {
+	case directionOriginal:
+		return "ct direction original"
+	case directionReply:
+		return "ct direction reply"
+	}
+	return ""
+}
+
+// ctDirection is the zone match of a connection's packets in one direction.
+type ctDirection struct {
+	direction packetDirection
+	in, out   string
+}
 
 // ctDirections matches e's zones for the packets of a connection the
 // target sees: as written on the original direction, swapped on replies.
-// Without zones, one match without a direction covers both. matches is
-// false when the zones match no connection of the target.
+// Without zones on the forward hook, one match covers both directions.
+// Gate hooks retain their direction even without zone restrictions.
+// matches is false when the zones match no connection of the target.
 func (z zoneLowering) ctDirections(e rules.Entry) (dirs []ctDirection, matches bool) {
 	in, out, ok := z.original(e)
 	if !ok {
 		return nil, false
 	}
-	if in == "" && out == "" {
-		return []ctDirection{{}}, true
-	}
-	original := ctDirection{"ct direction original", in, out}
+	original := ctDirection{directionOriginal, in, out}
 	switch z.target {
 	case targetGateInput:
 		return []ctDirection{original}, true
 	case targetGateReply:
 		replyOut, _ := z.idx.clause("oifname", e.SourceZones)
-		return []ctDirection{{"ct direction reply", out, replyOut}}, true
+		return []ctDirection{{directionReply, out, replyOut}}, true
+	}
+	if in == "" && out == "" {
+		return []ctDirection{{}}, true
 	}
 	replyIn, _ := z.idx.clause("iifname", e.DestZones)
 	replyOut, _ := z.idx.clause("oifname", e.SourceZones)
-	return []ctDirection{original, {"ct direction reply", replyIn, replyOut}}, true
+	return []ctDirection{original, {directionReply, replyIn, replyOut}}, true
 }

@@ -234,6 +234,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/interfaces/state", interfacesStateHandler())
 	mux.HandleFunc("/internal/ownership", ownershipHandler(ownership))
 	mux.HandleFunc("/internal/events", eventsHandler(dpEngine))
+	mux.HandleFunc("/internal/events/forward", eventsFeedHandler(dpEngine))
 	mux.HandleFunc("/internal/flows", flowsHandler(dpEngine))
 	mux.HandleFunc("/internal/stats/protocols", protoStatsHandler(dpEngine))
 	mux.HandleFunc("/internal/stats/top-talkers", topTalkersHandler(dpEngine))

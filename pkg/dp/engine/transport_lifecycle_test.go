@@ -228,7 +228,7 @@ func TestTransportApplierRechecksWholeNamespace(t *testing.T) {
 func TestTransportEngineWiresApplierAndStatus(t *testing.T) {
 	base := &transportApplyFake{}
 	e, err := New(Config{Capture: capture.Config{Mode: "afpacket", Interfaces: []string{"lo"}},
-		Enforce: EnforceConfig{Enabled: true, Applier: base}})
+		Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: base}})
 	if err != nil {
 		t.Fatal(err)
 	}

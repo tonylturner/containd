@@ -182,6 +182,7 @@ func (s *nfqueueSource) run(ctx context.Context, ready func()) error {
 		MaxPacketLen: inlineMaxPacketLen,
 		MaxQueueLen:  1024,
 		Copymode:     nfqueue.NfQnlCopyPacket,
+		Flags:        nfqueue.NfQaCfgFlagConntrack,
 	}
 
 	nf, err := nfqueue.Open(&cfg)
@@ -203,6 +204,7 @@ func (s *nfqueueSource) run(ctx context.Context, ready func()) error {
 		}
 		return nf.SetVerdict(id, nfqueue.NfAccept)
 	}, s.comp, s.cfg.OnError)
+	gen.fence = s.cfg.PublicationFence
 	open := make(chan struct{}) // closed once the Ready event is delivered
 
 	hookFn := func(a nfqueue.Attribute) int {
@@ -217,6 +219,7 @@ func (s *nfqueueSource) run(ctx context.Context, ready func()) error {
 		pkt := DecodeIPPacket(raw)
 		pkt.Timestamp = time.Now().UTC()
 		pkt.Interface = "nfqueue"
+		pkt.Queue = queueMetadata(a)
 		if a.Mark != nil {
 			pkt.Mark = *a.Mark
 			pkt.HasMark = true
@@ -268,7 +271,7 @@ func (s *nfqueueSource) run(ctx context.Context, ready func()) error {
 // ENOBUFS means the kernel dropped packets it could not queue to us (no
 // token was issued for them); timeouts and interrupts are transient.
 func receiveRecoverable(err error) bool {
-	if errors.Is(err, unix.ENOBUFS) || errors.Is(err, unix.EINTR) || errors.Is(err, unix.EAGAIN) {
+	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOBUFS) || errors.Is(err, unix.EINTR) || errors.Is(err, unix.EAGAIN) {
 		return true
 	}
 	var timeout interface{ Timeout() bool }

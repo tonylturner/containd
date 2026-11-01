@@ -57,7 +57,12 @@ export type {
 } from "./api-dataplane";
 export type {
   FirewallRule,
+  FirewallRuleCreate,
   FirewallRulePatch,
+  Position,
+  ForwardPlacement,
+  ForwardPublishResult,
+  ForwardDeleteResult,
   ICSPredicate,
   ICSPredicatePatch,
   IdentityBinding,
@@ -82,6 +87,8 @@ export type {
 } from "./api-ics-coverage";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export { fetchHealth } from "./api-health";
+export { getEvidenceStatus } from "./api-evidence";
+export type { AuditPersistenceStatus, EvidenceStatus, EvidenceState } from "./api-evidence";
 export type {
   EnforcementHealth,
   HealthResponse,
@@ -268,6 +275,7 @@ export type PortForward = {
   ingressZone: string;
   proto: "tcp" | "udp";
   listenPort: number;
+  listenAddress?: string;
   destIp: string;
   destPort?: number;
   allowedSources?: string[];
@@ -593,7 +601,8 @@ export type PcapIdentification = {
 };
 
 export type TelemetryEvent = {
-  id: number;
+  /** Exact decimal uint64; never convert event identity to a JavaScript number. */
+  id: string;
   flowId: string;
   proto: string;
   kind: string;

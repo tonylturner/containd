@@ -15,6 +15,9 @@ import (
 )
 
 const GeneratorVersion = "exact-2"
+
+// EvaluatorVersion follows the runtime ordered predicate contract; retained
+// proofs from another evaluator must be recertified, never reinterpreted.
 const EvaluatorVersion = rules.EvaluatorVersion
 
 // CompatibleVersions deliberately does not reinterpret historical decoder or

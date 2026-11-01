@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/evidence"
 	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -354,12 +355,29 @@ func (m *Manager) hasMetrics(service string) bool {
 	return m.primary[service].active() || m.errs[service].active()
 }
 
-// SetEventLister provides a function that returns recent events (newest-first) for syslog forwarding.
-func (m *Manager) SetEventLister(fn func(limit int) []dpevents.Event) {
-	if m == nil || m.Syslog == nil {
-		return
+// SetEventFeeds installs independently cursorable syslog sources.
+func (m *Manager) SetEventFeeds(feeds map[evidence.Source]dpevents.FeedReader) {
+	if m != nil && m.Syslog != nil {
+		m.Syslog.SetEventFeeds(feeds)
 	}
-	m.Syslog.SetEventLister(fn)
+}
+
+// ReadTelemetryFeed reads the service store's append stream.
+func (m *Manager) ReadTelemetryFeed(_ context.Context, q dpevents.FeedRequest) (dpevents.FeedPage, error) {
+	return m.telemetry.ReadFeed(q), nil
+}
+
+// RecordTelemetryEvent inserts a management notice once into service telemetry.
+func (m *Manager) RecordTelemetryEvent(ev dpevents.Event) { m.telemetry.Append(ev) }
+
+var _ evidence.ForwardReporter = (*Manager)(nil)
+
+// ForwardStatus delegates to the syslog delivery reporter.
+func (m *Manager) ForwardStatus() []evidence.ForwardStatus {
+	if m == nil || m.Syslog == nil {
+		return nil
+	}
+	return m.Syslog.ForwardStatus()
 }
 
 // SetAuditLog makes the syslog forwarders also deliver audit records.

@@ -137,6 +137,9 @@ func applyTemplateHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 
+		if !candidateShadowWarnings(c, cfg) {
+			return
+		}
 		auditLog(c, audit.Record{Action: "templates.apply", Target: r.Name, Detail: "candidate"})
 		c.JSON(http.StatusOK, gin.H{"applied": r.Name, "ruleCount": len(cfg.Firewall.Rules), "mode": r.Mode})
 	}
@@ -249,6 +252,9 @@ func applyICSTemplateHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 
+		if !candidateShadowWarnings(c, cfg) {
+			return
+		}
 		auditLog(c, audit.Record{Action: "templates.ics.apply", Target: r.Template, Detail: "candidate"})
 		c.JSON(http.StatusOK, gin.H{
 			"template":  r.Template,

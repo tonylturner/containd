@@ -9,15 +9,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- Telemetry event IDs are JSON strings. API clients that parse event IDs as
+  numbers must accept decimal strings.
+
+### Added
+
+- Evidence health in the UI shell, Audit persistence view and `show audit --status`,
+  with per-destination/source syslog backlog, retry, loss and continuity counters.
+- Authenticated `GET /api/v1/evidence/status` and sanitized `evidence.state` in health.
+
+### Changed
+
+- Serialize telemetry event IDs as decimal JSON strings across API, UI, CLI,
+  previews and syslog; audit record IDs remain numeric.
+- Forward engine and management syslog streams independently, retry failed
+  destinations, and report telemetry retention loss. New destinations start at
+  current tails without backfill; audit resumes its durable cursor after restart.
+- Keep operations and management available when audit persistence fails, with
+  visible degradation rather than an audit fail-closed policy.
+- Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
+
+### Security
+
+- Reject unsafe daemon configuration fields and require valid proxy TLS certificate/key pairs before publishing configuration.
+- Restrict OpenVPN profile imports to the shared bounded parser; manage client credentials by issuer/serial ID with read-only downloads and durable revocation.
+- OpenVPN credential lists report whether a running managed server has loaded the current revocation list; the VPN page offers Apply revocation only while it has not.
+
+### Fixed
+
+- WireGuard configuration is applied to the kernel. The netlink attribute numbers
+  did not match the kernel interface, so enabling WireGuard failed.
+- Project stored service faults for firewall replay and report per-service
+  status. Retain AV fail policy and allow unrelated edits carrying unchanged
+  faults. WireGuard teardown removes only containd-created links, including
+  custom names and old names after rename. Engine runtime failures are attributed
+  per service without blocking other services or firewall application.
+
+## [0.1.37] - 2026-10-31
+
+### Upgrade notes
+
+- Back up before upgrading. The configuration schema advances from 0.1.9 to
+  0.1.10. 0.1.36 and earlier cannot read schema 0.1.10; restore a pre-upgrade
+  backup to downgrade.
 - Off-loopback deployments (split, or combined with a wildcard/interface
   `CONTAIND_ENGINE_ADDR`) must set the same dedicated `CONTAIND_ENGINE_SECRET`
   on both peers and use `https://`, or leave the engine URL empty in combined
   mode to derive it. Generate with `openssl rand -hex 32`. No lab bypass or
   plaintext fallback exists. Rotate by changing and restarting both peers;
   replace any exported client credentials too.
+- Firewall rules now use first-match in listed order: the first matching
+  enforcing ALLOW, DENY or RESET decides; monitor rules never decide. Before,
+  an overlapping ALLOW won regardless of position. Configs below schema
+  0.1.10 are upgraded on load, import or commit: potentially overlapping
+  terminals are reordered to preserve legacy rule precedence, and the
+  before/after rule order is recorded. Review the order after upgrade;
+  a DENY placed above a broader ALLOW now takes effect.
+- Port forwards only translate; firewall policy decides admission. Unless a
+  rule already references the forward, the upgrade inserts a matching
+  `viaForwards` ALLOW only when no enforcing ICS scope overlaps. Full
+  containment in an enforcing ICS scope generates no grant; partial or
+  uncertain overlap generates no grant for any of the forward's traffic and
+  produces a warning. Existing rules and defaults still decide delivery;
+  some previously admitted traffic may now be denied.
 
 ### Changed
 
+- Add ordered firewall-rule placement and moves, atomic port-forward publication
+  and deletion with placement explanations, and candidate-aware previews;
+  via-forward rules report historical preview unavailable.
 - Published management and engine images expose their release version, revision,
   creation time, vendor and authors as OCI labels.
 - Release promotion to `:latest`, including manual promotion, now requires
@@ -30,9 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Reject unsafe daemon configuration fields and require valid proxy TLS certificate/key pairs before publishing configuration.
-- Restrict OpenVPN profile imports to the shared bounded parser; manage client credentials by issuer/serial ID with read-only downloads and durable revocation.
-- OpenVPN credential lists report whether a running managed server has loaded the current revocation list; the VPN page offers Apply revocation only while it has not.
 - Prevent concurrent deletion or demotion of the last administrator.
 - Make MFA login and enrollment challenges single-use and durable across management
   restarts, and invalidate them on password, TOTP or role changes. Pending
@@ -43,31 +100,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- WireGuard configuration is applied to the kernel. The netlink attribute numbers
-  did not match the kernel interface, so enabling WireGuard failed.
-- Project stored service faults for firewall replay and report per-service
-  status. Retain AV fail policy and allow unrelated edits carrying unchanged
-  faults. WireGuard teardown removes only containd-created links, including
-  custom names and old names after rename. Engine runtime failures are attributed
-  per service without blocking other services or firewall application.
-- Direct CLI login explains when an account needs MFA, password rotation or MFA
-  enrollment and directs users to the web UI or SSH.
+- The engine keeps watching kernel interface, address and route changes after
+  an interrupted system call instead of stopping until restart; drift was
+  otherwise repaired only by the 10-second periodic reconcile.
+- Direct CLI login directs accounts needing MFA or password rotation to the
+  web UI or SSH, and accounts needing MFA enrollment to the web UI.
 - Partial account profile updates preserve omitted fields and still allow explicit clearing.
-- Interface PATCH writes preserve every omitted setting. Interface edits send
-  explicit clears for removed aliases, device bindings, zones and VLAN settings.
+- Interface PATCH writes preserve omitted top-level fields; a supplied `access`
+  object replaces that object. Interface edits send explicit clears for removed
+  aliases, device bindings, zones and VLAN settings.
 - Service, policy, network, PCAP and staged-config editors block saves until settings
   load successfully and while reads are unavailable. Failed refreshes keep drafts
   instead of substituting defaults or reporting success; saves preserve unrelated
   settings, including default-route metrics and gateway metadata. Saved staged
   JSON adopts later refreshes unless it has been edited again.
-- CLI NAT, port-forward, proxy, interface, routing and system edits stop without
-  writing when current configuration cannot be read, rather than substituting
-  defaults or running configuration. Proxy edits preserve domains, client ACLs,
-  upstream settings, logging and reverse sites. Interface edits preserve unrelated
-  device, VLAN, bridge, addressing and access settings. Outbound quick start
+- CLI read-modify-write edits for NAT, port forwards, proxies, interfaces,
+  routing and system settings stop without writing when current configuration
+  cannot be read, rather than substituting defaults or running configuration.
+  Proxy edits preserve domains, client ACLs, upstream settings, logging and
+  reverse sites. Interface edits preserve unrelated device, VLAN, bridge,
+  addressing and access settings. Outbound quick start
   completes all reads before staging changes and retains unrelated NAT, routing
   and firewall rule settings, including when creating the first rule. Empty
-  configuration lists return JSON arrays rather than `null`.
+  interface, firewall-rule, asset, object and zone lists return JSON arrays
+  rather than `null`.
 - Scripted `containd cli` sessions exit with status 1 if any command fails,
   including when later commands or `exit` run.
 - Routine interface apply and reconciliation remove only stale addresses
@@ -2151,7 +2207,8 @@ these changes.
 - Schedule predicate evaluation is allocation-free.
 - TCP reassembler uses pre-allocated segment buffers.
 
-[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.36...HEAD
+[Unreleased]: https://github.com/tonylturner/containd/compare/v0.1.37...HEAD
+[0.1.37]: https://github.com/tonylturner/containd/compare/v0.1.36...v0.1.37
 [0.1.36]: https://github.com/tonylturner/containd/compare/v0.1.35...v0.1.36
 [0.1.35]: https://github.com/tonylturner/containd/compare/v0.1.34...v0.1.35
 [0.1.34]: https://github.com/tonylturner/containd/compare/v0.1.33...v0.1.34

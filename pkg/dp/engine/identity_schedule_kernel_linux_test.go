@@ -292,8 +292,10 @@ func TestKernelScheduleWindowOpensAndCloses(t *testing.T) {
 	l.apply(rules.Snapshot{
 		Default: rules.ActionAllow,
 		Firewall: []rules.Entry{
-			{ID: "closed-7002", Protocols: []rules.Protocol{{Name: "tcp", Port: "7002"}}, Action: rules.ActionDeny},
+			// The conditional exception must precede its unconditional
+			// fallback: admission is configured-order first match.
 			{ID: "window-7002", Protocols: []rules.Protocol{{Name: "tcp", Port: "7002"}}, Action: rules.ActionAllow, Schedule: window},
+			{ID: "closed-7002", Protocols: []rules.Protocol{{Name: "tcp", Port: "7002"}}, Action: rules.ActionDeny},
 			{ID: "window-deny-7003", Protocols: []rules.Protocol{{Name: "tcp", Port: "7003"}}, Action: rules.ActionDeny, Schedule: window},
 		},
 	})
@@ -323,8 +325,8 @@ func TestKernelScheduleHorizonExhausted(t *testing.T) {
 	l.apply(rules.Snapshot{
 		Default: rules.ActionAllow,
 		Firewall: []rules.Entry{
-			{ID: "closed-7004", Protocols: []rules.Protocol{{Name: "tcp", Port: "7004"}}, Action: rules.ActionDeny},
 			{ID: "always-7004", Protocols: []rules.Protocol{{Name: "tcp", Port: "7004"}}, Action: rules.ActionAllow, Schedule: everyDay},
+			{ID: "closed-7004", Protocols: []rules.Protocol{{Name: "tcp", Port: "7004"}}, Action: rules.ActionDeny},
 			{ID: "later-deny-7005", Protocols: []rules.Protocol{{Name: "tcp", Port: "7005"}}, Action: rules.ActionDeny, Schedule: notToday},
 		},
 	})

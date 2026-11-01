@@ -202,7 +202,7 @@ func TestEvaluateIEC104Predicates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ev := NewEvaluator(&Snapshot{Firewall: []Entry{iecEntry("r", ActionDeny, tc.pred)}})
+			ev := NewEvaluator(&Snapshot{DPIMode: "enforce", Firewall: []Entry{iecEntry("r", ActionDeny, tc.pred)}})
 			_, entry := ev.EvaluateIEC104(sessionCtx("request", tc.obj))
 			if got := entry != nil; got != tc.match {
 				t.Fatalf("match = %v, want %v", got, tc.match)
@@ -260,6 +260,7 @@ func TestIEC104Envelope(t *testing.T) {
 // matcher: they never match US traffic and keep their ASDU predicates.
 func TestGenericEvaluationOfIEC104Entries(t *testing.T) {
 	snap := &Snapshot{
+		DPIMode:  "enforce",
 		Default:  ActionAllow,
 		Firewall: []Entry{iecEntry("iec-deny-46", ActionDeny, ICSPredicate{TypeIDs: []int{46}})},
 	}

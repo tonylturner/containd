@@ -44,7 +44,7 @@ func TestModbusDNP3ReadOnlyFromWire(t *testing.T) {
 		t.Run(tc.protocol+"/"+tc.name, func(t *testing.T) {
 			state := flow.NewState(flow.Key{SrcIP: net.ParseIP("192.0.2.1"), DstIP: net.ParseIP("192.0.2.2"),
 				SrcPort: 40000, DstPort: tc.port, Proto: 6}, time.Unix(0, 0))
-			snapshot := rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{
+			snapshot := rules.Snapshot{DPIMode: "enforce", Default: rules.ActionDeny, Firewall: []rules.Entry{
 				{ID: "read-only", Action: rules.ActionAllow,
 					Protocols: []rules.Protocol{{Name: "tcp", Port: strconv.Itoa(int(tc.port))}},
 					ICS:       rules.ICSPredicate{Protocol: tc.protocol, ReadOnly: true}},

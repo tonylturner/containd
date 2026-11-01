@@ -42,7 +42,7 @@ func (a *countingApplier) ReadCounters(_ context.Context, table string) (map[str
 
 func TestRuleCountersOfTheAppliedRuleset(t *testing.T) {
 	applier := &countingApplier{}
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, TableName: "lab", Applier: applier}})
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, TableName: "lab", Applier: applier}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestRuleCountersOfTheAppliedRuleset(t *testing.T) {
 func TestRuleCountersUnavailableBeforeAnyInstall(t *testing.T) {
 	applier := &countingApplier{}
 	applier.err = errors.New("nft: busy")
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: applier}})
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: applier}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ package enforce
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/dp/rules"
@@ -44,11 +45,66 @@ func TestShadowWarnings(t *testing.T) {
 	}
 }
 
+func TestShadowUsesOnlyEarlierTerminals(t *testing.T) {
+	for _, first := range []rules.Action{rules.ActionAllow, rules.ActionDeny, rules.ActionReset} {
+		for _, second := range []rules.Action{rules.ActionAllow, rules.ActionDeny, rules.ActionReset} {
+			snap := &rules.Snapshot{Firewall: []rules.Entry{
+				{ID: "z-first", Action: first}, {ID: "a-second", Action: second},
+			}}
+			w := shadowWarnings(snap)
+			if len(w) != 1 || w[0].RuleID != "a-second" || w[0].ShadowedBy != "z-first" ||
+				!strings.Contains(w[0].Message, "position 2") || !strings.Contains(w[0].Message, "position 1") {
+				t.Fatalf("%s/%s: %v", first, second, w)
+			}
+			snap.Firewall[0].Action = rules.ActionTag
+			if w := shadowWarnings(snap); len(w) != 0 {
+				t.Fatalf("effect shadows terminal: %v", w)
+			}
+			snap.Firewall[0].Action = first
+			snap.Firewall[0].ViaForwards = []string{"f"}
+			if w := shadowWarnings(snap); len(w) != 0 {
+				t.Fatalf("via-only rule covers direct traffic: %v", w)
+			}
+		}
+	}
+}
+
+// Every semantic selector, including selectors added later, must prevent
+// treating an application-scoped terminal as unconditional coverage.
+func TestICSEmptyIncludesEverySelector(t *testing.T) {
+	typ := reflect.TypeFor[rules.ICSPredicate]()
+	for i := range typ.NumField() {
+		name := typ.Field(i).Name
+		t.Run(name, func(t *testing.T) {
+			var pred rules.ICSPredicate
+			field := reflect.ValueOf(&pred).Elem().Field(i)
+			switch field.Kind() {
+			case reflect.String:
+				field.SetString("x")
+			case reflect.Bool:
+				field.SetBool(true)
+			case reflect.Pointer:
+				field.Set(reflect.New(field.Type().Elem()))
+			case reflect.Slice:
+				field.Set(reflect.MakeSlice(field.Type(), 1, 1))
+			default:
+				t.Fatalf("new selector kind %s needs coverage", field.Kind())
+			}
+			if icsEmpty(pred) {
+				t.Fatalf("%s omitted from emptiness", name)
+			}
+			if name != "Protocol" && name != "Mode" && unconditional(rules.Entry{ICS: pred}) {
+				t.Fatalf("%s omitted from unconditional coverage", name)
+			}
+		})
+	}
+}
+
 // A broad L4 ALLOW does not shadow an IEC104 DENY: IEC104 objects are
 // decided among IEC104 rules alone.
 func TestShadowWarningsLeaveIEC104Out(t *testing.T) {
 	snap := iecSnapshot()
-	snap.Firewall = append(snap.Firewall, rules.Entry{ID: "any", Action: rules.ActionAllow})
+	snap.Firewall = append([]rules.Entry{{ID: "any", Action: rules.ActionAllow}}, snap.Firewall...)
 	for _, w := range NewCompiler().RuleWarnings(snap) {
 		if w.ShadowedBy != "" && isIEC104Rule(entryByID(snap, w.RuleID)) {
 			t.Fatalf("IEC104 rule reported shadowed: %+v", w)

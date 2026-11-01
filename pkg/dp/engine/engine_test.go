@@ -79,7 +79,7 @@ func TestApplyRulesEnforcesBeforeSwap(t *testing.T) {
 	applier := &recordingApplier{}
 	e, err := New(Config{
 		Capture: capture.Config{Interfaces: []string{"lo"}},
-		Enforce: EnforceConfig{
+		Enforce: EnforceConfig{ClearMark: noPolicyMarks,
 			Enabled: true,
 			Applier: applier,
 		},
@@ -87,7 +87,7 @@ func TestApplyRulesEnforcesBeforeSwap(t *testing.T) {
 	if err != nil {
 		e, err = New(Config{
 			Capture: capture.Config{Interfaces: []string{"lo0"}},
-			Enforce: EnforceConfig{
+			Enforce: EnforceConfig{ClearMark: noPolicyMarks,
 				Enabled: true,
 				Applier: applier,
 			},
@@ -113,7 +113,7 @@ func TestApplyRulesDoesNotSwapOnFailure(t *testing.T) {
 	applier := &recordingApplier{err: context.DeadlineExceeded}
 	e, err := New(Config{
 		Capture: capture.Config{Interfaces: []string{"lo"}},
-		Enforce: EnforceConfig{
+		Enforce: EnforceConfig{ClearMark: noPolicyMarks,
 			Enabled: true,
 			Applier: applier,
 		},
@@ -121,7 +121,7 @@ func TestApplyRulesDoesNotSwapOnFailure(t *testing.T) {
 	if err != nil {
 		e, err = New(Config{
 			Capture: capture.Config{Interfaces: []string{"lo0"}},
-			Enforce: EnforceConfig{
+			Enforce: EnforceConfig{ClearMark: noPolicyMarks,
 				Enabled: true,
 				Applier: applier,
 			},
@@ -164,7 +164,7 @@ func TestApplyVerdictUsesUpdater(t *testing.T) {
 	up := &recordingUpdater{}
 	e, err := New(Config{
 		Capture: capture.Config{Interfaces: []string{"lo"}},
-		Enforce: EnforceConfig{
+		Enforce: EnforceConfig{ClearMark: noPolicyMarks,
 			Enabled: true,
 			Updater: up,
 		},
@@ -172,7 +172,7 @@ func TestApplyVerdictUsesUpdater(t *testing.T) {
 	if err != nil {
 		e, err = New(Config{
 			Capture: capture.Config{Interfaces: []string{"lo0"}},
-			Enforce: EnforceConfig{
+			Enforce: EnforceConfig{ClearMark: noPolicyMarks,
 				Enabled: true,
 				Updater: up,
 			},
@@ -264,7 +264,7 @@ func TestEnforceDPIEventsDeniesWithoutBlock(t *testing.T) {
 	up := &recordingUpdater{}
 	e, err := New(Config{
 		Capture: capture.Config{Interfaces: []string{"lo"}},
-		Enforce: EnforceConfig{
+		Enforce: EnforceConfig{ClearMark: noPolicyMarks,
 			Enabled: true,
 			Updater: up,
 		},
@@ -273,7 +273,7 @@ func TestEnforceDPIEventsDeniesWithoutBlock(t *testing.T) {
 	if err != nil {
 		e, err = New(Config{
 			Capture: capture.Config{Interfaces: []string{"lo0"}},
-			Enforce: EnforceConfig{
+			Enforce: EnforceConfig{ClearMark: noPolicyMarks,
 				Enabled: true,
 				Updater: up,
 			},

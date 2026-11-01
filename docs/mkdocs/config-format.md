@@ -29,7 +29,12 @@ See [Service faults](services.md#service-faults) for status and protection effec
 
 ## Schema
 
-This complete example uses schema `0.1.9`. It defines two routed networks and a
+The current schema is `0.1.10`. Back up before upgrading: 0.1.36 and earlier
+cannot read schema 0.1.10; restore a pre-upgrade backup to downgrade.
+See [ordered policy upgrades](#ordered-policy-upgrades) for rule-order and
+port-forward migration behavior.
+
+This complete example uses schema `0.1.10`. It defines two routed networks and a
 single TCP/80 allow rule. With enforcement enabled, other new forwarded
 connections are denied. Enforcement is off until you enable it deliberately. Replace the illustrative kernel devices and
 addresses with your deployment's values before applying it. This is not the
@@ -37,7 +42,7 @@ Docker starter topology.
 
 ```json
 {
-  "schema_version": "0.1.9",
+  "schema_version": "0.1.10",
   "description": "Two-zone routed lab; adapt device names and addressing before committing",
   "system": {
     "hostname": "containd",
@@ -235,10 +240,13 @@ Notes:
     when that route leaves intent. Unsupported collisions fail with route details.
     See [routing ownership and upgrades](dataplane.md#routing-ownership-and-upgrades).
 - `firewall.defaultAction` applies to forwarded traffic that no rule matches. It is `ALLOW` or `DENY`; omitted or empty means `DENY`, and any other value is rejected.
-- `firewall.rules` must have unique `id`; `action` is `ALLOW`, `DENY`, `RESET`, `RATE_LIMIT` or `TAG` (see [Actions and precedence](policy-model.md#actions-and-precedence)). Rule order does not decide: any matching `ALLOW` wins, then the first matching `DENY` or `RESET` by `id`.
+- `firewall.rules` must have unique `id`; `action` is `ALLOW`, `DENY`, `RESET`, `RATE_LIMIT` or `TAG` (see [Actions and precedence](policy-model.md#actions-and-precedence)). The first matching enforcing terminal rule in configured order wins; otherwise firewall.defaultAction applies. Monitor rules never decide.
   - `RATE_LIMIT` needs `rateLimit`: `{"packetsPerSecond": 100, "burst": 20}`, with `packetsPerSecond` 1–1000000 and `burst` 0–1000000 packets (0 means `packetsPerSecond`). Other actions reject `rateLimit`.
   - `TAG` needs `tag`, matching `^[a-z0-9][a-z0-9_.-]{0,31}$`, and takes no `schedule`; a config uses at most 32 distinct labels. Other actions reject `tag`.
   - `RESET`, `RATE_LIMIT` and `TAG` reject an `ics.protocol`; `RESET` is not a valid `firewall.defaultAction`.
+  - `viaForwards` limits a rule to connections translated by any of the named
+    port forwards. Every ID must exist in `firewall.nat.portForwards`; ordinary
+    routed traffic to the same backend does not match this selector.
 - Firewall rule objects, and their `rateLimit` objects, reject unknown and duplicate keys. Key spelling is exact; decoding errors identify the rule ID when available. This applies to full config, candidate, import, and rule patch JSON.
 - `firewall.identityBindings` tags source addresses with identity labels for
   rule `identities`: `[{"ip": "10.0.0.5", "identities": ["operator"]}]`. Each
@@ -262,6 +270,8 @@ Notes:
   The destination sees the firewall's egress address, ensuring a return path.
   Port-forward enablement is independent of `firewall.nat.enabled`; disabling
   source NAT leaves DNAT enabled and requires a routed return path.
+  Translation does not grant firewall admission; see
+  [Port-forward publication and deletion](policy-model.md#port-forward-publication-and-deletion).
 - `protocols.port` accepts single ports or ranges (`"443"` or `"1000-2000"`).
 - Syslog forwarders require address and port; proto `udp` or `tcp` (defaults to udp if empty).
 
@@ -283,6 +293,29 @@ path, unsafe changes and rollback targets are refused; see
 Exports are redacted by default. Only admins can request an unredacted export;
 store full backups securely. Keep the persistent data volume as well as exported
 JSON if you need users, audit history, or service files during recovery.
+
+## Ordered policy upgrades
+
+Loading, importing or committing a configuration below schema `0.1.10` upgrades
+it to ordered first-match policy. Potentially overlapping terminal rules are
+reordered to preserve legacy precedence (ALLOW first, then DENY/RESET, ordered
+by ID within each group); rules proven disjoint retain authored order where
+possible. Rule reordering leaves `RATE_LIMIT` and `TAG` in their slots; generated
+forward grants can shift rule positions. Running, candidate and previous banks
+record their before/after rule IDs in durable
+`config.ordered_policy.migrated` audit records.
+
+Port forwards now translate only; firewall policy decides admission. For each
+forward not already referenced by a `viaForwards` rule, migration generates a
+forward-scoped ALLOW before existing terminals only when no enforcing ICS
+transport scope overlaps. Full containment in an enforcing ICS scope generates
+no grant. Partial or uncertain overlap generates no grant for **any** of that
+forward's traffic, even outside the inspected subset, and records a warning.
+Existing inspection rules and defaults still decide delivery, so migration does
+not promise to preserve every former port-forward admission. Review rule order
+and warnings before relying on a published service. See
+[port-forward publication](policy-model.md#port-forward-publication-and-deletion)
+for placement explanations and explicit permission authoring.
 
 ## Unsupported protocols during upgrade
 

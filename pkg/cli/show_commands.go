@@ -27,6 +27,14 @@ func showHealth(api *API) Command {
 		}
 		kv := map[string]string{}
 		for k, v := range payload {
+			if k == "evidence" {
+				if evidence, ok := v.(map[string]any); ok {
+					kv["evidence.state"] = firstNonEmpty(fmtAny(evidence["state"]), "unknown")
+				} else {
+					kv["evidence.state"] = "unknown"
+				}
+				continue
+			}
 			kv[k] = fmtAny(v)
 		}
 		kvTable(out, kv)
@@ -77,6 +85,12 @@ func showAuth(api *API) Command {
 
 func showAudit(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
+		if len(args) == 1 && args[0] == "--status" {
+			return showEvidenceStatus(api)(ctx, out, nil)
+		}
+		if len(args) != 0 {
+			return fmt.Errorf("usage: show audit [--status]")
+		}
 		var records []audit.Record
 		if err := api.getJSON(ctx, "/api/v1/audit", &records); err != nil {
 			return err
@@ -416,8 +430,8 @@ func showFirewallRulesAPI(api *API) Command {
 		if err := api.getJSON(ctx, "/api/v1/firewall/rules", &rules); err != nil {
 			return err
 		}
-		t := newTable("ID", "ACTION", "SRC_ZONES", "DST_ZONES", "SRC", "DST", "PROTO", "ICS")
-		for _, r := range rules {
+		t := newTable("ORDER", "ID", "ACTION", "SRC_ZONES", "DST_ZONES", "SRC", "DST", "PROTO", "ICS", "VIA_FORWARDS")
+		for i, r := range rules {
 			protos := make([]string, 0, len(r.Protocols))
 			for _, p := range r.Protocols {
 				if strings.TrimSpace(p.Port) != "" {
@@ -431,6 +445,7 @@ func showFirewallRulesAPI(api *API) Command {
 				ics = r.ICS.Protocol
 			}
 			t.addRow(
+				fmt.Sprint(i+1),
 				r.ID,
 				string(r.Action),
 				joinCSV(r.SourceZones),
@@ -438,7 +453,7 @@ func showFirewallRulesAPI(api *API) Command {
 				joinCSV(r.Sources),
 				joinCSV(r.Destinations),
 				joinCSV(protos),
-				ics,
+				ics, joinCSV(r.ViaForwards),
 			)
 		}
 		t.render(out)

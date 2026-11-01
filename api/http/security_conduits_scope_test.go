@@ -104,6 +104,7 @@ func TestConduitProtocolPortChecks(t *testing.T) {
 			}}
 			// The plaintext-mixing check remains driven by an explicit ICS predicate.
 			cfg.Firewall.Rules[0].ICS.Protocol = "modbus"
+			cfg.Firewall.Rules[0].ICS.Mode = "enforce"
 			result := buildConduitResult(cfg, computeConduitGlobals(cfg), "lan", "wan")
 			if result.TLSEnforced != tc.encrypted {
 				t.Errorf("TLS enforced=%t want=%t", result.TLSEnforced, tc.encrypted)

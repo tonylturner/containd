@@ -248,6 +248,7 @@ func TestShowSyslogStatusAuditForwarding(t *testing.T) {
   sent_total: 7
   failed_total: 0
   last_batch: 3 (limit 500)
+  telemetry: progress unknown
   audit: enabled
     sent_total: 40
     failed_total: 2

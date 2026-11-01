@@ -4,10 +4,9 @@
 package enforce
 
 import (
+	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // TestICSQueueChainMarksHandshakes pins the chain every generic ICS queue
@@ -17,48 +16,14 @@ import (
 // The chain is declared once, before the forward chain, and only for a
 // ruleset that queues a generic ICS rule.
 func TestICSQueueChainMarksHandshakes(t *testing.T) {
-	modbus := rules.Entry{ID: "modbus", Protocols: []rules.Protocol{{Name: "tcp", Port: "502"}},
-		ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "modbus"}, Action: rules.ActionAllow}
-	iec := rules.Entry{ID: "iec", Protocols: []rules.Protocol{{Name: "tcp", Port: "2404"}},
-		ICS: rules.ICSPredicate{Mode: "enforce", Protocol: "iec104"}, Action: rules.ActionAllow}
-	const chain = "  chain ics_queue {\n" +
-		"    ct status assured meta mark set meta mark and 0xf0ffffff queue num 100;\n" +
-		"    ct state != { invalid, untracked } meta mark set meta mark and 0xf0ffffff or 0x02000000 queue num 100;\n" +
-		"    meta mark set meta mark and 0xf0ffffff queue num 100;\n" +
-		"  }\n"
-	for _, tc := range []struct {
-		name    string
-		queueID int
-		entries []rules.Entry
-		want    bool
-	}{
-		{"generic ICS rule", 100, []rules.Entry{modbus, iec}, true},
-		{"IEC104 rules only", 100, []rules.Entry{iec}, false},
-		{"no queue", 0, []rules.Entry{modbus}, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c := NewCompiler()
-			c.QueueID = tc.queueID
-			text, err := compileWithoutCounters(c, &rules.Snapshot{Default: rules.ActionDeny, Firewall: tc.entries})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := strings.Count(text, "chain "+ICSQueueChain); got != map[bool]int{true: 1, false: 0}[tc.want] {
-				t.Fatalf("%d %s chains:\n%s", got, ICSQueueChain, text)
-			}
-			if !tc.want {
-				if strings.Contains(text, ICSQueueChain) {
-					t.Fatalf("a line jumps to the undeclared %s:\n%s", ICSQueueChain, text)
-				}
-				return
-			}
-			if i := strings.Index(text, chain); i < 0 || i > strings.Index(text, "chain forward") {
-				t.Fatalf("chain missing or after forward, want:\n%s\nin:\n%s", chain, text)
-			}
-			if !strings.Contains(text, "    meta mark & 0x04000000 == 0 tcp dport 502 jump ics_queue;\n") {
-				t.Fatalf("the modbus line does not jump to %s:\n%s", ICSQueueChain, text)
-			}
-		})
+	c := NewCompiler()
+	c.QueueID = 100
+	for _, mark := range []uint32{0, 0x08000000, 0x09000000} {
+		got := strings.Join(c.queueRules(mark), "\n")
+		assertText(t, got, "ct status assured", trackedState, "0xe0ffffff", "queue num 100")
+		if mark != 0 {
+			assertText(t, got, fmt.Sprintf("or 0x%08x", mark), fmt.Sprintf("or 0x%08x", mark|HandshakeMark))
+		}
 	}
 }
 

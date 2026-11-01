@@ -146,17 +146,8 @@ func TestSyslogManagerForwardLoopAndRun(t *testing.T) {
 		defer emittedMu.Unlock()
 		emitted = append(emitted, kind)
 	}
-	mgr.SetEventLister(func(limit int) []dpevents.Event {
-		return []dpevents.Event{{
-			ID:        7,
-			Proto:     "modbus",
-			Kind:      "service.modbus.read",
-			Timestamp: time.Date(2026, 3, 13, 12, 0, 0, 0, time.UTC),
-			Attributes: map[string]any{
-				"count": 1,
-			},
-		}}
-	})
+	store := dpevents.NewStore(8)
+	mgr.SetEventFeeds(testEventFeeds(store))
 
 	cfg := config.SyslogConfig{
 		Forwarders: []config.SyslogForwarder{{
@@ -172,6 +163,7 @@ func TestSyslogManagerForwardLoopAndRun(t *testing.T) {
 		t.Fatalf("Apply(syslog): %v", err)
 	}
 
+	store.Append(dpevents.Event{ID: 7, Proto: "modbus", Kind: "service.modbus.read", Timestamp: time.Now()})
 	waitFor(t, 2*time.Second, func() bool {
 		return mgr.Status()["sent_total"].(int) > 0
 	})
@@ -183,12 +175,9 @@ func TestSyslogManagerForwardLoopAndRun(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for forwarded syslog packet")
 	}
-	mgr.mu.Lock()
-	lastID := mgr.lastID
-	sentTotal := mgr.sentTotal
-	mgr.mu.Unlock()
-	if lastID != 7 || sentTotal == 0 {
-		t.Fatalf("unexpected syslog counters: lastID=%d sentTotal=%d", lastID, sentTotal)
+	status := mgr.ForwardStatus()
+	if len(status) != 1 || status[0].SentThrough != "1" || status[0].Backlog != 0 {
+		t.Fatalf("unexpected status %+v", status)
 	}
 	emittedMu.Lock()
 	emittedCount := len(emitted)

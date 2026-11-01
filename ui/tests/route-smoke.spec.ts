@@ -88,7 +88,7 @@ const rulesetPreview = {
       ruleId: "tpl-modbus-deny-writes",
       shadowedBy: "tpl-modbus-allow-reads",
       action: "DENY",
-      message: "shadowed by ALLOW rule tpl-modbus-allow-reads, which matches all of its traffic; a matching ALLOW takes precedence over every DENY and RESET",
+      message: "shadowed by earlier ALLOW rule tpl-modbus-allow-reads, which matches all of its traffic",
     },
   ],
 };
@@ -416,7 +416,7 @@ test("firewall ruleset preview lists rules that do not act as written", async ({
   await response;
   const warning = page.getByRole("status").filter({ hasText: "Rules that do not act as written" });
   await expect(warning).toContainText("shadowed");
-  await expect(warning).toContainText("tpl-modbus-deny-writes: shadowed by ALLOW rule tpl-modbus-allow-reads");
+  await expect(warning).toContainText("tpl-modbus-deny-writes: shadowed by earlier ALLOW rule tpl-modbus-allow-reads");
 });
 
 test("templates describe maintenance windows as scheduled allows", async ({ page }) => {

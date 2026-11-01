@@ -1,0 +1,277 @@
+{
+  "schema_version": "0.1.0",
+  "system": {
+    "hostname": "containd",
+    "mgmt": {
+      "listenAddr": ":8080",
+      "enableHTTP": true,
+      "enableHTTPS": true,
+      "httpListenAddr": ":8080",
+      "httpsListenAddr": ":8443",
+      "tlsCertFile": "/data/tls/server.crt",
+      "tlsKeyFile": "/data/tls/server.key"
+    },
+    "ssh": {}
+  },
+  "interfaces": [
+    {
+      "name": "wan",
+      "zone": "wan",
+      "access": {}
+    },
+    {
+      "name": "dmz",
+      "zone": "dmz",
+      "access": {}
+    },
+    {
+      "name": "lan1",
+      "zone": "lan1",
+      "access": {}
+    },
+    {
+      "name": "lan2",
+      "zone": "lan2",
+      "access": {}
+    },
+    {
+      "name": "lan3",
+      "zone": "lan3",
+      "access": {
+        "mgmt": true,
+        "http": true,
+        "https": true,
+        "ssh": true
+      }
+    },
+    {
+      "name": "lan4",
+      "zone": "lan4",
+      "access": {}
+    },
+    {
+      "name": "lan5",
+      "zone": "lan5",
+      "access": {}
+    }
+  ],
+  "zones": [
+    {
+      "name": "wan",
+      "description": "Enterprise Zone - untrusted student and attacker access"
+    },
+    {
+      "name": "dmz",
+      "description": "Vendor and Engineering Zone"
+    },
+    {
+      "name": "lan1",
+      "description": "Station Zone - IEC104 RTU, OpenPLC and GPS clock"
+    },
+    {
+      "name": "lan2",
+      "description": "Feeder Field Zone - breaker, RMUs and OLTC Modbus endpoints"
+    },
+    {
+      "name": "lan3",
+      "description": "RangerDanger control plane - backend and containd management"
+    },
+    {
+      "name": "lan4",
+      "description": "Control Centre Zone - IEC104 client"
+    },
+    {
+      "name": "lan5",
+      "description": "Operations DMZ - read-only historian"
+    }
+  ],
+  "routing": {},
+  "dataplane": {
+    "nflogGroup": 100
+  },
+  "pcap": {
+    "filter": {}
+  },
+  "firewall": {
+    "defaultAction": "DENY",
+    "rules": [
+      {
+        "id": "weak-iec104-exposure",
+        "description": "WEAK: enterprise, vendor, and control centre can open IEC104 sessions to the RTU",
+        "sourceZones": [
+          "wan",
+          "dmz",
+          "lan4"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "2404"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "weak-rtu-modbus",
+        "description": "WEAK: all station-zone nodes can reach every field device over Modbus TCP",
+        "sourceZones": [
+          "lan1"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "502"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "weak-foreign-field-modbus",
+        "description": "WEAK teaching exposure: enterprise and vendor direct Modbus access to field devices (should be blocked)",
+        "sourceZones": [
+          "wan",
+          "dmz"
+        ],
+        "destZones": [
+          "lan2"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "502"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "weak-historian-ingest",
+        "description": "WEAK: any control-centre-zone source can push historian snapshots",
+        "sourceZones": [
+          "lan4"
+        ],
+        "destZones": [
+          "lan5"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8081"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "weak-historian-read",
+        "description": "WEAK: enterprise, vendor and control centre can read the historian",
+        "sourceZones": [
+          "wan",
+          "dmz",
+          "lan4"
+        ],
+        "destZones": [
+          "lan5"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          }
+        ],
+        "action": "ALLOW"
+      },
+      {
+        "id": "weak-enterprise-vendor-remote",
+        "description": "Workshop weak exposure",
+        "sourceZones": [
+          "wan"
+        ],
+        "destZones": [
+          "dmz"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "3389"
+          },
+          {
+            "name": "tcp",
+            "port": "5900"
+          }
+        ],
+        "action": "ALLOW",
+        "log": true,
+        "destinations": [
+          "10.20.20.10/32"
+        ]
+      },
+      {
+        "id": "weak-vendor-station-web",
+        "description": "Workshop weak exposure",
+        "sourceZones": [
+          "dmz"
+        ],
+        "destZones": [
+          "lan1"
+        ],
+        "protocols": [
+          {
+            "name": "tcp",
+            "port": "8080"
+          }
+        ],
+        "action": "ALLOW",
+        "log": true
+      }
+    ],
+    "nat": {
+      "enabled": false
+    }
+  },
+  "ids": {
+    "enabled": false
+  },
+  "services": {
+    "syslog": {
+      "forwarders": [],
+      "format": "rfc5424",
+      "batchSize": 500,
+      "flushEvery": 2
+    },
+    "dns": {
+      "enabled": false
+    },
+    "ntp": {
+      "enabled": false
+    },
+    "proxy": {
+      "forward": {
+        "enabled": false
+      },
+      "reverse": {
+        "enabled": false
+      }
+    },
+    "dhcp": {
+      "enabled": false
+    },
+    "vpn": {
+      "wireguard": {
+        "enabled": false
+      },
+      "openvpn": {
+        "enabled": false
+      }
+    },
+    "av": {
+      "enabled": false,
+      "icap": {},
+      "clamav": {}
+    }
+  }
+}

@@ -77,7 +77,7 @@ func assertPredicateParity(t *testing.T, entry rules.Entry, ev events.Event, par
 		t.Fatal(err)
 	}
 	e.eventStore.Append(retained)
-	preview := e.previewRule(entry, previewZoneResolver)
+	preview := e.previewRule(PreviewRuleRequest{Entry: entry}, previewZoneResolver)
 	wantCount := 0
 	if wantMatch {
 		wantCount = 1
@@ -272,7 +272,7 @@ func TestCIPMSPOperationsJudgeOwnTargets(t *testing.T) {
 			e.eventStore.Append(retained)
 			decoded = append(decoded, dpi.Event{Proto: ev.Proto, Kind: ev.Kind, Attributes: attrs})
 		}
-		preview := e.previewRule(entry, previewZoneResolver)
+		preview := e.previewRule(PreviewRuleRequest{Entry: entry}, previewZoneResolver)
 		if preview.MatchCount != 1 || preview.TotalEvents != 3 ||
 			preview.SampleMatches[0].Attributes[eventfields.KeyInstanceID] != float64(instance) {
 			t.Fatalf("preview included wrapper or other operation: %+v", preview)

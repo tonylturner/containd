@@ -196,7 +196,7 @@ func (t *iecTable) completeLocked(tok capture.Token, err error, now time.Time) i
 	}
 	delete(t.aborts, tok)
 	txn.pending--
-	if err != nil {
+	if err != nil && !errors.Is(err, capture.ErrTokenFlushed) {
 		txn.errs = append(txn.errs, err.Error())
 	}
 	if txn.pending > 0 {

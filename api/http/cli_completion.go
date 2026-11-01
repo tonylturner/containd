@@ -39,6 +39,8 @@ var cliCompletionHandlers = map[string]cliCompletionFunc{
 	"set interface vlan":       completeSetInterfaceVLAN,
 	"assign interfaces":        completeAssignInterfaces,
 	"set firewall rule":        completeSetFirewallRule,
+	"add firewall rule":        completeSetFirewallRule,
+	"move firewall rule":       completeMoveFirewallRule,
 	"delete firewall rule":     completeDeleteFirewallRule,
 	"set port-forward add":     completePortForwardAdd,
 	"set port-forward del":     completePortForwardID,
@@ -91,6 +93,8 @@ var cliUsageHintHandlers = map[string]cliUsageHintFunc{
 	"set interface bridge":                   staticArgHints(2, "<members_csv>"),
 	"set interface vlan":                     staticArgHints(3, "<vlan_id>"),
 	"set firewall rule":                      staticArgHints(0, "<id>", 1, "ALLOW", "DENY"),
+	"add firewall rule":                      staticArgHints(0, "<id>", 1, "ALLOW", "DENY"),
+	"move firewall rule":                     staticArgHints(0, "<id>", 1, "top", "bottom", "before", "after", 2, "<id>"),
 	"delete firewall rule":                   staticArgHints(0, "<id>"),
 	"set port-forward add":                   usagePortForwardAdd,
 	"set port-forward del":                   staticArgHints(0, "<id>"),
@@ -253,15 +257,33 @@ func completeAssignInterfaces(ctx cliCompletionContext) []string {
 
 func completeSetFirewallRule(ctx cliCompletionContext) []string {
 	switch {
+	case ctx.argIndex >= 3 && (ctx.prev == "before" || ctx.prev == "after"):
+		return ctx.rules
 	case ctx.argIndex == 0:
 		return ctx.rules
 	case ctx.argIndex == 1:
 		return []string{"ALLOW", "DENY", "allow", "deny"}
 	case ctx.argIndex == 2 || ctx.argIndex == 3:
-		return ctx.zones
+		return append(append([]string{}, ctx.zones...), "top", "bottom", "before", "after")
+	case ctx.argIndex == 4:
+		return []string{"top", "bottom", "before", "after"}
 	default:
 		return nil
 	}
+}
+
+func completeMoveFirewallRule(ctx cliCompletionContext) []string {
+	switch ctx.argIndex {
+	case 0:
+		return ctx.rules
+	case 1:
+		return []string{"top", "bottom", "before", "after"}
+	case 2:
+		if ctx.prev == "before" || ctx.prev == "after" {
+			return ctx.rules
+		}
+	}
+	return nil
 }
 
 func completeDeleteFirewallRule(ctx cliCompletionContext) []string {
@@ -488,7 +510,7 @@ func usagePortForwardAdd(ctx cliCompletionContext) []string {
 		return []string{"<dest_ip[:dest_port]>"}
 	default:
 		if ctx.argIndex >= 5 {
-			return []string{"sources", "desc", "off"}
+			return []string{"sources", "desc", "off", "no-allow"}
 		}
 		return nil
 	}

@@ -45,6 +45,8 @@ func (f *resetFlow) handle(pkt capture.Packet) capture.Decision {
 	v := capture.VerdictAccept
 	if d.Action == capture.Drop {
 		v = capture.VerdictDrop
+	} else if d.Action == capture.Repeat {
+		v = capture.VerdictRepeat
 	}
 	f.e.hooks.onVerdict(pkt.Token, v, nil)
 	return d
@@ -94,8 +96,8 @@ func TestPickupResetOnce(t *testing.T) {
 		t.Run(p.name, func(t *testing.T) {
 			f := newResetFlow(t, p.port)
 			const clientSeq, serverSeq = 7000, resyncServerISN + 1
-			if d := f.handle(f.segment(true, serverSeq, clientSeq, capture.TCPFlagACK, nil)); d.Action != capture.Accept {
-				t.Fatalf("server ACK of the picked-up connection = %+v, want Accept", d)
+			if d := f.handle(f.segment(true, serverSeq, clientSeq, capture.TCPFlagACK, nil)); d.Action != capture.Repeat {
+				t.Fatalf("server ACK of the picked-up connection = %+v, want Repeat", d)
 			}
 			rule := p.name + "-read"
 			f.pickedUp("read on the picked-up connection", f.handle(f.segment(false, clientSeq, serverSeq, ackPsh, p.read(1))), rule, 0)
@@ -186,14 +188,14 @@ func TestReconnectOnSamePortAfterLostConnection(t *testing.T) {
 			f.accept("read head", p.read(2)[:5])
 			rcvNext := f.isn + f.next // the server's receive point
 			f.isn, f.next = 400000, 0
-			if d := f.establishedSyn(0); d.Action != capture.Accept {
-				t.Fatalf("reconnect SYN into the connection = %+v, want Accept", d)
+			if d := f.establishedSyn(0); d.Action != capture.Repeat {
+				t.Fatalf("reconnect SYN into the connection = %+v, want Repeat", d)
 			}
-			if d := f.handle(f.segment(true, resyncServerISN, rcvNext, capture.TCPFlagACK, nil)); d.Action != capture.Accept {
-				t.Fatalf("challenge ACK = %+v, want Accept", d)
+			if d := f.handle(f.segment(true, resyncServerISN, rcvNext, capture.TCPFlagACK, nil)); d.Action != capture.Repeat {
+				t.Fatalf("challenge ACK = %+v, want Repeat", d)
 			}
-			if d := f.handle(f.segment(false, rcvNext, 0, capture.TCPFlagRST, nil)); d.Action != capture.Accept {
-				t.Fatalf("client RST at the challenge ACK = %+v, want Accept", d)
+			if d := f.handle(f.segment(false, rcvNext, 0, capture.TCPFlagRST, nil)); d.Action != capture.Repeat {
+				t.Fatalf("client RST at the challenge ACK = %+v, want Repeat", d)
 			}
 			f.syn()
 			f.synAck()

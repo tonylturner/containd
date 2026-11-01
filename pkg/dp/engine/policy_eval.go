@@ -85,18 +85,21 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 			deniedCtx = contexts[0]
 			continue
 		}
-		if scope == nil || e.effectiveMode(scope) != "enforce" {
+		if state.InlinePolicy.Load() == nil && (scope == nil || e.effectiveMode(scope) != "enforce") {
 			continue
 		}
 		var matchedDeny *rules.Entry
 		var deniedEvent bool
 		for _, ctx := range contexts {
 			v, matched := e.evaluateVerdictMatch(ctx, !isReply(state), state)
+			if v.Denies() && state.InlinePolicy.Load() != nil && (matched == nil || matched.ICS.Protocol == "") {
+				v.Reason = reasonPolicyNonAdmit
+			}
 			if v.Denies() {
 				deniedEvent = true
 				matchedDeny = matched
 			}
-			if v.Denies() && !denied.Denies() {
+			if v.Denies() && (!denied.Denies() || denied.Reason == reasonPolicyNonAdmit && v.Reason != reasonPolicyNonAdmit) {
 				denied, deniedCtx = v, ctx
 			}
 		}
@@ -110,7 +113,9 @@ func (e *Engine) enforceDPIEvents(state *flow.State, pkt *dpi.ParsedPacket, evs 
 	}
 	for _, f := range findings {
 		action := "passed"
-		if denied.Denies() || streamDenied {
+		if denied.Reason == reasonPolicyNonAdmit && !streamDenied {
+			action = "non-admitting continuation"
+		} else if denied.Denies() || streamDenied {
 			action = "dropped and reset"
 		} else if f.strict {
 			action = "would drop"
@@ -212,7 +217,12 @@ func isStreamErrorEvent(ev dpi.Event) bool {
 
 // isReply is deliberately limited to the US path; IEC envelopes evaluate
 // both directions through EvaluateIEC104 and deny unmatched replies.
-func isReply(state *flow.State) bool { return state.ServiceKey().Dir == flow.DirReverse }
+func isReply(state *flow.State) bool {
+	if p := state.InlinePolicy.Load(); p != nil {
+		return p.Reply
+	}
+	return state.ServiceKey().Dir == flow.DirReverse
+}
 
 // servicePort returns the server port of the packet's connection: the
 // destination port when the sender opened the connection, the source port

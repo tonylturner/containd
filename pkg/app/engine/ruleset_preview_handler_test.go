@@ -48,7 +48,7 @@ func TestRulesetPreviewHandler(t *testing.T) {
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &preview) != nil {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	want, err := enforce.NewCompilerWithSettings(compilerSettings(cfg.DataPlane), nil).CompileFirewall(&snap)
+	want, err := enforce.NewCompilerWithSettings(compilerSettings(cfg.DataPlane), nil).CompileFirewall(&preview.Snapshot)
 	if err != nil || preview.Ruleset != want || preview.Runtime.IEC104EnvelopeOpen {
 		t.Fatalf("preview=%+v err=%v", preview, err)
 	}
@@ -60,7 +60,7 @@ func TestRulesetPreviewHandler(t *testing.T) {
 	}
 	if !strings.Contains(preview.Ruleset, "group 205") || !strings.Contains(preview.Ruleset, "table inet candidate") ||
 		!regexp.MustCompile(`tcp dport 502 counter name "rule_[0-9a-f]{16}" jump ics_queue;`).MatchString(preview.Ruleset) ||
-		!strings.Contains(preview.Ruleset, "ct status assured meta mark set meta mark and 0xf0ffffff queue num 209;") ||
+		!strings.Contains(preview.Ruleset, "ct status assured meta mark set meta mark and 0xe0ffffff queue num 209;") ||
 		!strings.Contains(preview.Runtime.Reason, "not owned") || dp.CurrentRules() != nil {
 		t.Fatalf("candidate preview = %+v", preview)
 	}
@@ -91,7 +91,7 @@ func TestRulesetPreviewSettingsMapping(t *testing.T) {
 func TestRulesetPreviewHandlerEnforcementDisabled(t *testing.T) {
 	for _, runningEnabled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("running-enforcement=%v", runningEnabled), func(t *testing.T) {
-			dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{Enabled: runningEnabled}})
+			dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{ClearMark: noPolicyMarks, Enabled: runningEnabled}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -170,7 +170,7 @@ func TestRulesetPreviewHandlerUsesManagementSnapshot(t *testing.T) {
 
 func TestRulesetPreviewHandlerRejectsReservationConflict(t *testing.T) {
 	r := &mgmtpath.Reservation{Device: "fixture", Local: netip.MustParsePrefix("10.99.99.2/24"), Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}, Port: 8080}
-	dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{Enabled: true, ManagementReservation: r}})
+	dp, err := engine.New(engine.Config{Enforce: engine.EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, ManagementReservation: r}})
 	if err != nil {
 		t.Fatal(err)
 	}
