@@ -300,6 +300,43 @@ test("a failed apply is reported and applied coverage describes the previous rul
   await expect(page.getByText("Last activation attempt:", { exact: false })).toBeVisible();
 });
 
+test("ICS inspection reports each installed apply and schedule fault once, without expanding", async ({ page }) => {
+  const applyError = "nft: syntax error";
+  const reason = "the schedule horizon ends within an hour";
+  const lastError = "set refill: netlink busy";
+  await mockAPI(page, {
+    coverage: { status: 200, json: { ...report, applyError } },
+    installed: {
+      installed: true, error: applyError,
+      schedulePlanner: { state: "degraded", reason, lastError },
+    },
+  });
+  await open(page, "/ics/");
+  for (const cause of [applyError, reason, lastError]) {
+    const text = page.getByText(cause, { exact: false });
+    await expect(text).toHaveCount(1);
+    await expect(text).toBeVisible();
+  }
+  await expect(page.getByText("The last apply failed, so applied coverage describes the rules still in force from before it.", { exact: false })).toBeVisible();
+});
+
+for (const installedError of [undefined, "nft: a different apply failed"]) {
+  test(`ICS inspection retains the coverage apply cause when installed status ${installedError ? "reports a different cause" : "is unavailable"}`, async ({ page }) => {
+    const applyError = "nft: syntax error";
+    await mockAPI(page, {
+      coverage: { status: 200, json: { ...report, applyError } },
+      installed: { installed: true, error: installedError },
+    });
+    if (!installedError) {
+      await page.route("**/api/v1/dataplane/ruleset/status", route => route.fulfill({ status: 503, json: { error: "installed status offline" } }));
+    }
+    await open(page, "/ics/");
+    await expect(page.getByText(applyError, { exact: true })).toHaveCount(1);
+    await expect(page.getByText(applyError, { exact: true })).toBeVisible();
+    if (installedError) await expect(page.getByText(installedError, { exact: true })).toBeVisible();
+  });
+}
+
 test("an unreachable coverage route reports why and claims no coverage", async ({ page }) => {
   const seen = await mockAPI(page, { coverage: { status: 500, json: { error: "failed to load candidate" } } });
   await open(page, "/ics/");
@@ -431,6 +468,37 @@ for (const [state, expected] of [["enforcing", "Enforcing"], ["partial", "Partly
   });
 }
 
+for (const pending of [false, true]) {
+  test(`active inspection names confirmed absence neutrally with ${pending ? "pending candidate rules" : "no candidate rules"}`, async ({ page }) => {
+    await mockAPI(page, {
+      rules: pending ? [rules[0]] : [],
+      coverage: { status: 200, json: { candidate: pending ? [cov("plc-read", "enforcing")] : [], applied: [] } },
+      health: { status: "ok", component: "mgmt", icsEnforcement: { state: "none" } },
+    });
+    await open(page, "/ics/");
+    const header = page.getByLabel("Active inspection state", { exact: true });
+    await expect(header.getByText("No ICS rules applied", { exact: true })).toHaveClass(/badge-offline/);
+    await expect(header.locator(".badge-secure")).toHaveCount(0);
+    if (pending) await expect(coverageOf(page, "plc-read").getByText("not applied", { exact: true })).toBeVisible();
+  });
+}
+
+for (const observation of ["missing applied coverage", "conflicting applied coverage", "unknown health"] as const) {
+  test(`active inspection does not claim absence with ${observation}`, async ({ page }) => {
+    await mockAPI(page, {
+      coverage: { status: 200, json: {
+        candidate: [],
+        ...(observation === "missing applied coverage" ? {} : { applied: observation === "conflicting applied coverage" ? [cov("plc-read", "enforcing")] : [] }),
+      } },
+      health: { status: "ok", component: "mgmt", icsEnforcement: { state: observation === "unknown health" ? "unknown" : "none" } },
+    });
+    await open(page, "/ics/");
+    const header = page.getByLabel("Active inspection state", { exact: true });
+    await expect(header.getByText("Unknown", { exact: true })).toBeVisible();
+    await expect(header.getByText("No ICS rules applied", { exact: true })).toHaveCount(0);
+  });
+}
+
 for (const endpoint of ["health", "dataplane/ics-coverage"]) {
   test(`active inspection header is unknown after failed ${endpoint} read`, async ({ page }) => {
     await mockAPI(page, {
@@ -473,6 +541,38 @@ test("Why? reveals full applied and candidate reasons without inventing drift", 
   await page.keyboard.press("Space");
   await expect(why).toHaveAttribute("aria-expanded", "false");
   await expect(why).toBeFocused();
+});
+
+test("ICS read-only inspection remains operable after a failed refresh disables saving", async ({ page }) => {
+  await mockAPI(page, { rules: [rules[1]] });
+  await open(page, "/ics/");
+  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "plc-inherit", exact: true }) });
+  const inspect = row.getByRole("button", { name: "Inspect rule", exact: true });
+  await expect(inspect).toHaveAttribute("aria-expanded", "true");
+  await inspect.click();
+  await expect(inspect).toHaveAttribute("aria-expanded", "false");
+
+  await page.route("**/api/v1/dataplane", route => route.fulfill({ status: 503, json: { error: "settings unavailable" } }));
+  const failed = page.waitForResponse("**/api/v1/dataplane");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await failed;
+  await expect(page.getByRole("alert").filter({ hasText: "Configuration unavailable." })).toBeVisible();
+
+  await inspect.focus();
+  await page.keyboard.press("Enter");
+  await expect(inspect).toHaveAttribute("aria-expanded", "true");
+  await expect(row.getByText("Codes", { exact: true })).toBeVisible();
+  const why = row.getByRole("button", { name: "Why?", exact: true });
+  await why.focus();
+  await page.keyboard.press("Enter");
+  await expect(why).toHaveAttribute("aria-expanded", "true");
+  await expect(row.getByText("Applied: partial", { exact: true })).toBeVisible();
+
+  const details = page.getByRole("button", { name: "Inspection details", exact: true });
+  await details.click();
+  await expect(details).toHaveAttribute("aria-expanded", "true");
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Save filter", exact: true })).toBeDisabled();
 });
 
 test("compact rules retain all matching fields and keyboard inspection at 390px", async ({ page }) => {

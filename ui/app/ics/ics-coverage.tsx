@@ -73,7 +73,7 @@ function formatTime(value: string): string {
 const MODE_ALONE = "Choosing Enforce does not guarantee blocking is active.";
 
 /** Why coverage is missing or stale; nothing when both sides are known. */
-export function ICSCoverageNotice({ view }: { view: ICSCoverageView }) {
+export function ICSCoverageNotice({ view, reportedApplyError }: { view: ICSCoverageView; reportedApplyError?: string }) {
   const warnings: { message: string; detail: string }[] = [];
   if (view.status === "unavailable") {
     warnings.push({ message: `ICS coverage unavailable. ${MODE_ALONE}`, detail: view.error });
@@ -97,7 +97,7 @@ export function ICSCoverageNotice({ view }: { view: ICSCoverageView }) {
       {loaded?.applyError && (
         <div role="status" className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-400">
           The last apply failed, so applied coverage describes the rules still in force from before it. The enforcement status shows why it failed.
-          <p className="mt-1 break-words">{loaded.applyError}</p>
+          {loaded.applyError !== reportedApplyError && <p className="mt-1 break-words">{loaded.applyError}</p>}
         </div>
       )}
       {loaded?.appliedAt && (
