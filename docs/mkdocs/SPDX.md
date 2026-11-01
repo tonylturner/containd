@@ -19,13 +19,13 @@ This file tracks third‑party/external components that containd embeds, vendors
 | Gin | REST API framework | MIT | Used in `api/http`. |
 | `github.com/golang-jwt/jwt/v5` | JWT auth | MIT | Used for UI/API auth sessions. |
 | `github.com/prometheus/client_golang` | Prometheus metrics | Apache-2.0 | Exposes `/metrics` endpoint for monitoring. |
-| `modernc.org/sqlite` | Embedded SQLite (Go) | BSD-3-Clause | Used for config/audit/users DBs. |
+| `modernc.org/sqlite` | Embedded SQLite (Go) | BSD-3-Clause | Used for config/audit/users/evidence DBs. |
 | Next.js | Web UI framework | MIT | UI is built as a static export and embedded in the mgmt image. |
 | React | UI library | MIT | Via Next.js. |
 | Tailwind CSS | UI styling | MIT | Built into UI assets. |
 | Envoy Proxy | Optional explicit forward proxy | Apache-2.0 | Copied into the mgmt appliance image from `envoyproxy/envoy`. |
 | Nginx | Optional reverse proxy | BSD-2-Clause | Installed as Wolfi `nginx-mainline` in the mgmt image. |
-| Unbound | DNS caching/forwarding resolver | BSD-3-Clause | Embedded in the mgmt image (forwarder-first config; supervised by `containd mgmt`). |
+| Unbound | DNS caching/forwarding resolver | BSD-3-Clause | Embedded in the mgmt image; forwards to configured upstreams and is supervised by `containd mgmt` when enabled. |
 | chrony | NTP client/server | GPL-2.0-only | Installed as Wolfi `chrony` in the mgmt image; supervised when enabled. The [upstream program header](https://github.com/mlichvar/chrony/blob/master/main.c) specifies GPL version 2. |
 | WireGuard (Linux kernel) | Remote access VPN dataplane | GPL-2.0-only | WireGuard runs via Linux kernel interfaces + generic netlink control; we do not bundle the `wg` CLI in the appliance image. |
 | OpenVPN | Compatibility VPN | GPL-2.0-only WITH OpenSSL-exception | Embedded in the mgmt image; supervised by `containd mgmt` when enabled with a foreground config (no `daemon`). |
@@ -34,7 +34,6 @@ This file tracks third‑party/external components that containd embeds, vendors
 | ClamAV | Antivirus scanning (ICAP pipeline) | GPL-2.0-only | Embedded `clamd`/`freshclam` binaries; executed as separate processes, not linked into `containd`. |
 | tini | PID 1 init | MIT | Lightweight init for the mgmt container entrypoint. |
 | React Flow | Topology UI | MIT | Used for topology/graph screens in the UI. |
-| Recharts | Charts | MIT | Used for dashboard charts and sparklines. |
 | Wolfi base (`cgr.dev/chainguard/wolfi-base`) | Minimal glibc runtime base | Apache-2.0 | Used as the final base image for mgmt/engine containers. |
 
 ---
@@ -50,4 +49,3 @@ These are used to build UI/docs (CI/Docker build stages), but are not included i
 | pymdown-extensions | Markdown extensions | MIT | Enables advanced admonitions/code fences. |
 | Node.js | UI build toolchain | MIT | Used in Docker UI build stage. |
 | Python | Docs build toolchain | PSF-2.0 | Used in Docker docs build stage. |
-
