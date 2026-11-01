@@ -30,7 +30,7 @@ push_parsing() {
   local label=$1 filter=$2 code
   UPDATED_CFG=$(jq "$filter" <<<"$UPDATED_CFG")
   DATAPLANE_CFG=$(jq '.dataplane' <<<"$UPDATED_CFG")
-  code=$(echo "$UPDATED_CFG" | curl -s --max-time 10 --connect-timeout 5 -w "%{http_code}" -H "$AUTH_HEADER" \
+  code=$(echo "$UPDATED_CFG" | cas_write "$WORK_DIR/config.revision" curl -s --max-time 10 --connect-timeout 5 -w "%{http_code}" -H "$AUTH_HEADER" \
     -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$WORK_DIR/parsing-config.out" || true)
   if [[ "$code" != "200" ]]; then
     check_fail "$label: config save failed (HTTP $code): $(head -c 300 "$WORK_DIR/parsing-config.out")"
@@ -48,7 +48,7 @@ push_parsing() {
 # connection on PORT recorded at or after SINCE to OUT.
 port_events() {
   local port=$1 since=$2 out=$3
-  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=1000" 2>/dev/null | jq --argjson port "$port" --arg since "$since" '
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=1000" 2>/dev/null | jq --argjson port "$port" --arg since "$since" '
     [.[] | select(.srcPort == $port
       and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= ($since | fromdateiso8601)))]' \
     >"$out" 2>/dev/null || printf '[]\n' >"$out"
@@ -204,10 +204,10 @@ probe_bad_length() {
 # parsing pushed through the API, and restores the default.
 run_parsing_probes() {
   log "Testing tolerant and strict Modbus parsing..."
-  if $CURL -H "$AUTH_HEADER" "${BASE}/config" | jq -e '.dataplane.dpiIcsParsing == null' >/dev/null 2>&1; then
+  if "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config" | jq -e '.dataplane.dpiIcsParsing == null' >/dev/null 2>&1; then
     pass "Tolerant parsing is the default: the saved config has no dpiIcsParsing"
   else
-    check_fail "the saved config already sets dpiIcsParsing: $($CURL -H "$AUTH_HEADER" "${BASE}/config" | jq -c '.dataplane.dpiIcsParsing')"
+    check_fail "the saved config already sets dpiIcsParsing: $("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config" | jq -c '.dataplane.dpiIcsParsing')"
   fi
   probe_pid_nonzero tolerant
   probe_bad_length tolerant

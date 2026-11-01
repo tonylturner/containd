@@ -49,7 +49,8 @@ func setNATAPI(api *API) Command {
 			return fmt.Errorf("usage: set nat on|off [egress <zone|default>] [sources <z1,z2|default>]")
 		}
 		var nat config.NATConfig
-		if err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
+		revision, err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat)
+		if err != nil {
 			return err
 		}
 
@@ -104,6 +105,6 @@ func setNATAPI(api *API) Command {
 			}
 		}
 
-		return api.postJSON(ctx, "/api/v1/firewall/nat", nat, out)
+		return api.saveJSON(ctx, "/api/v1/firewall/nat", nat, revision, out)
 	}
 }

@@ -7,14 +7,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
 
 	"encoding/json"
 
-	"bytes"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/ids"
 )
@@ -53,35 +51,13 @@ func assignInterfacesAPI(api *API) Command {
 			req["mappings"] = mappings
 		}
 
-		if api.Client == nil {
-			api.Client = defaultHTTPClient
-		}
-		buf := &bytes.Buffer{}
-		if err := json.NewEncoder(buf).Encode(req); err != nil {
-			return err
-		}
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, api.BaseURL+"/api/v1/interfaces/assign", buf)
-		if err != nil {
-			return err
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		if api.Token != "" {
-			httpReq.Header.Set("Authorization", "Bearer "+api.Token)
-		}
-		resp, err := api.Client.Do(httpReq)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		api.updateTokenFromResponse(resp)
-		if resp.StatusCode >= 300 {
-			body, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
-		}
 		var payload struct {
 			Interfaces []config.Interface `json:"interfaces"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&payload)
+		if err := api.mutateJSON(ctx, "POST", "/api/v1/interfaces/assign", req, &payload, nil); err != nil {
+			return err
+		}
+
 		if out == nil {
 			return nil
 		}
@@ -289,7 +265,8 @@ func setDataPlaneAPI(api *API) Command {
 		}
 
 		var dp config.DataPlaneConfig
-		if err := api.getConfigJSON(ctx, "/api/v1/dataplane", &dp); err != nil {
+		revision, err := api.getConfigJSON(ctx, "/api/v1/dataplane", &dp)
+		if err != nil {
 			return err
 		}
 		dp.Enforcement = on
@@ -299,7 +276,7 @@ func setDataPlaneAPI(api *API) Command {
 		if len(args) > 3 {
 			dp.CaptureInterfaces = args[3:]
 		}
-		return api.postJSON(ctx, "/api/v1/dataplane", dp, out)
+		return api.saveJSON(ctx, "/api/v1/dataplane", dp, revision, out)
 	}
 }
 
@@ -354,7 +331,8 @@ func setForwardProxyAPI(api *API) Command {
 		}
 		on := args[0] == "on" || args[0] == "true" || args[0] == "1"
 		var fp config.ForwardProxyConfig
-		if err := api.getConfigJSON(ctx, "/api/v1/services/proxy/forward", &fp); err != nil {
+		revision, err := api.getConfigJSON(ctx, "/api/v1/services/proxy/forward", &fp)
+		if err != nil {
 			return err
 		}
 		fp.Enabled = on
@@ -368,7 +346,7 @@ func setForwardProxyAPI(api *API) Command {
 		if len(args) > 2 {
 			fp.ListenZones = args[2:]
 		}
-		return api.postJSON(ctx, "/api/v1/services/proxy/forward", fp, out)
+		return api.saveJSON(ctx, "/api/v1/services/proxy/forward", fp, revision, out)
 	}
 }
 
@@ -380,17 +358,24 @@ func setReverseProxyAPI(api *API) Command {
 		}
 		on := args[0] == "on" || args[0] == "true" || args[0] == "1"
 		var rp config.ReverseProxyConfig
-		if err := api.getConfigJSON(ctx, "/api/v1/services/proxy/reverse", &rp); err != nil {
+		revision, err := api.getConfigJSON(ctx, "/api/v1/services/proxy/reverse", &rp)
+		if err != nil {
 			return err
 		}
 		rp.Enabled = on
-		return api.postJSON(ctx, "/api/v1/services/proxy/reverse", rp, out)
+		return api.saveJSON(ctx, "/api/v1/services/proxy/reverse", rp, revision, out)
 	}
 }
 
 func commitAPI(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
-		return api.postJSON(ctx, "/api/v1/config/commit", map[string]any{}, out)
+		if len(args) == 0 {
+			return api.postJSON(ctx, "/api/v1/config/commit", map[string]any{}, out)
+		}
+		if len(args) != 2 || args[0] != "revision" || !config.Revision(args[1]).Valid() {
+			return fmt.Errorf("usage: commit [revision <token>]")
+		}
+		return api.saveJSON(ctx, "/api/v1/config/commit", map[string]any{}, config.Revision(args[1]), out)
 	}
 }
 

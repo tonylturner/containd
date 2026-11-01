@@ -60,7 +60,9 @@ ENDPOINT_IMAGE=${IEC104_ENDPOINT_IMAGE:-containd-iec104-endpoint:iec104-smoke-$(
 RESULTS_DIR=${IEC104_RESULTS_DIR:-$ROOT/build/iec104-smoke}
 RESULTS_FILE="$RESULTS_DIR/results.json"
 WORK_DIR=$(mktemp -d)
-CURL="curl -sf --max-time 10 --connect-timeout 5"
+CURL=(curl -sf --max-time 10 --connect-timeout 5)
+# shellcheck source=scripts/config-revision.sh
+source "$(dirname "${BASH_SOURCE[0]}")/config-revision.sh"
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
 
 CC_SUBNET=${IEC104_CC_SUBNET:-10.233.0}
@@ -212,7 +214,7 @@ ensure_images() {
 wait_http() {
   local url=$1
   for _ in $(seq 1 60); do
-    $CURL "$url" >/dev/null 2>&1 && return 0
+    "${CURL[@]}" "$url" >/dev/null 2>&1 && return 0
     sleep 1
   done
   return 1
@@ -289,7 +291,7 @@ fi
 log "Discovering firewall interfaces..."
 STATE=""
 for _ in $(seq 1 15); do
-  STATE=$($CURL -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
+  STATE=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
   [[ -n "$STATE" && "$STATE" != "[]" ]] && break
   sleep 2
 done
@@ -327,7 +329,7 @@ wait_cc_settled() {
 apply_config() {
   local cfg=$1 label=$2 resp code
   resp="$WORK_DIR/cfg-resp.json"
-  code=$(echo "$cfg" | $CURL -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+  code=$(echo "$cfg" | cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" \
     -X POST "${BASE}/config" --data-binary @- -o "$resp" 2>/dev/null || true)
   if [[ "$code" != "200" ]]; then
     log "config POST for $label rejected (HTTP $code): $(cat "$resp" 2>/dev/null)"
@@ -335,7 +337,7 @@ apply_config() {
   fi
   local ruleset snap
   ruleset="$WORK_DIR/ruleset.json"
-  $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset" || return 1
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset" || return 1
   snap=$(jq -c '.snapshot' "$ruleset")
   code=$(echo "$cfg" | jq -c '.dataplane' | engine_post firewall /internal/config "$resp")
   [[ "$code" == "200" ]] || { log "engine config for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
@@ -345,7 +347,7 @@ apply_config() {
   return 0
 }
 
-CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
+CFG=$(cas_read "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config")
 
 # L4 baseline: zones for the two sides and a plain tcp/2404 allow both ways, so
 # monitoring works and the harness routing is provable even before IEC
@@ -439,7 +441,7 @@ else
 fi
 
 health_json() {
-  $CURL -H "$AUTH_HEADER" "${BASE}/health" 2>/dev/null || echo '{}'
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/health" 2>/dev/null || echo '{}'
 }
 
 if [[ "$EU_APPLIED" -eq 1 ]] && health_json | jq -e '.iec104Enforcement.active == true and .iec104Enforcement.healthy == true' >/dev/null 2>&1; then
@@ -484,7 +486,7 @@ socket_of() {
 # unsupported event at or after TS (UTC, second resolution).
 iec_event_since() {
   local since=$1
-  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=200" 2>/dev/null | jq -e --arg since "$since" '
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=200" 2>/dev/null | jq -e --arg since "$since" '
     any(.[]; .proto == "iec104" and (.kind == "malformed" or .kind == "unsupported")
       and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= ($since | fromdateiso8601)))' >/dev/null 2>&1
 }
@@ -712,7 +714,7 @@ run_parsing_gates
 reject_check() {
   local name=$1 cfg=$2 code
   # Expected HTTP errors are data here: -f can discard their response body.
-  code=$(echo "$cfg" | curl -sS --max-time 10 --connect-timeout 5 -w "%{http_code}" \
+  code=$(echo "$cfg" | cas_write "$WORK_DIR/config.revision" curl -sS --max-time 10 --connect-timeout 5 -w "%{http_code}" \
     -H "$AUTH_HEADER" -H "Content-Type: application/json" \
     -X POST "${BASE}/config" --data-binary @- -o "$WORK_DIR/reject.json" || true)
   if [[ "$code" == "400" && -s "$WORK_DIR/reject.json" ]]; then

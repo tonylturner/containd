@@ -288,6 +288,13 @@ func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
+	if req.Method == "GET" && req.URL.Path == "/api/v1/config/candidate" {
+		return jsonHTTPResponse(http.StatusOK, config.DefaultConfig(), nil), nil
+	}
+	if m.resp.Header == nil {
+		m.resp.Header = make(http.Header)
+	}
+	m.resp.Header.Set("X-Containd-Revision", "0123456789abcdef.2")
 	return m.resp, nil
 }
 
@@ -426,11 +433,11 @@ func TestCommitConfirmedViaAPI(t *testing.T) {
 	if err := reg.Execute(ctx, "commit confirmed", &buf, []string{"5"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if len(client.reqs) != 1 {
-		t.Fatalf("expected one request")
+	if len(client.reqs) != 2 || client.reqs[0].URL.Path != "/api/v1/config/candidate" {
+		t.Fatalf("expected candidate read then commit, got %v", client.reqs)
 	}
 	var body map[string]any
-	_ = json.NewDecoder(client.reqs[0].Body).Decode(&body)
+	_ = json.NewDecoder(client.reqs[1].Body).Decode(&body)
 	if body["ttl_seconds"] != float64(5) {
 		t.Fatalf("expected ttl_seconds=5, got %#v", body)
 	}

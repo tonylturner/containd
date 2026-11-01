@@ -6,6 +6,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +16,15 @@ func TestMutationOutputDistinguishesStagedAndOperational(t *testing.T) {
 	for _, state := range []string{"", "staged", "committed"} {
 		t.Run("header="+state, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if _, err := io.Copy(io.Discard, r.Body); err != nil {
+					t.Error(err)
+					return
+				}
+				w.Header().Set("X-Containd-Revision", "0123456789abcdef.1")
+				if r.Method == "GET" {
+					_, _ = io.WriteString(w, "{}")
+					return
+				}
 				w.Header().Set("X-Containd-Config", state)
 				w.WriteHeader(http.StatusOK)
 			}))

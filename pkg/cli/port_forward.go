@@ -277,7 +277,8 @@ func setPortForwardEnableAPI(api *API, enabled bool) Command {
 		id := strings.TrimSpace(args[0])
 
 		var nat config.NATConfig
-		if err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
+		revision, err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat)
+		if err != nil {
 			return err
 		}
 		updated := false
@@ -291,7 +292,7 @@ func setPortForwardEnableAPI(api *API, enabled bool) Command {
 		if !updated {
 			return fmt.Errorf("port-forward not found: %s", id)
 		}
-		if err := api.postJSON(ctx, "/api/v1/firewall/nat", nat, nil); err != nil {
+		if err := api.saveJSON(ctx, "/api/v1/firewall/nat", nat, revision, nil); err != nil {
 			return err
 		}
 		if out != nil {

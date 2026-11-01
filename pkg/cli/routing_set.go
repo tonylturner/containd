@@ -121,7 +121,8 @@ func parseRouteAddArgs(args []string) (config.StaticRoute, error) {
 
 func addRouteConfig(ctx context.Context, api *API, rt config.StaticRoute) error {
 	var routing config.RoutingConfig
-	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
+	revision, err := api.getConfigJSON(ctx, "/api/v1/routing", &routing)
+	if err != nil {
 		return err
 	}
 	for _, existing := range routing.Routes {
@@ -130,7 +131,7 @@ func addRouteConfig(ctx context.Context, api *API, rt config.StaticRoute) error 
 		}
 	}
 	routing.Routes = append(routing.Routes, rt)
-	return api.postJSON(ctx, "/api/v1/routing", routing, nil)
+	return api.saveJSON(ctx, "/api/v1/routing", routing, revision, nil)
 }
 
 func parseIPRuleAddArgs(args []string) (config.PolicyRule, error) {
@@ -174,7 +175,8 @@ func parseIPRuleAddArgs(args []string) (config.PolicyRule, error) {
 
 func addIPRuleConfig(ctx context.Context, api *API, rule config.PolicyRule) error {
 	var routing config.RoutingConfig
-	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
+	revision, err := api.getConfigJSON(ctx, "/api/v1/routing", &routing)
+	if err != nil {
 		return err
 	}
 	for _, existing := range routing.Rules {
@@ -183,7 +185,7 @@ func addIPRuleConfig(ctx context.Context, api *API, rule config.PolicyRule) erro
 		}
 	}
 	routing.Rules = append(routing.Rules, rule)
-	return api.postJSON(ctx, "/api/v1/routing", routing, nil)
+	return api.saveJSON(ctx, "/api/v1/routing", routing, revision, nil)
 }
 
 func setIPRuleDelAPI(api *API) Command {
@@ -275,7 +277,8 @@ func parseRouteDeleteArgs(args []string) (config.StaticRoute, routeDeleteFilters
 
 func deleteMatchingRoutes(ctx context.Context, api *API, match config.StaticRoute, filters routeDeleteFilters) error {
 	var routing config.RoutingConfig
-	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
+	revision, err := api.getConfigJSON(ctx, "/api/v1/routing", &routing)
+	if err != nil {
 		return err
 	}
 	matches := 0
@@ -294,7 +297,7 @@ func deleteMatchingRoutes(ctx context.Context, api *API, match config.StaticRout
 		return fmt.Errorf("multiple routes match; specify via/dev/table/metric to disambiguate")
 	}
 	routing.Routes = filtered
-	return api.postJSON(ctx, "/api/v1/routing", routing, nil)
+	return api.saveJSON(ctx, "/api/v1/routing", routing, revision, nil)
 }
 
 func parseIPRuleDeleteArgs(args []string) (int, config.PolicyRule, ipRuleDeleteFilters, bool, error) {
@@ -345,7 +348,8 @@ func parseIPRuleDeleteArgs(args []string) (int, config.PolicyRule, ipRuleDeleteF
 
 func deleteMatchingIPRules(ctx context.Context, api *API, match config.PolicyRule, filters ipRuleDeleteFilters) error {
 	var routing config.RoutingConfig
-	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
+	revision, err := api.getConfigJSON(ctx, "/api/v1/routing", &routing)
+	if err != nil {
 		return err
 	}
 	matches := 0
@@ -364,7 +368,7 @@ func deleteMatchingIPRules(ctx context.Context, api *API, match config.PolicyRul
 		return fmt.Errorf("multiple rules match; specify src/dst/priority or use 'all'")
 	}
 	routing.Rules = filtered
-	return api.postJSON(ctx, "/api/v1/routing", routing, nil)
+	return api.saveJSON(ctx, "/api/v1/routing", routing, revision, nil)
 }
 
 func routingOptionValue(usage string, args []string, i int) (string, int, error) {
@@ -389,7 +393,8 @@ func routingIntOption(usage string, args []string, i int, min int, max int, labe
 
 func deleteAllIPRulesForTable(ctx context.Context, out io.Writer, api *API, table int) error {
 	var routing config.RoutingConfig
-	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
+	revision, err := api.getConfigJSON(ctx, "/api/v1/routing", &routing)
+	if err != nil {
 		return err
 	}
 	filtered := make([]config.PolicyRule, 0, len(routing.Rules))
@@ -405,7 +410,7 @@ func deleteAllIPRulesForTable(ctx context.Context, out io.Writer, api *API, tabl
 		return fmt.Errorf("no rules found for table %d", table)
 	}
 	routing.Rules = filtered
-	if err := api.postJSON(ctx, "/api/v1/routing", routing, nil); err != nil {
+	if err := api.saveJSON(ctx, "/api/v1/routing", routing, revision, nil); err != nil {
 		return err
 	}
 	if out != nil {

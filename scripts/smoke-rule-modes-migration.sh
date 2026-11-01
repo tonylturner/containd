@@ -4,6 +4,8 @@ set -euo pipefail
 # Upgrade a genuine 0.1.35 data directory, then restart and prove audit AddOnce.
 : "${RULE_MODES_IMAGE:?set RULE_MODES_IMAGE to the branch-built firewall image}"
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=scripts/config-revision.sh
+source "$ROOT/scripts/config-revision.sh"
 RESULTS=${RULE_MODES_RESULTS:-$ROOT/build/rule-modes-migration-$(date +%s)-$$}
 NAME=rule-modes-migration-$$
 mkdir -p "$RESULTS/data"
@@ -58,6 +60,30 @@ for boot_number in 1 2; do
     cat "$RESULTS/running-$boot_number.json" >&2
     exit 1
   }
+  # The legacy image above has no CAS protocol. Only the upgraded server must
+  # reject missing/stale bases and chain successful acknowledgements.
+  state="$RESULTS/revision-$boot_number"
+  cas_read "$state" api "$BASE/config/candidate" >"$RESULTS/candidate-$boot_number.json"
+  base_revision=$(cas_revision "$state")
+  code=$(curl -sS --max-time 15 -H 'Authorization: Bearer devtoken' -H 'Content-Type: application/json' \
+    -X POST "$BASE/config" --data-binary @"$RESULTS/candidate-$boot_number.json" \
+    -o "$RESULTS/missing-$boot_number.json" -w '%{http_code}')
+  [[ $code == 428 ]] || { echo "expected missing revision HTTP 428, got $code" >&2; exit 1; }
+  jq -e '.code=="config_revision_required"' "$RESULTS/missing-$boot_number.json" >/dev/null
+  cas_write "$state" api -X POST "$BASE/config" --data-binary @"$RESULTS/candidate-$boot_number.json" >"$RESULTS/cas-save-$boot_number.json"
+  [[ $(cas_revision "$state") != "$base_revision" ]]
+  # A second save uses the first acknowledgement, not a freshly fetched token.
+  cas_write "$state" api -X POST "$BASE/config" --data-binary @"$RESULTS/candidate-$boot_number.json" >"$RESULTS/cas-chain-$boot_number.json"
+  saved_revision=$(cas_revision "$state")
+  code=$(curl -sS --max-time 15 -H 'Authorization: Bearer devtoken' -H 'Content-Type: application/json' \
+    -H "X-Containd-If-Revision: $base_revision" -X POST "$BASE/config" \
+    --data-binary @"$RESULTS/candidate-$boot_number.json" -o "$RESULTS/stale-$boot_number.json" -w '%{http_code}')
+  [[ $code == 412 ]] || { echo "expected stale revision HTTP 412, got $code" >&2; exit 1; }
+  jq -e --arg rev "$saved_revision" \
+    '.code=="config_revision_mismatch" and .currentRevision==$rev' "$RESULTS/stale-$boot_number.json" >/dev/null
+  cas_read "$state" api "$BASE/config/candidate" >"$RESULTS/after-stale-$boot_number.json"
+  [[ $(cas_revision "$state") == "$saved_revision" ]]
+  cmp "$RESULTS/candidate-$boot_number.json" "$RESULTS/after-stale-$boot_number.json"
   cleanup
 done
 cmp "$RESULTS/audit-1.json" "$RESULTS/audit-2.json" || {

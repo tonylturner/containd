@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- CLI configuration edits and repository smoke scripts carry snapshot revisions
+  through saves and staged sequences; `show diff` displays a revision and
+  `commit revision <token>` commits only that reviewed revision.
+- Web configuration saves and commits reject stale revisions, keep the conflicting draft, and commit only a reviewed diff.
 - Reject stale configuration saves, section edits and lifecycle actions using
   a durable whole-state revision, including IDS banks and secret-only edits.
 

@@ -7,6 +7,7 @@
 #
 # Environment:
 #   CONTAIND_IMAGE              image to test (Compose default when unset)
+#   QUICKSTART_COMPOSE_OVERRIDE optional isolation override file
 #   COMPOSE_PROJECT_NAME        Compose project (default containd-quickstart)
 #   CONTAIND_JWT_SECRET         JWT secret (a random one when unset)
 #   CONTAIND_PUBLISH_HTTP_PORT  published management port (default 8080)
@@ -25,11 +26,19 @@ if [ -z "${CONTAIND_JWT_SECRET:-}" ]; then
 fi
 api="http://localhost:${CONTAIND_PUBLISH_HTTP_PORT:-8080}/api/v1"
 scratch="$(mktemp -d)"
+# shellcheck source=scripts/config-revision.sh
+source "$ROOT/scripts/config-revision.sh"
 cookie="$scratch/cookie"
 routing="$scratch/routing.json"
 passed=0
 
-compose() { docker compose -f "$COMPOSE_FILE_PATH" "$@"; }
+compose() {
+  local -a args=(-f "$COMPOSE_FILE_PATH")
+  if [[ -n ${QUICKSTART_COMPOSE_OVERRIDE:-} ]]; then
+    args+=(-f "$QUICKSTART_COMPOSE_OVERRIDE")
+  fi
+  docker compose "${args[@]}" "$@"
+}
 
 cleanup() {
   if [ "$passed" -ne 1 ]; then
@@ -74,18 +83,19 @@ curl -fsS -c "$cookie" \
   -H 'Content-Type: application/json' \
   -d "{\"username\":\"containd\",\"password\":\"${quickstart_password}\"}" \
   "$api/auth/login" >/dev/null
-curl -fsS -b "$cookie" \
+cas_read "$scratch/config.revision" curl -fsS -b "$cookie" "$api/config/candidate" >"$scratch/candidate.json"
+cas_write "$scratch/config.revision" curl -fsS -b "$cookie" \
   -H 'Content-Type: application/json' \
   -d '{"mode":"auto"}' \
   "$api/interfaces/assign" | jq -e '.interfaces | type == "array" and length > 0' >/dev/null
-curl -fsS -b "$cookie" \
+cas_write "$scratch/config.revision" curl -fsS -b "$cookie" \
   -H 'Content-Type: application/json' \
   -X PATCH \
   -d '{"alias":"wan-ci"}' \
   "$api/interfaces/wan" | jq -e '.alias == "wan-ci"' >/dev/null
-curl -fsS -b "$cookie" \
+cas_read "$scratch/config.revision" curl -fsS -b "$cookie" \
   "$api/routing" > "$routing"
-curl -fsS -b "$cookie" \
+cas_write "$scratch/config.revision" curl -fsS -b "$cookie" \
   -H 'Content-Type: application/json' \
   -d @"$routing" \
   "$api/routing" | jq -e 'type == "object" and ((.gateways // []) | type == "array")' >/dev/null

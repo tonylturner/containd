@@ -11,15 +11,6 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
-// routingReadClient serves the candidate routing subtree.
-func routingReadClient(t *testing.T, current config.RoutingConfig) *dispatchHTTPClient {
-	return &dispatchHTTPClient{t: t, handlers: map[string]func(*http.Request) (*http.Response, error){
-		"GET /api/v1/routing": func(*http.Request) (*http.Response, error) {
-			return jsonHTTPResponse(200, current, nil), nil
-		},
-	}}
-}
-
 func TestPrepareQuickstartRoutingReplacesGatewayAndDefaultRoute(t *testing.T) {
 	t.Parallel()
 
@@ -30,12 +21,7 @@ func TestPrepareQuickstartRoutingReplacesGatewayAndDefaultRoute(t *testing.T) {
 		Gateways: []config.Gateway{other, {Name: quickstartGatewayName, Address: "192.0.2.254", Iface: "wan"}},
 		Routes:   []config.StaticRoute{lab, tableDefault, {Dst: "0.0.0.0/0", Gateway: "192.0.2.254"}},
 	}
-	api := &API{BaseURL: "http://test", Client: routingReadClient(t, current)}
-
-	posted, err := prepareQuickstartRouting(context.Background(), api, "eth0", "192.0.2.1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	posted := prepareQuickstartRouting(current, "eth0", "192.0.2.1")
 
 	wantGateways := []config.Gateway{other, {
 		Name: quickstartGatewayName, Address: "192.0.2.1", Iface: "eth0", Description: "Quick start: WAN default gateway",
@@ -52,12 +38,7 @@ func TestPrepareQuickstartRoutingReplacesGatewayAndDefaultRoute(t *testing.T) {
 func TestPrepareQuickstartRoutingAppendsGatewayAndDefaultRoute(t *testing.T) {
 	t.Parallel()
 
-	api := &API{BaseURL: "http://test", Client: routingReadClient(t, config.RoutingConfig{})}
-
-	posted, err := prepareQuickstartRouting(context.Background(), api, "eth0", "192.0.2.1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	posted := prepareQuickstartRouting(config.RoutingConfig{}, "eth0", "192.0.2.1")
 
 	if len(posted.Gateways) != 1 || posted.Gateways[0].Name != quickstartGatewayName || posted.Gateways[0].Iface != "eth0" {
 		t.Fatalf("gateways = %#v", posted.Gateways)
@@ -122,16 +103,13 @@ func TestInferWANGatewayGuessesFromTheWANAddress(t *testing.T) {
 		"198.51.100.7/32": "",
 	} {
 		client := &dispatchHTTPClient{t: t, handlers: map[string]func(*http.Request) (*http.Response, error){
-			"GET /api/v1/interfaces": func(*http.Request) (*http.Response, error) {
-				return jsonHTTPResponse(200, []outboundIface{{Name: "wan", Device: "eth0", Zone: "wan"}}, nil), nil
-			},
 			"GET /api/v1/interfaces/state": func(*http.Request) (*http.Response, error) {
 				return jsonHTTPResponse(200, []outboundIfaceState{{Name: "eth0", Addrs: []string{addr}}}, nil), nil
 			},
 		}}
 		api := &API{BaseURL: "http://test", Client: client}
 
-		dev, gw, err := inferWANGateway(context.Background(), api)
+		dev, gw, err := inferWANGateway(context.Background(), api, []outboundIface{{Name: "wan", Device: "eth0", Zone: "wan"}})
 		if want == "" {
 			if err == nil {
 				t.Errorf("%s: inferWANGateway = %q, %q; want an error", addr, dev, gw)

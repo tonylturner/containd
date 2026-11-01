@@ -57,7 +57,9 @@ LAN_NET=${SMOKE_LAN_NET:-172.31.0}
 BASE=${BASE:-http://localhost:18080/api/v1}
 TOKEN=${TOKEN:-devtoken}
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
-CURL="curl -sf --max-time 30 --connect-timeout 5"
+CURL=(curl -sf --max-time 30 --connect-timeout 5)
+# shellcheck source=scripts/config-revision.sh
+source "$(dirname "${BASH_SOURCE[0]}")/config-revision.sh"
 SMOKE_SKIP_UP=${SMOKE_SKIP_UP:-0}
 SMOKE_BUILD=${SMOKE_BUILD:-1}
 SMOKE_MUTATION=${SMOKE_MUTATION:-}
@@ -130,7 +132,7 @@ ensure_tools() {
 wait_for_http() {
   local url=$1
   for _ in $(seq 1 30); do
-    if $CURL "$url" >/dev/null 2>&1; then
+    if "${CURL[@]}" "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 2
@@ -272,7 +274,7 @@ origin_upload_count() {
 }
 
 api_get() {
-  $CURL -H "$AUTH_HEADER" "${BASE}$1"
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}$1"
 }
 
 # av_status prints the av entry of the services status.
@@ -385,12 +387,12 @@ apply_policy() {
       }
   ')
   resp="$WORK_DIR/cfg_resp"
-  code=$(echo "$updated" | $CURL -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$resp" 2>"$WORK_DIR/cfg_err" || true)
+  code=$(echo "$updated" | cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$resp" 2>"$WORK_DIR/cfg_err" || true)
   if [[ "$code" != "200" ]]; then
     harness_error "config save failed (HTTP $code): body=$(cat "$resp"), err=$(cat "$WORK_DIR/cfg_err")"
   fi
-  headers="$WORK_DIR/commit_headers"
-  code=$($CURL -w "%{http_code}" -D "$headers" -H "$AUTH_HEADER" -X POST "${BASE}/config/commit" -o "$resp" 2>"$WORK_DIR/commit_err" || true)
+  headers="$WORK_DIR/config.revision.headers"
+  code=$(cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -w "%{http_code}" -H "$AUTH_HEADER" -X POST "${BASE}/config/commit" -o "$resp" 2>"$WORK_DIR/commit_err" || true)
   if [[ "$code" != "200" || "$(jq -r '.status' "$resp" 2>/dev/null)" != "committed" ]]; then
     harness_error "commit failed (HTTP $code): body=$(cat "$resp"), err=$(cat "$WORK_DIR/commit_err")"
   fi
@@ -404,7 +406,7 @@ apply_policy() {
 upload_definition() {
   local resp="$WORK_DIR/defs_resp" code
   printf '%s:%s:Smoke.EICAR.Test\n' "$EICAR_MD5" "$EICAR_SIZE" >"$WORK_DIR/eicar.hdb"
-  code=$($CURL -w "%{http_code}" -H "$AUTH_HEADER" -X POST "${BASE}/services/av/defs" -F "file=@${WORK_DIR}/eicar.hdb;filename=eicar.hdb" -o "$resp" 2>"$WORK_DIR/defs_err" || true)
+  code=$("${CURL[@]}" -w "%{http_code}" -H "$AUTH_HEADER" -X POST "${BASE}/services/av/defs" -F "file=@${WORK_DIR}/eicar.hdb;filename=eicar.hdb" -o "$resp" 2>"$WORK_DIR/defs_err" || true)
   if [[ "$code" != "200" ]]; then
     harness_error "definition upload failed (HTTP $code): body=$(cat "$resp"), err=$(cat "$WORK_DIR/defs_err")"
   fi
@@ -478,7 +480,7 @@ wait_for_http "${BASE}/health"
 log "Fetching interface state..."
 STATE=""
 for _ in $(seq 1 10); do
-  STATE=$($CURL -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
+  STATE=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
   if [[ -n "$STATE" && "$STATE" != "[]" ]]; then
     break
   fi
@@ -492,7 +494,7 @@ fi
 log "Detected wan=${WAN_DEV}, lan=${LAN_DEV}"
 
 log "Fetching current config..."
-CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
+CFG=$(cas_read "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config")
 
 log "Uploading the EICAR signature as a custom definition..."
 upload_definition
@@ -506,7 +508,7 @@ for chain in gate_pre gate_admit; do
 done
 
 log "Verifying mgmt API still reachable..."
-$CURL "${BASE}/health" >/dev/null
+"${CURL[@]}" "${BASE}/health" >/dev/null
 
 log "Setting test client routes (cross-subnet and default via the engine)..."
 route_client lan_client "$LAN_CLIENT" "$LAN_NET" "$WAN_NET" "$ENGINE_LAN"
@@ -575,7 +577,7 @@ expect_refused unavailable-closed-clean "clean download with the scanner unavail
 OUTCOME=$(fetch lan_client post "$AV_SERVER" 8080 /upload clean)
 expect_refused unavailable-closed-upload "clean upload with the scanner unavailable under fail-closed" "$OUTCOME"
 log "Testing unavailable-closed: management API still answers (harness path and lan_client -> ${ENGINE_LAN}:18080)..."
-MGMT_HARNESS=$($CURL -w "%{http_code}" -o /dev/null "${BASE}/health" || true)
+MGMT_HARNESS=$("${CURL[@]}" -w "%{http_code}" -o /dev/null "${BASE}/health" || true)
 OUTCOME=$(fetch lan_client get "$ENGINE_LAN" 18080 /api/v1/health)
 if [[ "$MGMT_HARNESS" == 200 && "$(outcome_field "$OUTCOME" status)" == 200 ]]; then
   pass mgmt-reachable "management health answers 200 on the harness path and from lan_client ($OUTCOME)"

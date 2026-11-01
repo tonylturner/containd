@@ -20,6 +20,22 @@ bash test/data-smoke/generate.sh
 
 **Do not commit private keys or database files to the repository.**
 
+## Configuration revisions
+
+Management configuration writes, including candidate saves, section edits,
+learner staging and commits, require `X-Containd-If-Revision`. The smoke scripts
+capture `X-Containd-Revision` from the snapshot they modify, then chain the
+revision each successful write returns. Ordinary monitoring reads do not move
+a staged edit's base. A rejected write is not retried or committed; validation
+probes include a valid revision so precondition checks cannot mask the error
+under test. `scripts/config-revision.sh` shares this transport for local and
+in-container curl, preserving response bodies, status output and headers.
+
+The migration smoke writes to the historical 0.1.35 image without revision
+headers, then checks required and stale preconditions after upgrading.
+Internal engine endpoints are not management configuration writes and do not
+use these headers.
+
 ## Running the smoke scripts beside another smoke stack
 
 `scripts/smoke-forward.sh` and `scripts/smoke-dpi.sh` default to compose
