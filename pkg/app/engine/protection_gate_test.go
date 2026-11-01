@@ -55,3 +55,23 @@ func TestProtectionGateObservesScannerWithoutHealthRequests(t *testing.T) {
 	env.g.publishProtection()
 	await("scan-gate", "failed")
 }
+
+func TestProtectionGatePublicationWaitsForAdmissionTransaction(t *testing.T) {
+	env := newGateTestEnv(t)
+	env.g.protection = newCountingDP(t).Engine
+	env.g.admitMu.Lock()
+	done := make(chan struct{})
+	go func() { env.g.publishProtection(); close(done) }()
+	select {
+	case <-done:
+		env.g.admitMu.Unlock()
+		t.Fatal("published an in-flight admission transaction")
+	case <-time.After(20 * time.Millisecond):
+	}
+	env.g.admitMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("publication did not resume after admission completed")
+	}
+}

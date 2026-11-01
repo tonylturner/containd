@@ -9,6 +9,10 @@ func (g *gateManager) publishProtection() {
 	if g == nil || g.protection == nil {
 		return
 	}
+	// A sample must not publish the gap between a successful kernel switch
+	// and syncAdmit recording that acknowledgement.
+	g.admitMu.Lock()
+	defer g.admitMu.Unlock()
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	st := g.statusLocked()

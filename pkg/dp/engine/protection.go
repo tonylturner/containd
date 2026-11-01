@@ -142,8 +142,18 @@ func (p *protectionState) recomputeLocked() {
 	}
 	slices.SortFunc(p.status.Components, func(a, b ProtectionComponent) int { return strings.Compare(a.Name, b.Name) })
 	if reason == "" {
+		// A pending component (notably the closed envelope) must not hide
+		// the failed consumer that caused this transition.
 		for _, c := range p.status.Components {
-			if c.Required && c.State != "ready" {
+			if c.Required && c.State == "failed" && c.Reason != "" {
+				reason = c.Reason
+				break
+			}
+		}
+	}
+	if reason == "" {
+		for _, c := range p.status.Components {
+			if c.Required && c.State != "ready" && c.Reason != "" {
 				reason = c.Reason
 				break
 			}

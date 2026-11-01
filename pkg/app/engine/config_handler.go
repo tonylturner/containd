@@ -82,6 +82,9 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 				return
 			}
 			coordinator.joinWorker()
+			// Even a failed replacement must resume the bind worker. Admission
+			// alone never cancels it; this handler owns cancellation and restart.
+			defer coordinator.start()
 			current.mu.Lock()
 			unchanged := current.applied && sameDataPlane(current.dp, next)
 			previous := current.dp
@@ -116,7 +119,6 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			coordinator.start()
 			writeJSON(w, map[string]any{"status": "configured", "unchanged": unchanged})
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

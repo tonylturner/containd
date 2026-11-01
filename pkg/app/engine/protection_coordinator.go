@@ -84,7 +84,6 @@ func (c *protectionCoordinator) admit(next http.HandlerFunc) http.HandlerFunc {
 		// request cannot reuse an earlier rules acknowledgement for this ID.
 		c.dp.BeginProtection(engineBootID, id)
 		if id != c.current {
-			c.joinWorker()
 			c.current = id
 			c.seen[id] = true
 		}
@@ -157,6 +156,7 @@ func (c *protectionCoordinator) retryHandler(gate *gateManager) http.HandlerFunc
 			return
 		}
 		c.joinWorker()
+		defer c.start()
 		if err := c.dp.RetryProtection(c.ctx); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -164,7 +164,6 @@ func (c *protectionCoordinator) retryHandler(gate *gateManager) http.HandlerFunc
 		if gate != nil {
 			gate.syncAdmit()
 		}
-		c.start()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		writeJSON(w, map[string]string{"status": "retrying", "applyId": id})

@@ -202,3 +202,38 @@ func TestProtectionCoordinatorRetryCASAndJoin(t *testing.T) {
 		t.Fatal("duplicate retirement")
 	}
 }
+
+func TestProtectionCoordinatorAbortedApplyKeepsBindWorker(t *testing.T) {
+	f := &coordinatorFake{starts: make(chan context.Context, 2)}
+	c := testProtectionCoordinator(t, f)
+	start := c.admit(func(http.ResponseWriter, *http.Request) { c.start() })
+	coordinatedPost(start, "A", `{}`)
+	waitCoordinatorStart(t, f)
+	// Services may precede a rejected or never-arriving configuration. They
+	// must adopt the retrying run, not silently terminate its bind budget.
+	services := c.admit(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
+	coordinatedPost(services, "B", `{}`)
+	if f.exits.Load() != 0 {
+		t.Fatal("services orphaned a pending initial-bind worker")
+	}
+}
+
+func TestProtectionCoordinatorFailedConfigureRestartsBindWorker(t *testing.T) {
+	dp := newCountingDP(t)
+	c := testProtectionCoordinator(t, dp)
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, c)
+	entered := make(chan struct{})
+	dp.startFn = func(ctx context.Context) error { close(entered); <-ctx.Done(); return ctx.Err() }
+	if w := coordinatedPost(h, "A", `{}`); w.Code != 200 {
+		t.Fatalf("config A: %d %s", w.Code, w.Body)
+	}
+	<-entered
+	dp.reconfigErr = context.DeadlineExceeded
+	if w := coordinatedPost(h, "B", `{"dpiEnabled":true}`); w.Code != 500 {
+		t.Fatalf("config B: %d %s", w.Code, w.Body)
+	}
+	dp.waitStart(t) // old worker must have joined
+	if err := dp.waitStart(t); err != nil {
+		t.Fatalf("failed replacement did not resume the existing run: %v", err)
+	}
+}

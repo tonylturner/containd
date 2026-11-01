@@ -5,6 +5,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -56,13 +57,58 @@ func TestProtectionRunAdoptionAndStaleCallbacks(t *testing.T) {
 		t.Fatalf("adopted: %+v", st)
 	}
 	old := e.hooks
-	fresh, _ := New(Config{Events: e.Events(), NFQueueGroup: 102})
+	fresh, _ := New(Config{Events: e.Events(), NFQueueGroup: 101})
 	if err := e.Reconfigure(fresh); err != nil {
 		t.Fatal(err)
 	}
+	before := e.Protection()
 	old.onSource(capture.SourceEvent{Ready: true, Generation: 2})
-	if c := protectionComponent(t, e.Protection(), "nfqueue:102"); c.State == "ready" {
+	after := e.Protection()
+	before.ObservedAt = after.ObservedAt
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("retired callback changed observation: before=%+v after=%+v", before, after)
+	}
+	if c := protectionComponent(t, after, "nfqueue:101"); c.State != "pending" {
 		t.Fatal("retired callback advanced replacement")
+	}
+	e.gate.mu.Lock()
+	owned := e.gate.owned
+	e.gate.mu.Unlock()
+	if owned != 0 {
+		t.Fatalf("retired callback reopened envelope ownership: %d", owned)
+	}
+}
+
+func TestProtectionFailedEventPrefersFailedComponentReason(t *testing.T) {
+	e := protectionFixture(t, false)
+	e.protection.update(func() { e.protection.setLocked("iec-envelope", "pending", "", 0, 0) })
+	e.hooks.onSource(capture.SourceEvent{Terminal: true, Err: errBind})
+	for _, ev := range e.Events().List(0) {
+		if ev.Kind == "protection.state" && ev.Attributes["state"] == "failed" {
+			reason, _ := ev.Attributes["reason"].(string)
+			if !strings.HasPrefix(reason, "nfqueue:101: ") {
+				t.Fatalf("failed transition lost its cause: %+v", ev)
+			}
+			return
+		}
+	}
+	t.Fatal("missing failed transition event")
+}
+
+func TestProtectionRebindDropsRetiredQueueImmediately(t *testing.T) {
+	e := protectionFixture(t, false)
+	e.hooks.onSource(capture.SourceEvent{Ready: true})
+	fresh, err := New(Config{NFQueueGroup: 102, Enforce: EnforceConfig{Enabled: true}, ResetInjector: e.iec.injector})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.Reconfigure(fresh); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range e.Protection().Components {
+		if c.Name == "nfqueue:101" {
+			t.Fatalf("retired queue still published before ApplyRules: %+v", c)
+		}
 	}
 }
 
@@ -253,7 +299,7 @@ func TestProtectionReleaseClearsInstalledIdentity(t *testing.T) {
 	e := gateEngine(t, &nftModel{}, 101, &bindCapture{})
 	e.BeginProtection("boot", "enabled")
 	applyIEC(t, e)
-	fresh, err := New(Config{Events: e.Events()})
+	fresh, err := New(Config{Events: e.Events(), NFQueueGroup: 101, ResetInjector: e.iec.injector})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,6 +309,10 @@ func TestProtectionReleaseClearsInstalledIdentity(t *testing.T) {
 	st := e.Protection()
 	if st.State != "disabled" || st.InstalledApplyID != "" || protectionComponent(t, st, "nft").State != "off" {
 		t.Fatalf("released policy: %+v", st)
+	}
+	e.hooks.onSource(capture.SourceEvent{Terminal: true, Err: errBind})
+	if e.Protection().State != "disabled" || protectionComponent(t, e.Protection(), "nfqueue:101").State != "failed" {
+		t.Fatalf("terminal loss made disabled enforcement fail: %+v", e.Protection())
 	}
 }
 

@@ -27,13 +27,17 @@ func (e *Engine) bindProtection(newConfiguration bool) {
 				p.setLocked("nflog", "pending", "awaiting NFLOG bind", 0, 0)
 			}
 		}
-		for name, c := range p.components {
-			if strings.HasPrefix(name, "nfqueue:") && !c.Required {
+		for name := range p.components {
+			if strings.HasPrefix(name, "nfqueue:") {
 				delete(p.components, name)
 			}
 		}
 		if group != 0 {
-			p.setLocked(fmt.Sprintf("nfqueue:%d", group), "pending", "awaiting queue bind", 0, 0)
+			name := fmt.Sprintf("nfqueue:%d", group)
+			p.setLocked(name, "pending", "awaiting queue bind", 0, 0)
+			c := p.components[name]
+			c.Required = p.queue == name
+			p.components[name] = c
 		}
 	})
 	e.hooks.active = func() bool { return p.current(epoch) }
