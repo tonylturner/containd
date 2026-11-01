@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { InfoTip } from "../../components/InfoTip";
 import type { FirewallRule, ICSPredicate, ICSPredicatePatch } from "../../lib/api";
@@ -43,6 +43,7 @@ export function ICSPredicateFields({
   const meta = icsProtoMeta(protocol);
   const selectorError = selectorFieldError(protocol, functionCodes, unitId, objectClasses);
   const [showHelp, setShowHelp] = useState(false);
+  const helpId = useId();
 
   return (
     <div className="mt-3 rounded-xs border bg-(--surface) p-4 space-y-3">
@@ -56,6 +57,9 @@ export function ICSPredicateFields({
         {protocol && <ICSModeSelect value={mode} onChange={onModeChange} globalMode={globalMode} />}
         <div className="flex items-end">
           <button
+            type="button"
+            aria-expanded={showHelp}
+            aria-controls={helpId}
             onClick={() => setShowHelp(!showHelp)}
             className="rounded-xs border border-blue-500/20 bg-blue-500/10 px-2.5 py-2 text-[10px] text-blue-400 hover:bg-blue-500/20 transition-ui w-full"
           >
@@ -64,8 +68,7 @@ export function ICSPredicateFields({
         </div>
       </div>
 
-      {showHelp && (
-        <div className="rounded-xs border border-blue-500/10 bg-blue-500/3 p-3 space-y-2">
+        <div id={helpId} hidden={!showHelp} className="rounded-xs border border-blue-500/10 bg-blue-500/3 p-3 space-y-2">
           <div className="text-xs font-medium text-blue-400">{meta.label} Reference</div>
           <div className="grid gap-3 md:grid-cols-2">
             <div>
@@ -83,13 +86,13 @@ export function ICSPredicateFields({
             <div className="text-[10px] text-(--text-dim) border-t border-white/4 pt-2 mt-2">{meta.notes}</div>
           )}
         </div>
-      )}
 
       {selectorError && <p role="alert" className="text-sm text-red-400">{selectorError}</p>}
       {protocol === "iec104" ? (
         <IEC104Fields draft={iec} onChange={onIecChange} />
       ) : (
         <>
+          <h3 className="text-sm font-medium text-(--text)">Basic matching</h3>
           <div className="grid gap-3 md:grid-cols-2">
             <div>
               <label className="block text-[10px] font-medium text-(--text-muted) mb-1">{meta.fcLabel} <span className="text-(--text-dim)">(comma-separated)</span></label>

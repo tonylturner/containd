@@ -5,11 +5,9 @@ import type { FirewallRule } from "../lib/api";
 // Headless page tests for the IEC 104 UI against a mocked management API.
 
 async function showAdvancedSelectors(page: Page) {
-  const details = page.locator("details").filter({ has: page.getByText("Advanced selectors (saved values still apply)", { exact: true }) });
-  if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) {
-    await details.locator("summary").click();
-  }
-  await expect(details).toHaveJSProperty("open", true);
+  const button = page.getByRole("button", { name: "Advanced protocol fields", exact: true });
+  if (await button.getAttribute("aria-expanded") !== "true") await button.click();
+  await expect(button).toHaveAttribute("aria-expanded", "true");
 }
 
 const adminUser = { id: "admin-1", username: "containd", role: "admin" };

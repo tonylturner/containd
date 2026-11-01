@@ -1,5 +1,6 @@
 "use client";
 
+import { useId, useState } from "react";
 import { StatusBadge, StatusIndicator } from "../../components/StatusBadge";
 import type { ICSCoverageReason, ICSCoverageRule, ICSEnforcementHealth } from "../../lib/api";
 import {
@@ -23,10 +24,13 @@ function ReasonList({ reasons }: { reasons: ICSCoverageReason[] }) {
 }
 
 /** Applied coverage of one rule, plus the candidate's when it differs. */
-export function ICSCoverageCell({ view, ruleId }: { view: ICSCoverageView; ruleId: string }) {
+export function ICSCoverageCell({ view, ruleId, compact = false }: { view: ICSCoverageView; ruleId: string; compact?: boolean }) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const lines = describeRuleCoverage(view, ruleId);
   return (
     <div aria-label={`ICS coverage of ${ruleId}`} className="space-y-1.5">
-      {describeRuleCoverage(view, ruleId).map((l) => (
+      {lines.map((l) => (
         <div key={l.label}>
           <StatusBadge variant={l.variant} dot>
             {l.label}
@@ -34,6 +38,29 @@ export function ICSCoverageCell({ view, ruleId }: { view: ICSCoverageView; ruleI
           <ReasonList reasons={l.reasons} />
         </div>
       ))}
+      {compact && (
+        <>
+          <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}
+            className="rounded-xs border bg-(--surface2) px-2 py-1 text-xs text-(--text)">
+            Why?
+          </button>
+          <div id={id} hidden={!open}>
+            {open && view.status !== "loaded" && <p className="mt-2 text-xs">{view.status === "unavailable" ? view.error : "Checking coverage."}</p>}
+            {open && view.status === "loaded" && ([
+              ["Applied", view.applied],
+              ["Candidate", view.candidate],
+            ] as const).map(([label, rules]) => {
+              const rule = rules?.get(ruleId);
+              return (
+                <div key={label} className="mt-2 text-xs">
+                  <p>{label}: {rule ? coverageStateLabel(rule.state) : rules ? label === "Applied" ? "not applied" : "not configured" : "unknown / not reported"}</p>
+                  {rule && <><p>Mode: {rule.mode}</p><ReasonList reasons={rule.reasons} /></>}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -70,6 +97,7 @@ export function ICSCoverageNotice({ view }: { view: ICSCoverageView }) {
       {loaded?.applyError && (
         <div role="status" className="mb-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-400">
           The last apply failed, so applied coverage describes the rules still in force from before it. The enforcement status shows why it failed.
+          <p className="mt-1 break-words">{loaded.applyError}</p>
         </div>
       )}
       {loaded?.appliedAt && (

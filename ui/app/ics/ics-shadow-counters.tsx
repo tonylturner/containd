@@ -6,7 +6,6 @@ import { getShadowCounters, type ShadowCounters } from "../../lib/api-shadow-cou
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 import type { FirewallRule } from "../../lib/api";
 import { formatICSMode } from "./ics-shared";
-import { TechnicalDetails } from "../../components/TechnicalDetails";
 
 export function useShadowCounters() {
   const [counters, setCounters] = useState<ShadowCounters | null>(null);
@@ -29,7 +28,7 @@ export function useShadowCounters() {
 export function ShadowCountersNote({ counters }: { counters: ShadowCounters | null }) {
   return <div role="status" aria-label="Shadow counters" className="mb-2 text-xs text-(--text-muted)">
     {!counters ? "Loading monitor counts…" : !counters.available
-      ? <>Monitor counts unavailable.<TechnicalDetails>{counters.reason}</TechnicalDetails></>
+      ? <>Monitor counts unavailable. <span className="break-words">{counters.reason}</span></>
       : <>Messages matched since <time dateTime={counters.since}>{counters.since}</time>.
         Reset when policy is applied or the inspection service restarts. Estimated allow/block for this rule only, not full-policy predictions.</>}
   </div>;

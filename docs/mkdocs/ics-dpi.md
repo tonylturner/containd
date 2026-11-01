@@ -142,6 +142,29 @@ separately. Enabling a decoder does not create a policy rule. For saved
 configurations affected by removed protocol support, see
 [upgrade recovery](config-format.md#unsupported-protocols-during-upgrade).
 
+## ICS inspection workspace
+
+The ICS page leads with **Active inspection**, derived from applied coverage
+and runtime health rather than candidate settings: **Enforcing**, **Partly
+active**, **Monitoring** or **Unknown**. A confirmed absence of enforcing
+coverage is labelled **Not enforcing**, not partly protected. Failed coverage
+or health reads leave the active state unknown. Monitoring is observation
+only; monitor rules do not protect traffic.
+
+Protocol filters and candidate counts lead into the rule list. **Inspect
+rule** retains **Codes**, **Addresses** and **R/W** (with protocol-specific
+labels when filtered). It opens automatically for saved matching constraints.
+Mode, applied coverage, candidate differences, shadow matches and actions
+remain in the list. **Why?** reveals the full applied and candidate coverage
+reasons; equal candidate coverage is not presented as a pending difference.
+Coverage limitations, failed applies and unavailable counter causes stay
+inline even with details closed.
+
+**Inspection setup** contains **Supported Protocols** and **Quick Start**,
+with a link to Firewall Rules; it opens when no filters are configured.
+**Inspection details** retains healthy firewall and IEC 104 runtime indicators.
+Faults and unavailable states remain visible without opening it.
+
 ## Parsing modes
 
 `dataplane.dpiIcsParsing` sets parsing independently for `modbus`, `dnp3`,
@@ -168,8 +191,8 @@ If the saved settings cannot be read, their status is **unknown**, including
 after a failed refresh; the page does not imply inspection is disabled or show
 previous queue and interface values as current.
 
-Rule editors keep uncommon station, object, direction and message selectors
-under **Advanced selectors (saved values still apply)**. This section opens
+Rule editors separate **Basic matching** from uncommon station, object,
+direction and message selectors under **Advanced protocol fields**. This section opens
 automatically when any of its selectors has a saved restriction, including an
 explicit zero or false value. IEC 104 message types, station address (CA) and
 point addresses (IOA) remain directly visible. Closing the disclosure never
