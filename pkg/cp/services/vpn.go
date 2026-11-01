@@ -74,15 +74,11 @@ func NewVPNManager(baseDir string) *VPNManager {
 }
 
 func newVPNLogger() *zap.SugaredLogger {
-	lg, err := commonlog.NewZap("vpn", "vpn", commonlog.Options{
+	return commonlog.NewServiceWithOptions("vpn", "vpn", commonlog.Options{
 		FilePath: "/data/logs/vpn.log",
 		JSON:     true,
 		Level:    "info",
 	})
-	if err != nil {
-		return zap.NewNop().Sugar()
-	}
-	return lg
 }
 
 func (m *VPNManager) Current() config.VPNConfig {

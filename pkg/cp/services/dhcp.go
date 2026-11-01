@@ -44,15 +44,11 @@ func NewDHCPManager(baseDir string) *DHCPManager {
 }
 
 func newDHCPLogger() *zap.SugaredLogger {
-	lg, err := commonlog.NewZap("dhcp", "dhcp", commonlog.Options{
+	return commonlog.NewServiceWithOptions("dhcp", "dhcp", commonlog.Options{
 		FilePath: "/data/logs/dhcp.log",
 		JSON:     true,
 		Level:    "info",
 	})
-	if err != nil {
-		return zap.NewNop().Sugar()
-	}
-	return lg
 }
 
 func (m *DHCPManager) Apply(ctx context.Context, cfg config.DHCPConfig) error {

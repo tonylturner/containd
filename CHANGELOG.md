@@ -64,6 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   period, so a failed operation leaves the account unchanged.
 - Keep topology security matrix columns visible at 1024 px and horizontally
   scrollable for larger zone selections.
+- Make `set system mgmt listen` update the HTTP listener even when
+  `httpListenAddr` is already configured; both HTTP listener commands clear the
+  legacy `listenAddr` field.
+- Keep stdout and file logging for containd and its embedded services when
+  syslog initialization fails, and report the failure once to stderr.
+- Use the repository-root `.env` in `scripts/containd-connect` and surface
+  Compose interpolation errors instead of reporting a running service as stopped.
 - Omit unknown DHCP and WireGuard runtime gauge series instead of reporting
   them stopped. Publish the VPN aggregate only when a VPN is observed running;
   service faults no longer manufacture stopped runtime observations.

@@ -13,11 +13,12 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// Every firewall rule has a named counter in the policy table, which each
-// of its lines updates, and a RATE_LIMIT rule a second one for the packets
-// it drops over the limit. The policy table is replaced on every apply, so
-// the counters start at zero with each applied ruleset; logging need not
-// be on.
+// Every firewall rule has a named counter in the policy table. Counted
+// policy matches update it, but established traffic taking the ordered
+// admission fast path bypasses ALLOW counters. RATE_LIMIT rules have a
+// second counter for packets dropped over the limit. The policy table is
+// replaced on every apply, so counters start at zero with each applied
+// ruleset; logging need not be on.
 
 // ruleCounterName names the counter of the rule with ID id. Rule IDs are
 // free text, so the name is derived from a digest of the ID.
@@ -107,8 +108,10 @@ func parseCounters(doc []byte) (map[string]CounterValue, error) {
 	return out, nil
 }
 
-// RuleCount is the kernel accounting of one firewall rule: every packet
-// its lines matched, and for RATE_LIMIT the packets dropped over the limit.
+// RuleCount is the kernel accounting of one firewall rule's counted policy
+// matches. Established traffic on the ordered admission fast path bypasses ALLOW
+// counters; queued ICS counters measure selected steering, not admission.
+// For RATE_LIMIT it also reports packets dropped over the limit.
 // A TAG rule counts the connection openers it matched.
 type RuleCount struct {
 	RuleID      string       `json:"ruleId"`

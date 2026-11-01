@@ -145,15 +145,11 @@ func NewAVManager(ctx context.Context, opts AVOptions) *AVManager {
 }
 
 func newAVLogger() *zap.SugaredLogger {
-	lg, err := commonlog.NewZap("av", "av", commonlog.Options{
+	return commonlog.NewServiceWithOptions("av", "av", commonlog.Options{
 		FilePath: "/data/logs/av.log",
 		JSON:     true,
 		Level:    "info",
 	})
-	if err != nil {
-		return zap.NewNop().Sugar()
-	}
-	return lg
 }
 
 // lock acquires the operation lock unless ctx or the manager ends first.

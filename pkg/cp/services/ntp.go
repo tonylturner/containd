@@ -93,15 +93,11 @@ func detectNTPD() (path string, name string) {
 }
 
 func newNTPLogger() *zap.SugaredLogger {
-	lg, err := commonlog.NewZap("ntp", "ntp", commonlog.Options{
+	return commonlog.NewServiceWithOptions("ntp", "ntp", commonlog.Options{
 		FilePath: "/data/logs/ntp.log",
 		JSON:     true,
 		Level:    "info",
 	})
-	if err != nil {
-		return zap.NewNop().Sugar()
-	}
-	return lg
 }
 
 func (m *NTPManager) Apply(ctx context.Context, cfg config.NTPConfig) error {

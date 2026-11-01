@@ -212,7 +212,8 @@ func setSystemMgmtListenAPI(api *API) Command {
 		if err != nil {
 			return err
 		}
-		cfg.System.Mgmt.ListenAddr = args[0]
+		cfg.System.Mgmt.HTTPListenAddr = args[0]
+		cfg.System.Mgmt.ListenAddr = ""
 		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
 	}
 }
@@ -227,6 +228,7 @@ func setSystemMgmtHTTPListenAPI(api *API) Command {
 			return err
 		}
 		cfg.System.Mgmt.HTTPListenAddr = args[0]
+		cfg.System.Mgmt.ListenAddr = ""
 		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
 	}
 }
