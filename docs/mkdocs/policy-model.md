@@ -26,6 +26,11 @@ action means `DENY`.
 The first matching enforcing terminal rule in configured order wins; otherwise
 firewall.defaultAction applies. Monitor rules never decide.
 
+Configurations below schema 0.1.10 migrate legacy rule precedence and
+port-forward permissions on upgrade. Review
+[ordered policy upgrades](config-format.md#ordered-policy-upgrades), including
+the warnings for forwards whose permissions cannot be generated safely.
+
 Terminals are `ALLOW`, `DENY` and `RESET`; rule IDs do not set precedence.
 Events and logs name the first matching deciding rule. Put exceptions before
 broader rules: an earlier `DENY` can shadow a later `ALLOW`, just as an earlier

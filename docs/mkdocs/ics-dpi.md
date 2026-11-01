@@ -92,7 +92,10 @@ could admit at L7 and mask an enforce DENY under the legacy evaluator. As monito
 it does neither: that traffic is now denied (and reset where the envelope resets).
 A former learn DENY no longer drops at L4 without a queue. Audit existing rules
 and arrange separate enforcing/L4 allowances where observation needs traffic.
-Back up before upgrading: 0.1.35 and earlier cannot read schema 0.1.9; restore
+The current schema is 0.1.10, which also migrates rule order and port-forward
+permissions to first-match policy; see
+[ordered policy upgrades](config-format.md#ordered-policy-upgrades).
+Back up before upgrading: 0.1.36 and earlier cannot read schema 0.1.10; restore
 a pre-upgrade backup to downgrade.
 
 Monitoring is observation, **not learning**. It never starts evidence collection.
