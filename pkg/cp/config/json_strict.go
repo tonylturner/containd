@@ -11,6 +11,15 @@ import (
 	"slices"
 )
 
+type objectKeyError struct {
+	kind string
+	key  string
+}
+
+func (e *objectKeyError) Error() string {
+	return fmt.Sprintf("%s key %q", e.kind, e.key)
+}
+
 // decodeStrictObject splits one JSON object into its raw member values.
 // Keys must appear in known (exact spelling) and at most once. Custom
 // UnmarshalJSON methods use it because an outer DisallowUnknownFields does
@@ -35,10 +44,10 @@ func decodeStrictObject(data []byte, known []string) (map[string]json.RawMessage
 			return nil, errors.New("expected an object key")
 		}
 		if !slices.Contains(known, key) {
-			return nil, fmt.Errorf("unknown key %q", key)
+			return nil, &objectKeyError{kind: "unknown", key: key}
 		}
 		if _, dup := fields[key]; dup {
-			return nil, fmt.Errorf("duplicate key %q", key)
+			return nil, &objectKeyError{kind: "duplicate", key: key}
 		}
 		var raw json.RawMessage
 		if err := dec.Decode(&raw); err != nil {
