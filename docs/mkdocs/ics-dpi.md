@@ -146,10 +146,12 @@ configurations affected by removed protocol support, see
 
 The ICS page leads with **Active inspection**, derived from applied coverage
 and runtime health rather than candidate settings: **Enforcing**, **Partly
-active**, **Monitoring** or **Unknown**. A confirmed absence of enforcing
-coverage is labelled **Not enforcing**, not partly protected. Failed coverage
-or health reads leave the active state unknown. Monitoring is observation
-only; monitor rules do not protect traffic.
+active**, **Monitoring** or **Unknown**. When applied coverage and runtime
+health confirm an empty applied rule set, it says **No ICS rules applied** in
+neutral styling, even if candidate filters are configured. Applied rules
+without enforcing coverage are labelled **Not enforcing**, not partly
+protected. Failed coverage or health reads leave the active state unknown.
+Monitoring is observation only; monitor rules do not protect traffic.
 
 Protocol filters and candidate counts lead into the rule list. **Inspect
 rule** retains **Codes**, **Addresses** and **R/W** (with protocol-specific

@@ -13,8 +13,9 @@ import { ICSDisclosure } from "./ics-disclosure";
 
 function inspectionState(coverage: ICSCoverageView, health?: HealthResponse) {
   const aggregate = health?.icsEnforcement;
-  if (coverage.status !== "loaded" || !coverage.applied || !aggregate ||
-      aggregate.state === "unknown" || aggregate.state === "none") return "Unknown";
+  if (coverage.status !== "loaded" || !coverage.applied || !aggregate) return "Unknown";
+  if (coverage.applied.size === 0 && aggregate.state === "none") return "No ICS rules applied";
+  if (aggregate.state === "unknown" || aggregate.state === "none") return "Unknown";
   const applied = [...coverage.applied.values()];
   if (applied.length === 0 || applied.some(rule => rule.state === "unknown")) return "Unknown";
   if (aggregate.state === "monitoring" && applied.every(rule => rule.state === "monitoring")) return "Monitoring";
@@ -46,6 +47,7 @@ export function ICSInspectionStatus({ coverage, health, installed }: {
         <span className="text-xs text-(--text-muted)">
           {state === "Monitoring" ? "Observation only — monitor rules do not protect traffic."
             : state === "Unknown" ? "Active inspection could not be established from coverage and health."
+              : state === "No ICS rules applied" ? "Candidate filters are not active inspection."
               : "Applied inspection coverage, not the candidate mode or a guarantee of delivery."}
         </span>
       </div>
@@ -59,12 +61,8 @@ export function ICSInspectionStatus({ coverage, health, installed }: {
           {health?.iec104Enforcement?.healthy === true && <IEC104HealthIndicator health={health.iec104Enforcement} />}
         </ICSDisclosure>
         {installed.state === "loaded" && <RulesetFaults status={installed.status} />}
-        {installed.state === "loaded" && installed.status.error && <p className="break-words text-xs text-red-400">{installed.status.error}</p>}
-        {installed.state === "loaded" && installed.status.schedulePlanner?.state === "degraded" && (
-          <p className="break-words text-xs text-amber">{installed.status.schedulePlanner.reason} {installed.status.schedulePlanner.lastError}</p>
-        )}
         {installed.state === "unavailable" && <p role="status" aria-label="Installed ruleset status" className="break-words text-xs text-red-400">Installed ruleset status unavailable. {installed.error}</p>}
-        <ICSCoverageNotice view={coverage} />
+        <ICSCoverageNotice view={coverage} reportedApplyError={installed.state === "loaded" ? installed.status.error : undefined} />
       </div>
     </Card>
   );
