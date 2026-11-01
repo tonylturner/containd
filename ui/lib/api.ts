@@ -178,6 +178,8 @@ export type ConduitProto = {
 };
 
 export type Conduit = {
+  from: string;
+  to: string;
   state: "allow" | "block" | "partial" | "unmodeled";
   ids: "full" | "partial" | "none";
   proto: ConduitProto[];
@@ -192,8 +194,6 @@ export type Conduit = {
   auditLogged: boolean;
   avEnabled: boolean;
 };
-
-export type ConduitMap = Record<string, Conduit>;
 
 export type Interface = {
   name: string;

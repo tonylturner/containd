@@ -14,7 +14,7 @@ import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useCallback, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type Zone, type ConduitMap } from "../../lib/api";
+import { api, isAdmin, type Zone, type Conduit } from "../../lib/api";
 import { mapZone, scoreZone, slColor } from "../../lib/security-scoring";
 import { validateZoneName } from "../../lib/validate";
 import { useToast } from "../../components/ToastProvider";
@@ -31,7 +31,7 @@ export default function ZonesPage() {
   const toast = useToast();
   const rowsDraft = useConfigEditor<Zone[]>([], false);
   const { cfg: zones, readConfig: adoptRows } = rowsDraft;
-  const [conduits, setConduits] = useState<ConduitMap>({});
+  const [conduits, setConduits] = useState<Conduit[]>([]);
   const form = useConfigForm({ name: "", alias: "", description: "", slTarget: 0 });
   const { readConfig: refreshForm } = form;
   const [name, setName] = form.field("name");
@@ -48,7 +48,7 @@ export default function ZonesPage() {
     const list = (listSnapshot?.data ?? null);
     if (!checkLoaded(list)) return;
     adoptRows({ data: list, revision: listSnapshot?.revision ?? "" }, keepEdits);
-    setConduits((conds as ConduitMap) ?? {});
+    setConduits(conds ?? []);
     refreshForm({ data: list, revision: listSnapshot?.revision ?? "" }, keepEdits);
   }, [checkLoaded, refreshForm, adoptRows]));
 
@@ -308,7 +308,7 @@ function ZoneRow({
 }: {
   draft: ConfigFields;
   zone: Zone;
-  conduits: ConduitMap;
+  conduits: Conduit[];
   onDelete: (name: string) => void;
   onUpdate: (name: string, patch: Partial<Zone>) => void;
   canEdit: boolean;

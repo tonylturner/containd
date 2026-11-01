@@ -3041,7 +3041,10 @@ components:
       required: [srcIp, dstIp, proto, dstPort]
     ConduitResult:
       type: object
+      required: [from, to]
       properties:
+        from: {type: string, description: Exact source zone name}
+        to: {type: string, description: Exact destination zone name}
         state: {type: string}
         ids: {type: string}
         proto: {type: array, items: {$ref: '#/components/schemas/ProtoEntry'}}
@@ -7517,6 +7520,11 @@ paths:
   /security/conduits:
     get:
       summary: Summarize running zone-to-zone policy
+      description: >-
+        Returns every ordered pair of distinct zones, in configured zone order
+        (source first, then destination). Each entry carries exact from and to
+        names; names may contain punctuation, including arrows. Returns an
+        empty array when fewer than two zones are configured.
       tags: [Security]
       responses:
         '200':
@@ -7525,7 +7533,7 @@ paths:
           description: Success
           content:
             application/json:
-              schema: {type: object, additionalProperties: {$ref: '#/components/schemas/ConduitResult'}}
+              schema: {type: array, items: {$ref: '#/components/schemas/ConduitResult'}}
   /system/tls/cert:
     post:
       summary: Atomically replace the managed TLS bundle (admin)
