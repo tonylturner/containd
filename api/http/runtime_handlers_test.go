@@ -173,8 +173,8 @@ type telemetryOnlyServices struct {
 	events []dpevents.Event
 }
 
-func (t telemetryOnlyServices) Apply(ctx context.Context, cfg config.ServicesConfig) error {
-	return nil
+func (t telemetryOnlyServices) ApplyEffective(ctx context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+	return cfg, nil
 }
 
 func (t telemetryOnlyServices) ListTelemetryEvents(limit int) []dpevents.Event {
@@ -633,7 +633,7 @@ func TestVPNServiceHelperHandlers(t *testing.T) {
 		ListenPort: 51820,
 	}
 
-	s := NewServerWithEngine(store, nil, eng)
+	s := NewServerWithEngineAndServices(store, nil, eng, vpnManagedAuthority(t, cfg.Services.VPN), nil)
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/services/vpn/openvpn/profile", bytes.NewBufferString(`{"name":"labclient","ovpn":"client\nremote 198.51.100.10 1194\nproto udp\n"}`))
@@ -653,6 +653,12 @@ func TestVPNServiceHelperHandlers(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "labuser01") {
 		t.Fatalf("create openvpn client: expected client payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("create returned no credential ID: %s %v", rec.Body, err)
+	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/services/vpn/openvpn/clients", nil)
@@ -662,7 +668,7 @@ func TestVPNServiceHelperHandlers(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = authedRequest(http.MethodGet, "/api/v1/services/vpn/openvpn/clients/labuser01", nil)
+	req = authedRequest(http.MethodGet, "/api/v1/services/vpn/openvpn/clients/"+created.ID, nil)
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<ca>") || !strings.Contains(rec.Body.String(), "remote vpn.example.com 1194") {
 		t.Fatalf("download openvpn client: expected inline profile, got %d body=%s", rec.Code, rec.Body.String())
@@ -764,3 +770,5 @@ func (m *runtimeMockEngine) AnalyzePcap(ctx context.Context, name string, r io.R
 func (m *runtimeMockEngine) AnalyzePcapByName(context.Context, string) (*pcap.ImportResult, error) {
 	return &pcap.ImportResult{Stats: pcap.AnalysisResult{PacketCount: 1}}, nil
 }
+
+func (telemetryOnlyServices) RecordEngineFaults([]config.ServiceFault) {}

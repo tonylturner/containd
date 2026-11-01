@@ -164,8 +164,15 @@ func losslessCases(t *testing.T) []losslessCase {
 		add(name, "/api/v1/config/candidate", command, args, whole, edit)
 	}
 	system("hostname", setSystemHostnameAPI, []string{"new"}, func(c *config.Config) { c.System.Hostname = "new" })
-	system("mgmt listen", setSystemMgmtListenAPI, []string{":9090"}, func(c *config.Config) { c.System.Mgmt.ListenAddr = ":9090" })
-	system("http listen", setSystemMgmtHTTPListenAPI, []string{":9090"}, func(c *config.Config) { c.System.Mgmt.HTTPListenAddr = ":9090" })
+	for name, command := range map[string]func(*API) Command{
+		"mgmt listen": setSystemMgmtListenAPI,
+		"http listen": setSystemMgmtHTTPListenAPI,
+	} {
+		system(name, command, []string{":9090"}, func(c *config.Config) {
+			c.System.Mgmt.HTTPListenAddr = ":9090"
+			c.System.Mgmt.ListenAddr = ""
+		})
+	}
 	system("https listen", setSystemMgmtHTTPSListenAPI, []string{":9443"}, func(c *config.Config) { c.System.Mgmt.HTTPSListenAddr = ":9443" })
 	system("http enable", setSystemMgmtEnableHTTPAPI, []string{"false"}, func(c *config.Config) { c.System.Mgmt.EnableHTTP = new(false) })
 	system("https enable", setSystemMgmtEnableHTTPSAPI, []string{"false"}, func(c *config.Config) { c.System.Mgmt.EnableHTTPS = new(false) })

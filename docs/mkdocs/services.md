@@ -12,6 +12,76 @@ namespace; engine-owned services run in the engine's namespace. Both processes
 need the intended network reachability and privileges.
 Check runtime status after commit, not just whether saving succeeded.
 
+## Service faults
+
+An older stored service configuration that no longer passes validation is
+quarantined independently. Management, firewall replay and other services keep
+running. Missing or expired proxy TLS material is also checked at apply time:
+there is no plaintext fallback. Management-run process or filesystem failures
+and engine-side WireGuard, DHCP or AV apply failures are reported per service
+as runtime faults; they do not prevent other services or firewall application.
+An AV backend still starting is a warning, not a fault.
+
+`GET /api/v1/services/status` includes a sorted `faults` array (empty when healthy).
+Each entry has `service`, `kind` (`config` or `runtime`) and a sanitized `message`.
+Service identities are `syslog`, `dns`, `ntp`, `av`, `proxy`, `dhcp`, `wireguard`
+and `openvpn`. Faulted service entries also contain `state: "faulted"` and `fault`
+with that same object. WireGuard and OpenVPN have independent entries; the legacy
+`vpn` entry remains. AV retains engine availability and runtime details alongside
+the management-known fault, even when the engine is unreachable.
+
+The desired configuration remains available for inspection, export and repair;
+quarantine is never saved over it. Unchanged faults can be carried through
+unrelated configuration edits, but new faults and invalid edits to a faulting
+service are rejected. Clear the service section or repair it before changing
+that service. Commit checks this again against the current running document.
+Ruleset and coverage previews use the effective configuration and disclose
+`serviceFaults`.
+
+A quarantined service gets no automatic firewall admission rule. VPN CIDR tokens
+for a quarantined tunnel match nothing; OpenVPN is stopped, and a quarantined
+DHCP server is stopped without its UDP/67 input rule. WireGuard quarantine or
+explicit disable removes containd-created links regardless of their names;
+changing the enabled interface name removes the previous owned link. Delete
+failures are reported as WireGuard runtime faults and retried on the next apply.
+WireGuard link ownership is persisted in `/data/wireguard-links.json` (override
+with `CONTAIND_WIREGUARD_STATE_PATH`) and scoped to the kernel boot and network
+namespace. A kernel identity recorded only after exclusive creation prevents
+adoption of foreign links. Ownership survives engine process restarts, but
+existing unmarked links from older versions remain unowned on upgrade and are
+never deleted automatically.
+AV is different: scanner quarantine retains scan selection, directions and fail
+policy. A closed policy still blocks unscanned content except the configured ICS
+bypass; an open policy permits it. Quarantine does not silently disable the gate.
+
+Fault-set changes produce service events and best-effort durable audit records,
+not duplicate faults on every engine reconnect. The most recent boot's faults
+also appear as `bootServiceFaults` in `/api/v1/system/management-reservation`.
+Audit-write failure is logged and does not stop enforcement. Metrics expose
+`containd_services_faulted{service}` independently of runtime observations:
+a fault is not proof that a process or kernel interface has stopped.
+Successful later application clears the fault.
+
+## Runtime metrics
+
+`containd_services_running{service="..."}` reports observed running state
+(`1`) or stopped state (`0`). An absent series means unknown, not stopped;
+do not fill missing series with zero in alerts or dashboards.
+
+- Management refreshes `dns`, `ntp`, `syslog`, `proxy` and `openvpn` from its
+  service managers during service application and fault updates. An absent
+  manager removes its series. OpenVPN measures the supervised process, not
+  tunnel connectivity; a connecting client counts as running.
+- Management omits `dhcp` and `wireguard`: it has no live runtime observation
+  for these engine-owned services in this collector. Desired configuration,
+  apply outcomes and stored DHCP leases do not establish runtime state.
+  WireGuard's on-demand status API does not feed these gauges.
+- The aggregate `vpn` is `1` when OpenVPN is observed running. Otherwise it is
+  omitted: without a WireGuard observation, management cannot establish that
+  every VPN is stopped. A WireGuard fault does not hide a running OpenVPN daemon.
+- The engine's AV manager owns `av`; management fault reporting does not
+  overwrite that runtime gauge.
+
 ## Syslog
 
 - Config model: `services.syslog.forwarders[]` with `address`, `port`, `proto` (udp|tcp).
@@ -58,6 +128,13 @@ Check runtime status after commit, not just whether saving succeeded.
   - `GET/POST /api/v1/services/vpn`
   - OpenVPN profiles and clients: `/api/v1/services/vpn/openvpn/*`
 - Status is exposed via `/api/v1/services/status`; WireGuard runtime status is available from `/api/v1/services/vpn/wireguard/status`.
+- OpenVPN status distinguishes a supervised daemon (`openvpn_running`) from
+  completed initialization (`openvpn_connected`). A running client without a
+  completed tunnel is connecting, not faulted. Client startup checks for early
+  process exit for 250 ms, then leaves DNS and connection retries supervised.
+  Connection status clears on a soft restart or process exit. Server startup
+  still requires the initialization marker within five seconds before
+  acknowledging its loaded revocation list.
 
 ### OpenVPN (managed client)
 
@@ -74,6 +151,13 @@ You can also import a foreground `.ovpn` profile (advanced):
 
 - Upload a `.ovpn` from the UI (VPN page) to store it under `/data/openvpn/profiles/` and automatically set `services.vpn.openvpn.configPath` (managed config is cleared).
 - The OpenVPN supervisor requires a **foreground** config (do not include the `daemon` directive).
+- Imports are limited to **1 MiB** and parsed with a bounded option/arity
+  allowlist. Certificate, key and TLS material must be inline
+  (`<ca>`, `<cert>`, `<key>`, `<tls-auth>` or `<tls-crypt>` blocks).
+  External file references, scripts/hooks, plugins, includes, management
+  directives and unknown options are rejected. Uploads and runtime reads of
+  `configPath` use the same parser and are re-rendered into containd-owned files;
+  an arbitrary profile path does not bypass these restrictions.
 
 ### Docker requirements
 
@@ -81,8 +165,6 @@ OpenVPN requires `/dev/net/tun` and network administration privileges. The
 starter maps the device and grants the required capabilities; use
 [Docker Compose onboarding](docker-compose.md) rather than an unprivileged
 `docker run`. WireGuard also needs engine-side kernel/network support.
-Uploaded OpenVPN profiles can contain script hooks that run as root; only import
-profiles you trust.
 
 ### OpenVPN (managed server)
 
@@ -91,10 +173,50 @@ To configure managed server mode:
 - Configure `services.vpn.openvpn.mode=server` and `services.vpn.openvpn.server` (listen port/proto + `tunnelCIDR`).
 - `tunnelCIDR` is the client address pool assigned by the OpenVPN server. This differs from WireGuard, where client networks are expressed via peer `AllowedIPs`.
 - mgmt renders a server config under `/data/openvpn/managed/server/` and generates a local PKI under `/data/openvpn/managed/server/pki/`.
-- Client profiles can be generated and downloaded as inline `.ovpn` files (requires setting `openvpn.server.publicEndpoint`).
+- Client credentials can be created and downloaded as inline `.ovpn` files (requires setting `openvpn.server.publicEndpoint`).
 - Enabling the managed OpenVPN server automatically opens its listen port in
   nftables INPUT on `listenInterfaces`, or `listenZone` when no interfaces are
   specified. The default zone is `wan`.
+
+#### Client credentials and revocation
+
+The VPN page lists each credential's name, issuer/serial ID, issue and expiry
+times, and revoked state. Creating a credential takes effect immediately on
+the **active managed server**, not the staged candidate. Names must be lowercase,
+filename-safe and 1–64 characters long. An active name cannot be issued again
+until its credential is revoked; reusing a name creates a new ID.
+
+Use `GET /api/v1/services/vpn/openvpn/clients` to list credentials and `POST`
+to that path with `{"name":"operator"}` to create one. Download with
+`GET /api/v1/services/vpn/openvpn/clients/{id}`. IDs are opaque issuer/serial
+identifiers, not names. Downloads are read-only: they never issue, renew or
+repair credentials. Unknown IDs return 404; duplicate names, revoked downloads
+and operations requiring an inactive managed server return 409; invalid names
+return 400.
+
+Revoke with the VPN page's confirmation dialog or
+`POST /api/v1/services/vpn/openvpn/clients/{id}/revoke`. Revocation is durable
+and irreversible; revoked entries stay in the inventory and cannot be downloaded.
+The server checks a signed certificate revocation list (CRL) and restarts after
+revocation, so **all clients reconnect once**. A 503 response containing
+`revoked:true, applied:false` means **revoked, not yet applied**, not an undone
+revocation: it is saved, but enforcement by the running server is not confirmed.
+The UI keeps that warning while the page is open and offers **Retry apply**.
+The list response reports `revocationsApplied`: false only when revoked credentials
+exist and a running managed server has not confirmed loading the current CRL;
+otherwise true, including when no managed server is running, since its next start
+loads the current CRL.
+The VPN page offers **Apply revocation** only while unapplied.
+The revoke operation is idempotent; retry it after resolving the runtime problem.
+These operations do not require a configuration commit.
+
+The CRL lasts **7 days**, renews within **24 hours of expiry**, and is checked
+**hourly** while running. Renewal is also checked across server restarts.
+
+**Back up the OpenVPN PKI volume**, including the CA keys, credential inventory,
+and revocation material under `/data/openvpn/managed/server/pki/`. Protect that
+backup as a secret. Configuration exports, even unredacted ones, exclude the PKI
+authority and are not a substitute for a PKI backup.
 
 ## AV
 
@@ -216,7 +338,42 @@ Gate status, the `gate` object of the `av` status entry:
 - A commit whose scanner backend is still starting succeeds with the
   `services:` warning `AV backend is still starting … scanning is pending
   until it is ready`, records `service.av.pending`, and the gate shows
-  `pending` until clamd answers. The AV page shows the same state.
+  `pending` until clamd is capable and its selected scan paths are proven. The AV page
+  shows the same state.
+- Scanner readiness keeps two independent facts for each selected direction:
+  backend capability and scan-path health. clamd must answer `PING` and
+  `VERSION`; ICAP `OPTIONS` must declare `REQMOD` for uploads and `RESPMOD`
+  for downloads. A successful scan never overrides a missing capability.
+  Initial scan-path proof and recovery after a scan failure require a bounded
+  scan of the standard EICAR antivirus test string in each unhealthy direction.
+  Only an infected verdict is accepted: a clean reply (including ICAP `204`)
+  could mean antivirus was bypassed and cannot restore readiness. These
+  synthetic scans do not enter object counters, detections or security events.
+  Healthy directions are not continuously canary-scanned.
+- Readiness follows observable backend loss and recovery without a commit or
+  status request. clamd capability is probed once per second after completion.
+  ICAP honours `Options-TTL`, bounded to one through 30 seconds; a missing or
+  invalid TTL selects one second. No autonomous ICAP probes run without a
+  selected scan direction. Unhealthy directions retry their canary once per
+  second, reusing unexpired OPTIONS capability. Each complete observation
+  (capability plus canaries) has a two-second budget, or `timeoutSec` if shorter.
+  Capability loss is detected within at most 34 seconds (an in-flight
+  observation, the capped TTL, then the next observation); with the default
+  one-second cadence the bound is five seconds. The gate samples readiness
+  every 200 ms. A scan failure invalidates its direction immediately;
+  transport failures also invalidate backend capability. Object-level
+  rejections, detections and cancelled diagnostic requests do not invalidate
+  readiness. An unchanged backend reapply retains the existing proof and accepts
+  failures from scans already in flight; readiness ignores scan results from a
+  replaced backend.
+- Readiness proves the latest capability and scan-path observations, not that
+  every future object will scan successfully. In particular, if an ICAP
+  frontend keeps answering OPTIONS after its antivirus dependency fails,
+  that scan-path loss is discovered by the next scan, not by OPTIONS or a
+  periodic healthy-path canary. After that failure, OPTIONS alone cannot
+  restore protection; the unhealthy direction must detect EICAR again.
+  An active scan selection is not reported as protecting while either
+  required fact is unavailable.
 
 Gate runtime: the listeners bind `127.0.0.1` and `::1` on ports 18100
 (plain) and 18101 (masqueraded upstream); the gate's replies reach it over
@@ -276,11 +433,15 @@ ClamAV mode:
   re-owned, never followed.
 
 Applying AV fails, and the commit reports a `services:` warning, when the
-backend is missing, clamd exits, or the ICAP server does not answer
-`OPTIONS` with the needed methods. A clamd that is still starting when the
-three-second apply budget ends is pending, not failed (see the gate status
-above); a freshly started clamd with the full official database can take
-longer to load, and the status `ready` field turns true once it answers.
+backend is missing, clamd exits, the ICAP server does not answer
+`OPTIONS` with a non-empty `Methods` header declaring the needed methods,
+or an initial scan-path canary fails.
+A missing, empty or incomplete declaration reports the scanner as not
+ready, with the reason in AV and gate status. A clamd that is still starting
+when the three-second apply budget ends is pending, not failed (see the gate
+status above); a freshly started clamd with the full official database can take
+longer to load. Readiness requires capability, confirmed database activation
+and scan-path proof for the selected directions.
 
 Scanning:
 
@@ -306,19 +467,20 @@ Scanning:
   transferred (chunked framing removed, content coding kept), with
   `X-Client-IP` and `X-Server-IP`. A reply is infected when it carries
   `X-Infection-Found`, `X-Violations-Found`, `X-Virus-ID` or an
-  `X-ICAP-Status` containing `VirusFound`; `204 No Content` is clean; any
-  other reply, including `200` with adapted content, is a scan error.
-  An `OPTIONS` response must return `200`. If it includes `Methods`, that
-  list must include `REQMOD` when uploads are scanned and `RESPMOD` when
-  downloads are; the current probe also accepts an absent `Methods` header.
+  `X-ICAP-Status` containing `VirusFound`; `204 No Content` is clean;
+  `413` rejects an oversized object. Any other reply, including `200`
+  with adapted content, is a scan error.
+  An `OPTIONS` response must include a non-empty `Methods` header, listing
+  `REQMOD` when uploads are scanned and `RESPMOD` when downloads are.
+  A `200` response without that declaration is not ready.
   `useTls` connects with verified TLS 1.2 or
   newer, using the configured host as the server name and the system roots
   plus the [additional CA bundle](config-format.md#additional-ca-bundle);
   there is no plaintext fallback.
 
-Status (`av` entry) reports the applied settings and `ready` from a live clamd
-`PING`/`VERSION` or ICAP `OPTIONS` check. `db_version` holds clamd's version
-response and is empty for ICAP. Status also includes scan, error and
+Status (`av` entry) reports the applied settings, combined capability and
+scan-path `ready`, and `db_version` from a live clamd `VERSION` (empty for
+ICAP). Status also includes scan, error and
 detection counters, the clamd process, the FreshClam schedule, the pending
 reload, the applied additional CA bundle revision (`trust_revision`) and
 the `gate` object above.

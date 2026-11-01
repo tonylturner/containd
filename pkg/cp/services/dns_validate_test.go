@@ -39,7 +39,7 @@ func TestDNSManagerValidate(t *testing.T) {
 				ListenPort:      53,
 				UpstreamServers: []string{"1.1.1.1", "   "},
 			},
-			wantErr: "dns upstreamServers contains empty entry",
+			wantErr: "dns upstreamServers:",
 		},
 		{
 			name: "valid config without validator binary",

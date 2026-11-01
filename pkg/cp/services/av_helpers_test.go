@@ -127,23 +127,46 @@ func TestAVManagerIcapAndClamAVScanPaths(t *testing.T) {
 }
 
 func TestAVManagerICAPProbeRequiresScannedMethods(t *testing.T) {
-	icapAddr, _ := startFakeICAP(t, nil, icapReply("ICAP/1.0 200 OK", "Methods: RESPMOD", "Encapsulated: null-body=0"))
-	mgr := newTestAVManager(t, AVOptions{})
-	cfg := config.AVConfig{
-		Enabled:      true,
-		Mode:         "icap",
-		HTTPDownload: true,
-		ICAP:         config.ICAPConfig{Servers: []config.ICAPServer{{Address: icapAddr}}},
-	}
-	if err := mgr.Apply(context.Background(), cfg); err != nil {
-		t.Fatalf("Apply(downloads): %v", err)
-	}
-	cfg.HTTPUpload = true
-	if err := mgr.Apply(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "REQMOD") {
-		t.Fatalf("Apply(uploads) against a RESPMOD-only service = %v", err)
-	}
-	if status := mgr.Status(context.Background()); status["ready"] != false || !strings.Contains(status["ready_error"].(string), "REQMOD") {
-		t.Fatalf("status after a failed probe = %+v", status)
+	for _, tc := range []struct {
+		name, methods, errPart string
+		upload, download       bool
+	}{
+		{"missing", "", "missing or empty Methods", true, true},
+		{"empty", "Methods:", "missing or empty Methods", true, true},
+		{"partial", "Methods: RESPMOD", "REQMOD", true, true},
+		{"download only", "Methods: RESPMOD", "", false, true},
+		{"complete", "Methods: REQMOD, RESPMOD", "", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := []string{"ICAP/1.0 200 OK", "Encapsulated: null-body=0"}
+			if tc.methods != "" {
+				lines = append(lines, tc.methods)
+			}
+			icapAddr, _ := startFakeICAP(t, nil, func(req icapRequest) string {
+				if req.Method == "OPTIONS" {
+					return icapReply(lines...)(req)
+				}
+				return healthyReadinessReply(req)
+			})
+			mgr := newTestAVManager(t, AVOptions{})
+			cfg := config.AVConfig{
+				Enabled: true, Mode: "icap",
+				HTTPUpload: tc.upload, HTTPDownload: tc.download,
+				ICAP: config.ICAPConfig{Servers: []config.ICAPServer{{Address: icapAddr}}},
+			}
+			err := mgr.Apply(context.Background(), cfg)
+			wantReady := tc.errPart == ""
+			if wantReady && err != nil || !wantReady && (err == nil || !strings.Contains(err.Error(), tc.errPart)) {
+				t.Fatalf("Apply = %v, want error containing %q", err, tc.errPart)
+			}
+			if ready, why := mgr.Ready(); ready != wantReady || !strings.Contains(why, tc.errPart) {
+				t.Fatalf("Ready = %v (%s), want %v (%s)", ready, why, wantReady, tc.errPart)
+			}
+			status := mgr.Status(context.Background())
+			if status["ready"] != wantReady || !strings.Contains(status["ready_error"].(string), tc.errPart) {
+				t.Fatalf("Status = %+v, want ready=%v (%s)", status, wantReady, tc.errPart)
+			}
+		})
 	}
 }
 

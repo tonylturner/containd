@@ -65,7 +65,7 @@ func TestOpenVPNPKICreationAndRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected server ExtKeyUsage: %#v", server.ExtKeyUsage)
 	}
 
-	clientCert, clientKey, err := EnsureOpenVPNClientCert(filepath.Join(dir, "pki"), caCert, caKey, "Lab User 01")
+	clientCert, clientKey, err := EnsureOpenVPNClientCert(filepath.Join(dir, "pki"), caCert, caKey, "lab-user-01")
 	if err != nil {
 		t.Fatalf("EnsureOpenVPNClientCert: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestOpenVPNPKICreationAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadCertAndKey(client): %v", err)
 	}
-	if client.Subject.CommonName != "labuser01" && client.Subject.CommonName != "lab_user_01" {
+	if client.Subject.CommonName != "lab-user-01" {
 		t.Fatalf("unexpected client common name: %q", client.Subject.CommonName)
 	}
 	if len(client.ExtKeyUsage) == 0 || client.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth {

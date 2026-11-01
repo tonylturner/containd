@@ -383,12 +383,8 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/internal/services", bytes.NewBufferString(`{"vpn":{"wireguard":{"enabled":false}}}`))
 		servicesHandler(logger, dp, nil, nil, nil, nil).ServeHTTP(rec, req)
-		if runtime.GOOS == "linux" {
-			if rec.Code != http.StatusOK {
-				t.Fatalf("services valid POST status = %d body=%s", rec.Code, rec.Body.String())
-			}
-		} else if rec.Code != http.StatusBadRequest || !strings.Contains(strings.ToLower(rec.Body.String()), "wireguard") {
-			t.Fatalf("services non-linux wireguard fallback = %d body=%s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"faults":`) {
+			t.Fatalf("services valid POST status = %d body=%s", rec.Code, rec.Body)
 		}
 
 		rec = httptest.NewRecorder()

@@ -90,7 +90,7 @@ func buildWireGuardStatusRequest(seq uint32, familyID, ifIndex int) []byte {
 	var req bytes.Buffer
 	_ = binary.Write(&req, binary.NativeEndian, unix.NlMsghdr{
 		Type:  uint16(familyID),
-		Flags: unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_DUMP,
+		Flags: unix.NLM_F_REQUEST | unix.NLM_F_DUMP,
 		Seq:   seq,
 		Pid:   uint32(unix.Getpid()),
 	})
@@ -165,7 +165,7 @@ func handleWireGuardStatusMessage(msg syscall.NetlinkMessage, seq uint32, status
 	}
 	switch msg.Header.Type {
 	case unix.NLMSG_DONE:
-		return true, nil
+		return true, netlinkMessageError(msg.Data)
 	case unix.NLMSG_ERROR:
 		return false, netlinkMessageError(msg.Data)
 	default:
@@ -193,7 +193,16 @@ func parseWireGuardDeviceAttrs(out *WireGuardStatus, attrs []byte) {
 				out.ListenPort = int(binary.NativeEndian.Uint16(a.Value[:2]))
 			}
 		case wgDeviceAPeers:
-			out.Peers = parseWireGuardPeers(a.Value)
+			for _, peer := range parseWireGuardPeers(a.Value) {
+				// Large dumps split a peer's allowed IPs across adjacent
+				// messages, then continue with the remaining peers.
+				last := len(out.Peers) - 1
+				if last >= 0 && out.Peers[last].PublicKey == peer.PublicKey {
+					out.Peers[last].AllowedIPs = append(out.Peers[last].AllowedIPs, peer.AllowedIPs...)
+				} else {
+					out.Peers = append(out.Peers, peer)
+				}
+			}
 		}
 	}
 }

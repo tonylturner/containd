@@ -319,7 +319,7 @@ function responseFor(pathname: string) {
   }
   if (pathname === "/api/v1/identities") return json({ mappings: [] });
   if (pathname === "/api/v1/security/conduits") return json([]);
-  if (pathname === "/api/v1/services/status") return json({ av: { available: false, error: "engine unavailable" } });
+  if (pathname === "/api/v1/services/status") return json({ faults: [], av: { available: false, error: "engine unavailable" } });
   if (
     pathname === "/api/v1/services/syslog" ||
     pathname === "/api/v1/services/dns" ||
@@ -332,10 +332,10 @@ function responseFor(pathname: string) {
   ) {
     return json({});
   }
-  if (
-    pathname === "/api/v1/services/av/defs" ||
-    pathname === "/api/v1/services/vpn/openvpn/clients"
-  ) {
+  if (pathname === "/api/v1/services/vpn/openvpn/clients") {
+    return json({ clients: [] });
+  }
+  if (pathname === "/api/v1/services/av/defs") {
     return json([]);
   }
   if (pathname === "/api/v1/services/vpn/wireguard/status") {

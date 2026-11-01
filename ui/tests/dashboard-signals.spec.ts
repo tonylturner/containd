@@ -82,6 +82,7 @@ async function openDashboard(page: Page, mocks: Mocks) {
 const zoneCard = (page: Page, name: string) => page.locator("a[href='/zones/']").filter({ hasText: name });
 
 const services = {
+  faults: [],
   dns: { enabled: true, running: true, ...meter([1, 0, 2]) },
   av: { available: true, enabled: true, mode: "clamav", ...meter([3, 1]) },
 };
@@ -135,7 +136,7 @@ test("service cards read the services status, antivirus included", async ({ page
   await expect(card("DNS")).toContainText("Resolving");
 
   await page.unrouteAll({ behavior: "wait" });
-  await openDashboard(page, { events: [], services: { av: { available: false, error: "engine unavailable" } } });
+  await openDashboard(page, { events: [], services: { faults: [], av: { available: false, error: "engine unavailable" } } });
   await expect(card("AV")).toContainText("Engine unavailable");
   await expect(card("DNS")).toContainText("Disabled");
 });

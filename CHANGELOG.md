@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Telemetry event IDs are JSON strings. API clients that parse event IDs as
   numbers must accept decimal strings.
+- ICAP servers must answer `OPTIONS` with a non-empty `Methods` header that
+  declares `REQMOD` for scanned uploads and `RESPMOD` for scanned downloads.
+  A server without that declaration reports the scanner as not ready.
 
 ### Added
 
@@ -19,9 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System settings show management TLS reload failures while the last valid
   certificate keeps serving, and offer certificate upload only for the managed
   identity; external identities show how to rotate them at their source.
+- Service fault banners on the services overview, service settings and VPN page
+  distinguish quarantined configuration from runtime retries and explain AV
+  fail-policy enforcement.
 - Evidence health in the UI shell, Audit persistence view and `show audit --status`,
   with per-destination/source syslog backlog, retry, loss and continuity counters.
 - Authenticated `GET /api/v1/evidence/status` and sanitized `evidence.state` in health.
+- Live antivirus readiness: AV status and the scan gate follow clamd and ICAP
+  loss and recovery without a commit, and a direction becomes ready only after
+  an EICAR test scan through it is detected.
 
 ### Fixed
 
@@ -59,14 +68,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve in-flight AV scan failures across unchanged backend reapplies so
+  readiness requires scan-canary recovery.
 - Use the theme's failure color for degraded evidence and audit persistence
   banners.
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
+- An ICAP `413` reply counts as an oversized object, not a scanner error.
 - Make admin MFA disable atomic with the required account's new enrollment grace
   period, so a failed operation leaves the account unchanged.
 - Keep topology security matrix columns visible at 1024 px and horizontally
   scrollable for larger zone selections.
+- Make `set system mgmt listen` update the HTTP listener even when
+  `httpListenAddr` is already configured; both HTTP listener commands clear the
+  legacy `listenAddr` field.
+- Keep stdout and file logging for containd and its embedded services when
+  syslog initialization fails, and report the failure once to stderr.
+- Use the repository-root `.env` in `scripts/containd-connect` and surface
+  Compose interpolation errors instead of reporting a running service as stopped.
+- Consume the TOTP enrollment confirmation time step so its code cannot also
+  authenticate on web/API or SSH outside lab mode.
+- Count Unicode characters, not UTF-8 bytes, toward the eight-character password
+  minimum; ASCII uppercase, lowercase and digit requirements are unchanged.
+- Require `exp` on lab-mode JWTs when `CONTAIND_JWT_SECRET` is set. API callers
+  must include an expiration; session-less tokens without `jti` still work,
+  with the existing 30-second leeway.
+- Resolve lab-mode local-account context from the token subject, including custom
+  bootstrap usernames, rather than assuming `containd`. Non-user automation
+  subjects retain admin access and the configured bootstrap profile.
+- Report the effective caller role consistently in auth and dashboard responses,
+  including admin for lab tokens whose subject is a local view account, without
+  changing stored account roles.
+- Omit unknown DHCP and WireGuard runtime gauge series instead of reporting
+  them stopped. Publish the VPN aggregate only when a VPN is observed running;
+  service faults no longer manufacture stopped runtime observations.
+- Keep connecting OpenVPN clients supervised instead of quarantining them when
+  the remote is slow or unreachable; expose connection status separately from
+  process status while retaining the server readiness gate.
+- WireGuard configuration is applied to the kernel. The netlink attribute numbers
+  did not match the kernel interface, so enabling WireGuard failed.
+- Project stored service faults for firewall replay and report per-service
+  status. Retain AV fail policy and allow unrelated edits carrying unchanged
+  faults. WireGuard teardown removes only containd-created links, including
+  custom names and old names after rename. Engine runtime failures are attributed
+  per service without blocking other services or firewall application.
+
+### Security
+
+- Reject unsafe daemon configuration fields and require valid proxy TLS certificate/key pairs before publishing configuration.
+- Restrict OpenVPN profile imports to the shared bounded parser; manage client credentials by issuer/serial ID with read-only downloads and durable revocation.
+- OpenVPN credential lists report whether a running managed server has loaded the current revocation list; the VPN page offers Apply revocation only while it has not.
 
 ## [0.1.37] - 2026-10-31
 

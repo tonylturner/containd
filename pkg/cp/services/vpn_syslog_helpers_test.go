@@ -60,7 +60,7 @@ func TestValidateAndRenderOpenVPNManagedServerHelpers(t *testing.T) {
 	if opts.port != 1194 || opts.proto != "tcp" || opts.mask != "255.255.255.0" {
 		t.Fatalf("unexpected managed server opts: %#v", opts)
 	}
-	if got := renderOpenVPNManagedServerConfig(opts, "ca.crt", "server.crt", "server.key"); !strings.Contains(got, "proto tcp-server") || !strings.Contains(got, "client-to-client") || !strings.Contains(got, `push "route 192.168.10.0 255.255.255.0"`) {
+	if got := renderOpenVPNManagedServerConfig(opts, "ca.crt", "server.crt", "server.key"); !strings.Contains(got, "proto tcp-server") || !strings.Contains(got, "crl-verify pki/crl.pem") || !strings.Contains(got, "client-to-client") || !strings.Contains(got, `push "route 192.168.10.0 255.255.255.0"`) {
 		t.Fatalf("unexpected rendered server config:\n%s", got)
 	}
 
@@ -107,44 +107,45 @@ func TestOpenVPNConfigPathAndManagedRendering(t *testing.T) {
 	if err := atomicWriteFile(foregroundPath, []byte("client\nverb 3\n"), 0o600); err != nil {
 		t.Fatalf("atomicWriteFile foreground: %v", err)
 	}
-	if err := ensureOpenVPNConfigForeground(foregroundPath); err != nil {
-		t.Fatalf("ensureOpenVPNConfigForeground(valid): %v", err)
+	if _, err := readOpenVPNProfile(foregroundPath); err != nil {
+		t.Fatalf("readOpenVPNProfile(valid): %v", err)
 	}
 
 	daemonPath := filepath.Join(tmp, "client-daemon.ovpn")
 	if err := atomicWriteFile(daemonPath, []byte("client\ndaemon\n"), 0o600); err != nil {
 		t.Fatalf("atomicWriteFile daemon: %v", err)
 	}
-	if err := ensureOpenVPNConfigForeground(daemonPath); err == nil {
+	if _, err := readOpenVPNProfile(daemonPath); err == nil {
 		t.Fatal("expected daemonized config validation error")
 	}
 
-	mgr := &VPNManager{SuperviseOpenVPN: true, OpenVPNPath: "/usr/sbin/openvpn"}
-	if got, err := mgr.openVPNConfigPathForEnabled(config.OpenVPNConfig{}); err != nil || got != "" {
-		t.Fatalf("openVPNConfigPathForEnabled(disabled) = %q, %v", got, err)
+	mgr := &VPNManager{BaseDir: tmp, SuperviseOpenVPN: true, OpenVPNPath: "/usr/sbin/openvpn"}
+	if err := mgr.Validate(context.Background(), config.VPNConfig{}); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := mgr.openVPNConfigPathForEnabled(config.OpenVPNConfig{Enabled: true}); err == nil {
+	if err := mgr.Validate(context.Background(), config.VPNConfig{OpenVPN: config.OpenVPNConfig{Enabled: true}}); err == nil {
 		t.Fatal("expected missing configPath validation error")
 	}
-	got, err := mgr.openVPNConfigPathForEnabled(config.OpenVPNConfig{Enabled: true, ConfigPath: foregroundPath})
-	if err != nil || got != foregroundPath {
-		t.Fatalf("openVPNConfigPathForEnabled(foreground) = %q, %v", got, err)
+	profile, err := mgr.preflight(config.OpenVPNConfig{Enabled: true, ConfigPath: foregroundPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := mgr.renderOpenVPNProfile(profile)
+	if err != nil || got == foregroundPath || filepath.Base(got) != "openvpn.conf" {
+		t.Fatalf("renderOpenVPNProfile(foreground) = %q, %v", got, err)
 	}
 
-	managedPath, err := mgr.openVPNConfigPathForEnabled(config.OpenVPNConfig{
-		Enabled: true,
-		Managed: &config.OpenVPNManagedClientConfig{
-			Remote:   "vpn.example.test",
-			Proto:    "tcp",
-			CA:       "ca-pem",
-			Cert:     "cert-pem",
-			Key:      "key-pem",
-			Username: "alice",
-			Password: authPassword,
-		},
+	managedPath, err := mgr.renderOpenVPNManagedClient(&config.OpenVPNManagedClientConfig{
+		Remote:   "vpn.example.test",
+		Proto:    "tcp",
+		CA:       "ca-pem",
+		Cert:     "cert-pem",
+		Key:      "key-pem",
+		Username: "alice",
+		Password: authPassword,
 	})
 	if err != nil {
-		t.Fatalf("openVPNConfigPathForEnabled(managed): %v", err)
+		t.Fatalf("renderOpenVPNManagedClient: %v", err)
 	}
 	if managedPath == "" {
 		t.Fatal("expected managed config path")
