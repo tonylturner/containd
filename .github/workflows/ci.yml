@@ -93,6 +93,22 @@ jobs:
       - name: Build
         run: npm run build
         working-directory: ui
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: ui
+      - name: Playwright suite
+        run: npm run test:routes
+        working-directory: ui
+        env:
+          PLAYWRIGHT_PORT: '3504'
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: |
+            ui/playwright-report/
+            ui/test-results/
 
   # Docker build + Trivy scan runs in parallel with other jobs (not gated).
   # It does its own full multi-stage build so doesn't need prior job outputs.

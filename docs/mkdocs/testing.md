@@ -75,6 +75,9 @@ behavior.
 `npm run test:routes` runs **all Playwright specs** in `ui/tests/`, not only
 the route sweep. The route sweep logs in via mocked API responses, visits app
 routes, and fails on uncaught page exceptions or console errors.
+CI installs Chromium with its OS dependencies and runs the entire suite after
+the UI lint and production build. Failed runs upload the HTML report and test
+results as the `playwright-report` artifact.
 
 Run it directly from `ui/`:
 
@@ -83,6 +86,9 @@ npm ci
 npx playwright install chromium
 npm run test:routes
 ```
+
+On Linux, use `npx playwright install --with-deps chromium` to install the
+browser's OS dependencies as well.
 
 To run only the route sweep, use `npm run test:routes -- route-smoke.spec.ts`.
 The Playwright configuration starts a local Next.js development server on
