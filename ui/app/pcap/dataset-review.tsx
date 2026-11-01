@@ -201,8 +201,8 @@ export function DatasetReview({
       </p>
       {error && (
         <div role="alert" className="mt-3 break-words text-sm text-(--red)">
-          Could not complete this collection action. Check the details before retrying.
-          <details><summary className="cursor-pointer">Technical details</summary><p>{error}</p></details>
+          Could not complete this collection action.
+          <p>{error}</p>
         </div>
       )}
       {notice && (

@@ -461,7 +461,6 @@ for (const status of [400, 403, 422]) {
     await select.check();
     await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
-    await page.getByLabel("Dataset review").getByRole("alert").locator("summary").click();
     await expect(page.getByText("not persisted", { exact: true })).toBeVisible();
     await expect(select).toBeChecked();
     await expect(select).toBeEnabled();

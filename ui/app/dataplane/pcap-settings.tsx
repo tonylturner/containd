@@ -61,7 +61,7 @@ export function CaptureStatusCard({
       {status?.lastError ? (
         <div className="mt-2 rounded-xs border px-3 py-2 text-xs">
           Capture needs attention.
-          <details><summary className="cursor-pointer">Capture error details</summary>{status.lastError}</details>
+          <p className="wrap-break-word">{status.lastError}</p>
         </div>
       ) : null}
     </Card>
@@ -316,7 +316,14 @@ export function CaptureSetupCard({
           </div>
         </div>
 
-        <details className="rounded-xs border bg-(--surface) px-4 py-3">
+        <details
+          open={settings.snaplen !== 262144
+            || settings.filePrefix !== "capture"
+            || settings.rotateSeconds !== 300
+            || settings.bufferMB !== 4
+            || settings.promisc !== true}
+          className="rounded-xs border bg-(--surface) px-4 py-3"
+        >
           <summary className="cursor-pointer text-sm text-(--text)">
             Advanced capture options
           </summary>

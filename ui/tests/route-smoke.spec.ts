@@ -639,20 +639,20 @@ test("topology uses OS/Docker fallback in zone subnets, interface details and ph
   await page.goto("/topology");
   const zone = page.locator('.react-flow__node[data-id="zone-lan"]');
   await expect(zone).toContainText("192.168.242.2/24");
-  await expect(zone.getByRole("img", { name: "OS/Docker address" })).toBeVisible();
+  await expect(zone.getByRole("img", { name: "Detected address" })).toBeVisible();
   const configured = page.locator('.react-flow__node[data-id="zone-wan"]');
   await expect(configured).toContainText("192.0.2.1/24");
   await expect(configured.getByRole("img")).toHaveCount(0);
   await page.locator('.react-flow__node[data-id="fw-main"]').click();
   const detail = page.locator('[class*="ifaceItem"]').filter({ hasText: "eth0" });
   await expect(detail).toContainText("192.168.242.2/24");
-  await expect(detail.getByRole("img", { name: "OS/Docker address" })).toBeVisible();
+  await expect(detail.getByRole("img", { name: "Detected address" })).toBeVisible();
   await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
   await page.getByText("Application runtime details", { exact: true }).click();
   const pills = page.locator('[class*="layerSectionFull"]').filter({ hasText: "Bound Interfaces (in-process)" });
   const pill = pills.locator("div").filter({ has: page.getByText("eth0", { exact: true }) }).last();
   await expect(pill).toContainText("192.168.242.2/24");
-  await expect(pill.getByRole("img", { name: "OS/Docker address" })).toBeVisible();
+  await expect(pill.getByRole("img", { name: "Detected address" })).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
 

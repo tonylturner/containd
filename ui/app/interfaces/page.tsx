@@ -279,16 +279,15 @@ export default function InterfacesPage() {
             even when all interface access is disabled. Login is still required. Keep this device physical and unaddressed in config.
           </p>
           {(!reservation.guard?.active || reservation.guard?.error) && (
-            <div className="mt-1">
-              Management safeguard status unavailable.
-              {reservation.guard?.error && <details><summary className="cursor-pointer">Safeguard details</summary>{reservation.guard.error}</details>}
-            </div>
+            <p className="mt-1 wrap-break-word">
+              {reservation.guard?.error || "Management safeguard status unavailable."}
+            </p>
           )}
           {!!reservation.guard?.faults && (
-            <details className="mt-1">
-              <summary className="cursor-pointer">Safeguard repairs/faults: {reservation.guard.faults}</summary>
-              {reservation.guard.lastFault?.reason}
-            </details>
+            <div className="mt-1">
+              <p>Safeguard repairs/faults: {reservation.guard.faults}</p>
+              <p className="wrap-break-word">{reservation.guard.lastFault?.reason}</p>
+            </div>
           )}
           {reservation.bootFault && (
             <BootFaultStatus bootFault={reservation.bootFault} recovery={reservation.recovery} reserved className="mt-2" />

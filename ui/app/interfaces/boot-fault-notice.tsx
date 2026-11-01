@@ -20,10 +20,7 @@ export function BootFaultStatus({
     <div role="status" className={`rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-amber ${className}`}>
       <p className="font-semibold">Configuration apply paused</p>
       <p>{recovery || "recovery pending: ruleset not verified"}</p>
-      <details className="wrap-break-word">
-        <summary className="cursor-pointer">Configuration fault details</summary>
-        {bootFault}
-      </details>
+      <p className="wrap-break-word">{bootFault}</p>
       <p>
         {reserved
           ? "Reserved management remains available."

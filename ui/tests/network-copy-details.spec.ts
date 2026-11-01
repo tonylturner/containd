@@ -38,39 +38,53 @@ test("collection disclosures retain exact destination, checksums and unknown rea
   await expect(reason.getByText("future_reason_code", { exact: true })).toBeVisible();
 });
 
-test("advanced capture settings and exact filter stay reachable and survive saving collapsed", async ({ page }) => {
-  let saved: Record<string, unknown> | null = null;
-  await page.route("**/api/v1/**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    const config = { snaplen: 128, interfaces: ["eth0"], filter: { proto: "tcp", port: "2404" }, bufferMB: 9, promisc: false };
-    if (path === "/api/v1/pcap/config" && route.request().method() === "POST") {
-      saved = route.request().postDataJSON();
-      return route.fulfill({ json: saved, headers: { "X-Containd-Revision": "0123456789abcdef.2", "X-Containd-Config": "staged" } });
-    }
-    const json = path.includes("/auth/") ? { id: "admin", username: "containd", role: "admin" }
-      : path === "/api/v1/pcap/config" ? config
-      : path === "/api/v1/pcap/status" ? { running: false }
-      : path === "/api/v1/interfaces" ? [{ name: "lan1", device: "eth0", zone: "lan" }]
-      : path === "/api/v1/interfaces/state" ? [{ name: "eth0", up: true, addrs: [] }]
-      : path === "/api/v1/zones" ? [{ name: "lan" }]
-      : path === "/api/v1/pcap/list" ? []
-      : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json, headers: { "X-Containd-Revision": saved ? "0123456789abcdef.2" : "0123456789abcdef.1" } });
+for (const override of [
+  {},
+  { snaplen: 128 },
+  { bufferMB: 9 },
+  { promisc: false },
+  { rotateSeconds: 60 },
+  { filePrefix: "incident" },
+  { snaplen: 128, bufferMB: 9, promisc: false },
+]) {
+  test(`advanced capture options reflect saved ${Object.keys(override).join("+") || "defaults"} and survive saving collapsed`, async ({ page }) => {
+    const config = { snaplen: 262144, bufferMB: 4, promisc: true, rotateSeconds: 300, filePrefix: "capture", interfaces: ["eth0"], filter: { proto: "tcp", port: "2404" }, ...override };
+    const captureError = "capture open failed: eth0: permission denied";
+    let saved: Record<string, unknown> | null = null;
+    await page.route("**/api/v1/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/api/v1/pcap/config" && route.request().method() === "POST") {
+        saved = route.request().postDataJSON();
+        return route.fulfill({ json: saved, headers: { "X-Containd-Revision": "0123456789abcdef.2", "X-Containd-Config": "staged" } });
+      }
+      const json = path.includes("/auth/") ? { id: "admin", username: "containd", role: "admin" }
+        : path === "/api/v1/pcap/config" ? config
+        : path === "/api/v1/pcap/status" ? { running: false, lastError: captureError }
+        : path === "/api/v1/interfaces" ? [{ name: "lan1", device: "eth0", zone: "lan" }]
+        : path === "/api/v1/interfaces/state" ? [{ name: "eth0", up: true, addrs: [] }]
+        : path === "/api/v1/zones" ? [{ name: "lan" }]
+        : path === "/api/v1/pcap/list" ? []
+        : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] } : {};
+      await route.fulfill({ json, headers: { "X-Containd-Revision": saved ? "0123456789abcdef.2" : "0123456789abcdef.1" } });
+    });
+    await page.goto("/dataplane/");
+    const advanced = page.locator("details").filter({ has: page.getByText("Advanced capture options", { exact: true }) });
+    await expect(page.getByText(captureError, { exact: true })).toBeVisible();
+    const hasNonDefault = Object.keys(override).length > 0;
+    await expect(advanced).toHaveJSProperty("open", hasNonDefault);
+    if (!hasNonDefault) await advanced.locator("summary").click();
+    const snaplen = advanced.locator("input[type=number]").first();
+    await expect(snaplen).toBeVisible();
+    await expect(snaplen).toHaveValue(String(config.snaplen));
+    await expect(advanced.locator("label").filter({ hasText: "Capture memory buffer (MB)" })).toBeVisible();
+    await expect(advanced.locator("label").filter({ hasText: "Capture all traffic visible on the interface" })).toBeVisible();
+    await advanced.locator("summary").click();
+    await expect(advanced).toHaveJSProperty("open", false);
+    const filter = page.locator("details").filter({ has: page.getByText("Capture filter (BPF)", { exact: true }) });
+    await expect(filter).toHaveJSProperty("open", false);
+    await filter.locator("summary").click();
+    await expect(filter.locator("code")).toHaveText("tcp and port 2404");
+    await page.getByRole("button", { name: "Save PCAP defaults", exact: true }).click();
+    await expect.poll(() => saved).toMatchObject(config);
   });
-  await page.goto("/dataplane/");
-  const advanced = page.locator("details").filter({ has: page.getByText("Advanced capture options", { exact: true }) });
-  await expect(advanced).toHaveJSProperty("open", false);
-  await advanced.locator("summary").click();
-  const snaplen = advanced.locator("input[type=number]").first();
-  await expect(snaplen).toBeVisible();
-  await expect(snaplen).toHaveValue("128");
-  await expect(advanced.locator("label").filter({ hasText: "Capture memory buffer (MB)" })).toBeVisible();
-  await expect(advanced.locator("label").filter({ hasText: "Capture all traffic visible on the interface" })).toBeVisible();
-  await advanced.locator("summary").click();
-  const filter = page.locator("details").filter({ has: page.getByText("Capture filter (BPF)", { exact: true }) });
-  await expect(filter).toHaveJSProperty("open", false);
-  await filter.locator("summary").click();
-  await expect(filter.locator("code")).toHaveText("tcp and port 2404");
-  await page.getByRole("button", { name: "Save PCAP defaults", exact: true }).click();
-  await expect.poll(() => saved).toMatchObject({ snaplen: 128, bufferMB: 9, promisc: false, filter: { proto: "tcp", port: "2404" } });
-});
+}

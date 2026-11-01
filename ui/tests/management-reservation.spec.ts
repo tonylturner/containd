@@ -30,7 +30,8 @@ test("Interfaces explains immutable access and exposes guard faults", async ({ p
   await expect(note).toContainText("10.99.99.10, 10.99.99.3");
   await expect(note).toContainText("even when all interface access is disabled");
   await expect(note).toContainText("Login is still required");
-  await expect(note).toContainText("source address removed");
+  await expect(note.getByText("source address removed", { exact: true })).toBeVisible();
+  await expect(note.getByText(bootFault, { exact: true })).toBeVisible();
   await expect(note).toContainText("rollback refused");
   await expect(note.getByRole("status")).toContainText("Configuration apply paused");
   await expect(note.getByRole("status")).toContainText("Commit a safe configuration");
@@ -81,8 +82,32 @@ test("Interfaces shows a boot fault without a reservation", async ({ page }) => 
   const fault = page.getByRole("complementary", { name: "Boot fault" }).getByRole("status");
   await expect(fault).toContainText("Configuration apply paused");
   await expect(fault).toContainText("recovery: new transit dropped");
-  await expect(fault).toContainText(bootFault);
+  await expect(fault.getByText(bootFault, { exact: true })).toBeVisible();
   await expect(fault).toContainText("keeps the stored management listener access");
   await expect(fault).not.toContainText("Reserved management");
   await expect(fault).toHaveClass(/text-amber/);
 });
+
+for (const active of [true, false]) {
+  test(`Interfaces shows the safeguard error inline when guard active is ${active}`, async ({ page }) => {
+    const error = "nft safeguard check failed: permission denied";
+    let guard: { active: boolean; error?: string } = { active, error };
+    await page.route("**/api/v1/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const data = path.endsWith("/management-reservation")
+        ? { active: true, device: "eth7", local: "10.99.99.2/24", sources: ["10.99.99.10"], port: 8080, guard }
+        : path.endsWith("/interfaces") || path.endsWith("/state") || path.endsWith("/zones") ? []
+          : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
+      await route.fulfill({ json: data, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    });
+    await page.goto("/interfaces/");
+    const note = page.getByRole("complementary", { name: "Reserved management path" });
+    await expect(note.getByText(error, { exact: true })).toBeVisible();
+    await expect(note).not.toContainText("Management safeguard status unavailable.");
+
+    guard = { active: false };
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(note).toContainText("Management safeguard status unavailable.");
+    await expect(note.getByText(error, { exact: true })).toHaveCount(0);
+  });
+}
