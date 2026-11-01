@@ -124,6 +124,38 @@ jobs:
           tags: containd/containd:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: AV scanning gate smoke
+        env:
+          COMPOSE_FILE: deploy/docker-compose.smoke.yml:${{ runner.temp }}/av-ci.yml
+          SMOKE_PROJECT: containd-av-ci
+          SMOKE_BUILD: '0'
+        run: |
+          source scripts/smoke-lib.sh
+          cleanup() {
+            local smoke_status=$? logs_status=0 down_status=0
+            compose logs --no-color > "$RUNNER_TEMP/av-compose.log" 2>&1 || logs_status=$?
+            compose down --volumes --remove-orphans || down_status=$?
+            if (( smoke_status != 0 )); then
+              exit "$smoke_status"
+            fi
+            if (( logs_status != 0 )); then
+              exit "$logs_status"
+            fi
+            exit "$down_status"
+          }
+          trap cleanup EXIT
+          cat > "$RUNNER_TEMP/av-ci.yml" <<'YAML'
+          services:
+            engine:
+              image: containd/containd:ci
+          YAML
+          bash scripts/smoke-av-gate.sh
+      - name: Upload AV compose logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: av-compose-logs
+          path: ${{ runner.temp }}/av-compose.log
       - name: Quickstart smoke (public compose)
         env:
           COMPOSE_PROJECT_NAME: containd-quickstart-ci
