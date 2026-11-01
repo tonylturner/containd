@@ -87,7 +87,7 @@ test("retrying the security matrix clears the previous error while IO is pending
   const held = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/v1/security/conduits", async (route) => {
     await held;
-    await route.fulfill({ json: {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    await route.fulfill({ json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const requested = page.waitForRequest("**/api/v1/security/conduits");
   await error.locator("..").getByRole("button", { name: "Retry", exact: true }).click();

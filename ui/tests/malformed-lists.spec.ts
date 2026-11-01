@@ -175,26 +175,28 @@ for (const t of transitions) {
   }
 }
 
-test("topology SECURITY view reports malformed zones after a healthy load (config)", async ({ page }) => {
-  const pageErrors: string[] = [];
-  page.on("pageerror", (err) => pageErrors.push(String(err)));
-  const list = await mockHealthyThenMalformed(page, "/api/v1/zones", {
-    "/api/v1/zones": [{ name: "it" }, { name: "ot", slTarget: 2 }],
-    "/api/v1/security/conduits": {},
-  });
-  await page.goto("/topology/");
-  const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/security/conduits");
-  await page.getByRole("button", { name: "SECURITY", exact: true }).click();
-  await loaded;
-  await expect(page.getByText("ZONE · CONDUIT MATRIX")).toBeVisible();
+for (const endpoint of ["/api/v1/zones", "/api/v1/security/conduits"]) {
+  test(`topology SECURITY view reports malformed ${endpoint} after a healthy load (config)`, async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (err) => pageErrors.push(String(err)));
+    const list = await mockHealthyThenMalformed(page, endpoint, {
+      "/api/v1/zones": [{ name: "it" }, { name: "ot", slTarget: 2 }],
+      "/api/v1/security/conduits": [],
+    });
+    await page.goto("/topology/");
+    const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/security/conduits");
+    await page.getByRole("button", { name: "SECURITY", exact: true }).click();
+    await loaded;
+    await expect(page.getByText("ZONE · CONDUIT MATRIX")).toBeVisible();
 
-  const answered = list.breakList();
-  await committed(page);
-  await answered;
-  await expect(page.getByText("Failed to load security data")).toBeVisible();
-  await expect(page.getByText("ZONE · CONDUIT MATRIX")).toHaveCount(0);
-  expect(pageErrors).toEqual([]);
-});
+    const answered = list.breakList();
+    await committed(page);
+    await answered;
+    await expect(page.getByText("Failed to load security data")).toBeVisible();
+    await expect(page.getByText("ZONE · CONDUIT MATRIX")).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+  });
+}
 
 test("topology PHYSICAL view reports malformed flows after a healthy load (poll)", async ({ page }) => {
   const pageErrors: string[] = [];
