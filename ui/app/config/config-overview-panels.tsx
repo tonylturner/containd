@@ -256,6 +256,7 @@ export function IDSRulesCard({
 
 export function ConfigActionBar({
   canEdit,
+  canCommit,
   ttlSeconds,
   onTtlChange,
   onCommit,
@@ -264,6 +265,7 @@ export function ConfigActionBar({
   onRollback,
 }: {
   canEdit: boolean;
+  canCommit: boolean;
   ttlSeconds: string;
   onTtlChange: (value: string) => void;
   onCommit: () => void;
@@ -277,7 +279,8 @@ export function ConfigActionBar({
         {canEdit && (
           <button
             onClick={onCommit}
-            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
+            disabled={!canCommit}
+            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
           >
             Commit
           </button>
@@ -286,7 +289,8 @@ export function ConfigActionBar({
           {canEdit && (
             <button
               onClick={onCommitConfirmed}
-              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
+              disabled={!canCommit}
+              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
             >
               Commit-confirmed
             </button>
@@ -303,7 +307,7 @@ export function ConfigActionBar({
           <>
             <button
               onClick={onConfirmCommit}
-              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
+              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
             >
               Confirm
             </button>

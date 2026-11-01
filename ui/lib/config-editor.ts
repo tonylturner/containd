@@ -2,6 +2,7 @@ export type ConfigSubmission<T> = {
   readonly id: symbol;
   readonly cfg: T;
   readonly raw: Record<string, string>;
+  readonly baseRevision?: string;
 };
 
 export type ConfigEditor<T> = {
@@ -10,6 +11,11 @@ export type ConfigEditor<T> = {
   raw: Record<string, string>;
   superseded: boolean;
   pending: ConfigSubmission<T>[];
+  baseRevision?: string;
+  serverRevision?: string;
+  conflictRevision?: string;
+  olderView?: boolean;
+  revisionRequired?: boolean;
 };
 
 export function sameConfig(a: unknown, b: unknown): boolean {
@@ -18,8 +24,8 @@ export function sameConfig(a: unknown, b: unknown): boolean {
   return serialize(a) === serialize(b);
 }
 
-export function fresh<T>(cfg: T): ConfigEditor<T> {
-  return { cfg, server: cfg, raw: {}, superseded: false, pending: [] };
+export function fresh<T>(cfg: T, revision?: string): ConfigEditor<T> {
+  return { cfg, server: cfg, raw: {}, superseded: false, pending: [], baseRevision: revision, serverRevision: revision };
 }
 
 export function isDirty<T>(editor: ConfigEditor<T>): boolean {
@@ -37,18 +43,18 @@ export function failSave<T>(editor: ConfigEditor<T>, submitted: ConfigSubmission
 }
 
 /** Background reads never discard either structured or unfinished text edits. */
-export function adopt<T>(editor: ConfigEditor<T>, next: T, keepEdits = true): ConfigEditor<T> {
-  if (!keepEdits) return fresh(next);
-  if (!isDirty(editor)) return { ...fresh(next), pending: editor.pending };
-  return { ...editor, server: next, superseded: editor.superseded || !sameConfig(next, editor.server) };
+export function adopt<T>(editor: ConfigEditor<T>, next: T, keepEdits = true, revision?: string): ConfigEditor<T> {
+  if (!keepEdits) return fresh(next, revision);
+  if (!isDirty(editor) && !editor.conflictRevision && !editor.olderView) return { ...fresh(next, revision), pending: editor.pending };
+  return { ...editor, server: next, serverRevision: revision, superseded: editor.superseded || revision !== editor.baseRevision || !sameConfig(next, editor.server) };
 }
 
 /** Compare the entire submitted draft, not a parsed/normalized wire payload. */
-export function accept<T>(editor: ConfigEditor<T>, submitted: ConfigSubmission<T>, next: T): ConfigEditor<T> {
+export function accept<T>(editor: ConfigEditor<T>, submitted: ConfigSubmission<T>, next: T, revision?: string): ConfigEditor<T> {
   if (!editor.pending.some((entry) => entry.id === submitted.id)) return editor;
   const settled = failSave(editor, submitted);
   return sameConfig(editor.cfg, submitted.cfg) && sameConfig(editor.raw, submitted.raw)
-    ? { ...fresh(next), pending: settled.pending }
+    ? { ...fresh(next, revision), pending: settled.pending }
     : { ...settled, server: next, superseded: false };
 }
 
@@ -60,13 +66,21 @@ export function acceptCollection<T>(
   update: (cfg: T) => T,
   prefixes: string[] = [],
   submitted?: ConfigSubmission<T>,
+  revision?: string,
 ): ConfigEditor<T> {
   if (submitted && !editor.pending.some((entry) => entry.id === submitted.id)) return editor;
   const raw = Object.fromEntries(Object.entries(editor.raw).filter(([key, value]) =>
     !prefixes.some((prefix) => key.startsWith(prefix)) || (submitted && value !== submitted.raw[key])));
   const settled = submitted ? failSave(editor, submitted) : editor;
   const next = { ...settled, cfg: update(editor.cfg), server: update(editor.server), raw };
-  return { ...next, superseded: isDirty(next) && editor.superseded };
+  return { ...next, baseRevision: isDirty(next) ? editor.baseRevision : revision ?? editor.baseRevision,
+    serverRevision: revision ?? editor.serverRevision, superseded: isDirty(next) && editor.superseded };
+}
+
+/** Explicit operator consent only; never called by refresh or save failure. */
+export function keepEdits<T>(editor: ConfigEditor<T>): ConfigEditor<T> {
+  if (!editor.conflictRevision) return editor;
+  return { ...editor, baseRevision: editor.conflictRevision, conflictRevision: undefined, olderView: true, superseded: true, pending: [] };
 }
 
 /** Reconcile a collection read after a mutation without replacing unchanged rows'

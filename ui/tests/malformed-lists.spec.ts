@@ -20,10 +20,10 @@ for (const [name, body] of [["object", { unexpected: true }], ["string", "unexpe
       await page.route("**/api/v1/**", async (route) => {
         const p = new URL(route.request().url()).pathname;
         if (p === "/api/v1/auth/me" || p === "/api/v1/auth/session") {
-          await route.fulfill({ json: user });
+          await route.fulfill({ json: user, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
           return;
         }
-        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       });
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -51,7 +51,7 @@ for (const [path, endpoint, message] of [
       const body = p === "/api/v1/auth/me" || p === "/api/v1/auth/session" ? user
         : p === endpoint ? { items: [{ id: 1 }] }
           : p.endsWith("/config/diff") ? { changed: false, changedSections: [] } : [];
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     });
     await page.goto(path);
     await expect(page.getByText(message, { exact: false }).first()).toBeVisible();
@@ -67,7 +67,7 @@ for (const [name, body] of [["object", { unexpected: true }], ["string", "unexpe
       await page.route("**/api/v1/**", async (route) => {
         const p = new URL(route.request().url()).pathname;
         const json = p === "/api/v1/auth/me" || p === "/api/v1/auth/session" ? user : body;
-        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(json) });
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(json), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       });
       await page.goto("/topology/");
       await page.getByRole("button", { name: view, exact: true }).click();
@@ -101,7 +101,7 @@ async function mockHealthyThenMalformed(page: Page, endpoint: string, bodies: Re
       : p === endpoint && broken ? malformed
         : p in bodies ? bodies[p]
           : p.endsWith("/config/diff") ? { changed: false, changedSections: [] } : [];
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return {
     /** Breaks the list; resolves once the next fetch of it has answered. */

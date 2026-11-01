@@ -43,7 +43,7 @@ async function open(page: Page, path: string, status: unknown) {
     if (p === "/api/v1/services/status") body = status;
     if (p === "/api/v1/dhcp/leases") body = { leases: [] };
     if (p === "/api/v1/interfaces" || p === "/api/v1/zones" || p === "/api/v1/interfaces/state") body = [];
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/status");
   await page.goto(path);
@@ -101,7 +101,7 @@ test("topology nodes draw no made-up traffic sparklines", async ({ page }) => {
     if (p === "/api/v1/interfaces/state") body = [{ name: "eth9", up: true, mtu: 1500, addrs: ["192.0.2.9/24"] }];
     if (p === "/api/v1/flows" || p === "/api/v1/events") body = [];
     if (p === "/api/v1/routing/os") body = { routes: [] };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.goto("/topology/");
   await expect(page.locator(".react-flow__node-firewall")).toBeVisible();

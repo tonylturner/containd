@@ -52,7 +52,7 @@ export function useSaveAction<K extends string = "save">() {
         const error = withRetryTime(result.error || messages.failure, result.retryAfter);
         setState("error");
         toast(error, "error");
-        return { ok: false, error };
+        return { ...result, error };
       }
       setState("saved");
       toast(result.warning ? `${messages.success} Warning: ${result.warning}` : messages.success, "success");

@@ -44,14 +44,12 @@ export default function ZonesPage() {
   const confirm = useConfirm();
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [list, conds] = await Promise.all([
-      api.listZones(),
-      api.getSecurityConduits(),
-    ]);
+    const [listSnapshot, conds] = await Promise.all([api.listZones(), api.getSecurityConduits()]);
+    const list = (listSnapshot?.data ?? null);
     if (!checkLoaded(list)) return;
-    adoptRows(list, keepEdits);
+    adoptRows(list, keepEdits, listSnapshot?.revision);
     setConduits((conds as ConduitMap) ?? {});
-    refreshForm(list, keepEdits);
+    refreshForm(list, keepEdits, listSnapshot?.revision);
   }, [checkLoaded, refreshForm, adoptRows]));
 
   useConfigRefresh(refresh);
@@ -66,7 +64,7 @@ export default function ZonesPage() {
     if (nameErr) return;
     setSaving(true);
     const submitted = form.editor;
-    const result = await api.createZone({
+    const result = await api.createZone(form.editor.baseRevision ?? "", {
       name,
       alias: alias.trim() || undefined,
       description: description.trim() || undefined,
@@ -74,13 +72,14 @@ export default function ZonesPage() {
     });
     setSaving(false);
     if (!result.ok) {
+      form.fail(result);
       setError(result.error);
       return;
     }
     rowsDraft.acceptCollection((rows) => upsertRow(rows, result.data, (row) => row.name));
     toast("Zone staged — commit to apply.", "success");
     refresh();
-    form.acceptFields(submitted, ["name", "alias", "description", "slTarget"]);
+    form.acceptFields(submitted, ["name", "alias", "description", "slTarget"], result.revision);
   }
 
   async function onDelete(zoneName: string) {
@@ -93,12 +92,13 @@ export default function ZonesPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setError(null);
-        const result = await api.deleteZone(zoneName);
+        const result = await api.deleteZone(rowsDraft.editor.baseRevision ?? "", zoneName);
         if (!result.ok) {
+          rowsDraft.reportFailure(result);
           setError(result.error);
           return;
         }
-        rowsDraft.acceptCollection((rows) => rows.filter((row) => row.name !== zoneName), [`${JSON.stringify(zoneName)}.`]);
+        rowsDraft.acceptCollection((rows) => rows.filter((row) => row.name !== zoneName), [`${JSON.stringify(zoneName)}.`], result.revision);
         toast("Zone staged — commit to apply.", "success");
         refresh();
       },
@@ -109,13 +109,13 @@ export default function ZonesPage() {
     if (!canSaveNow()) return;
     setError(null);
     const submitted = rowsDraft.beginSave();
-    const result = await api.updateZone(zoneName, patch);
+    const result = await api.updateZone(submitted.baseRevision ?? "", zoneName, patch);
     if (!result.ok) {
-      rowsDraft.failSave(submitted);
+      rowsDraft.failSave(submitted, result);
       setError(result.error);
       return;
     }
-    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, result.data, (row) => row.name), `${JSON.stringify(zoneName)}.`);
+    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, result.data, (row) => row.name), `${JSON.stringify(zoneName)}.`, result.revision);
     toast("Zone staged — commit to apply.", "success");
     refresh();
   }
@@ -162,6 +162,8 @@ export default function ZonesPage() {
     >
       {configLoadError && <p role="alert" className="mb-4 text-sm text-red-400">{configLoadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
+      <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} />
+      <ConfigEditNotice superseded={false} {...rowsDraft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!isAdmin() && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">

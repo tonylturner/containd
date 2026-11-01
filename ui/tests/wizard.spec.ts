@@ -19,7 +19,7 @@ async function mockWizardAPI(page: Page, placement: unknown = { reason: "generat
     if (path === "/api/v1/firewall/port-forwards" && method === "POST") {
       const body = route.request().postDataJSON();
       staged.push(body);
-      await route.fulfill({ json: { forward: body.forward, placement } });
+      await route.fulfill({ json: { forward: body.forward, placement }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     const json = path.endsWith("/auth/me") || path.endsWith("/auth/session")
@@ -28,7 +28,7 @@ async function mockWizardAPI(page: Page, placement: unknown = { reason: "generat
         : path === "/api/v1/zones" ? zones
           : path === "/api/v1/firewall/nat" ? { enabled: false }
             : method === "POST" ? route.request().postDataJSON() : {};
-    await route.fulfill({ json });
+    await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return staged;
 }

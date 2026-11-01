@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRevision } from "../../lib/use-config-revision";
+
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useConfigLoad } from "../../lib/use-config-editor";
 
@@ -42,6 +44,7 @@ type SaveState = "idle" | "starting" | "stopping";
 type PcapForwardRow = PcapForwardTarget & { interface: string };
 
 export default function PcapPage() {
+  const { readConfig, expectedRevision, acceptRevision, handleRevision, revisionNotice } = useConfigRevision();
   const canEdit = isAdmin();
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const confirm = useConfirm();
@@ -65,6 +68,7 @@ export default function PcapPage() {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [savedConfigJson, setSavedConfigJson] = useState<string | null>(null);
   const dirtyRef = useRef(false);
+  const latestSettings = useRef("");
   const [settings, setSettings] = useState<PcapConfig>({
     enabled: false,
     interfaces: [],
@@ -88,21 +92,19 @@ export default function PcapPage() {
   const isDirty = savedConfigJson ? settingsSnapshot !== savedConfigJson : false;
   useConfigRefresh(() => {
     void refresh();
-    void api.listInterfaces().then((list) => setIfaces(list ?? []));
-    void api.listZones().then((list) => setZones(list ?? []));
+    void api.listInterfaces().then(snapshot => snapshot?.data ?? null).then((list) => setIfaces(list ?? []));
+    void api.listZones().then(snapshot => snapshot?.data ?? null).then((list) => setZones(list ?? []));
   });
 
   useEffect(() => {
     dirtyRef.current = isDirty;
-  }, [isDirty]);
+    latestSettings.current = settingsSnapshot;
+  }, [isDirty, settingsSnapshot]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    const [cfg, st, list] = await Promise.all([
-      getPcapConfig(),
-      getPcapStatus(),
-      listPcaps(),
-    ]);
+    const [cfgSnapshot, st, list] = await Promise.all([getPcapConfig(), getPcapStatus(), listPcaps()]);
+    const cfg = readConfig(cfgSnapshot);
     if (checkLoaded(cfg)) {
       const normalized = normalizeConfig(cfg);
       const nextJson = JSON.stringify(normalized);
@@ -115,11 +117,11 @@ export default function PcapPage() {
     setStatus(st);
     setPcaps(list);
     setRefreshing(false);
-  }, [checkLoaded]);
+  }, [checkLoaded, readConfig]);
 
   useEffect(() => {
-    api.listInterfaces().then((list) => setIfaces(list ?? []));
-    api.listZones().then((list) => setZones(list ?? []));
+    api.listInterfaces().then(snapshot => snapshot?.data ?? null).then((list) => setIfaces(list ?? []));
+    api.listZones().then(snapshot => snapshot?.data ?? null).then((list) => setZones(list ?? []));
     void refreshInterfaceState();
   }, []);
   useEffect(() => {
@@ -421,12 +423,17 @@ export default function PcapPage() {
       setNotice("Fix capture settings before saving.");
       return;
     }
-    const saved = await setPcapConfig(settings);
+    const submittedBase = expectedRevision();
+    const submittedSettings = settingsSnapshot;
+    const saved = await setPcapConfig(submittedBase, settings).then(handleRevision);
     if (!saved.ok) {
       setNotice(saved.error || "Failed to save capture settings.");
       return;
     }
-    setSettings(normalizeConfig(saved.data));
+    if (latestSettings.current === submittedSettings) {
+      setSettings(normalizeConfig(saved.data));
+      acceptRevision(submittedBase, saved.revision);
+    }
     setSavedConfigJson(JSON.stringify(normalizeConfig(saved.data)));
     setNotice(saved.warning ? `PCAP defaults staged — commit to apply. Warning: ${saved.warning}` : "PCAP defaults staged — commit to apply.");
     await refresh();
@@ -487,6 +494,7 @@ export default function PcapPage() {
         </div>
       }
     >
+      {revisionNotice(() => window.location.reload())}
       <ConfirmDialog {...confirm.props} />
       {loadError && (
         <p role="alert" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">

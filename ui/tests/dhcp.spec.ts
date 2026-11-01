@@ -24,17 +24,17 @@ async function mockAPI(page: Page, config: DHCPConfig): Promise<Server> {
       if (req.method() === "POST") {
         server.config = req.postDataJSON() as DHCPConfig;
         server.writes.push(server.config);
-        return route.fulfill({ headers: { "X-Containd-Config": "staged" }, json: server.config });
+        return route.fulfill({ json: server.config, headers: { "X-Containd-Revision": "0123456789abcdef.1", "X-Containd-Config": "staged" } });
       }
       if (server.hold) await server.hold;
-      return route.fulfill({ json: server.config });
+      return route.fulfill({ json: server.config, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     }
     const data = path.endsWith("/auth/me") || path.endsWith("/auth/session")
       ? { id: "admin-1", username: "containd", role: "admin" }
       : path.endsWith("/dhcp/leases") ? { leases: [] }
         : path.endsWith("/services/status") ? { dhcp: { enabled: false, ...idleMeter }, av: { available: false, error: "engine unavailable" } }
           : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: data });
+    await route.fulfill({ json: data, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return server;
 }

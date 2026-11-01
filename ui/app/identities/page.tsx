@@ -65,7 +65,8 @@ export default function IdentitiesPage() {
   const [saving, setSaving] = useState(false);
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [res, ruleList] = await Promise.all([api.listIdentityBindings(), api.listFirewallRules()]);
+    const [res, ruleListSnapshot] = await Promise.all([api.listIdentityBindings(), api.listFirewallRules()]);
+    const ruleList = (ruleListSnapshot?.data ?? null);
     setRules(ruleList ?? []);
     checkLoaded(res.ok ? res.data : null);
     if (!res.ok) {
@@ -73,23 +74,25 @@ export default function IdentitiesPage() {
       return;
     }
     setLoadError(null);
-    adoptRows(res.data, keepEdits);
-    refreshForm(res.data, keepEdits);
+    adoptRows(res.data, keepEdits, res.revision);
+    refreshForm(res.data, keepEdits, res.revision);
   }, [checkLoaded, refreshForm, adoptRows]));
 
   useConfigRefresh(refresh);
 
-  async function stage(binding: IdentityBinding): Promise<boolean> {
+  async function stage(binding: IdentityBinding, creationRevision?: string): Promise<boolean> {
     if (!canSaveNow()) return false;
     setError(null);
     const submitted = rowsDraft.beginSave();
-    const res = await api.setIdentityBinding(binding);
+    const res = await api.setIdentityBinding(creationRevision ?? submitted.baseRevision ?? "", binding);
     if (!res.ok) {
-      rowsDraft.failSave(submitted);
+      rowsDraft.failSave(submitted, creationRevision === undefined ? res : undefined);
+      if (creationRevision !== undefined) form.fail(res);
       setError(res.error);
       return false;
     }
-    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, res.data, (row) => row.ip), `${JSON.stringify(binding.ip)}.`);
+    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, res.data, (row) => row.ip), `${JSON.stringify(binding.ip)}.`, res.revision);
+    if (creationRevision !== undefined) form.acceptFields(form.editor, ["ip", "labels"], res.revision);
     toast(res.warning ? `Binding staged — commit to apply. Warning: ${res.warning}` : "Binding staged — commit to apply.", "success");
     await refresh();
     return true;
@@ -104,9 +107,8 @@ export default function IdentitiesPage() {
     }
     setSaving(true);
     const submitted = form.editor;
-    const ok = await stage(checked.binding);
+    await stage(checked.binding, submitted.baseRevision ?? "");
     setSaving(false);
-    if (ok) form.acceptFields(submitted, ["ip", "labels"]);
   }
 
   function onDelete(address: string) {
@@ -118,12 +120,13 @@ export default function IdentitiesPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setError(null);
-        const res = await api.deleteIdentityBinding(address);
+        const res = await api.deleteIdentityBinding(rowsDraft.editor.baseRevision ?? "", address);
         if (!res.ok) {
+          rowsDraft.reportFailure(res);
           setError(res.error);
           return;
         }
-        rowsDraft.acceptCollection((rows) => rows.filter((row) => row.ip !== address), [`${JSON.stringify(address)}.`]);
+        rowsDraft.acceptCollection((rows) => rows.filter((row) => row.ip !== address), [`${JSON.stringify(address)}.`], res.revision);
         toast("Binding removal staged — commit to apply.", "success");
         refresh();
       },
@@ -146,6 +149,8 @@ export default function IdentitiesPage() {
     >
       {configLoadError && <p role="alert" className="mb-4 text-sm text-red-400">{configLoadError}</p>}
       <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
+      <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} />
+      <ConfigEditNotice superseded={false} {...rowsDraft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">

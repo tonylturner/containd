@@ -22,7 +22,7 @@ export default function DNSPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [status, setStatus] = useState<DNSStatus | null>(null);
-  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<DNSConfig>({
+  const { conflictProps, editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<DNSConfig>({
     enabled: false,
     listenPort: 53,
     upstreamServers: [],
@@ -36,10 +36,11 @@ export default function DNSPage() {
   const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const svc = await api.getServicesStatus();
     setStatus(svc?.dns ?? null);
-    const s = await api.getDNS();
+    const sSnapshot = await api.getDNS();
+    const s = (sSnapshot?.data ?? null);
     if (!checkLoaded(s)) return;
     setError(null);
-    adoptConfig(s, keepEdits);
+    adoptConfig(s, keepEdits, sSnapshot?.revision);
     setLastUpdated(new Date());
   }, [adoptConfig, checkLoaded]));
 
@@ -59,13 +60,13 @@ export default function DNSPage() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
     const submitted = beginSave();
-    const saved = await save.run("save", () => api.setDNS({ ...cfg, upstreamServers: upstreamText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
+    const saved = await save.run("save", () => api.setDNS(submitted.baseRevision ?? "", { ...cfg, upstreamServers: upstreamText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
       success: "DNS settings staged — commit to apply.",
       failure: "Failed to save DNS settings.",
     });
     if (!saved) { failSave(submitted); return; }
-    if (saved.ok) acceptConfig(submitted, saved.data);
-    else { failSave(submitted); setError(saved.error); }
+    if (saved.ok) acceptConfig(submitted, saved.data, saved.revision);
+    else { failSave(submitted, saved); setError(saved.error); }
     await refresh();
   }
 
@@ -102,7 +103,7 @@ export default function DNSPage() {
       }
     >
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
-      <ConfigEditNotice superseded={editor.superseded} />
+      <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">

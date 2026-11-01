@@ -1,6 +1,8 @@
 "use client";
 
-import { useConfigLoad } from "../../lib/use-config-editor";
+import { useConfigRevision } from "../../lib/use-config-revision";
+
+import { ConfigEditNotice, useConfigEditor, useConfigLoad } from "../../lib/use-config-editor";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
@@ -10,6 +12,7 @@ import { useCallback, Suspense, useEffect, useMemo, useRef, useState } from "rea
 import { useSearchParams } from "next/navigation";
 
 import { api, isAdmin, type ConfigBackup, type ConfigBundle } from "../../lib/api";
+import { ConfigDiffBlocks } from "./config-diff-blocks";
 import type { ConfigDiff } from "../../lib/api-config";
 import { formatICSMode } from "../ics/ics-shared";
 import { Shell } from "../../components/Shell";
@@ -47,19 +50,27 @@ export default function ConfigPageWrapper() {
 
 function ConfigPage() {
   const canEdit = isAdmin();
-  const { canSave, loadError, checkLoaded } = useConfigLoad();
+  const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const confirm = useConfirm();
   const searchParams = useSearchParams();
   const initialTab = parseTab(searchParams.get("tab"));
   const [tab, setTab] = useState<Tab>(initialTab);
+  const [queryTab, setQueryTab] = useState(initialTab);
+  // The global review link can navigate within this already-mounted page.
+  if (queryTab !== initialTab) {
+    setQueryTab(initialTab);
+    setTab(initialTab);
+  }
   const [configDiff, setConfigDiff] = useState<ConfigDiff | null>();
   const running = configDiff?.running ?? null;
   const candidate = configDiff?.candidate ?? null;
-  const [candidateText, setCandidateText] = useState("");
-  const candidateDraft = useRef(false);
-  const candidateEditRevision = useRef(0);
+  const draft = useConfigEditor("", false);
+  const { cfg: candidateText, setCfg: setCandidateText, adoptConfig } = draft;
+  const [diffRevision, setDiffRevision] = useState<string>();
+  const dialogOpen = useRef(false);
   const [status, setStatus] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState("60");
+  const importRevision = useConfigRevision();
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [backupName, setBackupName] = useState("");
   const [backups, setBackups] = useState<ConfigBackup[]>([]);
@@ -71,16 +82,14 @@ function ConfigPage() {
   const selectedRef = useRef<HTMLDivElement | null>(null);
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const d = await api.diffConfig();
-    setConfigDiff(d);
+    const snapshot = await api.diffConfig();
+    const d = snapshot?.data ?? null;
+    if (!dialogOpen.current) { setConfigDiff(d); setDiffRevision(snapshot?.revision); }
     if (!checkLoaded(d?.candidate ?? d?.running)) return;
-    if (!keepEdits || !candidateDraft.current) {
-      setCandidateText(JSON.stringify(d?.candidate ?? d?.running, null, 2));
-      candidateDraft.current = false;
-    }
+    adoptConfig(JSON.stringify(d?.candidate ?? d?.running, null, 2), keepEdits, snapshot?.revision);
     if (d?.running) setRunningLoadedAt(new Date());
     if (d?.candidate) setCandidateLoadedAt(new Date());
-  }, [checkLoaded]));
+  }, [checkLoaded, adoptConfig]));
 
   useConfigRefresh(refresh);
 
@@ -96,16 +105,15 @@ function ConfigPage() {
     if (!canEdit || !canSave) return;
     setStatus(null);
     try {
-      const submittedRevision = candidateEditRevision.current;
       const parsed = JSON.parse(candidateText) as ConfigBundle;
-      const res = await api.setCandidateConfig(parsed);
+      const submitted = draft.beginSave();
+      const res = await api.setCandidateConfig(submitted.baseRevision ?? "", parsed);
       if (!res.ok) {
+        draft.failSave(submitted, res);
         setStatus(`Failed to save candidate: ${res.error}`);
         return;
       }
-      if (candidateEditRevision.current === submittedRevision) {
-        candidateDraft.current = false;
-      }
+      draft.acceptConfig(submitted, candidateText, res.revision);
       setCandidateLoadedAt(new Date());
       setStatus(statusWithWarning("Candidate staged — commit to apply.", res.warning));
       refresh();
@@ -117,19 +125,22 @@ function ConfigPage() {
   async function copyRunningToCandidate() {
     if (!canEdit || !canSave || !running) return;
     setStatus(null);
-    const res = await api.setCandidateConfig(running);
+    const res = await api.setCandidateConfig(draft.editor.baseRevision ?? "", running);
     if (!res.ok) {
+      draft.reportFailure(res);
       setStatus(`Failed to copy running to candidate: ${res.error}`);
       return;
     }
-    setCandidateText(JSON.stringify(running, null, 2));
+    adoptConfig(JSON.stringify(running, null, 2), false, res.revision);
     setCandidateLoadedAt(new Date());
     setStatus(statusWithWarning("Candidate replaced with running and staged — commit to apply.", res.warning));
     refresh();
   }
 
   function doCommit() {
-    if (!canEdit) return;
+    if (!canEdit || tab !== "diff" || !canSave || !configDiff || !diffRevision) { setTab("diff"); return; }
+    const reviewedRevision = diffRevision;
+    dialogOpen.current = true;
     const changedCount = diffBlocks.length;
     confirm.open({
       title: "Commit configuration",
@@ -140,7 +151,8 @@ function ConfigPage() {
       variant: "default",
       onConfirm: async () => {
         setStatus(null);
-        const result = await api.commit();
+        if (!canSaveNow()) { setStatus("Commit failed: configuration diff unavailable. Refresh and review again."); return; }
+        const result = await api.commit(reviewedRevision);
         if (result.ok) {
           setStatus(statusWithWarning("Committed.", result.warning));
         } else {
@@ -152,7 +164,9 @@ function ConfigPage() {
   }
 
   function doCommitConfirmed() {
-    if (!canEdit) return;
+    if (!canEdit || tab !== "diff" || !canSave || !configDiff || !diffRevision) { setTab("diff"); return; }
+    const reviewedRevision = diffRevision;
+    dialogOpen.current = true;
     const ttl = Number(ttlSeconds);
     const secs = Number.isFinite(ttl) && ttl > 0 ? ttl : 60;
     confirm.open({
@@ -162,7 +176,8 @@ function ConfigPage() {
       variant: "default",
       onConfirm: async () => {
         setStatus(null);
-        const result = await api.commitConfirmed(secs);
+        if (!canSaveNow()) { setStatus("Commit failed: configuration diff unavailable. Refresh and review again."); return; }
+        const result = await api.commitConfirmed(reviewedRevision, secs);
         setStatus(result.ok ? statusWithWarning(`Commit-confirmed started (${secs}s).`, result.warning) : `Commit-confirmed failed: ${result.error}`);
         refresh();
       },
@@ -172,22 +187,23 @@ function ConfigPage() {
   async function doConfirm() {
     if (!canEdit) return;
     setStatus(null);
-    const result = await api.confirmCommit();
+    const result = await api.confirmCommit(diffRevision ?? "");
     setStatus(result.ok ? statusWithWarning("Commit confirmed.", result.warning) : `Confirm failed: ${result.error}`);
     refresh();
   }
 
   function doRollback() {
     if (!canEdit) return;
+    const reviewedRevision = diffRevision ?? "";
     confirm.open({
       title: "Rollback configuration",
       message:
-        "This will restore the previous running config (from before the last commit). Any changes made since the last commit — including new zones, rules, or interfaces — will be lost. This cannot be undone.",
+        "This will restore the previous running config (from before the last commit). The newer staged candidate is kept. Review it before any later commit.",
       confirmLabel: "Rollback",
       variant: "danger",
       onConfirm: async () => {
         setStatus(null);
-        const result = await api.rollback();
+        const result = await api.rollback(reviewedRevision);
         if (result.ok) {
           setStatus(statusWithWarning("Rolled back.", result.warning));
         } else {
@@ -200,7 +216,8 @@ function ConfigPage() {
 
   async function downloadConfig(redacted: boolean) {
     setStatus(null);
-    const cfg = await api.exportConfig(redacted);
+    const snapshot = await api.exportConfig(redacted);
+    const cfg = snapshot?.data;
     if (!cfg) {
       setStatus("Failed to export config.");
       return;
@@ -217,17 +234,20 @@ function ConfigPage() {
   }
 
   async function restoreConfig() {
-    if (!canEdit) return;
+    if (!canEdit || !canSaveNow()) return;
     setStatus(null);
     if (!uploadFile) {
       setStatus("Select a config JSON file first.");
       return;
     }
     try {
-      const text = await uploadFile.text();
+      const submittedFile = uploadFile;
+      const submittedBase = importRevision.expectedRevision();
+      const text = await submittedFile.text();
       const parsed = JSON.parse(text) as ConfigBundle;
-      const res = await api.importConfig(parsed);
+      const res = await api.importConfig(submittedBase, parsed).then(importRevision.handleRevision);
       setStatus(res.ok ? statusWithWarning("Config import staged — commit to apply.", res.warning) : `Restore failed: ${res.error}`);
+      if (res.ok) setUploadFile((current) => current === submittedFile ? null : current);
       refresh();
     } catch {
       setStatus("Invalid JSON file.");
@@ -367,7 +387,9 @@ function ConfigPage() {
         </button>
       }
     >
-      <ConfirmDialog {...confirm.props} />
+      <ConfirmDialog {...confirm.props} onCancel={() => { dialogOpen.current = false; confirm.props.onCancel(); }} onConfirm={() => { dialogOpen.current = false; confirm.props.onConfirm(); }} />
+      {importRevision.revisionNotice(() => window.location.reload())}
+      <ConfigEditNotice superseded={draft.editor.superseded} {...draft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
@@ -422,7 +444,10 @@ function ConfigPage() {
               onDownloadBackup={downloadBackup}
               onDownloadConfig={downloadConfig}
               onRestoreConfig={restoreConfig}
-              onUploadFileChange={setUploadFile}
+              onUploadFileChange={(file) => {
+                setUploadFile(file);
+                if (file && diffRevision) importRevision.readConfig({ data: file, revision: diffRevision }, false);
+              }}
             />
             <ConfigSummaryCard
               zoneCount={zoneCount}
@@ -440,12 +465,12 @@ function ConfigPage() {
             idsRuleCount={idsRuleCount}
             onDownloadRules={async () => {
               setStatus(null);
-              const blob = await api.backupIDSRules();
-              if (!blob) {
+              const snapshot = await api.backupIDSRules();
+              if (!snapshot) {
                 setStatus("Failed to export IDS rules.");
                 return;
               }
-              const url = URL.createObjectURL(blob);
+              const url = URL.createObjectURL(snapshot.data);
               const a = document.createElement("a");
               a.href = url;
               a.download = "containd-ids-rules.json";
@@ -463,7 +488,7 @@ function ConfigPage() {
                   setStatus("Invalid IDS rules file (expected JSON array).");
                   return;
                 }
-                const res = await api.restoreIDSRules(rules);
+                const res = await api.restoreIDSRules(diffRevision ?? "", rules);
                 setStatus(res.ok ? `IDS restore staged (${res.data.count} rules) — commit to apply.` : `Restore failed: ${res.error}`);
                 refresh();
               } catch {
@@ -491,6 +516,7 @@ function ConfigPage() {
 
           <ConfigActionBar
             canEdit={canEdit}
+            canCommit={false}
             ttlSeconds={ttlSeconds}
             onTtlChange={setTtlSeconds}
             onCommit={doCommit}
@@ -503,7 +529,7 @@ function ConfigPage() {
 
       {tab === "candidate" && (
         <Card padding="md">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-(--text)">Staged config JSON</h2>
               <div className="text-xs text-(--text-muted)">
@@ -537,7 +563,7 @@ function ConfigPage() {
           <textarea
             aria-label="Staged config JSON"
             value={candidateText}
-            onChange={(e) => { candidateEditRevision.current++; candidateDraft.current = true; setCandidateText(e.target.value); }}
+            onChange={(e) => setCandidateText(e.target.value)}
             readOnly={!canEdit || !canSave}
             rows={22}
             className="w-full rounded-xs border bg-(--surface) p-3 font-mono text-xs text-(--text) transition-ui outline-hidden"
@@ -582,62 +608,7 @@ function ConfigPage() {
               No differences between running and staged config.
             </div>
           ) : (
-            diffBlocks.map((block) => (
-              <div
-                key={block.key}
-                role="region"
-                aria-label={`${block.label} changes`}
-                className="rounded-xs border bg-(--surface) p-4 shadow-card"
-              >
-                <div className="mb-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.2em] text-(--text-dim)">Changed block</div>
-                    <div className="text-sm font-semibold text-(--text)">{block.label}</div>
-                  </div>
-                  {block.diff.length > 0 && (
-                    <div className="text-xs text-(--text-muted)">
-                      {block.diff.filter((l) => l.type === "add").length} added ·{" "}
-                      {block.diff.filter((l) => l.type === "del").length} removed
-                    </div>
-                  )}
-                </div>
-                {block.hiddenChanges && (
-                  <p className="text-sm text-(--text)">Secret values changed (hidden).</p>
-                )}
-                {block.idsBank && (
-                  <div className="mb-3 grid gap-1 text-xs text-(--text)">
-                    <div className="font-semibold">IDS rule bank</div>
-                    <div>
-                      Running: {block.idsBank.running.count.toLocaleString()} rules · SHA-256{" "}
-                      <span className="font-mono">{block.idsBank.running.sha256.slice(0, 12)}</span>
-                    </div>
-                    <div>
-                      Staged: {block.idsBank.candidate.count.toLocaleString()} rules · SHA-256{" "}
-                      <span className="font-mono">{block.idsBank.candidate.sha256.slice(0, 12)}</span>
-                    </div>
-                  </div>
-                )}
-                {block.diff.length > 0 && (
-                  <div className="grid gap-1 rounded-xs border bg-black/60 p-3 text-xs text-(--text)">
-                    {block.diff.map((line, idx) => (
-                      <div
-                        key={`${block.key}-${idx}`}
-                        className={
-                          line.type === "add"
-                            ? "rounded-sm bg-mint/20 px-2 py-0.5 text-mint"
-                            : "rounded-sm bg-rose-500/20 px-2 py-0.5 text-rose-200"
-                        }
-                      >
-                        <span className="mr-2 inline-block w-3 text-center">
-                          {line.type === "add" ? "+" : "-"}
-                        </span>
-                        <span className="break-all font-mono whitespace-pre-wrap">{line.line}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))
+            <ConfigDiffBlocks blocks={diffBlocks} />
           )}
         </div>
       )}
@@ -645,6 +616,7 @@ function ConfigPage() {
       {tab !== "overview" && (
         <ConfigActionBar
           canEdit={canEdit}
+          canCommit={tab === "diff" && canSave && !!configDiff && !!diffRevision}
           ttlSeconds={ttlSeconds}
           onTtlChange={setTtlSeconds}
           onCommit={doCommit}

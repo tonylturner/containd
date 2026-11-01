@@ -1,26 +1,31 @@
 "use client";
 
 import { useCallback, useRef, useState, type SetStateAction } from "react";
-import { adopt, fresh, sameConfig, type ConfigEditor } from "./config-editor";
+import { adopt, fresh, keepEdits, sameConfig, type ConfigEditor } from "./config-editor";
+import { isRevisionConflict, isRevisionRequired } from "./use-config-editor";
+import type { ApiFailure } from "./api";
 
 /** Creation/row forms keep raw fields separately from their server context. */
-export function useConfigForm<F extends object>(initial: F, context: unknown = null) {
+export function useConfigForm<F extends object>(initial: F, context: unknown = null, revision?: string) {
   const defaults = useRef(initial);
-  const [editor, setEditor] = useState(() => fresh({ fields: initial, context }));
-  const refreshForm = useCallback((nextContext: unknown, keepEdits = true) => {
+  const [editor, setEditor] = useState(() => fresh({ fields: initial, context }, revision));
+  const refreshForm = useCallback((nextContext: unknown, keepEdits = true, revision?: string) => {
     setEditor((e) => {
-      const next = adopt(e, { fields: defaults.current, context: nextContext }, keepEdits);
+      const next = adopt(e, { fields: defaults.current, context: nextContext }, keepEdits, revision);
       return { ...next, cfg: { ...next.cfg, context: nextContext } };
     });
   }, []);
-  const acceptFields = useCallback((submitted: ConfigEditor<{ fields: F; context: unknown }>, keys: (keyof F)[]) => {
+  const acceptFields = useCallback((submitted: ConfigEditor<{ fields: F; context: unknown }>, keys: (keyof F)[], revision?: string) => {
     setEditor((e) => {
       const fields = { ...e.cfg.fields };
       for (const key of keys) {
         if (sameConfig(fields[key], submitted.cfg.fields[key])) fields[key] = defaults.current[key];
       }
       return { ...e, cfg: { ...e.cfg, fields },
-        superseded: !sameConfig(fields, defaults.current) && e.superseded };
+        superseded: !sameConfig(fields, defaults.current) && e.superseded,
+        ...(!sameConfig(fields, defaults.current) || !revision ? {} : {
+          baseRevision: revision, serverRevision: revision, conflictRevision: undefined, olderView: false, revisionRequired: false,
+        }) };
     });
   }, []);
   function field<K extends keyof F>(key: K): [F[K], (value: SetStateAction<F[K]>) => void] {
@@ -30,5 +35,17 @@ export function useConfigForm<F extends object>(initial: F, context: unknown = n
       } },
     }))];
   }
-  return { editor, field, refreshForm, acceptFields };
+  return { editor, field, refreshForm, acceptFields,
+    // Combining local drafts from different snapshots also requires explicit review.
+    requireReview: (revision: string) => setEditor((e) => ({ ...e, conflictRevision: revision })),
+    fail: (failure: ApiFailure) => {
+      if (isRevisionConflict(failure)) setEditor((e) => ({ ...e, conflictRevision: failure.currentRevision }));
+      if (isRevisionRequired(failure)) setEditor((e) => ({ ...e, revisionRequired: true }));
+    },
+    conflictProps: {
+      conflictRevision: editor.conflictRevision, olderView: editor.olderView, revisionRequired: editor.revisionRequired,
+      onKeep: () => setEditor(keepEdits),
+      onReload: () => setEditor((e) => fresh(e.server, e.serverRevision)),
+    },
+  };
 }

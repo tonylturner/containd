@@ -39,18 +39,18 @@ async function mockAPI(page: Page) {
     const req = route.request();
     const path = new URL(req.url()).pathname.slice(prefix.length);
     if (path === "/auth/me" || path === "/auth/session") {
-      return route.fulfill({ json: { id: "admin", username: "containd", role: "admin" } });
+      return route.fulfill({ json: { id: "admin", username: "containd", role: "admin" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     }
     if (req.method() === "GET") return server.failedReads.has(path)
-      ? route.fulfill({ status: 503, json: { error: "unavailable" } })
-      : route.fulfill({ json: data[path] ?? {} });
+      ? route.fulfill({ status: 503, json: { error: "unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } })
+      : route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     const body = req.postDataJSON();
     server.writes.push({ path, body });
     if (server.hold) await server.hold;
-    if (server.failedWrites.has(path)) return route.fulfill({ status: 400, json: { error: "rejected" } });
+    if (server.failedWrites.has(path)) return route.fulfill({ status: 400, json: { error: "rejected" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     let result = body;
     if (path === "/templates/ics/apply") {
-      return route.fulfill({ json: { rules: [], created: 0 }, headers: body.preview ? {} : { "X-Containd-Config": "staged" } });
+      return route.fulfill({ json: { rules: [], created: 0 }, headers: { "X-Containd-Revision": "0123456789abcdef.1", ...(body.preview ? {} : { "X-Containd-Config": "staged" }) } });
     }
     if (path === "/firewall/port-forwards" && req.method() === "POST") {
       const nat = data["/firewall/nat"] as { portForwards?: unknown[] };
@@ -71,7 +71,7 @@ async function mockAPI(page: Page) {
     } else if (path === "/identities") {
       data[path] = { mappings: [...(data[path] as { mappings: { ip: string }[] }).mappings.filter((row) => row.ip !== body.ip), body] };
     } else data[path] = body;
-    await route.fulfill({ json: result, headers: { "X-Containd-Config": "staged" } });
+    await route.fulfill({ json: result, headers: { "X-Containd-Revision": "0123456789abcdef.1", "X-Containd-Config": "staged" } });
   });
   return server;
 }
@@ -577,7 +577,7 @@ test("Templates keep parameters and zone selections through preview, notificatio
   await expect(codes).toHaveValue("3, ");
   server.failedWrites.add("/templates/ics/apply");
   await page.getByRole("button", { name: "Stage", exact: true }).click();
-  await expect(page.getByText("Failed to apply template.", { exact: true })).toBeVisible();
+  await expect(page.getByText("rejected", { exact: true })).toBeVisible();
   await expect(codes).toHaveValue("3, ");
   server.failedWrites.clear();
   let release!: () => void;

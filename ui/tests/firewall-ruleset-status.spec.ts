@@ -40,7 +40,7 @@ async function mockAPI(page: Page, mocks: Mocks): Promise<{ previewRequests: num
       seen.previewRequests++;
       body = { ruleset: "table inet containd_policy {}", runtime: { iec104EnvelopeOpen: false, reason: "no IEC 104 rules" } };
     }
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return seen;
 }

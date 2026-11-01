@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRevision } from "../../lib/use-config-revision";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { IEC104Inventory } from "./IEC104Inventory";
@@ -24,6 +26,7 @@ const criticalityVariant = (c: string) =>
     : "neutral" as const;
 
 export default function AssetsPage() {
+  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
   const toast = useToast();
   const [inventoryRefresh, setInventoryRefresh] = useState(0);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -41,11 +44,13 @@ export default function AssetsPage() {
   const [criticality, setCriticality] = useState("HIGH");
 
   const { refresh } = useAsyncRefresh(useCallback(async () => {
-    const [a, z] = await Promise.all([api.listAssets(), api.listZones()]);
+    const [aSnapshot, zSnapshot] = await Promise.all([api.listAssets(), api.listZones()]);
+    const a = readConfig(aSnapshot);
+    const z = readConfig(zSnapshot);
     setInventoryRefresh((key) => key + 1);
     setAssets(a ?? []);
     setZones(z ?? []);
-  }, []));
+  }, [readConfig]));
 
   useConfigRefresh(refresh);
 
@@ -59,7 +64,7 @@ export default function AssetsPage() {
       const ipErr = validateIPOrCIDRList(ips);
       if (ipErr) { setError(ipErr); return; }
     }
-    const result = await api.createAsset({
+    const result = await api.createAsset(expectedRevision(), {
       id: id.trim(),
       name: name.trim(),
       alias: alias.trim() || undefined,
@@ -70,7 +75,7 @@ export default function AssetsPage() {
         .map((s) => s.trim())
         .filter(Boolean),
       criticality,
-    });
+    }).then(handleRevision);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -85,7 +90,7 @@ export default function AssetsPage() {
 
   async function onDelete(assetID: string) {
     setError(null);
-    const result = await api.deleteAsset(assetID);
+    const result = await api.deleteAsset(expectedRevision(), assetID).then(handleRevision);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -96,7 +101,7 @@ export default function AssetsPage() {
 
   async function onUpdate(assetID: string, patch: Partial<Asset>) {
     setError(null);
-    const result = await api.updateAsset(assetID, patch);
+    const result = await api.updateAsset(expectedRevision(), assetID, patch).then(handleRevision);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -113,6 +118,7 @@ export default function AssetsPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      {revisionNotice(() => window.location.reload())}
       {error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}

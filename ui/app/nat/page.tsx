@@ -1,5 +1,7 @@
 "use client";
 
+import { matchingRevisions } from "../../lib/use-config-revision";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
@@ -13,6 +15,8 @@ import Link from "next/link";
 import {
   api,
   isAdmin,
+  type ApiResult,
+  type ForwardPublishResult,
   type NATConfig,
   type PortForward,
   type Zone,
@@ -35,6 +39,7 @@ const UNAVAILABLE = "NAT settings unavailable — the server did not return the 
 export default function NATPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [nat, setNat] = useState<NATConfig>({ enabled: false });
+  const [natRevision, setNatRevision] = useState("");
   const [rules, setRules] = useState<FirewallRule[] | null>(null);
   // Until the first answer the settings are unknown, not disabled or empty.
   const [loaded, setLoaded] = useState(false);
@@ -76,7 +81,11 @@ export default function NATPage() {
   ];
 
   const { initialLoading: loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [z, n, r] = await Promise.all([api.listZones(), api.getNAT(), api.listFirewallRules()]);
+    const [zSnapshot, nSnapshot, rSnapshot] = await Promise.all([api.listZones(), api.getNAT(), api.listFirewallRules()]);
+    if (zSnapshot && nSnapshot && (!matchingRevisions(zSnapshot, nSnapshot) || (rSnapshot && !matchingRevisions(nSnapshot, rSnapshot)))) { setLoadError("Configuration changed during loading. Refresh to review one consistent snapshot."); return; }
+    const z = (zSnapshot?.data ?? null);
+    const n = (nSnapshot?.data ?? null);
+    const r = (rSnapshot?.data ?? null);
     setRules(r);
     // Never save stand-in settings. After the first success, keep drafts
     // mounted but disabled while the current server copy is unavailable.
@@ -84,6 +93,7 @@ export default function NATPage() {
       setLoadError(null);
       setZones(z);
       setNat(n);
+      setNatRevision(nSnapshot?.revision ?? "");
       setLoaded(true);
       if (!keepEdits) setReloadKey((n) => n + 1);
     } else {
@@ -132,15 +142,16 @@ export default function NATPage() {
         key={`snat-${reloadKey}`}
         zones={zones}
         nat={nat}
-        onSave={async (cfg) => {
+        revision={natRevision}
+        onSave={async (cfg, revision) => {
           if (!writable.current) return null;
           setError(null);
           setNotice(null);
           setNoticeWarning(false);
-          const saved = await api.setNAT(cfg);
+          const saved = await api.setNAT(revision, cfg);
           if (!saved.ok) {
             setError(saved.error || "Failed to update NAT (check zones).");
-            return null;
+            return saved;
           }
           setNat(saved.data);
           setNotice(
@@ -149,7 +160,7 @@ export default function NATPage() {
               : "NAT configuration staged — commit to apply.",
           );
           refresh();
-          return saved.data;
+          return saved;
         }}
       />
 
@@ -157,43 +168,45 @@ export default function NATPage() {
         key={`dnat-${reloadKey}`}
         zones={zones}
         nat={nat}
+        revision={natRevision}
         rules={rules}
-        onPublish={async (forward, allowRule) => {
-          if (!writable.current) return false;
+        onPublish={async (forward, allowRule, revision) => {
+          if (!writable.current) return null;
           setError(null);
           setNotice(null);
-          const result = await api.publishPortForward(forward, allowRule);
+          const result = await api.publishPortForward(revision, forward, allowRule);
           if (!result.ok) {
             setError(result.error);
-            return false;
+            return result;
           }
           setNotice(forwardPlacementMessage(result.data) + (result.warning ? ` Warning: ${result.warning}` : ""));
           setNoticeWarning(!!result.data.placement?.warning);
           await refresh();
-          return true;
+          return result;
         }}
-        onDelete={async (id) => {
-          if (!writable.current) return;
-          setError(null);
-          setNotice(null);
-          setNoticeWarning(false);
-          const result = await api.deletePortForward(id);
-          if (!result.ok) {
-            setError(result.error);
-            return;
-          }
-          setNotice(`Port forward deleted — commit to apply. Deleted rules: ${result.data.deletedRuleIds.join(", ") || "none"}. Edited rules: ${result.data.editedRuleIds.join(", ") || "none"}.${result.warning ? ` Warning: ${result.warning}` : ""}`);
-          await refresh();
-        }}
-        onSave={async (cfg) => {
+        onDelete={async (id, revision) => {
           if (!writable.current) return null;
           setError(null);
           setNotice(null);
           setNoticeWarning(false);
-          const saved = await api.setNAT(cfg);
+          const result = await api.deletePortForward(revision, id);
+          if (!result.ok) {
+            setError(result.error);
+            return result;
+          }
+          setNotice(`Port forward deleted — commit to apply. Deleted rules: ${result.data.deletedRuleIds.join(", ") || "none"}. Edited rules: ${result.data.editedRuleIds.join(", ") || "none"}.${result.warning ? ` Warning: ${result.warning}` : ""}`);
+          await refresh();
+          return result;
+        }}
+        onSave={async (cfg, revision) => {
+          if (!writable.current) return null;
+          setError(null);
+          setNotice(null);
+          setNoticeWarning(false);
+          const saved = await api.setNAT(revision, cfg);
           if (!saved.ok) {
             setError(saved.error || "Failed to update port forwards (check zones/ports).");
-            return null;
+            return saved;
           }
           setNat(saved.data);
           setNotice(
@@ -202,7 +215,7 @@ export default function NATPage() {
               : "Port forwarding configuration staged — commit to apply.",
           );
           refresh();
-          return saved.data;
+          return saved;
         }}
       />
       </fieldset> : null}
@@ -217,22 +230,24 @@ function snat(nat: NATConfig): NATConfig {
 /* ── SNAT card ────────────────────────────────────────────────── */
 
 function NATCard({
+  revision,
   zones,
   nat,
   onSave,
 }: {
   zones: Zone[];
   nat: NATConfig;
-  onSave: (cfg: NATConfig) => Promise<NATConfig | null>;
+  revision: string;
+  onSave: (cfg: NATConfig, revision: string) => Promise<ApiResult<NATConfig> | null>;
 }) {
-  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, dirty } = useConfigEditor(() => snat(nat));
+  const { conflictProps, editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, dirty } = useConfigEditor(() => snat(nat), true, revision);
   const enabled = !!cfg.enabled;
   const egressZone = cfg.egressZone ?? "";
   const sourceZones = cfg.sourceZones ?? [];
   const setEnabled = (value: SetStateAction<boolean>) => setCfg((c) => ({ ...c, enabled: typeof value === "function" ? value(!!c.enabled) : value }));
   const setEgressZone = (egressZone: string) => setCfg((c) => ({ ...c, egressZone }));
   const setSourceZones = (value: SetStateAction<string[]>) => setCfg((c) => ({ ...c, sourceZones: typeof value === "function" ? value(c.sourceZones ?? []) : value }));
-  useEffect(() => { adoptConfig(snat(nat)); }, [nat, adoptConfig]);
+  useEffect(() => { adoptConfig(snat(nat), true, revision); }, [nat, adoptConfig, revision]);
 
   const zoneOptions = (zones ?? [])
     .map((z) => ({ value: z.name, label: zoneLabel(z) }))
@@ -241,7 +256,7 @@ function NATCard({
 
   return (
     <div className="mb-6 overflow-hidden rounded-xs border bg-(--surface) shadow-card backdrop-blur-sm">
-      <ConfigEditNotice superseded={editor.superseded} />
+      <ConfigEditNotice {...conflictProps} onReload={() => window.location.reload()} superseded={editor.superseded} />
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-(--text)">Source NAT (SNAT)</div>
@@ -353,9 +368,9 @@ function NATCard({
               const saved = await onSave({ ...nat, ...cfg,
                 egressZone: egressZone.trim() || undefined,
                 sourceZones: sourceZones.map((z) => z.trim()).filter(Boolean),
-              });
-              if (saved) acceptConfig(submitted, snat(saved));
-              else failSave(submitted);
+              }, submitted.baseRevision ?? "");
+              if (saved?.ok) acceptConfig(submitted, snat(saved.data), saved.revision);
+              else failSave(submitted, saved ?? undefined);
             }}
             className={
               "rounded-xs px-3 py-1.5 text-sm font-medium transition-ui " +
@@ -375,6 +390,7 @@ function NATCard({
 /* ── Port forwards (DNAT) card ────────────────────────────────── */
 
 function PortForwardsCard({
+  revision,
   zones,
   nat,
   onSave,
@@ -384,19 +400,20 @@ function PortForwardsCard({
 }: {
   zones: Zone[];
   nat: NATConfig;
-  onSave: (cfg: NATConfig) => Promise<NATConfig | null>;
+  revision: string;
+  onSave: (cfg: NATConfig, revision: string) => Promise<ApiResult<NATConfig> | null>;
   rules: FirewallRule[] | null;
-  onPublish: (forward: PortForward, allowRule: boolean) => Promise<boolean>;
-  onDelete: (id: string) => Promise<void>;
+  onPublish: (forward: PortForward, allowRule: boolean, revision: string) => Promise<ApiResult<ForwardPublishResult> | null>;
+  onDelete: (id: string, revision: string) => Promise<Awaited<ReturnType<typeof api.deletePortForward>> | null>;
 }) {
-  const { editor, cfg: items, setCfg: setItems, adoptConfig, beginSave, failSave, acceptConfig, dirty } = useConfigEditor<PortForward[]>(nat.portForwards ?? []);
+  const { conflictProps, editor, cfg: items, setCfg: setItems, adoptConfig, beginSave, failSave, acceptConfig, acceptRow, dirty } = useConfigEditor<PortForward[]>(nat.portForwards ?? [], true, revision);
   const form = useConfigForm({
     ingressChoice: "", newProto: "tcp" as "tcp" | "udp",
     newListen: "", newDestIp: "", newDestPort: "", newSources: "", newDesc: "",
     allowRule: true,
-  }, nat);
+  }, nat, revision);
   const { refreshForm } = form;
-  useEffect(() => { refreshForm(nat); }, [nat, refreshForm]);
+  useEffect(() => { refreshForm(nat, true, revision); }, [nat, refreshForm, revision]);
   const [ingressChoice, setIngressChoice] = form.field("ingressChoice");
   const [newProto, setNewProto] = form.field("newProto");
   const [newListen, setNewListen] = form.field("newListen");
@@ -410,8 +427,8 @@ function PortForwardsCard({
   const confirm = useConfirm();
 
   useEffect(() => {
-    adoptConfig(nat.portForwards ?? []);
-  }, [nat.portForwards, adoptConfig]);
+    adoptConfig(nat.portForwards ?? [], true, revision);
+  }, [nat.portForwards, adoptConfig, revision]);
 
   const zoneOptions = (zones ?? [])
     .map((z) => ({ value: z.name, label: zoneLabel(z) }))
@@ -479,18 +496,19 @@ function PortForwardsCard({
     };
     const submitted = form.editor;
     setBusy(true);
-    const ok = await onPublish(pf, allowRule);
+    const result = await onPublish(pf, allowRule, submitted.baseRevision ?? "");
     setBusy(false);
-    if (ok) form.acceptFields(submitted, ["newListen", "newDestIp", "newDestPort", "newSources", "newDesc"]);
+    if (result && !result.ok) form.fail(result);
+    if (result?.ok) form.acceptFields(submitted, ["newListen", "newDestIp", "newDestPort", "newSources", "newDesc"], result.revision);
   }
 
   async function save() {
     setError(null);
     const submitted = beginSave();
     setBusy(true);
-    const saved = await onSave({ ...nat, portForwards: items });
-    if (saved) acceptConfig(submitted, saved.portForwards ?? []);
-    else failSave(submitted);
+    const saved = await onSave({ ...nat, portForwards: items }, submitted.baseRevision ?? "");
+    if (saved?.ok) acceptConfig(submitted, saved.data.portForwards ?? [], saved.revision);
+    else failSave(submitted, saved ?? undefined);
     setBusy(false);
   }
 
@@ -513,13 +531,21 @@ function PortForwardsCard({
       </div>,
       confirmLabel: "Delete",
       variant: "danger",
-      onConfirm: async () => { setBusy(true); await onDelete(pf.id); setBusy(false); },
+      onConfirm: async () => {
+        setBusy(true);
+        const submitted = beginSave();
+        const result = await onDelete(pf.id, submitted.baseRevision ?? "");
+        if (result?.ok) acceptRow(submitted, rows => rows.filter(item => item.id !== pf.id), `${JSON.stringify(pf.id)}.`, result.revision);
+        else failSave(submitted, result ?? undefined);
+        setBusy(false);
+      },
     });
   }
 
   return (
     <div className="mb-6 overflow-hidden rounded-xs border bg-(--surface) shadow-card backdrop-blur-sm">
-      <ConfigEditNotice superseded={editor.superseded || form.editor.superseded} />
+      <ConfigEditNotice {...conflictProps} onReload={() => window.location.reload()} superseded={editor.superseded || form.editor.superseded} />
+      <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => window.location.reload()} />
       <ConfirmDialog {...confirm.props} />
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div>

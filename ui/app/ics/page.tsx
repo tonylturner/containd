@@ -1,5 +1,7 @@
 "use client";
 
+import { matchingRevisions } from "../../lib/use-config-revision";
+
 import { useConfigLoad } from "../../lib/use-config-editor";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
@@ -49,6 +51,7 @@ export default function ICSPolicyPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [rules, setRules] = useState<FirewallRule[]>([]);
+  const [viewRevision, setViewRevision] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [filterProto, setFilterProto] = useState<string>("all");
@@ -63,10 +66,14 @@ export default function ICSPolicyPage() {
   const queueGroup = dpiConfig.nfqueueGroup ?? 0;
 
   const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [list, dp] = await Promise.all([api.listFirewallRules(), fetchDataPlane()]);
+    const [listSnapshot, dpSnapshot] = await Promise.all([api.listFirewallRules(), fetchDataPlane()]);
+    if (!matchingRevisions(listSnapshot, dpSnapshot)) { checkLoaded(null); return; }
+    const list = (listSnapshot?.data ?? null);
+    const dp = (dpSnapshot?.data ?? null);
     if (!checkLoaded(list)) return;
     setError(null);
     if (dp) setDpiConfig(dp);
+    setViewRevision(listSnapshot?.revision ?? "");
     setRules(list);
     if (!keepEdits) setEditing(null);
   }, [checkLoaded]));
@@ -93,20 +100,20 @@ export default function ICSPolicyPage() {
 
   // The editor reports a disabled filter as no predicate; null clears the
   // stored one, where an omitted key would keep it.
-  async function onSave(id: string, ics: ICSPredicatePatch | undefined) {
+  async function onSave(id: string, ics: ICSPredicatePatch | undefined, revision: string) {
     setError(null);
     if (!canSave) return null;
-    const result = await api.updateFirewallRule(id, { ics: ics ?? null });
+    const result = await api.updateFirewallRule(revision, id, { ics: ics ?? null });
     if (!result.ok) {
       setError(result.error);
-      return null;
+      return result;
     }
     toast(
       ics ? "ICS filter staged — commit to apply." : "ICS filter removal staged — commit to apply.",
       "success",
     );
     refresh();
-    return result.data;
+    return result;
   }
 
   return (
@@ -357,12 +364,13 @@ export default function ICSPolicyPage() {
 
       {editing && canEdit && (
         <EditICSModal
+          revision={viewRevision}
           available={canSave}
           rule={rules.find((r) => r.id === editing.id) ?? editing}
           context={rules}
           globalMode={dpiConfig.dpiMode}
           onClose={() => setEditing(null)}
-          onSave={(ics) => onSave(editing.id, ics)}
+          onSave={(ics, revision) => onSave(editing.id, ics, revision)}
         />
       )}
     </Shell>

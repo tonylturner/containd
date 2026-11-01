@@ -29,7 +29,7 @@ async function openICS(page: Page, storedRule: ReturnType<typeof rule>) {
       const patch = request.postDataJSON() as { ics: Record<string, unknown> };
       patches.push(patch);
       stored = { ...stored, ics: { ...stored.ics, ...patch.ics } };
-      await route.fulfill({ json: stored });
+      await route.fulfill({ json: stored, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     let body: unknown = {};
@@ -37,7 +37,7 @@ async function openICS(page: Page, storedRule: ReturnType<typeof rule>) {
     if (path === "/api/v1/firewall/rules") body = [stored];
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "monitor" };
     if (path === "/api/v1/health") body = { status: "ok", component: "mgmt" };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/firewall/rules");
   await page.goto("/ics/");

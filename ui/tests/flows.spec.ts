@@ -24,7 +24,7 @@ test("flows show the TAG labels that matched them", async ({ page }) => {
       ? { id: "admin", username: "containd", role: "admin" }
       : path === "/api/v1/flows" ? flows
         : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/flows");
   await page.goto("/flows/");
@@ -51,13 +51,13 @@ test("flows show loading until the first answer, and polls keep the rows", async
       // phase gets the same snapshot; only the subsequent poll changes it.
       const snapshot = reply;
       await gate;
-      await route.fulfill({ json: snapshot });
+      await route.fulfill({ json: snapshot, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     const body = path.endsWith("/auth/me") || path.endsWith("/auth/session")
       ? { id: "admin", username: "containd", role: "admin" }
       : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const flowsAnswer = () => page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/flows");
 

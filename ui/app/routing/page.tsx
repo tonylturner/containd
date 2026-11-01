@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRevision } from "../../lib/use-config-revision";
+
 import { useConfigLoad } from "../../lib/use-config-editor";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
@@ -33,6 +35,7 @@ import {
 import { inferWanGateway, WAN_GATEWAY_NAME, wanGateway, withDefaultRoute } from "../../lib/wan-gateway";
 
 export default function RoutingPage() {
+  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
   const canEdit = isAdmin();
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const [cfg, setCfg] = useState<RoutingConfig>({ gateways: [], routes: [], rules: [] });
@@ -77,29 +80,31 @@ export default function RoutingPage() {
   };
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [r, osr] = await Promise.all([api.getRouting(), api.getOSRouting()]);
+    const [rSnapshot, osr] = await Promise.all([api.getRouting(), api.getOSRouting()]);
+    const r = readConfig(rSnapshot, keepEdits);
     if (!checkLoaded(r)) return;
     setCfg(r);
     setOSRouting(osr);
-    refreshForm(r, keepEdits);
-  }, [refreshForm, checkLoaded]));
+    refreshForm(r, keepEdits, rSnapshot?.revision);
+  }, [refreshForm, checkLoaded, readConfig]));
 
   useConfigRefresh(refresh);
 
-  async function save(next: RoutingConfig): Promise<{ ok: boolean; warning?: string }> {
+  async function save(next: RoutingConfig): Promise<{ ok: boolean; warning?: string; revision?: string }> {
     if (!canEdit || !canSaveNow()) return { ok: false };
     setError(null);
     setNotice(null);
     setSaving(true);
-    const updated = await api.setRouting(next);
+    const updated = await api.setRouting(form.editor.baseRevision ?? "", next);
     setSaving(false);
     if (!updated.ok) {
+      form.fail(updated);
       setError(updated.error || "Failed to save routing config.");
       return { ok: false };
     }
     setCfg(updated.data);
     setNotice(updated.warning ? `Routing staged — commit to apply. Warning: ${updated.warning}` : "Routing staged — commit to apply.");
-    return { ok: true, warning: updated.warning };
+    return { ok: true, warning: updated.warning, revision: updated.revision };
   }
 
   async function addGateway() {
@@ -130,7 +135,7 @@ export default function RoutingPage() {
     const result = await save(next);
     if (!result.ok) return;
 
-    form.acceptFields(submitted, ["gwName", "gwAlias", "gwAddr", "gwIface", "gwDesc"]);
+    form.acceptFields(submitted, ["gwName", "gwAlias", "gwAddr", "gwIface", "gwDesc"], result.revision);
   }
 
   async function deleteGateway(idx: number) {
@@ -156,7 +161,7 @@ export default function RoutingPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setReconciling(true);
-        const res = await api.reconcileRoutingReplace();
+        const res = await api.reconcileRoutingReplace(expectedRevision()).then(handleRevision);
         setReconciling(false);
         if (!res.ok) {
           setError(res.error || "Failed to reconcile routing.");
@@ -195,7 +200,7 @@ export default function RoutingPage() {
     const result = await save(next);
     if (!result.ok) return;
 
-    form.acceptFields(submitted, ["routeDst", "routeGw", "routeIface", "routeTable", "routeMetric"]);
+    form.acceptFields(submitted, ["routeDst", "routeGw", "routeIface", "routeTable", "routeMetric"], result.revision);
   }
 
   async function deleteRoute(idx: number) {
@@ -234,7 +239,7 @@ export default function RoutingPage() {
     const result = await save(next);
     if (!result.ok) return;
 
-    form.acceptFields(submitted, ["ruleSrc", "ruleDst", "ruleTable", "rulePrio"]);
+    form.acceptFields(submitted, ["ruleSrc", "ruleDst", "ruleTable", "rulePrio"], result.revision);
   }
 
   async function deleteRule(idx: number) {
@@ -253,7 +258,8 @@ export default function RoutingPage() {
     setError(null);
     setNotice(null);
     try {
-      const [ifs, states] = await Promise.all([api.listInterfaces(), api.listInterfaceState()]);
+      const [ifsSnapshot, states] = await Promise.all([api.listInterfaces(), api.listInterfaceState()]);
+      const ifs = readConfig(ifsSnapshot);
       setInterfaceStateUnavailable(states === null);
       if (states === null) return;
       if (ifs === null) {
@@ -370,8 +376,9 @@ export default function RoutingPage() {
         </div>
       }
     >
+      {revisionNotice(() => refresh({ keepEdits: false }))}
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
-      <ConfigEditNotice superseded={form.editor.superseded} />
+      <ConfigEditNotice superseded={form.editor.superseded} {...form.conflictProps} onReload={() => window.location.reload()} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.

@@ -32,7 +32,7 @@ async function mockAPI(page: Page, options: { held?: string[]; fail?: Record<str
     const path = new URL(request.url()).pathname;
     const method = request.method();
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") {
-      await route.fulfill({ json: admin });
+      await route.fulfill({ json: admin, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     if (method === "GET") {
@@ -43,31 +43,31 @@ async function mockAPI(page: Page, options: { held?: string[]; fail?: Record<str
             : path === "/api/v1/services/av/defs" ? { path: "/data/clamav", files: [], definitions: [] }
               : path === "/api/v1/services/status" ? { av: { available: false, error: "engine unavailable" } }
                 : {};
-      await route.fulfill({ json: body });
+      await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     gate.requests.push({ method, path, body: request.postDataJSON() });
     if (options.held?.includes(path)) await released;
     if (options.fail?.[path]) {
-      await route.fulfill({ status: 400, json: { error: options.fail[path] } });
+      await route.fulfill({ status: 400, json: { error: options.fail[path] }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     if (path === "/api/v1/users" && method === "POST") {
       const created = { ...(request.postDataJSON() as object), id: "u-bob" };
       users = [...users, created];
-      await route.fulfill({ json: created });
+      await route.fulfill({ json: created, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     if (path === `/api/v1/users/${alice.id}` && method === "DELETE") {
       users = users.filter((u) => u.id !== alice.id);
-      await route.fulfill({ status: 204, body: "" });
+      await route.fulfill({ status: 204, body: "", headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     if (path === "/api/v1/services/av" || path === "/api/v1/services/dns") {
-      await route.fulfill({ json: request.postDataJSON() });
+      await route.fulfill({ json: request.postDataJSON(), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
-    await route.fulfill({ json: { status: "ok" } });
+    await route.fulfill({ json: { status: "ok" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return gate;
 }

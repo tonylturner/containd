@@ -70,7 +70,7 @@ async function openDashboard(page: Page, mocks: Mocks) {
     if (p === "/api/v1/simulation") body = { running: false };
     if (p === "/api/v1/config/diff") body = { running: {}, candidate: {} };
     if (p === "/api/v1/services/status") body = mocks.services;
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = Promise.all(["/api/v1/events", "/api/v1/zones", "/api/v1/flows", "/api/v1/system/stats"].map(
     (path) => page.waitForResponse((r) => new URL(r.url()).pathname === path),
