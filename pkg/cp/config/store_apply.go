@@ -102,6 +102,7 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func(func(
 	var previous *Config
 	var saved []savedConfigRow
 	var bank []IDSRule
+	var banks []savedBank
 	recovering := false
 	capture := func(tx *sql.Tx) error {
 		var err error
@@ -127,14 +128,19 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func(func(
 		if err != nil {
 			return err
 		}
+		banks, err = captureRecoveryBanks(ctx, tx)
+		if err != nil {
+			return err
+		}
 		bank, err = loadIDSRulesFrom(ctx, tx)
 		return err
 	}
 	// This handle excludes its own writers and timers. Another handle can
 	// transition after the promotion commits; compensation compares the
 	// promoted revision and refuses to overwrite that newer state. Defer collection
-	// while these saved rows may be needed, even if the transition removes all
-	// of their persisted references (notably reset and rollback).
+	// while these saved rows may be needed. This is only an optimization:
+	// another handle may collect them, so compensation reconstructs the saved
+	// immutable banks in the same transaction as their restored references.
 	s.recoveryHoldsBanks = true
 	defer func() { s.recoveryHoldsBanks = false }()
 	revision, err := transition(capture)
@@ -166,7 +172,7 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func(func(
 	failure := &ApplyError{Err: err}
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	failure.RestoreError = s.restoreApplyStateLocked(recoveryCtx, revision, saved, bank)
+	failure.RestoreError = s.restoreApplyStateLocked(recoveryCtx, revision, saved, bank, banks)
 	switch {
 	case failure.RestoreError != nil:
 		failure.ReapplyError = errors.New("reapply not attempted: store restoration failed")
@@ -190,12 +196,17 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func(func(
 	return "", failure
 }
 
-func (s *SQLiteStore) restoreApplyStateLocked(ctx context.Context, expected Revision, saved []savedConfigRow, bank []IDSRule) error {
+func (s *SQLiteStore) restoreApplyStateLocked(ctx context.Context, expected Revision, saved []savedConfigRow, bank []IDSRule, banks []savedBank) error {
 	tx, err := s.beginConfigTx(ctx, &expected)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	for _, b := range banks {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO ids_banks (id, data) VALUES (?, ?) ON CONFLICT(id) DO NOTHING`, b.id, b.data); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM configs`); err != nil {
 		return err
 	}
