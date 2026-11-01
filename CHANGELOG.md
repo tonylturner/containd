@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Return `GET /api/v1/security/conduits` as an ordered array with explicit `from`
+  and `to` zone names instead of a map keyed by joined names. API clients must
+  consume the array; zone names containing arrows remain distinct in topology
+  selection and security scores.
 - Remove IEC 104 inventory `acceptedCommands` and `overflow.outcomes`; inventory
   reports decoded attempts and points, never delivery. Learner delivery evidence
   is unchanged.
@@ -82,6 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after live reconciliation, so a later save cannot silently overwrite another
   operator's changes. Operational reconcile responses no longer return a
   configuration revision.
+- Use the theme's failure color for degraded evidence and audit persistence
+  banners.
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
 - An ICAP `413` reply counts as an oversized object, not a scanner error.

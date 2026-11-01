@@ -17,13 +17,12 @@ async function openMatrix(page: Page, count: number) {
         enforcement: { state: "enforcing", reason: "" },
       },
       "/api/v1/zones": names.map((name) => ({ name, slTarget: 0 })),
-      "/api/v1/security/conduits": {
-        "ot→dmz": {
-          state: "allow", ids: "none", proto: [], traffic: 0, rules: [],
-          gaps: [], mitre: [], defaultDeny: false, tlsEnforced: false,
-          protoWhitelist: false, mfaRequired: false, auditLogged: true, avEnabled: false,
-        },
-      },
+      "/api/v1/security/conduits": [{
+        from: "ot", to: "dmz",
+        state: "allow", ids: "none", proto: [], traffic: 0, rules: [],
+        gaps: [], mitre: [], defaultDeny: false, tlsEnforced: false,
+        protoWhitelist: false, mfaRequired: false, auditLogged: true, avEnabled: false,
+      }],
     };
     await route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });

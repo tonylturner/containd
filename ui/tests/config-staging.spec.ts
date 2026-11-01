@@ -37,7 +37,7 @@ async function setup(page: Page) {
       "/zones": state.zones,
       "/ids/rules": state.ids,
       "/ids/sources": [],
-      "/security/conduits": {},
+      "/security/conduits": [],
       "/interfaces": [{ name: "lan", device: "eth0", zone: "lan" }],
       "/interfaces/state": [{ name: "eth0", index: 2, up: true, mtu: 1500, mac: "02:00:00:00:00:01", addrs: ["192.0.2.1/24"] }],
       "/pcap/config": { enabled: false, interfaces: ["lan"], snaplen: 65535 },
@@ -155,7 +155,7 @@ test("topology surfaces failed zone patches without optimistic target changes", 
   const state = await setup(page);
   state.zones = [{ name: "MixedCase" }, { name: "wan" }];
   state.reject = true;
-  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ json: { "MixedCase→wan": { state: "allow", ids: "none", traffic: 0, proto: [], gaps: [] } }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ json: [{ from: "MixedCase", to: "wan", state: "allow", ids: "none", traffic: 0, proto: [], gaps: [] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
   await page.getByText("ALLOW", { exact: true }).click();

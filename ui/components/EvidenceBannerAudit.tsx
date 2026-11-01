@@ -5,7 +5,7 @@ export function EvidenceBannerAudit({ audit, loading }: { audit: AuditPersistenc
   const state = audit?.state ?? "unknown";
   return (
     <section aria-label="Audit persistence" className={`mb-4 rounded-xs border p-4 text-sm ${
-      state === "degraded" ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+      state === "degraded" ? "border-(--red)/30 bg-(--red)/10 text-(--red)"
         : state !== "ok" ? "border-amber/30 bg-amber/10 text-amber" : "bg-(--surface) text-(--text)"}`}>
       <h2 className="font-semibold">Audit persistence: {loading ? "checking" : state}</h2>
       <p className="mt-1 text-xs">Local SQLite writes, not syslog delivery. Operations continue even when audit writes fail.</p>

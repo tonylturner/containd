@@ -8,7 +8,7 @@ import {
 } from "./api-request";
 
 import type {
-  ConduitMap,
+  Conduit,
   Interface,
   InterfaceState,
   NATConfig,
@@ -25,7 +25,7 @@ export const networkAPI = {
   deleteZone: (expectedRevision: string, name: string) =>
     deleteJSONResult(`/api/v1/zones/${encodeURIComponent(name)}`, expectedRevision),
   getSecurityConduits: (signal?: AbortSignal) =>
-    getJSON<ConduitMap>("/api/v1/security/conduits", signal),
+    getJSONList<Conduit>("/api/v1/security/conduits", signal),
 
   listInterfaces: (signal?: AbortSignal) =>
     getConfigJSON<Interface[]>("/api/v1/interfaces", "list", signal),

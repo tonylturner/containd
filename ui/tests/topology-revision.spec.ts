@@ -14,7 +14,7 @@ test('two override writes merge the first acknowledged payload before the second
    return route.fulfill({json:zones.find(z=>path.endsWith(z.name)),headers:{'X-Containd-Revision':token(counter),'X-Containd-Config':'staged'}});
   }
   if(path==='/zones'&&hold)await wait;
-  const json=path.startsWith('/auth/')?{id:'admin',role:'admin'}:path==='/zones'?zones:path==='/security/conduits'?{'ot→dmz':{state:'allow',ids:'none',proto:[],traffic:0,rules:[],gaps:[],mitre:[],defaultDeny:false,tlsEnforced:false,protoWhitelist:false,mfaRequired:false,auditLogged:true,avEnabled:false}}:path==='/config/diff'?{changed:false,changedSections:[],pendingConfirm:null,running:{},candidate:{}}:{};
+  const json=path.startsWith('/auth/')?{id:'admin',role:'admin'}:path==='/zones'?zones:path==='/security/conduits'?[{from:'ot',to:'dmz',state:'allow',ids:'none',proto:[],traffic:0,rules:[],gaps:[],mitre:[],defaultDeny:false,tlsEnforced:false,protoWhitelist:false,mfaRequired:false,auditLogged:true,avEnabled:false}]:path==='/config/diff'?{changed:false,changedSections:[],pendingConfirm:null,running:{},candidate:{}}:{};
   return route.fulfill({json,headers:{'X-Containd-Revision':token(counter)}});
  });
  try{

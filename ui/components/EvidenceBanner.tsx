@@ -14,7 +14,7 @@ export function EvidenceBanner() {
   return (
     <aside role="status" aria-label="Evidence health"
       className={`mb-4 rounded-xs border px-4 py-3 text-sm ${failed
-        ? "border-rose-400/30 bg-rose-400/10 text-rose-300"
+        ? "border-(--red)/30 bg-(--red)/10 text-(--red)"
         : "border-amber/30 bg-amber/10 text-amber"}`}>
       <p className="font-semibold">{failed ? "Evidence degraded"
         : state === "recovered" ? "Evidence recovered — history needs review" : "Evidence state unknown"}</p>

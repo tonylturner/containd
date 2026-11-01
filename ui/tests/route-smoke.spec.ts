@@ -376,7 +376,7 @@ function responseFor(pathname: string) {
   }
   if (pathname === "/api/v1/dhcp/leases") return json({ leases: [] });
   if (pathname === "/api/v1/identities") return json({ mappings: [] });
-  if (pathname === "/api/v1/security/conduits") return json({});
+  if (pathname === "/api/v1/security/conduits") return json([]);
   if (pathname === "/api/v1/services/status") return json({ faults: [], av: { available: false, error: "engine unavailable" } });
   if (
     pathname === "/api/v1/services/syslog" ||
