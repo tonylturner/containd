@@ -29,6 +29,7 @@ type SimulationStatus struct {
 
 // RuntimeHealth is the engine health needed by the management API.
 type RuntimeHealth struct {
+	Protection        dpengine.ProtectionStatus `json:"protection"`
 	BootID            string
 	IEC104Enforcement dpengine.IEC104Enforcement
 	IPv4Forwarding    netcfg.IPv4ForwardingStatus
@@ -391,6 +392,7 @@ func (c *HTTPClient) RuntimeHealth(ctx context.Context) (RuntimeHealth, error) {
 		return RuntimeHealth{}, engineStatusError(resp, "engine health status")
 	}
 	var out struct {
+		Protection        dpengine.ProtectionStatus   `json:"protection"`
 		BootID            string                      `json:"bootId"`
 		IEC104Enforcement *dpengine.IEC104Enforcement `json:"iec104Enforcement"`
 		IPv4Forwarding    netcfg.IPv4ForwardingStatus `json:"ipv4Forwarding"`
@@ -406,7 +408,12 @@ func (c *HTTPClient) RuntimeHealth(ctx context.Context) (RuntimeHealth, error) {
 	default:
 		out.IPv4Forwarding = netcfg.IPv4ForwardingUnknown
 	}
+	protection := NormalizeProtection(out.Protection, "")
+	if protection.BootID != out.BootID {
+		protection = UnknownProtection("")
+	}
 	return RuntimeHealth{
+		Protection:        protection,
 		BootID:            out.BootID,
 		IEC104Enforcement: *out.IEC104Enforcement,
 		IPv4Forwarding:    out.IPv4Forwarding,

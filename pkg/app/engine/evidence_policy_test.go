@@ -14,7 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-func TestEvidencePolicyChangeStopsWithoutVoidingCompleteParents(t *testing.T) {
+func TestEvidencePolicyChangeStopsAndExcludesAffectedConnections(t *testing.T) {
 	a := newEvidenceTestAPI(t)
 	ctx := context.Background()
 	watch, err := a.watch.start(ctx, evidence.StartWatchRequest{})
@@ -50,12 +50,8 @@ func TestEvidencePolicyChangeStopsWithoutVoidingCompleteParents(t *testing.T) {
 				t.Fatalf("complete parent lost: %+v %v", ds, err)
 			}
 			result, err := a.generator.Generate(ctx, learn.GenerateRequest{DatasetID: ds.ID})
-			if err != nil || len(result.Suggestions) != 1 {
-				t.Fatalf("complete parent cannot certify: %+v %v", result, err)
-			}
-			suggestion, err := a.store.GetSuggestion(ctx, result.Suggestions[0].ID)
-			if err != nil || len(suggestion.Content.Limits) < 2 {
-				t.Fatalf("loss limit absent: %+v %v", suggestion, err)
+			if err != nil || len(result.Suggestions) != 0 || result.Withheld[evidence.WithheldCollectionLoss] != 1 {
+				t.Fatalf("policy collection stop did not exclude affected connection: %+v %v", result, err)
 			}
 			return
 		}

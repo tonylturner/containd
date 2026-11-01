@@ -38,6 +38,7 @@ var engineClientInterfaces = map[string]any{
 	"RuleCountersClient":    RuleCountersClient(httpEngineClient),
 	"RulePreviewClient":     RulePreviewClient(httpEngineClient),
 	"RulesetPreviewClient":  RulesetPreviewClient(httpEngineClient),
+	"ProtectionRetryClient": ProtectionRetryClient(httpEngineClient),
 	"RuntimeHealthClient":   RuntimeHealthClient(httpEngineClient),
 	"SignaturesClient":      SignaturesClient(httpEngineClient),
 	"SimulationClient":      SimulationClient(httpEngineClient),

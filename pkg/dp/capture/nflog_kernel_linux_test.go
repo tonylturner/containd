@@ -32,7 +32,7 @@ func TestKernelNFLogOrientsRuleHitsByConntrack(t *testing.T) {
 	t.Cleanup(func() { nft(t, "delete table inet containd_nflog_test\n") })
 
 	sink := &recordingSink{}
-	stop, err := StartNFLog(context.Background(), group, sink, nil)
+	stop, err := StartNFLog(context.Background(), group, sink, nil, nil)
 	if err != nil {
 		t.Fatalf("StartNFLog with conntrack direction: %v", err)
 	}

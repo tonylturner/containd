@@ -11,24 +11,44 @@ import (
 
 // IEC104Enforcement is the iec104Enforcement health object.
 type IEC104Enforcement struct {
-	Active  bool   `json:"active"`
-	Healthy bool   `json:"healthy"`
-	Reason  string `json:"reason"`
+	Active     bool                    `json:"active"`
+	Healthy    bool                    `json:"healthy"`
+	Reason     string                  `json:"reason"`
+	ReasonCode IEC104EnforcementReason `json:"reasonCode,omitempty"`
 }
 
-// Enforcement fault causes.
+// IEC104EnforcementReason carries a bounded fault category across the engine
+// client boundary. Reason retains detailed diagnostics for authenticated users;
+// unauthenticated health maps only these codes to fixed public text.
+type IEC104EnforcementReason string
+
 const (
-	faultQueue     = "queue"
-	faultVerdict   = "verdict"
-	faultReset     = "reset"
-	faultInjector  = "injector"
-	faultWorker    = "worker"
-	faultFraming   = "framing"
-	faultEnvelope  = "envelope"
-	faultSteering  = "steering"
-	faultAdmission = "admission_sweep"
-	faultGateZones = "gate_zone_sweep"
-	faultAddresses = "local_addresses"
+	IEC104ReasonQueue     IEC104EnforcementReason = "queue"
+	IEC104ReasonVerdict   IEC104EnforcementReason = "verdict"
+	IEC104ReasonReset     IEC104EnforcementReason = "reset"
+	IEC104ReasonInjector  IEC104EnforcementReason = "injector"
+	IEC104ReasonWorker    IEC104EnforcementReason = "worker"
+	IEC104ReasonFraming   IEC104EnforcementReason = "framing"
+	IEC104ReasonEnvelope  IEC104EnforcementReason = "envelope"
+	IEC104ReasonSteering  IEC104EnforcementReason = "steering"
+	IEC104ReasonAdmission IEC104EnforcementReason = "admission_sweep"
+	IEC104ReasonGateZones IEC104EnforcementReason = "gate_zone_sweep"
+	IEC104ReasonAddresses IEC104EnforcementReason = "local_addresses"
+)
+
+// Enforcement fault causes share the reason-code vocabulary.
+const (
+	faultQueue     = string(IEC104ReasonQueue)
+	faultVerdict   = string(IEC104ReasonVerdict)
+	faultReset     = string(IEC104ReasonReset)
+	faultInjector  = string(IEC104ReasonInjector)
+	faultWorker    = string(IEC104ReasonWorker)
+	faultFraming   = string(IEC104ReasonFraming)
+	faultEnvelope  = string(IEC104ReasonEnvelope)
+	faultSteering  = string(IEC104ReasonSteering)
+	faultAdmission = string(IEC104ReasonAdmission)
+	faultGateZones = string(IEC104ReasonGateZones)
+	faultAddresses = string(IEC104ReasonAddresses)
 )
 
 // transientFaults clear when the inline source reports ready again; the
@@ -43,6 +63,7 @@ var transientFaults = []string{faultQueue, faultVerdict, faultReset, faultWorker
 // loaded (ics) a reset fault makes the object unhealthy too, with active
 // still false.
 type iecHealth struct {
+	changed   func()
 	mu        sync.Mutex
 	active    bool
 	ics       bool
@@ -61,14 +82,23 @@ func (h *iecHealth) status() IEC104Enforcement {
 	defer h.mu.Unlock()
 	for _, cause := range []string{faultAdmission, faultGateZones, faultAddresses} {
 		if reason, ok := h.faults[cause]; ok {
-			return IEC104Enforcement{Active: h.active, Healthy: false, Reason: reason}
+			return IEC104Enforcement{Active: h.active, Healthy: false, Reason: reason, ReasonCode: IEC104EnforcementReason(cause)}
 		}
 	}
 	if h.active && len(h.faults) > 0 {
-		return IEC104Enforcement{Active: true, Healthy: false, Reason: h.reasonLocked()}
+		// Prefer queue readiness over its downstream symptoms. The detailed
+		// reason still contains every fault; the public category is stable.
+		var code IEC104EnforcementReason
+		for _, cause := range []string{faultQueue, faultInjector, faultReset, faultVerdict, faultWorker, faultFraming, faultEnvelope, faultSteering} {
+			if _, ok := h.faults[cause]; ok {
+				code = IEC104EnforcementReason(cause)
+				break
+			}
+		}
+		return IEC104Enforcement{Active: true, Healthy: false, Reason: h.reasonLocked(), ReasonCode: code}
 	}
 	if reason, ok := h.faults[faultReset]; ok && h.ics {
-		return IEC104Enforcement{Active: h.active, Healthy: false, Reason: reason}
+		return IEC104Enforcement{Active: h.active, Healthy: false, Reason: reason, ReasonCode: IEC104ReasonReset}
 	}
 	return IEC104Enforcement{Active: h.active, Healthy: true}
 }
@@ -111,6 +141,7 @@ func (h *iecHealth) setICS(ics bool) {
 	h.mu.Lock()
 	h.ics = ics
 	h.mu.Unlock()
+	h.notify()
 }
 
 // fault records a failure of cause with a human reason.
@@ -161,7 +192,23 @@ func (h *iecHealth) transitionLocked() (string, string) {
 }
 
 func (h *iecHealth) report(outcome, text string) {
+	h.notify()
 	if outcome != "" && h.emit != nil {
 		h.emit(outcome, text)
+	}
+}
+
+func (h *iecHealth) observe(changed func()) {
+	h.mu.Lock()
+	h.changed = changed
+	h.mu.Unlock()
+}
+
+func (h *iecHealth) notify() {
+	h.mu.Lock()
+	changed := h.changed
+	h.mu.Unlock()
+	if changed != nil {
+		changed()
 	}
 }

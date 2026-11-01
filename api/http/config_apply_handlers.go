@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
 func commitConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
@@ -60,11 +61,13 @@ func runningChangeHandler(store config.Store, engine EngineClient, services Serv
 			return
 		}
 		var warnings []string
+		var observation dpengine.ProtectionStatus
 		attempt := 0
 		revision, err := runtimeStore.ApplyChange(c.Request.Context(), expectedConfigRevision(c), change, ttl, func(ctx context.Context, previous, next *config.Config) error {
-			w, err := applyConfigSnapshot(ctx, store, engine, services, previous, next)
+			w, protection, err := applyConfigSnapshot(ctx, store, engine, services, previous, next)
 			if attempt == 0 {
 				warnings = w
+				observation = protection
 			}
 			attempt++
 			return err
@@ -100,7 +103,7 @@ func runningChangeHandler(store config.Store, engine EngineClient, services Serv
 			status = "rolled back"
 		}
 		configRevisionResponse(c, revision)
-		committedConfigResponse(c, status)
+		committedConfigResponse(c, status, protectionResponse(observation))
 	}
 }
 
@@ -118,6 +121,6 @@ func confirmCommitHandler(store config.Store) gin.HandlerFunc {
 		}
 		auditLog(c, audit.Record{Action: "config.confirm_commit", Target: "running"})
 		configRevisionResponse(c, revision)
-		committedConfigResponse(c, "confirmed")
+		committedConfigResponse(c, "confirmed", nil)
 	}
 }

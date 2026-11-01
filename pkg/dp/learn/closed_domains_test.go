@@ -37,7 +37,7 @@ func TestIECCommandRequirementsBoundByPredicates(t *testing.T) {
 }
 func TestModbusClosedCoilDomain(t *testing.T) {
 	unit, fc := uint8(1), uint8(5)
-	parent := evidence.Observation{Quality: evidence.Quality{Complete: true, Decoded: true}, Authority: evidence.Authority{RoleCertain: true, StandardPort: true}, Service: evidence.ServiceKey{ClientIP: "192.0.2.1", ServerIP: "192.0.2.2", ServerPort: 502, Transport: "tcp", Direction: "request", Protocol: "modbus"}, Modbus: &evidence.Modbus{UnitID: &unit, FunctionCode: &fc, Spans: []evidence.Span{{First: 7, Last: 7}}, Values: []uint16{0}}}
+	parent := evidence.Observation{Quality: evidence.Quality{Complete: true, Decoded: true}, Authority: evidence.Authority{RoleCertain: true, RoleEvidence: PortDecoderAuthority, StandardPort: true}, Service: evidence.ServiceKey{ClientIP: "192.0.2.1", ServerIP: "192.0.2.2", ServerPort: 502, Transport: "tcp", Direction: "request", Protocol: "modbus"}, Modbus: &evidence.Modbus{UnitID: &unit, FunctionCode: &fc, Spans: []evidence.Span{{First: 7, Last: 7}}, Values: []uint16{0}}}
 	bundle, reasons := GenerateRelation(parent)
 	if len(reasons) != 0 {
 		t.Fatal(reasons)

@@ -290,6 +290,9 @@ func (e *Engine) HandlePacket(pkt capture.Packet) (d capture.Decision) {
 	// Invalid packets never reach either flow handler; their tuple is untrusted.
 	if pkt.Invalid != "" {
 		e.recordPacketStats(pkt, nil)
+		if pkt.CaptureIncomplete || pkt.Invalid == capture.InvalidTruncated {
+			e.recordLearnPacketLoss(pkt)
+		}
 	}
 	return e.handlePacket(pkt)
 }

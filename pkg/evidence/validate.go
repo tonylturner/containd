@@ -14,6 +14,12 @@ func (o Observation) ValidateEnvelope() error {
 	if o.Source != SourceLive && o.Source != SourcePCAP {
 		return fmt.Errorf("unsupported observation source %q", o.Source)
 	}
+	if o.Authority.CaptureHook != "" && (o.Source != SourceLive || o.Authority.CaptureHook != CaptureNFQueue && o.Authority.CaptureHook != CaptureAFPacket) {
+		return fmt.Errorf("unsupported live capture hook %q", o.Authority.CaptureHook)
+	}
+	if o.Authority.Aliases != nil && (o.Source != SourceLive || o.Authority.Correlation != "verified" || !validAliases(o.Authority)) {
+		return fmt.Errorf("wire aliases require complete live verified authority")
+	}
 	switch o.Service.Coordinates {
 	case CoordinatesLogical:
 		if o.Authority.Logical == nil || o.Authority.Correlation != "verified" || o.Source == SourcePCAP {

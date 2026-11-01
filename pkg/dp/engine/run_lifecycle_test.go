@@ -121,7 +121,7 @@ func (c *blockingCapture) Interfaces() []string { return nil }
 
 func (c *blockingCapture) Settler() capture.Settler { return nil }
 
-func engineWithCapture(t *testing.T, runner captureRunner) *Engine {
+func engineWithCapture(t *testing.T, runner CaptureRunner) *Engine {
 	t.Helper()
 	e, err := New(Config{})
 	if err != nil {

@@ -23,7 +23,7 @@ func TestEvidenceCleanupRemainsAvailableAfterCollectorFailure(t *testing.T) {
 	}
 	a.watch.fail(errors.New("transient storage failure"))
 	mux := http.NewServeMux()
-	a.register(mux)
+	a.Register(mux)
 	for _, tc := range []struct{ method, path string }{{"GET", "/internal/learn/counters"}, {"DELETE", "/internal/learn/datasets/" + watch.DatasetID}} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))

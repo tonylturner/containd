@@ -104,7 +104,7 @@ func TestHealthReportsIEC104Enforcement(t *testing.T) {
 			name:       "engine unhealthy",
 			engine:     &healthMockEngine{mockEngine: &mockEngine{}, st: dpengine.IEC104Enforcement{Active: true, Reason: "reset injector unavailable"}},
 			forwarding: netcfg.IPv4ForwardingUnknown,
-			want:       map[string]any{"active": true, "healthy": false, "reason": "reset injector unavailable"},
+			want:       map[string]any{"active": true, "healthy": false, "reason": "IEC104 enforcement unavailable"},
 		},
 		{
 			name:       "inactive",
@@ -116,13 +116,13 @@ func TestHealthReportsIEC104Enforcement(t *testing.T) {
 			name:       "forwarding enabled",
 			engine:     &healthMockEngine{mockEngine: &mockEngine{}, forwarding: netcfg.IPv4ForwardingEnabled},
 			forwarding: netcfg.IPv4ForwardingEnabled,
-			want:       map[string]any{"active": false, "healthy": false, "reason": ""},
+			want:       map[string]any{"active": false, "healthy": false, "reason": "IEC104 enforcement unavailable"},
 		},
 		{
 			name:       "forwarding disabled",
 			engine:     &healthMockEngine{mockEngine: &mockEngine{}, forwarding: netcfg.IPv4ForwardingDisabled},
 			forwarding: netcfg.IPv4ForwardingDisabled,
-			want:       map[string]any{"active": false, "healthy": false, "reason": ""},
+			want:       map[string]any{"active": false, "healthy": false, "reason": "IEC104 enforcement unavailable"},
 		},
 	}
 	for _, c := range cases {
@@ -140,6 +140,55 @@ func TestHealthReportsIEC104Enforcement(t *testing.T) {
 	}
 }
 
+func TestHealthSanitizesIEC104ReasonCodes(t *testing.T) {
+	for _, tc := range []struct {
+		code, want string
+		active     bool
+	}{
+		{"queue", "IEC104 queue bind/receive failure", true},
+		{"injector", "IEC104 reset injector unavailable", true},
+		{"reset", "IEC104 reset failure", true},
+		{"reset", "ICS mid-stream reset failure", false},
+		{"verdict", "IEC104 queue verdict failure", true},
+		{"worker", "IEC104 packet worker failure", true},
+		{"framing", "IEC104 stream framing failure", true},
+		{"envelope", "IEC104 steering/envelope disagreement", true},
+		{"steering", "IEC104 steering unavailable", true},
+		{"admission_sweep", "dataplane admission cleanup failure", false},
+		{"gate_zone_sweep", "dataplane zone cleanup failure", false},
+		{"local_addresses", "dataplane local address refresh failure", false},
+		{"secret unknown code", "IEC104 enforcement unavailable", true},
+		{"", "IEC104 enforcement unavailable", true},
+	} {
+		t.Run(tc.code+tc.want, func(t *testing.T) {
+			// Exercise the wire boundary, including an unknown future code.
+			wire, err := json.Marshal(map[string]any{
+				"active": tc.active, "healthy": false, "reasonCode": tc.code,
+				"reason": "kernel failure: secret 192.0.2.44 queue 101",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var st dpengine.IEC104Enforcement
+			if err := json.Unmarshal(wire, &st); err != nil {
+				t.Fatal(err)
+			}
+			_, body := healthBody(t, &healthMockEngine{mockEngine: &mockEngine{}, st: st})
+			got := body["iec104Enforcement"]
+			want := map[string]any{"active": tc.active, "healthy": false, "reason": tc.want}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("health=%v want=%v", got, want)
+			}
+		})
+	}
+	_, body := healthBody(t, &healthMockEngine{mockEngine: &mockEngine{}, st: dpengine.IEC104Enforcement{
+		Healthy: true, ReasonCode: dpengine.IEC104ReasonQueue, Reason: "stale secret diagnostics",
+	}})
+	if got := body["iec104Enforcement"]; !reflect.DeepEqual(got, map[string]any{"active": false, "healthy": true, "reason": ""}) {
+		t.Fatalf("healthy state exposed stale fault: %v", got)
+	}
+}
+
 func TestRulesetHealthDoesNotExposePolicyDiagnostics(t *testing.T) {
 	store := stageStore(t)
 	sensitive := "nft apply failed: secret source 192.0.2.44 tcp dport 12345"
@@ -151,7 +200,7 @@ func TestRulesetHealthDoesNotExposePolicyDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	health := enforcementHealth(snapshot, nil, observeRuleset(context.Background(), engine))
+	health := enforcementHealth(snapshot, nil, observeRuleset(context.Background(), engine), dpengine.ProtectionStatus{State: "protecting"})
 	if health["state"] != "unavailable" || health["reason"] == "" || len(health) != 2 {
 		t.Fatalf("health fault hidden or shape changed: %v", health)
 	}
@@ -180,27 +229,29 @@ func TestHealthEnforcementStates(t *testing.T) {
 		snapshotErr error
 		status      dpengine.RulesetStatus
 		engineErr   error
+		protection  string
 		want        string
 	}{
-		{name: "disabled", want: "disabled"},
-		{name: "enforcing", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now()}, want: "enforcing"},
-		{name: "not applied", enabled: true, want: "unavailable"},
-		{name: "failed ruleset", enabled: true, status: dpengine.RulesetStatus{Error: "private nft diagnostic"}, want: "unavailable"},
-		{name: "failed over an installed ruleset", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now(), Error: "private nft diagnostic"}, want: "degraded"},
+		{name: "disabled", protection: "disabled", want: "disabled"},
+		{name: "enforcing", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now()}, protection: "protecting", want: "enforcing"},
+		{name: "not applied", enabled: true, protection: "pending", want: "unavailable"},
+		{name: "failed ruleset", enabled: true, status: dpengine.RulesetStatus{Error: "private nft diagnostic"}, protection: "failed", want: "unavailable"},
+		{name: "protection authoritative over stale ruleset error", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now(), Error: "private nft diagnostic"}, protection: "protecting", want: "enforcing"},
 		{name: "schedule planner degraded", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now(),
-			SchedulePlanner: &dpengine.SchedulePlan{State: dpengine.SchedulePlannerDegraded, Reason: "schedule refill failing", LastError: "private nft diagnostic"}}, want: "degraded"},
+			SchedulePlanner: &dpengine.SchedulePlan{State: dpengine.SchedulePlannerDegraded, Reason: "schedule refill failing", LastError: "private nft diagnostic"}}, protection: "protecting", want: "degraded"},
 		{name: "schedule planner ok", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now(),
-			SchedulePlanner: &dpengine.SchedulePlan{State: dpengine.SchedulePlannerOK}}, want: "enforcing"},
-		{name: "persisted fault", enabled: true, fault: "private replay diagnostic", want: "unavailable"},
-		{name: "failed disable", fault: "private replay diagnostic", want: "unavailable"},
-		{name: "store busy", snapshotErr: config.ErrHealthBusy, want: "unknown"},
-		{name: "engine unreadable", enabled: true, engineErr: context.DeadlineExceeded, want: "unknown"},
+			SchedulePlanner: &dpengine.SchedulePlan{State: dpengine.SchedulePlannerOK}}, protection: "protecting", want: "enforcing"},
+		{name: "persisted fault", enabled: true, fault: "private replay diagnostic", protection: "protecting", want: "unavailable"},
+		{name: "failed disable", fault: "private replay diagnostic", protection: "disabled", want: "unavailable"},
+		{name: "store busy", snapshotErr: config.ErrHealthBusy, protection: "protecting", want: "unknown"},
+		{name: "engine unreadable", enabled: true, engineErr: context.DeadlineExceeded, protection: "unknown", want: "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := config.DefaultConfig()
 			cfg.DataPlane.Enforcement = tc.enabled
 			engine := &healthRulesetEngine{mockEngine: &mockEngine{ruleset: tc.status}, err: tc.engineErr}
-			health := enforcementHealth(config.HealthSnapshot{Config: cfg, ApplyFault: tc.fault}, tc.snapshotErr, observeRuleset(context.Background(), engine))
+
+			health := enforcementHealth(config.HealthSnapshot{Config: cfg, ApplyFault: tc.fault}, tc.snapshotErr, observeRuleset(context.Background(), engine), dpengine.ProtectionStatus{State: tc.protection})
 			if health["state"] != tc.want || len(health) != 2 {
 				t.Fatalf("health: %v want %s", health, tc.want)
 			}

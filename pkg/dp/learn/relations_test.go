@@ -30,7 +30,7 @@ func TestExactIECMonitoringWithheldOnlyAsNonCommand(t *testing.T) {
 		t.Run(direction, func(t *testing.T) {
 			o := evidence.Observation{
 				Quality:   evidence.Quality{Complete: true, Decoded: true},
-				Authority: evidence.Authority{RoleCertain: true, StandardPort: true},
+				Authority: evidence.Authority{RoleCertain: true, RoleEvidence: learn.PortDecoderAuthority, StandardPort: true},
 				Service: evidence.ServiceKey{
 					ClientIP: "192.0.2.1", ServerIP: "192.0.2.2",
 					ServerPort: 2404, Transport: "tcp", Direction: direction, Protocol: "iec104",

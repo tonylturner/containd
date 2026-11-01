@@ -17,8 +17,9 @@ import (
 
 // bindCapture fails its first n Starts like an unbound NFQUEUE.
 type bindCapture struct {
-	fails  int32
-	starts atomic.Int32
+	onReady func()
+	fails   int32
+	starts  atomic.Int32
 }
 
 var errBind = errors.New("nfqueue: bind: operation not permitted")
@@ -26,6 +27,9 @@ var errBind = errors.New("nfqueue: bind: operation not permitted")
 func (c *bindCapture) Start(context.Context, capture.Handler) error {
 	if c.starts.Add(1) <= c.fails {
 		return errBind
+	}
+	if c.onReady != nil {
+		c.onReady()
 	}
 	return nil
 }
@@ -40,7 +44,7 @@ func fastRetry(t *testing.T, attempts int) {
 	t.Cleanup(func() { startRetryInitial, startRetryMax, startRetryAttempts = i, m, a })
 }
 
-func inlineEngine(t *testing.T, c captureRunner) *Engine {
+func inlineEngine(t *testing.T, c CaptureRunner) *Engine {
 	t.Helper()
 	e := engineWithCapture(t, c)
 	e.nfqueueGroup = 101

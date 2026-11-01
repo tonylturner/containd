@@ -735,6 +735,8 @@ sendDoubleCommand(CS104_Connection con, int ca, int ioa, int value, bool select,
         fprintf(stderr, "failed to queue command\n");
         return 2;
     }
+    printf("probe_sent=1\n");
+    fflush(stdout);
     return waitConfirm(4000);
 }
 
@@ -812,6 +814,11 @@ runCmd(const char* host, int port, int argc, char** argv)
             bool sent = CS104_Connection_sendProcessCommandEx(con, CS101_COT_ACTIVATION, atoi(argv[1]), io);
             InformationObject_destroy(io);
             awaitType = C_SC_NA_1;
+            if (sent)
+            {
+                printf("probe_sent=1\n");
+                fflush(stdout);
+            }
             rc = sent ? waitConfirm(4000) : 2;
         }
     }

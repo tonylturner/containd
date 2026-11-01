@@ -19,6 +19,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/identify"
 	"github.com/tonylturner/containd/pkg/dp/observe"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/evidence"
 )
 
 // AnalysisOptions supplies an immutable rule snapshot and a deadline clock.
@@ -28,7 +29,9 @@ type AnalysisOptions struct {
 	Rules *rules.Snapshot
 	Now   func() time.Time
 	// OnEvents receives whole decoder emissions, before bounded display retention.
-	OnEvents         func([]dpi.Event, int)
+	OnEvents func([]dpi.Event, int)
+	// OnLoss receives per-record capture-time loss before aggregate statistics.
+	OnLoss           func(evidence.CollectionLoss)
 	MaxFlows         int
 	MaxDisplayEvents int
 }

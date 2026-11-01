@@ -17,7 +17,7 @@ import (
 
 func TestRemovedProtocolInternalHandlers(t *testing.T) {
 	dp := newCountingDP(t)
-	config := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{})
+	config := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{}, testProtectionCoordinator(t, dp))
 	for _, name := range []string{"s7comm", "s7", "bacnet", "opcua", "mms", "iec61850", "goose", "enip", " ENiP "} {
 		want := fmt.Sprintf("protocol %q is not supported; supported: modbus, dnp3, iec104, cip", name)
 		if strings.EqualFold(strings.TrimSpace(name), "enip") {
@@ -29,7 +29,7 @@ func TestRemovedProtocolInternalHandlers(t *testing.T) {
 				t.Fatal(err)
 			}
 			rec := httptest.NewRecorder()
-			config.ServeHTTP(rec, httptest.NewRequest("POST", "/internal/config", bytes.NewReader(body)))
+			config.ServeHTTP(rec, protectionRequest("POST", "/internal/config", bytes.NewReader(body)))
 			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
 				t.Fatalf("%s toggle: %d %s", name, rec.Code, rec.Body)
 			}
@@ -43,7 +43,7 @@ func TestRemovedProtocolInternalHandlers(t *testing.T) {
 				t.Fatal(err)
 			}
 			rec := httptest.NewRecorder()
-			applyRulesHandler(dp.Engine, nil).ServeHTTP(rec, httptest.NewRequest("POST", "/internal/apply_rules", bytes.NewReader(body)))
+			applyRulesHandler(dp.Engine, nil, testProtectionCoordinator(t, dp.Engine)).ServeHTTP(rec, protectionRequest("POST", "/internal/apply_rules", bytes.NewReader(body)))
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("snapshot: %d %s", rec.Code, rec.Body)
 			}

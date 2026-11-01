@@ -76,12 +76,12 @@ Product documentation lives under `docs/mkdocs/`, with navigation in
 `docs/mkdocs.yml`. With the dependencies above installed, run from the repo root:
 
 ```bash
-mkdocs build -f docs/mkdocs.yml
+mkdocs build --strict -f docs/mkdocs.yml
 mkdocs serve -f docs/mkdocs.yml
 ```
 
-The first command builds the static site; the second starts a local preview
-server. Use `--strict` when checking documentation changes. Keep one canonical
+The first command builds the static site and rejects warnings, matching CI;
+the second starts a local preview server. Keep one canonical
 home per topic and link to it rather than duplicating instructions. Put images
 and diagrams under `docs/mkdocs/assets/`; Markdown files at the docs root refer
 to them as `assets/<file>`.
@@ -111,15 +111,22 @@ its Docker fallbacks; staticcheck and ineffassign have `go run` fallbacks.
 The baseline uses non-race Go tests and is not the complete CI gate.
 
 [CI](.github/workflows/ci.yml) also checks module tidiness, runs the full Go race
-suite, scans with curated Semgrep rules, builds the UI and appliance image,
-smokes the public Compose quickstart (`bash scripts/smoke-quickstart.sh`) and
-scans the image with Trivy. To run the module/race/security checks explicitly
-from the repository root:
+suite, scans with curated Semgrep rules, and builds docs with `--strict`.
+It tests release promotion decisions offline, audits npm dependencies, builds
+the UI and runs all Playwright specs with Chromium, uploading reports on failure.
+The Docker job builds the appliance image, runs the AV scanning gate
+(`bash scripts/smoke-av-gate.sh`) and public Compose quickstart
+(`bash scripts/smoke-quickstart.sh`) against that image, and scans it with Trivy.
+The AV step captures Compose logs and tears down its stack even on failure;
+the logs are uploaded as `av-compose-logs`.
+To run the module/race/security and offline release checks explicitly from the
+repository root:
 
 ```bash
 go mod tidy && git diff --exit-code go.mod go.sum
 go test -race ./...
 bash scripts/semgrep-verify.sh
+python3 scripts/release-ci-gate.test.py
 ```
 
 Run affected checks during development and record exact results or why a check

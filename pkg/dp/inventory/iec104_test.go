@@ -20,13 +20,9 @@ func observation() IEC104Observation {
 func TestIEC104CountsAndDetachedSnapshot(t *testing.T) {
 	inv := New()
 	o := observation()
-	ref := inv.ObserveIEC104(o)
-	outcome := IEC104Outcome{Command: ref, Accepted: true}
-	inv.IEC104CommandOutcome(outcome)
+	inv.ObserveIEC104(o)
 	o.Time = o.Time.Add(time.Minute)
 	inv.ObserveIEC104(o)
-	outcome.Accepted = false
-	inv.IEC104CommandOutcome(outcome)
 	o.ControlDirection = false
 	inv.ObserveIEC104(o) // server command echo is not an attempt
 	o.ControlDirection = true
@@ -35,7 +31,7 @@ func TestIEC104CountsAndDetachedSnapshot(t *testing.T) {
 	s := inv.SnapshotIEC104()
 	p := s.Pairs[0]
 	ca := p.CAs[0]
-	if p.AttemptedCommands != 2 || p.AcceptedCommands != 1 || ca.AttemptedCommands != 2 || ca.AcceptedCommands != 1 {
+	if p.AttemptedCommands != 2 || ca.AttemptedCommands != 2 {
 		t.Fatalf("counts: %+v / %+v", p, ca)
 	}
 	if len(ca.Points) != 2 || !ca.Points[1].LastSeen.Equal(o.Time) || !ca.FirstSeen.Before(ca.LastSeen) {
@@ -55,7 +51,7 @@ func TestIEC104CountsAndDetachedSnapshot(t *testing.T) {
 func TestIEC104BoundsLRUAndOverflow(t *testing.T) {
 	inv := New()
 	o := observation()
-	ref := inv.ObserveIEC104(o)
+	inv.ObserveIEC104(o)
 	// Reobserve point zero so point one, not zero, is evicted.
 	for i := 0; i < MaxIEC104Points; i++ {
 		o.IOAs = []uint32{uint32(i)}
@@ -78,13 +74,12 @@ func TestIEC104BoundsLRUAndOverflow(t *testing.T) {
 	if len(s.Pairs[0].CAs) != MaxIEC104CAs || s.Pairs[0].CAs[0].CA != 2 || s.Overflow.CAs != 1 {
 		t.Fatal(s)
 	}
-	inv.IEC104CommandOutcome(IEC104Outcome{Command: ref, Accepted: true})
 	for i := 1; i <= MaxIEC104Pairs; i++ {
 		o.Controlling = netip.MustParseAddrPort(fmt.Sprintf("198.51.100.%d:50000", i))
 		inv.ObserveIEC104(o)
 	}
 	s = inv.SnapshotIEC104()
-	if len(s.Pairs) != MaxIEC104Pairs || s.Overflow.Pairs != 1 || s.Overflow.Outcomes != 1 {
+	if len(s.Pairs) != MaxIEC104Pairs || s.Overflow.Pairs != 1 {
 		t.Fatalf("pairs: %d / %+v", len(s.Pairs), s.Overflow)
 	}
 }
@@ -92,15 +87,11 @@ func TestIEC104BoundsLRUAndOverflow(t *testing.T) {
 func TestInventoryIdleExpiry(t *testing.T) {
 	inv := New()
 	o := observation()
-	ref := inv.ObserveIEC104(o)
+	inv.ObserveIEC104(o)
 	old := time.Now().Add(-MaxIdle)
 	inv.iec104.pairs.order.Back().Value.(*entry[pairKey, *pairState]).touched = old
 	if len(inv.SnapshotIEC104().Pairs) != 0 {
 		t.Fatal("pair did not expire")
-	}
-	inv.IEC104CommandOutcome(IEC104Outcome{Command: ref, Accepted: true})
-	if inv.SnapshotIEC104().Overflow.Outcomes != 1 {
-		t.Fatal("missing lost outcome")
 	}
 	inv.RecordEvent("a", "b", dpi.Event{Proto: "modbus"})
 	for _, e := range inv.assets.items {
@@ -171,28 +162,14 @@ func TestIEC104BoundedInputAndConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-func TestIEC104LateOutcomeDoesNotCreditRecreatedCA(t *testing.T) {
-	inv := New()
-	o := observation()
-	ref := inv.ObserveIEC104(o)
-	inv.Clear()
-	inv.ObserveIEC104(o)
-	inv.IEC104CommandOutcome(IEC104Outcome{Command: ref, Accepted: true})
-	s := inv.SnapshotIEC104()
-	if s.Overflow.Outcomes != 1 || s.Pairs[0].AcceptedCommands != 0 {
-		t.Fatal(s)
-	}
-}
-
 func TestIEC104InputsNeverWaitForInventoryLock(t *testing.T) {
 	inv := New()
 	o := observation()
-	ref := inv.ObserveIEC104(o)
+	inv.ObserveIEC104(o)
 	inv.iec104.mu.Lock()
 	done := make(chan struct{})
 	go func() {
 		inv.ObserveIEC104(o)
-		inv.IEC104CommandOutcome(IEC104Outcome{Command: ref, Accepted: true})
 		close(done)
 	}()
 	select {
@@ -204,7 +181,7 @@ func TestIEC104InputsNeverWaitForInventoryLock(t *testing.T) {
 		t.Fatal("inventory inputs blocked")
 	}
 	s := inv.SnapshotIEC104()
-	if s.Overflow.Observations != 1 || s.Overflow.Outcomes != 1 || s.Pairs[0].AcceptedCommands != 0 {
+	if s.Overflow.Observations != 1 {
 		t.Fatal(s)
 	}
 }
@@ -218,17 +195,19 @@ func TestBoundedObservationRecencyAndExpiry(t *testing.T) {
 	add(2, at)
 	add(1, at.Add(time.Second))
 	add(3, at.Add(2*time.Second))
-	if _, ok := b.get(2, at.Add(3*time.Second)); ok || overflow != 1 {
+	b.expire(at.Add(3 * time.Second))
+	if b.items[2] != nil || overflow != 1 {
 		t.Fatal("not LRU", overflow)
 	}
 	// Reading key one did not refresh its ingestion time.
-	if _, ok := b.get(1, at.Add(3*time.Second)); !ok {
+	if b.items[1] == nil {
 		t.Fatal("refreshed key missing")
 	}
-	if _, ok := b.get(1, at.Add(MaxIdle+time.Second)); ok {
+	b.expire(at.Add(MaxIdle + time.Second))
+	if b.items[1] != nil {
 		t.Fatal("reads extended retention")
 	}
-	if _, ok := b.get(3, at.Add(MaxIdle+time.Second)); !ok {
+	if b.items[3] == nil {
 		t.Fatal("active key expired")
 	}
 	if overflow != 1 {

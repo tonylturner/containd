@@ -411,28 +411,32 @@ JSON
 	IEC_REVISION=$(jq -r --arg id "$IEC_ID" '.items[] | select(.id == $id) | .revision' "$MODE_RESULTS/live-suggestions.json")
 	[[ -n $IEC_ID && -n $IEC_REVISION ]] ||
 		exact_fail "$CAPTURE_MODE did not identify the generated IEC104 suggestion for the review gate"
-	jq -n --arg id "$IEC_ID" --argjson revision "$IEC_REVISION" \
-		'{requestId:"pre-review-probe",selections:[{id:$id,revision:$revision}]}' \
-		>"$MODE_RESULTS/iec-pre-review-apply.json"
-	exact_api POST /learn/apply "$MODE_RESULTS/iec-pre-review-response.json" "$MODE_RESULTS/iec-pre-review-apply.json"
-	[[ $HTTP_CODE == 409 ]] ||
-		exact_fail "$CAPTURE_MODE unreviewed IEC /learn/apply returned HTTP $HTTP_CODE instead of review conflict 409; response=$(cat "$MODE_RESULTS/iec-pre-review-response.json")"
-	exact_pass_record "$CAPTURE_MODE IEC suggestion is rejected before authenticated review" \
-		"HTTP=$HTTP_CODE response=$(cat "$MODE_RESULTS/iec-pre-review-response.json")"
-
-	jq -r '.items[] | select((any(.content.rules[]; .ics.protocol == "iec104")) or .content.requiresCoordinateReview) | [.id,.revision] | @tsv' \
-		"$MODE_RESULTS/live-suggestions.json" >"$MODE_RESULTS/review-selections.tsv"
+	# Resolve other coordinate-review requirements first, so none can mask a
+	# broken IEC review gate with the same conflict message.
+	jq -r --arg id "$IEC_ID" '.items[] | select(.id != $id and .content.requiresCoordinateReview) | [.id,.revision] | @tsv' \
+		"$MODE_RESULTS/live-suggestions.json" >"$MODE_RESULTS/coordinate-review-selections.tsv"
 	while IFS=$'\t' read -r suggestion_id revision; do
 		[[ -n $suggestion_id ]] || continue
-		jq -n --arg id "$suggestion_id" --argjson revision "$revision" \
-			'{selection:{id:$id,revision:$revision},approve:true,coordinateApproved:true}' \
-			>"$MODE_RESULTS/review-request-$suggestion_id.json"
-		exact_api_post "/learn/suggestions/$suggestion_id/review" \
-			"$MODE_RESULTS/review-request-$suggestion_id.json" \
-			"$MODE_RESULTS/review-response-$suggestion_id.json" "$CAPTURE_MODE authenticated IEC/coordinate review"
-		jq -e '.status == "reviewed" and .review.actor != ""' "$MODE_RESULTS/review-response-$suggestion_id.json" >/dev/null ||
-			exact_fail "$CAPTURE_MODE suggestion review did not persist an authenticated reviewed state; response=$(cat "$MODE_RESULTS/review-response-$suggestion_id.json")"
-	done <"$MODE_RESULTS/review-selections.tsv"
+		exact_review_selection "$suggestion_id" "$revision"
+	done <"$MODE_RESULTS/coordinate-review-selections.tsv"
+	exact_api_get "/learn/suggestions?datasetId=$LIVE_DATASET_ID" \
+		"$MODE_RESULTS/live-suggestions-before-review-gate.json" "$CAPTURE_MODE selections before IEC review gate"
+	exact_api_get /config/candidate "$MODE_RESULTS/candidate-before-review-gate.json" "$CAPTURE_MODE candidate before review gate"
+	cp "$MODE_RESULTS/candidate-before-review-gate.json.revision" "$MODE_RESULTS/config.revision"
+	jq -n --arg request_id "exact-$STAMP-$CAPTURE_MODE" \
+		--slurpfile items "$MODE_RESULTS/live-suggestions-before-review-gate.json" \
+		'{requestId:$request_id,selections:([$items[0].items[] | {id,revision}] | sort_by(.id))}' \
+		>"$MODE_RESULTS/iec-pre-review-apply.json"
+	exact_api POST /learn/apply "$MODE_RESULTS/iec-pre-review-response.json" "$MODE_RESULTS/iec-pre-review-apply.json"
+	exact_review_required "$MODE_RESULTS/iec-pre-review-response.json" ||
+		exact_fail "$CAPTURE_MODE unreviewed IEC /learn/apply did not return the review-required conflict; HTTP=$HTTP_CODE response=$(cat "$MODE_RESULTS/iec-pre-review-response.json")"
+	exact_api_get /config/candidate "$MODE_RESULTS/candidate-after-review-gate.json" "$CAPTURE_MODE candidate after review gate"
+	exact_candidate_unchanged "$MODE_RESULTS/candidate-before-review-gate.json" "$MODE_RESULTS/candidate-after-review-gate.json" ||
+		exact_fail "$CAPTURE_MODE rejected unreviewed apply changed the candidate or its revision"
+	exact_pass_record "$CAPTURE_MODE IEC suggestion is rejected before authenticated review" \
+		"HTTP=409; candidate and revision unchanged; response=$(cat "$MODE_RESULTS/iec-pre-review-response.json")"
+
+	exact_review_selection "$IEC_ID" "$IEC_REVISION"
 	API_OUTPUT="$MODE_RESULTS/live-suggestions-reviewed.json"
 	exact_api_get "/learn/suggestions?datasetId=$LIVE_DATASET_ID" "$API_OUTPUT" "$CAPTURE_MODE reviewed live suggestions"
 	jq -e --arg id "$IEC_ID" '.items[] | select(.id == $id) | .status == "reviewed" and .review.actor != ""' \
@@ -454,8 +458,14 @@ JSON
 
 	jq -n --arg request_id "exact-$STAMP-$CAPTURE_MODE" \
 		--slurpfile items "$MODE_RESULTS/live-suggestions-reviewed.json" \
-		'{requestId:$request_id,selections:[$items[0].items[] | {id,revision}]}' \
+		'{requestId:$request_id,selections:([$items[0].items[] | {id,revision}] | sort_by(.id))}' \
 		>"$MODE_RESULTS/apply-request.json"
+	# Review increments suggestion revisions. Preserve the request identity and
+	# selection IDs; only advance those revisions from the authenticated read.
+	jq -S 'del(.selections[].revision)' "$MODE_RESULTS/iec-pre-review-apply.json" >"$MODE_RESULTS/pre-review-request-shape.json"
+	jq -S 'del(.selections[].revision)' "$MODE_RESULTS/apply-request.json" >"$MODE_RESULTS/reviewed-request-shape.json"
+	cmp -s "$MODE_RESULTS/pre-review-request-shape.json" "$MODE_RESULTS/reviewed-request-shape.json" ||
+		exact_fail "$CAPTURE_MODE reviewed apply changed the request identity or selected suggestions"
 	jq -e '.selections | length > 0' "$MODE_RESULTS/apply-request.json" >/dev/null ||
 		exact_fail "$CAPTURE_MODE apply request did not select any certified suggestions"
 	exact_api_post /learn/apply "$MODE_RESULTS/apply-request.json" \

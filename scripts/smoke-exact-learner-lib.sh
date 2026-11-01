@@ -50,6 +50,31 @@ exact_api_post() {
 	exact_api_expect 200 "$4"
 }
 
+exact_review_required() {
+	[[ $HTTP_CODE == 409 ]] &&
+		jq -e '.error == "explicit suggestion review required"' "$1" >/dev/null
+}
+
+exact_candidate_unchanged() {
+	local before after
+	cmp -s "$1.revision" "$2.revision" &&
+		before=$(jq -Sec 'select(type == "object")' "$1") &&
+		after=$(jq -Sec 'select(type == "object")' "$2") &&
+		[[ $before == "$after" ]]
+}
+
+exact_review_selection() {
+	local id=$1 revision=$2
+	jq -n --arg id "$id" --argjson revision "$revision" \
+		'{selection:{id:$id,revision:$revision},approve:true,coordinateApproved:true}' \
+		>"$MODE_RESULTS/review-request-$id.json"
+	exact_api_post "/learn/suggestions/$id/review" \
+		"$MODE_RESULTS/review-request-$id.json" \
+		"$MODE_RESULTS/review-response-$id.json" "$CAPTURE_MODE authenticated IEC/coordinate review"
+	jq -e '.status == "reviewed" and .review.actor != ""' "$MODE_RESULTS/review-response-$id.json" >/dev/null ||
+		exact_fail "$CAPTURE_MODE suggestion review did not persist an authenticated reviewed state; response=$(cat "$MODE_RESULTS/review-response-$id.json")"
+}
+
 exact_write_json() {
 	local output=$1
 	cat >"$output"

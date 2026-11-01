@@ -15,6 +15,27 @@ import (
 	"github.com/tonylturner/containd/pkg/common/avscan"
 )
 
+func TestAVReadinessCanaryTransportLossInvalidatesEarlierDirection(t *testing.T) {
+	s := startReadinessICAP(t, "127.0.0.1:0", func(req icapRequest) string {
+		if req.Method == icapRESPMOD {
+			return "ICAP/1.0 500 Error\r\n" // A truncated response loses transport proof.
+		}
+		return healthyReadinessReply(req)
+	})
+	m := newTestAVManager(t, AVOptions{})
+	cfg := readinessICAPConfig(s)
+	m.lastCfg = cfg
+	m.configureDirectionsLocked(cfg)
+	if ready, _, _ := m.observeBackend(context.Background(), cfg, 0, true, true); ready {
+		t.Fatal("transport loss during the download canary reported ready")
+	}
+	for dir, state := range m.directions {
+		if state.capable || state.healthy {
+			t.Fatalf("%s retained proof from before transport loss: %+v", dir, state)
+		}
+	}
+}
+
 // A completion in the still-supported direction must not erase OPTIONS
 // method loss, even if the scan started before that capability observation.
 func TestAVReadinessInFlightScanCannotEraseMethodLoss(t *testing.T) {
@@ -357,7 +378,15 @@ func TestAVReadinessSameEpochStartOrdering(t *testing.T) {
 			m.directions[avscan.Download] = avDirectionHealth{capable: true, healthy: true}
 			older := m.nextProbeLocked()
 			newer := m.nextProbeLocked()
-			m.publishScan(0, newer, avscan.Download, !staleHealthy, false, "newer failure")
+			if staleHealthy {
+				m.publishScan(0, newer, avscan.Download, false, false, "newer failure")
+			} else {
+				// A newer canary, not an ordinary clean object, supersedes
+				// an older failure's scan-path invalidation.
+				state := m.directions[avscan.Download]
+				state.publishCanary(newer, true, "")
+				m.directions[avscan.Download] = state
+			}
 			m.publishScan(0, older, avscan.Download, staleHealthy, false, "stale failure")
 			assertAVReady(t, m, !staleHealthy)
 		})
@@ -404,7 +433,20 @@ func TestAVReadinessSameEpochLateStatus(t *testing.T) {
 			assertAVReady(t, m, !staleSuccess)
 			unblock()
 			<-done
-			assertAVReady(t, m, !staleSuccess)
+			// Capability retains start ordering, but even a late failure
+			// invalidates old canaries independently of newer OPTIONS.
+			m.mu.Lock()
+			capabilityError := m.capabilityError
+			m.mu.Unlock()
+			if (capabilityError == "") == staleSuccess {
+				t.Fatalf("late status replaced newer capability: %q", capabilityError)
+			}
+			assertAVReady(t, m, false)
+			block.Store(false)
+			cfg := readinessICAPConfig(s)
+			if ready, _, why := m.observeBackend(context.Background(), cfg, m.backendEpoch, true, true); !ready {
+				t.Fatal(why)
+			}
 		})
 	}
 }

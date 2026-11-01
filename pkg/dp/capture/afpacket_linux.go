@@ -117,7 +117,7 @@ func decodePacket(iface string, data []byte) (Packet, bool) {
 		return Packet{}, false
 	}
 	pkt, ok := decodeIP(ip)
-	if !ok {
+	if !ok && !pkt.CaptureIncomplete {
 		return Packet{}, false
 	}
 	pkt.Interface = iface

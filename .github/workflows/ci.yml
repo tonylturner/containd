@@ -47,6 +47,16 @@ jobs:
         with:
           version: v2.11
 
+  release-ci-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Test release CI gate offline
+        run: python3 scripts/release-ci-gate.test.py
+
   docs:
     runs-on: ubuntu-latest
     steps:
@@ -59,7 +69,7 @@ jobs:
       - name: Install MkDocs deps
         run: pip install -r docs/requirements-mkdocs.txt
       - name: Build docs
-        run: mkdocs build -f docs/mkdocs.yml -d /tmp/containd-docs
+        run: mkdocs build --strict -f docs/mkdocs.yml -d /tmp/containd-docs
 
   ui:
     runs-on: ubuntu-latest
@@ -93,6 +103,22 @@ jobs:
       - name: Build
         run: npm run build
         working-directory: ui
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: ui
+      - name: Playwright suite
+        run: npm run test:routes
+        working-directory: ui
+        env:
+          PLAYWRIGHT_PORT: '3504'
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: |
+            ui/playwright-report/
+            ui/test-results/
 
   # Docker build + Trivy scan runs in parallel with other jobs (not gated).
   # It does its own full multi-stage build so doesn't need prior job outputs.
@@ -124,6 +150,38 @@ jobs:
           tags: containd/containd:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: AV scanning gate smoke
+        env:
+          COMPOSE_FILE: deploy/docker-compose.smoke.yml:${{ runner.temp }}/av-ci.yml
+          SMOKE_PROJECT: containd-av-ci
+          SMOKE_BUILD: '0'
+        run: |
+          source scripts/smoke-lib.sh
+          cleanup() {
+            local smoke_status=$? logs_status=0 down_status=0
+            compose logs --no-color > "$RUNNER_TEMP/av-compose.log" 2>&1 || logs_status=$?
+            compose down --volumes --remove-orphans || down_status=$?
+            if (( smoke_status != 0 )); then
+              exit "$smoke_status"
+            fi
+            if (( logs_status != 0 )); then
+              exit "$logs_status"
+            fi
+            exit "$down_status"
+          }
+          trap cleanup EXIT
+          cat > "$RUNNER_TEMP/av-ci.yml" <<'YAML'
+          services:
+            engine:
+              image: containd/containd:ci
+          YAML
+          bash scripts/smoke-av-gate.sh
+      - name: Upload AV compose logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: av-compose-logs
+          path: ${{ runner.temp }}/av-compose.log
       - name: Quickstart smoke (public compose)
         env:
           COMPOSE_PROJECT_NAME: containd-quickstart-ci

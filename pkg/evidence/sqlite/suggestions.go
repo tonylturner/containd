@@ -242,8 +242,14 @@ func (s *Store) ResolveForStage(ctx context.Context, req learn.ApplyRequest) ([]
 			if err := json.Unmarshal(resolved, &out); err != nil {
 				return err
 			}
-			// Resolve is the linearization point. Retries use the admitted
-			// snapshot, not evidence that may since have expired or been deleted.
+			// Expired/deleted evidence does not invalidate an admitted retry, but
+			// incompatible proofs can only reconcile rules already durably saved.
+			for i := range out {
+				if out[i].Proof == nil || out[i].Proof.ValidateBinding(out[i].Content) != nil {
+					return learn.ErrNotCertified
+				}
+				out[i].StageReconcileOnly = !s.compatibleProof(out[i].Proof.Versions)
+			}
 			return nil
 		}
 		if err != sql.ErrNoRows {

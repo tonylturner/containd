@@ -130,9 +130,14 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 		pkt.Timestamp = time.Now().UTC()
 	}
 	history := r.admitHistoryLocked(pkt)
+	var connection *flow.Connection
+	if history != nil {
+		connection = history.connection
+	}
 	if r.count.Add(1) > transportQueueLimit {
 		r.count.Add(-1)
 		r.noteDecodeLossLocked(pkt, history)
+		e.recordLearnCaptureLoss(pkt, connection)
 		r.unavailable(e, pkt, "queue_overflow")
 		return acceptDecision
 	}
@@ -140,6 +145,7 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 		r.bytes.Add(-n)
 		r.count.Add(-1)
 		r.noteDecodeLossLocked(pkt, history)
+		e.recordLearnCaptureLoss(pkt, connection)
 		r.unavailable(e, pkt, "queue_overflow")
 		return acceptDecision
 	}
@@ -158,6 +164,7 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 		r.bytes.Add(-n)
 		r.count.Add(-1)
 		r.noteDecodeLossLocked(pkt, history)
+		e.recordLearnCaptureLoss(pkt, connection)
 		r.unavailable(e, pkt, "queue_overflow")
 	}
 	return acceptDecision

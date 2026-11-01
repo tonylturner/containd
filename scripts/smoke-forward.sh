@@ -509,12 +509,14 @@ done
 pass rule-move-order "bottom allows, top denies, bottom allows again; indices and complete order verified"
 
 # The packaged CLI supports piped input; do not provision another CLI path.
-if compose exec -T engine sh -c 'command -v containd' >/dev/null; then
+CLI_AVAILABILITY=$(compose exec -T engine sh -c 'if command -v containd >/dev/null 2>&1; then echo present; else echo absent; fi') ||
+  harness_error "could not inspect the packaged CLI"
+if [[ $CLI_AVAILABILITY == present ]]; then
+  TESTS_EXPECTED=$((TESTS_EXPECTED + 1))
   CLI_STATUS=0
   CLI_OUTPUT=$(printf 'show firewall rules\nexit\n' | compose exec -T engine containd cli 2>&1) || CLI_STATUS=$?
   log "CLI show firewall rules (exit $CLI_STATUS): $CLI_OUTPUT"
   if [[ $CLI_STATUS -eq 0 ]]; then
-    TESTS_EXPECTED=$((TESTS_EXPECTED + 1))
     if awk -v id="$GENERATED_ID" '
       /ORDER/ && /VIA_FORWARDS/ { header=1 }
       $1 == 1 && $2 == id && $NF == "lan-http" { via=1 }
@@ -524,10 +526,12 @@ if compose exec -T engine sh -c 'command -v containd' >/dev/null; then
       check_fail cli-rule-order "CLI omitted order numbers or via forward: $CLI_OUTPUT"
     fi
   else
-    log "SKIP [cli-rule-order]: stack CLI login/path unavailable: $CLI_OUTPUT"
+    check_fail cli-rule-order "packaged CLI failed (exit $CLI_STATUS): $CLI_OUTPUT"
   fi
-else
+elif [[ $CLI_AVAILABILITY == absent ]]; then
   log "SKIP [cli-rule-order]: containd executable not available in the stack"
+else
+  harness_error "unexpected packaged CLI availability: $CLI_AVAILABILITY"
 fi
 
 log "Deleting lan-http and its generated permission..."

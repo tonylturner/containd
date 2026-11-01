@@ -221,7 +221,7 @@ func TestHTTPClientRepresentativeEndpoints(t *testing.T) {
 	defer srv.Close()
 
 	c := NewHTTPClient(srv.URL)
-	if err := c.ApplyRules(ctx, rules.Snapshot{}); err != nil {
+	if _, err := c.ApplyRules(ctx, rules.Snapshot{}); err != nil {
 		t.Fatalf("ApplyRules: %v", err)
 	}
 	if err := c.Configure(ctx, config.DataPlaneConfig{Enforcement: true}); err != nil {
@@ -284,7 +284,7 @@ func TestHTTPClientEmptyBaseURLGuards(t *testing.T) {
 
 	c := &HTTPClient{}
 	ctx := context.Background()
-	if err := c.ApplyRules(ctx, rules.Snapshot{}); err == nil {
+	if _, err := c.ApplyRules(ctx, rules.Snapshot{}); err == nil {
 		t.Fatal("expected ApplyRules to reject empty BaseURL")
 	}
 	if _, err := c.PcapConfig(ctx); err == nil {
@@ -535,14 +535,14 @@ func TestRuntimeHealthReadsEngineHealth(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"status":"ok","component":"engine","bootId":"engine-boot-1","iec104Enforcement":{"active":true,"healthy":false,"reason":"queue down"},"ipv4Forwarding":"disabled"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","component":"engine","bootId":"engine-boot-1","iec104Enforcement":{"active":true,"healthy":false,"reason":"queue down","reasonCode":"queue"},"ipv4Forwarding":"disabled"}`))
 	}))
 	defer srv.Close()
 	client := NewHTTPClient(srv.URL)
 	health, err := client.RuntimeHealth(context.Background())
 	if err != nil ||
 		health.BootID != "engine-boot-1" ||
-		health.IEC104Enforcement != (dpengine.IEC104Enforcement{Active: true, Reason: "queue down"}) ||
+		health.IEC104Enforcement != (dpengine.IEC104Enforcement{Active: true, Reason: "queue down", ReasonCode: dpengine.IEC104ReasonQueue}) ||
 		health.IPv4Forwarding != netcfg.IPv4ForwardingDisabled {
 		t.Fatalf("RuntimeHealth = %+v, %v", health, err)
 	}

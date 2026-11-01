@@ -24,12 +24,11 @@ var (
 // iecActions is the work an IEC104 state change produces. It is collected
 // under the session lock and carried out after the lock is released.
 type iecActions struct {
-	drops             []capture.Resolution // held tokens to drop
-	events            []iecTelemetry
-	jobs              []func()
-	inventoryObserve  []*iecInventoryCommand
-	inventoryOutcome  []*iecInventoryCommand
-	inventoryOverflow uint64
+	drops            []capture.Resolution // held tokens to drop
+	events           []iecTelemetry
+	jobs             []func()
+	inventoryObserve []*iecInventoryCommand
+	learnerDelivery  []*iecInventoryCommand
 	// retired reports that the tuple's connection ended or a new one
 	// started on it, so the engine ends the connection's conformance
 	// alert identity.
@@ -41,8 +40,7 @@ func (a *iecActions) merge(b iecActions) {
 	a.events = append(a.events, b.events...)
 	a.jobs = append(a.jobs, b.jobs...)
 	a.inventoryObserve = append(a.inventoryObserve, b.inventoryObserve...)
-	a.inventoryOutcome = append(a.inventoryOutcome, b.inventoryOutcome...)
-	a.inventoryOverflow += b.inventoryOverflow
+	a.learnerDelivery = append(a.learnerDelivery, b.learnerDelivery...)
 	a.retired = a.retired || b.retired
 }
 

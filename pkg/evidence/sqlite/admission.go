@@ -169,11 +169,16 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 	if len(req.Parents) > 128 || len(batch) > maxBatch {
 		return result, ErrBudget
 	}
-	if len(req.Gaps) > 32 {
+	if len(req.Gaps) > 32 || len(req.Losses) > evidence.MaxLosses {
 		return result, ErrBudget
 	}
 	for _, gap := range req.Gaps {
 		if gap == "" || len(gap) > 128 {
+			return result, ErrBudget
+		}
+	}
+	for _, loss := range req.Losses {
+		if loss.Code == "" || len(loss.Code) > 128 || len(loss.ConnectionID) > 4096 {
 			return result, ErrBudget
 		}
 	}
@@ -200,7 +205,19 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 			deadline = w.Deadline.UnixNano()
 		}
 		for _, gap := range req.Gaps {
-			d.Gaps = appendUnique(d.Gaps, gap)
+			localized := false
+			for _, loss := range req.Losses {
+				localized = localized || loss.Code == gap
+			}
+			if !localized {
+				d.RecordLoss(evidence.CollectionLoss{Code: gap})
+			}
+		}
+		for _, loss := range req.Losses {
+			d.RecordLoss(loss)
+		}
+		if req.LostBatches > 0 && len(req.Gaps) == 0 && len(req.Losses) == 0 {
+			d.RecordLoss(evidence.CollectionLoss{Code: "collection_loss"})
 		}
 		if len(d.Gaps) > 32 {
 			return ErrBudget
@@ -213,6 +230,21 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 		if c.Withheld == nil {
 			c.Withheld = map[evidence.WithheldReason]uint64{}
 		}
+		// Reserve a conservative upper bound for the whole decoded batch once.
+		// Without pressure, avoid repeating SQLite page/gauge queries per parent.
+		// Under pressure each parent still follows normal eviction/admission order.
+		records, bytes, _, err := gauges(ctx, tx)
+		if err != nil {
+			return err
+		}
+		reserve := uint64(len(batch)) + uint64(len(req.Parents))*4096
+		batchHeadroom, err := physicalFits(ctx, tx, reserve, uint64(len(req.Parents)), 0)
+		if err != nil {
+			return err
+		}
+		batchHeadroom = batchHeadroom && records+uint64(len(req.Parents)) <= s.limits.MaxRecords && bytes+reserve <= s.limits.MaxBytes
+		var pending []parentInsert
+		pendingDigests := make(map[string]string, len(req.Parents))
 		for _, parent := range req.Parents {
 			collected := req.CollectedAt
 			if collected.IsZero() {
@@ -244,6 +276,13 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 			if err != nil {
 				return err
 			}
+			if prior, found := pendingDigests[parent.ID]; found {
+				if prior != parent.ParentDigest {
+					return ErrConflict
+				}
+				result.Duplicates++
+				continue
+			}
 			var existing []byte
 			err = tx.QueryRowContext(ctx, `SELECT data FROM parents WHERE id=?`, parent.ID).Scan(&existing)
 			if err == nil {
@@ -270,10 +309,14 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 				c.RejectedParents++
 				result.Reasons[evidence.WithheldBudget]++
 				c.Withheld[evidence.WithheldBudget]++
-				d.Gaps = appendUnique(d.Gaps, "budget_exceeded")
+				d.RecordLoss(evidence.CollectionLoss{Code: "budget_exceeded", ConnectionID: parent.ConnectionID})
 				continue
 			}
-			if err := s.fit(ctx, tx, d.ID, uint64(len(b))+2048, 1, 0); err != nil {
+			var fitErr error
+			if !batchHeadroom {
+				fitErr = s.fit(ctx, tx, d.ID, uint64(len(b))+2048, 1, 0)
+			}
+			if err := fitErr; err != nil {
 				if err != ErrBudget {
 					return err
 				}
@@ -281,15 +324,25 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 				c.RejectedParents++
 				result.Reasons[evidence.WithheldBudget]++
 				c.Withheld[evidence.WithheldBudget]++
-				d.Gaps = appendUnique(d.Gaps, "budget_exceeded")
+				d.RecordLoss(evidence.CollectionLoss{Code: "budget_exceeded", ConnectionID: parent.ConnectionID})
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO parents(id,dataset,expires,data) VALUES(?,?,?,?)`, parent.ID, d.ID, parent.IngestedAt.Add(evidence.Retention).UnixNano(), b); err != nil {
-				return err
+			pending = append(pending, parentInsert{parent.ID, parent.IngestedAt.Add(evidence.Retention).UnixNano(), b})
+			pendingDigests[parent.ID] = parent.ParentDigest
+			if !batchHeadroom {
+				// Pressure admission must see each preceding row's real page
+				// and gauge usage before deciding what fits or may be evicted.
+				if err := insertParents(ctx, tx, d.ID, pending); err != nil {
+					return err
+				}
+				pending = nil
 			}
 			d.Records++
 			d.Bytes += uint64(len(b))
 			result.Accepted++
+		}
+		if err := insertParents(ctx, tx, d.ID, pending); err != nil {
+			return err
 		}
 		// fit may have updated eviction counters; do not overwrite those.
 		current, err := counters(ctx, tx)
@@ -336,15 +389,6 @@ func childCount(o evidence.Observation) uint32 {
 		return 4097
 	}
 	return uint32(count)
-}
-
-func appendUnique(items []string, value string) []string {
-	for _, v := range items {
-		if v == value {
-			return items
-		}
-	}
-	return append(items, value)
 }
 
 // CountWithheld is idempotent per parent, generator version and reason.

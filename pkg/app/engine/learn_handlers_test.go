@@ -20,7 +20,7 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence/sqlite"
 )
 
-func newEvidenceTestAPI(t testing.TB) *evidenceAPI {
+func newEvidenceTestAPI(t testing.TB) *EvidenceAPI {
 	t.Helper()
 	e, err := engine.New(engine.Config{})
 	if err != nil {
@@ -33,12 +33,12 @@ func newEvidenceTestAPI(t testing.TB) *evidenceAPI {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := newEvidenceWatch(ctx, s, e)
 	t.Cleanup(func() { e.SetLearnWatchHook(nil); cancel(); <-w.done; <-w.maintained; _ = s.Close() })
-	return &evidenceAPI{store: s, watch: w, generator: &learn.Generator{Store: s, Certifier: &learn.CompilerCertifier{Store: s}, CountWithheld: s.CountWithheld}}
+	return &EvidenceAPI{store: s, watch: w, generator: &learn.Generator{Store: s, Certifier: &learn.CompilerCertifier{Store: s}, CountWithheld: s.CountWithheld}}
 }
 func TestEvidenceWatchRoundTrip(t *testing.T) {
 	a := newEvidenceTestAPI(t)
 	mux := http.NewServeMux()
-	a.register(mux)
+	a.Register(mux)
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	client := engineapi.NewHTTPClient(server.URL)

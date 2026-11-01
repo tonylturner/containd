@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -42,13 +43,13 @@ type blockingApplyEngine struct {
 	applied []rules.Action
 }
 
-func (e *blockingApplyEngine) ApplyRules(_ context.Context, snap rules.Snapshot) error {
+func (e *blockingApplyEngine) ApplyRules(_ context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	e.applied = append(e.applied, snap.Default)
 	if len(e.applied) == 1 {
 		close(e.entered)
 		<-e.release
 	}
-	return nil
+	return dpengine.ProtectionStatus{}, nil
 }
 
 // The replay has already loaded the old config when the mutation arrives.

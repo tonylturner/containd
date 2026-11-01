@@ -12,7 +12,7 @@ import (
 )
 
 func TestStartNFLogUnavailableOnNonLinux(t *testing.T) {
-	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, nil)
+	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "only supported on linux") {
 		t.Fatalf("StartNFLog error = %v, want linux-unavailable error", err)
 	}
@@ -32,7 +32,7 @@ func TestStartNFLogNonLinuxNoOpWhenDisabled(t *testing.T) {
 		{name: "nil sink", group: 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			stop, err := StartNFLog(context.Background(), tc.group, tc.sink, nil)
+			stop, err := StartNFLog(context.Background(), tc.group, tc.sink, nil, nil)
 			if err != nil {
 				t.Fatalf("StartNFLog: %v", err)
 			}

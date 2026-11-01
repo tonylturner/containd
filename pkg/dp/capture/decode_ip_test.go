@@ -194,3 +194,31 @@ func TestDecodeIPPacketTruncatedKeepsBestEffortPayload(t *testing.T) {
 		t.Fatalf("Invalid=%q TCP=%+v payload=%x", got.Invalid, got.TCP, got.Payload)
 	}
 }
+
+func TestIPTruncationSurvivesIncompleteTransportHeader(t *testing.T) {
+	v4 := ipv4TCP([]byte{1, 2, 3})[:32]
+	v6 := make([]byte, 52)
+	v6[0] = 0x60
+	v6[5] = 40
+	v6[6] = 6
+	for _, raw := range [][]byte{v4, v6} {
+		got := DecodeIPPacket(raw)
+		if got.Invalid != InvalidTCPHeader || !got.CaptureIncomplete || got.TCP.Valid {
+			t.Fatalf("known missing IP bytes masked by TCP header: %+v", got)
+		}
+	}
+	// A genuinely malformed but fully captured header is not capture loss.
+	binary.BigEndian.PutUint16(v4[2:4], uint16(len(v4)))
+	if got := DecodeIPPacket(v4); got.Invalid != InvalidTCPHeader || got.CaptureIncomplete {
+		t.Fatalf("complete malformed packet became loss: %+v", got)
+	}
+}
+
+func TestFragmentTruncationCannotInventPorts(t *testing.T) {
+	raw := ipv4TCP([]byte{1, 2, 3})[:32]
+	binary.BigEndian.PutUint16(raw[6:8], 0x0010)
+	pkt := DecodeIPPacket(raw)
+	if !pkt.CaptureIncomplete || pkt.PortsValid || pkt.TCP.Valid || pkt.SrcPort != 0 || pkt.Invalid != InvalidFragment {
+		t.Fatal("noninitial fragment payload treated as L4 header", pkt)
+	}
+}

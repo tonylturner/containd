@@ -111,6 +111,7 @@ var mutationRouteClass = map[string]string{
 	"POST /api/v1/services/av/update":                      "non-config",
 	"POST /api/v1/services/av/defs":                        "non-config",
 	"DELETE /api/v1/services/av/defs":                      "non-config",
+	"POST /api/v1/dataplane/protection/retry":              "non-config",
 }
 
 func isConfigWriterRequest(request *http.Request) bool { return configWriterRoute(request) != "" }

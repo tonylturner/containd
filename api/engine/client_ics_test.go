@@ -72,7 +72,7 @@ func TestApplyRulesRoundTripsIEC104Predicate(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := NewHTTPClient(srv.URL).ApplyRules(context.Background(), snap); err != nil {
+	if _, err := NewHTTPClient(srv.URL).ApplyRules(context.Background(), snap); err != nil {
 		t.Fatalf("ApplyRules: %v", err)
 	}
 	for _, frag := range []string{

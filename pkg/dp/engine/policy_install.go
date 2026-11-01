@@ -15,9 +15,11 @@ import (
 // ApplyRules installs and publishes one policy under the verdict publication
 // fence. A failed install leaves the previous policy intact. A failed sweep
 // leaves the new policy installed, unhealthy, and blocks parity/index reuse.
-func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
+func (e *Engine) ApplyRules(ctx context.Context, snap rules.Snapshot) (applyErr error) {
 	e.lifecycleMu.Lock()
 	defer e.lifecycleMu.Unlock()
+	before := e.ruleSnap.Load()
+	defer func() { e.protectionInstalled(applyErr, e.ruleSnap.Load() != before) }()
 	if snap.DPIMode == "" {
 		snap.DPIMode = e.dpiMode
 	}

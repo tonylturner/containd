@@ -24,15 +24,17 @@ for (const mobile of [false, true]) {
     await page.goto("/assets");
     const panel = page.getByRole("region", { name: "Passive IEC 104 inventory" });
     await expect(panel).toContainText("never generates auto-ALLOW rules");
-    await expect(panel).toContainText("inline enforce mode only");
-    await expect(panel).toContainText("Monitor and non-inline capture never claim delivery");
+    await expect(panel).toContainText("not delivery or physical execution");
+    await expect(panel).toContainText("Inventory never claims delivery");
     await expect(panel).toContainText("128 pairs · 32 CAs per pair · 256 points per CA");
-    for (const [label, count] of [["Pairs", 2], ["CAs", 3], ["Points", 4], ["Lost outcomes", 8], ["Legacy assets", 5]] as const)
+    for (const [label, count] of [["Pairs", 2], ["CAs", 3], ["Points", 4], ["Legacy assets", 5]] as const)
       await expect(panel).toContainText(`${label} overflow: ${count}`);
     await expect(panel.getByRole("table")).toHaveCount(0);
     await panel.locator("summary").filter({ hasText: "192.0.2.10:50000" }).click();
     await panel.locator("summary").filter({ hasText: "CA 7" }).click();
-    await expect(panel).toContainText("3 attempted / 1 accepted");
+    await expect(panel).toContainText("3 attempted");
+    await expect(panel).not.toContainText("accepted");
+    await expect(panel).not.toContainText("Lost outcomes");
     const points = panel.getByRole("table", { name: "CA 7 observed points" });
     await expect(points.getByRole("row")).toHaveCount(3);
     await expect(points.getByRole("cell", { name: "100", exact: true })).toHaveCount(2);
@@ -62,7 +64,7 @@ test("inventory unavailable is not empty or zero, and Refresh retries", async ({
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   // The loaded panel has its own status badges until the refresh lands.
   await expect(panel.getByRole("status").filter({ hasText: "IEC 104 inventory unavailable" })).toBeVisible();
-  await expect(panel).not.toContainText("3 attempted / 1 accepted");
+  await expect(panel).not.toContainText("3 attempted");
 });
 
 test("reachable empty inventory is distinct from unavailable", async ({ page }) => {

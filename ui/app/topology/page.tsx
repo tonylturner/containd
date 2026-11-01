@@ -42,7 +42,9 @@ import { Shell } from "../../components/Shell";
 import { CONFIG_COMMITTED } from "../../lib/config-events";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { useHealth } from "../../hooks/useHealth";
-import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
+import { useProtection } from "../../hooks/useProtection";
+import { ProtectionRetry } from "../../components/ProtectionNotice";
+import { isAdmin } from "../../lib/api";
 import s from "./topology.module.css";
 import { DetailContent } from "./topology-detail";
 import {
@@ -67,7 +69,7 @@ function TopologyInner() {
   const [topoError, setTopoError] = useState<string | null>(null);
   const [nodeData, setNodeData] = useState<Record<string, TopoNodeData>>({});
   const health = useHealth();
-  const installed = useInstalledRuleset();
+  const protection = useProtection();
   const { fitView } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
 
@@ -142,7 +144,7 @@ function TopologyInner() {
 
   const selected = selectedId ? nodeData[selectedId] : null;
   const selectedData = selected ? withHealth(selected, health) : null;
-  const status = topologyStatus(health, installed);
+  const status = topologyStatus(health, protection.status);
   const statusColor = TONE_COLORS[status.tone];
 
   return (
@@ -158,11 +160,15 @@ function TopologyInner() {
           ))}
         </div>
         <div className={s.topbarRight}>
-          <div role="status" aria-label="Firewall enforcement" className={s.statusChip} title={status.reason ? `Firewall enforcement: ${status.reason}` : "Firewall enforcement"}>
+          <div role="status" aria-label="Firewall enforcement" className={s.statusChip} title={status.reason ? `Firewall enforcement: ${status.reason}. ${status.action || ""}` : "Firewall enforcement"}>
             <div className={s.chipDot} style={{ background: statusColor }} />
             <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: statusColor }}>{status.label}</span>
             {status.reason && <span className={s.chipReason}>{status.reason}</span>}
           </div>
+          {health?.enforcement?.state !== "enforcing" && <div className="flex flex-wrap items-center gap-2 text-amber">
+            {status.action && <span className="text-xs">{status.action}</span>}
+            <ProtectionRetry isAdmin={isAdmin()} />
+          </div>}
           <div className={s.statusChip}>
             <span style={{ color: "#4a4030" }}>LAST SYNC</span>
             <span style={{ color: "#f59e0b" }}>{syncTime}</span>

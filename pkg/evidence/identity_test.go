@@ -61,6 +61,16 @@ func TestImportIdentityBindsAllAuthorities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, version := range []string{"", NormalizationVersion + "-different"} {
+		authorities := []string{SchemaVersion, d.CaptureSHA256, d.DecoderVersion, d.ProfileFingerprint, d.SnapshotFingerprint}
+		if version != "" {
+			authorities = append(authorities, version)
+		}
+		historical, err := Digest(authorities)
+		if err != nil || historical == id {
+			t.Fatalf("normalization authority omitted from ID: %v", err)
+		}
+	}
 	for _, change := range []func(*Dataset){
 		func(p *Dataset) { p.CaptureSHA256, _ = Digest(p.CaptureSHA256 + "-different") },
 		func(p *Dataset) { p.DecoderVersion += "-different" },

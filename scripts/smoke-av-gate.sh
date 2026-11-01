@@ -20,8 +20,9 @@ set -euo pipefail
 #
 # The checks, each under the policy named in its ID:
 # - open (fail-open, scanner ready): the EICAR download and upload are
-#   refused with 403 and no EICAR byte reaches the client, the origin never
-#   receives the upload, clean objects pass whole, the origin sees the
+#   refused with a complete generated 403 and no 16-byte EICAR fragment
+#   reaches the client, the origin never receives the upload, clean objects
+#   pass whole (exact download body and upload receiver size/MD5), the origin sees the
 #   engine's WAN address (masquerade) and a detection event names the
 #   client; the DNAT forward refuses EICAR and delivers clean with the
 #   target seeing the engine's LAN address (return-path masquerade); the
@@ -214,13 +215,36 @@ eicar_path() {
 }
 
 # expect_refused ID DESCRIPTION OUTCOME passes when the gate answered 403
-# and no EICAR byte reached the client.
+# and a complete generated refusal contains no 16-byte EICAR fragment.
+refusal_ok() {
+  [[ "$(outcome_field "$1" status)" == 403 &&
+    "$(outcome_field "$1" complete)" == yes &&
+    "$(outcome_field "$1" fragment)" == no &&
+    "$(outcome_field "$1" refusal)" == yes ]]
+}
+
+clean_download_ok() {
+  [[ "$(outcome_field "$1" status)" == 200 &&
+    "$(outcome_field "$1" complete)" == yes &&
+    "$(outcome_field "$1" clean)" == yes ]]
+}
+
+clean_upload_ok() {
+  local line
+  line=$(outcome_field "$1" line)
+  [[ "$(outcome_field "$1" status)" == 200 &&
+    "$(outcome_field "$1" complete)" == yes &&
+    "$(reply_field "$line" method)" == POST &&
+    "$(reply_field "$line" size)" == "$(outcome_field "$1" upload_size)" &&
+    "$(reply_field "$line" md5)" == "$(outcome_field "$1" upload_md5)" ]]
+}
+
 expect_refused() {
   local id=$1 desc=$2 outcome=$3
-  if [[ "$(outcome_field "$outcome" status)" == 403 && "$(outcome_field "$outcome" eicar)" == no ]]; then
+  if refusal_ok "$outcome"; then
     pass "$id" "$desc refused ($outcome)"
   else
-    check_fail "$id" "$desc was not refused with 403 and no EICAR bytes ($outcome)"
+    check_fail "$id" "$desc lacked a complete generated 403 refusal free of EICAR fragments ($outcome)"
   fi
 }
 
@@ -228,7 +252,8 @@ expect_refused() {
 # response arrived whose EICAR content matches EICAR (yes or no).
 expect_delivered() {
   local id=$1 desc=$2 outcome=$3 eicar=$4
-  if [[ "$(outcome_field "$outcome" status)" == 200 && "$(outcome_field "$outcome" complete)" == yes && "$(outcome_field "$outcome" eicar)" == "$eicar" ]]; then
+  if [[ "$(outcome_field "$outcome" status)" == 200 && "$(outcome_field "$outcome" complete)" == yes && "$(outcome_field "$outcome" eicar)" == "$eicar" ]] &&
+    { [[ $eicar == yes ]] || clean_download_ok "$outcome"; }; then
     pass "$id" "$desc delivered ($outcome)"
   else
     check_fail "$id" "$desc was not delivered whole with eicar=$eicar ($outcome)"
@@ -449,7 +474,7 @@ download_checks() {
   log "Testing $prefix: lan_client GET clean file from av_server:8080 (should pass whole)..."
   outcome=$(fetch lan_client get "$AV_SERVER" 8080 /clean.txt)
   seen=$(reply_field "$(outcome_field "$outcome" line)" client)
-  if [[ "$(outcome_field "$outcome" status)" == 200 && "$(outcome_field "$outcome" complete)" == yes && "$(outcome_field "$outcome" eicar)" == no && "$seen" == "$ENGINE_WAN" ]]; then
+  if clean_download_ok "$outcome" && [[ "$seen" == "$ENGINE_WAN" ]]; then
     pass "$prefix-download-clean" "clean download delivered whole, av_server saw $ENGINE_WAN ($outcome)"
   else
     check_fail "$prefix-download-clean" "clean download was not delivered whole from the engine's WAN address $ENGINE_WAN ($outcome)"
@@ -458,7 +483,7 @@ download_checks() {
   before=$(origin_upload_count av_server "$EICAR_MD5")
   outcome=$(fetch lan_client post "$AV_SERVER" 8080 /upload eicar)
   after=$(origin_upload_count av_server "$EICAR_MD5")
-  if [[ "$(outcome_field "$outcome" status)" == 403 && "$after" == "$before" ]]; then
+  if refusal_ok "$outcome" && [[ "$after" == "$before" ]]; then
     pass "$prefix-upload-eicar" "EICAR upload refused, av_server received no EICAR body ($outcome)"
   else
     check_fail "$prefix-upload-eicar" "EICAR upload was not refused with 403 before the origin saw it (EICAR uploads at origin $before -> $after; $outcome)"
@@ -466,7 +491,7 @@ download_checks() {
   log "Testing $prefix: lan_client POST clean body to av_server:8080 (should pass)..."
   outcome=$(fetch lan_client post "$AV_SERVER" 8080 /upload clean)
   seen=$(reply_field "$(outcome_field "$outcome" line)" client)
-  if [[ "$(outcome_field "$outcome" status)" == 200 && "$(reply_field "$(outcome_field "$outcome" line)" method)" == POST && "$seen" == "$ENGINE_WAN" ]]; then
+  if clean_upload_ok "$outcome" && [[ "$seen" == "$ENGINE_WAN" ]]; then
     pass "$prefix-upload-clean" "clean upload delivered, av_server saw $ENGINE_WAN ($outcome)"
   else
     check_fail "$prefix-upload-clean" "clean upload was not delivered from the engine's WAN address $ENGINE_WAN ($outcome)"
@@ -548,7 +573,7 @@ fi
 log "Testing open: DNAT WAN:${DNAT_PORT} -> av_target:80 from av_server, clean file (should pass whole)..."
 OUTCOME=$(fetch av_server get "$ENGINE_WAN" "$DNAT_PORT" /clean.txt)
 SEEN=$(reply_field "$(outcome_field "$OUTCOME" line)" client)
-if [[ "$(outcome_field "$OUTCOME" status)" == 200 && "$(outcome_field "$OUTCOME" complete)" == yes && "$(reply_field "$(outcome_field "$OUTCOME" line)" server)" == av_target && "$SEEN" == "$ENGINE_LAN" ]]; then
+if clean_download_ok "$OUTCOME" && [[ "$(reply_field "$(outcome_field "$OUTCOME" line)" server)" == av_target && "$SEEN" == "$ENGINE_LAN" ]]; then
   pass dnat-download-clean "clean download through the port forward reached av_target, which saw the engine's LAN address $ENGINE_LAN ($OUTCOME)"
 else
   check_fail dnat-download-clean "clean download through the port forward was not delivered whole by av_target from the engine's LAN address $ENGINE_LAN ($OUTCOME)"

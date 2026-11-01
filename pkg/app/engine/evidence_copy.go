@@ -10,19 +10,19 @@ import (
 
 // Retain an owned bounded decoded-event copy, never raw payloads or a JSON
 // round trip on the forwarding path. Normalization belongs to the worker.
-func ownEvidenceEvents(events []dpi.Event) ([]dpi.Event, bool) {
+func ownEvidenceEvents(events []dpi.Event) ([]dpi.Event, int, bool) {
 	if len(events) > 4096 {
-		return nil, false
+		return nil, 0, false
 	}
 	budget := copyBudget{bytes: 1 << 20, nodes: 65536}
 	owned := make([]dpi.Event, len(events))
 	for i, ev := range events {
 		owned[i] = ev
 		if len(ev.Attributes) > budget.nodes {
-			return nil, false
+			return nil, 0, false
 		}
 		if !budget.take(len(ev.FlowID) + len(ev.Proto) + len(ev.Kind) + len(ev.CorrelationStatus) + 128) {
-			return nil, false
+			return nil, 0, false
 		}
 		attrs := make(map[string]any, len(ev.Attributes))
 		for k, v := range ev.Attributes {
@@ -30,11 +30,11 @@ func ownEvidenceEvents(events []dpi.Event) ([]dpi.Event, bool) {
 				continue
 			}
 			if !budget.take(len(k)) {
-				return nil, false
+				return nil, 0, false
 			}
 			copy, ok := budget.clone(reflect.ValueOf(v), 0)
 			if !ok {
-				return nil, false
+				return nil, 0, false
 			}
 			if copy.IsValid() {
 				attrs[k] = copy.Interface()
@@ -44,7 +44,7 @@ func ownEvidenceEvents(events []dpi.Event) ([]dpi.Event, bool) {
 		}
 		owned[i].Attributes = attrs
 	}
-	return owned, true
+	return owned, (1 << 20) - budget.bytes, true
 }
 
 type copyBudget struct{ bytes, nodes int }

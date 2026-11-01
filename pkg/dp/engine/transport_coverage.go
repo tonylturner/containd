@@ -365,6 +365,7 @@ func (e *Engine) stopDecodeCoverage(marker *transportCoverage, connection *flow.
 	}
 	if report {
 		key, proto := transportOverflowIdentity(pkt, connection)
+		e.recordLearnCaptureLoss(pkt, connection)
 		e.eventStore.Append(events.Event{Kind: eventfields.KindCoverageLoss, Timestamp: pkt.Timestamp,
 			FlowID: key.Hash(), Proto: proto, Transport: pkt.Transport, TransportConnectionID: connection.PublicID(),
 			SrcIP: pkt.SrcIP.String(), DstIP: pkt.DstIP.String(), SrcPort: pkt.SrcPort, DstPort: pkt.DstPort,

@@ -38,6 +38,7 @@ const (
 	WithheldBudget           WithheldReason = "budget_exceeded"
 	WithheldExpired          WithheldReason = "evidence_expired"
 	WithheldReplay           WithheldReason = "replay_failed"
+	WithheldCollectionLoss   WithheldReason = "collection_loss"
 )
 
 // Budgets are hard admission limits, never permissions to truncate a parent.
@@ -70,10 +71,11 @@ type IngestRequest struct {
 	DatasetID string        `json:"datasetId"`
 	Parents   []Observation `json:"parents"`
 	Seal      bool          `json:"seal"`
-	// Gaps retains capture/queue loss that cannot be attributed to a parent.
+	// Gaps without corresponding Losses are dataset-wide exclusions.
 	// Codes are bounded metadata, never packet payloads or free-form logs.
-	Gaps        []string `json:"gaps,omitempty"`
-	LostBatches uint64   `json:"lostBatches,omitempty"`
+	Gaps        []string         `json:"gaps,omitempty"`
+	Losses      []CollectionLoss `json:"losses,omitempty"`
+	LostBatches uint64           `json:"lostBatches,omitempty"`
 	// CollectedAt is the trusted worker lease boundary, not capture input.
 	// Only in-process collectors can supply it; it is never decoded from JSON.
 	CollectedAt time.Time `json:"-"`

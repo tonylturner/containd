@@ -7,9 +7,41 @@ package capture
 
 import (
 	"bytes"
+	"fmt"
 	"golang.org/x/sys/unix"
 	"testing"
 )
+
+func TestAFPacketPreservesShortHeaderLoss(t *testing.T) {
+	for _, size := range []int{20, 22, 24, 32} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			raw := tcpIPv4Packet(7, 0x18, []byte{1, 2}, 4)[:size]
+			eth := make([]byte, 14)
+			eth[12] = 8
+			pkt, ok := decodePacket("eth0", append(eth, raw...))
+			if !ok || pkt.IPVersion != 4 || !pkt.CaptureIncomplete || pkt.TCP.Valid || pkt.SrcIP == nil || pkt.PortsValid != (size >= 24) {
+				t.Fatalf("trusted truncation discarded before handler: delivered=%v packet=%+v", ok, pkt)
+			}
+			// NFQUEUE uses the same public IP decoder and unconditionally
+			// delivers its result through generation.deliver.
+			inline := DecodeIPPacket(raw)
+			if inline.IPVersion != pkt.IPVersion || inline.CaptureIncomplete != pkt.CaptureIncomplete || inline.PortsValid != pkt.PortsValid || !inline.SrcIP.Equal(pkt.SrcIP) || inline.SrcPort != pkt.SrcPort {
+				t.Fatalf("NFQUEUE/AF_PACKET disagree: %+v %+v", inline, pkt)
+			}
+			delivered := false
+			comp := newCompleter(nil, nil)
+			defer comp.close()
+			g := newGeneration(func(uint32, Verdict, uint32) error { return nil }, comp, nil)
+			g.deliver(1, inline, func(p Packet) Decision {
+				delivered = p.CaptureIncomplete && p.Invalid != ""
+				return Decision{Action: Accept}
+			})
+			if !delivered {
+				t.Fatal("inline generation lost capture incompleteness")
+			}
+		})
+	}
+}
 
 func TestDecodePacketEthernetTCP(t *testing.T) {
 	eth := make([]byte, 14)

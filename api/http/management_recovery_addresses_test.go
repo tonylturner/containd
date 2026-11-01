@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -26,7 +27,7 @@ func (e *addressEngine) Configure(ctx context.Context, dp config.DataPlaneConfig
 	return e.recoveryEngine.Configure(ctx, dp)
 }
 
-func (e *addressEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
+func (e *addressEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	e.calls = append(e.calls, "rules")
 	return e.recoveryEngine.ApplyRules(ctx, snap)
 }

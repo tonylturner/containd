@@ -18,6 +18,8 @@ const (
 // one engine configuration. Capture calls them on its completion goroutine;
 // Reconfigure moves the hooks together with the fresh capture manager.
 type inlineHooks struct {
+	active  func() bool
+	source  func(capture.SourceEvent)
 	after   *afterVerdict
 	blocks  *worker
 	iec     *iecTable
@@ -53,6 +55,12 @@ func (h *inlineHooks) onVerdict(tok capture.Token, v capture.Verdict, err error)
 // aborts the enforce sessions; enforcement is healthy again only once the
 // source reports ready.
 func (h *inlineHooks) onSource(ev capture.SourceEvent) {
+	if h.active != nil && !h.active() {
+		return
+	}
+	if h.source != nil {
+		h.source(ev)
+	}
 	// A queue closed by Stop (every Reconfigure) is not an error to log.
 	if ev.Err != nil && !errors.Is(ev.Err, capture.ErrQueueClosed) && h.onError != nil {
 		h.onError(ev.Err)

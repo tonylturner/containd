@@ -59,7 +59,7 @@ function InventoryContent() {
         <div aria-label="Inventory overflow counters" className="mb-4 flex flex-wrap gap-2">
           {([
             ["Busy observations", inventory.overflow.observations], ["Pairs", inventory.overflow.pairs], ["CAs", inventory.overflow.cas],
-            ["Points", inventory.overflow.points], ["Lost outcomes", inventory.overflow.outcomes],
+            ["Points", inventory.overflow.points],
             ["Legacy assets", inventory.overflow.assets], ["Legacy peers", inventory.overflow.peers],
             ["Legacy station addresses", inventory.overflow.stationAddresses],
           ] as const).map(([label, count]) => (
@@ -67,20 +67,20 @@ function InventoryContent() {
           ))}
         </div>
         <p className="mb-4 text-xs text-(--text)">
-          Overflow totals count truncated observations or capacity evictions since inventory clear or engine restart, not unique missing devices. Busy observations and lost outcomes include data dropped on inventory lock contention.
-          Attempted counts decoded client command APDUs; accepted requires an allow decision and successful Accept verdicts for every carrying packet in inline enforce mode only. Monitor and non-inline capture never claim delivery. Lost outcomes also include delivery-ledger overflow. Counts cover retained history, not lifetime traffic.
+          Overflow totals count truncated observations or capacity evictions since inventory clear or engine restart, not unique missing devices. Busy observations include data dropped on inventory lock contention.
+          Attempted counts decoded client command APDUs, not delivery or physical execution. Inventory never claims delivery. Counts cover retained history, not lifetime traffic.
         </p>
         {inventory.pairs.length === 0 && <EmptyState title="No IEC 104 stations observed" description="Stations and points appear here when the engine supplies decoded IEC 104 observations." />}
         {inventory.pairs.map((pair) => (
           <Disclosure key={`${pair.controlling}-${pair.controlled}`} summary={<>
               <span className="font-mono">{pair.controlling}</span> (controlling client) → <span className="font-mono">{pair.controlled}</span> (controlled server)
-              <span className="ml-3">{pair.attemptedCommands} attempted / {pair.acceptedCommands} accepted · {pair.cas.length} CAs</span>
+              <span className="ml-3">{pair.attemptedCommands} attempted · {pair.cas.length} CAs</span>
             </>}>
             {() => <>
             <p className="my-3 text-xs text-(--text)">First seen: <Seen value={pair.firstSeen} /> · Last seen: <Seen value={pair.lastSeen} /></p>
             {pair.cas.map((ca) => (
               <Disclosure key={ca.ca} summary={<>
-                  CA {ca.ca} · {ca.points.length} points · {ca.attemptedCommands} attempted / {ca.acceptedCommands} accepted
+                  CA {ca.ca} · {ca.points.length} points · {ca.attemptedCommands} attempted
                 </>}>
                 {() => <>
                 <p className="my-2 text-xs text-(--text)">First seen: <Seen value={ca.firstSeen} /> · Last seen: <Seen value={ca.lastSeen} /></p>

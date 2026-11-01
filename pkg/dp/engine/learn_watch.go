@@ -2,10 +2,13 @@
 package engine
 
 import (
+	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/evidence"
 )
 
 // InspectionSnapshot keeps offline imports and watch fingerprints bound to the
@@ -63,7 +66,27 @@ func (e *Engine) recordLearnEvents(state *flow.State, evs []dpi.Event) {
 	if hook := e.learnWatch.Load(); hook != nil && state != nil {
 		e.flowMu.Lock()
 		snapshot := *state
+		snapshot.CaptureHook = ""
+		if state.InlinePolicy.Load() != nil {
+			snapshot.CaptureHook = evidence.CaptureNFQueue
+		} else if e.transport != nil {
+			snapshot.CaptureHook = evidence.CaptureAFPacket
+		}
+		var lossPacket capture.Packet
+		knownLoss := false
+		if r := e.transport; r != nil {
+			r.admissionMu.Lock()
+			if c := e.transportCoverage[state].root(); c != nil && c.lost {
+				lossPacket, knownLoss = c.packet, true
+			}
+			r.admissionMu.Unlock()
+		}
 		e.flowMu.Unlock()
+		// A watch may start with a preexisting loss notice still pending.
+		// Never admit a parent from that marked connection as clean.
+		if knownLoss {
+			e.recordLearnCaptureLoss(lossPacket, snapshot.Connection.Load())
+		}
 		hook.offer(&snapshot, evs)
 	}
 }
@@ -72,4 +95,51 @@ func (e *Engine) recordLearnOutcome(events []dpi.Event) {
 	if hook := e.learnWatch.Load(); hook != nil {
 		hook.offer(nil, events)
 	}
+}
+
+// SetLearnLossHook fences synchronous loss admissions independently of the
+// semantic queue. Disabling waits for every already-entered callback to finish.
+// The callback must be nonblocking and must not reenter this hook setter.
+func (e *Engine) SetLearnLossHook(offer func(evidence.CollectionLoss)) {
+	// Admission records coverage before invoking the hook. Fence that whole
+	// critical section, not just callbacks that already acquired learnLossMu.
+	if r := e.transport; r != nil {
+		r.admissionMu.Lock()
+		defer r.admissionMu.Unlock()
+	}
+	e.learnLossMu.Lock()
+	defer e.learnLossMu.Unlock()
+	e.learnLoss = offer
+}
+
+func (e *Engine) recordLearnCaptureLoss(pkt capture.Packet, connection *flow.Connection) {
+	loss := learn.CaptureLoss(pkt, "capture_loss")
+	if loss.CaptureHook == "" && e.transport != nil {
+		loss.CaptureHook = evidence.CaptureAFPacket
+	}
+	if connection != nil && connection.Key != "" {
+		loss.ConnectionID = connection.Key
+	}
+	e.learnLossMu.RLock()
+	defer e.learnLossMu.RUnlock()
+	if e.learnLoss != nil {
+		e.learnLoss(loss)
+	}
+}
+
+// Full ports permit an admission-index identity lookup without network I/O.
+// Partial ports retain host-pair scope; certification checks every retained
+// verified alias, including mappings on connections with no retained reply.
+func (e *Engine) recordLearnPacketLoss(pkt capture.Packet) {
+	var connection *flow.Connection
+	if r := e.transport; r != nil {
+		r.admissionMu.Lock()
+		defer r.admissionMu.Unlock()
+		if pkt.Invalid != capture.InvalidIPHeader && (pkt.PortsValid || pkt.TCP.Valid) {
+			if entry := r.indexed[packetKey(pkt).Tuple()]; entry != nil && !entry.connection.Closed().Load() {
+				connection = entry.connection
+			}
+		}
+	}
+	e.recordLearnCaptureLoss(pkt, connection)
 }

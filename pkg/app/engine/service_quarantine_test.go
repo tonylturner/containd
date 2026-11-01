@@ -24,9 +24,9 @@ func TestServiceQuarantineDisablesBackendNotPolicy(t *testing.T) {
 	gate := &gateManager{}
 	body := `{"av":{"enabled":true,"backendDisabled":true,"failPolicy":"closed","httpDownload":true,"scan":{"include":[{"destPorts":["80"]}]}}}`
 	rec := httptest.NewRecorder()
-	servicesHandler(zap.NewNop().Sugar(), nil, nil, nil, av, gate).ServeHTTP(rec,
-		httptest.NewRequest(http.MethodPost, "/internal/services", strings.NewReader(body)))
-	// Non-Linux cannot apply WireGuard, but that follows both AV operations.
+	servicesHandler(zap.NewNop().Sugar(), nil, nil, nil, av, gate, testProtectionCoordinator(t, newCountingDP(t))).ServeHTTP(rec,
+		protectionRequest(http.MethodPost, "/internal/services", strings.NewReader(body)))
+	// Independent WireGuard faults must not prevent either AV operation.
 	if av.cfg.Enabled || !av.cfg.BackendDisabled || av.cfg.FailPolicy != "closed" {
 		t.Fatalf("scanner backend was not stopped: %+v", av.cfg)
 	}

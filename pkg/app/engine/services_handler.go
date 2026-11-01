@@ -41,12 +41,12 @@ type dhcpConfigApplier interface {
 	Apply(context.Context, config.DHCPConfig, []config.Interface) error
 }
 
-func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager, av avConfigApplier, gate *gateManager) http.HandlerFunc {
+func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr *dhcpd.Manager, av avConfigApplier, gate *gateManager, coordinator *protectionCoordinator) http.HandlerFunc {
 	var dhcp dhcpConfigApplier
 	if dhcpMgr != nil {
 		dhcp = dhcpMgr
 	}
-	return serviceApplyHandler(logger, dpEngine, ownership, dhcp, av, gate, netcfg.ApplyWireGuard)
+	return coordinator.admit(serviceApplyHandler(logger, dpEngine, ownership, dhcp, av, gate, netcfg.ApplyWireGuard))
 }
 
 func serviceApplyHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownership *ownershipManager, dhcpMgr dhcpConfigApplier, av avConfigApplier, gate *gateManager, applyWireGuard func(context.Context, config.WireGuardConfig) error) http.HandlerFunc {

@@ -199,6 +199,14 @@ func (m *ownershipManager) reconcileLoop(ctx context.Context) {
 }
 
 func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
+	m.netlinkWatchWith(ctx, unix.Poll, unix.Recvfrom)
+}
+
+// netlinkWatchWith keeps syscall injection local to one watcher.
+func (m *ownershipManager) netlinkWatchWith(ctx context.Context,
+	poll func([]unix.PollFd, int) (int, error),
+	recvfrom func(int, []byte, int) (int, unix.Sockaddr, error),
+) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
 		m.logger.Warnf("ownership netlink watch disabled: %v", err)
@@ -230,7 +238,7 @@ func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
 		}
 		// Bounded wait so context cancellation cannot leak this worker.
 		polls := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-		ready, pollErr := unix.Poll(polls, 100)
+		ready, pollErr := poll(polls, 100)
 		if errors.Is(pollErr, unix.EINTR) {
 			continue
 		}
@@ -242,7 +250,7 @@ func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
 			continue
 		}
 		// Read the available event.
-		n, _, err := unix.Recvfrom(fd, buf, 0)
+		n, _, err := recvfrom(fd, buf, 0)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}

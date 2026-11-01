@@ -99,7 +99,11 @@ type SourceEvent struct {
 	// Ready is true when the source is bound and delivering; false when it
 	// is down and all outstanding tokens of this generation are gone.
 	Ready bool
-	Err   error
+	// Terminal is sent once when established-source supervision exhausts its budget.
+	Terminal    bool
+	Attempt     int
+	MaxAttempts int
+	Err         error
 }
 
 var (

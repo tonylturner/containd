@@ -471,5 +471,5 @@ func main() {
 	}
 	// The client_port and client_socket fields are machine-read by
 	// scripts/smoke-iec104.sh and its parsing helpers.
-	fmt.Printf("%s: sent %d bytes %s client_port=%d client_socket=%s\n", r.name, r.sent, r.note, r.port, r.socket)
+	fmt.Printf("%s: sent %d bytes %s probe_sent=1 client_port=%d client_socket=%s\n", r.name, r.sent, r.note, r.port, r.socket)
 }

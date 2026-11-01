@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -396,5 +397,105 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestEvidenceStageUpgradeOnlyReconcilesExistingRules(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "not saved", true: "already saved"}[existing], func(t *testing.T) {
+			ctx := context.Background()
+			store := stageStore(t)
+			s := stageProposal(t)
+			// Rebind a genuine historical snapshot: binding remains valid, but the
+			// generator is guaranteed different from the currently accepted authority.
+			s.Content.Versions.Generator = learn.GeneratorVersion + "-historical"
+			var err error
+			s.ID, err = s.Content.ContentID()
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.Proof.ContentID, s.Proof.Versions = s.ID, s.Content.Versions
+			s.StageReconcileOnly = true
+			if existing {
+				if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
+					cfg.Firewall.Rules = append(cfg.Firewall.Rules, s.Content.Rules...)
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, frozen: []learn.Suggestion{s}}
+			server := NewServerWithEngine(store, nil, e)
+			req := learn.ApplyRequest{RequestID: "upgraded-request", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}}
+			for range 2 {
+				rec := requestStage(t, server, "POST", "/learn/apply", req)
+				if existing && rec.Code != 200 || !existing && rec.Code != 409 {
+					t.Fatalf("upgrade status: %d %s", rec.Code, rec.Body)
+				}
+			}
+			after, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before.Candidate.Firewall.Rules, after.Candidate.Firewall.Rules) {
+				t.Fatal("upgrade mutated candidate")
+			}
+			if e.releases != 0 {
+				t.Fatal("lost historical receipt needed for reconciliation")
+			}
+		})
+	}
+}
+
+func TestEvidenceStageUpgradeRevisionMismatch(t *testing.T) {
+	ctx := context.Background()
+	store := stageStore(t)
+	s := stageProposal(t)
+	s.StageReconcileOnly = true
+	e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, frozen: []learn.Suggestion{s}}
+	server := NewServerWithEngine(store, nil, e)
+	body, err := json.Marshal(learn.ApplyRequest{RequestID: "stale-upgrade", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := withTestRevision(store, authedRequest(http.MethodPost, "/api/v1/learn/apply", strings.NewReader(string(body))))
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
+		cfg.System.Hostname = "external-edit"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale upgrade status: %d %s", rec.Code, rec.Body)
+	}
+	var failure struct {
+		Code            string          `json:"code"`
+		CurrentRevision config.Revision `json:"currentRevision"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Code != "config_revision_mismatch" || failure.CurrentRevision != before.Revision {
+		t.Fatalf("wrong revision failure: %+v", failure)
+	}
+	after, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) || e.resolves != 1 || e.releases != 0 || e.done != 0 {
+		t.Fatal("stale upgrade changed candidate or lost the historical receipt")
+	}
+	if rec.Header().Get(revisionHeader) != "" {
+		t.Fatal("stale upgrade acknowledged a write")
 	}
 }

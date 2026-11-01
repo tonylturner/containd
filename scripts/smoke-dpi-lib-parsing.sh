@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Sourced by smoke-dpi.sh: tolerant and strict ICS parsing on live Modbus
 # traffic. Uses the caller's compose, pass, check_fail, timestamp,
-# engine_post, CURL, AUTH_HEADER, BASE, WORK_DIR, UPDATED_CFG, DATAPLANE_CFG,
+# engine_apply, engine_apply_id, CURL, AUTH_HEADER, BASE, WORK_DIR, UPDATED_CFG, DATAPLANE_CFG,
 # SMOKE_DPI_CAPTURE and MODBUS_DST.
 #
 # Tolerant (the default, no dpiIcsParsing key) passes content it cannot vouch
@@ -36,7 +36,7 @@ push_parsing() {
     check_fail "$label: config save failed (HTTP $code): $(head -c 300 "$WORK_DIR/parsing-config.out")"
     return 1
   fi
-  code=$(engine_post engine /internal/config "$WORK_DIR/parsing-engine.out" <<<"$DATAPLANE_CFG")
+  code=$(engine_apply engine /internal/config "$WORK_DIR/parsing-engine.out" "$(engine_apply_id)" <<<"$DATAPLANE_CFG")
   if [[ "$code" != "200" ]]; then
     check_fail "$label: engine config failed (HTTP $code): $(head -c 300 "$WORK_DIR/parsing-engine.out")"
     return 1

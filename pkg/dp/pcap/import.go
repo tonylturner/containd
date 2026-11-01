@@ -111,6 +111,8 @@ func Import(ctx context.Context, r io.ReadSeeker, store evidence.Store, metadata
 		}
 		flush()
 	}
+	var losses evidence.Dataset
+	opts.OnLoss = losses.RecordLoss
 	stats, parseErr := AnalyzeWithOptions(importReader{ctx, r}, opts, decoders...)
 	commit()
 	gaps := []string{}
@@ -120,13 +122,11 @@ func Import(ctx context.Context, r io.ReadSeeker, store evidence.Store, metadata
 	if ingestErr != nil {
 		gaps = append(gaps, "ingest_failed")
 	}
-	if stats != nil && stats.Truncated {
-		gaps = append(gaps, "capture_truncated")
-	}
+
 	if !sealed {
 		sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		if _, err := store.Ingest(sealCtx, evidence.IngestRequest{DatasetID: ds.ID, Seal: true, Gaps: gaps}); err != nil {
+		if _, err := store.Ingest(sealCtx, evidence.IngestRequest{DatasetID: ds.ID, Seal: true, Gaps: gaps, Losses: losses.Losses}); err != nil {
 			return nil, err
 		}
 	}

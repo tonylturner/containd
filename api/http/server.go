@@ -59,7 +59,7 @@ type EngineClient interface {
 	// independent runtime outcomes and pending warnings.
 	ConfigureServices(ctx context.Context, services config.ServicesConfig) (engineclient.ServicesApplyResult, error)
 	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
-	ApplyRules(ctx context.Context, snap rules.Snapshot) error
+	ApplyRules(ctx context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error)
 	RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
 	PcapConfig(ctx context.Context) (config.PCAPConfig, error)
 	SetPcapConfig(ctx context.Context, cfg config.PCAPConfig) (config.PCAPConfig, error)
@@ -311,6 +311,8 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/dataplane", requireAdmin(), requireConfigRevision(), setDataPlaneHandler(store))
 		protected.GET("/dataplane/ruleset", requireAdmin(), getRulesetPreviewHandler(store, engine))
 		protected.GET("/dataplane/ruleset/status", getInstalledRulesetStatusHandler(engine))
+		protected.GET("/dataplane/protection", getProtectionHandler(engine))
+		protected.POST("/dataplane/protection/retry", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), retryProtectionHandler(engine))
 		protected.GET("/dataplane/ics-coverage", getICSCoverageHandler(store, engine))
 		protected.POST("/dataplane/blocks/host", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), blockHostHandler(engine))
 		protected.POST("/dataplane/blocks/flow", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), blockFlowHandler(engine))
@@ -556,23 +558,26 @@ func applyRunningConfigLocked(ctx context.Context, store config.Store, engine En
 		}
 		return nil, err
 	}
-	return applyConfigSnapshot(ctx, store, engine, services, previous, cfg)
+	warnings, _, err = applyConfigSnapshot(ctx, store, engine, services, previous, cfg)
+	return warnings, err
 }
 
 // applyConfigSnapshot must not load or mutate the store: a transition holds its
 // mutex across this callback. Validation uses only immutable boot authority.
-func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous, cfg *config.Config) ([]string, error) {
+func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineClient, services ServicesApplier, previous, cfg *config.Config) ([]string, dpengine.ProtectionStatus, error) {
+	ctx = engineclient.NewApplyContext(ctx)
 	// Bind unbound default logical interfaces to discovered kernel devices
 	// before applying them. Explicit bindings are applied exactly as staged
 	// and validated. Keep this change in memory only: applying a previously
 	// loaded snapshot must never persist it over a newer store mutation.
 	// Bootstrap owns persisted default device bindings.
+	// Reserved bindings were persisted by bootstrap; never normalize them on replay.
 	if config.ReservationForStore(store) == nil {
 		bindUnboundDefaultInterfaceDevices(cfg)
 	}
 	effective, faults, err := config.EffectiveForStore(store, cfg)
 	if err != nil {
-		return nil, err
+		return nil, dpengine.ProtectionStatus{}, err
 	}
 	cfg = effective
 	scanWarnings, _ := config.ValidateScanSelection(cfg)
@@ -580,7 +585,7 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	// another service; compile that narrower projection again before engine apply.
 	snap, err := compile.CompileSnapshot(cfg)
 	if err != nil {
-		return nil, err
+		return nil, dpengine.ProtectionStatus{}, err
 	}
 	if services != nil {
 		var serviceWarnings []string
@@ -588,7 +593,7 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 		scanWarnings = append(scanWarnings, serviceWarnings...)
 		snap, err = compile.CompileSnapshot(cfg)
 		if err != nil {
-			return nil, err
+			return nil, dpengine.ProtectionStatus{}, err
 		}
 	}
 	for _, fault := range faults {
@@ -596,7 +601,7 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	}
 	warnings := scanWarnings
 	if engine == nil {
-		return nil, errors.New("engine unavailable")
+		return nil, dpengine.ProtectionStatus{}, errors.New("engine unavailable")
 	}
 	// Auxiliary infrastructure remains best-effort. Dataplane configuration
 	// and ruleset application are mandatory: they control enforcement.
@@ -628,7 +633,7 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 		warnings = append(warnings, "services: "+warning)
 	}
 	if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
-		return nil, fmt.Errorf("dataplane: %w", err)
+		return nil, dpengine.ProtectionStatus{}, fmt.Errorf("dataplane: %w", err)
 	}
 	// Replay config on boot/reconnect, but preserve operational captures
 	// across promotions that do not change saved capture settings.
@@ -646,8 +651,9 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 			}
 		}
 	}
-	if err := engine.ApplyRules(ctx, snap); err != nil {
-		return nil, fmt.Errorf("ruleset: %w", err)
+	observation, err := engine.ApplyRules(ctx, snap)
+	if err != nil {
+		return nil, dpengine.ProtectionStatus{}, fmt.Errorf("ruleset: %w", err)
 	}
-	return warnings, nil
+	return warnings, engineclient.NormalizeProtection(observation, engineclient.ApplyID(ctx)), nil
 }

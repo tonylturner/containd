@@ -40,15 +40,6 @@ func (b *bounded[K, V]) expire(now time.Time) {
 	}
 }
 
-func (b *bounded[K, V]) get(key K, now time.Time) (V, bool) {
-	b.expire(now)
-	if e := b.items[key]; e != nil {
-		return e.Value.(*entry[K, V]).value, true
-	}
-	var zero V
-	return zero, false
-}
-
 func (b *bounded[K, V]) observe(key K, now time.Time, create func() V, overflow *uint64) V {
 	b.expire(now)
 	if e := b.items[key]; e != nil {

@@ -28,24 +28,26 @@ const (
 
 // Dataset is an evidence window. PCAP import seals atomically; no append/edit API
 // exists for a sealed dataset. Expiry/eviction can remove it but cannot rewrite it.
-// PCAP ID binds capture SHA + decoder/profile/snapshot fingerprints; live ID is
-// assigned at explicit start. Incomplete retention is visible through Gaps.
+// PCAP ID binds capture SHA + decoder/profile/snapshot fingerprints and adapter
+// normalization version; live ID is assigned at explicit start.
+// Incomplete retention is visible through Gaps.
 type Dataset struct {
-	SchemaVersion       string       `json:"schemaVersion"`
-	ID                  string       `json:"id"`
-	Source              Source       `json:"source"`
-	State               DatasetState `json:"state"`
-	CreatedAt           time.Time    `json:"createdAt"`
-	SealedAt            *time.Time   `json:"sealedAt,omitempty"`
-	ExpiresAt           time.Time    `json:"expiresAt"`
-	CaptureSHA256       string       `json:"captureSha256,omitempty"`
-	DecoderVersion      string       `json:"decoderVersion"`
-	ProfileFingerprint  string       `json:"profileFingerprint"`
-	SnapshotFingerprint string       `json:"snapshotFingerprint"`
-	EvidenceDigest      string       `json:"evidenceDigest"`
-	Records             uint64       `json:"records"`
-	Bytes               uint64       `json:"bytes"`
-	Gaps                []string     `json:"gaps"`
+	SchemaVersion       string           `json:"schemaVersion"`
+	ID                  string           `json:"id"`
+	Source              Source           `json:"source"`
+	State               DatasetState     `json:"state"`
+	CreatedAt           time.Time        `json:"createdAt"`
+	SealedAt            *time.Time       `json:"sealedAt,omitempty"`
+	ExpiresAt           time.Time        `json:"expiresAt"`
+	CaptureSHA256       string           `json:"captureSha256,omitempty"`
+	DecoderVersion      string           `json:"decoderVersion"`
+	ProfileFingerprint  string           `json:"profileFingerprint"`
+	SnapshotFingerprint string           `json:"snapshotFingerprint"`
+	EvidenceDigest      string           `json:"evidenceDigest"`
+	Records             uint64           `json:"records"`
+	Bytes               uint64           `json:"bytes"`
+	Gaps                []string         `json:"gaps"`
+	Losses              []CollectionLoss `json:"losses,omitempty"`
 }
 
 // Watch is an explicit live collection lease. A restart stops, never resumes it.

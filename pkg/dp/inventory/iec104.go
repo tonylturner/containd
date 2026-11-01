@@ -34,23 +34,6 @@ type IEC104Observation struct {
 	Time                    time.Time
 }
 
-// IEC104Outcome describes a command's final fate. Accepted means the IEC decision
-// allowed the APDU AND every packet carrying its bytes completed Accept without
-// error. The caller emits exactly one outcome, after the corresponding observation.
-type IEC104Outcome struct {
-	Command  IEC104CommandRef
-	Accepted bool
-}
-
-// IEC104CommandRef is an opaque retention-generation reference returned for a
-// control-direction command. Store it in the caller's bounded delivery ledger.
-// It prevents late outcomes from crediting a newly recreated pair or CA.
-type IEC104CommandRef struct {
-	pair       pairKey
-	ca         uint16
-	generation uint64
-}
-
 type IEC104Point struct {
 	IOA       uint32    `json:"ioa"`
 	TypeID    uint8     `json:"typeId"`
@@ -63,7 +46,6 @@ type IEC104CA struct {
 	FirstSeen         time.Time     `json:"firstSeen"`
 	LastSeen          time.Time     `json:"lastSeen"`
 	AttemptedCommands uint64        `json:"attemptedCommands"`
-	AcceptedCommands  uint64        `json:"acceptedCommands"`
 	Points            []IEC104Point `json:"points"`
 }
 
@@ -73,7 +55,6 @@ type IEC104Pair struct {
 	FirstSeen         time.Time      `json:"firstSeen"`
 	LastSeen          time.Time      `json:"lastSeen"`
 	AttemptedCommands uint64         `json:"attemptedCommands"`
-	AcceptedCommands  uint64         `json:"acceptedCommands"`
 	CAs               []IEC104CA     `json:"cas"`
 }
 
@@ -85,7 +66,6 @@ type InventoryOverflow struct {
 	Assets           uint64 `json:"assets"`
 	Peers            uint64 `json:"peers"`
 	StationAddresses uint64 `json:"stationAddresses"`
-	Outcomes         uint64 `json:"outcomes"`
 }
 
 type InventoryLimits struct {
@@ -111,8 +91,7 @@ type pointKey struct {
 }
 type caState struct {
 	IEC104CA
-	generation uint64
-	points     *bounded[pointKey, *IEC104Point]
+	points *bounded[pointKey, *IEC104Point]
 }
 type pairState struct {
 	IEC104Pair
@@ -121,10 +100,8 @@ type pairState struct {
 type iec104Store struct {
 	mu               sync.Mutex
 	busyObservations atomic.Uint64
-	busyOutcomes     atomic.Uint64
 	pairs            *bounded[pairKey, *pairState]
 	overflow         InventoryOverflow
-	nextGeneration   uint64
 }
 
 func newIEC104Store() iec104Store {
@@ -135,17 +112,17 @@ func newIEC104Store() iec104Store {
 // cheap and non-blocking: no I/O, external callbacks or channel waits. It uses
 // its own TryLock; contention drops the observation and increments
 // overflow.observations. All work is bounded. Call once per deduplicated APDU,
-// before its outcome. The return value is zero for non-command or dropped inputs.
+// with no delivery-outcome tracking.
 // Only control-direction command type IDs count as attempts. Inventory
 // is observational and never feeds the learner or auto-ALLOW.
-func (inv *Inventory) ObserveIEC104(o IEC104Observation) IEC104CommandRef {
+func (inv *Inventory) ObserveIEC104(o IEC104Observation) {
 	if !o.Controlling.IsValid() || !o.Controlled.IsValid() {
-		return IEC104CommandRef{}
+		return
 	}
 	s := &inv.iec104
 	if !s.mu.TryLock() {
 		s.busyObservations.Add(1)
-		return IEC104CommandRef{}
+		return
 	}
 	defer s.mu.Unlock()
 	now := time.Now()
@@ -158,13 +135,10 @@ func (inv *Inventory) ObserveIEC104(o IEC104Observation) IEC104CommandRef {
 	}, &s.overflow.Pairs)
 	seen(&p.FirstSeen, &p.LastSeen, at)
 	ca := p.cas.observe(o.CA, now, func() *caState {
-		s.nextGeneration++
-		return &caState{generation: s.nextGeneration, IEC104CA: IEC104CA{CA: o.CA, FirstSeen: at, LastSeen: at}, points: newBounded[pointKey, *IEC104Point](MaxIEC104Points)}
+		return &caState{IEC104CA: IEC104CA{CA: o.CA, FirstSeen: at, LastSeen: at}, points: newBounded[pointKey, *IEC104Point](MaxIEC104Points)}
 	}, &s.overflow.CAs)
 	seen(&ca.FirstSeen, &ca.LastSeen, at)
-	var ref IEC104CommandRef
 	if o.IsCommand() {
-		ref = IEC104CommandRef{pairKey{o.Controlling, o.Controlled}, o.CA, ca.generation}
 		p.AttemptedCommands++
 		ca.AttemptedCommands++
 	}
@@ -183,39 +157,6 @@ func (inv *Inventory) ObserveIEC104(o IEC104Observation) IEC104CommandRef {
 			return &IEC104Point{IOA: ioa, TypeID: o.TypeID, FirstSeen: at, LastSeen: at}
 		}, &s.overflow.Points)
 		seen(&point.FirstSeen, &point.LastSeen, at)
-	}
-	return ref
-}
-
-// IEC104CommandOutcome must be called outside the engine's IEC table lock and
-// must stay cheap and non-blocking (no I/O or channel waits). It uses its own
-// TryLock; contention drops the outcome and increments overflow.outcomes. It
-// increments accepted, not attempted (already counted by ObserveIEC104). Exactly-once delivery/deduplication belongs to the caller.
-// An outcome whose pair/CA expired or was evicted is counted in overflow.outcomes.
-func (inv *Inventory) IEC104CommandOutcome(o IEC104Outcome) {
-	if o.Command.generation == 0 {
-		return
-	}
-	s := &inv.iec104
-	if !s.mu.TryLock() {
-		s.busyOutcomes.Add(1)
-		return
-	}
-	defer s.mu.Unlock()
-	now := time.Now()
-	p, ok := s.pairs.get(o.Command.pair, now)
-	if !ok {
-		s.overflow.Outcomes++
-		return
-	}
-	ca, ok := p.cas.get(o.Command.ca, now)
-	if !ok || ca.generation != o.Command.generation {
-		s.overflow.Outcomes++
-		return
-	}
-	if o.Accepted {
-		p.AcceptedCommands++
-		ca.AcceptedCommands++
 	}
 }
 
@@ -256,7 +197,6 @@ func (inv *Inventory) SnapshotIEC104() IEC104Snapshot {
 		out.Pairs = append(out.Pairs, cp)
 	}
 	out.Overflow.Observations = s.busyObservations.Load()
-	out.Overflow.Outcomes += s.busyOutcomes.Load()
 	s.mu.Unlock()
 	for i := range out.Pairs {
 		cas := out.Pairs[i].CAs

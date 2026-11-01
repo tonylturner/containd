@@ -104,6 +104,9 @@ type State struct {
 	// Tags are the labels of the TAG rules that match this connection
 	// at evidence binding. The engine guards updates and snapshots with flowMu.
 	Tags []string
+	// CaptureHook is receive-time provenance retained in learner snapshots,
+	// not inferred from correlation success or the current configuration.
+	CaptureHook string `json:"-"`
 }
 
 func NewState(key Key, now time.Time) *State {

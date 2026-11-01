@@ -125,8 +125,11 @@ protection behavior. It reports a step position at CA 1 / IOA 1301 as Type 5
 in the GI and Type 32 spontaneously (position 12, not transient), matching the
 EU RTU's type pair and exercising the VTI/QDS/CP56Time2a layouts.
 
-A prevention assertion passes only if `commands_received` (or `gi_requests`)
-does not move: the RTU never decoded the forbidden bytes. The reset assertion
+A prevention assertion first requires a `probe_sent=1` marker proving that the
+client connected and successfully sent its command; connection, executable and
+send failures are harness failures, never proof of prevention. It then passes
+only if `commands_received` (or `gi_requests`) and `writes_applied` do not move:
+the RTU never decoded the forbidden bytes. The reset assertion
 needs both sockets: the client reads `ECONNRESET` and the RTU records a closed
 session while the client is still holding its socket.
 

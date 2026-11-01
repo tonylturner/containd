@@ -329,6 +329,8 @@ func TestAutoRollbackReplaysPreviousConfig(t *testing.T) {
 				waitForRollback(t, store)
 			}
 			applied := make(chan rules.Action, 8)
+			seenApplyIDs := map[string]bool{}
+			var idMu sync.Mutex
 			entered := make(chan struct{})
 			release := make(chan struct{})
 			var once sync.Once
@@ -346,6 +348,13 @@ func TestAutoRollbackReplaysPreviousConfig(t *testing.T) {
 						w.WriteHeader(http.StatusBadRequest)
 						return
 					}
+					idMu.Lock()
+					id := r.Header.Get(engineapi.ApplyIDHeader)
+					if id == "" || seenApplyIDs[id] {
+						t.Errorf("rollback/boot replay ID missing or reused: %q", id)
+					}
+					seenApplyIDs[id] = true
+					idMu.Unlock()
 					if timing == "during replay" && snap.Default == rules.ActionDeny {
 						close(entered)
 						<-release

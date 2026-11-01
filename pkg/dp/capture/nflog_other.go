@@ -12,7 +12,7 @@ import (
 
 // StartNFLog is a no-op on non-linux platforms when disabled or without a
 // sink. A configured group reports that nflog is unavailable on this OS.
-func StartNFLog(_ context.Context, group uint16, sink RuleHitSink, _ func(error)) (func(), error) {
+func StartNFLog(_ context.Context, group uint16, sink RuleHitSink, _ func(error), _ func(SourceEvent)) (func(), error) {
 	if group == 0 || sink == nil {
 		return func() {}, nil
 	}

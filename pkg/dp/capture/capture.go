@@ -38,19 +38,21 @@ type TCPMeta struct {
 
 // Packet is a minimal decoded packet for DPI/telemetry.
 type Packet struct {
-	Timestamp time.Time
-	Interface string
-	SrcIP     net.IP
-	DstIP     net.IP
-	SrcPort   uint16
-	DstPort   uint16
-	Proto     uint8  // IP protocol number (6 TCP, 17 UDP)
-	Transport string // "tcp" or "udp"
-	Payload   []byte // L4 payload; always an owned copy
-	TCP       TCPMeta
-	Token     Token  // zero unless delivered inline
-	Mark      uint32 // NFQUEUE skb mark when HasMark; opaque to capture
-	HasMark   bool
+	Timestamp  time.Time
+	Interface  string
+	SrcIP      net.IP
+	DstIP      net.IP
+	SrcPort    uint16
+	DstPort    uint16
+	IPVersion  uint8  // decoded IP header version; never inferred from address spelling
+	PortsValid bool   // both ports were captured, even if the rest of L4 was not
+	Proto      uint8  // IP protocol number (6 TCP, 17 UDP)
+	Transport  string // "tcp" or "udp"
+	Payload    []byte // L4 payload; always an owned copy
+	TCP        TCPMeta
+	Token      Token  // zero unless delivered inline
+	Mark       uint32 // NFQUEUE skb mark when HasMark; opaque to capture
+	HasMark    bool
 	// Queue is nil on observational sources. Missing queue/conntrack fields
 	// stay missing; a reverse tuple is never synthesized from packet headers.
 	Queue             *QueueMetadata
@@ -58,6 +60,9 @@ type Packet struct {
 	// Invalid is "" when the packet decoded. Otherwise it names the reason
 	// (see the Invalid* constants); tuple fields are then best effort.
 	Invalid string
+	// CaptureIncomplete records trusted IP-length truncation independently of
+	// the primary Invalid reason (which can instead name a short TCP/UDP header).
+	CaptureIncomplete bool
 }
 
 // Manager manages interface capture workers.
