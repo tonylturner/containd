@@ -34,8 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make `set system mgmt listen` update the HTTP listener even when
   `httpListenAddr` is already configured; both HTTP listener commands clear the
   legacy `listenAddr` field.
-- Preserve application stdout logging when syslog initialization fails and
-  report the failure once to stderr.
+- Keep stdout and file logging for containd and its embedded services when
+  syslog initialization fails, and report the failure once to stderr.
 - Use the repository-root `.env` in `scripts/containd-connect` and surface
   Compose interpolation errors instead of reporting a running service as stopped.
 
