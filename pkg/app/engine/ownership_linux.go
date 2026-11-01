@@ -7,6 +7,7 @@ package engineapp
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -230,6 +231,9 @@ func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
 		// Bounded wait so context cancellation cannot leak this worker.
 		polls := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		ready, pollErr := unix.Poll(polls, 100)
+		if errors.Is(pollErr, unix.EINTR) {
+			continue
+		}
 		if pollErr != nil {
 			m.logger.Warnf("ownership watch poll: %v", pollErr)
 			return
@@ -239,6 +243,9 @@ func (m *ownershipManager) netlinkWatchLoop(ctx context.Context) {
 		}
 		// Read the available event.
 		n, _, err := unix.Recvfrom(fd, buf, 0)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
 		if err != nil {
 			// If the socket becomes invalid (container constraints), stop watching.
 			m.logger.Warnf("ownership netlink watch stopped: %v", err)

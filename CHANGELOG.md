@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The engine keeps watching kernel interface, address and route changes after
+  an interrupted system call instead of stopping until restart; drift was
+  otherwise repaired only by the 10-second periodic reconcile.
 - Direct CLI login explains when an account needs MFA, password rotation or MFA
   enrollment and directs users to the web UI or SSH.
 - Partial account profile updates preserve omitted fields and still allow explicit clearing.
