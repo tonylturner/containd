@@ -236,6 +236,33 @@ preserve evidence off-box before eviction or restart; the built-in cache and bes
 session history.
 
 
+## Triage in the web UI
+
+The dashboard leads with attention items and the next setup task. The First-Run
+Checklist collapses once all four tasks are complete, and you can reopen it.
+Traffic and System Health stay visible; Dashboard details holds Network Pulse,
+Zone Status, Service Health and Event Stream. Open Monitoring for live
+investigation. Tools holds SIM and CLI Console. Simulation controls act
+immediately, not on commit, and an active simulation stays indicated while Tools
+is closed.
+
+Events keeps timestamps, endpoints, activity and protection evidence visible.
+Advanced event filters holds exact IDs, protocol, decision, outcome, time and
+cursor bounds, and opens when a deep link fills them. Inspect event keeps
+Message and session details, Event attributes (JSON), and the Event ID lookup
+with Download event JSON. Retention warnings and failure causes always show.
+
+The Alerts Protection outcome separates detection from would-block, deny
+decisions, reported packet drops and reset failures. A deny decision alone does
+not prove that a packet was dropped. Select a message with the pointer or
+keyboard to open its full protocol, packet and reference detail; Close returns
+to that message.
+
+Flows are observed conversations; Sessions lists kernel connections. Inspect
+flow shows exact IDs, Tags and First Seen. Inspect connection shows Mark, Tags,
+Assured, TTL and Reply tuple (NAT). Session Kill stays immediate and keeps its
+exact-connection or client-service scope, revocation interval and confirmation.
+
 ## Search a session before applying the page limit
 
 `GET /api/v1/events?session=<session_id>&limit=500` searches **all retained**

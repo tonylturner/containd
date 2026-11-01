@@ -18,6 +18,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   NFQUEUE, nftables, conntrack, engine and daemon names. Exact values, IDs,
   paths and raw diagnostics stay available under technical details. Button,
   tab and column names are unchanged.
+- Pages lead with what needs attention and fold detail into expandable rows
+  and sections. No capability, field or control is removed, and every button,
+  tab and column keeps its name. Collapsed rows and sections still show
+  failures, warnings and non-default values.
+  - Firewall: the rules table comes first, with seven columns and an
+    expandable detail row per rule (conditions, ICS filter, shadow matches,
+    logging, full counters). Create rule opens on demand; DPI settings and
+    the generated configuration follow the table.
+  - ICS rules: the page leads with the active inspection state. Matching
+    details and setup help fold away, and protocol editors split basic and
+    advanced fields, opening the advanced ones when they are set.
+  - Configuration: the review leads with changed sections and old → new
+    values (secrets show only as changed), with the exact JSON under
+    Advanced. Protection, startup recovery, missing activity records and
+    pending settings share one attention area and stay independent.
+  - PCAP analysis follows Collect → Generate → Review → stage steps, each
+    with the reason it is unavailable. Capture separates capture now, saved
+    captures and replay to a network.
+  - Interfaces show the detected device, logical interface and zone
+    together, with an inspect view for addressing and link settings.
+    Topology labels live and saved-target data; the Physical tab keeps its
+    deployment detail.
+  - Service pages lead with status and essential settings and fold process
+    detail into Troubleshooting. IDS leads with the rules list and one
+    add/import flow; groups and export are secondary.
+  - Events, alerts, flows and sessions show triage columns first, with full
+    detail in a keyboard-accessible inspector. The dashboard leads with
+    attention and the next setup task; the completed checklist collapses,
+    and simulation and the CLI sit under Tools.
 
 ### Fixed
 
