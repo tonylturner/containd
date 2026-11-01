@@ -97,6 +97,24 @@ at zero, and the response says when (`since`). These are rule-path counters,
 not total connection traffic: established packets can use the admission fast
 path without incrementing an `ALLOW` counter, and ICS counters measure steering.
 
+### Established connections and policy changes
+
+A stateful firewall remembers admitted connections so established traffic can
+take a fast path. That state is not a permanent permission: mainstream stateful
+firewalls also re-match existing sessions when policy changes.
+
+When a commit changes the policy, the next packet of each established
+connection is evaluated again against the new first-match policy, using the
+connection's original tuple. If the new policy no longer admits it, the packet
+is dropped; unmatched traffic follows `firewall.defaultAction`, which is
+`DENY` unless configured otherwise. Reordering or removing an `ALLOW`, or adding
+an earlier `DENY`, can therefore stop traffic without waiting for a new
+connection.
+
+Re-evaluation does not delete the kernel conntrack entry. The Sessions page and
+`GET /api/v1/conntrack` can still show the tuple until the kernel times it out;
+an entry's presence does not prove that traffic is passing.
+
 ### Identity and schedule predicates
 
 A rule's `identities` and `schedule` are conditions that change without a new

@@ -36,8 +36,9 @@ type Config struct {
 	Version       string          `json:"version,omitempty"`
 }
 
-// RedactedCopy returns a copy of c with secrets removed.
-// Today there are no persisted secrets, but this is a stable hook for future redaction.
+// RedactedCopy returns nil for nil c, otherwise a copy with the WireGuard private
+// key and managed OpenVPN CA, certificate, key and password cleared. Other fields
+// are unchanged; this is not a general-purpose secret scrubber.
 func (c *Config) RedactedCopy() *Config {
 	if c == nil {
 		return nil
