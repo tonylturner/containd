@@ -24,7 +24,8 @@ export function protectionView(status: ProtectionStatus | undefined): { title: s
         ?? status.components.find((c) => c.state === "pending");
       const budget = active?.maxAttempts !== undefined && active.attempt !== undefined
         ? ` (retry ${active.attempt}/${active.maxAttempts})` : "";
-      return { title: `Committed — protection pending${budget}`, action: [effects, action].filter(Boolean).join(". ") };
+      const title = status.applyId === "" ? "Engine waiting for configuration" : "Committed — protection pending";
+      return { title: `${title}${budget}`, action: [effects, action].filter(Boolean).join(". ") };
     }
     case "failed":
       return { title: drops ? `Configured but not protecting — ${effects}`
