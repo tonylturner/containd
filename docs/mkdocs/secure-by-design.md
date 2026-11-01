@@ -54,10 +54,9 @@ What the design delivers by default:
   whose MFA enrollment grace period has ended cannot log in over SSH either.
 - A password or MFA change ends the account's other sessions, including its SSH
   connections. The session that made the change stays signed in.
-- Web/API and SSH record the time step of an accepted TOTP login or
-  MFA-disable code and refuse earlier or equal steps, including after a restart.
-  Enrollment confirmation does not record that step, so its code can still
-  authenticate once after enrollment.
+- Enrollment confirmation, web/API login and MFA-disable checks record the
+  accepted TOTP time step. Web/API and SSH refuse earlier or equal steps,
+  including after a restart, so an enrollment code cannot also sign in.
 - Each MFA login or enrollment challenge works once and expires after five
   minutes. Pending and consumed state survives management restarts. A password,
   TOTP or role change invalidates pending challenges; start login or setup again.
@@ -96,9 +95,9 @@ What the design delivers by default:
   session, logout, health and the password-change endpoint.
 - SSH asks for the change at login, for password and key logins alike, before
   the CLI, menu or shell opens. It applies the same password rules.
-- A new password needs at least 8 bytes with an ASCII uppercase letter,
-  lowercase letter and digit, and must differ from the current one, so the
-  bootstrap value cannot be kept. The length check counts bytes, not characters.
+- A new password needs at least 8 characters (Unicode code points) with an ASCII
+  uppercase letter, lowercase letter and digit, and must differ from the current
+  one, so the bootstrap value cannot be kept.
 
 Design note: the default bootstrap credential is the same on every instance, and the
 forced change at first login is what retires it, as the pledge describes.
@@ -124,10 +123,14 @@ every password change for every user, on every path, with the same reason:
   password change and is unaffected.
 
 Lab mode also relaxes web/API authentication. Every accepted token gets admin
-access. With a JWT secret, a valid HS256 JWT passes without a session lookup.
-Expiry is checked when present, with 30 seconds of leeway; an `exp` claim is
-not required. Without a secret, any nonempty token passes. Factory reset does not
-revoke lab tokens. SSH password login is on by default, uses the same stored
+access. With a JWT secret, an HS256 JWT must have a valid `exp` claim, with
+30 seconds of leeway; it passes without a session lookup or `jti`. Local-account
+tokens resolve the profile from their subject's user ID, including custom
+bootstrap usernames. Automation subjects that are not local users still get
+admin access and use the configured bootstrap account for profile operations.
+Without a secret, any nonempty token passes and uses that same bootstrap
+username (default `containd`). Factory reset does not revoke lab tokens.
+SSH password login is on by default, uses the same stored
 credential, and skips the forced change and MFA checks.
 
 Use lab mode only for single-tenant, isolated or offline training environments,

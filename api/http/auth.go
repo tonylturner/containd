@@ -77,13 +77,28 @@ func handleLabAuth(c *gin.Context, userStore users.Store, cfg authModeConfig) {
 		abortJSON(c, http.StatusUnauthorized, "login required")
 		return
 	}
-	if !validateOptionalJWT(raw, cfg.secret) {
+	sub, ok := parseLabSubject(raw, cfg.secret)
+	if !ok {
 		abortJSON(c, http.StatusUnauthorized, "invalid token")
 		return
 	}
 	c.Set(ctxRoleKey, string(roleAdmin))
 	if userStore != nil {
-		if u, err := userStore.GetByUsername(c.Request.Context(), "containd"); err == nil {
+		var u *users.StoredUser
+		var err error
+		if len(cfg.secret) > 0 && sub != "" {
+			u, err = userStore.GetByID(c.Request.Context(), sub)
+		}
+		// Session-less automation subjects need not name a local account.
+		// They retain the configured bootstrap identity, as do unsigned labs.
+		if u == nil && (err == nil || errors.Is(err, users.ErrNotFound)) {
+			username := strings.TrimSpace(os.Getenv("CONTAIND_DEFAULT_ADMIN_USERNAME"))
+			if username == "" {
+				username = "containd"
+			}
+			u, err = userStore.GetByUsername(c.Request.Context(), username)
+		}
+		if err == nil && u != nil {
 			c.Set(ctxUserKey, u.ID)
 			c.Set(ctxSessionKey, "lab")
 		}
@@ -138,13 +153,17 @@ func handleSessionAuth(c *gin.Context, userStore users.Store, cfg authModeConfig
 	c.Next()
 }
 
-func validateOptionalJWT(raw string, secret []byte) bool {
+func parseLabSubject(raw string, secret []byte) (string, bool) {
 	if len(secret) == 0 {
-		return true
+		return "", true
 	}
 	claims := jwt.MapClaims{}
-	parsed, err := jwt.ParseWithClaims(raw, claims, jwtKeyFunc(secret), jwt.WithLeeway(30*time.Second))
-	return err == nil && parsed.Valid
+	parsed, err := jwt.ParseWithClaims(raw, claims, jwtKeyFunc(secret), jwt.WithExpirationRequired(), jwt.WithLeeway(30*time.Second))
+	if err != nil || !parsed.Valid {
+		return "", false
+	}
+	sub, _ := claims["sub"].(string)
+	return sub, true
 }
 
 func requireBearerToken(c *gin.Context) string {

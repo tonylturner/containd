@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -385,7 +386,7 @@ func validatePassword(pw string) error {
 	if pw == "" {
 		return &PasswordPolicyError{reason: "password required"}
 	}
-	if len(pw) < 8 {
+	if utf8.RuneCountInString(pw) < 8 {
 		return &PasswordPolicyError{reason: "password must be at least 8 characters"}
 	}
 	var hasUpper, hasLower, hasDigit bool

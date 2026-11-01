@@ -29,6 +29,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visible degradation rather than an audit fail-closed policy.
 - Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
 
+### Fixed
+
+- Consume the TOTP enrollment confirmation time step so its code cannot also
+  authenticate on web/API or SSH outside lab mode.
+- Count Unicode characters, not UTF-8 bytes, toward the eight-character password
+  minimum; ASCII uppercase, lowercase and digit requirements are unchanged.
+- Require `exp` on lab-mode JWTs when `CONTAIND_JWT_SECRET` is set. API callers
+  must include an expiration; session-less tokens without `jti` still work,
+  with the existing 30-second leeway.
+- Resolve lab-mode local-account context from the token subject, including custom
+  bootstrap usernames, rather than assuming `containd`. Non-user automation
+  subjects retain admin access and the configured bootstrap profile.
+
 ## [0.1.37] - 2026-10-31
 
 ### Upgrade notes
