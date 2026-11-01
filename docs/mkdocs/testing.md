@@ -56,7 +56,7 @@ That complements the other validation workflows:
 
 ## Release CI Gate
 
-Run the promotion decision tests offline:
+CI runs the promotion decision tests offline. To run them locally:
 
 ```bash
 python3 scripts/release-ci-gate.test.py
