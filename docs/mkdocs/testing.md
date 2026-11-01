@@ -5,6 +5,18 @@ refactor or feature. See [Contributing](https://github.com/tonylturner/containd/
 for development prerequisites and the contributor workflow, and
 [Performance Baseline](performance.md) for benchmarks and profiles.
 
+## CI Checks
+
+On pull requests and pushes to `main`, CI runs module tidiness, Go vet and the
+full Go race suite, golangci-lint, Semgrep, a strict documentation build, and
+the offline release promotion tests. The UI job runs npm audit, lint,
+docs-builder tests, the production build and all Playwright specs with Chromium.
+The Docker job builds the management/all-mode image, runs the AV gate and public
+Compose quickstart against that image, then scans it with Trivy.
+
+These checks do not run the opt-in privileged kernel test suite or every live
+smoke below. Mocked browser tests do not replace live backend or lab-path checks.
+
 ## Coverage Workflow
 
 From the repo root:
@@ -56,7 +68,7 @@ That complements the other validation workflows:
 
 ## Release CI Gate
 
-Run the promotion decision tests offline:
+CI runs the promotion decision tests offline. To run them locally:
 
 ```bash
 python3 scripts/release-ci-gate.test.py
@@ -75,6 +87,9 @@ behavior.
 `npm run test:routes` runs **all Playwright specs** in `ui/tests/`, not only
 the route sweep. The route sweep logs in via mocked API responses, visits app
 routes, and fails on uncaught page exceptions or console errors.
+CI installs Chromium with its OS dependencies and runs the entire suite after
+the UI lint and production build. Failed runs upload the HTML report and test
+results as the `playwright-report` artifact.
 
 Run it directly from `ui/`:
 
@@ -83,6 +98,9 @@ npm ci
 npx playwright install chromium
 npm run test:routes
 ```
+
+On Linux, use `npx playwright install --with-deps chromium` to install the
+browser's OS dependencies as well.
 
 To run only the route sweep, use `npm run test:routes -- route-smoke.spec.ts`.
 The Playwright configuration starts a local Next.js development server on
@@ -166,6 +184,12 @@ defeats only the LAN-to-WAN source-address check. Both scripts accept the
 isolation variables described in the smoke fixture README linked below.
 
 ## Scanning Gate Smoke
+
+CI runs this smoke against the just-built `containd/containd:ci` image, using a
+Compose override for the engine image and `SMOKE_BUILD=0`. It captures Compose
+logs and tears down the stack on success or failure, preserving a failed smoke's
+exit status. A log collection or teardown failure also fails an otherwise
+successful step. Logs are uploaded as `av-compose-logs`.
 
 `bash scripts/smoke-av-gate.sh` brings up the same harness, enables the
 native clamd with FreshClam off and the EICAR test file's MD5 as its only
