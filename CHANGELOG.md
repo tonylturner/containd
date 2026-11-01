@@ -7,28 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Recorded collection or admission loss excludes every connection it could have
-  touched from suggestion generation and direct certification, with durable
-  `collection_loss` withholding. Live transport overflow retains the connection
-  incarnation; offline truncation retains the connection or capture-time scope
-  instead of voiding unrelated traffic. Missing scope, restart/policy uncertainty
-  and exhausted localization capacity exclude the dataset. Previously certified
-  suggestions require regeneration; frozen historical stage retries can only
-  reconcile identical rules already saved to candidate.
-- Batch live learner persistence so IEC 104 command watches keep up with normal
-  captures; outcome-only drops do not exclude certification inputs. Large repeated
-  relations use bounded proofs instead of overflowing suggestion storage budgets.
-
-- Exclude observation-bound and content/port-mismatched connections from offline
-  and live policy suggestions, including port-decoded events emitted before
-  content confirmation; retain the exclusion in withheld counts and limitations.
-  Previously certified suggestions require regeneration; historical datasets
-  without retained binding authority remain readable but fail closed. Reimporting
-  the same capture after an adapter-normalization change creates a separate
-  dataset using the current normalization, without rewriting historical evidence.
-
 ### Upgrade notes
 
 - Telemetry event IDs are JSON strings. API clients that parse event IDs as
@@ -57,6 +35,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
+- Recorded collection or admission loss excludes every connection it could have
+  touched from suggestion generation and direct certification, with durable
+  `collection_loss` withholding. Live transport overflow retains the connection
+  incarnation; offline truncation retains the connection or capture-time scope
+  instead of voiding unrelated traffic. Missing scope, restart/policy uncertainty
+  and exhausted localization capacity exclude the dataset. Previously certified
+  suggestions require regeneration; frozen historical stage retries can only
+  reconcile identical rules already saved to candidate.
+- Batch live learner persistence so IEC 104 command watches keep up with normal
+  captures; outcome-only drops do not exclude certification inputs. Large repeated
+  relations use bounded proofs instead of overflowing suggestion storage budgets.
+- Exclude observation-bound and content/port-mismatched connections from offline
+  and live policy suggestions, including port-decoded events emitted before
+  content confirmation; retain the exclusion in withheld counts and limitations.
+  Previously certified suggestions require regeneration; historical datasets
+  without retained binding authority remain readable but fail closed. Reimporting
+  the same capture after an adapter-normalization change creates a separate
+  dataset using the current normalization, without rewriting historical evidence.
 
 ## [0.1.37] - 2026-10-31
 
