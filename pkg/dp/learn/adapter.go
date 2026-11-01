@@ -236,6 +236,9 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 // EvidenceConnectionID is shared with the collector's rejection path so dropped
 // events exclude exactly the identity Normalize would have retained.
 func EvidenceConnectionID(state *flow.State, ev dpi.Event) string {
+	if ev.Connection != nil && ev.Connection.Key != "" {
+		return ev.Connection.Key
+	}
 	if state != nil {
 		if c := state.Connection.Load(); c != nil && c.Key != "" {
 			return c.Key

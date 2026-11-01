@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/flow"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/evidence"
 	"github.com/tonylturner/containd/pkg/evidence/sqlite"
@@ -20,17 +21,24 @@ import (
 
 const decoderVersion = "ics-1"
 
+// Absorb bounded SQLite flush/scheduler bursts without raising the previous
+// 64 MiB decoded-copy budget. Packet verdicts never wait for the worker.
+const watchQueueBatches = 256
+const watchQueueBytes = 64 << 20
+
 type watchLease struct {
-	dataset  evidence.Dataset
-	watch    evidence.Watch
-	lossMu   sync.Mutex
-	dropped  uint64
-	losses   map[evidence.CollectionLoss]bool
-	inflight atomic.Int64
-	changed  atomic.Bool
-	token    engine.InspectionToken
+	dataset     evidence.Dataset
+	watch       evidence.Watch
+	lossMu      sync.Mutex
+	dropped     uint64
+	losses      map[evidence.CollectionLoss]bool
+	queuedBytes atomic.Int64
+	inflight    atomic.Int64
+	changed     atomic.Bool
+	token       engine.InspectionToken
 }
 type evidenceBatch struct {
+	bytes       int
 	lease       *watchLease
 	parents     []evidence.Observation
 	outcomes    []dpi.Event
@@ -42,6 +50,7 @@ type evidenceBatch struct {
 type evidenceWatch struct {
 	mu         sync.Mutex
 	active     atomic.Pointer[watchLease]
+	stopping   *watchLease // protected by mu; retained until a successful seal
 	queue      chan evidenceBatch
 	done       chan struct{}
 	maintained chan struct{}
@@ -78,7 +87,7 @@ func evidenceMetadataFrom(inputs engine.InspectionSnapshot) (evidence.Dataset, e
 	return evidence.Dataset{SchemaVersion: evidence.SchemaVersion, DecoderVersion: decoderVersion, ProfileFingerprint: p, SnapshotFingerprint: s}, nil
 }
 func newEvidenceWatch(ctx context.Context, store *sqlite.Store, e *engine.Engine) *evidenceWatch {
-	w := &evidenceWatch{queue: make(chan evidenceBatch, 64), done: make(chan struct{}), maintained: make(chan struct{}), store: store, engine: e}
+	w := &evidenceWatch{queue: make(chan evidenceBatch, watchQueueBatches), done: make(chan struct{}), maintained: make(chan struct{}), store: store, engine: e}
 	go w.run(ctx)
 	go w.maintain(ctx)
 	return w
@@ -113,8 +122,25 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 		lease.changed.Store(true)
 		return
 	}
-	owned, ok := ownEvidenceEvents(events)
+	// Coverage notifications are authority, not semantic parents. Keep them
+	// out of the lossy work queue and bind the transport's exact incarnation.
+	for _, ev := range events {
+		if ev.Kind == eventfields.KindCoverageLoss {
+			lease.lossMu.Lock()
+			loss := droppedEventLoss(state, ev)
+			loss.Code = "capture_loss"
+			lease.addLossLocked(loss)
+			lease.lossMu.Unlock()
+			return
+		}
+	}
+	owned, size, ok := ownEvidenceEvents(events)
 	if !ok {
+		lease.drop(state, events)
+		return
+	}
+	if lease.queuedBytes.Add(int64(size)) > watchQueueBytes {
+		lease.queuedBytes.Add(-int64(size))
 		lease.drop(state, events)
 		return
 	}
@@ -129,21 +155,25 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 		snapshot = &copy
 	}
 	select {
-	case w.queue <- evidenceBatch{lease: lease, state: snapshot, events: owned, collectedAt: collectedAt}:
+	case w.queue <- evidenceBatch{lease: lease, state: snapshot, events: owned, collectedAt: collectedAt, bytes: size}:
 	default:
+		lease.queuedBytes.Add(-int64(size))
 		lease.drop(state, events)
 	}
 }
 func (w *evidenceWatch) run(ctx context.Context) {
 	defer close(w.done)
 	join := newEvidenceJoin(w, ctx)
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case batch := <-w.queue:
+			if batch.lease != nil {
+				batch.lease.queuedBytes.Add(-int64(batch.bytes))
+			}
 			if batch.barrier != nil {
 				join.flushAll()
 				batch.barrier <- w.err()
@@ -171,6 +201,7 @@ func (w *evidenceWatch) run(ctx context.Context) {
 			}
 		case <-ticker.C:
 			join.expire(time.Now())
+			join.flushWrites()
 			if lease := w.active.Load(); lease != nil {
 				w.fail(w.flushLosses(ctx, lease))
 			}
@@ -211,6 +242,9 @@ func (w *evidenceWatch) start(ctx context.Context, req evidence.StartWatchReques
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.stopping != nil {
+		return evidence.Watch{}, sqlite.ErrConflict
+	}
 	if w.err() != nil {
 		if w.active.Load() != nil {
 			return evidence.Watch{}, sqlite.ErrConflict
@@ -251,6 +285,9 @@ func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	lease := w.active.Load()
+	if lease == nil {
+		lease = w.stopping
+	}
 	watch, err := w.store.GetWatch(ctx, id)
 	if err != nil {
 		return watch, err
@@ -261,6 +298,7 @@ func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch
 	if err := ctx.Err(); err != nil {
 		return watch, err
 	}
+	w.stopping = lease
 	w.active.Store(nil)
 	w.engine.SetLearnWatchHook(nil)
 	disabled = true
@@ -304,36 +342,65 @@ func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch
 		return watch, err
 	}
 	if lease.changed.Load() {
-		return w.store.StopWatchReason(ctx, id, "policy_changed")
+		out, outErr = w.store.StopWatchReason(ctx, id, "policy_changed")
+	} else {
+		out, outErr = w.store.StopWatch(ctx, id)
 	}
-	return w.store.StopWatch(ctx, id)
+	if outErr == nil {
+		w.stopping = nil
+		w.failure.Store(nil)
+	}
+	return out, outErr
 }
 
 // Rejection must retain identity before decoded metadata is discarded. This
 // small critical section owns only identity/time metadata, never packet data.
+func (lease *watchLease) addLossLocked(loss evidence.CollectionLoss) {
+	if lease.losses == nil {
+		lease.losses = map[evidence.CollectionLoss]bool{}
+	}
+	global := evidence.CollectionLoss{Code: "collection_loss"}
+	if lease.losses[global] {
+		return
+	}
+	loss = loss.Normalized()
+	if lease.losses[loss] {
+		return
+	}
+	if len(lease.losses) >= evidence.MaxLosses {
+		lease.losses = map[evidence.CollectionLoss]bool{global: true}
+		return
+	}
+	lease.losses[loss] = true
+}
 func (lease *watchLease) drop(state *flow.State, events []dpi.Event) {
 	lease.lossMu.Lock()
 	defer lease.lossMu.Unlock()
 	lease.dropped++
-	if lease.losses == nil {
-		lease.losses = map[evidence.CollectionLoss]bool{}
+	if state == nil && len(events) > 0 {
+		outcomes := true
+		for _, ev := range events {
+			outcomes = outcomes && (ev.Kind == "ics.decision" || ev.Kind == "ics.verdict" || ev.Kind == "evidence.delivery")
+		}
+		if outcomes {
+			lease.addLossLocked(evidence.CollectionLoss{Code: "outcome_loss"})
+			return
+		}
 	}
 	if len(events) == 0 {
-		lease.losses[droppedEventLoss(state, dpi.Event{})] = true
+		lease.addLossLocked(droppedEventLoss(state, dpi.Event{}))
 	}
 	for _, event := range events {
-		lease.losses[droppedEventLoss(state, event)] = true
+		lease.addLossLocked(droppedEventLoss(state, event))
 	}
 }
 
 func droppedEventLoss(state *flow.State, event dpi.Event) evidence.CollectionLoss {
 	loss := evidence.CollectionLoss{Code: "watch_collection_loss", ConnectionID: learn.EvidenceConnectionID(state, event)}
 	if loss.ConnectionID == "" {
-		// A timestamp without an identity still excludes every connection
-		// whose observed lifetime covers that instant. Zero remains unknown.
 		loss.Start, loss.End = event.Timestamp, event.Timestamp
 	}
-	return loss
+	return loss.Normalized()
 }
 
 func (w *evidenceWatch) flushLosses(ctx context.Context, lease *watchLease) error {
@@ -341,27 +408,28 @@ func (w *evidenceWatch) flushLosses(ctx context.Context, lease *watchLease) erro
 	losses, lost := lease.losses, lease.dropped
 	lease.losses, lease.dropped = nil, 0
 	lease.lossMu.Unlock()
-	// Bound individual ingestion requests even if many connections lost data
-	// between worker ticks. Preserve identities and counters across failed writes;
-	// stop/recovery also records the uncertainty of the storage failure itself.
-	for loss := range losses {
-		_, err := w.store.Ingest(ctx, evidence.IngestRequest{
-			DatasetID: lease.dataset.ID, LostBatches: lost,
-			Losses: []evidence.CollectionLoss{loss},
-		})
+	// 128 maximum-sized identities fit comfortably inside the ingest byte bound.
+	for len(losses) > 0 {
+		batch := make([]evidence.CollectionLoss, 0, 128)
+		for loss := range losses {
+			batch = append(batch, loss)
+			if len(batch) == 128 {
+				break
+			}
+		}
+		_, err := w.store.Ingest(ctx, evidence.IngestRequest{DatasetID: lease.dataset.ID, LostBatches: lost, Losses: batch})
 		if err != nil {
 			lease.lossMu.Lock()
-			if lease.losses == nil {
-				lease.losses = map[evidence.CollectionLoss]bool{}
-			}
 			for pending := range losses {
-				lease.losses[pending] = true
+				lease.addLossLocked(pending)
 			}
 			lease.dropped += lost
 			lease.lossMu.Unlock()
 			return err
 		}
-		delete(losses, loss)
+		for _, loss := range batch {
+			delete(losses, loss)
+		}
 		lost = 0
 	}
 	return nil

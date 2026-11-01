@@ -73,6 +73,13 @@ func (c *CompilerCertifier) Certify(ctx context.Context, content SuggestionConte
 		digest, _ := evidence.Digest(o)
 		proof.Counterexamples = append(proof.Counterexamples, Counterexample{Parent: ref, Mutation: mutation, Expected: expected, Actual: actual, ContextDigest: digest})
 	}
+	// Replay every positive, but repeat identical boundary inputs only once.
+	// Scheduled candidates retain capture time in that identity.
+	scheduled := false
+	for _, rule := range content.Rules {
+		scheduled = scheduled || rule.Schedule != nil
+	}
+	replayed := map[string]bool{}
 	for i, o := range parents {
 		if err := ctx.Err(); err != nil {
 			return proof, err
@@ -89,6 +96,14 @@ func (c *CompilerCertifier) Certify(ctx context.Context, content SuggestionConte
 			proof.Positive.Failed++
 			failure(refs[i], "positive", o, "accept", "reject")
 		}
+		key, err := boundaryReplayKey(o, scheduled)
+		if err != nil {
+			return proof, err
+		}
+		if replayed[key] {
+			continue
+		}
+		replayed[key] = true
 		var replayErr error
 		boundaryMutations(o, func(mutation mutation) bool {
 			if err := ctx.Err(); err != nil {
@@ -440,4 +455,14 @@ func dnpRelationContains(d *evidence.DNP3, obj evidence.DNP3Object, index uint32
 		}
 	}
 	return false
+}
+
+// Only redundant boundary work omits non-evaluator metadata; the complete
+// evidence digest and positive references retain it, including capture time.
+func boundaryReplayKey(o evidence.Observation, scheduled bool) (string, error) {
+	if !scheduled {
+		o.CapturedAt = time.Time{}
+	}
+	o.Outcome = evidence.Outcome{}
+	return o.SemanticDigest()
 }

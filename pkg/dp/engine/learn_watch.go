@@ -2,9 +2,11 @@
 package engine
 
 import (
+	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -71,5 +73,13 @@ func (e *Engine) recordLearnEvents(state *flow.State, evs []dpi.Event) {
 func (e *Engine) recordLearnOutcome(events []dpi.Event) {
 	if hook := e.learnWatch.Load(); hook != nil {
 		hook.offer(nil, events)
+	}
+}
+
+// Capture loss is authority even when semantic decoding has stopped. Unknown
+// incarnations retain only capture time, never a tuple masquerading as identity.
+func (e *Engine) recordLearnCaptureLoss(pkt capture.Packet, connection *flow.Connection) {
+	if hook := e.learnWatch.Load(); hook != nil {
+		hook.offer(nil, []dpi.Event{{Kind: eventfields.KindCoverageLoss, Timestamp: pkt.Timestamp, Connection: connection}})
 	}
 }

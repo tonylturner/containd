@@ -2,6 +2,7 @@
 package engineapp
 
 import (
+	"container/list"
 	"context"
 	"encoding/json"
 	"time"
@@ -23,28 +24,57 @@ type pendingEvidence struct {
 	at          time.Time
 	bytes       int
 	collectedAt time.Time
+	order       *list.Element
 }
 type evidenceJoin struct {
-	watch   *evidenceWatch
-	ctx     context.Context
-	entries map[string]*pendingEvidence
-	bytes   int
+	watch       *evidenceWatch
+	ctx         context.Context
+	entries     map[string]*pendingEvidence
+	order       list.List
+	bytes       int
+	writes      []evidence.Observation
+	writeBytes  int
+	writeLease  *watchLease
+	collectedAt time.Time
 }
 
 func newEvidenceJoin(w *evidenceWatch, ctx context.Context) *evidenceJoin {
 	return &evidenceJoin{watch: w, ctx: ctx, entries: map[string]*pendingEvidence{}}
 }
 func (j *evidenceJoin) write(lease *watchLease, parents []evidence.Observation, collectedAt time.Time) {
-	if err := j.watch.flushLosses(j.ctx, lease); err != nil {
+	for _, parent := range parents {
+		data, err := json.Marshal(parent)
+		if err != nil {
+			j.watch.fail(err)
+			return
+		}
+		if len(j.writes) > 0 && (j.writeLease != lease || len(j.writes) == 128 || j.writeBytes+len(data)+1 > (1<<20)-4096) {
+			j.flushWrites()
+		}
+		j.writeLease = lease
+		j.writes = append(j.writes, parent)
+		j.writeBytes += len(data) + 1
+		if collectedAt.After(j.collectedAt) {
+			j.collectedAt = collectedAt
+		}
+	}
+}
+func (j *evidenceJoin) flushWrites() {
+	if len(j.writes) == 0 {
+		return
+	}
+	defer func() { j.writes = nil; j.writeBytes = 0; j.collectedAt = time.Time{} }()
+	if err := j.watch.flushLosses(j.ctx, j.writeLease); err != nil {
 		j.watch.fail(err)
 		return
 	}
-	_, err := j.watch.store.Ingest(j.ctx, evidence.IngestRequest{DatasetID: lease.dataset.ID, Parents: parents, CollectedAt: collectedAt})
+	_, err := j.watch.store.Ingest(j.ctx, evidence.IngestRequest{DatasetID: j.writeLease.dataset.ID, Parents: j.writes, CollectedAt: j.collectedAt})
 	j.watch.fail(err)
 }
 func (j *evidenceJoin) finish(key string) {
 	entry := j.entries[key]
 	delete(j.entries, key)
+	j.order.Remove(entry.order)
 	j.bytes -= entry.bytes
 	if entry.parent != nil {
 		entry.parent.Outcome = entry.outcome
@@ -55,14 +85,10 @@ func (j *evidenceJoin) finish(key string) {
 	}
 }
 func (j *evidenceJoin) oldest() string {
-	var key string
-	var at time.Time
-	for id, e := range j.entries {
-		if key == "" || e.at.Before(at) || e.at.Equal(at) && id < key {
-			key, at = id, e.at
-		}
+	if first := j.order.Front(); first != nil {
+		return first.Value.(string)
 	}
-	return key
+	return ""
 }
 func (j *evidenceJoin) entry(id string, lease *watchLease) *pendingEvidence {
 	if e := j.entries[id]; e != nil {
@@ -72,6 +98,7 @@ func (j *evidenceJoin) entry(id string, lease *watchLease) *pendingEvidence {
 		j.finish(j.oldest())
 	}
 	e := &pendingEvidence{lease: lease, at: time.Now(), outcome: evidence.Outcome{Delivery: "unknown"}}
+	e.order = j.order.PushBack(id)
 	j.entries[id] = e
 	return e
 }
@@ -137,14 +164,17 @@ func (j *evidenceJoin) accept(batch evidenceBatch) {
 	}
 }
 func (j *evidenceJoin) expire(now time.Time) {
-	for key, e := range j.entries {
-		if !now.Before(e.at.Add(joinTTL)) {
-			j.finish(key)
+	for len(j.entries) > 0 {
+		key := j.oldest()
+		if now.Before(j.entries[key].at.Add(joinTTL)) {
+			break
 		}
+		j.finish(key)
 	}
 }
 func (j *evidenceJoin) flushAll() {
 	for len(j.entries) > 0 {
 		j.finish(j.oldest())
 	}
+	j.flushWrites()
 }
