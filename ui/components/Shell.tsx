@@ -7,10 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { navigateToUI, uiNavigationPath, uiRoutePath } from "../lib/ui-navigation";
 import { type User, api } from "../lib/api";
 import { Breadcrumbs } from "./Breadcrumbs";
-import { ConfigStatusBar } from "./ConfigStatusBar";
-import { EvidenceBanner } from "./EvidenceBanner";
-import { ProtectionNotice } from "./ProtectionNotice";
-import { ShellRecoveryBanner } from "./ManagementRecoveryBanner";
+import { ShellAttention } from "./ShellAttention";
 import { ProfileModal } from "./ProfileModal";
 import {
   buildNavGroups,
@@ -617,10 +614,7 @@ export function Shell({
                     </div>
                   </div>
                 )}
-                <ShellRecoveryBanner />
-                <EvidenceBanner />
-                <ConfigStatusBar />
-                <ProtectionNotice isAdmin={isAdmin} />
+                <ShellAttention isAdmin={isAdmin} />
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <h1 className="text-lg font-semibold tracking-wide text-white">

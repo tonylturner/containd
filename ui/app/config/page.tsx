@@ -13,6 +13,9 @@ import { useSearchParams } from "next/navigation";
 
 import { api, isAdmin, type ConfigBackup, type ConfigBundle } from "../../lib/api";
 import { ConfigDiffBlocks } from "./config-diff-blocks";
+import { ConfigChangeSummary } from "./config-change-summary";
+import { ConfigActionBar } from "./config-action-bar";
+import { Disclosure } from "../../components/Disclosure";
 import type { ConfigDiff } from "../../lib/api-config";
 import { formatICSMode } from "../ics/ics-shared";
 import { Shell } from "../../components/Shell";
@@ -25,7 +28,6 @@ import {
   ViewerSource,
 } from "./config-block-explorer";
 import {
-  ConfigActionBar,
   ConfigBackupRecoveryCard,
   ConfigSummaryCard,
   IDSRulesCard,
@@ -394,6 +396,14 @@ function ConfigPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      {configDiff?.pendingConfirm && (
+        <section aria-label="Pending confirmation" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 p-4 text-sm text-amber">
+          <p className="font-semibold">Confirm before <time dateTime={configDiff.pendingConfirm.deadline}>{new Date(configDiff.pendingConfirm.deadline).toLocaleString()}</time> to keep these changes.</p>
+          <p className="mt-1 text-xs">Otherwise they will be undone automatically.</p>
+          {canEdit && <button onClick={doConfirm} disabled={!canSave || !diffRevision || diffView.stale}
+            className="mt-3 rounded-xs bg-(--amber) px-3 py-1.5 font-semibold text-white disabled:opacity-50">Confirm</button>}
+        </section>
+      )}
       <div className="mb-4 flex flex-wrap gap-2">
         {(["overview", "running", "candidate", "diff"] as Tab[]).map((t) => (
           <button
@@ -482,24 +492,27 @@ function ConfigPage() {
             onChanged={refresh}
           />
 
-          <ConfigBlockExplorer
-            viewerSource={viewerSource}
-            setViewerSource={setViewerSource}
-            selectedBlock={selectedBlock}
-            setSelectedBlock={setSelectedBlock}
-            selectedItemId={selectedItemId}
-            setSelectedItemId={setSelectedItemId}
-            blockItems={blockItems}
-            selectedItem={selectedItem}
-            blockValue={blockValue}
-            viewerConfig={viewerConfig}
-            idsBankCount={configDiff?.idsBank?.[viewerSource].count ?? null}
-            setSelectedRef={(node) => {
-              selectedRef.current = node;
-            }}
-          />
-
+          <Disclosure title="Advanced">
+            <ConfigBlockExplorer
+              viewerSource={viewerSource}
+              setViewerSource={setViewerSource}
+              selectedBlock={selectedBlock}
+              setSelectedBlock={setSelectedBlock}
+              selectedItemId={selectedItemId}
+              setSelectedItemId={setSelectedItemId}
+              blockItems={blockItems}
+              selectedItem={selectedItem}
+              blockValue={blockValue}
+              viewerConfig={viewerConfig}
+              idsBankCount={configDiff?.idsBank?.[viewerSource].count ?? null}
+              setSelectedRef={(node) => {
+                selectedRef.current = node;
+              }}
+            />
+          </Disclosure>
           <ConfigActionBar
+            showReview={false}
+            pendingConfirm={!!configDiff?.pendingConfirm}
             canEdit={canEdit}
             canMutate={canSave && !!diffRevision && !diffView.stale}
             canCommit={false}
@@ -566,7 +579,7 @@ function ConfigPage() {
           <div className="mb-3 text-xs text-(--text-muted)">
             This is the last committed config, not proof of live enforcement.
           </div>
-          <pre>{runningText}</pre>
+          <pre className="max-w-full overflow-x-auto">{runningText}</pre>
         </div>
       )}
 
@@ -594,13 +607,22 @@ function ConfigPage() {
               No differences between running and staged config.
             </div>
           ) : (
-            <ConfigDiffBlocks blocks={diffBlocks} />
+            <>
+              <p className="text-xs text-(--text-muted)">Running → Staged. This is the last committed config, not proof of live enforcement.</p>
+              <ConfigChangeSummary diff={configDiff} blocks={diffBlocks} />
+              <Disclosure title="Advanced">
+                <p className="mb-3 text-xs text-(--text-muted)">Exact redacted JSON changes by block.</p>
+                <div className="grid min-w-0 gap-4"><ConfigDiffBlocks blocks={diffBlocks} /></div>
+              </Disclosure>
+            </>
           )}
         </div>
       )}
 
       {tab !== "overview" && (
         <ConfigActionBar
+          showReview={tab === "diff"}
+          pendingConfirm={!!configDiff?.pendingConfirm}
           canEdit={canEdit}
           canMutate={canSave && !!diffRevision && !diffView.stale}
           canCommit={tab === "diff" && canSave && !!configDiff && !!diffRevision && !diffView.stale}
