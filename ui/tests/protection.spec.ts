@@ -2,6 +2,22 @@ import { expect, test } from "@playwright/test";
 import { isProtectionStatus } from "../lib/api-protection";
 import { observation, openProtection, protectionAPI } from "./fixtures/protection-api";
 
+test("an engine awaiting its first configuration does not imply a commit", async ({ page }) => {
+  await protectionAPI(page, observation({
+    state: "pending", applyId: "", installedApplyId: "",
+    components: [{ name: "nft", required: true, state: "pending", reason: "awaiting configuration",
+      since: "2026-10-31T12:00:00Z" }],
+    effects: [],
+  }));
+  await openProtection(page);
+  const notice = page.getByRole("status", { name: "Dataplane protection" });
+  await expect(notice.locator("p").first()).toHaveText("Engine waiting for configuration");
+  await expect(notice).not.toContainText("Committed");
+  await expect(notice).toContainText("awaiting configuration");
+  await expect(notice).toContainText("Wait for protection to finish, then check status.");
+  await expect(notice.getByRole("button")).toHaveCount(0);
+});
+
 for (const bounded of [true, false]) {
   test(`pending protection ${bounded ? "with" : "without"} a retry budget`, async ({ page }) => {
     await protectionAPI(page, observation({
