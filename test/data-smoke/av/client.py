@@ -8,7 +8,8 @@ Usage: client.py get IP PORT PATH TIMEOUT_SECONDS
 Makes one HTTP/1.1 request with "Connection: close", reads the reply to
 end of stream and prints exactly one outcome line, exiting 0 when the
 network gave an answer:
-  status=CODE bytes=N complete=yes|no eicar=yes|no line=<first body line>
+  status=CODE bytes=N complete=yes|no eicar=yes|no fragment=yes|no
+  refusal=yes|no clean=yes|no upload_size=N upload_md5=HEX line=<first body line>
                         a response arrived; complete says whether the body
                         matched its Content-Length; eicar says whether the
                         body carries the EICAR test file, whose line is
@@ -22,11 +23,14 @@ Any other failure exits 2 with the reason on stderr, so a broken probe
 never reads as a refusal.
 """
 import errno
+import hashlib
 import ipaddress
+import re
 import socket
 import sys
 
 from eicar import eicar_bytes
+from payloads import clean_download, clean_upload
 
 UNREACHABLE = {errno.EHOSTUNREACH, errno.ENETUNREACH}
 RESET = {errno.ECONNRESET, errno.EPIPE}
@@ -54,7 +58,7 @@ def main() -> int:
     if argv[0] == "post":
         if len(argv) != 6 or argv[5] not in ("eicar", "clean"):
             return usage()
-        body = eicar if argv[5] == "eicar" else b"clean upload from the scanning-gate smoke\n" * 8
+        body = eicar if argv[5] == "eicar" else clean_upload()
         head = (
             f"POST {path} HTTP/1.1\r\nHost: {ip}:{port}\r\nConnection: close\r\n"
             f"Content-Type: application/octet-stream\r\nContent-Length: {len(body)}\r\n\r\n"
@@ -105,10 +109,29 @@ def main() -> int:
             length = int(value.strip())
     complete = "yes" if length is None or len(payload) == length else "no"
     has_eicar = "yes" if eicar in payload else "no"
+    # Any 16-byte window catches truncated prefixes, suffixes and interior
+    # leaks, not just the complete test file. Never print leaked fragments.
+    fragment = "yes" if any(eicar[i:i + 16] in payload for i in range(len(eicar) - 15)) else "no"
+    refusal = "yes" if (
+        length is not None
+        and complete == "yes"
+        and re.fullmatch(
+            rb"containd (?:blocked this object: [^\r\n]+|refused this object(?:: [^\r\n]+)?)\n",
+            payload,
+        )
+    ) else "no"
+    clean = "no"
+    echo = re.match(rb"server=([a-z_]+) port=(\d+) client=([0-9.]+)\n", payload)
+    if echo:
+        name, origin_port, client = echo.groups()
+        if payload == clean_download(name.decode("ascii"), int(origin_port), client.decode("ascii")):
+            clean = "yes"
     # The EICAR string never goes into a log line: a body that carries it is
     # reported as "(eicar)" so no smoke log file contains the test string.
-    first = "(eicar)" if has_eicar == "yes" else payload.split(b"\n", 1)[0].decode("ascii", "replace")
-    print(f"status={status} bytes={len(payload)} complete={complete} eicar={has_eicar} line={first}")
+    first = "(eicar)" if fragment == "yes" else payload.split(b"\n", 1)[0].decode("ascii", "replace")
+    print(f"status={status} bytes={len(payload)} complete={complete} eicar={has_eicar} "
+          f"fragment={fragment} refusal={refusal} clean={clean} "
+          f"upload_size={len(body)} upload_md5={hashlib.md5(body).hexdigest()} line={first}")
     return 0
 
 

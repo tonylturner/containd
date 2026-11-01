@@ -5,6 +5,45 @@ import { pressure } from "./fixtures/iec104-pressure";
 import { interfaceAddresses, OS_ADDRESS_HINT, runtimeFor } from "../lib/interface-addresses";
 import type { Interface, SystemInspection } from "../lib/api";
 
+const routeExpectations = {
+  "/": { heading: "Dashboard", api: "/dashboard" },
+  "/alerts": { heading: "IDS Alerts", api: "/events" },
+  "/assets": { heading: "Assets", api: "/assets" },
+  "/audit": { heading: "Audit Log", api: "/audit" },
+  "/config": { heading: "Config", api: "/config/diff" },
+  "/dataplane": { heading: "PCAP", api: "/pcap/config" },
+  "/dhcp": { heading: "DHCP", api: "/services/dhcp" },
+  "/diagnostics": { heading: "Diagnostics", api: "/interfaces/state" },
+  "/events": { heading: "Events", api: "/events" },
+  "/firewall": { heading: "Firewall Rules", api: "/firewall/rules" },
+  "/flows": { heading: "Active Flows", api: "/flows" },
+  // This is a static denial page, with no page-specific data request.
+  "/forbidden": { heading: "Access denied", api: null },
+  "/ics": { heading: "ICS / OT Protocol Filters", api: "/firewall/rules" },
+  "/identities": { heading: "Identity Bindings", api: "/identities" },
+  "/ids": { heading: "IDS Rules", api: "/ids/rules" },
+  "/interfaces": { heading: "Interfaces", api: "/interfaces" },
+  "/login": { heading: "containd login", api: "/auth/me" },
+  "/monitoring": { heading: "Monitoring Overview", api: "/flows" },
+  "/nat": { heading: "NAT", api: "/firewall/nat" },
+  "/pcap": { heading: "PCAP Analysis", api: "/learn/datasets" },
+  "/proxies": { heading: "Proxies", api: "/services/proxy/forward" },
+  "/routing": { heading: "Routing", api: "/routing" },
+  "/sessions": { heading: "Sessions", api: "/conntrack" },
+  "/system/services": { heading: "Services", api: "/services/status" },
+  "/system/services/av": { heading: "Antivirus / ICAP", api: "/services/av" },
+  "/system/services/dns": { heading: "DNS", api: "/services/dns" },
+  "/system/services/ntp": { heading: "NTP", api: "/services/ntp" },
+  "/system/services/syslog": { heading: "Syslog", api: "/services/syslog" },
+  "/system/settings": { heading: "System Settings", api: "/system/tls" },
+  "/system/users": { heading: "User Management", api: "/users" },
+  "/templates": { heading: "ICS Rule Templates", api: "/templates/ics" },
+  "/topology": { heading: "Topology", api: "/config" },
+  "/vpn": { heading: "VPN", api: "/services/vpn" },
+  "/wizard": { heading: "Policy Wizard", api: "/zones" },
+  "/zones": { heading: "Zones", api: "/zones" },
+} satisfies Record<(typeof routes)[number], { heading: string; api: string | null }>;
+
 const adminUser = {
   id: "admin-1",
   username: "containd",
@@ -251,6 +290,15 @@ function responseFor(pathname: string) {
   if (pathname === "/api/v1/inventory/iec104") return json(snapshot);
   if (pathname === "/api/v1/diagnostics/iec104") return json(pressure);
   if (pathname === "/api/v1/dashboard") return json(dashboard);
+  if (pathname === "/api/v1/learn/datasets" || pathname === "/api/v1/learn/watches") {
+    return json({ items: [], nextCursor: "" });
+  }
+  if (pathname === "/api/v1/learn/counters") {
+    return json({ records: 0, bytes: 0, evictedRecords: 0, evictedBytes: 0, expiredRecords: 0, lostBatches: 0, rejectedParents: 0, withheld: {} });
+  }
+  if (pathname === "/api/v1/evidence/status") {
+    return json({ audit: { state: "ok", failures: 0 }, forwarding: [] });
+  }
   if (pathname === "/api/v1/zones") return json(zones);
   if (pathname === "/api/v1/interfaces") return json(interfaces);
   if (pathname === "/api/v1/interfaces/state") return json(interfaceState);
@@ -266,6 +314,9 @@ function responseFor(pathname: string) {
       since: "2026-03-14T00:00:00Z",
       rules: malformedFirewallRules.map((r) => ({ ruleId: r.id, action: r.action, packets: 10, bytes: 600 })),
     });
+  }
+  if (pathname === "/api/v1/firewall/shadow-counters") {
+    return json({ available: true, unit: "messages", rules: [] });
   }
   if (pathname === "/api/v1/audit") return json(auditRecords);
   if (pathname === "/api/v1/firewall/nat") {
@@ -296,6 +347,12 @@ function responseFor(pathname: string) {
   if (pathname === "/api/v1/dataplane/ruleset") {
     return json(rulesetPreview);
   }
+  if (pathname === "/api/v1/dataplane/ics-coverage") {
+    return json({ candidate: [], applied: [], appliedAt: "2026-10-26T06:00:00Z" });
+  }
+  if (pathname === "/api/v1/system/management-reservation") {
+    return json({ active: false, guard: { active: false, faults: 0 } });
+  }
   if (pathname === "/api/v1/dataplane/ruleset/status") {
     return json({ installed: true, appliedAt: "2026-10-26T06:00:00Z", snapshotVersion: "v1" });
   }
@@ -306,7 +363,6 @@ function responseFor(pathname: string) {
     pathname === "/api/v1/flows" ||
     pathname === "/api/v1/anomalies" ||
     pathname === "/api/v1/conntrack" ||
-    pathname === "/api/v1/dhcp/leases" ||
     pathname === "/api/v1/inventory" ||
     pathname === "/api/v1/signatures" ||
     pathname === "/api/v1/signatures/matches" ||
@@ -318,6 +374,7 @@ function responseFor(pathname: string) {
   ) {
     return json([]);
   }
+  if (pathname === "/api/v1/dhcp/leases") return json({ leases: [] });
   if (pathname === "/api/v1/identities") return json({ mappings: [] });
   if (pathname === "/api/v1/security/conduits") return json([]);
   if (pathname === "/api/v1/services/status") return json({ faults: [], av: { available: false, error: "engine unavailable" } });
@@ -337,7 +394,7 @@ function responseFor(pathname: string) {
     return json({ clients: [] });
   }
   if (pathname === "/api/v1/services/av/defs") {
-    return json([]);
+    return json({ path: "/data/av", files: [], definitions: [] });
   }
   if (pathname === "/api/v1/services/vpn/wireguard/status") {
     return json({ interface: "wg0", peers: [] });
@@ -368,7 +425,7 @@ function responseFor(pathname: string) {
   if (pathname === "/api/v1/health") {
     return json({ status: "ok", component: "mgmt" });
   }
-  return json({});
+  throw new Error(`Unmocked GET API path: ${pathname}`);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -382,12 +439,18 @@ test.beforeEach(async ({ page }) => {
       await route.fulfill(responseFor(url.pathname));
       return;
     }
-    await route.fulfill(json({ status: "ok" }));
+    if (route.request().method() === "PATCH" && url.pathname === "/api/v1/interfaces/external-test") {
+      await route.fulfill(json({ name: "external-test", ...route.request().postDataJSON() }));
+      return;
+    }
+    throw new Error(`Unmocked API request: ${route.request().method()} ${url.pathname}`);
   });
 });
 
 for (const path of routes) {
   test(`route smoke ${path}`, async ({ page }) => {
+    // Match the authenticated fixture before mount-time admin data loaders run.
+    await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
     const consoleErrors: string[] = [];
     const pageErrors: string[] = [];
 
@@ -398,8 +461,14 @@ for (const path of routes) {
       pageErrors.push(String(err));
     });
 
+    const { heading, api } = routeExpectations[path];
+    const loaded = api ? page.waitForResponse((res) =>
+      res.request().method() === "GET" && new URL(res.url()).pathname === `/api/v1${api}`,
+    ) : null;
     await page.goto(path);
-    await expect(page.locator("body")).toBeVisible();
+    if (loaded) expect((await loaded).status()).toBe(200);
+    await expect(page).toHaveURL(new RegExp(`${path === "/" ? "/" : path}/?$`));
+    await expect(page.getByRole("heading", { name: heading, exact: true, level: 1 })).toBeVisible();
     await page.waitForLoadState("networkidle");
 
     expect(pageErrors).toEqual([]);

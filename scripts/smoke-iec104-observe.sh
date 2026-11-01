@@ -27,8 +27,7 @@ observe_counts() {
   jq --arg cc "$CC_IP:" --arg rtu "$RTU_IP:$RTU_PORT" '
     [.pairs[] | select((.controlling | startswith($cc)) and .controlled == $rtu)
       | .cas[] | select(.ca == 1)]
-    | {attempted: (map(.attemptedCommands) | add // 0),
-       accepted: (map(.acceptedCommands) | add // 0)}' "$1"
+    | {attempted: (map(.attemptedCommands) | add // 0)}' "$1"
 }
 
 observe_denied() {
@@ -36,9 +35,9 @@ observe_denied() {
   observe_inventory denied
   before=$(observe_counts "$RESULTS_DIR/inventory-before-deny.json")
   after=$(observe_counts "$RESULTS_DIR/inventory-denied.json")
-  observe_check "inventory: denied command increments attempts, never accepts" "$before -> $after" \
+  observe_check "inventory: denied command increments attempts" "$before -> $after" \
     jq -en --argjson before "$before" --argjson after "$after" \
-    '$after.attempted > $before.attempted and $after.accepted == $before.accepted'
+    '$after.attempted > $before.attempted'
 }
 
 observe_allowed() {
@@ -46,13 +45,16 @@ observe_allowed() {
   observe_inventory allowed
   before=$(observe_counts "$RESULTS_DIR/inventory-denied.json")
   after=$(observe_counts "$RESULTS_DIR/inventory-allowed.json")
-  observe_check "inventory: allowed type 46 command is accepted at CA 1 / IOA 2001" "$before -> $after" \
+  observe_check "inventory: new type 46 attempts at CA 1 / IOA 2001" "$before -> $after" \
     jq -e --arg cc "$CC_IP:" --arg rtu "$RTU_IP:$RTU_PORT" \
+    --slurpfile previous "$RESULTS_DIR/inventory-denied.json" \
     --argjson before "$before" --argjson after "$after" '
-      $after.accepted >= 1 and $after.accepted > $before.accepted
-      and any(.pairs[]; (.controlling | startswith($cc)) and .controlled == $rtu
-        and any(.cas[]; .ca == 1 and .acceptedCommands >= 1
-          and any(.points[]; .ioa == 2001 and .typeId == 46)))' \
+      def point_attempts:
+        [.pairs[] | select((.controlling | startswith($cc)) and .controlled == $rtu)
+          | .cas[] | select(.ca == 1 and any(.points[]; .ioa == 2001 and .typeId == 46))
+          | .attemptedCommands] | add // 0;
+      $after.attempted > $before.attempted
+      and point_attempts > ($previous[0] | point_attempts)' \
     "$RESULTS_DIR/inventory-allowed.json"
 }
 

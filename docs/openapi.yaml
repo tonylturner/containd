@@ -2331,27 +2331,25 @@ components:
         lastSeen: {type: string, format: date-time}
     IEC104InventoryCA:
       type: object
-      required: [ca, firstSeen, lastSeen, attemptedCommands, acceptedCommands, points]
+      required: [ca, firstSeen, lastSeen, attemptedCommands, points]
       properties:
         ca: {type: integer, minimum: 0, maximum: 65535}
         firstSeen: {type: string, format: date-time}
         lastSeen: {type: string, format: date-time}
         attemptedCommands: {type: integer, minimum: 0, description: Decoded control-direction command APDUs.}
-        acceptedCommands: {type: integer, minimum: 0, description: Commands allowed in inline enforce mode whose carrying packets all completed an Accept verdict. Always 0 in monitor mode.}
         points:
           type: array
           maxItems: 256
           items: {$ref: '#/components/schemas/IEC104InventoryPoint'}
     IEC104InventoryPair:
       type: object
-      required: [controlling, controlled, firstSeen, lastSeen, attemptedCommands, acceptedCommands, cas]
+      required: [controlling, controlled, firstSeen, lastSeen, attemptedCommands, cas]
       properties:
         controlling: {type: string, description: 'Controlling client IP:port (IPv6 bracketed).'}
         controlled: {type: string, description: 'Controlled server IP:port (normally port 2404; IPv6 bracketed).'}
         firstSeen: {type: string, format: date-time}
         lastSeen: {type: string, format: date-time}
         attemptedCommands: {type: integer, minimum: 0}
-        acceptedCommands: {type: integer, minimum: 0}
         cas:
           type: array
           maxItems: 32
@@ -2378,7 +2376,7 @@ components:
         overflow:
           type: object
           description: Capacity evictions or truncated observations since clear/restart; expiry is not overflow. Not unique missing devices.
-          required: [observations, pairs, cas, points, assets, peers, stationAddresses, outcomes]
+          required: [observations, pairs, cas, points, assets, peers, stationAddresses]
           properties:
             observations: {type: integer, minimum: 0, description: Observations dropped because the inventory mutex was busy.}
             pairs: {type: integer, minimum: 0}
@@ -2387,7 +2385,6 @@ components:
             assets: {type: integer, minimum: 0}
             peers: {type: integer, minimum: 0}
             stationAddresses: {type: integer, minimum: 0}
-            outcomes: {type: integer, minimum: 0, description: Command outcomes not credited because the inventory was busy, the pair or CA was evicted, or the per-session delivery ledger was full.}
     InventoryDiscoveredAsset:
       properties:
         firstSeen: {format: date-time, type: string}

@@ -16,13 +16,11 @@ import (
 const iecInventoryCap = 128 // commands and carrying tokens, independently, per session
 
 type iecInventoryInput interface {
-	ObserveIEC104(inventory.IEC104Observation) inventory.IEC104CommandRef
-	IEC104CommandOutcome(inventory.IEC104Outcome)
-	RecordIEC104DeliveryOverflow(uint64)
+	ObserveIEC104(inventory.IEC104Observation)
 }
 
 // Session-owned delivery evidence. All maps, pending and allowed are protected
-// by iecTable.mu. Only the observation/outcome rendezvous crosses that lock.
+// by iecTable.mu. Only the observation/learner-delivery rendezvous crosses that lock.
 type iecInventoryLedger struct {
 	commands map[string]*iecInventoryCommand
 	tokens   map[capture.Token]map[*iecInventoryCommand]struct{}
@@ -32,7 +30,6 @@ type iecInventoryCommand struct {
 	input         iecInventoryInput
 	learnDelivery func(string)
 	observation   inventory.IEC104Observation // immutable after construction
-	ref           inventory.IEC104CommandRef  // published by observed.Store
 	observed      atomic.Bool
 	final         atomic.Uint32 // 0 pending, 1 not accepted, 2 accepted
 	emitted       atomic.Bool
@@ -43,16 +40,15 @@ type iecInventoryCommand struct {
 }
 
 func (c *iecInventoryCommand) observe() {
-	c.ref = c.input.ObserveIEC104(c.observation)
+	c.input.ObserveIEC104(c.observation)
 	c.observed.Store(true)
 	c.flush()
 }
 
-// Neither side waits for the other. Observation publishes the opaque ref
-// before an outcome can acquire it; whichever side arrives last emits once.
+// Neither side waits for the other. Preserve observation-before-delivery
+// ordering for learner evidence; whichever side arrives last emits once.
 func (c *iecInventoryCommand) flush() {
 	if c.observed.Load() && c.final.Load() != 0 && c.emitted.CompareAndSwap(false, true) {
-		c.input.IEC104CommandOutcome(inventory.IEC104Outcome{Command: c.ref, Accepted: c.final.Load() == 2})
 		if c.final.Load() == 2 && c.id != "" && c.learnDelivery != nil {
 			c.learnDelivery(c.id)
 		}
@@ -86,7 +82,6 @@ func (t *iecTable) observeInventoryLocked(s *iecSession, dir int, f dpi.DecodedF
 	}
 	if len(s.inventory.commands) >= iecInventoryCap {
 		c.final.Store(1)
-		acts.inventoryOverflow++
 		return
 	}
 	c.id = eventfields.APDUID(s.id, dirLetter(dir), f.Start)
@@ -105,7 +100,6 @@ func (t *iecTable) inventoryAttachLocked(s *iecSession, c *iecInventoryCommand, 
 	cmds := l.tokens[h.tok]
 	if cmds == nil {
 		if len(l.tokens) >= iecInventoryCap {
-			acts.inventoryOverflow++
 			t.inventoryFinalLocked(s, c, false, acts)
 			return
 		}
@@ -156,7 +150,7 @@ func (t *iecTable) inventoryFinalLocked(s *iecSession, c *iecInventoryCommand, a
 			delete(t.inventoryTokens, tok)
 		}
 	}
-	acts.inventoryOutcome = append(acts.inventoryOutcome, c)
+	acts.learnerDelivery = append(acts.learnerDelivery, c)
 }
 
 func (t *iecTable) inventoryVerdictLocked(tok capture.Token, v capture.Verdict, err error, acts *iecActions) {
@@ -205,12 +199,10 @@ func (t *iecTable) finishInventory(acts iecActions) {
 	for _, c := range acts.inventoryObserve {
 		c.observe()
 	}
-	for _, c := range acts.inventoryOutcome {
+	for _, c := range acts.learnerDelivery {
 		c.flush()
 	}
-	if acts.inventoryOverflow != 0 {
-		t.inventory.RecordIEC104DeliveryOverflow(acts.inventoryOverflow)
-	}
+
 }
 
 // stopInventory also covers a configuration replaced before Start.
