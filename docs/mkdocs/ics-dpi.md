@@ -990,6 +990,12 @@ interpreted as complete coverage. Recorded collection or admission loss excludes
 every connection it could have touched from generation and direct certification.
 Known-connection loss excludes that incarnation; coordinate-scoped loss excludes
 matching wire tuples or host pairs across every incarnation, in either direction.
+Live observations retain both verified original/reply NAT aliases, so loss on
+the opposite wire face still excludes request-only or response-only evidence.
+Identity and scope are additive. Live parents lacking complete verified aliases
+cannot prove endpoint disjointness from same-transport coordinate loss and are
+excluded; PCAP
+retains only its observed wire authority.
 Retained message times do not prove lifecycle bounds. Legacy timestamp-only loss
 and missing scope exclude the dataset. Excluded retained parents count toward
 the durable `collection_loss` withheld reason. Connections
@@ -1186,13 +1192,16 @@ historical loss and missing coordinates exclude the dataset. A short IP/TCP
 header therefore cannot leave an earlier parent eligible for certification.
 A cut non-IP record with readable EtherType (including VLAN tags), or a known
 non-TCP/UDP IP protocol, records non-excluding `capture_unrelated` loss. Opaque
-IPv6 extension chains are not proof of unrelated traffic. Ordinary unrelated
+IPv6 extension chains are not proof of unrelated traffic; their IP family comes
+from the decoded header, never IPv4-mapped address spelling. A cut opaque chain
+(including MLD-style traffic) still excludes the dataset. Ordinary unrelated
 ARP/LLDP/ICMP truncation does not erase workshop suggestions. A header-less final
 record remains dataset-wide.
 
 Live `capture_loss` is retained at transport admission, before worker processing,
 and delivered through AF_PACKET and NFQUEUE even with incomplete TCP headers.
-Stop, deadline and policy-change cleanup fence loss callbacks before sealing;
+Stop, deadline and policy-change cleanup close parent admission before detaching
+loss callbacks and fence those callbacks before sealing;
 failed automatic stops retry the retained lease. `watch_collection_loss` and
 `budget_exceeded` retain known rejected connections; `watch_restart`,
 `policy_changed` and storage/import failures are dataset-wide. Dropped

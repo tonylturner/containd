@@ -296,6 +296,12 @@ func (w *evidenceWatch) start(ctx context.Context, req evidence.StartWatchReques
 	return watch, nil
 }
 func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch, outErr error) {
+	return w.stopWithLossFence(ctx, id, func() { w.engine.SetLearnLossHook(nil) })
+}
+
+// The injected fence isolates the exact boundary for deterministic ordering
+// tests; production always uses the engine's synchronous admission fence.
+func (w *evidenceWatch) stopWithLossFence(ctx context.Context, id string, fenceLoss func()) (out evidence.Watch, outErr error) {
 	disabled := false
 	defer func() {
 		if disabled && outErr != nil {
@@ -325,9 +331,9 @@ func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch
 		return watch, err
 	}
 	w.stopping = lease
-	w.engine.SetLearnLossHook(nil)
 	w.active.Store(nil)
 	w.engine.SetLearnWatchHook(nil)
+	fenceLoss()
 	disabled = true
 	control, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()

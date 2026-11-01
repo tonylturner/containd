@@ -51,7 +51,7 @@ func TestLossScope(t *testing.T) {
 			if err = json.Unmarshal(raw, &ds); err != nil {
 				t.Fatal(err)
 			}
-			if got := ds.LossTouches("a", wire); got != tc.want {
+			if got := ds.LossTouches(Observation{ConnectionID: "a", Source: SourcePCAP, Authority: Authority{Wire: wire}}); got != tc.want {
 				t.Fatalf("LossTouches=%v want %v", got, tc.want)
 			}
 		})
@@ -62,7 +62,7 @@ func TestLegacyGapCannotAcquireNarrowerScope(t *testing.T) {
 	ds := Dataset{Gaps: []string{"old"}}
 	ds.RecordLoss(CollectionLoss{Code: "old", ConnectionID: "a"})
 	ds.RecordLoss(CollectionLoss{Code: "old", ConnectionID: "a"})
-	if len(ds.Losses) != 2 || !ds.LossTouches("b", Tuple{}) {
+	if len(ds.Losses) != 2 || !ds.LossTouches(Observation{ConnectionID: "b"}) {
 		t.Fatalf("legacy gap narrowed by later localization: %+v", ds)
 	}
 }
@@ -86,7 +86,7 @@ func TestLossBoundAndTimeDedupe(t *testing.T) {
 	for i := range MaxLosses + 100 {
 		ds.RecordLoss(CollectionLoss{Code: "drop", ConnectionID: fmt.Sprint(i)})
 	}
-	if len(ds.Losses) != 1 || !ds.LossTouches("clean", Tuple{}) {
+	if len(ds.Losses) != 1 || !ds.LossTouches(Observation{ConnectionID: "clean"}) {
 		t.Fatal("loss cap failed closed", ds)
 	}
 }
@@ -94,7 +94,7 @@ func TestOutcomeLossDoesNotExclude(t *testing.T) {
 	ds := Dataset{}
 	ds.RecordLoss(CollectionLoss{Code: "outcome_loss"})
 	ds.RecordLoss(CollectionLoss{Code: "capture_unrelated"})
-	if ds.LossTouches("any", Tuple{}) {
+	if ds.LossTouches(Observation{ConnectionID: "any"}) {
 		t.Fatal("non-authority outcome excluded connection")
 	}
 }

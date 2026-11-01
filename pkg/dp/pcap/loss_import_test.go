@@ -288,3 +288,20 @@ func TestCoordinateLossUsefulness(t *testing.T) {
 		})
 	}
 }
+
+func TestOpaqueIPv6ExtensionLossStaysConservative(t *testing.T) {
+	for _, proto := range []byte{0, 44, 60} {
+		t.Run(fmt.Sprint(proto), func(t *testing.T) {
+			cut := make([]byte, 14+48)
+			binary.BigEndian.PutUint16(cut[12:], 0x86dd)
+			cut[14], cut[19], cut[20] = 0x60, 128, proto
+			cut[37], cut[53] = 1, 2
+			cut[54] = 58 // MLD-style ICMPv6 next header; the chain remains opaque.
+			s, r, out := imported(t, [][]byte{frame(1, 1), cut}, []int{66, len(cut)})
+			if len(out.Suggestions) != 0 {
+				t.Fatal("opaque chain was declared disjoint", out)
+			}
+			assertDirectLoss(t, s, r.Dataset)
+		})
+	}
+}

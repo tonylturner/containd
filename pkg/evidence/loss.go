@@ -95,7 +95,7 @@ func (d *Dataset) RecordLoss(loss CollectionLoss) {
 
 // LossTouches never infers lifecycle bounds from retained message timestamps.
 // Missing/legacy scope fails closed; coordinates match either wire direction.
-func (d Dataset) LossTouches(connection string, wire Tuple) bool {
+func (d Dataset) LossTouches(o Observation) bool {
 	for _, code := range d.Gaps {
 		if nonExcludingLoss(code) {
 			continue
@@ -112,31 +112,66 @@ func (d Dataset) LossTouches(connection string, wire Tuple) bool {
 		if nonExcludingLoss(loss.Code) {
 			continue
 		}
-		if loss.ConnectionID != "" {
-			if loss.ConnectionID == connection {
+		if loss.ConnectionID != "" && loss.ConnectionID == o.ConnectionID {
+			return true
+		}
+		// Identity is additional authority, not a reason to skip a wire scope
+		// that can touch other incarnations (or their opposite NAT faces).
+		if loss.ConnectionID != "" && loss.Scope == (LossScope{}) {
+			continue
+		}
+		if !validScope(loss.Scope) {
+			return true
+		}
+		// NAT can change endpoints, not the transport protocol. This remains
+		// disjoint even when the opposite wire face is unavailable.
+		if validTuple(o.Authority.Wire) && o.Authority.Wire.Transport != loss.Scope.Transport {
+			continue
+		}
+		tuples := []Tuple{o.Authority.Wire}
+		if o.Source == SourceLive {
+			// Without a complete verified pair, a disjoint observed wire face
+			// cannot prove that the unknown opposite NAT face escaped this loss.
+			if o.Authority.Correlation != "verified" || !validAliases(o.Authority) {
 				return true
 			}
-			continue
+			tuples = append(tuples, o.Authority.Aliases.Original, o.Authority.Aliases.Reply)
 		}
-		s := loss.Scope
-		if !validIP(s.Source.IP) || !validIP(s.Destination.IP) || (s.Transport != "tcp" && s.Transport != "udp") {
-			return true
-		}
-		if !validIP(wire.Source.IP) || !validIP(wire.Destination.IP) || wire.Transport == "" {
-			return true
-		}
-		if s.Transport != wire.Transport {
-			continue
-		}
-		match := func(a, b Endpoint) bool {
-			x, _ := netip.ParseAddr(a.IP)
-			y, _ := netip.ParseAddr(b.IP)
-			return x.Unmap() == y.Unmap() && (!s.Ports || a.Port == b.Port)
-		}
-		if match(s.Source, wire.Source) && match(s.Destination, wire.Destination) || match(s.Source, wire.Destination) && match(s.Destination, wire.Source) {
-			return true
+		for _, wire := range tuples {
+			if !validTuple(wire) || scopeMatches(loss.Scope, wire) {
+				return true
+			}
 		}
 	}
 	return false
 }
 func validIP(s string) bool { _, err := netip.ParseAddr(s); return err == nil }
+
+func validTuple(t Tuple) bool {
+	return validIP(t.Source.IP) && validIP(t.Destination.IP) && (t.Transport == "tcp" || t.Transport == "udp")
+}
+func validScope(s LossScope) bool {
+	return validTuple(Tuple{Source: s.Source, Destination: s.Destination, Transport: s.Transport})
+}
+func scopeMatches(s LossScope, wire Tuple) bool {
+	if s.Transport != wire.Transport {
+		return false
+	}
+	match := func(a, b Endpoint) bool {
+		x, _ := netip.ParseAddr(a.IP)
+		y, _ := netip.ParseAddr(b.IP)
+		return x.Unmap() == y.Unmap() && (!s.Ports || a.Port == b.Port)
+	}
+	return match(s.Source, wire.Source) && match(s.Destination, wire.Destination) || match(s.Source, wire.Destination) && match(s.Destination, wire.Source)
+}
+func validAliases(a Authority) bool {
+	if a.Aliases == nil || a.Aliases.Original.Transport != a.Aliases.Reply.Transport || !validTuple(a.Wire) || !validTuple(a.Aliases.Original) || !validTuple(a.Aliases.Reply) {
+		return false
+	}
+	for _, t := range []Tuple{a.Aliases.Original, a.Aliases.Reply} {
+		if scopeMatches(LossScope{Source: t.Source, Destination: t.Destination, Transport: t.Transport, Ports: true}, a.Wire) {
+			return true
+		}
+	}
+	return false
+}

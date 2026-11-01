@@ -54,6 +54,10 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 			authority.Logical = &logical
 			authority.Correlation = "verified"
 			ct := state.Connection.Load().Evidence
+			authority.Aliases = &evidence.WireAliases{
+				Original: tuple(flow.TupleKey(ct.Original, flow.DirForward)),
+				Reply:    tuple(flow.TupleKey(ct.Reply, flow.DirReverse)),
+			}
 			authority.MappingFingerprint, _ = evidence.Digest(struct {
 				Original, Reply any
 				Zone            uint16

@@ -108,13 +108,29 @@ func (e *Engine) SetLearnLossHook(offer func(evidence.CollectionLoss)) {
 
 func (e *Engine) recordLearnCaptureLoss(pkt capture.Packet, connection *flow.Connection) {
 	loss := learn.CaptureLoss(pkt, "capture_loss")
-	if connection != nil {
+	if connection != nil && connection.Key != "" {
 		loss.ConnectionID = connection.Key
-		loss.Scope = evidence.LossScope{}
 	}
 	e.learnLossMu.RLock()
 	defer e.learnLossMu.RUnlock()
 	if e.learnLoss != nil {
 		e.learnLoss(loss)
 	}
+}
+
+// Full ports permit an admission-index identity lookup without network I/O.
+// Partial ports retain host-pair scope; certification checks every retained
+// verified alias, including mappings on connections with no retained reply.
+func (e *Engine) recordLearnPacketLoss(pkt capture.Packet) {
+	var connection *flow.Connection
+	if r := e.transport; r != nil {
+		r.admissionMu.Lock()
+		defer r.admissionMu.Unlock()
+		if pkt.Invalid != capture.InvalidIPHeader && (pkt.PortsValid || pkt.TCP.Valid) {
+			if entry := r.indexed[packetKey(pkt).Tuple()]; entry != nil && !entry.connection.Closed().Load() {
+				connection = entry.connection
+			}
+		}
+	}
+	e.recordLearnCaptureLoss(pkt, connection)
 }

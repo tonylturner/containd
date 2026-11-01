@@ -55,9 +55,10 @@ func decodeIPv4Raw(data []byte) (Packet, bool) {
 		return Packet{Invalid: InvalidTruncated, CaptureIncomplete: true}, false
 	}
 	pkt := Packet{
-		Proto: data[9],
-		SrcIP: net.IPv4(data[12], data[13], data[14], data[15]),
-		DstIP: net.IPv4(data[16], data[17], data[18], data[19]),
+		IPVersion: 4,
+		Proto:     data[9],
+		SrcIP:     net.IPv4(data[12], data[13], data[14], data[15]),
+		DstIP:     net.IPv4(data[16], data[17], data[18], data[19]),
 	}
 	ihl := int(data[0]&0x0f) * 4
 	if ihl < 20 {
@@ -108,9 +109,10 @@ func decodeIPv6Raw(data []byte) (Packet, bool) {
 		return Packet{Invalid: InvalidTruncated, CaptureIncomplete: true}, false
 	}
 	pkt := Packet{
-		Proto: data[6],
-		SrcIP: net.IP(append([]byte(nil), data[8:24]...)),
-		DstIP: net.IP(append([]byte(nil), data[24:40]...)),
+		IPVersion: 6,
+		Proto:     data[6],
+		SrcIP:     net.IP(append([]byte(nil), data[8:24]...)),
+		DstIP:     net.IP(append([]byte(nil), data[24:40]...)),
 	}
 	data, lengthErr := clampIPLength(data, 40+int(binary.BigEndian.Uint16(data[4:6])), 40)
 	pkt.CaptureIncomplete = lengthErr == InvalidTruncated

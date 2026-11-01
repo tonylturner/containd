@@ -19,13 +19,13 @@ func TestAFPacketPreservesShortHeaderLoss(t *testing.T) {
 			eth := make([]byte, 14)
 			eth[12] = 8
 			pkt, ok := decodePacket("eth0", append(eth, raw...))
-			if !ok || !pkt.CaptureIncomplete || pkt.TCP.Valid || pkt.SrcIP == nil || pkt.PortsValid != (size >= 24) {
+			if !ok || pkt.IPVersion != 4 || !pkt.CaptureIncomplete || pkt.TCP.Valid || pkt.SrcIP == nil || pkt.PortsValid != (size >= 24) {
 				t.Fatalf("trusted truncation discarded before handler: delivered=%v packet=%+v", ok, pkt)
 			}
 			// NFQUEUE uses the same public IP decoder and unconditionally
 			// delivers its result through generation.deliver.
 			inline := DecodeIPPacket(raw)
-			if inline.CaptureIncomplete != pkt.CaptureIncomplete || inline.PortsValid != pkt.PortsValid || !inline.SrcIP.Equal(pkt.SrcIP) || inline.SrcPort != pkt.SrcPort {
+			if inline.IPVersion != pkt.IPVersion || inline.CaptureIncomplete != pkt.CaptureIncomplete || inline.PortsValid != pkt.PortsValid || !inline.SrcIP.Equal(pkt.SrcIP) || inline.SrcPort != pkt.SrcPort {
 				t.Fatalf("NFQUEUE/AF_PACKET disagree: %+v %+v", inline, pkt)
 			}
 			delivered := false

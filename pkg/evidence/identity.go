@@ -13,7 +13,7 @@ import (
 // NormalizationVersion versions the live/PCAP event-to-observation adapter,
 // independently of decoder and storage schemas. Bump when retained authority or
 // normalized semantics change so an import never reuses obsolete observations.
-const NormalizationVersion = "loss-scope-3"
+const NormalizationVersion = "nat-loss-scope-4"
 
 // ImportID binds a capture to the semantic authorities used to decode and
 // normalize it. Historical IDs remain readable but are never reused here.

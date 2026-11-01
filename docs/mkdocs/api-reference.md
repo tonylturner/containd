@@ -403,16 +403,26 @@ with ports, the five-tuple; without ports, the host pair and transport protocol.
 There is no observation-time bound: the first and last retained messages do not
 prove when a connection opened or closed. Missing scope, including legacy
 unlocalized gaps and timestamp-only losses, excludes the entire dataset.
-Dataset `losses` retains each code with `connectionId` or `scope` (source and
+Dataset `losses` retains each code with `connectionId` and/or `scope` (source and
 destination endpoints, `transport`, and `ports`, which indicates whether ports
 are authoritative). Historical `start`/`end` fields remain readable but cannot
 prove a connection disjoint. `gaps` retains certification-related summary codes.
+
+Live observation `authority.aliases` retains the verified conntrack `original`
+and `reply` wire tuples, even when only requests or only responses were retained.
+Scope matches either alias across every incarnation; NAT reply tuples need not
+be the endpoint reversal of the original. A known `connectionId` adds exclusion,
+never replaces or narrows a coordinate scope. Live parents without a complete
+verified alias pair cannot prove endpoint disjointness from same-transport
+coordinate-scoped loss and are excluded. PCAP remains wire-coordinate evidence and never invents NAT
+mapping authority. Full ports preserve unrelated verified mappings; host-pair
+loss can exclude several mappings sharing translated hosts.
 
 Loss scopes depend on the available authority:
 
 | Code | Scope |
 | --- | --- |
-| `capture_loss` | Live transport overflow is retained synchronously at admission, even if Stop, deadline or policy change precedes worker processing. Overflow and IP truncation use wire five-tuple scope when ports are captured, otherwise host-pair/transport scope. Worker-resolved loss can additionally retain an authoritative incarnation. |
+| `capture_loss` | Live transport overflow is retained synchronously at admission, even if Stop, deadline or policy change precedes worker processing. Overflow and IP truncation use wire five-tuple scope when ports are captured, otherwise host-pair/transport scope, matched against both verified NAT aliases. An already-indexed incarnation is retained as additional authority without waiting for a worker. |
 | `capture_truncated` | Offline cut record or IP-length truncation: wire five-tuple when ports are captured, otherwise host-pair/transport. Missing IP coordinates, an unreadable EtherType or a header-less final record excludes the dataset. Opaque IPv6 extension chains remain conservative, not unrelated. |
 | `watch_collection_loss`, `budget_exceeded` | Rejected decoded batch or parent: known connection incarnation; missing identity excludes the dataset, never just an observation-time interval. |
 | `watch_restart`, `policy_changed` | Dataset-wide: wall-clock watch bounds cannot delimit packet timestamps after clock skew or capture lag. |

@@ -91,7 +91,7 @@ func TestAutomaticStopRetriesDetachedLease(t *testing.T) {
 				t.Fatalf("automatic retry: %+v %v", got, err)
 			}
 			ds, err := w.store.GetDataset(ctx, watch.DatasetID)
-			if err != nil || !ds.LossTouches("affected", evidence.Tuple{}) {
+			if err != nil || !ds.LossTouches(evidence.Observation{ConnectionID: "affected"}) {
 				t.Fatalf("retry lost exclusion: %+v %v", ds, err)
 			}
 		})

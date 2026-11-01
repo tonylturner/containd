@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve learner loss across both verified NAT wire aliases, including
+  request-only SNAT and response-only DNAT evidence. Known incarnation identity
+  adds to coordinate scope without narrowing it; unproved live alias
+  disjointness fails closed. Stop closes parent admission before detaching the
+  loss fence. IPv6 truncation classification uses decoded header family, not
+  IPv4-mapped address spelling, and empty connection placeholders retain scope.
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
 - Recorded collection or admission loss excludes every connection it could have

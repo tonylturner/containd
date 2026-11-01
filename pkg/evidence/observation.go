@@ -38,6 +38,13 @@ type Tuple struct {
 	Transport   string   `json:"transport"` // tcp|udp
 }
 
+// WireAliases retains both verified conntrack faces, not a synthesized reverse.
+// The pair is immutable and bounded independently of connection lifetime.
+type WireAliases struct {
+	Original Tuple `json:"original"`
+	Reply    Tuple `json:"reply"`
+}
+
 // ServiceKey is the policy relation key. Client source port is deliberately absent.
 // Direction is request|response, from decoder/session authority, not port guessing.
 type ServiceKey struct {
@@ -53,13 +60,14 @@ type ServiceKey struct {
 // Authority records why coordinates and roles may be used. Logical is absent
 // without verified connection authority; PCAP never silently acquires NAT truth.
 type Authority struct {
-	Wire               Tuple  `json:"wire"`
-	Logical            *Tuple `json:"logical,omitempty"`
-	Correlation        string `json:"correlation"` // verified|wire|unavailable
-	RoleCertain        bool   `json:"roleCertain"`
-	RoleEvidence       string `json:"roleEvidence"`
-	MappingFingerprint string `json:"mappingFingerprint,omitempty"`
-	StandardPort       bool   `json:"standardPort"`
+	Wire               Tuple        `json:"wire"`
+	Logical            *Tuple       `json:"logical,omitempty"`
+	Aliases            *WireAliases `json:"aliases,omitempty"`
+	Correlation        string       `json:"correlation"` // verified|wire|unavailable
+	RoleCertain        bool         `json:"roleCertain"`
+	RoleEvidence       string       `json:"roleEvidence"`
+	MappingFingerprint string       `json:"mappingFingerprint,omitempty"`
+	StandardPort       bool         `json:"standardPort"`
 }
 
 // EvidenceRef locates original evidence without embedding packet payloads.

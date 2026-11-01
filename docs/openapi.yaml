@@ -785,6 +785,14 @@ components:
           type: string
         logical:
           $ref: '#/components/schemas/LearnTuple'
+        aliases:
+          type: object
+          additionalProperties: false
+          required: [original, reply]
+          description: Complete verified live conntrack wire faces. Loss scope matches either face across every incarnation; a reverse tuple is not invented.
+          properties:
+            original: {$ref: '#/components/schemas/LearnTuple'}
+            reply: {$ref: '#/components/schemas/LearnTuple'}
         mappingFingerprint:
           type: string
         roleCertain:
@@ -987,7 +995,7 @@ components:
         losses:
           type: array
           maxItems: 1024
-          description: Durable loss scope. Known incarnations are excluded in full. Coordinate scope matches both wire directions across every incarnation, using ports when authoritative and otherwise host pair plus transport. Observation timestamps never delimit connection lifetime. Missing scope, legacy timestamp-only losses and legacy gaps exclude the dataset. outcome_loss and capture_unrelated do not exclude certification inputs. Localization exhaustion collapses to dataset-wide collection_loss.
+          description: Durable loss scope. Known incarnations are excluded in full. connectionId and scope are additive when both are present. Coordinate scope matches both verified original/reply NAT aliases across every incarnation, using ports when authoritative and otherwise host pair plus transport. Live parents without complete verified aliases cannot prove endpoint disjointness from same-transport coordinate-scoped loss and are excluded. PCAP retains wire coordinates only. Observation timestamps never delimit connection lifetime. Missing scope, legacy timestamp-only losses and legacy gaps exclude the dataset. outcome_loss and capture_unrelated do not exclude certification inputs. Localization exhaustion collapses to dataset-wide collection_loss.
           items:
             type: object
             additionalProperties: false

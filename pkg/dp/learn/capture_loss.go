@@ -26,7 +26,7 @@ func CaptureLoss(pkt capture.Packet, code string) evidence.CollectionLoss {
 		}
 	case 0, 43, 44, 51, 60, 135, 139, 140, 253, 254:
 		// Without walking the extension chain, no transport is proven absent.
-		if pkt.SrcIP.To4() != nil {
+		if pkt.IPVersion == 4 {
 			loss.Code = "capture_unrelated"
 		}
 	default:

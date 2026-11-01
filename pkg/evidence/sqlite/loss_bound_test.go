@@ -33,7 +33,7 @@ func TestLossIngestBoundCollapsesConservatively(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(d.Losses) != 1 || d.Losses[0].Code != "collection_loss" || !d.LossTouches("unrelated", evidence.Tuple{}) {
+	if len(d.Losses) != 1 || d.Losses[0].Code != "collection_loss" || !d.LossTouches(evidence.Observation{ConnectionID: "unrelated"}) {
 		t.Fatal("loss cap narrowed authority", d)
 	}
 }

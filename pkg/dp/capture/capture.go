@@ -44,6 +44,7 @@ type Packet struct {
 	DstIP      net.IP
 	SrcPort    uint16
 	DstPort    uint16
+	IPVersion  uint8  // decoded IP header version; never inferred from address spelling
 	PortsValid bool   // both ports were captured, even if the rest of L4 was not
 	Proto      uint8  // IP protocol number (6 TCP, 17 UDP)
 	Transport  string // "tcp" or "udp"
