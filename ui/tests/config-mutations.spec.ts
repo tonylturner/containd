@@ -219,7 +219,7 @@ test("IDS blocks Save after an acknowledged import until its rules can be read",
   await expect.poll(() => server.readHeld).toBe(true);
   server.failImportRead = true;
   await importFile(page);
-  await expect(page.getByText("Rules were imported, but could not be loaded. Refresh to reconcile them before saving.")).toBeVisible();
+  await expect(page.getByText("Changes staged, but the updated configuration is unavailable. Reload before saving.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   // Releasing a pre-import snapshot must not acknowledge the import or enable Save.
   const stale = page.waitForResponse((r) => read("/ids/rules")(r) && r.status() === 200);

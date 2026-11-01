@@ -1,4 +1,4 @@
-import { acknowledgeRevision, canAcknowledge, keepRevision, readRevision, revisionFrom, type ConfigRevision } from "./config-revision";
+import { acknowledgeRevision, canAcknowledge, keepRevision, readRevision, retainRevision, revisionFrom, type ConfigRevision } from "./config-revision";
 
 export type ConfigSubmission<T> = {
   readonly id: symbol;
@@ -40,10 +40,12 @@ export function failSave<T>(editor: ConfigEditor<T>, submitted: ConfigSubmission
 }
 
 /** Background reads never discard either structured or unfinished text edits. */
-export function adopt<T>(editor: ConfigEditor<T>, next: T, keepEdits = true, revision?: string): ConfigEditor<T> {
+export function adopt<T>(editor: ConfigEditor<T>, next: T, keepEdits = true, revision?: string, hasDraft = false): ConfigEditor<T> {
   if (!keepEdits) return fresh(next, revision);
-  if (!isDirty(editor)) return { ...readRevision(editor, revision, !!editor.conflictRevision || !!editor.olderView), cfg: next, server: next, superseded: false };
-  return { ...readRevision(editor, revision, true), server: next, superseded: editor.superseded || revision !== editor.baseRevision || !sameConfig(next, editor.server) };
+  const dirty = isDirty(editor);
+  const state = readRevision(editor, revision, retainRevision(editor, keepEdits, dirty || hasDraft));
+  if (!dirty) return { ...state, cfg: next, server: next, superseded: false };
+  return { ...state, server: next, superseded: editor.superseded || revision !== editor.baseRevision || !sameConfig(next, editor.server) };
 }
 
 /** Compare the entire submitted draft, not a parsed/normalized wire payload. */

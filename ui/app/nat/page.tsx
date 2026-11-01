@@ -1,12 +1,12 @@
 "use client";
 
-import { canAcknowledge } from "../../lib/config-revision";
+import type { ConfigBase } from "../../lib/config-boundary";
 
-import { matchingRevisions } from "../../lib/use-config-revision";
+import { useConfigView, matchingRevisions } from "../../lib/use-config-revision";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
-import { useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
+import { revisionError, useConfigEditor, ConfigEditNotice } from "../../lib/use-config-editor";
 import { useConfigForm } from "../../lib/use-config-form";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
@@ -39,16 +39,10 @@ const UNAVAILABLE = "NAT settings unavailable — the server did not return the 
 /* ── page ──────────────────────────────────────────────────────── */
 
 export default function NATPage() {
-  const [zones, setZones] = useState<Zone[]>([]);
-  const [natSnapshot, setNatSnapshot] = useState({ data: { enabled: false } as NATConfig, revision: "" });
-  const { data: nat, revision: natRevision } = natSnapshot;
-  const currentRevision = useRef("");
-  const acknowledgeNAT = (submittedBase: string, data: NATConfig, revision?: string) => {
-    if (!canAcknowledge(currentRevision.current, submittedBase, revision)) return;
-    currentRevision.current = revision!;
-    setNatSnapshot({ data, revision: revision! });
-  };
-  const [rules, setRules] = useState<FirewallRule[] | null>(null);
+  const natView = useConfigView({ nat: { enabled: false } as NATConfig, zones: [] as Zone[], rules: null as FirewallRule[] | null });
+  const { readConfig } = natView;
+  const { nat, zones, rules } = natView.data;
+  const natRevision = natView.state.baseRevision ?? "";
   // Until the first answer the settings are unknown, not disabled or empty.
   const [loaded, setLoaded] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -94,20 +88,17 @@ export default function NATPage() {
     const z = (zSnapshot?.data ?? null);
     const n = (nSnapshot?.data ?? null);
     const r = (rSnapshot?.data ?? null);
-    setRules(r);
     // Never save stand-in settings. After the first success, keep drafts
     // mounted but disabled while the current server copy is unavailable.
     if (z && n) {
       setLoadError(null);
-      setZones(z);
-      currentRevision.current = nSnapshot!.revision;
-      setNatSnapshot({ data: n, revision: nSnapshot!.revision });
+      readConfig({ data: { nat: n, zones: z, rules: r }, revision: nSnapshot!.revision }, keepEdits);
       setLoaded(true);
       if (!keepEdits) setReloadKey((n) => n + 1);
     } else {
       setLoadError(UNAVAILABLE);
     }
-  }, []));
+  }, [readConfig]));
 
   useConfigRefresh(refresh);
 
@@ -151,17 +142,16 @@ export default function NATPage() {
         zones={zones}
         nat={nat}
         revision={natRevision}
-        onSave={async (cfg, revision) => {
-          if (!writable.current) return null;
+        onSave={(base, cfg) => natView.writer(async (revision, cfg: NATConfig) => {
+          if (!writable.current) return { ok: false, error: UNAVAILABLE };
           setError(null);
           setNotice(null);
           setNoticeWarning(false);
           const saved = await api.setNAT(revision, cfg);
           if (!saved.ok) {
-            setError(saved.error || "Failed to update NAT (check zones).");
+            setError(revisionError(saved));
             return saved;
           }
-          acknowledgeNAT(revision, saved.data, saved.revision);
           setNotice(
             saved.warning
               ? `NAT configuration staged — commit to apply. Warning: ${saved.warning}`
@@ -169,7 +159,7 @@ export default function NATPage() {
           );
           refresh();
           return saved;
-        }}
+        }, (view, saved) => ({ ...view, nat: saved }))(base, cfg)}
       />
 
       <PortForwardsCard
@@ -178,45 +168,58 @@ export default function NATPage() {
         nat={nat}
         revision={natRevision}
         rules={rules}
-        onPublish={async (forward, allowRule, revision) => {
-          if (!writable.current) return null;
+        onPublish={(base, forward, allowRule) => natView.writer(async (revision, forward: PortForward, allowRule: boolean) => {
+          if (!writable.current) return { ok: false, error: UNAVAILABLE };
           setError(null);
           setNotice(null);
           const result = await api.publishPortForward(revision, forward, allowRule);
           if (!result.ok) {
-            setError(result.error);
+            setError(revisionError(result));
             return result;
           }
           setNotice(forwardPlacementMessage(result.data) + (result.warning ? ` Warning: ${result.warning}` : ""));
           setNoticeWarning(!!result.data.placement?.warning);
           await refresh();
           return result;
-        }}
-        onDelete={async (id, revision) => {
-          if (!writable.current) return null;
+        }, (view, saved) => {
+          let rules = [...(view.rules ?? [])];
+          if (saved.placement?.reason === "generated") {
+            const placement = saved.placement;
+            rules = rules.filter(row => row.id !== placement.rule.id);
+            rules.splice(placement.index, 0, placement.rule);
+          }
+          return { ...view, nat: { ...view.nat, portForwards: [
+            ...(view.nat.portForwards ?? []).filter(row => row.id !== saved.forward.id), saved.forward,
+          ] }, rules };
+        })(base, forward, allowRule)}
+        onDelete={(base, id) => natView.writer(async (revision, id: string) => {
+          if (!writable.current) return { ok: false, error: UNAVAILABLE };
           setError(null);
           setNotice(null);
           setNoticeWarning(false);
           const result = await api.deletePortForward(revision, id);
           if (!result.ok) {
-            setError(result.error);
+            setError(revisionError(result));
             return result;
           }
           setNotice(`Port forward deleted — commit to apply. Deleted rules: ${result.data.deletedRuleIds.join(", ") || "none"}. Edited rules: ${result.data.editedRuleIds.join(", ") || "none"}.${result.warning ? ` Warning: ${result.warning}` : ""}`);
           await refresh();
           return result;
-        }}
-        onSave={async (cfg, revision) => {
-          if (!writable.current) return null;
+        }, (view, saved, id) => ({ ...view,
+          nat: { ...view.nat, portForwards: (view.nat.portForwards ?? []).filter(row => row.id !== id) },
+          rules: view.rules?.filter(row => !saved.deletedRuleIds.includes(row.id)).map(row => saved.editedRuleIds.includes(row.id)
+            ? { ...row, viaForwards: row.viaForwards?.filter(forward => forward !== id) } : row) ?? null,
+        }))(base, id)}
+        onSave={(base, cfg) => natView.writer(async (revision, cfg: NATConfig) => {
+          if (!writable.current) return { ok: false, error: UNAVAILABLE };
           setError(null);
           setNotice(null);
           setNoticeWarning(false);
           const saved = await api.setNAT(revision, cfg);
           if (!saved.ok) {
-            setError(saved.error || "Failed to update port forwards (check zones/ports).");
+            setError(revisionError(saved));
             return saved;
           }
-          acknowledgeNAT(revision, saved.data, saved.revision);
           setNotice(
             saved.warning
               ? `Port forwarding configuration staged — commit to apply. Warning: ${saved.warning}`
@@ -224,7 +227,7 @@ export default function NATPage() {
           );
           refresh();
           return saved;
-        }}
+        }, (view, saved) => ({ ...view, nat: saved }))(base, cfg)}
       />
       </fieldset> : null}
     </Shell>
@@ -246,16 +249,16 @@ function NATCard({
   zones: Zone[];
   nat: NATConfig;
   revision: string;
-  onSave: (cfg: NATConfig, revision: string) => Promise<ApiResult<NATConfig> | null>;
+  onSave: (revision: ConfigBase, cfg: NATConfig) => Promise<ApiResult<NATConfig> | null>;
 }) {
-  const { conflictProps, editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, dirty } = useConfigEditor(() => snat(nat), true, revision);
+  const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write, dirty } = useConfigEditor(() => snat(nat), true, revision);
   const enabled = !!cfg.enabled;
   const egressZone = cfg.egressZone ?? "";
   const sourceZones = cfg.sourceZones ?? [];
   const setEnabled = (value: SetStateAction<boolean>) => setCfg((c) => ({ ...c, enabled: typeof value === "function" ? value(!!c.enabled) : value }));
   const setEgressZone = (egressZone: string) => setCfg((c) => ({ ...c, egressZone }));
   const setSourceZones = (value: SetStateAction<string[]>) => setCfg((c) => ({ ...c, sourceZones: typeof value === "function" ? value(c.sourceZones ?? []) : value }));
-  useEffect(() => { adoptConfig(snat(nat), true, revision); }, [nat, adoptConfig, revision]);
+  useEffect(() => { adoptConfig({ data: snat(nat), revision: revision ?? "" }, true); }, [nat, adoptConfig, revision]);
 
   const zoneOptions = (zones ?? [])
     .map((z) => ({ value: z.name, label: zoneLabel(z) }))
@@ -372,13 +375,10 @@ function NATCard({
           <button
             disabled={!dirty}
             onClick={async () => {
-              const submitted = beginSave();
-              const saved = await onSave({ ...nat, ...cfg,
+              await write(base => onSave(base, { ...nat, ...cfg,
                 egressZone: egressZone.trim() || undefined,
                 sourceZones: sourceZones.map((z) => z.trim()).filter(Boolean),
-              }, submitted.baseRevision ?? "");
-              if (saved?.ok) acceptConfig(submitted, snat(saved.data), saved.revision);
-              else failSave(submitted, saved ?? undefined);
+              }), { replace: data => snat(data) });
             }}
             className={
               "rounded-xs px-3 py-1.5 text-sm font-medium transition-ui " +
@@ -409,19 +409,19 @@ function PortForwardsCard({
   zones: Zone[];
   nat: NATConfig;
   revision: string;
-  onSave: (cfg: NATConfig, revision: string) => Promise<ApiResult<NATConfig> | null>;
+  onSave: (revision: ConfigBase, cfg: NATConfig) => Promise<ApiResult<NATConfig> | null>;
   rules: FirewallRule[] | null;
-  onPublish: (forward: PortForward, allowRule: boolean, revision: string) => Promise<ApiResult<ForwardPublishResult> | null>;
-  onDelete: (id: string, revision: string) => Promise<Awaited<ReturnType<typeof api.deletePortForward>> | null>;
+  onPublish: (revision: ConfigBase, forward: PortForward, allowRule: boolean) => Promise<ApiResult<ForwardPublishResult> | null>;
+  onDelete: (revision: ConfigBase, id: string) => Promise<Awaited<ReturnType<typeof api.deletePortForward>> | null>;
 }) {
-  const { conflictProps, editor, cfg: items, setCfg: setItems, adoptConfig, beginSave, failSave, acceptConfig, acceptRow, dirty } = useConfigEditor<PortForward[]>(nat.portForwards ?? [], true, revision);
+  const { conflictProps, editor, cfg: items, setCfg: setItems, readConfig: adoptConfig, write, dirty } = useConfigEditor<PortForward[]>(nat.portForwards ?? [], true, revision);
   const form = useConfigForm({
     ingressChoice: "", newProto: "tcp" as "tcp" | "udp",
     newListen: "", newDestIp: "", newDestPort: "", newSources: "", newDesc: "",
     allowRule: true,
   }, nat, revision);
-  const { refreshForm } = form;
-  useEffect(() => { refreshForm(nat, true, revision); }, [nat, refreshForm, revision]);
+  const { readConfig: refreshForm } = form;
+  useEffect(() => { refreshForm({ data: nat, revision: revision ?? "" }, true); }, [nat, refreshForm, revision]);
   const [ingressChoice, setIngressChoice] = form.field("ingressChoice");
   const [newProto, setNewProto] = form.field("newProto");
   const [newListen, setNewListen] = form.field("newListen");
@@ -435,7 +435,7 @@ function PortForwardsCard({
   const confirm = useConfirm();
 
   useEffect(() => {
-    adoptConfig(nat.portForwards ?? [], true, revision);
+    adoptConfig({ data: nat.portForwards ?? [], revision: revision ?? "" }, true);
   }, [nat.portForwards, adoptConfig, revision]);
 
   const zoneOptions = (zones ?? [])
@@ -502,21 +502,15 @@ function PortForwardsCard({
         .filter(Boolean),
       description: newDesc.trim() || undefined,
     };
-    const submitted = form.editor;
     setBusy(true);
-    const result = await onPublish(pf, allowRule, submitted.baseRevision ?? "");
+    await form.write(base => onPublish(base, pf, allowRule), ["newListen", "newDestIp", "newDestPort", "newSources", "newDesc"]);
     setBusy(false);
-    if (result && !result.ok) form.fail(result);
-    if (result?.ok) form.acceptFields(submitted, ["newListen", "newDestIp", "newDestPort", "newSources", "newDesc"], result.revision);
   }
 
   async function save() {
     setError(null);
-    const submitted = beginSave();
     setBusy(true);
-    const saved = await onSave({ ...nat, portForwards: items }, submitted.baseRevision ?? "");
-    if (saved?.ok) acceptConfig(submitted, saved.data.portForwards ?? [], saved.revision);
-    else failSave(submitted, saved ?? undefined);
+    await write(base => onSave(base, { ...nat, portForwards: items }), { replace: data => data.portForwards ?? [] });
     setBusy(false);
   }
 
@@ -541,10 +535,7 @@ function PortForwardsCard({
       variant: "danger",
       onConfirm: async () => {
         setBusy(true);
-        const submitted = beginSave();
-        const result = await onDelete(pf.id, submitted.baseRevision ?? "");
-        if (result?.ok) acceptRow(submitted, rows => rows.filter(item => item.id !== pf.id), `${JSON.stringify(pf.id)}.`, result.revision);
-        else failSave(submitted, result ?? undefined);
+        await write(base => onDelete(base, pf.id), { patch: rows => rows.filter(item => item.id !== pf.id), prefixes: [`${JSON.stringify(pf.id)}.`] });
         setBusy(false);
       },
     });

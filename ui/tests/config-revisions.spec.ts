@@ -57,6 +57,7 @@ test("two views cannot silently overwrite; 412 keeps JSON and requires a second 
   await page.getByRole("button", { name: "Save staged config", exact: true }).click();
   await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toBeVisible();
   expect(writes[0].revision).toBe(token(1));
+  await expect(page.getByText("Failed to save candidate:", { exact: false })).toHaveCount(0);
   await mkdir(shots, { recursive: true });
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -65,6 +66,7 @@ test("two views cannot silently overwrite; 412 keeps JSON and requires a second 
   await page.getByRole("button", { name: "Keep my edits", exact: true }).click();
   await expect(page.getByText("Based on an older view — review, then save again.", { exact: true })).toBeVisible();
   expect(writes).toHaveLength(1);
+  await expect(page.getByText("Failed to save candidate:", { exact: false })).toHaveCount(0);
   await page.getByRole("button", { name: "Save staged config", exact: true }).click();
   await expect.poll(() => writes.length).toBe(2);
   expect(writes[1].revision).toBe(token(2));
@@ -101,7 +103,16 @@ test("status bar only opens review; commit dialog freezes displayed diff and rev
   await page.getByRole("dialog").getByRole("button", { name: "Commit", exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ path: "/config/commit", revision: token(1) });
-  await expect(page.getByText("Commit failed:", { exact: false })).toBeVisible();
+  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toBeVisible();
+  await expect(page.getByText("Commit failed:", { exact: false })).toHaveCount(0);
+  await page.getByRole("button", { name: "Reload", exact: true }).click();
+  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Commit failed:", { exact: false })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "System changes" })).toContainText("not-reviewed");
+  await page.getByRole("button", { name: "Commit", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Commit", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1].revision).toBe(token(2));
 });
 
 test("unavailable revision or diff never enables commit", async ({ page }) => {
@@ -179,7 +190,8 @@ test("commit-confirmed remains bound to the diff visible when its dialog opened"
   await page.getByRole("dialog").getByRole("button", { name: "Start timer", exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ path: "/config/commit_confirmed", revision: token(1) });
-  await expect(page.getByText("Commit-confirmed failed:", { exact: false })).toBeVisible();
+  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toBeVisible();
+  await expect(page.getByText("Commit-confirmed failed:", { exact: false })).toHaveCount(0);
 });
 
 test("428 keeps the draft and requires Reload rather than inventing a revision", async ({ page }) => {

@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 
-import type { useConfigRevision } from "../../lib/use-config-revision";
+import type { ConfigBase, ConfigWriteResult } from "../../lib/config-boundary";
+import type { ApiResult } from "../../lib/api";
+import { revisionError } from "../../lib/config-revision";
 
 import { ICSModeSelect } from "../ics/ics-mode-select";
 import { formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
@@ -11,7 +13,6 @@ import { InfoTip } from "../../components/InfoTip";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
   isAdmin,
-  setDataPlane,
   type DataPlaneConfig,
   type DPIExclusion,
   type HealthResponse,
@@ -27,20 +28,18 @@ import {
 export function DPIConfigSection({
   config: cfg,
   revision,
-  revisionState,
+  onSave, onSaveDraft,
   health,
   available,
-  onChange,
 }: {
   config: DataPlaneConfig;
   revision: string;
-  revisionState: Pick<ReturnType<typeof useConfigRevision>, "expectedRevision" | "handleRevision">;
+  onSave: (update: (config: DataPlaneConfig) => DataPlaneConfig) => Promise<ConfigWriteResult<DataPlaneConfig>>;
+  onSaveDraft: (base: ConfigBase, config: DataPlaneConfig) => Promise<ApiResult<DataPlaneConfig> | null>;
   available: boolean;
   /** Runtime health; undefined while unknown. */
   health: HealthResponse | undefined;
-  onChange: (c: DataPlaneConfig, revision: string) => void;
 }) {
-  const { expectedRevision: directRevision, handleRevision } = revisionState;
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saved" | "error">(
     "idle",
@@ -68,49 +67,47 @@ export function DPIConfigSection({
 
   // Failed requests leave the editor open; only acknowledged state replaces
   // the displayed server copy.
-  async function save(updated: DataPlaneConfig, expectedRevision?: string) {
+  async function save(update: (config: DataPlaneConfig) => DataPlaneConfig, expectedRevision?: ConfigBase) {
     if (!canEdit || !available || saving) return null;
     setSaving(true);
     setSaveError(null);
-    const submittedBase = expectedRevision ?? directRevision();
-    const response = await setDataPlane(submittedBase, updated);
-    const result = response.ok || expectedRevision === undefined ? handleRevision(submittedBase)(response) : response;
+    const result = expectedRevision === undefined ? await onSave(update) : await onSaveDraft(expectedRevision, update(cfg));
+    if (!result) { setSaving(false); return null; }
     setSaving(false);
-    setSaveState(result.ok ? "saved" : "error");
+    setSaveState(result.ok ? "saved" : revisionError(result) === null ? "idle" : "error");
     if (!result.ok) {
-      setSaveError(result.error);
+      setSaveError(revisionError(result));
       return result;
     }
-    if ("adopted" in result && result.adopted && result.revision) onChange(result.data, result.revision);
     return result;
   }
 
   function toggleDPI() {
-    save({ ...cfg, dpiEnabled: !dpiOn });
+    save(current => ({ ...current, dpiEnabled: !(current.dpiEnabled ?? false) }));
   }
 
   function setMode(mode: ICSModeSelection) {
-    save({ ...cfg, dpiMode: mode });
+    save(current => ({ ...current, dpiMode: mode }));
   }
 
-  function saveProtos(newProtos: Record<string, boolean>, expectedRevision: string) {
-    return save({ ...cfg, dpiProtocols: newProtos }, expectedRevision);
+  function saveProtos(newProtos: Record<string, boolean>, expectedRevision: ConfigBase) {
+    return save(current => ({ ...current, dpiProtocols: newProtos }), expectedRevision);
   }
 
   function saveICSProtos(
     newICSProtos: Record<string, boolean>,
     parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>,
-    expectedRevision: string,
+    expectedRevision: ConfigBase,
   ) {
-    return save({
-      ...cfg,
+    return save(current => ({
+      ...current,
       dpiIcsProtocols: newICSProtos,
       ...(Object.keys(parsing).length > 0 ? { dpiIcsParsing: parsing } : {}),
-    }, expectedRevision);
+    }), expectedRevision);
   }
 
-  function saveExclusions(newExcl: DPIExclusion[], expectedRevision: string) {
-    return save({ ...cfg, dpiExclusions: newExcl }, expectedRevision);
+  function saveExclusions(newExcl: DPIExclusion[], expectedRevision: ConfigBase) {
+    return save(current => ({ ...current, dpiExclusions: newExcl }), expectedRevision);
   }
 
   return (

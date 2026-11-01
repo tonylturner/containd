@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useToast } from "../components/ToastProvider";
+import { revisionError } from "../lib/config-revision";
 import type { ApiResult } from "../lib/api";
 import { withRetryTime } from "../lib/utils";
 
@@ -49,6 +50,7 @@ export function useSaveAction<K extends string = "save">() {
       }
       settle.current = setTimeout(() => setState("idle"), SETTLE_MS);
       if (!result.ok) {
+        if (revisionError(result) === null) { setState("idle"); return result; }
         const error = withRetryTime(result.error || messages.failure, result.retryAfter);
         setState("error");
         toast(error, "error");

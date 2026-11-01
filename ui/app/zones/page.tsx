@@ -7,7 +7,7 @@ import { upsertRow } from "../../lib/config-editor";
 import type { ConfigFields } from "../../lib/use-config-editor";
 
 import { useConfigForm } from "../../lib/use-config-form";
-import { ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
+import { revisionError, ConfigEditNotice, useConfigLoad, useConfigEditor } from "../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
@@ -30,10 +30,10 @@ export default function ZonesPage() {
   const { canSave, canSaveNow, loadError: configLoadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const rowsDraft = useConfigEditor<Zone[]>([], false);
-  const { cfg: zones, adoptConfig: adoptRows } = rowsDraft;
+  const { cfg: zones, readConfig: adoptRows } = rowsDraft;
   const [conduits, setConduits] = useState<ConduitMap>({});
   const form = useConfigForm({ name: "", alias: "", description: "", slTarget: 0 });
-  const { refreshForm } = form;
+  const { readConfig: refreshForm } = form;
   const [name, setName] = form.field("name");
   const [alias, setAlias] = form.field("alias");
   const [description, setDescription] = form.field("description");
@@ -47,9 +47,9 @@ export default function ZonesPage() {
     const [listSnapshot, conds] = await Promise.all([api.listZones(), api.getSecurityConduits()]);
     const list = (listSnapshot?.data ?? null);
     if (!checkLoaded(list)) return;
-    adoptRows(list, keepEdits, listSnapshot?.revision);
+    adoptRows({ data: list, revision: listSnapshot?.revision ?? "" }, keepEdits);
     setConduits((conds as ConduitMap) ?? {});
-    refreshForm(list, keepEdits, listSnapshot?.revision);
+    refreshForm({ data: list, revision: listSnapshot?.revision ?? "" }, keepEdits);
   }, [checkLoaded, refreshForm, adoptRows]));
 
   useConfigRefresh(refresh);
@@ -63,23 +63,19 @@ export default function ZonesPage() {
     setNameError(nameErr);
     if (nameErr) return;
     setSaving(true);
-    const submitted = form.editor;
-    const result = await api.createZone(form.editor.baseRevision ?? "", {
+    const result = await form.write(base => api.createZone(base, {
       name,
       alias: alias.trim() || undefined,
       description: description.trim() || undefined,
       slTarget: slTarget || undefined,
-    });
+    }), ["name", "alias", "description", "slTarget"], { targets: [rowsDraft.collection((rows, data: Zone) => upsertRow(rows, data, row => row.name))] });
     setSaving(false);
     if (!result.ok) {
-      form.fail(result);
-      setError(result.error);
+      setError(revisionError(result));
       return;
     }
-    rowsDraft.acceptCollection(submitted.baseRevision, (rows) => upsertRow(rows, result.data, (row) => row.name), [], result.revision);
     toast("Zone staged — commit to apply.", "success");
     refresh();
-    form.acceptFields(submitted, ["name", "alias", "description", "slTarget"], result.revision);
   }
 
   async function onDelete(zoneName: string) {
@@ -92,14 +88,12 @@ export default function ZonesPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setError(null);
-        const submittedBase = rowsDraft.editor.baseRevision;
-        const result = await api.deleteZone(submittedBase ?? "", zoneName);
+
+        const result = await rowsDraft.write(base => api.deleteZone(base, zoneName), { patch: rows => rows.filter(row => row.name !== zoneName), prefixes: [`${JSON.stringify(zoneName)}.`] });
         if (!result.ok) {
-          rowsDraft.reportFailure(result);
-          setError(result.error);
+          setError(revisionError(result));
           return;
         }
-        rowsDraft.acceptCollection(submittedBase, (rows) => rows.filter((row) => row.name !== zoneName), [`${JSON.stringify(zoneName)}.`], result.revision);
         toast("Zone staged — commit to apply.", "success");
         refresh();
       },
@@ -109,14 +103,11 @@ export default function ZonesPage() {
   async function onUpdate(zoneName: string, patch: Partial<Zone>) {
     if (!canSaveNow()) return;
     setError(null);
-    const submitted = rowsDraft.beginSave();
-    const result = await api.updateZone(submitted.baseRevision ?? "", zoneName, patch);
+    const result = await rowsDraft.write(base => api.updateZone(base, zoneName, patch), { patch: (rows, data) => upsertRow(rows, data, row => row.name), prefixes: [`${JSON.stringify(zoneName)}.`] });
     if (!result.ok) {
-      rowsDraft.failSave(submitted, result);
-      setError(result.error);
+      setError(revisionError(result));
       return;
     }
-    rowsDraft.acceptRow(submitted, (rows) => upsertRow(rows, result.data, (row) => row.name), `${JSON.stringify(zoneName)}.`, result.revision);
     toast("Zone staged — commit to apply.", "success");
     refresh();
   }

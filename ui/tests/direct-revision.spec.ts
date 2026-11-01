@@ -1,6 +1,38 @@
 import { expect, test } from "@playwright/test";
 const token = (n: number) => `0123456789abcdef.${n}`;
 
+test("quick-start conflict offers one review notice without a generic red error", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("containd.auth.role", "admin"));
+  await page.route("**/api/v1/**", async route => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname.replace("/api/v1", "");
+    if (request.method() === "POST" && path === "/routing") {
+      request.postDataJSON();
+      return route.fulfill({ status: 412, json: {
+        error: "quick-start conflict detail", code: "config_revision_mismatch", currentRevision: token(2),
+      } });
+    }
+    const json = path.startsWith("/auth/") ? { id: "admin", role: "admin" }
+      : path === "/interfaces" ? [{ name: "wan", device: "eth1", zone: "wan" }]
+      : path === "/interfaces/state" ? [{ name: "eth1", addrs: ["192.0.2.2/24"] }]
+      : path === "/routing" ? { gateways: [], routes: [], rules: [] }
+      : path === "/zones" || path === "/firewall/rules" ? []
+      : path === "/dataplane" ? { captureInterfaces: [], dpiMock: false }
+      : path === "/firewall/nat" ? { enabled: false }
+      : path === "/config/diff" ? { pendingConfirm: null, changed: false, changedSections: [], running: {}, candidate: {} }
+      : {};
+    return route.fulfill({ json, headers: { "X-Containd-Revision": token(1) } });
+  });
+  await page.goto("/firewall/");
+  await page.getByRole("button", { name: "Quick start (LAN→WAN)", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toBeVisible();
+  await expect(page.getByText("quick-start conflict detail", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Keep my edits", exact: true }).click();
+  await expect(page.getByText("Based on an older view — review, then save again.", { exact: true })).toBeVisible();
+  await expect(page.getByText("quick-start conflict detail", { exact: true })).toHaveCount(0);
+});
+
 test("two direct DPI saves without a competing writer use each acknowledgement", async ({ page }) => {
   let counter = 1;
   let dp: Record<string, unknown> = { dpiEnabled: true, dpiMode: "monitor", dpiIcsProtocols: { modbus: true } };
