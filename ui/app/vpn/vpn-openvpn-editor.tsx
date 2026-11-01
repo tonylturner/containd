@@ -34,6 +34,7 @@ type Props = {
   interfaceOptions: InterfaceOption[];
   openvpnIssues: FieldIssue[];
   svcStatus: VPNStatus | null;
+  faulted: boolean;
   uploadState: UploadState;
   ovpnClients: OpenVPNCredential[];
   revocationsApplied: boolean;
@@ -59,6 +60,7 @@ export function OpenVPNEditorCard({
   interfaceOptions,
   openvpnIssues,
   svcStatus,
+  faulted,
   uploadState,
   ovpnClients,
   revocationsApplied,
@@ -93,7 +95,9 @@ export function OpenVPNEditorCard({
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Badge tone={cfg.openvpn.enabled ? "warn" : "off"}>{cfg.openvpn.enabled ? "enabled" : "disabled"}</Badge>
+          <Badge tone={faulted || cfg.openvpn.enabled ? "warn" : "off"}>
+            {faulted ? "faulted" : cfg.openvpn.enabled ? "enabled" : "disabled"}
+          </Badge>
           <Badge tone={svcStatus?.openvpn_installed ? "info" : "off"}>
             {svcStatus?.openvpn_installed ? "installed" : "not installed"}
           </Badge>

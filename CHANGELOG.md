@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Service fault banners on the services overview, service settings and VPN page
+  distinguish quarantined configuration from runtime retries and explain AV
+  fail-policy enforcement.
 - Evidence health in the UI shell, Audit persistence view and `show audit --status`,
   with per-destination/source syslog backlog, retry, loss and continuity counters.
 - Authenticated `GET /api/v1/evidence/status` and sanitized `evidence.state` in health.

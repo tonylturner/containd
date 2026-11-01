@@ -3,20 +3,20 @@
 import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
 
-import type { VPNStatus } from "../../lib/api";
-import type { NormalizedVPNConfig } from "./vpn-shared";
+import type { ServicesStatus } from "../../lib/api";
 
 export function VPNRuntimeStatusCard({
-  cfg,
   loading,
-  svcStatus,
+  servicesStatus,
 }: {
-  cfg: NormalizedVPNConfig;
   loading: boolean;
-  svcStatus: VPNStatus | null;
+  servicesStatus: ServicesStatus | null;
 }) {
+  const svcStatus = servicesStatus?.vpn;
+  const wireguardFaulted = servicesStatus?.wireguard?.state === "faulted";
+  const openvpnFaulted = servicesStatus?.openvpn?.state === "faulted";
   return (
-    <div className="mb-4 rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
+    <section aria-label="VPN runtime status" className="mb-4 rounded-xs border bg-(--surface) p-5 shadow-card backdrop-blur-sm">
       <h2 className="text-sm font-semibold text-(--text)">Runtime status</h2>
       {loading ? (
         <div className="mt-3 space-y-2">
@@ -26,12 +26,16 @@ export function VPNRuntimeStatusCard({
       ) : (
         <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
           <div>
-            WireGuard enabled:{" "}
-            <span className="text-(--text)">{cfg.wireguard.enabled ? "yes" : "no"}</span>
+            WireGuard:{" "}
+            <span className={wireguardFaulted ? "text-amber" : "text-(--text)"}>
+              {wireguardFaulted ? "faulted" : !svcStatus ? "unavailable" : svcStatus.wireguard_enabled ? "enabled" : "disabled"}
+            </span>
           </div>
           <div>
-            OpenVPN running:{" "}
-            <span className="text-(--text)">{svcStatus?.openvpn_running ? "yes" : "no"}</span>
+            OpenVPN:{" "}
+            <span className={openvpnFaulted ? "text-amber" : "text-(--text)"}>
+              {openvpnFaulted ? "faulted" : !svcStatus ? "unavailable" : svcStatus.openvpn_running ? "running" : "stopped"}
+            </span>
             {svcStatus?.openvpn_pid ? <span className="text-(--text-muted)"> (pid {svcStatus.openvpn_pid})</span> : null}
           </div>
           {svcStatus?.openvpn_mode === "server" ? (
@@ -59,7 +63,7 @@ export function VPNRuntimeStatusCard({
               {svcStatus.openvpn_last_error}
             </div>
           ) : null}
-          {svcStatus?.sparkline.length ? (
+          {svcStatus?.sparkline?.length ? (
             <div className="md:col-span-2">
               <Sparkline
                 values={svcStatus.sparkline}
@@ -71,6 +75,6 @@ export function VPNRuntimeStatusCard({
           ) : null}
         </div>
       )}
-    </div>
+    </section>
   );
 }

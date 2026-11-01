@@ -69,7 +69,7 @@ async function openServices(page: Page, av: Record<string, unknown>, sparkline: 
     sparkline, count: sparkline.reduce((a, b) => a + b, 0), rate_per_min: 0,
     errors_sparkline: [], errors_count: 0, errors_rate_per_min: 0,
   };
-  await mockAPI(page, { "/api/v1/services/status": { json: { av: { available: true, ...meter, ...av } } } });
+  await mockAPI(page, { "/api/v1/services/status": { json: { faults: [], av: { available: true, ...meter, ...av } } } });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/status");
   await page.goto("/system/services/");
   await loaded;

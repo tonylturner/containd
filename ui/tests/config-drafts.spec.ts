@@ -26,7 +26,7 @@ async function mockAPI(page: Page) {
     "/services/proxy/forward": { enabled: false, upstream: "", listenZones: [], allowedDomains: [] },
     "/services/proxy/reverse": { enabled: false, sites: [] },
     "/services/vpn": { wireguard: { enabled: false, interface: "wg0", peers: [] }, openvpn: { enabled: false } },
-    "/services/status": { av: { available: false, error: "engine unavailable" } },
+    "/services/status": { faults: [], av: { available: false, error: "engine unavailable" } },
     "/assets": [],
     "/config/diff": { changed: false, changedSections: [] },
   };

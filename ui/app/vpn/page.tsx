@@ -18,11 +18,12 @@ import {
   type Interface,
   type InterfaceState,
   type WireGuardStatus,
-  type VPNStatus,
+  type ServicesStatus,
 } from "../../lib/api";
 import { authHeaders, fetchWithSession, handleUnauthorized, staticAssetURL } from "../../lib/api-core";
 import { parseErrorBody } from "../../lib/api-request";
 import type { OpenVPNCredential } from "../../lib/api-vpn";
+import { ServiceFaultBanner } from "../../components/ServiceFaultBanner";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -55,7 +56,9 @@ export default function VPNPage() {
   const [runtime, setRuntime] = useState<InterfaceState | null>(null);
   const [interfaceStateStatus, setInterfaceStateStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [wgStatus, setWgStatus] = useState<WireGuardStatus | null>(null);
-  const [svcStatus, setSvcStatus] = useState<VPNStatus | null>(null);
+  const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
+  const svcStatus = servicesStatus?.vpn ?? null;
+  const wireguardFaulted = servicesStatus?.wireguard?.state === "faulted";
   const [zones, setZones] = useState<Zone[]>([]);
   const [interfaces, setInterfaces] = useState<Interface[]>([]);
   const [ovpnClients, setOvpnClients] = useState<OpenVPNCredential[]>([]);
@@ -146,9 +149,9 @@ export default function VPNPage() {
           setWgStatus(null);
         }
         try {
-          setSvcStatus((await api.getServicesStatus())?.vpn ?? null);
+          setServicesStatus(await api.getServicesStatus());
         } catch {
-          setSvcStatus(null);
+          setServicesStatus(null);
         }
 
         // OpenVPN server: list clients (admin-only).
@@ -407,6 +410,7 @@ export default function VPNPage() {
         </div>
       }
     >
+      <ServiceFaultBanner status={servicesStatus} loading={loading} only={["wireguard", "openvpn"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={editor.superseded || clientForm.editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
@@ -418,7 +422,7 @@ export default function VPNPage() {
       <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <VPNRuntimeStatusCard cfg={cfg} loading={loading} svcStatus={svcStatus} />
+      <VPNRuntimeStatusCard loading={loading} servicesStatus={servicesStatus} />
       {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
@@ -445,7 +449,9 @@ export default function VPNPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <Badge tone={cfg.wireguard.enabled ? "ok" : "off"}>{cfg.wireguard.enabled ? "enabled" : "disabled"}</Badge>
+              <Badge tone={wireguardFaulted ? "warn" : cfg.wireguard.enabled ? "ok" : "off"}>
+                {wireguardFaulted ? "faulted" : cfg.wireguard.enabled ? "enabled" : "disabled"}
+              </Badge>
               <Badge
                 tone={interfaceStateStatus === "unavailable" ? "warn" : runtime?.up ? "ok" : runtime ? "warn" : "off"}
                 title={interfaceStateStatus !== "ready" ? "Kernel interface state unknown" : runtime ? "Kernel interface state" : "Kernel interface not present"}
@@ -472,7 +478,7 @@ export default function VPNPage() {
 
             {cfg.wireguard.enabled ? <IssuesBanner title="WireGuard setup checklist" issues={wireguardIssues} /> : null}
             <div className="rounded-xs border bg-black/20 px-3 py-2 text-xs text-(--text)">
-              When enabled, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the configured listen zone or interfaces
+              When enabled and not quarantined, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the configured listen zone or interfaces
               (default <span className="font-mono">wan</span>) via nftables input so clients can connect.
             </div>
 
@@ -630,6 +636,7 @@ export default function VPNPage() {
           interfaceOptions={interfaceOptions}
           openvpnIssues={openvpnIssues}
           svcStatus={svcStatus}
+          faulted={servicesStatus?.openvpn?.state === "faulted"}
           uploadState={uploadState}
           ovpnClients={ovpnClients}
           revocationsApplied={revocationsApplied}
