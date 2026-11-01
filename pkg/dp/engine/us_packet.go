@@ -4,6 +4,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/tonylturner/containd/pkg/dp/capture"
@@ -38,12 +39,11 @@ func invalidPacketDecision(pkt capture.Packet) capture.Decision {
 }
 
 // handleFlowPacket is the wire-oriented path for every protocol except
-// IEC104 sessions. A denied ICS message drops the current packet
-// and resets only that TCP session once the drop verdict is
-// submitted; a cached denial drops later packets of the same flow. An
-// inline flow in the scope of an enforce ICS rule fails closed on a stream
-// error, a stream picked up mid-connection, or a decoder panic the same
-// way (failClosedRule).
+// IEC104 sessions. Explicit ICS denials and scoped stream failures drop
+// directly; decoded default/plain-rule denials repeat with a non-admitting
+// mark for ordered kernel admission. Both close a scoped TCP stream and
+// schedule best-effort peer resets after verdict completion. Failed streams
+// retain their respective denial until a new handshake or scope removal.
 func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correlationAdmitted, decodingStopped, observeOnly bool) (d capture.Decision) {
 	e.recordPacketStats(pkt, state)
 	e.iec.answerPickupChallenge(pkt)
@@ -121,6 +121,10 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		e.dpiMgr.FailStream(state, &parsed, dpi.StreamDecoderPanic)
 		return e.failClosed(pkt, state, &parsed, scope, failClosedPanic, "", panicErr)
 	}
+	var streamErr *dpi.StreamError
+	if scope != nil && errors.As(res.Err, &streamErr) && streamErr.Kind == dpi.StreamNonAdmit {
+		return nonAdmitDecision(pkt)
+	}
 	// Events come before the error: a stream error's malformed event is
 	// already among them. Outside an enforce scope the packet itself passes.
 	e.RecordDPIEvents(state, &parsed, res.Events)
@@ -148,14 +152,34 @@ func (e *Engine) handleFlowPacket(pkt capture.Packet, state *flow.State, correla
 		return denied
 	}
 	if enforced {
-		return capture.Decision{Action: capture.Repeat, Mark: markabi.Continue(pkt.Mark, true), Reason: reasonPolicyNonAdmit}
+		d := nonAdmitDecision(pkt)
+		if scope != nil {
+			// DPI has consumed these bytes, not delivered them. Preserve the
+			// denial in stream state so a TCP retry cannot become an admitting
+			// duplicate, including after verdict-cache expiry. Kernel admission
+			// still owns DROP versus RESET on every repeated traversal.
+			e.dpiMgr.FailStream(state, &parsed, dpi.StreamNonAdmit)
+			if pkt.Token.Inline() && pkt.Proto == 6 {
+				if guard := e.rememberDeniedTCP(state.Key, state.ServiceKey(), true); guard != nil {
+					e.resetDeniedTCP(pkt, state, evalCtx.ICS.Protocol, reasonPolicyNonAdmit, guard)
+					// Repeat normally has no completion callback. Request one
+					// so reset I/O follows submission of this continuation.
+					d.Notify = true
+				}
+			}
+		}
+		return d
 	}
 	return acceptDecision
 }
 
-// afterDrop runs job once the drop verdict of tok is submitted. A packet that
-// is not inline has no verdict, so the job is queued at once.
-func (e *Engine) afterDrop(tok capture.Token, job func()) {
+func nonAdmitDecision(pkt capture.Packet) capture.Decision {
+	return capture.Decision{Action: capture.Repeat, Mark: markabi.Continue(pkt.Mark, true), Reason: reasonPolicyNonAdmit}
+}
+
+// afterPacketVerdict runs job once tok's verdict completes. Non-Drop callers
+// must request capture notification. A non-inline job is queued at once.
+func (e *Engine) afterPacketVerdict(tok capture.Token, job func()) {
 	if tok.Inline() {
 		if e.hooks.after.add(tok, job) {
 			return
