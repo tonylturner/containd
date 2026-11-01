@@ -99,6 +99,10 @@ const (
 	// policy denied (Manager.FailStream). The denied bytes were consumed,
 	// so a retransmission of them would otherwise pass as a duplicate.
 	StreamDenied
+	// StreamNonAdmit has consumed a decoded message that did not admit
+	// its packet. Retries must retain the non-admitting continuation,
+	// rather than passing as already-inspected duplicate bytes.
+	StreamNonAdmit
 )
 
 func (k StreamErrKind) String() string {
@@ -119,6 +123,8 @@ func (k StreamErrKind) String() string {
 		return "midstream"
 	case StreamDenied:
 		return "denied"
+	case StreamNonAdmit:
+		return "non_admit"
 	default:
 		return "unknown(" + strconv.Itoa(int(k)) + ")"
 	}
