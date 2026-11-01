@@ -34,7 +34,7 @@ test("Interfaces explains immutable access and exposes guard faults", async ({ p
   await expect(note).toContainText("rollback refused");
   await expect(note.getByRole("status")).toContainText("Configuration apply paused");
   await expect(note.getByRole("status")).toContainText("Commit a safe configuration");
-  await expect(note.getByRole("status")).toContainText("has not received");
+  await expect(note.getByRole("status")).toContainText("has not been activated after startup");
   await expect(note.getByRole("status")).toContainText("recovery pending: ruleset not applied");
   await expect(note).not.toContainText("recovery: new transit dropped");
   recovery = "recovery: new transit dropped";

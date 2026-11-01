@@ -40,6 +40,7 @@ type LayerId = "host" | "runtime" | "container" | "process";
 interface SecurityFlag {
   level: "ok" | "warn" | "crit";
   title: string;
+  summary: string;
   desc: string;
 }
 
@@ -79,45 +80,45 @@ function computeFlags(d: PhysicalData): SecurityFlag[] {
   const insp = d.inspection;
   const stats = d.stats;
 
-  if (!insp) return [{ level: "warn", title: "Inspection data unavailable", desc: "Cannot compute security posture without /api/v1/system/inspection" }];
+  if (!insp) return [{ level: "warn", title: "Inspection data unavailable", summary: "Deployment security information unavailable", desc: "Cannot compute security posture without /api/v1/system/inspection" }];
 
   // CRIT flags
   if (insp.container.privileged) {
-    flags.push({ level: "crit", title: "Running --privileged", desc: "Full host capability access. Required for packet filtering but increases blast radius if compromised." });
+    flags.push({ level: "crit", title: "Running --privileged", summary: "Container has broad host access", desc: "Full host capability access. Required for packet filtering but increases blast radius if compromised." });
   }
   if (insp.security.dockerSocketMounted) {
-    flags.push({ level: "crit", title: "Docker socket mounted", desc: "/var/run/docker.sock is accessible. Container can control host Docker daemon." });
+    flags.push({ level: "crit", title: "Docker socket mounted", summary: "Container can control the host runtime", desc: "/var/run/docker.sock is accessible. Container can control host Docker daemon." });
   }
   const authEnv = insp.container.envVars.find((e) => e.key === "CONTAIND_AUTH");
   if (authEnv?.value === "relaxed") {
-    flags.push({ level: "crit", title: "CONTAIND_AUTH=relaxed", desc: "Authentication is in relaxed mode. All API calls bypass credential checks." });
+    flags.push({ level: "crit", title: "CONTAIND_AUTH=relaxed", summary: "Relaxed authentication setting detected", desc: "Authentication is in relaxed mode. All API calls bypass credential checks." });
   }
   if (insp.container.seccompProfile === "unconfined") {
-    flags.push({ level: "crit", title: "Seccomp unconfined", desc: "No syscall filtering. Container has unrestricted kernel surface." });
+    flags.push({ level: "crit", title: "Seccomp unconfined", summary: "System-call restrictions are off", desc: "No syscall filtering. Container has unrestricted kernel surface." });
   }
 
   // WARN flags
   if (stats && stats.container.memLimitBytes === 0) {
-    flags.push({ level: "warn", title: "No memory cgroup limit", desc: "Container can consume all host RAM. Set --memory in production." });
+    flags.push({ level: "warn", title: "No memory cgroup limit", summary: "No memory limit", desc: "Container can consume all host RAM. Set --memory in production." });
   }
   if (insp.security.cgroupCPUQuota === "max" || insp.security.cgroupCPUQuota === "unlimited") {
-    flags.push({ level: "warn", title: "CPU quota unlimited", desc: "No CPU cgroup limit set. Container can saturate all cores." });
+    flags.push({ level: "warn", title: "CPU quota unlimited", summary: "No CPU limit", desc: "No CPU cgroup limit set. Container can saturate all cores." });
   }
   if (insp.container.networkMode === "host") {
-    flags.push({ level: "warn", title: "Host network namespace", desc: "--net=host expected for a firewall, but container sees all host interfaces." });
+    flags.push({ level: "warn", title: "Host network namespace", summary: "Host network is shared", desc: "--net=host expected for a firewall, but container sees all host interfaces." });
   }
   const configMount = insp.container.mounts.find((m) => m.containerPath.includes("/config"));
   if (configMount?.mode?.toLowerCase().includes("rw")) {
-    flags.push({ level: "warn", title: "Config volume is writable", desc: `${configMount.containerPath} mounted RW. Consider RO + config reload via signal.` });
+    flags.push({ level: "warn", title: "Config volume is writable", summary: "Configuration storage is writable", desc: `${configMount.containerPath} mounted RW. Consider RO + config reload via signal.` });
   }
   if (insp.container.restartCount > 0) {
-    flags.push({ level: "warn", title: `${insp.container.restartCount} container restart(s)`, desc: "Container has restarted since host boot. Check logs for crash cause." });
+    flags.push({ level: "warn", title: `${insp.container.restartCount} container restart(s)`, summary: "Container restarts recorded", desc: "Container has restarted since host boot. Check logs for crash cause." });
   }
   if (!insp.container.readonlyRootfs) {
-    flags.push({ level: "warn", title: "Root filesystem not read-only", desc: "Container rootfs is writable. Set --read-only for defense in depth." });
+    flags.push({ level: "warn", title: "Root filesystem not read-only", summary: "Application filesystem is writable", desc: "Container rootfs is writable. Set --read-only for defense in depth." });
   }
   if (!insp.security.cgroupPIDsLimit || insp.security.cgroupPIDsLimit === "max") {
-    flags.push({ level: "warn", title: "PIDs limit not set", desc: "No fork bomb protection. Set pids_limit in docker-compose or --pids-limit on docker run." });
+    flags.push({ level: "warn", title: "PIDs limit not set", summary: "No process-count limit", desc: "No fork bomb protection. Set pids_limit in docker-compose or --pids-limit on docker run." });
   }
   // Check for RW mounts that could be sensitive
   const rwMounts = insp.container.mounts.filter((m) => {
@@ -129,29 +130,29 @@ function computeFlags(d: PhysicalData): SecurityFlag[] {
   });
   if (rwMounts.length > 0) {
     const paths = rwMounts.map((m) => m.containerPath).join(", ");
-    flags.push({ level: "warn", title: `${rwMounts.length} writable volume mount(s)`, desc: `Writable mounts: ${paths}. Mount read-only where possible (:ro).` });
+    flags.push({ level: "warn", title: `${rwMounts.length} writable volume mount(s)`, summary: "Writable storage mounts detected", desc: `Writable mounts: ${paths}. Mount read-only where possible (:ro).` });
   }
   const hasLabEnv = insp.container.envVars.some((e) => /lab|debug/i.test(e.value));
   if (hasLabEnv) {
-    flags.push({ level: "warn", title: "Lab/debug env detected", desc: "Environment variables contain 'lab' or 'debug'. Not suitable for production." });
+    flags.push({ level: "warn", title: "Lab/debug env detected", summary: "Lab or debugging settings detected", desc: "Environment variables contain 'lab' or 'debug'. Not suitable for production." });
   }
   if (!insp.container.noNewPrivileges) {
-    flags.push({ level: "warn", title: "no-new-privileges not set", desc: "Process can gain privileges via setuid/setgid binaries. Set security_opt: no-new-privileges in production." });
+    flags.push({ level: "warn", title: "no-new-privileges not set", summary: "Additional process privileges are not restricted", desc: "Process can gain privileges via setuid/setgid binaries. Set security_opt: no-new-privileges in production." });
   }
 
   // OK flags
   if (!insp.security.dockerSocketMounted) {
-    flags.push({ level: "ok", title: "Docker socket not mounted", desc: "No /var/run/docker.sock bind mount. Container cannot escape to host Docker daemon." });
+    flags.push({ level: "ok", title: "Docker socket not mounted", summary: "Host runtime control socket is not mounted", desc: "No /var/run/docker.sock bind mount. Container cannot escape to host Docker daemon." });
   }
   const certsMount = insp.container.mounts.find((m) => m.containerPath.includes("/certs"));
   if (certsMount?.mode?.toLowerCase().includes("ro")) {
-    flags.push({ level: "ok", title: "Certs volume read-only", desc: `${certsMount.containerPath} mounted RO. Certificate files are protected.` });
+    flags.push({ level: "ok", title: "Certs volume read-only", summary: "Certificate storage is read-only", desc: `${certsMount.containerPath} mounted RO. Certificate files are protected.` });
   }
   if (insp.security.cgroupPIDsLimit && insp.security.cgroupPIDsLimit !== "max") {
-    flags.push({ level: "ok", title: `PIDs limit set (${insp.security.cgroupPIDsLimit})`, desc: "Fork bomb protection active via cgroup PIDs controller." });
+    flags.push({ level: "ok", title: `PIDs limit set (${insp.security.cgroupPIDsLimit})`, summary: "Process-count limit configured", desc: "Fork bomb protection active via cgroup PIDs controller." });
   }
   if (insp.container.noNewPrivileges) {
-    flags.push({ level: "ok", title: "no-new-privileges enabled", desc: "Process cannot gain additional privileges via setuid/setgid." });
+    flags.push({ level: "ok", title: "no-new-privileges enabled", summary: "Additional process privileges are restricted", desc: "Process cannot gain additional privileges via setuid/setgid." });
   }
 
   return flags;
@@ -210,7 +211,7 @@ export default function PhysicalView() {
       if (!running) throw new Error("Running configuration unavailable");
       if (ifaceState === null || flows === null) {
         setData(null);
-        setError("Physical topology unavailable — interface runtime state or flows could not be read from the engine.");
+        setError("Physical topology unavailable — live interface information or traffic observations could not be read.");
         return;
       }
       setError(null);
@@ -407,7 +408,9 @@ export default function PhysicalView() {
                 {memLimit === 0 && <span className={`${s.badge} ${s.badgeWarn}`}>NO MEM LIMIT</span>}
               </div>
             </div>
-            <div className={s.layerBody}>
+            <details>
+              <summary className="cursor-pointer px-3 py-2 text-xs text-(--text-muted)">Container runtime details</summary>
+              <div className={s.layerBody}>
               <div className={s.layerSection}>
                 <div className={s.layerSectionLabel}>Engine</div>
                 <KVc k="Docker version" v={dockerVer} color="#a855f7" />
@@ -445,6 +448,7 @@ export default function PhysicalView() {
                 </div>
               </div>
             </div>
+            </details>
           </div>
         </div>
 
@@ -477,7 +481,9 @@ export default function PhysicalView() {
                 {hasLabEnv(envVars) && <span className={`${s.badge} ${s.badgeWarn}`}>LAB MODE</span>}
               </div>
             </div>
-            <div className={s.layerBody}>
+            <details>
+              <summary className="cursor-pointer px-3 py-2 text-xs text-(--text-muted)">Container deployment details</summary>
+              <div className={s.layerBody}>
               <div className={s.layerSection}>
                 <div className={s.layerSectionLabel}>Identity</div>
                 <KVc k="Container ID" v={containerId} color="#f97316" />
@@ -542,6 +548,7 @@ export default function PhysicalView() {
                 </div>
               )}
             </div>
+            </details>
           </div>
         </div>
 
@@ -572,7 +579,9 @@ export default function PhysicalView() {
                 <span className={`${s.badge} ${s.badgePurple}`}>{sessionCount} SESSIONS</span>
               </div>
             </div>
-            <div className={s.layerBody}>
+            <details>
+              <summary className="cursor-pointer px-3 py-2 text-xs text-(--text-muted)">Application runtime details</summary>
+              <div className={s.layerBody}>
               <div className={s.layerSection}>
                 <div className={s.layerSectionLabel}>Runtime</div>
                 <KVc k="PID" v="1" color="#f59e0b" />
@@ -621,6 +630,7 @@ export default function PhysicalView() {
                 </div>
               )}
             </div>
+            </details>
           </div>
         </div>
 
@@ -650,8 +660,11 @@ export default function PhysicalView() {
                   <div key={i} className={`${s.flag} ${f.level === "crit" ? s.flagCrit : f.level === "warn" ? s.flagWarn : s.flagOk}`}>
                     <div className={s.flagDot} style={{ background: f.level === "crit" ? "#ef4444" : f.level === "warn" ? "#f59e0b" : "#22c55e" }} />
                     <div className={s.flagBody}>
-                      <div className={s.flagTitle}>{f.title}</div>
-                      <div className={s.flagDesc}>{f.desc}</div>
+                      <div className={s.flagTitle}>{f.summary}</div>
+                      <details className={s.flagDesc}>
+                        <summary className="cursor-pointer">Deployment security details</summary>
+                        <p>{f.title}</p><p>{f.desc}</p>
+                      </details>
                     </div>
                   </div>
                 ))}

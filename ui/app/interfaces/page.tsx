@@ -71,8 +71,8 @@ export default function InterfacesPage() {
     },
     {
       id: "interfaces:binding",
-      title: "Bind interfaces to OS devices",
-      body: "Use Auto-assign or pick a Device so the engine can apply addresses and rules.",
+      title: "Connect logical interfaces to network devices",
+      body: "Use Auto-assign or choose a Device to apply addresses and firewall rules to the right network port.",
       when: () => unboundConfigured.missingRuntime.length > 0 && unboundConfigured.unassignedOS.length > 0,
     },
     {
@@ -125,7 +125,7 @@ export default function InterfacesPage() {
     confirm.open({
       title: "Reconcile interfaces",
       message:
-        "Live reconcile reapplies running config and will REPLACE OS interface addresses for interfaces with configured static addresses. Continue?",
+        "Reapply active interface settings now? This REPLACES live addresses on interfaces with configured static addresses.",
       confirmLabel: "Reconcile",
       variant: "warning",
       onConfirm: async () => {
@@ -247,7 +247,7 @@ export default function InterfacesPage() {
                 onClick={onAutoAssign}
                 disabled={assigning || !canSave}
                 className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
-                title="Auto-assign default logical interfaces (wan/dmz/lan1-6) to detected OS interfaces"
+                title="Auto-assign default logical interfaces (wan/dmz/lan1-6) to detected network devices"
               >
                 {assigning ? "Assigning..." : "Auto-assign"}
               </button>
@@ -279,10 +279,16 @@ export default function InterfacesPage() {
             even when all interface access is disabled. Login is still required. Keep this device physical and unaddressed in config.
           </p>
           {(!reservation.guard?.active || reservation.guard?.error) && (
-            <p className="mt-1">Guard fault: {reservation.guard?.error || "engine guard unavailable"}</p>
+            <div className="mt-1">
+              Management safeguard status unavailable.
+              {reservation.guard?.error && <details><summary className="cursor-pointer">Safeguard details</summary>{reservation.guard.error}</details>}
+            </div>
           )}
           {!!reservation.guard?.faults && (
-            <p className="mt-1">Guard repairs/faults: {reservation.guard.faults}. {reservation.guard.lastFault?.reason}</p>
+            <details className="mt-1">
+              <summary className="cursor-pointer">Safeguard repairs/faults: {reservation.guard.faults}</summary>
+              {reservation.guard.lastFault?.reason}
+            </details>
           )}
           {reservation.bootFault && (
             <BootFaultStatus bootFault={reservation.bootFault} recovery={reservation.recovery} reserved className="mt-2" />
@@ -322,16 +328,16 @@ export default function InterfacesPage() {
       )}
       {runtimeStatus === "unavailable" && (
         <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          <p>Interface runtime state unavailable — the engine could not be reached. Link and address state is unknown.</p>
+          <p>Live device information is unavailable. Link and address state is unknown.</p>
           <button onClick={() => refresh()} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
         </div>
       )}
-      {runtimeStatus === "ready" && state.length === 0 && <p role="status" className="mb-4 text-sm text-(--text)">No OS interfaces reported.</p>}
+      {runtimeStatus === "ready" && state.length === 0 && <p role="status" className="mb-4 text-sm text-(--text)">No network devices reported.</p>}
       {isAdmin() && unboundConfigured.missingRuntime.length > 0 && unboundConfigured.unassignedOS.length > 0 && (
         <div className="mb-4 rounded-xs border px-4 py-3 text-sm">
           <div className="font-semibold">Interface bindings needed</div>
           <div className="mt-1">
-            Some configured interfaces are not bound to OS devices. Use <span className="font-semibold">Auto-assign</span>{" "}
+            Some configured interfaces are not connected to network devices. Use <span className="font-semibold">Auto-assign</span>{" "}
             or set the <span className="font-semibold">Device</span> field per interface.
           </div>
         </div>
@@ -431,8 +437,8 @@ export default function InterfacesPage() {
             </span>
           ) : ifaceType === "vlan" ? (
             <span>
-              VLAN creates a subinterface in the engine netns. Use <span className="font-semibold">parent</span> as a
-              logical interface name (e.g. <span className="font-mono">wan</span>) or an OS device name (e.g.{" "}
+              A VLAN creates a virtual network interface inside the appliance. Use <span className="font-semibold">parent</span> as a
+              logical interface name (e.g. <span className="font-mono">wan</span>) or a network device name (e.g.{" "}
               <span className="font-mono">eth0</span>).
             </span>
           ) : (
@@ -501,9 +507,9 @@ export default function InterfacesPage() {
 
       {state.length > 0 && (
         <Card padding="lg" className="mt-6">
-          <h2 className="text-sm font-semibold text-(--text)">Detected OS interfaces</h2>
+          <h2 className="text-sm font-semibold text-(--text)">Detected network devices</h2>
           <div className="mt-1 text-xs text-(--text-muted)">
-            This is what the kernel currently exposes (used for device binding and link/address state).
+            Live devices available to the appliance, with their current link state and addresses.
           </div>
           <div className="mt-3 overflow-hidden rounded-xs border">
             <table className="w-full text-sm">

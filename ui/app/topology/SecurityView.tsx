@@ -457,9 +457,10 @@ function SLSection({ zone, label, conduits, setSLTarget, toggleOverride }: {
             <button key={lvl} aria-label={`Stage ${zone.name} target SL ${lvl}`} className={`${s.slPipBtn} ${lvl === zone.sl_t ? s.slPipSelected : lvl < zone.sl_t ? s.slPipBelow : ""}`} onClick={() => setSLTarget(zone.id, lvl)}>{lvl}</button>
           ))}
         </div>
-        <div style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)", marginTop: 4 }}>
-          Equivalent to <span style={{ color: "var(--topo-cyan)" }}>sl_target: {zone.sl_t}</span> in zone config
-        </div>
+        <details style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)", marginTop: 4 }}>
+          <summary className="cursor-pointer">Configuration field</summary>
+          <span style={{ color: "var(--topo-cyan)" }}>sl_target: {zone.sl_t}</span>
+        </details>
       </div>
       <div className={s.slAchievedBadge}>
         <div>

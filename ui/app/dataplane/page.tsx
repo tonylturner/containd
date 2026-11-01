@@ -201,7 +201,7 @@ export default function PcapPage() {
       issues.push("Select at least one interface or zone to capture.");
     }
     if (ifaceStateStatus === "ready" && captureIfaceOptions.length === 0 && zoneOptions.length === 0) {
-      issues.push("No firewall interfaces are bound to OS devices. Set device bindings on the Interfaces page.");
+      issues.push("No firewall interfaces are connected to network devices. Choose devices on the Interfaces page.");
     }
     for (const selectedZone of settings.zones ?? []) {
       if (!zoneOptions.some((zone) => zone.value === selectedZone)) {
@@ -475,11 +475,11 @@ export default function PcapPage() {
       )}
       {ifaceStateStatus === "unavailable" && (
         <div role="status" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          <p>Interface runtime state unavailable — the engine could not be reached. Device discovery is unknown; saved capture settings are unchanged.</p>
+          <p>Live interface information is unavailable. Device discovery is unknown; saved capture settings have not changed.</p>
           <button onClick={refreshInterfaceState} className="mt-2 rounded-xs border border-red-500/30 px-3 py-1">Retry</button>
         </div>
       )}
-      {ifaceStateStatus === "ready" && ifaceStates.length === 0 && <p role="status" className="mb-4 text-sm text-(--text)">No OS interfaces reported.</p>}
+      {ifaceStateStatus === "ready" && ifaceStates.length === 0 && <p role="status" className="mb-4 text-sm text-(--text)">No network devices reported.</p>}
 
       {notice && (
         <div className="mb-4 rounded-xs border px-3 py-2 text-sm">

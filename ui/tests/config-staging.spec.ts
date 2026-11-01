@@ -130,7 +130,7 @@ test("capture cannot start when discovery reports the saved device is absent", a
   const state = await setup(page);
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill({ json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/dataplane/");
-  await expect(page.getByText("No OS interfaces reported.", { exact: true })).toBeVisible();
+  await expect(page.getByText("No network devices reported.", { exact: true })).toBeVisible();
   await expect(page.getByText("Kernel devices not found: eth0. Bind the interfaces or choose an available device.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start capture now", exact: true })).toBeDisabled();
   expect(state.writes).toEqual([]);
