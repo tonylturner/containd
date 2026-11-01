@@ -273,7 +273,7 @@ export default function InterfacesPage() {
       <ConfirmDialog {...confirm.props} />
       {reservation?.active && (
         <aside aria-label="Reserved management path" className="mb-4 rounded-xs border border-(--border) bg-(--surface) px-4 py-3 text-sm text-(--text)">
-          <p className="font-semibold">RangerDanger management access is reserved</p>
+          <p className="font-semibold">Management access is reserved</p>
           <p className="mt-1 wrap-break-word">
             {reservation.sources?.join(", ")} can reach HTTP management on {reservation.device} ({reservation.local}, port {reservation.port}),
             even when all interface access is disabled. Login is still required. Keep this device physical and unaddressed in config.
