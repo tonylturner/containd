@@ -36,6 +36,10 @@ protocols, including IEC 104. The executable in `cmd/containd/main.go` supports
   contributor-facing entry points.
 - Public pages in `docs/mkdocs/` are present-tense documentation for users.
   Maintain their navigation in `docs/mkdocs.yml`.
+- Before a change merges into `main`, check it for docs drift: search
+  `docs/`, `README.md` and `docs/openapi.yaml` for the settings, routes, paths,
+  defaults and behaviour it changes, and update every statement it makes wrong
+  in the same branch.
 - Never commit `ui/node_modules/`; it is a local dependency installation.
 - Follow [Code Boundaries](docs/mkdocs/code-boundaries.md) for code placement
   and [Testing and Coverage](docs/mkdocs/testing.md) for test selection.
