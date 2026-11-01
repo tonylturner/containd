@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	nflog "github.com/florianl/go-nflog/v2"
 	nfqueue "github.com/florianl/go-nfqueue/v2"
 )
 
@@ -40,13 +39,13 @@ func InstallSocketFaults(t *testing.T) *SocketFaults {
 		}
 		return q, err
 	}
-	openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) {
+	openNFLog = func(group uint16) (nfLogHandle, error) {
 		if f.RejectLog.Load() {
 			return nil, errors.New("logging re-registration unavailable")
 		}
-		log, err := logOpen(cfg)
+		log, err := logOpen(group)
 		if err == nil {
-			f.LogClose <- log.(*nflog.Nflog).Con.Close
+			f.LogClose <- log.(*nfLogReceiver).conn.Close
 		}
 		return log, err
 	}

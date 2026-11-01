@@ -14,20 +14,19 @@ import (
 	"testing"
 	"time"
 
-	nflog "github.com/florianl/go-nflog/v2"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
 
 type fakeNFLogHandle struct {
 	ctx               context.Context
 	registerErr       error
-	errFn             nflog.ErrorFunc
+	errFn             func(error) bool
 	closeCalls        int
 	closeBeforeCancel bool
 	closed            chan struct{} // closed on first Close when non-nil
 }
 
-func (f *fakeNFLogHandle) RegisterWithErrorFunc(ctx context.Context, _ nflog.HookFunc, errFn nflog.ErrorFunc) error {
+func (f *fakeNFLogHandle) Start(ctx context.Context, _ func(nfLogAttribute), errFn func(error) bool) error {
 	f.ctx = ctx
 	f.errFn = errFn
 	return f.registerErr
@@ -49,8 +48,8 @@ func TestStartNFLogStopCancelsBeforeClosingAndIsIdempotent(t *testing.T) {
 	oldOpenNFLog := openNFLog
 	t.Cleanup(func() { openNFLog = oldOpenNFLog })
 	fake := &fakeNFLogHandle{}
-	var flags uint16
-	openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) { flags = cfg.Flags; return fake, nil }
+	var group uint16
+	openNFLog = func(g uint16) (nfLogHandle, error) { group = g; return fake, nil }
 
 	var reported int
 	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, func(error) { reported++ }, nil)
@@ -63,8 +62,8 @@ func TestStartNFLogStopCancelsBeforeClosingAndIsIdempotent(t *testing.T) {
 	if fake.ctx == nil || fake.ctx.Err() != nil {
 		t.Fatalf("registration context before stop = %v, want active child context", fake.ctx)
 	}
-	if flags != nflog.FlagConntrack {
-		t.Fatalf("nflog flags = %#x, want conntrack direction", flags)
+	if group != 100 {
+		t.Fatalf("nflog group = %d, want 100", group)
 	}
 	stop()
 	if fake.ctx.Err() != context.Canceled {
@@ -80,8 +79,8 @@ func TestStartNFLogStopCancelsBeforeClosingAndIsIdempotent(t *testing.T) {
 	if fake.closeCalls != 1 {
 		t.Fatalf("Close calls after second stop = %d, want 1", fake.closeCalls)
 	}
-	if got := fake.errFn(errors.New("closed")); got != 1 {
-		t.Fatalf("error callback return after cancellation = %d, want 1", got)
+	if got := fake.errFn(errors.New("closed")); got {
+		t.Fatalf("error callback return after cancellation = %t, want false", got)
 	}
 	if reported != 1 {
 		t.Fatalf("onErr calls = %d, want 1", reported)
@@ -93,7 +92,7 @@ func TestStartNFLogRegisterErrorCancelsAndCloses(t *testing.T) {
 	t.Cleanup(func() { openNFLog = oldOpenNFLog })
 	wantErr := errors.New("register failed")
 	fake := &fakeNFLogHandle{registerErr: wantErr}
-	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
+	openNFLog = func(uint16) (nfLogHandle, error) { return fake, nil }
 
 	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, nil, nil)
 	if !errors.Is(err, wantErr) {
@@ -121,7 +120,7 @@ func TestStartNFLogParentContextCancelClosesHandle(t *testing.T) {
 	oldOpenNFLog := openNFLog
 	t.Cleanup(func() { openNFLog = oldOpenNFLog })
 	fake := &fakeNFLogHandle{closed: make(chan struct{})}
-	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
+	openNFLog = func(uint16) (nfLogHandle, error) { return fake, nil }
 
 	ctx, cancel := context.WithCancel(context.Background())
 	stop, err := StartNFLog(ctx, 100, &recordingSink{}, nil, nil)
@@ -155,7 +154,7 @@ func TestStartNFLogDisabledReturnsNoOpStop(t *testing.T) {
 	oldOpenNFLog := openNFLog
 	t.Cleanup(func() { openNFLog = oldOpenNFLog })
 	var opens int
-	openNFLog = func(*nflog.Config) (nfLogHandle, error) {
+	openNFLog = func(uint16) (nfLogHandle, error) {
 		opens++
 		return &fakeNFLogHandle{}, nil
 	}
@@ -183,16 +182,14 @@ func TestStartNFLogDisabledReturnsNoOpStop(t *testing.T) {
 	}
 }
 
-// strPtr is a small helper to build nflog.Attribute.Prefix (which is a
-// *string in the upstream API).
+// strPtr is a small helper to build nfLogAttribute.Prefix (*string).
 func strPtr(s string) *string { return &s }
 
-// bytesPtr is a small helper to build nflog.Attribute.Payload (which is
-// a *[]byte in the upstream API).
+// bytesPtr is a small helper to build nfLogAttribute.Payload (*[]byte).
 func bytesPtr(b []byte) *[]byte { return &b }
 
 func TestBuildRuleHitEventParsesPrefix(t *testing.T) {
-	a := nflog.Attribute{
+	a := nfLogAttribute{
 		Prefix: strPtr("containd:deny-ent-to-field:DENY "),
 	}
 	ev, key, ok := buildRuleHitEvent(a)
@@ -223,7 +220,7 @@ func TestBuildRuleHitEventRejectsForeignPrefix(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c, func(t *testing.T) {
-			a := nflog.Attribute{Prefix: strPtr(c)}
+			a := nfLogAttribute{Prefix: strPtr(c)}
 			if _, _, ok := buildRuleHitEvent(a); ok {
 				t.Errorf("expected !ok for prefix %q", c)
 			}
@@ -232,7 +229,7 @@ func TestBuildRuleHitEventRejectsForeignPrefix(t *testing.T) {
 }
 
 func TestBuildRuleHitEventNoPrefixIsNoop(t *testing.T) {
-	a := nflog.Attribute{} // Prefix nil
+	a := nfLogAttribute{} // Prefix nil
 	if _, _, ok := buildRuleHitEvent(a); ok {
 		t.Error("expected !ok when no prefix is set")
 	}
@@ -263,7 +260,7 @@ func TestBuildRuleHitEventExtractsPacketFields(t *testing.T) {
 		0x00, 0x00, // checksum
 		0x00, 0x00, // urgent
 	}
-	a := nflog.Attribute{
+	a := nfLogAttribute{
 		Prefix:  strPtr("containd:fw-test:DENY "),
 		Payload: bytesPtr(pkt),
 	}
@@ -337,7 +334,7 @@ func TestBuildRuleHitEventICMPKeepsAddresses(t *testing.T) {
 		{"icmpv6", icmpv6, 3, "fd00::1", "fd00::2", 58, "icmpv6", flow.DirReverse},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := nflog.Attribute{Prefix: strPtr("containd:fw-ping:ALLOW "), Payload: bytesPtr(tc.pkt), CtInfo: &tc.ctinfo}
+			a := nfLogAttribute{Prefix: strPtr("containd:fw-ping:ALLOW "), Payload: bytesPtr(tc.pkt), CtInfo: &tc.ctinfo}
 			ev, key, ok := buildRuleHitEvent(a)
 			if !ok {
 				t.Fatal("expected event, got !ok")
@@ -364,7 +361,7 @@ func TestBuildRuleHitEventICMPKeepsAddresses(t *testing.T) {
 	// Other protocols that do not decode keep no addressing.
 	gre := append([]byte(nil), icmp...)
 	gre[9] = 47
-	ev, key, ok := buildRuleHitEvent(nflog.Attribute{Prefix: strPtr("containd:fw-gre:DENY "), Payload: bytesPtr(gre)})
+	ev, key, ok := buildRuleHitEvent(nfLogAttribute{Prefix: strPtr("containd:fw-gre:DENY "), Payload: bytesPtr(gre)})
 	if !ok || key != nil || ev.SrcIP != "" || ev.Transport != "" {
 		t.Fatalf("GRE hit = %+v key %v, want an event without addressing", ev, key)
 	}
@@ -412,7 +409,7 @@ func TestRulePrefixRERejectsUnsafeRuleIDs(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c, func(t *testing.T) {
-			a := nflog.Attribute{Prefix: strPtr(c)}
+			a := nfLogAttribute{Prefix: strPtr(c)}
 			if _, _, ok := buildRuleHitEvent(a); ok {
 				t.Errorf("expected !ok for malformed prefix %q", c)
 			}
@@ -424,7 +421,7 @@ func TestNFLogTransientErrorsDoNotRetireConsumer(t *testing.T) {
 	oldOpen := openNFLog
 	t.Cleanup(func() { openNFLog = oldOpen })
 	fake := &fakeNFLogHandle{}
-	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
+	openNFLog = func(uint16) (nfLogHandle, error) { return fake, nil }
 	source := make(chan SourceEvent, 2)
 	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, nil, func(ev SourceEvent) { source <- ev })
 	if err != nil {
@@ -432,7 +429,7 @@ func TestNFLogTransientErrorsDoNotRetireConsumer(t *testing.T) {
 	}
 	defer stop()
 	for _, err := range []error{syscall.ENOBUFS, syscall.EINTR, syscall.EAGAIN} {
-		if ret := fake.errFn(err); ret != 0 {
+		if ret := fake.errFn(err); !ret {
 			t.Fatalf("transient %v retired consumer", err)
 		}
 	}
@@ -441,7 +438,7 @@ func TestNFLogTransientErrorsDoNotRetireConsumer(t *testing.T) {
 		t.Fatalf("transient emitted source death: %+v", ev)
 	default:
 	}
-	if ret := fake.errFn(syscall.EBADF); ret != 1 {
+	if ret := fake.errFn(syscall.EBADF); ret {
 		t.Fatal("terminal receive error did not end consumer")
 	}
 	select {

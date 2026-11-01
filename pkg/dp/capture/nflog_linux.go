@@ -14,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	nflog "github.com/florianl/go-nflog/v2"
-
 	"github.com/tonylturner/containd/pkg/dp/events"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 )
@@ -33,11 +31,7 @@ var rulePrefixRE = regexp.MustCompile(`^containd:([A-Za-z0-9_-]+):([A-Z_]+)\s*$`
 
 type nfLogHandle interface {
 	Close() error
-	RegisterWithErrorFunc(context.Context, nflog.HookFunc, nflog.ErrorFunc) error
-}
-
-var openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) {
-	return nflog.Open(cfg)
+	Start(context.Context, func(nfLogAttribute), func(error) bool) error
 }
 
 // StartNFLog opens an nflog subscription on the given group and emits a
@@ -61,47 +55,38 @@ func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(
 		return func() {}, nil
 	}
 
-	// The conntrack flag adds each packet's conntrack direction, which
-	// orients its connection key on the side that opened the connection.
-	cfg := nflog.Config{
-		Group:    group,
-		Copymode: nflog.CopyPacket,
-		Flags:    nflog.FlagConntrack,
-	}
-
-	nf, err := openNFLog(&cfg)
+	nf, err := openNFLog(group)
 	if err != nil {
 		return func() {}, fmt.Errorf("nflog open group %d: %w", group, err)
 	}
 
 	nflogCtx, cancel := context.WithCancel(ctx)
 
-	hook := func(a nflog.Attribute) int {
+	hook := func(a nfLogAttribute) {
 		if ev, key, ok := buildRuleHitEvent(a); ok {
 			sink.RuleHit(ev, key)
 		}
-		return 0
 	}
 
 	lost := make(chan error, 1)
-	errFn := func(e error) int {
+	errFn := func(e error) bool {
 		if onErr != nil {
 			onErr(e)
 		}
 		if nflogCtx.Err() != nil {
-			return 1
+			return false
 		}
 		if receiveRecoverable(e) {
-			return 0
+			return true
 		}
 		select {
 		case lost <- e:
 		default:
 		}
-		return 1
+		return false
 	}
 
-	if err := nf.RegisterWithErrorFunc(nflogCtx, hook, errFn); err != nil {
+	if err := nf.Start(nflogCtx, hook, errFn); err != nil {
 		cancel()
 		_ = nf.Close()
 		return func() {}, fmt.Errorf("nflog register group %d: %w", group, err)
@@ -157,7 +142,7 @@ const (
 // key is nil when the packet's tuple does not decode; otherwise it is
 // the packet's wire tuple with the conntrack direction (DirReverse for a
 // reply), and it also names the event's flow.
-func buildRuleHitEvent(a nflog.Attribute) (events.Event, *flow.Key, bool) {
+func buildRuleHitEvent(a nfLogAttribute) (events.Event, *flow.Key, bool) {
 	if a.Prefix == nil {
 		return events.Event{}, nil, false
 	}

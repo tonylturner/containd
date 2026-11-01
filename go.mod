@@ -12,10 +12,10 @@ require (
 	github.com/RackSec/srslog v0.0.0-20180709174129-a4725f04ec91
 	github.com/cilium/ebpf v0.21.0
 	github.com/creack/pty v1.1.24
-	github.com/florianl/go-nflog/v2 v2.3.0
 	github.com/florianl/go-nfqueue/v2 v2.1.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
+	github.com/mdlayher/netlink v1.11.2
 	github.com/peterh/liner v1.2.2
 	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.23.2
@@ -33,7 +33,6 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattn/go-runewidth v0.0.3 // indirect
-	github.com/mdlayher/netlink v1.11.2 // indirect
 	github.com/mdlayher/socket v0.6.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
