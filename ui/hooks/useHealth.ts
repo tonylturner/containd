@@ -10,6 +10,8 @@ export const HEALTH_POLL_MS = 30_000;
 // One GET /health poll shared by every component on the page: the shell's
 // recovery banner and any page indicator read the same snapshot.
 let snapshot: HealthResponse | undefined;
+// False until the first poll settles, so readers can tell loading from unavailable.
+let settled = false;
 const listeners = new Set<() => void>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let inflight: AbortController | null = null;
@@ -28,6 +30,7 @@ async function poll() {
   if (inflight !== controller) return;
   inflight = null;
   snapshot = next;
+  settled = true;
   listeners.forEach((notify) => notify());
 }
 
@@ -52,4 +55,9 @@ function subscribe(notify: () => void): () => void {
 /** Runtime health, polled while any component reads it; undefined while unknown. */
 export function useHealth(): HealthResponse | undefined {
   return useSyncExternalStore(subscribe, () => snapshot, () => undefined);
+}
+
+/** True once the first health poll has finished, whether or not it succeeded. */
+export function useHealthSettled(): boolean {
+  return useSyncExternalStore(subscribe, () => settled, () => false);
 }

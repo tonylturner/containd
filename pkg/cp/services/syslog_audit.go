@@ -6,8 +6,10 @@ package services
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tonylturner/containd/pkg/cp/audit"
@@ -58,18 +60,23 @@ func syslogTargets(fwds []config.SyslogForwarder) []syslogTarget {
 // auditForwarderStatus is the audit delivery state of one forwarder as of
 // its last flush.
 type auditForwarderStatus struct {
-	lastID    int64
-	backlog   int
-	lastError string
-	lastSent  time.Time
+	historical bool
+	lastID     int64
+	backlog    int
+	lastError  string
+	lastSent   time.Time
 }
 
 // SetAuditLog makes every forwarder also deliver audit records, oldest first,
 // with a cursor per forwarder kept in the audit database.
 func (m *SyslogManager) SetAuditLog(log audit.ForwardLog) {
+	m.controlMu.Lock()
+	defer m.controlMu.Unlock()
+	m.stopAndWait()
+	m.auditMu.Lock()
+	defer m.auditMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.stopForwarder()
 	m.auditLog = log
 	m.syncAuditCursors()
 	m.restartForwarder()
@@ -87,18 +94,41 @@ func (m *SyslogManager) syncAuditCursors() {
 	keep := make([]string, 0, len(targets))
 	ctx, cancel := context.WithTimeout(context.Background(), auditCursorTimeout)
 	defer cancel()
-	m.auditMu.Lock()
-	defer m.auditMu.Unlock()
 	var errs []string
+	gates := make(map[string]*sync.Mutex)
+	states := make(map[string]auditForwarderStatus)
 	for _, t := range targets {
 		keep = append(keep, t.cursor())
+		gate := m.auditGates[t.id]
+		if gate == nil {
+			gate = &sync.Mutex{}
+		}
+		gates[t.id] = gate
+		st := m.auditForwarders[t.id]
+		st.lastError = ""
 		if err := m.auditLog.StartForwardCursor(ctx, t.cursor()); err != nil {
-			errs = append(errs, err.Error())
+			st.lastError = err.Error()
+		} else {
+			var err error
+			st.lastID, _, err = m.auditLog.ForwardCursor(ctx, t.cursor())
+			if err == nil {
+				st.backlog, err = m.auditLog.CountAfter(ctx, st.lastID)
+			}
+			if err != nil {
+				st.lastError = err.Error()
+			}
+		}
+		st.historical = st.historical || st.lastError != ""
+		states[t.id] = st
+		if st.lastError != "" {
+			errs = append(errs, st.lastError)
 		}
 	}
 	if err := m.auditLog.RetainForwardCursors(ctx, auditCursorPrefix, keep); err != nil {
 		errs = append(errs, err.Error())
 	}
+	m.auditGates, m.auditForwarders = gates, states
+	m.auditLastError = ""
 	if len(errs) > 0 {
 		m.auditLastError = strings.Join(errs, "; ")
 		m.log.Errorw("syslog audit cursor sync failed", "error", m.auditLastError)
@@ -109,73 +139,62 @@ func (m *SyslogManager) syncAuditCursors() {
 // first, and advances the cursor past the records it delivered. A failed send
 // stops that forwarder's batch; the next tick retries from the cursor.
 func (m *SyslogManager) flushAudit(ctx context.Context) {
+	m.auditMu.Lock()
+	defer m.auditMu.Unlock()
 	m.mu.Lock()
-	log := m.auditLog
 	targets := syslogTargets(m.config.Forwarders)
-	format := m.config.Format
-	batch := m.batchSize
+	m.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, target := range targets {
+		wg.Go(func() { m.flushAuditTarget(ctx, target) })
+	}
+	wg.Wait()
+}
+
+func (m *SyslogManager) flushAuditTarget(ctx context.Context, target syslogTarget) {
+	m.mu.Lock()
+	gate := m.auditGates[target.id]
+	m.mu.Unlock()
+	if gate == nil {
+		return
+	}
+	gate.Lock()
+	defer gate.Unlock()
+	m.mu.Lock()
+	log, format, batch := m.auditLog, m.config.Format, m.batchSize
 	host := syslogHostname(m.hostname)
 	m.mu.Unlock()
-	if log == nil || len(targets) == 0 {
+	if log == nil || ctx.Err() != nil {
 		return
 	}
 	if batch <= 0 {
 		batch = 500
 	}
-
-	m.auditMu.Lock()
-	if ctx.Err() != nil {
-		m.auditMu.Unlock()
-		return
-	}
-	results := make(map[string]auditForwarderStatus, len(targets))
-	sent := make(map[string]int, len(targets))
-	for _, t := range targets {
-		if ctx.Err() != nil {
-			break
-		}
-		st, n := m.forwardAudit(ctx, log, t, format, host, batch)
-		results[t.id], sent[t.id] = st, n
-	}
-	m.auditMu.Unlock()
-	if ctx.Err() != nil {
-		// The loop was replaced or stopped mid-flush. Progress is persisted;
-		// the next loop reports status for the current forwarders.
-		return
-	}
-
-	now := time.Now().UTC()
+	st, sent := m.forwardAudit(ctx, log, target, format, host, batch)
 	m.mu.Lock()
-	for _, t := range targets {
-		st := results[t.id]
-		if sent[t.id] > 0 {
-			st.lastSent = now
-		} else {
-			st.lastSent = m.auditForwarders[t.id].lastSent
-		}
-		results[t.id] = st
-		m.auditSentTotal += sent[t.id]
-		if st.lastError != "" {
-			m.auditFailTotal++
-			m.auditLastError = st.lastError
-		}
+	defer m.mu.Unlock()
+	prior := m.auditForwarders[target.id]
+	st.historical = prior.historical || st.lastError != ""
+	if sent > 0 {
+		st.lastSent = time.Now().UTC()
+	} else {
+		st.lastSent = prior.lastSent
 	}
-	m.auditForwarders = results
-	m.auditLastFlush = now
-	m.mu.Unlock()
-
-	for _, t := range targets {
-		if err := results[t.id].lastError; err != "" {
-			m.log.Errorw("syslog audit forward failed", "forwarder", t.id, "error", err)
-			m.emit("service.syslog.audit_forward_failed", map[string]any{"error": err, "forwarder": t.id, "error_count": 1})
-		}
-		if sent[t.id] > 0 {
-			m.emit("service.syslog.audit_forward_ok", map[string]any{"forwarder": t.id, "count": sent[t.id]})
+	m.auditForwarders[target.id] = st
+	m.auditSentTotal += sent
+	if st.lastError != "" {
+		m.auditFailTotal++
+	}
+	m.auditLastFlush = time.Now().UTC()
+	m.auditLastError = ""
+	for _, state := range m.auditForwarders {
+		if state.lastError != "" {
+			m.auditLastError = state.lastError
 		}
 	}
 }
 
-// forwardAudit delivers one batch to one forwarder. Callers hold m.auditMu.
+// forwardAudit delivers one batch while holding the destination gate.
 func (m *SyslogManager) forwardAudit(ctx context.Context, log audit.ForwardLog, t syslogTarget, format, host string, batch int) (auditForwarderStatus, int) {
 	var st auditForwarderStatus
 	cursor, ok, err := log.ForwardCursor(ctx, t.cursor())
@@ -213,6 +232,7 @@ func (m *SyslogManager) forwardAudit(ctx context.Context, log audit.ForwardLog, 
 	if last > cursor {
 		if err := log.AdvanceForwardCursor(persistCtx, t.cursor(), last); err != nil {
 			st.lastError = err.Error()
+			last = cursor // report durable progress, not an unpersisted send
 		}
 	}
 	st.lastID = last
@@ -281,8 +301,15 @@ func (c *syslogConn) send(ctx context.Context, payload string) error {
 			}
 			c.conn = conn
 		}
-		_ = c.conn.SetWriteDeadline(time.Now().Add(syslogWriteTimeout))
-		if _, err := c.conn.Write(msg); err != nil {
+		conn := c.conn
+		stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+		_ = conn.SetWriteDeadline(time.Now().Add(syslogWriteTimeout))
+		n, err := conn.Write(msg)
+		stop()
+		if err == nil && n != len(msg) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
 			lastErr = err
 			c.close()
 			continue

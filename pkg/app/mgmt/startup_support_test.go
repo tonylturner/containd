@@ -75,9 +75,13 @@ func TestReservedStartupWaitsForMatchingGuard(t *testing.T) {
 
 type testAuditStore struct {
 	records []audit.Record
+	err     error
 }
 
 func (s *testAuditStore) Add(_ context.Context, r audit.Record) error {
+	if s.err != nil {
+		return s.err
+	}
 	s.records = append(s.records, r)
 	return nil
 }
@@ -191,5 +195,42 @@ func TestPickUIDirAndDirExists(t *testing.T) {
 	}
 	if !dirExists(custom) || dirExists(filepath.Join(tmp, "missing")) {
 		t.Fatal("unexpected dirExists result")
+	}
+}
+
+func TestAuditDHCPFailedWriteRetainsCursor(t *testing.T) {
+	store := &testAuditStore{err: fmt.Errorf("unwritable")}
+	events := []dpevents.Event{{ID: 12, Kind: "service.dhcp.lease.created", Proto: "dhcp"}, {ID: 11, Kind: "service.dhcp.lease.created", Proto: "dhcp"}}
+	if got := ingestDHCPLeaseAuditEvents(store, events, 10); got != 10 {
+		t.Fatalf("cursor advanced: %d", got)
+	}
+	store.err = nil
+	if got := ingestDHCPLeaseAuditEvents(store, events, 10); got != 12 || len(store.records) != 2 {
+		t.Fatalf("retry cursor=%d records=%d", got, len(store.records))
+	}
+}
+
+func TestAuditStartupInstallsObservation(t *testing.T) {
+	t.Setenv("CONTAIND_AUDIT_DB", filepath.Join(t.TempDir(), "audit.db"))
+	store := mustInitAuditStore()
+	defer store.Close()
+	observed, ok := store.(*audit.ObservedStore)
+	if !ok {
+		t.Fatalf("unobserved startup store: %T", store)
+	}
+	if err := observed.Add(context.Background(), audit.Record{Action: "startup"}); err != nil {
+		t.Fatal(err)
+	}
+	if observed.Successes() != 1 {
+		t.Fatal("startup writes not observed")
+	}
+	if err := observed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := observed.Add(context.Background(), audit.Record{}); err == nil {
+		t.Fatal("closed store accepted write")
+	}
+	if observed.AuditStatus().Failures != 1 {
+		t.Fatal("startup failure not observed")
 	}
 }

@@ -17,6 +17,7 @@ import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { Card } from "../../../../components/Card";
+import { SyslogEventStatusPanel } from "./syslog-event-status";
 import { SyslogAuditStatusPanel } from "./syslog-audit-status";
 
 export default function SyslogPage() {
@@ -170,6 +171,7 @@ export default function SyslogPage() {
           ) : null}
         </div>
       )}
+      <SyslogEventStatusPanel events={status?.events} />
       {status?.audit && <SyslogAuditStatusPanel audit={status.audit} />}
 
       <Card>

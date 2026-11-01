@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- Telemetry event IDs are JSON strings. API clients that parse event IDs as
+  numbers must accept decimal strings.
+
+### Added
+
+- Evidence health in the UI shell, Audit persistence view and `show audit --status`,
+  with per-destination/source syslog backlog, retry, loss and continuity counters.
+- Authenticated `GET /api/v1/evidence/status` and sanitized `evidence.state` in health.
+
+### Changed
+
+- Document established-session re-evaluation after policy changes and why a
+  blocked connection can remain visible in Sessions until conntrack timeout.
+- Serialize telemetry event IDs as decimal JSON strings across API, UI, CLI,
+  previews and syslog; audit record IDs remain numeric.
+- Forward engine and management syslog streams independently, retry failed
+  destinations, and report telemetry retention loss. New destinations start at
+  current tails without backfill; audit resumes its durable cursor after restart.
+- Keep operations and management available when audit persistence fails, with
+  visible degradation rather than an audit fail-closed policy.
+- Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
+
+### Fixed
+
+- Keep zone security scores, topology conduit selection and staged zone updates
+  separate for names that differ by case or punctuation.
+
 ## [0.1.37] - 2026-10-31
 
 ### Upgrade notes
@@ -62,6 +91,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The engine keeps watching kernel interface, address and route changes after
+  an interrupted system call instead of stopping until restart; drift was
+  otherwise repaired only by the 10-second periodic reconcile.
 - Direct CLI login directs accounts needing MFA or password rotation to the
   web UI or SSH, and accounts needing MFA enrollment to the web UI.
 - Partial account profile updates preserve omitted fields and still allow explicit clearing.

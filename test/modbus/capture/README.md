@@ -23,7 +23,8 @@ wheel URL in `source-lock.json` and run
 The bootstrap digest is **local**, not a published Docker Hub dependency.
 On a new host, transfer it with `docker save`/`docker load` before building.
 There is no claim that a fresh apt/PyPI rebuild will reproduce this image.
-The generated image's actual identities are retained in `testdata/images.json`.
+The generated image's actual identities are retained in
+[`../testdata/images.json`](../testdata/images.json).
 
 From the repository root, with Docker Desktop running, Python 3 and host
 tshark **4.6.7** installed:

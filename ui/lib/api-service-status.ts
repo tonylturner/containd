@@ -47,7 +47,23 @@ export type SyslogAuditStatus = {
   forwarders: SyslogAuditForwarder[];
 };
 
+/** Independent bounded telemetry stream progress; offsets are exact decimals. */
+export type SyslogEventProgress = {
+  destination: string;
+  source: "engine" | "services";
+  epoch: string;
+  offset: string;
+  backlog: number;
+  sent: number;
+  failed: number;
+  lost: number;
+  continuity_unknown: number;
+  last_error: string;
+  last_success: string;
+};
+
 export type SyslogStatus = ServiceMeter & {
+  events?: SyslogEventProgress[];
   configured_forwarders: number;
   format: string;
   protos: string[] | null;

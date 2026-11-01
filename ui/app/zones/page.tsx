@@ -257,7 +257,7 @@ export default function ZonesPage() {
                   <SortableHeader label="Alias" sortKey="alias" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
                   <SortableHeader label="Description" sortKey="description" currentSort={table.sortKey} currentDir={table.sortDir} onSort={table.setSort} />
                   <th className="px-4 py-3 text-center whitespace-nowrap">SL-T</th>
-                  <th className="px-4 py-3 text-center whitespace-nowrap">SL-A</th>
+                  <th className="px-4 py-3 text-center whitespace-nowrap">Check-based SL</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -324,7 +324,7 @@ function ZoneRow({
   const [editSlt, setEditSlt] = draft.field(`${JSON.stringify(zone.name)}.editSlt`, zone.slTarget ?? 0);
   const [editing, setEditing] = useState(false);
 
-  // Compute SL-A from conduit data
+  // Compute check-based SL from conduit data
   const zv = mapZone(zone);
   const { sl_a } = scoreZone(zv, conduits);
   const sl_t = zone.slTarget ?? 0;

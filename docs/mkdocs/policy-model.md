@@ -12,7 +12,7 @@ engine runs:
 ## Firewall and DPI
 
 Zone firewall rules use the Linux nftables backend. Rules match zones,
-CIDRs/assets, transport/port ranges, and optional identity, schedule, and ICS
+CIDRs, transport/port ranges, and optional identity, schedule, and ICS
 predicates. Sources and destinations may be IPv4 or IPv6 CIDRs, mixed in one
 rule: each address family matches its own addresses, so a rule whose sources
 are all IPv4 and destinations all IPv6 (or the reverse) matches nothing. A zone
@@ -32,8 +32,8 @@ port-forward permissions on upgrade. Review
 the warnings for forwards whose permissions cannot be generated safely.
 
 Terminals are `ALLOW`, `DENY` and `RESET`; rule IDs do not set precedence.
-Events and logs name the first matching deciding rule. Put exceptions before
-broader rules: an earlier `DENY` can shadow a later `ALLOW`, just as an earlier
+Logged enforcing matches name the deciding rule. Put exceptions before broader
+rules: an earlier `DENY` can shadow a later `ALLOW`, just as an earlier
 `ALLOW` can shadow a later `DENY`. This holds for ICS rules too. IEC 104
 objects are decided among IEC 104 rules only, so a broad
 `ALLOW` on TCP 2404 does not admit them (see
@@ -64,7 +64,10 @@ protocol: the engine owns the resets of inspected ICS connections (aborted IEC
 104 sessions and connections picked up mid-stream), and an ICS rate or label
 is not defined. `RESET` cannot be the default action. Inside NFQUEUE
 inspection the engine cannot reject a queued packet, so a `RESET` rule that
-decides an inspected ICS message drops it like `DENY` and blocks the flow.
+decides an inspected ICS message drops it like `DENY`. TCP denials use the
+session-only reset and tombstone path described in
+[Enforcement](dataplane-enforcement.md#capture-is-not-inline-enforcement);
+they do not install a host or service block.
 
 `RATE_LIMIT` is a kernel packet policer, keyed by source and destination
 address, layer-4 protocol and, for TCP and UDP, both ports; on IPv4 and IPv6.
@@ -90,7 +93,27 @@ from the running ruleset.
 Every rule has an nftables counter. `GET /api/v1/firewall/counters` reports
 each rule's packets and bytes, and each `RATE_LIMIT` rule's excess drops, for
 the applied ruleset; logging need not be on. Every apply restarts the counters
-at zero, and the response says when (`since`).
+at zero, and the response says when (`since`). These are rule-path counters,
+not total connection traffic: established packets can use the admission fast
+path without incrementing an `ALLOW` counter, and ICS counters measure steering.
+
+### Established connections and policy changes
+
+A stateful firewall remembers admitted connections so established traffic can
+take a fast path. That state is not a permanent permission: mainstream stateful
+firewalls also re-match existing sessions when policy changes.
+
+When a commit changes the policy, the next packet of each established
+connection is evaluated again against the new first-match policy, using the
+connection's original tuple. If the new policy no longer admits it, the packet
+is dropped; unmatched traffic follows `firewall.defaultAction`, which is
+`DENY` unless configured otherwise. Reordering or removing an `ALLOW`, or adding
+an earlier `DENY`, can therefore stop traffic without waiting for a new
+connection.
+
+Re-evaluation does not delete the kernel conntrack entry. The Sessions page and
+`GET /api/v1/conntrack` can still show the tuple until the kernel times it out;
+an entry's presence does not prove that traffic is passing.
 
 ### Identity and schedule predicates
 

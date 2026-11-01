@@ -1,4 +1,4 @@
-// IEC 62443-3-3 SL scoring — shared between SecurityView and Zones page.
+// IEC 62443-3-3 requirement checks and check-based SL — shared between SecurityView and Zones page.
 
 import type { Conduit, ConduitMap, Zone } from "./api";
 
@@ -31,10 +31,10 @@ export interface SRCheck extends SRDef {
 /* ── SR definitions (SL 0 through SL 4) ── */
 
 export const SR_DEFS: SRDef[] = [
-  // SL-0: No security requirements (always met — baseline for unprotected zones)
+  // SL-0: No requirement checks (baseline for unprotected zones)
 
   // SL-1
-  { id: "SR-1.1",  sl: 1, label: "Human interface identification & authentication",            source: "zone",    check: (z) => z.id !== "internet" },
+  { id: "SR-1.1",  sl: 1, label: "Human interface identification & authentication",            source: "zone",    check: (z) => z.id.toLowerCase() !== "internet" },
   { id: "SR-3.3",  sl: 1, label: "Security functionality verification",                         source: "zone",    check: () => true },
   { id: "SR-5.1",  sl: 1, label: "Network segmentation — zone has explicit policy",             source: "zone",    check: (_, cs) => cs.some((c) => c.defaultDeny || c.state === "block") },
   { id: "SR-2.8",  sl: 1, label: "Auditable events — conduit traffic logged",                    source: "conduit", check: (_, cs) => cs.every((c) => c.auditLogged) },
@@ -84,7 +84,7 @@ export function zoneColor(name: string): string {
 
 export function mapZone(z: Zone): ZoneView {
   return {
-    id: z.name.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+    id: z.name,
     name: z.name.toUpperCase(),
     sl_t: z.slTarget ?? 0,
     color: zoneColor(z.name),
@@ -97,12 +97,11 @@ export function mapZone(z: Zone): ZoneView {
 /* ── Score a zone against its outbound conduits ── */
 
 export function scoreZone(zone: ZoneView, conduits: ConduitMap): { sl_a: number; checks: SRCheck[] } {
-  // Conduit keys use original zone names from the backend.
-  // Match by comparing lowercased key prefix against zone.id.
+  // Zone identity and conduit keys both use the exact original zone name.
   const cs = Object.entries(conduits)
     .filter(([k]) => {
       const from = k.split("\u2192")[0];
-      return from.toLowerCase().replace(/[^a-z0-9]+/g, "_") === zone.id;
+      return from === zone.id;
     })
     .map(([, v]) => v);
   const checks: SRCheck[] = SR_DEFS.map((sr) => {
