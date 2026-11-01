@@ -30,6 +30,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/session"
 	"github.com/tonylturner/containd/pkg/dp/signatures"
 	"github.com/tonylturner/containd/pkg/dp/stats"
+	"github.com/tonylturner/containd/pkg/evidence"
 )
 
 var startNFLog = capture.StartNFLog
@@ -90,6 +91,8 @@ type Engine struct {
 	inventory             *inventory.Inventory
 	anomalyDetector       *anomaly.Detector
 	learnWatch            atomic.Pointer[learnWatchHook]
+	learnLossMu           sync.RWMutex
+	learnLoss             func(evidence.CollectionLoss)
 	sigEngine             *signatures.Engine
 	stats                 *stats.Tracker
 	hooks                 *inlineHooks

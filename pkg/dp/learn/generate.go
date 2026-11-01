@@ -14,7 +14,11 @@ import (
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
-const GeneratorVersion = "exact-2"
+const GeneratorVersion = "exact-8"
+
+// Frozen proofs include every positive reference. Keep repeated relations below
+// the store's per-suggestion byte ceiling instead of constructing oversized rows.
+const maxProofParents = 512
 
 // EvaluatorVersion follows the runtime ordered predicate contract; retained
 // proofs from another evaluator must be recertified, never reinterpreted.
@@ -46,6 +50,10 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 	if ds.State != evidence.DatasetSealed {
 		return result, ErrNotCertified
 	}
+	excluded, err := connectionExclusions(ctx, g.Store, ds)
+	if err != nil {
+		return result, err
+	}
 	groups := map[string]*relationGroup{}
 	withheld := func(o evidence.Observation, reasons []evidence.WithheldReason) error {
 		seen := map[evidence.WithheldReason]bool{}
@@ -70,6 +78,12 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 			return result, err
 		}
 		for _, o := range page.Items {
+			if reason := excluded[o.ConnectionID]; reason != "" {
+				if err := withheld(o, []evidence.WithheldReason{reason}); err != nil {
+					return result, err
+				}
+				continue
+			}
 			bundle, reasons := GenerateRelation(o)
 			if len(reasons) > 0 {
 				if err := withheld(o, reasons); err != nil {
@@ -98,12 +112,10 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	suggested := map[string]bool{}
 	for _, key := range keys {
 		group := groups[key]
 		reasons := closedDomains(group.parents)
-		if len(group.parents) > 10000 {
-			reasons = append(reasons, evidence.WithheldBudget)
-		}
 		if len(reasons) > 0 {
 			for _, o := range group.parents {
 				if err := withheld(o, reasons); err != nil {
@@ -112,45 +124,33 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 			}
 			continue
 		}
-		digest, err := evidence.EvidenceDigest(group.parents)
-		if err != nil {
-			return result, err
-		}
-		content := SuggestionContent{Versions: Versions{Schema: SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: GeneratorVersion, Evaluator: EvaluatorVersion, Decoder: ds.DecoderVersion, Profile: ds.ProfileFingerprint, Snapshot: ds.SnapshotFingerprint}, EvidenceDigest: digest, Rules: group.rules, Limits: []string{"Finite boundary replay; selector relations, not transaction or delivery guarantees."}, RequiresCoordinateReview: needsCoordinateReview(group.parents)}
-		gaps := append([]string(nil), ds.Gaps...)
-		sort.Strings(gaps)
-		for _, gap := range gaps {
-			content.Limits = append(content.Limits, "Dataset collection limit: "+gap+"; proof covers retained complete parents only.")
-		}
-		draft, err := g.Store.PutDraft(ctx, Suggestion{DatasetID: ds.ID, Content: content})
-		if err != nil {
-			return result, err
-		}
-		if draft.Status == SuggestionDraft && draft.DatasetID != ds.ID {
-			// Content identity excludes source IDs. A failed historical draft
-			// cannot acquire different positive references under the same ID.
+		parts, bounded := boundedProofGroups(group)
+		if !bounded {
 			for _, o := range group.parents {
-				if err := withheld(o, []evidence.WithheldReason{evidence.WithheldReplay}); err != nil {
+				if err := withheld(o, []evidence.WithheldReason{evidence.WithheldBudget}); err != nil {
 					return result, err
 				}
 			}
 			continue
 		}
-		if draft.Status == SuggestionDraft {
-			refs := make([]evidence.EvidenceRef, 0, len(group.parents))
-			for _, o := range group.parents {
-				refs = append(refs, evidence.EvidenceRef{DatasetID: ds.ID, ObservationID: o.ID})
-			}
-			// Failed replay deliberately returns a concrete, non-pointer proof
-			// value for bounded counterexample retention; it is never certified.
-			// nosemgrep: trailofbits.go.invalid-usage-of-modified-variable.invalid-usage-of-modified-variable
-			proof, err := g.Certifier.Certify(ctx, content, refs)
+		for _, group := range parts {
+			digest, err := evidence.EvidenceDigest(group.parents)
 			if err != nil {
-				if len(proof.Counterexamples) > 0 {
-					if _, saveErr := g.Store.SaveReplayFailure(ctx, Selection{ID: draft.ID, Revision: draft.Revision}, proof); saveErr != nil {
-						return result, saveErr
-					}
-				}
+				return result, err
+			}
+			content := SuggestionContent{Versions: Versions{Schema: SuggestionSchemaVersion, Observation: evidence.SchemaVersion, Generator: GeneratorVersion, Evaluator: EvaluatorVersion, Decoder: ds.DecoderVersion, Profile: ds.ProfileFingerprint, Snapshot: ds.SnapshotFingerprint}, EvidenceDigest: digest, Rules: group.rules, Limits: []string{"Finite boundary replay; selector relations, not transaction or delivery guarantees.", observationBindingLimit}, RequiresCoordinateReview: needsCoordinateReview(group.parents)}
+			gaps := append([]string(nil), ds.Gaps...)
+			sort.Strings(gaps)
+			for _, gap := range gaps {
+				content.Limits = append(content.Limits, "Dataset collection limit: "+gap+"; all connections that recorded loss could have touched are excluded. Unlocalized loss excludes the entire dataset.")
+			}
+			draft, err := g.Store.PutDraft(ctx, Suggestion{DatasetID: ds.ID, Content: content})
+			if err != nil {
+				return result, err
+			}
+			if draft.Status == SuggestionDraft && draft.DatasetID != ds.ID {
+				// Content identity excludes source IDs. A failed historical draft
+				// cannot acquire different positive references under the same ID.
 				for _, o := range group.parents {
 					if err := withheld(o, []evidence.WithheldReason{evidence.WithheldReplay}); err != nil {
 						return result, err
@@ -158,13 +158,37 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 				}
 				continue
 			}
-			draft, err = g.Store.SaveCertification(ctx, Selection{ID: draft.ID, Revision: draft.Revision}, proof)
-			if err != nil {
-				return result, err
+			if draft.Status == SuggestionDraft {
+				refs := make([]evidence.EvidenceRef, 0, len(group.parents))
+				for _, o := range group.parents {
+					refs = append(refs, evidence.EvidenceRef{DatasetID: ds.ID, ObservationID: o.ID})
+				}
+				// Failed replay deliberately returns a concrete, non-pointer proof
+				// value for bounded counterexample retention; it is never certified.
+				// nosemgrep: trailofbits.go.invalid-usage-of-modified-variable.invalid-usage-of-modified-variable
+				proof, err := g.Certifier.Certify(ctx, content, refs)
+				if err != nil {
+					if len(proof.Counterexamples) > 0 {
+						if _, saveErr := g.Store.SaveReplayFailure(ctx, Selection{ID: draft.ID, Revision: draft.Revision}, proof); saveErr != nil {
+							return result, saveErr
+						}
+					}
+					for _, o := range group.parents {
+						if err := withheld(o, []evidence.WithheldReason{evidence.WithheldReplay}); err != nil {
+							return result, err
+						}
+					}
+					continue
+				}
+				draft, err = g.Store.SaveCertification(ctx, Selection{ID: draft.ID, Revision: draft.Revision}, proof)
+				if err != nil {
+					return result, err
+				}
 			}
-		}
-		if draft.Status == SuggestionCertified || draft.Status == SuggestionReviewed || draft.Status == SuggestionStaged {
-			result.Suggestions = append(result.Suggestions, Selection{ID: draft.ID, Revision: draft.Revision})
+			if !suggested[draft.ID] && (draft.Status == SuggestionCertified || draft.Status == SuggestionReviewed || draft.Status == SuggestionStaged) {
+				suggested[draft.ID] = true
+				result.Suggestions = append(result.Suggestions, Selection{ID: draft.ID, Revision: draft.Revision})
+			}
 		}
 	}
 	return result, nil
@@ -173,6 +197,9 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) (Generate
 // GenerateRelation emits the narrow selector relation for a complete parent.
 // It never unions targets from different parents or invents missing selectors.
 func GenerateRelation(o evidence.Observation) ([]config.Rule, []evidence.WithheldReason) {
+	if reason := connectionExclusion(o); reason != "" {
+		return nil, []evidence.WithheldReason{reason}
+	}
 	var reasons []evidence.WithheldReason
 	if !parentComplete(o) || len(o.Quality.Loss) > 0 {
 		reasons = append(reasons, evidence.WithheldIncomplete)

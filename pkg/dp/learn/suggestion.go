@@ -106,16 +106,19 @@ type Review struct {
 // new content gets a new ID. Evidence/proof expiry also invalidates prior review.
 // IEC requires explicit admin review before staging; normal commit is separate.
 type Suggestion struct {
-	ID             string            `json:"id"`
-	Revision       uint64            `json:"revision"`
-	DatasetID      string            `json:"datasetId"`
-	Content        SuggestionContent `json:"content"`
-	Status         SuggestionStatus  `json:"status"`
-	CreatedAt      time.Time         `json:"createdAt"`
-	ExpiresAt      time.Time         `json:"expiresAt"`
-	Proof          *Certification    `json:"proof,omitempty"`
-	Review         *Review           `json:"review,omitempty"`
-	LegacyOverlaps []LegacyOverlap   `json:"legacyOverlaps"`
+	// StageReconcileOnly is set only on internal frozen-stage responses after
+	// a proof compatibility cutover. It permits receipt reconciliation, not adds.
+	StageReconcileOnly bool              `json:"stageReconcileOnly,omitempty"`
+	ID                 string            `json:"id"`
+	Revision           uint64            `json:"revision"`
+	DatasetID          string            `json:"datasetId"`
+	Content            SuggestionContent `json:"content"`
+	Status             SuggestionStatus  `json:"status"`
+	CreatedAt          time.Time         `json:"createdAt"`
+	ExpiresAt          time.Time         `json:"expiresAt"`
+	Proof              *Certification    `json:"proof,omitempty"`
+	Review             *Review           `json:"review,omitempty"`
+	LegacyOverlaps     []LegacyOverlap   `json:"legacyOverlaps"`
 }
 
 // Selection identifies immutable server-owned content at an expected revision.
