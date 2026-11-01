@@ -58,6 +58,13 @@ export function DPIConfigSection({
     (key) => !ICS_DPI_PROTOCOLS.some((protocol) => protocol.key === key),
   );
 
+  const nonDefault = dpiOn || (dpiMode !== "" && dpiMode !== "monitor") ||
+    Object.entries(protos).some(([key, value]) => value !== true || !IT_PROTOCOLS.some(p => p.key === key)) ||
+    Object.values(icsProtos).some(value => value !== true) || unsupportedICSKeys.length > 0 ||
+    Object.entries(cfg.dpiIcsParsing ?? {}).some(([key, value]) => value !== "tolerant" || !ICS_DPI_PROTOCOLS.some(p => p.key === key)) || exclusions.length > 0;
+  const [disclosure, setDisclosure] = useState<{ revision: string; open: boolean } | null>(null);
+  const expanded = disclosure?.revision === revision ? disclosure.open : nonDefault;
+
   const enabledProtoCount = IT_PROTOCOLS.filter(
     (p) => protos[p.key] !== false,
   ).length;
@@ -113,7 +120,7 @@ export function DPIConfigSection({
   return (
     <>
       <Card padding="md" className="mt-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-(--text)">
               Deep Packet Inspection
@@ -151,8 +158,8 @@ export function DPIConfigSection({
                 />
               </button>
             )}
-            <StatusBadge variant={dpiOn ? "success" : "neutral"} dot>
-              {dpiOn ? "Enabled" : "Disabled"}
+            <StatusBadge variant={available && dpiOn ? "success" : "neutral"} dot>
+              {!available ? "Unknown" : dpiOn ? "Enabled" : "Disabled"}
             </StatusBadge>
           </div>
         </div>
@@ -163,7 +170,12 @@ export function DPIConfigSection({
           </div>
         )}
 
-        {dpiOn && (
+        <div className="mt-3"><IEC104HealthIndicator health={health?.iec104Enforcement} /></div>
+        <button type="button" aria-expanded={expanded} aria-controls="dpi-settings" onClick={() => setDisclosure({ revision, open: !expanded })}
+          className="mt-3 rounded-xs border bg-(--surface2) px-2.5 py-1 text-xs text-(--text)">
+          DPI settings{unsupportedICSKeys.length > 0 ? " · unsupported settings" : nonDefault ? " · saved settings" : ""}
+        </button>
+        <div id="dpi-settings" hidden={!expanded}>
           <div className="mt-4 space-y-3">
             <div className="rounded-xs border bg-(--surface2) px-3 py-2">
               <div className="flex items-center justify-between">
@@ -225,9 +237,6 @@ export function DPIConfigSection({
                     {key} — unsupported
                   </span>
                 ))}
-              </div>
-              <div className="mt-2">
-                <IEC104HealthIndicator health={health?.iec104Enforcement} />
               </div>
             </div>
 
@@ -323,7 +332,7 @@ export function DPIConfigSection({
               metadata only (SNI, JA3) — full interception is planned.
             </div>
           </div>
-        )}
+        </div>
       </Card>
 
       {showProtoModal && (

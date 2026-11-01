@@ -57,6 +57,7 @@ async function openFirewall(
   const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/firewall/rules");
   await page.goto("/firewall/");
   await loaded;
+  await page.getByRole("button", { name: "Create rule", exact: true }).click();
   return { patches, creates };
 }
 

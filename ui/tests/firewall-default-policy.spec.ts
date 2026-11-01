@@ -73,7 +73,12 @@ test("view-only users see the default but no reorder or mutation controls", asyn
   const region = page.getByRole("region", { name: "Firewall rules" });
   await expect(region.getByRole("row", { name: "Default policy" })).toContainText("ALLOW");
   await expect(region.locator("tbody tr[id]")).toHaveCount(3);
-  await expect(region.getByRole("button")).toHaveCount(0);
+  const controls = region.getByRole("button");
+  await expect(controls.filter({ hasNotText: /^Details for / })).toHaveCount(0);
+  await expect(controls).toHaveCount(3);
+  await region.getByRole("button", { name: "Details for rule-0", exact: true }).click();
+  await expect(page.getByLabel("Details of rule-0", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Details of rule-0", { exact: true }).getByRole("button")).toHaveCount(0);
 });
 
 for (const count of [0, 3]) {

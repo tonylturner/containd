@@ -1,24 +1,23 @@
 "use client";
 
 import type { ShadowCounters } from "../../lib/api-shadow-counters";
-import { ShadowCountersCell, ShadowCountersNote } from "../ics/ics-shadow-counters";
+import { ShadowCountersNote } from "../ics/ics-shadow-counters";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { isAdmin, type FirewallRule, type Position, type Zone } from "../../lib/api";
 import { MoveRuleDialog } from "./firewall-rule-position";
-import { useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { FirewallDefaultRow, type DefaultAction } from "./firewall-default-row";
-import { summarizeIEC104 } from "../ics/iec104";
 import { ICSCoverageCell } from "../ics/ics-coverage";
 import type { ICSCoverageView } from "../ics/ics-coverage-model";
-import { summarizeGenericICS, formatICSMode, isSupportedICSProtocol } from "../ics/ics-shared";
+import { formatICSMode, isSupportedICSProtocol } from "../ics/ics-shared";
 import { zoneName } from "../../lib/zones";
 import { RuleCountersCell, RuleCountersNote, type CountersState } from "./firewall-rule-counters";
+import { FirewallRuleDetail } from "./firewall-rule-detail";
 import {
   actionInfo,
   actionVariant,
   formatRateLimit,
-  formatSchedule,
 } from "./firewall-rule-policy";
 
 /** States how ordered enforcing rules decide. */
@@ -48,25 +47,24 @@ function ActionCell({ rule }: { rule: FirewallRule }) {
   );
 }
 
-function ConditionsCell({ rule }: { rule: FirewallRule }) {
-  if (!rule.identities?.length && !rule.schedule && !rule.viaForwards?.length) return <>{"\u2014"}</>;
-  return (
-    <div className="space-y-1 text-xs">
-      {!!rule.viaForwards?.length && <div>via <span className="font-mono">{rule.viaForwards.join(", ")}</span></div>}
-      {!!rule.identities?.length && (
-        <div title="Opener bound to any of these identities">
-          <span className="text-(--text-dim)">identity </span>
-          <span className="font-mono">{rule.identities.join(", ")}</span>
-        </div>
-      )}
-      {rule.schedule && (
-        <div title="Recurring window">
-          <span className="text-(--text-dim)">schedule </span>
-          {formatSchedule(rule.schedule)}
-        </div>
-      )}
-    </div>
-  );
+/** Keep hidden matching constraints and monitor telemetry discoverable. */
+function RuleIndicators({ rule, dpiMode, shadowCounters }: {
+  rule: FirewallRule; dpiMode?: string; shadowCounters: ShadowCounters | null;
+}) {
+  const count = shadowCounters?.available ? shadowCounters.rules.find(c => c.ruleId === rule.id) : undefined;
+  const monitor = !!rule.ics?.protocol && formatICSMode(rule.ics.mode, dpiMode).effectiveMode === "monitor";
+  return <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+    {(rule.sources?.length || rule.destinations?.length || rule.identities?.length || rule.schedule || rule.viaForwards?.length)
+      ? <StatusBadge variant="neutral">has conditions</StatusBadge> : null}
+    {rule.ics?.protocol && <>
+      <StatusBadge variant="neutral">ICS Filter: {rule.ics.protocol}</StatusBadge>
+      <StatusBadge variant="neutral">{formatICSMode(rule.ics.mode, dpiMode).label}</StatusBadge>
+      {!isSupportedICSProtocol(rule.ics.protocol) && <StatusBadge variant="warning">unsupported</StatusBadge>}
+    </>}
+    {rule.log && <StatusBadge variant="info">Log: on</StatusBadge>}
+    {count && count.shadowMatches > 0 && <StatusBadge variant="warning">Shadow matches: {count.shadowMatches.toLocaleString()} messages</StatusBadge>}
+    {monitor && !count && <StatusBadge variant="neutral">Shadow matches: {!shadowCounters ? "checking" : !shadowCounters.available ? "unavailable" : "not applied yet"}</StatusBadge>}
+  </div>;
 }
 
 /** The firewall page's rule list. */
@@ -95,6 +93,7 @@ export function FirewallRuleTable({
   onMove: (id: string, position: Position) => void;
   moving: boolean;
 }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [moveTarget, setMoveTarget] = useState<FirewallRule | null>(null);
   const moveControl = useRef<HTMLButtonElement | null>(null);
   useLayoutEffect(() => {
@@ -108,121 +107,105 @@ export function FirewallRuleTable({
     moveControl.current = null;
   }, [moving, rules]);
   return (
-    <section aria-label="Firewall rules">
+    <section aria-label="Firewall rules" className="min-w-0">
       <RulePrecedenceNote />
       <RuleCountersNote counters={counters} />
-      <ShadowCountersNote counters={shadowCounters} />
+      {shadowCounters && !shadowCounters.available
+        ? <div role="status" aria-label="Shadow counters" className="mb-2 text-xs text-(--text-muted)">
+          Monitor counts unavailable.<p className="break-words">{shadowCounters.reason}</p>
+        </div>
+        : <ShadowCountersNote counters={shadowCounters} />}
       <div className="overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
             <tr>
               <th className="px-3 py-3">Order</th>
-              <th className="px-3 py-3">ID</th>
               <th className="px-3 py-3">Description</th>
               <th className="px-3 py-3">Zones</th>
               <th className="px-3 py-3">Protocols</th>
-              <th className="px-3 py-3">Conditions</th>
-              <th className="px-3 py-3">ICS Filter</th>
               <th className="px-3 py-3">Action</th>
               <th className="px-3 py-3">Hits</th>
-              <th className="px-3 py-3">Shadow matches</th>
-              <th className="px-3 py-3">Log</th>
               <th className="px-3 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {rules.length === 0 && (
               <tr>
-                <td className="px-4 py-4" colSpan={12}>
+                <td className="px-4 py-4" colSpan={7}>
                   <EmptyState
                     title="No firewall rules configured"
-                    description="Create rules below to control traffic between zones."
+                    description="Use Create rule below to control traffic between zones."
                   />
                 </td>
               </tr>
             )}
             {rules.map((r, index) => (
-              <tr key={r.id} id={`rule-${r.id}`} className="border-t table-row-hover transition-ui">
-                <td className="px-3 py-3 font-mono">
-                  <div className="flex items-center gap-1 whitespace-nowrap">
-                    <span aria-label={`Position ${index + 1}`} className="mr-1">{index + 1}</span>
+              <Fragment key={r.id}>
+                <tr id={`rule-${r.id}`} className="border-t table-row-hover transition-ui">
+                  <td className="px-3 py-3 font-mono">
+                    <div className="flex items-center gap-1 whitespace-nowrap">
+                      <span aria-label={`Position ${index + 1}`} className="mr-1">{index + 1}</span>
+                      {isAdmin() && (
+                        <>
+                          <button disabled={moving || index === 0} aria-label={`Move ${r.id} up`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { before: rules[index - 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↑</button>
+                          <button disabled={moving || index === rules.length - 1} aria-label={`Move ${r.id} down`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { after: rules[index + 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↓</button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-(--text)">
+                    <div className="max-w-72 break-words">{r.description || "\u2014"}</div>
+                    <div className="mt-1 font-mono text-xs break-all"><span className="text-(--text-dim)">ID: </span><span data-rule-id>{r.id}</span></div>
+                    <RuleIndicators rule={r} dpiMode={dpiMode} shadowCounters={shadowCounters} />
+                    {r.ics?.protocol && <div className="mt-2"><ICSCoverageCell view={coverage} ruleId={r.id} /></div>}
+                    <button type="button" aria-expanded={expanded.has(r.id)} aria-controls={`rule-detail-${r.id}`}
+                      onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(r.id)) next.delete(r.id); else next.add(r.id); return next; })}
+                      className="mt-2 rounded-xs border bg-(--surface2) px-2 py-1 text-xs">
+                      Details for {r.id}
+                    </button>
+                  </td>
+                  <td className="px-3 py-3 text-(--text)">
+                    {(r.sourceZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}{" \u2192 "}
+                    {(r.destZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}
+                  </td>
+                  <td className="px-3 py-3 text-(--text)">
+                    {(r.protocols ?? []).map((p) => `${p.name}${p.port ? ":" + p.port : ""}`).join(", ") || "any"}
+                  </td>
+                  <td className="px-3 py-3">
+                    <ActionCell rule={r} />
+                  </td>
+                  <td className="px-3 py-3">
+                    <RuleCountersCell rule={r} counters={counters} compact />
+                  </td>
+                  <td className="px-3 py-3 text-right">
                     {isAdmin() && (
                       <>
-                        <button disabled={moving || index === 0} aria-label={`Move ${r.id} up`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { before: rules[index - 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↑</button>
-                        <button disabled={moving || index === rules.length - 1} aria-label={`Move ${r.id} down`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { after: rules[index + 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↓</button>
+                        <div className="mb-2 flex items-center justify-end gap-2">
+                          <button disabled={moving} onClick={() => setMoveTarget(r)} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">Move to…</button>
+                        </div>
+                        {(!r.ics?.protocol || isSupportedICSProtocol(r.ics.protocol)) ? (
+                          <button onClick={() => onEdit(r)} className="mr-2 rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Edit</button>
+                        ) : (
+                          <span className="mr-2 text-xs text-(--text-muted)" title="Unsupported ICS rules are read-only; delete this rule to remove it.">Read-only</span>
+                        )}
+                        <button
+                          onClick={() => onDelete(r.id)}
+                          className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
+                        >
+                          Delete
+                        </button>
                       </>
                     )}
-                  </div>
-                </td>
-                <td className="px-3 py-3 font-mono text-xs text-(--text)">{r.id}</td>
-                <td className="px-3 py-3 text-(--text)">{r.description || "\u2014"}</td>
-                <td className="px-3 py-3 text-(--text)">
-                  {(r.sourceZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}{" \u2192 "}
-                  {(r.destZones ?? []).map((z) => zoneName(zones, z)).join(", ") || "any"}
-                </td>
-                <td className="px-3 py-3 text-(--text)">
-                  {(r.protocols ?? []).map((p) => `${p.name}${p.port ? ":" + p.port : ""}`).join(", ") || "any"}
-                </td>
-                <td className="px-3 py-3 text-(--text)">
-                  <ConditionsCell rule={r} />
-                </td>
-                <td className="px-3 py-3 text-(--text)">
-                  {r.ics?.protocol ? (
-                    <div className="space-y-1.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge variant="neutral">
-                          {formatICSMode(r.ics.mode, dpiMode).label}
-                        </StatusBadge>
-                        <span className="text-xs text-(--text)">
-                          {r.ics.protocol === "iec104"
-                            ? `iec104 ${summarizeIEC104(r.ics).types} ${summarizeIEC104(r.ics).addresses}`
-                            : `${r.ics.protocol} ${summarizeGenericICS(r.ics)}`}
-                        </span>
-                        {!isSupportedICSProtocol(r.ics.protocol) && (
-                          <StatusBadge variant="warning">unsupported</StatusBadge>
-                        )}
-                      </div>
-                      <ICSCoverageCell view={coverage} ruleId={r.id} />
+                  </td>
+                </tr>
+                <tr hidden={!expanded.has(r.id)} className="border-t bg-(--surface2)">
+                  <td colSpan={7} className="px-4 py-4">
+                    <div id={`rule-detail-${r.id}`}>
+                      {expanded.has(r.id) && <FirewallRuleDetail rule={r} dpiMode={dpiMode} counters={counters} shadowCounters={shadowCounters} />}
                     </div>
-                  ) : "\u2014"}
-                </td>
-                <td className="px-3 py-3">
-                  <ActionCell rule={r} />
-                </td>
-                <td className="px-3 py-3">
-                  <RuleCountersCell rule={r} counters={counters} />
-                </td>
-                <td className="px-3 py-3">
-                  <ShadowCountersCell rule={r} globalMode={dpiMode} counters={shadowCounters} />
-                </td>
-                <td className="px-3 py-3">
-                  {r.log ? (
-                    <StatusBadge variant="info">log</StatusBadge>
-                  ) : (
-                    <span className="text-xs text-(--text-muted)">&mdash;</span>
-                  )}
-                </td>
-                <td className="px-3 py-3 text-right">
-                  {isAdmin() && (
-                    <>
-                      <div className="mb-2 flex items-center justify-end gap-2">
-                        <button disabled={moving} onClick={() => setMoveTarget(r)} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">Move to…</button>
-                      </div>
-                      {(!r.ics?.protocol || isSupportedICSProtocol(r.ics.protocol)) ? (
-                        <button onClick={() => onEdit(r)} className="mr-2 rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Edit</button>
-                      ) : (
-                        <span className="mr-2 text-xs text-(--text-muted)" title="Unsupported ICS rules are read-only; delete this rule to remove it.">Read-only</span>
-                      )}
-                      <button
-                        onClick={() => onDelete(r.id)}
-                        className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
+                  </td>
+                </tr>
+              </Fragment>
             ))}
             <FirewallDefaultRow action={defaultAction} />
           </tbody>

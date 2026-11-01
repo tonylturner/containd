@@ -16,20 +16,15 @@ export function FirewallDefaultRow({ action }: { action: DefaultAction }) {
   return (
     <tr className="border-t bg-(--surface2)" aria-label="Default policy">
       <th scope="row" className="px-3 py-3 text-left font-semibold">Default</th>
-      <td className="px-3 py-3 text-xs text-(--text-muted)">—</td>
       <td className="px-3 py-3 text-xs text-(--text-muted)">
         Applies when no enforcing rule allows, blocks or rejects traffic.
         {action === "ALLOW" && <div className="mt-1 text-amber">Unmatched traffic allowed</div>}
       </td>
       <td className="whitespace-nowrap px-3 py-3">any → any</td>
       <td className="px-3 py-3">any</td>
-      <td className="px-3 py-3">—</td>
-      <td className="px-3 py-3">—</td>
       <td className="whitespace-nowrap px-3 py-3">
         <StatusBadge variant={action === "DENY" ? "error" : "warning"}>{action}</StatusBadge>
       </td>
-      <td className="px-3 py-3">—</td>
-      <td className="px-3 py-3">—</td>
       <td className="px-3 py-3">—</td>
       <td className="px-3 py-3 text-right text-xs text-(--text-muted)">Read-only</td>
     </tr>

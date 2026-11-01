@@ -68,16 +68,17 @@ async function openFirewall(page: Page, hash = "") {
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
   await page.goto(`/firewall/${hash}`);
   await loaded;
+  await page.getByRole("button", { name: "Create rule", exact: true }).click();
   return { moves, revisions, creates, patches, reject: () => { rejectMove = true; }, remove: (id: string) => { rules = rules.filter((r) => r.id !== id); } };
 }
 
 function ruleRow(page: Page, id: string) {
-  return page.getByRole("row").filter({ has: page.getByRole("cell", { name: id, exact: true }) });
+  return page.getByRole("row").filter({ has: page.getByText(id, { exact: true }) });
 }
 
 async function expectOrder(page: Page, ids: string[]) {
   const rows = page.getByRole("region", { name: "Firewall rules" }).locator("tbody tr[id]");
-  await expect(rows.locator("td:nth-child(2)")).toHaveText(ids);
+  await expect(rows.locator("[data-rule-id]")).toHaveText(ids);
   await expect(rows.locator("td:first-child span")).toHaveText(ids.map((_, i) => String(i + 1)));
 }
 
