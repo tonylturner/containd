@@ -397,24 +397,27 @@ or partial final record; `stats.displayTruncated` means only the display sample
 was capped. Check `dataset.gaps` separately for collection and admission loss.
 Recorded loss excludes every connection it could have touched from generation
 and direct certification, with durable `collection_loss` withheld counts.
-Known-connection loss excludes that incarnation; interval-only loss excludes
-connections whose observed lifetimes overlap it. Loss without either identity
-or interval, including legacy unlocalized gaps, excludes the entire dataset.
-Connections fully outside localized loss remain eligible. Dataset `losses`
-retains each loss code with its connection identity or inclusive `start`/`end`
-capture-time interval when known; `gaps` retains certification-related summary
-codes.
+Known-connection loss excludes that incarnation. Coordinate-scoped loss excludes
+all matching wire connections in either direction, across every incarnation:
+with ports, the five-tuple; without ports, the host pair and transport protocol.
+There is no observation-time bound: the first and last retained messages do not
+prove when a connection opened or closed. Missing scope, including legacy
+unlocalized gaps and timestamp-only losses, excludes the entire dataset.
+Dataset `losses` retains each code with `connectionId` or `scope` (source and
+destination endpoints, `transport`, and `ports`, which indicates whether ports
+are authoritative). Historical `start`/`end` fields remain readable but cannot
+prove a connection disjoint. `gaps` retains certification-related summary codes.
 
 Loss scopes depend on the available authority:
 
 | Code | Scope |
 | --- | --- |
-| `capture_loss` | Live transport overflow or IP truncation: authoritative connection incarnation when known; capture-time instant otherwise. |
-| `capture_truncated` | Each offline cut record or IP-length truncation: offline connection incarnation, or its capture-time instant if headers do not decode. A partial final record header has no trustworthy time or tuple and excludes the dataset. |
-| `watch_collection_loss`, `budget_exceeded` | Rejected decoded batch or parent: known connection incarnation; timestamp-only decoded drops use an inclusive capture-time instant. Missing identity and time exclude the dataset. |
+| `capture_loss` | Live transport overflow is retained synchronously at admission, even if Stop, deadline or policy change precedes worker processing. Overflow and IP truncation use wire five-tuple scope when ports are captured, otherwise host-pair/transport scope. Worker-resolved loss can additionally retain an authoritative incarnation. |
+| `capture_truncated` | Offline cut record or IP-length truncation: wire five-tuple when ports are captured, otherwise host-pair/transport. Missing IP coordinates, an unreadable EtherType or a header-less final record excludes the dataset. Opaque IPv6 extension chains remain conservative, not unrelated. |
+| `watch_collection_loss`, `budget_exceeded` | Rejected decoded batch or parent: known connection incarnation; missing identity excludes the dataset, never just an observation-time interval. |
 | `watch_restart`, `policy_changed` | Dataset-wide: wall-clock watch bounds cannot delimit packet timestamps after clock skew or capture lag. |
-| `watch_storage_loss`, `import_failed`, `ingest_failed`, `interrupted_import`, `collection_loss` | Dataset-wide, including legacy unlocalized gaps and exhausted loss-localization capacity. |
-| `outcome_loss` | Counted in `losses` and lost-batch counters, not `gaps`: decision/delivery annotations are not certification inputs and do not exclude connections. |
+| `watch_storage_loss`, `import_failed`, `ingest_failed`, `interrupted_import`, `collection_loss` | Dataset-wide, including collector initialization/storage failure, legacy unlocalized gaps and exhausted loss-localization capacity. Failed automatic stops retry with their retained loss authority. |
+| `outcome_loss`, `capture_unrelated` | Counted in `losses`, not `gaps`, without excluding certification inputs. Decision/delivery annotations, cut frames with a readable non-IP EtherType (including VLAN tags), and known non-TCP/UDP IP protocols cannot carry learner parents. |
 
 A dataset retains at most 1,024 loss entries. Beyond that bound, localization
 collapses to one dataset-wide `collection_loss`, rather than dropping exclusions.

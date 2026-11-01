@@ -6,8 +6,9 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics"
-	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/dp/rules"
+	"github.com/tonylturner/containd/pkg/evidence"
 )
 
 // InspectionSnapshot keeps offline imports and watch fingerprints bound to the
@@ -65,7 +66,21 @@ func (e *Engine) recordLearnEvents(state *flow.State, evs []dpi.Event) {
 	if hook := e.learnWatch.Load(); hook != nil && state != nil {
 		e.flowMu.Lock()
 		snapshot := *state
+		var lossPacket capture.Packet
+		knownLoss := false
+		if r := e.transport; r != nil {
+			r.admissionMu.Lock()
+			if c := e.transportCoverage[state].root(); c != nil && c.lost {
+				lossPacket, knownLoss = c.packet, true
+			}
+			r.admissionMu.Unlock()
+		}
 		e.flowMu.Unlock()
+		// A watch may start with a preexisting loss notice still pending.
+		// Never admit a parent from that marked connection as clean.
+		if knownLoss {
+			e.recordLearnCaptureLoss(lossPacket, snapshot.Connection.Load())
+		}
 		hook.offer(&snapshot, evs)
 	}
 }
@@ -76,10 +91,30 @@ func (e *Engine) recordLearnOutcome(events []dpi.Event) {
 	}
 }
 
-// Capture loss is authority even when semantic decoding has stopped. Unknown
-// incarnations retain only capture time, never a tuple masquerading as identity.
+// SetLearnLossHook fences synchronous loss admissions independently of the
+// semantic queue. Disabling waits for every already-entered callback to finish.
+// The callback must be nonblocking and must not reenter this hook setter.
+func (e *Engine) SetLearnLossHook(offer func(evidence.CollectionLoss)) {
+	// Admission records coverage before invoking the hook. Fence that whole
+	// critical section, not just callbacks that already acquired learnLossMu.
+	if r := e.transport; r != nil {
+		r.admissionMu.Lock()
+		defer r.admissionMu.Unlock()
+	}
+	e.learnLossMu.Lock()
+	defer e.learnLossMu.Unlock()
+	e.learnLoss = offer
+}
+
 func (e *Engine) recordLearnCaptureLoss(pkt capture.Packet, connection *flow.Connection) {
-	if hook := e.learnWatch.Load(); hook != nil {
-		hook.offer(nil, []dpi.Event{{Kind: eventfields.KindCoverageLoss, Timestamp: pkt.Timestamp, Connection: connection}})
+	loss := learn.CaptureLoss(pkt, "capture_loss")
+	if connection != nil {
+		loss.ConnectionID = connection.Key
+		loss.Scope = evidence.LossScope{}
+	}
+	e.learnLossMu.RLock()
+	defer e.learnLossMu.RUnlock()
+	if e.learnLoss != nil {
+		e.learnLoss(loss)
 	}
 }

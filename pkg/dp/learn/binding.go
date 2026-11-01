@@ -4,7 +4,6 @@ package learn
 
 import (
 	"context"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
@@ -17,9 +16,9 @@ import (
 const observationBindingAuthority = "observation_binding"
 
 // PortDecoderAuthority identifies role evidence from an adapter that retains
-// connection binding exclusions. Historical "decoder_and_connection" records
-// discarded that authority and must be reimported or recollected, not trusted.
-const PortDecoderAuthority = "port_decoder_and_connection"
+// connection binding and loss exclusions. Historical authorities without the
+// corrected loss scope must be reimported or recollected, not trusted.
+const PortDecoderAuthority = "port_decoder_and_connection_loss_scope"
 
 // WithheldObservationBinding excludes all parents on an observation binding.
 const WithheldObservationBinding evidence.WithheldReason = "observation_binding"
@@ -54,7 +53,6 @@ func connectionExclusion(o evidence.Observation) evidence.WithheldReason {
 // message timestamp; confirmation may follow every usable legacy parent.
 func connectionExclusions(ctx context.Context, store evidence.Store, dataset evidence.Dataset) (map[string]evidence.WithheldReason, error) {
 	excluded := map[string]evidence.WithheldReason{}
-	lifetimes := map[string]connectionLifetime{}
 	cursor := ""
 	for {
 		page, err := store.ListObservations(ctx, dataset.ID, evidence.PageRequest{Limit: 200, Cursor: cursor})
@@ -63,45 +61,25 @@ func connectionExclusions(ctx context.Context, store evidence.Store, dataset evi
 		}
 		for _, o := range page.Items {
 			recordConnectionExclusion(excluded, o)
-			recordLifetime(lifetimes, o)
+			recordLossExclusion(dataset, excluded, o)
 		}
 		cursor = page.NextCursor
 		if cursor == "" {
-			excludeLoss(dataset, lifetimes, excluded)
 			return excluded, nil
 		}
 	}
 }
 
-type connectionLifetime struct {
-	first, last time.Time
-	unknown     bool
-}
-
-func recordLifetime(lifetimes map[string]connectionLifetime, o evidence.Observation) {
-	life, found := lifetimes[o.ConnectionID]
-	life.unknown = life.unknown || o.CapturedAt.IsZero()
-	if !found || o.CapturedAt.Before(life.first) {
-		life.first = o.CapturedAt
-	}
-	if !found || o.CapturedAt.After(life.last) {
-		life.last = o.CapturedAt
-	}
-	lifetimes[o.ConnectionID] = life
-}
-
-func excludeLoss(ds evidence.Dataset, lifetimes map[string]connectionLifetime, excluded map[string]evidence.WithheldReason) {
-	for connection, life := range lifetimes {
-		if life.unknown {
-			life.first = time.Time{}
-		}
-		if ds.LossTouches(connection, life.first, life.last) {
-			excluded[connection] = evidence.WithheldCollectionLoss
-		}
+func recordLossExclusion(ds evidence.Dataset, excluded map[string]evidence.WithheldReason, o evidence.Observation) {
+	if ds.LossTouches(o.ConnectionID, o.Authority.Wire) {
+		excluded[o.ConnectionID] = evidence.WithheldCollectionLoss
 	}
 }
 
 func recordConnectionExclusion(excluded map[string]evidence.WithheldReason, o evidence.Observation) {
+	if excluded[o.ConnectionID] == evidence.WithheldCollectionLoss {
+		return
+	}
 	reason := connectionExclusion(o)
 	// A known observation binding is more specific than missing authority.
 	if reason != "" && excluded[o.ConnectionID] != WithheldObservationBinding {

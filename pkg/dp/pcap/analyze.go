@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/evidence"
 )
 
@@ -75,12 +76,8 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 	}
 
 	var firstTS, lastTS time.Time
-	loss := func(connection string, ts time.Time) {
+	loss := func(l evidence.CollectionLoss) {
 		if opts.OnLoss != nil {
-			l := evidence.CollectionLoss{Code: "capture_truncated", ConnectionID: connection}
-			if connection == "" {
-				l.Start, l.End = ts, ts
-			}
 			opts.OnLoss(l)
 		}
 	}
@@ -96,7 +93,7 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 			}
 			result.Truncated = true
 			if data == nil {
-				loss("", time.Time{})
+				loss(evidence.CollectionLoss{Code: "capture_truncated"})
 				break // incomplete record header: no trustworthy tuple
 			}
 		}
@@ -111,7 +108,7 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 		result.Truncated = result.Truncated || truncated
 		if !ok {
 			if truncated {
-				loss("", ts)
+				loss(packetTruncationLoss(data, pkt))
 			}
 			continue
 		}
@@ -132,11 +129,7 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 		}
 		observer.record(observer.packet(pkt, state, ts, truncated), result, flowEvents)
 		if truncated {
-			connection := ""
-			if c := state.Connection.Load(); c != nil {
-				connection = c.Key
-			}
-			loss(connection, ts)
+			loss(packetTruncationLoss(data, pkt))
 		}
 		var events []dpi.Event
 		if pkt.Invalid == "" && !truncated {
@@ -319,7 +312,7 @@ func decodeEthernetPacket(data []byte) (capture.Packet, bool) {
 	ipData := data[14:]
 
 	// Handle 802.1Q VLAN tagging.
-	if etherType == 0x8100 {
+	for etherType == 0x8100 || etherType == 0x88a8 {
 		if len(ipData) < 4 {
 			return capture.Packet{}, false
 		}
@@ -329,6 +322,29 @@ func decodeEthernetPacket(data []byte) (capture.Packet, bool) {
 	if etherType != 0x0800 && etherType != 0x86DD {
 		return capture.Packet{}, false
 	}
+	if len(ipData) == 0 || etherType == 0x0800 && ipData[0]>>4 != 4 || etherType == 0x86dd && ipData[0]>>4 != 6 {
+		return capture.Packet{}, false
+	}
 	pkt := capture.DecodeIPPacket(ipData)
 	return pkt, pkt.Invalid == "" || pkt.Invalid == capture.InvalidTruncated && pkt.TCP.Valid
+}
+
+// A readable non-IP EtherType proves that this record cannot contain learner
+// inputs. Missing link/IP authority remains dataset-wide, not timestamp-scoped.
+func packetTruncationLoss(data []byte, pkt capture.Packet) evidence.CollectionLoss {
+	if len(data) >= 14 {
+		typ := binary.BigEndian.Uint16(data[12:14])
+		offset := 14
+		for typ == 0x8100 || typ == 0x88a8 {
+			if len(data) < offset+4 {
+				return evidence.CollectionLoss{Code: "capture_truncated"}
+			}
+			typ = binary.BigEndian.Uint16(data[offset+2 : offset+4])
+			offset += 4
+		}
+		if typ != 0x0800 && typ != 0x86dd {
+			return evidence.CollectionLoss{Code: "capture_unrelated"}
+		}
+	}
+	return learn.CaptureLoss(pkt, "capture_truncated")
 }

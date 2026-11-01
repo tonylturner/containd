@@ -243,6 +243,8 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 			return err
 		}
 		batchHeadroom = batchHeadroom && records+uint64(len(req.Parents)) <= s.limits.MaxRecords && bytes+reserve <= s.limits.MaxBytes
+		var pending []parentInsert
+		pendingDigests := make(map[string]string, len(req.Parents))
 		for _, parent := range req.Parents {
 			collected := req.CollectedAt
 			if collected.IsZero() {
@@ -273,6 +275,13 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 			parent.ID, err = evidence.Digest([]string{d.ID, parent.ConnectionID, parent.ParentID})
 			if err != nil {
 				return err
+			}
+			if prior, found := pendingDigests[parent.ID]; found {
+				if prior != parent.ParentDigest {
+					return ErrConflict
+				}
+				result.Duplicates++
+				continue
 			}
 			var existing []byte
 			err = tx.QueryRowContext(ctx, `SELECT data FROM parents WHERE id=?`, parent.ID).Scan(&existing)
@@ -318,12 +327,22 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 				d.RecordLoss(evidence.CollectionLoss{Code: "budget_exceeded", ConnectionID: parent.ConnectionID})
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO parents(id,dataset,expires,data) VALUES(?,?,?,?)`, parent.ID, d.ID, parent.IngestedAt.Add(evidence.Retention).UnixNano(), b); err != nil {
-				return err
+			pending = append(pending, parentInsert{parent.ID, parent.IngestedAt.Add(evidence.Retention).UnixNano(), b})
+			pendingDigests[parent.ID] = parent.ParentDigest
+			if !batchHeadroom {
+				// Pressure admission must see each preceding row's real page
+				// and gauge usage before deciding what fits or may be evicted.
+				if err := insertParents(ctx, tx, d.ID, pending); err != nil {
+					return err
+				}
+				pending = nil
 			}
 			d.Records++
 			d.Bytes += uint64(len(b))
 			result.Accepted++
+		}
+		if err := insertParents(ctx, tx, d.ID, pending); err != nil {
+			return err
 		}
 		// fit may have updated eviction counters; do not overwrite those.
 		current, err := counters(ctx, tx)

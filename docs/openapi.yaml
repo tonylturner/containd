@@ -954,6 +954,13 @@ components:
       - allObjects
       - spans
       type: object
+    LearnLossEndpoint:
+      type: object
+      additionalProperties: false
+      required: [ip, port]
+      properties:
+        ip: {type: string}
+        port: {type: integer, minimum: 0, maximum: 65535}
     LearnDataset:
       additionalProperties: false
       properties:
@@ -980,7 +987,7 @@ components:
         losses:
           type: array
           maxItems: 1024
-          description: Durable loss scope. Known connections are excluded in full; otherwise inclusive capture-time intervals exclude overlapping observed connection lifetimes. Missing scope and legacy gaps exclude the entire dataset. outcome_loss counts annotation loss without excluding certification inputs. Localization exhaustion collapses to one dataset-wide collection_loss.
+          description: Durable loss scope. Known incarnations are excluded in full. Coordinate scope matches both wire directions across every incarnation, using ports when authoritative and otherwise host pair plus transport. Observation timestamps never delimit connection lifetime. Missing scope, legacy timestamp-only losses and legacy gaps exclude the dataset. outcome_loss and capture_unrelated do not exclude certification inputs. Localization exhaustion collapses to dataset-wide collection_loss.
           items:
             type: object
             additionalProperties: false
@@ -988,8 +995,17 @@ components:
             properties:
               code: {type: string}
               connectionId: {type: string}
-              start: {type: string, format: date-time}
-              end: {type: string, format: date-time}
+              scope:
+                type: object
+                additionalProperties: false
+                required: [source, destination, transport, ports]
+                properties:
+                  source: {$ref: '#/components/schemas/LearnLossEndpoint'}
+                  destination: {$ref: '#/components/schemas/LearnLossEndpoint'}
+                  transport: {type: string, enum: [tcp, udp]}
+                  ports: {type: boolean, description: Whether both endpoint ports are authoritative.}
+              start: {type: string, format: date-time, deprecated: true, description: Historical capture time; not a lifecycle bound.}
+              end: {type: string, format: date-time, deprecated: true, description: Historical capture time; not a lifecycle bound.}
         id:
           type: string
         profileFingerprint:
@@ -4840,7 +4856,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       description: Imports normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly
         generate suggestions after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import
-        has bounded flow and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; interval-only loss excludes overlapping observed connection lifetimes. Loss without either identity or interval, including legacy gaps, excludes the entire dataset; connections fully outside localized loss remain eligible.
+        has bounded flow and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; coordinate-scoped loss excludes matching wire tuples or host pairs across every incarnation, in either direction. Missing scope and legacy timestamp-only loss exclude the dataset; retained message times are not lifecycle bounds. capture_unrelated counts cut non-IP or known non-TCP/UDP traffic without excluding inputs.
   /pcap/analyze/{name}:
     post:
       summary: Analyze a previously uploaded PCAP by name (admin)
@@ -4892,7 +4908,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       description: Imports normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly
         generate suggestions after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import
-        has bounded flow and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; interval-only loss excludes overlapping observed connection lifetimes. Loss without either identity or interval, including legacy gaps, excludes the entire dataset; connections fully outside localized loss remain eligible.
+        has bounded flow and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; coordinate-scoped loss excludes matching wire tuples or host pairs across every incarnation, in either direction. Missing scope and legacy timestamp-only loss exclude the dataset; retained message times are not lifecycle bounds. capture_unrelated counts cut non-IP or known non-TCP/UDP traffic without excluding inputs.
 
   # ── ICS Rule Templates ──────────────────────────────────────────
   /templates/ics:
@@ -7868,7 +7884,7 @@ x-internal-paths:
       description: Engine-internal trusted management boundary; never exposed as a public management route. Imports
         normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly generate suggestions
         after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import has bounded flow
-        and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; interval-only loss excludes overlapping observed connection lifetimes. Loss without either identity or interval, including legacy gaps, excludes the entire dataset; connections fully outside localized loss remain eligible.
+        and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; coordinate-scoped loss excludes matching wire tuples or host pairs across every incarnation, in either direction. Missing scope and legacy timestamp-only loss exclude the dataset; retained message times are not lifecycle bounds. capture_unrelated counts cut non-IP or known non-TCP/UDP traffic without excluding inputs.
       security: []
   /internal/pcap/analyze/{name}:
     post:
@@ -7922,7 +7938,7 @@ x-internal-paths:
       description: Engine-internal trusted management boundary; never exposed as a public management route. Imports
         normalized wire-coordinate evidence in the engine only. No rules are returned; explicitly generate suggestions
         after sealing. Does not stage or commit policy. Classic PCAP only, maximum 64 MiB; import has bounded flow
-        and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; interval-only loss excludes overlapping observed connection lifetimes. Loss without either identity or interval, including legacy gaps, excludes the entire dataset; connections fully outside localized loss remain eligible.
+        and display resources. Collection and admission loss exclude every connection they could have touched from generation and direct certification, with durable collection_loss withheld counts. Known-connection loss excludes that incarnation; coordinate-scoped loss excludes matching wire tuples or host pairs across every incarnation, in either direction. Missing scope and legacy timestamp-only loss exclude the dataset; retained message times are not lifecycle bounds. capture_unrelated counts cut non-IP or known non-TCP/UDP traffic without excluding inputs.
       security: []
   /internal/learn/watches:
     post:

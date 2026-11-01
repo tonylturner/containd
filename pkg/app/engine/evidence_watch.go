@@ -13,7 +13,6 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/flow"
-	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/evidence"
 	"github.com/tonylturner/containd/pkg/evidence/sqlite"
@@ -122,18 +121,7 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 		lease.changed.Store(true)
 		return
 	}
-	// Coverage notifications are authority, not semantic parents. Keep them
-	// out of the lossy work queue and bind the transport's exact incarnation.
-	for _, ev := range events {
-		if ev.Kind == eventfields.KindCoverageLoss {
-			lease.lossMu.Lock()
-			loss := droppedEventLoss(state, ev)
-			loss.Code = "capture_loss"
-			lease.addLossLocked(loss)
-			lease.lossMu.Unlock()
-			return
-		}
-	}
+
 	owned, size, ok := ownEvidenceEvents(events)
 	if !ok {
 		lease.drop(state, events)
@@ -217,15 +205,7 @@ func (w *evidenceWatch) maintain(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if lease := w.active.Load(); lease != nil {
-				if w.engine.InspectionToken() != lease.token {
-					lease.changed.Store(true)
-				}
-				if lease.changed.Load() || !w.store.Clock().Before(lease.watch.Deadline) {
-					_, err := w.stop(ctx, lease.watch.ID)
-					w.fail(err)
-				}
-			}
+			w.maintainWatch(ctx)
 			w.mu.Lock()
 			if w.err() == nil {
 				w.fail(w.store.Maintain(ctx))
@@ -234,6 +214,28 @@ func (w *evidenceWatch) maintain(ctx context.Context) {
 		}
 	}
 }
+
+// Retry detached automatic stops as well as checking active watch boundaries.
+func (w *evidenceWatch) maintainWatch(ctx context.Context) {
+	w.mu.Lock()
+	lease := w.active.Load()
+	detached := lease == nil
+	if detached {
+		lease = w.stopping
+	}
+	w.mu.Unlock()
+	if lease == nil {
+		return
+	}
+	if !detached && w.engine.InspectionToken() != lease.token {
+		lease.changed.Store(true)
+	}
+	if detached || lease.changed.Load() || !w.store.Clock().Before(lease.watch.Deadline) {
+		_, err := w.stop(ctx, lease.watch.ID)
+		w.fail(err)
+	}
+}
+
 func (w *evidenceWatch) start(ctx context.Context, req evidence.StartWatchRequest) (evidence.Watch, error) {
 	if lease := w.active.Load(); lease != nil && !w.store.Clock().Before(lease.watch.Deadline) {
 		if _, err := w.stop(ctx, lease.watch.ID); err != nil {
@@ -258,21 +260,39 @@ func (w *evidenceWatch) start(ctx context.Context, req evidence.StartWatchReques
 	if err != nil {
 		return watch, err
 	}
+	// Retain cleanup authority before any subsequent fallible initialization.
+	lease := &watchLease{dataset: evidence.Dataset{ID: watch.DatasetID}, watch: watch}
+	w.stopping = lease
+	defer func() {
+		if w.stopping == lease {
+			lease.lossMu.Lock()
+			lease.addLossLocked(evidence.CollectionLoss{Code: "watch_storage_loss"})
+			lease.lossMu.Unlock()
+		}
+	}()
 	ds, err := w.store.GetDataset(ctx, watch.DatasetID)
 	if err != nil {
+		w.fail(err)
 		return watch, err
 	}
 	inputs := w.engine.InspectionSnapshot()
 	metadata, err := evidenceMetadataFrom(inputs)
 	if err != nil {
+		w.fail(err)
 		return watch, err
 	}
-	lease := &watchLease{dataset: ds, watch: watch, token: inputs.Token}
+	lease.dataset, lease.token = ds, inputs.Token
 	if metadata.ProfileFingerprint != ds.ProfileFingerprint || metadata.SnapshotFingerprint != ds.SnapshotFingerprint {
 		lease.changed.Store(true)
 	}
 	w.active.Store(lease)
+	w.engine.SetLearnLossHook(func(loss evidence.CollectionLoss) {
+		lease.lossMu.Lock()
+		lease.addLossLocked(loss)
+		lease.lossMu.Unlock()
+	})
 	w.engine.SetLearnWatchHook(w.offer)
+	w.stopping = nil
 	return watch, nil
 }
 func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch, outErr error) {
@@ -293,12 +313,19 @@ func (w *evidenceWatch) stop(ctx context.Context, id string) (out evidence.Watch
 		return watch, err
 	}
 	if lease == nil || lease.dataset.ID != watch.DatasetID {
+		if watch.StoppedAt != nil {
+			return watch, nil
+		}
+		if _, err := w.store.Ingest(ctx, evidence.IngestRequest{DatasetID: watch.DatasetID, Losses: []evidence.CollectionLoss{{Code: "watch_storage_loss"}}}); err != nil {
+			return watch, err
+		}
 		return w.store.StopWatch(ctx, id)
 	}
 	if err := ctx.Err(); err != nil {
 		return watch, err
 	}
 	w.stopping = lease
+	w.engine.SetLearnLossHook(nil)
 	w.active.Store(nil)
 	w.engine.SetLearnWatchHook(nil)
 	disabled = true
@@ -397,9 +424,6 @@ func (lease *watchLease) drop(state *flow.State, events []dpi.Event) {
 
 func droppedEventLoss(state *flow.State, event dpi.Event) evidence.CollectionLoss {
 	loss := evidence.CollectionLoss{Code: "watch_collection_loss", ConnectionID: learn.EvidenceConnectionID(state, event)}
-	if loss.ConnectionID == "" {
-		loss.Start, loss.End = event.Timestamp, event.Timestamp
-	}
 	return loss.Normalized()
 }
 

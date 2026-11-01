@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -117,10 +118,23 @@ func assertDirectLoss(t *testing.T, s *sqlite.Store, ds evidence.Dataset) {
 	}
 }
 func TestRecordTruncationScopeFallbacks(t *testing.T) {
+	for _, size := range []int{0, 8, 13, 16} {
+		t.Run(fmt.Sprintf("unreadable EtherType or VLAN/%d", size), func(t *testing.T) {
+			cut := frame(13, 1)[:size]
+			if size == 16 {
+				binary.BigEndian.PutUint16(cut[12:], 0x8100)
+			}
+			s, r, out := imported(t, [][]byte{frame(1, 1), cut}, []int{66, 66})
+			if len(out.Suggestions) != 0 {
+				t.Fatal("unlocalizable record certified", out)
+			}
+			assertDirectLoss(t, s, r.Dataset)
+		})
+	}
 	t.Run("IP truncation before TCP header completes", func(t *testing.T) {
 		_, r, out := imported(t, [][]byte{frame(1, 1), frame(1, 3)[:46]}, []int{66, 46})
-		if len(out.Suggestions) != 1 || !r.Stats.Truncated || len(r.Dataset.Losses) != 1 || r.Dataset.Losses[0].Start.IsZero() {
-			t.Fatal("missing IP bytes were not recorded as interval loss", r.Dataset, out)
+		if len(out.Suggestions) != 1 || !r.Stats.Truncated || len(r.Dataset.Losses) != 1 || r.Dataset.Losses[0].Scope.Transport != "tcp" {
+			t.Fatal("missing IP bytes were not coordinate scoped", r.Dataset, out)
 		}
 	})
 	t.Run("same connection", func(t *testing.T) {
@@ -132,7 +146,7 @@ func TestRecordTruncationScopeFallbacks(t *testing.T) {
 	})
 	t.Run("unknown tuple", func(t *testing.T) {
 		_, r, out := imported(t, [][]byte{frame(1, 1), make([]byte, 30)}, []int{66, 60})
-		if len(out.Suggestions) != 1 || len(r.Dataset.Losses) != 1 || r.Dataset.Losses[0].Start.IsZero() {
+		if len(out.Suggestions) != 1 || len(r.Dataset.Losses) != 1 || r.Dataset.Losses[0].Code != "capture_unrelated" {
 			t.Fatal(r.Dataset, out)
 		}
 	})
@@ -189,5 +203,88 @@ func TestWorkshopCaptureKeepsSuggestionsWithUnrelatedCutRecord(t *testing.T) {
 		} else if len(out.Suggestions) != baseline {
 			t.Fatal("unrelated cut ARP erased workshop suggestions")
 		}
+	}
+}
+
+func TestShortHeaderSameConnection(t *testing.T) {
+	for _, size := range []int{34, 36, 38, 46} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			s, r, out := imported(t, [][]byte{frame(1, 1), frame(13, 1)[:size]}, []int{66, size})
+			if len(out.Suggestions) != 0 {
+				t.Fatal("known loss certified earlier parent", out)
+			}
+			assertDirectLoss(t, s, r.Dataset)
+		})
+	}
+}
+
+func TestCutNonIPRecordSweep(t *testing.T) {
+	raw, err := os.ReadFile("../../../test/modbus/testdata/operations.pcap")
+	check(t, err)
+	placements := 0
+	for offset := 24; offset+16 <= len(raw); {
+		record := raw[offset:]
+		header := make([]byte, 16)
+		copy(header, record[:8])
+		binary.LittleEndian.PutUint32(header[8:], 30)
+		binary.LittleEndian.PutUint32(header[12:], 120)
+		arp := make([]byte, 30)
+		binary.BigEndian.PutUint16(arp[12:], 0x806)
+		fixture := append(append(append([]byte{}, raw...), header...), arp...)
+		s := open(t)
+		r, err := pcap.Import(context.Background(), bytes.NewReader(fixture), s, meta(), pcap.AnalysisOptions{}, modbus.NewDecoder())
+		check(t, err)
+		g := learn.Generator{Store: s, Certifier: &learn.CompilerCertifier{Store: s}}
+		out, err := g.Generate(context.Background(), learn.GenerateRequest{DatasetID: r.Dataset.ID})
+		check(t, err)
+		if len(out.Suggestions) != 15 || len(r.Dataset.Gaps) != 0 || len(r.Dataset.Losses) != 1 || r.Dataset.Losses[0].Code != "capture_unrelated" {
+			t.Fatalf("placement %d erased workshop suggestions: %+v %+v", placements, out, r.Dataset)
+		}
+		check(t, s.Close())
+		placements++
+		offset += 16 + int(binary.LittleEndian.Uint32(record[8:]))
+	}
+	t.Logf("all %d cut-ARP placements preserved 15 suggestions", placements)
+}
+
+func TestUnrelatedTruncationClassification(t *testing.T) {
+	for _, kind := range []string{"VLAN ARP", "stacked VLAN LLDP", "ICMP", "IGMP"} {
+		t.Run(kind, func(t *testing.T) {
+			cut := frame(13, 1)[:38]
+			switch kind {
+			case "VLAN ARP":
+				binary.BigEndian.PutUint16(cut[12:], 0x8100)
+				binary.BigEndian.PutUint16(cut[16:], 0x806)
+			case "stacked VLAN LLDP":
+				binary.BigEndian.PutUint16(cut[12:], 0x88a8)
+				binary.BigEndian.PutUint16(cut[16:], 0x8100)
+				binary.BigEndian.PutUint16(cut[20:], 0x88cc)
+			case "ICMP":
+				cut[23] = 1
+			case "IGMP":
+				cut[23] = 2
+			}
+			_, r, out := imported(t, [][]byte{frame(1, 1), cut}, []int{66, 120})
+			if len(out.Suggestions) != 1 || len(r.Dataset.Gaps) != 0 || len(r.Dataset.Losses) != 1 || r.Dataset.Losses[0].Code != "capture_unrelated" {
+				t.Fatal("unrelated traffic excluded certification inputs", r.Dataset, out)
+			}
+		})
+	}
+}
+
+func TestCoordinateLossUsefulness(t *testing.T) {
+	for _, size := range []int{34, 38} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			other := frame(1, 1)
+			binary.BigEndian.PutUint16(other[34:], 49153)
+			_, r, out := imported(t, [][]byte{frame(1, 1), other, frame(13, 1)[:size]}, []int{66, 66, size})
+			want := 0 // no ports: either same-host connection may have lost bytes
+			if size == 38 {
+				want = 1 // intact ports: preserve the other connection
+			}
+			if len(out.Suggestions) != want || len(r.Dataset.Losses) != 1 || r.Dataset.Losses[0].Scope.Ports != (size == 38) {
+				t.Fatal("coordinate precision/usefulness", r.Dataset, out)
+			}
+		})
 	}
 }

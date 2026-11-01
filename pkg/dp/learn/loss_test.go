@@ -17,7 +17,7 @@ import (
 )
 
 func TestCollectionLossExclusionsAndDirectCertification(t *testing.T) {
-	for _, kind := range []string{"connection", "interval", "legacy", "counter-only", "budget"} {
+	for _, kind := range []string{"connection", "tuple", "host pair", "interval", "legacy", "counter-only", "budget"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "evidence.db")
@@ -36,15 +36,22 @@ func TestCollectionLossExclusionsAndDirectCertification(t *testing.T) {
 			}
 			var serial uint64
 			var excluded evidence.Observation
+			var affectedWire evidence.Tuple
 			ingest := func(connection string, at time.Time, objects uint32) {
 				t.Helper()
 				state := requestState()
+				if connection == "clean" {
+					state.Key.SrcPort++
+				}
 				state.Connection.Store(&flow.Connection{Key: connection})
 				ev := request()
 				ev.Timestamp = at
 				parents, err := learn.Normalize(ds, state, []dpi.Event{ev}, &serial)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if connection == "affected" {
+					affectedWire = parents[0].Authority.Wire
 				}
 				parents[0].ObjectCount = objects
 				result, err := store.Ingest(ctx, evidence.IngestRequest{DatasetID: ds.ID, Parents: parents})
@@ -53,15 +60,20 @@ func TestCollectionLossExclusionsAndDirectCertification(t *testing.T) {
 				}
 			}
 			at := request().Timestamp
-			// No individual observation lies within the loss interval. The
-			// connection's observed lifetime nevertheless spans it.
+			// Legacy timestamp-only loss cannot prove any incarnation disjoint.
 			ingest("affected", at, 1)
-			ingest("affected", at.Add(2*time.Minute), 1)
+			later := "affected"
+			if kind == "tuple" || kind == "host pair" {
+				later = "reused-tuple"
+			}
+			ingest(later, at.Add(2*time.Minute), 1)
 			ingest("clean", at.Add(3*time.Minute), 1)
 			req := evidence.IngestRequest{DatasetID: ds.ID, Seal: true}
 			switch kind {
 			case "connection":
 				req.Losses = []evidence.CollectionLoss{{Code: "collection_drop", ConnectionID: "affected"}}
+			case "tuple", "host pair":
+				req.Losses = []evidence.CollectionLoss{{Code: "capture_truncated", Scope: evidence.LossScope{Source: affectedWire.Source, Destination: affectedWire.Destination, Transport: affectedWire.Transport, Ports: kind == "tuple"}}}
 			case "interval":
 				req.Losses = []evidence.CollectionLoss{{Code: "capture_stop", Start: at.Add(time.Minute), End: at.Add(time.Minute)}}
 			case "legacy":
@@ -92,7 +104,7 @@ func TestCollectionLossExclusionsAndDirectCertification(t *testing.T) {
 			}
 			g := learn.Generator{Store: store, Certifier: &learn.CompilerCertifier{Store: store}, CountWithheld: store.CountWithheld}
 			wantSuggestions, wantWithheld := 1, uint64(2)
-			if kind == "legacy" || kind == "counter-only" {
+			if kind == "legacy" || kind == "counter-only" || kind == "interval" || kind == "host pair" {
 				wantSuggestions, wantWithheld = 0, 3
 			}
 			for range 2 {

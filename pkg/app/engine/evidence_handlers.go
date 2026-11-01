@@ -32,6 +32,7 @@ func NewEvidenceAPI(ctx context.Context, store *sqlite.Store, e *engine.Engine) 
 
 // Close stops collection and waits for both collector workers.
 func (a *EvidenceAPI) Close() {
+	a.watch.engine.SetLearnLossHook(nil)
 	a.watch.engine.SetLearnWatchHook(nil)
 	a.cancel()
 	<-a.watch.done

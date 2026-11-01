@@ -133,6 +133,7 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 	if r.count.Add(1) > transportQueueLimit {
 		r.count.Add(-1)
 		r.noteDecodeLossLocked(pkt, history)
+		e.recordLearnCaptureLoss(pkt, nil)
 		r.unavailable(e, pkt, "queue_overflow")
 		return acceptDecision
 	}
@@ -140,6 +141,7 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 		r.bytes.Add(-n)
 		r.count.Add(-1)
 		r.noteDecodeLossLocked(pkt, history)
+		e.recordLearnCaptureLoss(pkt, nil)
 		r.unavailable(e, pkt, "queue_overflow")
 		return acceptDecision
 	}
@@ -158,6 +160,7 @@ func (r *transportResolver) admit(e *Engine, pkt capture.Packet) capture.Decisio
 		r.bytes.Add(-n)
 		r.count.Add(-1)
 		r.noteDecodeLossLocked(pkt, history)
+		e.recordLearnCaptureLoss(pkt, nil)
 		r.unavailable(e, pkt, "queue_overflow")
 	}
 	return acceptDecision

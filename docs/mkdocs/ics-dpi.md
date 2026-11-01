@@ -988,16 +988,17 @@ normalized evidence; each parent is limited to 256 KiB and 4,096 objects. Loss,
 rejection, eviction, expiry and withheld reasons are exposed, not silently
 interpreted as complete coverage. Recorded collection or admission loss excludes
 every connection it could have touched from generation and direct certification.
-Known-connection loss excludes that incarnation; interval-only loss excludes
-connections whose observed lifetimes overlap the interval. Legacy gaps and loss
-with neither identity nor interval exclude the entire dataset. Excluded retained
-parents count toward the durable `collection_loss` withheld reason. Connections
+Known-connection loss excludes that incarnation; coordinate-scoped loss excludes
+matching wire tuples or host pairs across every incarnation, in either direction.
+Retained message times do not prove lifecycle bounds. Legacy timestamp-only loss
+and missing scope exclude the dataset. Excluded retained parents count toward
+the durable `collection_loss` withheld reason. Connections
 fully outside localized loss remain eligible. Restart and policy-change loss
 exclude the dataset: store-clock lease bounds cannot safely delimit packet times.
 Loss localization is capped at 1,024 entries per dataset; exhaustion collapses to
-one dataset-wide loss. Live collection batches SQLite persistence and uses a
-256-batch queue with a 64 MiB decoded-copy budget to absorb flush bursts without
-blocking packet verdicts. Deletion or eviction invalidates
+one dataset-wide loss. Live collection batches parent rows in bounded SQLite
+statements and uses a 256-batch queue with a 64 MiB decoded-copy budget to absorb
+flush bursts without blocking packet verdicts. Deletion or eviction invalidates
 dependent proofs for new stage requests.
 Resolved staging snapshots and completed receipts count toward the storage
 budget and are purged when their retry window expires. Dataset review shows the
@@ -1177,14 +1178,26 @@ statistics and capture duration. `stats.truncated` identifies partial,
 snap-length-cut or IP-length-truncated records. `stats.displayTruncated` means the display sample was
 capped, not that normalized evidence was sampled. Inspect dataset gaps separately:
 collection and admission loss exclude every connection they could have touched.
-Loss with neither a connection identity nor a time interval excludes the entire
-dataset, including legacy unlocalized gaps. Offline `capture_truncated` is
-connection-local when transport headers decode, otherwise a capture-time instant;
-only a header-less final record is dataset-wide. Live `capture_loss` preserves
-the transport incarnation. `watch_collection_loss` and `budget_exceeded` retain
-known rejected connections; `watch_restart`, `policy_changed` and storage/import
-failures are dataset-wide. Dropped decision/delivery annotations (`outcome_loss`)
-are counted but do not exclude certification inputs. See the
+Known loss excludes the authoritative incarnation, or every matching wire
+five-tuple incarnation when ports are captured. Without ports, host-pair and
+transport scope excludes all matching connections in either direction. First
+and last retained messages are not connection lifecycle bounds; timestamp-only
+historical loss and missing coordinates exclude the dataset. A short IP/TCP
+header therefore cannot leave an earlier parent eligible for certification.
+A cut non-IP record with readable EtherType (including VLAN tags), or a known
+non-TCP/UDP IP protocol, records non-excluding `capture_unrelated` loss. Opaque
+IPv6 extension chains are not proof of unrelated traffic. Ordinary unrelated
+ARP/LLDP/ICMP truncation does not erase workshop suggestions. A header-less final
+record remains dataset-wide.
+
+Live `capture_loss` is retained at transport admission, before worker processing,
+and delivered through AF_PACKET and NFQUEUE even with incomplete TCP headers.
+Stop, deadline and policy-change cleanup fence loss callbacks before sealing;
+failed automatic stops retry the retained lease. `watch_collection_loss` and
+`budget_exceeded` retain known rejected connections; `watch_restart`,
+`policy_changed` and storage/import failures are dataset-wide. Dropped
+decision/delivery annotations (`outcome_loss`) are counted but do not exclude
+certification inputs. See the
 [loss-code scope table](api-reference.md#content-identification-results) for fallbacks.
 
 The internal engine `/internal/pcap/analyze` endpoints use the same import

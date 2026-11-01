@@ -213,3 +213,12 @@ func TestIPTruncationSurvivesIncompleteTransportHeader(t *testing.T) {
 		t.Fatalf("complete malformed packet became loss: %+v", got)
 	}
 }
+
+func TestFragmentTruncationCannotInventPorts(t *testing.T) {
+	raw := ipv4TCP([]byte{1, 2, 3})[:32]
+	binary.BigEndian.PutUint16(raw[6:8], 0x0010)
+	pkt := DecodeIPPacket(raw)
+	if !pkt.CaptureIncomplete || pkt.PortsValid || pkt.TCP.Valid || pkt.SrcPort != 0 || pkt.Invalid != InvalidFragment {
+		t.Fatal("noninitial fragment payload treated as L4 header", pkt)
+	}
+}

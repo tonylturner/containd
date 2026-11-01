@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,11 +25,11 @@ import (
 )
 
 func TestLiveTransportLossCannotCertifyEarlierParent(t *testing.T) {
-	for _, mode := range []string{"clean control", "overflow", "IP truncation"} {
+	for _, mode := range []string{"clean control", "overflow", "pending overflow", "pre-watch overflow", "deadline overflow", "policy overflow", "IP truncation", "short IP header"} {
 		t.Run(mode, func(t *testing.T) {
 			loss := mode != "clean control"
 			ctx := context.Background()
-			e, exercise := engine.NewLearnerOverflowEngine(t)
+			e, exercise, drain, emit := engine.NewLearnerOverflowEngine(t)
 			// Fingerprints bind the test authority to the actual installed registry.
 			inputs := e.InspectionSnapshot()
 			var enabled []string
@@ -51,7 +52,9 @@ func TestLiveTransportLossCannotCertifyEarlierParent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s, err := sqlite.Open(filepath.Join(t.TempDir(), "evidence.db"), sqlite.Options{CompatibleProof: learn.CompatibleVersions, WatchMetadata: func() (evidence.Dataset, error) {
+			var clock atomic.Int64
+			clock.Store(time.Now().UnixNano())
+			s, err := sqlite.Open(filepath.Join(t.TempDir(), "evidence.db"), sqlite.Options{Now: func() time.Time { return time.Unix(0, clock.Load()) }, CompatibleProof: learn.CompatibleVersions, WatchMetadata: func() (evidence.Dataset, error) {
 				return evidence.Dataset{DecoderVersion: "ics-1", ProfileFingerprint: profile, SnapshotFingerprint: snapshot}, nil
 			}})
 			if err != nil {
@@ -71,15 +74,56 @@ func TestLiveTransportLossCannotCertifyEarlierParent(t *testing.T) {
 				}
 				return rec.Body.Bytes()
 			}
+			if mode == "pre-watch overflow" {
+				exercise(true)
+			}
 			var watch evidence.Watch
 			if err := json.Unmarshal(request("/internal/learn/watches"), &watch); err != nil {
 				t.Fatal(err)
 			}
-			exercise(mode == "overflow")
-			if mode == "IP truncation" {
-				e.HandlePacket(capture.Packet{Timestamp: time.Now(), SrcIP: net.ParseIP("10.10.0.5"), DstIP: net.ParseIP("10.20.0.4"), SrcPort: 41000, DstPort: 502, Proto: 6, TCP: capture.TCPMeta{Valid: true}, Invalid: capture.InvalidTruncated})
+			overflow := strings.Contains(mode, "overflow")
+			if mode == "pre-watch overflow" {
+				emit()
+			} else {
+				exercise(overflow)
 			}
-			request("/internal/learn/watches/" + watch.ID + "/stop")
+			if mode == "overflow" {
+				drain()
+			}
+			if mode == "IP truncation" || mode == "short IP header" {
+				e.HandlePacket(capture.Packet{Timestamp: time.Now(), SrcIP: net.ParseIP("10.10.0.5"), DstIP: net.ParseIP("10.20.0.4"), SrcPort: 41000, DstPort: 502, Proto: 6, TCP: capture.TCPMeta{Valid: mode == "IP truncation"}, Invalid: capture.InvalidTruncated})
+			}
+			if mode == "deadline overflow" || mode == "policy overflow" {
+				expected := "deadline"
+				if mode == "policy overflow" {
+					expected = "policy_changed"
+					e.SetICSParsing(map[string]string{"modbus": "strict"})
+				} else {
+					clock.Store(watch.Deadline.Add(time.Second).UnixNano())
+				}
+				limit := time.Now().Add(5 * time.Second)
+				for {
+					current, err := s.GetWatch(ctx, watch.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if current.StoppedAt != nil {
+						if current.StopReason != expected {
+							t.Fatal(current)
+						}
+						break
+					}
+					if time.Now().After(limit) {
+						t.Fatal("deadline did not seal")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			} else {
+				request("/internal/learn/watches/" + watch.ID + "/stop")
+			}
+			if overflow && mode != "overflow" {
+				drain()
+			}
 			ds, err := s.GetDataset(ctx, watch.DatasetID)
 			if err != nil {
 				t.Fatal(err)
@@ -97,8 +141,8 @@ func TestLiveTransportLossCannotCertifyEarlierParent(t *testing.T) {
 			if (len(out.Suggestions) == 0) != loss {
 				t.Fatalf("loss=%v suggestions=%+v dataset=%+v", loss, out, ds)
 			}
-			if loss && (len(ds.Losses) != 1 || ds.Losses[0].ConnectionID != p.ConnectionID) {
-				t.Fatalf("wrong incarnation: %+v parent=%+v", ds, p)
+			if loss && !ds.LossTouches(p.ConnectionID, p.Authority.Wire) {
+				t.Fatalf("missing exclusion: %+v parent=%+v", ds, p)
 			}
 			rules, reasons := learn.GenerateRelation(p)
 			if len(reasons) > 0 {

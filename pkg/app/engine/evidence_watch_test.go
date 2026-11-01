@@ -82,8 +82,8 @@ func TestEvidenceLossFlushPreservesIdentityOnFailure(t *testing.T) {
 		t.Fatalf("retry lost localization: %+v %v", ds, err)
 	}
 	for _, loss := range ds.Losses {
-		if loss.ConnectionID != "dropped" && (loss.ConnectionID != "" || !loss.Start.Equal(at) || !loss.End.Equal(at)) {
-			t.Fatalf("retry lost connection or time-only scope: %+v", loss)
+		if loss.ConnectionID != "dropped" && (loss.ConnectionID != "" || !loss.Start.IsZero() || !loss.End.IsZero() || loss.Scope != (evidence.LossScope{})) {
+			t.Fatalf("retry lost connection or dataset-wide uncertainty: %+v", loss)
 		}
 	}
 	counts, err := a.store.Counters(ctx)

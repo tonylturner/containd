@@ -29,11 +29,11 @@ func DecodeIPPacket(data []byte) Packet {
 	return pkt
 }
 
-// decodeIP decodes like DecodeIPPacket and also reports whether an
-// observational source (AF_PACKET) delivers the packet to its handler: only
-// packets whose transport header decodes. Those can still carry an Invalid
-// reason (fragment, truncated, ip_header); their payload is best effort.
-// The inline NFQUEUE source delivers every packet, decoded or not.
+// decodeIP decodes like DecodeIPPacket and reports observational eligibility.
+// Usable transport headers and noninitial IPv4 fragments remain deliverable;
+// fragment payload is never interpreted as transport headers. AF_PACKET also
+// delivers trusted CaptureIncomplete metadata regardless of this flag.
+// NFQUEUE delivers every packet, decoded or not.
 //
 // Bytes beyond the IP length field (link-layer padding) are not payload.
 func decodeIP(data []byte) (Packet, bool) {
@@ -66,11 +66,16 @@ func decodeIPv4Raw(data []byte) (Packet, bool) {
 	}
 	if len(data) < ihl {
 		pkt.Invalid = InvalidTruncated
+		pkt.CaptureIncomplete = true
 		return pkt, false
 	}
 	data, lengthErr := clampIPLength(data, int(binary.BigEndian.Uint16(data[2:4])), ihl)
-	ok := decodeL4(&pkt, data[ihl:])
 	pkt.CaptureIncomplete = lengthErr == InvalidTruncated
+	if binary.BigEndian.Uint16(data[6:8])&0x1fff != 0 {
+		pkt.Invalid = InvalidFragment
+		return pkt, true // preserve invalid-packet delivery, but never invent L4 ports
+	}
+	ok := decodeL4(&pkt, data[ihl:])
 	if !ok {
 		return pkt, false
 	}
@@ -107,6 +112,8 @@ func decodeIPv6Raw(data []byte) (Packet, bool) {
 		SrcIP: net.IP(append([]byte(nil), data[8:24]...)),
 		DstIP: net.IP(append([]byte(nil), data[24:40]...)),
 	}
+	data, lengthErr := clampIPLength(data, 40+int(binary.BigEndian.Uint16(data[4:6])), 40)
+	pkt.CaptureIncomplete = lengthErr == InvalidTruncated
 	switch pkt.Proto {
 	case 44:
 		pkt.Invalid = InvalidFragment
@@ -115,8 +122,6 @@ func decodeIPv6Raw(data []byte) (Packet, bool) {
 		pkt.Invalid = InvalidIPv6
 		return pkt, false
 	}
-	data, lengthErr := clampIPLength(data, 40+int(binary.BigEndian.Uint16(data[4:6])), 40)
-	pkt.CaptureIncomplete = lengthErr == InvalidTruncated
 	if !decodeL4(&pkt, data[40:]) {
 		return pkt, false
 	}
@@ -142,6 +147,7 @@ func decodeL4(pkt *Packet, data []byte) bool {
 
 func decodeTCP(pkt *Packet, data []byte) bool {
 	if len(data) >= 4 {
+		pkt.PortsValid = true
 		pkt.SrcPort = binary.BigEndian.Uint16(data[0:2])
 		pkt.DstPort = binary.BigEndian.Uint16(data[2:4])
 	}
@@ -166,12 +172,15 @@ func decodeTCP(pkt *Packet, data []byte) bool {
 }
 
 func decodeUDP(pkt *Packet, data []byte) bool {
+	if len(data) >= 4 {
+		pkt.PortsValid = true
+		pkt.SrcPort = binary.BigEndian.Uint16(data[0:2])
+		pkt.DstPort = binary.BigEndian.Uint16(data[2:4])
+	}
 	if len(data) < 8 {
 		pkt.Invalid = InvalidUDPHeader
 		return false
 	}
-	pkt.SrcPort = binary.BigEndian.Uint16(data[0:2])
-	pkt.DstPort = binary.BigEndian.Uint16(data[2:4])
 	pkt.Payload = append([]byte(nil), data[8:]...)
 	return true
 }

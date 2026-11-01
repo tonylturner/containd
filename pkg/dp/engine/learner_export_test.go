@@ -11,10 +11,20 @@ import (
 
 // NewLearnerOverflowEngine exposes controlled transport admission only to the
 // external integration test. No production test switches or kernel I/O exist.
-func NewLearnerOverflowEngine(t *testing.T) (*Engine, func(bool)) {
+func NewLearnerOverflowEngine(t *testing.T) (*Engine, func(bool), func(), func()) {
 	t.Helper()
 	e, r, _ := newTransportTest(t, &transportCTFake{evidence: natEvidence()})
 	r.authority.check(context.Background())
+	drain := func() {
+		select {
+		case notice := <-r.losses:
+			e.consumeDecodeLoss(notice, r.resolve(context.Background(), notice.packet, false))
+		default:
+			t.Fatal("real transport byte overflow failed to notify")
+		}
+	}
+	var next capture.Packet
+	emit := func() { r.admit(e, next); processTransportAdmission(t, e, r) }
 	return e, func(loss bool) {
 		at := time.Now()
 		pkt := transportWire(natEvidence().Original, at, nil)
@@ -28,15 +38,13 @@ func NewLearnerOverflowEngine(t *testing.T) (*Engine, func(bool)) {
 		if len(transportModbusEvents(e)) != 1 {
 			t.Fatal("missing initial read")
 		}
+		next = pkt
+		next.Timestamp = at.Add(1500 * time.Microsecond)
+		next.TCP.Seq = 113
+		next.Payload = modbusADU(2, 3, 10, 2)
 		if loss {
 			pkt.Timestamp, pkt.Payload = at.Add(2*time.Millisecond), make([]byte, transportByteLimit+1)
 			r.admit(e, pkt)
-			select {
-			case notice := <-r.losses:
-				e.consumeDecodeLoss(notice, r.resolve(context.Background(), notice.packet, false))
-			default:
-				t.Fatal("real transport byte overflow failed to notify")
-			}
 		}
-	}
+	}, drain, emit
 }

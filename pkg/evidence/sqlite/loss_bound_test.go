@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/tonylturner/containd/pkg/evidence"
 )
@@ -34,7 +33,7 @@ func TestLossIngestBoundCollapsesConservatively(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(d.Losses) != 1 || d.Losses[0].Code != "collection_loss" || !d.LossTouches("unrelated", time.Now(), time.Now()) {
+	if len(d.Losses) != 1 || d.Losses[0].Code != "collection_loss" || !d.LossTouches("unrelated", evidence.Tuple{}) {
 		t.Fatal("loss cap narrowed authority", d)
 	}
 }

@@ -267,15 +267,7 @@ func (e *Engine) HandlePacket(pkt capture.Packet) (d capture.Decision) {
 	if pkt.Invalid != "" {
 		e.recordPacketStats(pkt, nil)
 		if pkt.CaptureIncomplete || pkt.Invalid == capture.InvalidTruncated {
-			var connection *flow.Connection
-			if pkt.TCP.Valid {
-				e.flowMu.Lock()
-				if st := e.tupleStateLocked(packetKey(pkt).Tuple()); st != nil {
-					connection = st.Connection.Load()
-				}
-				e.flowMu.Unlock()
-			}
-			e.recordLearnCaptureLoss(pkt, connection)
+			e.recordLearnCaptureLoss(pkt, nil)
 		}
 	}
 	return e.handlePacket(pkt)

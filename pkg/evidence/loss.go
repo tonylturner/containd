@@ -2,16 +2,32 @@
 
 package evidence
 
-import "time"
+import (
+	"net/netip"
+	"time"
+)
 
-// CollectionLoss retains the most precise exclusion available at collection.
-// A connection ID excludes that entire incarnation. Otherwise both interval
-// endpoints are inclusive capture times. Neither means dataset-wide loss.
+// LossScope identifies both directions of a wire tuple, or a host pair when
+// Ports is false. It applies to every matching incarnation, without time bounds.
+type LossScope struct {
+	Source      Endpoint `json:"source"`
+	Destination Endpoint `json:"destination"`
+	Transport   string   `json:"transport"`
+	Ports       bool     `json:"ports"`
+}
+
+// CollectionLoss retains the strongest available exclusion authority. Old time
+// fields remain readable, but cannot prove any connection disjoint from loss.
 type CollectionLoss struct {
 	Code         string    `json:"code"`
 	ConnectionID string    `json:"connectionId,omitempty"`
+	Scope        LossScope `json:"scope,omitzero"`
 	Start        time.Time `json:"start,omitzero"`
 	End          time.Time `json:"end,omitzero"`
+}
+
+func nonExcludingLoss(code string) bool {
+	return code == "outcome_loss" || code == "capture_unrelated"
 }
 
 // MaxLosses bounds per-dataset loss metadata and collector pending identities.
@@ -21,6 +37,18 @@ const MaxLosses = 1024
 func (l CollectionLoss) Normalized() CollectionLoss {
 	l.Start = l.Start.Round(0).UTC()
 	l.End = l.End.Round(0).UTC()
+	if !l.Scope.Ports {
+		l.Scope.Source.Port, l.Scope.Destination.Port = 0, 0
+	}
+	for _, endpoint := range []*Endpoint{&l.Scope.Source, &l.Scope.Destination} {
+		if ip, err := netip.ParseAddr(endpoint.IP); err == nil {
+			endpoint.IP = ip.Unmap().String()
+		}
+	}
+	a, b := l.Scope.Source, l.Scope.Destination
+	if a.IP > b.IP || a.IP == b.IP && a.Port > b.Port {
+		l.Scope.Source, l.Scope.Destination = b, a
+	}
 	return l
 }
 
@@ -29,7 +57,7 @@ func (l CollectionLoss) Normalized() CollectionLoss {
 func (d *Dataset) RecordLoss(loss CollectionLoss) {
 	loss = loss.Normalized()
 	for _, prior := range d.Losses {
-		if prior.Code == "collection_loss" && prior.ConnectionID == "" && prior.Start.IsZero() && prior.End.IsZero() {
+		if prior.Code == "collection_loss" && prior.ConnectionID == "" && prior.Scope == (LossScope{}) && prior.Start.IsZero() && prior.End.IsZero() {
 			return
 		}
 	}
@@ -46,7 +74,7 @@ func (d *Dataset) RecordLoss(loss CollectionLoss) {
 	for _, code := range d.Gaps {
 		found = found || code == loss.Code
 	}
-	if !found && loss.Code != "outcome_loss" {
+	if !found && !nonExcludingLoss(loss.Code) {
 		// Annotation loss is visible in losses/counters, not in the summary of
 		// gaps that can invalidate certification inputs.
 		d.Gaps = append(d.Gaps, loss.Code)
@@ -65,19 +93,15 @@ func (d *Dataset) RecordLoss(loss CollectionLoss) {
 	d.Losses = append(d.Losses, loss)
 }
 
-// LossTouches fails closed for legacy gaps or invalid/missing time authority.
-// first/last span all retained observations of the connection, not just a
-// candidate relation's references.
-func (d Dataset) LossTouches(connection string, first, last time.Time) bool {
+// LossTouches never infers lifecycle bounds from retained message timestamps.
+// Missing/legacy scope fails closed; coordinates match either wire direction.
+func (d Dataset) LossTouches(connection string, wire Tuple) bool {
 	for _, code := range d.Gaps {
-		if code == "outcome_loss" {
+		if nonExcludingLoss(code) {
 			continue
 		}
 		localized := false
 		for _, loss := range d.Losses {
-			if loss.Code == "outcome_loss" {
-				continue
-			}
 			localized = localized || loss.Code == code
 		}
 		if !localized {
@@ -85,7 +109,7 @@ func (d Dataset) LossTouches(connection string, first, last time.Time) bool {
 		}
 	}
 	for _, loss := range d.Losses {
-		if loss.Code == "outcome_loss" {
+		if nonExcludingLoss(loss.Code) {
 			continue
 		}
 		if loss.ConnectionID != "" {
@@ -94,10 +118,25 @@ func (d Dataset) LossTouches(connection string, first, last time.Time) bool {
 			}
 			continue
 		}
-		if loss.Start.IsZero() || loss.End.IsZero() || loss.End.Before(loss.Start) ||
-			first.IsZero() || last.IsZero() || (!last.Before(loss.Start) && !first.After(loss.End)) {
+		s := loss.Scope
+		if !validIP(s.Source.IP) || !validIP(s.Destination.IP) || (s.Transport != "tcp" && s.Transport != "udp") {
+			return true
+		}
+		if !validIP(wire.Source.IP) || !validIP(wire.Destination.IP) || wire.Transport == "" {
+			return true
+		}
+		if s.Transport != wire.Transport {
+			continue
+		}
+		match := func(a, b Endpoint) bool {
+			x, _ := netip.ParseAddr(a.IP)
+			y, _ := netip.ParseAddr(b.IP)
+			return x.Unmap() == y.Unmap() && (!s.Ports || a.Port == b.Port)
+		}
+		if match(s.Source, wire.Source) && match(s.Destination, wire.Destination) || match(s.Source, wire.Destination) && match(s.Destination, wire.Source) {
 			return true
 		}
 	}
 	return false
 }
+func validIP(s string) bool { _, err := netip.ParseAddr(s); return err == nil }

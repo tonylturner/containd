@@ -37,15 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separate for names that differ by case or punctuation.
 - Recorded collection or admission loss excludes every connection it could have
   touched from suggestion generation and direct certification, with durable
-  `collection_loss` withholding. Live transport overflow retains the connection
-  incarnation; offline truncation retains the connection or capture-time scope
-  instead of voiding unrelated traffic. Missing scope, restart/policy uncertainty
-  and exhausted localization capacity exclude the dataset. Previously certified
+  `collection_loss` withholding. Live transport overflow is retained before Stop
+  or deadline cleanup; failed automatic stops retry safely. Short captured headers
+  exclude matching wire tuples or host pairs across all incarnations, never just
+  observed message times. Unrelated cut ARP/LLDP/ICMP records preserve workshop
+  suggestions. Missing scope, restart/policy uncertainty and exhausted localization
+  capacity exclude the dataset. Previously collected captures must be reimported
+  or watches recollected under the corrected loss authority. Previously certified
   suggestions require regeneration; frozen historical stage retries can only
   reconcile identical rules already saved to candidate.
-- Batch live learner persistence so IEC 104 command watches keep up with normal
-  captures; outcome-only drops do not exclude certification inputs. Large repeated
-  relations use bounded proofs instead of overflowing suggestion storage budgets.
+- Batch live learner persistence in bounded multi-row SQLite statements so IEC
+  104 command watches keep up with normal captures; outcome-only drops do not
+  exclude certification inputs. Large repeated relations use bounded proofs
+  instead of overflowing suggestion storage budgets.
 - Exclude observation-bound and content/port-mismatched connections from offline
   and live policy suggestions, including port-decoded events emitted before
   content confirmation; retain the exclusion in withheld counts and limitations.
