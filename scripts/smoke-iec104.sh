@@ -296,7 +296,7 @@ STACK_UP=1
 
 # Copy the malformer binary into the cc container for the split/malformed cases.
 compose cp "$WORK_DIR/malformer" cc:/usr/local/bin/malformer >/dev/null 2>&1 ||
-  log "WARNING: could not install the malformer in the cc container"
+  fatal "could not install the malformer in the cc container"
 
 BASE="http://127.0.0.1:$(compose port firewall 18080 | awk -F: '{print $NF}')/api/v1"
 log "Management on $BASE (loopback only); engine API through compose exec"
@@ -525,25 +525,8 @@ iec_event_since() {
       and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= ($since | fromdateiso8601)))' >/dev/null 2>&1
 }
 
-# assert_not_received NAME COUNTER CMD...: run CMD and assert the RTU counter
-# (commands_received or gi_requests) did not advance and no write was applied.
-# These must be prevented by the active IEC104 enforcement policy.
-assert_not_received() {
-  local name=$1 counter=$2 rc=0 before after writes_before writes_after out detail
-  shift 2
-  before=$(rtu_field "$counter")
-  writes_before=$(rtu_field writes_applied)
-  out=$("$@" 2>&1) || rc=$?
-  sleep 1
-  after=$(rtu_field "$counter")
-  writes_after=$(rtu_field writes_applied)
-  detail="exit $rc; $counter $before -> $after; writes $writes_before -> $writes_after; last_command '$(rtu_field last_command)'; $(tr '\n' ' ' <<<"$out" | head -c 100)"
-  if [[ -n "$before" && "$after" == "$before" && "$writes_after" == "$writes_before" ]]; then
-    gate_pass "$name" "$detail"
-  else
-    gate_fail "$name" "$detail"
-  fi
-}
+# shellcheck source=scripts/smoke-iec104-probes.sh
+source "$ROOT/scripts/smoke-iec104-probes.sh"
 
 if [[ ${SMOKE_RULE_MODES_ONLY:-0} == 1 ]]; then
   # shellcheck source=scripts/smoke-rule-modes-iec104-lib.sh
@@ -722,15 +705,15 @@ fi
 # double command handler records ioa=2003 in last_command.
 STALE_IOA=$((FORBIDDEN_IOA + 1))
 received_before=$(rtu_field commands_received)
-STALE_OUT=$(compose exec -T cc /usr/local/bin/malformer -addr "$RTU_IP:$RTU_PORT" \
-  -scenario stale-retransmit -lport 40405 -ca "$ALLOWED_CA" -ioa "$FORBIDDEN_IOA" -dcs "$DCS_OPEN" 2>&1 | tr -d '\r' | tail -n 1)
+rc=0
+STALE_OUT=$(malformer -scenario stale-retransmit -lport 40405 -ca "$ALLOWED_CA" \
+  -ioa "$FORBIDDEN_IOA" -dcs "$DCS_OPEN") || rc=$?
+iec_stale_probe_ran "$rc" "$STALE_OUT" || fatal "raw replay did not run: exit $rc; $STALE_OUT"
 sleep 1
 last_cmd=$(rtu_field last_command)
 received_after=$(rtu_field commands_received)
 STALE_DETAIL="malformer: $STALE_OUT; RTU last_command '$last_cmd'; commands_received $received_before -> $received_after"
-if [[ "$STALE_OUT" == *FAILED* ]]; then
-  fail "stale retransmit after a new handshake cannot bypass" "raw replay could not run: $STALE_OUT"
-elif [[ "$last_cmd" != *"ioa=$STALE_IOA"* ]]; then
+if [[ -n "$received_before" && "$received_after" == "$received_before" && "$last_cmd" != *"ioa=$STALE_IOA"* ]]; then
   gate_pass "stale retransmit after a new handshake cannot bypass" "$STALE_DETAIL"
 else
   gate_fail "stale retransmit after a new handshake cannot bypass" "the stale segment reached the RTU: $STALE_DETAIL"
