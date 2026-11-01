@@ -154,6 +154,10 @@ test("a healthy installed ruleset reads quietly", async ({ page }) => {
 test("the ICS page shows nothing extra while the installed ruleset is healthy", async ({ page }) => {
   await mockAPI(page, { enforcement: { state: "enforcing", reason: "" } });
   await open(page, "/ics/");
+  const details = page.getByRole("button", { name: "Inspection details", exact: true });
+  await expect(details).toHaveAttribute("aria-expanded", "false");
+  await details.click();
+  await expect(details).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("status", { name: "Firewall enforcing: healthy" })).toBeVisible();
   await expect(page.getByRole("status", { name: "Failed apply" })).toHaveCount(0);
   await expect(page.getByRole("status", { name: "Installed ruleset status" })).toHaveCount(0);
