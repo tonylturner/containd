@@ -257,6 +257,7 @@ export function IDSRulesCard({
 export function ConfigActionBar({
   canEdit,
   canCommit,
+  canMutate,
   ttlSeconds,
   onTtlChange,
   onCommit,
@@ -266,6 +267,7 @@ export function ConfigActionBar({
 }: {
   canEdit: boolean;
   canCommit: boolean;
+  canMutate: boolean;
   ttlSeconds: string;
   onTtlChange: (value: string) => void;
   onCommit: () => void;
@@ -307,12 +309,14 @@ export function ConfigActionBar({
           <>
             <button
               onClick={onConfirmCommit}
+              disabled={!canMutate}
               className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
             >
               Confirm
             </button>
             <button
               onClick={onRollback}
+              disabled={!canMutate}
               className="rounded-xs bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
             >
               Rollback

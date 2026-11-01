@@ -90,7 +90,7 @@ export default function SecurityView() {
   const setSLTarget = useCallback(async (zoneId: string, lvl: number) => {
     const name = zoneNames.current.get(zoneId);
     if (!name) return;
-    const result = await api.updateZone(expectedRevision(), name, { slTarget: lvl }).then(handleRevision);
+    const result = await api.updateZone(expectedRevision(), name, { slTarget: lvl }).then(handleRevision(expectedRevision()));
     if (!result.ok) { toast(result.error || "Failed to stage zone target", "error"); return; }
     toast("Zone target staged — commit to apply.", "success");
     await fetchData();
@@ -103,7 +103,7 @@ export default function SecurityView() {
     const ov = { ...zone.overrides };
     if (Object.prototype.hasOwnProperty.call(ov, srId)) delete ov[srId];
     else ov[srId] = newVal;
-    const result = await api.updateZone(expectedRevision(), name, { slOverrides: ov }).then(handleRevision);
+    const result = await api.updateZone(expectedRevision(), name, { slOverrides: ov }).then(handleRevision(expectedRevision()));
     if (!result.ok) { toast(result.error || "Failed to stage zone override", "error"); return; }
     toast("Zone override staged — commit to apply.", "success");
     await fetchData();

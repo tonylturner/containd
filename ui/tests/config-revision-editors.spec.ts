@@ -42,7 +42,7 @@ async function setup(page: Page) {
   return state;
 }
 
-test("one row acknowledgement cannot rebase another row's retained edits", async ({ page }) => {
+test("one row acknowledgement advances the shared base without discarding another row's edits", async ({ page }) => {
   const state = await setup(page);
   await page.goto("/zones/");
   const one = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "one", exact: true }) });
@@ -53,16 +53,11 @@ test("one row acknowledgement cannot rebase another row's retained edits", async
   }
   await one.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => state.counter).toBe(2);
-  await two.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toBeVisible();
-  expect(state.writes.map(w => w.revision)).toEqual(["0123456789abcdef.1", "0123456789abcdef.1"]);
-  await page.getByRole("button", { name: "Keep my edits", exact: true }).click();
-  expect(state.writes).toHaveLength(2);
-  await two.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(two.getByRole("textbox").first()).toHaveValue("second");
   await two.getByRole("button", { name: "Save", exact: true }).click();
-  await expect.poll(() => state.writes.length).toBe(3);
-  expect(state.writes[2].revision).toBe("0123456789abcdef.2");
+  await expect.poll(() => state.counter).toBe(3);
+  expect(state.writes.map(w => w.revision)).toEqual(["0123456789abcdef.1", "0123456789abcdef.2"]);
+  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toHaveCount(0);
 });
 
 for (const surface of ["Firewall", "ICS"]) {
@@ -214,3 +209,28 @@ for (const surface of ["syslog", "IDS group"]) {
     expect(state.writes[0].revision).toBe("0123456789abcdef.2");
   });
 }
+
+test("a clean collection continues refreshing after Keep and clears the warning after a write", async ({ page }) => {
+  const state = await setup(page);
+  await page.goto("/zones/");
+  const row = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "one", exact: true }) });
+  await expect(row).toBeVisible();
+  state.counter++;
+  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: "Keep my edits", exact: true }).click();
+  state.zones.push({ name: "three", alias: "" });
+  const refreshed = page.waitForResponse("**/api/v1/zones");
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
+  await (await refreshed).finished();
+  await expect(page.getByRole("cell", { name: "three", exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+  await expect.poll(() => state.counter).toBe(3);
+  await expect(page.getByText("Based on an older view — review, then save again.", { exact: true })).toHaveCount(0);
+  const two = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "two", exact: true }) });
+  await two.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+  await expect.poll(() => state.counter).toBe(4);
+  expect(state.writes.map(w => w.revision)).toEqual(["0123456789abcdef.1", "0123456789abcdef.2", "0123456789abcdef.3"]);
+});

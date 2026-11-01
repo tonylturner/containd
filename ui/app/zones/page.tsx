@@ -76,7 +76,7 @@ export default function ZonesPage() {
       setError(result.error);
       return;
     }
-    rowsDraft.acceptCollection((rows) => upsertRow(rows, result.data, (row) => row.name));
+    rowsDraft.acceptCollection(submitted.baseRevision, (rows) => upsertRow(rows, result.data, (row) => row.name), [], result.revision);
     toast("Zone staged — commit to apply.", "success");
     refresh();
     form.acceptFields(submitted, ["name", "alias", "description", "slTarget"], result.revision);
@@ -92,13 +92,14 @@ export default function ZonesPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setError(null);
-        const result = await api.deleteZone(rowsDraft.editor.baseRevision ?? "", zoneName);
+        const submittedBase = rowsDraft.editor.baseRevision;
+        const result = await api.deleteZone(submittedBase ?? "", zoneName);
         if (!result.ok) {
           rowsDraft.reportFailure(result);
           setError(result.error);
           return;
         }
-        rowsDraft.acceptCollection((rows) => rows.filter((row) => row.name !== zoneName), [`${JSON.stringify(zoneName)}.`], result.revision);
+        rowsDraft.acceptCollection(submittedBase, (rows) => rows.filter((row) => row.name !== zoneName), [`${JSON.stringify(zoneName)}.`], result.revision);
         toast("Zone staged — commit to apply.", "success");
         refresh();
       },

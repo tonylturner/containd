@@ -90,19 +90,23 @@ export default function RoutingPage() {
 
   useConfigRefresh(refresh);
 
-  async function save(next: RoutingConfig): Promise<{ ok: boolean; warning?: string; revision?: string }> {
+  async function save(next: RoutingConfig, fields: Parameters<typeof form.acceptFields>[1] = []): Promise<{ ok: boolean; warning?: string; revision?: string }> {
     if (!canEdit || !canSaveNow()) return { ok: false };
     setError(null);
     setNotice(null);
     setSaving(true);
-    const updated = await api.setRouting(form.editor.baseRevision ?? "", next);
+    const submitted = form.editor;
+    const base = submitted.baseRevision ?? "";
+    const response = await api.setRouting(base, next);
+    const updated = response.ok ? handleRevision(base)(response) : response;
     setSaving(false);
     if (!updated.ok) {
       form.fail(updated);
       setError(updated.error || "Failed to save routing config.");
       return { ok: false };
     }
-    setCfg(updated.data);
+    if (updated.adopted) setCfg(updated.data);
+    form.acceptFields(submitted, fields, updated.revision);
     setNotice(updated.warning ? `Routing staged — commit to apply. Warning: ${updated.warning}` : "Routing staged — commit to apply.");
     return { ok: true, warning: updated.warning, revision: updated.revision };
   }
@@ -131,11 +135,7 @@ export default function RoutingPage() {
       routes: cfg.routes ?? [],
       rules: cfg.rules ?? [],
     };
-    const submitted = form.editor;
-    const result = await save(next);
-    if (!result.ok) return;
-
-    form.acceptFields(submitted, ["gwName", "gwAlias", "gwAddr", "gwIface", "gwDesc"], result.revision);
+    await save(next, ["gwName", "gwAlias", "gwAddr", "gwIface", "gwDesc"]);
   }
 
   async function deleteGateway(idx: number) {
@@ -161,7 +161,7 @@ export default function RoutingPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setReconciling(true);
-        const res = await api.reconcileRoutingReplace(expectedRevision()).then(handleRevision);
+        const res = await api.reconcileRoutingReplace(expectedRevision()).then(handleRevision(expectedRevision()));
         setReconciling(false);
         if (!res.ok) {
           setError(res.error || "Failed to reconcile routing.");
@@ -196,11 +196,7 @@ export default function RoutingPage() {
       routes: [...(cfg.routes ?? []), nextRoute],
       rules: cfg.rules ?? [],
     };
-    const submitted = form.editor;
-    const result = await save(next);
-    if (!result.ok) return;
-
-    form.acceptFields(submitted, ["routeDst", "routeGw", "routeIface", "routeTable", "routeMetric"], result.revision);
+    await save(next, ["routeDst", "routeGw", "routeIface", "routeTable", "routeMetric"]);
   }
 
   async function deleteRoute(idx: number) {
@@ -235,11 +231,7 @@ export default function RoutingPage() {
       routes: cfg.routes ?? [],
       rules: [...(cfg.rules ?? []), nextRule],
     };
-    const submitted = form.editor;
-    const result = await save(next);
-    if (!result.ok) return;
-
-    form.acceptFields(submitted, ["ruleSrc", "ruleDst", "ruleTable", "rulePrio"], result.revision);
+    await save(next, ["ruleSrc", "ruleDst", "ruleTable", "rulePrio"]);
   }
 
   async function deleteRule(idx: number) {
@@ -259,7 +251,7 @@ export default function RoutingPage() {
     setNotice(null);
     try {
       const [ifsSnapshot, states] = await Promise.all([api.listInterfaces(), api.listInterfaceState()]);
-      const ifs = readConfig(ifsSnapshot);
+      const ifs = ifsSnapshot?.data ?? null;
       setInterfaceStateUnavailable(states === null);
       if (states === null) return;
       if (ifs === null) {

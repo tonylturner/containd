@@ -248,3 +248,46 @@ test("copy running cannot discard candidate changes hidden behind a retained JSO
   expect(state.hostname).toBe("unseen");
   await expect(editor).toHaveValue('{"system":{"hostname":"mine"}}');
 });
+
+test("412 Reload discards JSON edits and adopts a fresh server snapshot", async ({ page }) => {
+  const { state, writes } = await mockConfig(page);
+  await page.goto("/config/?tab=candidate");
+  const editor = page.getByRole("textbox", { name: "Staged config JSON" });
+  await expect(editor).toContainText("initial");
+  await editor.fill('{"system":{"hostname":"mine"}}');
+  state.hostname = "theirs";
+  state.counter++;
+  await page.getByRole("button", { name: "Save staged config", exact: true }).click();
+  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Reload", exact: true }).click();
+  await expect(editor).toContainText("theirs");
+  expect(writes).toHaveLength(1);
+  await editor.fill('{"system":{"hostname":"reviewed"}}');
+  await page.getByRole("button", { name: "Save staged config", exact: true }).click();
+  await expect.poll(() => state.counter).toBe(3);
+  expect(writes[1].revision).toBe(token(2));
+});
+
+test("Confirm and Rollback are disabled without a diff revision", async ({ page }) => {
+  await mockConfig(page);
+  await page.route("**/api/v1/config/diff", route => route.fulfill({ json: { changed: true, changedSections: [], running: {}, candidate: {} } }));
+  await page.goto("/config/?tab=diff");
+  await expect(page.getByRole("button", { name: "Confirm", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Rollback", exact: true })).toBeDisabled();
+});
+
+test("rollback holds the displayed diff and the revision captured when its dialog opens", async ({ page }) => {
+  const { state, writes } = await mockConfig(page);
+  await page.goto("/config/?tab=diff");
+  await expect(page.getByRole("region", { name: "System changes" })).toContainText("initial");
+  await page.getByRole("button", { name: "Rollback", exact: true }).click();
+  state.counter++;
+  state.hostname = "not-reviewed";
+  const response = page.waitForResponse("**/api/v1/config/diff");
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("containd:config:staged")));
+  await (await response).finished();
+  await expect(page.getByRole("region", { name: "System changes" })).not.toContainText("not-reviewed");
+  await page.getByRole("dialog").getByRole("button", { name: "Rollback", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toMatchObject({ path: "/config/rollback", revision: token(1) });
+});

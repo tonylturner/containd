@@ -45,7 +45,7 @@ test("late NAT acknowledgement cannot give old data a newer refresh revision", a
     await page.getByRole("button", { name: "Off", exact: true }).click();
     await page.getByRole("button", { name: "Save NAT", exact: true }).click();
     await expect.poll(() => counter).toBe(2);
-    const remoteForward = { id: "remote", enabled: true, ingressZone: "wan", proto: "tcp", listenPort: 8443, destIp: "192.0.2.22", destPort: 443 };
+    const remoteForward = { id: "remote", enabled: true, ingressZone: "wan", proto: "tcp" as const, listenPort: 8443, destIp: "192.0.2.22", destPort: 443 };
     nat = { ...nat, portForwards: [remoteForward] };
     counter++;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();

@@ -44,7 +44,7 @@ type SaveState = "idle" | "starting" | "stopping";
 type PcapForwardRow = PcapForwardTarget & { interface: string };
 
 export default function PcapPage() {
-  const { readConfig, expectedRevision, acceptRevision, handleRevision, revisionNotice } = useConfigRevision();
+  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
   const canEdit = isAdmin();
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const confirm = useConfirm();
@@ -104,7 +104,7 @@ export default function PcapPage() {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     const [cfgSnapshot, st, list] = await Promise.all([getPcapConfig(), getPcapStatus(), listPcaps()]);
-    const cfg = readConfig(cfgSnapshot);
+    const cfg = readConfig(cfgSnapshot, true, dirtyRef.current);
     if (checkLoaded(cfg)) {
       const normalized = normalizeConfig(cfg);
       const nextJson = JSON.stringify(normalized);
@@ -425,16 +425,15 @@ export default function PcapPage() {
     }
     const submittedBase = expectedRevision();
     const submittedSettings = settingsSnapshot;
-    const saved = await setPcapConfig(submittedBase, settings).then(handleRevision);
+    const saved = await setPcapConfig(submittedBase, settings).then(handleRevision(submittedBase));
     if (!saved.ok) {
       setNotice(saved.error || "Failed to save capture settings.");
       return;
     }
-    if (latestSettings.current === submittedSettings) {
+    if (saved.adopted && latestSettings.current === submittedSettings) {
       setSettings(normalizeConfig(saved.data));
-      acceptRevision(submittedBase, saved.revision);
     }
-    setSavedConfigJson(JSON.stringify(normalizeConfig(saved.data)));
+    if (saved.adopted) setSavedConfigJson(JSON.stringify(normalizeConfig(saved.data)));
     setNotice(saved.warning ? `PCAP defaults staged — commit to apply. Warning: ${saved.warning}` : "PCAP defaults staged — commit to apply.");
     await refresh();
   }

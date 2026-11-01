@@ -44,7 +44,7 @@ export default function IDSPage() {
   const { acceptCollection } = draft;
   const panelForm = useConfigForm<IDSPanelFields>({ name: "", filter: "", format: "", sigmaText: "" });
   const { refreshForm } = panelForm;
-  const importedFrom = useRef<IDSRule[] | null>(null);
+  const importedFrom = useRef<{ rules: IDSRule[]; base: string; revision?: string } | null>(null);
   const refreshId = useRef(0);
   const [importPending, setImportPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,18 +67,18 @@ export default function IDSPage() {
       return;
     }
     setError(null);
-    adoptConfig(cfg, keepEdits, cfgSnapshot?.revision);
     if (importedFrom.current) {
       // File import only appends new IDs. Other changes in this read are
       // background changes, not acknowledgement of the user's local edits.
-      const before = new Set(importedFrom.current.map((rule) => rule.id));
+      const before = new Set(importedFrom.current.rules.map((rule) => rule.id));
       const added = (cfg.rules ?? []).filter((rule) => !before.has(rule.id));
-      acceptCollection((current) => ({
+      if (cfgSnapshot?.revision === importedFrom.current.revision) acceptCollection(importedFrom.current.base, (current) => ({
         ...current, rules: added.reduce((rules, rule) => upsertRow(rules, rule, (r) => r.id), current.rules ?? []),
-      }));
+      }), [], importedFrom.current.revision);
       importedFrom.current = null;
       setImportPending(false);
     }
+    adoptConfig(cfg, keepEdits, cfgSnapshot?.revision);
     refreshForm(cfg, keepEdits, cfgSnapshot?.revision);
     setSources(src ?? []);
     if (!keepEdits) setEditing(null);
@@ -104,7 +104,8 @@ export default function IDSPage() {
     const before = editor.server.rules ?? [];
     setImportPending(true);
     setError(null);
-    const result = await api.importIDSRules(expectedRevision(), file, format || undefined).then(handleRevision);
+    const submittedBase = expectedRevision();
+    const result = await api.importIDSRules(submittedBase, file, format || undefined).then(handleRevision(submittedBase));
     if (!result.ok) {
       setImportPending(false);
       setError(result.error || "Import failed. Check the file format and try again.");
@@ -112,7 +113,7 @@ export default function IDSPage() {
     }
     // The import response contains counts, not rules. Keep Save blocked until
     // a successful read has acknowledged the additions, even if that read fails.
-    importedFrom.current = before;
+    importedFrom.current = { rules: before, base: submittedBase, revision: result.revision };
     await refresh();
     const { imported, skipped, format: detected, total } = result.data;
     flashSuccess(`IDS rules staged — commit to apply. Imported ${imported} rule${imported !== 1 ? "s" : ""} (${skipped} skipped). Format: ${detected}. Total: ${total}.`);

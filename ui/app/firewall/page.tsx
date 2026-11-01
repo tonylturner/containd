@@ -51,7 +51,8 @@ import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 // under ui/app/firewall/ as they become non-trivial.
 
 export default function FirewallPage() {
-  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
+  const configRevision = useConfigRevision();
+  const { readConfig, expectedRevision, handleRevision, revisionNotice } = configRevision;
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const [rules, setRules] = useState<FirewallRule[]>([]);
   const [viewRevision, setViewRevision] = useState("");
@@ -166,7 +167,7 @@ export default function FirewallPage() {
     if (!canSaveNow()) return;
     setError(null);
     setNotice(null);
-    const result = await api.deleteFirewallRule(expectedRevision(), id).then(handleRevision);
+    const result = await api.deleteFirewallRule(expectedRevision(), id).then(handleRevision(expectedRevision()));
     if (!result.ok) {
       setError(result.error || "Failed to delete rule.");
       return;
@@ -180,13 +181,13 @@ export default function FirewallPage() {
     setMoving(true);
     setError(null);
     setNotice(null);
-    const result = await api.moveFirewallRule(expectedRevision(), id, position).then(handleRevision);
+    const result = await api.moveFirewallRule(expectedRevision(), id, position).then(handleRevision(expectedRevision()));
     setMoving(false);
     if (!result.ok) {
       setError(result.error);
       return;
     }
-    setRules(result.data.rules);
+    if (result.adopted) setRules(result.data.rules);
     setRulesetPreview(null);
     setNotice(`Rule moved to position ${result.data.index + 1} — commit to apply.${result.warning ? ` Warning: ${result.warning}` : ""}`);
   }
@@ -266,8 +267,8 @@ export default function FirewallPage() {
     try {
       const warnings: string[] = [];
       const [ifsSnapshot, states, curRoutingSnapshot] = await Promise.all([api.listInterfaces(), api.listInterfaceState(), api.getRouting()]);
-      const ifs = readConfig(ifsSnapshot);
-      const curRouting = readConfig(curRoutingSnapshot);
+      const ifs = ifsSnapshot?.data ?? null;
+      const curRouting = curRoutingSnapshot?.data ?? null;
       if (curRouting === null) {
         checkLoaded(null);
         throw new Error("Routing configuration unavailable; no quick-start changes were staged.");
@@ -279,7 +280,7 @@ export default function FirewallPage() {
       if (!inferred.ok) throw new Error(inferred.error);
       const nextRouting = withDefaultRoute(curRouting, wanGateway(inferred.wan));
 
-      const routingUpdated = await api.setRouting(expectedRevision(), nextRouting).then(handleRevision);
+      const routingUpdated = await api.setRouting(expectedRevision(), nextRouting).then(handleRevision(expectedRevision()));
       if (!routingUpdated.ok) throw new Error(routingUpdated.error || "Failed to update routing configuration.");
       if (routingUpdated.warning) warnings.push(`routing: ${routingUpdated.warning}`);
 
@@ -290,7 +291,7 @@ export default function FirewallPage() {
         egressZone: nat.egressZone || "wan",
         sourceZones: Array.from(sourceZones),
       };
-      const natUpdated = await api.setNAT(routingUpdated.revision ?? "", natNext).then(handleRevision);
+      const natUpdated = await api.setNAT(routingUpdated.revision ?? "", natNext).then(handleRevision(routingUpdated.revision ?? ""));
       if (!natUpdated.ok) throw new Error(natUpdated.error || "Failed to update NAT configuration.");
       if (natUpdated.warning) warnings.push(`nat: ${natUpdated.warning}`);
 
@@ -304,11 +305,11 @@ export default function FirewallPage() {
         action: "ALLOW",
       };
       if (!existing) {
-        const created = await api.createFirewallRule(natUpdated.revision ?? "", allowRule).then(handleRevision);
+        const created = await api.createFirewallRule(natUpdated.revision ?? "", allowRule).then(handleRevision(natUpdated.revision ?? ""));
         if (!created.ok) throw new Error(created.error || "Failed to create the LAN\u2192WAN allow rule.");
         if (created.warning) warnings.push(`firewall rule: ${created.warning}`);
       } else {
-        const updated = await api.updateFirewallRule(natUpdated.revision ?? "", allowID, allowRule).then(handleRevision);
+        const updated = await api.updateFirewallRule(natUpdated.revision ?? "", allowID, allowRule).then(handleRevision(natUpdated.revision ?? ""));
         if (!updated.ok) throw new Error(updated.error || "Failed to update the LAN\u2192WAN allow rule.");
         if (updated.warning) warnings.push(`firewall rule: ${updated.warning}`);
       }
@@ -453,7 +454,7 @@ export default function FirewallPage() {
         )}
       </Card>
 
-      <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} revision={viewRevision} available={canSave} health={health} onChange={setDpiConfig} />
+      <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} revision={viewRevision} available={canSave} health={health} revisionState={configRevision} onChange={(config, revision) => { setDpiConfig(config); setViewRevision(revision); }} />
 
       <fieldset disabled={!canSave} className="min-w-0">
       {isAdmin() && (
