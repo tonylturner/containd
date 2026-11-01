@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 /** Presentation only: each caller supplies independent saved and live observations. */
 export function ServiceStatusStrip({ configured, running, attention, updated, note, summary, label = "Service status" }: {
   configured?: boolean | string;
