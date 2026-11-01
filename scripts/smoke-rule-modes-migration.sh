@@ -53,8 +53,8 @@ for boot_number in 1 2; do
     exit 1
   }
   api "$BASE/config" >"$RESULTS/running-$boot_number.json"
-  jq -e '.schema_version=="0.1.9" and .dataplane.dpiMode=="monitor" and .firewall.rules[0].ics.mode=="monitor"' "$RESULTS/running-$boot_number.json" >/dev/null || {
-    echo "FAIL migration boot $boot_number: expected schema 0.1.9 and global/rule monitor modes; observed:" >&2
+  jq -e '.schema_version=="0.1.10" and .dataplane.dpiMode=="monitor" and .firewall.rules[0].ics.mode=="monitor"' "$RESULTS/running-$boot_number.json" >/dev/null || {
+    echo "FAIL migration boot $boot_number: expected schema 0.1.10 and global/rule monitor modes; observed:" >&2
     cat "$RESULTS/running-$boot_number.json" >&2
     exit 1
   }
