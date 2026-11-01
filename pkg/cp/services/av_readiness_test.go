@@ -288,11 +288,15 @@ func TestAVReadinessScanAndStatusPublish(t *testing.T) {
 		t.Fatal(status)
 	}
 	assertAVReady(t, m, false)
+	m.stopObserver()
 	failed.Store(false)
-	if status := m.Status(context.Background()); status["ready"] != true {
+	if status := m.Status(context.Background()); status["ready"] != false {
 		t.Fatal(status)
 	}
-	assertAVReady(t, m, true)
+	// OPTIONS recovery alone cannot resurrect scan proof from before loss.
+	assertAVReady(t, m, false)
+	m.startObserver(m.Current(), m.backendEpoch)
+	waitAVReady(t, m, true)
 }
 
 func TestAVReadinessFailedApplyRecoversAndDisableJoins(t *testing.T) {

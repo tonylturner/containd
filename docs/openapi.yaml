@@ -244,6 +244,14 @@ components:
         hostname: {type: string}
         time: {type: string, format: date-time}
         iec104Enforcement: {$ref: "#/components/schemas/IEC104Enforcement"}
+        protection:
+          type: object
+          required: [state, applyId]
+          additionalProperties: false
+          description: Sanitized observation only; components and diagnostics require authentication.
+          properties:
+            state: {type: string, enum: [pending, protecting, degraded, failed, disabled, unknown]}
+            applyId: {type: string}
         enforcement: {$ref: "#/components/schemas/EnforcementHealth"}
         icsEnforcement: {$ref: "#/components/schemas/ICSEnforcementHealth"}
         ipv4Forwarding:
@@ -292,39 +300,65 @@ components:
             False after a queue bind, verdict submission, reset send,
             reset injector or bounded-worker failure. IEC104 envelope
             traffic then fails closed until readiness returns.
-        reason: {type: string, description: "Cause when IEC104 is unhealthy, else empty"}
+        reason: {type: string, description: "Fixed sanitized summary when unhealthy, else empty"}
       example: {active: true, healthy: true, reason: ""}
+
+    ProtectionStatus:
+      type: object
+      required: [bootId, applyId, installedApplyId, state, retryable, observedAt, components, effects]
+      properties:
+        bootId: {type: string, description: Engine process identity; empty when unknown}
+        applyId: {type: string, maxLength: 64, description: Opaque runtime application identity; empty before first apply}
+        installedApplyId: {type: string, description: Application whose nft policy is installed; empty if none}
+        state: {type: string, enum: [pending, protecting, degraded, failed, disabled, unknown]}
+        retryable: {type: boolean}
+        observedAt: {type: string, format: date-time}
+        components:
+          type: array
+          items:
+            type: object
+            required: [name, required, state, reason, since]
+            properties:
+              name: {type: string, description: 'nft, nfqueue:<group>, iec-envelope, scan-gate, scanner or nflog'}
+              required: {type: boolean}
+              state: {type: string, enum: [ready, pending, failed, off]}
+              reason: {type: string}
+              attempt: {type: integer}
+              maxAttempts: {type: integer}
+              since: {type: string, format: date-time}
+        effects:
+          type: array
+          items:
+            type: object
+            required: [traffic, effect]
+            properties:
+              traffic: {type: string}
+              effect: {type: string, enum: [normal, fail_closed_drop, not_inspected, unknown]}
+
+    RuntimeApplyResponse:
+      type: object
+      required: [status, applyId, protection]
+      description: Synchronous apply succeeded, not a certificate of asynchronous readiness. Missing or mismatched telemetry is unknown and never undoes the transaction.
+      properties:
+        status: {type: string}
+        applyId: {type: string, maxLength: 64}
+        protection: {$ref: '#/components/schemas/ProtectionStatus'}
 
     EnforcementHealth:
       type: object
       required: [state, reason]
       additionalProperties: false
       description: >
-        General firewall health, separate from IEC104 queue/reset health.
-        Health stays HTTP 200 and shares one one-second observation budget.
-        Persisted replay/recovery faults take precedence over configured mode
-        and yield unavailable with a generic reason, never private nft policy
-        diagnostics. Metadata reads wait through brief store contention within
-        the shared budget, yielding unknown if it expires rather than exposing
-        unapplied running state or waiting indefinitely for commit/recovery.
-        Management binding is also unknown
-        when that snapshot or its engine observation cannot be read in time.
+        Health stays HTTP 200 within one shared one-second observation budget.
+        Persisted replay/recovery faults and management recovery override protection.
+        Protecting maps to enforcing, degraded to degraded (rule-hit logging
+        unavailable; nft policy enforcing), pending or failed to unavailable
+        (protection pending or protection failed), disabled to disabled, and
+        absent, stale or unreadable protection to unknown. Schedule planner
+        degradation still overrides enforcing. Reasons contain no private diagnostics.
       properties:
-        state:
-          type: string
-          enum: [enforcing, degraded, disabled, unavailable, unknown]
-          description: >
-            Enforcing means enforcement enabled and an applied ruleset without
-            error. Degraded means a ruleset is in force but the last apply
-            failed, leaving the previous ruleset in force, or the schedule
-            planner is degraded (a failing refill, or a schedule horizon that
-            ends within an hour). Disabled means
-            dataplane.enforcement is false. Unavailable means a ruleset apply
-            failure with no ruleset in force, a persisted replay/recovery fault,
-            or no applied ruleset while enforcement is on. Unknown means
-            required config/fault or engine state could not be read within the
-            budget.
-        reason: {type: string, description: Generic summary for degraded, unavailable or unknown; otherwise empty}
+        state: {type: string, enum: [enforcing, degraded, disabled, unavailable, unknown]}
+        reason: {type: string, description: Fixed summary; empty for enforcing or disabled}
       example: {state: enforcing, reason: ""}
 
     ConfigApplyError:
@@ -3663,7 +3697,10 @@ components:
             format: date-time
     FactoryResetResponse:
       type: object
+      required: [status, applyId, protection]
       properties:
+        applyId: {type: string, maxLength: 64}
+        protection: {$ref: '#/components/schemas/ProtectionStatus'}
         status:
           type: string
         loggedOut:
@@ -4042,6 +4079,7 @@ paths:
         "200":
           description: Reset applied; inspect warnings for incomplete convergence and reauthenticate with default credentials
           headers:
+            X-Containd-Config: {$ref: '#/components/headers/Committed'}
             X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}
           content:
@@ -4222,7 +4260,7 @@ paths:
         service side effect. A non-2xx does not guarantee the live firewall is
         unchanged; after a disconnect, read running, candidate and health before
         retrying. A persisted recovery fault survives restarts until successful apply.
-        Check health afterwards for continuing IEC104 queue/reset readiness.
+        Inspect protection in the response or GET /dataplane/protection for readiness; pending is not protecting.
         Never treat import as a fallback activation step: import only stages.
       tags: [Config]
       responses:
@@ -4236,7 +4274,7 @@ paths:
             X-Containd-Config: {$ref: '#/components/headers/Committed'}
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/StatusResponse'}
+              schema: {$ref: '#/components/schemas/RuntimeApplyResponse'}
         "400": {description: Preflight or candidate validation failed; no promotion or recovery fields, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "500":
@@ -4301,7 +4339,7 @@ paths:
       responses:
         "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
-        "200": {description: Previous configuration restored and applied, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}, headers: {
+        "200": {description: Previous configuration restored and applied, content: {application/json: {schema: {$ref: '#/components/schemas/RuntimeApplyResponse'}}}, headers: {
             X-Containd-Config: {$ref: '#/components/headers/Committed'}, X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
         "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "400":
@@ -7007,7 +7045,7 @@ paths:
           description: Applied and awaiting confirmation
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/StatusResponse'}
+              schema: {$ref: '#/components/schemas/RuntimeApplyResponse'}
           headers:
             X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Committed'}
@@ -7433,6 +7471,60 @@ paths:
           description: Engine unavailable or unable to compile candidate; no ruleset returned
         '503':
           description: No engine with ruleset preview support is configured; no ruleset returned
+  /dataplane/protection:
+    get:
+      summary: Observe engine protection (any authenticated user)
+      tags: [DataPlane]
+      responses:
+        '200':
+          description: Current engine-owned observation; unknown if telemetry is missing or stale
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProtectionStatus'}
+        '401': {description: Authentication required}
+        '502': {description: 'Engine protection status unavailable: upstream failure'}
+        '503': {description: Engine unavailable}
+  /dataplane/protection/retry:
+    post:
+      summary: Retry failed protection consumers (admin)
+      description: >
+        Audited as dataplane.protection.retry. Send the bootId and applyId from
+        the observation reviewed by the operator. The engine atomically rejects
+        superseded or non-retryable observations. This is not a new configuration
+        apply and keeps its applyId; no configuration revision is required.
+      tags: [DataPlane]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bootId, applyId]
+              properties:
+                bootId: {type: string, minLength: 1}
+                applyId: {type: string, minLength: 1, maxLength: 64}
+      responses:
+        '202':
+          description: Retry accepted, not a readiness certificate
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, applyId]
+                properties:
+                  status: {type: string, enum: [retrying]}
+                  applyId: {type: string}
+        '400': {description: Invalid body or identity}
+        '401': {description: Authentication required}
+        '403': {description: Admin role required}
+        '409':
+          description: protection_superseded or protection_not_retryable
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502': {description: Engine protection retry unavailable}
+        '503': {description: Engine unavailable}
+
   /dataplane/ruleset/status:
     get:
       summary: Status of the installed ruleset

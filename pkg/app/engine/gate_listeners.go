@@ -75,7 +75,20 @@ func (g *gateManager) listenersUpLocked() bool {
 func (g *gateManager) run(ctx context.Context, srv *httpgate.Server, listeners []*gateListener, done chan struct{}) {
 	defer close(done)
 	var wg sync.WaitGroup
-	wg.Add(1 + len(listeners))
+	wg.Add(2 + len(listeners))
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				g.publishProtection()
+			}
+		}
+	}()
 	go func() {
 		defer wg.Done()
 		g.installRouting(ctx)
@@ -98,12 +111,14 @@ func (g *gateManager) installRouting(ctx context.Context) {
 		err := g.ensureRouting(ctx)
 		g.mu.Lock()
 		g.routingOK = err == nil
+		g.routingTerminal = gateUnsupported(err)
 		prev := g.routingErr
 		g.routingErr = ""
 		if err != nil {
 			g.routingErr = err.Error()
 		}
 		g.mu.Unlock()
+		g.publishProtection()
 		if err == nil {
 			g.logger.Infof("gate routing installed")
 			g.syncAdmit()

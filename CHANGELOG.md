@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- Commit, commit-confirmed, rollback and factory reset responses add `applyId`
+  and `protection`. Success acknowledges synchronous apply, not readiness; health
+  reports `unavailable` while protection is pending or failed.
 - Every configuration write and commit must send `X-Containd-If-Revision` with
   the revision from the read it is based on; requests without it get 428, stale
   ones 412. Scripts and integrations that stage then commit must read the
@@ -21,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Datapath protection status: `GET /api/v1/dataplane/protection` reports
+  whether the engine enforces the committed policy (queue binding, IEC
+  envelope, scan gate, scanner, rule-hit logging) and which traffic is dropped
+  or not inspected; admins retry a failed consumer with
+  `POST /api/v1/dataplane/protection/retry`. Commit and reset bodies carry the
+  observation and the runtime apply ID.
+- Protection notices, effect-aware topology and firewall/ICS indicators, and
+  administrator retry in the management UI.
 - An authoritative `managed` boolean in TLS status identifies the next-start
   identity's upload policy without ambiguous file-path inference.
 - System settings show management TLS reload failures while the last valid
@@ -36,34 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loss and recovery without a commit, and a direction becomes ready only after
   an EICAR test scan through it is detected.
 
-### Fixed
-
-- Isolate live learner intake from SQLite stalls with byte-bounded persistence
-  and group commits. Small decoded batches use the full intake byte budget
-  instead of overflowing a short count limit on busy hosts; Stop still drains
-  all accepted evidence before sealing, and real overflow retains its loss scope.
-- Keep decoded NFQUEUE default denials non-admitting across TCP
-  retransmissions, including reserved Modbus FC5 coil values, without
-  bypassing ordered kernel admission. The first scoped TCP non-admission
-  schedules best-effort resets toward both peers after its continuation
-  verdict completes, allowing a fresh connection instead of a timeout.
-- Cache accepted and rejected management TLS file identities so unchanged
-  handshakes do not read or parse PEM, and a reload does not block other
-  handshakes from serving the last-good identity.
-- Publish management HTTPS certificate chains and private keys together as one
-  durable, atomically replaced `/data/tls/server.pem` bundle. Import valid legacy
-  default-path pairs automatically without changing the originals; invalid legacy
-  pairs get a fresh self-signed bundle. Operator-owned paths are read-only, with
-  last-good retention on invalid rotation, explicit status errors and upload 409s.
-- Preserve TLS identity and its managed/external selection across factory reset;
-  share the validated public-leaf snapshot with status and SSH/local CLI pins.
-
 ### Changed
 
 - Return `GET /api/v1/security/conduits` as an ordered array with explicit `from`
   and `to` zone names instead of a map keyed by joined names. API clients must
   consume the array; zone names containing arrows remain distinct in topology
   selection and security scores.
+- Health `enforcement` reflects pending and failed protection rather than
+  treating nft installation alone as an enforcing dataplane.
 - Remove IEC 104 inventory `acceptedCommands` and `overflow.outcomes`; inventory
   reports decoded attempts and points, never delivery. Learner delivery evidence
   is unchanged.
@@ -84,6 +75,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Isolate live learner intake from SQLite stalls with byte-bounded persistence
+  and group commits. Small decoded batches use the full intake byte budget
+  instead of overflowing a short count limit on busy hosts; Stop still drains
+  all accepted evidence before sealing, and real overflow retains its loss scope.
+- Show the enforcement health reason for topology and firewall/ICS health-only
+  degradation instead of the contradictory explanation "Protecting".
+- Start rule-hit logging independently of capture so an optional NFQUEUE bind
+  failure cannot leave protection pending without an advancing consumer.
+- Keep antivirus capability, scan-proof invalidation and recovery canaries
+  independently ordered so concurrent OPTIONS and clean traffic cannot
+  resurrect stale readiness or prevent recovery.
+- Keep decoded NFQUEUE default denials non-admitting across TCP
+  retransmissions, including reserved Modbus FC5 coil values, without
+  bypassing ordered kernel admission. The first scoped TCP non-admission
+  schedules best-effort resets toward both peers after its continuation
+  verdict completes, allowing a fresh connection instead of a timeout.
+- Cache accepted and rejected management TLS file identities so unchanged
+  handshakes do not read or parse PEM, and a reload does not block other
+  handshakes from serving the last-good identity.
+- Publish management HTTPS certificate chains and private keys together as one
+  durable, atomically replaced `/data/tls/server.pem` bundle. Import valid legacy
+  default-path pairs automatically without changing the originals; invalid legacy
+  pairs get a fresh self-signed bundle. Operator-owned paths are read-only, with
+  last-good retention on invalid rotation, explicit status errors and upload 409s.
+- Preserve TLS identity and its managed/external selection across factory reset;
+  share the validated public-leaf snapshot with status and SSH/local CLI pins.
+
+- A commit no longer reads as enforcing when an NFQUEUE bind fails after the
+  ruleset is installed; health and the UI report pending or failed protection.
+- Protection follows live AV readiness after apply: scanner loss removes
+  `protecting`, and recovery requires canary detection in each selected direction.
 - Preserve in-flight AV scan failures across unchanged backend reapplies so
   readiness requires scan-canary recovery.
 - Keep unfinished routing and interface edits pinned to their original revision

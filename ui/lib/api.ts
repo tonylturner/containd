@@ -89,6 +89,8 @@ export type {
 } from "./api-ics-coverage";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export { fetchHealth } from "./api-health";
+export { fetchProtection, retryProtection } from "./api-protection";
+export type { ProtectionStatus, ProtectionState, ProtectionComponent, ProtectionEffect } from "./api-protection";
 export { getEvidenceStatus } from "./api-evidence";
 export type { AuditPersistenceStatus, EvidenceStatus, EvidenceState } from "./api-evidence";
 export type {

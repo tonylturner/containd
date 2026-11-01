@@ -237,6 +237,7 @@ func healthHandler(dpEngine *engine.Engine, guard *netcfg.ManagementGuard) http.
 			Component:             "engine",
 			Build:                 config.BuildVersion,
 			BootID:                engineBootID,
+			Protection:            dpEngine.Protection(),
 			IEC104Enforcement:     dpEngine.IEC104Enforcement(),
 			IPv4Forwarding:        netcfg.ReadIPv4ForwardingStatus(),
 		})
@@ -244,8 +245,8 @@ func healthHandler(dpEngine *engine.Engine, guard *netcfg.ManagementGuard) http.
 }
 
 // applyRulesHandler applies a snapshot and hands its scan selection to the gate.
-func applyRulesHandler(dpEngine *engine.Engine, gate *gateManager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func applyRulesHandler(dpEngine *engine.Engine, gate *gateManager, coordinator *protectionCoordinator) http.HandlerFunc {
+	return coordinator.admit(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -262,13 +263,12 @@ func applyRulesHandler(dpEngine *engine.Engine, gate *gateManager) http.HandlerF
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		if err := dpEngine.ApplyRules(ctx, snap); err != nil {
+		if err := dpEngine.ApplyRulesAndReconcile(ctx, snap, func() { gate.applySnapshot(snap.Gate) }); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		gate.applySnapshot(snap.Gate)
-		writeJSON(w, map[string]any{"status": "applied"})
-	}
+		writeJSON(w, dpEngine.Protection())
+	})
 }
 
 func getRulesHandler(dpEngine *engine.Engine) http.HandlerFunc {

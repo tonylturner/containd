@@ -42,12 +42,15 @@ const (
 )
 
 type gateManager struct {
-	logger   *zap.SugaredLogger
-	scanner  avscan.Scanner
-	admit    gateAdmitter // nil leaves the policy's switch untouched
-	events   *events.Store
-	ports    [2]uint16 // plain, masquerading
-	registry *gateRegistry
+	protection      *engine.Engine
+	lifetime        context.Context
+	routingTerminal bool
+	logger          *zap.SugaredLogger
+	scanner         avscan.Scanner
+	admit           gateAdmitter // nil leaves the policy's switch untouched
+	events          *events.Store
+	ports           [2]uint16 // plain, masquerading
+	registry        *gateRegistry
 
 	// The socket, routing and sysctl operations are fields so tests can run
 	// the manager with plain loopback sockets on any platform.
@@ -134,9 +137,14 @@ func (g *gateManager) start() {
 		g.mu.Unlock()
 		panic("gate settings: " + err.Error())
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	lifetime := g.lifetime
+	if lifetime == nil {
+		lifetime = context.Background()
+	}
+	ctx, cancel := context.WithCancel(lifetime)
 	g.server, g.cancel, g.done = srv, cancel, make(chan struct{})
 	g.routingOK, g.routingErr, g.warning = false, "", ""
+	g.routingTerminal = false
 	g.appliedKnown = false
 	g.listeners = g.newListeners()
 	listeners := g.listeners
@@ -306,6 +314,7 @@ func (g *gateManager) desiredAdmitLocked() enforce.GateAdmitState {
 // changed. It serialises switches so a later decision never loses to an
 // earlier one still in flight.
 func (g *gateManager) syncAdmit() {
+	defer g.publishProtection()
 	g.admitMu.Lock()
 	defer g.admitMu.Unlock()
 	g.mu.Lock()

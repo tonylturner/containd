@@ -1,6 +1,7 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { join } from "node:path";
 import { expect, test } from "./fixtures/topology-test";
+import { mockProtection } from "./fixtures/protection-api";
 
 test.use({ viewport: { width: 1024, height: 768 } });
 
@@ -26,6 +27,7 @@ async function openMatrix(page: Page, count: number) {
     };
     await route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
+  await mockProtection(page);
   const loaded = page.waitForResponse("**/api/v1/security/conduits");
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();

@@ -157,7 +157,9 @@ func TestAVReadinessTransportAndProtocolConstraints(t *testing.T) {
 			m.mu.Lock()
 			upload, download := m.directions[avscan.Upload], m.directions[avscan.Download]
 			m.mu.Unlock()
-			if upload.capable != tc.capable || download.capable != tc.capable || !upload.healthy || download.healthy {
+			// A protocol error is local to the failed direction; transport
+			// loss invalidates scan proof for both directions of that backend.
+			if upload.capable != tc.capable || download.capable != tc.capable || upload.healthy != tc.capable || download.healthy {
 				t.Fatalf("upload=%+v download=%+v", upload, download)
 			}
 		})

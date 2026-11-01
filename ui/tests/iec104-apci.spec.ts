@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { describeICSEvidence } from "../app/events/iec104-evidence";
 import type { TelemetryEvent } from "../lib/api";
+import { mockProtection } from "./fixtures/protection-api";
 
 const session = "0123456789abcdef0123456789abcdef-1";
 const types = {
@@ -34,9 +35,11 @@ async function mockAlert(page: Page, alert: TelemetryEvent) {
     else if (path.endsWith("/system/info")) body = { version: "0.1.35", hostname: "containd" };
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(body), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
+  await mockProtection(page);
 }
 
 async function detailFitsViewport(page: Page, headline: string, screenshot: string) {
+  await expect(page.getByRole("status", { name: "Dataplane protection" })).toHaveCount(0);
   const panel = page.getByRole("heading", { name: headline, exact: true }).locator("xpath=../../..");
   const bounds = await panel.boundingBox();
   expect(bounds).not.toBeNull();

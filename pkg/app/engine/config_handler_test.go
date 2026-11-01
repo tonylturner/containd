@@ -59,7 +59,7 @@ func (c *countingDP) Reconfigure(fresh *engine.Engine) error {
 	return c.Engine.Reconfigure(fresh)
 }
 
-func (c *countingDP) StartWithRetry(ctx context.Context) error {
+func (c *countingDP) StartProtection(ctx, lifetime context.Context) error {
 	c.starts.Add(1)
 	c.mu.Lock()
 	fn := c.startFn
@@ -69,7 +69,7 @@ func (c *countingDP) StartWithRetry(ctx context.Context) error {
 	if fn != nil {
 		err = fn(ctx)
 	} else {
-		err = c.Engine.StartWithRetry(ctx)
+		err = c.Engine.StartProtection(ctx, lifetime)
 	}
 	c.results <- err
 	return err
@@ -89,7 +89,7 @@ func (c *countingDP) waitStart(t *testing.T) error {
 func postConfig(t *testing.T, h http.Handler, body string) map[string]any {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(body)))
+	h.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(body)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("POST %s = %d %s", body, rec.Code, rec.Body.String())
 	}
@@ -137,7 +137,7 @@ func iecSessionIDs(e *engine.Engine) map[string]int {
 func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 	dp := newCountingDP(t)
 	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
-	h := configHandler(zap.NewNop().Sugar(), dp, sim)
+	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
 	learn := `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true}}`
 	if out := postConfig(t, h, learn); out["unchanged"] != false || dp.reconfigs.Load() != 1 {
 		t.Fatalf("first POST must rebuild: %v reconfigs=%d", out, dp.reconfigs.Load())
@@ -215,7 +215,7 @@ func TestConfigUnchangedKeepsEngineState(t *testing.T) {
 func TestConfigChangedKeepsEventsAndRecordsNewIECSession(t *testing.T) {
 	dp := newCountingDP(t)
 	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
-	h := configHandler(zap.NewNop().Sugar(), dp, sim)
+	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
 	store := dp.Events()
 	postConfig(t, h, `{"dpiEnabled":true,"dpiMode":"monitor","dpiIcsProtocols":{"iec104":true}}`)
 	dp.waitStart(t)
@@ -261,7 +261,7 @@ func TestConfigChangedKeepsEventsAndRecordsNewIECSession(t *testing.T) {
 
 func TestConfigEqualityIsExact(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()})
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, testProtectionCoordinator(t, dp))
 	steps := []struct {
 		body      string
 		unchanged bool
@@ -287,11 +287,11 @@ func TestConfigEqualityIsExact(t *testing.T) {
 
 func TestConfigInvalidEngineDoesNotRecordApplied(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()})
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, testProtectionCoordinator(t, dp))
 	postConfig(t, h, `{}`)
 	dp.waitStart(t)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"dpiMode":`)))
+	h.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"dpiMode":`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid JSON = %d", rec.Code)
 	}
@@ -303,7 +303,7 @@ func TestConfigInvalidEngineDoesNotRecordApplied(t *testing.T) {
 
 func TestConfigUnchangedRetriesAStartThatGaveUp(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()})
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, testProtectionCoordinator(t, dp))
 	gaveUp := errors.New("nfqueue 101: giving up after 8 bind attempts")
 	dp.startFn = func(context.Context) error { return gaveUp }
 	postConfig(t, h, `{"dpiEnabled":true}`)
@@ -322,7 +322,7 @@ func TestConfigUnchangedKeepsTheSimulationRunning(t *testing.T) {
 	dp := newCountingDP(t)
 	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
 	t.Cleanup(sim.stop)
-	h := configHandler(zap.NewNop().Sugar(), dp, sim)
+	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
 	run := func() string {
 		sim.mu.Lock()
 		defer sim.mu.Unlock()
@@ -356,7 +356,7 @@ func TestConfigUnchangedKeepsTheSimulationRunning(t *testing.T) {
 
 func TestConfigConcurrentGetAndPost(t *testing.T) {
 	dp := newCountingDP(t)
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()})
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, testProtectionCoordinator(t, dp))
 	go func() {
 		for range dp.results {
 		}
@@ -369,7 +369,7 @@ func TestConfigConcurrentGetAndPost(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
 				rec := httptest.NewRecorder()
-				h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(bodies[(i+j)%2])))
+				h.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(bodies[(i+j)%2])))
 				if rec.Code != http.StatusOK {
 					t.Errorf("POST = %d", rec.Code)
 				}
@@ -393,10 +393,10 @@ func TestConfigConcurrentGetAndPost(t *testing.T) {
 func TestConfigFailedRebuildIsRetried(t *testing.T) {
 	dp := newCountingDP(t)
 	sim := &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}
-	h := configHandler(zap.NewNop().Sugar(), dp, sim)
+	h := configHandler(zap.NewNop().Sugar(), dp, sim, testProtectionCoordinator(t, dp))
 	dp.reconfigErr = errors.New("remove enforcement tables: nft: netlink busy")
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"enforcement":false}`)))
+	h.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"enforcement":false}`)))
 	if rec.Code != http.StatusInternalServerError || !bytes.Contains(rec.Body.Bytes(), []byte("remove enforcement tables")) {
 		t.Fatalf("failed rebuild = %d %s", rec.Code, rec.Body.String())
 	}

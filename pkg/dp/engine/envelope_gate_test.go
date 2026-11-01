@@ -74,7 +74,7 @@ func (m *nftModel) state() (string, int) {
 	return m.envelope, len(m.scripts)
 }
 
-func gateEngine(t *testing.T, nft *nftModel, group uint16, c captureRunner) *Engine {
+func gateEngine(t *testing.T, nft *nftModel, group uint16, c CaptureRunner) *Engine {
 	t.Helper()
 	e, err := New(Config{
 		Enforce:       EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: nft, Updater: &recordingUpdater{}},
@@ -87,6 +87,9 @@ func gateEngine(t *testing.T, nft *nftModel, group uint16, c captureRunner) *Eng
 		t.Fatal(err)
 	}
 	e.capture = c
+	if fake, ok := c.(*bindCapture); ok {
+		fake.onReady = func() { e.hooks.onSource(capture.SourceEvent{Generation: 1, Ready: true}) }
+	}
 	return e
 }
 

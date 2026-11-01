@@ -57,7 +57,7 @@ func TestServiceQuarantineReplayAndStatus(t *testing.T) {
 			m.Syslog, m.DNS, m.NTP, m.DHCP, m.VPN = nil, nil, nil, nil, nil
 			m.Proxy.CertsDir = filepath.Join(t.TempDir(), "missing")
 			engine := &mockEngine{}
-			warnings, err := applyConfigSnapshot(context.Background(), &mockStore{cfg: cfg}, engine, m, nil, cfg)
+			warnings, _, err := applyConfigSnapshot(context.Background(), &mockStore{cfg: cfg}, engine, m, nil, cfg)
 			if err != nil || !engine.applied || len(warnings) == 0 {
 				t.Fatalf("quarantine blocked firewall: %v %v", err, warnings)
 			}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -69,6 +70,7 @@ func reenterRecoveryLocked(ctx context.Context, store config.Store, engine Engin
 // recovery ruleset is in force. Callers hold runningConfigApplyMu.
 func applyRecoveryLocked(ctx context.Context, store config.Store, engine EngineClient) (warnings []string, applyErr error) {
 	defer func() { applyErr = recordRuntimeApplyResult(ctx, store, applyErr) }()
+	ctx = engineclient.NewApplyContext(ctx)
 	if engine == nil {
 		return nil, errors.New("recovery engine unavailable")
 	}
@@ -91,7 +93,7 @@ func applyRecoveryLocked(ctx context.Context, store config.Store, engine EngineC
 	// Unlike normal best-effort infrastructure apply, a failure here must not
 	// be downgraded to a warning or reported as successful recovery.
 	snap := RecoverySnapshot(stored, r)
-	if err := engine.ApplyRules(ctx, snap); err != nil {
+	if _, err := engine.ApplyRules(ctx, snap); err != nil {
 		return nil, fmt.Errorf("recovery ruleset: %w", err)
 	}
 	if addressed := recoveryAddresses(stored, snap.LocalInput); len(addressed) > 0 {

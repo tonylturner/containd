@@ -22,9 +22,18 @@ engine_api() {
   printf '%s' "${resp##*$'\n'}"
 }
 
-# engine_post SERVICE PATH OUT posts the JSON document on stdin to PATH.
-engine_post() {
-  engine_api "$1" "$2" "$3" -X POST -H 'Content-Type: application/json' --data-binary @-
+# engine_apply_id prints a fresh opaque runtime apply ID. One apply sequence
+# (/internal/config, then /internal/apply_rules) sends one ID; the engine
+# rejects an ID once a newer apply has superseded it.
+engine_apply_id() {
+  printf 'smoke-%s-%s-%s' "$(date +%s)" "$RANDOM" "$RANDOM"
+}
+
+# engine_apply SERVICE PATH OUT APPLY_ID posts the JSON document on stdin to
+# the runtime apply route PATH as part of apply APPLY_ID.
+engine_apply() {
+  engine_api "$1" "$2" "$3" -X POST -H 'Content-Type: application/json' \
+    -H "X-Containd-Apply-Id: $4" --data-binary @-
 }
 
 # engine_get SERVICE PATH OUT fetches PATH.

@@ -270,7 +270,8 @@ container command. The `pkg/dp/netcfg` management kernel test also needs a
 TUN device, OpenVPN and reverse-path filtering;
 `bash pkg/dp/netcfg/management-kernel.sh` builds that container and runs it.
 
-The scanning-gate kernel tests run together with
+The protection-bind (`TestProtectionBindKernel` in `pkg/dp/engine`) and
+scanning-gate kernel tests run together with
 `bash scripts/gate-kernel-tests.sh`: the nft steering (`TestGateKernel`) and
 the nft load of every golden ruleset (`TestKernelNFTLoadsGoldens`) in
 `pkg/dp/enforce`, the gate policy routing (`TestGateRoutingKernel`) in
@@ -282,6 +283,12 @@ named Docker volumes, and passes extra arguments to `go test`. It runs the
 packages one at a time (`go test -p 1`) because the netcfg and engine tests
 install the gate's policy routing in the namespace-global table 104010 and
 would remove each other's objects in parallel.
+
+Repeated real-exhaustion protection runs need an explicit longer timeout:
+
+```sh
+KERNEL_TEST_RUN='^TestProtectionBindKernel$' bash scripts/gate-kernel-tests.sh -count=20 -timeout 30m -- ./pkg/dp/engine
+```
 
 ## Interface Address Ownership Tests
 

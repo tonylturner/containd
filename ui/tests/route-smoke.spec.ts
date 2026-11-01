@@ -2,6 +2,7 @@ import { expect, test } from "./fixtures/topology-test";
 import { routes } from "./fixtures/routes";
 import { snapshot } from "./fixtures/iec104-inventory";
 import { pressure } from "./fixtures/iec104-pressure";
+import { mockProtection } from "./fixtures/protection-api";
 import { interfaceAddresses, OS_ADDRESS_HINT, runtimeFor } from "../lib/interface-addresses";
 import type { Interface, SystemInspection } from "../lib/api";
 
@@ -445,6 +446,7 @@ test.beforeEach(async ({ page }) => {
     }
     throw new Error(`Unmocked API request: ${route.request().method()} ${url.pathname}`);
   });
+  await mockProtection(page);
 });
 
 for (const path of routes) {
