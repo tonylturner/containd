@@ -226,3 +226,5 @@ func TestConfigReadsOmitBankAndRoundTripRetainsIt(t *testing.T) {
 		})
 	}
 }
+
+func (validationReadServices) RecordEngineFaults([]config.ServiceFault) {}

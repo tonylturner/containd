@@ -325,3 +325,5 @@ func TestFactoryResetReportsDynamicBlockClearFailure(t *testing.T) {
 		t.Fatalf("users not reset after an applied configuration: %+v %v", admins, err)
 	}
 }
+
+func (*resetCaptureServices) RecordEngineFaults([]config.ServiceFault) {}

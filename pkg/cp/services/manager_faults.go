@@ -37,6 +37,9 @@ func ConfigFaults(in []config.ServiceConfigError) []ServiceFault {
 
 // SeedFaults records faults already emitted in the boot decision.
 func (m *Manager) SeedFaults(in []config.ServiceConfigError) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+	m.localFaults = ConfigFaults(in)
 	m.faultMu.Lock()
 	m.faults = ConfigFaults(in)
 	m.faultMu.Unlock()
@@ -161,7 +164,8 @@ func (m *Manager) ApplyEffective(ctx context.Context, cfg config.ServicesConfig,
 	if m.VPN != nil {
 		apply(config.ServiceOpenVPN, func() error { return m.VPN.Apply(ctx, cfg.VPN) })
 	}
-	m.publishFaults(faults)
+	m.localFaults = faults
+	m.publishCombinedFaults()
 	m.updateServiceGauges(cfg)
 	return cfg, warnings
 }
@@ -179,4 +183,31 @@ func faultStatus(service string, base any, faults []ServiceFault) any {
 		}
 	}
 	return mp
+}
+
+// RecordEngineFaults replaces only engine runtime outcomes after a successful
+// request. A transport failure cannot certify recovery. Configuration and local
+// render faults take precedence over a failed attempt to stop their projection.
+func (m *Manager) RecordEngineFaults(faults []config.ServiceFault) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+	m.engineFaults = append([]ServiceFault(nil), faults...)
+	m.publishCombinedFaults()
+}
+
+func (m *Manager) publishCombinedFaults() {
+	faults := append([]ServiceFault{}, m.localFaults...)
+	for _, engineFault := range m.engineFaults {
+		found := false
+		for _, localFault := range faults {
+			found = found || localFault.Service == engineFault.Service
+		}
+		if !found {
+			faults = append(faults, engineFault)
+		}
+	}
+	m.publishFaults(faults)
+	for _, fault := range faults {
+		metrics.ServicesRunning.WithLabelValues(fault.Service).Set(0)
+	}
 }

@@ -97,16 +97,31 @@ type genlMsgHdr struct {
 }
 
 func ApplyWireGuard(ctx context.Context, cfg config.WireGuardConfig) error {
+	wireGuardApplyMu.Lock()
+	defer wireGuardApplyMu.Unlock()
+	owned, err := loadWireGuardOwnership()
+	if err != nil {
+		return err
+	}
+	// Prove persistence is writable before touching links.
+	if err := owned.save(); err != nil {
+		return fmt.Errorf("save wireguard ownership: %w", err)
+	}
 	ifName := strings.TrimSpace(cfg.Interface)
 	if ifName == "" {
 		ifName = "wg0"
 	}
+	desired := ""
+	if cfg.Enabled {
+		desired = ifName
+	}
+	if err := owned.cleanup(desired, deleteLinkIndex); err != nil {
+		return err
+	}
 	if !cfg.Enabled {
-		// Best-effort: if disabled, remove the interface (this also drops its routes).
-		_ = deleteLink(ifName)
 		return nil
 	}
-	if err := ensureWireGuard(ifName); err != nil {
+	if err := owned.ensure(ifName); err != nil {
 		return err
 	}
 	if err := setLinkUp(ifName); err != nil {
@@ -159,11 +174,19 @@ func deleteLink(name string) error {
 	if name == "" {
 		return fmt.Errorf("empty link name")
 	}
-	nic, err := net.InterfaceByName(name)
+	links, err := net.Interfaces()
 	if err != nil {
-		return nil
+		return err
 	}
+	for _, nic := range links {
+		if nic.Name == name {
+			return deleteLinkIndex(nic.Index)
+		}
+	}
+	return nil
+}
 
+func deleteLinkIndex(index int) error {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
 		return err
@@ -184,7 +207,7 @@ func deleteLink(name string) error {
 	_ = binary.Write(&req, binary.NativeEndian, hdr)
 	ifi := unix.IfInfomsg{
 		Family: unix.AF_UNSPEC,
-		Index:  int32(nic.Index),
+		Index:  int32(index),
 	}
 	_ = binary.Write(&req, binary.NativeEndian, ifi)
 	b := req.Bytes()
@@ -195,15 +218,11 @@ func deleteLink(name string) error {
 	return readNetlinkAck(fd, seq)
 }
 
-func ensureWireGuard(name string) error {
+func createWireGuard(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("empty wireguard iface name")
 	}
-	if _, err := net.InterfaceByName(name); err == nil {
-		return nil
-	}
-
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
 		return err
@@ -235,7 +254,7 @@ func ensureWireGuard(name string) error {
 	if err := unix.Sendto(fd, b, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return err
 	}
-	return readNetlinkAck(fd, seq)
+	return readAck(fd, seq, false)
 }
 
 func addRouteCIDR(ifIndex int, cidr string) error {

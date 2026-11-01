@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/templates"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
@@ -38,9 +39,9 @@ func (e *stageEngine) ConfigureRouting(context.Context, config.RoutingConfig) er
 	e.mutations++
 	return nil
 }
-func (e *stageEngine) ConfigureServices(context.Context, config.ServicesConfig) ([]string, error) {
+func (e *stageEngine) ConfigureServices(context.Context, config.ServicesConfig) (engineclient.ServicesApplyResult, error) {
 	e.mutations++
-	return nil, nil
+	return engineclient.ServicesApplyResult{}, nil
 }
 func (e *stageEngine) SetPcapConfig(_ context.Context, cfg config.PCAPConfig) (config.PCAPConfig, error) {
 	e.mutations++
@@ -335,3 +336,5 @@ func TestVPNProfileUploadsNeverOverwriteRunningArtifact(t *testing.T) {
 		t.Fatalf("profile overwritten: %q %q %q %s %v", first, second, third, data, err)
 	}
 }
+
+func (*stageServices) RecordEngineFaults([]config.ServiceFault) {}

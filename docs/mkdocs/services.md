@@ -17,7 +17,9 @@ An older stored service configuration that no longer passes validation is
 quarantined independently. Management, firewall replay and other services keep
 running. Missing or expired proxy TLS material is also checked at apply time:
 there is no plaintext fallback. Management-run process or filesystem failures
-are reported as runtime faults; they do not prevent firewall application.
+and engine-side WireGuard, DHCP or AV apply failures are reported per service
+as runtime faults; they do not prevent other services or firewall application.
+An AV backend still starting is a warning, not a fault.
 
 `GET /api/v1/services/status` includes a sorted `faults` array (empty when healthy).
 Each entry has `service`, `kind` (`config` or `runtime`) and a sanitized `message`.
@@ -37,9 +39,16 @@ Ruleset and coverage previews use the effective configuration and disclose
 
 A quarantined service gets no automatic firewall admission rule. VPN CIDR tokens
 for a quarantined tunnel match nothing; OpenVPN is stopped, and a quarantined
-DHCP server is stopped without its UDP/67 input rule. WireGuard quarantine
-currently requests removal of `wg0`, not a previously configured custom
-interface name. Do not rely on quarantine to tear down a custom-named tunnel.
+DHCP server is stopped without its UDP/67 input rule. WireGuard quarantine or
+explicit disable removes containd-created links regardless of their names;
+changing the enabled interface name removes the previous owned link. Delete
+failures are reported as WireGuard runtime faults and retried on the next apply.
+WireGuard link ownership is persisted in `/data/wireguard-links.json` (override
+with `CONTAIND_WIREGUARD_STATE_PATH`) and scoped to the kernel boot and network
+namespace. A kernel identity recorded only after exclusive creation prevents
+adoption of foreign links. Ownership survives engine process restarts, but
+existing unmarked links from older versions remain unowned on upgrade and are
+never deleted automatically.
 AV is different: scanner quarantine retains scan selection, directions and fail
 policy. A closed policy still blocks unscanned content except the configured ICS
 bypass; an open policy permits it. Quarantine does not silently disable the gate.

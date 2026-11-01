@@ -372,3 +372,5 @@ func TestSystemInspectionAndFactoryResetHandlers(t *testing.T) {
 		t.Fatalf("unexpected post-reset audit records: %#v", records)
 	}
 }
+
+func (*dashboardServices) RecordEngineFaults([]config.ServiceFault) {}

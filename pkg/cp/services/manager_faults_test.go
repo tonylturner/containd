@@ -127,3 +127,31 @@ func TestManagerFaultChangesAndConcurrentStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestManagerEngineFaultIsolation(t *testing.T) {
+	m := NewManager(ManagerOptions{BaseDir: t.TempDir()})
+	m.Syslog, m.DNS, m.NTP, m.Proxy, m.DHCP, m.VPN = nil, nil, nil, nil, nil, nil
+	initial := []config.ServiceConfigError{{Service: config.ServiceWireGuard, Err: errors.New("bad key")}}
+	runtime := []config.ServiceFault{
+		{Service: config.ServiceWireGuard, Kind: "runtime", Message: "runtime apply failed"},
+		{Service: config.ServiceDHCP, Kind: "runtime", Message: "runtime apply failed"},
+	}
+	m.ApplyEffective(context.Background(), config.ServicesConfig{}, initial)
+	m.RecordEngineFaults(runtime)
+	runtime[1].Message = "mutated"
+	faults := m.Faults()
+	if len(faults) != 2 || faults[0].Service != "dhcp" || faults[0].Message != "runtime apply failed" ||
+		faults[1].Service != "wireguard" || faults[1].Kind != "config" {
+		t.Fatalf("engine outcome overwrote local/config fault: %+v", faults)
+	}
+	// Until a successful engine request, a local apply does not assert that
+	// the engine recovered. No transient clear/re-fault event is emitted.
+	m.ApplyEffective(context.Background(), config.ServicesConfig{}, initial)
+	if len(m.Faults()) != 2 {
+		t.Fatalf("local apply cleared engine fault: %+v", m.Faults())
+	}
+	m.RecordEngineFaults(nil)
+	if faults := m.Faults(); len(faults) != 1 || faults[0].Kind != "config" {
+		t.Fatalf("clean engine apply cleared config fault: %+v", faults)
+	}
+}

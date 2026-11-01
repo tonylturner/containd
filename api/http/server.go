@@ -56,8 +56,8 @@ type EngineClient interface {
 	ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error
 	ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error
 	// ConfigureServices applies the services configuration and returns the
-	// warnings the engine applied it with.
-	ConfigureServices(ctx context.Context, services config.ServicesConfig) ([]string, error)
+	// independent runtime outcomes and pending warnings.
+	ConfigureServices(ctx context.Context, services config.ServicesConfig) (engineclient.ServicesApplyResult, error)
 	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
 	ApplyRules(ctx context.Context, snap rules.Snapshot) error
 	RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
@@ -155,6 +155,7 @@ type ServicesValidator interface {
 // failures narrow that projection and return warnings, never block enforcement.
 type ServicesApplier interface {
 	ApplyEffective(ctx context.Context, cfg config.ServicesConfig, faults []config.ServiceConfigError) (config.ServicesConfig, []string)
+	RecordEngineFaults([]config.ServiceFault)
 }
 
 // NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
@@ -594,11 +595,18 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	if err := pushTrustedCA(ctx, cfg, engine); err != nil {
 		warnings = append(warnings, fmt.Sprintf("trust: %v", err))
 	}
-	serviceWarnings, err := engine.ConfigureServices(ctx, cfg.Services)
+	serviceResult, err := engine.ConfigureServices(ctx, cfg.Services)
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("services: %v", err))
+	} else {
+		if services != nil {
+			services.RecordEngineFaults(serviceResult.Faults)
+		}
+		for _, fault := range serviceResult.Faults {
+			warnings = append(warnings, "services: "+fault.Service+": "+fault.Message)
+		}
 	}
-	for _, warning := range serviceWarnings {
+	for _, warning := range serviceResult.Warnings {
 		warnings = append(warnings, "services: "+warning)
 	}
 	if err := engine.Configure(ctx, cfg.DataPlane); err != nil {

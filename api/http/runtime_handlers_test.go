@@ -770,3 +770,5 @@ func (m *runtimeMockEngine) AnalyzePcap(ctx context.Context, name string, r io.R
 func (m *runtimeMockEngine) AnalyzePcapByName(context.Context, string) (*pcap.ImportResult, error) {
 	return &pcap.ImportResult{Stats: pcap.AnalysisResult{PacketCount: 1}}, nil
 }
+
+func (telemetryOnlyServices) RecordEngineFaults([]config.ServiceFault) {}

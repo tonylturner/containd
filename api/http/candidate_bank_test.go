@@ -103,3 +103,5 @@ func TestServiceValidationReadsBankFreeDocument(t *testing.T) {
 		t.Fatalf("service staging loaded bank: %+v", store)
 	}
 }
+
+func (bankFreeValidationServices) RecordEngineFaults([]config.ServiceFault) {}

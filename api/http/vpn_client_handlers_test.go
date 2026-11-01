@@ -205,3 +205,5 @@ func TestVPNClientListRevocationsApplied(t *testing.T) {
 		}
 	}
 }
+
+func (*vpnClientServices) RecordEngineFaults([]config.ServiceFault) {}

@@ -174,3 +174,5 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 		})
 	}
 }
+
+func (routeInventoryServices) RecordEngineFaults([]config.ServiceFault) {}

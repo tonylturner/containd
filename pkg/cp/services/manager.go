@@ -36,14 +36,16 @@ type Manager struct {
 	DHCP   *DHCPManager
 	VPN    *VPNManager
 
-	applyMu    sync.Mutex
-	faultMu    sync.Mutex
-	faults     []ServiceFault
-	faultAudit audit.Store
-	telemetry  *dpevents.Store
-	sparkMu    sync.Mutex
-	primary    map[string]*meter // primary metric per service (events/traffic)
-	errs       map[string]*meter // error metric per service
+	applyMu      sync.Mutex
+	faultMu      sync.Mutex
+	faults       []ServiceFault
+	localFaults  []ServiceFault // guarded by applyMu
+	engineFaults []ServiceFault // guarded by applyMu
+	faultAudit   audit.Store
+	telemetry    *dpevents.Store
+	sparkMu      sync.Mutex
+	primary      map[string]*meter // primary metric per service (events/traffic)
+	errs         map[string]*meter // error metric per service
 }
 
 func NewManager(opts ManagerOptions) *Manager {

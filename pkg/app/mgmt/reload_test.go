@@ -143,3 +143,5 @@ func TestReloadRunningConfigReappliesAndRecordsFailure(t *testing.T) {
 		t.Fatal("reload failures were not logged and audited")
 	}
 }
+
+func (*reloadServices) RecordEngineFaults([]config.ServiceFault) {}
