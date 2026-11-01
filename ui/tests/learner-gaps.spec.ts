@@ -19,7 +19,7 @@ for (const gap of ["watch_collection_loss", "budget_exceeded"]) {
       `Collection limitations: ${gap}`,
     );
     await expect(review.getByRole("status")).toContainText(
-      "Connections that loss could have touched are excluded",
+      "Localized loss excludes only connections it could have touched",
     );
     const generate = review.getByRole("button", {
       name: "Generate suggestions",
@@ -72,7 +72,7 @@ test("unlocalized loss yields no suggestions and explains withheld parents", asy
   await openDataset(page);
   const review = page.getByLabel("Dataset review");
   await expect(review.getByRole("status")).toContainText(
-    "excludes the entire dataset",
+    "Timestamp-only loss, missing scope, restart and policy-change loss exclude the entire dataset",
   );
   const generated = page.waitForResponse(
     (response) =>

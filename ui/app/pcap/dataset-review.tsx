@@ -161,9 +161,9 @@ export function DatasetReview({
       </details>
       {!!dataset.gaps?.length && (
         <p role="status" className="mt-3 break-words text-sm text-(--amber)">
-          Collection limitations: {dataset.gaps.join(", ")}. Connections that loss
-          could have touched are excluded. Loss without a connection or time
-          interval excludes the entire dataset.
+          Collection limitations: {dataset.gaps.join(", ")}. Localized loss excludes
+          only connections it could have touched. Timestamp-only loss, missing
+          scope, restart and policy-change loss exclude the entire dataset.
         </p>
       )}
       <p className="mt-3 text-xs text-(--text-muted)">
