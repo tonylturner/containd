@@ -35,7 +35,7 @@ export function RoutingSetupCallout({
         <div>
           <div className="text-sm font-semibold text-(--text)">Routing not configured yet</div>
           <div className="mt-1 text-xs text-(--text)">
-            The kernel already has a working default route (
+            The appliance already has a detected default route (
             <span className="font-semibold">{defaultIface}</span> →{" "}
             <span className="font-semibold">{defaultGateway}</span>). Adopt it into containd so routing/NAT policies can
             be applied consistently.
@@ -69,8 +69,7 @@ export function OSRoutingCard({ osRouting, isAdmin, onAdoptOSDefaultRoute }: OSR
         <div>
           <h2 className="text-sm font-semibold text-(--text)">Detect from OS</h2>
           <div className="mt-1 text-xs text-(--text-muted)">
-            Shows the current kernel routing table. This is useful in Docker labs where the OS already has a working
-            default route, but your configured routing is still empty.
+            Shows the live route table. You can save a detected default route when no route is configured yet; review and commit to manage it through containd.
           </div>
         </div>
         {isAdmin && (
@@ -349,11 +348,11 @@ export function StaticRoutesCard(props: StaticRoutesCardProps) {
             </div>
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Interface
-              <InfoTip label="Logical or OS device (optional)." />
+              <InfoTip label="Logical interface or network device (optional)." />
               <input
                 value={routeIface}
                 onChange={(e) => setRouteIface(e.target.value)}
-                placeholder="iface (logical or OS dev, optional)"
+                placeholder="Interface or network device (optional)"
                 className={INPUT_CLASS}
               />
             </label>

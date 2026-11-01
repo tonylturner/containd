@@ -16,8 +16,10 @@ for (const gap of ["watch_collection_loss", "budget_exceeded"]) {
 
     const review = page.getByLabel("Dataset review");
     await expect(review.getByRole("status")).toContainText(
-      `Collection limitations: ${gap}`,
+      "Collection limitations reported.",
     );
+    await review.getByText("Collection limitation details", { exact: true }).click();
+    await expect(review.getByRole("status").getByText(gap, { exact: true })).toBeVisible();
     await expect(review.getByRole("status")).toContainText(
       "Localized loss excludes only connections it could have touched",
     );
@@ -83,7 +85,7 @@ test("unlocalized loss yields no suggestions and explains withheld parents", asy
   await generated;
   await expect(review.getByRole("status").filter({ hasText: "Generation complete:" }))
     .toContainText("0 certified suggestion(s). Nothing selected.");
-  await expect(review.getByText("collection_loss: 24", { exact: false }))
+  await expect(review.getByRole("listitem").filter({ hasText: "Connection excluded: collection loss may hide observations: 24" }))
     .toContainText("Connection excluded: collection loss may hide observations");
   await expect(page.getByRole("article", { name: "Suggestion modbus-1", exact: true }))
     .toHaveCount(0);

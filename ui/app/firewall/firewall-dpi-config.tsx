@@ -184,7 +184,7 @@ export function DPIConfigSection({
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-xs font-medium text-(--text)">
-                    ICS Protocol Decoders
+                    Industrial protocols
                   </span>
                   <span className="ml-2 text-[10px] text-(--text-muted)">
                     {enabledICSCount}/{ICS_DPI_PROTOCOLS.length} enabled
@@ -235,7 +235,7 @@ export function DPIConfigSection({
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-xs font-medium text-(--text)">
-                    IT Protocol Decoders
+                    Network protocols
                   </span>
                   <span className="ml-2 text-[10px] text-(--text-muted)">
                     {enabledProtoCount}/{IT_PROTOCOLS.length} enabled

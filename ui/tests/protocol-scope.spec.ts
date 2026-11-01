@@ -140,6 +140,11 @@ test("decoder toggles list only supported protocols and preserve unsupported key
   for (const name of retired) await expect(supportedRows).not.toContainText(name);
   await expect(modal).toContainText("s7comm");
   await expect(modal).toContainText("unsupported");
+  await expect(modal.getByText("s7comm", { exact: true })).not.toBeVisible();
+  const unsupported = modal.locator("details").filter({ hasText: "Stored value: false" });
+  await unsupported.locator("summary").click();
+  await expect(modal.getByText("s7comm", { exact: true })).toBeVisible();
+  await expect(unsupported).toContainText("Stored value: false");
 
   await modal.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(`Not saved: ${unsupportedMapError}`)).toBeVisible();
@@ -261,6 +266,7 @@ test("legacy alert attributes keep generic raw rendering instead of retired deta
   await openAndWait(page, "/alerts/", ["/api/v1/events"]);
   await page.getByText("Historical event", { exact: true }).click();
   const detail = page.locator("div.sticky").filter({ hasText: "Historical event" });
+  await detail.getByText("Technical event details", { exact: true }).click();
   await expect(detail).toContainText("Event Attributes");
   await expect(detail).toContainText("function_code:");
   await expect(detail.getByText("marker:", { exact: true })).toBeVisible();

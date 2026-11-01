@@ -12,6 +12,47 @@ namespace; engine-owned services run in the engine's namespace. Both processes
 need the intended network reachability and privileges.
 Check runtime status after commit, not just whether saving succeeded.
 
+Service panels show **Unknown** when live status is unavailable; missing readings
+are not stopped services or zero activity. Use **Refresh** or the panel's **Retry**
+to request a new observation. **Service details** keeps process IDs, generated
+settings files and scanner metadata available without crowding the status summary.
+Antivirus **Scan-path details** retains listener counts and admission metadata;
+fault causes, the scanning outcome and fail policy remain visible. Syslog
+**Delivery details** and per-stream **Technical details** expose batching and exact
+stream positions.
+**Advanced local scanner settings** and **Advanced remote scanner settings**
+retain scanner paths, update scheduling and ICAP protocol settings. VPN keeps
+peer JSON and profile import under **Advanced peer settings** and
+**Advanced profile import**; opening a disclosure does not change saved settings.
+Saved peers and customized scanner settings open automatically. Remote scanner
+settings also open whenever ICAP mode requires them. **Advanced profile path**
+opens for a saved OpenVPN path or when an enabled path-based client needs one.
+
+Dashboard's **No recent IDS/AV alerts** describes only the reported alert counts,
+not overall appliance health or protection. The dashboard does not observe live
+IPS protection state, so its IPS card always shows **Unknown**. Unknown service
+cards are visually distinct from disabled services. Rule counts are counts, not
+measured utilization; container memory bars require a reported positive memory
+limit and percentage. An unlimited container has no memory utilization gauge.
+The **Bind interfaces** checklist item is ready only when at least one interface
+is configured and every configured interface matches a reported network device,
+using its Device field or matching interface name. Logical interface counts alone
+do not establish readiness. Missing configuration or live device information
+leaves binding readiness **Unknown**.
+
+Syslog **Last check** records the latest forwarding check, including empty or
+failed batches, not successful delivery. Per-forwarder **Last sent** advances
+only when records are sent. NTP binary details distinguish **not found** (discovery
+reported no binary) from **Unknown** (no discovery result was reported).
+
+Deleting a reverse proxy site first changes local edits. **Save** stages the
+removal; review and **Commit** apply it. Saving alone does not remove a live site.
+
+In Diagnostics, temporary flow blocks match source IP, destination IP,
+destination service port and protocol, with any source port: they can affect
+multiple connections. When enforcement is off, open **Deployment details** for
+configuration and startup guidance. There is no enforcement switch on PCAP.
+
 ## Service faults
 
 An older stored service configuration that no longer passes validation is

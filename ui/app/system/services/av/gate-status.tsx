@@ -21,7 +21,7 @@ function present(gate: AVGateStatus): Presentation {
         ? { variant: "success", badge: "open", description: "Scanning the selected HTTP traffic." }
         : { variant: "success", badge: "open", description: "Ready; no traffic is selected." };
     case "pending":
-      return { variant: "warning", badge: "pending", description: "The gate is up and waiting for the scanner to become ready." };
+      return { variant: "warning", badge: "pending", description: "Waiting for the scanner to become ready." };
     case "refuse":
       return {
         variant: "error",
@@ -35,7 +35,7 @@ function present(gate: AVGateStatus): Presentation {
         description: "Not scanning: a listener or the routing is down and the fail policy is open, so selected connections pass unscanned.",
       };
     default:
-      return { variant: "neutral", badge: "off", description: "Off: the data plane is not enforcing." };
+      return { variant: "neutral", badge: "off", description: "Off: firewall enforcement is off." };
   }
 }
 
@@ -44,7 +44,7 @@ export function GateStatus({ gate }: { gate: AVGateStatus | undefined }) {
   if (!gate) {
     return (
       <div className="mt-4 border-t pt-3 text-sm text-(--text-muted)" data-testid="gate-status">
-        Scanning gate: not reported by this engine.
+        Live scan-path status not reported.
       </div>
     );
   }
@@ -63,13 +63,16 @@ export function GateStatus({ gate }: { gate: AVGateStatus | undefined }) {
       <p className="mt-1 text-xs text-(--text-muted)">{view.description}</p>
       <div className="mt-2 grid gap-2 text-sm text-(--text) md:grid-cols-3">
         <div>Selection active: <span className="text-(--text)">{gate.enabled ? "yes" : "no"}</span></div>
-        <div>Listeners up: <span className="text-(--text)">{up}/{gate.listeners.length}</span></div>
         <div>
           Scanner ready: <span className={gate.scanner.ready ? "text-(--text)" : "text-(--amber)"}>{gate.scanner.ready ? "yes" : `no (${scannerIssue})`}</span>
         </div>
         <div>Active connections: <span className="text-(--text)">{gate.connections}</span></div>
-        <div>Fail policy: <span className="text-(--text)">{gate.fail_policy || "open"}</span></div>
-        <div>Admission applied: <span className="text-(--text)">{gate.admit}</span></div>
+        <div>Fail policy: <span className="text-(--text)">{gate.fail_policy || "Unknown"}</span></div>
+        <details className="md:col-span-3 rounded-xs border p-3">
+          <summary className="cursor-pointer">Scan-path details</summary>
+          <div>Listeners up: <span className="text-(--text)">{up}/{gate.listeners.length}</span></div>
+          <div>Admission applied: <span className="text-(--text)">{gate.admit}</span></div>
+        </details>
         {down.map((l) => (
           <div key={l.address} className="md:col-span-3 text-xs text-(--amber)">
             Listener {l.address}{l.masquerade ? " (masquerade)" : ""}: {l.unavailable ? "unavailable on this host" : "down"}{l.error ? ` — ${l.error}` : ""}

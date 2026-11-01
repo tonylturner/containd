@@ -6,7 +6,7 @@ export function IdentificationTable({ identifications }: { identifications: Pcap
   return (
     <section aria-labelledby="identifications-title" className="space-y-2">
       <h3 id="identifications-title" className="text-sm font-semibold text-(--text)">Content identifications ({identifications.length})</h3>
-      <p className="text-xs text-(--text-muted)">Passive evidence only. Identification does not change verdicts; observation-bound connections do not generate rules.</p>
+      <p className="text-xs text-(--text-muted)">Identified traffic is evidence only, not permission. Identification does not change traffic decisions; connections identified only by observation do not generate rules.</p>
       {identifications.length === 0 ? <p className="text-sm text-(--text-muted)">No eligible connections identified.</p> : (
         <div className="overflow-x-auto rounded-xs border">
           <table className="w-full text-left text-sm">
@@ -21,11 +21,19 @@ export function IdentificationTable({ identifications }: { identifications: Pcap
                   </td>
                   <td className="px-4 py-2"><IdentificationBadge identification={id} /></td>
                   <td className="px-4 py-2 text-xs text-(--text)">
-                    <div>{id.identification_state}</div>
-                    {id.identification_coverage && <div className="text-(--text-muted)">{id.identification_coverage}</div>}
-                    <div className="text-(--text-muted)">{id.reason}</div>
+                    <details>
+                      <summary className="cursor-pointer">Identification details</summary>
+                      <div>{id.identification_state}</div>
+                      {id.identification_coverage && <div className="text-(--text-muted)">{id.identification_coverage}</div>}
+                      <div className="text-(--text-muted)">{id.reason}</div>
+                    </details>
                   </td>
-                  <td className="px-4 py-2 text-xs text-(--text)">{id.binding}</td>
+                  <td className="px-4 py-2 text-xs text-(--text)">
+                    <details>
+                      <summary className="cursor-pointer">How this was identified</summary>
+                      <p>{id.binding}</p>
+                    </details>
+                  </td>
                   <td className="px-4 py-2 font-mono text-xs text-(--text)">{id.expected.map((p) => p || "none").join(" / ")}</td>
                   <td className="px-4 py-2 font-mono text-xs text-(--text)">{id.service_transport}/{id.service_port}</td>
                   <td className={`px-4 py-2 text-xs ${id.outside_rule_port_scope === true ? "text-(--amber)" : "text-(--text-muted)"}`}>

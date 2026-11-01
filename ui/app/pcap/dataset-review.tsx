@@ -43,15 +43,18 @@ export function ReasonCounts({
     iec104_sbo_sequence: "IEC command withheld: select-before-operate sequence",
     cip_observation_only: "CIP observations only; no actionable rules",
     nonstandard_port: "Nonstandard service: observation only",
-    replay_failed: "Certification replay failed",
+    replay_failed: "Recorded-traffic check failed",
     collection_loss: "Connection excluded: collection loss may hide observations",
   };
   return (
     <ul className="mt-2 space-y-1 break-words text-xs">
       {Object.entries(counts ?? {}).map(([reason, count]) => (
         <li key={reason}>
-          {reason}: {count}
-          {labels[reason] && ` — ${labels[reason]}`}
+          <span>{labels[reason] || "Unrecognized reason"}: {count}</span>
+          <details className="mt-1">
+            <summary className="cursor-pointer">Technical details</summary>
+            <code>{reason}</code>
+          </details>
         </li>
       ))}
     </ul>
@@ -163,15 +166,15 @@ export function DatasetReview({
       </p>
       <details className="mt-3 text-xs">
         <summary className="cursor-pointer">
-          Dataset fingerprints and gaps
+          Collection details
         </summary>
         <dl className="mt-2 space-y-1 break-all">
           {Object.entries({
-            "Capture SHA256": dataset.captureSha256 || "Live source",
-            "Evidence digest": dataset.evidenceDigest,
-            Decoder: dataset.decoderVersion,
-            Profile: dataset.profileFingerprint,
-            Snapshot: dataset.snapshotFingerprint,
+            "File checksum (SHA-256)": dataset.captureSha256 || "Live source",
+            "Evidence checksum": dataset.evidenceDigest,
+            "Protocol reader version": dataset.decoderVersion,
+            "Inspection profile ID": dataset.profileFingerprint,
+            "Configuration ID": dataset.snapshotFingerprint,
           }).map(([k, v]) => (
             <div key={k}>
               <dt className="inline font-semibold">{k}: </dt>
@@ -181,21 +184,26 @@ export function DatasetReview({
         </dl>
       </details>
       {!!dataset.gaps?.length && (
-        <p role="status" className="mt-3 break-words text-sm text-(--amber)">
-          Collection limitations: {dataset.gaps.join(", ")}. Localized loss excludes
+        <div role="status" className="mt-3 break-words text-sm text-(--amber)">
+          Collection limitations reported. Localized loss excludes
           only connections it could have touched. Timestamp-only loss, missing
           scope, restart and policy-change loss exclude the entire dataset.
-        </p>
+          <details>
+            <summary className="cursor-pointer">Collection limitation details</summary>
+            <code>{dataset.gaps.join(", ")}</code>
+          </details>
+        </div>
       )}
       <p className="mt-3 text-xs text-(--text-muted)">
         Import and collection never generate or stage policy. Generate
-        explicitly after sealing. Selection is not approval; every generated
-        rule stages as monitor.
+        explicitly after collection finishes. Selection is not approval; every generated
+        rule is saved in monitor mode, not blocking mode.
       </p>
       {error && (
-        <p role="alert" className="mt-3 break-words text-sm text-(--red)">
-          {error}
-        </p>
+        <div role="alert" className="mt-3 break-words text-sm text-(--red)">
+          Could not complete this collection action.
+          <p>{error}</p>
+        </div>
       )}
       {notice && (
         <p role="status" className="mt-3 text-sm text-(--green)">
@@ -221,8 +229,15 @@ export function DatasetReview({
         </div>
       )}
       <section aria-label="Staging destination" className="mt-3 rounded-xs border px-3 py-2 text-sm">
-        <p>Destination candidate: {destination ? revision.state.serverRevision : "unavailable"}</p>
-        {destination && <p className="text-xs">Pending sections: {destination.changedSections.join(", ") || "none"}. <a href="/config/?tab=diff" target="_blank" rel="noreferrer" className="underline">Review full diff</a></p>}
+        <p>{destination ? "Changes will be saved to the pending configuration—not activated." : "Pending configuration unavailable. Reload before saving."}</p>
+        {destination && <>
+          <a href="/config/?tab=diff" target="_blank" rel="noreferrer" className="underline">Review full diff</a>
+          <details className="mt-2 text-xs">
+            <summary className="cursor-pointer">Destination details</summary>
+            <p>Configuration version: {revision.state.serverRevision}</p>
+            <p>Pending sections: {destination.changedSections.join(", ") || "none"}</p>
+          </details>
+        </>}
         {needsReview && destination && <div className="mt-3 grid gap-3"><ConfigDiffBlocks blocks={buildDiffBlocks(destination)} /></div>}
         {revision.revisionNotice(() => refresh({ discard: true }))}
       </section>
@@ -267,7 +282,7 @@ export function DatasetReview({
               onClick={() =>
                 confirm.open({
                   title: "Stage selected suggestions",
-                  message: `Stage ${eligible.length} suggestion(s), ${ruleCount} monitor rule(s), atomically? Nothing becomes active until candidate commit.`,
+                  message: `Save all ${eligible.length} selected suggestion(s), ${ruleCount} monitor rule(s), together? Nothing becomes active until you review and commit the pending configuration.`,
                   confirmLabel: "Stage",
                   onConfirm: () =>
                     void run(() =>
@@ -300,7 +315,7 @@ export function DatasetReview({
       </div>
       {(eligible.length > 128 || ruleCount > 128) && (
         <p role="alert" className="mt-2 text-sm text-(--amber)">
-          Select at most 128 suggestions and 128 total rules per atomic batch.
+          Select at most 128 suggestions and 128 total rules to save together.
         </p>
       )}
       {withheld && (
@@ -337,35 +352,40 @@ export function DatasetReview({
                       <p>
                         {o.service.protocol} · {o.service.direction}
                       </p>
-                      <p className="break-all font-mono">{o.id}</p>
+                      <details className="break-all">
+                        <summary className="cursor-pointer">Observation ID</summary>
+                        <code>{o.id}</code>
+                      </details>
                     </td>
                     <td className="px-3 py-2">
                       <p>
-                        {o.service.coordinates} · {o.authority.correlation}
-                      </p>
-                      <p>
                         Role {o.authority.roleCertain ? "certain" : "uncertain"}
-                        : {o.authority.roleEvidence}
                       </p>
                       <p>
                         {o.authority.standardPort
                           ? "Standard service"
                           : "Nonstandard: observation only"}
                       </p>
-                      <p className="break-all">
-                        {o.authority.mappingFingerprint}
-                      </p>
+                      <details className="break-all">
+                        <summary className="cursor-pointer">Address and service evidence</summary>
+                        <p>{o.service.coordinates} · {o.authority.correlation}</p>
+                        <p>{o.authority.roleEvidence}</p>
+                        <p>{o.authority.mappingFingerprint}</p>
+                      </details>
                     </td>
                     <td className="px-3 py-2">
                       {o.quality.complete ? "Complete" : "Incomplete"} ·{" "}
                       {o.quality.decoded ? "Decoded" : "Undecoded"}
-                      <p>
-                        {[
-                          ...(o.quality.loss ?? []),
-                          ...(o.quality.conformance ?? []),
-                          ...(o.quality.undecoded ?? []),
-                        ].join(", ")}
-                      </p>
+                      <details>
+                        <summary className="cursor-pointer">Collection quality details</summary>
+                        <p>
+                          {[
+                            ...(o.quality.loss ?? []),
+                            ...(o.quality.conformance ?? []),
+                            ...(o.quality.undecoded ?? []),
+                          ].join(", ")}
+                        </p>
+                      </details>
                     </td>
                   </tr>
                 ))}

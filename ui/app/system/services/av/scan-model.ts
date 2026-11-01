@@ -31,7 +31,7 @@ export function icsPortConflict(ports: string[]): string | null {
     for (const [port, protocol] of Object.entries(ICS_DECODER_PORTS)) {
       const p = Number(port);
       if (p >= range.lo && p <= range.hi) {
-        return `${spec} covers ICS decoder port ${p} (${protocol}); the server refuses it.`;
+        return `Port range ${spec} includes reserved industrial port ${p} (${protocol}); choose different ports.`;
       }
     }
   }

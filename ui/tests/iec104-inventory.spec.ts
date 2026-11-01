@@ -27,6 +27,9 @@ for (const mobile of [false, true]) {
     await expect(panel).toContainText("not delivery or physical execution");
     await expect(panel).toContainText("Inventory never claims delivery");
     await expect(panel).toContainText("128 pairs · 32 CAs per pair · 256 points per CA");
+    await expect(panel.getByText("Pairs overflow: 2", { exact: true })).not.toBeVisible();
+    await panel.locator("summary").filter({ hasText: "Collection quality" }).click();
+    await expect(panel.getByText("Pairs overflow: 2", { exact: true })).toBeVisible();
     for (const [label, count] of [["Pairs", 2], ["CAs", 3], ["Points", 4], ["Legacy assets", 5]] as const)
       await expect(panel).toContainText(`${label} overflow: ${count}`);
     await expect(panel.getByRole("table")).toHaveCount(0);
@@ -51,7 +54,7 @@ test("inventory unavailable is not empty or zero, and Refresh retries", async ({
   await mock(page, () => offline ? { status: 503, body: { error: "engine inventory unavailable" } } : { status: 200, body: snapshot });
   await page.goto("/assets");
   const panel = page.getByRole("region", { name: "Passive IEC 104 inventory" });
-  await expect(panel.getByRole("status")).toContainText("IEC 104 inventory unavailable");
+  await expect(panel.getByRole("status")).toContainText("Live industrial-device observations are unavailable");
   await expect(panel).not.toContainText("No IEC 104 stations observed");
   await expect(panel.getByLabel("Inventory overflow counters")).toHaveCount(0);
   if (process.env.IEC104_INVENTORY_UNAVAILABLE_SCREENSHOT)
@@ -63,7 +66,7 @@ test("inventory unavailable is not empty or zero, and Refresh retries", async ({
   offline = true;
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   // The loaded panel has its own status badges until the refresh lands.
-  await expect(panel.getByRole("status").filter({ hasText: "IEC 104 inventory unavailable" })).toBeVisible();
+  await expect(panel.getByRole("status").filter({ hasText: "Live industrial-device observations are unavailable" })).toBeVisible();
   await expect(panel).not.toContainText("3 attempted");
 });
 
@@ -71,5 +74,5 @@ test("reachable empty inventory is distinct from unavailable", async ({ page }) 
   await mock(page, () => ({ status: 200, body: { ...snapshot, pairs: [] } }));
   await page.goto("/assets");
   await expect(page.getByText("No IEC 104 stations observed", { exact: true })).toBeVisible();
-  await expect(page.getByText("IEC 104 inventory unavailable", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("Live industrial-device observations are unavailable", { exact: false })).toHaveCount(0);
 });

@@ -149,8 +149,32 @@ configurations affected by removed protocol support, see
 An omitted map, omitted key or empty value means tolerant. Unknown protocol
 names and other values are rejected. Existing configurations become tolerant
 without migration. Stage settings in **Firewall → Deep Packet Inspection →
-ICS Protocol Decoders → Configure**, or POST the full candidate dataplane
+Industrial protocols → Configure**, or POST the full candidate dataplane
 document to `/api/v1/dataplane`, then commit to apply.
+
+The **Unrecognized messages** control offers **Inspect supported messages
+(tolerant)** and **Treat unrecognized messages as violations (strict)**. Strict
+violations are blocked in Enforce mode; Monitor reports what would be dropped
+without blocking. These labels do not change the stored `tolerant`/`strict`
+values or enable blocking by themselves.
+The ICS page shows whether inline inspection is configured; its **Technical
+details** retains the NFQUEUE number and capture interfaces. Live protection
+and per-rule coverage remain separate from these saved settings.
+The details open automatically when a nonzero inline queue or any capture
+interfaces are saved; default capture settings stay collapsed.
+The IEC 104 health indicator distinguishes no active blocking rules from a
+healthy active enforcement path.
+If the saved settings cannot be read, their status is **unknown**, including
+after a failed refresh; the page does not imply inspection is disabled or show
+previous queue and interface values as current.
+
+Rule editors keep uncommon station, object, direction and message selectors
+under **Advanced selectors (saved values still apply)**. This section opens
+automatically when any of its selectors has a saved restriction, including an
+explicit zero or false value. IEC 104 message types, station address (CA) and
+point addresses (IOA) remain directly visible. Closing the disclosure never
+clears its values. Reasons for limited or unavailable coverage are shown inline,
+including the exact reported fault text.
 
 For example, this fragment selects strict IEC 104 parsing and leaves the other
 protocols tolerant (merge it into the full dataplane document before posting;
@@ -916,8 +940,8 @@ collection. Observation is not authorization, even when the traffic was delivere
    endpoints, direction, wire/logical coordinates, role certainty and coverage.
 3. For a sealed dataset, explicitly **Generate suggestions**. Review the proposed
    endpoint/service and protocol selectors, withheld-reason counts, limitations,
-   and **Certified evidence (frozen)**: positive replay, negative boundary tests,
-   evidence digest and evaluator/generator versions. A rule's **Preview live recent
+   and **Checks on saved evidence**: recorded-traffic tests, boundary tests,
+   evidence checksum and evaluator/generator versions. A rule's **Preview live recent
    evidence** is a separate isolated impact check against recent retained events;
    it does not recertify the frozen suggestion or simulate the whole policy.
 4. IEC 104 requires an explicit authenticated administrator **Review** before

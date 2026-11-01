@@ -36,7 +36,20 @@ const flows = Array.from({ length: 60 }, (_, i) => ({
   eventCount: 1,
 }));
 
-type Mocks = { events: unknown[]; services: unknown };
+type Mocks = {
+  events: unknown[];
+  services: unknown;
+  health?: unknown;
+  eventStats?: unknown;
+  stats?: unknown;
+  ruleCount?: number;
+  ids?: unknown;
+  interfaces?: unknown;
+  interfaceState?: unknown;
+  interfaceCount?: number;
+  interfacesStatus?: number;
+  interfaceStateStatus?: number;
+};
 
 async function openDashboard(page: Page, mocks: Mocks) {
   await page.addInitScript(() => {
@@ -46,31 +59,41 @@ async function openDashboard(page: Page, mocks: Mocks) {
   await page.route("**/api/v1/**", async (route) => {
     const p = new URL(route.request().url()).pathname;
     let body: unknown = {};
+    let status = 200;
     if (p === "/api/v1/auth/me" || p === "/api/v1/auth/session") body = user;
     if (p === "/api/v1/dashboard") {
       body = {
         user,
-        health: { status: "ok", hostname: "test" },
-        counts: { assets: 0, zones: zones.length, interfaces: 0, rules: 0, icsRules: 0 },
-        eventStats: { total: mocks.events.length, idsAlerts: 0, modbusWrites: 0, avDetections: 0, avBlocks: 0 },
+        health: mocks.health ?? { status: "ok", hostname: "test" },
+        counts: { assets: 0, zones: zones.length, interfaces: mocks.interfaceCount ?? 0, rules: mocks.ruleCount ?? 0, icsRules: 0 },
+        eventStats: "eventStats" in mocks ? mocks.eventStats : { total: mocks.events.length, idsAlerts: 0, modbusWrites: 0, avDetections: 0, avBlocks: 0 },
         services: null,
         lastActivity: null,
       };
     }
     if (p === "/api/v1/system/stats") {
-      body = {
-        cpu: { usagePercent: 0 }, memory: { totalBytes: 0, usagePercent: 0 },
-        disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true },
+      body = mocks.stats ?? {
+        ruleEval: {}, cpu: { usagePercent: 0 }, memory: { totalBytes: 0, usagePercent: 0 },
+        disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true, memUsedBytes: 1024, memLimitBytes: 0, memPercent: 0 },
         runtime: { uptime: "1m", goroutines: 1 },
       };
     }
+    if (p === "/api/v1/interfaces") {
+      body = "interfaces" in mocks ? mocks.interfaces : [];
+      status = mocks.interfacesStatus ?? 200;
+    }
+    if (p === "/api/v1/interfaces/state") {
+      body = "interfaceState" in mocks ? mocks.interfaceState : [];
+      status = mocks.interfaceStateStatus ?? 200;
+    }
     if (p === "/api/v1/zones") body = zones;
+    if (p === "/api/v1/ids/rules") body = mocks.ids ?? { enabled: false, rules: [] };
     if (p === "/api/v1/events") body = mocks.events;
     if (p === "/api/v1/flows") body = flows;
     if (p === "/api/v1/simulation") body = { running: false };
     if (p === "/api/v1/config/diff") body = { running: {}, candidate: {} };
     if (p === "/api/v1/services/status") body = mocks.services;
-    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    await route.fulfill({ status, json: status === 200 ? body : { error: "interface read unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = Promise.all(["/api/v1/events", "/api/v1/zones", "/api/v1/flows", "/api/v1/system/stats"].map(
     (path) => page.waitForResponse((r) => new URL(r.url()).pathname === path),
@@ -137,6 +160,129 @@ test("service cards read the services status, antivirus included", async ({ page
 
   await page.unrouteAll({ behavior: "wait" });
   await openDashboard(page, { events: [], services: { faults: [], av: { available: false, error: "engine unavailable" } } });
-  await expect(card("AV")).toContainText("Engine unavailable");
-  await expect(card("DNS")).toContainText("Disabled");
+  await expect(card("AV")).toContainText("Scanner unavailable");
+  await expect(card("DNS")).toContainText("Unknown");
+});
+
+test("partially reported service entries do not claim stopped or disabled", async ({ page }) => {
+  await openDashboard(page, { events: [], services: {
+    faults: [], av: { available: true }, vpn: { wireguard_enabled: false }, proxy: { envoy_running: false },
+  } });
+  for (const name of ["AV", "DNS", "VPN", "Syslog", "Proxy"]) {
+    const card = page.locator("a.rounded-lg").filter({ has: page.getByText(name, { exact: true }) });
+    await expect(card).toContainText("Unknown");
+    await expect(card).not.toContainText(/Disabled|Stopped|No tunnels/);
+  }
+});
+
+
+test("a quiet alert window does not claim overall health when protection is degraded", async ({ page }) => {
+  await openDashboard(page, { events: [], services, health: { hostname: "test", status: "degraded", enforceEnabled: false } });
+  await expect(page.getByText("No recent IDS/AV alerts", { exact: true })).toBeVisible();
+  await expect(page.getByText("All systems nominal", { exact: true })).toHaveCount(0);
+});
+
+test("missing dashboard alert counts remain unknown", async ({ page }) => {
+  await openDashboard(page, { events: [], services, eventStats: {} });
+  await expect(page.getByText("Recent IDS/AV alerts unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("No recent IDS/AV alerts", { exact: true })).toHaveCount(0);
+});
+
+
+test("rule counts and unknown container memory do not fabricate utilization bars", async ({ page }) => {
+  await openDashboard(page, { events: [], services, ruleCount: 60 });
+  const ruleRow = page.getByText("Rule Eval", { exact: true }).locator("../..");
+  await expect(ruleRow).toContainText("60 rules");
+  await expect(ruleRow.locator("[style*='width']")).toHaveCount(0);
+  const containerRow = page.getByText("Container", { exact: true }).locator("../..");
+  await expect(containerRow).toContainText("Running");
+  await expect(containerRow.locator("[style*='width']")).toHaveCount(0);
+});
+
+test("a measured zero container memory stays zero, not a synthetic minimum", async ({ page }) => {
+  await openDashboard(page, { events: [], services, stats: {
+    ruleEval: {}, cpu: { usagePercent: 0 }, memory: { totalBytes: 0, usagePercent: 0 },
+    disk: { totalBytes: 0, usagePercent: 0 }, container: { running: true, memUsedBytes: 0, memLimitBytes: 1048576, memPercent: 0 },
+    runtime: { uptime: "1m", goroutines: 1 },
+  } });
+  const containerRow = page.getByText("Container", { exact: true }).locator("../..");
+  await expect(containerRow.locator("[style*='width']")).toHaveAttribute("style", /width: 0%;/);
+});
+
+for (const ids of [{ enabled: false, rules: [] }, { enabled: true, rules: [] }]) {
+  test(`IPS is unknown without a live protection observation, even with IDS enabled=${ids.enabled}`, async ({ page }) => {
+    await openDashboard(page, { events: [], services, ids });
+    const ips = page.locator("a.rounded-lg").filter({ has: page.getByText("IPS", { exact: true }) });
+    await expect(ips).toContainText("Unknown");
+    await expect(ips).not.toContainText("Active");
+    await expect(ips).not.toHaveClass(/border-emerald/);
+  });
+}
+
+for (const forward_enabled of [false, true]) {
+  test(`proxy distinguishes disabled from stopped with forward enabled=${forward_enabled}`, async ({ page }) => {
+    await openDashboard(page, { events: [], services: { ...services,
+      proxy: { forward_enabled, reverse_enabled: false, envoy_running: false, nginx_running: false },
+    } });
+    const proxy = page.locator("a.rounded-lg").filter({ has: page.getByText("Proxy", { exact: true }) });
+    await expect(proxy).toContainText(forward_enabled ? "Stopped" : "Disabled");
+    const unknown = page.locator("a.rounded-lg").filter({ has: page.getByText("IPS", { exact: true }) });
+    await expect(unknown).toContainText("Unknown");
+    await expect(unknown).not.toHaveClass(/opacity-50|border-emerald/);
+    await expect(proxy).toHaveClass(/opacity-50/);
+  });
+}
+
+const bindStep = (page: Page) => page.getByText("Bind interfaces", { exact: true }).locator("../..");
+const device = (name: string) => ({ name, index: 1, up: true, mtu: 1500, mac: "02:00:00:00:00:01", addrs: [] });
+
+for (const scenario of [
+  { name: "unbound logical records", interfaces: [{ name: "lo" }, { name: "lan" }], interfaceState: [device("lo"), device("eth0")], ready: false },
+  { name: "partially bound records", interfaces: [{ name: "lan", device: "eth0" }, { name: "wan" }], interfaceState: [device("eth0"), device("eth1")], ready: false },
+  { name: "missing device with no spare device", interfaces: [{ name: "lan", device: "absent0" }], interfaceState: [device("lo")], ready: false },
+  { name: "explicit device binding", interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")], ready: true },
+  { name: "bound device with its link down", interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [{ ...device("eth0"), up: false }], ready: true },
+  { name: "matching logical and device name", interfaces: [{ name: "eth0" }], interfaceState: [device("eth0")], ready: true },
+  { name: "no reported network devices", interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [], ready: false },
+  { name: "no configured interfaces", interfaces: [], interfaceState: [device("eth0")], ready: false },
+]) {
+  test(`Bind interfaces readiness follows Interfaces device matching: ${scenario.name}`, async ({ page }) => {
+    await openDashboard(page, { events: [], services, interfaceCount: scenario.interfaces.length, ...scenario });
+    await expect(bindStep(page).getByText(scenario.ready ? "Ready" : "Action", { exact: true })).toBeVisible();
+    await expect(bindStep(page).getByText(scenario.ready ? "Action" : "Ready", { exact: true })).toHaveCount(0);
+    if (scenario.ready) await expect(bindStep(page)).toContainText("1 of 1 bound to network devices");
+    else if (scenario.interfaces.length) await expect(bindStep(page)).toContainText("not connected to network devices");
+  });
+}
+
+for (const failure of [
+  { name: "configuration HTTP failure", interfacesStatus: 503 },
+  { name: "runtime HTTP failure", interfaceStateStatus: 503 },
+  { name: "configuration null", interfaces: null },
+  { name: "runtime null", interfaceState: null },
+]) {
+  test(`Bind interfaces stays unknown with ${failure.name}`, async ({ page }) => {
+    await openDashboard(page, { events: [], services, interfaceCount: 1,
+      interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")], ...failure,
+    });
+    await expect(bindStep(page).getByText("Unknown", { exact: true })).toBeVisible();
+    await expect(bindStep(page).getByText("Ready", { exact: true })).toHaveCount(0);
+    await expect(bindStep(page)).toContainText("Interface bindings unknown");
+  });
+}
+
+test("Bind interfaces discards stale readiness on a failed refresh and recovers", async ({ page }) => {
+  await page.clock.install();
+  const mocks: Mocks = { events: [], services, interfaceCount: 1,
+    interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")],
+  };
+  await openDashboard(page, mocks);
+  await expect(bindStep(page).getByText("Ready", { exact: true })).toBeVisible();
+  mocks.interfaceStateStatus = 503;
+  await page.clock.fastForward(10_000);
+  await expect(bindStep(page).getByText("Unknown", { exact: true })).toBeVisible();
+  await expect(bindStep(page).getByText("Ready", { exact: true })).toHaveCount(0);
+  mocks.interfaceStateStatus = 200;
+  await page.clock.fastForward(10_000);
+  await expect(bindStep(page).getByText("Ready", { exact: true })).toBeVisible();
 });

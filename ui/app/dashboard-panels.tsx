@@ -4,6 +4,8 @@ import Link from "next/link";
 
 import type {
   DashboardData,
+  Interface,
+  InterfaceState,
   SystemStats,
   TelemetryEvent,
 } from "../lib/api";
@@ -11,10 +13,16 @@ import type {
 import { Skeleton } from "../components/Skeleton";
 import { formatEndpoint } from "../lib/endpoint";
 import { formatBytes } from "../lib/utils";
+import { runtimeFor } from "../lib/interface-addresses";
+
+export type InterfaceBindings = {
+  configured: Interface[];
+  runtime: InterfaceState[];
+};
 
 export type ServiceInfo = {
   name: string;
-  active: boolean;
+  active: boolean | null;
   detail: string;
   href: string;
   sparkline?: number[];
@@ -23,13 +31,17 @@ export type ServiceInfo = {
 
 export function SetupChecklist({
   counts,
+  interfaceBindings,
   configDirty,
   isAdmin,
 }: {
   counts: DashboardData["counts"] | null | undefined;
+  interfaceBindings: InterfaceBindings | null;
   configDirty: boolean | null;
   isAdmin: boolean;
 }) {
+  const interfaceCount = interfaceBindings?.configured.length ?? 0;
+  const missingBindings = interfaceBindings?.configured.filter((iface) => !runtimeFor(iface, interfaceBindings.runtime)).length ?? 0;
   const steps = [
     {
       title: "Create zones",
@@ -40,8 +52,14 @@ export function SetupChecklist({
     },
     {
       title: "Bind interfaces",
-      detail: counts && counts.interfaces > 0 ? `${counts.interfaces} configured` : "Assign zones to interfaces so policy can attach to ports.",
-      complete: !!counts && counts.interfaces > 0,
+      detail: interfaceBindings === null
+        ? "Interface bindings unknown. Check configured interfaces and live devices."
+        : interfaceCount === 0
+          ? "Assign zones to interfaces so policy can attach to ports."
+          : missingBindings > 0
+            ? `${missingBindings} of ${interfaceCount} configured interfaces not connected to network devices.`
+            : `${interfaceCount} of ${interfaceCount} bound to network devices.`,
+      complete: interfaceBindings === null ? null : interfaceCount > 0 && missingBindings === 0,
       href: "/interfaces/",
       cta: (counts?.interfaces ?? 0) > 0 ? "Review interfaces" : "Bind interfaces",
     },
@@ -100,7 +118,7 @@ export function SetupChecklist({
                     : ""
                 }`}
               >
-                {step.complete ? "Ready" : "Action"}
+                {step.complete === null ? "Unknown" : step.complete ? "Ready" : "Action"}
               </span>
             </div>
             <p className="mb-3 text-xs text-slate-500">{step.detail}</p>
@@ -125,9 +143,11 @@ export function ServiceGrid({ services }: { services: ServiceInfo[] }) {
           key={service.name}
           href={service.href}
           className={`block rounded-lg border p-3 transition-colors hover:border-white/12 ${
-            service.active
-              ? "border-emerald-500/20 bg-emerald-500/4 hover:bg-emerald-500/[0.07]"
-              : "border-white/6 bg-white/2 opacity-50 hover:opacity-70"
+            service.active === null
+              ? "border-slate-500/30 bg-white/2 hover:bg-white/4"
+              : service.active
+                ? "border-emerald-500/20 bg-emerald-500/4 hover:bg-emerald-500/[0.07]"
+                : "border-white/6 bg-white/2 opacity-50 hover:opacity-70"
           }`}
         >
           <div
@@ -282,7 +302,7 @@ export function SystemHealthPanel({
   const items: Array<{
     name: string;
     value: string;
-    pct: number;
+    pct: number | null;
     color: string;
   }> = [];
 
@@ -316,8 +336,8 @@ export function SystemHealthPanel({
     items.push({
       name: "Rule Eval",
       value: `${totalRules} rules`,
-      pct: Math.min(100, totalRules * 2),
-      color: totalRules > 40 ? "#f59e0b" : "#22c55e",
+      pct: null,
+      color: "#94a3b8",
     });
   }
 
@@ -330,14 +350,14 @@ export function SystemHealthPanel({
         : stats.container.uptime
           ? `Up ${stats.container.uptime}`
           : "Running",
-      pct: memPct > 0 ? memPct : 25,
+      pct: stats.container.memLimitBytes > 0 && Number.isFinite(memPct) ? memPct : null,
       color: memPct > 85 ? "#ef4444" : memPct > 65 ? "#f59e0b" : "#06b6d4",
     });
   } else if (stats) {
     items.push({
       name: "Go Heap",
       value: `${stats.runtime.heapAllocMB.toFixed(0)} MB`,
-      pct: Math.min(100, (stats.runtime.heapAllocMB / stats.runtime.heapSysMB) * 100),
+      pct: stats.runtime.heapSysMB > 0 ? Math.min(100, (stats.runtime.heapAllocMB / stats.runtime.heapSysMB) * 100) : null,
       color: "#06b6d4",
     });
   }
@@ -359,12 +379,12 @@ export function SystemHealthPanel({
             </span>
             <span className="text-slate-300 tabular-nums">{item.value}</span>
           </div>
-          <div className="h-1 w-full rounded-full bg-white/6">
+          {item.pct !== null && Number.isFinite(item.pct) && <div className="h-1 w-full rounded-full bg-white/6">
             <div
               className="h-1 rounded-full transition-all duration-700"
-              style={{ width: `${Math.max(1, item.pct)}%`, background: item.color }}
+              style={{ width: `${Math.min(100, Math.max(0, item.pct))}%`, background: item.color }}
             />
-          </div>
+          </div>}
         </div>
       ))}
     </div>

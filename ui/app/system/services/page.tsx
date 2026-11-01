@@ -172,7 +172,7 @@ export default function ServicesOverviewPage() {
             Forward unified events to external collectors.
           </p>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Forwarders: {status?.syslog?.configured_forwarders ?? 0}
+            Forwarders: {status?.syslog?.configured_forwarders ?? "Unknown"}
             {rate("syslog") !== null && (
               <> · Rate: {(rate("syslog") ?? 0).toFixed(1)} /min</>
             )}
@@ -197,17 +197,17 @@ export default function ServicesOverviewPage() {
           <div className="flex items-center gap-2 text-xs text-(--text)">
             <Image src={staticAssetURL("/icons/envoyproxy.svg")} alt="" width={16} height={16} className="h-4 w-4" />
             <Image src={staticAssetURL("/icons/nginx.svg")} alt="" width={16} height={16} className="h-4 w-4" />
-            <span>Envoy + Nginx</span>
+            <span>Web proxies</span><span className="text-xs text-(--text-muted)">Software: Envoy + Nginx</span>
           </div>
           <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>Envoy + Nginx proxies</span>
+            <span>Outbound and published web apps</span>
             <InfoTip label="Forward proxy for outbound traffic and reverse proxy for published apps." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Envoy: {status?.proxy?.envoy_running ? "running" : "stopped"}{" "}
+            Forward proxy: {typeof status?.proxy?.envoy_running === "boolean" ? (status.proxy.envoy_running ? "running" : "stopped") : "Unknown"}{" "}
             {status?.proxy?.envoy_last_error && `(error=${status?.proxy?.envoy_last_error})`}
             <br />
-            Nginx: {status?.proxy?.nginx_running ? "running" : "stopped"}{" "}
+            Reverse proxy: {typeof status?.proxy?.nginx_running === "boolean" ? (status.proxy.nginx_running ? "running" : "stopped") : "Unknown"}{" "}
             {status?.proxy?.nginx_last_error && `(error=${status?.proxy?.nginx_last_error})`}
             {rate("proxy") !== null && (
               <>
@@ -218,14 +218,14 @@ export default function ServicesOverviewPage() {
             {rate("envoy") !== null && (
               <>
                 <br />
-                Envoy rate: {(rate("envoy") ?? 0).toFixed(1)} /min
+                Forward proxy activity: {(rate("envoy") ?? 0).toFixed(1)} /min
                 {errRate("envoy") !== null && <> · errors {(errRate("envoy") ?? 0).toFixed(1)}/min</>}
               </>
             )}
             {rate("nginx") !== null && (
               <>
                 <br />
-                Nginx rate: {(rate("nginx") ?? 0).toFixed(1)} /min
+                Reverse proxy activity: {(rate("nginx") ?? 0).toFixed(1)} /min
                 {errRate("nginx") !== null && <> · errors {(errRate("nginx") ?? 0).toFixed(1)}/min</>}
               </>
             )}
@@ -250,14 +250,14 @@ export default function ServicesOverviewPage() {
           errorsRate={errRate("dns")}
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>Unbound DNS resolver</span>
+            <span>DNS resolver</span><span className="text-xs text-(--text-muted)">Software: Unbound</span>
             <InfoTip label="Embedded resolver with upstream forwarding and caching." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Enabled: {status?.dns?.enabled ? "yes" : "no"}, running:{" "}
-            {status?.dns?.running ? "yes" : "no"}
+            Enabled: {typeof status?.dns?.enabled === "boolean" ? (status.dns.enabled ? "yes" : "no") : "Unknown"}, running:{" "}
+            {typeof status?.dns?.running === "boolean" ? (status.dns.running ? "yes" : "no") : "Unknown"}
             <br />
-            Upstreams: {status?.dns?.configured_upstreams ?? 0}{" "}
+            Upstreams: {status?.dns?.configured_upstreams ?? "Unknown"}{" "}
             {status?.dns?.last_error && `(error=${status?.dns?.last_error})`}
             {rate("dns") !== null && (
               <>
@@ -284,14 +284,14 @@ export default function ServicesOverviewPage() {
           errorsRate={errRate("ntp")}
         >
           <div className="flex items-center gap-2 text-sm text-(--text)">
-            <span>chrony NTP client</span>
+            <span>Time synchronization</span><span className="text-xs text-(--text-muted)">Software: chrony</span>
             <InfoTip label="Keeps system time in sync using configured NTP servers." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Enabled: {status?.ntp?.enabled ? "yes" : "no"}, running:{" "}
-            {status?.ntp?.running ? "yes" : "no"}
+            Enabled: {typeof status?.ntp?.enabled === "boolean" ? (status.ntp.enabled ? "yes" : "no") : "Unknown"}, running:{" "}
+            {typeof status?.ntp?.running === "boolean" ? (status.ntp.running ? "yes" : "no") : "Unknown"}
             <br />
-            Servers: {status?.ntp?.servers_count ?? 0}{" "}
+            Servers: {status?.ntp?.servers_count ?? "Unknown"}{" "}
             {status?.ntp?.last_error && `(error=${status?.ntp?.last_error})`}
             {rate("ntp") !== null && (
               <>
@@ -322,7 +322,7 @@ export default function ServicesOverviewPage() {
             <InfoTip label="Assigns IPs to LAN clients and tracks leases." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            Enabled: {status?.dhcp?.enabled ? "yes" : "no"}{" "}
+            Enabled: {typeof status?.dhcp?.enabled === "boolean" ? (status.dhcp.enabled ? "yes" : "no") : "Unknown"}{" "}
             {(status?.dhcp?.listen_ifaces ?? 0) > 0 &&
               `(ifaces=${status?.dhcp?.listen_ifaces ?? 0})`}
             {rate("dhcp") !== null && (
@@ -356,7 +356,7 @@ export default function ServicesOverviewPage() {
             <InfoTip label="Secure remote access tunnels (WireGuard preferred; OpenVPN optional)." />
           </div>
           <p className="mt-2 text-xs text-(--text-muted)">
-            WireGuard: {status?.vpn?.wireguard_enabled ? "on" : "off"}{" "}
+            WireGuard: {typeof status?.vpn?.wireguard_enabled === "boolean" ? (status.vpn.wireguard_enabled ? "on" : "off") : "Unknown"}{" "}
             {(status?.vpn?.wg_peers ?? 0) > 0 &&
               `(peers=${status?.vpn?.wg_peers ?? 0})`}
             {rate("vpn") !== null && (
@@ -389,21 +389,23 @@ export default function ServicesOverviewPage() {
           </div>
           {av?.available === false ? (
             <p className="mt-2 text-xs text-(--text-muted)">
-              Engine status unavailable: {av.error || "no reason reported"}
+              Scanner status unavailable: {av.error || "no reason reported"}
             </p>
           ) : av ? (
-            <p className="mt-2 text-xs text-(--text-muted)">
-              Mode: {av.mode}, Enabled: {av.enabled ? "yes" : "no"}
+            <div className="mt-2 text-xs text-(--text-muted)">
+              Mode: {av.mode || "Unknown"}, Enabled: {typeof av.enabled === "boolean" ? (av.enabled ? "yes" : "no") : "Unknown"}
+              <details className="mt-2 rounded-xs border p-3">
+                <summary className="cursor-pointer">Service details</summary>
               {av.freshclam_last && (
                 <>
                   <br />
-                  freshclam {av.freshclam_last}
+                  Definition updater {av.freshclam_last}
                 </>
               )}
               {av.clamav_custom_defs && (
                 <>
                   <br />
-                  Custom defs: {av.clamav_custom_defs}
+                  Custom definitions: {av.clamav_custom_defs}
                 </>
               )}
               {av.last_render && (
@@ -412,9 +414,10 @@ export default function ServicesOverviewPage() {
                   Last update: {av.last_render}
                 </>
               )}
+              </details>
               <br />
-              Rate: {av.rate_per_min.toFixed(1)} /min
-            </p>
+              Rate: {typeof av.rate_per_min === "number" ? av.rate_per_min.toFixed(1) : "Unknown"} /min
+            </div>
           ) : null}
           <Link href="/system/services/av/" className="mt-3 inline-block text-xs text-(--text) hover:text-(--text)">
             Configure →

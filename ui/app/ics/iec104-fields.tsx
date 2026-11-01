@@ -54,7 +54,7 @@ export function IEC104Fields({
       <div className="grid gap-3 md:grid-cols-2">
         <div>
           <label className={LABEL}>
-            Type IDs <span className="text-(--text-dim)">(comma-separated, 1-255; empty = any)</span>
+            Type IDs <span className="text-(--text-dim)">(message types; comma-separated, 1-255; empty = any)</span>
           </label>
           <input
             value={draft.typeIds}
@@ -123,7 +123,7 @@ export function IEC104Fields({
         </div>
         <div>
           <label className={LABEL}>
-            Common address (CA) <span className="text-(--text-dim)">(0-65534)</span>
+            Common address (CA) <span className="text-(--text-dim)">(station address, 0-65534)</span>
           </label>
           <input
             value={draft.ca}
@@ -135,7 +135,7 @@ export function IEC104Fields({
         </div>
         <div>
           <label className={LABEL}>
-            IOA ranges <span className="text-(--text-dim)">(0-16777215)</span>
+            IOA ranges <span className="text-(--text-dim)">(point addresses, 0-16777215)</span>
           </label>
           <input
             value={draft.ioa}
@@ -147,43 +147,46 @@ export function IEC104Fields({
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        {([ ["cot", "Cause of transmission (1-63)"], ["originators", "Originators (0-255)"] ] as const).map(([key, label]) => (
-          <label key={key} className={LABEL}>{label}
-            <input aria-label={label} value={draft[key]} onChange={(e) => set(key, e.target.value)} disabled={disabled} placeholder="Empty = any" className="mt-1 input-industrial w-full disabled:opacity-60" />
-          </label>
-        ))}
-      </div>
-      <div className="grid gap-3 md:grid-cols-3">
-        {([ ["negative", "P/N flag"], ["test", "Test flag"] ] as const).map(([key, label]) => (
-          <label key={key} className={LABEL}>{label}
-            <select aria-label={label} value={draft[key]} onChange={(e) => set(key, e.target.value as "" | "true" | "false")} disabled={disabled} className="mt-1 input-industrial w-full disabled:opacity-60">
-              <option value="">Any</option><option value="false">False (0)</option><option value="true">True (1)</option>
+      <details open={[draft.cot, draft.originators, draft.negative, draft.test, draft.selectExecute, draft.commandStates, draft.commandQualifiers].some(value => value !== "")}>
+        <summary className="cursor-pointer text-xs text-(--text-muted)">Advanced selectors (saved values still apply)</summary>
+        <div className="mt-2 grid gap-3 md:grid-cols-2">
+          {([ ["cot", "Cause of transmission (1-63)"], ["originators", "Originators (0-255)"] ] as const).map(([key, label]) => (
+            <label key={key} className={LABEL}>{label}
+              <input aria-label={label} value={draft[key]} onChange={(e) => set(key, e.target.value)} disabled={disabled} placeholder="Empty = any" className="mt-1 input-industrial w-full disabled:opacity-60" />
+            </label>
+          ))}
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          {([ ["negative", "P/N flag"], ["test", "Test flag"] ] as const).map(([key, label]) => (
+            <label key={key} className={LABEL}>{label}
+              <select aria-label={label} value={draft[key]} onChange={(e) => set(key, e.target.value as "" | "true" | "false")} disabled={disabled} className="mt-1 input-industrial w-full disabled:opacity-60">
+                <option value="">Any</option><option value="false">False (0)</option><option value="true">True (1)</option>
+              </select>
+            </label>
+          ))}
+          <label className={LABEL}>Select / execute
+            <select aria-label="Select / execute" value={draft.selectExecute} onChange={(e) => set("selectExecute", e.target.value as IEC104Draft["selectExecute"])} disabled={disabled} className="mt-1 input-industrial w-full disabled:opacity-60">
+              <option value="">Any</option><option value="select">Select</option><option value="execute">Execute</option>
             </select>
           </label>
-        ))}
-        <label className={LABEL}>Select / execute
-          <select aria-label="Select / execute" value={draft.selectExecute} onChange={(e) => set("selectExecute", e.target.value as IEC104Draft["selectExecute"])} disabled={disabled} className="mt-1 input-industrial w-full disabled:opacity-60">
-            <option value="">Any</option><option value="select">Select</option><option value="execute">Execute</option>
-          </select>
-        </label>
-      </div>
-      <p className="text-xs text-(--text-muted)">Select/execute applies only to Type IDs 45–50 and 58–63. ASDU selectors do not match S/U frames.</p>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <div>
-          <label className={LABEL}>Command states (comma-separated)
-            <input aria-label="Command states" aria-describedby={stateHelpId} value={draft.commandStates} onChange={(e) => set("commandStates", e.target.value)} disabled={disabled} placeholder="Empty = any" className="mt-1 input-industrial w-full disabled:opacity-60" />
-          </label>
-          <p id={stateHelpId} className="text-xs text-(--text-muted)">
-            {commandStateHelp(parsedTypes.ok ? parsedTypes.value : [])}
-          </p>
         </div>
-        <label className={LABEL}>Command qualifiers (QU, 0-31)
-          <input aria-label="Command qualifiers (QU)" value={draft.commandQualifiers} onChange={(e) => set("commandQualifiers", e.target.value)} disabled={disabled} placeholder="Empty = any" className="mt-1 input-industrial w-full disabled:opacity-60" />
-        </label>
-      </div>
-      <p className="text-xs text-(--text-muted)">State and QU filters require explicit Type IDs: 45, 46, 47, 58, 59 or 60. Empty = any; a bound filter never matches an object without that field.</p>
+        <p className="text-xs text-(--text-muted)">Select/execute applies only to Type IDs 45–50 and 58–63. ASDU selectors do not match S/U frames.</p>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <label className={LABEL}>Command states (comma-separated)
+              <input aria-label="Command states" aria-describedby={stateHelpId} value={draft.commandStates} onChange={(e) => set("commandStates", e.target.value)} disabled={disabled} placeholder="Empty = any" className="mt-1 input-industrial w-full disabled:opacity-60" />
+            </label>
+            <p id={stateHelpId} className="text-xs text-(--text-muted)">
+              {commandStateHelp(parsedTypes.ok ? parsedTypes.value : [])}
+            </p>
+          </div>
+          <label className={LABEL}>Command qualifiers (QU, 0-31)
+            <input aria-label="Command qualifiers (QU)" value={draft.commandQualifiers} onChange={(e) => set("commandQualifiers", e.target.value)} disabled={disabled} placeholder="Empty = any" className="mt-1 input-industrial w-full disabled:opacity-60" />
+          </label>
+        </div>
+        <p className="text-xs text-(--text-muted)">State and QU filters require explicit Type IDs: 45, 46, 47, 58, 59 or 60. Empty = any; a bound filter never matches an object without that field.</p>
+      </details>
 
       <label className="flex items-center gap-2 text-sm text-(--text)">
         <input

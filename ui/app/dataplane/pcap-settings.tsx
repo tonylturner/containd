@@ -60,7 +60,8 @@ export function CaptureStatusCard({
       </div>
       {status?.lastError ? (
         <div className="mt-2 rounded-xs border px-3 py-2 text-xs">
-          {status.lastError}
+          Capture needs attention.
+          <p className="wrap-break-word">{status.lastError}</p>
         </div>
       ) : null}
     </Card>
@@ -207,24 +208,6 @@ export function CaptureSetupCard({
           </div>
           <div>
             <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-              Snaplen (bytes)
-              <InfoTip label="Max bytes captured per packet (higher = larger PCAPs)." />
-            </label>
-            <input
-              type="number"
-              value={settings.snaplen}
-              disabled={!canEdit}
-              onChange={(e) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  snaplen: Number(e.target.value) || 0,
-                }))
-              }
-              className="input-industrial mt-1 w-full transition-ui outline-hidden focus-visible:shadow-focus-ring"
-            />
-          </div>
-          <div>
-            <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
               Max size (MB)
               <InfoTip label="Max file size before rotation or stop." />
             </label>
@@ -325,17 +308,44 @@ export function CaptureSetupCard({
               />
             </div>
             <div className="mt-2 text-xs text-(--text-muted)">
-              Filter preview:{" "}
-              <span className="font-mono text-(--text)">{bpfPreview}</span>
+              <details>
+                <summary className="cursor-pointer">Capture filter (BPF)</summary>
+                <code className="text-(--text)">{bpfPreview}</code>
+              </details>
             </div>
           </div>
         </div>
 
-        <details className="rounded-xs border bg-(--surface) px-4 py-3">
+        <details
+          open={settings.snaplen !== 262144
+            || settings.filePrefix !== "capture"
+            || settings.rotateSeconds !== 300
+            || settings.bufferMB !== 4
+            || settings.promisc !== true}
+          className="rounded-xs border bg-(--surface) px-4 py-3"
+        >
           <summary className="cursor-pointer text-sm text-(--text)">
             Advanced capture options
           </summary>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
+                Bytes saved per packet (snaplen)
+                <InfoTip label="Max bytes captured per packet (higher = larger PCAPs)." />
+              </label>
+              <input
+                type="number"
+                value={settings.snaplen}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    snaplen: Number(e.target.value) || 0,
+                  }))
+                }
+                className="input-industrial mt-1 w-full transition-ui outline-hidden focus-visible:shadow-focus-ring"
+              />
+            </div>
             <div>
               <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                 File prefix
@@ -373,8 +383,8 @@ export function CaptureSetupCard({
             </div>
             <div>
               <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
-                Buffer (MB)
-                <InfoTip label="Capture buffer size before flush." />
+                Capture memory buffer (MB)
+                <InfoTip label="Memory reserved for packets waiting to be written to disk." />
               </label>
               <input
                 type="number"
@@ -402,7 +412,7 @@ export function CaptureSetupCard({
                 }
                 className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)"
               />
-              Promiscuous mode
+              Capture all traffic visible on the interface
               <InfoTip label="Capture all traffic seen by the interface." />
             </label>
           </div>
@@ -415,7 +425,7 @@ export function CaptureSetupCard({
                 PCAP Forwarding (Remote Sensor)
               </div>
               <p className="mt-1 text-sm text-(--text)">
-                Stream captures per interface to a remote sensor (tap-style).
+                Send a separate captured-traffic stream for each interface to a remote sensor.
               </p>
             </div>
           </div>

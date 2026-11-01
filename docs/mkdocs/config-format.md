@@ -20,6 +20,13 @@ shows the intentionally disabled mode, which updates the engine's in-memory
 snapshot without installing firewall rules. Interface and service configuration
 can still change.
 
+In Configuration, save changes, review the diff, then use **Commit** to apply
+or **Commit-confirmed** for automatic rollback unless you **Confirm** before
+the deadline. Restoring a backup replaces saved changes, not active settings.
+The policy wizard's **Review & Stage** step also saves for later review and
+commit; it does not activate policy. Configuration tabs and JSON keys retain
+their existing names.
+
 ## Concurrent edits
 
 Configuration revisions are transport metadata, not JSON fields or schema

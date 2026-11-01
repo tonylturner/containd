@@ -110,7 +110,7 @@ const services = [
   { name: "NTP", route: "/system/services/ntp/", path: "/services/ntp", label: "Enable NTP client" },
   { name: "AV", route: "/system/services/av/", path: "/services/av", label: "Enable AV/ICAP scanning" },
   { name: "DHCP", route: "/dhcp/", path: "/services/dhcp", label: "Enable DHCP server" },
-  { name: "IDS", route: "/ids/", path: "/ids/rules", label: "Enable IDS engine" },
+  { name: "IDS", route: "/ids/", path: "/ids/rules", label: "Enable intrusion detection" },
   { name: "VPN", route: "/vpn/", path: "/services/vpn", label: "Enable WireGuard" },
   { name: "Forward proxy", route: "/proxies/", path: "/services/proxy/forward", label: "Enabled", index: 0 },
   { name: "Reverse proxy", route: "/proxies/", path: "/services/proxy/reverse", label: "Enabled", index: 1 },
@@ -222,10 +222,15 @@ for (const failure of ["HTTP", "null"] as const) {
     await expect(error).toHaveCount(0);
     await expect(refreshed).toBeVisible();
     const lastRefresh = await refreshed.textContent();
-    await page.getByText("Advanced capture options", { exact: true }).click();
+    const advanced = page.locator("details").filter({
+      has: page.getByText("Advanced capture options", { exact: true }),
+    });
+    // The saved non-default values must open this section after recovery.
+    await expect(advanced).toHaveJSProperty("open", true);
     // The file-prefix input follows its visible label in the advanced section.
     const prefixField = page.locator("label").filter({ hasText: "File prefix" }).locator("..").locator("input");
     await expect(prefixField).toHaveValue("existing");
+    await expect(prefixField).toBeVisible();
     await prefixField.fill("draft");
     failed.add("/pcap/config");
     await page.clock.setFixedTime(new Date("2026-10-31T12:01:00Z"));

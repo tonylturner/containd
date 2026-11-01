@@ -355,7 +355,7 @@ function ConfigPage() {
     {
       id: "config:restore",
       title: "Restore carefully",
-      body: "Restore replaces the candidate config; use commit-confirmed if you need a safe rollback window.",
+      body: "Restore replaces saved changes, not active settings. Use Commit-confirmed for a safe rollback window when applying them.",
       when: () => canEdit,
     },
     {
@@ -411,7 +411,7 @@ function ConfigPage() {
         ))}
       </div>
       <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-xs text-(--text)">
-        Workflow: edit the staged config, review the change summary, then commit or commit-confirmed to update the live appliance safely.
+        Workflow: save changes, review the change summary, then use Commit to apply or Commit-confirmed for automatic rollback unless you confirm.
       </div>
 
       {status && (
@@ -574,7 +574,7 @@ function ConfigPage() {
         <div className="grid gap-4">
           {candidateLoadedAt && runningLoadedAt && candidateLoadedAt < runningLoadedAt && (
             <div className="rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 shadow-card">
-              Staged config looks older than running config. Copy running → staged first if you want to review your latest committed state.
+              Saved changes are older than the last committed configuration. Review before replacing them with Copy running → staged.
             </div>
           )}
           {configDiff === undefined ? (

@@ -16,11 +16,11 @@ export function EvidenceBanner() {
       className={`mb-4 rounded-xs border px-4 py-3 text-sm ${failed
         ? "border-(--red)/30 bg-(--red)/10 text-(--red)"
         : "border-amber/30 bg-amber/10 text-amber"}`}>
-      <p className="font-semibold">{failed ? "Evidence degraded"
+      <p className="font-semibold">{failed ? "Activity records may be missing"
         : state === "recovered" ? "Evidence recovered — history needs review" : "Evidence state unknown"}</p>
       <p className="mt-1 text-xs">
-        {failed ? "Audit persistence or syslog forwarding is failing. Operations continue; evidence may be missing."
-          : state === "recovered" ? "Delivery or persistence is working again. Previous failures and loss are not undone."
+        {failed ? "Saving audit records or sending logs is failing. Operations continue; evidence may be missing."
+          : state === "recovered" ? "Saving or sending records is working again. Previous failures and loss are not undone."
             : "Evidence completeness cannot be verified."}{" "}
         Review <Link href="/audit/" className="font-semibold underline">Audit persistence</Link>
         {" and "}<Link href="/system/services/syslog/" className="font-semibold underline">Syslog delivery</Link>.

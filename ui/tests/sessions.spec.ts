@@ -67,7 +67,7 @@ test("exact kill preserves NAT tuple and reports each step", async ({ page }) =>
   await page.getByRole("button", { name: "Kill", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("A fresh source port is allowed");
   await page.getByRole("dialog").getByRole("button", { name: "Kill", exact: true }).click();
-  await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Conntrack deleted: yes (1/1)");
+  await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Connection entries removed: yes (1/1)");
   await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Revocation installed: yes, until");
   await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("closure not confirmed");
   expect(writes).toEqual([{ proto: "tcp", src: entry.src, dst: entry.dst, sport: 41001, dport: 443, scope: "connection", durationSecs: 60 }]);
@@ -81,7 +81,7 @@ test("client-service warns about all connections and exposes partial failure", a
   await page.getByRole("button", { name: "Kill", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("all of this client's connections to that service");
   await page.getByRole("dialog").getByRole("button", { name: "Kill", exact: true }).click();
-  await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Conntrack deleted: no (0/1) — delete permission denied");
+  await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Connection entries removed: no (0/1) — delete permission denied");
   await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Revocation installed: yes");
   expect(writes[0]).toMatchObject({ scope: "client-service", durationSecs: 30 });
 });
@@ -135,7 +135,7 @@ test("ICMP rows show identifier and type in place of ports and can be killed", a
   await expect(page.getByRole("dialog")).toContainText("icmp 192.0.2.10 → 198.51.100.20 (id 4660)");
   await expect(page.getByRole("dialog")).toContainText("A new ICMP identifier is allowed. Matching packets are dropped.");
   await page.getByRole("dialog").getByRole("button", { name: "Kill", exact: true }).click();
-  await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Conntrack deleted: yes (1/1)");
+  await expect(page.getByRole("status", { name: "Connection revocation result" })).toContainText("Connection entries removed: yes (1/1)");
   expect(writes).toEqual([{ proto: "icmp", src: ping.src, dst: ping.dst, icmpId: 4660, icmpType: 8, icmpCode: 0, scope: "connection", durationSecs: 60 }]);
 });
 

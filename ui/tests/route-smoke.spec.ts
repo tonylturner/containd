@@ -550,7 +550,7 @@ test("Interfaces shows configured, external OS/Docker, and DHCP addresses", asyn
 
   const fallback = row("lan1").getByRole("cell").nth(7);
   await expect(fallback).toHaveText("192.168.242.2/24, 2001:db8::1/64");
-  await expect(fallback.getByRole("img", { name: "OS/Docker address" })).toBeVisible();
+  await expect(fallback.getByRole("img", { name: "Detected address" })).toBeVisible();
   await expect(fallback.getByTitle(OS_ADDRESS_HINT)).toBeVisible();
   await expect(fallback.locator("[title]").first()).toHaveAttribute("title", interfaceState[1].addrs.join(", "));
   await expect(row("lan1").getByRole("cell").nth(6)).toHaveText("external");
@@ -626,7 +626,7 @@ test("Interfaces sends explicit clears when removing an alias and leaving VLAN",
   }]);
 
   await row.getByRole("button", { name: "Edit", exact: true }).click();
-  await row.getByPlaceholder("os iface (e.g. eth0)").fill("");
+  await row.getByPlaceholder("Network device (e.g. eth0)").fill("");
   await row.getByRole("cell").nth(5).getByRole("combobox").selectOption("");
   await row.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => writes.length).toBe(2);
@@ -639,19 +639,20 @@ test("topology uses OS/Docker fallback in zone subnets, interface details and ph
   await page.goto("/topology");
   const zone = page.locator('.react-flow__node[data-id="zone-lan"]');
   await expect(zone).toContainText("192.168.242.2/24");
-  await expect(zone.getByRole("img", { name: "OS/Docker address" })).toBeVisible();
+  await expect(zone.getByRole("img", { name: "Detected address" })).toBeVisible();
   const configured = page.locator('.react-flow__node[data-id="zone-wan"]');
   await expect(configured).toContainText("192.0.2.1/24");
   await expect(configured.getByRole("img")).toHaveCount(0);
   await page.locator('.react-flow__node[data-id="fw-main"]').click();
   const detail = page.locator('[class*="ifaceItem"]').filter({ hasText: "eth0" });
   await expect(detail).toContainText("192.168.242.2/24");
-  await expect(detail.getByRole("img", { name: "OS/Docker address" })).toBeVisible();
+  await expect(detail.getByRole("img", { name: "Detected address" })).toBeVisible();
   await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
+  await page.getByText("Application runtime details", { exact: true }).click();
   const pills = page.locator('[class*="layerSectionFull"]').filter({ hasText: "Bound Interfaces (in-process)" });
   const pill = pills.locator("div").filter({ has: page.getByText("eth0", { exact: true }) }).last();
   await expect(pill).toContainText("192.168.242.2/24");
-  await expect(pill.getByRole("img", { name: "OS/Docker address" })).toBeVisible();
+  await expect(pill.getByRole("img", { name: "Detected address" })).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
 

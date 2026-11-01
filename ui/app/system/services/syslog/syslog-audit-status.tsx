@@ -19,7 +19,7 @@ export function SyslogAuditStatusPanel({ audit }: { audit: SyslogAuditStatus }) 
         <h2 className="text-sm font-semibold">Audit forwarding</h2>
         <span className="text-(--text-muted)">
           {audit.enabled
-            ? "Audit records go to every forwarder, oldest first; each forwarder resumes from its own cursor."
+            ? "Audit records go to every forwarder, oldest first; each forwarder resumes where it left off."
             : "Audit records are not forwarded."}
         </span>
       </div>
@@ -27,7 +27,7 @@ export function SyslogAuditStatusPanel({ audit }: { audit: SyslogAuditStatus }) 
         <div>Sent: {audit.sent_total}</div>
         <div>Failed: {audit.failed_total}</div>
         <div className={stalled ? "text-amber" : undefined}>Backlog: {audit.backlog}</div>
-        <div>Last flush: {when(audit.last_flush)}</div>
+        <div>Last check: {when(audit.last_flush)}</div>
       </div>
       {audit.last_error && (
         <p role="status" aria-label="Audit forwarding error" className="mt-2 rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-amber wrap-break-word">
@@ -49,7 +49,7 @@ export function SyslogAuditStatusPanel({ audit }: { audit: SyslogAuditStatus }) 
             {forwarders.map((f) => (
               <tr key={f.forwarder} className="border-t">
                 <td className="py-1.5 pr-3 font-mono">{f.forwarder}</td>
-                <td className="py-1.5 pr-3 font-mono">{f.last_id}</td>
+                <td className="py-1.5 pr-3 font-mono"><details><summary className="cursor-pointer">Record position</summary><code>{f.last_id}</code></details></td>
                 <td className={`py-1.5 pr-3 ${f.backlog > 0 && f.last_error ? "text-amber" : ""}`}>{f.backlog}</td>
                 <td className="py-1.5 pr-3">{when(f.last_sent)}</td>
                 <td className={`py-1.5 wrap-break-word ${f.last_error ? "text-amber" : "text-(--text-muted)"}`}>{f.last_error || "—"}</td>

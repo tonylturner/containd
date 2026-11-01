@@ -48,7 +48,7 @@ function InventoryContent() {
       {state === "loading" && <p role="status" className="text-sm text-(--text)">Loading IEC 104 inventory…</p>}
       {state === "unavailable" && (
         <p role="status" className="rounded-xs border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
-          IEC 104 inventory unavailable — the engine could not be reached. Use Refresh to retry; this is not an empty inventory.
+          Live industrial-device observations are unavailable. Use Refresh to retry; this is not an empty inventory.
         </p>
       )}
       {state === "ready" && inventory && <>
@@ -56,21 +56,26 @@ function InventoryContent() {
           Limits: {inventory.limits.pairs} pairs · {inventory.limits.casPerPair} CAs per pair · {inventory.limits.pointsPerCA} points per CA.
           Least recently observed entries are evicted; idle entries expire after {inventory.limits.maxIdleSeconds / 3600} hours.
         </p>
-        <div aria-label="Inventory overflow counters" className="mb-4 flex flex-wrap gap-2">
-          {([
-            ["Busy observations", inventory.overflow.observations], ["Pairs", inventory.overflow.pairs], ["CAs", inventory.overflow.cas],
-            ["Points", inventory.overflow.points],
-            ["Legacy assets", inventory.overflow.assets], ["Legacy peers", inventory.overflow.peers],
-            ["Legacy station addresses", inventory.overflow.stationAddresses],
-          ] as const).map(([label, count]) => (
-            <StatusBadge key={label} variant={count ? "warning" : "neutral"}>{label} overflow: {count}</StatusBadge>
-          ))}
-        </div>
+        <details className="mb-4">
+          <summary className="cursor-pointer text-sm text-(--text)">
+            Collection quality{Object.values(inventory.overflow).some((count) => count > 0) ? " — overflow reported" : ""}
+          </summary>
+          <div aria-label="Inventory overflow counters" className="mt-2 flex flex-wrap gap-2">
+            {([
+              ["Busy observations", inventory.overflow.observations], ["Pairs", inventory.overflow.pairs], ["CAs", inventory.overflow.cas],
+              ["Points", inventory.overflow.points],
+              ["Legacy assets", inventory.overflow.assets], ["Legacy peers", inventory.overflow.peers],
+              ["Legacy station addresses", inventory.overflow.stationAddresses],
+            ] as const).map(([label, count]) => (
+              <StatusBadge key={label} variant={count ? "warning" : "neutral"}>{label} overflow: {count}</StatusBadge>
+            ))}
+          </div>
+        </details>
         <p className="mb-4 text-xs text-(--text)">
-          Overflow totals count truncated observations or capacity evictions since inventory clear or engine restart, not unique missing devices. Busy observations include data dropped on inventory lock contention.
+          Overflow totals count shortened observations or entries removed at capacity, not unique missing devices. Counts reset when observations are cleared or the inspection service restarts. Busy periods can prevent recording some observations.
           Attempted counts decoded client command APDUs, not delivery or physical execution. Inventory never claims delivery. Counts cover retained history, not lifetime traffic.
         </p>
-        {inventory.pairs.length === 0 && <EmptyState title="No IEC 104 stations observed" description="Stations and points appear here when the engine supplies decoded IEC 104 observations." />}
+        {inventory.pairs.length === 0 && <EmptyState title="No IEC 104 stations observed" description="Stations and points appear when IEC 104 traffic is observed." />}
         {inventory.pairs.map((pair) => (
           <Disclosure key={`${pair.controlling}-${pair.controlled}`} summary={<>
               <span className="font-mono">{pair.controlling}</span> (controlling client) → <span className="font-mono">{pair.controlled}</span> (controlled server)

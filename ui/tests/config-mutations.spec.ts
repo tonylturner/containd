@@ -197,7 +197,7 @@ test("IDS import and group creation forms never dirty the configuration or block
     page.waitForResponse(read("/ids/rules")),
     page.evaluate((event) => window.dispatchEvent(new CustomEvent(event)), CONFIG_STAGED),
   ]);
-  await expect(page.getByRole("checkbox", { name: "Enable IDS engine" })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Enable intrusion detection" })).not.toBeChecked();
   await expect(page.getByRole("status", { name: "Unsaved edits" })).toHaveCount(0);
   await expect(page.locator("select")).toHaveValue("suricata");
   await expect(page.locator("textarea")).toHaveValue("unfinished sigma");
@@ -219,7 +219,7 @@ test("IDS blocks Save after an acknowledged import until its rules can be read",
   await expect.poll(() => server.readHeld).toBe(true);
   server.failImportRead = true;
   await importFile(page);
-  await expect(page.getByText("Changes staged, but the updated configuration is unavailable. Reload before saving.")).toBeVisible();
+  await expect(page.getByText("Changes saved, but the latest settings could not be loaded. Reload before saving again.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   // Releasing a pre-import snapshot must not acknowledge the import or enable Save.
   const stale = page.waitForResponse((r) => read("/ids/rules")(r) && r.status() === 200);
@@ -268,12 +268,14 @@ test("Sigma conversion adds a local rule without acknowledging unrelated rule ed
 test("VPN profile import acknowledges its path while retaining unrelated WireGuard text", async ({ page }) => {
   const server = await mockAPI(page);
   await Promise.all([page.waitForResponse(read("/services/vpn")), page.goto("/vpn/")]);
-  const peers = page.locator("textarea").first();
+  await page.getByText("Advanced peer settings", { exact: true }).click();
+  const peers = page.getByRole("textbox", { name: /^Peers \(JSON\)/ });
   await peers.fill('[{"publicKey":"pending","allowedIPs":["192.0.2.0/24"]}] ');
+  await page.getByText("Advanced profile import", { exact: true }).click();
   await page.locator('input[type="file"]').setInputFiles({
     name: "imported.ovpn", mimeType: "text/plain", buffer: Buffer.from("client\nremote vpn.example\n"),
   });
-  await page.getByText("Advanced profile path", { exact: true }).last().click();
+  await expect(page.getByPlaceholder("/data/openvpn/profiles/client.ovpn")).toBeVisible();
   await expect(page.getByPlaceholder("/data/openvpn/profiles/client.ovpn")).toHaveValue("/data/openvpn/profiles/imported.ovpn");
   await expect(peers).toHaveValue('[{"publicKey":"pending","allowedIPs":["192.0.2.0/24"]}] ');
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -282,3 +284,27 @@ test("VPN profile import acknowledges its path while retaining unrelated WireGua
     openvpn: { configPath: "/data/openvpn/profiles/imported.ovpn" },
   });
 });
+
+for (const scenario of [
+  { name: "saved disabled OpenVPN profile path opens by default", enabled: false, configPath: "/data/openvpn/profiles/saved.ovpn", open: true },
+  { name: "enabled path-based OpenVPN client reveals its required path", enabled: true, configPath: "", open: true },
+  { name: "unused empty OpenVPN profile path stays available in its disclosure", enabled: false, configPath: "", open: false },
+]) {
+  test(scenario.name, async ({ page }) => {
+    const server = await mockAPI(page);
+    server.vpn.openvpn = { enabled: scenario.enabled, mode: "client", configPath: scenario.configPath };
+    await Promise.all([page.waitForResponse(read("/services/vpn")), page.goto("/vpn/")]);
+    const path = page.getByPlaceholder("/data/openvpn/profiles/client.ovpn");
+    const disclosure = page.locator("details").filter({ has: path });
+    if (scenario.open) {
+      await expect(disclosure).toHaveAttribute("open", "");
+      await expect(path).toBeVisible();
+    } else {
+      await expect(path).not.toBeVisible();
+      await disclosure.locator("summary").click();
+      await expect(path).toBeVisible();
+    }
+    await expect(path).toHaveValue(scenario.configPath);
+    expect(server.savedVPN).toBeNull();
+  });
+}

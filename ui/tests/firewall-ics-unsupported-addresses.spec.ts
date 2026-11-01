@@ -121,7 +121,7 @@ test("firewall Modbus address input and IEC 104 CA/IOA remain available", async 
 
 test("DPI decoder reference distinguishes DNP3 points from CIP targets", async ({ page }) => {
   await openFirewall(page, [], { dpiEnabled: true });
-  await page.getByText("ICS Protocol Decoders", { exact: true })
+  await page.getByText("Industrial protocols", { exact: true })
     .locator("xpath=../..")
     .getByRole("button", { name: "Configure", exact: true })
     .click();

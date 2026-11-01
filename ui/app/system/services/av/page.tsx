@@ -87,6 +87,12 @@ export default function AVPage() {
   }, [autoRefresh, refresh]);
 
   const icapServers = useMemo(() => cfg.icap?.servers ?? [], [cfg.icap?.servers]);
+  const localScannerCustomized = Boolean(
+    (cfg.clamav?.socketPath && cfg.clamav.socketPath !== "/run/clamav/clamd.sock") ||
+    (cfg.clamav?.customDefsPath && cfg.clamav.customDefsPath !== "/data/clamav/custom") ||
+    cfg.clamav?.updateSchedule ||
+    cfg.clamav?.freshclamEnabled === false
+  );
 
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
@@ -217,7 +223,7 @@ export default function AVPage() {
 
       {status?.available === false && (
         <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-          Engine antivirus unavailable: {status.error || "no response"}
+          Antivirus status unavailable: {status.error || "no response"}
         </div>
       )}
       {status?.available && status.state !== "faulted" && cfg.enabled !== status.enabled && (
@@ -233,38 +239,42 @@ export default function AVPage() {
             <Skeleton className="h-10 w-1/2" />
           </div>
         ) : !status || !status.available ? (
-          <p className="mt-3 text-sm text-(--text-muted)">The engine did not report its runtime status.</p>
+          <p className="mt-3 text-sm text-(--text-muted)">Live scanner status was not reported.</p>
         ) : (
           <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-3">
-            <div>Enabled: <span className="text-(--text)">{status?.enabled ? "yes" : "no"}</span></div>
-            <div>Backend ready: <span className="text-(--text)">{status?.ready ? "yes" : `no${status?.ready_error ? ` (${status.ready_error})` : ""}`}</span></div>
-            <div>Definitions: <span className="text-(--text)">{status?.db_version || "n/a"}</span></div>
-            <div>Detections: <span className="text-(--text)">{status?.detections ?? 0}</span></div>
-            <div>Additional CA: <span className="text-(--text)">{status?.trust_revision && status.trust_revision !== "none" ? status.trust_revision.slice(0, 19) : "none"}</span></div>
-            <div>Mode: <span className="text-(--text)">{status?.mode ?? cfg.mode ?? "clamav"}</span></div>
-            <div>Fail policy: <span className="text-(--text)">{status?.failPolicy ?? cfg.failPolicy ?? "open"}</span></div>
+            <div>Enabled: <span className="text-(--text)">{typeof status?.enabled === "boolean" ? (status.enabled ? "yes" : "no") : "Unknown"}</span></div>
+            <div>Scanner ready: <span className="text-(--text)">{typeof status?.ready !== "boolean" ? "Unknown" : status.ready ? "yes" : `no${status?.ready_error ? ` (${status.ready_error})` : ""}`}</span></div>
+            <div>Detections: <span className="text-(--text)">{status?.detections ?? "Unknown"}</span></div>
+            <div>Mode: <span className="text-(--text)">{status?.mode ?? "Unknown"}</span></div>
+            <div>Fail policy: <span className="text-(--text)">{status?.failPolicy ?? "Unknown"}</span></div>
             <div>
-              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status?.rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
             </div>
             <div>
-              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status?.errors_rate_per_min.toFixed(1) : "0.0"} / min</span>
+              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
             </div>
-            <div>ICAP servers: <span className="text-(--text)">{status?.icap_servers ?? 0}</span></div>
-            <div>Cache: <span className="text-(--text)">{status?.cache_size ?? 0}</span></div>
-            <div>ClamAV running: <span className="text-(--text)">{status?.clamav_running ? `yes (pid ${status?.clamav_pid ?? ""})` : "no"}</span></div>
-            <div>ClamAV socket: <span className="text-(--text)">{status?.clamav_socket || "n/a"}</span></div>
-            <div>ClamAV last start: <span className="text-(--text)">{status?.clamav_last_start || "never"}</span></div>
-            <div>Freshclam: <span className="text-(--text)">{status?.freshclam_enabled ? (status?.freshclam_running ? "running" : "enabled") : "disabled"}</span></div>
-            <div>Freshclam last: <span className="text-(--text)">{status?.freshclam_last || "never"}</span></div>
-            <div>Freshclam interval: <span className="text-(--text)">{status?.freshclam_interval || "6h"}</span></div>
-            <div>Custom defs path (engine): <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
+            <details className="md:col-span-3 rounded-xs border p-3">
+              <summary className="cursor-pointer">Service details</summary>
+              <div>Additional CA: <span className="text-(--text)">{status?.trust_revision || "Unknown"}</span></div>
+              <div>Definitions: <span className="text-(--text)">{status?.db_version || "n/a"}</span></div>
+              <div>ICAP servers: <span className="text-(--text)">{status?.icap_servers ?? "Unknown"}</span></div>
+              <div>Cache: <span className="text-(--text)">{status?.cache_size ?? "Unknown"}</span></div>
+              <div>ClamAV running: <span className="text-(--text)">{typeof status?.clamav_running !== "boolean" ? "Unknown" : status.clamav_running ? `yes (pid ${status?.clamav_pid ?? ""})` : "no"}</span></div>
+              <div>ClamAV socket: <span className="text-(--text)">{status?.clamav_socket || "n/a"}</span></div>
+              <div>ClamAV last start: <span className="text-(--text)">{status?.clamav_last_start || "Unknown"}</span></div>
+              <div>Definition updater software: Freshclam</div>
+              <div>Definition updater: <span className="text-(--text)">{typeof status?.freshclam_enabled !== "boolean" ? "Unknown" : status.freshclam_enabled ? (status?.freshclam_running ? "running" : "enabled") : "disabled"}</span></div>
+              <div>Definition updater last: <span className="text-(--text)">{status?.freshclam_last || "Unknown"}</span></div>
+              <div>Definition updater interval: <span className="text-(--text)">{status?.freshclam_interval || "Unknown"}</span></div>
+              <div>Custom definition folder: <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
+            </details>
             {status.sparkline?.length ? (
               <div className="md:col-span-3">
                 <Sparkline
                   values={status.sparkline}
                   color="var(--purple)"
                   background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))"
-                  title="Engine AV scans per minute"
+                  title="Scans per minute"
                 />
               </div>
             ) : null}
@@ -312,8 +322,8 @@ export default function AVPage() {
               }}
               className="mt-1 w-full input-industrial"
             >
-              <option value="clamav">ClamAV (native)</option>
-              <option value="icap">ICAP (remote server)</option>
+              <option value="clamav">Local scanner (ClamAV)</option>
+              <option value="icap">Remote scanner (ICAP)</option>
             </select>
           </div>
           <div>
@@ -324,8 +334,8 @@ export default function AVPage() {
               onChange={(e) => setCfg((c) => ({ ...c, failPolicy: e.target.value as AVConfig["failPolicy"] }))}
               className="mt-1 w-full input-industrial"
             >
-              <option value="open">Fail open</option>
-              <option value="closed">Fail closed</option>
+              <option value="open">Allow unscanned traffic when the scanner is unavailable</option>
+              <option value="closed">Block selected traffic when the scanner is unavailable</option>
             </select>
           </div>
           <div>
@@ -349,7 +359,8 @@ export default function AVPage() {
             />
           </div>
         </div>
-        <div className="mt-6">
+        <details className="mt-6 rounded-xs border p-3" open={cfg.mode === "icap" || icapServers.length > 0}>
+          <summary className="cursor-pointer text-sm">Advanced remote scanner settings</summary>
           <h3 className="text-sm font-semibold text-(--text)">ICAP servers</h3>
           <p className="text-xs text-(--text-muted)">Used when mode is ICAP: one RFC 3507 server (REQMOD for uploads, RESPMOD for downloads).</p>
           <div className="mt-3 space-y-2">
@@ -398,11 +409,12 @@ export default function AVPage() {
               </button>
             )}
           </div>
-        </div>
+        </details>
 
-        <div className="mt-6">
+        <details className="mt-6 rounded-xs border p-3" open={localScannerCustomized}>
+          <summary className="cursor-pointer text-sm">Advanced local scanner settings</summary>
           <h3 className="text-sm font-semibold text-(--text)">ClamAV</h3>
-          <p className="text-xs text-(--text-muted)">Used when mode is ClamAV (native, the default).</p>
+          <p className="text-xs text-(--text-muted)">Used with the local scanner (ClamAV, the default).</p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div>
               <label className="text-xs uppercase tracking-wide text-(--text-muted)">Socket path</label>
@@ -436,7 +448,7 @@ export default function AVPage() {
                 onChange={(e) =>
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), updateSchedule: e.target.value } }))
                 }
-                placeholder="e.g. 4h (Go duration)"
+                placeholder="Update interval, for example 4h"
                 className="mt-1 w-full input-industrial"
               />
             </div>
@@ -453,7 +465,7 @@ export default function AVPage() {
               Enable definition auto-update
             </label>
           </div>
-        </div>
+        </details>
 
         <CustomDefinitions
           defs={defs}

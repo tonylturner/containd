@@ -203,7 +203,7 @@ test("428 keeps the draft and requires Reload rather than inventing a revision",
   const raw = '{"system":{"hostname":"mine"}}';
   await editor.fill(raw);
   await page.getByRole("button", { name: "Save staged config", exact: true }).click();
-  await expect(page.getByText("Configuration revision unavailable. Reload before saving.", { exact: true })).toBeVisible();
+  await expect(page.getByText("The current configuration version could not be checked. Reload before saving.", { exact: true })).toBeVisible();
   await expect(editor).toHaveValue(raw);
   await expect(page.getByRole("button", { name: "Keep my edits", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Reload", exact: true }).click();
@@ -319,7 +319,7 @@ test("an uncertain learner request still requires review after an unavailable de
   await page.getByLabel("Select modbus-1", { exact: true }).check();
   await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
-  await expect(page.getByText("Destination candidate: unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("Pending configuration unavailable. Reload before saving.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeDisabled();
   offline = false;
   await page.getByRole("button", { name: "Refresh suggestions", exact: true }).click();

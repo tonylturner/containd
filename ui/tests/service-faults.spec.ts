@@ -91,11 +91,11 @@ async function screenshot(page: Page, name: string) {
 test("config faults explain quarantine and repair, regardless of message wording", async ({ page }) => {
   await mockAPI(page, statusWith([configFault]));
   await open(page);
-  await expect(banner(page)).toContainText("DNS — Config fault");
-  await expect(banner(page)).toContainText(configFault.message);
-  await expect(banner(page)).toContainText("Edit or clear that section");
+  await expect(banner(page)).toContainText("DNS — Settings need attention");
+  await expect(banner(page).getByText(configFault.message, { exact: true })).toBeVisible();
+  await expect(banner(page)).toContainText("Edit or clear them");
   await expect(banner(page)).toContainText("Unrelated edits can still be saved");
-  await expect(banner(page)).toContainText("No automatic input allow rule");
+  await expect(banner(page)).toContainText("Remote clients cannot connect unless access is explicitly allowed");
   await expect(banner(page).getByRole("link", { name: "Configure DNS" })).toHaveAttribute("href", "/system/services/dns/");
   await screenshot(page, "config-fault");
 });
@@ -103,10 +103,10 @@ test("config faults explain quarantine and repair, regardless of message wording
 test("runtime faults explain retry, not stored quarantine", async ({ page }) => {
   await mockAPI(page, statusWith([runtimeFault]));
   await open(page);
-  await expect(banner(page)).toContainText("NTP — Runtime fault");
-  await expect(banner(page)).toContainText(runtimeFault.message);
-  await expect(banner(page)).toContainText("Retries on the next apply");
-  await expect(banner(page)).not.toContainText("Stored section quarantined");
+  await expect(banner(page)).toContainText("NTP — Service could not run");
+  await expect(banner(page).getByText(runtimeFault.message, { exact: true })).toBeVisible();
+  await expect(banner(page)).toContainText("Applying configuration again retries this service");
+  await expect(banner(page)).not.toContainText("These saved settings were rejected");
   await screenshot(page, "runtime-fault");
 });
 
@@ -127,7 +127,7 @@ test("overview names every independent service and renders diagnostics as text",
   await open(page);
   await expect(banner(page).getByRole("listitem")).toHaveCount(8);
   for (const label of ["Antivirus / ICAP", "DHCP", "DNS", "NTP", "OpenVPN", "Proxies", "Syslog", "WireGuard"]) {
-    await expect(banner(page).getByRole("heading", { name: `${label} — Config fault`, exact: true })).toBeVisible();
+    await expect(banner(page).getByRole("heading", { name: `${label} — Settings need attention`, exact: true })).toBeVisible();
   }
   await expect(banner(page).locator("b")).toHaveCount(0);
   await expect(banner(page).getByText("<b>invalid section</b>", { exact: true })).toHaveCount(8);
@@ -141,7 +141,7 @@ for (const [service, path, label] of [
   test(`${label} settings show the fault without disabling repair`, async ({ page }) => {
     await mockAPI(page, statusWith([{ ...configFault, service }]));
     await open(page, path);
-    await expect(banner(page)).toContainText(`${label} — Config fault`);
+    await expect(banner(page)).toContainText(`${label} — Settings need attention`);
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
     await expect(banner(page).getByRole("link")).toHaveCount(0);
   });
@@ -162,8 +162,8 @@ for (const policy of ["closed", "open"]) {
     const fault: ServiceFault = { service: "av", kind: "config", message: "scanner configuration rejected" };
     await mockAPI(page, statusWith([fault], policy), policy);
     await open(page, "/system/services/av/");
-    await expect(banner(page)).toContainText("Antivirus / ICAP — Config fault");
-    await expect(banner(page)).toContainText("Scanner backend off; scan selection and fail policy still apply");
+    await expect(banner(page)).toContainText("Antivirus / ICAP — Settings need attention");
+    await expect(banner(page)).toContainText("Scanner unavailable; scan selection and fail policy still apply");
     await expect(banner(page)).toContainText(policy === "closed" ? "Closed policy still blocks" : "Open policy permits selected traffic unscanned");
     await expect(page.getByText(/Settings show AV/)).toHaveCount(0);
     await expect(page.getByLabel("Enable AV/ICAP scanning")).toBeChecked();
@@ -174,7 +174,7 @@ for (const policy of ["closed", "open"]) {
     await page.locator("select").filter({ has: page.locator('option[value="closed"]') }).selectOption(policy === "closed" ? "open" : "closed");
     await expect(banner(page)).toContainText(policy === "closed" ? "Closed policy still blocks" : "Open policy permits");
     await open(page);
-    await expect(banner(page)).toContainText("Scanner backend off");
+    await expect(banner(page)).toContainText("Scanner unavailable");
     await expect(page.getByText("Mode: clamav, Enabled: no")).toBeVisible();
   });
 }
@@ -185,7 +185,7 @@ test("AV faults remain visible when the engine is unreachable without guessing i
   await expect(banner(page)).toContainText("invalid scanner");
   await expect(banner(page)).toContainText("Closed policy still blocks");
   await expect(banner(page)).toContainText("open policy permits it");
-  await expect(page.getByText("Engine antivirus unavailable: engine unreachable")).toBeVisible();
+  await expect(page.getByText("Antivirus status unavailable: engine unreachable")).toBeVisible();
 });
 
 test("VPN keeps WireGuard and OpenVPN fault identities independent", async ({ page }) => {
@@ -194,9 +194,9 @@ test("VPN keeps WireGuard and OpenVPN fault identities independent", async ({ pa
     { service: "openvpn", kind: "runtime", message: "runtime apply failed" },
   ]));
   await open(page, "/vpn/");
-  await expect(banner(page)).toContainText("WireGuard — Config fault");
-  await expect(banner(page)).toContainText("WireGuard tunnel quarantined: its CIDR tokens match nothing");
-  await expect(banner(page)).toContainText("OpenVPN — Runtime fault");
+  await expect(banner(page)).toContainText("WireGuard — Settings need attention");
+  await expect(banner(page)).toContainText("WireGuard tunnel settings were rejected: rules targeting this tunnel do not match traffic");
+  await expect(banner(page)).toContainText("OpenVPN — Service could not run");
   await expect(page.getByRole("region", { name: "VPN runtime status" })).toContainText("WireGuard: faulted");
   await expect(page.getByRole("region", { name: "VPN runtime status" })).toContainText("OpenVPN: faulted");
   await screenshot(page, "vpn-faults");

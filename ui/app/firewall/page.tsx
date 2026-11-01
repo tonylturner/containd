@@ -44,6 +44,7 @@ import { AppliedRulesetStatus, InstalledRulesetUnavailable } from "./firewall-ru
 import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
 import { ICSCoverageNotice } from "../ics/ics-coverage";
 import { FirewallRuleTable } from "./firewall-rule-table";
+import { effectiveDefaultAction, type DefaultAction } from "./firewall-default-row";
 import { tagsInUse } from "./firewall-rule-policy";
 import type { CountersState } from "./firewall-rule-counters";
 import { useICSCoverage } from "../ics/use-ics-coverage";
@@ -64,10 +65,11 @@ function insertCreatedRule(rows: FirewallRule[], saved: FirewallRule & { index: 
 
 export default function FirewallPage() {
   const configView = useConfigView({ rules: [] as FirewallRule[], zones: [] as Zone[],
+    defaultAction: "unknown" as DefaultAction,
     nat: { enabled: false } as NATConfig, routing: null as RoutingConfig | null,
     dpiConfig: { captureInterfaces: [], dpiMock: false } as DataPlaneConfig });
   const { readConfig, write, revisionNotice } = configView;
-  const { rules, zones, nat, routing, dpiConfig } = configView.data;
+  const { rules, defaultAction, zones, nat, routing, dpiConfig } = configView.data;
   const viewRevision = configView.state.baseRevision ?? "";
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const [error, setError] = useState<string | null>(null);
@@ -134,10 +136,12 @@ export default function FirewallPage() {
   ];
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot, c] = await Promise.all([api.listFirewallRules(), api.listZones(), api.getNAT(), api.getRouting(), fetchDataPlane(), api.getRuleCounters()]);
+    const [rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot, c, candidate] = await Promise.all([api.listFirewallRules(), api.listZones(), api.getNAT(), api.getRouting(), fetchDataPlane(), api.getRuleCounters(), api.getCandidateConfig()]);
     if (!matchingRevisions(rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot)) { checkLoaded(null); return; }
     if (!checkLoaded(rSnapshot && zSnapshot && nSnapshot && rtSnapshot && dpSnapshot)) return;
-    readConfig({ data: { rules: rSnapshot!.data, zones: zSnapshot!.data, nat: nSnapshot!.data,
+    readConfig({ data: { rules: rSnapshot!.data,
+      defaultAction: matchingRevisions(rSnapshot, candidate) ? effectiveDefaultAction(candidate!.data) : "unknown",
+      zones: zSnapshot!.data, nat: nSnapshot!.data,
       routing: rtSnapshot!.data, dpiConfig: dpSnapshot!.data }, revision: rSnapshot!.revision }, keepEdits);
     setCounters(c);
     if (!keepEdits) {
@@ -382,7 +386,7 @@ export default function FirewallPage() {
               egress=wan
             </StatusBadge>
             <StatusBadge variant={outboundStatus.natHasLan ? "success" : "warning"} dot>
-              src includes lan/mgmt
+              Source zones include lan/mgmt
             </StatusBadge>
             <StatusBadge variant={outboundStatus.hasAllowLanWan ? "success" : "warning"} dot>
               {"allow lan\u2192wan present"}
@@ -415,9 +419,9 @@ export default function FirewallPage() {
       <Card padding="lg" className="mt-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-(--text)">nftables ruleset preview</h2>
+            <h2 className="text-sm font-semibold text-(--text)">Generated firewall configuration (nftables)</h2>
             <p className="mt-1 text-xs text-(--text-muted)">
-              Compile the candidate using the engine&apos;s current queue ownership, without applying it.
+              Preview the low-level configuration for your saved changes without activating it.
             </p>
           </div>
           {isAdmin() && (
@@ -437,20 +441,25 @@ export default function FirewallPage() {
         )}
         {rulesetState === "error" && (
           <div className="mt-3 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            Ruleset preview unavailable: {rulesetError}. A live engine must be reachable and able to compile the candidate. Try again after checking engine health and candidate settings.
+            Preview unavailable. Check appliance health and saved settings.
+            <details className="mt-2 text-xs"><summary className="cursor-pointer">Technical details</summary>{rulesetError}</details>
           </div>
         )}
         {rulesetPreview?.runtime && (
-          <p className="mt-3 text-xs text-(--text-muted)">
+          <details className="mt-3 text-xs text-(--text-muted)">
+            <summary className="cursor-pointer">Technical details</summary>
             {rulesetPreview.runtime.reason}.
             {rulesetPreview.ruleset && " Queue ownership is sampled at preview time; changes before commit can change IEC 104 steering."}
-          </p>
+          </details>
         )}
         <RuleWarningList scope="candidate" warnings={rulesetPreview?.warnings} />
         {rulesetPreview?.ruleset && (
-          <pre className="mt-4 max-h-[360px] overflow-auto rounded-xs border bg-(--surface) p-4 text-xs text-(--text)">
+          <details className="mt-4 text-xs text-(--text)">
+            <summary className="cursor-pointer">Generated ruleset</summary>
+          <pre className="mt-2 max-h-[360px] overflow-auto rounded-xs border bg-(--surface) p-4">
             {rulesetPreview.ruleset}
           </pre>
+          </details>
         )}
       </Card>
 
@@ -476,6 +485,7 @@ export default function FirewallPage() {
       </div>
       <FirewallRuleTable
         rules={rules}
+        defaultAction={canSave ? defaultAction : "unknown"}
         zones={zones}
         shadowCounters={shadow.counters}
         dpiMode={dpiConfig.dpiMode}

@@ -6,9 +6,9 @@ import { useHealth } from "../hooks/useHealth";
 import type { ManagementRecoveryHealth } from "../lib/api";
 
 const TITLES: Record<Exclude<ManagementRecoveryHealth["state"], "inactive">, string> = {
-  active: "Boot recovery active: new transit dropped",
-  pending: "Boot recovery pending: recovery ruleset not applied",
-  failed: "Boot recovery failed: recovery ruleset not applied",
+  active: "Startup recovery active: new through-traffic is blocked",
+  pending: "Startup recovery pending: recovery protection is not active",
+  failed: "Startup recovery failed: recovery protection is not active",
   unknown: "Boot recovery state unknown",
 };
 
@@ -21,11 +21,11 @@ function ManagementRecoveryBanner({ recovery }: { recovery: ManagementRecoveryHe
   return (
     <aside role="status" aria-label="Boot recovery" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
       <p className="font-semibold">{TITLES[recovery.state]}</p>
-      {recovery.reason && <p className="mt-1">{recovery.reason}</p>}
+      {recovery.reason && <p className="mt-1 whitespace-pre-wrap break-words">{recovery.reason}</p>}
       <p className="mt-1 text-xs">
         {recovery.state === "unknown"
-          ? "Health could not read whether a boot fault holds. Boot faults are shown on "
-          : "The stored running configuration was refused at boot and is not applied. Commit a safe configuration, roll back to a safe snapshot, or factory reset to resume. The refusal is shown on "}
+          ? "Startup recovery status could not be checked. Startup faults are shown on "
+          : "The saved active configuration was rejected at startup and is not applied. Commit a safe configuration, roll back to a safe previous version, or factory reset to resume. Management is serving; verify listener and interface access. The fault is shown on "}
         <Link href="/interfaces/" className="font-semibold underline">Interfaces</Link>.
       </p>
     </aside>

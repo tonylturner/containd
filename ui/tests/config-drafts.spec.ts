@@ -167,7 +167,7 @@ for (const item of [
   { name: "NTP", route: "/system/services/ntp/", path: "/services/ntp", label: "Enable NTP client" },
   { name: "AV", route: "/system/services/av/", path: "/services/av", label: "Enable AV/ICAP scanning" },
   { name: "VPN", route: "/vpn/", path: "/services/vpn", label: "Enable WireGuard" },
-  { name: "IDS", route: "/ids/", path: "/ids/rules", label: "Enable IDS engine" },
+  { name: "IDS", route: "/ids/", path: "/ids/rules", label: "Enable intrusion detection" },
 ]) {
   test(`${item.name} keeps a reversion to the old server value during an outstanding save`, async ({ page }) => {
     const server = await mockAPI(page);
@@ -231,9 +231,9 @@ const textPages: TextPage[] = [
   { name: "DNS", route: "/system/services/dns/", path: "/services/dns", field: (p) => p.locator("textarea"), first: "192.0.2.53\n192.0.2.54\n", later: "192.0.2.53\n192.0.2.", },
   { name: "NTP", route: "/system/services/ntp/", path: "/services/ntp", field: (p) => p.locator("textarea"), first: "pool.ntp.org\nntp.lab\n", later: "pool.ntp.org\nntp.", },
   { name: "Syslog", route: "/system/services/syslog/", path: "/services/syslog", field: (p) => p.locator('input[type="number"]').first(), first: "700", later: "701" },
-  { name: "AV", route: "/system/services/av/", path: "/services/av", field: (p) => p.getByPlaceholder("/run/clamav/clamd.sock"), first: "/data/clamd.sock", later: "/data/clamd-new.sock" },
+  { name: "AV", route: "/system/services/av/", path: "/services/av", field: (p) => p.getByPlaceholder("/run/clamav/clamd.sock"), prepare: async (p) => { await p.getByText("Advanced local scanner settings", { exact: true }).click(); }, first: "/data/clamd.sock", later: "/data/clamd-new.sock" },
   { name: "Proxies", route: "/proxies/", path: "/services/proxy/forward", field: (p) => p.getByPlaceholder("mgmt, lan"), prepare: async (p) => { await p.getByText("Advanced options", { exact: true }).first().click(); }, first: "lan, ", later: "lan, wan, " },
-  { name: "VPN", route: "/vpn/", path: "/services/vpn", field: (p) => p.locator("textarea").first(), first: "[] ", later: "[ " },
+  { name: "VPN", route: "/vpn/", path: "/services/vpn", field: (p) => p.getByRole("textbox", { name: /^Peers \(JSON\)/ }), prepare: async (p) => { await p.getByText("Advanced peer settings", { exact: true }).click(); }, first: "[] ", later: "[ " },
 ];
 
 for (const item of textPages) {

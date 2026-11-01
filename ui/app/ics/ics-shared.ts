@@ -150,7 +150,7 @@ export function genericSelectorDraftFrom(ics?: ICSPredicate): GenericSelectorDra
   };
 }
 
-export const UNSUPPORTED_UNIT_ID = "unitId is not supported for DNP3 or CIP: these decoders emit no unit ID. Remove this filter before saving.";
+export const UNSUPPORTED_UNIT_ID = "Unit ID filtering is unavailable for DNP3 and CIP. Remove this filter before saving.";
 
 /** PATCH is the validated effective predicate plus explicit removals. */
 export function predicatePatch(effective: ICSPredicate, existing?: ICSPredicate): ICSPredicatePatch {

@@ -58,13 +58,13 @@ test("interface failure differs from a reachable engine with no interfaces", asy
     ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
     : { json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/interfaces/");
-  await expect(page.getByRole("status").filter({ hasText: "Interface runtime state unavailable" })).toBeVisible();
-  await expect(page.getByText("No OS interfaces reported.", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Live device information is unavailable" })).toBeVisible();
+  await expect(page.getByText("No network devices reported.", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("cell", { name: "configured-lan", exact: true })).toBeVisible();
   unavailable = false;
-  await page.getByRole("status").filter({ hasText: "Interface runtime state unavailable" }).getByRole("button", { name: "Retry", exact: true }).click();
-  await expect(page.getByText("No OS interfaces reported.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Interface runtime state unavailable")).toHaveCount(0);
+  await page.getByRole("status").filter({ hasText: "Live device information is unavailable" }).getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByText("No network devices reported.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Live device information is unavailable")).toHaveCount(0);
 });
 
 test("simulation failure is unknown, not stopped, and Retry recovers", async ({ page }) => {
@@ -89,7 +89,7 @@ test("monitoring overview does not fabricate zero flow counters", async ({ page 
   await page.goto("/monitoring/");
   await expect(page.getByRole("status").filter({ hasText: "Flows unavailable" })).toBeVisible();
   await expect(page.getByText("No flow apps yet.", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Unknown", { exact: true })).toHaveCount(2);
+  await expect(page.getByRole("region", { name: "Endpoints", exact: true }).getByText("Unknown", { exact: true })).toHaveCount(2);
 });
 
 test("PCAP discovery distinguishes unavailable, empty and populated state without deleting saved forwarding", async ({ page }) => {
@@ -102,15 +102,15 @@ test("PCAP discovery distinguishes unavailable, empty and populated state withou
     ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
     : { json: phase === "empty" ? [] : [{ name: "eth9", index: 9, up: true, addrs: ["192.0.2.2/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/dataplane/");
-  const unavailable = page.getByRole("status").filter({ hasText: "Interface runtime state unavailable" });
+  const unavailable = page.getByRole("status").filter({ hasText: "Live interface information is unavailable" });
   const savedHost = page.locator('input[placeholder="sensor.example.local"][value="198.51.100.7"]');
   await expect(unavailable).toBeVisible();
-  await expect(page.getByText("No OS interfaces reported.", { exact: true })).toHaveCount(0);
-  await expect(page.getByText(/No firewall interfaces are bound to OS devices/)).toHaveCount(0);
+  await expect(page.getByText("No network devices reported.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/No firewall interfaces are connected to network devices/)).toHaveCount(0);
   await expect(savedHost).toHaveValue("198.51.100.7");
   phase = "empty";
   await unavailable.getByRole("button", { name: "Retry", exact: true }).click();
-  await expect(page.getByText("No OS interfaces reported.", { exact: true })).toBeVisible();
+  await expect(page.getByText("No network devices reported.", { exact: true })).toBeVisible();
   await expect(unavailable).toHaveCount(0);
   await expect(savedHost).toHaveValue("198.51.100.7");
   phase = "populated";
@@ -142,7 +142,7 @@ test("Auto WAN setup retries unavailable discovery without staging fabricated ro
   await page.goto("/routing/");
   const autoWAN = page.getByRole("button", { name: "Auto WAN default", exact: true });
   await autoWAN.click();
-  const unavailable = page.getByRole("status").filter({ hasText: "Interface runtime state unavailable" });
+  const unavailable = page.getByRole("status").filter({ hasText: "Live interface information is unavailable" });
   await expect(unavailable).toBeVisible();
   await expect(page.getByText(/Could not determine WAN IPv4 address/)).toHaveCount(0);
   expect(staged).toHaveLength(0);
@@ -323,4 +323,19 @@ test("VPN runtime distinguishes unavailable interface state from an absent WireG
   await expect(unavailable).toBeVisible();
   await expect(runtime.getByText("10.8.0.1/24", { exact: true })).toHaveCount(0);
   await expect(page.getByText("not present", { exact: true })).toHaveCount(0);
+});
+
+test("temporary block guidance names the real enforcement setting and full matching scope", async ({ page }) => {
+  await page.route("**/api/v1/dataplane", (route) => route.fulfill({ json: { enforcement: false }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+  await page.goto("/diagnostics/");
+  const blocks = page.getByRole("region", { name: "Temporary Blocks", exact: true });
+  await expect(blocks).toContainText("Firewall enforcement is off");
+  await expect(blocks).not.toContainText("Enable enforcement on the Dataplane page");
+  await blocks.getByText("Deployment details", { exact: true }).click();
+  await expect(blocks).toContainText("dataplane.enforcement");
+  await expect(blocks).toContainText("CONTAIND_ENFORCE_ENABLED=1");
+  await expect(blocks).toContainText("any source port");
+  await expect(blocks).not.toContainText("5-tuple");
+  await expect(blocks.getByRole("button", { name: "Block host", exact: true })).toBeDisabled();
+  await expect(blocks.getByRole("button", { name: "Block flow", exact: true })).toBeDisabled();
 });

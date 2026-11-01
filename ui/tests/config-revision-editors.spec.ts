@@ -234,3 +234,23 @@ test("a clean collection continues refreshing after Keep and clears the warning 
   await expect.poll(() => state.counter).toBe(4);
   expect(state.writes.map(w => w.revision)).toEqual(["0123456789abcdef.1", "0123456789abcdef.2", "0123456789abcdef.3"]);
 });
+
+test("proxy deletion stays local until Save and commit, as the dialog explains", async ({ page }) => {
+  const state = await setup(page);
+  await page.goto("/proxies/");
+  await page.getByPlaceholder("site name").fill("operator-console");
+  await page.getByPlaceholder("backends host:port, host:port").fill("192.0.2.10:80");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  const row = page.getByText("operator-console", { exact: true }).locator("../..");
+  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Save to stage the removal, then commit to apply");
+  await expect(dialog).not.toContainText("takes effect when you save");
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(row).toHaveCount(0);
+  expect(state.writes).toEqual([]);
+  await page.getByRole("button", { name: "Save", exact: true }).last().click();
+  await expect.poll(() => state.writes.length).toBe(1);
+  expect(state.writes[0].path).toBe("/services/proxy/reverse");
+  expect(state.writes[0].body.sites).toEqual([]);
+});

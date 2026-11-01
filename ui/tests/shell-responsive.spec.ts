@@ -99,3 +99,58 @@ test("1280px shell keeps the desktop sidebar", async ({ page }) => {
   expect((await page.getByRole("complementary", { name: "Sidebar" }).boundingBox())?.width).toBe(240);
   await page.screenshot({ path: test.info().outputPath("shell-1280.png"), fullPage: true });
 });
+
+for (const width of [1280, 390]) {
+  test(`expanded navigation has settled readable contrast at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await openZones(page);
+    if (width === 390) await page.getByRole("button", { name: "Navigation", exact: true }).click();
+    const nav = page.getByRole("navigation", { name: "Main navigation" });
+    const policy = nav.getByRole("button", { name: "Policy & Rules", exact: true });
+    if (await policy.getAttribute("aria-expanded") === "false") await policy.click();
+    const network = nav.getByRole("button", { name: "Network", exact: true });
+    if (await network.getAttribute("aria-expanded") === "false") await network.click();
+    await expect(nav.getByRole("link", { name: "Firewall Rules", exact: true })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Zones", exact: true })).toHaveAttribute("aria-current", "page");
+    await nav.evaluate(async (element) => {
+      await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished));
+    });
+    const samples = await nav.locator("a, button").evaluateAll((elements) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      const ctx = canvas.getContext("2d")!;
+      const rgba = (color: string) => {
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, 1, 1);
+        return [...ctx.getImageData(0, 0, 1, 1).data].map((n) => n / 255);
+      };
+      const blend = (front: number[], back: number[]) =>
+        back.map((n, i) => front[i] * front[3] + n * (1 - front[3]));
+      const luminance = (rgb: number[]) => rgb.slice(0, 3).reduce((sum, n, i) =>
+        sum + (n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4) * [0.2126, 0.7152, 0.0722][i], 0);
+      return elements.map((element) => {
+        const ancestors: Element[] = [];
+        for (let el: Element | null = element; el; el = el.parentElement) ancestors.unshift(el);
+        let background = [1, 1, 1];
+        let opacity = 1;
+        for (const el of ancestors) {
+          const style = getComputedStyle(el);
+          background = blend(rgba(style.backgroundColor), background);
+          opacity *= Number(style.opacity);
+        }
+        const color = rgba(getComputedStyle(element).color);
+        color[3] *= opacity;
+        const foreground = blend(color, background);
+        const a = luminance(foreground), b = luminance(background);
+        return { text: element.textContent?.trim(), opacity, contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
+      });
+    });
+    await test.info().attach("navigation-contrast", { body: JSON.stringify(samples, null, 2), contentType: "application/json" });
+    await page.screenshot({ path: test.info().outputPath(`navigation-settled-${width}.png`), fullPage: true });
+    for (const sample of samples) {
+      expect(sample.opacity, sample.text).toBe(1);
+      expect(sample.contrast, sample.text).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+}

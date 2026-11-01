@@ -8,6 +8,8 @@ async function openFirewall(page: Page, hash = "") {
     { id: "allow-web", action: "ALLOW" },
   ];
   const moves: { id: string; position: Position }[] = [];
+  const revisions: (string | undefined)[] = [];
+  let revisionNumber = 1;
   const creates: unknown[] = [];
   const patches: unknown[] = [];
   let rejectMove = false;
@@ -21,6 +23,7 @@ async function openFirewall(page: Page, hash = "") {
     let json: unknown = {};
     if (path.endsWith("/auth/me") || path.endsWith("/auth/session")) json = { id: "admin", role: "admin" };
     if (path.endsWith("/config/diff")) json = { changed: false, changedSections: [] };
+    if (path.endsWith("/config/candidate")) json = { firewall: { rules, defaultAction: "DENY" } };
     if (path === "/api/v1/zones") json = [{ name: "wan" }];
     if (path === "/api/v1/routing") json = { routes: [], rules: [], gateways: [] };
     if (path === "/api/v1/dataplane") json = { captureInterfaces: [], dpiMock: false };
@@ -39,13 +42,15 @@ async function openFirewall(page: Page, hash = "") {
       const { position } = request.postDataJSON() as { position: Position };
       const id = decodeURIComponent(path.split("/").at(-2)!);
       moves.push({ id, position });
-      if (rejectMove) return route.fulfill({ status: 400, json: { error: "Unknown anchor" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+      revisions.push(request.headers()["x-containd-if-revision"]);
+      if (rejectMove) return route.fulfill({ status: 400, json: { error: "Unknown anchor" }, headers: { "X-Containd-Revision": `0123456789abcdef.${revisionNumber}` } });
       const moved = rules.find((r) => r.id === id)!;
       rules = rules.filter((r) => r.id !== id);
       const index = position === "top" ? 0 : position === "bottom" ? rules.length
         : "before" in position ? rules.findIndex((r) => r.id === position.before)
           : rules.findIndex((r) => r.id === position.after) + 1;
       rules.splice(index, 0, moved);
+      revisionNumber++;
       json = { index, rules };
     }
     if (request.method() === "PATCH") {
@@ -58,12 +63,12 @@ async function openFirewall(page: Page, hash = "") {
       ruleId: "allow-ssh", action: "ALLOW", shadowedBy: "deny-all",
       message: "rule at position 2 is shadowed by earlier DENY rule deny-all at position 1",
     }] };
-    await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    await route.fulfill({ json, headers: { "X-Containd-Revision": `0123456789abcdef.${revisionNumber}` } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
   await page.goto(`/firewall/${hash}`);
   await loaded;
-  return { moves, creates, patches, reject: () => { rejectMove = true; }, remove: (id: string) => { rules = rules.filter((r) => r.id !== id); } };
+  return { moves, revisions, creates, patches, reject: () => { rejectMove = true; }, remove: (id: string) => { rules = rules.filter((r) => r.id !== id); } };
 }
 
 function ruleRow(page: Page, id: string) {
@@ -71,9 +76,9 @@ function ruleRow(page: Page, id: string) {
 }
 
 async function expectOrder(page: Page, ids: string[]) {
-  const rows = page.getByRole("region", { name: "Firewall rules" }).locator("tbody tr");
+  const rows = page.getByRole("region", { name: "Firewall rules" }).locator("tbody tr[id]");
   await expect(rows.locator("td:nth-child(2)")).toHaveText(ids);
-  await expect(rows.locator("td:first-child")).toHaveText(ids.map((_, i) => String(i + 1)));
+  await expect(rows.locator("td:first-child span")).toHaveText(ids.map((_, i) => String(i + 1)));
 }
 
 test("move up and down persist through the move endpoint and refresh", async ({ page }) => {
@@ -90,8 +95,69 @@ test("move up and down persist through the move endpoint and refresh", async ({ 
     { id: "allow-ssh", position: { before: "deny-all" } },
     { id: "allow-ssh", position: { after: "deny-all" } },
   ]);
+  expect(server.revisions).toEqual(["0123456789abcdef.1", "0123456789abcdef.2"]);
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expectOrder(page, ["deny-all", "allow-ssh", "allow-web"]);
+});
+
+test("order arrows are visible without horizontal scrolling at desktop width", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openFirewall(page);
+  const row = ruleRow(page, "allow-ssh");
+  // Vertical scrolling is fine; never let Playwright scroll the table horizontally.
+  await row.evaluate((element) => element.scrollIntoView({ block: "center", inline: "start" }));
+  for (const name of ["Move allow-ssh up", "Move allow-ssh down"]) {
+    const control = row.getByRole("button", { name, exact: true });
+    await expect(control).toBeInViewport({ ratio: 1 });
+    await expect(row.locator("td").first().getByRole("button", { name, exact: true })).toBeVisible();
+    const box = await control.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(1280);
+  }
+  expect(await row.evaluate((element) => element.closest("div.overflow-x-auto")!.scrollLeft)).toBe(0);
+});
+
+test("keyboard moves retain focus for repeated presses, switching direction at an end", async ({ page }) => {
+  const server = await openFirewall(page);
+  const down = page.getByLabel("Move deny-all down", { exact: true });
+  await down.focus();
+  await page.keyboard.press("Enter");
+  await expectOrder(page, ["allow-ssh", "deny-all", "allow-web"]);
+  await expect(down).toBeFocused();
+  await page.keyboard.press("Space");
+  await expectOrder(page, ["allow-ssh", "allow-web", "deny-all"]);
+  await expect(down).toBeDisabled();
+  await expect(page.getByLabel("Move deny-all up", { exact: true })).toBeFocused();
+  expect(server.moves).toEqual([
+    { id: "deny-all", position: { after: "allow-ssh" } },
+    { id: "deny-all", position: { after: "allow-web" } },
+  ]);
+});
+
+test("all reorder controls are disabled while a move is pending", async ({ page }) => {
+  await openFirewall(page);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let received!: () => void;
+  const sent = new Promise<void>((resolve) => { received = resolve; });
+  await page.route("**/api/v1/firewall/rules/*/move", async (route) => {
+    // Read the body before signalling receipt to the test.
+    const body = route.request().postDataJSON();
+    expect(body).toEqual({ position: { before: "deny-all" } });
+    received();
+    await held;
+    await route.fallback();
+  });
+  await page.getByLabel("Move allow-ssh up").click();
+  await sent;
+  const controls = page.getByRole("region", { name: "Firewall rules" }).getByRole("button", { name: /^Move / });
+  try {
+    await expect(controls).toHaveCount(9);
+    for (const control of await controls.all()) await expect(control).toBeDisabled();
+  } finally {
+    release();
+  }
+  await expectOrder(page, ["allow-ssh", "deny-all", "allow-web"]);
 });
 
 test("forward rule links scroll to their asynchronously loaded row", async ({ page }) => {

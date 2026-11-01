@@ -145,7 +145,7 @@ export default function AlertsPage() {
 
       {alerts.length === 0 ? (
         <EmptyState title="No IDS alerts"
-          description={events.some((e) => alertView(e)) ? "No alerts match your filters." : "No alerts yet. Alerts appear when the IDS engine detects suspicious activity."} />
+          description={events.some((e) => alertView(e)) ? "No alerts match your filters." : "No alerts yet. Alerts appear when intrusion detection finds suspicious activity."} />
       ) : (
         <div className="flex gap-4">
           {/* Alert list */}
@@ -373,7 +373,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
               <DetailRow label="Cipher Suite" value={String(eventAttrs["cipher_suite"])} mono />
             )}
             {eventAttrs["ja3_hash"] != null && (
-              <DetailRow label="JA3 Fingerprint" value={String(eventAttrs["ja3_hash"])} mono />
+              <DetailRow label="TLS client fingerprint (JA3)" value={String(eventAttrs["ja3_hash"])} mono />
             )}
             {(eventAttrs["expected_cn"] != null || eventAttrs["observed_cn"] != null) && (
               <div className="rounded-xs border border-red-500/20 bg-red-500/6 px-3 py-2 mt-1 space-y-1.5">
@@ -399,7 +399,7 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
               <DetailRow label="Serial Number" value={String(eventAttrs["serial_number"])} mono />
             )}
             {eventAttrs["fingerprint"] != null && (
-              <DetailRow label="Cert Fingerprint" value={String(eventAttrs["fingerprint"])} mono />
+              <DetailRow label="Certificate fingerprint" value={String(eventAttrs["fingerprint"])} mono />
             )}
             {(eventAttrs["not_before"] != null || eventAttrs["not_after"] != null) && (
               <div className="flex gap-4 text-xs">
@@ -487,39 +487,45 @@ function AlertDetailPanel({ event, onClose }: { event: TelemetryEvent; onClose: 
 
         {/* Hex dump of raw payload */}
         {typeof eventAttrs["raw_hex"] === "string" && (eventAttrs["raw_hex"] as string).length > 0 && (
-          <DetailSection label="Raw Packet Data">
-            <div className="rounded-xs border bg-[#060808] p-3 font-mono text-[10px] leading-[1.6] overflow-x-auto">
-              <div className="flex gap-4 text-(--text-dim) mb-1 border-b pb-1">
-                <span className="w-10">OFFSET</span>
-                <span className="flex-1">HEX</span>
-                <span>ASCII</span>
-              </div>
-              {formatHexDump(eventAttrs["raw_hex"] as string).map((row, i) => (
-                <div key={i} className="flex gap-4">
-                  <span className="w-10">{row.offset}</span>
-                  <span className="flex-1 text-(--text)">{row.hex}</span>
-                  <span className="text-emerald-400/60">{row.ascii}</span>
+          <details className="border-b px-4 py-3">
+            <summary className="cursor-pointer text-xs">Packet bytes</summary>
+            <DetailSection label="Raw Packet Data">
+              <div className="rounded-xs border bg-[#060808] p-3 font-mono text-[10px] leading-[1.6] overflow-x-auto">
+                <div className="flex gap-4 text-(--text-dim) mb-1 border-b pb-1">
+                  <span className="w-10">OFFSET</span>
+                  <span className="flex-1">HEX</span>
+                  <span>ASCII</span>
                 </div>
-              ))}
-            </div>
-          </DetailSection>
+                {formatHexDump(eventAttrs["raw_hex"] as string).map((row, i) => (
+                  <div key={i} className="flex gap-4">
+                    <span className="w-10">{row.offset}</span>
+                    <span className="flex-1 text-(--text)">{row.hex}</span>
+                    <span className="text-emerald-400/60">{row.ascii}</span>
+                  </div>
+                ))}
+              </div>
+            </DetailSection>
+          </details>
         )}
 
         {/* Generic event attributes (for protocols without dedicated section) */}
         {Object.keys(eventAttrs).length > 0 && !isModbus && !isTLS && !isDNP3 && !isCIP && !isIEC104 && (
-          <DetailSection label="Event Attributes">
-            <div className="rounded-xs border bg-[#060808] p-3 font-mono text-[11px] leading-relaxed overflow-x-auto">
-              {Object.entries(eventAttrs).filter(([k]) => k !== "raw_hex").map(([key, val]) => {
-                const strVal = typeof val === "object" ? JSON.stringify(val) : String(val);
-                return (
-                  <div key={key} className="flex gap-2">
-                    <span className="text-(--text-dim) shrink-0">{key}:</span>
-                    <span className="text-(--text)">{strVal}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </DetailSection>
+          <details className="border-b px-4 py-3">
+            <summary className="cursor-pointer text-xs">Technical event details</summary>
+            <DetailSection label="Event Attributes">
+              <div className="rounded-xs border bg-[#060808] p-3 font-mono text-[11px] leading-relaxed overflow-x-auto">
+                {Object.entries(eventAttrs).filter(([k]) => k !== "raw_hex").map(([key, val]) => {
+                  const strVal = typeof val === "object" ? JSON.stringify(val) : String(val);
+                  return (
+                    <div key={key} className="flex gap-2">
+                      <span className="text-(--text-dim) shrink-0">{key}:</span>
+                      <span className="text-(--text)">{strVal}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </DetailSection>
+          </details>
         )}
 
         {/* References / CVEs / MITRE */}

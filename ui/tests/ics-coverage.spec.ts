@@ -120,6 +120,12 @@ async function open(page: Page, path: string) {
   await loaded;
 }
 
+async function inspectNotice(page: Page, message: string, detail: string) {
+  const notice = page.getByRole("status").filter({ hasText: message });
+  await expect(notice).toBeVisible();
+  await expect(notice.getByText(detail, { exact: true })).toBeVisible();
+}
+
 function coverageOf(page: Page, ruleId: string) {
   return page.getByLabel(`ICS coverage of ${ruleId}`);
 }
@@ -140,7 +146,7 @@ test("ICS page shows applied coverage for each state, never mode alone", async (
 
   const dnp3 = coverageOf(page, "dnp3-ops");
   await expect(dnp3.getByText("applied: not enforcing")).toHaveClass(/badge-critical/);
-  await expect(dnp3).toContainText(dpiOff.message);
+  await expect(dnp3.getByText(dpiOff.message, { exact: true })).toBeVisible();
 
   await expect(coverageOf(page, "plc-learn").getByText("applied: monitoring")).toHaveClass(/badge-offline/);
 
@@ -157,7 +163,7 @@ test("ICS page shows applied coverage for each state, never mode alone", async (
   // A runtime-only fault is an applied fact, not a pending change.
   const queue = coverageOf(page, "plc-queue");
   await expect(queue.getByText("applied: not enforcing")).toHaveClass(/badge-critical/);
-  await expect(queue).toContainText(`Running engine: ${queueDown.message}`);
+  await expect(queue.getByText(`Live inspection: ${queueDown.message}`, { exact: true })).toBeVisible();
   await expect(queue.getByText(/^candidate:/)).toHaveCount(0);
 
   // The mode column states the effective mode with no protection colour.
@@ -171,7 +177,7 @@ test("ICS page shows applied coverage for each state, never mode alone", async (
     "candidate: enforcing",
     "candidate: enforcing",
   ]);
-  await expect(page.getByText("Last apply attempt:", { exact: false })).toBeVisible();
+  await expect(page.getByText("Last activation attempt:", { exact: false })).toBeVisible();
   expect(seen.rulesetRequests).toBe(0);
   expect(seen.errors).toEqual([]);
 });
@@ -182,9 +188,31 @@ test("ICS page shows the runtime aggregate and the NFQUEUE inline path", async (
 
   await expect(page.getByRole("status", { name: /ICS protocol rules not enforcing/ })).toBeVisible();
   await expect(page.getByText("1 enforcing, 1 partial, 3 not enforcing, 1 monitoring")).toBeVisible();
-  await expect(page.getByText("Inline inspection: NFQUEUE group 101")).toBeVisible();
+  await expect(page.getByText("Inline inspection configured", { exact: true })).toBeVisible();
+  const queue = page.getByText("Inline inspection queue (NFQUEUE): 101", { exact: true });
+  await expect(queue.locator("..")).toHaveAttribute("open", "");
+  await expect(queue).toBeVisible();
   await expect(page.getByText("needs no capture interface", { exact: false })).toBeVisible();
   await expect(page.getByText("at least one capture interface")).toHaveCount(0);
+});
+
+for (const width of [1280, 390]) {
+  test(`saved capture interfaces are visible without expanding details at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockAPI(page, { dataplane: { dpiEnabled: true, nfqueueGroup: 0, captureInterfaces: ["eth0", "lan1"] } });
+    await open(page, "/ics/");
+    const interfaces = page.getByText("Capture interfaces: eth0, lan1", { exact: true });
+    await expect(interfaces).toBeVisible();
+    await expect(interfaces.locator("..")).toHaveAttribute("open", "");
+  });
+}
+
+test("default capture settings keep technical details collapsed", async ({ page }) => {
+  await mockAPI(page, { dataplane: { dpiEnabled: true, nfqueueGroup: 0, captureInterfaces: [] } });
+  await open(page, "/ics/");
+  const queue = page.getByText("Inline inspection queue (NFQUEUE): 0", { exact: true });
+  await expect(queue.locator("..")).not.toHaveAttribute("open");
+  await expect(queue).not.toBeVisible();
 });
 
 test("ICS page without an inline path says rules can only monitor", async ({ page }) => {
@@ -193,7 +221,7 @@ test("ICS page without an inline path says rules can only monitor", async ({ pag
     health: { status: "ok", component: "mgmt", icsEnforcement: { state: "monitoring", monitoring: 6 } },
   });
   await open(page, "/ics/");
-  await expect(page.getByText("Inline inspection: off \u2014 no NFQUEUE group, so ICS rules can only monitor")).toBeVisible();
+  await expect(page.getByText("Monitor only \u2014 inline inspection is not configured")).toBeVisible();
   await expect(page.getByRole("status", { name: /ICS protocol rules monitoring only/ })).toBeVisible();
 });
 
@@ -202,7 +230,7 @@ test("health with an unknown engine says so", async ({ page }) => {
     health: { status: "ok", component: "mgmt", icsEnforcement: { state: "unknown", enforcing: 0, partial: 0, notEnforcing: 0, monitoring: 0 } },
   });
   await open(page, "/ics/");
-  await expect(page.getByRole("status", { name: /ICS protocol enforcement/ })).toContainText("engine status unknown");
+  await expect(page.getByRole("status", { name: /ICS protocol enforcement/ })).toContainText("live inspection status unknown");
 });
 
 test("a coverage response without fields claims neither side and does not crash", async ({ page }) => {
@@ -213,8 +241,8 @@ test("a coverage response without fields claims neither side and does not crash"
   await expect(read.getByText("applied: unknown")).toHaveClass(/badge-offline/);
   await expect(read.getByText("candidate: unavailable")).toHaveClass(/badge-offline/);
   await expect(page.getByText("not applied", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Candidate ICS coverage unavailable: not reported by the server")).toBeVisible();
-  await expect(page.getByText("Applied ICS coverage unknown: not reported by the server.", { exact: false })).toBeVisible();
+  await inspectNotice(page, "Saved ICS inspection coverage unavailable.", "not reported by the server");
+  await inspectNotice(page, "Active ICS inspection coverage unknown.", "not reported by the server");
   await expect(page.locator("table .badge-secure")).toHaveCount(0);
   await expect(page.getByRole("status", { name: /ICS protocol enforcement/ })).toContainText("status unavailable");
   expect(seen.errors).toEqual([]);
@@ -232,7 +260,7 @@ test("an engine status error leaves applied unknown, never empty", async ({ page
   });
   await open(page, "/ics/");
 
-  await expect(page.getByText("Applied ICS coverage unknown: engine ruleset status unavailable: dial tcp 127.0.0.1:8081: connection refused.", { exact: false })).toBeVisible();
+  await inspectNotice(page, "Active ICS inspection coverage unknown.", "engine ruleset status unavailable: dial tcp 127.0.0.1:8081: connection refused");
   const read = coverageOf(page, "plc-read");
   await expect(read.getByText("applied: unknown")).toHaveClass(/badge-offline/);
   await expect(read.getByText("candidate: partial")).toHaveClass(/badge-warning/);
@@ -250,7 +278,7 @@ test("a candidate error keeps the applied coverage and names the fault", async (
   });
   await open(page, "/ics/");
 
-  await expect(page.getByText("Candidate ICS coverage unavailable: rule plc-read: ics enforce requires dataplane.nfqueueGroup")).toBeVisible();
+  await inspectNotice(page, "Saved ICS inspection coverage unavailable.", "rule plc-read: ics enforce requires dataplane.nfqueueGroup");
   const read = coverageOf(page, "plc-read");
   await expect(read.getByText("applied: enforcing")).toHaveClass(/badge-secure/);
   await expect(read.getByText("candidate: unavailable")).toHaveClass(/badge-offline/);
@@ -268,14 +296,14 @@ test("a failed apply is reported and applied coverage describes the previous rul
   await expect(page.getByText("The last apply failed, so applied coverage describes the rules still in force from before it.", { exact: false })).toBeVisible();
   await expect(page.getByRole("status", { name: "Failed apply" })).toContainText("nft: syntax error");
   await expect(coverageOf(page, "plc-read").getByText("applied: enforcing")).toBeVisible();
-  await expect(page.getByText("Last apply attempt:", { exact: false })).toBeVisible();
+  await expect(page.getByText("Last activation attempt:", { exact: false })).toBeVisible();
 });
 
 test("an unreachable coverage route reports why and claims no coverage", async ({ page }) => {
   const seen = await mockAPI(page, { coverage: { status: 500, json: { error: "failed to load candidate" } } });
   await open(page, "/ics/");
 
-  await expect(page.getByText("ICS coverage unavailable: failed to load candidate.", { exact: false })).toBeVisible();
+  await inspectNotice(page, "ICS coverage unavailable.", "failed to load candidate");
   await expect(coverageOf(page, "plc-read").getByText("coverage unavailable")).toHaveClass(/badge-offline/);
   await expect(page.locator("table .badge-secure")).toHaveCount(0);
   expect(seen.errors).toEqual([]);
@@ -286,7 +314,7 @@ test("a viewer sees per-rule coverage without the admin-only ruleset", async ({ 
   await open(page, "/ics/");
 
   await expect(coverageOf(page, "plc-read").getByText("applied: enforcing")).toHaveClass(/badge-secure/);
-  await expect(coverageOf(page, "plc-queue")).toContainText(`Running engine: ${queueDown.message}`);
+  await expect(coverageOf(page, "plc-queue")).toContainText(`Live inspection: ${queueDown.message}`);
   await expect(page.getByRole("status", { name: /ICS protocol rules not enforcing/ })).toBeVisible();
   // Editing is admin-only; the server refuses a viewer's change anyway.
   await expect(page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
@@ -362,9 +390,9 @@ test("rule preview shows coverage in its own section, apart from rule warnings",
   const summary = page.getByLabel("Rule impact preview");
   const section = summary.getByLabel("ICS coverage", { exact: true });
   await expect(section.getByText("not enforcing", { exact: true })).toHaveClass(/badge-critical/);
-  await expect(section).toContainText("effective mode: enforce");
+  await expect(section).toContainText("mode in use: enforce");
   await expect(section).toContainText(dpiOff.message);
-  await expect(section).toContainText(`Running engine: ${queueDown.message}`);
+  await expect(section).toContainText(`Live inspection: ${queueDown.message}`);
   const warnings = summary.getByRole("status").filter({ hasText: "Rules that do not act as written" });
   await expect(warnings).toContainText(warning.message);
   await expect(warnings).not.toContainText(dpiOff.message);
@@ -379,7 +407,7 @@ test("rule preview without coverage shows no coverage section", async ({ page })
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Preview impact" }).click();
   const summary = page.getByLabel("Rule impact preview");
-  await expect(summary).toContainText("No recent events to search: the engine has retained none yet.");
+  await expect(summary).toContainText("No recent events to search: none have been retained yet.");
   await expect(summary.getByLabel("ICS coverage", { exact: true })).toHaveCount(0);
   expect(seen.errors).toEqual([]);
 });

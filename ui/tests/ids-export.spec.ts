@@ -93,3 +93,17 @@ test("empty candidate does not prevent exporting running rules", async ({ page }
   await expect(page.getByText("No candidate rules. Running rules can still be exported.")).toBeVisible();
   await expect(page.getByRole("button", { name: /Snort/ })).toBeEnabled();
 });
+
+test("native rule format is inline and advanced group syntax remains reachable", async ({ page }) => {
+  await openExport(page);
+  await page.getByRole("button", { name: /^Rules/ }).click();
+  const format = page.getByText("native", { exact: true });
+  await expect(format).toBeVisible();
+  await expect(format).toHaveClass(/inline-block/);
+  await page.getByRole("button", { name: /^Groups/ }).click();
+  const matching = page.locator("details").filter({ has: page.getByText("Advanced group matching", { exact: true }) });
+  await matching.locator("summary").click();
+  for (const expression of ["proto:modbus", "format:suricata", "severity:critical"]) {
+    await expect(matching.getByText(expression, { exact: true })).toBeVisible();
+  }
+});

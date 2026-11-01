@@ -45,11 +45,34 @@ cannot shadow decisions. The check is conservative: coverage by several rules
 together is not reported, and IEC 104 rules are checked only against earlier
 IEC 104 rules.
 
-The firewall table displays configured order and provides move controls.
+The firewall table displays configured order, with ↑/↓ controls beside each
+position number for admins. The arrows are disabled at the ends and during a
+move. Keyboard focus follows the moved rule; at an end it switches to the
+remaining enabled direction. **Move to…** also supports top, bottom, before
+or after another rule. Moves stage changes; commit to apply them.
+
+A read-only **Default** row stays last, even with no configured rules. It applies
+to any zone and protocol when no enforcing `ALLOW`, `DENY` or `RESET` rule
+decides. Matching `TAG`, under-limit `RATE_LIMIT` and Monitor rules can fall
+through to this default. Its action comes from the
+same candidate revision as the listed rules: an empty or omitted action means
+`DENY`, `ALLOW` carries an unmatched-traffic warning in the description cell,
+and an unreadable or revision-mismatched default is shown as **unknown**, never assumed to deny.
+This row has no edit, delete or move controls.
+
 New rules default to the bottom; creation can instead select top, bottom,
 before or after another rule. Editing keeps a rule's slot. Templates append
 their ordered rules and can report a warning when an earlier terminal shadows
 an addition. CLI syntax is in [CLI](cli.md).
+
+The rule editor preserves all saved source zones, destination zones and
+protocols, including when only the description or logging changes. Its simple
+controls edit the first entry in each list; additional entries remain unchanged
+and can be inspected under **All saved matching values**. For multi-valued
+lists, the removal option explicitly removes only the first entry and retains
+the others; it does not change the match to any zone or protocol. To edit entire lists,
+use the **Staged** JSON editor in Configuration and review the diff before commit.
+An empty protocol list continues to mean any protocol.
 
 | Action | Decides | Effect |
 | --- | --- | --- |
@@ -96,6 +119,9 @@ the applied ruleset; logging need not be on. Every apply restarts the counters
 at zero, and the response says when (`since`). These are rule-path counters,
 not total connection traffic: established packets can use the admission fast
 path without incrementing an `ALLOW` counter, and ICS counters measure steering.
+When counters are unavailable, the firewall page shows the cause inline, not
+zero hits. Inactive firewall enforcement is explained directly; the exact
+engine response remains available under **Technical details**.
 
 ### Established connections and policy changes
 
@@ -174,8 +200,10 @@ nothing if none of its referenced candidate forwards can match. It is reported
 as a warning with its rule ID, the predicate (`identity`, `zone` with the
 `zones` concerned, `addressFamily`, or `forward`), the action and the effect, in:
 
-- The firewall page's nftables ruleset preview, which lists the candidate's
-  warnings.
+- The firewall page's **Generated firewall configuration (nftables)** preview,
+  which lists the candidate's warnings. Expand **Generated ruleset** for the
+  full low-level configuration; **Technical details** retains runtime reasons
+  and queue-ownership caveats.
 - `GET /api/v1/dataplane/ruleset`: `warnings` for the candidate and
   `engineStatus.warnings` for the last applied ruleset; any authenticated user
   reads the applied `warnings` through `GET /api/v1/dataplane/ruleset/status`.

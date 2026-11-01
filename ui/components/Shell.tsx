@@ -408,7 +408,7 @@ export function Shell({
                     className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium uppercase tracking-wider transition-ui ${
                       isGroupActive && collapsed[group.label]
                         ? ""
-                        : "text-slate-500 hover:text-slate-300 hover:bg-white/3"
+                        : "text-slate-400 hover:text-slate-300 hover:bg-white/3"
                     }`}
                   >
                     {IconFn && (

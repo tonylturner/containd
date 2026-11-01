@@ -7,7 +7,12 @@ function facts(dataset: LearnDataset) {
     Source: dataset.source,
     State: dataset.state,
     "Records / bytes": `${dataset.records} / ${dataset.bytes.toLocaleString()}`,
-    Gaps: dataset.gaps?.join(", ") || "None reported",
+    Gaps: dataset.gaps?.length ? (
+      <details>
+        <summary className="cursor-pointer">Collection limitations: {dataset.gaps.length}</summary>
+        {dataset.gaps.join(", ")}
+      </details>
+    ) : "None reported",
     Expires: new Date(dataset.expiresAt).toLocaleString(),
   };
 }

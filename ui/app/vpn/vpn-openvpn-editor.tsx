@@ -312,7 +312,7 @@ export function OpenVPNEditorCard({
                 </div>
               </div>
             ) : (
-              <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3">
+              <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3" open={Boolean(cfg.openvpn.configPath) || cfg.openvpn.enabled}>
                 <summary className="cursor-pointer text-sm text-(--text)">Advanced profile path</summary>
                 <div className="mt-3">
                   <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
@@ -330,7 +330,8 @@ export function OpenVPNEditorCard({
               </details>
             )}
 
-            <div className="mt-3 rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text)">
+            <details className="mt-3 rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text)">
+              <summary className="cursor-pointer">Advanced profile import</summary>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-(--text)">
                   Import profile (advanced)
@@ -351,7 +352,7 @@ export function OpenVPNEditorCard({
                   {uploadState === "uploading" ? "Uploading…" : "Choose file"}
                 </label>
               </div>
-            </div>
+            </details>
           </div>
         ) : cfg.openvpn.mode === "server" ? (
           <div className="rounded-xs border bg-black/20 p-3">
@@ -359,7 +360,7 @@ export function OpenVPNEditorCard({
             <div className="mt-3 grid gap-3">
               <div className="rounded-xs border bg-(--surface) px-3 py-2 text-xs text-(--text)">
                 Enabling OpenVPN server automatically opens the listen port on the configured listen zone or interfaces
-                (default WAN) via nftables input so clients can connect.
+                (default WAN) so clients can connect after these settings are applied.
               </div>
               <div className="grid gap-3 md:grid-cols-3">
                 <div>

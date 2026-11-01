@@ -103,9 +103,9 @@ export default function PcapAnalysisPage() {
       }
     >
       <p className="mb-4 max-w-prose text-sm text-(--text-muted)">
-        Import a capture or watch live traffic, generate certified suggestions,
-        then review and stage selected revisions. Learning never changes running
-        policy. The candidate diff and commit bar is the only activation path.
+        Import a capture or watch live traffic, generate checked rule suggestions,
+        then review and save selected versions. Learning never changes active
+        policy. Review the changes and commit them from Configuration to apply them.
       </p>
       {!canEdit && (
         <p className="mb-4 text-sm">
@@ -155,8 +155,8 @@ export default function PcapAnalysisPage() {
       )}
       <Card title="Live watch" className="mb-6">
         <p className="mb-3 text-sm text-(--text-muted)">
-          One active watch. Default 1 hour, maximum 24 hours. Stop seals its
-          dataset for the same review workflow. Restart never resumes
+          One active watch. Default 1 hour, maximum 24 hours. Stopping finishes this
+          collection so suggestions can be generated and reviewed. Restart never resumes
           collection; rule modes do not start a watch.
         </p>
         {canEdit && (
@@ -265,11 +265,11 @@ export default function PcapAnalysisPage() {
         )}
       </Card>
       <Card title="Evidence datasets" className="mb-6">
-        <p className="mb-3 text-xs text-(--text-muted)">
-          Retention: 7 days. Store ceilings: 32 datasets, 100,000 records, 128
-          MiB normalized evidence; 256 KiB / 4,096 objects per parent. Evictions
-          invalidate dependent proofs.
-        </p>
+        <p className="mb-3 text-xs text-(--text-muted)">Evidence expires after 7 days. Removing evidence at capacity invalidates the checks that depend on it.</p>
+        <details className="mb-3 text-xs text-(--text-muted)">
+          <summary className="cursor-pointer">Saved evidence limits</summary>
+          <p>Store ceilings: 32 datasets, 100,000 records, 128 MiB normalized evidence; 256 KiB / 4,096 objects per parent. Evictions invalidate dependent proofs.</p>
+        </details>
         {!datasets && (
           <p className="text-sm">
             Datasets unavailable or loading. Refresh to retry.
@@ -382,7 +382,7 @@ export default function PcapAnalysisPage() {
           )}
           {imported.stats.displayTruncated && (
             <p role="status" className="mb-2 text-sm text-(--amber)">
-              Display sample capped; normalized evidence is not sampled.
+              Only the display is shortened; analysis still uses all retained evidence.
             </p>
           )}
           <IdentificationTable

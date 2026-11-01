@@ -34,7 +34,7 @@ function gate(overrides: Record<string, unknown> = {}) {
 
 type Mock = { requests: { method: string; path: string; body: unknown }[] };
 
-async function mockAPI(page: Page, options: { gate?: Record<string, unknown>; fail?: string } = {}): Promise<Mock> {
+async function mockAPI(page: Page, options: { gate?: Record<string, unknown>; fail?: string; config?: Record<string, unknown> } = {}): Promise<Mock> {
   const mock: Mock = { requests: [] };
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
@@ -48,7 +48,7 @@ async function mockAPI(page: Page, options: { gate?: Record<string, unknown>; fa
       return;
     }
     if (request.method() === "GET") {
-      const body = path === "/api/v1/services/av" ? baseConfig
+      const body = path === "/api/v1/services/av" ? { ...baseConfig, ...options.config }
         : path === "/api/v1/services/status" ? { faults: [], av: { available: true, enabled: true, mode: "clamav", ready: true, ...meter, gate: options.gate ?? gate() } }
           : path === "/api/v1/zones" ? zones
             : path === "/api/v1/assets" ? assets
@@ -122,9 +122,23 @@ test("an ICS decoder port is flagged before the save", async ({ page }) => {
   await openPage(page);
   const include = page.getByTestId("scan-include").first();
   await include.getByLabel("Destination ports").fill("80, 500-510");
-  await expect(include.getByText("500-510 covers ICS decoder port 502 (Modbus); the server refuses it.")).toBeVisible();
+  await expect(include.getByText("Port range 500-510 includes reserved industrial port 502 (Modbus); choose different ports.")).toBeVisible();
   await include.getByLabel("Destination ports").fill("80");
-  await expect(include.getByText(/covers ICS decoder port/)).toHaveCount(0);
+  await expect(include.getByText(/includes reserved industrial port/)).toHaveCount(0);
+});
+
+test("advanced scanner settings retain protocol and path controls", async ({ page }) => {
+  await mockAPI(page, { config: { clamav: {
+    socketPath: "/run/clamav/clamd.sock", customDefsPath: "/data/clamav/custom", freshclamEnabled: true,
+  } } });
+  await openPage(page);
+  await expect(page.getByText("Socket path", { exact: true })).not.toBeVisible();
+  await page.getByText("Advanced local scanner settings", { exact: true }).click();
+  await expect(page.getByText("Socket path", { exact: true })).toBeVisible();
+  await expect(page.getByPlaceholder("/run/clamav/clamd.sock")).toBeVisible();
+  await page.getByText("Advanced remote scanner settings", { exact: true }).click();
+  await expect(page.getByText(/REQMOD for uploads, RESPMOD for downloads/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add server", exact: true })).toBeVisible();
 });
 
 test("a refused scan selection shows the server's validation error", async ({ page }) => {
@@ -141,6 +155,7 @@ test("an open gate reports that it scans", async ({ page }) => {
   await openPage(page);
   await expect(gateBlock(page).getByRole("status")).toHaveText("open");
   await expect(gateBlock(page).getByText("Scanning the selected HTTP traffic.")).toBeVisible();
+  await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
   await expect(gateBlock(page).getByText("Listeners up: 2/2")).toBeVisible();
   await expect(gateBlock(page).getByText("Active connections: 3")).toBeVisible();
   await expect(gateBlock(page).getByText("not scanning")).toHaveCount(0);
@@ -171,11 +186,12 @@ test("a refusing gate is a failure and names the listener and routing faults", a
   await expect(gateBlock(page).getByRole("status")).toHaveText("refusing");
   await expect(gateBlock(page).getByRole("status")).toHaveClass(/badge-critical/);
   await expect(gateBlock(page).getByText("selected connections are refused; ICS endpoints pass")).toBeVisible();
-  await expect(gateBlock(page).getByText("Listeners up: 1/2")).toBeVisible();
   await expect(gateBlock(page).getByText("Listener [::1]:18100: down — bind: address already in use")).toBeVisible();
   await expect(gateBlock(page).getByText("Routing: fwmark rule: operation not permitted")).toBeVisible();
   await expect(gateBlock(page).getByText("Admission: gate_admit: nft apply failed")).toBeVisible();
   await expect(gateBlock(page).getByText("zone \"ot\" has no interface bound to it")).toBeVisible();
+  await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
+  await expect(gateBlock(page).getByText("Listeners up: 1/2")).toBeVisible();
 });
 
 test("a passing gate says it is not scanning", async ({ page }) => {
@@ -185,6 +201,7 @@ test("a passing gate says it is not scanning", async ({ page }) => {
   await expect(gateBlock(page).getByRole("status")).toHaveClass(/badge-warning/);
   await expect(gateBlock(page).getByText("not scanning", { exact: true })).toBeVisible();
   await expect(gateBlock(page).getByText("selected connections pass unscanned")).toBeVisible();
+  await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
   await expect(gateBlock(page).getByText("Listener 127.0.0.1:18100: unavailable on this host")).toBeVisible();
 });
 
@@ -192,6 +209,38 @@ test("an off gate is neutral", async ({ page }) => {
   await mockAPI(page, { gate: gate({ state: "off", enabled: false, admit: "refuse", listeners: [], connections: 0 }) });
   await openPage(page);
   await expect(gateBlock(page).getByRole("status")).toHaveText("off");
-  await expect(gateBlock(page).getByText("Off: the data plane is not enforcing.")).toBeVisible();
+  await expect(gateBlock(page).getByText("Off: firewall enforcement is off.")).toBeVisible();
+  await gateBlock(page).getByText("Scan-path details", { exact: true }).click();
   await expect(gateBlock(page).getByText("Listeners up: 0/0")).toBeVisible();
+});
+
+for (const config of [
+  { mode: "icap" },
+  { icap: { servers: [{ address: "scanner.example:1344", service: "avscan", useTls: true }] } },
+  { clamav: { socketPath: "/custom/clamd.sock" } },
+  { clamav: { customDefsPath: "/custom/defs" } },
+  { clamav: { updateSchedule: "4h" } },
+  { clamav: { freshclamEnabled: false } },
+]) {
+  test(`advanced scanner settings reveal mode-required or non-default configuration ${JSON.stringify(config)}`, async ({ page }) => {
+    const mock = await mockAPI(page, { config });
+    await openPage(page);
+    const summary = "clamav" in config ? "Advanced local scanner settings" : "Advanced remote scanner settings";
+    const details = page.locator("details").filter({ has: page.getByText(summary, { exact: true }) });
+    await expect(details).toHaveAttribute("open", "");
+    expect(mock.requests).toEqual([]);
+  });
+}
+
+test("fail policy options name the scanner-unavailable condition and retain API values", async ({ page }) => {
+  const mock = await mockAPI(page);
+  await openPage(page);
+  for (const [value, label] of [["open", "Allow unscanned traffic when the scanner is unavailable"], ["closed", "Block selected traffic when the scanner is unavailable"]]) {
+    const option = page.getByRole("option", { name: label, exact: true });
+    await expect(option).toHaveAttribute("value", value);
+    await page.locator("select").filter({ has: option }).selectOption(value);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("status", { name: "Save state" })).toHaveText("State: staged — commit to apply.");
+    expect((mock.requests.at(-1)?.body as Record<string, unknown>).failPolicy).toBe(value);
+  }
 });

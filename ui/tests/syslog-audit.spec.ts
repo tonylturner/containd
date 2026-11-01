@@ -17,11 +17,11 @@ const syslog = {
   ],
 };
 
-async function open(page: Page, audit: unknown) {
+async function open(page: Page, audit: unknown, telemetry: Record<string, unknown> = {}) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const body = path.endsWith("/auth/me") || path.endsWith("/auth/session") ? user
-      : path === "/api/v1/services/status" ? { faults: [], syslog: { ...syslog, ...(audit === undefined ? {} : { audit }) }, av: { available: false, error: "x" } }
+      : path === "/api/v1/services/status" ? { faults: [], syslog: { ...syslog, ...telemetry, ...(audit === undefined ? {} : { audit }) }, av: { available: false, error: "x" } }
         : path === "/api/v1/services/syslog" ? { forwarders: [{ address: "192.0.2.10", port: 514, proto: "udp" }], batchSize: 500, flushEvery: 2 }
           : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
     await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
@@ -48,6 +48,8 @@ test("a failing forwarder's audit backlog and error are shown in amber", async (
   await expect(panel.getByText("Backlog: 57")).toHaveClass(/text-amber/);
   await expect(panel.getByRole("status", { name: "Audit forwarding error" })).toContainText("tcp://192.0.2.11:6514: connection refused");
   const row = (f: string) => panel.getByRole("row").filter({ has: page.getByRole("cell", { name: f, exact: true }) });
+  await row("tcp://192.0.2.11:6514").getByText("Record position", { exact: true }).click();
+  await expect(row("tcp://192.0.2.11:6514").getByText("856", { exact: true })).toBeVisible();
   await expect(row("tcp://192.0.2.11:6514")).toContainText("856");
   await expect(row("tcp://192.0.2.11:6514").getByRole("cell").nth(2)).toHaveClass(/text-amber/);
   await expect(row("tcp://192.0.2.11:6514").getByRole("cell").nth(3)).toHaveText("—");
@@ -61,10 +63,10 @@ test("healthy audit forwarding reads quietly", async ({ page }) => {
     forwarders: [{ forwarder: "udp://192.0.2.10:514", last_id: 9, backlog: 0, last_error: "", last_sent: "2026-10-26T08:00:00Z" }],
   });
   const panel = page.getByRole("region", { name: "Audit forwarding" });
-  await expect(panel).toContainText("each forwarder resumes from its own cursor");
+  await expect(panel).toContainText("each forwarder resumes where it left off");
   await expect(panel.getByText("Backlog: 0")).not.toHaveClass(/text-amber/);
   await expect(panel.getByRole("status", { name: "Audit forwarding error" })).toHaveCount(0);
-  await expect(panel).toContainText("Last flush: —");
+  await expect(panel).toContainText("Last check: —");
 });
 
 test("a status without audit forwarding shows no audit panel", async ({ page }) => {
@@ -97,3 +99,25 @@ test("telemetry source loss and continuity are independent of audit forwarding a
   await refreshed;
   await expect(batch).toHaveValue("123");
 });
+
+for (const failed of [false, true]) {
+  test(`syslog ${failed ? "failed send" : "empty batch"} reports a check without claiming delivery`, async ({ page }) => {
+    const lastCheck = "2026-11-01T12:00:00Z";
+    const error = failed ? "connection refused" : "";
+    await open(page, {
+      enabled: true, sent_total: 0, failed_total: failed ? 1 : 0, last_flush: lastCheck,
+      last_error: error, backlog: failed ? 1 : 0,
+      forwarders: [{ forwarder: "tcp://192.0.2.11:6514", last_id: 0, backlog: failed ? 1 : 0, last_error: error, last_sent: "" }],
+    }, { sent_total: 0, failed_total: failed ? 1 : 0, last_flush: lastCheck, last_batch: 0, last_error: error });
+    await expect(page.getByText(`Last check: ${lastCheck}`, { exact: true })).toBeVisible();
+    await expect(page.getByText(/^Last send:/)).toHaveCount(0);
+    const panel = page.getByRole("region", { name: "Audit forwarding" });
+    await expect(panel.getByText(/^Last check:/)).toBeVisible();
+    await expect(panel.getByText(/^Last check:/)).not.toHaveText("Last check: —");
+    await expect(panel.getByRole("columnheader", { name: "Last sent", exact: true })).toBeVisible();
+    const row = panel.getByRole("row").filter({ hasText: "tcp://192.0.2.11:6514" });
+    await expect(row.getByRole("cell").nth(3)).toHaveText("—");
+    await expect(panel).toContainText("Sent: 0");
+    if (failed) await expect(panel.getByRole("status", { name: "Audit forwarding error" })).toContainText(error);
+  });
+}

@@ -133,8 +133,7 @@ export function DPIProtocolModal({
         </div>
 
         <div className="mt-4 text-[10px] text-(--text-dim)">
-          ICS protocol decoders are enabled or disabled separately under ICS
-          Protocol Decoders. TLS inspection covers handshake metadata only
+          Choose industrial protocols in their own settings. TLS inspection covers handshake metadata only
           (SNI, JA3, cipher suites) — full TLS interception is planned for a
           future release.
         </div>
@@ -232,7 +231,7 @@ export function ICSDPIConfigModal({
               ICS Protocol DPI Configuration
             </h2>
             <p className="mt-1 text-xs text-(--text-muted)">
-              Stage protocol decoders and parsing modes. Commit to apply.
+              Save protocol-inspection settings, then commit to apply changes.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -300,7 +299,7 @@ export function ICSDPIConfigModal({
                     </div>
                   </div>
                   <label className="flex items-center gap-2 text-xs text-(--text-muted)">
-                    Parsing
+                    Unrecognized messages
                     <select
                       aria-label={`${p.label} parsing`}
                       value={draftParsing[p.key] === "strict" ? "strict" : "tolerant"}
@@ -310,8 +309,8 @@ export function ICSDPIConfigModal({
                       }))}
                       className="rounded-xs border bg-(--surface2) px-2 py-1.5 text-xs text-(--text) outline-hidden focus-visible:ring-2 focus-visible:ring-(--amber)"
                     >
-                      <option value="tolerant">Tolerant</option>
-                      <option value="strict">Strict</option>
+                      <option value="tolerant">Inspect supported messages (tolerant)</option>
+                      <option value="strict">Treat unrecognized messages as violations (strict)</option>
                     </select>
                   </label>
                   <button
@@ -371,16 +370,16 @@ export function ICSDPIConfigModal({
                     <div className="pt-2 border-t border-white/4">
                       <div className="flex items-center gap-2 text-[10px]">
                         <span className="text-(--text-muted)">
-                          Decoder status:
+                          Inspection status:
                         </span>
                         {on ? (
                           <span className="text-emerald-400">
-                            Candidate decoder enabled on port {p.port}
+                            Inspection will use port {p.port} after applying changes
                           </span>
                         ) : (
                           <span className="text-(--text-dim)">
-                            Disabled — traffic on port {p.port} will not be
-                            decoded
+                            After applying changes, traffic on port {p.port} will not be
+                            inspected
                           </span>
                         )}
                       </div>
@@ -400,11 +399,14 @@ export function ICSDPIConfigModal({
               className="mt-3 flex items-center justify-between rounded-xs border border-amber-500/20 bg-amber-500/5 px-3 py-2.5"
             >
               <div className="text-sm text-(--text)">
-                <span className="font-mono">{key}</span>{" "}
-                <span className="text-amber-300">unsupported</span>
+                <span className="text-amber-300">Unsupported saved protocol</span>
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-xs">Technical details</summary>
+                  <span className="font-mono">{key}</span>
                 <div className="mt-0.5 text-[10px] text-(--text-muted)">
-                  Stored value: {String(enabled)}. Remove this key to repair the decoder map.
+                  Stored value: {String(enabled)}. Remove this unsupported setting to repair protocol inspection.
                 </div>
+                </details>
               </div>
               <button
                 type="button"
@@ -422,17 +424,20 @@ export function ICSDPIConfigModal({
           ))}
 
         <div className="mt-4 text-[10px] text-(--text-dim)">
-          Tolerant enforces what is decoded and alerts on the rest. Strict drops
-          nonconformant frames and resets the session in enforce mode; monitoring
-          reports would-drop without blocking. A lost frame boundary and integrity
-          faults reset the session in both parsing modes when enforcing.
+          Inspect supported messages to apply rules to recognized content and alert on the rest.
+          Strict parsing treats unrecognized or nonconformant messages as violations.
+          Enforce blocks these violations; Monitor reports what would be dropped without blocking.
+          Lost message boundaries and integrity faults reset the connection in both modes when enforcing.
+          <details className="mt-2">
+            <summary className="cursor-pointer">Technical details</summary>
+            Saved parsing values: <code>tolerant</code> inspects supported messages; <code>strict</code> blocks unrecognized messages when enforcing.
+          </details>
         </div>
 
         <div className="mt-3 text-[10px] text-(--text-dim)">
           Protocol-specific DPI parameters (function codes, register addresses,
           unit IDs) are configured per-rule in firewall entries with ICS
-          predicates. This panel controls which ICS decoders will be enabled after commit at the
-          engine level.
+          predicates. These settings choose which industrial protocols the appliance will inspect after commit.
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
