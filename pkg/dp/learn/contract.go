@@ -51,6 +51,8 @@ type Certifier interface {
 // ResolveForStage checks ALL selections in one transaction, binds RequestID to
 // their immutable revisions for retries, and returns
 // detached immutable content or one error, never a partially resolved batch.
+// Incompatible frozen retries set StageReconcileOnly: management must verify
+// identical rules already in candidate and must not add missing rules.
 // It rejects expired/uncertified/rejected entries, unreviewed IEC and missing
 // coordinate approval. Management atomically mutates config.Store's candidate
 // using only these returned rules, never sends arbitrary rule JSON back here.

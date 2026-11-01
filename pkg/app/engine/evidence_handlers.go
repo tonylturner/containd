@@ -2,21 +2,41 @@
 package engineapp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strconv"
 
+	"github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/learn"
 	"github.com/tonylturner/containd/pkg/evidence"
 	"github.com/tonylturner/containd/pkg/evidence/sqlite"
 )
 
-type evidenceAPI struct {
+// EvidenceAPI owns explicit learner collection and its internal HTTP surface.
+type EvidenceAPI struct {
+	cancel    context.CancelFunc
 	store     *sqlite.Store
 	generator learn.Service
 	watch     *evidenceWatch
+}
+
+// NewEvidenceAPI assembles a learner on an existing engine evidence authority.
+// Close must precede closing store; the caller retains ownership of the store.
+func NewEvidenceAPI(ctx context.Context, store *sqlite.Store, e *engine.Engine) *EvidenceAPI {
+	ctx, cancel := context.WithCancel(ctx)
+	return &EvidenceAPI{store: store, cancel: cancel, watch: newEvidenceWatch(ctx, store, e), generator: &learn.Generator{Store: store, Certifier: &learn.CompilerCertifier{Store: store}, CountWithheld: store.CountWithheld}}
+}
+
+// Close stops collection and waits for both collector workers.
+func (a *EvidenceAPI) Close() {
+	a.watch.engine.SetLearnLossHook(nil)
+	a.watch.engine.SetLearnWatchHook(nil)
+	a.cancel()
+	<-a.watch.done
+	<-a.watch.maintained
 }
 
 func evidenceError(w http.ResponseWriter, err error) {
@@ -60,12 +80,14 @@ func evidencePage(w http.ResponseWriter, r *http.Request) (evidence.PageRequest,
 	}
 	return p, true
 }
-func (a *evidenceAPI) register(mux *http.ServeMux) {
+
+// Register installs engine-internal learner routes on mux.
+func (a *EvidenceAPI) Register(mux *http.ServeMux) {
 	for _, pattern := range []string{"POST /internal/learn/watches", "GET /internal/learn/watches", "GET /internal/learn/watches/{id}", "POST /internal/learn/watches/{id}/stop", "GET /internal/learn/datasets", "GET /internal/learn/datasets/{id}", "GET /internal/learn/datasets/{id}/observations", "DELETE /internal/learn/datasets/{id}", "POST /internal/learn/generate", "GET /internal/learn/suggestions", "GET /internal/learn/suggestions/{id}", "POST /internal/learn/suggestions/{id}/review", "GET /internal/learn/counters", "POST /internal/learn/stage/resolve", "POST /internal/learn/stage/complete", "POST /internal/learn/stage/release"} {
 		mux.HandleFunc(pattern, a.serve)
 	}
 }
-func (a *evidenceAPI) serve(w http.ResponseWriter, r *http.Request) {
+func (a *EvidenceAPI) serve(w http.ResponseWriter, r *http.Request) {
 	// Collector failures affect readiness, not authority reads or cleanup.
 	var result any
 	var err error

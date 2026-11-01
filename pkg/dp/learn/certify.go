@@ -73,6 +73,13 @@ func (c *CompilerCertifier) Certify(ctx context.Context, content SuggestionConte
 		digest, _ := evidence.Digest(o)
 		proof.Counterexamples = append(proof.Counterexamples, Counterexample{Parent: ref, Mutation: mutation, Expected: expected, Actual: actual, ContextDigest: digest})
 	}
+	// Replay every positive, but repeat identical boundary inputs only once.
+	// Scheduled candidates retain capture time in that identity.
+	scheduled := false
+	for _, rule := range content.Rules {
+		scheduled = scheduled || rule.Schedule != nil
+	}
+	replayed := map[string]bool{}
 	for i, o := range parents {
 		if err := ctx.Err(); err != nil {
 			return proof, err
@@ -89,6 +96,14 @@ func (c *CompilerCertifier) Certify(ctx context.Context, content SuggestionConte
 			proof.Positive.Failed++
 			failure(refs[i], "positive", o, "accept", "reject")
 		}
+		key, err := boundaryReplayKey(o, scheduled)
+		if err != nil {
+			return proof, err
+		}
+		if replayed[key] {
+			continue
+		}
+		replayed[key] = true
 		var replayErr error
 		boundaryMutations(o, func(mutation mutation) bool {
 			if err := ctx.Err(); err != nil {
@@ -130,6 +145,7 @@ func (c *CompilerCertifier) Certify(ctx context.Context, content SuggestionConte
 
 func loadParents(ctx context.Context, store evidence.Store, refs []evidence.EvidenceRef) ([]evidence.Observation, error) {
 	byDataset := map[string]map[string]evidence.Observation{}
+	excluded := map[string]map[string]evidence.WithheldReason{}
 	seen := map[string]bool{}
 	for _, ref := range refs {
 		key := ref.DatasetID + "/" + ref.ObservationID
@@ -148,6 +164,7 @@ func loadParents(ctx context.Context, store evidence.Store, refs []evidence.Evid
 			return nil, ErrNotCertified
 		}
 		found := map[string]evidence.Observation{}
+		excluded[ds.ID] = map[string]evidence.WithheldReason{}
 		cursor := ""
 		for {
 			page, err := store.ListObservations(ctx, ds.ID, evidence.PageRequest{Limit: 200, Cursor: cursor})
@@ -156,6 +173,8 @@ func loadParents(ctx context.Context, store evidence.Store, refs []evidence.Evid
 			}
 			for _, o := range page.Items {
 				found[o.ID] = o
+				recordConnectionExclusion(excluded[ds.ID], o)
+				recordLossExclusion(ds, excluded[ds.ID], o)
 			}
 			cursor = page.NextCursor
 			if cursor == "" {
@@ -169,6 +188,9 @@ func loadParents(ctx context.Context, store evidence.Store, refs []evidence.Evid
 		o, ok := byDataset[ref.DatasetID][ref.ObservationID]
 		if !ok {
 			return nil, ErrExpired
+		}
+		if excluded[ref.DatasetID][o.ConnectionID] != "" {
+			return nil, ErrNotCertified
 		}
 		out = append(out, o)
 	}
@@ -431,4 +453,14 @@ func dnpRelationContains(d *evidence.DNP3, obj evidence.DNP3Object, index uint32
 		}
 	}
 	return false
+}
+
+// Only redundant boundary work omits non-evaluator metadata; the complete
+// evidence digest and positive references retain it, including capture time.
+func boundaryReplayKey(o evidence.Observation, scheduled bool) (string, error) {
+	if !scheduled {
+		o.CapturedAt = time.Time{}
+	}
+	o.Outcome = evidence.Outcome{}
+	return o.SemanticDigest()
 }
