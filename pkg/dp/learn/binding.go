@@ -18,7 +18,7 @@ const observationBindingAuthority = "observation_binding"
 // PortDecoderAuthority identifies role evidence from an adapter that retains
 // connection binding and loss exclusions. Historical authorities without the
 // corrected loss scope must be reimported or recollected, not trusted.
-const PortDecoderAuthority = "port_decoder_and_nat_alias_loss_scope"
+const PortDecoderAuthority = "port_decoder_and_capture_hook_loss_scope"
 
 // WithheldObservationBinding excludes all parents on an observation binding.
 const WithheldObservationBinding evidence.WithheldReason = "observation_binding"

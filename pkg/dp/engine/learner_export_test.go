@@ -32,7 +32,7 @@ func NewLearnerOverflowEngine(t *testing.T, variant string) (*Engine, func(bool)
 		}
 	}
 	lost := ct.Original
-	if variant == "SNAT" {
+	if variant == "SNAT" || variant == "DNAT request" {
 		lost = ct.Reply
 	}
 	truncate := func(ports bool) {

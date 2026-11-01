@@ -17,6 +17,11 @@ const (
 	SourcePCAP Source = "pcap"
 )
 
+const (
+	CaptureNFQueue  = "nfqueue"
+	CaptureAFPacket = "afpacket"
+)
+
 // Coordinates identifies the address space used by ServiceKey.
 type Coordinates string
 
@@ -60,6 +65,7 @@ type ServiceKey struct {
 // Authority records why coordinates and roles may be used. Logical is absent
 // without verified connection authority; PCAP never silently acquires NAT truth.
 type Authority struct {
+	CaptureHook        string       `json:"captureHook,omitempty"`
 	Wire               Tuple        `json:"wire"`
 	Logical            *Tuple       `json:"logical,omitempty"`
 	Aliases            *WireAliases `json:"aliases,omitempty"`

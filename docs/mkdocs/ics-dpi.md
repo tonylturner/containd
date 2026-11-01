@@ -992,10 +992,16 @@ Known-connection loss excludes that incarnation; coordinate-scoped loss excludes
 matching wire tuples or host pairs across every incarnation, in either direction.
 Live observations retain both verified original/reply NAT aliases, so loss on
 the opposite wire face still excludes request-only or response-only evidence.
-Identity and scope are additive. Live parents lacking complete verified aliases
-cannot prove endpoint disjointness from same-transport coordinate loss and are
-excluded; PCAP
-retains only its observed wire authority.
+Identity and scope are additive. Parents and losses retain `captureHook`
+(`nfqueue` or `afpacket`) when known. NFQUEUE's forward hook observes one
+post-DNAT/pre-SNAT face in both directions, so NFQUEUE parents and losses use
+wire-only matching even without conntrack verification. An unrelated malformed
+frame no longer erases the watch's suggestions; same-tuple loss still excludes
+every matching incarnation, and missing ports widen to host pair/transport.
+Unverified AF_PACKET parents still cannot prove that their unknown opposite
+NAT face escaped a same-transport loss. Missing capture authority remains
+conservative unless a complete verified alias pair proves disjointness.
+PCAP retains only its observed wire authority.
 Retained message times do not prove lifecycle bounds. Legacy timestamp-only loss
 and missing scope exclude the dataset. Excluded retained parents count toward
 the durable `collection_loss` withheld reason. Connections

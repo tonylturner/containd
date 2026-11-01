@@ -781,6 +781,10 @@ components:
     LearnAuthority:
       additionalProperties: false
       properties:
+        captureHook:
+          type: string
+          enum: [nfqueue, afpacket]
+          description: Live receive-time capture provenance, independent of conntrack verification. Absent for PCAP and unknown historical authority.
         correlation:
           type: string
         logical:
@@ -995,13 +999,14 @@ components:
         losses:
           type: array
           maxItems: 1024
-          description: Durable loss scope. Known incarnations are excluded in full. connectionId and scope are additive when both are present. Coordinate scope matches both verified original/reply NAT aliases across every incarnation, using ports when authoritative and otherwise host pair plus transport. Live parents without complete verified aliases cannot prove endpoint disjointness from same-transport coordinate-scoped loss and are excluded. PCAP retains wire coordinates only. Observation timestamps never delimit connection lifetime. Missing scope, legacy timestamp-only losses and legacy gaps exclude the dataset. outcome_loss and capture_unrelated do not exclude certification inputs. Localization exhaustion collapses to dataset-wide collection_loss.
+          description: Durable loss scope. Known incarnations are excluded in full. connectionId and scope are additive when both are present. Coordinate scope matches both verified original/reply NAT aliases across every incarnation, using ports when authoritative and otherwise host pair plus transport. When both live parent and loss carry captureHook nfqueue, wire-only matching is sound at the common forward-hook face without verified aliases. Other live parents lacking complete verified aliases cannot prove same-transport endpoint disjointness and are excluded. PCAP retains wire coordinates only. Observation timestamps never delimit connection lifetime. Missing scope, legacy timestamp-only losses and legacy gaps exclude the dataset. outcome_loss and capture_unrelated do not exclude certification inputs. Localization exhaustion collapses to dataset-wide collection_loss.
           items:
             type: object
             additionalProperties: false
             required: [code]
             properties:
               code: {type: string}
+              captureHook: {type: string, enum: [nfqueue, afpacket], description: Receive-time capture provenance when known. NFQUEUE wire-only disjointness requires this authority on both parent and loss.}
               connectionId: {type: string}
               scope:
                 type: object

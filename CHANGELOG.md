@@ -33,9 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve NFQUEUE learner suggestions after scoped loss between unrelated hosts.
+  Parents and losses retain capture-hook authority, allowing wire-only matching
+  at the common forward-hook face without conntrack verification. Same-tuple
+  loss still excludes every incarnation; unverified AF_PACKET and unknown
+  capture authority remain conservative. Reimport or recollect older evidence
+  and regenerate proofs to use the corrected authority.
 - Preserve learner loss across both verified NAT wire aliases, including
   request-only SNAT and response-only DNAT evidence. Known incarnation identity
-  adds to coordinate scope without narrowing it; unproved live alias
+  adds to coordinate scope without narrowing it; unproved AF_PACKET alias
   disjointness fails closed. Stop closes parent admission before detaching the
   loss fence. IPv6 truncation classification uses decoded header family, not
   IPv4-mapped address spelling, and empty connection placeholders retain scope.

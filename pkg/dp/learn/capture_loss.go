@@ -10,6 +10,9 @@ import (
 // Opaque IPv6 extension chains can contain TCP/UDP and must stay excluding.
 func CaptureLoss(pkt capture.Packet, code string) evidence.CollectionLoss {
 	loss := evidence.CollectionLoss{Code: code}
+	if pkt.Token.Inline() {
+		loss.CaptureHook = evidence.CaptureNFQueue
+	}
 	if pkt.SrcIP == nil || pkt.DstIP == nil || pkt.Invalid == capture.InvalidIPHeader {
 		return loss
 	}

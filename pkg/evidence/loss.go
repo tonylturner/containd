@@ -20,6 +20,7 @@ type LossScope struct {
 // fields remain readable, but cannot prove any connection disjoint from loss.
 type CollectionLoss struct {
 	Code         string    `json:"code"`
+	CaptureHook  string    `json:"captureHook,omitempty"`
 	ConnectionID string    `json:"connectionId,omitempty"`
 	Scope        LossScope `json:"scope,omitzero"`
 	Start        time.Time `json:"start,omitzero"`
@@ -130,12 +131,18 @@ func (d Dataset) LossTouches(o Observation) bool {
 		}
 		tuples := []Tuple{o.Authority.Wire}
 		if o.Source == SourceLive {
-			// Without a complete verified pair, a disjoint observed wire face
-			// cannot prove that the unknown opposite NAT face escaped this loss.
-			if o.Authority.Correlation != "verified" || !validAliases(o.Authority) {
+			switch {
+			case o.Authority.CaptureHook == CaptureNFQueue && loss.CaptureHook == CaptureNFQueue:
+				// The forward hook observes the same face in both directions.
+				// Both inputs must carry that authority; missing loss provenance
+				// must not silently become proof of coordinate disjointness.
+			case o.Authority.Correlation == "verified" && validAliases(o.Authority):
+				tuples = append(tuples, o.Authority.Aliases.Original, o.Authority.Aliases.Reply)
+			default:
+				// AF_PACKET lookup failures and unknown capture authority cannot
+				// prove that an unseen opposite NAT face escaped this loss.
 				return true
 			}
-			tuples = append(tuples, o.Authority.Aliases.Original, o.Authority.Aliases.Reply)
 		}
 		for _, wire := range tuples {
 			if !validTuple(wire) || scopeMatches(loss.Scope, wire) {

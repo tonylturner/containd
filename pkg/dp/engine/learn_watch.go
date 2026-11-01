@@ -66,6 +66,12 @@ func (e *Engine) recordLearnEvents(state *flow.State, evs []dpi.Event) {
 	if hook := e.learnWatch.Load(); hook != nil && state != nil {
 		e.flowMu.Lock()
 		snapshot := *state
+		snapshot.CaptureHook = ""
+		if state.InlinePolicy.Load() != nil {
+			snapshot.CaptureHook = evidence.CaptureNFQueue
+		} else if e.transport != nil {
+			snapshot.CaptureHook = evidence.CaptureAFPacket
+		}
 		var lossPacket capture.Packet
 		knownLoss := false
 		if r := e.transport; r != nil {
@@ -108,6 +114,9 @@ func (e *Engine) SetLearnLossHook(offer func(evidence.CollectionLoss)) {
 
 func (e *Engine) recordLearnCaptureLoss(pkt capture.Packet, connection *flow.Connection) {
 	loss := learn.CaptureLoss(pkt, "capture_loss")
+	if loss.CaptureHook == "" && e.transport != nil {
+		loss.CaptureHook = evidence.CaptureAFPacket
+	}
 	if connection != nil && connection.Key != "" {
 		loss.ConnectionID = connection.Key
 	}

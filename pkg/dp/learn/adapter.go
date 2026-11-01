@@ -49,6 +49,9 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 		}
 		coordinates := evidence.CoordinatesWire
 		authority := evidence.Authority{Wire: tuple(wire), Correlation: "wire", RoleCertain: roleCertain(state, ev), RoleEvidence: PortDecoderAuthority, StandardPort: ics.IsProtocolPortOn(ev.Proto, k.Proto, serverPort(k))}
+		if ds.Source == evidence.SourceLive {
+			authority.CaptureHook = state.CaptureHook
+		}
 		if ds.Source == evidence.SourceLive && state.Connection.Load().Verified() {
 			logical := tuple(k)
 			authority.Logical = &logical

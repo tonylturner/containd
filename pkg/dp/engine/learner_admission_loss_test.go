@@ -2,6 +2,7 @@
 package engine
 
 import (
+	"context"
 	"net/netip"
 	"testing"
 	"time"
@@ -17,6 +18,16 @@ func TestTransportAdmissionRetainsLossBeforeWorker(t *testing.T) {
 			e, r, _ := newTransportTest(t, &transportCTFake{evidence: natEvidence()})
 			pkt := transportWire(natEvidence().Original, time.Now(), []byte{1})
 			pkt.TCP = capture.TCPMeta{Valid: true}
+			wantIdentity := ""
+			if mode != "unindexed" {
+				r.authority.check(context.Background())
+				connection := r.resolve(context.Background(), pkt, false)
+				if connection == nil || connection.Key == "" {
+					t.Fatal("fixture failed to bind admission history")
+				}
+				r.indexed[packetKey(pkt).Tuple()] = &transportAdmission{connection: connection}
+				wantIdentity = connection.Key
+			}
 			switch mode {
 			case "byte capacity":
 				r.bytes.Store(transportByteLimit)
@@ -47,6 +58,9 @@ func TestTransportAdmissionRetainsLossBeforeWorker(t *testing.T) {
 			e.SetLearnLossHook(nil)
 			if len(losses) != 1 || losses[0].Code != "capture_loss" || !losses[0].Scope.Ports || losses[0].Scope.Source.IP != pkt.SrcIP.String() || losses[0].Scope.Source.Port != pkt.SrcPort {
 				t.Fatalf("upstream loss depended on worker consumption: %+v", losses)
+			}
+			if losses[0].ConnectionID != wantIdentity {
+				t.Fatalf("admission lost bound identity: got=%q want=%q", losses[0].ConnectionID, wantIdentity)
 			}
 			if mode == "unindexed" && r.unindexedLoss == 0 {
 				t.Fatal("fixture did not exhaust the loss index")

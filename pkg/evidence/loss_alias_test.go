@@ -79,3 +79,16 @@ func TestWireAliasEnvelopeAuthority(t *testing.T) {
 		}
 	}
 }
+
+func TestCaptureHookEnvelopeAuthority(t *testing.T) {
+	for _, source := range []Source{SourceLive, SourcePCAP} {
+		for _, hook := range []string{"", CaptureNFQueue, CaptureAFPacket, "unknown"} {
+			o := observation()
+			o.Source, o.Authority.CaptureHook = source, hook
+			valid := hook == "" || source == SourceLive && (hook == CaptureNFQueue || hook == CaptureAFPacket)
+			if err := o.ValidateEnvelope(); (err == nil) != valid {
+				t.Fatalf("source=%s hook=%q: %v", source, hook, err)
+			}
+		}
+	}
+}
