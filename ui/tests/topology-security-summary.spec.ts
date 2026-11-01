@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures/topology-test";
 
 import { summarizeTargets, targetSummaryText } from "../app/topology/security-summary";
-import type { ConduitMap, Zone } from "../lib/api";
+import type { Conduit, Zone } from "../lib/api";
 import { mapZone, SR_DEFS } from "../lib/security-scoring";
 
 // The security view's overview counts every zone below its SL target, not
@@ -19,7 +19,7 @@ const zones = [
 ];
 
 test("zones below their target are counted across all zones", () => {
-  const summary = summarizeTargets(zones.map(mapZone), {});
+  const summary = summarizeTargets(zones.map(mapZone), []);
   expect(summary).toEqual({
     total: 4,
     below: [
@@ -28,21 +28,37 @@ test("zones below their target are counted across all zones", () => {
     ],
   });
   expect(targetSummaryText(summary)).toBe("2 of 4 zones have unmet SL target checks:");
-  expect(targetSummaryText(summarizeTargets([zones[0], zones[2]].map(mapZone), {}))).toBe("All 2 zones pass SL target checks.");
-  expect(targetSummaryText(summarizeTargets([mapZone(zones[0])], {}))).toBe("The zone passes its SL target checks.");
-  expect(targetSummaryText(summarizeTargets([mapZone(zones[1])], {}))).toBe("1 of 1 zone has unmet SL target checks:");
-  expect(targetSummaryText(summarizeTargets([], {}))).toBe("No zones configured.");
+  expect(targetSummaryText(summarizeTargets([zones[0], zones[2]].map(mapZone), []))).toBe("All 2 zones pass SL target checks.");
+  expect(targetSummaryText(summarizeTargets([mapZone(zones[0])], []))).toBe("The zone passes its SL target checks.");
+  expect(targetSummaryText(summarizeTargets([mapZone(zones[1])], []))).toBe("1 of 1 zone has unmet SL target checks:");
+  expect(targetSummaryText(summarizeTargets([], []))).toBe("No zones configured.");
 });
 
-async function serveSecurity(page: Page, zoneList: Zone[], conduits: ConduitMap = {}) {
+async function serveSecurity(page: Page, zoneList: Zone[], conduits: Conduit[] = []) {
+  let counter = 1;
+  const revision = () => `0123456789abcdef.${counter}`;
+  const updates: { name: string; body: unknown }[] = [];
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (route.request().method() === "PATCH" && path.startsWith("/api/v1/zones/")) {
+      const body = route.request().postDataJSON();
+      const expected = route.request().headers()["x-containd-if-revision"];
+      if (!expected) return route.fulfill({ status: 428, json: { error: "revision required", code: "config_revision_required" } });
+      if (expected !== revision()) return route.fulfill({ status: 412, json: { error: "configuration changed", code: "config_revision_mismatch", currentRevision: revision() } });
+      const name = decodeURIComponent(path.split("/").pop()!);
+      const zone = zoneList.find((z) => z.name === name)!;
+      Object.assign(zone, body);
+      updates.push({ name, body });
+      counter++;
+      return route.fulfill({ json: zone, headers: { "X-Containd-Revision": revision(), "X-Containd-Config": "staged" } });
+    }
     const body = path === "/api/v1/auth/me" || path === "/api/v1/auth/session" ? { id: "admin", username: "containd", role: "admin" }
       : path === "/api/v1/zones" ? zoneList
         : path === "/api/v1/security/conduits" ? conduits
           : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": revision() } });
   });
+  return updates;
 }
 
 test("the security view summarizes zones below target, including zones outside the matrix", async ({ page }) => {
@@ -67,14 +83,13 @@ test("the security view summarizes zones below target, including zones outside t
 });
 
 test("conduit details label requirement check results without claiming a security level", async ({ page }) => {
-  await serveSecurity(page, [zones[1], zones[2]], {
-    "ot→dmz": {
-      state: "allow", ids: "none", proto: [], traffic: 0,
-      rules: [], gaps: [], mitre: [], defaultDeny: false,
-      tlsEnforced: false, protoWhitelist: false, mfaRequired: false,
-      auditLogged: true, avEnabled: false,
-    },
-  });
+  await serveSecurity(page, [zones[1], zones[2]], [{
+    from: "ot", to: "dmz",
+    state: "allow", ids: "none", proto: [], traffic: 0,
+    rules: [], gaps: [], mitre: [], defaultDeny: false,
+    tlsEnforced: false, protoWhitelist: false, mfaRequired: false,
+    auditLogged: true, avEnabled: false,
+  }]);
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/security/conduits");
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
@@ -110,19 +125,10 @@ test("colliding zone slugs keep separate scores, conduits and staging targets", 
     tlsEnforced: true, protoWhitelist: true, mfaRequired: false,
     auditLogged: true, avEnabled: false,
   };
-  await serveSecurity(page, zoneList, {
-    "OT-1→ot_1": admitted,
-    "ot_1→OT-1": { ...admitted, state: "block", defaultDeny: false, auditLogged: false },
-  });
-  const updates: { name: string; body: unknown }[] = [];
-  await page.route("**/api/v1/zones/*", async (route) => {
-    const name = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop()!);
-    const body = route.request().postDataJSON();
-    updates.push({ name, body });
-    const zone = zoneList.find((z) => z.name === name)!;
-    Object.assign(zone, body);
-    await route.fulfill({ json: zone });
-  });
+  const updates = await serveSecurity(page, zoneList, [
+    { ...admitted, from: "OT-1", to: "ot_1" },
+    { ...admitted, from: "ot_1", to: "OT-1", state: "block", defaultDeny: false, auditLogged: false },
+  ]);
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/security/conduits");
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
@@ -148,4 +154,44 @@ test("colliding zone slugs keep separate scores, conduits and staging targets", 
   const rowFor = (name: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
   await expect(rowFor("OT-1").getByRole("cell").nth(4)).toHaveText("2");
   await expect(rowFor("ot_1").getByRole("cell").nth(4)).toHaveText("—");
+});
+
+test("arrow-containing endpoints keep distinct matrix selection and zone scores", async ({ page }) => {
+  const zoneList = ["a→b", "a", "b", "b→a"].map((name) => ({ name, slTarget: 1 }));
+  const admitted = {
+    state: "allow" as const, ids: "full" as const, proto: [], traffic: 0,
+    rules: [], gaps: [], mitre: [], defaultDeny: true,
+    tlsEnforced: true, protoWhitelist: true, mfaRequired: false,
+    auditLogged: true, avEnabled: false,
+  };
+  // These pairs used to share the same joined key.
+  await serveSecurity(page, zoneList, [
+    { ...admitted, from: "a→b", to: "a", rules: ["arrow source policy"] },
+    { ...admitted, from: "a", to: "b→a", state: "block", auditLogged: false, rules: ["arrow destination policy"] },
+  ]);
+  const loaded = page.waitForResponse("**/api/v1/security/conduits");
+  await page.goto("/topology/");
+  await page.getByRole("button", { name: "SECURITY", exact: true }).click();
+  await loaded;
+  const matrix = page.getByRole("region", { name: "Zone conduit matrix" });
+  const details = page.getByRole("region", { name: "Conduit details" });
+  await matrix.getByText("ALLOW", { exact: true }).click();
+  await expect(details).toContainText("A→B → A");
+  await expect(details).toContainText("arrow source policy");
+  await expect(details.getByRole("button", { name: "Stage A→B target SL 2", exact: true })).toBeVisible();
+  await matrix.getByText("BLOCK", { exact: true }).click();
+  await expect(details).toContainText("A → B→A");
+  await expect(details).toContainText("arrow destination policy");
+  await expect(details).not.toContainText("arrow source policy");
+  // Removing an endpoint clears selection without splitting either zone name.
+  await page.locator('[class*="zoneChipName"]', { hasText: /^B→A$/ }).locator("..").getByTitle("Remove", { exact: true }).click();
+  await expect(details).toContainText("SELECT A CELL");
+
+  const scoresLoaded = page.waitForResponse("**/api/v1/security/conduits");
+  await page.goto("/zones/");
+  await scoresLoaded;
+  const rowFor = (name: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
+  await expect(rowFor("a→b").getByRole("cell").nth(4)).toHaveText("2");
+  await expect(rowFor("a").getByRole("cell").nth(4)).toHaveText("—");
+  await expect(rowFor("b").getByRole("cell").nth(4)).toHaveText("—");
 });

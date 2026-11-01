@@ -1,13 +1,17 @@
 "use client";
 
+import { revisionError } from "../../lib/config-revision";
+
+import { useConfigView, matchingRevisions } from "../../lib/use-config-revision";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { notifyConfigMutation } from "../../lib/config-events";
 
-import { getJSONList, postJSON } from "../../lib/api-request";
+import { getJSONList, postJSONResult } from "../../lib/api-request";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, apiURL, fetchDataPlane, isAdmin, type Zone, type FirewallRule } from "../../lib/api";
 import { Shell } from "../../components/Shell";
@@ -17,7 +21,6 @@ import { ICSModeSelect } from "../ics/ics-mode-select";
 import { SkeletonList } from "../../components/Skeleton";
 import { useConfigForm } from "../../lib/use-config-form";
 import { ConfigEditNotice } from "../../lib/use-config-editor";
-import { sameConfig } from "../../lib/config-editor";
 
 /* ── Types ─────────────────────────────────────────────────────── */
 
@@ -78,8 +81,9 @@ async function previewTemplate(
 
 async function applyTemplate(
   req: TemplateApplyRequest,
-): Promise<TemplateApplyResponse | null> {
-  return postJSON<TemplateApplyResponse>("/api/v1/templates/ics/apply", req);
+  revision: string,
+) {
+  return postJSONResult<TemplateApplyResponse>("/api/v1/templates/ics/apply", req, revision);
 }
 
 /* ── Protocol badge colors ─────────────────────────────────────── */
@@ -98,22 +102,29 @@ function protoBadgeClass(proto: string): string {
 /* ── Page ─────────────────────────────────────────────────────── */
 
 export default function TemplatesPage() {
+  const view = useConfigView({ zones: [] as Zone[], globalMode: "" as ICSModeSelection });
+  const { readConfig } = view;
+  const { zones, globalMode } = view.data;
+  const viewRevision = view.state.baseRevision ?? "";
   const canEdit = isAdmin();
   const [templates, setTemplates] = useState<ICSTemplate[] | null>([]);
   // Until the first answer the list is unknown, not empty.
-  const [globalMode, setGlobalMode] = useState<ICSModeSelection>("");
-  const [zones, setZones] = useState<Zone[]>([]);
+  const [configAvailable, setConfigAvailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<ICSTemplate | null>(null);
 
   const { initialLoading: loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [t, z, dp] = await Promise.all([fetchTemplates(), api.listZones(), fetchDataPlane()]);
-    setGlobalMode(dp?.dpiMode ?? "");
+    const [t, zSnapshot, dpSnapshot] = await Promise.all([fetchTemplates(), api.listZones(), fetchDataPlane()]);
     setTemplates(t);
-    setZones(z ?? []);
+    const coherent = matchingRevisions(zSnapshot, dpSnapshot);
+    setConfigAvailable(coherent);
+    if (!coherent) { setError("Configuration changed during loading. Refresh before applying a template."); return; }
+    const z = zSnapshot?.data;
+    const dp = dpSnapshot?.data;
+    readConfig({ data: { zones: z!, globalMode: dp?.dpiMode ?? "" }, revision: zSnapshot!.revision }, keepEdits);
     if (!keepEdits) setActiveTemplate(null);
-  }, []));
+  }, [readConfig]));
 
   useConfigRefresh(refresh);
 
@@ -212,11 +223,12 @@ export default function TemplatesPage() {
       {/* Template configuration modal */}
       {activeTemplate && (
         <TemplateModal
+          revision={viewRevision}
           template={activeTemplate}
           globalMode={globalMode}
           context={templates}
           zones={zones}
-          canEdit={canEdit}
+          canEdit={canEdit && configAvailable}
           onClose={() => setActiveTemplate(null)}
           onSuccess={(msg, close) => {
             setSuccess(msg);
@@ -232,6 +244,7 @@ export default function TemplatesPage() {
 /* ── Template Configuration Modal ──────────────────────────────── */
 
 function TemplateModal({
+  revision,
   context,
   globalMode,
   template,
@@ -241,6 +254,7 @@ function TemplateModal({
   onSuccess,
   onError,
 }: {
+  revision: string;
   context: ICSTemplate[] | null;
   globalMode: ICSModeSelection;
   template: ICSTemplate;
@@ -250,15 +264,13 @@ function TemplateModal({
   onSuccess: (msg: string, close: boolean) => void;
   onError: (msg: string) => void;
 }) {
-  const form = useConfigForm({ sourceZones: [] as string[], destZones: [] as string[], params: {} as Record<string, string>, mode: "" as ICSModeSelection });
-  const { refreshForm } = form;
-  useEffect(() => { refreshForm({ templates: context, zones, globalMode }); }, [refreshForm, context, zones, globalMode]);
+  const form = useConfigForm({ sourceZones: [] as string[], destZones: [] as string[], params: {} as Record<string, string>, mode: "" as ICSModeSelection }, null as unknown, revision);
+  const { readConfig: refreshForm } = form;
+  useEffect(() => { refreshForm({ data: { templates: context, zones, globalMode }, revision: revision ?? "" }, true); }, [refreshForm, context, zones, globalMode, revision]);
   const [sourceZones, setSourceZones] = form.field("sourceZones");
   const [destZones, setDestZones] = form.field("destZones");
   const [mode, setMode] = form.field("mode");
   const [params, setParams] = form.field("params");
-  const latest = useRef(form.editor);
-  useLayoutEffect(() => { latest.current = form.editor; });
   const mounted = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [preview, setPreview] = useState<FirewallRule[] | null>(null);
@@ -288,23 +300,22 @@ function TemplateModal({
   async function handleApply() {
     if (!canEdit) return;
     setLoading(true);
-    const submitted = form.editor;
-    const res = await applyTemplate(buildRequest());
+    const result = await form.write(base => applyTemplate(buildRequest(), base), ["sourceZones", "destZones", "params", "mode"]);
     if (!mounted.current) return;
     setLoading(false);
-    if (!res) {
-      onError("Failed to apply template.");
+    if (!result.ok) {
+      if (revisionError(result) !== null) onError(result.error);
       return;
     }
+    const res = result.data;
     const created = res.created ?? res.rules.length;
     const updated = res.updated ?? 0;
     const parts = [];
     if (created > 0) parts.push(`${created} created`);
     if (updated > 0) parts.push(`${updated} updated`);
     if (parts.length === 0) parts.push(`${res.rules.length} rules`);
-    form.acceptFields(submitted, ["sourceZones", "destZones", "params", "mode"]);
     onSuccess(`Template "${template.name}" staged — commit to apply. ${parts.join(", ")}.`,
-      sameConfig(latest.current.cfg.fields, submitted.cfg.fields));
+      !!result.adopted && !!result.unchanged);
   }
 
   function toggleZone(
@@ -337,7 +348,7 @@ function TemplateModal({
           </button>
         </div>
 
-        <ConfigEditNotice superseded={form.editor.superseded} />
+        <ConfigEditNotice superseded={form.editor.superseded} {...form.conflictProps} onReload={() => window.location.reload()} />
         <div className="space-y-4 text-sm">
           {/* Zone selectors */}
           <div className="grid gap-4 md:grid-cols-2">

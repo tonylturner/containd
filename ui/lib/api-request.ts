@@ -6,7 +6,16 @@ import {
   handleUnauthorized,
 } from "./api-core";
 
-import type { ApiFailure, ApiResult } from "./api";
+import type { ApiFailure, ApiResult, ConfigSnapshot } from "./api";
+
+export function responseRevision(res: Response): string | undefined {
+  const revision = res.headers.get("X-Containd-Revision") ?? "";
+  return revision.length <= 64 && /^[0-9a-f]{16}\.[1-9][0-9]*$/.test(revision) ? revision : undefined;
+}
+
+export function revisionHeaders(revision: string) {
+  return { "X-Containd-If-Revision": revision };
+}
 
 /**
  * A JSON object body type. Lists have a length, so `getJSON<Zone[]>` does
@@ -34,14 +43,25 @@ async function getBody(
   path: string,
   shape: Shape,
   signal?: AbortSignal,
-): Promise<{ status: number; body: unknown } | { status: number; failure: ApiFailure }> {
+): Promise<{ status: number; body: unknown; revision?: string } | { status: number; failure: ApiFailure }> {
   const res = await fetchWithSession(path, { cache: "no-store", headers: authHeaders() }, signal);
   if (handleUnauthorized(res)) return { status: 401, failure: await failureOf(res) };
   clearAuthExpired();
   if (!res.ok) return { status: res.status, failure: await failureOf(res) };
   const body: unknown = await res.json().catch(() => undefined);
   if (!fits(body, shape)) return { status: res.status, failure: { ok: false, error: `malformed response from ${path}` } };
-  return { status: res.status, body };
+  return { status: res.status, body, revision: responseRevision(res) };
+}
+
+/** A config read without its coherent revision is unavailable, not writable. */
+export async function getConfigJSON<T>(path: string, shape: Shape = "object", signal?: AbortSignal): Promise<ConfigSnapshot<T> | null> {
+  try {
+    const res = await getBody(path, shape, signal);
+    return "body" in res && res.revision ? { data: res.body as T, revision: res.revision } : null;
+  } catch (e) {
+    if (isAbort(e)) throw e;
+    return null;
+  }
 }
 
 function isAbort(e: unknown): boolean {
@@ -127,7 +147,7 @@ export async function getJSONListResult<T>(path: string): Promise<ApiResult<T[]>
 async function getResult<T>(path: string, shape: Shape): Promise<ApiResult<T>> {
   try {
     const res = await getBody(path, shape);
-    return "body" in res ? { ok: true, data: res.body as T } : res.failure;
+    return "body" in res ? { ok: true, data: res.body as T, revision: res.revision } : res.failure;
   } catch (e) {
     return {
       ok: false,
@@ -212,8 +232,13 @@ export async function failureOf(res: Response): Promise<ApiFailure> {
   const retryAfter = parseRetryAfter(res);
   // A 401 keeps the server's reason, such as an invalid current password;
   // only an empty body falls back to the bare status.
+  const parsed: unknown = await res.clone().json().catch(() => ({}));
+  const body = isRecord(parsed) ? parsed : {};
   const error = (await parseErrorBody(res)) || (res.status === 401 ? "Unauthorized" : `request failed (${res.status})`);
-  return retryAfter === undefined ? { ok: false, error } : { ok: false, error, retryAfter };
+  return { ok: false, error, retryAfter, status: res.status,
+    code: typeof body.code === "string" ? body.code : undefined,
+    currentRevision: typeof body.currentRevision === "string" ? body.currentRevision : undefined,
+    revision: responseRevision(res) };
 }
 
 /**
@@ -249,11 +274,12 @@ export function parseWarningHeader(res: Response): string | undefined {
 export async function postJSONResult<T>(
   path: string,
   payload: unknown,
+  expectedRevision?: string,
 ): Promise<ApiResult<T>> {
   try {
     const res = await fetchWithSession(path, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...(expectedRevision === undefined ? {} : revisionHeaders(expectedRevision)) },
       body: JSON.stringify(payload),
     });
     if (handleUnauthorized(res)) return failureOf(res);
@@ -264,6 +290,7 @@ export async function postJSONResult<T>(
       ok: true,
       data: await parseSuccessBody<T>(res),
       warning: parseWarningHeader(res),
+      revision: responseRevision(res),
     };
   } catch (e) {
     return {
@@ -276,11 +303,12 @@ export async function postJSONResult<T>(
 export async function patchJSONResult<T>(
   path: string,
   payload: unknown,
+  expectedRevision?: string,
 ): Promise<ApiResult<T>> {
   try {
     const res = await fetchWithSession(path, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...(expectedRevision === undefined ? {} : revisionHeaders(expectedRevision)) },
       body: JSON.stringify(payload),
     });
     if (handleUnauthorized(res)) return failureOf(res);
@@ -291,6 +319,7 @@ export async function patchJSONResult<T>(
       ok: true,
       data: await parseSuccessBody<T>(res),
       warning: parseWarningHeader(res),
+      revision: responseRevision(res),
     };
   } catch (e) {
     return {
@@ -300,17 +329,17 @@ export async function patchJSONResult<T>(
   }
 }
 
-export async function deleteJSONResult<T = void>(path: string): Promise<ApiResult<T>> {
+export async function deleteJSONResult<T = void>(path: string, expectedRevision?: string): Promise<ApiResult<T>> {
   try {
     const res = await fetchWithSession(path, {
       method: "DELETE",
-      headers: authHeaders(),
+      headers: { ...authHeaders(), ...(expectedRevision === undefined ? {} : revisionHeaders(expectedRevision)) },
     });
     if (handleUnauthorized(res)) return failureOf(res);
     clearAuthExpired();
     if (!res.ok) return failureOf(res);
     notifyConfigMutation(res);
-    return { ok: true, data: await parseSuccessBody<T>(res), warning: parseWarningHeader(res) };
+    return { ok: true, data: await parseSuccessBody<T>(res), warning: parseWarningHeader(res), revision: responseRevision(res) };
   } catch (e) {
     return {
       ok: false,

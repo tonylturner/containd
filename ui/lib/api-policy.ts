@@ -5,6 +5,7 @@ import {
   handleUnauthorized,
 } from "./api-core";
 import {
+  getConfigJSON,
   deleteJSONResult,
   failureOf,
   getJSON,
@@ -30,12 +31,12 @@ export type TrustedCAUploadResult =
   | { state: "failed"; error: string };
 
 export const policyAPI = {
-  listAssets: () => getJSONList<Asset>("/api/v1/assets"),
-  createAsset: (a: Asset) => postJSONResult<Asset>("/api/v1/assets", a),
-  updateAsset: (id: string, a: Partial<Asset>) =>
-    patchJSONResult<Asset>(`/api/v1/assets/${encodeURIComponent(id)}`, a),
-  deleteAsset: (id: string) =>
-    deleteJSONResult(`/api/v1/assets/${encodeURIComponent(id)}`),
+  listAssets: () => getConfigJSON<Asset[]>("/api/v1/assets", "list"),
+  createAsset: (expectedRevision: string, a: Asset) => postJSONResult<Asset>("/api/v1/assets", a, expectedRevision),
+  updateAsset: (expectedRevision: string, id: string, a: Partial<Asset>) =>
+    patchJSONResult<Asset>(`/api/v1/assets/${encodeURIComponent(id)}`, a, expectedRevision),
+  deleteAsset: (expectedRevision: string, id: string) =>
+    deleteJSONResult(`/api/v1/assets/${encodeURIComponent(id)}`, expectedRevision),
 
 
   listAudit: () => getJSONList<AuditRecord>("/api/v1/audit"),

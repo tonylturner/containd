@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
       "/api/v1/flows": [],
       "/api/v1/events": [],
     };
-    return route.fulfill({ json: data[path] ?? {} });
+    return route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse("**/api/v1/config");
   await page.goto("/topology/");

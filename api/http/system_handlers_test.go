@@ -118,7 +118,7 @@ func TestTLSInfoReportsEffectiveListeners(t *testing.T) {
 			router := gin.New()
 			router.GET("/tls", getTLSHandler(&mockStore{cfg: tc.cfg}))
 			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
+			serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
 			var got tlsInfoResponse
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 				t.Fatal(err)

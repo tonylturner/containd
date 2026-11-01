@@ -33,7 +33,7 @@ func TestSSHDisableRequiresAccessValidator(t *testing.T) {
 	s := candidateStore(t)
 	cfg := DefaultConfig()
 	cfg.System.SSH.AllowPassword = new(false)
-	if err := s.SaveCandidate(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "usable admin authorized key") {
+	if err := testSaveCandidate(s, context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "usable admin authorized key") {
 		t.Fatalf("stage: %v", err)
 	}
 }
@@ -50,20 +50,21 @@ func TestSSHAccessRecheckedOnPromotion(t *testing.T) {
 				}
 				return nil
 			})
-			if err := s.MutateCandidate(ctx, func(c *Config) error {
+			if err := testMutateCandidate(s, ctx, func(c *Config) error {
 				c.System.SSH.AllowPassword = new(false)
 				return nil
 			}); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := s.LoadCandidate(ctx)
+			cfgSnapshot1, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+			cfg := cfgSnapshot1.Candidate
 			if err != nil || cfg.System.SSH.AllowPassword == nil || *cfg.System.SSH.AllowPassword {
 				t.Fatalf("explicit false was not persisted: %v", err)
 			}
 			keyAvailable = false
-			commit := func() error { return s.Commit(ctx) }
+			commit := func() error { return testCommit(s, ctx) }
 			if confirmed {
-				commit = func() error { return s.CommitConfirmed(ctx, time.Minute) }
+				commit = func() error { return testCommitConfirmed(s, ctx, time.Minute) }
 			}
 			if err := commit(); err == nil {
 				t.Fatal("promotion accepted after key disappeared")

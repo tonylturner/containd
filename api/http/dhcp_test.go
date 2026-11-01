@@ -30,7 +30,7 @@ func TestDHCPAuthorityRoundTrip(t *testing.T) {
 		req := authedRequest(method, "/api/v1"+path, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
-		server.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, server, rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body.String())
 		}
@@ -50,7 +50,7 @@ func TestDHCPAuthorityRoundTrip(t *testing.T) {
 				t.Fatalf("authority lost in service response: %s", rec.Body.String())
 			}
 		}
-		if err := store.Commit(ctx); err != nil {
+		if err := testCommit(store, ctx); err != nil {
 			t.Fatal(err)
 		}
 		exported := call(http.MethodGet, "/config/export", nil).Body.Bytes()
@@ -62,7 +62,8 @@ func TestDHCPAuthorityRoundTrip(t *testing.T) {
 			t.Fatal("authority lost in export")
 		}
 		call(http.MethodPost, "/config/import", exported)
-		candidate, err := store.LoadCandidate(ctx)
+		candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+		candidate := candidateSnapshot1.Candidate
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +89,8 @@ func TestDHCPAuthorityRoundTrip(t *testing.T) {
 	defer store.Close()
 	// Older configuration documents have no authority flag and remain passive.
 	call(http.MethodPost, "/services/dhcp", []byte(`{"enabled":false}`))
-	got, err := store.LoadCandidate(ctx)
+	gotSnapshot2, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	got := gotSnapshot2.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}

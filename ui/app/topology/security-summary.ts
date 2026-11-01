@@ -1,4 +1,4 @@
-import type { ConduitMap } from "../../lib/api";
+import type { Conduit } from "../../lib/api";
 import { type ZoneView, scoreZone } from "../../lib/security-scoring";
 
 /** A zone whose check-based security level is below its target. */
@@ -8,7 +8,7 @@ export type ZoneBelowTarget = { id: string; name: string; sl_a: number; sl_t: nu
 export type TargetSummary = { total: number; below: ZoneBelowTarget[] };
 
 /** Zones below their SL target, in zone order, scored as the matrix scores them. */
-export function summarizeTargets(zones: ZoneView[], conduits: ConduitMap): TargetSummary {
+export function summarizeTargets(zones: ZoneView[], conduits: Conduit[]): TargetSummary {
   const below: ZoneBelowTarget[] = [];
   for (const zone of zones) {
     const { sl_a } = scoreZone(zone, conduits);

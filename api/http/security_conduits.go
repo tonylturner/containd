@@ -58,6 +58,8 @@ type protoEntry struct {
 }
 
 type conduitResult struct {
+	From           string       `json:"from"`
+	To             string       `json:"to"`
 	State          string       `json:"state"`
 	IDS            string       `json:"ids"`
 	Proto          []protoEntry `json:"proto"`
@@ -83,20 +85,19 @@ type conduitGlobalState struct {
 
 func securityConduitsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := readRunningOrDefault(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
 		}
 		globals := computeConduitGlobals(cfg)
-		result := make(map[string]*conduitResult)
+		result := make([]*conduitResult, 0)
 		for _, from := range globals.zoneNames {
 			for _, to := range globals.zoneNames {
 				if from == to {
 					continue
 				}
-				key := from + "\u2192" + to
-				result[key] = buildConduitResult(cfg, globals, from, to)
+				result = append(result, buildConduitResult(cfg, globals, from, to))
 			}
 		}
 		c.JSON(http.StatusOK, result)
@@ -149,6 +150,8 @@ func buildConduitResult(cfg *config.Config, globals conduitGlobalState, from, to
 	gaps := computeGaps(state, defaultDeny, tlsEnforced, protoWhitelist, globals.auditLogged, globals.avEnabled, allPorts, hasICSPredicate)
 	mitre := computeMitre(state, protoWhitelist, from, protos)
 	return &conduitResult{
+		From:           from,
+		To:             to,
 		State:          state,
 		IDS:            globals.idsMode,
 		Proto:          nonNilProtoEntries(protos),

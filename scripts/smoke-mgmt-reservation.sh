@@ -4,6 +4,8 @@ trap 'echo "FAIL: line $LINENO: $BASH_COMMAND" >&2' ERR
 
 # A fully independent project: no published ports, shared images or host data.
 ROOT=$(git rev-parse --show-toplevel)
+# shellcheck source=scripts/config-revision.sh
+source "$ROOT/scripts/config-revision.sh"
 PROJECT="containd-v033fix-mgmt-c3-$(date +%s)-$$"
 PREFIX=${MGMT_SMOKE_PREFIX:-10.217}
 if [[ ! "$PREFIX" =~ ^10\.[0-9]{1,3}$ ]] || (( ${PREFIX#10.} > 255 )); then
@@ -148,13 +150,13 @@ reject_address() {
   # Docker may renumber NICs on restart. Derive this negative case from the
   # current boot authority and config, not from a cached pre-restart device.
   api "$BASE/system/management-reservation" >"$SCRATCH/reservation.json"
-  api "$BASE/config" >"$SCRATCH/current.json"
+  cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/current.json"
   local device
   device=$(jq -er '.device' "$SCRATCH/reservation.json")
   jq '(.interfaces[] | select(.device == $device)).addresses = ["192.0.2.2/24"]' \
     --arg device "$device" "$SCRATCH/current.json" >"$SCRATCH/unsafe.json"
   local status
-  status=$(peer source -o /tmp/rejection.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
+  status=$(cas_write "$SCRATCH/config.revision" peer source -o /tmp/rejection.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' --data-binary @- "$BASE/config/candidate" <"$SCRATCH/unsafe.json")
   [[ "$status" == 400 ]] || { echo "unsafe substrate accepted: HTTP $status" >&2; return 1; }
   compose exec -T source cat /tmp/rejection.json >"$SCRATCH/rejection.json"
@@ -164,7 +166,7 @@ wait_ready
 login
 # A reachable outsider before the edit proves the negative test isn't a bad peer.
 peer outsider --fail "$BASE/health" >"$SCRATCH/outsider-before.json"
-api "$BASE/config" >"$SCRATCH/running.json"
+cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/running.json"
 jq '.interfaces |= map(.access = {mgmt:false,http:false,https:false,ssh:false}) | (.interfaces[] | select(.name == "lan4")).addresses = ["192.0.2.14/24"]' \
   "$SCRATCH/running.json" >"$SCRATCH/disabled.json"
 # An explicit narrow allow, not default allow, proves the transit fixture works
@@ -174,9 +176,9 @@ jq --arg source "$PREFIX.2.10/32" --arg target "$PREFIX.3.10/32" '
   .firewall.rules += [{id:"smoke-transit", sources:[$source], destinations:[$target],
     protocols:[{name:"tcp",port:"18082"}], action:"ALLOW"}]
 ' "$SCRATCH/disabled.json" >"$SCRATCH/transit-allowed.json"
-api --data-binary @- "$BASE/config/candidate" <"$SCRATCH/transit-allowed.json" >"$SCRATCH/stage.json"
-api -D /tmp/commit.headers -X POST "$BASE/config/commit" >"$SCRATCH/commit.json"
-compose exec -T source cat /tmp/commit.headers >"$SCRATCH/commit.headers"
+cas_write "$SCRATCH/config.revision" api --data-binary @- "$BASE/config/candidate" <"$SCRATCH/transit-allowed.json" >"$SCRATCH/stage.json"
+cas_write "$SCRATCH/config.revision" api -X POST "$BASE/config/commit" >"$SCRATCH/commit.json"
+cp "$SCRATCH/config.revision.headers" "$SCRATCH/commit.headers"
 jq -e '.status == "committed"' "$SCRATCH/commit.json" >/dev/null
 if grep -qi '^X-Containd-Warnings:' "$SCRATCH/commit.headers"; then
   echo "commit applied with runtime warnings; see $SCRATCH/commit.headers" >&2
@@ -193,7 +195,7 @@ wait_ready
 login
 assert_reachability
 reject_address
-api "$BASE/config" >"$SCRATCH/restarted.json"
+cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/restarted.json"
 jq -e --arg old "$OLD_DEVICE" '.device != $old and (.bootFault == "")' "$SCRATCH/reservation.json" >/dev/null
 jq -e 'all(.interfaces[]; .access.mgmt == false and .access.http == false and .access.https == false and .access.ssh == false)' \
   "$SCRATCH/restarted.json" >/dev/null
@@ -246,11 +248,18 @@ assert_recovery
 jq -e --slurpfile first "$SCRATCH/first-recovery-ruleset.json" '.appliedAt == $first[0].appliedAt' "$SCRATCH/fault-ruleset.json" >/dev/null
 api "$BASE/events?limit=100" >"$SCRATCH/fault-events.json"
 jq -e '[.[] | select(.kind == "management.reservation.boot_fault")] | length == 1' "$SCRATCH/fault-events.json" >/dev/null
-api "$BASE/config" >"$SCRATCH/fault-config.json"
+cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/fault-config.json"
 jq -e '.system.mgmt.enableHTTP == false and .system.mgmt.httpListenAddr == ":9090" and any(.interfaces[]; .name == "custom-reserved" and .addresses == ["192.0.2.77/24"])' \
   "$SCRATCH/fault-config.json" >/dev/null
-api --data-binary @- "$BASE/config/candidate" <"$SCRATCH/restarted.json" >"$SCRATCH/recovery-stage.json"
-api -X POST "$BASE/config/commit" >"$SCRATCH/recovery-commit.json"
+# Repair only the deliberately corrupted fields in the just-read snapshot;
+# unrelated current settings must not be replaced by the pre-fault document.
+jq --slurpfile healthy "$SCRATCH/restarted.json" '
+  .interfaces = $healthy[0].interfaces |
+  .system.mgmt = $healthy[0].system.mgmt |
+  .system.ssh.listenAddr = $healthy[0].system.ssh.listenAddr
+' "$SCRATCH/fault-config.json" >"$SCRATCH/recovery-candidate.json"
+cas_write "$SCRATCH/config.revision" api --data-binary @- "$BASE/config/candidate" <"$SCRATCH/recovery-candidate.json" >"$SCRATCH/recovery-stage.json"
+cas_write "$SCRATCH/config.revision" api -X POST "$BASE/config/commit" >"$SCRATCH/recovery-commit.json"
 api "$BASE/system/management-reservation" >"$SCRATCH/recovered.json"
 jq -e '.bootFault == "" and .recovery == ""' "$SCRATCH/recovered.json" >/dev/null
 transit >"$SCRATCH/transit-recovered.txt"
@@ -261,20 +270,21 @@ jq -e '.ruleset | length > 0' "$SCRATCH/recovered-ruleset.json" >/dev/null
 # first boot. It must work under a valid reservation and revoke the session.
 inject_conflict
 assert_recovery
-api -d '{"confirm":"NUCLEAR"}' "$BASE/system/factory-reset" >"$SCRATCH/reset.json"
+cas_read "$SCRATCH/config.revision" api "$BASE/config/candidate" >"$SCRATCH/before-reset.json"
+cas_write "$SCRATCH/config.revision" api -d '{"confirm":"NUCLEAR"}' "$BASE/system/factory-reset" >"$SCRATCH/reset.json"
 jq -e '.status == "reset" and .loggedOut' "$SCRATCH/reset.json" >/dev/null
 login
 api "$BASE/system/management-reservation" >"$SCRATCH/reset-reservation.json"
 jq -e '.bootFault == "" and .recovery == ""' "$SCRATCH/reset-reservation.json" >/dev/null
-api "$BASE/config" >"$SCRATCH/reset-config.json"
+cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/reset-config.json"
 jq -e --arg device "$DEVICE" '[.interfaces[] | select(.device == $device)] | length == 1 and all(.[]; (.addresses // [] | length) == 0 and (.addressMode // "static") == "static")' \
   "$SCRATCH/reset-config.json" >/dev/null
 
 # Syntactically valid but not local: optional HTTPS must not crash-loop mgmt.
 jq '.system.mgmt.enableHTTPS = true | .system.mgmt.httpsListenAddr = "192.0.2.250:18443"' \
   "$SCRATCH/reset-config.json" >"$SCRATCH/unbindable-listener.json"
-api --data-binary @- "$BASE/config/candidate" <"$SCRATCH/unbindable-listener.json" >"$SCRATCH/listener-stage.json"
-api -X POST "$BASE/config/commit" >"$SCRATCH/listener-commit.json"
+cas_write "$SCRATCH/config.revision" api --data-binary @- "$BASE/config/candidate" <"$SCRATCH/unbindable-listener.json" >"$SCRATCH/listener-stage.json"
+cas_write "$SCRATCH/config.revision" api -X POST "$BASE/config/commit" >"$SCRATCH/listener-commit.json"
 compose restart containd
 wait_ready
 login

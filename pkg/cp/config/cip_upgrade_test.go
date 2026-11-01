@@ -49,21 +49,22 @@ func TestProtocolScopeCIPUpgrade(t *testing.T) {
 	cfg.SchemaVersion = "0.1.7"
 	cfg.IDS.Rules = historicalCIPBuiltinDefinitions()
 	cfg.IDS.Rules = append(cfg.IDS.Rules, retiredBuiltinDefinitions()...)
-	if err := s.SaveCandidate(context.Background(), cfg); err != nil {
+	if err := testSaveCandidate(s, context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
 	records, err := s.IndustrialScopeMigrations(context.Background())
 	if err != nil || len(records) != 1 || len(records[0].Removed) != 5 || len(records[0].Updated) != 2 {
 		t.Fatalf("combined migration: %+v %v", records, err)
 	}
-	got, err := s.LoadCandidate(context.Background())
+	gotSnapshot1, err := s.ReadSnapshot(context.Background(), SnapshotCandidate, true)
+	got := gotSnapshot1.Candidate
 	if err != nil || len(got.IDS.Rules) != 2 || got.IDS.Rules[0].Proto != "cip" {
 		t.Fatalf("staged: %+v %v", got, err)
 	}
 	custom := DefaultConfig()
 	custom.SchemaVersion = "0.1.7"
 	custom.IDS.Rules = []IDSRule{{ID: "custom", Proto: "enip"}}
-	if err := s.SaveCandidate(context.Background(), custom); err == nil || err.Error() != `ids rule custom proto "enip": EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command` {
+	if err := testSaveCandidate(s, context.Background(), custom); err == nil || err.Error() != `ids rule custom proto "enip": EtherNet/IP is decoded as "cip"; match encapsulation commands with enip_command` {
 		t.Fatalf("custom accepted: %v", err)
 	}
 	if custom.IDS.Rules[0].Proto != "enip" {
@@ -118,7 +119,7 @@ func TestProtocolScopeCIPStoreOpen(t *testing.T) {
 				t.Fatalf("updated-only outbox: %+v %v", records, err)
 			}
 			for _, key := range []string{configKeyRunning, configKeyCandidate, configKeyPrevious} {
-				got, err := s.loadKind(ctx, key)
+				got, err := loadKindFrom(ctx, s.db, key)
 				if err != nil {
 					t.Fatal(err)
 				}

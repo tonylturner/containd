@@ -49,7 +49,8 @@ func TestProtocolScopeLegacyImport(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("stock import: %d %s", rec.Code, rec.Body)
 			}
-			got, err := store.LoadCandidate(ctx)
+			gotSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			got := gotSnapshot1.Candidate
 			if err != nil || got.SchemaVersion != config.SchemaVersionCurrent || len(got.IDS.Rules) != len(config.DefaultIDSConfig().Rules) {
 				t.Fatalf("staged: %+v %v", got, err)
 			}

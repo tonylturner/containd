@@ -21,18 +21,18 @@ async function mockAPI(page: Page) {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") {
-      await route.fulfill({ json: admin });
+      await route.fulfill({ json: admin, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     if (path === "/api/v1/services/dns" && request.method() !== "GET") {
       saves.push(request.postDataJSON());
       await released;
-      await route.fulfill({ json: request.postDataJSON() });
+      await route.fulfill({ json: request.postDataJSON(), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     const body = path === "/api/v1/services/dns" ? { enabled: true, listenPort: 53, upstreamServers: ["192.0.2.53"] }
       : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return { saves, release };
 }

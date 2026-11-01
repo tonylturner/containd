@@ -38,34 +38,35 @@ func setOutboundQuickstartLANWAN(api *API) Command {
 			return nil
 		}
 
-		wanDev, gwIP, err := inferWANGateway(ctx, api)
+		var snapshot config.Config
+		revision, err := api.getConfigJSON(ctx, "/api/v1/config/candidate", &snapshot)
 		if err != nil {
 			return err
 		}
-		routing, err := prepareQuickstartRouting(ctx, api, wanDev, gwIP)
+		ifaces := make([]outboundIface, 0, len(snapshot.Interfaces))
+		for _, iface := range snapshot.Interfaces {
+			ifaces = append(ifaces, outboundIface{Name: iface.Name, Device: iface.Device, Zone: iface.Zone})
+		}
+		wanDev, gwIP, err := inferWANGateway(ctx, api, ifaces)
 		if err != nil {
 			return err
 		}
-		var nat config.NATConfig
-		if err := api.getConfigJSON(ctx, "/api/v1/firewall/nat", &nat); err != nil {
-			return err
-		}
-		var rules []config.Rule
-		if err := api.getConfigJSON(ctx, "/api/v1/firewall/rules", &rules); err != nil {
-			return err
-		}
+		routing := prepareQuickstartRouting(snapshot.Routing, wanDev, gwIP)
+		nat, rules := snapshot.Firewall.NAT, snapshot.Firewall.Rules
 
 		// Finish every authoritative read before staging any part of the edit.
 		nat.Enabled = true
 		nat.EgressZone = "wan"
 		nat.SourceZones = []string{"lan", "mgmt"}
-		if err := api.postJSON(ctx, "/api/v1/routing", routing, nil); err != nil {
+		revision, err = api.mutateRevisionJSON(ctx, "POST", "/api/v1/routing", routing, nil, revision, nil)
+		if err != nil {
 			return err
 		}
-		if err := api.postJSON(ctx, "/api/v1/firewall/nat", nat, nil); err != nil {
+		revision, err = api.mutateRevisionJSON(ctx, "POST", "/api/v1/firewall/nat", nat, nil, revision, nil)
+		if err != nil {
 			return err
 		}
-		if err := ensureQuickstartAllowRule(ctx, api, rules); err != nil {
+		if err := ensureQuickstartAllowRule(ctx, api, rules, revision); err != nil {
 			return err
 		}
 
@@ -79,11 +80,7 @@ func setOutboundQuickstartLANWAN(api *API) Command {
 	}
 }
 
-func inferWANGateway(ctx context.Context, api *API) (string, string, error) {
-	var ifaces []outboundIface
-	if err := api.getJSON(ctx, "/api/v1/interfaces", &ifaces); err != nil {
-		return "", "", err
-	}
+func inferWANGateway(ctx context.Context, api *API, ifaces []outboundIface) (string, string, error) {
 	wan := pickWAN(ifaces)
 	if wan == nil {
 		return "", "", fmt.Errorf("could not determine wan interface (expected an interface named 'wan' or in zone 'wan')")
@@ -107,11 +104,7 @@ func inferWANGateway(ctx context.Context, api *API) (string, string, error) {
 	return wanDev, gwIP, nil
 }
 
-func prepareQuickstartRouting(ctx context.Context, api *API, wanDev, gwIP string) (config.RoutingConfig, error) {
-	var routing config.RoutingConfig
-	if err := api.getConfigJSON(ctx, "/api/v1/routing", &routing); err != nil {
-		return routing, err
-	}
+func prepareQuickstartRouting(routing config.RoutingConfig, wanDev, gwIP string) config.RoutingConfig {
 	routing.Gateways = upsertFirst(routing.Gateways, func(g config.Gateway) bool {
 		return g.Name == quickstartGatewayName
 	}, func(g *config.Gateway) {
@@ -127,7 +120,7 @@ func prepareQuickstartRouting(ctx context.Context, api *API, wanDev, gwIP string
 		r.Gateway = quickstartGatewayName
 		r.Iface = wanDev
 	})
-	return routing, nil
+	return routing
 }
 
 // upsertFirst edits the first matching item, or appends a new item when none
@@ -149,7 +142,7 @@ func isDefaultQuickstartRoute(dst string) bool {
 	return d == "default" || d == "0.0.0.0/0"
 }
 
-func ensureQuickstartAllowRule(ctx context.Context, api *API, rules []config.Rule) error {
+func ensureQuickstartAllowRule(ctx context.Context, api *API, rules []config.Rule, revision config.Revision) error {
 	allow := config.Rule{ID: quickstartAllowRuleID}
 	exists := false
 	for _, r := range rules {
@@ -164,9 +157,10 @@ func ensureQuickstartAllowRule(ctx context.Context, api *API, rules []config.Rul
 	allow.DestZones = []string{"wan"}
 	allow.Action = config.ActionAllow
 	if exists {
-		return api.patchJSON(ctx, "/api/v1/firewall/rules/"+urlEscape(quickstartAllowRuleID), allow, nil)
+		_, err := api.mutateRevisionJSON(ctx, "PATCH", "/api/v1/firewall/rules/"+urlEscape(quickstartAllowRuleID), allow, nil, revision, nil)
+		return err
 	}
-	return api.postJSON(ctx, "/api/v1/firewall/rules", allow, nil)
+	return api.saveJSON(ctx, "/api/v1/firewall/rules", allow, revision, nil)
 }
 
 // guessGatewayAddress returns the gateway guess for an interface that holds

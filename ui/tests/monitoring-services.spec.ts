@@ -34,7 +34,7 @@ test("monitoring overview reads the typed services status", async ({ page }) => 
         av: { available: false, error: "engine unavailable" },
       };
     }
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/services/status");
   await page.goto("/monitoring/");

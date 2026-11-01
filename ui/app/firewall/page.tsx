@@ -1,5 +1,11 @@
 "use client";
 
+import { revisionError } from "../../lib/config-revision";
+
+import type { ConfigBase } from "../../lib/config-boundary";
+
+import { matchingRevisions, useConfigView } from "../../lib/use-config-revision";
+
 import { useConfigLoad } from "../../lib/use-config-editor";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
@@ -13,6 +19,7 @@ import {
   api,
   isAdmin,
   fetchDataPlane,
+  setDataPlane,
   getRulesetPreview,
   type DataPlaneConfig,
   type FirewallRule,
@@ -48,13 +55,21 @@ import { useInstalledRuleset } from "../../hooks/useInstalledRuleset";
 // Large forms, modals, and static protocol metadata belong in sibling modules
 // under ui/app/firewall/ as they become non-trivial.
 
+function insertCreatedRule(rows: FirewallRule[], saved: FirewallRule & { index: number }): FirewallRule[] {
+  const { index, ...rule } = saved;
+  const next = rows.filter(row => row.id !== rule.id);
+  next.splice(index, 0, rule);
+  return next;
+}
+
 export default function FirewallPage() {
+  const configView = useConfigView({ rules: [] as FirewallRule[], zones: [] as Zone[],
+    nat: { enabled: false } as NATConfig, routing: null as RoutingConfig | null,
+    dpiConfig: { captureInterfaces: [], dpiMock: false } as DataPlaneConfig });
+  const { readConfig, write, revisionNotice } = configView;
+  const { rules, zones, nat, routing, dpiConfig } = configView.data;
+  const viewRevision = configView.state.baseRevision ?? "";
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
-  const [rules, setRules] = useState<FirewallRule[]>([]);
-  const [zones, setZones] = useState<Zone[]>([]);
-  const [nat, setNat] = useState<NATConfig>({ enabled: false });
-  const [routing, setRouting] = useState<RoutingConfig | null>(null);
-  const [dpiConfig, setDpiConfig] = useState<DataPlaneConfig>({ captureInterfaces: [], dpiMock: false });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [counters, setCounters] = useState<CountersState>(null);
@@ -119,28 +134,17 @@ export default function FirewallPage() {
   ];
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [r, z, n, rt, dp, c] = await Promise.all([
-      api.listFirewallRules(),
-      api.listZones(),
-      api.getNAT(),
-      api.getRouting(),
-      fetchDataPlane(),
-      api.getRuleCounters(),
-    ]);
-    if (!checkLoaded(r && z && n && rt && dp)) return;
-    setRules(r ?? []);
+    const [rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot, c] = await Promise.all([api.listFirewallRules(), api.listZones(), api.getNAT(), api.getRouting(), fetchDataPlane(), api.getRuleCounters()]);
+    if (!matchingRevisions(rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot)) { checkLoaded(null); return; }
+    if (!checkLoaded(rSnapshot && zSnapshot && nSnapshot && rtSnapshot && dpSnapshot)) return;
+    readConfig({ data: { rules: rSnapshot!.data, zones: zSnapshot!.data, nat: nSnapshot!.data,
+      routing: rtSnapshot!.data, dpiConfig: dpSnapshot!.data }, revision: rSnapshot!.revision }, keepEdits);
     setCounters(c);
-    setZones(z ?? []);
-    setNat(n ?? { enabled: false });
-    setRouting(rt);
-    if (dp) {
-      setDpiConfig(dp);
-    }
     if (!keepEdits) {
       setEditing(null);
       setRefreshKey((key) => key + 1);
     }
-  }, [checkLoaded]));
+  }, [checkLoaded, readConfig]));
 
   useConfigRefresh(refresh);
 
@@ -162,9 +166,9 @@ export default function FirewallPage() {
     if (!canSaveNow()) return;
     setError(null);
     setNotice(null);
-    const result = await api.deleteFirewallRule(id);
+    const result = await write(base => api.deleteFirewallRule(base, id), { patch: view => ({ ...view, rules: view.rules.filter(row => row.id !== id) }) });
     if (!result.ok) {
-      setError(result.error || "Failed to delete rule.");
+      setError(revisionError(result));
       return;
     }
     setNotice(result.warning ? `Rule staged — commit to apply. Warning: ${result.warning}` : "Rule staged — commit to apply.");
@@ -176,43 +180,44 @@ export default function FirewallPage() {
     setMoving(true);
     setError(null);
     setNotice(null);
-    const result = await api.moveFirewallRule(id, position);
+    const result = await write(base => api.moveFirewallRule(base, id, position), { patch: (view, data) => ({ ...view, rules: data.rules }) });
     setMoving(false);
     if (!result.ok) {
-      setError(result.error);
+      setError(revisionError(result));
       return;
     }
-    setRules(result.data.rules);
     setRulesetPreview(null);
     setNotice(`Rule moved to position ${result.data.index + 1} — commit to apply.${result.warning ? ` Warning: ${result.warning}` : ""}`);
   }
 
-  async function onCreate(rule: FirewallRuleCreate) {
-    if (!canSaveNow()) return false;
-    setError(null);
-    setNotice(null);
-    const created = await api.createFirewallRule(rule);
-    if (!created.ok) {
-      setError(created.error || "Failed to create rule (check zones/CIDRs).");
-      return false;
-    }
-    setNotice(created.warning ? `Rule staged — commit to apply. Warning: ${created.warning}` : "Rule staged — commit to apply.");
-    refresh();
-    return true;
-  }
-
-  async function onUpdate(id: string, patch: FirewallRulePatch) {
+  async function onCreate(rule: FirewallRuleCreate, revision: ConfigBase) {
     if (!canSaveNow()) return null;
     setError(null);
     setNotice(null);
-    const updated = await api.updateFirewallRule(id, patch);
+    const created = await configView.writer((base, input: FirewallRuleCreate) => api.createFirewallRule(base, input),
+      (view, saved) => ({ ...view, rules: insertCreatedRule(view.rules, saved) }))(revision, rule);
+    if (!created.ok) {
+      setError(revisionError(created));
+      return created;
+    }
+    setNotice(created.warning ? `Rule staged — commit to apply. Warning: ${created.warning}` : "Rule staged — commit to apply.");
+    refresh();
+    return created;
+  }
+
+  async function onUpdate(id: string, patch: FirewallRulePatch, revision: ConfigBase) {
+    if (!canSaveNow()) return null;
+    setError(null);
+    setNotice(null);
+    const updated = await configView.writer((base, input: FirewallRulePatch) => api.updateFirewallRule(base, id, input),
+      (view, saved) => ({ ...view, rules: view.rules.map(row => row.id === saved.id ? saved : row) }))(revision, patch);
     if (!updated.ok) {
-      setError(updated.error || "Failed to update rule.");
-      return null;
+      setError(revisionError(updated));
+      return updated;
     }
     setNotice(updated.warning ? `Rule staged — commit to apply. Warning: ${updated.warning}` : "Rule staged — commit to apply.");
     refresh();
-    return updated.data;
+    return updated;
   }
   const outboundStatus = (() => {
     const isDefaultDst = (dst: string) => {
@@ -261,34 +266,33 @@ export default function FirewallPage() {
     setQuickStarting(true);
     try {
       const warnings: string[] = [];
-      const [ifs, states, curRouting] = await Promise.all([
-        api.listInterfaces(),
-        api.listInterfaceState(),
-        api.getRouting(),
-      ]);
+      const [ifsSnapshot, states, curRoutingSnapshot] = await Promise.all([api.listInterfaces(), api.listInterfaceState(), api.getRouting()]);
+      const ifs = ifsSnapshot?.data ?? null;
+      const curRouting = curRoutingSnapshot?.data ?? null;
       if (curRouting === null) {
         checkLoaded(null);
         throw new Error("Routing configuration unavailable; no quick-start changes were staged.");
       }
       if (states === null) throw new Error("Interface state unavailable — WAN address discovery failed; no quick-start changes were staged.");
       if (ifs === null) throw new Error("Interface configuration unavailable — WAN discovery failed; no quick-start changes were staged.");
+      if (!matchingRevisions(ifsSnapshot, curRoutingSnapshot) || curRoutingSnapshot?.revision !== viewRevision) throw new Error("Configuration changed since you loaded it. Refresh and review before quick start.");
       const inferred = inferWanGateway(ifs, states);
       if (!inferred.ok) throw new Error(inferred.error);
       const nextRouting = withDefaultRoute(curRouting, wanGateway(inferred.wan));
 
-      const routingUpdated = await api.setRouting(nextRouting);
-      if (!routingUpdated.ok) throw new Error(routingUpdated.error || "Failed to update routing configuration.");
+      const routingUpdated = await write(base => base === curRoutingSnapshot?.revision
+        ? api.setRouting(base, nextRouting) : Promise.resolve({ ok: false as const, error: "Configuration changed during discovery. Refresh and review before quick start." }),
+        { patch: (view, data) => ({ ...view, routing: data }) });
+      if (!routingUpdated.ok) { setError(revisionError(routingUpdated)); return; }
+      if (!routingUpdated.adopted) return;
       if (routingUpdated.warning) warnings.push(`routing: ${routingUpdated.warning}`);
 
-      const sourceZones = new Set([...(nat.sourceZones ?? []), "lan", "mgmt"]);
-      const natNext: NATConfig = {
-        ...nat,
-        enabled: true,
-        egressZone: nat.egressZone || "wan",
-        sourceZones: Array.from(sourceZones),
-      };
-      const natUpdated = await api.setNAT(natNext);
-      if (!natUpdated.ok) throw new Error(natUpdated.error || "Failed to update NAT configuration.");
+      const natUpdated = await write((base, view) => api.setNAT(base, {
+        ...view.nat, enabled: true, egressZone: view.nat.egressZone || "wan",
+        sourceZones: Array.from(new Set([...(view.nat.sourceZones ?? []), "lan", "mgmt"])),
+      }), { patch: (view, data) => ({ ...view, nat: data }) });
+      if (!natUpdated.ok) { setError(revisionError(natUpdated)); return; }
+      if (!natUpdated.adopted) return;
       if (natUpdated.warning) warnings.push(`nat: ${natUpdated.warning}`);
 
       const allowID = "allow-lan-wan";
@@ -301,12 +305,12 @@ export default function FirewallPage() {
         action: "ALLOW",
       };
       if (!existing) {
-        const created = await api.createFirewallRule(allowRule);
-        if (!created.ok) throw new Error(created.error || "Failed to create the LAN\u2192WAN allow rule.");
+        const created = await write(base => api.createFirewallRule(base, allowRule), { patch: (view, data) => ({ ...view, rules: insertCreatedRule(view.rules, data) }) });
+        if (!created.ok) { setError(revisionError(created)); return; }
         if (created.warning) warnings.push(`firewall rule: ${created.warning}`);
       } else {
-        const updated = await api.updateFirewallRule(allowID, allowRule);
-        if (!updated.ok) throw new Error(updated.error || "Failed to update the LAN\u2192WAN allow rule.");
+        const updated = await write(base => api.updateFirewallRule(base, allowID, allowRule), { patch: (view, data) => ({ ...view, rules: view.rules.map(row => row.id === data.id ? data : row) }) });
+        if (!updated.ok) { setError(revisionError(updated)); return; }
         if (updated.warning) warnings.push(`firewall rule: ${updated.warning}`);
       }
 
@@ -347,6 +351,7 @@ export default function FirewallPage() {
         </div>
       }
     >
+      {revisionNotice(() => refresh({ keepEdits: false }))}
       {!isAdmin() && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -449,11 +454,13 @@ export default function FirewallPage() {
         )}
       </Card>
 
-      <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} available={canSave} health={health} onChange={setDpiConfig} />
+      <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} revision={viewRevision} available={canSave} health={health} onSave={update => write((base, view) => setDataPlane(base, update(view.dpiConfig)), { patch: (view, data) => ({ ...view, dpiConfig: data }) })}
+        onSaveDraft={configView.writer((base, updated: DataPlaneConfig) => setDataPlane(base, updated), (view, data) => ({ ...view, dpiConfig: data }))} />
 
       <fieldset disabled={!canSave} className="min-w-0">
       {isAdmin() && (
         <CreateRuleForm
+          revision={viewRevision}
           key={`create-${refreshKey}`}
           context={rules}
           zones={zones}
@@ -490,6 +497,7 @@ export default function FirewallPage() {
 
       {editing && isAdmin() && (
         <EditRuleModal
+          revision={viewRevision}
           zones={zones}
           forwards={nat.portForwards ?? []}
           rule={rules.find((r) => r.id === editing.id) ?? editing}
@@ -497,7 +505,7 @@ export default function FirewallPage() {
           globalMode={dpiConfig.dpiMode}
           tagsInUse={tagsInUse(rules, editing.id)}
           onClose={() => setEditing(null)}
-          onSave={(patch) => onUpdate(editing.id, patch)}
+          onSave={(patch, revision) => onUpdate(editing.id, patch, revision)}
         />
       )}
       </fieldset>

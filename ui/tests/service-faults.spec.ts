@@ -34,6 +34,8 @@ function statusWith(faults: ServiceFault[] = [], policy = "closed", available = 
 }
 
 async function mockAPI(page: Page, initial: unknown, policy = "closed") {
+  let counter = 1;
+  const revision = () => `0123456789abcdef.${counter}`;
   const server = { status: initial, writes: [] as { path: string; body: unknown }[] };
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
@@ -44,8 +46,10 @@ async function mockAPI(page: Page, initial: unknown, policy = "closed") {
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
     if (request.method() !== "GET") {
       const body: unknown = request.postDataJSON();
+      expect(request.headers()["x-containd-if-revision"]).toBe(revision());
       server.writes.push({ path, body });
-      await route.fulfill({ json: body, headers: { "X-Containd-Config": "staged" } });
+      counter++;
+      await route.fulfill({ json: body, headers: { "X-Containd-Config": "staged", "X-Containd-Revision": revision() } });
       return;
     }
     const bodies: Record<string, unknown> = {
@@ -62,7 +66,7 @@ async function mockAPI(page: Page, initial: unknown, policy = "closed") {
       "/zones": [{ name: "lan" }], "/assets": [], "/interfaces": [], "/interfaces/state": [],
       "/config/diff": { changed: false, changedSections: [] },
     };
-    await route.fulfill({ json: bodies[path] ?? {} });
+    await route.fulfill({ json: bodies[path] ?? {}, headers: { "X-Containd-Revision": revision() } });
   });
   return server;
 }

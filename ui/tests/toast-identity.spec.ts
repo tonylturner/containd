@@ -10,7 +10,7 @@ test("simultaneous notifications have unique keys even when the clock is fixed",
       ? { id: "admin", username: "containd", role: "admin" }
       : path.endsWith("/config/diff") ? { changed: false }
       : path.endsWith("/dhcp/leases") ? { leases: [] } : {};
-    return route.fulfill({ json });
+    return route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.goto("/dhcp/");
   const notifications = page.getByRole("status", { name: "Notifications" });

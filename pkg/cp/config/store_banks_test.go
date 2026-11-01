@@ -20,7 +20,7 @@ func TestBankFreeMutationRejectsRulesAndNeverReadsBank(t *testing.T) {
 	ctx := context.Background()
 	before := storeRows(t, s)
 	for _, rules := range [][]IDSRule{{}, DefaultIDSConfig().Rules[:1]} {
-		if err := s.MutateCandidate(ctx, func(c *Config) error {
+		if err := testMutateCandidate(s, ctx, func(c *Config) error {
 			if c.IDS.Rules != nil {
 				t.Fatal("callback received bank")
 			}
@@ -50,11 +50,12 @@ func TestBankFreeMutationRejectsRulesAndNeverReadsBank(t *testing.T) {
 		}
 	}
 	for range 2 { // Both running seeding and an existing candidate.
-		doc, err := s.LoadCandidateDocument(ctx)
+		snapshot, err := s.ReadSnapshot(ctx, SnapshotCandidate, false)
+		doc := snapshot.Candidate
 		if err != nil || doc.IDS.Rules != nil {
 			t.Fatalf("document read touched bank: %v", err)
 		}
-		if err := s.MutateCandidate(ctx, func(c *Config) error { c.Description = "cheap edit"; return nil }); err != nil {
+		if err := testMutateCandidate(s, ctx, func(c *Config) error { c.Description = "cheap edit"; return nil }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -70,18 +71,19 @@ func TestPairedReadWithConcurrentPromotions(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		for i := 1; i <= 100; i++ {
-			if err := s.MutateCandidate(ctx, func(c *Config) error { c.Description = strconv.Itoa(i); return nil }); err != nil {
+			if err := testMutateCandidate(s, ctx, func(c *Config) error { c.Description = strconv.Itoa(i); return nil }); err != nil {
 				t.Error(err)
 				return
 			}
-			if err := s.Commit(ctx); err != nil {
+			if err := testCommit(s, ctx); err != nil {
 				t.Error(err)
 				return
 			}
 		}
 	})
 	for range 150 {
-		running, candidate, err := s.LoadPair(ctx)
+		pairSnapshot1, err := s.ReadSnapshot(ctx, SnapshotPair, true)
+		running, candidate := pairSnapshot1.Running, pairSnapshot1.Candidate
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -178,7 +180,7 @@ func TestExtractEmbeddedBanksFromPreviousSchema(t *testing.T) {
 	ctx := context.Background()
 	ids := map[string]int64{}
 	for key, want := range states {
-		got, err := s.loadKind(ctx, key)
+		got, err := loadKindFrom(ctx, s.db, key)
 		if err != nil || !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s migration lost config/bank: %v", key, err)
 		}
@@ -199,14 +201,14 @@ func TestExtractEmbeddedBanksFromPreviousSchema(t *testing.T) {
 			t.Fatalf("migration not idempotent: %s %d != %d: %v", key, got, id, err)
 		}
 	}
-	if err := s.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(s, ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.Load(ctx)
 	if err != nil || len(got.IDS.Rules) != 0 {
 		t.Fatalf("migrated empty candidate not promoted: %v", err)
 	}
-	if err := s.Rollback(ctx); err != nil {
+	if err := testRollback(s, ctx); err != nil {
 		t.Fatal(err)
 	}
 	got, err = s.Load(ctx)
@@ -244,14 +246,15 @@ func TestBankReferencesSurviveApplyRecovery(t *testing.T) {
 		t.Run(string(change), func(t *testing.T) {
 			s := resetTestStore(t)
 			before := resetConfigRows(t, s)
-			running, candidate, err := s.LoadPair(context.Background())
+			pairSnapshot2, err := s.ReadSnapshot(context.Background(), SnapshotPair, true)
+			running, candidate := pairSnapshot2.Running, pairSnapshot2.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			calls := 0
-			err = s.ApplyChange(ctx, change, time.Hour, func(ctx context.Context, _, next *Config) error {
+			err = testApplyChange(s, ctx, change, time.Hour, func(ctx context.Context, _, next *Config) error {
 				calls++
 				if calls == 1 {
 					cancel()
@@ -269,7 +272,8 @@ func TestBankReferencesSurviveApplyRecovery(t *testing.T) {
 			if !reflect.DeepEqual(before, resetConfigRows(t, s)) {
 				t.Fatal("recovery changed pinned references")
 			}
-			gotRunning, gotCandidate, err := s.LoadPair(context.Background())
+			pairSnapshot3, err := s.ReadSnapshot(context.Background(), SnapshotPair, true)
+			gotRunning, gotCandidate := pairSnapshot3.Running, pairSnapshot3.Candidate
 			if err != nil || !reflect.DeepEqual(gotRunning, running) || !reflect.DeepEqual(gotCandidate, candidate) {
 				t.Fatalf("recovery lost bank: %v", err)
 			}

@@ -7,6 +7,7 @@ import {
   handleUnauthorized,
 } from "./api-core";
 import {
+  getConfigJSON,
   deleteJSONResult,
   failureOf,
   getJSON,
@@ -15,7 +16,7 @@ import {
   postJSONResult,
 } from "./api-request";
 
-import type { ApiResult } from "./api";
+import type { ApiResult, ConfigSnapshot } from "./api";
 
 // Packet capture: capture settings, the capture run, and stored captures.
 
@@ -77,14 +78,15 @@ export type PcapTagRequest = {
   tags: string[];
 };
 
-export async function getPcapConfig(): Promise<PcapConfig | null> {
-  return await getJSON<PcapConfig>("/api/v1/pcap/config");
+export async function getPcapConfig(): Promise<ConfigSnapshot<PcapConfig> | null> {
+  return await getConfigJSON<PcapConfig>("/api/v1/pcap/config", "object");
 }
 
 export async function setPcapConfig(
+  expectedRevision: string,
   cfg: PcapConfig,
 ): Promise<ApiResult<PcapConfig>> {
-  return await postJSONResult<PcapConfig>("/api/v1/pcap/config", cfg);
+  return await postJSONResult<PcapConfig>("/api/v1/pcap/config", cfg, expectedRevision);
 }
 
 export async function startPcap(

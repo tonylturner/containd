@@ -1,13 +1,15 @@
 /** Discriminated result type for mutation API calls that surfaces backend error messages. */
 export type ApiResult<T> =
-  | { ok: true; data: T; warning?: string }
+  | { ok: true; data: T; warning?: string; revision?: string }
   | ApiFailure;
 
 /**
  * A refused or failed call. `retryAfter` is the server's Retry-After in
  * seconds, set when it said when to try again (a 429 rate limit or lock).
  */
-export type ApiFailure = { ok: false; error: string; retryAfter?: number };
+export type ApiFailure = { ok: false; error: string; retryAfter?: number; status?: number; code?: string; currentRevision?: string; revision?: string };
+
+export type ConfigSnapshot<T> = { data: T; revision: string };
 
 // This file is the stable UI API facade. Keep shared public types and the
 // exported `api` surface here, but place endpoint families in `api-*.ts`
@@ -174,6 +176,8 @@ export type ConduitProto = {
 };
 
 export type Conduit = {
+  from: string;
+  to: string;
   state: "allow" | "block" | "partial" | "unmodeled";
   ids: "full" | "partial" | "none";
   proto: ConduitProto[];
@@ -188,8 +192,6 @@ export type Conduit = {
   auditLogged: boolean;
   avEnabled: boolean;
 };
-
-export type ConduitMap = Record<string, Conduit>;
 
 export type Interface = {
   name: string;

@@ -1,11 +1,15 @@
 "use client";
 
+import { revisionError } from "../../lib/config-revision";
+
+import { useConfigView } from "../../lib/use-config-revision";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 import { useToast } from "../../components/ToastProvider";
-import { api, Conduit, ConduitMap } from "../../lib/api";
+import { api, Conduit } from "../../lib/api";
 import { type ZoneView, MAX_SL, mapZone, scoreZone, slColor } from "../../lib/security-scoring";
 import { summarizeTargets, targetSummaryText } from "./security-summary";
 import s from "./security.module.css";
@@ -18,12 +22,12 @@ const INITIAL_ZONES = 6;
    ════════════════════════════════════════════════════════════════════ */
 
 export default function SecurityView() {
+  const { readConfig, write, data: allZones, revisionNotice } = useConfigView<ZoneView[]>([]);
   const toast = useToast();
   const zoneNames = useRef(new Map<string, string>());
-  const [allZones, setAllZones] = useState<ZoneView[]>([]);
-  const [conduits, setConduits] = useState<ConduitMap>({});
+  const [conduits, setConduits] = useState<Conduit[]>([]);
   const [activeIds, setActiveIds] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ from: string; to: string } | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [error, setError] = useState<string | null>(null);
@@ -39,20 +43,32 @@ export default function SecurityView() {
       ]);
       setError(null);
       if (!zones || !conds) throw new Error("Failed to load security data");
-      zoneNames.current = new Map(zones.map((z) => [mapZone(z).id, z.name]));
-      const zv = zones.map(mapZone);
-      setAllZones(zv);
-      setConduits((conds as ConduitMap) || {});
+      zoneNames.current = new Map(zones.data.map((z) => [mapZone(z).id, z.name]));
+      const zv = zones.data.map(mapZone);
+      readConfig({ data: zv, revision: zones.revision });
+      setConduits(conds);
       setActiveIds((prev) => prev.length ? prev : zv.slice(0, INITIAL_ZONES).map((z) => z.id));
     } catch (e) {
       setError(String(e));
     }
-  }, []));
+  }, [readConfig]));
 
   useConfigRefresh(fetchData);
 
   const activeZones = useMemo(() => allZones.filter((z) => activeIds.includes(z.id)), [allZones, activeIds]);
   const targets = useMemo(() => summarizeTargets(allZones, conduits), [allZones, conduits]);
+  const conduitIndex = useMemo(() => {
+    const index = new Map<string, Map<string, Conduit>>();
+    for (const conduit of conduits) {
+      let outbound = index.get(conduit.from);
+      if (!outbound) {
+        outbound = new Map();
+        index.set(conduit.from, outbound);
+      }
+      outbound.set(conduit.to, conduit);
+    }
+    return index;
+  }, [conduits]);
 
   // ── Zone selector ──
   const addZone = useCallback((id: string) => {
@@ -72,8 +88,7 @@ export default function SecurityView() {
     });
     setSelected((prev) => {
       if (!prev) return prev;
-      const [fi, ti] = prev.split("\u2192");
-      if (fi === id || ti === id) return null;
+      if (prev.from === id || prev.to === id) return null;
       return prev;
     });
   }, []);
@@ -87,28 +102,31 @@ export default function SecurityView() {
   const setSLTarget = useCallback(async (zoneId: string, lvl: number) => {
     const name = zoneNames.current.get(zoneId);
     if (!name) return;
-    const result = await api.updateZone(name, { slTarget: lvl });
-    if (!result.ok) { toast(result.error || "Failed to stage zone target", "error"); return; }
+    const result = await write(base => api.updateZone(base, name, { slTarget: lvl }), { patch: (rows, saved) => rows.map(row => row.id === zoneId ? mapZone(saved) : row) });
+    if (!result.ok) { revisionError(result) !== null && toast(result.error, "error"); return; }
     toast("Zone target staged — commit to apply.", "success");
     await fetchData();
-  }, [fetchData, toast]);
+  }, [fetchData, toast, write]);
 
   const toggleOverride = useCallback(async (zoneId: string, srId: string, newVal: boolean) => {
     const zone = allZones.find((z) => z.id === zoneId);
     const name = zoneNames.current.get(zoneId);
     if (!zone || !name) return;
-    const ov = { ...zone.overrides };
-    if (Object.prototype.hasOwnProperty.call(ov, srId)) delete ov[srId];
-    else ov[srId] = newVal;
-    const result = await api.updateZone(name, { slOverrides: ov });
-    if (!result.ok) { toast(result.error || "Failed to stage zone override", "error"); return; }
+    const result = await write((base, rows) => {
+      const current = rows.find(row => row.id === zoneId);
+      const ov = { ...current?.overrides };
+      if (Object.prototype.hasOwnProperty.call(ov, srId)) delete ov[srId];
+      else ov[srId] = newVal;
+      return api.updateZone(base, name, { slOverrides: ov });
+    }, { patch: (rows, saved) => rows.map(row => row.id === zoneId ? mapZone(saved) : row) });
+    if (!result.ok) { revisionError(result) !== null && toast(result.error, "error"); return; }
     toast("Zone override staged — commit to apply.", "success");
     await fetchData();
-  }, [allZones, fetchData, toast]);
+  }, [allZones, fetchData, toast, write]);
 
   // ── Cell selection ──
-  const selectCell = useCallback((key: string) => {
-    setSelected(key);
+  const selectCell = useCallback((from: string, to: string) => {
+    setSelected({ from, to });
     setPanelOpen(true);
   }, []);
 
@@ -133,13 +151,14 @@ export default function SecurityView() {
     );
   }
 
-  const selectedConduit = selected ? conduits[selected] : null;
-  const selectedFrom = selected ? allZones.find((z) => z.id === selected.split("\u2192")[0]) : null;
-  const selectedTo = selected ? allZones.find((z) => z.id === selected.split("\u2192")[1]) : null;
+  const selectedConduit = selected ? conduitIndex.get(selected.from)?.get(selected.to) : null;
+  const selectedFrom = selected ? allZones.find((z) => z.id === selected.from) : null;
+  const selectedTo = selected ? allZones.find((z) => z.id === selected.to) : null;
 
   return (
     <div className={`${ts.workspace} ${s.workspace} ${panelOpen ? s.workspaceWithPanel : ""} ${panelOpen && selected ? s.workspaceWithSelection : ""}`}>
       <div className={s.matrixPane}>
+        {revisionNotice(() => window.location.reload())}
         <div className={s.matrixHeader}>
           <div className={s.matrixTitle}>ZONE &middot; CONDUIT MATRIX</div>
           <div className={s.matrixSubtitle}>Zone targets are candidate settings; conduit observations are live. Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR requirement checks. Check-based SL / SL-T shown on zone headers. Automated checks tag requirements from observed policy; not a standards assessment.</div>
@@ -245,12 +264,11 @@ export default function SecurityView() {
                         </div>
                       );
                     }
-                    const key = `${fromZ.id}\u2192${toZ.id}`;
-                    const cd = conduits[key];
-                    const isSelected = selected === key;
+                    const cd = conduitIndex.get(fromZ.id)?.get(toZ.id);
+                    const isSelected = selected?.from === fromZ.id && selected.to === toZ.id;
                     if (!cd) {
                       return (
-                        <div key={toZ.id} className={`${s.cell} ${s.cellUnmodeled} ${isSelected ? s.cellSelected : ""}`} style={{ animationDelay: `${ri * 0.04 + ci * 0.02}s` }} onClick={() => selectCell(key)}>
+                        <div key={toZ.id} className={`${s.cell} ${s.cellUnmodeled} ${isSelected ? s.cellSelected : ""}`} style={{ animationDelay: `${ri * 0.04 + ci * 0.02}s` }} onClick={() => selectCell(fromZ.id, toZ.id)}>
                           <div className={s.cellAccent} />
                           <div className={s.cellBody}><div className={s.cellState}>&mdash;</div></div>
                         </div>
@@ -264,7 +282,7 @@ export default function SecurityView() {
                     const gaps = cd.gaps || [];
                     const topProtos = proto.slice(0, 2).map((p) => p.n).join(" \u00b7 ") || "\u2014";
                     return (
-                      <div key={toZ.id} className={`${s.cell} ${stateCls} ${isSelected ? s.cellSelected : ""}`} style={{ animationDelay: `${ri * 0.04 + ci * 0.02}s` }} onClick={() => selectCell(key)}>
+                      <div key={toZ.id} className={`${s.cell} ${stateCls} ${isSelected ? s.cellSelected : ""}`} style={{ animationDelay: `${ri * 0.04 + ci * 0.02}s` }} onClick={() => selectCell(fromZ.id, toZ.id)}>
                         <div className={s.cellAccent} />
                         {gaps.length > 0 && <div className={s.cellFindings}><div className={s.findingDot} style={{ background: "var(--amber)" }} /></div>}
                         <div className={s.cellBody}>
@@ -344,7 +362,7 @@ function PanelContent({ conduit, fromZ, toZ, conduits, setSLTarget, toggleOverri
   conduit: Conduit;
   fromZ: ZoneView;
   toZ: ZoneView;
-  conduits: ConduitMap;
+  conduits: Conduit[];
   setSLTarget: (zoneId: string, lvl: number) => void;
   toggleOverride: (zoneId: string, srId: string, newVal: boolean) => void;
 }) {
@@ -416,7 +434,7 @@ function PanelContent({ conduit, fromZ, toZ, conduits, setSLTarget, toggleOverri
 function SLSection({ zone, label, conduits, setSLTarget, toggleOverride }: {
   zone: ZoneView;
   label: string;
-  conduits: ConduitMap;
+  conduits: Conduit[];
   setSLTarget: (zoneId: string, lvl: number) => void;
   toggleOverride: (zoneId: string, srId: string, newVal: boolean) => void;
 }) {

@@ -1,11 +1,15 @@
 "use client";
 
+import { revisionError } from "../../lib/config-revision";
+
+import { useConfigView } from "../../lib/use-config-revision";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { IEC104Inventory } from "./IEC104Inventory";
 import { useConfigRefresh } from "../../lib/use-config-refresh";
 
-import { useCallback, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import { api, isAdmin, type Asset, type Zone } from "../../lib/api";
 import { useToast } from "../../components/ToastProvider";
@@ -24,9 +28,9 @@ const criticalityVariant = (c: string) =>
     : "neutral" as const;
 
 export default function AssetsPage() {
+  const { readConfig, write, data: assets, revisionNotice } = useConfigView<Asset[]>([]);
   const toast = useToast();
   const [inventoryRefresh, setInventoryRefresh] = useState(0);
-  const [assets, setAssets] = useState<Asset[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Asset | null>(null);
@@ -40,12 +44,18 @@ export default function AssetsPage() {
   const [ips, setIps] = useState("");
   const [criticality, setCriticality] = useState("HIGH");
 
+  const retainedDraft = useRef(false);
+  useLayoutEffect(() => {
+    retainedDraft.current = !!(id || name || alias || zone || ips || type !== "PLC" || criticality !== "HIGH" || editing);
+  }, [id, name, alias, zone, ips, type, criticality, editing]);
+
   const { refresh } = useAsyncRefresh(useCallback(async () => {
-    const [a, z] = await Promise.all([api.listAssets(), api.listZones()]);
+    const [aSnapshot, zSnapshot] = await Promise.all([api.listAssets(), api.listZones()]);
+    readConfig(aSnapshot, true, retainedDraft.current);
+    const z = zSnapshot?.data ?? null;
     setInventoryRefresh((key) => key + 1);
-    setAssets(a ?? []);
     setZones(z ?? []);
-  }, []));
+  }, [readConfig]));
 
   useConfigRefresh(refresh);
 
@@ -59,7 +69,7 @@ export default function AssetsPage() {
       const ipErr = validateIPOrCIDRList(ips);
       if (ipErr) { setError(ipErr); return; }
     }
-    const result = await api.createAsset({
+    const result = await write(base => api.createAsset(base, {
       id: id.trim(),
       name: name.trim(),
       alias: alias.trim() || undefined,
@@ -70,9 +80,9 @@ export default function AssetsPage() {
         .map((s) => s.trim())
         .filter(Boolean),
       criticality,
-    });
+    }), { patch: (rows, data) => [...rows, data] });
     if (!result.ok) {
-      setError(result.error);
+      setError(revisionError(result));
       return;
     }
     toast("Asset staged — commit to apply.", "success");
@@ -85,9 +95,9 @@ export default function AssetsPage() {
 
   async function onDelete(assetID: string) {
     setError(null);
-    const result = await api.deleteAsset(assetID);
+    const result = await write(base => api.deleteAsset(base, assetID), { patch: rows => rows.filter(row => row.id !== assetID) });
     if (!result.ok) {
-      setError(result.error);
+      setError(revisionError(result));
       return;
     }
     toast("Asset staged — commit to apply.", "success");
@@ -96,9 +106,9 @@ export default function AssetsPage() {
 
   async function onUpdate(assetID: string, patch: Partial<Asset>) {
     setError(null);
-    const result = await api.updateAsset(assetID, patch);
+    const result = await write(base => api.updateAsset(base, assetID, patch), { patch: (rows, data) => rows.map(row => row.id === assetID ? data : row) });
     if (!result.ok) {
-      setError(result.error);
+      setError(revisionError(result));
       return;
     }
     toast("Asset staged — commit to apply.", "success");
@@ -113,6 +123,7 @@ export default function AssetsPage() {
           View-only mode: configuration changes are disabled.
         </div>
       )}
+      {revisionNotice(() => window.location.reload())}
       {error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}

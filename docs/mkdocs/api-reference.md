@@ -58,6 +58,20 @@ list (learner pages use `{items: [], nextCursor?}`); a reachable stopped simulat
 returns `200` with `running: false`.
 Retry unavailable requests rather than interpreting them as empty or stopped.
 
+## Security Conduits
+
+`GET /security/conduits` returns an array of running zone-to-zone policy
+summaries. Each object contains explicit `from` and `to` zone names alongside
+`state`, `ids`, `proto`, `traffic`, `rules`, `gaps`, `mitre` and the security
+control flags documented in OpenAPI. Every ordered pair of distinct zones is
+included, in configured zone order (source-major, then destination).
+With fewer than two zones, the response is `[]`.
+
+Zone names are exact, case-sensitive identities and may contain arrows or other
+punctuation. Use the `from` and `to` fields directly; do not split a joined name.
+Clients expecting the former map keyed by joined zone names must switch to
+the array response; the map format is not supported.
+
 ## Evidence Status
 
 `GET /api/v1/evidence/status` is authenticated, including for view-role readers.
@@ -135,26 +149,76 @@ See [Config Format](config-format.md) for the configuration lifecycle and JSON.
 Successful staged edits return `X-Containd-Config: staged`. Successful commit,
 commit-confirmed, confirm and rollback return `X-Containd-Config: committed`.
 Operational, read and preview-only responses carry neither header value.
-Failed responses normally omit it too. One exception is `POST /learn/apply`:
+Failed responses also omit them. One exception is `POST /learn/apply`:
 if candidate persistence succeeds but receipt completion fails, HTTP `503`
-still carries `X-Containd-Config: staged`. Retry that request ID and ordered
-selections; the header does not mean the entire request completed.
+still carries `X-Containd-Config: staged`; the header does not mean the
+entire request completed.
+Configuration reads also return `X-Containd-Revision`; successful configuration
+writes return the revision produced by that write, alongside the staged or
+committed header. The revision is header-only, including on `/config/diff`.
+Unauthenticated `/health` and all error responses omit the revision header.
+A learner HTTP 503 reporting durable staging has no revision header: re-read the
+candidate and review it before retrying the receipt.
+
+`POST /interfaces/reconcile` and `POST /routing/reconcile` are runtime operations,
+not configuration writers. They ignore `X-Containd-If-Revision` and return no
+`X-Containd-Revision`. Reconcile leaves unfinished UI edits based on their original
+revision; a later stale save requires conflict review rather than silently
+overwriting another operator's changes.
 
 ## Orchestrator Client Contract
 
-Orchestrators that push a whole policy, such as RangerDanger, apply it with
-the following steps (paths below are relative to `/api/v1`):
+Every configuration writer requires `X-Containd-If-Revision` with the revision
+of the snapshot it is based on. This includes full documents, section edits,
+imports, IDS uploads, learner staging, commits, confirmation, rollback and
+factory reset. There are no client or lab-mode exemptions. The ICS template
+apply route with `preview: true` needs no revision header and ignores one if
+sent; preview does not compare or change configuration state.
 
-1. `POST /config/candidate` with the full document. A non-2xx response means
-   staging failed; report the error body. Staging alone never activates policy.
-2. `POST /config/commit`. A 200 with `X-Containd-Config: committed` means the
-   requested snapshot was applied. With `dataplane.enforcement: true`, the nft
-   ruleset has been installed; nft errors, including missing `NET_ADMIN`, are
-   failures, never ruleset warnings. Keep enforcement enabled for a firewall.
-3. Optionally, `GET /config` and compare running with what was submitted
-   (secrets are redacted and the IDS rule bank is omitted). Use
-   `GET /config/export` to include the running IDS rules. Check `GET /health`
-   for continuing runtime health.
+The revision covers running, candidate (including absence), previous,
+confirmed-commit state and IDS bank references together. Treat it as an opaque
+string, never a number or a document field. It has the form
+`<16 lowercase hex characters>.<positive decimal counter>`, at most 64 bytes.
+Unrelated simultaneous edits intentionally conflict. Restarts preserve it;
+reset, rollback and apply compensation never restore an old revision.
+
+Integrations that push a whole policy use these steps (paths are relative to
+`/api/v1`):
+
+1. `GET /config/candidate` and retain its `X-Containd-Revision` with the document.
+2. `POST /config/candidate` with the full document and
+   `X-Containd-If-Revision: <read revision>`. A non-2xx means staging failed;
+   report the error. Staging alone never activates policy.
+3. Review `GET /config/diff` and retain that response's revision with the diff.
+   `POST /config/commit` with that reviewed revision. A 200 with
+   `X-Containd-Config: committed` means the reviewed candidate was applied.
+   An automated stage-then-commit sequence can send the exact revision returned
+   by its stage; never fetch a later revision merely to authorize an old edit.
+   With `dataplane.enforcement: true`, nft installation failures, including
+   missing `NET_ADMIN`, fail the request rather than becoming warnings. Keep
+   enforcement enabled for a firewall.
+4. Optionally compare `GET /config` with the submitted running document
+   (secrets are redacted and the IDS rule bank is omitted; `GET /config/export`
+   includes the running IDS rules), and check `GET /health` for continuing
+   runtime health.
+
+Missing preconditions return HTTP **428** with `code: config_revision_required`.
+Malformed preconditions (including `*`, quoted tokens and multiple values)
+return **400** with `code: config_revision_malformed`, before body decoding.
+Authentication and authorization run first. A stale valid precondition returns
+**412**, without changing configuration, banks, timers or runtime policy:
+
+```json
+{"error":"configuration changed since it was read","code":"config_revision_mismatch","currentRevision":"0123456789abcdef.42"}
+```
+
+Keep the draft on 412. Re-read and review the changed state before deliberately
+resubmitting; never automatically retry an old edit with `currentRevision`.
+Independent semantic conflicts still use 409. A rejected VPN upload removes its
+new file. Learner staging releases its engine reservation on rejection; release
+uncertainty remains 503. If a learner 503 reports durable staging, retain the
+receipt, re-read/review the candidate, and resubmit that same receipt with the
+reviewed revision; the original precondition remains stale.
 
 Commit, commit-confirmed and rollback restore the pre-request running document
 and IDS bank on apply failure, then reapply them. The failed candidate stays
@@ -239,8 +303,13 @@ the submitted document must keep the reserved interface's `device` binding and
 set `dataplane.enforcement: true`. Copy the binding from `GET /config`.
 Otherwise staging is rejected with HTTP 400 and running remains unchanged.
 
+`GET /config/diff` includes `pendingConfirm: {"deadline":"<RFC3339 UTC>"}`
+or `pendingConfirm: null`, read in the same snapshot as the documents and
+revision. This is server state, including after navigation or a restart.
+
 `POST /config/confirm` only cancels the pending rollback deadline; its
-`committed` header acknowledges confirmation, not a new runtime apply.
+`committed` header acknowledges confirmation, not a new runtime apply. When
+nothing is pending it returns the current revision without invalidating drafts.
 
 ### Factory reset
 

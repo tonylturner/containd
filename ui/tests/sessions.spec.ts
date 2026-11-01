@@ -20,7 +20,7 @@ async function mockAPI(page: Page, options: { unavailable?: boolean; empty?: boo
       body = { id: "admin-1", username: "containd", role: options.role ?? "admin" };
     } else if (path === "/api/v1/conntrack") {
       if (options.unavailable) {
-        await route.fulfill({ status: 502, json: { error: "ctnetlink: operation not permitted" } });
+        await route.fulfill({ status: 502, json: { error: "ctnetlink: operation not permitted" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
         return;
       }
       body = options.empty ? [] : options.entries ?? [entry];
@@ -34,7 +34,7 @@ async function mockAPI(page: Page, options: { unavailable?: boolean; empty?: boo
         closure: "TCP reset signalled on each endpoint's next packet; closure not confirmed",
       };
     }
-    await route.fulfill({ status: 200, json: body });
+    await route.fulfill({ status: 200, json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return writes;
 }

@@ -1,7 +1,8 @@
 import { authHeaders, fetchWithSession, handleUnauthorized } from "./api-core";
 import {
+  getConfigJSON,
+  responseRevision,
   deleteJSONResult,
-  getJSON,
   getJSONList,
   isRecord,
   postJSONResult,
@@ -13,6 +14,7 @@ export type IDSBankSummary = { count: number; sha256: string };
 export type ConfigDiff = {
   changed: boolean;
   changedSections: string[];
+  pendingConfirm: { deadline: string } | null;
   running: ConfigBundle | null;
   candidate: ConfigBundle | null;
   /** Absent when the response did not carry both bank summaries. */
@@ -28,17 +30,21 @@ function normalizeConfigDiff(diff: ConfigDiff | null): ConfigDiff | null {
 }
 
 export const configAPI = {
-  getRunningConfig: (signal?: AbortSignal) => getJSON<ConfigBundle>("/api/v1/config", signal),
-  getCandidateConfig: () => getJSON<ConfigBundle>("/api/v1/config/candidate"),
-  setCandidateConfig: (cfg: ConfigBundle) =>
-    postJSONResult<{ status: string }>("/api/v1/config/candidate", cfg),
-  diffConfig: async () => normalizeConfigDiff(await getJSON<ConfigDiff>("/api/v1/config/diff")),
+  getRunningConfig: (signal?: AbortSignal) => getConfigJSON<ConfigBundle>("/api/v1/config", "object", signal),
+  getCandidateConfig: () => getConfigJSON<ConfigBundle>("/api/v1/config/candidate", "object"),
+  setCandidateConfig: (expectedRevision: string, cfg: ConfigBundle) =>
+    postJSONResult<{ status: string }>("/api/v1/config/candidate", cfg, expectedRevision),
+  diffConfig: async () => {
+    const snapshot = await getConfigJSON<ConfigDiff>("/api/v1/config/diff");
+    const data = normalizeConfigDiff(snapshot?.data ?? null);
+    return snapshot && data ? { data, revision: snapshot.revision } : null;
+  },
   exportConfig: (redacted = true) =>
-    getJSON<ConfigBundle>(
-      `/api/v1/config/export?redacted=${redacted ? "1" : "0"}`,
+    getConfigJSON<ConfigBundle>(
+      `/api/v1/config/export?redacted=${redacted ? "1" : "0"}`, "object",
     ),
-  importConfig: (cfg: ConfigBundle) =>
-    postJSONResult<{ status: string }>("/api/v1/config/import", cfg),
+  importConfig: (expectedRevision: string, cfg: ConfigBundle) =>
+    postJSONResult<{ status: string }>("/api/v1/config/import", cfg, expectedRevision),
   listConfigBackups: () => getJSONList<ConfigBackup>("/api/v1/config/backups"),
   createConfigBackup: (req: { name?: string; redacted: boolean }) =>
     postJSONResult<ConfigBackup>("/api/v1/config/backups", req),
@@ -61,21 +67,22 @@ export const configAPI = {
       cache: "no-store",
     });
     if (handleUnauthorized(res) || !res.ok) return null;
-    return await res.blob();
+    const revision = responseRevision(res);
+    return revision ? { data: await res.blob(), revision } : null;
   },
-  restoreIDSRules: async (rules: unknown[]) =>
+  restoreIDSRules: async (expectedRevision: string, rules: unknown[]) =>
     postJSONResult<{ status: string; count: number }>(
       "/api/v1/ids/restore",
-      rules,
+      rules, expectedRevision,
     ),
-  commit: () => postJSONResult<{ status: string }>("/api/v1/config/commit", {}),
-  commitConfirmed: (ttlSeconds?: number) =>
+  commit: (expectedRevision: string) => postJSONResult<{ status: string }>("/api/v1/config/commit", {}, expectedRevision),
+  commitConfirmed: (expectedRevision: string, ttlSeconds?: number) =>
     postJSONResult<{ status: string }>(
       "/api/v1/config/commit_confirmed",
-      ttlSeconds ? { ttl_seconds: ttlSeconds } : {},
+      ttlSeconds ? { ttl_seconds: ttlSeconds } : {}, expectedRevision,
     ),
-  confirmCommit: () =>
-    postJSONResult<{ status: string }>("/api/v1/config/confirm", {}),
-  rollback: () =>
-    postJSONResult<{ status: string }>("/api/v1/config/rollback", {}),
+  confirmCommit: (expectedRevision: string) =>
+    postJSONResult<{ status: string }>("/api/v1/config/confirm", {}, expectedRevision),
+  rollback: (expectedRevision: string) =>
+    postJSONResult<{ status: string }>("/api/v1/config/rollback", {}, expectedRevision),
 };

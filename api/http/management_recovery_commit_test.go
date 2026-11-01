@@ -60,7 +60,7 @@ func TestFailedTransitionDuringRecoveryReentersRecovery(t *testing.T) {
 
 	for _, path := range []string{"/config/commit", "/config/commit_confirmed"} {
 		t.Run(path, func(t *testing.T) {
-			if err := store.SaveCandidate(ctx, cfg); err != nil {
+			if err := testSaveCandidate(store, ctx, cfg); err != nil {
 				t.Fatal(err)
 			}
 			engine.applied = nil
@@ -94,7 +94,7 @@ func TestFailedTransitionDuringRecoveryReentersRecovery(t *testing.T) {
 
 	// A failed recovery apply is the compensation's failure.
 	engine.rulesErr = errors.New("nft unavailable")
-	if err := store.SaveCandidate(ctx, cfg); err != nil {
+	if err := testSaveCandidate(store, ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
 	rec := requestStage(t, server, "POST", "/config/commit", nil)

@@ -2,7 +2,7 @@
 
 import { useAsyncRefresh } from "../../../../hooks/useAsyncRefresh";
 
-import { useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
+import { revisionError, useConfigLoad, useConfigEditor, ConfigEditNotice } from "../../../../lib/use-config-editor";
 
 import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 
@@ -24,7 +24,7 @@ export default function DNSPage() {
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
   const status = servicesStatus?.dns ?? null;
-  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<DNSConfig>({
+  const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write, text, setText } = useConfigEditor<DNSConfig>({
     enabled: false,
     listenPort: 53,
     upstreamServers: [],
@@ -38,10 +38,11 @@ export default function DNSPage() {
   const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const svc = await api.getServicesStatus();
     setServicesStatus(svc);
-    const s = await api.getDNS();
+    const sSnapshot = await api.getDNS();
+    const s = (sSnapshot?.data ?? null);
     if (!checkLoaded(s)) return;
     setError(null);
-    adoptConfig(s, keepEdits);
+    adoptConfig({ data: s, revision: sSnapshot?.revision ?? "" }, keepEdits);
     setLastUpdated(new Date());
   }, [adoptConfig, checkLoaded]));
 
@@ -60,14 +61,12 @@ export default function DNSPage() {
   async function onSave() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
-    const submitted = beginSave();
-    const saved = await save.run("save", () => api.setDNS({ ...cfg, upstreamServers: upstreamText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
+    const saved = await save.run("save", () => write((base, submitted) => api.setDNS(base, { ...submitted, upstreamServers: upstreamText.split("\n").map((s) => s.trim()).filter(Boolean) }), { replace: data => data }), {
       success: "DNS settings staged — commit to apply.",
       failure: "Failed to save DNS settings.",
     });
-    if (!saved) { failSave(submitted); return; }
-    if (saved.ok) acceptConfig(submitted, saved.data);
-    else { failSave(submitted); setError(saved.error); }
+    if (!saved) return;
+    if (!saved.ok) setError(revisionError(saved));
     await refresh();
   }
 
@@ -105,7 +104,7 @@ export default function DNSPage() {
     >
       <ServiceFaultBanner status={servicesStatus} loading={loading} only={["dns"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
-      <ConfigEditNotice superseded={editor.superseded} />
+      <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">

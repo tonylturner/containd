@@ -23,6 +23,10 @@ On failure the harness stops immediately and preserves diagnostics, not the
 running stack. Every check emits a named PASS/FAIL; exit 1 means a failed check,
 exit 2 a prerequisite/harness failure.
 
+Configuration reads retain their snapshot revision; saves and commits chain
+the acknowledged revisions without retrying conflicts. Credential issuance
+and revocation use the separate service authority, not the candidate revision.
+
 The quarantine fixture deliberately edits only the stopped, disposable running
 SQLite snapshot. No public API can introduce a new service fault: candidate and
 import paths validate new content. This models a pre-upgrade configuration, as

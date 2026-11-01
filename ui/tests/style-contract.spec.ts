@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
       : path.endsWith("/dhcp/leases") ? { leases: [] }
         : path.endsWith("/config/diff") ? { changed: false, changedSections: [] }
           : {};
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 });
 
@@ -61,11 +61,11 @@ for (const [path, placeholder] of [
   ["/ids", "Search rules..."],
 ] as const) {
   test(`${path} search text starts clear of its icon`, async ({ page }) => {
-    await page.route("**/api/v1/identities", (route) => route.fulfill({ json: { mappings: [{ ip: "10.0.0.5", identities: ["ops"] }] } }));
-    await page.route("**/api/v1/zones", (route) => route.fulfill({ json: [{ name: "ot" }] }));
-    await page.route("**/api/v1/audit", (route) => route.fulfill({ json: [] }));
-    await page.route("**/api/v1/events?*", (route) => route.fulfill({ json: [] }));
-    await page.route("**/api/v1/ids/rules", (route) => route.fulfill({ json: { enabled: true, rules: [{ id: "r1", title: "rule" }] } }));
+    await page.route("**/api/v1/identities", (route) => route.fulfill({ json: { mappings: [{ ip: "10.0.0.5", identities: ["ops"] }] }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+    await page.route("**/api/v1/zones", (route) => route.fulfill({ json: [{ name: "ot" }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+    await page.route("**/api/v1/audit", (route) => route.fulfill({ json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+    await page.route("**/api/v1/events?*", (route) => route.fulfill({ json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+    await page.route("**/api/v1/ids/rules", (route) => route.fulfill({ json: { enabled: true, rules: [{ id: "r1", title: "rule" }] }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
     await page.goto(path);
     const input = page.getByPlaceholder(placeholder, { exact: true });
     await expect(input).toHaveCSS("padding-left", "36px");
@@ -77,7 +77,7 @@ for (const [path, placeholder] of [
 }
 
 test("a toolbar search field fits its placeholder", async ({ page }) => {
-  await page.route("**/api/v1/identities", (route) => route.fulfill({ json: { mappings: [{ ip: "10.0.0.5", identities: ["ops"] }] } }));
+  await page.route("**/api/v1/identities", (route) => route.fulfill({ json: { mappings: [{ ip: "10.0.0.5", identities: ["ops"] }] }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/identities");
   const input = page.getByPlaceholder("Search addresses or identities...", { exact: true });
   await expect(input).toBeVisible();

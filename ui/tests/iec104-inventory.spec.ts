@@ -11,7 +11,7 @@ async function mock(page: Page, response: () => { status: number; body: unknown 
     else if (["/assets", "/zones", "/interfaces", "/interfaces/state"].some((p) => path.endsWith(p))) body = [];
     else if (path.endsWith("/auth/me") || path.endsWith("/auth/session")) body = { id: "admin", username: "operator", role: "admin" };
     else if (path.endsWith("/health")) body = { status: "ok", iec104Enforcement: { active: false, healthy: true } };
-    await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 }
 

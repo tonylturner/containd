@@ -38,14 +38,15 @@ func TestImportNormalizesLegacyShellModeAndSaveStaysStrict(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodPost, path, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		s.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, s, rec, req)
 		return rec
 	}
 	for backup, want := range map[string]string{"Linux": "linux", "LINUX": "linux", "linux": "linux", "bash": "appliance", "": ""} {
 		if rec := post("/api/v1/config/import", backup); rec.Code != http.StatusOK {
 			t.Fatalf("import %q: %d %s", backup, rec.Code, rec.Body.String())
 		}
-		candidate, err := store.LoadCandidate(context.Background())
+		candidateSnapshot1, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+		candidate := candidateSnapshot1.Candidate
 		if err != nil || candidate.System.SSH.ShellMode != want {
 			t.Fatalf("import %q staged %q (%v), want %q", backup, candidate.System.SSH.ShellMode, err, want)
 		}

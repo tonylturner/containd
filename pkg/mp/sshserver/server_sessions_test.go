@@ -33,7 +33,7 @@ func TestFactoryResetDisconnectsSSHAfterResult(t *testing.T) {
 				if secretless {
 					srv.opts.JWTSecret = nil
 				}
-				api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				api := httptest.NewServer(revisionedSSHResetHandler(func(w http.ResponseWriter, r *http.Request) {
 					initiator := r.Header.Get("X-Containd-SSH-Connection")
 					if !secretless {
 						claims := jwt.MapClaims{}

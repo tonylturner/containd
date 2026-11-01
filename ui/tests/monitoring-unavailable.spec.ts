@@ -25,9 +25,9 @@ test.beforeEach(async ({ page }) => {
       runtime: { uptime: "1m", goroutines: 1 },
     };
     if (["/api/v1/flows", "/api/v1/interfaces/state", "/api/v1/simulation", "/api/v1/diagnostics/iec104"].includes(path)) {
-      await route.fulfill({ status: 503, json: { error: "engine unavailable" } });
+      await route.fulfill({ status: 503, json: { error: "engine unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     } else {
-      await route.fulfill({ json: body });
+      await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     }
   });
 });
@@ -35,8 +35,8 @@ test.beforeEach(async ({ page }) => {
 test("flow failure is not an empty flow set and Retry recovers", async ({ page }, testInfo) => {
   let unavailable = true;
   await page.route("**/api/v1/flows?*", (route) => route.fulfill(unavailable
-    ? { status: 503, json: { error: "engine flows unavailable" } }
-    : { json: [] }));
+    ? { status: 503, json: { error: "engine flows unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
+    : { json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/flows/");
   await expect(page.getByRole("status").filter({ hasText: "Flows unavailable" })).toBeVisible();
   await expect(page.getByText("No flows yet", { exact: true })).toHaveCount(0);
@@ -53,10 +53,10 @@ test("flow failure is not an empty flow set and Retry recovers", async ({ page }
 
 test("interface failure differs from a reachable engine with no interfaces", async ({ page }) => {
   let unavailable = true;
-  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "configured-lan", device: "eth0", addresses: ["192.0.2.1/24"] }] }));
+  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "configured-lan", device: "eth0", addresses: ["192.0.2.1/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(unavailable
-    ? { status: 503, json: { error: "engine interface state unavailable" } }
-    : { json: [] }));
+    ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
+    : { json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/interfaces/");
   await expect(page.getByRole("status").filter({ hasText: "Interface runtime state unavailable" })).toBeVisible();
   await expect(page.getByText("No OS interfaces reported.", { exact: true })).toHaveCount(0);
@@ -70,8 +70,8 @@ test("interface failure differs from a reachable engine with no interfaces", asy
 test("simulation failure is unknown, not stopped, and Retry recovers", async ({ page }) => {
   let unavailable = true;
   await page.route("**/api/v1/simulation", (route) => route.fulfill(unavailable
-    ? { status: 503, json: { error: "engine simulation unavailable" } }
-    : { json: { running: false } }));
+    ? { status: 503, json: { error: "engine simulation unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
+    : { json: { running: false }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/");
   const state = page.getByRole("status").filter({ hasText: "Simulation unavailable" });
   await expect(state).toBeVisible();
@@ -97,10 +97,10 @@ test("PCAP discovery distinguishes unavailable, empty and populated state withou
   await page.route("**/api/v1/pcap/config", (route) => route.fulfill({ json: {
     interfaces: [], zones: [],
     forwardTargets: [{ interface: "saved-sensor", enabled: true, host: "198.51.100.7", port: 9000, proto: "udp" }],
-  } }));
+  }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
-    ? { status: 503, json: { error: "engine interface state unavailable" } }
-    : { json: phase === "empty" ? [] : [{ name: "eth9", index: 9, up: true, addrs: ["192.0.2.2/24"] }] }));
+    ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
+    : { json: phase === "empty" ? [] : [{ name: "eth9", index: 9, up: true, addrs: ["192.0.2.2/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/dataplane/");
   const unavailable = page.getByRole("status").filter({ hasText: "Interface runtime state unavailable" });
   const savedHost = page.locator('input[placeholder="sensor.example.local"][value="198.51.100.7"]');
@@ -127,17 +127,17 @@ test("PCAP discovery distinguishes unavailable, empty and populated state withou
 test("Auto WAN setup retries unavailable discovery without staging fabricated routes", async ({ page }) => {
   let phase: "unavailable" | "empty" | "populated" = "unavailable";
   const staged: unknown[] = [];
-  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "wan", device: "eth0", zone: "wan" }] }));
+  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "wan", device: "eth0", zone: "wan" }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
-    ? { status: 503, json: { error: "engine interface state unavailable" } }
-    : { json: phase === "empty" ? [] : [{ name: "eth0", index: 1, up: true, addrs: ["192.0.2.2/24"] }] }));
+    ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
+    : { json: phase === "empty" ? [] : [{ name: "eth0", index: 1, up: true, addrs: ["192.0.2.2/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/routing", (route) => {
     if (route.request().method() === "POST") {
       const next = route.request().postDataJSON();
       staged.push(next);
-      return route.fulfill({ json: next, headers: { "X-Containd-Config": "staged" } });
+      return route.fulfill({ json: next, headers: { "X-Containd-Revision": "0123456789abcdef.1", "X-Containd-Config": "staged" } });
     }
-    return route.fulfill({ json: staged.at(-1) ?? { gateways: [], routes: [], rules: [] } });
+    return route.fulfill({ json: staged.at(-1) ?? { gateways: [], routes: [], rules: [] }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.goto("/routing/");
   const autoWAN = page.getByRole("button", { name: "Auto WAN default", exact: true });
@@ -170,10 +170,10 @@ test("diagnostics keeps interface-state failure local and retries runtime addres
   let phase: "unavailable" | "empty" | "populated" = "unavailable";
   await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [
     { name: "lan", device: "eth0", zone: "lan" },
-  ] }));
+  ], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
-    ? { status: 503, json: { error: "engine interface state unavailable" } }
-    : { json: phase === "empty" ? [] : [{ name: "eth0", up: true, addrs: ["192.0.2.10/24"] }] }));
+    ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
+    : { json: phase === "empty" ? [] : [{ name: "eth0", up: true, addrs: ["192.0.2.10/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/diagnostics/");
   const connectivity = page.getByRole("region", { name: "Interface Connectivity", exact: true });
   const unavailable = connectivity.getByRole("status").filter({ hasText: "Interface runtime state unavailable" });
@@ -205,18 +205,16 @@ for (const view of ["physical", "logical"] as const) {
       await page.route("**/api/v1/config", (route) => route.fulfill({ json: {
         interfaces: view === "logical" ? [{ name: "lan", device: "eth9", zone: "lan" }] : [],
         zones: [], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] },
-      } }));
-      await page.route("**/api/v1/system/inspection", (route) => route.fulfill({
-        status: 503, json: { error: "inspection unavailable" },
-      }));
+      }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+      await page.route("**/api/v1/system/inspection", (route) => route.fulfill({ status: 503, json: { error: "inspection unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
       await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable" && failedEndpoint === "interfaces"
-        ? { status: 503, json: { error: "engine interface state unavailable" } }
-        : { json: phase === "empty" ? [] : [{ name: "eth9", up: true, mtu: 1500, addrs: ["192.0.2.9/24"] }] }));
+        ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
+        : { json: phase === "empty" ? [] : [{ name: "eth9", up: true, mtu: 1500, addrs: ["192.0.2.9/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
       await page.route("**/api/v1/flows?*", (route) => route.fulfill(phase === "unavailable" && failedEndpoint === "flows"
-        ? { status: 503, json: { error: "engine flows unavailable" } }
+        ? { status: 503, json: { error: "engine flows unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
         : { json: phase === "empty" ? [] : [{
           flowId: "flow-1", firstSeen: "2026-01-01T00:00:00Z", lastSeen: "2026-01-01T00:01:00Z", eventCount: 1,
-        }] }));
+        }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
       await page.goto("/topology/");
       if (view === "physical") await page.getByRole("button", { name: "PHYSICAL", exact: true }).click();
       const unavailable = page.getByRole("alert").filter({ hasText: view === "physical" ? "Physical topology unavailable" : "Logical topology unavailable" });
@@ -252,10 +250,10 @@ for (const view of ["physical", "logical"] as const) {
 test("firewall quick-start rejects unavailable WAN discovery before staging any changes", async ({ page }) => {
   let phase: "unavailable" | "empty" | "populated" = "unavailable";
   const writes: { path: string; body: unknown }[] = [];
-  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "wan", device: "eth0", zone: "wan" }] }));
+  await page.route("**/api/v1/interfaces", (route) => route.fulfill({ json: [{ name: "wan", device: "eth0", zone: "wan" }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
-    ? { status: 503, json: { error: "engine interface state unavailable" } }
-    : { json: phase === "empty" ? [] : [{ name: "eth0", up: true, addrs: ["192.0.2.2/24"] }] }));
+    ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
+    : { json: phase === "empty" ? [] : [{ name: "eth0", up: true, addrs: ["192.0.2.2/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   for (const [path, initial] of [
     ["/routing", { gateways: [], routes: [], rules: [] }],
     ["/firewall/nat", { enabled: false, sourceZones: [] }],
@@ -266,9 +264,9 @@ test("firewall quick-start rejects unavailable WAN discovery before staging any 
       if (route.request().method() === "POST") {
         saved = route.request().postDataJSON();
         writes.push({ path, body: saved });
-        return route.fulfill({ json: saved, headers: { "X-Containd-Config": "staged" } });
+        return route.fulfill({ json: saved, headers: { "X-Containd-Revision": "0123456789abcdef.1", "X-Containd-Config": "staged" } });
       }
-      return route.fulfill({ json: path === "/firewall/rules" && !Array.isArray(saved) ? [saved] : saved });
+      return route.fulfill({ json: path === "/firewall/rules" && !Array.isArray(saved) ? [saved] : saved, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     });
   }
   await page.goto("/firewall/");
@@ -301,11 +299,11 @@ test("VPN runtime distinguishes unavailable interface state from an absent WireG
   await page.route("**/api/v1/services/vpn", (route) => route.fulfill({ json: {
     wireguard: { enabled: true, interface: "wg0", addressCIDR: "10.8.0.1/24", peers: [] },
     openvpn: { enabled: false, mode: "client" },
-  } }));
-  await page.route("**/api/v1/services/vpn/wireguard/status?*", (route) => route.fulfill({ json: { present: false, peers: [] } }));
+  }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+  await page.route("**/api/v1/services/vpn/wireguard/status?*", (route) => route.fulfill({ json: { present: false, peers: [] }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/interfaces/state", (route) => route.fulfill(phase === "unavailable"
-    ? { status: 503, json: { error: "engine interface state unavailable" } }
-    : { json: phase === "empty" ? [] : [{ name: "wg0", up: true, addrs: ["10.8.0.1/24"] }] }));
+    ? { status: 503, json: { error: "engine interface state unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
+    : { json: phase === "empty" ? [] : [{ name: "wg0", up: true, addrs: ["10.8.0.1/24"] }], headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/vpn/");
   const runtime = page.getByRole("region", { name: "WireGuard runtime", exact: true });
   const unavailable = runtime.getByRole("status").filter({ hasText: "Interface state unavailable" });

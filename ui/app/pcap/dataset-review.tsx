@@ -1,10 +1,16 @@
 "use client";
 
+import { revisionError } from "../../lib/config-revision";
+
 import { useCallback, useState } from "react";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { Card } from "../../components/Card";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-import { type ApiResult } from "../../lib/api";
+import { api, type ApiResult } from "../../lib/api";
+import { ConfigDiffBlocks } from "../config/config-diff-blocks";
+import { buildDiffBlocks } from "../config/config-utils";
+import type { ConfigDiff } from "../../lib/api-config";
+import { useConfigView } from "../../lib/use-config-revision";
 import {
   learner,
   selectable,
@@ -73,18 +79,26 @@ export function DatasetReview({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [receipt, setReceipt] = useState<LearnApplyRequest | null>(null);
+  const revision = useConfigView<ConfigDiff | null>(null);
+  const destination = revision.available ? revision.data : null;
+  const { readConfig, requireReview } = revision;
+  const baseRevision = revision.state.baseRevision;
+  const [uncertain, setUncertain] = useState(false);
+  const needsReview = !!revision.state.conflictRevision || !!revision.state.revisionRequired;
   const confirm = useConfirm();
 
-  const { loading, refresh } = useAsyncRefresh(useCallback(async () => {
+  const { loading, refresh } = useAsyncRefresh(useCallback(async ({ discard = false }: { discard?: boolean } = {}) => {
     try {
       setSuggestions(dataOf(await learner.suggestions(dataset.id)));
     } catch (e) {
       setSuggestions(null);
       setError(String(e));
-    } finally {
-      setSelected(new Map());
     }
-  }, [dataset.id]));
+    // Destination refresh is comparison context, not permission to rebase a receipt.
+    const snapshot = await api.diffConfig();
+    readConfig(snapshot, !discard, true);
+    if (snapshot && discard) { setReceipt(null); setSelected(new Map()); setUncertain(false); }
+  }, [dataset.id, readConfig]));
   const suggestions = loading ? null : loadedSuggestions;
   useConfigRefresh(refresh);
 
@@ -101,16 +115,23 @@ export function DatasetReview({
     }
   }
   async function stage(payload: LearnApplyRequest) {
-    const res = await stageSuggestions(payload);
+    if (!baseRevision || needsReview || !destination || !revision.writable) return;
+    setReceipt(payload);
+    const res = await revision.writeRefresh(base => stageSuggestions(payload, base), api.diffConfig);
     if (res.ok) {
       setReceipt(null);
+      if (res.adopted) setSelected(new Map());
+      setUncertain(false);
       setNotice(
         `${payload.selections.length} suggestion(s) staged — not active. Review the candidate diff and commit to apply monitor rules.`,
       );
     } else {
       // Network/5xx can follow durable candidate persistence. Never invent a new receipt.
-      setReceipt(!res.status || res.status >= 500 ? payload : null);
-      setError(res.error);
+      const uncertain = !res.status || res.status >= 500;
+      setReceipt(res.status === 412 || uncertain ? payload : null);
+      setUncertain(uncertain);
+      if (uncertain) requireReview();
+      setError(revisionError(res) ?? "");
     }
     await refresh();
     await onChanged();
@@ -127,7 +148,7 @@ export function DatasetReview({
         <button
           className={secondaryButton}
           disabled={busy}
-          onClick={() => void run(refresh)}
+          onClick={() => void run(() => refresh())}
         >
           Refresh suggestions
         </button>
@@ -184,18 +205,27 @@ export function DatasetReview({
       {receipt && (
         <div className="mt-3 space-y-2 text-sm">
           <p>
-            Staging completion is uncertain; the candidate may already contain
-            this batch. Retry the same request before staging another selection.
+            {uncertain ? "Staging completion is uncertain; the candidate may already contain this batch. Review the destination before retrying the same receipt." : "Staging did not complete. Your selections and the original receipt are kept."}
           </p>
           <button
             className={secondaryButton}
-            disabled={busy}
+            disabled={busy || needsReview || !baseRevision || !destination || !revision.writable}
             onClick={() => void run(() => stage(receipt))}
           >
             Retry same staging request
           </button>
+          <button className={secondaryButton} disabled={busy} onClick={() => {
+            setReceipt(null);
+            setNotice("Receipt discarded. This does not undo any rules already staged; review the destination before staging a new batch.");
+          }}>Discard receipt</button>
         </div>
       )}
+      <section aria-label="Staging destination" className="mt-3 rounded-xs border px-3 py-2 text-sm">
+        <p>Destination candidate: {destination ? revision.state.serverRevision : "unavailable"}</p>
+        {destination && <p className="text-xs">Pending sections: {destination.changedSections.join(", ") || "none"}. <a href="/config/?tab=diff" target="_blank" rel="noreferrer" className="underline">Review full diff</a></p>}
+        {needsReview && destination && <div className="mt-3 grid gap-3"><ConfigDiffBlocks blocks={buildDiffBlocks(destination)} /></div>}
+        {revision.revisionNotice(() => refresh({ discard: true }))}
+      </section>
       <div className="mt-4 flex flex-wrap gap-2">
         {canEdit && (
           <>
@@ -225,6 +255,10 @@ export function DatasetReview({
               className={eligible.length ? primaryButton : secondaryButton}
               disabled={
                 busy ||
+                needsReview ||
+                !baseRevision ||
+                !destination ||
+                !revision.writable ||
                 !!receipt ||
                 !eligible.length ||
                 eligible.length > 128 ||
@@ -384,13 +418,14 @@ export function DatasetReview({
           now={now}
           key={`${s.id}:${s.revision}`}
           suggestion={s}
-          checked={selected.get(s.id) === s.revision}
+          checked={selected.get(s.id) === s.revision && selectable(s, now)}
+          changedSinceSelected={selected.has(s.id) && selected.get(s.id) !== s.revision}
           canEdit={canEdit}
           busy={busy || !!receipt}
           onToggle={() =>
             setSelected((prev) => {
               const next = new Map(prev);
-              if (next.has(s.id)) next.delete(s.id);
+              if (next.get(s.id) === s.revision) next.delete(s.id);
               else next.set(s.id, s.revision);
               return next;
             })

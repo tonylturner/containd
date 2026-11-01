@@ -178,7 +178,9 @@ export default function DiagnosticsPage() {
 
   useEffect(() => {
     (async () => {
-      const [i, dp] = await Promise.all([api.listInterfaces(), fetchDataPlane()]);
+      const [iSnapshot, dpSnapshot] = await Promise.all([api.listInterfaces(), fetchDataPlane()]);
+      const i = (iSnapshot?.data ?? null);
+      const dp = (dpSnapshot?.data ?? null);
       setIfaces(i ?? []);
       setEnforcementEnabled(dp?.enforcement ?? null);
     })();

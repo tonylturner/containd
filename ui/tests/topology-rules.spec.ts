@@ -61,7 +61,7 @@ test("the firewall node shows effects apart from deny and real hit counts", asyn
       "/api/v1/events": [],
       "/api/v1/firewall/counters": counters,
     };
-    await route.fulfill({ json: data[path] ?? {} });
+    await route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.goto("/topology/");
   await page.locator('.react-flow__node[data-id="fw-main"]').click();
@@ -97,7 +97,7 @@ test("topology reads health from the shared poll, not its own snapshot fetches",
       "/api/v1/flows": [],
       "/api/v1/events": [],
     };
-    await route.fulfill({ json: data[path] ?? {} });
+    await route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.goto("/topology/");
   await page.locator('.react-flow__node[data-id="fw-main"]').click();

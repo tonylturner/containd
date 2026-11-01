@@ -219,19 +219,19 @@ func TestRemovedProtocolBootRecovery(t *testing.T) {
 				fixed.Firewall.Rules = nil
 				fixed.DataPlane.DPIICSProtocols = nil
 				fixed.IDS.Rules = config.DefaultIDSConfig().Rules
-				if err := stores.store.SaveCandidate(ctx, &fixed); err != nil {
+				if err := testSaveCandidate(stores.store, ctx, &fixed); err != nil {
 					t.Fatal(err)
 				}
 				if err := config.CheckManagementBootFault(ctx, stores.store); err == nil {
 					t.Fatal("staging repaired recovery without a commit")
 				}
-				if err := stores.store.Commit(ctx); err != nil {
+				if err := testCommit(stores.store, ctx); err != nil {
 					t.Fatal(err)
 				}
 				if err := config.CheckManagementBootFault(ctx, stores.store); err != nil {
 					t.Fatalf("explicit valid commit did not repair: %v", err)
 				}
-				if err := stores.store.Rollback(ctx); err == nil {
+				if err := testRollback(stores.store, ctx); err == nil {
 					t.Fatal("rollback accepted the incompatible original")
 				}
 			})
