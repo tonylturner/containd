@@ -435,6 +435,10 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 			return group, err
 		}
 	}
+	// NFLOG owns an independent lifetime and retry budget. A failed capture
+	// bind (which may be optional for the installed policy) must not strand
+	// rule-hit logging pending without ever starting its consumer.
+	e.startNFLogLocked(ctx)
 	runCtx, runCancel := context.WithCancel(ctx)
 	runCapture := e.capture
 	e.runCancel = runCancel
@@ -467,7 +471,6 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 	// Only SourceReady owns the envelope. The consumer can die after
 	// registration but before Start returns; a successful return cannot
 	// overwrite the later SourceDown and reopen a dark queue.
-	e.startNFLogLocked(ctx)
 	runDone := make(chan struct{})
 	e.runDone = runDone
 	var run sync.WaitGroup

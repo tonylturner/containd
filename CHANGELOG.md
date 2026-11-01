@@ -72,6 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Start rule-hit logging independently of capture so an optional NFQUEUE bind
+  failure cannot leave protection pending without an advancing consumer.
 - Keep antivirus capability, scan-proof invalidation and recovery canaries
   independently ordered so concurrent OPTIONS and clean traffic cannot
   resurrect stale readiness or prevent recovery.

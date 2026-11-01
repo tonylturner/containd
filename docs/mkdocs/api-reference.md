@@ -181,6 +181,11 @@ clamd or ICAP removes `protecting` without a commit; recovery requires an EICAR
 canary detection in every selected direction, not merely a successful connection
 or ICAP `OPTIONS` response.
 
+NFLOG rule-hit logging starts and retries independently of NFQUEUE capture.
+An exhausted queue bind does not prevent logging from becoming ready. A queue
+that the installed policy does not require cannot by itself prevent
+`protecting`; unavailable logging instead reports `degraded` with a retry action.
+
 - `GET /dataplane/protection` (any authenticated user) returns the current
   `ProtectionStatus`: `bootId`, `applyId`, `installedApplyId`, `state`, `retryable`,
   `observedAt`, `components` and `effects`. Components carry `name`, `required`,
