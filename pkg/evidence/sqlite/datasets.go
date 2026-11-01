@@ -228,11 +228,11 @@ func (s *Store) stop(ctx context.Context, tx *sql.Tx, w evidence.Watch, reason s
 		return w, err
 	}
 	if reason == "restart" {
-		// No durable collector checkpoint exists. The entire lease up to
-		// recovery is the narrowest safe crash-loss interval.
-		d.RecordLoss(evidence.CollectionLoss{Code: "watch_restart", Start: w.StartedAt, End: now})
+		// Wall-clock lease bounds cannot delimit capture timestamps after
+		// a clock step or capture lag. No durable packet checkpoint exists.
+		d.RecordLoss(evidence.CollectionLoss{Code: "watch_restart"})
 	} else if reason == "policy_changed" {
-		d.RecordLoss(evidence.CollectionLoss{Code: "policy_changed", Start: w.StartedAt, End: now})
+		d.RecordLoss(evidence.CollectionLoss{Code: "policy_changed"})
 	}
 	return w, s.seal(ctx, tx, d)
 }

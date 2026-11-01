@@ -13,6 +13,7 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/flow"
 	"github.com/tonylturner/containd/pkg/dp/ics/eventfields"
+	"github.com/tonylturner/containd/pkg/evidence"
 )
 
 // AnalysisResult holds the outcome of offline PCAP analysis.
@@ -74,6 +75,15 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 	}
 
 	var firstTS, lastTS time.Time
+	loss := func(connection string, ts time.Time) {
+		if opts.OnLoss != nil {
+			l := evidence.CollectionLoss{Code: "capture_truncated", ConnectionID: connection}
+			if connection == "" {
+				l.Start, l.End = ts, ts
+			}
+			opts.OnLoss(l)
+		}
+	}
 
 	for {
 		ts, data, truncated, err := reader.readRecord()
@@ -86,6 +96,7 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 			}
 			result.Truncated = true
 			if data == nil {
+				loss("", time.Time{})
 				break // incomplete record header: no trustworthy tuple
 			}
 		}
@@ -96,7 +107,12 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 		}
 		observer.record(observer.observer.Sweep(opts.Now()), result, flowEvents)
 		pkt, ok := decodeEthernetPacket(data)
+		truncated = truncated || pkt.CaptureIncomplete || pkt.Invalid == capture.InvalidTruncated
+		result.Truncated = result.Truncated || truncated
 		if !ok {
+			if truncated {
+				loss("", ts)
+			}
 			continue
 		}
 		hash, state, reoriented := analysisFlowState(flows, pkt, ts)
@@ -115,6 +131,13 @@ func analyzeCore(r io.Reader, opts AnalysisOptions, decoders ...dpi.Decoder) (*A
 			recordAnalysisEvents(result, flowEvents, key.Hash(), events)
 		}
 		observer.record(observer.packet(pkt, state, ts, truncated), result, flowEvents)
+		if truncated {
+			connection := ""
+			if c := state.Connection.Load(); c != nil {
+				connection = c.Key
+			}
+			loss(connection, ts)
+		}
 		var events []dpi.Event
 		if pkt.Invalid == "" && !truncated {
 			events = analyzePacket(mgr, sessions, state, pkt, ts)

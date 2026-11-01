@@ -3,6 +3,8 @@
 package evidence
 
 import (
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -43,5 +45,36 @@ func TestLegacyGapCannotAcquireNarrowerScope(t *testing.T) {
 	ds.RecordLoss(CollectionLoss{Code: "old", ConnectionID: "a"})
 	if len(ds.Losses) != 2 || !ds.LossTouches("b", time.Now(), time.Now()) {
 		t.Fatalf("legacy gap narrowed by later localization: %+v", ds)
+	}
+}
+
+func TestLossBoundAndTimeDedupe(t *testing.T) {
+	ds := Dataset{}
+	at := time.Now()
+	ds.RecordLoss(CollectionLoss{Code: "drop", Start: at, End: at})
+	data, err := json.Marshal(ds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundtrip Dataset
+	if err := json.Unmarshal(data, &roundtrip); err != nil {
+		t.Fatal(err)
+	}
+	roundtrip.RecordLoss(CollectionLoss{Code: "drop", Start: at.In(time.FixedZone("offset", 3600)), End: at})
+	if len(roundtrip.Losses) != 1 {
+		t.Fatal("JSON/location duplicated interval", roundtrip)
+	}
+	for i := range MaxLosses + 100 {
+		ds.RecordLoss(CollectionLoss{Code: "drop", ConnectionID: fmt.Sprint(i)})
+	}
+	if len(ds.Losses) != 1 || !ds.LossTouches("clean", at, at) {
+		t.Fatal("loss cap failed closed", ds)
+	}
+}
+func TestOutcomeLossDoesNotExclude(t *testing.T) {
+	ds := Dataset{}
+	ds.RecordLoss(CollectionLoss{Code: "outcome_loss"})
+	if ds.LossTouches("any", time.Now(), time.Now()) {
+		t.Fatal("non-authority outcome excluded connection")
 	}
 }

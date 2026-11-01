@@ -169,7 +169,7 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 	if len(req.Parents) > 128 || len(batch) > maxBatch {
 		return result, ErrBudget
 	}
-	if len(req.Gaps) > 32 {
+	if len(req.Gaps) > 32 || len(req.Losses) > evidence.MaxLosses {
 		return result, ErrBudget
 	}
 	for _, gap := range req.Gaps {
@@ -230,6 +230,19 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 		if c.Withheld == nil {
 			c.Withheld = map[evidence.WithheldReason]uint64{}
 		}
+		// Reserve a conservative upper bound for the whole decoded batch once.
+		// Without pressure, avoid repeating SQLite page/gauge queries per parent.
+		// Under pressure each parent still follows normal eviction/admission order.
+		records, bytes, _, err := gauges(ctx, tx)
+		if err != nil {
+			return err
+		}
+		reserve := uint64(len(batch)) + uint64(len(req.Parents))*4096
+		batchHeadroom, err := physicalFits(ctx, tx, reserve, uint64(len(req.Parents)), 0)
+		if err != nil {
+			return err
+		}
+		batchHeadroom = batchHeadroom && records+uint64(len(req.Parents)) <= s.limits.MaxRecords && bytes+reserve <= s.limits.MaxBytes
 		for _, parent := range req.Parents {
 			collected := req.CollectedAt
 			if collected.IsZero() {
@@ -290,7 +303,11 @@ func (s *Store) Ingest(ctx context.Context, req evidence.IngestRequest) (evidenc
 				d.RecordLoss(evidence.CollectionLoss{Code: "budget_exceeded", ConnectionID: parent.ConnectionID})
 				continue
 			}
-			if err := s.fit(ctx, tx, d.ID, uint64(len(b))+2048, 1, 0); err != nil {
+			var fitErr error
+			if !batchHeadroom {
+				fitErr = s.fit(ctx, tx, d.ID, uint64(len(b))+2048, 1, 0)
+			}
+			if err := fitErr; err != nil {
 				if err != ErrBudget {
 					return err
 				}

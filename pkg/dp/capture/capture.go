@@ -58,6 +58,9 @@ type Packet struct {
 	// Invalid is "" when the packet decoded. Otherwise it names the reason
 	// (see the Invalid* constants); tuple fields are then best effort.
 	Invalid string
+	// CaptureIncomplete records trusted IP-length truncation independently of
+	// the primary Invalid reason (which can instead name a short TCP/UDP header).
+	CaptureIncomplete bool
 }
 
 // Manager manages interface capture workers.

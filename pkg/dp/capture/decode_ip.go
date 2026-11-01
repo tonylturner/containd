@@ -38,7 +38,7 @@ func DecodeIPPacket(data []byte) Packet {
 // Bytes beyond the IP length field (link-layer padding) are not payload.
 func decodeIP(data []byte) (Packet, bool) {
 	if len(data) < 1 {
-		return Packet{Invalid: InvalidTruncated}, false
+		return Packet{Invalid: InvalidTruncated, CaptureIncomplete: true}, false
 	}
 	switch data[0] >> 4 {
 	case 4:
@@ -52,7 +52,7 @@ func decodeIP(data []byte) (Packet, bool) {
 
 func decodeIPv4Raw(data []byte) (Packet, bool) {
 	if len(data) < 20 {
-		return Packet{Invalid: InvalidTruncated}, false
+		return Packet{Invalid: InvalidTruncated, CaptureIncomplete: true}, false
 	}
 	pkt := Packet{
 		Proto: data[9],
@@ -70,6 +70,7 @@ func decodeIPv4Raw(data []byte) (Packet, bool) {
 	}
 	data, lengthErr := clampIPLength(data, int(binary.BigEndian.Uint16(data[2:4])), ihl)
 	ok := decodeL4(&pkt, data[ihl:])
+	pkt.CaptureIncomplete = lengthErr == InvalidTruncated
 	if !ok {
 		return pkt, false
 	}
@@ -99,7 +100,7 @@ func clampIPLength(data []byte, total, header int) ([]byte, string) {
 
 func decodeIPv6Raw(data []byte) (Packet, bool) {
 	if len(data) < 40 {
-		return Packet{Invalid: InvalidTruncated}, false
+		return Packet{Invalid: InvalidTruncated, CaptureIncomplete: true}, false
 	}
 	pkt := Packet{
 		Proto: data[6],
@@ -115,6 +116,7 @@ func decodeIPv6Raw(data []byte) (Packet, bool) {
 		return pkt, false
 	}
 	data, lengthErr := clampIPLength(data, 40+int(binary.BigEndian.Uint16(data[4:6])), 40)
+	pkt.CaptureIncomplete = lengthErr == InvalidTruncated
 	if !decodeL4(&pkt, data[40:]) {
 		return pkt, false
 	}
