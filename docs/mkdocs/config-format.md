@@ -4,14 +4,15 @@ Canonical JSON configuration for export/import and persistent state. The config
 schema version is independent of the containd release version.
 
 Imports stage a candidate; commit is required to activate it. Failed commit,
-commit-confirmed or rollback restores and reapplies the pre-request running
-document and IDS bank while retaining the candidate. Inspect the error body's
+commit-confirmed or rollback attempts to restore and reapply the pre-request
+running document and IDS bank while retaining the candidate. Inspect the error body's
 `restored`/`reapplied` fields rather than assuming recovery succeeded. Nft
 ruleset failures are fatal, including missing `NET_ADMIN`; see the
 [Orchestrator Client Contract](api-reference.md#orchestrator-client-contract).
 Keep `dataplane.enforcement: true` to install firewall rules. The example below
-shows the existing intentionally disabled mode, which only applies an in-memory
-snapshot and cannot certify nft enforcement.
+shows the intentionally disabled mode, which updates the engine's in-memory
+snapshot without installing firewall rules. Interface and service configuration
+can still change.
 
 ## Schema
 
@@ -194,7 +195,7 @@ Notes:
 - `zones` must be unique. A zone name is 1 to 125 bytes without leading or
   trailing whitespace; enforcement names each zone's nftables interface set
   after it.
-- `interfaces.zone` must reference an existing zone; addresses are CIDR strings.
+- `interfaces.zone`, when set, must reference an existing zone; addresses are CIDR strings.
 - `interfaces.device`, or the `name` of an interface without a device (which is then its kernel name), must be a Linux interface name that nftables can match exactly: 1–15 bytes, without `/`, `:`, whitespace, control characters, `"`, `*` or `\`, and neither `.` nor `..`. So must each `services.dhcp.listenIfaces` entry of an enabled DHCP server that names a kernel device rather than a configured interface.
 - `pcap.interfaces` accepts logical interface names or kernel device names. Logical names resolve to their configured device (or the logical name when no device is set).
 - `pcap.zones` captures every configured interface assigned to each listed zone; interface and zone selections are combined and deduplicated when capture starts.
@@ -246,8 +247,9 @@ Notes:
   `startTime` and `endTime` (24-hour `HH:MM`) and an IANA `timezone` (blank is
   UTC). Equal start and end times are rejected. Zone data ships with containd.
 - `firewall.nat.enabled` enables source NAT (masquerade) from `sourceZones` out
-  `egressZone` (defaults: `lan`/`dmz` out `wan`). Only zones with bound interfaces
-  generate matches; custom zone names are supported.
+  `egressZone` (default `wan`). When `sourceZones` is empty, configuration
+  compilation selects every configured zone except the egress zone. Only zones
+  with bound interfaces generate matches; custom zone names are supported.
 - Each enabled `firewall.nat.portForwards` entry translates traffic arriving in
   its `ingressZone` to `destIp`/`destPort`; disabled entries generate no rules.
   The ingress zone must have bound interfaces. When source NAT is enabled,

@@ -17,7 +17,8 @@ Use Docker Compose to define the world of possible networks and interface attach
 Follow [Docker Compose onboarding](docker-compose.md#quickstart) to create a
 starter directory with a generated JWT secret. Stop before first boot if you
 need to change topology. That page also covers ports, runtime variables,
-persistent-data locations, and the unauthenticated engine trust boundary.
+persistent-data locations, and the engine trust boundary: namespace-local HTTP
+on numeric loopback or mutual TLS for non-loopback listeners.
 
 The starter runs combined mode with enforcement enabled and root/capabilities
 for network operations. Logical roles map to configured subnets/IPs; Docker's
@@ -33,7 +34,7 @@ Use `.env` when you only need to change addressing or published ports:
 - `CONTAIND_WAN_IP`, `CONTAIND_DMZ_IP`, `CONTAIND_LAN1_IP` ... `CONTAIND_LAN6_IP`
 - `CONTAIND_PUBLISH_HTTP_PORT`, `CONTAIND_PUBLISH_HTTPS_PORT`, `CONTAIND_PUBLISH_SSH_PORT`
 - `CONTAIND_JWT_SECRET`
-- `CONTAIND_LAB_MODE` — set to `1` for workshop / classroom / single-host lab deployments. Pins the canonical credential (`containd/containd`) and disables password change so reproducible lab docs and SSH-on-`:2222` keep working across student runs. Also relaxes session lifetime defaults for instructor-paced exercises. **This is a deliberate weakening of the default-password posture, scoped to the lab boundary.** Read the [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) transparency note before enabling. Do NOT set this on any deployment whose HTTP UI or SSH port is reachable from a hostile or shared network.
+- `CONTAIND_LAB_MODE` — set to `1` only for disposable workshop / classroom / single-host lab deployments. Pins the canonical credential (`containd/containd`) and disables password change so reproducible lab docs and SSH-on-`:2222` keep working across student runs. Lab API authentication bypasses session lookup, but signed tokens must still be unexpired; login does not extend the normal token lifetime. **This is a deliberate weakening of the default-password posture, scoped to the lab boundary.** Read the [Secure by Design § Default Passwords](secure-by-design.md#2-default-passwords) transparency note before enabling. Do NOT set this on any deployment whose HTTP UI or SSH port is reachable from a hostile or shared network.
 
 Auto-assign uses the topology subnet variables for the eight default roles.
 Optional `CONTAIND_AUTO_<NAME>_SUBNET` overrides take precedence; leave them unset

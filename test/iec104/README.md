@@ -42,7 +42,7 @@ volumes. Built images remain available for reuse.
 
 | Variable | Default | Use |
 |---|---|---|
-| `IEC104_FIREWALL_IMAGE` | `containd/containd:iec104-smoke` | firewall image under test |
+| `IEC104_FIREWALL_IMAGE` | `containd/containd:iec104-smoke-<source-hash>` | firewall image under test; hash covers tracked and non-ignored untracked worktree files, their contents and file modes |
 | `IEC104_ENDPOINT_IMAGE` | `containd-iec104-endpoint:iec104-smoke-<source-hash>` | lib60870 endpoint image; hash covers the endpoint build context, including pinned dependencies in its Dockerfile |
 | `IEC104_PROJECT` | `iec104-smoke-<time>-<pid>` | compose project |
 | `IEC104_CC_SUBNET`, `IEC104_RTU_SUBNET` | `10.233.0`, `10.234.0` | first three octets of the two /24s, for a parallel run |
@@ -76,10 +76,10 @@ saved beside `results.json`.
 
 The parsing gates (`scripts/smoke-iec104-lib-parsing.sh`) run the malformer
 scenarios under strict parsing (`dataplane.dpiIcsParsing.iec104 = "strict"`),
-under strict parsing with a learn policy, and under the tolerant default.
+under strict parsing with a monitor policy, and under the tolerant default.
 Strict resets every APDU with a conformance finding before the RTU, with
-decision reason `nonconformant` when an ALLOW would otherwise have matched
-(the `reserved-bits` command) and reason `rule` when the DENY rule matches.
+decision reason `nonconformant` before rule evaluation, even when a DENY
+would otherwise match.
 Tolerant evaluates the decoded fields: the `reserved-bits` command reaches
 the RTU twice on one connection with two allow decisions and exactly one
 `passed` conformance alert, while `malformed-dcs` (its IOA is unreadable, so
