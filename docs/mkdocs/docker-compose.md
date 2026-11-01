@@ -62,6 +62,19 @@ and `docker-compose.yml`. For a repository checkout, use the explicit
 
 The default `:latest` tag moves only to signed, SBOM-attached stable releases whose commits have reached main; prereleases never move it. Pin `CONTAIND_IMAGE` to a version tag or digest for a fixed lab release. See [Update Policy](update-policy.md#when-latest-moves).
 
+### Management HTTPS mounts and rotation
+
+The default writable `/data` volume holds the atomically replaced management
+identity `/data/tls/server.pem`. A valid legacy `server.crt`/`server.key` pair
+at the default paths is imported automatically without changing the originals.
+For operator-owned credentials, set `CONTAIND_TLS_CERT_FILE` and
+`CONTAIND_TLS_KEY_FILE` to the **same bundle path** and mount its containing
+directory read-only. Rotate by atomically replacing that bundle on the host;
+a single-file bind mount can pin the old inode. External paths are never
+modified by containd, and certificate uploads return 409 in external mode.
+See [Management HTTPS identity](config-format.md#management-https-identity)
+for migration, split-file limitations, status and reset behavior.
+
 ### Management ↔ Engine connectivity
 
 The management plane talks to the engine's privileged control API. Compose runs

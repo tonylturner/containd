@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with per-destination/source syslog backlog, retry, loss and continuity counters.
 - Authenticated `GET /api/v1/evidence/status` and sanitized `evidence.state` in health.
 
+### Fixed
+
+- Publish management HTTPS certificate chains and private keys together as one
+  durable, atomically replaced `/data/tls/server.pem` bundle. Import valid legacy
+  default-path pairs automatically without changing the originals; invalid legacy
+  pairs get a fresh self-signed bundle. Operator-owned paths are read-only, with
+  last-good retention on invalid rotation, explicit status errors and upload 409s.
+- Preserve TLS identity and its managed/external selection across factory reset;
+  share the validated public-leaf snapshot with status and SSH/local CLI pins.
+
 ### Changed
 
 - Serialize telemetry event IDs as decimal JSON strings across API, UI, CLI,

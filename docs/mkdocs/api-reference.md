@@ -285,11 +285,15 @@ after resolving the reported failure. Auxiliary apply failures remain warnings,
 as with commit.
 
 Environment variables and command-line flags are never reloaded. Management
-HTTP/HTTPS listeners, TLS files, HTTP middleware, SSH listen address/banner/shell
+HTTP/HTTPS listeners, TLS source paths, HTTP middleware, SSH listen address/banner/shell
 mode and other startup-only system settings require a restart. SSH authentication
 policy and host-key rotation already read their live running settings.
 Engine-only mode logs that configuration reload is performed through management;
 signal the management process to replay into a split engine.
+
+The bound HTTPS listener reloads a validated identity without restart when its
+contents change. See [Management HTTPS identity](config-format.md#management-https-identity)
+for atomic bundle uploads, read-only external paths and rotation status.
 
 ## Events: Filtered Queries and Legacy Lists
 
