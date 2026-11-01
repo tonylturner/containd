@@ -32,7 +32,7 @@ no installed ruleset. Renaming the table replaces the old
 tables with the new ones on the next apply. A table name starts with a letter
 or underscore, followed by letters, digits, underscores and hyphens.
 Local input and NAT rules match a zone's interfaces through the set
-`zone_<hex-encoded zone name>` in the policy table, so every zone gets its own
+`zone_<hex-encoded zone name>` in the policy table, so each bound zone gets its own
 set even when names differ only in case or punctuation. A zone with interfaces
 can therefore have a name of at most 125 bytes. The engine places a flow's
 addresses in zones by the networks on each zone's interfaces. It reads them
@@ -68,7 +68,8 @@ rule is reported in the ruleset warnings
   After the drop completes, the engine sends a best-effort RST to each peer
   and deletes exactly that conntrack tuple, including both ports. No DPI deny
   installs a host or service block. A fresh handshake, including one from the
-  same source port, is admitted immediately; other sessions are untouched.
+  same source port, can start inspection immediately, subject to the current
+  firewall policy; other sessions are untouched.
   UDP denies drop only the datagram, with no reset or block.
   Generic DPI can cache per-flow verdicts; IEC 104 retains session-level
   inspection.
@@ -87,7 +88,8 @@ enforcing rules and strict enforce scopes still apply. See
 [ICS DPI modes](ics-dpi.md#dpi-modes).
 
 IEC 104 enforce rules require DPI enabled, its decoder enabled, NFQUEUE capture,
-and no overlapping DPI exclusion. Inside the IEC inspection envelope unmatched,
+and no overlapping IP or CIDR DPI exclusion. Domain exclusions do not exempt the
+IEC 104 envelope. Inside the IEC inspection envelope unmatched,
 malformed, unsupported, or broadcast object traffic cannot be allowed by a broad
 TCP rule. Enforce-mode tracking exhaustion is fail closed; monitor-mode exhaustion
 accepts new connections without inspection. These are protocol-specific limits,
@@ -216,8 +218,11 @@ exclusions never lower a rule. Coverage appears in:
 - `GET /api/v1/health`: `icsEnforcement`, counts only (see
   [API Reference](api-reference.md)).
 
-Generic decoders still pass a packet whose payload they cannot parse; only
-IEC 104 fails closed on malformed traffic.
+Generic inline ICS streams in an enforce scope also fail closed on framing,
+reassembly and decoder faults, as described above. Outside an enforce scope,
+a parse failure alone does not block delivery. Strict parsing can additionally
+deny decoded messages with conformance or undecoded findings; see
+[ICS DPI](ics-dpi.md).
 
 ## Actions and rule order
 
@@ -247,10 +252,12 @@ runs in this order:
    `reject with tcp reset` for TCP and `reject with icmpx admin-prohibited`
    otherwise.
 
-Every line updates its rule's named counter, read through
+Each rule has a named counter, read through
 `GET /api/v1/firewall/counters`; a `RATE_LIMIT` rule has a second counter for
-its excess drops. Counters live in the policy table, so each apply restarts
-them. `TAG` has no kernel mark and no enforcement effect. Internal packet and
+its excess drops. These measure rule-path hits, not all connection traffic:
+established packets can bypass `ALLOW` counters, and ICS counters measure
+steering. Counters live in the policy table, so each apply restarts them.
+`TAG` has no kernel mark and no enforcement effect. Internal packet and
 connection marks track inspection continuation and admission; they do not
 replace ordered policy.
 
