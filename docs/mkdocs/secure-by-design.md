@@ -128,6 +128,9 @@ access. With a JWT secret, an HS256 JWT must have a valid `exp` claim, with
 tokens resolve the profile from their subject's user ID, including custom
 bootstrap usernames. Automation subjects that are not local users still get
 admin access and use the configured bootstrap account for profile operations.
+Caller profiles, including `/api/v1/auth/me`, report the effective admin role,
+not the subject account's stored role. User-management responses retain stored
+account roles; lab authentication never changes them.
 Without a secret, any nonempty token passes and uses that same bootstrap
 username (default `containd`). Factory reset does not revoke lab tokens.
 SSH password login is on by default, uses the same stored

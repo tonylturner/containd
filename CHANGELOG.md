@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resolve lab-mode local-account context from the token subject, including custom
   bootstrap usernames, rather than assuming `containd`. Non-user automation
   subjects retain admin access and the configured bootstrap profile.
+- Report the effective caller role consistently in auth and dashboard responses,
+  including admin for lab tokens whose subject is a local view account, without
+  changing stored account roles.
 
 ## [0.1.37] - 2026-10-31
 

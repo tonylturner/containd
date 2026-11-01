@@ -9,7 +9,11 @@ info:
     containd_token cookie. Cookie-authenticated writes enforce same-origin checks.
     Lab mode grants admin access to a supplied token. With a signing secret the
     token must be an HS256 JWT with exp (30 seconds of leeway); no session or
-    jti is required. Static admin/auditor bearer tokens are a
+    jti is required. Caller profiles in auth, session and dashboard responses
+    report the effective role (admin in lab mode), with the subject's local
+    profile or the configured bootstrap profile for non-user subjects.
+    User-management responses report stored account roles.
+    Static admin/auditor bearer tokens are a
     fallback only when the user store or JWT secret is unavailable.
     Persisted configuration edits stage a shared candidate. Reads of editable
     settings use that candidate; commit promotes and applies it. Operational

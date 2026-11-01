@@ -17,6 +17,11 @@ privileges without normal session enforcement. If a JWT secret is configured,
 the token must be an HS256 JWT signed with it and carry `exp` (30 seconds of
 leeway); no session or `jti` is required. Without a secret, any nonempty token
 is accepted.
+`GET /auth/me` reports the effective `admin` role and the subject's local-account
+profile, regardless of that account's stored role. A subject that does not name
+a local account uses the configured bootstrap profile. Login, session, profile
+update and dashboard caller profiles likewise report the effective role;
+user-management endpoints still report stored account roles.
 Factory reset does not revoke lab tokens, even with a JWT secret configured.
 Do not expose lab mode to untrusted clients.
 

@@ -82,7 +82,7 @@ func handleLabAuth(c *gin.Context, userStore users.Store, cfg authModeConfig) {
 		abortJSON(c, http.StatusUnauthorized, "invalid token")
 		return
 	}
-	c.Set(ctxRoleKey, string(roleAdmin))
+	c.Set(ctxRoleKey, effectiveUserRole(cfg.lab, ""))
 	if userStore != nil {
 		var u *users.StoredUser
 		var err error
@@ -240,7 +240,7 @@ func maybeRefreshSession(c *gin.Context, userStore users.Store, secret []byte, c
 	if claims.exp.IsZero() || expirationMoved(updated.ExpiresAt, claims.exp) {
 		u, err := userStore.GetByID(c.Request.Context(), claims.sub)
 		if err == nil && u != nil {
-			newTok, _ := signJWT(secret, u.ID, u.Username, u.Role, claims.jti, updated.ExpiresAt)
+			newTok, _ := signJWT(secret, u.ID, u.Username, effectiveUserRole(false, u.Role), claims.jti, updated.ExpiresAt)
 			if newTok != "" {
 				c.Header("X-Auth-Token", newTok)
 				setAuthCookie(c, newTok, updated.ExpiresAt)
@@ -275,12 +275,26 @@ func loadSessionUser(c *gin.Context, userStore users.Store, sess *users.Session,
 	return u, true
 }
 
-func setAuthenticatedContext(c *gin.Context, u *users.StoredUser, jti string) {
-	r := u.Role
-	if r == "" {
-		r = string(roleView)
+// effectiveUserRole is shared by local-account authentication and login
+// responses. Lab subjects select a profile, never a privilege level.
+func effectiveUserRole(lab bool, storedRole string) string {
+	if lab {
+		return string(roleAdmin)
 	}
-	c.Set(ctxRoleKey, r)
+	if storedRole == "" {
+		return string(roleView)
+	}
+	return storedRole
+}
+
+// callerProfile copies the account profile without changing its persisted role.
+func callerProfile(c *gin.Context, u users.User) users.User {
+	u.Role = c.GetString(ctxRoleKey)
+	return u
+}
+
+func setAuthenticatedContext(c *gin.Context, u *users.StoredUser, jti string) {
+	c.Set(ctxRoleKey, effectiveUserRole(false, u.Role))
 	c.Set(ctxUserKey, u.ID)
 	c.Set(ctxSessionKey, jti)
 	c.Set("actor", u.Username)
