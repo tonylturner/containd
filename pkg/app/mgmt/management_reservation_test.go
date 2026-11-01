@@ -102,7 +102,8 @@ func TestReservedBootFaultPreservesRecoveryAndCandidate(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("boot emitted %d fault events", count)
 	}
-	candidate, err := stores.store.LoadCandidate(ctx)
+	candidateSnapshot1, err := stores.store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil || candidate.Description != "staged edit survives boot" {
 		t.Fatal("boot lost candidate")
 	}

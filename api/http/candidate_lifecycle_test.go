@@ -37,7 +37,8 @@ func TestWholeConfigReplacesCandidateOnly(t *testing.T) {
 				t.Fatalf("replacement failed or applied: %d %s", rec.Code, rec.Body)
 			}
 			assertConfigResponseHeader(t, rec, "staged")
-			candidate, _ := store.LoadCandidate(ctx)
+			candidateSnapshot1, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			candidate := candidateSnapshot1.Candidate
 			after, _ := store.Load(ctx)
 			if candidate.System.Hostname != "replacement" || candidate.Description != "" || !reflect.DeepEqual(after, running) {
 				t.Fatal("replacement did not exclusively replace candidate")
@@ -60,11 +61,13 @@ func TestImportValidationIsClientErrorAndPreservesCandidate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := store.LoadCandidate(ctx)
+	beforeSnapshot2, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	before := beforeSnapshot2.Candidate
 	cfg := config.DefaultConfig()
 	cfg.Interfaces = []config.Interface{{Name: "bad", Zone: "missing"}}
 	rec := requestStage(t, NewServer(store, nil), "POST", "/config/import", cfg)
-	after, _ := store.LoadCandidate(ctx)
+	afterSnapshot3, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	after := afterSnapshot3.Candidate
 	if rec.Code != http.StatusBadRequest || !reflect.DeepEqual(before, after) {
 		t.Fatalf("invalid import status=%d changed candidate=%v", rec.Code, !reflect.DeepEqual(before, after))
 	}
@@ -147,7 +150,8 @@ func TestPCAPOperationsPreserveRunningAndCandidate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	candidate, _ := store.LoadCandidate(ctx)
+	candidateSnapshot4, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot4.Candidate
 	engine := newRuntimeMockEngine()
 	server := NewServerWithEngine(store, nil, engine)
 	for _, body := range []string{"", `{"interfaces":["explicit"]}`} {
@@ -164,7 +168,8 @@ func TestPCAPOperationsPreserveRunningAndCandidate(t *testing.T) {
 		rec = requestStage(t, server, "POST", "/pcap/stop", nil)
 		assertConfigResponseHeader(t, rec, "")
 		after, _ := store.Load(ctx)
-		desired, _ := store.LoadCandidate(ctx)
+		desiredSnapshot5, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+		desired := desiredSnapshot5.Candidate
 		if rec.Code != http.StatusOK || !reflect.DeepEqual(after, running) || !reflect.DeepEqual(desired, candidate) {
 			t.Fatal("capture start/stop persisted configuration")
 		}
@@ -188,7 +193,8 @@ func TestCandidateRoundTripPreservesStagedSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec = requestStage(t, server, "POST", "/config/candidate", redacted)
-	cfg, _ := store.LoadCandidate(ctx)
+	cfgSnapshot6, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	cfg := cfgSnapshot6.Candidate
 	if rec.Code != http.StatusOK || cfg.Services.VPN.WireGuard.PrivateKey != secret {
 		t.Fatal("redacted round trip restored running rather than staged secrets")
 	}

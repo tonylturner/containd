@@ -50,7 +50,8 @@ func TestBankFreeMutationRejectsRulesAndNeverReadsBank(t *testing.T) {
 		}
 	}
 	for range 2 { // Both running seeding and an existing candidate.
-		doc, err := s.LoadCandidateDocument(ctx)
+		snapshot, err := s.ReadSnapshot(ctx, SnapshotCandidate, false)
+		doc := snapshot.Candidate
 		if err != nil || doc.IDS.Rules != nil {
 			t.Fatalf("document read touched bank: %v", err)
 		}
@@ -81,7 +82,8 @@ func TestPairedReadWithConcurrentPromotions(t *testing.T) {
 		}
 	})
 	for range 150 {
-		running, candidate, err := s.LoadPair(ctx)
+		pairSnapshot1, err := s.ReadSnapshot(ctx, SnapshotPair, true)
+		running, candidate := pairSnapshot1.Running, pairSnapshot1.Candidate
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -178,7 +180,7 @@ func TestExtractEmbeddedBanksFromPreviousSchema(t *testing.T) {
 	ctx := context.Background()
 	ids := map[string]int64{}
 	for key, want := range states {
-		got, err := s.loadKind(ctx, key)
+		got, err := loadKindFrom(ctx, s.db, key)
 		if err != nil || !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s migration lost config/bank: %v", key, err)
 		}
@@ -244,7 +246,8 @@ func TestBankReferencesSurviveApplyRecovery(t *testing.T) {
 		t.Run(string(change), func(t *testing.T) {
 			s := resetTestStore(t)
 			before := resetConfigRows(t, s)
-			running, candidate, err := s.LoadPair(context.Background())
+			pairSnapshot2, err := s.ReadSnapshot(context.Background(), SnapshotPair, true)
+			running, candidate := pairSnapshot2.Running, pairSnapshot2.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -269,7 +272,8 @@ func TestBankReferencesSurviveApplyRecovery(t *testing.T) {
 			if !reflect.DeepEqual(before, resetConfigRows(t, s)) {
 				t.Fatal("recovery changed pinned references")
 			}
-			gotRunning, gotCandidate, err := s.LoadPair(context.Background())
+			pairSnapshot3, err := s.ReadSnapshot(context.Background(), SnapshotPair, true)
+			gotRunning, gotCandidate := pairSnapshot3.Running, pairSnapshot3.Candidate
 			if err != nil || !reflect.DeepEqual(gotRunning, running) || !reflect.DeepEqual(gotCandidate, candidate) {
 				t.Fatalf("recovery lost bank: %v", err)
 			}

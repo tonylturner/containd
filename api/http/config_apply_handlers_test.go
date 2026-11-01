@@ -68,7 +68,8 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 				if err := testSaveCandidate(store, ctx, candidate); err != nil {
 					t.Fatal(err)
 				}
-				candidate, _ = store.LoadCandidate(ctx)
+				candidateSnapshot1, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				candidate = candidateSnapshot1.Candidate
 				engine := &transactionalEngine{mockEngine: &mockEngine{}, failRestore: failRestore}
 				server := NewServerWithEngine(store, nil, engine)
 				rec := requestStage(t, server, "POST", "/config/"+action, map[string]int{"ttl_seconds": 1})
@@ -93,7 +94,8 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 				if err != nil || !reflect.DeepEqual(jsonValue(t, got), jsonValue(t, running)) {
 					t.Fatalf("running not restored: %v %+v", err, got)
 				}
-				staged, err := store.LoadCandidate(ctx)
+				stagedSnapshot2, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				staged := stagedSnapshot2.Candidate
 				if err != nil || !reflect.DeepEqual(jsonValue(t, staged), jsonValue(t, candidate)) {
 					t.Fatalf("candidate changed: %v %+v", err, staged)
 				}

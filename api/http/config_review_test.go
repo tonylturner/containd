@@ -216,7 +216,8 @@ func TestConfigReadsOmitBankAndRoundTripRetainsIt(t *testing.T) {
 				}
 				cfg.Description = "round-tripped without bank"
 				rec = requestStage(t, server, "POST", path, cfg)
-				candidate, err := store.LoadCandidate(ctx)
+				candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				candidate := candidateSnapshot1.Candidate
 				if rec.Code != http.StatusOK || err != nil || !reflect.DeepEqual(candidate.IDS.Rules, running.IDS.Rules) {
 					t.Fatalf("%s lost omitted bank: %d %s %v", path, rec.Code, rec.Body, err)
 				}

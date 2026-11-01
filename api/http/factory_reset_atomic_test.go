@@ -48,7 +48,8 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 			if err := testSaveCandidate(store, ctx, candidate); err != nil {
 				t.Fatal(err)
 			}
-			candidate, err = store.LoadCandidate(ctx)
+			candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			candidate = candidateSnapshot1.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -121,7 +122,8 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(jsonValue(t, running), jsonValue(t, got)) {
 				t.Fatalf("running changed: %+v %v", got, err)
 			}
-			staged, err := store.LoadCandidate(ctx)
+			stagedSnapshot2, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			staged := stagedSnapshot2.Candidate
 			if err != nil || !reflect.DeepEqual(jsonValue(t, candidate), jsonValue(t, staged)) {
 				t.Fatalf("candidate changed: %+v %v", staged, err)
 			}
@@ -227,7 +229,8 @@ func TestFactoryResetSuccessReplacesConfigurationAndUsers(t *testing.T) {
 	if err != nil || running.System.Hostname != "containd" {
 		t.Fatalf("defaults not saved: %+v %v", running, err)
 	}
-	staged, err := store.LoadCandidate(ctx)
+	stagedSnapshot3, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	staged := stagedSnapshot3.Candidate
 	if err != nil || staged.System.Hostname != "containd" {
 		t.Fatalf("old candidate retained: %+v %v", staged, err)
 	}

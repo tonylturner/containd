@@ -58,7 +58,8 @@ func TestStoredDNP3UnitIDBootsIntoRecovery(t *testing.T) {
 	defer stores.store.Close()
 	defer stores.auditStore.Close()
 	defer stores.userStore.Close()
-	candidate, err := stores.store.LoadCandidate(ctx)
+	candidateSnapshot1, err := stores.store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil {
 		t.Fatalf("candidate no longer loads: %v", err)
 	}

@@ -45,7 +45,8 @@ func TestImportNormalizesLegacyShellModeAndSaveStaysStrict(t *testing.T) {
 		if rec := post("/api/v1/config/import", backup); rec.Code != http.StatusOK {
 			t.Fatalf("import %q: %d %s", backup, rec.Code, rec.Body.String())
 		}
-		candidate, err := store.LoadCandidate(context.Background())
+		candidateSnapshot1, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+		candidate := candidateSnapshot1.Candidate
 		if err != nil || candidate.System.SSH.ShellMode != want {
 			t.Fatalf("import %q staged %q (%v), want %q", backup, candidate.System.SSH.ShellMode, err, want)
 		}

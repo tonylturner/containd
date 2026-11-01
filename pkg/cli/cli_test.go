@@ -39,7 +39,8 @@ func (m *memStore) MutateCandidate(ctx context.Context, expected config.Revision
 	if expected != m.currentRevision() {
 		return "", &config.ErrRevisionMismatch{CurrentRevision: m.currentRevision()}
 	}
-	cfg, err := m.LoadCandidate(ctx)
+	snapshot, err := m.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	cfg := snapshot.Candidate
 	if err != nil && err != config.ErrNotFound {
 		return "", err
 	}
@@ -74,10 +75,6 @@ func (m *memStore) SaveCandidate(ctx context.Context, expected config.Revision, 
 		return "", err
 	}
 	return m.currentRevision(), nil
-}
-
-func (m *memStore) LoadCandidate(ctx context.Context) (*config.Config, error) {
-	return m.Load(ctx)
 }
 
 func (m *memStore) currentRevision() config.Revision {

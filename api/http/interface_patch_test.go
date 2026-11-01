@@ -86,7 +86,8 @@ func TestInterfacePatchMerge(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store := interfacePatchStore(t)
 			ctx := context.Background()
-			want, err := store.LoadCandidate(ctx)
+			wantSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			want := wantSnapshot1.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -100,7 +101,8 @@ func TestInterfacePatchMerge(t *testing.T) {
 				t.Fatalf("PATCH: %d %s", rec.Code, rec.Body)
 			}
 			assertConfigResponseHeader(t, rec, "staged")
-			got, err := store.LoadCandidate(ctx)
+			gotSnapshot2, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			got := gotSnapshot2.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -129,7 +131,8 @@ func TestInterfacePatchRejected(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store := interfacePatchStore(t)
 			ctx := context.Background()
-			before, err := store.LoadCandidate(ctx)
+			beforeSnapshot3, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			before := beforeSnapshot3.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,7 +143,8 @@ func TestInterfacePatchRejected(t *testing.T) {
 			if rec.Code != tt.status {
 				t.Fatalf("PATCH: %d %s, want %d", rec.Code, rec.Body, tt.status)
 			}
-			after, err := store.LoadCandidate(ctx)
+			afterSnapshot4, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			after := afterSnapshot4.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -62,7 +62,8 @@ func TestDHCPAuthorityRoundTrip(t *testing.T) {
 			t.Fatal("authority lost in export")
 		}
 		call(http.MethodPost, "/config/import", exported)
-		candidate, err := store.LoadCandidate(ctx)
+		candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+		candidate := candidateSnapshot1.Candidate
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +89,8 @@ func TestDHCPAuthorityRoundTrip(t *testing.T) {
 	defer store.Close()
 	// Older configuration documents have no authority flag and remain passive.
 	call(http.MethodPost, "/services/dhcp", []byte(`{"enabled":false}`))
-	got, err := store.LoadCandidate(ctx)
+	gotSnapshot2, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	got := gotSnapshot2.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}

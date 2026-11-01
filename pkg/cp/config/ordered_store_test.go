@@ -145,7 +145,8 @@ func TestOrderedStoreRepeatedImportsAndCurrentOrder(t *testing.T) {
 			if err := testSaveCandidate(s, ctx, c); err != nil {
 				t.Fatal(err)
 			}
-			got, err := s.LoadCandidate(ctx)
+			gotSnapshot1, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+			got := gotSnapshot1.Candidate
 			if err != nil || !reflect.DeepEqual(policyRuleIDs(got), []string{"pf-process", "reads", "z-deny"}) {
 				t.Fatal("legacy POST/import order lost", got, err)
 			}
@@ -196,7 +197,8 @@ func TestOrderedStorePlacementAtUpgradeAndPublish(t *testing.T) {
 				if kind == "partial" && (len(recs[0].Warnings) != 1 || recs[0].Warnings[0].RuleIDs[0] != "reads") {
 					t.Fatal("partial overlap not durably warned", recs)
 				}
-				got, err := s.LoadCandidate(ctx)
+				gotSnapshot2, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+				got := gotSnapshot2.Candidate
 				wantRules := 1
 				if kind == "no-overlap" {
 					wantRules = 2
@@ -312,7 +314,8 @@ func TestOrderedStorePublishWarningFailureIsAtomic(t *testing.T) {
 	if err := testSaveCandidate(s, ctx, placementConfig("partial")); err == nil {
 		t.Fatal("warning failure was ignored")
 	}
-	got, err := s.LoadCandidate(ctx)
+	gotSnapshot3, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+	got := gotSnapshot3.Candidate
 	if err != nil || len(ForwardWarnings(got)) != 0 {
 		t.Fatal("config published without durable warning", got, err)
 	}

@@ -11,26 +11,6 @@ import (
 	"time"
 )
 
-// LoadCandidate reads desired state. An absent candidate is represented by
-// running in memory, so seeding and diff reads never persist pending changes.
-func (s *SQLiteStore) LoadCandidate(ctx context.Context) (*Config, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.loadCandidateLocked(ctx)
-}
-
-func (s *SQLiteStore) loadCandidateLocked(ctx context.Context) (*Config, error) {
-	return loadCandidateFrom(ctx, s.db, true)
-}
-
-// LoadCandidateDocument reads editable settings without loading the rule bank.
-// Callers must not interpret its absent rules as an empty stored bank.
-func (s *SQLiteStore) LoadCandidateDocument(ctx context.Context) (*Config, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return loadCandidateFrom(ctx, s.db, false)
-}
-
 func loadCandidateFrom(ctx context.Context, db configReader, withBank bool) (*Config, error) {
 	cfg, err := readKindFrom(ctx, db, configKeyCandidate, withBank)
 	if errors.Is(err, ErrNotFound) {
@@ -44,28 +24,6 @@ func loadCandidateFrom(ctx context.Context, db configReader, withBank bool) (*Co
 type IDSCandidateStore interface {
 	Store
 	MutateCandidateIDS(context.Context, Revision, func(*Config) error) (Revision, error)
-}
-
-// PairedStore reads both desired states from the same serialized boundary.
-type PairedStore interface {
-	Store
-	LoadPair(context.Context) (*Config, *Config, error)
-}
-
-// LoadPair returns detached running and candidate snapshots. Missing documents
-// are nil; an absent candidate is seeded in memory, just like LoadCandidate.
-func (s *SQLiteStore) LoadPair(ctx context.Context) (*Config, *Config, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	running, err := s.loadRunningLocked(ctx)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return nil, nil, err
-	}
-	candidate, err := s.loadCandidateLocked(ctx)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return nil, nil, err
-	}
-	return running, candidate, nil
 }
 
 // MutateCandidate never loads, validates or rewrites the bank. The callback

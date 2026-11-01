@@ -56,7 +56,8 @@ func TestSSHAccessRecheckedOnPromotion(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := s.LoadCandidate(ctx)
+			cfgSnapshot1, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+			cfg := cfgSnapshot1.Candidate
 			if err != nil || cfg.System.SSH.AllowPassword == nil || *cfg.System.SSH.AllowPassword {
 				t.Fatalf("explicit false was not persisted: %v", err)
 			}

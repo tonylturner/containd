@@ -161,7 +161,8 @@ func TestRepairTransaction(t *testing.T) {
 						t.Fatal("repair seeded a candidate")
 					}
 				} else {
-					candidate, err := s.LoadCandidate(ctx)
+					candidateSnapshot1, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+					candidate := candidateSnapshot1.Candidate
 					if err != nil || candidate.Description != "staged" || candidate.System.Hostname != "repaired" || candidate.IDS.Rules[0].ID == rulesBefore[0].ID {
 						t.Fatalf("repair lost staged edit/bank: %+v %v", candidate, err)
 					}

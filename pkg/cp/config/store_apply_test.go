@@ -131,7 +131,8 @@ func TestFailedConfirmedApplyCannotExpireAfterRestoration(t *testing.T) {
 	if err != nil || running.System.Hostname != baseline.System.Hostname {
 		t.Fatalf("running changed after failed apply: %+v %v", running, err)
 	}
-	candidate, err := store.LoadCandidate(ctx)
+	candidateSnapshot1, err := store.ReadSnapshot(ctx, SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil || candidate.System.Hostname != "candidate" {
 		t.Fatalf("candidate changed: %+v %v", candidate, err)
 	}

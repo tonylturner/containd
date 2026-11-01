@@ -70,7 +70,8 @@ func TestRepeatedIDSImportsReclaimBankGenerations(t *testing.T) {
 		}
 		assertHandlerBankBound(t, inspector)
 	}
-	cfg, err := store.LoadCandidate(context.Background())
+	cfgSnapshot1, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+	cfg := cfgSnapshot1.Candidate
 	if err != nil || len(cfg.IDS.Rules) != 30001 {
 		t.Fatalf("large-bank import/deduplication changed: %v", err)
 	}

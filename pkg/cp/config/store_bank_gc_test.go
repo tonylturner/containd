@@ -125,7 +125,7 @@ func TestBankGCPinsRecoveryAcrossImports(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s := resetTestStore(t)
 			ctx := context.Background()
-			previous, err := s.loadKind(ctx, configKeyPrevious)
+			previous, err := loadKindFrom(ctx, s.db, configKeyPrevious)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -227,7 +227,7 @@ func TestBankGCBootSweepsOrphansAndPreservesPendingRollback(t *testing.T) {
 		t.Run(fmt.Sprint("expired=", expired), func(t *testing.T) {
 			s := resetTestStore(t)
 			ctx := context.Background()
-			previous, err := s.loadKind(ctx, configKeyPrevious)
+			previous, err := loadKindFrom(ctx, s.db, configKeyPrevious)
 			if err != nil {
 				t.Fatal(err)
 			}

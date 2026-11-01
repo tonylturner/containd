@@ -91,25 +91,6 @@ func (m *mockStore) ReadHealthSnapshot(ctx context.Context) (config.HealthSnapsh
 	return config.HealthSnapshot{Config: cfg, Revision: m.currentRevision()}, nil
 }
 
-func (m *mockStore) LoadCandidateDocument(ctx context.Context) (*config.Config, error) {
-	cfg, err := m.LoadCandidate(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cp := *cfg
-	cp.IDS.Rules = nil
-	return &cp, nil
-}
-
-func (m *mockStore) LoadPair(ctx context.Context) (*config.Config, *config.Config, error) {
-	running, err := m.Load(ctx)
-	if err != nil && err != config.ErrNotFound {
-		return nil, nil, err
-	}
-	candidate, err := m.LoadCandidate(ctx)
-	return running, candidate, err
-}
-
 func (m *mockStore) MutateCandidate(ctx context.Context, expected config.Revision, edit func(*config.Config) error) (config.Revision, error) {
 	m.mutations++
 	return m.MutateCandidateIDS(ctx, expected, func(cfg *config.Config) error {
@@ -131,7 +112,8 @@ func (m *mockStore) MutateCandidateIDS(ctx context.Context, expected config.Revi
 	if err := m.compareRevision(expected); err != nil {
 		return "", err
 	}
-	cfg, err := m.LoadCandidate(ctx)
+	snapshot, err := m.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	cfg := snapshot.Candidate
 	if err != nil && err != config.ErrNotFound {
 		return "", err
 	}
@@ -161,14 +143,6 @@ func (m *mockStore) SaveCandidate(ctx context.Context, expected config.Revision,
 		return "", err
 	}
 	return m.currentRevision(), nil
-}
-
-func (m *mockStore) LoadCandidate(ctx context.Context) (*config.Config, error) {
-	cfg, err := m.Load(ctx)
-	if err == config.ErrNotFound {
-		return config.DefaultConfig(), nil
-	}
-	return cfg, err
 }
 
 func (m *mockStore) currentRevision() config.Revision {
@@ -203,8 +177,25 @@ func (m *mockStore) Rollback(ctx context.Context, expected config.Revision) (con
 	return m.Commit(ctx, expected)
 }
 func (m *mockStore) ReadSnapshot(ctx context.Context, _ config.SnapshotKind, withBank bool) (config.ConfigSnapshot, error) {
-	running, candidate, err := m.LoadPair(ctx)
-	return config.ConfigSnapshot{Running: running, Candidate: candidate, Revision: m.currentRevision()}, err
+	running, err := m.Load(ctx)
+	if err != nil && err != config.ErrNotFound {
+		return config.ConfigSnapshot{}, err
+	}
+	candidate := running
+	if candidate == nil {
+		candidate = config.DefaultConfig()
+	}
+	if !withBank {
+		copyCandidate := *candidate
+		copyCandidate.IDS.Rules = nil
+		candidate = &copyCandidate
+		if running != nil {
+			copyRunning := *running
+			copyRunning.IDS.Rules = nil
+			running = &copyRunning
+		}
+	}
+	return config.ConfigSnapshot{Running: running, Candidate: candidate, Revision: m.currentRevision()}, nil
 }
 func (m *mockStore) SaveIDSRules(ctx context.Context, rules []config.IDSRule) error {
 	m.mutations++
@@ -579,7 +570,11 @@ func (m *mockStore) RuntimeApplyFault(context.Context) (string, error)  { return
 func (m *mockStore) SetRuntimeApplyFault(context.Context, string) error { return nil }
 
 func mockApplyChange(ctx context.Context, store config.Store, expected config.Revision, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) (config.Revision, error) {
-	previous, err := loadOrInitConfig(ctx, store)
+	before, err := store.ReadSnapshot(ctx, config.SnapshotRunning, true)
+	previous := before.Running
+	if previous == nil {
+		previous = config.DefaultConfig()
+	}
 	if err != nil {
 		return "", err
 	}
@@ -595,7 +590,11 @@ func mockApplyChange(ctx context.Context, store config.Store, expected config.Re
 	if err != nil {
 		return "", err
 	}
-	next, err := loadOrInitConfig(ctx, store)
+	after, err := store.ReadSnapshot(ctx, config.SnapshotRunning, true)
+	next := after.Running
+	if next == nil {
+		next = config.DefaultConfig()
+	}
 	if err != nil {
 		return "", err
 	}

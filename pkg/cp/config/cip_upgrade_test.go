@@ -56,7 +56,8 @@ func TestProtocolScopeCIPUpgrade(t *testing.T) {
 	if err != nil || len(records) != 1 || len(records[0].Removed) != 5 || len(records[0].Updated) != 2 {
 		t.Fatalf("combined migration: %+v %v", records, err)
 	}
-	got, err := s.LoadCandidate(context.Background())
+	gotSnapshot1, err := s.ReadSnapshot(context.Background(), SnapshotCandidate, true)
+	got := gotSnapshot1.Candidate
 	if err != nil || len(got.IDS.Rules) != 2 || got.IDS.Rules[0].Proto != "cip" {
 		t.Fatalf("staged: %+v %v", got, err)
 	}
@@ -118,7 +119,7 @@ func TestProtocolScopeCIPStoreOpen(t *testing.T) {
 				t.Fatalf("updated-only outbox: %+v %v", records, err)
 			}
 			for _, key := range []string{configKeyRunning, configKeyCandidate, configKeyPrevious} {
-				got, err := s.loadKind(ctx, key)
+				got, err := loadKindFrom(ctx, s.db, key)
 				if err != nil {
 					t.Fatal(err)
 				}

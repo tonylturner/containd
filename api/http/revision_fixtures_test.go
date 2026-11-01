@@ -3,11 +3,12 @@ package httpapi
 
 import (
 	"context"
-	"github.com/tonylturner/containd/pkg/cp/config"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 func testBaseRevision(store config.Store, ctx context.Context) config.Revision {
@@ -50,7 +51,7 @@ func testSaveCandidate(store config.Store, ctx context.Context, cfg *config.Conf
 // mutation. Precondition rejection tests call ServeHTTP directly instead.
 func serveWithConfigRevision(t *testing.T, server http.Handler, writer http.ResponseWriter, request *http.Request) {
 	t.Helper()
-	if (isConfigWriterRequest(request) || request.URL.Path == "/reset" || request.URL.Path == "/system/factory-reset" || request.URL.Path == "/") && request.Header.Get(ifRevisionHeader) == "" {
+	if isConfigWriterRequest(request) && request.Header.Get(ifRevisionHeader) == "" {
 		read := httptest.NewRecorder()
 		readRequest := httptest.NewRequest(http.MethodGet, "/api/v1/config/candidate", nil)
 		readRequest.Header = request.Header.Clone()

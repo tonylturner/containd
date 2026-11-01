@@ -236,7 +236,8 @@ func TestInvalidStoredConfigBootsIntoRecovery(t *testing.T) {
 	}
 
 	// A fixed commit leaves recovery and replays the stored policy.
-	candidate, err := stores.store.LoadCandidate(ctx)
+	candidateSnapshot1, err := stores.store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}

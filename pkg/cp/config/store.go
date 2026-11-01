@@ -36,7 +36,6 @@ type Store interface {
 	Load(ctx context.Context) (*Config, error)
 	ReadSnapshot(context.Context, SnapshotKind, bool) (ConfigSnapshot, error)
 	SaveCandidate(ctx context.Context, expected Revision, cfg *Config) (Revision, error)
-	LoadCandidate(ctx context.Context) (*Config, error)
 	MutateCandidate(ctx context.Context, expected Revision, edit func(*Config) error) (Revision, error)
 	Commit(ctx context.Context, expected Revision) (Revision, error)
 	CommitConfirmed(ctx context.Context, expected Revision, ttl time.Duration) (Revision, error)
@@ -245,10 +244,6 @@ type configReader interface {
 
 func loadRunningFrom(ctx context.Context, db configReader) (*Config, error) {
 	return loadKindFrom(ctx, db, configKeyRunning)
-}
-
-func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error) {
-	return loadKindFrom(ctx, s.db, kind)
 }
 
 func loadKindFrom(ctx context.Context, db configReader, kind string) (*Config, error) {

@@ -620,13 +620,3 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	}
 	return warnings, nil
 }
-
-// loadOrInitConfig only supplies an in-memory default for an uninitialized
-// store. Bootstrap owns persistence; reads must never modify running/candidate.
-func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, error) {
-	cfg, err := store.Load(ctx)
-	if errors.Is(err, config.ErrNotFound) {
-		return config.DefaultConfig(), nil
-	}
-	return cfg, err
-}

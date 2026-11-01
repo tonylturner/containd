@@ -56,7 +56,8 @@ func TestStoredUnsupportedAddressesRemainRepairable(t *testing.T) {
 			if err := CheckManagementBootFault(ctx, store); !errors.Is(err, ErrManagementBootFault) || !strings.Contains(err.Error(), conflict.Error()) {
 				t.Fatalf("replay gate lost the cause: %v", err)
 			}
-			candidate, err := store.LoadCandidate(ctx)
+			candidateSnapshot1, err := store.ReadSnapshot(ctx, SnapshotCandidate, true)
+			candidate := candidateSnapshot1.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}

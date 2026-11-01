@@ -37,7 +37,8 @@ func TestCandidateSeedingIsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := s.LoadCandidate(ctx)
+	candidateSnapshot1, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil || !reflect.DeepEqual(candidate, running) {
 		t.Fatalf("seed differs: %v", err)
 	}
@@ -78,7 +79,8 @@ func TestCandidateConcurrentEditsRejectStaleBases(t *testing.T) {
 	if success != 1 {
 		t.Fatalf("successful edits=%d", success)
 	}
-	cfg, err := s.LoadCandidate(ctx)
+	cfgSnapshot2, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+	cfg := cfgSnapshot2.Candidate
 	if err != nil || len(cfg.Assets) != 1 {
 		t.Fatalf("lost edits: %+v err=%v", cfg, err)
 	}
@@ -184,7 +186,8 @@ func TestCandidatePromotionFailureIsAtomic(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("partial promotion: %+v err=%v", after, err)
 	}
-	candidate, err := s.LoadCandidate(ctx)
+	candidateSnapshot3, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+	candidate := candidateSnapshot3.Candidate
 	if err != nil || candidate.System.Hostname != "must-not-promote" {
 		t.Fatalf("failed promotion lost candidate: %+v err=%v", candidate, err)
 	}
@@ -216,7 +219,8 @@ func TestRollbackPreservesNewerCandidateEdits(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			desired, err := s.LoadCandidate(ctx)
+			desiredSnapshot4, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+			desired := desiredSnapshot4.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -242,7 +246,8 @@ func TestRollbackPreservesNewerCandidateEdits(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(running, original) {
 				t.Fatalf("rollback failed: %+v %v", running, err)
 			}
-			candidate, err := s.LoadCandidate(ctx)
+			candidateSnapshot5, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+			candidate := candidateSnapshot5.Candidate
 			if err != nil || !reflect.DeepEqual(candidate, desired) {
 				t.Fatalf("rollback lost newer candidate: %+v %v", candidate, err)
 			}

@@ -84,7 +84,8 @@ func TestCLIQuickstartCreatesFirstCandidateRule(t *testing.T) {
 	if err := registry.ParseAndExecute(cli.WithRole(ctx, string(cli.RoleAdmin)), "set outbound quickstart", &output); err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := store.LoadCandidate(ctx)
+	candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}

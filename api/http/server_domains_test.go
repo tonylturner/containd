@@ -607,6 +607,7 @@ func TestImportConfigReplacesEmbeddedIDSRules(t *testing.T) {
 	s := NewServer(store, nil)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config/import", bytes.NewReader(body))
+	withTestRevision(store, req)
 	req.Header.Set("Content-Type", "application/json")
 	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
@@ -617,7 +618,8 @@ func TestImportConfigReplacesEmbeddedIDSRules(t *testing.T) {
 	if err != nil || len(gotRules) != len(oldRules) || gotRules[0].ID != oldRules[0].ID {
 		t.Fatalf("import changed running bank: %v %v", gotRules, err)
 	}
-	loaded, err := store.LoadCandidate(context.Background())
+	loadedSnapshot1, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+	loaded := loadedSnapshot1.Candidate
 	if err != nil || len(loaded.IDS.Rules) != len(wantRules) || loaded.IDS.Rules[0].ID != wantRules[0].ID {
 		t.Fatalf("candidate bank=%+v err=%v", loaded, err)
 	}

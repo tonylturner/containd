@@ -84,11 +84,12 @@ func stageCandidateWith(c *gin.Context, mutate func(context.Context, config.Revi
 // Service discovery runs outside mutation callbacks because validators can read
 // the store. It needs only settings, never the potentially large IDS bank.
 func loadCandidateDocument(ctx context.Context, store config.Store) (*config.Config, error) {
-	reader, ok := store.(interface {
-		LoadCandidateDocument(context.Context) (*config.Config, error)
-	})
-	if !ok {
-		return nil, errors.New("store does not support bank-free document reads")
+	snapshot, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, false)
+	if err != nil {
+		return nil, err
 	}
-	return reader.LoadCandidateDocument(ctx)
+	if snapshot.Candidate == nil {
+		return nil, config.ErrNotFound
+	}
+	return snapshot.Candidate, nil
 }

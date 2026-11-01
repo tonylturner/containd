@@ -93,6 +93,7 @@ func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
 				}
 				rec = httptest.NewRecorder()
 				resetReq := jwtAuthedRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), token)
+				withTestRevision(store, resetReq)
 				resetReq.Header.Set("X-Containd-SSH-Connection", "initiating-ssh-connection")
 				serveWithConfigRevision(t, router, rec, resetReq)
 				var body struct {
@@ -257,7 +258,7 @@ func TestFactoryResetPreservesSecretlessLabBypass(t *testing.T) {
 	router.POST("/reset", factoryResetHandler(store, us, &mockEngine{}, nil))
 	router.GET("/auth/me", func(c *gin.Context) { c.Status(http.StatusOK) })
 	rec := httptest.NewRecorder()
-	serveWithConfigRevision(t, router, rec, jwtAuthedRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), "lab"))
+	serveWithConfigRevision(t, router, rec, withTestRevision(store, jwtAuthedRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), "lab")))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reset: %d %s", rec.Code, rec.Body)
 	}

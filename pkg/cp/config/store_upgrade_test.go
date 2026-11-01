@@ -203,7 +203,8 @@ func TestStoredRemovedExportSectionLoads(t *testing.T) {
 	if err := running.Validate(); err != nil {
 		t.Fatalf("validate running: %v", err)
 	}
-	candidate, err := s.LoadCandidate(ctx)
+	candidateSnapshot1, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil {
 		t.Fatalf("load candidate: %v", err)
 	}

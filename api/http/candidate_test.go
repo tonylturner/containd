@@ -240,7 +240,8 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
 			}
 			assertConfigResponseHeader(t, rec, "staged")
-			candidate, err := store.LoadCandidate(ctx)
+			candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			candidate := candidateSnapshot1.Candidate
 			if err != nil || candidate.System.Hostname != "unrelated-edit" {
 				t.Fatalf("lost candidate: %+v %v", candidate, err)
 			}
@@ -305,7 +306,8 @@ func TestIDSSaveResponseSurvivesSecondSave(t *testing.T) {
 		t.Fatalf("IDS import applied or failed: %d %s", rec.Code, rec.Body)
 	}
 	assertConfigResponseHeader(t, rec, "staged")
-	cfg, _ := store.LoadCandidate(context.Background())
+	cfgSnapshot2, _ := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+	cfg := cfgSnapshot2.Candidate
 	if len(cfg.IDS.Rules) != 2 {
 		t.Fatalf("IDS import lost candidate bank: %+v", cfg.IDS.Rules)
 	}
@@ -321,7 +323,8 @@ func TestVPNProfileUploadsNeverOverwriteRunningArtifact(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%d %s", rec.Code, rec.Body)
 		}
-		cfg, _ := store.LoadCandidate(context.Background())
+		cfgSnapshot3, _ := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+		cfg := cfgSnapshot3.Candidate
 		return cfg.Services.VPN.OpenVPN.ConfigPath
 	}
 	first := upload("client\nremote first 1194\n")

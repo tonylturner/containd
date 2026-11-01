@@ -80,7 +80,8 @@ func TestICSParsingAPIRejectsInvalid(t *testing.T) {
 		for _, path := range []string{"/dataplane", "/config/import"} {
 			t.Run(fmt.Sprint(path, ":", modes), func(t *testing.T) {
 				store := stageStore(t)
-				before, err := store.LoadCandidate(context.Background())
+				beforeSnapshot1, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+				before := beforeSnapshot1.Candidate
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -94,7 +95,8 @@ func TestICSParsingAPIRejectsInvalid(t *testing.T) {
 				if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "dpiIcsParsing") {
 					t.Fatalf("invalid parsing: %d %s", rec.Code, rec.Body)
 				}
-				after, err := store.LoadCandidate(context.Background())
+				afterSnapshot2, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+				after := afterSnapshot2.Candidate
 				if err != nil || !reflect.DeepEqual(before, after) {
 					t.Fatalf("invalid save changed candidate: %v", err)
 				}
