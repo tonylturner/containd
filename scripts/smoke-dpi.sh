@@ -155,7 +155,9 @@ apply_snapshot() {
   rm -f "$ruleset_file"
 
   log "Applying dataplane configuration to engine..."
-  code=$(engine_post engine /internal/config "$WORK_DIR/smoke-dpi-engine-config.out" <<<"$DATAPLANE_CFG")
+  local apply_id
+  apply_id=$(engine_apply_id)
+  code=$(engine_apply engine /internal/config "$WORK_DIR/smoke-dpi-engine-config.out" "$apply_id" <<<"$DATAPLANE_CFG")
   if [[ "$code" != "200" ]]; then
     log "engine config failed (HTTP $code): $(cat "$WORK_DIR/smoke-dpi-engine-config.out")"
     exit 1
@@ -163,7 +165,7 @@ apply_snapshot() {
 
   log "Applying snapshot to engine..."
   tmp_apply_resp=$(mktemp)
-  code=$(engine_post engine /internal/apply_rules "$tmp_apply_resp" <<<"$snap")
+  code=$(engine_apply engine /internal/apply_rules "$tmp_apply_resp" "$apply_id" <<<"$snap")
   if [[ "$code" != "200" ]]; then
     log "engine apply_rules failed (HTTP $code): $(cat "$tmp_apply_resp")"
     rm -f "$tmp_apply_resp"

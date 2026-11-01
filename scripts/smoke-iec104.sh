@@ -373,9 +373,11 @@ apply_config() {
   ruleset="$WORK_DIR/ruleset.json"
   "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset" || return 1
   snap=$(jq -c '.snapshot' "$ruleset")
-  code=$(echo "$cfg" | jq -c '.dataplane' | engine_post firewall /internal/config "$resp")
+  local apply_id
+  apply_id=$(engine_apply_id)
+  code=$(echo "$cfg" | jq -c '.dataplane' | engine_apply firewall /internal/config "$resp" "$apply_id")
   [[ "$code" == "200" ]] || { log "engine config for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
-  code=$(engine_post firewall /internal/apply_rules "$resp" <<<"$snap")
+  code=$(engine_apply firewall /internal/apply_rules "$resp" "$apply_id" <<<"$snap")
   [[ "$code" == "200" ]] || { log "engine apply_rules for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
   CC_LAST_POLICY_COT3=$(cc_count 'cot=3 ' cc.log)
   return 0
