@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 import { isAdmin, listPcaps, type PcapItem } from "../../lib/api";
 import {
@@ -33,10 +33,19 @@ export default function PcapAnalysisPage() {
   const [imported, setImported] = useState<PcapImportResult | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [collectTab, setCollectTab] = useState<"import" | "watch">("import");
+  const watchToInspect = useRef<string | null>(null);
   const [duration, setDuration] = useState("3600");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (collectTab !== "watch" || !watchToInspect.current) return;
+    const row = document.getElementById(`watch-${watchToInspect.current}`);
+    watchToInspect.current = null;
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView({ block: "center" });
+  }, [collectTab]);
 
   const { refresh } = useAsyncRefresh(useCallback(async () => {
     try {
@@ -90,6 +99,9 @@ export default function PcapAnalysisPage() {
   const active = (watches?.items ?? []).filter(
     (w) => !w.stoppedAt && Date.parse(w.deadline) > now,
   );
+  const abnormalStops = (watches?.items ?? []).filter(
+    (w) => w.stoppedAt && w.stopReason && !["operator", "deadline"].includes(w.stopReason),
+  );
   const seconds = Number(duration);
   return (
     <Shell
@@ -123,7 +135,7 @@ export default function PcapAnalysisPage() {
           {error}
         </p>
       )}
-      {!chosen && <LearnerSteps generateReason="Open a dataset after collecting evidence." reviewReason="Open a dataset to inspect suggestions." stageReason="Review and select eligible suggestions first." />}
+      {!chosen && <LearnerSteps hasDataset={false} generateReason="Open a dataset after collecting evidence." reviewReason="Open a dataset to inspect suggestions." stageReason="Review and select eligible suggestions first." />}
       <section id="learner-collect" tabIndex={-1} aria-label="Collect evidence" className="min-w-0">
         <h2 className="mb-3 text-lg font-semibold">1 Collect</h2>
         <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Collection source">
@@ -269,6 +281,8 @@ export default function PcapAnalysisPage() {
                 return (
                   <li
                     key={w.id}
+                    id={`watch-${w.id}`}
+                    tabIndex={-1}
                     className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-xs"
                   >
                     <div className="min-w-0">
@@ -323,6 +337,26 @@ export default function PcapAnalysisPage() {
       </section>
       {collectTab !== "watch" && active.length > 0 && <p className="mb-4 text-sm text-(--amber)">Live watch collecting · {active.length} active. Open Watch live to inspect or stop collection.</p>}
       {!watches && collectTab !== "watch" && <p className="mb-4 text-sm">Watch status unavailable or loading.</p>}
+      {collectTab !== "watch" && abnormalStops.length > 0 && (
+        <section aria-label="Abnormally stopped watches" role="status" className="mb-4 space-y-2 break-words text-sm text-(--amber)">
+          <p>Live collection stopped unexpectedly. Review the cause and collection limitations before using its evidence.</p>
+          {abnormalStops.map((watch) => (
+            <p key={watch.id}>
+              <a
+                className="break-all underline"
+                href={`#watch-${watch.id}`}
+                onClick={() => {
+                  watchToInspect.current = watch.id;
+                  setCollectTab("watch");
+                }}
+              >
+                Inspect watch {watch.id}
+              </a>
+              {" · "}{watch.stopReason} · stopped {new Date(watch.stoppedAt!).toLocaleString()}
+            </p>
+          ))}
+        </section>
+      )}
       {chosen && (
         <DatasetReview now={now} key={chosen.id} dataset={chosen} canEdit={canEdit} onChanged={refresh} />
       )}

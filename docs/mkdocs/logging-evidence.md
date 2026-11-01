@@ -28,12 +28,18 @@ so these variables do not override their levels. CLI queries include
 Import capture contains Upload & Analyze PCAP and Existing PCAP Files; Watch live
 contains duration, Start watch, watch status, Stop watch and pagination. An active
 watch or unavailable watch status remains indicated when viewing Import capture.
+Abnormal stops (including restart, budget and policy change) also show their
+cause there, with an **Inspect watch** link that opens and focuses the affected
+watch. Ordinary operator and deadline stops remain in watch history without an
+extra warning.
 Switching tabs does not start, stop or discard a collection.
 
 The learner steps are explicit: **1 Collect → 2 Generate → 3 Review → 4 Stage**.
-Disabled steps explain their prerequisites. Opening a step only navigates to its
-controls: it does not generate, approve, select or stage anything. Expired
-datasets cannot generate new suggestions; collect new evidence instead.
+Steps explain action prerequisites. Once a dataset is open, all step navigation
+remains available, including for viewers and expired evidence; only the actions
+are permission- and eligibility-gated. Opening a step only navigates to its
+controls: it does not generate, approve, select or stage anything. Expired datasets
+cannot generate new suggestions; collect new evidence instead.
 
 The selected Dataset review stays above the retained Evidence datasets list.
 Collection details retains its full ID, checksums and reader/configuration
@@ -43,6 +49,8 @@ not proof that traffic is safe. Checks on saved evidence retains replay and
 boundary results, limitations, raw versions, digests and counterexamples.
 Collection gaps, failure causes, overlaps, expiry and selection restrictions stay
 visible. Import statistics and content identifications remain available below.
+**Inspect service authority** and its pagination remain available during staging;
+reading authority does not unlock mutation controls or dismiss a staging failure.
 
 **Stage N selected** stays separate from approval and selection. IEC 104 review,
 address/NAT approval where required, the 128-suggestion/128-rule cap, destination
