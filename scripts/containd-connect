@@ -4,13 +4,19 @@
 set -euo pipefail
 
 service="${1:-containd}"
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+compose=(docker compose)
+if [[ -f "$repo_root/.env" ]]; then
+  compose+=(--env-file "$repo_root/.env")
+fi
+compose+=(-f "$repo_root/deploy/docker-compose.yml")
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required" >&2
   exit 1
 fi
 
-ps_out="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" ps -q "$service" 2>/dev/null || true)"
+ps_out="$("${compose[@]}" ps -q "$service")"
 # Some Docker/Compose builds print warnings to stdout; only keep container IDs.
 cid="$(printf '%s\n' "$ps_out" | tr -d '\r' | grep -E '^[0-9a-f]{12,64}$' | head -n 1 || true)"
 if [[ -z "${cid}" ]]; then
@@ -19,10 +25,11 @@ if [[ -z "${cid}" ]]; then
   exit 1
 fi
 
-http_map="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" port "$service" 8080 2>/dev/null | tr -d '\r' | head -n 1 || true)"
-https_map="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" port "$service" 8443 2>/dev/null | tr -d '\r' | head -n 1 || true)"
-ssh_map="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" port "$service" 2222 2>/dev/null | tr -d '\r' | head -n 1 || true)"
-engine_map="$(docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" port "$service" 8081 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+# Optional ports may be unpublished; keep Compose diagnostics visible on stderr.
+http_map="$("${compose[@]}" port "$service" 8080 | tr -d '\r' | head -n 1 || true)"
+https_map="$("${compose[@]}" port "$service" 8443 | tr -d '\r' | head -n 1 || true)"
+ssh_map="$("${compose[@]}" port "$service" 2222 | tr -d '\r' | head -n 1 || true)"
+engine_map="$("${compose[@]}" port "$service" 8081 | tr -d '\r' | head -n 1 || true)"
 
 ips="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s:%s\n" $k $v.IPAddress}}{{end}}' "$cid" 2>/dev/null | tr -d '\r' || true)"
 
@@ -59,7 +66,7 @@ fi
 echo ""
 if [[ -n "${ssh_map}" ]]; then
   echo "SSH CLI (host published):"
-  # docker compose -f "$(dirname "$0")/../deploy/docker-compose.yml" port prints host:port; assume host is localhost-like.
+  # Compose port prints host:port; assume host is localhost-like.
   host="${ssh_map%:*}"
   port="${ssh_map##*:}"
   if [[ "${host}" == "0.0.0.0" ]]; then
@@ -94,5 +101,7 @@ fi
 
 echo ""
 echo "Logs:"
-echo "  docker compose -f deploy/docker-compose.yml logs -f ${service}"
+printf '  '
+printf '%q ' "${compose[@]}" logs -f "$service"
+printf '\n'
 echo "------------------------------------------------------------"

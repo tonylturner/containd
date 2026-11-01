@@ -101,15 +101,11 @@ func NewDNSManager(baseDir string) *DNSManager {
 }
 
 func newDNSLogger() *zap.SugaredLogger {
-	lg, err := commonlog.NewZap("dns", "dns", commonlog.Options{
+	return commonlog.NewServiceWithOptions("dns", "dns", commonlog.Options{
 		FilePath: "/data/logs/dns.log",
 		JSON:     true,
 		Level:    "info",
 	})
-	if err != nil {
-		return zap.NewNop().Sugar()
-	}
-	return lg
 }
 
 func (m *DNSManager) Apply(ctx context.Context, cfg config.DNSConfig) error {
