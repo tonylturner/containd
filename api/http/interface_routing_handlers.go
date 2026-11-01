@@ -187,6 +187,8 @@ func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.Han
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
 		cfg, err := readRunningOrDefault(c, store)
+		// This read drives a runtime action, not a configuration acknowledgement.
+		c.Header(revisionHeader, "")
 		if err != nil {
 			internalError(c, err)
 			return
@@ -361,6 +363,8 @@ func routingReconcileHandler(store config.Store, engine EngineClient) gin.Handle
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
 		cfg, err := readRunningOrDefault(c, store)
+		// This read drives a runtime action, not a configuration acknowledgement.
+		c.Header(revisionHeader, "")
 		if err != nil {
 			internalError(c, err)
 			return

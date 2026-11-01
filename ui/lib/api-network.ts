@@ -40,10 +40,10 @@ export const networkAPI = {
       mode,
       mappings: mappings ?? {},
     }, expectedRevision),
-  reconcileInterfacesReplace: (expectedRevision: string) =>
+  reconcileInterfacesReplace: () =>
     postJSONResult<{ status: string }>("/api/v1/interfaces/reconcile", {
       confirm: "REPLACE",
-    }, expectedRevision),
+    }),
   createInterface: (expectedRevision: string, i: Interface) =>
     postJSONResult<Interface>("/api/v1/interfaces", i, expectedRevision),
   updateInterface: (expectedRevision: string, name: string, i: Partial<Interface>) =>
@@ -60,10 +60,10 @@ export const networkAPI = {
     getJSON<OSRoutingSnapshot>("/api/v1/routing/os", signal),
   setRouting: (expectedRevision: string, cfg: RoutingConfig) =>
     postJSONResult<RoutingConfig>("/api/v1/routing", cfg, expectedRevision),
-  reconcileRoutingReplace: (expectedRevision: string) =>
+  reconcileRoutingReplace: () =>
     postJSONResult<{ status: string }>("/api/v1/routing/reconcile", {
       confirm: "REPLACE",
-    }, expectedRevision),
+    }),
 
   getNAT: () => getConfigJSON<NATConfig>("/api/v1/firewall/nat", "object"),
   setNAT: (expectedRevision: string, cfg: NATConfig) =>

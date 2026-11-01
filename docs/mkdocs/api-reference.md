@@ -129,6 +129,12 @@ Unauthenticated `/health` and all error responses omit the revision header.
 A learner HTTP 503 reporting durable staging has no revision header: re-read the
 candidate and review it before retrying the receipt.
 
+`POST /interfaces/reconcile` and `POST /routing/reconcile` are runtime operations,
+not configuration writers. They ignore `X-Containd-If-Revision` and return no
+`X-Containd-Revision`. Reconcile leaves unfinished UI edits based on their original
+revision; a later stale save requires conflict review rather than silently
+overwriting another operator's changes.
+
 ## Orchestrator Client Contract
 
 Every configuration writer requires `X-Containd-If-Revision` with the revision

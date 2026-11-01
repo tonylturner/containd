@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep unfinished routing and interface edits pinned to their original revision
+  after live reconciliation, so a later save cannot silently overwrite another
+  operator's changes. Operational reconcile responses no longer return a
+  configuration revision.
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
 - Make admin MFA disable atomic with the required account's new enrollment grace

@@ -172,6 +172,9 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 				if class == "config-writer" && rec.Code != http.StatusPreconditionRequired {
 					t.Fatalf("unguarded config writer: %d %s", rec.Code, rec.Body)
 				}
+				if strings.HasSuffix(route.Path, "/reconcile") && rec.Header().Get(revisionHeader) != "" {
+					t.Fatal("operational reconcile response acknowledged a configuration revision")
+				}
 				if store.mutations != 0 {
 					t.Fatalf("unconditioned probe mutated store %d times", store.mutations)
 				}

@@ -6633,7 +6633,7 @@ paths:
     post:
       summary: Replace kernel interfaces from running config (admin)
       tags: [Interfaces]
-      description: 'Immediate destructive reconciliation from running, not candidate; requires confirm: REPLACE.'
+      description: 'Immediate destructive reconciliation from running, not candidate; requires confirm: REPLACE. Does not compare X-Containd-If-Revision or return X-Containd-Revision; it does not save configuration.'
       requestBody:
         required: true
         content:
@@ -6649,7 +6649,7 @@ paths:
     post:
       summary: Replace kernel routing from running config (admin)
       tags: [Routing]
-      description: 'Immediate destructive reconciliation from running, not candidate; requires confirm: REPLACE.'
+      description: 'Immediate destructive reconciliation from running, not candidate; requires confirm: REPLACE. Does not compare X-Containd-If-Revision or return X-Containd-Revision; it does not save configuration.'
       requestBody:
         required: true
         content:
