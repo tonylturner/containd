@@ -119,3 +119,49 @@ func TestNewServiceAndSetupGlobalLogger(t *testing.T) {
 	}
 	slog.Info("global bridge test", "component", "audit")
 }
+
+func TestNewServiceSyslogFailureKeepsStdout(t *testing.T) {
+	// An unsupported transport fails deterministically without a live collector.
+	t.Setenv("CONTAIND_LOG_SYSLOG_ADDR", "unused")
+	t.Setenv("CONTAIND_LOG_SYSLOG_PROTO", "invalid-transport")
+	t.Setenv("CONTAIND_LOG_LEVEL", "error")
+	t.Setenv("CONTAIND_LOG_LEVEL_FALLBACK", "debug")
+	stdout, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldOut, oldErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = stdout, stderr
+	t.Cleanup(func() {
+		os.Stdout, os.Stderr = oldOut, oldErr
+		_ = stdout.Close()
+		_ = stderr.Close()
+	})
+
+	logger := NewService("fallback")
+	logger.Debug("stdout survives syslog failure")
+	logger.Info("stdout still works")
+	output, err := os.ReadFile(stdout.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"stdout survives syslog failure", "stdout still works", "fallback", "daemon"} {
+		if !strings.Contains(string(output), want) {
+			t.Errorf("stdout missing %q: %s", want, output)
+		}
+	}
+	diagnostic, err := os.ReadFile(stderr.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(diagnostic), "\n") != 1 ||
+		!strings.Contains(string(diagnostic), "syslog") ||
+		!strings.Contains(string(diagnostic), "fallback") ||
+		!strings.Contains(string(diagnostic), "invalid-transport") {
+		t.Errorf("expected one syslog failure diagnostic: %s", diagnostic)
+	}
+}

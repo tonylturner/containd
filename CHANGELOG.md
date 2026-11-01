@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visible degradation rather than an audit fail-closed policy.
 - Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
 
+### Fixed
+
+- Make `set system mgmt listen` update the HTTP listener even when
+  `httpListenAddr` is already configured; both HTTP listener commands clear the
+  legacy `listenAddr` field.
+- Preserve application stdout logging when syslog initialization fails and
+  report the failure once to stderr.
+- Use the repository-root `.env` in `scripts/containd-connect` and surface
+  Compose interpolation errors instead of reporting a running service as stopped.
+
 ## [0.1.37] - 2026-10-31
 
 ### Upgrade notes
