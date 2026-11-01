@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Firewall rule reorder arrows now sit beside each order number, with keyboard
+  focus retained after moves. A read-only Default row always shows the
+  candidate policy's fallback action, warning when unmatched traffic is allowed
+  and showing unknown when that action cannot be read coherently.
+
 ## [0.1.37] - 2026-11-01
 
 ### Upgrade notes

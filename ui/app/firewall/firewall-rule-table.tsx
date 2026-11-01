@@ -6,7 +6,8 @@ import { EmptyState } from "../../components/EmptyState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { isAdmin, type FirewallRule, type Position, type Zone } from "../../lib/api";
 import { MoveRuleDialog } from "./firewall-rule-position";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { FirewallDefaultRow, type DefaultAction } from "./firewall-default-row";
 import { summarizeIEC104 } from "../ics/iec104";
 import { ICSCoverageCell } from "../ics/ics-coverage";
 import type { ICSCoverageView } from "../ics/ics-coverage-model";
@@ -71,6 +72,7 @@ function ConditionsCell({ rule }: { rule: FirewallRule }) {
 /** The firewall page's rule list. */
 export function FirewallRuleTable({
   rules,
+  defaultAction,
   zones,
   dpiMode,
   coverage,
@@ -82,6 +84,7 @@ export function FirewallRuleTable({
   moving,
 }: {
   rules: FirewallRule[];
+  defaultAction: DefaultAction;
   zones: Zone[];
   dpiMode: string | undefined;
   coverage: ICSCoverageView;
@@ -93,6 +96,17 @@ export function FirewallRuleTable({
   moving: boolean;
 }) {
   const [moveTarget, setMoveTarget] = useState<FirewallRule | null>(null);
+  const moveControl = useRef<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    if (moving || !moveControl.current) return;
+    const control = moveControl.current;
+    // At an end, keep focus on the same rule's remaining enabled direction.
+    const target = control.disabled
+      ? control.parentElement?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      : control;
+    target?.focus({ preventScroll: true });
+    moveControl.current = null;
+  }, [moving, rules]);
   return (
     <section aria-label="Firewall rules">
       <RulePrecedenceNote />
@@ -129,7 +143,17 @@ export function FirewallRuleTable({
             )}
             {rules.map((r, index) => (
               <tr key={r.id} id={`rule-${r.id}`} className="border-t table-row-hover transition-ui">
-                <td className="px-3 py-3 font-mono">{index + 1}</td>
+                <td className="px-3 py-3 font-mono">
+                  <div className="flex items-center gap-1 whitespace-nowrap">
+                    <span aria-label={`Position ${index + 1}`} className="mr-1">{index + 1}</span>
+                    {isAdmin() && (
+                      <>
+                        <button disabled={moving || index === 0} aria-label={`Move ${r.id} up`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { before: rules[index - 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↑</button>
+                        <button disabled={moving || index === rules.length - 1} aria-label={`Move ${r.id} down`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { after: rules[index + 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↓</button>
+                      </>
+                    )}
+                  </div>
+                </td>
                 <td className="px-3 py-3 font-mono text-xs text-(--text)">{r.id}</td>
                 <td className="px-3 py-3 text-(--text)">{r.description || "\u2014"}</td>
                 <td className="px-3 py-3 text-(--text)">
@@ -182,8 +206,6 @@ export function FirewallRuleTable({
                   {isAdmin() && (
                     <>
                       <div className="mb-2 flex items-center justify-end gap-2">
-                        <button disabled={moving || index === 0} aria-label={`Move ${r.id} up`} onClick={() => onMove(r.id, { before: rules[index - 1].id })} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↑</button>
-                        <button disabled={moving || index === rules.length - 1} aria-label={`Move ${r.id} down`} onClick={() => onMove(r.id, { after: rules[index + 1].id })} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↓</button>
                         <button disabled={moving} onClick={() => setMoveTarget(r)} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">Move to…</button>
                       </div>
                       {(!r.ics?.protocol || isSupportedICSProtocol(r.ics.protocol)) ? (
@@ -202,6 +224,7 @@ export function FirewallRuleTable({
                 </td>
               </tr>
             ))}
+            <FirewallDefaultRow action={defaultAction} />
           </tbody>
         </table>
       </div>

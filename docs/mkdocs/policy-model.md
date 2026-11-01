@@ -45,7 +45,19 @@ cannot shadow decisions. The check is conservative: coverage by several rules
 together is not reported, and IEC 104 rules are checked only against earlier
 IEC 104 rules.
 
-The firewall table displays configured order and provides move controls.
+The firewall table displays configured order, with ↑/↓ controls beside each
+position number for admins. The arrows are disabled at the ends and during a
+move. Keyboard focus follows the moved rule; at an end it switches to the
+remaining enabled direction. **Move to…** also supports top, bottom, before
+or after another rule. Moves stage changes; commit to apply them.
+
+A read-only **Default** row stays last, even with no configured rules. It applies
+to any zone and protocol when no rule above matched. Its action comes from the
+same candidate revision as the listed rules: an empty or omitted action means
+`DENY`, `ALLOW` carries an unmatched-traffic warning, and an unreadable or
+revision-mismatched default is shown as **unknown**, never assumed to deny.
+This row has no edit, delete or move controls.
+
 New rules default to the bottom; creation can instead select top, bottom,
 before or after another rule. Editing keeps a rule's slot. Templates append
 their ordered rules and can report a warning when an earlier terminal shadows

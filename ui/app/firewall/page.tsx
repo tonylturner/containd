@@ -44,6 +44,7 @@ import { AppliedRulesetStatus, InstalledRulesetUnavailable } from "./firewall-ru
 import { EnforcementHealthIndicator } from "../../components/EnforcementHealthIndicator";
 import { ICSCoverageNotice } from "../ics/ics-coverage";
 import { FirewallRuleTable } from "./firewall-rule-table";
+import { effectiveDefaultAction, type DefaultAction } from "./firewall-default-row";
 import { tagsInUse } from "./firewall-rule-policy";
 import type { CountersState } from "./firewall-rule-counters";
 import { useICSCoverage } from "../ics/use-ics-coverage";
@@ -64,10 +65,11 @@ function insertCreatedRule(rows: FirewallRule[], saved: FirewallRule & { index: 
 
 export default function FirewallPage() {
   const configView = useConfigView({ rules: [] as FirewallRule[], zones: [] as Zone[],
+    defaultAction: "unknown" as DefaultAction,
     nat: { enabled: false } as NATConfig, routing: null as RoutingConfig | null,
     dpiConfig: { captureInterfaces: [], dpiMock: false } as DataPlaneConfig });
   const { readConfig, write, revisionNotice } = configView;
-  const { rules, zones, nat, routing, dpiConfig } = configView.data;
+  const { rules, defaultAction, zones, nat, routing, dpiConfig } = configView.data;
   const viewRevision = configView.state.baseRevision ?? "";
   const { canSave, canSaveNow, loadError, checkLoaded } = useConfigLoad();
   const [error, setError] = useState<string | null>(null);
@@ -134,10 +136,12 @@ export default function FirewallPage() {
   ];
 
   const { refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot, c] = await Promise.all([api.listFirewallRules(), api.listZones(), api.getNAT(), api.getRouting(), fetchDataPlane(), api.getRuleCounters()]);
+    const [rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot, c, candidate] = await Promise.all([api.listFirewallRules(), api.listZones(), api.getNAT(), api.getRouting(), fetchDataPlane(), api.getRuleCounters(), api.getCandidateConfig()]);
     if (!matchingRevisions(rSnapshot, zSnapshot, nSnapshot, rtSnapshot, dpSnapshot)) { checkLoaded(null); return; }
     if (!checkLoaded(rSnapshot && zSnapshot && nSnapshot && rtSnapshot && dpSnapshot)) return;
-    readConfig({ data: { rules: rSnapshot!.data, zones: zSnapshot!.data, nat: nSnapshot!.data,
+    readConfig({ data: { rules: rSnapshot!.data,
+      defaultAction: matchingRevisions(rSnapshot, candidate) ? effectiveDefaultAction(candidate!.data) : "unknown",
+      zones: zSnapshot!.data, nat: nSnapshot!.data,
       routing: rtSnapshot!.data, dpiConfig: dpSnapshot!.data }, revision: rSnapshot!.revision }, keepEdits);
     setCounters(c);
     if (!keepEdits) {
@@ -476,6 +480,7 @@ export default function FirewallPage() {
       </div>
       <FirewallRuleTable
         rules={rules}
+        defaultAction={canSave ? defaultAction : "unknown"}
         zones={zones}
         shadowCounters={shadow.counters}
         dpiMode={dpiConfig.dpiMode}
