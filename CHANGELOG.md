@@ -43,6 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-forwarder "Last sent" claims delivery.
 - Strict protocol parsing describes unrecognized messages as violations rather
   than promising a block in monitor mode.
+- Firewall hit-counter failures show their cause inline, and the ICS page
+  shows saved capture interfaces without expanding a section.
+- The dashboard marks interfaces ready only when configured interfaces match
+  live devices, as the Interfaces page does. Saved OpenVPN profile paths stay
+  visible.
+- The Default rule row keeps a compact action badge, and sidebar group labels
+  are easier to read.
 
 ## [0.1.37] - 2026-11-01
 
