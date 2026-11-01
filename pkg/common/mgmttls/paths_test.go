@@ -3,6 +3,7 @@
 package mgmttls
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -72,6 +73,36 @@ func TestManagedIdentitySelection(t *testing.T) {
 			if tc.managed && (c != DefaultBundleFile || k != c) {
 				t.Fatal("not using bundle")
 			}
+			dataDir := t.TempDir()
+			c, k = IdentityFilesIn(cfg, dataDir)
+			if tc.managed {
+				want := filepath.Join(dataDir, "tls", "server.pem")
+				if c != want || k != want {
+					t.Fatalf("managed identity = %q, %q; want %q", c, k, want)
+				}
+			} else if c != tc.cert || k != tc.key {
+				t.Fatal("external paths were rebased")
+			}
 		})
+	}
+}
+
+func TestIdentityFilesInDefaultsAndOverrides(t *testing.T) {
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+	c, k := IdentityFiles(nil)
+	if c != DefaultBundleFile || k != c {
+		t.Fatal("default identity and bundle constant disagree")
+	}
+	dataDir := t.TempDir()
+	c, k = IdentityFilesIn(nil, dataDir)
+	if c != filepath.Join(dataDir, "tls", "server.pem") || k != c {
+		t.Fatal("nil configuration did not select the managed bundle")
+	}
+	t.Setenv("CONTAIND_TLS_CERT_FILE", "/external/bundle")
+	t.Setenv("CONTAIND_TLS_KEY_FILE", "/external/bundle")
+	c, k = IdentityFilesIn(nil, dataDir)
+	if c != "/external/bundle" || k != c {
+		t.Fatal("external environment overrides were rebased")
 	}
 }

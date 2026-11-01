@@ -216,7 +216,7 @@ type setTLSCertRequest struct {
 }
 
 func setTLSCertHandler(store config.Store) gin.HandlerFunc {
-	return tlsCertUploadHandler(store, "/data")
+	return tlsCertUploadHandler(store, mgmttls.DefaultDataDir)
 }
 
 // tlsCertUploadHandler publishes only the managed identity. dataDir is the
@@ -256,7 +256,7 @@ func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 			apiError(c, http.StatusConflict, fmt.Sprintf("external TLS paths are read-only: certificate %q (source: %s), key %q (source: %s); unset CONTAIND_TLS_CERT_FILE/CONTAIND_TLS_KEY_FILE and clear system.mgmt.tlsCertFile/tlsKeyFile or restore their default paths to use the managed bundle", cert.Path, cert.Source, key.Path, key.Source))
 			return
 		}
-		certFile := filepath.Join(dataDir, "tls", "server.pem")
+		certFile, _ := mgmttls.IdentityFilesIn(cfg, dataDir)
 		served := currentServedManagement()
 		liveCert := sameFilePath(certFile, served.CertFile) && sameFilePath(certFile, served.KeyFile)
 		if err := mgmttls.Publish(certFile, []byte(req.CertPEM), []byte(req.KeyPEM)); err != nil {

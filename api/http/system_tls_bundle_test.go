@@ -26,14 +26,15 @@ func TestTLSConcurrentUploadAndHandshakes(t *testing.T) {
 	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
 	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
 	dir := t.TempDir()
-	path := filepath.Join(dir, "tls", "server.pem")
+	cfg := config.DefaultConfig()
+	path, keyPath := mgmttls.IdentityFilesIn(cfg, dir)
 	oldCert, oldKey := generateTestCertPEM(t)
 	newCert, newKey := generateTestCertPEM(t)
 	if err := mgmttls.Publish(path, []byte(oldCert), []byte(oldKey)); err != nil {
 		t.Fatal(err)
 	}
-	loader := mgmttls.NewLoader(path, path)
-	recordServed(t, ServedManagement{CertFile: path, KeyFile: path, TLS: loader})
+	loader := mgmttls.NewLoader(path, keyPath)
+	recordServed(t, ServedManagement{CertFile: path, KeyFile: keyPath, TLS: loader})
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	srv.TLS = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: loader.GetCertificate}
 	srv.StartTLS()
@@ -42,7 +43,7 @@ func TestTLSConcurrentUploadAndHandshakes(t *testing.T) {
 	roots.AppendCertsFromPEM([]byte(oldCert))
 	roots.AppendCertsFromPEM([]byte(newCert))
 	router := gin.New()
-	router.POST("/upload", tlsCertUploadHandler(&mockStore{cfg: config.DefaultConfig()}, dir))
+	router.POST("/upload", tlsCertUploadHandler(&mockStore{cfg: cfg}, dir))
 	oldPair, err := tls.X509KeyPair([]byte(oldCert), []byte(oldKey))
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +93,31 @@ func TestTLSConcurrentUploadAndHandshakes(t *testing.T) {
 	close(failures)
 	for err := range failures {
 		t.Error(err)
+	}
+	// A final synchronous rotation must reach the listener, not merely leave
+	// it serving its last-good pair if the upload target ever drifts.
+	body, err := json.Marshal(setTLSCertRequest{CertPEM: newCert, KeyPEM: newKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("final upload: %d %s", rec.Code, rec.Body)
+	}
+	var response struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || response.Status != "updated" {
+		t.Fatalf("listener and upload paths disagree: %s (%v)", rec.Body, err)
+	}
+	conn, err := tls.Dial("tcp", srv.Listener.Addr().String(), &tls.Config{MinVersion: tls.VersionTLS12, ServerName: "containd.local", RootCAs: roots})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if !bytes.Equal(conn.ConnectionState().PeerCertificates[0].Raw, newPair.Certificate[0]) {
+		t.Fatal("next handshake did not serve the upload at the resolved listener path")
 	}
 }
 
