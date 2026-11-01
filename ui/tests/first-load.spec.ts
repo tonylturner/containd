@@ -20,13 +20,13 @@ async function serve(page: Page, held: string, replies: Record<string, Reply>) {
     if (path === held) await gate;
     const reply = replies[path];
     if (reply) {
-      await route.fulfill({ status: reply.status ?? 200, json: reply.json });
+      await route.fulfill({ status: reply.status ?? 200, json: reply.json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     const json = path.endsWith("/auth/me") || path.endsWith("/auth/session")
       ? { id: "admin", username: "containd", role: "admin" }
       : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json });
+    await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return () => release();
 }

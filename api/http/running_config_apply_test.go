@@ -25,11 +25,15 @@ type commitApplyStore struct {
 	commit func() error
 }
 
-func (s *commitApplyStore) Commit(context.Context) error { return s.commit() }
-func (s *commitApplyStore) CommitConfirmed(context.Context, time.Duration) error {
-	return s.commit()
+func (s *commitApplyStore) Commit(context.Context, config.Revision) (config.Revision, error) {
+	return "", s.commit()
 }
-func (s *commitApplyStore) Rollback(context.Context) error { return s.commit() }
+func (s *commitApplyStore) CommitConfirmed(context.Context, config.Revision, time.Duration) (config.Revision, error) {
+	return "", s.commit()
+}
+func (s *commitApplyStore) Rollback(context.Context, config.Revision) (config.Revision, error) {
+	return "", s.commit()
+}
 
 type blockingApplyEngine struct {
 	*mockEngine
@@ -90,6 +94,8 @@ func TestApplyRunningConfigSerializesReplayAndRunningMutation(t *testing.T) {
 			var release sync.Once
 			unblock := func() { release.Do(func() { close(engine.release) }) }
 			defer unblock()
+			base := testBaseRevision(store, context.Background())
+			loads = 0
 			replayDone := make(chan error, 1)
 			go func() {
 				_, err := ApplyRunningConfig(context.Background(), store, engine, nil)
@@ -105,7 +111,9 @@ func TestApplyRunningConfigSerializesReplayAndRunningMutation(t *testing.T) {
 			mutationDone := make(chan struct{})
 			go func() {
 				defer close(mutationDone)
-				server.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/v1/config/"+action, http.NoBody))
+				req := authedRequest(http.MethodPost, "/api/v1/config/"+action, http.NoBody)
+				req.Header.Set(ifRevisionHeader, string(base))
+				server.ServeHTTP(rec, req)
 			}()
 			earlyMutation := false
 			select {
@@ -242,7 +250,7 @@ func TestRuntimeMutationsWaitForReplay(t *testing.T) {
 				}
 				req := authedRequest(method, "/api/v1"+endpoint.path, bytes.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
-				server.ServeHTTP(rec, req)
+				serveWithConfigRevision(t, server, rec, req)
 			}()
 			earlyMutation := false
 			select {
@@ -266,8 +274,8 @@ func TestRuntimeMutationsWaitForReplay(t *testing.T) {
 	}
 }
 
-func (s *commitApplyStore) ApplyChange(ctx context.Context, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) error {
-	return mockApplyChange(ctx, s, change, ttl, apply)
+func (s *commitApplyStore) ApplyChange(ctx context.Context, expected config.Revision, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) (config.Revision, error) {
+	return mockApplyChange(ctx, s, expected, change, ttl, apply)
 }
 func (s *commitApplyStore) RuntimeApplyFault(context.Context) (string, error)  { return "", nil }
 func (s *commitApplyStore) SetRuntimeApplyFault(context.Context, string) error { return nil }

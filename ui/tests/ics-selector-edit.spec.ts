@@ -91,7 +91,7 @@ test("template preview renders nested rule protocol and codes", async ({ page })
     if (path === "/api/v1/zones") body = [];
     if (path === "/api/v1/templates/ics") body = [{ name: "Read operations", protocol: "cip", description: "Read services" }];
     if (path === "/api/v1/templates/ics/apply") body = { rules: [{ id: "generated", description: "Generated read", action: "ALLOW", ics: { protocol: "cip", functionCode: [14, 76] } }, { id: "dnp-time", action: "ALLOW", ics: { protocol: "dnp3", functionCode: [2], groups: [50, 80] } }] };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/templates/ics");
   await page.goto("/templates/");

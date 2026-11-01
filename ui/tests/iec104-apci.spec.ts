@@ -32,7 +32,7 @@ async function mockAlert(page: Page, alert: TelemetryEvent) {
     if (path.endsWith("/auth/me") || path.endsWith("/auth/session")) body = user;
     else if (path.endsWith("/events")) body = [alert];
     else if (path.endsWith("/system/info")) body = { version: "0.1.35", hostname: "containd" };
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(body), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 }
 

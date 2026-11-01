@@ -38,7 +38,7 @@ func TestCLICommandsHandlerIncludesExpectedCommands(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/cli/commands", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -69,7 +69,7 @@ func TestCLIExecuteHandlerSupportsBlankAndCommandExecution(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/cli/execute", bytes.NewBufferString(`{"line":"   "}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for blank input, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -87,7 +87,7 @@ func TestCLIExecuteHandlerSupportsBlankAndCommandExecution(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/cli/execute", bytes.NewBufferString(`{"line":"show version"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for show version, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -121,7 +121,7 @@ func TestCLICompleteHandlerSuggestsConfigAwareArgs(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/cli/complete?line="+url.QueryEscape("set interface "), nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -143,7 +143,7 @@ func TestCLIWebsocketHandlerExecutesCommands(t *testing.T) {
 	bindConsoleTest(t, config.ManagementListeners{HTTP: config.ManagementListener{Addr: srv.Listener.Addr().String(), Enabled: true}})
 
 	rec := httptest.NewRecorder()
-	srv.Config.Handler.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/v1/cli/ws/ticket", nil))
+	serveWithConfigRevision(t, srv.Config.Handler, rec, authedRequest(http.MethodPost, "/api/v1/cli/ws/ticket", nil))
 	ticket := decodeCLITicket(t, rec)
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/cli/ws?ticket=" + ticket
 	headers := http.Header{}
@@ -274,7 +274,7 @@ func executeConsoleTest(t *testing.T, router http.Handler, host string) (string,
 	req.Header.Set("Authorization", "Bearer console-secret")
 	req.Header.Set("X-Forwarded-Proto", "http")
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, router, rec, req)
 	var result struct{ Output, Error string }
 	if rec.Code != http.StatusOK {
 		t.Fatalf("console status = %d, body=%s", rec.Code, rec.Body)
@@ -586,7 +586,7 @@ func TestConsoleTLSInfoUsesServedEnvironmentPaths(t *testing.T) {
 	router := gin.New()
 	router.GET("/tls", getTLSHandler(&mockStore{cfg: cfg}))
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
+	serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
 	var result tlsInfoResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)

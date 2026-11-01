@@ -83,7 +83,7 @@ func patchSyslogHandler(store config.Store) gin.HandlerFunc {
 
 func getSyslogHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -114,7 +114,7 @@ func setSyslogHandler(store config.Store) gin.HandlerFunc {
 
 func getDNSHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -157,7 +157,7 @@ func setDNSHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 
 func getNTPHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -187,7 +187,7 @@ func setNTPHandler(store config.Store) gin.HandlerFunc {
 
 func getAVHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -336,7 +336,7 @@ func deleteAVDefHandler(engine EngineClient) gin.HandlerFunc {
 
 func getDHCPHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -366,7 +366,7 @@ func setDHCPHandler(store config.Store) gin.HandlerFunc {
 
 func getForwardProxyHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -396,7 +396,7 @@ func setForwardProxyHandler(store config.Store) gin.HandlerFunc {
 
 func getReverseProxyHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return

@@ -28,10 +28,15 @@ func committedConfigResponse(c *gin.Context, status string) {
 }
 
 func replaceCandidate(c *gin.Context, ctx context.Context, store config.Store, cfg *config.Config) bool {
-	if err := store.SaveCandidate(ctx, cfg); err != nil {
+	revision, err := store.SaveCandidate(ctx, expectedConfigRevision(c), cfg)
+	if err != nil {
+		if revisionMismatchResponse(c, err) {
+			return false
+		}
 		apiError(c, http.StatusBadRequest, err.Error())
 		return false
 	}
+	configRevisionResponse(c, revision)
 	configChangeResponse(c, "staged")
 	return true
 }
@@ -53,9 +58,9 @@ func stageCandidateIDS(c *gin.Context, store config.Store, edit func(*config.Con
 	return stageCandidateWith(c, bankStore.MutateCandidateIDS, edit)
 }
 
-func stageCandidateWith(c *gin.Context, mutate func(context.Context, func(*config.Config) error) error, edit func(*config.Config) bool) (*config.Config, bool) {
+func stageCandidateWith(c *gin.Context, mutate func(context.Context, config.Revision, func(*config.Config) error) (config.Revision, error), edit func(*config.Config) bool) (*config.Config, bool) {
 	var saved *config.Config
-	err := mutate(c.Request.Context(), func(cfg *config.Config) error {
+	revision, err := mutate(c.Request.Context(), expectedConfigRevision(c), func(cfg *config.Config) error {
 		if !edit(cfg) {
 			return errCandidateRejected
 		}
@@ -63,11 +68,15 @@ func stageCandidateWith(c *gin.Context, mutate func(context.Context, func(*confi
 		return nil
 	})
 	if err != nil {
+		if revisionMismatchResponse(c, err) {
+			return nil, false
+		}
 		if !errors.Is(err, errCandidateRejected) {
 			apiError(c, http.StatusBadRequest, err.Error())
 		}
 		return nil, false
 	}
+	configRevisionResponse(c, revision)
 	configChangeResponse(c, "staged")
 	return saved, true
 }
@@ -75,11 +84,12 @@ func stageCandidateWith(c *gin.Context, mutate func(context.Context, func(*confi
 // Service discovery runs outside mutation callbacks because validators can read
 // the store. It needs only settings, never the potentially large IDS bank.
 func loadCandidateDocument(ctx context.Context, store config.Store) (*config.Config, error) {
-	reader, ok := store.(interface {
-		LoadCandidateDocument(context.Context) (*config.Config, error)
-	})
-	if !ok {
-		return nil, errors.New("store does not support bank-free document reads")
+	snapshot, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, false)
+	if err != nil {
+		return nil, err
 	}
-	return reader.LoadCandidateDocument(ctx)
+	if snapshot.Candidate == nil {
+		return nil, config.ErrNotFound
+	}
+	return snapshot.Candidate, nil
 }

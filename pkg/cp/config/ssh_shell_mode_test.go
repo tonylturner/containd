@@ -47,7 +47,8 @@ func TestStoredSSHShellModeLoadsAsTheModeItRan(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		candidate, err := s.LoadCandidate(ctx)
+		candidateSnapshot1, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+		candidate := candidateSnapshot1.Candidate
 		if err != nil {
 			t.Fatal(err)
 		}

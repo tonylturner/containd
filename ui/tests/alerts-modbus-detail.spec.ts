@@ -44,7 +44,7 @@ test("modbus alert detail shows the fields of each function code", async ({ page
       : path.endsWith("/auth/me") || path.endsWith("/auth/session")
         ? { id: "admin", username: "containd", role: "admin" }
         : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json });
+    await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 
   const answered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/events");

@@ -46,7 +46,7 @@ async function openFirewall(
       previews.push(request.postDataJSON());
       body = preview;
     }
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = Promise.all([
     page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules"),
@@ -207,9 +207,7 @@ test("ruleset preview explains rules that match nothing because of zones or addr
     message: "its sources and destinations share no address family (IPv4 or IPv6); the rule matches nothing",
   };
   await openFirewall(page, []);
-  await page.route("**/api/v1/dataplane/ruleset", (route) => route.fulfill({
-    json: { ruleset: "table inet containd {}", runtime: { iec104EnvelopeOpen: false, reason: "no IEC 104 rules" }, warnings: [zone, family, unbound] },
-  }));
+  await page.route("**/api/v1/dataplane/ruleset", (route) => route.fulfill({ json: { ruleset: "table inet containd {}", runtime: { iec104EnvelopeOpen: false, reason: "no IEC 104 rules" }, warnings: [zone, family, unbound] }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.getByRole("button", { name: "Preview", exact: true }).click();
   const items = page.getByRole("status", { name: "Candidate rule warnings" }).getByRole("listitem");
   await expect(items).toHaveCount(3);

@@ -3,6 +3,7 @@ package config
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 )
@@ -48,15 +49,23 @@ func (s *SQLiteStore) ReadHealthSnapshot(ctx context.Context) (HealthSnapshot, e
 		}
 	}
 	defer s.mu.Unlock()
-	cfg, err := s.loadKind(ctx, configKeyRunning)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return HealthSnapshot{}, err
-	}
-	fault, err := s.runtimeApplyFaultLocked(ctx)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return HealthSnapshot{}, err
 	}
+	defer tx.Rollback() //nolint:errcheck
+	cfg, err := readKindFrom(ctx, tx, configKeyRunning, false)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return HealthSnapshot{}, err
+	}
+	var fault string
+	if err := tx.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, runtimeApplyFaultKey).Scan(&fault); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return HealthSnapshot{}, err
+	}
 	if err := ctx.Err(); err != nil {
+		return HealthSnapshot{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return HealthSnapshot{}, err
 	}
 	return HealthSnapshot{Config: cfg, ApplyFault: fault}, nil

@@ -4,7 +4,7 @@
 
 run_identification_probes() {
   if [[ "$SMOKE_DPI_CAPTURE" == "nfqueue" ]]; then
-    if $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=1000" | jq -e 'all(.[]; .proto != "identify")' >/dev/null; then
+    if "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=1000" | jq -e 'all(.[]; .proto != "identify")' >/dev/null; then
       pass "NFQUEUE produced no identification events"
     else
       check_fail "NFQUEUE unexpectedly produced identification events"
@@ -23,7 +23,7 @@ run_identification_probes() {
        ics:{protocol:"iec104",mode:"monitor"}, action:"ALLOW"}]
   ' <<<"$UPDATED_CFG")
   local code
-  code=$(curl -s --max-time 10 -w '%{http_code}' -o "$WORK_DIR/identify-save.json" \
+  code=$(cas_write "$WORK_DIR/config.revision" curl -s --max-time 10 -w '%{http_code}' -o "$WORK_DIR/identify-save.json" \
     -H "$AUTH_HEADER" -H 'Content-Type: application/json' -X POST "${BASE}/config" --data-binary @- <<<"$UPDATED_CFG")
   [[ "$code" == 200 ]] || { log "identification config save failed: $(cat "$WORK_DIR/identify-save.json")"; exit 1; }
   # shellcheck disable=SC2034 # apply_snapshot consumes this caller-owned value.
@@ -78,7 +78,7 @@ run_identification_probes() {
     check_fail "TCP/1502 identification missing, duplicated or not content-confirmed outside scope"
   fi
   local connection
-  connection=$($CURL -H "$AUTH_HEADER" "${BASE}/events?limit=1000" | jq -er "$mb_filter | .[0].transportConnectionId // empty")
+  connection=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=1000" | jq -er "$mb_filter | .[0].transportConnectionId // empty")
   if wait_for_jq "${BASE}/events?limit=1000" "[.[] | select(.transportConnectionId == \"$connection\" and .proto == \"modbus\" and .attributes.observation_only == true and .attributes.transaction_id == 1)] | length == 2 and any(.[]; .kind == \"request\" and .srcPort == $mb_port and .dstPort == 1502) and any(.[]; .kind == \"response\" and .srcPort == 1502) and ([.[].flowId] | unique | length) == 2"; then
     pass "TCP/1502 observation decoded request and reply exactly once, with directional flow IDs"
   else
@@ -100,7 +100,7 @@ run_identification_probes() {
   else
     check_fail "TCP/12404 identification missing, duplicated or not content-confirmed outside scope"
   fi
-  connection=$($CURL -H "$AUTH_HEADER" "${BASE}/events?limit=1000" | jq -er "$iec_filter | .[0].transportConnectionId // empty")
+  connection=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=1000" | jq -er "$iec_filter | .[0].transportConnectionId // empty")
   if wait_for_jq "${BASE}/events?limit=1000" "[.[] | select(.transportConnectionId == \"$connection\" and .proto == \"iec104\" and .attributes.observation_only == true)] | any(.[]; .attributes.direction == \"request\" and .dstPort == 12404 and .attributes.type_id == 100 and .attributes.ca == 1) and any(.[]; .attributes.direction == \"response\" and .srcPort == 12404 and .attributes.ca == 1 and .attributes.ioa == 1001 and (.attributes.session_id | length) > 0) and ([.[].flowId] | unique | length) == 2 and ([.[] | [.attributes.apdu_id,.attributes.ioa,.kind]] | length) == ([.[] | [.attributes.apdu_id,.attributes.ioa,.kind]] | unique | length)"; then
     pass "TCP/12404 observation decoded GI request and RTU reply with correct directions and frozen APDU identities"
   else
@@ -108,7 +108,7 @@ run_identification_probes() {
   fi
   wait "$server_capture" || capture_ok=0
   wait "$client_capture" || capture_ok=0
-  if [[ "$capture_ok" == 1 ]] && $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=1000" | jq -e \
+  if [[ "$capture_ok" == 1 ]] && "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=1000" | jq -e \
     --arg mb "$mb_connection" --arg iec "$connection" \
     'all(.[]; (.transportConnectionId != $mb and .transportConnectionId != $iec) or (.kind | startswith("ics.") | not))' >/dev/null; then
     pass "Both endpoint captures saw alternate-port packets; no reset or enforcement decision attempts"

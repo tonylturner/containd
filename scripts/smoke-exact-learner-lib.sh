@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Shared assertions and public management API helpers for smoke-exact-learner.sh.
+# shellcheck source=scripts/config-revision.sh
+source "$(dirname "${BASH_SOURCE[0]}")/config-revision.sh"
 
 exact_fail() {
 	printf 'FAIL: %s; evidence: %s\n' "$*" "$MODE_RESULTS" >&2
@@ -21,7 +23,13 @@ exact_api() {
 		args+=(-X "$method" -H 'Content-Type: application/json')
 		[[ -z $body ]] || args+=(--data-binary "@$body")
 	fi
-	HTTP_CODE=$(curl "${args[@]}" "${BASE}${path}" 2>"$MODE_RESULTS/curl-error.log") || HTTP_CODE=000
+	local -a request=(curl)
+	if [[ $method == GET && ( $path == /config || $path == /config/candidate ) ]]; then
+		request=(cas_read "$output.revision" curl)
+	elif [[ $method == POST && ( $path == /config/* || $path == /learn/apply ) ]]; then
+		request=(cas_write "$MODE_RESULTS/config.revision" curl)
+	fi
+	HTTP_CODE=$("${request[@]}" "${args[@]}" "${BASE}${path}" 2>"$MODE_RESULTS/curl-error.log") || HTTP_CODE=000
 }
 
 exact_api_expect() {

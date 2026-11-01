@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRevision } from "../../lib/use-config-revision";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -18,6 +20,7 @@ const MAX_ZONES = 6;
    ════════════════════════════════════════════════════════════════════ */
 
 export default function SecurityView() {
+  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
   const toast = useToast();
   const zoneNames = useRef(new Map<string, string>());
   const [allZones, setAllZones] = useState<ZoneView[]>([]);
@@ -34,7 +37,7 @@ export default function SecurityView() {
   const { initialLoading: loading, loading: refreshing, refresh: fetchData } = useAsyncRefresh(useCallback(async () => {
     try {
       const [zones, conds] = await Promise.all([
-        api.listZones(),
+        api.listZones().then(snapshot => readConfig(snapshot)),
         api.getSecurityConduits(),
       ]);
       setError(null);
@@ -47,7 +50,7 @@ export default function SecurityView() {
     } catch (e) {
       setError(String(e));
     }
-  }, []));
+  }, [readConfig]));
 
   useConfigRefresh(fetchData);
 
@@ -87,11 +90,11 @@ export default function SecurityView() {
   const setSLTarget = useCallback(async (zoneId: string, lvl: number) => {
     const name = zoneNames.current.get(zoneId);
     if (!name) return;
-    const result = await api.updateZone(name, { slTarget: lvl });
+    const result = await api.updateZone(expectedRevision(), name, { slTarget: lvl }).then(handleRevision(expectedRevision()));
     if (!result.ok) { toast(result.error || "Failed to stage zone target", "error"); return; }
     toast("Zone target staged — commit to apply.", "success");
     await fetchData();
-  }, [fetchData, toast]);
+  }, [fetchData, toast, expectedRevision, handleRevision]);
 
   const toggleOverride = useCallback(async (zoneId: string, srId: string, newVal: boolean) => {
     const zone = allZones.find((z) => z.id === zoneId);
@@ -100,11 +103,11 @@ export default function SecurityView() {
     const ov = { ...zone.overrides };
     if (Object.prototype.hasOwnProperty.call(ov, srId)) delete ov[srId];
     else ov[srId] = newVal;
-    const result = await api.updateZone(name, { slOverrides: ov });
+    const result = await api.updateZone(expectedRevision(), name, { slOverrides: ov }).then(handleRevision(expectedRevision()));
     if (!result.ok) { toast(result.error || "Failed to stage zone override", "error"); return; }
     toast("Zone override staged — commit to apply.", "success");
     await fetchData();
-  }, [allZones, fetchData, toast]);
+  }, [allZones, fetchData, toast, expectedRevision, handleRevision]);
 
   // ── Cell selection ──
   const selectCell = useCallback((key: string) => {
@@ -140,6 +143,7 @@ export default function SecurityView() {
   return (
     <div className={ts.workspace} style={{ gridTemplateColumns: panelOpen ? "1fr 320px" : "1fr" }}>
       <div className={s.matrixPane}>
+        {revisionNotice(() => window.location.reload())}
         <div className={s.matrixHeader}>
           <div className={s.matrixTitle}>ZONE &middot; CONDUIT MATRIX</div>
           <div className={s.matrixSubtitle}>Zone targets are candidate settings; conduit observations are live. Each cell is a conduit &mdash; click to inspect policy, IDS coverage, and IEC 62443 SR requirement checks. Check-based SL / SL-T shown on zone headers. Automated checks tag requirements from observed policy; not a standards assessment.</div>

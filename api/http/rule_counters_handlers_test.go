@@ -36,7 +36,7 @@ func TestRuleCountersRoute(t *testing.T) {
 	s := NewServerWithEngine(&mockStore{}, nil, eng)
 	get := func() *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
-		s.ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/firewall/counters", nil))
+		serveWithConfigRevision(t, s, rec, authedRequest(http.MethodGet, "/api/v1/firewall/counters", nil))
 		return rec
 	}
 	rec := get()
@@ -50,7 +50,7 @@ func TestRuleCountersRoute(t *testing.T) {
 	}
 	s = NewServerWithEngine(&mockStore{}, nil, &mockEngine{})
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/firewall/counters", nil))
+	serveWithConfigRevision(t, s, rec, authedRequest(http.MethodGet, "/api/v1/firewall/counters", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("engine without counters: %d", rec.Code)
 	}

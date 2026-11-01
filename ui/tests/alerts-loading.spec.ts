@@ -16,13 +16,13 @@ test("alerts show loading, not the empty state, until the first list answers", a
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/v1/events") {
       await held;
-      await route.fulfill({ json: [] });
+      await route.fulfill({ json: [], headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     const json = path.endsWith("/auth/me") || path.endsWith("/auth/session")
       ? { id: "admin", username: "containd", role: "admin" }
       : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json });
+    await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 
   const requested = page.waitForRequest((r) => new URL(r.url()).pathname === "/api/v1/events");

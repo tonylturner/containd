@@ -247,6 +247,7 @@ run_mode() {
 
 	API_OUTPUT="$MODE_RESULTS/initial-running.json"
 	exact_api_get /config "$API_OUTPUT" "$CAPTURE_MODE running configuration read"
+	cp "$API_OUTPUT.revision" "$MODE_RESULTS/config.revision"
 	if [[ $CAPTURE_MODE == afpacket ]]; then
 		jq --arg wan_dev "$WAN_IFACE" --arg lan_dev "$LAN_IFACE" --arg client "$LAN_CLIENT_IP" --arg server "$MODBUS_SERVER_IP" \
 			--arg rtu "$RTU_IP" '
@@ -414,8 +415,8 @@ JSON
 		'{requestId:"pre-review-probe",selections:[{id:$id,revision:$revision}]}' \
 		>"$MODE_RESULTS/iec-pre-review-apply.json"
 	exact_api POST /learn/apply "$MODE_RESULTS/iec-pre-review-response.json" "$MODE_RESULTS/iec-pre-review-apply.json"
-	[[ $HTTP_CODE -ge 400 && $HTTP_CODE -lt 500 ]] ||
-		exact_fail "$CAPTURE_MODE unreviewed IEC /learn/apply returned HTTP $HTTP_CODE instead of 4xx; response=$(cat "$MODE_RESULTS/iec-pre-review-response.json")"
+	[[ $HTTP_CODE == 409 ]] ||
+		exact_fail "$CAPTURE_MODE unreviewed IEC /learn/apply returned HTTP $HTTP_CODE instead of review conflict 409; response=$(cat "$MODE_RESULTS/iec-pre-review-response.json")"
 	exact_pass_record "$CAPTURE_MODE IEC suggestion is rejected before authenticated review" \
 		"HTTP=$HTTP_CODE response=$(cat "$MODE_RESULTS/iec-pre-review-response.json")"
 
@@ -440,6 +441,7 @@ JSON
 
 	# Empty the candidate rule list only; the currently running baseline remains
 	# active while the selected certified rules are atomically staged.
+	cp "$MODE_RESULTS/running-baseline.json.revision" "$MODE_RESULTS/config.revision"
 	jq '.firewall.rules=[] | .firewall.defaultAction="ALLOW"' "$MODE_RESULTS/running-baseline.json" \
 		>"$MODE_RESULTS/candidate-empty.json"
 	exact_api_post /config/candidate "$MODE_RESULTS/candidate-empty.json" \
@@ -476,6 +478,9 @@ JSON
 	exact_pass_record "$CAPTURE_MODE selected batch is candidate-only and all staged rules are monitor rules" \
 		"candidate rules=$(jq '.firewall.rules|length' "$MODE_RESULTS/candidate-staged.json"); running baseline unchanged"
 
+	# The candidate and original receipt have been reviewed above. Retry is a
+	# deliberate request based on that read, never an automatic CAS bypass.
+	cp "$MODE_RESULTS/candidate-staged.json.revision" "$MODE_RESULTS/config.revision"
 	exact_api_post /learn/apply "$MODE_RESULTS/apply-request.json" \
 		"$MODE_RESULTS/apply-retry-response.json" "$CAPTURE_MODE same-request retry"
 	jq -S '[.firewall.rules[]]' "$MODE_RESULTS/candidate-staged.json" >"$MODE_RESULTS/candidate-rules-before-retry.json"
@@ -527,6 +532,7 @@ JSON
 	if [[ $CAPTURE_MODE == nfqueue ]]; then
 		API_OUTPUT="$MODE_RESULTS/running-before-enforce-edit.json"
 		exact_api_get /config "$API_OUTPUT" "$CAPTURE_MODE running config before normal FC5 candidate edit"
+		cp "$API_OUTPUT.revision" "$MODE_RESULTS/config.revision"
 		jq --arg id "$FC5_RULE_ID" '
       .firewall.defaultAction="DENY"
       | .firewall.rules |= map(if .id == $id then .ics.mode="enforce" else . end)
@@ -566,6 +572,7 @@ JSON
 		# policy. A direct execute has no prior selection at this SBO-only RTU:
 		# its negative confirmation proves delivery, not successful actuation.
 		exact_api_get /config "$MODE_RESULTS/running-before-iec-enforce.json" "$CAPTURE_MODE running config before IEC mode edit"
+		cp "$MODE_RESULTS/running-before-iec-enforce.json.revision" "$MODE_RESULTS/config.revision"
 		jq --arg id "$IEC_RULE_ID" '
 			(.firewall.rules[] | select(.id == $id)) as $command
 			| .firewall.rules |= map(if .id == $id then .ics.mode="enforce" else . end)

@@ -69,13 +69,15 @@ export default function ProxiesPage() {
   const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     try {
       setStatus(await api.getServicesStatus());
-      const fp = await api.getForwardProxy();
-      const rp = await api.getReverseProxy();
+      const fpSnapshot = await api.getForwardProxy();
+      const fp = (fpSnapshot?.data ?? null);
+      const rpSnapshot = await api.getReverseProxy();
+      const rp = (rpSnapshot?.data ?? null);
       if (!checkLoaded(fp) || !checkLoaded(rp)) return;
       setError(null);
-      adoptForward(fp, keepEdits);
-      adoptReverse(rp, keepEdits);
-      refreshSite(rp, keepEdits);
+      adoptForward(fp, keepEdits, fpSnapshot?.revision);
+      adoptReverse(rp, keepEdits, rpSnapshot?.revision);
+      refreshSite(rp, keepEdits, rpSnapshot?.revision);
       toast("Proxy status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -108,18 +110,18 @@ export default function ProxiesPage() {
     setError(null);
     setSaveState("saving");
     const submitted = forwardDraft.beginSave();
-    const saved = await api.setForwardProxy({ ...forward,
+    const saved = await api.setForwardProxy(submitted.baseRevision ?? "", { ...forward,
       listenZones: listenZonesCSV.split(",").map((s) => s.trim()).filter(Boolean),
       allowedDomains: allowedDomainsCSV.split(",").map((s) => s.trim()).filter(Boolean),
     });
     setSaveState(saved.ok ? "saved" : "error");
     if (!saved.ok) {
-      forwardDraft.failSave(submitted);
+      forwardDraft.failSave(submitted, saved);
       const msg = saved.error || "Failed to save forward proxy settings.";
       setError(msg);
       toast(msg, "error");
     } else {
-      forwardDraft.acceptConfig(submitted, saved.data);
+      forwardDraft.acceptConfig(submitted, saved.data, saved.revision);
       toast(saved.warning ? `Forward proxy staged — commit to apply. Warning: ${saved.warning}` : "Forward proxy staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
@@ -130,15 +132,15 @@ export default function ProxiesPage() {
     setError(null);
     setSaveState("saving");
     const submitted = reverseDraft.beginSave();
-    const saved = await api.setReverseProxy(reverse);
+    const saved = await api.setReverseProxy(submitted.baseRevision ?? "", reverse);
     setSaveState(saved.ok ? "saved" : "error");
     if (!saved.ok) {
-      reverseDraft.failSave(submitted);
+      reverseDraft.failSave(submitted, saved);
       const msg = saved.error || "Failed to save reverse proxy settings.";
       setError(msg);
       toast(msg, "error");
     } else {
-      reverseDraft.acceptConfig(submitted, saved.data);
+      reverseDraft.acceptConfig(submitted, saved.data, saved.revision);
       toast(saved.warning ? `Reverse proxy staged — commit to apply. Warning: ${saved.warning}` : "Reverse proxy staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
@@ -159,6 +161,10 @@ export default function ProxiesPage() {
     const hostnames = hostnamesCSV.split(",").map((s) => s.trim()).filter(Boolean);
     if (backends.length === 0) {
       setError("At least one backend is required.");
+      return;
+    }
+    if (siteDraft.editor.baseRevision !== reverseDraft.editor.baseRevision) {
+      siteDraft.requireReview(reverseDraft.editor.baseRevision ?? "");
       return;
     }
     setReverse((r) => ({
@@ -207,6 +213,9 @@ export default function ProxiesPage() {
         </div>
       }
     >
+      <ConfigEditNotice superseded={false} {...forwardDraft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
+      <ConfigEditNotice superseded={false} {...siteDraft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
+      <ConfigEditNotice superseded={false} {...reverseDraft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       <ConfirmDialog {...confirm.props} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice superseded={forwardDraft.editor.superseded || reverseDraft.editor.superseded || siteDraft.editor.superseded} />

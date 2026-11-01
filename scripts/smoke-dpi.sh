@@ -50,7 +50,9 @@ LAN_NET=${SMOKE_LAN_NET:-172.31.0}
 BASE=${BASE:-http://localhost:18080/api/v1}
 TOKEN=${TOKEN:-devtoken}
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
-CURL="curl -sf --max-time 10 --connect-timeout 5"
+CURL=(curl -sf --max-time 10 --connect-timeout 5)
+# shellcheck source=scripts/config-revision.sh
+source "$(dirname "${BASH_SOURCE[0]}")/config-revision.sh"
 SMOKE_SKIP_UP=${SMOKE_SKIP_UP:-0}
 SMOKE_BUILD=${SMOKE_BUILD:-1}
 SMOKE_DPI_CAPTURE=${SMOKE_DPI_CAPTURE:-afpacket}
@@ -111,7 +113,7 @@ ensure_tools() {
 wait_for_http() {
   local url=$1
   for _ in $(seq 1 30); do
-    if $CURL "$url" >/dev/null 2>&1; then
+    if "${CURL[@]}" "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 2
@@ -130,7 +132,7 @@ discover_iface() {
 wait_for_jq() {
   local url=$1 filter=$2
   for _ in $(seq 1 20); do
-    if $CURL -H "$AUTH_HEADER" "$url" | jq -e "$filter" >/dev/null 2>&1; then
+    if "${CURL[@]}" -H "$AUTH_HEADER" "$url" | jq -e "$filter" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -141,7 +143,7 @@ wait_for_jq() {
 apply_snapshot() {
   local ruleset_file snap ruleset_head code tmp_apply_resp
   ruleset_file=$(mktemp)
-  if ! $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset_file"; then
+  if ! "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset_file"; then
     log "failed to fetch ruleset preview"
     rm -f "$ruleset_file"
     exit 1
@@ -285,7 +287,7 @@ probe_dnp3_control() {
 assert_enforce_refused() {
   local code body
   body="$WORK_DIR/enforce-refused.json"
-  code=$(curl -s --max-time 10 --connect-timeout 5 -w "%{http_code}" -o "$body" -H "$AUTH_HEADER" \
+  code=$(cas_write "$WORK_DIR/config.revision" curl -s --max-time 10 --connect-timeout 5 -w "%{http_code}" -o "$body" -H "$AUTH_HEADER" \
     -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- <<<"$1" || true)
   if [[ "$code" == "400" ]] && jq -e '.error | contains("rule smoke-") and contains("dataplane.nfqueueGroup")' "$body" >/dev/null 2>&1; then
     pass "Enforce without NFQUEUE refused: $(jq -r '.error' "$body")"
@@ -303,20 +305,20 @@ assert_ics_coverage() {
   filter='(.icsCoverage | length) == 5 and all(.icsCoverage[]; .state == $s)
     and (.engineStatus.icsCoverage | length) == 5 and all(.engineStatus.icsCoverage[]; .state == $s)'
   for _ in $(seq 1 20); do
-    if $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" | jq -e --arg s "$state" "$filter" >/dev/null 2>&1; then
+    if "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" | jq -e --arg s "$state" "$filter" >/dev/null 2>&1; then
       break
     fi
     sleep 1
   done
-  if $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" | jq -e --arg s "$state" "$filter" >/dev/null 2>&1; then
+  if "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" | jq -e --arg s "$state" "$filter" >/dev/null 2>&1; then
     pass "Candidate and applied ICS coverage: every rule $state"
   else
-    check_fail "ICS coverage is not $state: $($CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" | jq -c '{icsCoverage, applied: .engineStatus.icsCoverage}' | head -c 600)"
+    check_fail "ICS coverage is not $state: $("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" | jq -c '{icsCoverage, applied: .engineStatus.icsCoverage}' | head -c 600)"
   fi
-  if $CURL "${BASE}/health" | jq -e --arg s "$state" '.icsEnforcement.state == $s' >/dev/null 2>&1; then
+  if "${CURL[@]}" "${BASE}/health" | jq -e --arg s "$state" '.icsEnforcement.state == $s' >/dev/null 2>&1; then
     pass "Health icsEnforcement reports $state"
   else
-    check_fail "Health icsEnforcement is not $state: $($CURL "${BASE}/health" | jq -c '.icsEnforcement')"
+    check_fail "Health icsEnforcement is not $state: $("${CURL[@]}" "${BASE}/health" | jq -c '.icsEnforcement')"
   fi
 }
 
@@ -437,7 +439,7 @@ wait_for_http "${BASE}/health"
 log "Fetching interface state..."
 STATE=""
 for _ in $(seq 1 10); do
-  STATE=$($CURL -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
+  STATE=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
   if [[ -n "$STATE" && "$STATE" != "[]" ]]; then
     break
   fi
@@ -453,7 +455,7 @@ fi
 log "Detected wan=${WAN_DEV}, lan=${LAN_DEV}"
 
 log "Fetching current config..."
-CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
+CFG=$(cas_read "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config")
 
 # The nfqueue variant uses extra client addresses (.6-.10) so each
 # first-actuation probe has no dynamic block (src, dst, dport) from another.
@@ -574,7 +576,7 @@ DATAPLANE_CFG=$(echo "$UPDATED_CFG" | jq '.dataplane')
 
 tmp_cfg_resp=$(mktemp)
 tmp_cfg_err=$(mktemp)
-code=$(echo "$UPDATED_CFG" | $CURL -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$tmp_cfg_resp" 2>"$tmp_cfg_err" || true)
+code=$(echo "$UPDATED_CFG" | cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$tmp_cfg_resp" 2>"$tmp_cfg_err" || true)
 if [[ "$code" != "200" ]]; then
   log "config save failed (HTTP $code): body=$(cat "$tmp_cfg_resp"), err=$(cat "$tmp_cfg_err")"
   rm -f "$tmp_cfg_resp" "$tmp_cfg_err"
@@ -661,12 +663,12 @@ export MODBUS_READ_PORT
 
 if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_event_filter"; then
   log "expected modbus event not found"
-  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=20" | jq '.'
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=20" | jq '.'
   exit 1
 fi
 pass "Modbus event recorded in telemetry"
 
-READ_EVENTS=$($CURL -H "$AUTH_HEADER" "${BASE}/events?limit=500")
+READ_EVENTS=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=500")
 READ_REQUEST=$(echo "$READ_EVENTS" | jq -ce --argjson port "$MODBUS_READ_PORT" \
   '[.[] | select(.proto == "modbus" and .kind == "request" and .srcIp == env.MODBUS_SRC and .dstIp == env.MODBUS_DST and .srcPort == $port and .attributes.transaction_id == 1 and .attributes.unit_id == 1 and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= (env.START_TS | fromdateiso8601)))] | sort_by(.id) | last')
 if [[ "$SMOKE_DPI_CAPTURE" == "afpacket" ]]; then
@@ -686,7 +688,7 @@ EOF
     log "NAT read lacks a decoded response sharing the request's transportConnectionId"
     exit 1
   fi
-  if ! $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=500" | jq -e \
+  if ! "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=500" | jq -e \
     'all(.[]; .transportConnectionId != env.MODBUS_CONNECTION_ID or (.attributes.message // "" | contains("without prior request") | not))' >/dev/null; then
     log "conformant NAT read raised a matching unmatched-reply anomaly"
     exit 1
@@ -773,7 +775,7 @@ fi
 
 if ! wait_for_jq "${BASE}/events?limit=100" "$modbus_deny_filter"; then
   log "expected Modbus deny rule hit not found"
-  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '.'
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '.'
   exit 1
 fi
 pass "Modbus write matched the deny rule"
@@ -808,14 +810,14 @@ fi
 
 if ! wait_for_jq "${BASE}/stats/protocols" 'any(.[]; .protocol == "modbus" and .packetCount >= 2 and .readCount >= 1 and .writeCount >= 1)'; then
   log "expected modbus protocol stats not found"
-  $CURL -H "$AUTH_HEADER" "${BASE}/stats/protocols" | jq '.'
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/stats/protocols" | jq '.'
   exit 1
 fi
 pass "Protocol stats recorded Modbus read and write traffic"
 
 if ! wait_for_jq "${BASE}/inventory" "$modbus_inventory_filter"; then
   log "expected modbus inventory asset not found"
-  $CURL -H "$AUTH_HEADER" "${BASE}/inventory" | jq '.'
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/inventory" | jq '.'
   exit 1
 fi
 pass "Inventory discovered Modbus endpoints"
@@ -862,14 +864,14 @@ EOF
 
 if ! wait_for_jq "${BASE}/events?limit=500" "$persistent_write_filter"; then
   log "write on the persistent connection was not decoded"
-  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '[.[] | select(.proto == "modbus")]'
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '[.[] | select(.proto == "modbus")]'
   exit 1
 fi
 pass "Persistent-connection write decoded (FC6, is_write=true)"
 
 if ! wait_for_jq "${BASE}/events?limit=500" "$persistent_deny_filter"; then
   log "write on the persistent connection did not match the deny rule"
-  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '.'
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=30" | jq '.'
   exit 1
 fi
 pass "Persistent-connection write matched the deny rule"

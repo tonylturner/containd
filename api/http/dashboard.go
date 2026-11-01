@@ -58,7 +58,10 @@ func dashboardHandler(store config.Store, engine EngineClient, services Services
 		resp := dashboardResponse{
 			Health: buildDashboardHealth(),
 		}
-		resp.Counts = loadDashboardCounts(c.Request.Context(), store)
+		cfg, err := readRunningOrDefault(c, store)
+		if err == nil {
+			resp.Counts = loadDashboardCounts(cfg)
+		}
 		resp.EventStats = collectDashboardEventStats(c.Request.Context(), engine, services)
 		resp.Services = dashboardServicesStatus(services)
 		resp.User = dashboardCurrentUser(c, userStore)
@@ -81,11 +84,7 @@ func buildDashboardHealth() dashboardHealth {
 	}
 }
 
-func loadDashboardCounts(ctx context.Context, store config.Store) dashboardCounts {
-	cfg, err := loadOrInitConfig(ctx, store)
-	if err != nil {
-		return dashboardCounts{}
-	}
+func loadDashboardCounts(cfg *config.Config) dashboardCounts {
 	return dashboardCounts{
 		Assets:     len(cfg.Assets),
 		Zones:      len(cfg.Zones),

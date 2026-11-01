@@ -19,7 +19,7 @@ func TestTemplateHandlers(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/templates", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "maintenance-window") {
 		t.Fatalf("templates list: expected built-in template payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -27,7 +27,7 @@ func TestTemplateHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/templates/apply", bytes.NewBufferString(`{"name":"modbus-read-only"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"applied":"modbus-read-only"`) {
 		t.Fatalf("template apply: expected success payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -60,28 +60,28 @@ func TestZoneListDeleteAndPatchHandlers(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/zones", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"spare"`) {
 		t.Fatalf("zones list: expected zone payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodDelete, "/api/v1/zones/ot", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "zone in use by interface") {
 		t.Fatalf("zone delete interface-use: expected 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodDelete, "/api/v1/zones/dmz", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "zone in use by firewall rule") {
 		t.Fatalf("zone delete rule-use: expected 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodDelete, "/api/v1/zones/missing", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("zone delete missing: expected 404, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -89,7 +89,7 @@ func TestZoneListDeleteAndPatchHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPatch, "/api/v1/zones/spare", bytes.NewBufferString(`{"alias":"plant","slTarget":2,"slOverrides":{"SR_1":true},"description":"updated"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("zone patch: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -100,7 +100,7 @@ func TestZoneListDeleteAndPatchHandlers(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodDelete, "/api/v1/zones/spare", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("zone delete success: expected 204, got %d body=%s", rec.Code, rec.Body.String())
 	}

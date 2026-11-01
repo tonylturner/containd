@@ -44,18 +44,14 @@ async function mockAPI(page: Page, options: MockOptions = {}) {
       const body = request.postDataJSON() as Record<string, unknown>;
       seen.dataPlanePosts.push(body);
       if (options.setDataPlaneStatus === 400 && seen.dataPlanePosts.length === 1) {
-        await route.fulfill({
-          status: 400,
-          contentType: "application/json",
-          body: JSON.stringify({ error: unsupportedMapError }),
-        });
+        await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: unsupportedMapError }), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       } else {
-        await route.fulfill({ json: body });
+        await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       }
       return;
     }
     if (path.startsWith("/api/v1/firewall/rules/") && method === "DELETE") {
-      await route.fulfill({ status: 200, json: {} });
+      await route.fulfill({ status: 200, json: {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
 
@@ -76,7 +72,7 @@ async function mockAPI(page: Page, options: MockOptions = {}) {
     if (path === "/api/v1/firewall/counters") body = {};
     if (path === "/api/v1/templates/ics") body = options.templates ?? [];
     if (path === "/api/v1/events") body = options.events ?? [];
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return seen;
 }

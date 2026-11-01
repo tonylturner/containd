@@ -26,6 +26,10 @@ func (d *dispatchHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	key := req.Method + " " + req.URL.Path
 	h, ok := d.handlers[key]
 	if !ok {
+		// Direct-intent commands establish a base in the same invocation.
+		if key == "GET /api/v1/config/candidate" {
+			return jsonHTTPResponse(200, config.DefaultConfig(), nil), nil
+		}
 		return nil, fmt.Errorf("unexpected request %s", key)
 	}
 	return h(req)
@@ -46,6 +50,7 @@ func jsonHTTPResponse(status int, body any, headers map[string]string) *http.Res
 		Header:     make(http.Header),
 		Body:       io.NopCloser(bytes.NewReader(payload)),
 	}
+	resp.Header.Set("X-Containd-Revision", "0123456789abcdef.1")
 	for k, v := range headers {
 		resp.Header.Set(k, v)
 	}
@@ -218,7 +223,7 @@ func TestSystemCommandsAndViews(t *testing.T) {
 	api := &API{BaseURL: "http://localhost:8080", Client: client}
 	ctx := context.Background()
 
-	if got, err := loadCandidateConfig(ctx, api); err != nil || got.System.Hostname != "containd" {
+	if got, _, err := loadCandidateConfig(ctx, api); err != nil || got.System.Hostname != "containd" {
 		t.Fatalf("loadCandidateConfig = %#v, %v", got, err)
 	}
 	if err := setSystemMgmtListenAPI(api)(ctx, nil, []string{":9090"}); err != nil {

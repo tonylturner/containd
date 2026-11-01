@@ -24,7 +24,7 @@ import (
 
 func getDataPlaneHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -41,7 +41,7 @@ type RulesetPreviewClient interface {
 
 func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -164,7 +164,7 @@ func blockFlowHandler(engine EngineClient) gin.HandlerFunc {
 
 func getIDSHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -285,7 +285,7 @@ func idsExportHandler(store config.Store) gin.HandlerFunc {
 			format = "suricata"
 		}
 
-		rules, err := store.LoadIDSRules(c.Request.Context())
+		rules, err := readRunningIDS(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -322,7 +322,7 @@ func idsSourcesHandler() gin.HandlerFunc {
 
 func idsBackupHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		rules, err := store.LoadIDSRules(c.Request.Context())
+		rules, err := readRunningIDS(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -363,7 +363,7 @@ func idsRestoreHandler(store config.Store) gin.HandlerFunc {
 
 func getFirewallNATHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return

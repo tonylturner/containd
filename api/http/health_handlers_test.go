@@ -29,7 +29,7 @@ func TestHealthReportsUnboundManagement(t *testing.T) {
 	check := func(want string) {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+		serveWithConfigRevision(t, server, rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
 		var body struct {
 			Binding struct {
 				State string `json:"state"`
@@ -74,7 +74,7 @@ func healthBody(t *testing.T, engine EngineClient) (int, map[string]any) {
 	s := NewServerWithEngine(&mockStore{}, nil, engine)
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
@@ -230,7 +230,7 @@ func TestHealthWaitsForBriefStoreOperation(t *testing.T) {
 	defer unblock()
 	mutated := make(chan error, 1)
 	go func() {
-		mutated <- store.MutateCandidate(ctx, func(candidate *config.Config) error {
+		mutated <- testMutateCandidate(store, ctx, func(candidate *config.Config) error {
 			close(entered)
 			<-release
 			candidate.System.Hostname = "candidate-only"
@@ -248,7 +248,7 @@ func TestHealthWaitsForBriefStoreOperation(t *testing.T) {
 	started := time.Now()
 	timer := time.AfterFunc(50*time.Millisecond, unblock)
 	defer timer.Stop()
-	server.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, server, rec, req)
 	elapsed := time.Since(started)
 	if elapsed < 50*time.Millisecond || elapsed > engineHealthTimeout+100*time.Millisecond {
 		t.Fatalf("health did not wait within budget: %s", elapsed)
@@ -281,7 +281,7 @@ func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
 	}
 	candidate.System.Hostname = "not-yet-applied"
 	candidate.DataPlane.Enforcement = true
-	if err := store.SaveCandidate(ctx, candidate); err != nil {
+	if err := testSaveCandidate(store, ctx, candidate); err != nil {
 		t.Fatal(err)
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -290,7 +290,7 @@ func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
 	defer unblock()
 	applied := make(chan error, 1)
 	go func() {
-		applied <- store.ApplyChange(ctx, config.ChangeCommit, 0, func(context.Context, *config.Config, *config.Config) error {
+		applied <- testApplyChange(store, ctx, config.ChangeCommit, 0, func(context.Context, *config.Config, *config.Config) error {
 			close(entered)
 			<-release
 			return nil
@@ -316,7 +316,7 @@ func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
 	answered := make(chan struct{})
 	start := time.Now()
 	go func() {
-		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+		serveWithConfigRevision(t, server, rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
 		close(answered)
 	}()
 	select {
@@ -390,7 +390,7 @@ func TestHealthSharesOneObservationDeadline(t *testing.T) {
 			defer cancel()
 			rec := httptest.NewRecorder()
 			started := time.Now()
-			server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil).WithContext(ctx))
+			serveWithConfigRevision(t, server, rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil).WithContext(ctx))
 			if rec.Code != http.StatusOK || time.Since(started) >= engineHealthTimeout {
 				t.Fatalf("late liveness: %d %s", rec.Code, rec.Body)
 			}

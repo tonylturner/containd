@@ -46,7 +46,9 @@ LAN_NET=${SMOKE_LAN_NET:-172.31.0}
 BASE=${BASE:-http://localhost:18080/api/v1}
 TOKEN=${TOKEN:-devtoken}
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
-CURL="curl -sf --max-time 10 --connect-timeout 5"
+CURL=(curl -sf --max-time 10 --connect-timeout 5)
+# shellcheck source=scripts/config-revision.sh
+source "$(dirname "${BASH_SOURCE[0]}")/config-revision.sh"
 SMOKE_SKIP_UP=${SMOKE_SKIP_UP:-0}
 SMOKE_BUILD=${SMOKE_BUILD:-1}
 SMOKE_MUTATION=${SMOKE_MUTATION:-}
@@ -122,7 +124,7 @@ ensure_tools() {
 wait_for_http() {
   local url=$1
   for _ in $(seq 1 30); do
-    if $CURL "$url" >/dev/null 2>&1; then
+    if "${CURL[@]}" "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 2
@@ -229,7 +231,11 @@ assert_route_via() {
 # RESPONSE holds the last successful API body, including reads of candidate order.
 api_request() {
   local method=$1 path=$2 body=${3:-} code status=0
-  code=$(curl -sS --max-time 30 --connect-timeout 5 -w '%{http_code}' \
+  local -a request=(curl)
+  if [[ $method != GET && $path != */preview ]]; then
+    request=(cas_write "$WORK_DIR/config.revision" curl)
+  fi
+  code=$("${request[@]}" -sS --max-time 30 --connect-timeout 5 -w '%{http_code}' \
     -H "$AUTH_HEADER" -H 'Content-Type: application/json' \
     -X "$method" "${BASE}${path}" --data-binary "$body" \
     -o "$WORK_DIR/api-response" 2>"$WORK_DIR/api-error") || status=$?
@@ -274,7 +280,7 @@ wait_for_http "${BASE}/health"
 log "Fetching interface state..."
 STATE=""
 for _ in $(seq 1 10); do
-  STATE=$($CURL -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
+  STATE=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
   if [[ -n "$STATE" && "$STATE" != "[]" ]]; then
     break
   fi
@@ -288,7 +294,7 @@ fi
 log "Detected wan=${WAN_DEV}, lan=${LAN_DEV}"
 
 log "Fetching current config..."
-CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
+CFG=$(cas_read "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config")
 
 log "Applying the harness policy (default deny, allow ${LAN_CLIENT} -> wan tcp/8080, SNAT lan->wan, DNAT ${DNAT_PORT} -> lan_target:80)${SMOKE_MUTATION:+ with mutation ${SMOKE_MUTATION}}..."
 UPDATED_CFG=$(echo "$CFG" | jq --arg wan "$WAN_DEV" --arg lan "$LAN_DEV" \
@@ -356,7 +362,7 @@ for chain in forward prerouting postrouting; do
 done
 
 log "Verifying mgmt API still reachable..."
-$CURL "${BASE}/health" >/dev/null
+"${CURL[@]}" "${BASE}/health" >/dev/null
 
 log "Setting test client routes (cross-subnet and default via the engine)..."
 route_client lan_client "$LAN_CLIENT" "$LAN_NET" "$WAN_NET" "$ENGINE_LAN"

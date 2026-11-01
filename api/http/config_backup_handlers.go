@@ -26,7 +26,7 @@ import (
 
 func exportConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.Load(c.Request.Context())
+		cfg, err := readRunning(c, store)
 		if err != nil {
 			if errors.Is(err, config.ErrNotFound) {
 				apiError(c, http.StatusNotFound, "config not found")
@@ -229,7 +229,7 @@ func createConfigBackupHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid request")
 			return
 		}
-		cfg, err := store.Load(c.Request.Context())
+		cfg, err := readRunning(c, store)
 		if err != nil {
 			if errors.Is(err, config.ErrNotFound) {
 				apiError(c, http.StatusNotFound, "config not found")

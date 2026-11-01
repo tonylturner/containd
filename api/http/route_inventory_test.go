@@ -30,6 +30,11 @@ func (s routeInventoryServices) Status() any { return map[string]any{} }
 func (s routeInventoryServices) RecentEvents(limit int) []dpevents.Event { return nil }
 
 func newRouteInventoryServer(t *testing.T) *gin.Engine {
+	server, _ := newRouteInventoryProbe(t)
+	return server
+}
+
+func newRouteInventoryProbe(t *testing.T) (*gin.Engine, *mockStore) {
 	t.Helper()
 	resetTestRateLimiters()
 	cfg := config.DefaultConfig()
@@ -37,13 +42,14 @@ func newRouteInventoryServer(t *testing.T) *gin.Engine {
 	store := &mockStore{cfg: cfg}
 	engine := newRuntimeMockEngine()
 	userStore := newMockUserStore()
-	return NewServerWithEngineAndServices(
+	server := NewServerWithEngineAndServices(
 		store,
 		nil,
 		engine,
 		routeInventoryServices{},
 		userStore,
 	)
+	return server, store
 }
 
 func sampleRoutePath(path string) string {
@@ -138,7 +144,7 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 		route := route
 		t.Run(route.Method+" "+route.Path, func(t *testing.T) {
 			resetTestRateLimiters()
-			s := newRouteInventoryServer(t)
+			s, store := newRouteInventoryProbe(t)
 
 			path := sampleRoutePath(route.Path)
 			if path == "/api/v1/cli/complete" {
@@ -150,15 +156,27 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 
 			req := routeProbeRequest(t, route.Method, path)
 			rec := httptest.NewRecorder()
+			// Simulate an earlier config read, even for routes that reject
+			// the request before reaching their handler.
+			rec.Header().Set(revisionHeader, string(testBaseRevision(store, context.Background())))
 			s.ServeHTTP(rec, req)
-
-			// Every operational/read route, including mutation verbs, must be
-			// header-free. Successful configuration routes alone classify edits.
-			state := configResponseRouteState(route.Method, route.Path)
-			if rec.Code < 200 || rec.Code >= 300 {
-				state = ""
+			if rec.Code >= http.StatusBadRequest && rec.Result().Header.Get(revisionHeader) != "" {
+				t.Fatalf("error response leaked a revision: status %d", rec.Code)
 			}
-			assertConfigResponseHeader(t, rec, state)
+
+			if route.Method == "POST" || route.Method == "PATCH" || route.Method == "PUT" || route.Method == "DELETE" {
+				class, classified := mutationRouteClass[route.Method+" "+route.Path]
+				if !classified {
+					t.Fatalf("unclassified mutation route: %s %s", route.Method, route.Path)
+				}
+				if class == "config-writer" && rec.Code != http.StatusPreconditionRequired {
+					t.Fatalf("unguarded config writer: %d %s", rec.Code, rec.Body)
+				}
+				if store.mutations != 0 {
+					t.Fatalf("unconditioned probe mutated store %d times", store.mutations)
+				}
+			}
+			assertConfigResponseHeader(t, rec, "")
 
 			if rec.Code >= 500 &&
 				rec.Code != http.StatusNotImplemented &&

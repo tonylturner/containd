@@ -86,7 +86,7 @@ func (f accountFixture) do(t *testing.T, method, path, token string, body any) (
 		buf = bytes.NewBuffer(raw)
 	}
 	rec := httptest.NewRecorder()
-	f.server.ServeHTTP(rec, jwtAuthedRequest(method, path, buf, token))
+	serveWithConfigRevision(t, f.server, rec, jwtAuthedRequest(method, path, buf, token))
 	return rec.Code, rec.Body.Bytes()
 }
 
@@ -230,7 +230,7 @@ func TestTLSCertificateReplacementIsAudited(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", bytes.NewReader(body)))
+	serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/upload", bytes.NewReader(body)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("upload = %d %s", rec.Code, rec.Body)
 	}

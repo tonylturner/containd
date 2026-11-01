@@ -68,7 +68,7 @@ func TestTrustedCAUpload(t *testing.T) {
 	post := func(body string, want int, message string) {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body)))
+		serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body)))
 		if rec.Code != want || !strings.Contains(rec.Body.String(), message) {
 			t.Fatalf("got %d %s; want %d containing %q", rec.Code, rec.Body.String(), want, message)
 		}
@@ -118,7 +118,7 @@ func TestTrustedCAUpload(t *testing.T) {
 	stored := func(router *gin.Engine, body, wantRevision, wantWarning string) {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body)))
+		serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body)))
 		var got struct {
 			Status   string   `json:"status"`
 			Revision string   `json:"revision"`
@@ -148,7 +148,7 @@ func TestTrustedCAUpload(t *testing.T) {
 	noStore := gin.New()
 	noStore.POST("/upload", trustedCAUploadHandler(nil, engine, dir))
 	rec := httptest.NewRecorder()
-	noStore.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(encode(setTrustedCARequest{PEM: chain}))))
+	serveWithConfigRevision(t, noStore, rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(encode(setTrustedCARequest{PEM: chain}))))
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "config store unavailable") {
 		t.Fatalf("no store: %d %s", rec.Code, rec.Body)
 	}
@@ -163,7 +163,7 @@ func TestTrustedCAUploadStorageBoundary(t *testing.T) {
 	router := gin.New()
 	router.POST("/upload", setTrustedCAHandler(&mockStore{cfg: cfg}, &mockEngine{}))
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(`{"clear":true}`)))
+	serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(`{"clear":true}`)))
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "must be under /data") {
 		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}

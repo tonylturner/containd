@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- Every configuration write and commit must send `X-Containd-If-Revision` with
+  the revision from the read it is based on; requests without it get 428, stale
+  ones 412. Scripts and integrations that stage then commit must read the
+  revision first and pass the one each write returns.
 - Telemetry event IDs are JSON strings. API clients that parse event IDs as
   numbers must accept decimal strings.
 
@@ -35,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
+- CLI configuration edits and repository smoke scripts carry snapshot revisions
+  through saves and staged sequences; `show diff` displays a revision and
+  `commit revision <token>` commits only that reviewed revision.
+- Web configuration saves and commits reject stale revisions, keep the conflicting draft, and commit only a reviewed diff.
+- Reject stale configuration saves, section edits and lifecycle actions using
+  a durable whole-state revision, including IDS banks and secret-only edits.
 
 ## [0.1.37] - 2026-10-31
 

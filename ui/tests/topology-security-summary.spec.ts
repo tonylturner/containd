@@ -41,7 +41,7 @@ async function serveSecurity(page: Page, zoneList: Zone[], conduits: ConduitMap 
       : path === "/api/v1/zones" ? zoneList
         : path === "/api/v1/security/conduits" ? conduits
           : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 }
 

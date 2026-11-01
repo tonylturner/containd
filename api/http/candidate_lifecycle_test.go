@@ -21,7 +21,7 @@ func TestWholeConfigReplacesCandidateOnly(t *testing.T) {
 			store := stageStore(t)
 			ctx := context.Background()
 			running, _ := store.Load(ctx)
-			if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+			if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 				cfg.Description = "replace-me"
 				return nil
 			}); err != nil {
@@ -37,7 +37,8 @@ func TestWholeConfigReplacesCandidateOnly(t *testing.T) {
 				t.Fatalf("replacement failed or applied: %d %s", rec.Code, rec.Body)
 			}
 			assertConfigResponseHeader(t, rec, "staged")
-			candidate, _ := store.LoadCandidate(ctx)
+			candidateSnapshot1, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			candidate := candidateSnapshot1.Candidate
 			after, _ := store.Load(ctx)
 			if candidate.System.Hostname != "replacement" || candidate.Description != "" || !reflect.DeepEqual(after, running) {
 				t.Fatal("replacement did not exclusively replace candidate")
@@ -54,17 +55,19 @@ func TestWholeConfigReplacesCandidateOnly(t *testing.T) {
 func TestImportValidationIsClientErrorAndPreservesCandidate(t *testing.T) {
 	store := stageStore(t)
 	ctx := context.Background()
-	if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 		cfg.Description = "keep-me"
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := store.LoadCandidate(ctx)
+	beforeSnapshot2, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	before := beforeSnapshot2.Candidate
 	cfg := config.DefaultConfig()
 	cfg.Interfaces = []config.Interface{{Name: "bad", Zone: "missing"}}
 	rec := requestStage(t, NewServer(store, nil), "POST", "/config/import", cfg)
-	after, _ := store.LoadCandidate(ctx)
+	afterSnapshot3, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	after := afterSnapshot3.Candidate
 	if rec.Code != http.StatusBadRequest || !reflect.DeepEqual(before, after) {
 		t.Fatalf("invalid import status=%d changed candidate=%v", rec.Code, !reflect.DeepEqual(before, after))
 	}
@@ -84,7 +87,7 @@ func TestRunningExportsAndDiffAuthority(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &diff); err != nil || !reflect.DeepEqual(diff.Running, diff.Candidate) {
 		t.Fatalf("seed looks pending: %s %v", rec.Body, err)
 	}
-	if err := store.MutateCandidateIDS(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidateIDS(store, ctx, func(cfg *config.Config) error {
 		cfg.System.Hostname = "staged"
 		cfg.IDS.Rules = config.DefaultIDSConfig().Rules[1:2]
 		return nil
@@ -141,18 +144,19 @@ func TestPCAPOperationsPreserveRunningAndCandidate(t *testing.T) {
 	if err := store.Save(ctx, running); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 		cfg.PCAP.Interfaces = []string{"candidate"}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	candidate, _ := store.LoadCandidate(ctx)
+	candidateSnapshot4, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot4.Candidate
 	engine := newRuntimeMockEngine()
 	server := NewServerWithEngine(store, nil, engine)
 	for _, body := range []string{"", `{"interfaces":["explicit"]}`} {
 		rec := httptest.NewRecorder()
-		server.ServeHTTP(rec, authedRequest("POST", "/api/v1/pcap/start", strings.NewReader(body)))
+		serveWithConfigRevision(t, server, rec, authedRequest("POST", "/api/v1/pcap/start", strings.NewReader(body)))
 		assertConfigResponseHeader(t, rec, "")
 		want := "running"
 		if body != "" {
@@ -164,7 +168,8 @@ func TestPCAPOperationsPreserveRunningAndCandidate(t *testing.T) {
 		rec = requestStage(t, server, "POST", "/pcap/stop", nil)
 		assertConfigResponseHeader(t, rec, "")
 		after, _ := store.Load(ctx)
-		desired, _ := store.LoadCandidate(ctx)
+		desiredSnapshot5, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+		desired := desiredSnapshot5.Candidate
 		if rec.Code != http.StatusOK || !reflect.DeepEqual(after, running) || !reflect.DeepEqual(desired, candidate) {
 			t.Fatal("capture start/stop persisted configuration")
 		}
@@ -175,7 +180,7 @@ func TestCandidateRoundTripPreservesStagedSecrets(t *testing.T) {
 	store := stageStore(t)
 	ctx := context.Background()
 	secret := testSensitiveValue("staged-key")
-	if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 		cfg.Services.VPN.WireGuard.PrivateKey = secret
 		return nil
 	}); err != nil {
@@ -188,7 +193,8 @@ func TestCandidateRoundTripPreservesStagedSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec = requestStage(t, server, "POST", "/config/candidate", redacted)
-	cfg, _ := store.LoadCandidate(ctx)
+	cfgSnapshot6, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	cfg := cfgSnapshot6.Candidate
 	if rec.Code != http.StatusOK || cfg.Services.VPN.WireGuard.PrivateKey != secret {
 		t.Fatal("redacted round trip restored running rather than staged secrets")
 	}

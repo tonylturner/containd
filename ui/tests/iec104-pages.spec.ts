@@ -177,12 +177,12 @@ async function mockAPI(
       }
       await route.fulfill(
         writeError
-          ? { status: 400, contentType: "application/json", body: JSON.stringify({ error: writeError }) }
-          : { status: 200, contentType: "application/json", body: JSON.stringify(req.postDataJSON()) },
+          ? { status: 400, contentType: "application/json", body: JSON.stringify({ error: writeError }), headers: { "X-Containd-Revision": "0123456789abcdef.1" } }
+          : { status: 200, contentType: "application/json", body: JSON.stringify(req.postDataJSON()), headers: { "X-Containd-Revision": "0123456789abcdef.1" } },
       );
       return;
     }
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(url.pathname === "/api/v1/firewall/rules" ? rules : url.pathname === "/api/v1/events" && url.searchParams.has("query") ? { events: evidenceEvents, historyTruncated: true } : body(url.pathname)) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(url.pathname === "/api/v1/firewall/rules" ? rules : url.pathname === "/api/v1/events" && url.searchParams.has("query") ? { events: evidenceEvents, historyTruncated: true } : body(url.pathname)), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 }
 
@@ -306,11 +306,7 @@ test("client navigation keeps verified page content visible while revalidating t
         await heldResponse;
       }
     }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(url.pathname === "/api/v1/events" && url.searchParams.has("query") ? { events: evidenceEvents, historyTruncated: true } : body(url.pathname)),
-    });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(url.pathname === "/api/v1/events" && url.searchParams.has("query") ? { events: evidenceEvents, historyTruncated: true } : body(url.pathname)), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 
   try {
@@ -464,9 +460,9 @@ test("Events sends edited filters before limiting and loads older evidence with 
   const requests: URL[] = [];
   await page.route("**/api/v1/events?**", async (route) => {
     const url = new URL(route.request().url()); requests.push(url);
-    if (url.searchParams.get("session") === "unavailable") { await route.fulfill({ status: 503, json: { error: "offline" } }); return; }
+    if (url.searchParams.get("session") === "unavailable") { await route.fulfill({ status: 503, json: { error: "offline" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }); return; }
     const older = url.searchParams.get("cursor") === "older";
-    await route.fulfill({ json: { events: older ? [evidenceEvents[2]] : [evidenceEvents[0]], nextCursor: older ? undefined : "older", historyTruncated: true } });
+    await route.fulfill({ json: { events: older ? [evidenceEvents[2]] : [evidenceEvents[0]], nextCursor: older ? undefined : "older", historyTruncated: true }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.goto(`/events?flow=flow-a&protocol=iec104&decision=deny&since=2026-01-01T00:00:00Z`);
   await expect(page.getByText("IEC 104 reset sent to client")).toBeVisible();

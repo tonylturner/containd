@@ -7,7 +7,7 @@ test("a service stays loading until every requested refresh has settled", async 
       ? { id: "admin", username: "containd", role: "admin" }
       : path.endsWith("/config/diff") ? { changed: false }
       : path.endsWith("/services/dns") ? { enabled: true, listenPort: 53 } : {};
-    return route.fulfill({ json });
+    return route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const initial = page.waitForResponse("**/api/v1/services/dns");
   await page.goto("/system/services/dns/");
@@ -17,7 +17,7 @@ test("a service stays loading until every requested refresh has settled", async 
   const releases: Array<() => void> = [];
   await page.route("**/api/v1/services/dns", async (route) => {
     await new Promise<void>((resolve) => { releases.push(resolve); });
-    await route.fulfill({ json: { enabled: true, listenPort: 53 } });
+    await route.fulfill({ json: { enabled: true, listenPort: 53 }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.getByRole("button", { name: "Refresh", exact: true }).evaluate((button: HTMLButtonElement) => {
     button.click();
@@ -44,7 +44,7 @@ test("a background NAT refresh keeps the existing draft mounted while awaiting I
       : path.endsWith("/config/diff") ? { changed: false }
       : path.endsWith("/zones") ? [{ name: "wan" }, { name: "lan" }]
       : path.endsWith("/firewall/nat") ? { enabled: true, egressZone: "wan", portForwards: [] } : {};
-    return route.fulfill({ json });
+    return route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const initial = page.waitForResponse("**/api/v1/firewall/nat");
   await page.goto("/nat/");
@@ -55,7 +55,7 @@ test("a background NAT refresh keeps the existing draft mounted while awaiting I
   const held = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/v1/firewall/nat", async (route) => {
     await held;
-    await route.fulfill({ json: { enabled: true, egressZone: "wan", portForwards: [] } });
+    await route.fulfill({ json: { enabled: true, egressZone: "wan", portForwards: [] }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const requested = page.waitForRequest("**/api/v1/firewall/nat");
   await page.evaluate(() => window.dispatchEvent(new Event("containd:config:staged")));
@@ -75,9 +75,9 @@ test("retrying the security matrix clears the previous error while IO is pending
       ? { id: "admin", username: "containd", role: "admin" }
       : path.endsWith("/config/diff") ? { changed: false }
       : path.endsWith("/zones") ? [] : {};
-    return route.fulfill({ json });
+    return route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
-  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ status: 503, json: {} }));
+  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ status: 503, json: {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
   const error = page.getByText("Error: Failed to load security data", { exact: true });
@@ -87,7 +87,7 @@ test("retrying the security matrix clears the previous error while IO is pending
   const held = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/v1/security/conduits", async (route) => {
     await held;
-    await route.fulfill({ json: {} });
+    await route.fulfill({ json: {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const requested = page.waitForRequest("**/api/v1/security/conduits");
   await error.locator("..").getByRole("button", { name: "Retry", exact: true }).click();

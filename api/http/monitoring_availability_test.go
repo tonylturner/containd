@@ -92,7 +92,7 @@ func TestMonitoringAvailability(t *testing.T) {
 					req := authedRequest(op.method, "/api/v1"+op.path, strings.NewReader(op.body))
 					req.Header.Set("Content-Type", "application/json")
 					rec := httptest.NewRecorder()
-					server.ServeHTTP(rec, req)
+					serveWithConfigRevision(t, server, rec, req)
 					if mode != "empty" {
 						if rec.Code != http.StatusServiceUnavailable {
 							t.Fatalf("status %d: %s", rec.Code, rec.Body)

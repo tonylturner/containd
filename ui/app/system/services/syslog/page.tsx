@@ -24,7 +24,7 @@ export default function SyslogPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
-  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 }, false);
+  const { conflictProps, editor, cfg, getBaseRevision, setCfg, adoptConfig, beginSave, failSave, acceptConfig } = useConfigEditor<SyslogConfig>({ forwarders: [], batchSize: 500, flushEvery: 2 }, false);
   const [status, setStatus] = useState<SyslogStatus | null>(null);
   const form = useConfigForm({ forwarder: {
     address: "",
@@ -43,10 +43,11 @@ export default function SyslogPage() {
       const svc = await api.getServicesStatus();
       setError(null);
       setStatus(svc?.syslog ?? null);
-      const s = await api.getSyslog();
+      const sSnapshot = await api.getSyslog();
+      const s = (sSnapshot?.data ?? null);
       if (!checkLoaded(s)) return;
-      refreshForm(s, keepEdits);
-      adoptConfig(s, keepEdits);
+      refreshForm(s, keepEdits, sSnapshot?.revision);
+      adoptConfig(s, keepEdits, sSnapshot?.revision);
       toast("Syslog status refreshed", "success");
       setLastUpdated(new Date());
     } catch (e) {
@@ -80,6 +81,10 @@ export default function SyslogPage() {
       setError("Port must be valid.");
       return;
     }
+    if (form.editor.baseRevision !== getBaseRevision()) {
+      form.requireReview(getBaseRevision() ?? "");
+      return;
+    }
     setCfg((c) => ({
       ...c,
       forwarders: [...(c.forwarders ?? []), { ...newFwd, address: newFwd.address.trim() }],
@@ -99,13 +104,13 @@ export default function SyslogPage() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
     const submitted = beginSave();
-    const saved = await save.run("save", () => api.setSyslog(cfg), {
+    const saved = await save.run("save", () => api.setSyslog(submitted.baseRevision ?? "", cfg), {
       success: "Syslog staged — commit to apply.",
       failure: "Failed to save syslog settings.",
     });
     if (!saved) { failSave(submitted); return; }
-    if (saved.ok) acceptConfig(submitted, saved.data);
-    else { failSave(submitted); setError(saved.error); }
+    if (saved.ok) acceptConfig(submitted, saved.data, saved.revision);
+    else { failSave(submitted, saved); setError(saved.error); }
   }
 
   return (
@@ -141,7 +146,8 @@ export default function SyslogPage() {
       }
     >
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
-      <ConfigEditNotice superseded={editor.superseded || form.editor.superseded} />
+      <ConfigEditNotice {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={false} />
+      <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded || form.editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">

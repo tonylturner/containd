@@ -184,13 +184,13 @@ func TestRuleModesImportRollbackAndTransactionFailure(t *testing.T) {
 	if recs, err := s.RuleModeMigrations(ctx); err != nil || len(recs) != 0 {
 		t.Fatal(recs, err)
 	}
-	if err := s.SaveCandidate(ctx, c); err != nil {
+	if err := testSaveCandidate(s, ctx, c); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(s, ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Rollback(ctx); err != nil {
+	if err := testRollback(s, ctx); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.Load(ctx)
@@ -203,7 +203,7 @@ func TestRuleModesImportRollbackAndTransactionFailure(t *testing.T) {
 	}
 	bad := legacyModes("")
 	bad.Firewall.Rules[0].ICS.Protocol = "invalid"
-	if err := s.SaveCandidate(ctx, bad); err == nil {
+	if err := testSaveCandidate(s, ctx, bad); err == nil {
 		t.Fatal("invalid import saved")
 	}
 	after, err := s.RuleModeMigrations(ctx)
@@ -214,7 +214,7 @@ func TestRuleModesImportRollbackAndTransactionFailure(t *testing.T) {
 	if _, err := s.db.Exec(`CREATE TRIGGER refuse_modes BEFORE INSERT ON configs WHEN NEW.key = 'rule_mode_migration_019' BEGIN SELECT RAISE(ABORT, 'test failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveCandidate(ctx, legacyModes("0.1.8")); err == nil {
+	if err := testSaveCandidate(s, ctx, legacyModes("0.1.8")); err == nil {
 		t.Fatal("transaction failure ignored")
 	}
 	after, err = s.RuleModeMigrations(ctx)

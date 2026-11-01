@@ -69,13 +69,13 @@ export default function Home() {
     const { signal } = controller;
     const load = () => {
       api.getDashboard(signal).then((r) => r && setData(r)).catch(() => {});
-      api.listZones(signal).then((r) => r && setZones(r)).catch(() => {});
+      api.listZones(signal).then(snapshot => (snapshot?.data ?? null)).then((r) => r && setZones(r)).catch(() => {});
       api.listEvents(50, signal).then((r) => r && setEvents(r)).catch(() => {});
       api.listFlows(100, signal).then((r) => { setFlowsUnavailable(r === null); setFlows(r ?? []); }).catch(() => { if (!signal.aborted) setFlowsUnavailable(true); });
       api.getSystemStats(signal).then((r) => r && setStats(r)).catch(() => {});
       api.getServicesStatus(signal).then((r) => r && setServicesStatus(r)).catch(() => {});
       api.getSimulationStatus(signal).then((r) => { setSimUnavailable(r === null); setSimRunning(r?.running ?? null); }).catch(() => { if (!signal.aborted) { setSimUnavailable(true); setSimRunning(null); } });
-      api.diffConfig().then((r) => {
+      api.diffConfig().then(snapshot => (snapshot?.data ?? null)).then((r) => {
         if (!r) return;
         const running = JSON.stringify(r.running ?? null);
         const candidate = JSON.stringify(r.candidate ?? null);

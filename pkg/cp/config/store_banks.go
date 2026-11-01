@@ -57,11 +57,12 @@ func loadBankFrom(ctx context.Context, db configReader, id int64) ([]IDSRule, er
 // Extraction is one transaction across running, candidate and previous. Keep
 // unknown document fields intact and preserve authoritative empty banks.
 func (s *SQLiteStore) extractBanks(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginConfigTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	changed := false
 	runningID, err := bankReference(ctx, tx, configKeyRunning)
 	if err != nil {
 		return err
@@ -131,12 +132,17 @@ func (s *SQLiteStore) extractBanks(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		changed = true
 		if _, err := tx.ExecContext(ctx, `UPDATE configs SET data = ? WHERE key = ?`, string(blob), key); err != nil {
 			return err
 		}
 		if key == configKeyRunning {
 			runningID = id
 		}
+	}
+	if changed {
+		_, err = s.commitRevisionTx(ctx, tx)
+		return err
 	}
 	return s.commitStateTx(ctx, tx)
 }

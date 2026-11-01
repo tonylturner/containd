@@ -26,15 +26,15 @@ func resetTestStore(t *testing.T) *SQLiteStore {
 	}
 	cfg.System.Hostname = "running"
 	cfg.IDS.Rules = DefaultIDSConfig().Rules[:1]
-	if err := store.SaveCandidate(ctx, cfg); err != nil {
+	if err := testSaveCandidate(store, ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(store, ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	cfg.System.Hostname = "candidate"
 	cfg.IDS.Rules = []IDSRule{}
-	if err := store.SaveCandidate(ctx, cfg); err != nil {
+	if err := testSaveCandidate(store, ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
 	return store
@@ -73,7 +73,7 @@ func TestApplyResetRestoresStateAndCanceledCaller(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			calls := 0
-			err = store.ApplyReset(ctx, DefaultConfig(), func(ctx context.Context, previous, next *Config) error {
+			err = testApplyReset(store, ctx, DefaultConfig(), func(ctx context.Context, previous, next *Config) error {
 				calls++
 				if calls == 1 {
 					if previous.System.Hostname != "running" || next.System.Hostname != DefaultConfig().System.Hostname {
@@ -105,7 +105,7 @@ func TestApplyResetRestoresStateAndCanceledCaller(t *testing.T) {
 			if err != nil || (fault != "") != failReapply {
 				t.Fatalf("runtime fault: %q %v", fault, err)
 			}
-			if err := store.Rollback(context.Background()); err != nil {
+			if err := testRollback(store, context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			running, err := store.Load(context.Background())
@@ -128,7 +128,7 @@ func TestApplyResetClearsHistoryAndBank(t *testing.T) {
 	defaults := DefaultConfig()
 	defaults.IDS.Rules = []IDSRule{}
 	calls := 0
-	if err := store.ApplyReset(ctx, defaults, func(_ context.Context, _, next *Config) error {
+	if err := testApplyReset(store, ctx, defaults, func(_ context.Context, _, next *Config) error {
 		calls++
 		if len(next.IDS.Rules) != 0 {
 			t.Fatalf("reset retained IDS bank: %+v", next.IDS.Rules)
@@ -157,7 +157,7 @@ func TestApplyResetRejectsInvalidDefaults(t *testing.T) {
 	invalid := DefaultConfig()
 	invalid.System.Hostname = strings.Repeat("x", 256)
 	for _, cfg := range []*Config{nil, invalid} {
-		err := store.ApplyReset(context.Background(), cfg, func(context.Context, *Config, *Config) error {
+		err := testApplyReset(store, context.Background(), cfg, func(context.Context, *Config, *Config) error {
 			t.Fatal("invalid defaults reached runtime apply")
 			return nil
 		})
@@ -181,7 +181,7 @@ func TestConfigWipeTransactionFailurePreservesStateAndTimer(t *testing.T) {
 				t.Fatal(err)
 			}
 			if reset {
-				err = store.ApplyReset(context.Background(), DefaultConfig(), func(context.Context, *Config, *Config) error {
+				err = testApplyReset(store, context.Background(), DefaultConfig(), func(context.Context, *Config, *Config) error {
 					t.Fatal("failed reset transaction reached runtime apply")
 					return nil
 				})

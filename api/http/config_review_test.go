@@ -53,13 +53,13 @@ func TestPromotionReconcilesOnlyChangedPCAPSettings(t *testing.T) {
 				}
 				// Rollback promotes previous instead of candidate.
 				if action == "rollback" {
-					if err := store.SaveCandidate(ctx, &next); err != nil {
+					if err := testSaveCandidate(store, ctx, &next); err != nil {
 						t.Fatal(err)
 					}
-					if err := store.Commit(ctx); err != nil {
+					if err := testCommit(store, ctx); err != nil {
 						t.Fatal(err)
 					}
-				} else if err := store.SaveCandidate(ctx, &next); err != nil {
+				} else if err := testSaveCandidate(store, ctx, &next); err != nil {
 					t.Fatal(err)
 				}
 				engine := &captureApplyEngine{runtimeMockEngine: newRuntimeMockEngine()}
@@ -119,7 +119,7 @@ func TestDiffDetectsSecretsAndSummarizesBank(t *testing.T) {
 		t.Fatal("unseeded candidate appears dirty")
 	}
 	secret := testSensitiveValue("rotated-secret")
-	if err := store.MutateCandidate(context.Background(), func(cfg *config.Config) error {
+	if err := testMutateCandidate(store, context.Background(), func(cfg *config.Config) error {
 		cfg.Services.VPN.WireGuard.PrivateKey = secret
 		return nil
 	}); err != nil {
@@ -132,7 +132,7 @@ func TestDiffDetectsSecretsAndSummarizesBank(t *testing.T) {
 	if !reflect.DeepEqual(diff.Running, diff.Candidate) {
 		t.Fatal("secret-only redacted snapshots should be equal")
 	}
-	if err := store.MutateCandidateIDS(context.Background(), func(cfg *config.Config) error {
+	if err := testMutateCandidateIDS(store, context.Background(), func(cfg *config.Config) error {
 		cfg.IDS.Rules = []config.IDSRule{}
 		return nil
 	}); err != nil {
@@ -216,7 +216,8 @@ func TestConfigReadsOmitBankAndRoundTripRetainsIt(t *testing.T) {
 				}
 				cfg.Description = "round-tripped without bank"
 				rec = requestStage(t, server, "POST", path, cfg)
-				candidate, err := store.LoadCandidate(ctx)
+				candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				candidate := candidateSnapshot1.Candidate
 				if rec.Code != http.StatusOK || err != nil || !reflect.DeepEqual(candidate.IDS.Rules, running.IDS.Rules) {
 					t.Fatalf("%s lost omitted bank: %d %s %v", path, rec.Code, rec.Body, err)
 				}

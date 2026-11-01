@@ -20,7 +20,7 @@ export default function NTPPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const [status, setStatus] = useState<NTPStatus | null>(null);
-  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<NTPConfig>({
+  const { conflictProps, editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, text, setText } = useConfigEditor<NTPConfig>({
     enabled: false,
     servers: [],
     intervalSeconds: 0,
@@ -33,10 +33,11 @@ export default function NTPPage() {
   const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const svc = await api.getServicesStatus();
     setStatus(svc?.ntp ?? null);
-    const s = await api.getNTP();
+    const sSnapshot = await api.getNTP();
+    const s = (sSnapshot?.data ?? null);
     if (!checkLoaded(s)) return;
     setError(null);
-    adoptConfig(s, keepEdits);
+    adoptConfig(s, keepEdits, sSnapshot?.revision);
     setLastUpdated(new Date());
   }, [adoptConfig, checkLoaded]));
 
@@ -56,13 +57,13 @@ export default function NTPPage() {
     if (!canEdit || !canSave || loading) return;
     setError(null);
     const submitted = beginSave();
-    const saved = await save.run("save", () => api.setNTP({ ...cfg, servers: serversText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
+    const saved = await save.run("save", () => api.setNTP(submitted.baseRevision ?? "", { ...cfg, servers: serversText.split("\n").map((s) => s.trim()).filter(Boolean) }), {
       success: "NTP settings staged — commit to apply.",
       failure: "Failed to save NTP settings.",
     });
     if (!saved) { failSave(submitted); return; }
-    if (saved.ok) acceptConfig(submitted, saved.data);
-    else { failSave(submitted); setError(saved.error); }
+    if (saved.ok) acceptConfig(submitted, saved.data, saved.revision);
+    else { failSave(submitted, saved); setError(saved.error); }
   }
 
   return (
@@ -98,7 +99,7 @@ export default function NTPPage() {
       }
     >
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
-      <ConfigEditNotice superseded={editor.superseded} />
+      <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">

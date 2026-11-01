@@ -54,10 +54,20 @@ func TestShellAPIResetRawClientHelper(t *testing.T) {
 	}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport}
+	read, err := client.Get("http://ssh-session/api/v1/config/candidate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readErr := io.Copy(io.Discard, read.Body)
+	_ = read.Body.Close()
+	if readErr != nil || read.StatusCode != http.StatusOK {
+		t.Fatalf("candidate read: status %d, error %v", read.StatusCode, readErr)
+	}
 	req, err := http.NewRequest(http.MethodPost, "http://ssh-session/api/v1/system/factory-reset", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.Header.Set("X-Containd-If-Revision", read.Header.Get("X-Containd-Revision"))
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +102,7 @@ func (u *shellAPIUpstream) Do(req *http.Request) (*http.Response, error) {
 	resp := jsonResponse(http.StatusOK, map[string]string{"username": "shell-api-admin"})
 	resp.Header.Set("X-Auth-Token", "refreshed")
 	resp.Header.Set("Set-Cookie", "containd_token=refreshed")
+	resp.Header.Set("X-Containd-Revision", "0123456789abcdef.2")
 	return resp, nil
 }
 
@@ -119,7 +130,7 @@ func TestShellAPIActsAsTheSSHLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	conn := &sshConnection{id: "conn-1", sessionID: sessionID}
-	api, err := srv.openShellAPI(conn)
+	api, err := srv.openShellAPI(conn, func() {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +160,9 @@ func TestShellAPIActsAsTheSSHLogin(t *testing.T) {
 
 	// Bodies, queries and the method reach management; credentials do not
 	// come back.
-	resp, err := client.Client.Do(mustRequest(t, http.MethodPost, "http://ssh-session/api/v1/config/candidate?x=1", `{"a":1}`))
+	write := mustRequest(t, http.MethodPost, "http://ssh-session/api/v1/config/candidate?x=1", `{"a":1}`)
+	write.Header.Set("X-Containd-If-Revision", "0123456789abcdef.1")
+	resp, err := client.Client.Do(write)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,6 +173,23 @@ func TestShellAPIActsAsTheSSHLogin(t *testing.T) {
 	}
 	if resp.Header.Get("X-Auth-Token") != "" || resp.Header.Get("Set-Cookie") != "" {
 		t.Fatalf("credential returned to the shell: %v", resp.Header)
+	}
+	if req.Header.Get("X-Containd-If-Revision") != "0123456789abcdef.1" || resp.Header.Get("X-Containd-Revision") != "0123456789abcdef.2" {
+		t.Fatalf("revision transport: request %v, response %v", req.Header, resp.Header)
+	}
+	// Duplicate preconditions must reach management unchanged, so its syntax
+	// validation cannot be bypassed by the proxy collapsing them.
+	write = mustRequest(t, http.MethodPost, "http://ssh-session/api/v1/config/candidate", `{}`)
+	write.Header.Add("X-Containd-If-Revision", "0123456789abcdef.1")
+	write.Header.Add("X-Containd-If-Revision", "0123456789abcdef.2")
+	resp, err = client.Client.Do(write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	req, _ = upstream.last()
+	if len(req.Header.Values("X-Containd-If-Revision")) != 2 {
+		t.Fatal("proxy collapsed duplicate preconditions")
 	}
 	for _, p := range []string{"/metrics", "/api/v1/../metrics", "/api/v1/%2e%2e/metrics", "/api/v1/", "/api/v1//health", "/internal/config"} {
 		resp, err := client.Client.Do(mustRequest(t, http.MethodGet, "http://ssh-session"+p, ""))
@@ -196,7 +226,7 @@ func TestFactoryResetDisconnectsLinuxShellCLI(t *testing.T) {
 	srv, store, _ := newAssuranceServer(t)
 	srv.opts.ShellMode = "linux"
 	srv.opts.LabMode = true
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	api := httptest.NewServer(revisionedSSHResetHandler(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/auth/me":
 			_, _ = io.WriteString(w, `{"username":"shell-reset-admin"}`)
@@ -244,7 +274,7 @@ func TestFactoryResetDisconnectsLinuxShellRawClient(t *testing.T) {
 	srv, store, _ := newAssuranceServer(t)
 	srv.opts.ShellMode = "linux"
 	srv.opts.LabMode = true
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	api := httptest.NewServer(revisionedSSHResetHandler(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/auth/me":
 			_, _ = io.WriteString(w, `{"username":"shell-reset-raw-admin"}`)
@@ -280,15 +310,29 @@ func TestFactoryResetDisconnectsLinuxShellRawClient(t *testing.T) {
 	go func() { connectionClosed <- client.Conn.Wait() }()
 	select {
 	case <-exited:
-	case <-time.After(shellResetCloseGrace + time.Second):
+	case <-time.After(shellResetCloseGrace + shellOutputGrace + time.Second):
 		tty.send(t, "echo shell-survived-$((6*7))\n")
 		tty.waitFor(t, "shell-survived-42", 1)
 		t.Fatalf("raw factory reset response reached the socket client, but its SSH Linux shell remained usable: %q", tty.output())
 	}
 	select {
 	case <-connectionClosed:
-	case <-time.After(shellResetCloseGrace + time.Second):
+	case <-time.After(shellResetCloseGrace + shellOutputGrace + time.Second):
 		t.Fatal("SSH connection remained open after raw factory reset")
+	}
+}
+
+func TestShellAPIResetAcknowledgementStopsShell(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn := &sshConnection{cancel: cancel}
+	conn.reset.Store(true)
+	stopped := false
+	handler := (&Server{}).shellAPIHandler(conn, func() { stopped = true })
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, cli.SSHResetAcknowledgePath, nil))
+	if rec.Code != http.StatusNoContent || !stopped || ctx.Err() != nil {
+		t.Fatalf("acknowledgement must stop the shell without closing its transport: status %d, stopped %v, context %v", rec.Code, stopped, ctx.Err())
 	}
 }
 

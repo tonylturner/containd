@@ -97,7 +97,8 @@ func TestEvidenceStageAtomicRetry(t *testing.T) {
 		}
 		assertConfigResponseHeader(t, rec, "staged")
 	}
-	candidate, err := store.LoadCandidate(ctx)
+	candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,13 +126,14 @@ func TestEvidenceStageConflictRollsBackWholeBatch(t *testing.T) {
 	s.ID, s.Proof.ContentID = id, id
 	conflict := s.Content.Rules[1]
 	conflict.ICS.Addresses = []string{"4-6"}
-	if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 		cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict, config.Rule{ID: "learned-legacy", Action: config.ActionAllow})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	before, err := store.LoadCandidate(ctx)
+	beforeSnapshot2, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	before := beforeSnapshot2.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +143,8 @@ func TestEvidenceStageConflictRollsBackWholeBatch(t *testing.T) {
 		t.Fatalf("conflict: %d %s", rec.Code, rec.Body)
 	}
 	assertConfigResponseHeader(t, rec, "")
-	after, err := store.LoadCandidate(ctx)
+	afterSnapshot3, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	after := afterSnapshot3.Candidate
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("partially staged conflict or deleted legacy", err)
 	}
@@ -207,7 +210,7 @@ func TestEvidenceStageRecoveryErrorsAreRetryable(t *testing.T) {
 					e.releaseError = failure
 					conflict := s.Content.Rules[0]
 					conflict.ICS.Addresses = []string{"4-6"}
-					if err := store.MutateCandidate(context.Background(), func(cfg *config.Config) error {
+					if err := testMutateCandidate(store, context.Background(), func(cfg *config.Config) error {
 						cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict)
 						return nil
 					}); err != nil {
@@ -322,17 +325,19 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 					t.Fatal(err)
 				}
 				store := stageStore(t)
-				before, err := store.LoadCandidate(ctx)
+				beforeSnapshot4, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				before := beforeSnapshot4.Candidate
 				if err != nil {
 					t.Fatal(err)
 				}
 				if release {
 					conflict := s.Content.Rules[0]
 					conflict.ICS.Addresses = []string{"4-6"}
-					if err := store.MutateCandidate(ctx, func(cfg *config.Config) error { cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict); return nil }); err != nil {
+					if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error { cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict); return nil }); err != nil {
 						t.Fatal(err)
 					}
-					before, err = store.LoadCandidate(ctx)
+					beforeSnapshot5, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+					before = beforeSnapshot5.Candidate
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -368,7 +373,8 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 					if err := es.ReleaseStage(ctx, req); err != nil {
 						t.Fatal("release retry", err)
 					}
-					after, err := store.LoadCandidate(ctx)
+					afterSnapshot6, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+					after := afterSnapshot6.Candidate
 					if err != nil || !reflect.DeepEqual(before, after) {
 						t.Fatal("failed mutation changed candidate", err)
 					}
@@ -383,7 +389,8 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 						t.Fatalf("retry: %d %s", rec.Code, rec.Body)
 					}
 				}
-				after, err := store.LoadCandidate(ctx)
+				afterSnapshot7, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				after := afterSnapshot7.Candidate
 				if err != nil || len(after.Firewall.Rules) != len(before.Firewall.Rules)+1 {
 					t.Fatal("duplicate or missing staged rules", err)
 				}

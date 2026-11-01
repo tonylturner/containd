@@ -236,18 +236,19 @@ func TestInvalidStoredConfigBootsIntoRecovery(t *testing.T) {
 	}
 
 	// A fixed commit leaves recovery and replays the stored policy.
-	candidate, err := stores.store.LoadCandidate(ctx)
+	candidateSnapshot1, err := stores.store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}
 	candidate.Firewall.Rules[0].ICS.Mode = "monitor"
-	if err := stores.store.SaveCandidate(ctx, candidate); err != nil {
+	if err := testSaveCandidate(stores.store, ctx, candidate); err != nil {
 		t.Fatal(err)
 	}
 	if err := config.CheckManagementBootFault(ctx, stores.store); err == nil {
 		t.Fatal("staging cleared the boot fault")
 	}
-	if err := stores.store.Commit(ctx); err != nil {
+	if err := testCommit(stores.store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := config.CheckManagementBootFault(ctx, stores.store); err != nil {

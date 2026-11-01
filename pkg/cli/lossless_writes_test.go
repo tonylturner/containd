@@ -191,13 +191,9 @@ func losslessCases(t *testing.T) []losslessCase {
 		{"interface clear", setInterfaceIPAPI, []string{"wan", "none"}, map[string]any{"addressMode": "static", "addresses": []any{}, "gateway": ""}},
 	} {
 		current := losslessFixture(t).Interfaces
-		want := jsonValue(t, current[0]).(map[string]any)
-		for key, value := range tc.patch {
-			want[key] = value
-		}
 		cases = append(cases, losslessCase{
 			name: tc.name, path: "/api/v1/interfaces", method: http.MethodPatch, writePath: "/api/v1/interfaces/wan",
-			command: tc.command, args: tc.args, current: current, want: want,
+			command: tc.command, args: tc.args, current: current, want: tc.patch,
 		})
 	}
 	return cases
@@ -210,6 +206,7 @@ type recordedWrite struct {
 
 // Read bodies before recording requests, even when the client later cancels.
 type configFake struct {
+	counter  int
 	mu       sync.Mutex
 	reads    map[string]any
 	failPath string
@@ -231,6 +228,11 @@ func (f *configFake) serve(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
 	w.Header().Set("Content-Type", "application/json")
+	if f.counter == 0 {
+		f.counter = 1
+	}
+	revision := fmt.Sprintf("0123456789abcdef.%d", f.counter)
+	w.Header().Set("X-Containd-Revision", revision)
 	if r.Method == http.MethodGet {
 		if r.URL.Path == f.failPath {
 			w.WriteHeader(f.status)
@@ -245,6 +247,12 @@ func (f *configFake) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(v)
 		return
 	}
+	if r.Header.Get("X-Containd-If-Revision") != revision {
+		http.Error(w, "wrong revision", http.StatusPreconditionFailed)
+		return
+	}
+	f.counter++
+	w.Header().Set("X-Containd-Revision", fmt.Sprintf("0123456789abcdef.%d", f.counter))
 	f.writes = append(f.writes, recordedWrite{r.Method, r.URL.Path, body})
 	if r.Method == http.MethodPost {
 		f.reads[r.URL.Path] = body
@@ -380,11 +388,8 @@ func TestInterfaceEditRequiresExistingInterface(t *testing.T) {
 
 func quickstartReads(c config.Config) map[string]any {
 	return map[string]any{
-		"/api/v1/interfaces":       c.Interfaces,
+		"/api/v1/config/candidate": c,
 		"/api/v1/interfaces/state": []outboundIfaceState{{Name: "eth0", Addrs: []string{"192.0.2.7/24"}}},
-		"/api/v1/routing":          c.Routing,
-		"/api/v1/firewall/nat":     c.Firewall.NAT,
-		"/api/v1/firewall/rules":   c.Firewall.Rules,
 	}
 }
 

@@ -20,7 +20,7 @@ import (
 
 func listFirewallRulesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -135,13 +135,25 @@ func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		var patch map[string]json.RawMessage
-		if err := json.Unmarshal(body, &patch); err != nil {
+		if err := json.Unmarshal(body, &patch); err != nil || patch == nil {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
 		var rule config.Rule
 		icsPatch, patchesICS := patch["ics"]
 		delete(patch, "ics")
+		// Decode supplied types before CAS; only merging with existing state
+		// and protocol-dependent validation belong inside the mutation.
+		if _, err := mergeRulePatch(config.Rule{ID: id}, patch); err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid rule payload", err.Error())
+			return
+		}
+		if patchesICS {
+			if err := config.ValidateICSPredicatePatch(icsPatch); err != nil {
+				apiErrorDetail(c, http.StatusBadRequest, "invalid rule payload", err.Error())
+				return
+			}
+		}
 		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
 			idx := -1
 			for i, existing := range cfg.Firewall.Rules {
@@ -224,7 +236,7 @@ func previewFirewallRuleHandler(store config.Store, engine EngineClient) gin.Han
 			apiError(c, http.StatusServiceUnavailable, "engine rule preview unavailable")
 			return
 		}
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -240,7 +252,7 @@ func previewFirewallRuleHandler(store config.Store, engine EngineClient) gin.Han
 
 func listICSRulesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return

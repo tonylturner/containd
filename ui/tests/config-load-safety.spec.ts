@@ -42,15 +42,15 @@ async function mockAPI(page: Page) {
   await page.route("**/api/v1/**", async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname.slice(prefix.length);
-    if (path === "/auth/me" || path === "/auth/session") return route.fulfill({ json: { id: "admin", username: "containd", role: "admin" } });
+    if (path === "/auth/me" || path === "/auth/session") return route.fulfill({ json: { id: "admin", username: "containd", role: "admin" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     if (req.method() === "GET") {
-      if (server.failed.has(path)) return route.fulfill({ status: 503, json: { error: "unavailable" } });
-      return route.fulfill({ json: server.nullReads.has(path) ? null : server.data[path] ?? {} });
+      if (server.failed.has(path)) return route.fulfill({ status: 503, json: { error: "unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+      return route.fulfill({ json: server.nullReads.has(path) ? null : server.data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
     }
     const body: unknown = req.postDataJSON();
     server.writes.push({ path, body });
     server.data[path] = body;
-    return route.fulfill({ json: body, headers: { "X-Containd-Config": "staged" } });
+    return route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1", "X-Containd-Config": "staged" } });
   });
   return server;
 }

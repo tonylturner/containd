@@ -5,7 +5,9 @@ package config
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,13 +34,13 @@ const (
 type Store interface {
 	Save(ctx context.Context, cfg *Config) error
 	Load(ctx context.Context) (*Config, error)
-	SaveCandidate(ctx context.Context, cfg *Config) error
-	LoadCandidate(ctx context.Context) (*Config, error)
-	MutateCandidate(ctx context.Context, edit func(*Config) error) error
-	Commit(ctx context.Context) error
-	CommitConfirmed(ctx context.Context, ttl time.Duration) error
-	ConfirmCommit(ctx context.Context) error
-	Rollback(ctx context.Context) error
+	ReadSnapshot(context.Context, SnapshotKind, bool) (ConfigSnapshot, error)
+	SaveCandidate(ctx context.Context, expected Revision, cfg *Config) (Revision, error)
+	MutateCandidate(ctx context.Context, expected Revision, edit func(*Config) error) (Revision, error)
+	Commit(ctx context.Context, expected Revision) (Revision, error)
+	CommitConfirmed(ctx context.Context, expected Revision, ttl time.Duration) (Revision, error)
+	ConfirmCommit(ctx context.Context, expected Revision) (Revision, error)
+	Rollback(ctx context.Context, expected Revision) (Revision, error)
 
 	// Running IDS rules retain a separate engine-consumer table. All config
 	// states reference immutable banks; Load returns the complete snapshot.
@@ -81,7 +83,7 @@ func (s *SQLiteStore) WipeAll(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginConfigTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin wipe tx: %w", err)
 	}
@@ -89,7 +91,7 @@ func (s *SQLiteStore) WipeAll(ctx context.Context) error {
 	if err := wipeAllTx(ctx, tx); err != nil {
 		return err
 	}
-	if err := s.commitStateTx(ctx, tx); err != nil {
+	if _, err := s.commitRevisionTx(ctx, tx); err != nil {
 		return err
 	}
 	s.stopPendingTimerLocked()
@@ -153,6 +155,7 @@ func tuneSQLite(db *sql.DB) error {
 
 func bootstrapSchema(db *sql.DB) error {
 	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS config_revision (id INTEGER PRIMARY KEY CHECK (id = 1), epoch TEXT NOT NULL, counter INTEGER NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS ids_banks (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS configs (
   key TEXT PRIMARY KEY,
@@ -170,7 +173,12 @@ func bootstrapSchema(db *sql.DB) error {
 			return fmt.Errorf("create schema: %w", err)
 		}
 	}
-	return nil
+	var epoch [8]byte
+	if _, err := rand.Read(epoch[:]); err != nil {
+		return err
+	}
+	_, err := db.Exec(`INSERT OR IGNORE INTO config_revision (id, epoch, counter) VALUES (1, ?, 1)`, hex.EncodeToString(epoch[:]))
+	return err
 }
 
 // Save validates and writes running only, retaining an omitted IDS bank.
@@ -187,7 +195,7 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginConfigTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin save tx: %w", err)
 	}
@@ -201,10 +209,11 @@ func (s *SQLiteStore) Save(ctx context.Context, cfg *Config) error {
 	if err := writeConfigTx(ctx, tx, configKeyRunning, cfg); err != nil {
 		return err
 	}
-	return s.commitStateTx(ctx, tx)
+	_, err = s.commitRevisionTx(ctx, tx)
+	return err
 }
 
-func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) error {
+func (s *SQLiteStore) saveKindTx(ctx context.Context, tx *sql.Tx, kind string, cfg *Config) error {
 	if cfg == nil {
 		return errors.New("config is nil")
 	}
@@ -214,15 +223,7 @@ func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) er
 	if err := s.validateSSHAccessLocked(ctx, cfg); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback() //nolint:errcheck
-	if err := writeConfigTx(ctx, tx, kind, cfg); err != nil {
-		return err
-	}
-	return s.commitStateTx(ctx, tx)
+	return writeConfigTx(ctx, tx, kind, cfg)
 }
 
 // Load returns a consistent running configuration including its IDS bank.
@@ -243,10 +244,6 @@ type configReader interface {
 
 func loadRunningFrom(ctx context.Context, db configReader) (*Config, error) {
 	return loadKindFrom(ctx, db, configKeyRunning)
-}
-
-func (s *SQLiteStore) loadKind(ctx context.Context, kind string) (*Config, error) {
-	return loadKindFrom(ctx, s.db, kind)
 }
 
 func loadKindFrom(ctx context.Context, db configReader, kind string) (*Config, error) {
@@ -306,10 +303,10 @@ func readKindUnupgradedFrom(ctx context.Context, db configReader, kind string, w
 }
 
 // Commit promotes the candidate and cancels any pending confirmed commit.
-func (s *SQLiteStore) Commit(ctx context.Context) error {
+func (s *SQLiteStore) Commit(ctx context.Context, expected Revision) (Revision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.promoteLocked(ctx, 0)
+	return s.promoteLocked(ctx, &expected, 0, nil)
 }
 
 type pendingCommit struct {
@@ -317,34 +314,59 @@ type pendingCommit struct {
 }
 
 // CommitConfirmed promotes the candidate and schedules transactional rollback.
-func (s *SQLiteStore) CommitConfirmed(ctx context.Context, ttl time.Duration) error {
+func (s *SQLiteStore) CommitConfirmed(ctx context.Context, expected Revision, ttl time.Duration) (Revision, error) {
 	if ttl <= 0 {
-		return errors.New("ttl must be > 0")
+		return "", errors.New("ttl must be > 0")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.promoteLocked(ctx, ttl)
+	return s.promoteLocked(ctx, &expected, ttl, nil)
 }
 
 // ConfirmCommit cancels any pending auto-rollback from CommitConfirmed.
-func (s *SQLiteStore) ConfirmCommit(ctx context.Context) error {
+func (s *SQLiteStore) ConfirmCommit(ctx context.Context, expected Revision) (Revision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cfg, err := s.loadRunningLocked(ctx)
+	tx, err := s.beginConfigTx(ctx, &expected)
 	if err != nil {
-		return err
+		return "", err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	result, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyPending)
+	if err != nil {
+		return "", err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if n == 0 {
+		return expected, tx.Commit()
+	}
+	cfg, err := loadRunningFrom(ctx, tx)
+	if err != nil {
+		return "", err
 	}
 	if err := s.ValidateConfig(cfg); err != nil {
-		return err
+		return "", err
 	}
-	return s.clearPendingLocked(ctx)
+	revision, err := s.commitRevisionTx(ctx, tx)
+	if err == nil {
+		s.stopPendingTimerLocked()
+	}
+	return revision, err
 }
 
 // Rollback restores the previous running config if available.
-func (s *SQLiteStore) Rollback(ctx context.Context) error {
+func (s *SQLiteStore) Rollback(ctx context.Context, expected Revision) (Revision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.rollbackLocked(ctx)
+	revision, err := s.rollbackLocked(ctx, &expected, nil)
+	var invalid *ValidationError
+	if errors.As(err, &invalid) {
+		err = errors.Join(err, s.recordRollbackRefusal(ctx, err))
+	}
+	return revision, err
 }
 
 // Close releases database resources.
@@ -363,7 +385,11 @@ func (s *SQLiteStore) Close() error {
 }
 
 func (s *SQLiteStore) loadPending(ctx context.Context) (*pendingCommit, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, configKeyPending)
+	return loadPendingFrom(ctx, s.db)
+}
+
+func loadPendingFrom(ctx context.Context, db configReader) (*pendingCommit, error) {
+	row := db.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, configKeyPending)
 	var raw string
 	if err := row.Scan(&raw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -378,15 +404,27 @@ func (s *SQLiteStore) loadPending(ctx context.Context) (*pendingCommit, error) {
 	return &pending, nil
 }
 
-func (s *SQLiteStore) clearPendingLocked(ctx context.Context) error {
-	if s.pendingTimer != nil {
-		s.pendingTimer.Stop()
-		s.pendingTimer = nil
-	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyPending)
+func (s *SQLiteStore) clearPendingLocked(ctx context.Context, expected Revision) error {
+	tx, err := s.beginConfigTx(ctx, &expected)
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback() //nolint:errcheck
+	result, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE key = ?`, configKeyPending)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return nil
+	}
+	if _, err := s.commitRevisionTx(ctx, tx); err != nil {
+		return err
+	}
+	s.stopPendingTimerLocked()
 	return nil
 }
 
@@ -431,7 +469,7 @@ func (s *SQLiteStore) SaveIDSRules(ctx context.Context, rules []IDSRule) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginConfigTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
@@ -453,7 +491,8 @@ func (s *SQLiteStore) SaveIDSRules(ctx context.Context, rules []IDSRule) error {
 			return err
 		}
 	}
-	return s.commitStateTx(ctx, tx)
+	_, err = s.commitRevisionTx(ctx, tx)
+	return err
 }
 
 func replaceIDSRulesTx(ctx context.Context, tx *sql.Tx, rules []IDSRule) error {
@@ -530,7 +569,7 @@ func (s *SQLiteStore) checkAndSchedulePending() error {
 		if _, err := s.timedRollbackLocked(ctx); err != nil {
 			return err
 		}
-		return s.clearPendingLocked(ctx)
+		return nil
 	}
 	s.schedulePendingLocked(time.Until(deadline))
 	return nil

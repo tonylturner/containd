@@ -283,7 +283,7 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/pcap/config", bytes.NewBufferString(`{"interfaces":["wan"],"mode":"once","snaplen":256}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("pcap config: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -293,7 +293,7 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/pcap/start", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("pcap start: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -306,28 +306,28 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/pcap/status", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"running":true`) {
 		t.Fatalf("pcap status: expected running response, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/pcap/list", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "sample.pcap") {
 		t.Fatalf("pcap list: expected item response, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = multipartAuthedRequest(t, http.MethodPost, "/api/v1/pcap/upload", "file", "upload.pcap", buildTestPCAP([][]byte{buildTestModbusEthernetFrame()}))
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "upload.pcap") {
 		t.Fatalf("pcap upload: expected 200 upload response, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/pcap/download/sample.pcap", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || rec.Body.String() != "pcap-download" {
 		t.Fatalf("pcap download: expected download body, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -335,7 +335,7 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/pcap/replay", bytes.NewBufferString(`{"name":"sample.pcap","interface":"wan","ratePps":100}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("pcap replay: expected 202, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -345,7 +345,7 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodDelete, "/api/v1/pcap/sample.pcap", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("pcap delete: expected 204, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -355,7 +355,7 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = multipartAuthedRequest(t, http.MethodPost, "/api/v1/pcap/analyze", "file", "sample.pcap", buildTestPCAP([][]byte{buildTestModbusEthernetFrame()}))
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("pcap analyze upload: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -374,7 +374,7 @@ func TestPCAPRuntimeHandlers(t *testing.T) {
 	}
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/pcap/analyze/sample.pcap", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("pcap analyze by name: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -406,28 +406,28 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/events?limit=10", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"id":"7"`) {
 		t.Fatalf("events list: expected event payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/events/7", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"modbus"`) {
 		t.Fatalf("event detail: expected event payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/flows?limit=5", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "flow-1") {
 		t.Fatalf("flows: expected flow payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/simulation", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"running":false`) {
 		t.Fatalf("simulation status: expected status payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -435,7 +435,7 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/simulation", bytes.NewBufferString(`{"action":"start"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"running":true`) {
 		t.Fatalf("simulation control: expected running payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -445,35 +445,35 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/stats/protocols", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"protocol":"modbus"`) {
 		t.Fatalf("protocol stats: expected stats payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/stats/top-talkers?n=5", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"srcIp":"10.0.0.1"`) {
 		t.Fatalf("top talkers: expected payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/anomalies?limit=5", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"malformed_frame"`) {
 		t.Fatalf("anomalies: expected payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodDelete, "/api/v1/anomalies", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !eng.anomaliesCleared {
 		t.Fatalf("clear anomalies: expected 200 and clear call, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/conntrack?limit=5", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"dport":"502"`) || !strings.Contains(rec.Body.String(), `"tags":["plc"]`) {
 		t.Fatalf("conntrack list: expected payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -481,7 +481,7 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/conntrack/kill", bytes.NewBufferString(`{"proto":"tcp","src":"10.0.0.1","dst":"10.0.0.2","sport":1111,"dport":502}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || eng.conntrackDeleteReq.Dport != 502 {
 		t.Fatalf("conntrack kill: expected delete call, got %d body=%s req=%+v", rec.Code, rec.Body.String(), eng.conntrackDeleteReq)
 	}
@@ -503,21 +503,21 @@ func TestRuntimeTelemetryFallbackAndUnavailablePaths(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/events", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `service.syslog.forwarded`) || !strings.Contains(rec.Body.String(), `system.engine.telemetry_error`) {
 		t.Fatalf("events fallback: expected merged service event and telemetry error, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/events/not-a-number", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("event detail invalid id: expected 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/events/999", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("event detail not found: expected 404, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -526,28 +526,28 @@ func TestRuntimeTelemetryFallbackAndUnavailablePaths(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/flows", nil)
-	noEngine.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, noEngine, rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("flows without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/stats/protocols", nil)
-	noEngine.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, noEngine, rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("proto stats without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/stats/top-talkers", nil)
-	noEngine.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, noEngine, rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("top talkers without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/anomalies", nil)
-	noEngine.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, noEngine, rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("anomalies without engine: expected unavailable, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -555,7 +555,7 @@ func TestRuntimeTelemetryFallbackAndUnavailablePaths(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/simulation", bytes.NewBufferString(`{"action":"start"}`))
 	req.Header.Set("Content-Type", "application/json")
-	noEngine.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, noEngine, rec, req)
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "simulation unavailable") {
 		t.Fatalf("simulation without engine: expected unavailable error, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -581,7 +581,7 @@ func TestRuntimeTelemetryGatewayErrorsAndStoreLoadFailures(t *testing.T) {
 	} {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodGet, tc.path, nil)
-		s.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, s, rec, req)
 		expected := http.StatusServiceUnavailable
 		if tc.name == "conntrack" {
 			expected = http.StatusBadGateway
@@ -607,7 +607,7 @@ func TestRuntimeTelemetryGatewayErrorsAndStoreLoadFailures(t *testing.T) {
 	} {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodGet, tc.path, nil)
-		s.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, s, rec, req)
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("%s load error: expected 500, got %d body=%s", tc.name, rec.Code, rec.Body.String())
 		}
@@ -638,7 +638,7 @@ func TestVPNServiceHelperHandlers(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/services/vpn/openvpn/profile", bytes.NewBufferString(`{"name":"labclient","ovpn":"client\nremote 198.51.100.10 1194\nproto udp\n"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("upload openvpn profile: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -649,28 +649,28 @@ func TestVPNServiceHelperHandlers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/services/vpn/openvpn/clients", bytes.NewBufferString(`{"name":"labuser01"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "labuser01") {
 		t.Fatalf("create openvpn client: expected client payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/services/vpn/openvpn/clients", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "labuser01") {
 		t.Fatalf("list openvpn clients: expected created client, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/services/vpn/openvpn/clients/labuser01", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<ca>") || !strings.Contains(rec.Body.String(), "remote vpn.example.com 1194") {
 		t.Fatalf("download openvpn client: expected inline profile, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/services/vpn/wireguard/status?iface=wg0", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"listenPort":51820`) {
 		t.Fatalf("wireguard status: expected payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -702,7 +702,7 @@ func TestVPNServiceReadWritePreservesRedactedSecrets(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/services/vpn", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get vpn: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -730,7 +730,7 @@ func TestVPNServiceReadWritePreservesRedactedSecrets(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/services/vpn", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set vpn: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}

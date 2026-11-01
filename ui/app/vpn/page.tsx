@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfigRevision } from "../../lib/use-config-revision";
+
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useConfigForm } from "../../lib/use-config-form";
@@ -42,11 +44,12 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 type UploadState = "idle" | "uploading" | "uploaded" | "error";
 
 export default function VPNPage() {
+  const { readConfig, expectedRevision, handleRevision, revisionNotice } = useConfigRevision();
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
   const toast = useToast();
   const confirm = useConfirm();
-  const { editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, acceptCollection, text, setText } = useConfigEditor(() => normalize(null), false);
+  const { conflictProps, editor, cfg, setCfg, adoptConfig, beginSave, failSave, acceptConfig, acceptCollection, text, setText } = useConfigEditor(() => normalize(null), false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -118,16 +121,15 @@ export default function VPNPage() {
   const { loading, refresh } = useAsyncRefresh(useCallback(
     async ({ silent = false, keepEdits = true }: { silent?: boolean; keepEdits?: boolean } = {}) => {
       try {
-        const current = await api.getVPN();
+        const currentSnapshot = await api.getVPN();
+        const current = readConfig(currentSnapshot, keepEdits);
         if (!checkLoaded(current)) return;
         setError(null);
-        adoptConfig(normalize(current), keepEdits);
+        adoptConfig(normalize(current), keepEdits, currentSnapshot?.revision);
         refreshClient(current?.openvpn, keepEdits);
-        const [states, zonesResp, ifacesResp] = await Promise.all([
-          api.listInterfaceState(),
-          api.listZones(),
-          api.listInterfaces(),
-        ]);
+        const [states, zonesRespSnapshot, ifacesRespSnapshot] = await Promise.all([api.listInterfaceState(), api.listZones(), api.listInterfaces()]);
+        const zonesResp = zonesRespSnapshot?.data ?? null;
+        const ifacesResp = ifacesRespSnapshot?.data ?? null;
         setZones(zonesResp ?? []);
         setInterfaces(ifacesResp ?? []);
         const ifName = (current?.wireguard?.interface ?? "wg0").trim() || "wg0";
@@ -165,7 +167,7 @@ export default function VPNPage() {
         if (!silent) toast("Failed to refresh VPN status", "error");
       }
     },
-    [checkLoaded, toast, adoptConfig, refreshClient],
+    [checkLoaded, toast, adoptConfig, refreshClient, readConfig],
   ), { initialArgs: [{ silent: true }] });
 
   useConfigRefresh(refresh);
@@ -233,19 +235,19 @@ export default function VPNPage() {
         pushRoutes: text("pushRoutes", (openvpn.server.pushRoutes ?? []).join(", ")).split(",").map((s) => s.trim()).filter(Boolean),
       };
     }
-    const saved = await api.setVPN({
+    const saved = await api.setVPN(submitted.baseRevision ?? "", {
       ...cfg,
       wireguard: { ...cfg.wireguard, peers },
       openvpn,
     });
     setSaveState(saved.ok ? "saved" : "error");
     if (!saved.ok) {
-      failSave(submitted);
+      failSave(submitted, saved);
       const msg = saved.error || "Failed to save VPN settings.";
       setError(msg);
       toast(msg, "error");
     } else {
-      acceptConfig(submitted, normalize(saved.data));
+      acceptConfig(submitted, normalize(saved.data), saved.revision);
       toast(saved.warning ? `VPN staged — commit to apply. Warning: ${saved.warning}` : "VPN staged — commit to apply.", "success");
     }
     setTimeout(() => setSaveState("idle"), 1500);
@@ -258,7 +260,8 @@ export default function VPNPage() {
     try {
       const text = await file.text();
       const base = file.name.replace(/\.(ovpn|conf|txt)$/i, "");
-      const res = await api.uploadOpenVPNProfile(base || "client", text);
+      const submittedBase = expectedRevision();
+      const res = await api.uploadOpenVPNProfile(submittedBase, base || "client", text).then(handleRevision(submittedBase));
       if (!res.ok) {
         setUploadState("error");
         setError(res.error || "Failed to upload OpenVPN profile.");
@@ -268,10 +271,10 @@ export default function VPNPage() {
       setUploadState("uploaded");
       toast(res.warning ? `Profile staged — commit to apply. Warning: ${res.warning}` : "Profile staged — commit to apply.", "success");
       // Uploading a profile switches OpenVPN to "configPath" mode (advanced) and clears managed config.
-      acceptCollection((current) => ({
+      acceptCollection(submittedBase, (current) => ({
         ...current,
         openvpn: { ...current.openvpn, configPath: res.data.configPath, managed: undefined },
-      }));
+      }), [], res.revision);
       setTimeout(() => setUploadState("idle"), 1500);
       // Refresh runtime badges (installed/running/last error) after upload.
       refresh({ silent: true });
@@ -356,8 +359,9 @@ export default function VPNPage() {
         </div>
       }
     >
+      {revisionNotice(() => refresh({ keepEdits: false }))}
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
-      <ConfigEditNotice superseded={editor.superseded || clientForm.editor.superseded} />
+      <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded || clientForm.editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text) shadow-card">

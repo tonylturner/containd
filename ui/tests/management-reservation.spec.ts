@@ -21,7 +21,7 @@ test("Interfaces explains immutable access and exposes guard faults", async ({ p
         rollbackFault: "rollback refused: interfaces conflicts with reserved management path",
       },
     };
-    await route.fulfill({ json: data[path] ?? {} });
+    await route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.goto("/interfaces/");
   const note = page.getByRole("complementary", { name: "Reserved management path" });
@@ -58,7 +58,7 @@ test("Interfaces omits the note when no reservation is configured", async ({ pag
     const data = path.endsWith("/management-reservation") ? { active: false }
       : path.endsWith("/interfaces") || path.endsWith("/state") || path.endsWith("/zones") ? []
         : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: data });
+    await route.fulfill({ json: data, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.goto("/interfaces/");
   await expect(page.getByRole("heading", { name: "Interfaces", exact: true })).toBeVisible();
@@ -73,7 +73,7 @@ test("Interfaces shows a boot fault without a reservation", async ({ page }) => 
     const data = path.endsWith("/management-reservation") ? { active: false, bootFault, recovery: "recovery: new transit dropped" }
       : path.endsWith("/interfaces") || path.endsWith("/state") || path.endsWith("/zones") ? []
         : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: data });
+    await route.fulfill({ json: data, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.goto("/interfaces/");
   await expect(page.getByRole("complementary", { name: "Reserved management path" })).toHaveCount(0);

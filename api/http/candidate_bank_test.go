@@ -15,24 +15,23 @@ type bankRoutingStore struct {
 	ordinary, bankAware, fullReads, documentReads int
 }
 
-func (s *bankRoutingStore) LoadCandidate(ctx context.Context) (*config.Config, error) {
-	s.fullReads++
-	return s.SQLiteStore.LoadCandidate(ctx)
+func (s *bankRoutingStore) ReadSnapshot(ctx context.Context, kind config.SnapshotKind, withBank bool) (config.ConfigSnapshot, error) {
+	if withBank {
+		s.fullReads++
+	} else if kind == config.SnapshotCandidate {
+		s.documentReads++
+	}
+	return s.SQLiteStore.ReadSnapshot(ctx, kind, withBank)
 }
 
-func (s *bankRoutingStore) LoadCandidateDocument(ctx context.Context) (*config.Config, error) {
-	s.documentReads++
-	return s.SQLiteStore.LoadCandidateDocument(ctx)
-}
-
-func (s *bankRoutingStore) MutateCandidate(ctx context.Context, edit func(*config.Config) error) error {
+func (s *bankRoutingStore) MutateCandidate(ctx context.Context, expected config.Revision, edit func(*config.Config) error) (config.Revision, error) {
 	s.ordinary++
-	return s.SQLiteStore.MutateCandidate(ctx, edit)
+	return s.SQLiteStore.MutateCandidate(ctx, expected, edit)
 }
 
-func (s *bankRoutingStore) MutateCandidateIDS(ctx context.Context, edit func(*config.Config) error) error {
+func (s *bankRoutingStore) MutateCandidateIDS(ctx context.Context, expected config.Revision, edit func(*config.Config) error) (config.Revision, error) {
 	s.bankAware++
-	return s.SQLiteStore.MutateCandidateIDS(ctx, edit)
+	return s.SQLiteStore.MutateCandidateIDS(ctx, expected, edit)
 }
 
 func TestCandidateBankRoutingAndResponse(t *testing.T) {
@@ -50,7 +49,8 @@ func TestCandidateBankRoutingAndResponse(t *testing.T) {
 	if len(ids.Rules) == 0 || store.bankAware != 1 || store.ordinary != 0 {
 		t.Fatal("IDS response implied an empty bank or used bank-free path")
 	}
-	cfg, err := store.LoadCandidate(context.Background())
+	cfgSnapshot1, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+	cfg := cfgSnapshot1.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,8 @@ func TestCandidateBankRoutingAndResponse(t *testing.T) {
 	if rec.Code != http.StatusOK || store.ordinary != 1 || store.bankAware != 1 {
 		t.Fatalf("omitted bank did not use ordinary path: %d %s", rec.Code, rec.Body)
 	}
-	cfg, err = store.LoadCandidate(context.Background())
+	cfgSnapshot2, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+	cfg = cfgSnapshot2.Candidate
 	if err != nil || len(cfg.IDS.Rules) == 0 {
 		t.Fatalf("omitted bank dropped rules: %v", err)
 	}
@@ -77,7 +78,8 @@ func TestCandidateBankRoutingAndResponse(t *testing.T) {
 	if rec.Code != http.StatusOK || store.ordinary != 1 || store.bankAware != 2 {
 		t.Fatalf("explicit bank did not use IDS path: %d %s", rec.Code, rec.Body)
 	}
-	cfg, err = store.LoadCandidate(context.Background())
+	cfgSnapshot3, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+	cfg = cfgSnapshot3.Candidate
 	if err != nil || len(cfg.IDS.Rules) != 0 {
 		t.Fatalf("explicit empty bank did not clear rules: %v", err)
 	}
@@ -92,7 +94,7 @@ func TestServiceValidationReadsBankFreeDocument(t *testing.T) {
 	store := &bankRoutingStore{SQLiteStore: stageStore(t)}
 	server := NewServerWithEngineAndServices(store, nil, nil, bankFreeValidationServices{}, nil)
 	for _, path := range []string{"/services/dns", "/services/av"} {
-		rec := requestStage(t, server, "POST", path, map[string]any{})
+		rec := casRequest(t, server, "POST", path, map[string]any{}, string(testBaseRevision(store, context.Background())))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body)
 		}

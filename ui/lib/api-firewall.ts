@@ -1,6 +1,6 @@
 import {
+  getConfigJSON,
   deleteJSONResult,
-  getJSONList,
   getJSONResult,
   patchJSONResult,
   postJSONResult,
@@ -254,34 +254,36 @@ function normalizeIdentityBindings(value: unknown): IdentityBinding[] {
 
 export const firewallAPI = {
   listFirewallRules: async (signal?: AbortSignal) => {
-    const rules = await getJSONList<unknown>("/api/v1/firewall/rules", signal);
+    const rules = await getConfigJSON<unknown[]>("/api/v1/firewall/rules", "list", signal);
     if (rules == null) return null;
-    return normalizeFirewallRules(rules);
+    return { ...rules, data: normalizeFirewallRules(rules.data) };
   },
   createFirewallRule: async (
+    expectedRevision: string,
     r: FirewallRuleCreate,
   ): Promise<ApiResult<FirewallRule & { index: number }>> => {
-    const result = await postJSONResult<unknown>("/api/v1/firewall/rules", r);
+    const result = await postJSONResult<unknown>("/api/v1/firewall/rules", r, expectedRevision);
     if (!result.ok) return result;
     return { ...result, data: { ...normalizeFirewallRule(result.data), index: (result.data as { index: number }).index } };
   },
-  moveFirewallRule: async (id: string, position: Position): Promise<ApiResult<{ index: number; rules: FirewallRule[] }>> => {
+  moveFirewallRule: async (expectedRevision: string, id: string, position: Position): Promise<ApiResult<{ index: number; rules: FirewallRule[] }>> => {
     const result = await postJSONResult<{ index: number; rules: unknown[] }>(
-      `/api/v1/firewall/rules/${encodeURIComponent(id)}/move`, { position },
+      `/api/v1/firewall/rules/${encodeURIComponent(id)}/move`, { position }, expectedRevision,
     );
     return result.ok ? { ...result, data: { ...result.data, rules: normalizeFirewallRules(result.data.rules) } } : result;
   },
-  publishPortForward: (forward: PortForward, allowRule = true) =>
-    postJSONResult<ForwardPublishResult>("/api/v1/firewall/port-forwards", { forward, allowRule }),
-  deletePortForward: (id: string) =>
-    deleteJSONResult<ForwardDeleteResult>(`/api/v1/firewall/port-forwards/${encodeURIComponent(id)}`),
+  publishPortForward: (expectedRevision: string, forward: PortForward, allowRule = true) =>
+    postJSONResult<ForwardPublishResult>("/api/v1/firewall/port-forwards", { forward, allowRule }, expectedRevision),
+  deletePortForward: (expectedRevision: string, id: string) =>
+    deleteJSONResult<ForwardDeleteResult>(`/api/v1/firewall/port-forwards/${encodeURIComponent(id)}`, expectedRevision),
   updateFirewallRule: async (
+    expectedRevision: string,
     id: string,
     r: FirewallRulePatch,
   ): Promise<ApiResult<FirewallRule>> => {
     const result = await patchJSONResult<unknown>(
       `/api/v1/firewall/rules/${encodeURIComponent(id)}`,
-      r,
+      r, expectedRevision,
     );
     if (!result.ok) return result;
     return { ...result, data: normalizeFirewallRule(result.data) };
@@ -293,8 +295,8 @@ export const firewallAPI = {
     const icsCoverage = normalizeICSCoverageRule(res.data?.icsCoverage) ?? undefined;
     return { ...res, data: { ...res.data, icsCoverage } };
   },
-  deleteFirewallRule: (id: string) =>
-    deleteJSONResult(`/api/v1/firewall/rules/${encodeURIComponent(id)}`),
+  deleteFirewallRule: (expectedRevision: string, id: string) =>
+    deleteJSONResult(`/api/v1/firewall/rules/${encodeURIComponent(id)}`, expectedRevision),
 
   /** 502/503 when the engine has no readable applied ruleset; the error says why. */
   getRuleCounters: async (): Promise<ApiResult<RuleCounters>> => {
@@ -306,11 +308,12 @@ export const firewallAPI = {
 
   listIdentityBindings: async (): Promise<ApiResult<IdentityBinding[]>> => {
     const res = await getJSONResult<Record<string, unknown>>("/api/v1/identities");
-    return res.ok ? { ok: true, data: normalizeIdentityBindings(res.data) } : res;
+    if (!res.ok) return res;
+    return res.revision ? { ...res, data: normalizeIdentityBindings(res.data) } : { ok: false, error: "Configuration revision unavailable." };
   },
   /** Stages the binding, replacing any existing binding of its address. */
-  setIdentityBinding: (b: IdentityBinding) =>
-    postJSONResult<IdentityBinding>("/api/v1/identities", b),
-  deleteIdentityBinding: (ip: string) =>
-    deleteJSONResult(`/api/v1/identities/${encodeURIComponent(ip)}`),
+  setIdentityBinding: (expectedRevision: string, b: IdentityBinding) =>
+    postJSONResult<IdentityBinding>("/api/v1/identities", b, expectedRevision),
+  deleteIdentityBinding: (expectedRevision: string, ip: string) =>
+    deleteJSONResult(`/api/v1/identities/${encodeURIComponent(ip)}`, expectedRevision),
 };

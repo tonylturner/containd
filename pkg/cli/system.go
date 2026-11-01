@@ -57,9 +57,11 @@ func showCandidateConfig(api *API) Command {
 func showDiff(api *API) Command {
 	return func(ctx context.Context, out io.Writer, args []string) error {
 		var payload map[string]any
-		if err := api.getJSON(ctx, "/api/v1/config/diff", &payload); err != nil {
+		revision, err := api.getConfigJSON(ctx, "/api/v1/config/diff", &payload)
+		if err != nil {
 			return err
 		}
+		fmt.Fprintln(out, "Revision:", revision)
 		return printJSON(out, payload)
 	}
 }
@@ -194,12 +196,12 @@ func setSystemHostnameAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system hostname <name>")
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.Hostname = args[0]
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -208,12 +210,12 @@ func setSystemMgmtListenAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system mgmt listen <addr>")
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.Mgmt.ListenAddr = args[0]
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -222,12 +224,12 @@ func setSystemMgmtHTTPListenAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system mgmt http listen <addr>")
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.Mgmt.HTTPListenAddr = args[0]
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -236,12 +238,12 @@ func setSystemMgmtHTTPSListenAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system mgmt https listen <addr>")
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.Mgmt.HTTPSListenAddr = args[0]
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -254,12 +256,12 @@ func setSystemMgmtEnableHTTPAPI(api *API) Command {
 		if err != nil {
 			return err
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.Mgmt.EnableHTTP = &v
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -272,12 +274,12 @@ func setSystemMgmtEnableHTTPSAPI(api *API) Command {
 		if err != nil {
 			return err
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.Mgmt.EnableHTTPS = &v
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -290,12 +292,12 @@ func setSystemMgmtRedirectHTTPToHTTPSAPI(api *API) Command {
 		if err != nil {
 			return err
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.Mgmt.RedirectHTTPToHTTPS = &v
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -314,7 +316,7 @@ func setSystemMgmtHSTSAPI(api *API) Command {
 				maxAge = v
 			}
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
@@ -322,7 +324,7 @@ func setSystemMgmtHSTSAPI(api *API) Command {
 		if enabled {
 			cfg.System.Mgmt.HSTSMaxAgeSeconds = maxAge
 		}
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -331,12 +333,12 @@ func setSystemSSHListenAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system ssh listen <addr>")
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.SSH.ListenAddr = args[0]
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -355,12 +357,12 @@ func setSystemSSHAllowPasswordAPI(api *API) Command {
 		default:
 			return fmt.Errorf("invalid allow-password value %q", args[0])
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.SSH.AllowPassword = &enabled
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -369,12 +371,12 @@ func setSystemSSHAuthorizedKeysDirAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system ssh authorized-keys-dir <dir>")
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.SSH.AuthorizedKeysDir = args[0]
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -383,12 +385,12 @@ func setSystemSSHBannerAPI(api *API) Command {
 		if len(args) < 1 {
 			return fmt.Errorf("usage: set system ssh banner <text>")
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.SSH.Banner = strings.Join(args, " ")
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -401,12 +403,12 @@ func setSystemSSHHostKeyRotationAPI(api *API) Command {
 		if err != nil || days < 0 || days > config.MaxSSHHostKeyRotationDays {
 			return fmt.Errorf("invalid rotation days: %s", args[0])
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.SSH.HostKeyRotationDays = days
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -419,12 +421,12 @@ func setSystemSSHShellModeAPI(api *API) Command {
 		if mode != "linux" && mode != "appliance" {
 			return fmt.Errorf("invalid shell-mode %q (expected linux or appliance)", args[0])
 		}
-		cfg, err := loadCandidateConfig(ctx, api)
+		cfg, revision, err := loadCandidateConfig(ctx, api)
 		if err != nil {
 			return err
 		}
 		cfg.System.SSH.ShellMode = mode
-		return api.postJSON(ctx, "/api/v1/config/candidate", cfg, out)
+		return api.saveJSON(ctx, "/api/v1/config/candidate", cfg, revision, out)
 	}
 }
 
@@ -470,12 +472,13 @@ func showIDSRulesAPI(api *API) Command {
 	}
 }
 
-func loadCandidateConfig(ctx context.Context, api *API) (*config.Config, error) {
+func loadCandidateConfig(ctx context.Context, api *API) (*config.Config, config.Revision, error) {
 	var cfg config.Config
-	if err := api.getConfigJSON(ctx, "/api/v1/config/candidate", &cfg); err != nil {
-		return nil, err
+	revision, err := api.getConfigJSON(ctx, "/api/v1/config/candidate", &cfg)
+	if err != nil {
+		return nil, "", err
 	}
-	return &cfg, nil
+	return &cfg, revision, nil
 }
 
 func boolDefault(v *bool, def bool) bool {

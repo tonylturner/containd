@@ -114,7 +114,7 @@ func requestStage(t *testing.T, server http.Handler, method, path string, body a
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User", "stage-tester")
 	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, server, rec, req)
 	return rec
 }
 
@@ -221,7 +221,7 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 			store := stageStore(t)
 			ctx := context.Background()
 			running, _ := store.Load(ctx)
-			if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+			if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 				cfg.System.Hostname = "unrelated-edit"
 				return nil
 			}); err != nil {
@@ -240,7 +240,8 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
 			}
 			assertConfigResponseHeader(t, rec, "staged")
-			candidate, err := store.LoadCandidate(ctx)
+			candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			candidate := candidateSnapshot1.Candidate
 			if err != nil || candidate.System.Hostname != "unrelated-edit" {
 				t.Fatalf("lost candidate: %+v %v", candidate, err)
 			}
@@ -300,12 +301,13 @@ func TestIDSSaveResponseSurvivesSecondSave(t *testing.T) {
 		t.Fatalf("omitted rules erased bank: %d %s", rec.Code, rec.Body)
 	}
 	rec = httptest.NewRecorder()
-	server.ServeHTTP(rec, idsApplyRequest(t, "import"))
+	serveWithConfigRevision(t, server, rec, idsApplyRequest(t, "import"))
 	if rec.Code != http.StatusOK || engine.mutations != 0 {
 		t.Fatalf("IDS import applied or failed: %d %s", rec.Code, rec.Body)
 	}
 	assertConfigResponseHeader(t, rec, "staged")
-	cfg, _ := store.LoadCandidate(context.Background())
+	cfgSnapshot2, _ := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+	cfg := cfgSnapshot2.Candidate
 	if len(cfg.IDS.Rules) != 2 {
 		t.Fatalf("IDS import lost candidate bank: %+v", cfg.IDS.Rules)
 	}
@@ -321,11 +323,12 @@ func TestVPNProfileUploadsNeverOverwriteRunningArtifact(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%d %s", rec.Code, rec.Body)
 		}
-		cfg, _ := store.LoadCandidate(context.Background())
+		cfgSnapshot3, _ := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+		cfg := cfgSnapshot3.Candidate
 		return cfg.Services.VPN.OpenVPN.ConfigPath
 	}
 	first := upload("client\nremote first 1194\n")
-	if err := store.Commit(context.Background()); err != nil {
+	if err := testCommit(store, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	second := upload("client\nremote second 1194\n")

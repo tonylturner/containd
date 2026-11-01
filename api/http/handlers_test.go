@@ -386,7 +386,7 @@ func TestHealthEndpoint(t *testing.T) {
 	s := NewServer(&mockStore{}, nil)
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -410,7 +410,7 @@ func TestHealthNoAuthRequired(t *testing.T) {
 	s := NewServer(&mockStore{}, nil)
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("health without auth: expected 200, got %d", rec.Code)
 	}
@@ -421,7 +421,7 @@ func TestProtectedEndpointRejectsUnauthenticated(t *testing.T) {
 	s := NewServer(&mockStore{}, nil)
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/config", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -432,7 +432,7 @@ func TestProtectedEndpointRejectsInvalidToken(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/config", nil)
 	req.Header.Set("Authorization", "Bearer wrong-token")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
@@ -442,7 +442,7 @@ func TestGetConfigReturnsDefault(t *testing.T) {
 	s := NewServer(&mockStore{}, nil)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/config", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -457,7 +457,7 @@ func TestSaveConfigRejectsBadJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config", bytes.NewBufferString(`not json`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for bad JSON, got %d", rec.Code)
 	}
@@ -467,7 +467,7 @@ func TestGetSyslogDefault(t *testing.T) {
 	s := NewServer(&mockStore{}, nil)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/services/syslog", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -482,7 +482,7 @@ func TestSetAndGetDNS(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/services/dns", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set DNS expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -490,7 +490,7 @@ func TestSetAndGetDNS(t *testing.T) {
 	// Get DNS config.
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/services/dns", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get DNS expected 200, got %d", rec.Code)
 	}
@@ -507,14 +507,14 @@ func TestSetAndGetNTP(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/services/ntp", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set NTP expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/services/ntp", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get NTP expected 200, got %d", rec.Code)
 	}
@@ -539,7 +539,7 @@ func TestBackupPathTraversalProtection(t *testing.T) {
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()
 		req := authedRequest(tc.method, tc.path, nil)
-		s.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, s, rec, req)
 		// Should either 404 (gin can't match route) or return a safe error.
 		// Must NOT return 200.
 		if rec.Code == http.StatusOK {
@@ -554,7 +554,7 @@ func TestBackupIDSanitization(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/config/backups/..%2Fpasswd", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	// After sanitization the ID becomes "invalid" and won't find a file -> 404.
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for sanitized backup ID, got %d body=%s", rec.Code, rec.Body.String())
@@ -565,7 +565,7 @@ func TestSecurityHeaders(t *testing.T) {
 	s := NewServer(&mockStore{}, nil)
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("missing X-Content-Type-Options: nosniff header")
 	}

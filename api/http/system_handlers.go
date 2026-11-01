@@ -74,7 +74,7 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusServiceUnavailable, "config store unavailable")
 			return
 		}
-		cfg, err := store.Load(c.Request.Context())
+		cfg, err := readRunning(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -250,7 +250,7 @@ func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 			return
 		}
 
-		cfg, err := store.Load(c.Request.Context())
+		cfg, err := readRunning(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -371,7 +371,7 @@ func trustedCAUploadHandler(store config.Store, engine EngineClient, dataDir str
 		// Serialize with config applies so they push the same bundle.
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
-		cfg, err := store.Load(c.Request.Context())
+		cfg, err := readRunning(c, store)
 		if err != nil {
 			internalError(c, err)
 			return

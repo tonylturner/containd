@@ -145,7 +145,7 @@ func TestRemovedProtocolStoredBankMigration(t *testing.T) {
 			}
 			defer s.Close()
 			for _, key := range []string{configKeyRunning, configKeyCandidate, configKeyPrevious} {
-				got, err := s.loadKind(ctx, key)
+				got, err := loadKindFrom(ctx, s.db, key)
 				if err != nil {
 					t.Fatalf("saved invalid config unreadable: %v", err)
 				}
