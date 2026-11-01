@@ -187,6 +187,26 @@ Exit codes follow the forwarding smoke. `SMOKE_MUTATION=no-gate` commits an
 empty scan selection and must fail the refusal checks. The script accepts
 the isolation variables described in the smoke fixture README.
 
+## Remote-Access Smoke
+
+`bash scripts/smoke-remote-access.sh` builds the current checkout's appliance
+and an Alpine client image, runs them on private Docker networks in
+`10.250.0.0/16` and checks the Linux-kernel VPN paths:
+
+- management answers HTTPS only;
+- an issued OpenVPN client handshakes and pings a LAN target, and a revoked
+  profile is rejected by the CRL while another client still connects;
+- WireGuard completes a kernel handshake and routed ping, and disabling it
+  removes only the link containd created;
+- both transports, credentials and the CA survive a restart;
+- a stored WireGuard fault quarantines only WireGuard, while OpenVPN and
+  default-deny enforcement keep working;
+- forbidden profile directives are rejected with `400` and change nothing.
+
+Exit 1 is a failed check and exit 2 a prerequisite or harness failure. The
+evidence directory holds client keys and profiles; keep it private. Setup is in
+[`test/remote-access/README.md`](https://github.com/tonylturner/containd/blob/main/test/remote-access/README.md).
+
 ## Selecting Tests
 
 | Change | Checks |
@@ -196,6 +216,7 @@ the isolation variables described in the smoke fixture README.
 | UI routes or forms | Playwright specs and UI lint; mocked API tests do not validate the live backend |
 | Forwarding, NAT or live DPI | `bash scripts/smoketest`; set `SMOKE_INCLUDE_DPI=0` for forwarding only |
 | Scanning gate, AV fail policy or scan selection | `bash scripts/smoke-av-gate.sh` |
+| OpenVPN, WireGuard or service fault handling | `bash scripts/smoke-remote-access.sh` |
 | Linux networking or runtime behavior | Tests on Linux with the capabilities required by the package or harness |
 
 Keep regression tests beside the code they exercise, following
