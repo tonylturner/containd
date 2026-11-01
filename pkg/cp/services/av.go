@@ -227,15 +227,17 @@ func (m *AVManager) applyLocked(ctx context.Context, cfg config.AVConfig) error 
 	// Own the server list: callers may reuse their candidate after Apply.
 	cfg.ICAP.Servers = slices.Clone(cfg.ICAP.Servers)
 	m.mu.Lock()
-	m.backendEpoch++
-	epoch := m.backendEpoch
 	if !sameAVBackend(m.lastCfg, cfg) {
+		// The epoch identifies the backend, not the Apply call. Retained
+		// proof must still accept failures from scans already in flight.
+		m.backendEpoch++
 		m.directions = nil
 		m.backendReady = false
 		m.backendError = "backend apply in progress"
 		m.capabilityError = m.backendError
 		m.nextOptions = time.Time{}
 	}
+	epoch := m.backendEpoch
 	m.configureDirectionsLocked(cfg)
 	m.lastCfg = cfg
 	m.refreshBackendLocked()

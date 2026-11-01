@@ -241,7 +241,9 @@ Gate status, the `gate` object of the `av` status entry:
   every 200 ms. A scan failure invalidates its direction immediately;
   transport failures also invalidate backend capability. Object-level
   rejections, detections and cancelled diagnostic requests do not invalidate
-  readiness. An unchanged backend reapply retains the existing proof.
+  readiness. An unchanged backend reapply retains the existing proof and accepts
+  failures from scans already in flight; readiness ignores scan results from a
+  replaced backend.
 - Readiness proves the latest capability and scan-path observations, not that
   every future object will scan successfully. In particular, if an ICAP
   frontend keeps answering OPTIONS after its antivirus dependency fails,

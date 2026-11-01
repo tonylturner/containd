@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve in-flight AV scan failures across unchanged backend reapplies so
+  readiness requires scan-canary recovery.
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
 - An ICAP `413` reply counts as an oversized object, not a scanner error.

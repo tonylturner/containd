@@ -267,6 +267,85 @@ func TestAVReadinessUnchangedReapplyKeepsProof(t *testing.T) {
 	assertAVReady(t, m, true)
 }
 
+func TestAVReadinessInFlightFailureAcrossReapply(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unchanged backend", true: "changed backend"}[changed], func(t *testing.T) {
+			entered, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			defer unblock()
+			var downloads atomic.Int32
+			s := startReadinessICAP(t, "127.0.0.1:0", func(req icapRequest) string {
+				if req.Method == icapRESPMOD {
+					if bytes.Equal(req.Body, []byte(avCanaryPayload)) {
+						downloads.Add(1)
+					} else {
+						close(entered)
+						<-release
+						return icapErrorReply
+					}
+				}
+				return healthyReadinessReply(req)
+			})
+			m := newTestAVManager(t, AVOptions{})
+			cfg := readinessICAPConfig(s)
+			if err := m.Apply(applyCtx(t), cfg); err != nil {
+				t.Fatal(err)
+			}
+			m.stopObserver()
+			done := make(chan avscan.Result, 1)
+			go func() { done <- m.Scan(context.Background(), scanObject([]byte("object"))) }()
+			select {
+			case <-entered:
+			case <-time.After(readinessTestBound):
+				t.Fatal("scan never arrived")
+			}
+			if changed {
+				replacement := startReadinessICAP(t, "127.0.0.1:0", healthyReadinessReply)
+				cfg = readinessICAPConfig(replacement)
+			}
+			if err := m.Apply(applyCtx(t), cfg); err != nil {
+				t.Fatal(err)
+			}
+			m.stopObserver()
+			assertAVReady(t, m, true)
+			if downloads.Load() != 1 {
+				t.Fatal("unchanged backend reapply discarded scan proof")
+			}
+			unblock()
+			select {
+			case res := <-done:
+				if res.Verdict != avscan.Unscanned || res.Reason != avscan.ReasonScannerError {
+					t.Fatal(res)
+				}
+			case <-time.After(readinessTestBound):
+				t.Fatal("scan never finished")
+			}
+			assertAVReady(t, m, changed)
+			// OPTIONS cannot clear the retained backend's scan failure.
+			if status := m.Status(context.Background()); status["ready"] != changed {
+				t.Fatal(status)
+			}
+			if changed {
+				return
+			}
+			m.mu.Lock()
+			upload, download := m.directions[avscan.Upload], m.directions[avscan.Download]
+			epoch := m.backendEpoch
+			m.mu.Unlock()
+			if !upload.healthy || download.healthy || !download.capable {
+				t.Fatalf("upload=%+v download=%+v", upload, download)
+			}
+			// The observer must retry the failed direction's canary.
+			m.startObserver(cfg, epoch)
+			waitAVReady(t, m, true)
+			if downloads.Load() != 2 {
+				t.Fatalf("download canaries = %d, want 2", downloads.Load())
+			}
+		})
+	}
+}
+
 func TestAVReadinessSameEpochStartOrdering(t *testing.T) {
 	for _, staleHealthy := range []bool{false, true} {
 		t.Run(map[bool]string{false: "stale failure", true: "stale success"}[staleHealthy], func(t *testing.T) {
