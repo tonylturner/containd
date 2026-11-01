@@ -2769,15 +2769,15 @@ components:
       type: object
     WGPeer:
       properties:
-        allowedIPs: {items: {type: string}, type: array}
-        endpoint: {type: string}
+        allowedIPs: {description: IPv4 CIDRs only, items: {type: string}, type: array}
+        endpoint: {description: 'IPv4 host:port or a hostname resolving to IPv4; IPv6 endpoints are unsupported.', type: string}
         name: {type: string}
         persistentKeepalive: {type: integer}
         publicKey: {type: string}
       type: object
     WireGuardConfig:
       properties:
-        addressCIDR: {type: string}
+        addressCIDR: {description: IPv4 tunnel CIDR only (also validated when disabled), type: string}
         enabled: {type: boolean}
         interface: {type: string}
         listenInterfaces: {items: {type: string}, type: array}

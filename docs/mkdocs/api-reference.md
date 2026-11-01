@@ -58,6 +58,13 @@ list (learner pages use `{items: [], nextCursor?}`); a reachable stopped simulat
 returns `200` with `running: false`.
 Retry unavailable requests rather than interpreting them as empty or stopped.
 
+## WireGuard Address Families
+
+WireGuard supports IPv4-only tunnel addresses (`addressCIDR`), peer `allowedIPs`
+and endpoint addresses. Endpoint hostnames must resolve to IPv4 at runtime.
+IPv6 addresses in these fields are rejected when saving configuration, even
+while WireGuard is disabled. Other IPv6 interface and firewall features are unchanged.
+
 ## Security Conduits
 
 `GET /security/conduits` returns an array of running zone-to-zone policy

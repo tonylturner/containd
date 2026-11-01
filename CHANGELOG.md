@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reject unsupported IPv6 WireGuard tunnel addresses, AllowedIPs and endpoints
+  during configuration validation, including while disabled; clarify IPv4-only support.
 - Keep decoded NFQUEUE default denials non-admitting across TCP
   retransmissions, including reserved Modbus FC5 coil values, without
   bypassing ordered kernel admission. The first scoped TCP non-admission
