@@ -1,19 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package mgmttls resolves the management listener's certificate and key paths.
+// Package mgmttls publishes and loads management TLS identities atomically.
 package mgmttls
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
 const (
-	DefaultCertFile = "/data/tls/server.crt"
-	DefaultKeyFile  = "/data/tls/server.key"
+	DefaultCertFile   = "/data/tls/server.crt"
+	DefaultKeyFile    = "/data/tls/server.key"
+	DefaultBundleFile = "/data/tls/server.pem"
 )
+
+// Managed reports whether both resolved paths select containd's default identity.
+func Managed(cfg *config.Config) bool {
+	cert, key := ResolveFiles(cfg)
+	return filepath.Clean(cert) == DefaultCertFile && filepath.Clean(key) == DefaultKeyFile
+}
+
+// IdentityFiles selects the single managed bundle or the read-only external files.
+func IdentityFiles(cfg *config.Config) (string, string) {
+	if Managed(cfg) {
+		return DefaultBundleFile, DefaultBundleFile
+	}
+	return ResolveFiles(cfg)
+}
 
 // ResolvedFile identifies a listener file and the setting that selected it.
 type ResolvedFile struct {

@@ -141,8 +141,8 @@ func TestAuditCompletedMutationSurvivesCanceledRequest(t *testing.T) {
 func TestAuditTLSFailureStillReturnsReplacementSuccess(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.DefaultConfig()
-	cfg.System.Mgmt.TLSCertFile = filepath.Join(dir, "cert.pem")
-	cfg.System.Mgmt.TLSKeyFile = filepath.Join(dir, "key.pem")
+	cfg.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+	cfg.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
 	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
 	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
 	observed, backend := newEvidenceStore(t)
@@ -160,12 +160,11 @@ func TestAuditTLSFailureStillReturnsReplacementSuccess(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	for path, want := range map[string]string{cfg.System.Mgmt.TLSCertFile: cert, cfg.System.Mgmt.TLSKeyFile: key} {
-		got, err := os.ReadFile(path)
-		if err != nil || !bytes.Equal(bytes.TrimSpace(got), bytes.TrimSpace([]byte(want))) {
-			t.Fatalf("replacement missing: %s %v", path, err)
-		}
+	got, err := os.ReadFile(filepath.Join(dir, "tls", "server.pem"))
+	if err != nil || !bytes.Contains(got, bytes.TrimSpace([]byte(cert))) || !bytes.Contains(got, bytes.TrimSpace([]byte(key))) {
+		t.Fatalf("replacement missing: %v", err)
 	}
+
 	if observed.AuditStatus().Failures != 1 || backend.attempts[0].Action != "system.tls.cert.set" {
 		t.Fatalf("unobserved: %+v", observed.AuditStatus())
 	}

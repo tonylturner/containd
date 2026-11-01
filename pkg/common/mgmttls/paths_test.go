@@ -47,3 +47,31 @@ func TestResolveFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestManagedIdentitySelection(t *testing.T) {
+	for _, tc := range []struct {
+		name, cert, key string
+		managed         bool
+	}{
+		{"implicit defaults", "", "", true},
+		{"explicit defaults", DefaultCertFile, DefaultKeyFile, true},
+		{"cleaned defaults", "/data/tls/./server.crt", "/data/tls/../tls/server.key", true},
+		{"external certificate", "/custom/cert", DefaultKeyFile, false},
+		{"external bundle", "/custom/bundle", "/custom/bundle", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CONTAIND_TLS_CERT_FILE", "")
+			t.Setenv("CONTAIND_TLS_KEY_FILE", "")
+			cfg := &config.Config{}
+			cfg.System.Mgmt.TLSCertFile = tc.cert
+			cfg.System.Mgmt.TLSKeyFile = tc.key
+			if Managed(cfg) != tc.managed {
+				t.Fatal("wrong identity mode")
+			}
+			c, k := IdentityFiles(cfg)
+			if tc.managed && (c != DefaultBundleFile || k != c) {
+				t.Fatal("not using bundle")
+			}
+		})
+	}
+}
