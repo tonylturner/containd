@@ -324,3 +324,18 @@ test("VPN runtime distinguishes unavailable interface state from an absent WireG
   await expect(runtime.getByText("10.8.0.1/24", { exact: true })).toHaveCount(0);
   await expect(page.getByText("not present", { exact: true })).toHaveCount(0);
 });
+
+test("temporary block guidance names the real enforcement setting and full matching scope", async ({ page }) => {
+  await page.route("**/api/v1/dataplane", (route) => route.fulfill({ json: { enforcement: false }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+  await page.goto("/diagnostics/");
+  const blocks = page.getByRole("region", { name: "Temporary Blocks", exact: true });
+  await expect(blocks).toContainText("Firewall enforcement is off");
+  await expect(blocks).not.toContainText("Enable enforcement on the Dataplane page");
+  await blocks.getByText("Deployment details", { exact: true }).click();
+  await expect(blocks).toContainText("dataplane.enforcement");
+  await expect(blocks).toContainText("CONTAIND_ENFORCE_ENABLED=1");
+  await expect(blocks).toContainText("any source port");
+  await expect(blocks).not.toContainText("5-tuple");
+  await expect(blocks.getByRole("button", { name: "Block host", exact: true })).toBeDisabled();
+  await expect(blocks.getByRole("button", { name: "Block flow", exact: true })).toBeDisabled();
+});
