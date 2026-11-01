@@ -3,7 +3,8 @@
 import type { FirewallRule, Position } from "../../lib/api";
 import { useEffect, useRef, useState } from "react";
 
-export function MoveRuleDialog({ rule, rules, onMove, onClose }: {
+export function MoveRuleDialog({ available, rule, rules, onMove, onClose }: {
+  available: boolean;
   rule: FirewallRule;
   rules: FirewallRule[];
   onMove: (position: Position) => void;
@@ -20,7 +21,7 @@ export function MoveRuleDialog({ rule, rules, onMove, onClose }: {
     <div ref={dialog} role="dialog" aria-modal="true" aria-label={`Move rule ${rule.id}`} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onKeyDown={(e) => {
       if (e.key === "Escape") { e.preventDefault(); onClose(); }
       if (e.key !== "Tab") return;
-      const controls = dialog.current?.querySelectorAll<HTMLElement>("select, button");
+      const controls = dialog.current?.querySelectorAll<HTMLElement>("select:not(:disabled), button:not(:disabled)");
       if (!controls?.length) return;
       const first = controls[0], last = controls[controls.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
@@ -28,10 +29,10 @@ export function MoveRuleDialog({ rule, rules, onMove, onClose }: {
     }}>
       <div className="w-full max-w-md space-y-4 rounded-xs border bg-(--surface) p-6 shadow-card-lg">
         <h2 className="text-sm font-semibold text-(--text)">Move rule {rule.id}</h2>
-        <RulePositionSelect rules={rules.filter((r) => r.id !== rule.id)} value={position} onChange={setPosition} />
+        <RulePositionSelect disabled={!available} rules={rules.filter((r) => r.id !== rule.id)} value={position} onChange={setPosition} />
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm">Cancel</button>
-          <button onClick={() => onMove(position)} className="rounded-xs bg-(--amber) px-3 py-2 text-sm text-white">Move</button>
+          <button disabled={!available} onClick={() => onMove(position)} className="rounded-xs bg-(--amber) px-3 py-2 text-sm text-white">Move</button>
         </div>
       </div>
     </div>

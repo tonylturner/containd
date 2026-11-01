@@ -420,11 +420,12 @@ export default function FirewallPage() {
         </div>
       )}
 
-      <fieldset disabled={!canSave} className="min-w-0">
+      <div className="min-w-0">
         <div className="mt-6">
           {rules.some((r) => r.ics?.protocol) && <ICSCoverageNotice view={coverage.view} />}
         </div>
         <FirewallRuleTable
+          available={canSave}
           rules={rules}
           defaultAction={canSave ? defaultAction : "unknown"}
           zones={zones}
@@ -448,10 +449,11 @@ export default function FirewallPage() {
 
         {isAdmin() && (
           <div className="mt-4">
-            <button type="button" aria-expanded={showCreate} aria-controls="create-rule-panel" onClick={() => setShowCreate(!showCreate)}
+            <button type="button" disabled={!canSave} aria-expanded={showCreate} aria-controls="create-rule-panel" onClick={() => setShowCreate(!showCreate)}
               className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text)">Create rule</button>
             <div id="create-rule-panel" hidden={!showCreate}>
               <CreateRuleForm
+                available={canSave}
                 revision={viewRevision}
                 key={`create-${refreshKey}`}
                 context={rules}
@@ -467,6 +469,7 @@ export default function FirewallPage() {
 
         {editing && isAdmin() && (
           <EditRuleModal
+            available={canSave}
             revision={viewRevision}
             zones={zones}
             forwards={nat.portForwards ?? []}
@@ -478,7 +481,7 @@ export default function FirewallPage() {
             onSave={(patch, revision) => onUpdate(editing.id, patch, revision)}
           />
         )}
-      </fieldset>
+      </div>
       <DPIConfigSection key={`dpi-${refreshKey}`} config={dpiConfig} revision={viewRevision} available={canSave} health={health} onSave={update => write((base, view) => setDataPlane(base, update(view.dpiConfig)), { patch: (view, data) => ({ ...view, dpiConfig: data }) })}
         onSaveDraft={configView.writer((base, updated: DataPlaneConfig) => setDataPlane(base, updated), (view, data) => ({ ...view, dpiConfig: data }))} />
 

@@ -103,7 +103,7 @@ for (const path of ["/ics/", "/firewall/"]) {
     await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText(`Messages matched since ${since}`);
     if (path === "/firewall/") {
       for (const id of ["trial", "zero", "pending"]) {
-        await page.getByRole("button", { name: `Details for ${id}`, exact: true }).click();
+        await page.getByRole("button", { name: `Inspect rule ${id}`, exact: true }).click();
       }
     }
     const trial = page.getByLabel("Shadow matches of trial", { exact: true });
@@ -134,7 +134,7 @@ for (const path of ["/ics/", "/firewall/"]) {
     const note = page.getByRole("status", { name: "Shadow counters" });
     await expect(note).toContainText("Monitor counts unavailable.");
     await expect(note.getByText("engine unreachable", { exact: true })).toBeVisible();
-    if (path === "/firewall/") await page.getByRole("button", { name: "Details for trial", exact: true }).click();
+    if (path === "/firewall/") await page.getByRole("button", { name: "Inspect rule trial", exact: true }).click();
     await expect(page.getByLabel("Shadow matches of trial", { exact: true })).toContainText("unavailable");
     await expect(page.getByLabel("Shadow matches of trial", { exact: true })).not.toContainText("0 messages");
   });
@@ -202,7 +202,7 @@ for (const path of ["/ics/", "/firewall/"]) {
     let current: unknown = snapshot;
     await mock(page, () => current);
     await page.goto(path);
-    if (path === "/firewall/") await page.getByRole("button", { name: "Details for trial", exact: true }).click();
+    if (path === "/firewall/") await page.getByRole("button", { name: "Inspect rule trial", exact: true }).click();
     const trial = page.getByLabel("Shadow matches of trial", { exact: true });
     await expect(trial).toContainText("12 messages");
     // Candidate refresh or a failed apply still returns the installed snapshot.
