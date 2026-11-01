@@ -33,11 +33,11 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 		return nil, err
 	}
 	defer tx.Rollback() //nolint:errcheck
-	running, err := loadRunningFrom(ctx, tx)
+	running, err := readKindUnupgradedFrom(ctx, tx, configKeyRunning, true)
 	if err != nil {
 		return nil, err
 	}
-	candidate, err := loadKindFrom(ctx, tx, configKeyCandidate)
+	candidate, err := readKindUnupgradedFrom(ctx, tx, configKeyCandidate, true)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
@@ -55,6 +55,12 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 		if cfg == nil {
 			continue
 		}
+		// Compare with the persisted document, not a version already upgraded
+		// by the reader. Upgrade markers must reach the transactional outbox.
+		if err := UpgradeInPlace(cfg); err != nil {
+			return nil, err
+		}
+		NormalizeLegacySSHShellMode(cfg)
 		if err := edit(cfg); err != nil {
 			return nil, err
 		}
@@ -74,7 +80,7 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 		if err != nil {
 			return nil, err
 		}
-		if bytes.Equal(before[item.cfg], after) {
+		if bytes.Equal(before[item.cfg], after) && item.cfg.scopeMigration == nil && item.cfg.modeMigration == nil && item.cfg.orderMigration == nil {
 			continue
 		}
 		changed = true
