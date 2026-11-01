@@ -69,6 +69,7 @@ function RuleIndicators({ rule, dpiMode, shadowCounters }: {
 
 /** The firewall page's rule list. */
 export function FirewallRuleTable({
+  available,
   rules,
   defaultAction,
   zones,
@@ -81,6 +82,7 @@ export function FirewallRuleTable({
   onMove,
   moving,
 }: {
+  available: boolean;
   rules: FirewallRule[];
   defaultAction: DefaultAction;
   zones: Zone[];
@@ -147,8 +149,8 @@ export function FirewallRuleTable({
                       <span aria-label={`Position ${index + 1}`} className="mr-1">{index + 1}</span>
                       {isAdmin() && (
                         <>
-                          <button disabled={moving || index === 0} aria-label={`Move ${r.id} up`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { before: rules[index - 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↑</button>
-                          <button disabled={moving || index === rules.length - 1} aria-label={`Move ${r.id} down`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { after: rules[index + 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↓</button>
+                          <button disabled={!available || moving || index === 0} aria-label={`Move ${r.id} up`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { before: rules[index - 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↑</button>
+                          <button disabled={!available || moving || index === rules.length - 1} aria-label={`Move ${r.id} down`} onClick={(event) => { moveControl.current = event.currentTarget; onMove(r.id, { after: rules[index + 1].id }); }} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">↓</button>
                         </>
                       )}
                     </div>
@@ -158,10 +160,10 @@ export function FirewallRuleTable({
                     <div className="mt-1 font-mono text-xs break-all"><span className="text-(--text-dim)">ID: </span><span data-rule-id>{r.id}</span></div>
                     <RuleIndicators rule={r} dpiMode={dpiMode} shadowCounters={shadowCounters} />
                     {r.ics?.protocol && <div className="mt-2"><ICSCoverageCell view={coverage} ruleId={r.id} /></div>}
-                    <button type="button" aria-expanded={expanded.has(r.id)} aria-controls={`rule-detail-${r.id}`}
+                    <button type="button" aria-label={`Inspect rule ${r.id}`} aria-expanded={expanded.has(r.id)} aria-controls={`rule-detail-${r.id}`}
                       onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(r.id)) next.delete(r.id); else next.add(r.id); return next; })}
                       className="mt-2 rounded-xs border bg-(--surface2) px-2 py-1 text-xs">
-                      Details for {r.id}
+                      Inspect rule
                     </button>
                   </td>
                   <td className="px-3 py-3 text-(--text)">
@@ -181,14 +183,15 @@ export function FirewallRuleTable({
                     {isAdmin() && (
                       <>
                         <div className="mb-2 flex items-center justify-end gap-2">
-                          <button disabled={moving} onClick={() => setMoveTarget(r)} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">Move to…</button>
+                          <button disabled={!available || moving} onClick={() => setMoveTarget(r)} className="rounded-md border bg-(--surface2) px-2 py-1 text-xs disabled:opacity-50">Move to…</button>
                         </div>
                         {(!r.ics?.protocol || isSupportedICSProtocol(r.ics.protocol)) ? (
-                          <button onClick={() => onEdit(r)} className="mr-2 rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Edit</button>
+                          <button disabled={!available} onClick={() => onEdit(r)} className="mr-2 rounded-md border bg-(--surface2) px-2 py-1 text-xs transition-ui">Edit</button>
                         ) : (
                           <span className="mr-2 text-xs text-(--text-muted)" title="Unsupported ICS rules are read-only; delete this rule to remove it.">Read-only</span>
                         )}
                         <button
+                          disabled={!available}
                           onClick={() => onDelete(r.id)}
                           className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                         >
@@ -211,7 +214,7 @@ export function FirewallRuleTable({
           </tbody>
         </table>
       </div>
-      {moveTarget && <MoveRuleDialog rule={moveTarget} rules={rules} onClose={() => setMoveTarget(null)} onMove={(position) => { onMove(moveTarget.id, position); setMoveTarget(null); }} />}
+      {moveTarget && <MoveRuleDialog available={available} rule={moveTarget} rules={rules} onClose={() => setMoveTarget(null)} onMove={(position) => { onMove(moveTarget.id, position); setMoveTarget(null); }} />}
     </section>
   );
 }

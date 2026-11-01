@@ -320,8 +320,8 @@ test("the rule list tells deciding actions from effects and states precedence", 
   await expect(row("pps-cap")).toContainText("effect");
   await expect(row("pps-cap")).toContainText("100 pps, burst 20");
   await expect(row("label-eng")).toContainText("eng-access");
-  await page.getByRole("button", { name: "Details for label-eng", exact: true }).click();
-  await page.getByRole("button", { name: "Details for plc-write", exact: true }).click();
+  await page.getByRole("button", { name: "Inspect rule label-eng", exact: true }).click();
+  await page.getByRole("button", { name: "Inspect rule plc-write", exact: true }).click();
   await expect(page.getByLabel("Details of label-eng", { exact: true })).toContainText("identity engineering, vendor");
   await expect(page.getByLabel("Details of plc-write", { exact: true })).toContainText("schedule Mon,Fri 08:00-17:00 Europe/Berlin");
 });

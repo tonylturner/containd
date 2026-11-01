@@ -160,6 +160,7 @@ function ruleDraftFrom(rule: FirewallRule, rules: FirewallRule[], zones: Zone[],
 }
 
 export function EditRuleModal({
+  available,
   revision,
   context,
   zones,
@@ -170,6 +171,7 @@ export function EditRuleModal({
   onClose,
   onSave,
 }: {
+  available: boolean;
   context: FirewallRule[];
   revision: string;
   zones: Zone[];
@@ -305,47 +307,50 @@ export function EditRuleModal({
             </details>
           </div>
         )}
-        <div className="grid gap-3 md:grid-cols-3">
-          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-3" />
-          <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
-            <option value="">{cfg.originalSourceZones.length > 1 ? "Remove first source zone (keep remaining)" : "Source zone (any)"}</option>
-            {srcZone && !zones.some((z) => z.name === srcZone) && <option value={srcZone}>{srcZone} (no longer on server)</option>}
-            {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
-          </select>
-          <NoZonesHint zones={zones} />
-          <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
-            <option value="">{cfg.originalDestZones.length > 1 ? "Remove first destination zone (keep remaining)" : "Dest zone (any)"}</option>
-            {dstZone && !zones.some((z) => z.name === dstZone) && <option value={dstZone}>{dstZone} (no longer on server)</option>}
-            {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
-          </select>
-          <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
-            <option value="">{cfg.originalProtocols.length > 1 ? "Remove first protocol (keep remaining)" : "Any protocol"}</option>
-            {proto && !["tcp", "udp", "icmp"].includes(proto) && <option value={proto}>{proto}</option>}
-            <option value="tcp">tcp</option>
-            <option value="udp">udp</option>
-            <option value="icmp">icmp</option>
-          </select>
-          <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial md:col-span-2" />
-          <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="input-industrial" />
-          <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="input-industrial md:col-span-2" />
-          <label className="flex items-center gap-2 text-sm text-(--text)">
-            <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
-            Log hits
-            <InfoTip label={LOG_HELP} />
-          </label>
-          <details className="text-xs text-(--text-muted) md:col-span-3">
-            <summary className="cursor-pointer">Technical details</summary>
-            Rule-match event kind: <code>firewall.rule.hit</code>
-          </details>
-        </div>
+        <fieldset disabled={!available} className="min-w-0">
+          <div className="grid gap-3 md:grid-cols-3">
+            <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-3" />
+            <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
+              <option value="">{cfg.originalSourceZones.length > 1 ? "Remove first source zone (keep remaining)" : "Source zone (any)"}</option>
+              {srcZone && !zones.some((z) => z.name === srcZone) && <option value={srcZone}>{srcZone} (no longer on server)</option>}
+              {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
+            </select>
+            <NoZonesHint zones={zones} />
+            <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
+              <option value="">{cfg.originalDestZones.length > 1 ? "Remove first destination zone (keep remaining)" : "Dest zone (any)"}</option>
+              {dstZone && !zones.some((z) => z.name === dstZone) && <option value={dstZone}>{dstZone} (no longer on server)</option>}
+              {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
+            </select>
+            <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
+              <option value="">{cfg.originalProtocols.length > 1 ? "Remove first protocol (keep remaining)" : "Any protocol"}</option>
+              {proto && !["tcp", "udp", "icmp"].includes(proto) && <option value={proto}>{proto}</option>}
+              <option value="tcp">tcp</option>
+              <option value="udp">udp</option>
+              <option value="icmp">icmp</option>
+            </select>
+            <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial md:col-span-2" />
+            <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="input-industrial" />
+            <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="input-industrial md:col-span-2" />
+            <label className="flex items-center gap-2 text-sm text-(--text)">
+              <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
+              Log hits
+              <InfoTip label={LOG_HELP} />
+            </label>
+          </div>
 
-        <RulePolicyFields draft={policy} onChange={setPolicy} />
-        <RuleForwardFields forwards={forwards} value={cfg.viaForwards} onChange={(viaForwards) => setCfg((c) => ({ ...c, viaForwards }))} />
+          <RulePolicyFields draft={policy} onChange={setPolicy} />
+          <RuleForwardFields forwards={forwards} value={cfg.viaForwards} onChange={(viaForwards) => setCfg((c) => ({ ...c, viaForwards }))} />
 
-        <div className="mt-3 grid gap-3 md:grid-cols-4">
-          <ICSToggle draft={ics} onChange={setIcs} />
-        </div>
-        <ICSDraftFields draft={ics} onChange={setIcs} globalMode={globalMode} />
+          <div className="mt-3 grid gap-3 md:grid-cols-4">
+            <ICSToggle draft={ics} onChange={setIcs} />
+          </div>
+          <ICSDraftFields draft={ics} onChange={setIcs} globalMode={globalMode} />
+
+        </fieldset>
+        <details className="text-xs text-(--text-muted) md:col-span-3">
+          <summary className="cursor-pointer">Technical details</summary>
+          Rule-match event kind: <code>firewall.rule.hit</code>
+        </details>
 
         {preview && <RuleImpactSummary preview={preview} />}
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
@@ -354,7 +359,7 @@ export function EditRuleModal({
             {previewing ? "Previewing..." : "Preview impact"}
           </button>
           <button onClick={onClose} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui">Cancel</button>
-          <button onClick={save} disabled={saving} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110">Save changes</button>
+          <button onClick={save} disabled={!available || saving} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110">Save changes</button>
         </div>
       </div>
     </div>
@@ -362,6 +367,7 @@ export function EditRuleModal({
 }
 
 export function CreateRuleForm({
+  available,
   revision,
   context,
   zones,
@@ -370,6 +376,7 @@ export function CreateRuleForm({
   tagsInUse,
   onCreate,
 }: {
+  available: boolean;
   revision: string;
   zones: Zone[];
   forwards: PortForward[];
@@ -448,57 +455,63 @@ export function CreateRuleForm({
     <Card padding="lg" className="mt-6">
       <ConfigEditNotice superseded={form.editor.superseded} {...form.conflictProps} onReload={() => window.location.reload()} />
       <h2 className="text-sm font-semibold text-(--text)">Create rule</h2>
-      <div className="mt-3"><RulePositionSelect rules={context} value={position} onChange={setPosition} /></div>
-      <div className="mt-3 grid gap-3 md:grid-cols-3">
-        <input value={id} onChange={(e) => setId(e.target.value)} placeholder="id (e.g. mb-allow)" className="input-industrial" />
-        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-2" />
-      </div>
+      <fieldset disabled={!available} className="min-w-0">
+        <div className="mt-3"><RulePositionSelect rules={context} value={position} onChange={setPosition} /></div>
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <input value={id} onChange={(e) => setId(e.target.value)} placeholder="id (e.g. mb-allow)" className="input-industrial" />
+          <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-2" />
+        </div>
 
-      <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
-          <option value="">Source zone (any)</option>
-          {srcZone && !zones.some((z) => z.name === srcZone) && <option value={srcZone}>{srcZone} (no longer on server)</option>}
-          {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
-        </select>
-        <NoZonesHint zones={zones} />
-        <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
-          <option value="">Dest zone (any)</option>
-          {dstZone && !zones.some((z) => z.name === dstZone) && <option value={dstZone}>{dstZone} (no longer on server)</option>}
-          {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
-        </select>
-        <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial" />
-        <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="input-industrial" />
-      </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
+          <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
+            <option value="">Source zone (any)</option>
+            {srcZone && !zones.some((z) => z.name === srcZone) && <option value={srcZone}>{srcZone} (no longer on server)</option>}
+            {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
+          </select>
+          <NoZonesHint zones={zones} />
+          <select value={dstZone} onChange={(e) => setDstZone(e.target.value)} className="input-industrial">
+            <option value="">Dest zone (any)</option>
+            {dstZone && !zones.some((z) => z.name === dstZone) && <option value={dstZone}>{dstZone} (no longer on server)</option>}
+            {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
+          </select>
+          <input value={sources} onChange={(e) => setSources(e.target.value)} placeholder="sources CIDR (csv)" className="input-industrial" />
+          <input value={destinations} onChange={(e) => setDestinations(e.target.value)} placeholder="destinations CIDR (csv)" className="input-industrial" />
+        </div>
 
-      <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
-          <option value="tcp">tcp</option>
-          <option value="udp">udp</option>
-          <option value="icmp">icmp</option>
-        </select>
-        <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="input-industrial" />
-        <label className="flex items-center gap-2 text-sm text-(--text)">
-          <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
-          Log hits
-          <InfoTip label={LOG_HELP} />
-        </label>
-      </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
+          <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
+            <option value="tcp">tcp</option>
+            <option value="udp">udp</option>
+            <option value="icmp">icmp</option>
+          </select>
+          <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="port/range" className="input-industrial" />
+          <label className="flex items-center gap-2 text-sm text-(--text)">
+            <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
+            Log hits
+            <InfoTip label={LOG_HELP} />
+          </label>
+        </div>
+
+      </fieldset>
 
       <details className="mt-2 text-xs text-(--text-muted)">
         <summary className="cursor-pointer">Technical details</summary>
         Rule-match event kind: <code>firewall.rule.hit</code>
       </details>
-      <RulePolicyFields draft={policy} onChange={setPolicy} />
-      <RuleForwardFields forwards={forwards} value={viaForwards} onChange={setViaForwards} />
+      <fieldset disabled={!available} className="min-w-0">
+        <RulePolicyFields draft={policy} onChange={setPolicy} />
+        <RuleForwardFields forwards={forwards} value={viaForwards} onChange={setViaForwards} />
 
-      <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <ICSToggle draft={ics} onChange={setIcs} />
-      </div>
-      <ICSDraftFields draft={ics} onChange={setIcs} globalMode={globalMode} />
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
+          <ICSToggle draft={ics} onChange={setIcs} />
+        </div>
+        <ICSDraftFields draft={ics} onChange={setIcs} globalMode={globalMode} />
+
+      </fieldset>
 
       <div className="mt-3 flex items-center justify-between">
         {error && <p className="text-sm text-red-400">{error}</p>}
-        <button onClick={submit} disabled={saving} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
+        <button onClick={submit} disabled={!available || saving} className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50">
           {saving ? "Creating..." : "Create rule"}
         </button>
       </div>

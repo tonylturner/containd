@@ -59,7 +59,7 @@ test("the rule list shows hits, excess drops and when counting started", async (
 
   await expect(page.getByLabel("Hit summary of allow-hmi")).toContainText(`${await page.evaluate(v => v.toLocaleString(), 123456)} pkts`);
   await expect(page.getByLabel("Hit summary of pps-cap")).toContainText("42 over limit");
-  for (const id of ["allow-hmi", "pps-cap", "label-eng"]) await page.getByRole("button", { name: `Details for ${id}`, exact: true }).click();
+  for (const id of ["allow-hmi", "pps-cap", "label-eng"]) await page.getByRole("button", { name: `Inspect rule ${id}`, exact: true }).click();
   const hits = (id: string) => page.getByLabel(`Hits of ${id}`);
   const count = (n: number) => page.evaluate((v) => v.toLocaleString(), n);
   await expect(hits("allow-hmi")).toContainText(`${await count(123456)} pkts`);
