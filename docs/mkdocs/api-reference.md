@@ -115,13 +115,15 @@ See [Config Format](config-format.md) for the configuration lifecycle and JSON.
 
 Successful staged edits return `X-Containd-Config: staged`. Successful commit,
 commit-confirmed, confirm and rollback return `X-Containd-Config: committed`.
-Operational, read, preview-only and failed responses carry neither header value.
+Operational, read and preview-only responses carry neither header value.
+Failed responses also omit them, except a learner HTTP 503 reporting durable
+staging retains `X-Containd-Config: staged`.
 Configuration reads also return `X-Containd-Revision`; successful configuration
 writes return the revision produced by that write, alongside the staged or
 committed header. The revision is header-only, including on `/config/diff`.
 Unauthenticated `/health` and all error responses omit the revision header.
-A learner HTTP 503 reporting durable staging still requires a fresh candidate
-read and operator review before retrying the receipt.
+A learner HTTP 503 reporting durable staging has no revision header: re-read the
+candidate and review it before retrying the receipt.
 
 ## Orchestrator Client Contract
 
