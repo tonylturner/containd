@@ -21,7 +21,7 @@ async function mockConfig(page: Page, state = { counter: 1, hostname: "initial",
       if (state.offline) return route.fulfill({ status: 503, json: { error: "offline" } });
       const config = { system: { hostname: state.hostname } };
       return route.fulfill({ headers, json: path === "/config/diff" ? {
-        changed: true, changedSections: ["system"], running: { system: { hostname: "running" } }, candidate: config,
+        pendingConfirm: null, changed: true, changedSections: ["system"], running: { system: { hostname: "running" } }, candidate: config,
       } : path === "/config/backups" ? [] : {} });
     }
     const body = req.postDataJSON(); // Read before recording or unblocking tests.
@@ -106,7 +106,7 @@ test("status bar only opens review; commit dialog freezes displayed diff and rev
 
 test("unavailable revision or diff never enables commit", async ({ page }) => {
   await mockConfig(page);
-  await page.route("**/api/v1/config/diff", route => route.fulfill({ json: { changed: true, changedSections: [], running: {}, candidate: {} } }));
+  await page.route("**/api/v1/config/diff", route => route.fulfill({ json: { pendingConfirm: null, changed: true, changedSections: [], running: {}, candidate: {} } }));
   await page.goto("/config/?tab=diff");
   await expect(page.getByText("Unable to load configuration changes. Use Refresh to try again.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Commit", exact: true })).toBeDisabled();
@@ -118,7 +118,7 @@ test("learner preserves selections and original receipt through conflict and rev
   let counter = 1;
   const attempts: { revision?: string; body: unknown }[] = [];
   await page.route("**/api/v1/config/diff", route => route.fulfill({ headers: { "X-Containd-Revision": token(counter) }, json: {
-    changed: true, changedSections: ["firewall"], running: {}, candidate: {},
+    pendingConfirm: null, changed: true, changedSections: ["firewall"], running: {}, candidate: {},
   } }));
   await page.route("**/api/v1/learn/apply", async route => {
     const body = route.request().postDataJSON();
@@ -204,7 +204,7 @@ for (const persisted of [false, true]) {
     let counter = 1;
     const attempts: { revision?: string; body: unknown }[] = [];
     await page.route("**/api/v1/config/diff", route => route.fulfill({ headers: { "X-Containd-Revision": token(counter) }, json: {
-      changed: persisted && counter > 1, changedSections: persisted && counter > 1 ? ["firewall"] : [], running: {}, candidate: {},
+      pendingConfirm: null, changed: persisted && counter > 1, changedSections: persisted && counter > 1 ? ["firewall"] : [], running: {}, candidate: {},
     } }));
     await page.route("**/api/v1/learn/apply", async route => {
       const body = route.request().postDataJSON();
@@ -270,7 +270,7 @@ test("412 Reload discards JSON edits and adopts a fresh server snapshot", async 
 
 test("Confirm and Rollback are disabled without a diff revision", async ({ page }) => {
   await mockConfig(page);
-  await page.route("**/api/v1/config/diff", route => route.fulfill({ json: { changed: true, changedSections: [], running: {}, candidate: {} } }));
+  await page.route("**/api/v1/config/diff", route => route.fulfill({ json: { pendingConfirm: null, changed: true, changedSections: [], running: {}, candidate: {} } }));
   await page.goto("/config/?tab=diff");
   await expect(page.getByRole("button", { name: "Confirm", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Rollback", exact: true })).toBeDisabled();
@@ -297,7 +297,7 @@ test("an uncertain learner request still requires review after an unavailable de
   let offline = false;
   await page.route("**/api/v1/config/diff", route => offline
     ? route.fulfill({ status: 503, json: { error: "unavailable" } })
-    : route.fulfill({ headers: { "X-Containd-Revision": token(1) }, json: { changed: false, changedSections: [], running: {}, candidate: {} } }));
+    : route.fulfill({ headers: { "X-Containd-Revision": token(1) }, json: { pendingConfirm: null, changed: false, changedSections: [], running: {}, candidate: {} } }));
   await page.route("**/api/v1/learn/apply", async route => {
     route.request().postDataJSON();
     offline = true;

@@ -36,7 +36,7 @@ test("late NAT acknowledgement cannot give old data a newer refresh revision", a
       : path === "/firewall/nat" ? nat
       : path === "/zones" ? [{ name: "wan" }, { name: "lan" }]
       : path === "/firewall/rules" ? []
-      : path === "/config/diff" ? { changed: false, changedSections: [], running: {}, candidate: {} }
+      : path === "/config/diff" ? { pendingConfirm: null, changed: false, changedSections: [], running: {}, candidate: {} }
       : {};
     return route.fulfill({ json, headers: { "X-Containd-Revision": token(counter) } });
   });

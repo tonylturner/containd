@@ -24,7 +24,7 @@ test("two direct DPI saves without a competing writer use each acknowledgement",
     const json = path.startsWith("/auth/") ? { id: "admin", role: "admin" }
       : path === "/zones" || path === "/firewall/rules" ? []
       : path === "/dataplane" ? dp
-      : path === "/config/diff" ? { changed: false, changedSections: [], running: {}, candidate: {} }
+      : path === "/config/diff" ? { pendingConfirm: null, changed: false, changedSections: [], running: {}, candidate: {} }
       : {};
     return route.fulfill({ json, headers: { "X-Containd-Revision": token(counter) } });
   });

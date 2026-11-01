@@ -14,6 +14,7 @@ export type IDSBankSummary = { count: number; sha256: string };
 export type ConfigDiff = {
   changed: boolean;
   changedSections: string[];
+  pendingConfirm: { deadline: string } | null;
   running: ConfigBundle | null;
   candidate: ConfigBundle | null;
   /** Absent when the response did not carry both bank summaries. */

@@ -22,7 +22,7 @@ async function setup(page: Page) {
         "/services/proxy/forward": {}, "/services/proxy/reverse": { sites: [] },
         "/zones": state.zones, "/firewall/rules": [rule], "/routing": {}, "/firewall/nat": { enabled: false },
         "/dataplane": { dpiMode: "monitor", dpiEnabled: true, dpiIcsProtocols: { modbus: true } },
-        "/config/diff": { changed: false, changedSections: [], running: {}, candidate: {} },
+        "/config/diff": { pendingConfirm: null, changed: false, changedSections: [], running: {}, candidate: {} },
       };
       return route.fulfill({ headers, json: data[path] ?? {} });
     }
