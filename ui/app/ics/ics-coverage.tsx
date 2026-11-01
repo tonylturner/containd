@@ -1,7 +1,6 @@
 "use client";
 
 import { StatusBadge, StatusIndicator } from "../../components/StatusBadge";
-import { TechnicalDetails } from "../../components/TechnicalDetails";
 import type { ICSCoverageReason, ICSCoverageRule, ICSEnforcementHealth } from "../../lib/api";
 import {
   coverageStateLabel,
@@ -15,13 +14,11 @@ import {
 function ReasonList({ reasons }: { reasons: ICSCoverageReason[] }) {
   if (reasons.length === 0) return null;
   return (
-    <TechnicalDetails summary="Inspection details">
     <ul className="mt-1 space-y-0.5 text-xs text-(--text-muted)">
       {reasons.map((r) => (
         <li key={`${r.code}:${r.value ?? ""}`}>{formatReason(r)}</li>
       ))}
     </ul>
-    </TechnicalDetails>
   );
 }
 
@@ -67,7 +64,7 @@ export function ICSCoverageNotice({ view }: { view: ICSCoverageView }) {
       {warnings.map((w) => (
         <div key={w.message} role="status" className="mb-3 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-xs text-amber">
           {w.message}
-          <TechnicalDetails>{w.detail}</TechnicalDetails>
+          <p className="mt-1 whitespace-pre-wrap break-words">{w.detail}</p>
         </div>
       ))}
       {loaded?.applyError && (

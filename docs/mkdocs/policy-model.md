@@ -52,7 +52,9 @@ remaining enabled direction. **Move to…** also supports top, bottom, before
 or after another rule. Moves stage changes; commit to apply them.
 
 A read-only **Default** row stays last, even with no configured rules. It applies
-to any zone and protocol when no rule above matched. Its action comes from the
+to any zone and protocol when no enforcing `ALLOW`, `DENY` or `RESET` rule
+decides. Matching `TAG`, under-limit `RATE_LIMIT` and Monitor rules can fall
+through to this default. Its action comes from the
 same candidate revision as the listed rules: an empty or omitted action means
 `DENY`, `ALLOW` carries an unmatched-traffic warning, and an unreadable or
 revision-mismatched default is shown as **unknown**, never assumed to deny.
@@ -66,7 +68,9 @@ an addition. CLI syntax is in [CLI](cli.md).
 The rule editor preserves all saved source zones, destination zones and
 protocols, including when only the description or logging changes. Its simple
 controls edit the first entry in each list; additional entries remain unchanged
-and can be inspected under **All saved matching values**. To edit entire lists,
+and can be inspected under **All saved matching values**. For multi-valued
+lists, the removal option explicitly removes only the first entry and retains
+the others; it does not change the match to any zone or protocol. To edit entire lists,
 use the **Staged** JSON editor in Configuration and review the diff before commit.
 An empty protocol list continues to mean any protocol.
 

@@ -147,7 +147,7 @@ export function IEC104Fields({
         </div>
       </div>
 
-      <details>
+      <details open={[draft.cot, draft.originators, draft.negative, draft.test, draft.selectExecute, draft.commandStates, draft.commandQualifiers].some(value => value !== "")}>
         <summary className="cursor-pointer text-xs text-(--text-muted)">Advanced selectors (saved values still apply)</summary>
         <div className="mt-2 grid gap-3 md:grid-cols-2">
           {([ ["cot", "Cause of transmission (1-63)"], ["originators", "Originators (0-255)"] ] as const).map(([key, label]) => (

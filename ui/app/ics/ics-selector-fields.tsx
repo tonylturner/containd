@@ -30,7 +30,7 @@ export function ICSSelectorFields({
           </button>
         </div>
       )}
-      <details>
+      <details open={fields.some(([key]) => draft[key].trim() !== "") || draft.direction !== ""}>
         <summary className="cursor-pointer text-xs text-(--text-muted)">Advanced selectors (saved values still apply)</summary>
         <div className="mt-2 grid gap-3 md:grid-cols-2">
           {fields.map(([key, label]) => (

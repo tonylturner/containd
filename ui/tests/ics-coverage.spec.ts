@@ -123,8 +123,6 @@ async function open(page: Page, path: string) {
 async function inspectNotice(page: Page, message: string, detail: string) {
   const notice = page.getByRole("status").filter({ hasText: message });
   await expect(notice).toBeVisible();
-  await expect(notice.getByText(detail, { exact: true })).not.toBeVisible();
-  await notice.getByText("Technical details", { exact: true }).click();
   await expect(notice.getByText(detail, { exact: true })).toBeVisible();
 }
 
@@ -148,7 +146,7 @@ test("ICS page shows applied coverage for each state, never mode alone", async (
 
   const dnp3 = coverageOf(page, "dnp3-ops");
   await expect(dnp3.getByText("applied: not enforcing")).toHaveClass(/badge-critical/);
-  await expect(dnp3).toContainText(dpiOff.message);
+  await expect(dnp3.getByText(dpiOff.message, { exact: true })).toBeVisible();
 
   await expect(coverageOf(page, "plc-learn").getByText("applied: monitoring")).toHaveClass(/badge-offline/);
 
@@ -165,7 +163,7 @@ test("ICS page shows applied coverage for each state, never mode alone", async (
   // A runtime-only fault is an applied fact, not a pending change.
   const queue = coverageOf(page, "plc-queue");
   await expect(queue.getByText("applied: not enforcing")).toHaveClass(/badge-critical/);
-  await expect(queue).toContainText(`Live inspection: ${queueDown.message}`);
+  await expect(queue.getByText(`Live inspection: ${queueDown.message}`, { exact: true })).toBeVisible();
   await expect(queue.getByText(/^candidate:/)).toHaveCount(0);
 
   // The mode column states the effective mode with no protection colour.
