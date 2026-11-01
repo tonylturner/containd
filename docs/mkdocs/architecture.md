@@ -53,8 +53,9 @@ in the image. See [Services](services.md) and [Third-Party Licenses](SPDX.md).
   and policy templates.
 - `pkg/cp/services`: embedded service managers.
 - `pkg/dp/enforce`, `pkg/dp/netcfg`: nftables and Linux network programming.
-- `pkg/dp/engine`, `pkg/dp/capture`, `pkg/dp/reassembly`: runtime packet pipeline.
-- `pkg/dp/ics`, `pkg/dp/itdpi`: eight ICS and eight IT protocol decoders, plus
+- `pkg/dp/engine`, `pkg/dp/capture`, `pkg/dp/dpi`: runtime packet pipeline,
+  including TCP reassembly.
+- `pkg/dp/ics`, `pkg/dp/itdpi`: four ICS and eight IT protocol decoders, plus
   utility detection helpers.
 - `pkg/dp/ids`, `pkg/dp/inventory`, `pkg/dp/learn`, `pkg/dp/anomaly`,
   `pkg/dp/signatures`, `pkg/dp/stats`, `pkg/dp/pcap`: event consumers and offline

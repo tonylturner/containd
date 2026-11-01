@@ -21,11 +21,17 @@ containd is not a native Windows firewall. For classroom and lab use on Windows,
 
 - Confirm Docker Desktop is running and the WSL2 backend is enabled.
 - Run `docker compose logs -f containd` from the same WSL shell you used to start the stack.
-- If the quick-start ports are already in use, rerun `bootstrap-starter.sh` with custom port overrides such as:
+- If the quick-start ports are already in use, download the advanced bootstrap
+  script (the quickstart does not keep a copy in your starter directory) and
+  apply custom port overrides:
 
 ```bash
+curl -fsSLO https://raw.githubusercontent.com/tonylturner/containd/main/scripts/bootstrap-starter.sh
 sh bootstrap-starter.sh --dir containd-lab --no-start \
   --http-port 18080 \
   --https-port 18443 \
   --ssh-port 12222
 ```
+
+Use your existing starter directory instead of `containd-lab` if it differs.
+Then run `docker compose up -d` from that directory.

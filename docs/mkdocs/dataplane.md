@@ -15,7 +15,8 @@ outside its control.
    decoders. Generic DPI uses a per-flow verdict cache. IEC 104 uses a separate
    stateful inspection envelope and session gate rather than relying on that
    generic cache.
-4. Firewall rules evaluate to `ALLOW` or `DENY`. Enforced DPI denials drop the
+4. Ordered terminal rules decide admission with `ALLOW`, `DENY` or `RESET`;
+   `RATE_LIMIT` and `TAG` are nonterminal effects. Enforced DPI denials drop the
    packet and best-effort reset only that TCP session, without installing a host
    or service block. Generic TCP denial tombstones last 10 seconds and are
    capped at 16,384; later payload still fails closed as a mid-stream pickup.
