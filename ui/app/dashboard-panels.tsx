@@ -23,6 +23,7 @@ export type InterfaceBindings = {
 
 export type ServiceInfo = {
   name: string;
+  state: "unknown" | "active" | "inactive" | "stopped" | "unavailable";
   active: boolean | null;
   detail: string;
   href: string;

@@ -91,11 +91,21 @@ test("client-service warns about all connections and exposes partial failure", a
   expect(writes[0]).toMatchObject({ scope: "client-service", durationSecs: 30 });
 });
 
-test("view-only users cannot revoke connections", async ({ page }) => {
+test("view-only users can inspect connections but cannot revoke them", async ({ page }) => {
   await mockAPI(page, { role: "view" });
   await open(page);
   await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeDisabled();
   await expect(page.getByLabel("Kill scope")).toHaveCount(0);
+  const inspect = page.getByRole("button", { name: "Inspect connection" });
+  await expect(inspect).toBeEnabled();
+  await inspect.focus();
+  await page.keyboard.press("Enter");
+  await expect(inspect).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByText("[2001:db8:1::2]:8443 → [2001:db8:1::1]:51001", { exact: true })).toBeVisible();
+  await page.keyboard.press("Space");
+  await expect(inspect).toHaveAttribute("aria-expanded", "false");
+  await expect(inspect).toBeFocused();
+  await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeDisabled();
 });
 
 test("connections show the TAG labels that match them and filter by tag", async ({ page }) => {

@@ -410,12 +410,12 @@ export function deriveServices(
 
   if (!status) {
     return [
-      { name: "IPS", active: null, detail: "Unknown — protection not reported", href: "/ids/", sparkline: ips },
-      { name: "AV", active: null, detail: "Unknown", href: "/system/services/av/" },
-      { name: "DNS", active: null, detail: "Unknown", href: "/system/services/dns/" },
-      { name: "VPN", active: null, detail: "Unknown", href: "/vpn/" },
-      { name: "Syslog", active: null, detail: "Unknown", href: "/system/services/syslog/" },
-      { name: "Proxy", active: null, detail: "Unknown", href: "/proxies/" },
+      { name: "IPS", state: "unknown", active: null, detail: "Unknown — protection not reported", href: "/ids/", sparkline: ips },
+      { name: "AV", state: "unknown", active: null, detail: "Unknown", href: "/system/services/av/" },
+      { name: "DNS", state: "unknown", active: null, detail: "Unknown", href: "/system/services/dns/" },
+      { name: "VPN", state: "unknown", active: null, detail: "Unknown", href: "/vpn/" },
+      { name: "Syslog", state: "unknown", active: null, detail: "Unknown", href: "/system/services/syslog/" },
+      { name: "Proxy", state: "unknown", active: null, detail: "Unknown", href: "/proxies/" },
     ];
   }
 
@@ -436,6 +436,7 @@ export function deriveServices(
   return [
     {
       name: "IPS",
+      state: "unknown",
       active: null,
       detail: "Unknown — protection not reported",
       href: "/ids/",
@@ -443,6 +444,7 @@ export function deriveServices(
     },
     {
       name: "AV",
+      state: !av.available ? "unavailable" : !avKnown ? "unknown" : avEnabled ? "active" : "inactive",
       active: avKnown ? avEnabled : null,
       detail: !av.available ? "Scanner unavailable" : !avKnown ? "Unknown" : avEnabled ? av.mode || "Enabled" : "Disabled",
       href: "/system/services/av/",
@@ -450,6 +452,7 @@ export function deriveServices(
     },
     {
       name: "DNS",
+      state: !dnsKnown ? "unknown" : dnsActive ? "active" : dns!.enabled ? "stopped" : "inactive",
       active: dnsKnown ? dnsActive : null,
       detail: !dnsKnown ? "Unknown" : dnsActive ? "Resolving" : dns!.enabled ? "Stopped" : "Disabled",
       href: "/system/services/dns/",
@@ -457,6 +460,7 @@ export function deriveServices(
     },
     {
       name: "VPN",
+      state: !vpnKnown ? "unknown" : vpnActive ? "active" : "inactive",
       active: vpnKnown ? vpnActive : null,
       detail: !vpnKnown ? "Unknown" : vpn!.openvpn_running ? "OpenVPN running" : vpn!.wireguard_enabled ? "WireGuard enabled" : "No tunnels",
       href: "/vpn/",
@@ -464,6 +468,7 @@ export function deriveServices(
     },
     {
       name: "Syslog",
+      state: !syslogKnown ? "unknown" : syslogConfigured ? "active" : "inactive",
       active: syslogKnown ? syslogConfigured : null,
       detail: !syslogKnown ? "Unknown" : syslogConfigured
         ? `${syslog?.configured_forwarders} fwd · ${typeof syslog?.rate_per_min === "number" ? syslog.rate_per_min.toFixed(0) : "Unknown"}/min`
@@ -474,6 +479,7 @@ export function deriveServices(
     },
     {
       name: "Proxy",
+      state: !proxyKnown ? "unknown" : proxyActive ? "active" : proxy!.forward_enabled || proxy!.reverse_enabled ? "stopped" : "inactive",
       active: proxyKnown ? proxyActive : null,
       detail: !proxyKnown ? "Unknown" : proxyActive ? "Active" : proxy!.forward_enabled || proxy!.reverse_enabled ? "Stopped" : "Disabled",
       href: "/proxies/",

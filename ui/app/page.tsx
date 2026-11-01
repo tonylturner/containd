@@ -234,7 +234,7 @@ export default function Home() {
       {statsUnavailable && <p role="alert" className="mb-3 text-sm text-red-400">System telemetry unavailable — resource usage is unknown.</p>}
       {flowsUnavailable && <div role="status" className="mb-3 text-sm text-red-400">Flows unavailable — the engine could not be reached. <button onClick={retryFlows} className="ml-2 rounded-xs border px-3 py-1">Retry</button></div>}
       {zonesUnavailable && <p role="alert" className="mb-3 text-sm text-amber">Zones unavailable — zone configuration is unknown.</p>}
-      {services.filter(service => service.detail === "Scanner unavailable" || service.detail === "Stopped" || (service.errorRate ?? 0) > 0).map(service => (
+      {services.filter(service => service.state === "unavailable" || service.state === "stopped" || (service.errorRate ?? 0) > 0).map(service => (
         <p key={service.name} role="status" className="mb-3 text-sm text-amber">{service.name}: {service.detail}{(service.errorRate ?? 0) > 0 ? ` · ${service.errorRate!.toFixed(1)} err/min` : ""} — <Link className="underline" href={service.href}>Check service</Link></p>
       ))}
       <SetupChecklist
