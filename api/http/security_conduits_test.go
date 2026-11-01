@@ -35,14 +35,11 @@ func TestSecurityConduitsDefaultAction(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status %d body=%s", rec.Code, rec.Body.String())
 			}
-			var got map[string]conduitResult
+			var got []conduitResult
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 				t.Fatal(err)
 			}
-			c, ok := got["lan→wan"]
-			if !ok {
-				t.Fatalf("missing lan→wan conduit in %s", rec.Body.String())
-			}
+			c := requireConduit(t, got, "lan", "wan")
 			if c.State != tc.state || c.DefaultDeny != tc.defaultDeny {
 				t.Fatalf("state %q defaultDeny %v, want %q %v", c.State, c.DefaultDeny, tc.state, tc.defaultDeny)
 			}
@@ -67,14 +64,81 @@ func TestSecurityConduitsResetIsDenial(t *testing.T) {
 			}}
 			rec := httptest.NewRecorder()
 			NewServer(m, nil).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/security/conduits", nil))
-			var got map[string]conduitResult
+			var got []conduitResult
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 				t.Fatalf("status %d body=%s err=%v", rec.Code, rec.Body.String(), err)
 			}
-			if c := got["lan→wan"]; c.State != "block" || !c.DefaultDeny {
+			if c := requireConduit(t, got, "lan", "wan"); c.State != "block" || !c.DefaultDeny {
 				t.Fatalf("lan→wan state %q defaultDeny %v, want block true", c.State, c.DefaultDeny)
 			}
 		})
+	}
+}
+
+func requireConduit(t *testing.T, conduits []conduitResult, from, to string) conduitResult {
+	t.Helper()
+	for _, c := range conduits {
+		if c.From == from && c.To == to {
+			return c
+		}
+	}
+	t.Fatalf("missing conduit from %q to %q in %+v", from, to, conduits)
+	return conduitResult{}
+}
+
+func TestSecurityConduitsStructuredIdentity(t *testing.T) {
+	// The last zone also creates a collision in the retired joined-key format:
+	// ("a→b", "a") and ("a", "b→a") must remain distinct.
+	zones := []config.Zone{{Name: "a→b"}, {Name: "a"}, {Name: "b"}, {Name: "b→a"}}
+	m := &mockStore{cfg: &config.Config{
+		System: config.SystemConfig{Hostname: "containd"},
+		Zones:  zones,
+		Firewall: config.FirewallConfig{DefaultAction: config.ActionDeny, Rules: []config.Rule{{
+			ID: "arrow-zone", SourceZones: []string{"a→b"}, DestZones: []string{"b"}, Action: config.ActionAllow,
+		}}},
+	}}
+	for range 3 {
+		rec := httptest.NewRecorder()
+		NewServer(m, nil).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/security/conduits", nil))
+		var got []conduitResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("status %d body=%s err=%v", rec.Code, rec.Body.String(), err)
+		}
+		if len(got) != len(zones)*(len(zones)-1) {
+			t.Fatalf("got %d conduits: %s", len(got), rec.Body.String())
+		}
+		i := 0
+		for _, from := range zones {
+			for _, to := range zones {
+				if from.Name == to.Name {
+					continue
+				}
+				if got[i].From != from.Name || got[i].To != to.Name {
+					t.Fatalf("conduit %d = (%q, %q), want (%q, %q)", i, got[i].From, got[i].To, from.Name, to.Name)
+				}
+				i++
+			}
+		}
+		if c := requireConduit(t, got, "a→b", "b"); c.State != "allow" {
+			t.Fatalf("arrow zone conduit = %+v", c)
+		}
+		if c := requireConduit(t, got, "a", "b"); c.State != "block" {
+			t.Fatalf("plain zone conduit = %+v", c)
+		}
+	}
+}
+
+func TestSecurityConduitsEmptyArray(t *testing.T) {
+	for _, zones := range [][]config.Zone{{}, {{Name: "alone"}}} {
+		m := &mockStore{cfg: &config.Config{
+			System: config.SystemConfig{Hostname: "containd"},
+			Zones:  zones,
+		}}
+		rec := httptest.NewRecorder()
+		NewServer(m, nil).ServeHTTP(rec, authedRequest(http.MethodGet, "/api/v1/security/conduits", nil))
+		if rec.Code != http.StatusOK || rec.Body.String() != "[]" {
+			t.Fatalf("status %d body=%s, want 200 []", rec.Code, rec.Body.String())
+		}
 	}
 }
 

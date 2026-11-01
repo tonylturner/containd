@@ -51,6 +51,20 @@ list (learner pages use `{items: [], nextCursor?}`); a reachable stopped simulat
 returns `200` with `running: false`.
 Retry unavailable requests rather than interpreting them as empty or stopped.
 
+## Security Conduits
+
+`GET /security/conduits` returns an array of running zone-to-zone policy
+summaries. Each object contains explicit `from` and `to` zone names alongside
+`state`, `ids`, `proto`, `traffic`, `rules`, `gaps`, `mitre` and the security
+control flags documented in OpenAPI. Every ordered pair of distinct zones is
+included, in configured zone order (source-major, then destination).
+With fewer than two zones, the response is `[]`.
+
+Zone names are exact, case-sensitive identities and may contain arrows or other
+punctuation. Use the `from` and `to` fields directly; do not split a joined name.
+Clients expecting the former map keyed by joined zone names must switch to
+the array response; the map format is not supported.
+
 ## Evidence Status
 
 `GET /api/v1/evidence/status` is authenticated, including for view-role readers.
