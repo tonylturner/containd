@@ -55,7 +55,7 @@ func countIECAbort(reason *iecAbortReason) {
 
 func countIECVerdictFailure(err error) {
 	// Closing a queue intentionally drops its tokens; it is not a failed verdict.
-	if err != nil && !errors.Is(err, capture.ErrQueueClosed) {
+	if err != nil && !errors.Is(err, capture.ErrQueueClosed) && !errors.Is(err, capture.ErrTokenFlushed) {
 		pressureTotals.verdict.Add(1)
 		metrics.IEC104VerdictFailuresTotal.Inc()
 	}

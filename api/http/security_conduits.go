@@ -11,7 +11,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	"github.com/tonylturner/containd/pkg/dp/enforce"
 	"github.com/tonylturner/containd/pkg/dp/ics"
+	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
 // Non-industrial port names remain independent of transport.
@@ -133,11 +135,16 @@ func conduitAuditLogged(cfg *config.Config) bool {
 
 func buildConduitResult(cfg *config.Config, globals conduitGlobalState, from, to string) *conduitResult {
 	matching := matchingConduitRules(cfg.Firewall.Rules, from, to)
-	state := computeConduitState(matching, globals.defaultAction)
-	protos, allPorts, hasProtoRestrictions, hasICSPredicate := conduitProtocols(matching)
-	defaultDeny := globals.defaultAction == config.ActionDeny || hasExplicitDenyAll(cfg.Firewall.Rules, from)
+	effective := reachableConduitRules(matching, cfg.DataPlane.DPIMode)
+	state := computeConduitState(effective, globals.defaultAction, from, to, cfg.DataPlane.DPIMode)
+	protos, allPorts, hasProtoRestrictions, hasICSPredicate := conduitProtocols(effective)
+	defaultDeny := globals.defaultAction == config.ActionDeny || hasExplicitDenyAll(effective, from)
 	tlsEnforced := conduitTLSEnforced(allPorts)
 	protoWhitelist := hasProtoRestrictions
+	if state == "allow" {
+		// An unrestricted winning grant or ALLOW default is not a service whitelist.
+		tlsEnforced, protoWhitelist = false, false
+	}
 	ruleDescs := conduitRuleDescriptions(matching, from, to)
 	gaps := computeGaps(state, defaultDeny, tlsEnforced, protoWhitelist, globals.auditLogged, globals.avEnabled, allPorts, hasICSPredicate)
 	mitre := computeMitre(state, protoWhitelist, from, protos)
@@ -266,37 +273,57 @@ func nonNilStrings(in []string) []string {
 	return in
 }
 
-func computeConduitState(rules []config.Rule, defaultAction config.Action) string {
-	if len(rules) == 0 {
-		if defaultAction == config.ActionDeny {
-			return "block"
-		}
-		return "unmodeled"
+// reachableConduitRules uses the same ordered coverage warnings as enforcement.
+// Hidden grants must not advertise services, TLS or protocol whitelisting.
+func reachableConduitRules(list []config.Rule, mode string) []config.Rule {
+	snap := &rules.Snapshot{DPIMode: mode}
+	for _, r := range list {
+		snap.Firewall = append(snap.Firewall, firewallRuleEntry(r))
 	}
-
-	hasAllow := false
-	hasDeny := false
-	allAllowUnrestricted := true
-
-	for _, r := range rules {
-		if r.Action == config.ActionAllow {
-			hasAllow = true
-			if len(r.Protocols) > 0 || r.ICS.Protocol != "" {
-				allAllowUnrestricted = false
-			}
-		} else if denies(r.Action) {
-			hasDeny = true
+	hidden := map[string]bool{}
+	for _, w := range enforce.NewCompiler().RuleWarnings(snap) {
+		if w.ShadowedBy != "" {
+			hidden[w.RuleID] = true
 		}
 	}
+	out := make([]config.Rule, 0, len(list))
+	for _, r := range list {
+		if !hidden[r.ID] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
 
-	if !hasAllow && hasDeny {
+// A conduit is a static zone summary, not a proof about every address,
+// identity, schedule or decoded operation. The ordered evaluator determines
+// the unconditional terminal/default; earlier conditional exceptions make
+// the result partial rather than asserting universal permission or refusal.
+func computeConduitState(list []config.Rule, defaultAction config.Action, from, to, mode string) string {
+	snap := &rules.Snapshot{Default: rules.Action(defaultAction), DPIMode: mode}
+	for _, r := range list {
+		entry := firewallRuleEntry(r)
+		if entry.Action.Decides() && !rules.MonitorICS(entry, mode) {
+			snap.Firewall = append(snap.Firewall, entry)
+		}
+	}
+	if len(snap.Firewall) == 0 {
+		if defaultAction == config.ActionAllow {
+			return "unmodeled"
+		}
 		return "block"
 	}
-	if hasAllow && allAllowUnrestricted {
-		return "allow"
+	action, winner := rules.NewEvaluator(snap).EvaluateMatch(rules.EvalContext{SrcZone: from, DstZone: to})
+	for _, entry := range snap.Firewall {
+		if winner != nil && entry.ID == winner.ID {
+			break
+		}
+		if (entry.Action == rules.ActionAllow) != (action == rules.ActionAllow) {
+			return "partial"
+		}
 	}
-	if hasAllow {
-		return "partial"
+	if action == rules.ActionAllow {
+		return "allow"
 	}
 	return "block"
 }
@@ -308,7 +335,7 @@ func hasExplicitDenyAll(rules []config.Rule, srcZone string) bool {
 		}
 		srcMatch := len(r.SourceZones) == 0 || containsStr(r.SourceZones, srcZone)
 		dstMatch := len(r.DestZones) == 0
-		noProto := len(r.Protocols) == 0
+		noProto := len(r.Protocols) == 0 && len(r.Sources) == 0 && len(r.Destinations) == 0 && len(r.ViaForwards) == 0 && len(r.Identities) == 0 && r.Schedule == nil && r.ICS.Empty()
 		if srcMatch && dstMatch && noProto {
 			return true
 		}

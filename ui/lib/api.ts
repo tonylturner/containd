@@ -57,7 +57,12 @@ export type {
 } from "./api-dataplane";
 export type {
   FirewallRule,
+  FirewallRuleCreate,
   FirewallRulePatch,
+  Position,
+  ForwardPlacement,
+  ForwardPublishResult,
+  ForwardDeleteResult,
   ICSPredicate,
   ICSPredicatePatch,
   IdentityBinding,
@@ -268,6 +273,7 @@ export type PortForward = {
   ingressZone: string;
   proto: "tcp" | "udp";
   listenPort: number;
+  listenAddress?: string;
   destIp: string;
   destPort?: number;
   allowedSources?: string[];

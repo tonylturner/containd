@@ -48,7 +48,7 @@ func (l *scriptLog) take() []string {
 // a failed refill keeps the old plan so the next check retries.
 func TestSchedulePlannerRefills(t *testing.T) {
 	log := &scriptLog{}
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: log}})
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: log}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestClockStepped(t *testing.T) {
 // fails. A ruleset without scheduled rules has none.
 func TestRulesetStatusReportsSchedulePlanner(t *testing.T) {
 	log := &scriptLog{}
-	e, err := New(Config{Enforce: EnforceConfig{Enabled: true, Applier: log}})
+	e, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: log}})
 	if err != nil {
 		t.Fatal(err)
 	}

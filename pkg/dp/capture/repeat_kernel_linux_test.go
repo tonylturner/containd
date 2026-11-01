@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tonylturner/containd/pkg/dp/enforce"
+	"github.com/tonylturner/containd/pkg/dp/markabi"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 	"golang.org/x/sys/unix"
 )
@@ -23,8 +24,8 @@ import (
 func TestKernelNFQueueRepeatMarkResumesFirewall(t *testing.T) {
 	requireKernel(t)
 	const queue = 4714
-	const observed uint32 = 0x04000000
 	var seen atomic.Int32
+	var nonAdmit atomic.Bool
 	invalidMarks := make(chan uint32, 8)
 	mgr, err := NewManager(Config{Mode: "nfqueue", QueueID: queue})
 	if err != nil {
@@ -39,7 +40,7 @@ func TestKernelNFQueueRepeatMarkResumesFirewall(t *testing.T) {
 			if enforce.EnvelopeMarked(p.Mark) {
 				return Decision{Action: Drop}
 			}
-			return Decision{Action: Repeat, Mark: p.Mark & ^enforce.QueueMarkMask | observed}
+			return Decision{Action: Repeat, Mark: markabi.Continue(p.Mark, false)}
 		}
 		if p.Transport != "udp" {
 			return Decision{Action: Drop}
@@ -47,23 +48,27 @@ func TestKernelNFQueueRepeatMarkResumesFirewall(t *testing.T) {
 		if seen.Add(1) > 2 {
 			return Decision{Action: Drop}
 		} // bound a broken requeue loop
-		if p.Mark & ^enforce.QueueMarkMask != 0x000000ab {
+		if p.Mark & ^markabi.ContinuationSkbMask != 0x200000ab {
 			t.Errorf("original mark %#x", p.Mark)
 		}
-		return Decision{Action: Repeat, Mark: p.Mark&0xf0ffffff | observed}
+		return Decision{Action: Repeat, Mark: markabi.Continue(p.Mark, nonAdmit.Load())}
 	}); err != nil {
 		t.Fatal(err)
 	}
 	defer mgr.Stop()
 	for _, allow := range []bool{false, true} {
 		t.Run(fmt.Sprint("accept=", allow), func(t *testing.T) {
+			// The enforcing IEC scope admits transport even with default
+			// DENY. Simulate S4's default DENY with NonAdmit, not an
+			// admitting continuation that S2 is allowed to deliver.
+			nonAdmit.Store(!allow)
 			ln, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer ln.Close()
 			port := ln.LocalAddr().(*net.UDPAddr).Port
-			installRepeatPolicy(t, queue, allow, port, false)
+			installRepeatPolicy(t, queue, port, false)
 
 			conn, err := net.DialUDP("udp4", nil, ln.LocalAddr().(*net.UDPAddr))
 			if err != nil {
@@ -75,7 +80,7 @@ func TestKernelNFQueueRepeatMarkResumesFirewall(t *testing.T) {
 				t.Fatal(err)
 			}
 			var markErr error
-			if err := raw.Control(func(fd uintptr) { markErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, 0xab) }); err != nil {
+			if err := raw.Control(func(fd uintptr) { markErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, 0x200000ab) }); err != nil {
 				t.Fatal(err)
 			}
 			if markErr != nil {
@@ -94,7 +99,7 @@ func TestKernelNFQueueRepeatMarkResumesFirewall(t *testing.T) {
 				t.Fatalf("receiver n=%d err=%v", n, err)
 			}
 			if !allow && err == nil {
-				t.Fatal("later L4 drop was bypassed")
+				t.Fatal("S2 admitted a NonAdmit continuation")
 			}
 			if got := seen.Load() - before; got != 1 {
 				t.Fatalf("queued %d times, want exactly once", got)
@@ -103,7 +108,7 @@ func TestKernelNFQueueRepeatMarkResumesFirewall(t *testing.T) {
 	}
 	for _, reverse := range []bool{false, true} {
 		t.Run(fmt.Sprint("invalid-mixed/reverse=", reverse), func(t *testing.T) {
-			installRepeatPolicy(t, queue, true, 44818, reverse)
+			installRepeatPolicy(t, queue, 44818, reverse)
 			sendExtensionSYN(t)
 			select {
 			case mark := <-invalidMarks:
@@ -120,7 +125,7 @@ func TestKernelNFQueueRepeatMarkResumesFirewall(t *testing.T) {
 // Use the complete compiled mixed policy. Only move its policy hook from
 // forward to output to exercise it over loopback without a routing lab.
 // Steering, mark guards, counters, conntrack and default verdicts stay intact.
-func installRepeatPolicy(t *testing.T, queue int, allow bool, port int, reverse bool) {
+func installRepeatPolicy(t *testing.T, queue int, port int, reverse bool) {
 	t.Helper()
 	mid, eid := "a-monitor", "z-enforce"
 	if reverse {
@@ -131,9 +136,6 @@ func installRepeatPolicy(t *testing.T, queue int, allow bool, port int, reverse 
 		{ID: eid, Action: rules.ActionDeny, ICS: rules.ICSPredicate{Protocol: "iec104", Mode: "enforce"}},
 		{ID: "udp-monitor", Action: rules.ActionDeny, Protocols: []rules.Protocol{{Name: "udp", Port: fmt.Sprint(port)}}, ICS: rules.ICSPredicate{Protocol: "cip", Mode: "monitor"}},
 	}}
-	if allow {
-		snap.Default = rules.ActionAllow
-	}
 	c := enforce.NewCompiler()
 	c.TableName = "containd_repeat_test"
 	c.QueueID = queue

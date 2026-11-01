@@ -221,11 +221,11 @@ IEC 104 fails closed on malformed traffic.
 
 ## Actions and rule order
 
-Any matching `ALLOW` wins; otherwise the first matching `DENY` or `RESET` by
-rule ID decides; otherwise the default (see
-[Actions and precedence](policy-model.md#actions-and-precedence)). The engine
-decides inspected ICS messages the same way, so an ICS `DENY` that overlaps an
-`ALLOW` is shadowed. The forward chain of the policy table runs in this order:
+The first matching enforcing terminal rule in configured order wins; otherwise
+firewall.defaultAction applies. Monitor rules never decide. See
+[Actions and precedence](policy-model.md#actions-and-precedence) for shadow
+warnings and the separate IEC 104 object partition. The forward policy pipeline
+runs in this order:
 
 1. `RATE_LIMIT` meters, by rule ID: every packet of a matching flow, established
    or not and in both directions, is counted against its directional 5-tuple's
@@ -233,25 +233,31 @@ decides inspected ICS messages the same way, so an ICS `DENY` that overlaps an
    connection's original tuple (`ct original`, `ct reply`), packets without
    usable connection tracking state by their header.
 2. IEC 104 envelope steering and the NFQUEUE lines of ICS rules. Envelope
-   steering jumps to the `iec104_envelope` chain and the NFQUEUE lines of the
-   other ICS rules to the `ics_queue` chain. Both chains mark the packets of
+   steering jumps to the `iec104_envelope` chain and enforcing NFQUEUE lines
+   use the `ics_enforce_queue` chain. Both chains mark the packets of
    connections whose handshake connection tracking has not seen complete.
-3. The established/related accept and the DNAT accepts.
-4. `TAG` lines, by rule ID, which count matching connection openers and
+3. `TAG` lines, by rule ID, which count matching connection openers and
    continue.
-5. Every `ALLOW` line, by rule ID.
-6. Every `DENY` and `RESET` line, by rule ID. `RESET` lines end in
+4. Continuation guards, admission checks and ordered terminal evaluation.
+   Connections requiring re-evaluation use the current ordered policy;
+   established traffic can reuse a valid unconditional admission. DNAT alone
+   never grants admission.
+5. `ALLOW`, `DENY` and `RESET` terminals in configured order, followed by the
+   default action when none matches. `RESET` lines end in
    `reject with tcp reset` for TCP and `reject with icmpx admin-prohibited`
    otherwise.
-7. The chain policy, the default action.
 
 Every line updates its rule's named counter, read through
 `GET /api/v1/firewall/counters`; a `RATE_LIMIT` rule has a second counter for
 its excess drops. Counters live in the policy table, so each apply restarts
-them. `TAG` has no kernel mark: NFQUEUE steering owns mark mask `0x0f000000`
-(bit `0x01000000` for IEC 104 envelope traffic, bit `0x02000000` for a
-connection whose handshake connection tracking has not seen complete), and a
-tag has no enforcement effect.
+them. `TAG` has no kernel mark and no enforcement effect. Internal packet and
+connection marks track inspection continuation and admission; they do not
+replace ordered policy.
+
+DNAT selects only translation. Use an explicit rule or the atomic
+[port-forward publication](policy-model.md#port-forward-publication-and-deletion)
+operation to author admission, and review its placement explanation before
+committing.
 
 ## Temporary blocks
 

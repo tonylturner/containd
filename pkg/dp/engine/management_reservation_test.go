@@ -14,17 +14,17 @@ import (
 
 func TestProcessAuthoritySurvivesReconfigure(t *testing.T) {
 	r := &mgmtpath.Reservation{Device: "eth7", Local: netip.MustParsePrefix("10.99.99.2/24"), Sources: []netip.Addr{netip.MustParseAddr("10.99.99.10")}, Port: 8080}
-	if _, err := New(Config{Enforce: EnforceConfig{ManagementReservation: r}}); err == nil {
+	if _, err := New(Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, ManagementReservation: r}}); err == nil {
 		t.Fatal("accepted disabled enforcement")
 	}
 	api := &enforce.EngineAPIPath{Device: "eth6", Addr: netip.MustParseAddr("10.98.0.2"), Port: 9091}
-	cfg := Config{Enforce: EnforceConfig{Enabled: true, ManagementReservation: r, EngineAPI: api}}
+	cfg := Config{Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, ManagementReservation: r, EngineAPI: api}}
 	e, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	applier := &recordingApplier{}
-	fresh, err := New(Config{Events: e.Events(), Enforce: EnforceConfig{Enabled: true, Applier: applier}})
+	fresh, err := New(Config{Events: e.Events(), Enforce: EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Applier: applier}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -89,6 +89,7 @@ func connSegment(fromServer bool, clientPort, serverPort uint16, seq uint32, fla
 		pkt.SrcIP, pkt.DstIP = pkt.DstIP, pkt.SrcIP
 		pkt.SrcPort, pkt.DstPort = pkt.DstPort, pkt.SrcPort
 	}
+	pkt.Queue = policyQueue(net.ParseIP(testClient), net.ParseIP(testServer), clientPort, serverPort, fromServer)
 	markHandshake(&pkt)
 	return pkt
 }
@@ -208,7 +209,7 @@ func TestPersistentModbusUnderDefaultDeny(t *testing.T) {
 	up := &blockRecorder{}
 	e, err := New(Config{
 		Capture:    capture.Config{Interfaces: []string{"eth0", "eth1"}},
-		Enforce:    EnforceConfig{Enabled: true, Updater: up},
+		Enforce:    EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Updater: up},
 		DPIEnabled: true,
 		DPIMode:    "enforce",
 	})

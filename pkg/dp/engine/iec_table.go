@@ -113,6 +113,7 @@ type iecFrame struct{ start, end int64 }
 
 type heldPacket struct {
 	tok   capture.Token
+	mark  uint32
 	dir   int
 	off   int64
 	end   int64
@@ -217,12 +218,16 @@ func (t *iecTable) sessionCtx(client, server netip.AddrPort) rules.EvalContext {
 
 // stateContext uses the same service authority as generic ICS policy.
 func (t *iecTable) stateContext(state *flow.State) rules.EvalContext {
-	key := state.ServiceKey()
-	ctx := rules.EvalContext{SrcIP: key.OpenerIP(), DstIP: key.ServerIP(), Proto: "tcp",
-		Port: strconv.Itoa(int(servicePort(state, nil)))}
-	ctx.SrcZone, ctx.DstZone = t.zones.resolve(t.snap, ctx.SrcIP, ctx.DstIP)
-	ctx.Identities = t.snap.IdentitiesOf(ctx.SrcIP)
-	return ctx
+	return statePolicyContext(t.snap, state, t.zones)
+}
+
+func retainedIECState(state *flow.State) *flow.State {
+	retained := &flow.State{Key: state.ServiceKey()}
+	if evidence := state.InlinePolicy.Load(); evidence != nil {
+		copy := *evidence
+		retained.InlinePolicy.Store(&copy)
+	}
+	return retained
 }
 
 func (t *iecTable) sessionContext(s *iecSession) rules.EvalContext {
@@ -299,6 +304,12 @@ func hasEnforceICS(snap *rules.Snapshot, globalMode string) bool {
 // envelope or mode changed are aborted; sessions of an
 // unchanged envelope continue.
 func (t *iecTable) setPolicy(snap *rules.Snapshot) {
+	t.apply(t.installPolicy(snap, false))
+}
+
+// installPolicy collects work without submitting verdicts. An nft replacement
+// invalidates every held partial frame even when the effective policy is equal.
+func (t *iecTable) installPolicy(snap *rules.Snapshot, abortPartial bool) iecActions {
 	var acts iecActions
 	t.mu.Lock()
 	if snap != nil && snap.DPIMode != "" {
@@ -316,6 +327,8 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 		ctx := t.sessionContext(s)
 		matched, mode := t.envelopeLocked(ctx)
 		switch {
+		case abortPartial && s.mode == "enforce" && s.partial():
+			acts.merge(t.abortLocked(s, abortPolicy, "", nil, now))
 		case matched && mode == s.mode:
 			s.ctx = ctx
 		case s.mode == "enforce" || mode == "enforce":
@@ -332,7 +345,19 @@ func (t *iecTable) setPolicy(snap *rules.Snapshot) {
 		t.health.setICS(hasICS)
 		t.health.setActive(active)
 	}
-	t.apply(acts)
+	return acts
+}
+
+func (s *iecSession) partial() bool {
+	if len(s.held) != 0 {
+		return true
+	}
+	for _, dir := range s.dirs {
+		if dir != nil && dir.bytes != nil && dir.bytes.Next() > dir.framedEnd {
+			return true
+		}
+	}
+	return false
 }
 
 // expire runs the timers: pending holds, tombstones, closed and idle

@@ -11,6 +11,9 @@ import { InfoTip } from "../../components/InfoTip";
 import {
   api,
   type FirewallRule,
+  type FirewallRuleCreate,
+  type PortForward,
+  type Position,
   type FirewallRulePatch,
   type ICSPredicate,
   type ICSPredicatePatch,
@@ -32,6 +35,8 @@ import {
 } from "./firewall-rule-policy";
 import { RulePolicyFields } from "./firewall-rule-policy-fields";
 import { RuleImpactSummary } from "./firewall-rule-warnings";
+import { RulePositionSelect } from "./firewall-rule-position";
+import { RuleForwardFields } from "./firewall-rule-forwards";
 
 const LOG_HELP =
   "Logs matching traffic as firewall.rule.hit events. A RATE_LIMIT rule logs the packets it drops over the limit; a TAG rule logs the connections it labels.";
@@ -136,6 +141,7 @@ function ruleDraftFrom(rule: FirewallRule, rules: FirewallRule[], zones: Zone[],
     context: { rules, zones, globalMode },
     description: rule.description ?? "",
     log: rule.log ?? false,
+    viaForwards: rule.viaForwards ?? [],
     srcZone: (rule.sourceZones ?? [])[0] ?? "",
     dstZone: (rule.destZones ?? [])[0] ?? "",
     sources: (rule.sources ?? []).join(", "),
@@ -150,6 +156,7 @@ function ruleDraftFrom(rule: FirewallRule, rules: FirewallRule[], zones: Zone[],
 export function EditRuleModal({
   context,
   zones,
+  forwards,
   rule,
   globalMode,
   tagsInUse,
@@ -158,6 +165,7 @@ export function EditRuleModal({
 }: {
   context: FirewallRule[];
   zones: Zone[];
+  forwards: PortForward[];
   rule: FirewallRule;
   globalMode: ICSModeSelection | undefined;
   /** Distinct TAG labels of the other rules. */
@@ -217,6 +225,7 @@ export function EditRuleModal({
       destinations: splitCSV(destinations) ?? [],
       protocols: buildProtocols(proto, port),
       identities: fields.identities,
+      viaForwards: cfg.viaForwards,
     };
     // The PATCH keeps every omitted key, so a cleared field sends its empty
     // value and a removed predicate, rate limit or schedule sends null.
@@ -303,6 +312,7 @@ export function EditRuleModal({
         </div>
 
         <RulePolicyFields draft={policy} onChange={setPolicy} />
+        <RuleForwardFields forwards={forwards} value={cfg.viaForwards} onChange={(viaForwards) => setCfg((c) => ({ ...c, viaForwards }))} />
 
         <div className="mt-3 grid gap-3 md:grid-cols-4">
           <ICSToggle draft={ics} onChange={setIcs} />
@@ -326,20 +336,23 @@ export function EditRuleModal({
 export function CreateRuleForm({
   context,
   zones,
+  forwards,
   globalMode,
   tagsInUse,
   onCreate,
 }: {
   zones: Zone[];
+  forwards: PortForward[];
   globalMode: ICSModeSelection | undefined;
   /** Distinct TAG labels of the existing rules. */
   tagsInUse: string[];
   context: FirewallRule[];
-  onCreate: (rule: FirewallRule) => Promise<boolean>;
+  onCreate: (rule: FirewallRuleCreate) => Promise<boolean>;
 }) {
   const form = useConfigForm({
     id: "", description: "", log: false, srcZone: "", dstZone: "", sources: "", destinations: "",
     proto: "tcp", port: "502", policy: policyDraftFrom(), ics: icsDraftFrom(undefined, ""),
+    position: "bottom" as Position, viaForwards: [] as string[],
   });
   const { refreshForm } = form;
   useEffect(() => { refreshForm({ rules: context, zones, globalMode, tagsInUse }); }, [refreshForm, context, zones, globalMode, tagsInUse]);
@@ -354,6 +367,8 @@ export function CreateRuleForm({
   const [port, setPort] = form.field("port");
   const [policy, setPolicy] = form.field("policy");
   const [ics, setIcs] = form.field("ics");
+  const [position, setPosition] = form.field("position");
+  const [viaForwards, setViaForwards] = form.field("viaForwards");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -376,7 +391,7 @@ export function CreateRuleForm({
       return;
     }
     const { fields } = parts.value;
-    const rule: FirewallRule = {
+    const rule: FirewallRuleCreate = {
       id: id.trim(),
       description: description.trim() || undefined,
       sourceZones: srcZone ? [srcZone] : undefined,
@@ -391,6 +406,8 @@ export function CreateRuleForm({
       rateLimit: fields.rateLimit,
       tag: fields.tag,
       log: log || undefined,
+      position,
+      viaForwards: viaForwards.length ? viaForwards : undefined,
     };
     setSaving(true);
     const submitted = form.editor;
@@ -403,6 +420,7 @@ export function CreateRuleForm({
     <Card padding="lg" className="mt-6">
       <ConfigEditNotice superseded={form.editor.superseded} />
       <h2 className="text-sm font-semibold text-(--text)">Create rule</h2>
+      <div className="mt-3"><RulePositionSelect rules={context} value={position} onChange={setPosition} /></div>
       <div className="mt-3 grid gap-3 md:grid-cols-3">
         <input value={id} onChange={(e) => setId(e.target.value)} placeholder="id (e.g. mb-allow)" className="input-industrial" />
         <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-2" />
@@ -439,6 +457,7 @@ export function CreateRuleForm({
       </div>
 
       <RulePolicyFields draft={policy} onChange={setPolicy} />
+      <RuleForwardFields forwards={forwards} value={viaForwards} onChange={setViaForwards} />
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
         <ICSToggle draft={ics} onChange={setIcs} />

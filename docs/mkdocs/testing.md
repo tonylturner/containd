@@ -124,14 +124,26 @@ volumes on exit.
 ## Forwarding Smoke
 
 `bash scripts/smoke-forward.sh`, also run by `bash scripts/smoketest`, brings
-up `deploy/docker-compose.smoke.yml`, installs its own forward policy and NAT
-configuration, and checks that:
+up `deploy/docker-compose.smoke.yml`, saves its own base policy, publishes
+port forwards through the management API and commits each policy change.
+It checks that:
 
 - allowed LAN-to-WAN traffic arrives, and the WAN server sees the engine's
   WAN address as its source (masquerade);
 - the DNAT port forward reaches the LAN target, the target sees the engine's
   LAN address (return-path masquerade), and the DNAT rule's packet counter
   increases;
+- publishing with permission inserts a via-forward allow rule; publishing a
+  second forward without permission translates packets but does not admit
+  them;
+- moving a covering DENY from bottom to top and back changes fresh-connection
+  delivery according to first-match order, with matching response indices and
+  rule order;
+- a via-forward rule's historical preview reports unavailable matching, with
+  zero matches and no samples;
+- deleting the forward removes its generated rule and stops DNAT delivery;
+- `show firewall rules` prints order numbers and the via forward when the
+  stack exposes a usable CLI path (otherwise a skip reason is logged);
 - each denied flow times out. Every deny probe targets a live listener, and a
   control probe from the listener's own network segment shows that the
   listener answers before the deny is checked.
@@ -139,13 +151,16 @@ configuration, and checks that:
 The script exits 0 when every check passes and 1 when a check fails. It exits
 2 on a harness error, such as a missing tool, a failed `docker compose`
 command, a listener that does not answer, or a broken client route. A harness
-error never counts as a pass.
+error never counts as a pass. Unexpected check failures stop the run before
+further policy mutations.
 
 `bash scripts/smoke-forward-mutations.sh` shows that the checks can fail. It
 runs the smoke once with an allow-all forward rule and once with masquerade
 for LAN traffic disabled. It passes only when each run fails exactly the
-checks that its change breaks. Both scripts accept the isolation variables
-described in the smoke fixture README linked below.
+checks that its change breaks: the permissive policy defeats all four direct
+deny checks and the translate-only forward check; disabling LAN masquerade
+defeats only the LAN-to-WAN source-address check. Both scripts accept the
+isolation variables described in the smoke fixture README linked below.
 
 ## Scanning Gate Smoke
 

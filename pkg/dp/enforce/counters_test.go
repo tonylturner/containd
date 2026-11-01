@@ -41,7 +41,7 @@ func TestCompileFirewallCountsEveryRuleLine(t *testing.T) {
 	forward := text[strings.Index(text, "chain forward"):]
 	forward = forward[:strings.Index(forward, "\n  }\n")]
 	for _, line := range strings.Split(forward, "\n")[3:] {
-		if strings.Contains(line, "ct state") || strings.Contains(line, "dnat") {
+		if strings.Contains(line, "ct state") || strings.Contains(line, "dnat") || strings.Contains(line, "goto ") {
 			continue
 		}
 		if !ruleCounterStmt.MatchString(line) {
@@ -49,8 +49,8 @@ func TestCompileFirewallCountsEveryRuleLine(t *testing.T) {
 		}
 	}
 	steer := counterStmt("a-iec-allow") + " jump " + IEC104EnvelopeChain
-	if strings.Count(text, steer) != 2 {
-		t.Fatalf("IEC104 steering of a-iec-allow does not count both directions:\n%s", text)
+	if strings.Count(text, steer) != 3 {
+		t.Fatalf("IEC104 steering of a-iec-allow does not count both tracked directions and the untracked fallback:\n%s", text)
 	}
 }
 

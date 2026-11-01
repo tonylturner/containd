@@ -3,6 +3,7 @@
 package enforce
 
 import (
+	"net/netip"
 	"regexp"
 	"strings"
 	"testing"
@@ -27,13 +28,17 @@ func TestNATConfiguredZones(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snap := &rules.Snapshot{ZoneIfaces: tc.zones, NAT: rules.NATConfig{Enabled: true, EgressZone: tc.egress, SourceZones: tc.sources, PortForwards: []rules.PortForward{{ID: "forward", Enabled: tc.enabled, IngressZone: tc.ingress, Proto: "tcp", ListenPort: 443, DestIP: "192.0.2.10", DestPort: 8443}}}}
+			snap.ForwardMatches = map[string]rules.ForwardMatch{}
+			if tc.enabled && len(tc.zones[tc.ingress]) > 0 {
+				snap.ForwardMatches["forward"] = rules.ForwardMatch{Enabled: true, IngressDevices: tc.zones[tc.ingress], Protocol: "tcp", ListenPort: 443, Backend: netip.MustParseAddrPort("192.0.2.10:8443")}
+			}
 			text, err := NewCompiler().CompileFirewall(snap)
 			if err != nil {
 				t.Fatal(err)
 			}
 			assertDeclaredSets(t, text)
 			if tc.name == "custom" {
-				for _, want := range []string{"iifname @zone_706c616e74 oifname @zone_6f757473696465 masquerade", "dnat ip to 192.0.2.10:8443", "iifname @zone_6f757473696465 ct status dnat tcp dport 8443 ip daddr 192.0.2.10 masquerade"} {
+				for _, want := range []string{"iifname @zone_706c616e74 oifname @zone_6f757473696465 masquerade", "dnat ip to 192.0.2.10:8443", "ct original proto-dst 443 ct original ip daddr @local4_65746830 ct reply ip saddr 192.0.2.10 ct reply proto-src 8443 masquerade"} {
 					if !strings.Contains(text, want) {
 						t.Fatalf("missing %q:\n%s", want, text)
 					}

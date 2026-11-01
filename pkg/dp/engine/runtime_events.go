@@ -268,10 +268,7 @@ func (e *Engine) EvaluateVerdictMatch(ctx rules.EvalContext) (verdict.Verdict, *
 func (e *Engine) evaluateVerdictMatch(ctx rules.EvalContext, applyDefault bool, state *flow.State) (verdict.Verdict, *rules.Entry) {
 	start := time.Now()
 	ev := e.ruleSnap.Evaluator()
-	action, matched := ev.EvaluateEnforcing(ctx)
-	if matched == nil && !applyDefault {
-		action = rules.ActionAllow
-	}
+	action, matched := ev.EvaluateMessage(ctx, !applyDefault)
 	v := verdict.FromRulesAction(action)
 	metrics.RuleEvalDuration.Observe(time.Since(start).Seconds())
 	metrics.VerdictsTotal.WithLabelValues(string(v.Action)).Inc()

@@ -50,6 +50,8 @@ func (f *fcFlow) fromServer(off uint32, flags capture.TCPFlags) capture.Decision
 	v := capture.VerdictAccept
 	if d.Action == capture.Drop {
 		v = capture.VerdictDrop
+	} else if d.Action == capture.Repeat {
+		v = capture.VerdictRepeat
 	}
 	f.e.hooks.onVerdict(pkt.Token, v, nil)
 	return d
@@ -58,8 +60,8 @@ func (f *fcFlow) fromServer(off uint32, flags capture.TCPFlags) capture.Decision
 // synAck sends the server's handshake segment.
 func (f *fcFlow) synAck() {
 	f.t.Helper()
-	if d := f.fromServer(0, capture.TCPFlagSYN|capture.TCPFlagACK); d.Action != capture.Accept {
-		f.t.Fatalf("SYN-ACK decision = %+v, want Accept", d)
+	if d := f.fromServer(0, capture.TCPFlagSYN|capture.TCPFlagACK); d.Action != capture.Repeat {
+		f.t.Fatalf("SYN-ACK decision = %+v, want Repeat", d)
 	}
 }
 
@@ -87,8 +89,8 @@ func TestResyncOutOfWindowCloseKeepsStream(t *testing.T) {
 				f.syn()
 				f.synAck()
 				f.accept("read head", tc.read[:8])
-				if d := c.send(f); d.Action != capture.Accept {
-					t.Fatalf("out-of-window close = %+v, want Accept", d)
+				if d := c.send(f); d.Action != capture.Repeat {
+					t.Fatalf("out-of-window close = %+v, want Repeat", d)
 				}
 				f.denyAt(8, "segment completing "+tc.name, tc.rule, concatFrames(tc.read[8:], tc.command))
 			})
@@ -113,8 +115,8 @@ func TestResyncInWindowCloseThenNewConnection(t *testing.T) {
 				f.synAck()
 				f.accept("read 1", p.read(1))
 				f.accept("read 2 head", p.read(2)[:5])
-				if d := c.send(f); d.Action != capture.Accept {
-					t.Fatalf("in-window close = %+v, want Accept", d)
+				if d := c.send(f); d.Action != capture.Repeat {
+					t.Fatalf("in-window close = %+v, want Repeat", d)
 				}
 				f.isn, f.next = 900000, 0
 				f.syn()
@@ -172,8 +174,8 @@ func TestResyncSYNOnLiveStream(t *testing.T) {
 			f := newModeFlow(t, "enforce", tc.port)
 			f.syn()
 			f.accept("read head", tc.read[:8])
-			if d := f.establishedSyn(8); d.Action != capture.Accept {
-				t.Fatalf("SYN into the connection = %+v, want Accept", d)
+			if d := f.establishedSyn(8); d.Action != capture.Repeat {
+				t.Fatalf("SYN into the connection = %+v, want Repeat", d)
 			}
 			f.noBlock("SYN into the connection")
 			f.denyAt(8, "segment completing "+tc.name, tc.rule, crafted)
@@ -182,8 +184,8 @@ func TestResyncSYNOnLiveStream(t *testing.T) {
 			f := newModeFlow(t, "enforce", tc.port)
 			f.syn()
 			f.accept("read head", tc.read[:8])
-			if d := f.decide(8, capture.TCPFlagSYN, nil); d.Action != capture.Accept {
-				t.Fatalf("handshake SYN on the live stream = %+v, want Accept", d)
+			if d := f.decide(8, capture.TCPFlagSYN, nil); d.Action != capture.Repeat {
+				t.Fatalf("handshake SYN on the live stream = %+v, want Repeat", d)
 			}
 			f.noBlock("handshake SYN")
 			f.pickedUp("crafted segment", f.decide(8, ackPsh, crafted), scope, 0)

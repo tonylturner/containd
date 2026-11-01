@@ -10,7 +10,7 @@ import (
 )
 
 func TestEvaluatorMatch(t *testing.T) {
-	snap := Snapshot{
+	snap := Snapshot{DPIMode: "enforce",
 		Default: ActionDeny,
 		Firewall: []Entry{
 			{
@@ -47,14 +47,14 @@ func TestEvaluatorDefaultAction(t *testing.T) {
 		{"", ActionDeny},
 		{"REJECT", ActionDeny},
 	} {
-		if got := NewEvaluator(&Snapshot{Default: tc.def}).Evaluate(EvalContext{}); got != tc.want {
+		if got := NewEvaluator(&Snapshot{DPIMode: "enforce", Default: tc.def}).Evaluate(EvalContext{}); got != tc.want {
 			t.Fatalf("default %q evaluated to %s, want %s", tc.def, got, tc.want)
 		}
 	}
 }
 
 func TestPortRange(t *testing.T) {
-	snap := Snapshot{
+	snap := Snapshot{DPIMode: "enforce",
 		Default: ActionDeny,
 		Firewall: []Entry{
 			{
@@ -76,7 +76,7 @@ func TestPortRange(t *testing.T) {
 }
 
 func TestIdentityMatch(t *testing.T) {
-	snap := Snapshot{
+	snap := Snapshot{DPIMode: "enforce",
 		Default: ActionDeny,
 		Firewall: []Entry{
 			{
@@ -99,7 +99,7 @@ func TestIdentityMatch(t *testing.T) {
 
 func TestICSMatch(t *testing.T) {
 	unit := uint8(1)
-	snap := Snapshot{
+	snap := Snapshot{DPIMode: "enforce",
 		Default: ActionDeny,
 		Firewall: []Entry{
 			{
@@ -192,7 +192,7 @@ func TestMatchAddressMixedFormat(t *testing.T) {
 
 func TestICSAddressRangeEval(t *testing.T) {
 	unit := uint8(1)
-	snap := Snapshot{
+	snap := Snapshot{DPIMode: "enforce",
 		Default: ActionDeny,
 		Firewall: []Entry{
 			{
@@ -228,7 +228,7 @@ func TestICSAddressRangeEval(t *testing.T) {
 
 func TestScheduleMatchWithinWindow(t *testing.T) {
 	// Wednesday 10:00 UTC should match a Mon-Fri 09:00-17:00 schedule.
-	snap := Snapshot{
+	snap := Snapshot{DPIMode: "enforce",
 		Default: ActionDeny,
 		Firewall: []Entry{
 			{
@@ -255,7 +255,7 @@ func TestScheduleMatchWithinWindow(t *testing.T) {
 
 func TestScheduleNoMatchOutsideWindow(t *testing.T) {
 	// Wednesday 20:00 UTC is outside 09:00-17:00.
-	snap := Snapshot{
+	snap := Snapshot{DPIMode: "enforce",
 		Default: ActionDeny,
 		Firewall: []Entry{
 			{
@@ -281,7 +281,7 @@ func TestScheduleNoMatchOutsideWindow(t *testing.T) {
 
 func TestScheduleDayOfWeekFilter(t *testing.T) {
 	// Saturday should not match a Mon-Fri schedule even if time is within range.
-	snap := Snapshot{
+	snap := Snapshot{DPIMode: "enforce",
 		Default: ActionDeny,
 		Firewall: []Entry{
 			{
@@ -308,7 +308,7 @@ func TestScheduleDayOfWeekFilter(t *testing.T) {
 
 func TestScheduleTimezoneConversion(t *testing.T) {
 	// Rule is for America/New_York 09:00-17:00. At 14:00 UTC that's 09:00 EST => should match.
-	snap := Snapshot{
+	snap := Snapshot{DPIMode: "enforce",
 		Default: ActionDeny,
 		Firewall: []Entry{
 			{
@@ -340,7 +340,7 @@ func TestScheduleTimezoneConversion(t *testing.T) {
 
 func TestScheduleNoScheduleAlwaysMatches(t *testing.T) {
 	// A rule without a schedule should always match regardless of time.
-	snap := Snapshot{
+	snap := Snapshot{DPIMode: "enforce",
 		Default: ActionDeny,
 		Firewall: []Entry{
 			{
@@ -364,7 +364,7 @@ func TestScheduleNoScheduleAlwaysMatches(t *testing.T) {
 // ALLOW to every address nor narrow it to the entries that parse.
 func TestUnparseableICSAddressesMatchNothing(t *testing.T) {
 	for _, specs := range [][]string{{"junk", "1-"}, {"5", "0x01G0"}, {"0-0x200", "0x200-0x100"}} {
-		ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{{
+		ev := NewEvaluator(&Snapshot{DPIMode: "enforce", Default: ActionDeny, Firewall: []Entry{{
 			ID:     "write-one",
 			ICS:    ICSPredicate{Protocol: "modbus", Addresses: specs},
 			Action: ActionAllow,

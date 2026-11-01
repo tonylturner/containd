@@ -65,6 +65,7 @@ const (
 type Resolution struct {
 	Token   Token
 	Verdict Verdict
+	Mark    uint32 // full replacement skb mark; only meaningful for Repeat
 }
 
 // Decision is returned by a Handler for every delivered packet.
@@ -102,11 +103,13 @@ type SourceEvent struct {
 }
 
 var (
-	ErrStaleToken     = errors.New("capture: token belongs to a closed queue generation")
-	ErrUnknownToken   = errors.New("capture: token is not outstanding")
-	ErrQueueClosed    = errors.New("capture: inline queue is not bound")
-	ErrNotInline      = errors.New("capture: source is not inline")
-	ErrInvalidVerdict = errors.New("capture: verdict is neither accept nor drop")
+	ErrStaleToken          = errors.New("capture: token belongs to a closed queue generation")
+	ErrUnknownToken        = errors.New("capture: token is not outstanding")
+	ErrQueueClosed         = errors.New("capture: inline queue is not bound")
+	ErrNotInline           = errors.New("capture: source is not inline")
+	ErrInvalidVerdict      = errors.New("capture: verdict is neither accept, drop nor repeat")
+	ErrConflictingVerdicts = errors.New("capture: conflicting success verdicts")
+	ErrTokenFlushed        = errors.New("capture: token dropped by policy replacement")
 )
 
 // generations numbers inline queue generations for the whole process,
@@ -115,7 +118,7 @@ var generations atomic.Uint64
 
 func nextGeneration() uint64 { return generations.Add(1) }
 
-func (v Verdict) valid() bool { return v == VerdictAccept || v == VerdictDrop }
+func (v Verdict) valid() bool { return v == VerdictAccept || v == VerdictDrop || v == VerdictRepeat }
 
 // String names the verdict for logs.
 func (v Verdict) String() string {

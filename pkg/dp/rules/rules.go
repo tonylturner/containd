@@ -3,12 +3,18 @@
 
 package rules
 
+import "net/netip"
+
 // Snapshot is an immutable rule set used by the data-plane fast path.
 // It is intended to be hot-swapped atomically by the engine.
 type Snapshot struct {
-	DPIMode  string  // inherited ICS mode for this snapshot
-	Version  string  // compiled rule version
-	Firewall []Entry // firewall rules
+	// AdmissionParity is runtime state, restricted to zero or markabi.ParityBit.
+	AdmissionParity   uint32
+	ForwardMatches    map[string]ForwardMatch
+	LocalIPv4ByDevice map[string][]netip.Addr
+	DPIMode           string  // inherited ICS mode for this snapshot
+	Version           string  // compiled rule version
+	Firewall          []Entry // firewall rules
 	// LocalInput are rules applied to traffic destined to the appliance itself (nftables input).
 	// This is used for management plane, VPN listeners, etc.
 	LocalInput []LocalServiceRule
@@ -58,6 +64,7 @@ type PortForward struct {
 	Description    string
 	IngressZone    string
 	Proto          string
+	ListenAddress  string
 	ListenPort     int
 	DestIP         string
 	DestPort       int
@@ -73,6 +80,7 @@ type SchedulePredicate struct {
 }
 
 type Entry struct {
+	ViaForwards  []string
 	ID           string
 	SourceZones  []string
 	DestZones    []string
@@ -105,7 +113,7 @@ func (e Entry) HasSchedulePredicate() bool {
 type Action string
 
 // Actions mirror config.Action. ALLOW, DENY and RESET are terminal, with
-// ALLOW taking precedence; RATE_LIMIT and TAG are effects that never decide.
+// configured first-match order; RATE_LIMIT and TAG are effects that never decide.
 const (
 	ActionAllow     Action = "ALLOW"
 	ActionDeny      Action = "DENY"

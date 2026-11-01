@@ -349,8 +349,8 @@ func validateInterfaceAddressing(iface Interface) error {
 		if iface.Gateway != strings.TrimSpace(iface.Gateway) {
 			return fmt.Errorf("interface %s gateway has leading/trailing whitespace", iface.Name)
 		}
-		if ip := net.ParseIP(iface.Gateway); ip == nil {
-			return fmt.Errorf("interface %s has invalid gateway %q", iface.Name, iface.Gateway)
+		if ip, err := netip.ParseAddr(iface.Gateway); err != nil || !ip.Is4() {
+			return fmt.Errorf("interface %s gateway must be an IPv4 address, got %q", iface.Name, iface.Gateway)
 		}
 	}
 	for _, addr := range iface.Addresses {
@@ -401,6 +401,9 @@ func validateFirewall(f FirewallConfig, zones []Zone, ifaces []Interface) error 
 	}
 	zoneIfaces := zoneIfaceMap(ifaces)
 	if err := validateNAT(f.NAT, zoneSet, zoneIfaces); err != nil {
+		return err
+	}
+	if err := validateViaForwards(f); err != nil {
 		return err
 	}
 	if err := validateIdentityBindings(f.IdentityBindings); err != nil {
@@ -501,9 +504,10 @@ func validateNAT(n NATConfig, zoneSet map[string]struct{}, zoneIfaces map[string
 }
 
 type portForwardBinding struct {
-	id    string
-	any   bool
-	cidrs []*net.IPNet
+	listenAddress string
+	id            string
+	any           bool
+	cidrs         []*net.IPNet
 }
 
 func validatePortForwards(pfs []PortForward, zoneSet map[string]struct{}, zoneIfaces map[string][]string) error {
@@ -520,9 +524,10 @@ func validatePortForwards(pfs []PortForward, zoneSet map[string]struct{}, zoneIf
 		}
 
 		binding := portForwardBinding{
-			id:    pf.ID,
-			any:   len(allowed) == 0,
-			cidrs: allowed,
+			id:            pf.ID,
+			listenAddress: pf.ListenAddress,
+			any:           len(allowed) == 0,
+			cidrs:         allowed,
 		}
 
 		zoneKey := fmt.Sprintf("%s|%s|%d", ingress, proto, pf.ListenPort)
@@ -553,6 +558,9 @@ func validatePortForwardBasics(pf PortForward, ids map[string]struct{}, zoneSet 
 	}
 	proto, err := validatePortForwardTransport(pf)
 	if err != nil {
+		return "", "", nil, err
+	}
+	if err := validateForwardListenAddress(pf); err != nil {
 		return "", "", nil, err
 	}
 	if err := validatePortForwardDestination(pf); err != nil {
@@ -602,8 +610,8 @@ func validatePortForwardDestination(pf PortForward) error {
 	if strings.TrimSpace(pf.DestIP) == "" {
 		return fmt.Errorf("port-forward %s destIp cannot be empty", pf.ID)
 	}
-	ip := net.ParseIP(strings.TrimSpace(pf.DestIP))
-	if ip == nil || ip.To4() == nil {
+	ip, err := netip.ParseAddr(strings.TrimSpace(pf.DestIP))
+	if err != nil || !ip.Is4() {
 		return fmt.Errorf("port-forward %s destIp must be an IPv4 address: %q", pf.ID, pf.DestIP)
 	}
 	if pf.DestPort != 0 && (pf.DestPort < 1 || pf.DestPort > 65535) {
@@ -623,6 +631,9 @@ func ensureNoOverlap(bindings map[string][]portForwardBinding, key string, next 
 }
 
 func bindingsOverlap(a, b portForwardBinding) bool {
+	if a.listenAddress != "" && b.listenAddress != "" && a.listenAddress != b.listenAddress {
+		return false
+	}
 	if a.any || b.any {
 		return true
 	}
@@ -644,13 +655,13 @@ func parseIPv4CIDRs(in []string) ([]*net.IPNet, error) {
 	for _, raw := range in {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
-			continue
+			return nil, fmt.Errorf("empty CIDR")
 		}
 		ip, cidr, err := net.ParseCIDR(raw)
 		if err != nil {
 			return nil, fmt.Errorf("invalid CIDR %q", raw)
 		}
-		if ip == nil || ip.To4() == nil {
+		if p, e := netip.ParsePrefix(raw); e != nil || !p.Addr().Is4() || ip == nil {
 			return nil, fmt.Errorf("non-IPv4 CIDR %q", raw)
 		}
 		out = append(out, cidr)
@@ -777,8 +788,8 @@ func validateRoutes(routes []StaticRoute, gwByName map[string]Gateway, ifaceSet 
 		if strings.EqualFold(dst, "default") {
 			dst = "0.0.0.0/0"
 		}
-		if _, _, err := net.ParseCIDR(dst); err != nil {
-			return fmt.Errorf("routing.routes dst invalid %q: %w", rt.Dst, err)
+		if err := validateIPv4RoutingPrefix("routing.routes dst", dst); err != nil {
+			return err
 		}
 		if err := validateRouteGateway(rt.Gateway, gwByName); err != nil {
 			return err
@@ -803,10 +814,12 @@ func validateRouteGateway(gateway string, gwByName map[string]Gateway) error {
 	if gw == "" {
 		return nil
 	}
-	if net.ParseIP(gw) == nil {
+	if ip := net.ParseIP(gw); ip == nil {
 		if _, ok := gwByName[gw]; !ok {
 			return fmt.Errorf("routing.routes gateway invalid %q (must be IP or a defined gateway name)", gateway)
 		}
+	} else if ip.To4() == nil {
+		return fmt.Errorf("routing.routes gateway must be IPv4: %q", gateway)
 	}
 	return nil
 }
@@ -827,13 +840,13 @@ func validateRoutingRules(rulesCfg []PolicyRule) error {
 			seenPrio[rule.Priority] = struct{}{}
 		}
 		if src := strings.TrimSpace(rule.Src); src != "" {
-			if _, _, err := net.ParseCIDR(src); err != nil {
-				return fmt.Errorf("routing.rules src invalid %q: %w", rule.Src, err)
+			if err := validateIPv4RoutingPrefix("routing.rules src", src); err != nil {
+				return err
 			}
 		}
 		if dst := strings.TrimSpace(rule.Dst); dst != "" {
-			if _, _, err := net.ParseCIDR(dst); err != nil {
-				return fmt.Errorf("routing.rules dst invalid %q: %w", rule.Dst, err)
+			if err := validateIPv4RoutingPrefix("routing.rules dst", dst); err != nil {
+				return err
 			}
 		}
 	}

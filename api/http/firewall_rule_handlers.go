@@ -14,6 +14,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/compile"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -30,15 +31,17 @@ func listFirewallRulesHandler(store config.Store) gin.HandlerFunc {
 
 func createFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var r config.Rule
-		if err := c.ShouldBindJSON(&r); err != nil {
+		var request positionedRule
+		if err := c.ShouldBindJSON(&request); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid rule payload: "+err.Error())
 			return
 		}
+		r := request.Rule
 		if r.ID == "" {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
+		index := 0
 		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
 			for _, existing := range cfg.Firewall.Rules {
 				if existing.ID == r.ID {
@@ -46,14 +49,23 @@ func createFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 					return false
 				}
 			}
-			cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
+			var err error
+			index, err = request.Position.index(cfg.Firewall.Rules, "")
+			if err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return false
+			}
+			cfg.Firewall.Rules = insertRule(cfg.Firewall.Rules, index, r)
 			return true
 		})
 		if !ok {
 			return
 		}
 		auditLog(c, audit.Record{Action: "firewall.rules.create", Target: r.ID, Detail: "candidate"})
-		c.JSON(http.StatusOK, r)
+		c.JSON(http.StatusOK, struct {
+			config.Rule
+			Index int `json:"index"`
+		}{r, index})
 	}
 }
 
@@ -193,7 +205,7 @@ func mergeRulePatch(existing config.Rule, patch map[string]json.RawMessage) (con
 	return rule, err
 }
 
-func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
+func previewFirewallRuleHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req config.Rule
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -205,39 +217,19 @@ func previewFirewallRuleHandler(engine EngineClient) gin.HandlerFunc {
 			return
 		}
 
-		entry := rules.Entry{
-			ID:           req.ID,
-			SourceZones:  req.SourceZones,
-			DestZones:    req.DestZones,
-			Sources:      req.Sources,
-			Destinations: req.Destinations,
-			Action:       rules.Action(req.Action),
-			Tag:          req.Tag,
-			Identities:   req.Identities,
-			ICS:          compile.ICSPredicate(req.ICS),
-		}
-		// A zero burst means packetsPerSecond here as in the snapshot.
-		if rl := req.RateLimit; rl != nil {
-			entry.RateLimit = &rules.RateLimit{PacketsPerSecond: rl.PacketsPerSecond, Burst: rl.Burst}
-		}
-		if req.Schedule != nil {
-			entry.Schedule = rules.SchedulePredicate{
-				DaysOfWeek: req.Schedule.DaysOfWeek,
-				StartTime:  req.Schedule.StartTime,
-				EndTime:    req.Schedule.EndTime,
-				Timezone:   req.Schedule.Timezone,
-			}
-		}
-		for _, p := range req.Protocols {
-			entry.Protocols = append(entry.Protocols, rules.Protocol{Name: p.Name, Port: p.Port})
-		}
+		entry := firewallRuleEntry(req)
 
 		client, ok := engine.(RulePreviewClient)
 		if !ok || client == nil {
 			apiError(c, http.StatusServiceUnavailable, "engine rule preview unavailable")
 			return
 		}
-		result, err := client.PreviewRule(c.Request.Context(), entry)
+		cfg, err := store.LoadCandidate(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		result, err := client.PreviewRule(c.Request.Context(), dpengine.PreviewRuleRequest{Entry: entry, ForwardMatches: compile.ResolveForwardMatches(cfg)})
 		if err != nil {
 			apiError(c, http.StatusBadGateway, "failed to preview rule: "+err.Error())
 			return
@@ -268,11 +260,12 @@ func listICSRulesHandler(store config.Store) gin.HandlerFunc {
 
 func createICSRuleHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var r config.Rule
-		if err := c.ShouldBindJSON(&r); err != nil {
+		var request positionedRule
+		if err := c.ShouldBindJSON(&request); err != nil {
 			apiError(c, http.StatusBadRequest, "invalid rule payload: "+err.Error())
 			return
 		}
+		r := request.Rule
 		if r.ID == "" {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
@@ -281,6 +274,7 @@ func createICSRuleHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "rule must include an ICS predicate")
 			return
 		}
+		index := 0
 		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
 			for _, existing := range cfg.Firewall.Rules {
 				if existing.ID == r.ID {
@@ -288,14 +282,23 @@ func createICSRuleHandler(store config.Store) gin.HandlerFunc {
 					return false
 				}
 			}
-			cfg.Firewall.Rules = append(cfg.Firewall.Rules, r)
+			var err error
+			index, err = request.Position.index(cfg.Firewall.Rules, "")
+			if err != nil {
+				apiError(c, http.StatusBadRequest, err.Error())
+				return false
+			}
+			cfg.Firewall.Rules = insertRule(cfg.Firewall.Rules, index, r)
 			return true
 		})
 		if !ok {
 			return
 		}
 		auditLog(c, audit.Record{Action: "firewall.ics_rules.create", Target: r.ID, Detail: "candidate"})
-		c.JSON(http.StatusOK, r)
+		c.JSON(http.StatusOK, struct {
+			config.Rule
+			Index int `json:"index"`
+		}{r, index})
 	}
 }
 
@@ -335,4 +338,36 @@ func updateICSRuleHandler(store config.Store) gin.HandlerFunc {
 		auditLog(c, audit.Record{Action: "firewall.ics_rules.update", Target: id, Detail: "candidate"})
 		c.JSON(http.StatusOK, rule)
 	}
+}
+
+func firewallRuleEntry(req config.Rule) rules.Entry {
+	entry := rules.Entry{
+		ID:           req.ID,
+		ViaForwards:  req.ViaForwards,
+		SourceZones:  req.SourceZones,
+		DestZones:    req.DestZones,
+		Sources:      req.Sources,
+		Destinations: req.Destinations,
+		Action:       rules.Action(req.Action),
+		Tag:          req.Tag,
+		Identities:   req.Identities,
+		ICS:          compile.ICSPredicate(req.ICS),
+	}
+	// A zero burst means packetsPerSecond here as in the snapshot.
+	if rl := req.RateLimit; rl != nil {
+		entry.RateLimit = &rules.RateLimit{PacketsPerSecond: rl.PacketsPerSecond, Burst: rl.Burst}
+	}
+	if req.Schedule != nil {
+		entry.Schedule = rules.SchedulePredicate{
+			DaysOfWeek: req.Schedule.DaysOfWeek,
+			StartTime:  req.Schedule.StartTime,
+			EndTime:    req.Schedule.EndTime,
+			Timezone:   req.Schedule.Timezone,
+		}
+	}
+	for _, p := range req.Protocols {
+		entry.Protocols = append(entry.Protocols, rules.Protocol{Name: p.Name, Port: p.Port})
+	}
+
+	return entry
 }

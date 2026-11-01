@@ -77,18 +77,26 @@ func (a *API) getConfigJSON(ctx context.Context, path string, into any) error {
 }
 
 func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Writer) error {
+	return a.mutateJSON(ctx, http.MethodPost, path, payload, nil, out)
+}
+
+func (a *API) mutateJSON(ctx context.Context, method, path string, payload, into any, out io.Writer) error {
 	if a.Client == nil {
 		a.Client = defaultHTTPClient
 	}
 	buf := &bytes.Buffer{}
-	if err := json.NewEncoder(buf).Encode(payload); err != nil {
-		return err
+	if payload != nil || method == http.MethodPost {
+		if err := json.NewEncoder(buf).Encode(payload); err != nil {
+			return err
+		}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.BaseURL+path, buf)
+	req, err := http.NewRequestWithContext(ctx, method, a.BaseURL+path, buf)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if a.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+a.Token)
 	}
@@ -104,9 +112,15 @@ func (a *API) postJSON(ctx context.Context, path string, payload any, out io.Wri
 	}
 	if out != nil {
 		writeMutationResult(out, resp.Header.Get("X-Containd-Config"))
+		for _, warning := range resp.Header.Values("X-Containd-Warnings") {
+			fmt.Fprintln(out, "Warning:", warning)
+		}
 	}
-	if resp.Header.Get(SSHResetResponseHeader) == "true" {
+	if method == http.MethodPost && resp.Header.Get(SSHResetResponseHeader) == "true" {
 		return a.acknowledgeSSHReset(ctx)
+	}
+	if into != nil {
+		return json.NewDecoder(resp.Body).Decode(into)
 	}
 	return nil
 }
@@ -190,30 +204,7 @@ func (a *API) patchJSON(ctx context.Context, path string, payload any, out io.Wr
 }
 
 func (a *API) delete(ctx context.Context, path string, out io.Writer) error {
-	if a.Client == nil {
-		a.Client = defaultHTTPClient
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.BaseURL+path, nil)
-	if err != nil {
-		return err
-	}
-	if a.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+a.Token)
-	}
-	resp, err := a.Client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	a.updateTokenFromResponse(resp)
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
-	}
-	if out != nil {
-		writeMutationResult(out, resp.Header.Get("X-Containd-Config"))
-	}
-	return nil
+	return a.mutateJSON(ctx, http.MethodDelete, path, nil, nil, out)
 }
 
 func (a *API) acknowledgeSSHReset(ctx context.Context) error {

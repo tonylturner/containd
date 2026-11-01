@@ -376,6 +376,21 @@ func TestPortForwardCommandsAndViews(t *testing.T) {
 	client := &dispatchHTTPClient{
 		t: t,
 		handlers: map[string]func(*http.Request) (*http.Response, error){
+			"POST /api/v1/firewall/port-forwards": func(req *http.Request) (*http.Response, error) {
+				body := decodeJSONRequest[struct {
+					Forward config.PortForward `json:"forward"`
+					Allow   bool               `json:"allowRule"`
+				}](t, req)
+				if !body.Allow {
+					t.Error("allowRule default must be true")
+				}
+				nat.PortForwards = append(nat.PortForwards, body.Forward)
+				return jsonHTTPResponse(http.StatusOK, map[string]any{"forward": body.Forward}, nil), nil
+			},
+			"DELETE /api/v1/firewall/port-forwards/web": func(req *http.Request) (*http.Response, error) {
+				nat.PortForwards = nat.PortForwards[:1]
+				return jsonHTTPResponse(http.StatusOK, map[string]any{"deletedRuleIds": []string{"grant"}, "editedRuleIds": []string{}}, nil), nil
+			},
 			"GET /api/v1/firewall/nat": func(req *http.Request) (*http.Response, error) {
 				return jsonHTTPResponse(http.StatusOK, nat, nil), nil
 			},

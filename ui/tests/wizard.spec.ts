@@ -6,8 +6,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 const zones = [{ name: "wan" }, { name: "lan" }];
 
-/** Mocks the wizard's API and records the staged NAT config. */
-async function mockWizardAPI(page: Page) {
+/** Mocks the wizard's API and records atomic publish requests. */
+async function mockWizardAPI(page: Page, placement: unknown = { reason: "generated", rule: { id: "pf-allow" }, index: 0 }) {
   const staged: unknown[] = [];
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
@@ -16,10 +16,10 @@ async function mockWizardAPI(page: Page) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const method = route.request().method();
-    if (path === "/api/v1/firewall/nat" && method === "POST") {
+    if (path === "/api/v1/firewall/port-forwards" && method === "POST") {
       const body = route.request().postDataJSON();
       staged.push(body);
-      await route.fulfill({ json: body });
+      await route.fulfill({ json: { forward: body.forward, placement } });
       return;
     }
     const json = path.endsWith("/auth/me") || path.endsWith("/auth/session")
@@ -66,6 +66,20 @@ test("the publish-service wizard rejects a non-IPv4 server address at the server
   await expect(next).toBeEnabled();
 });
 
+test("the wizard never claims an allow rule was created when existing ICS policy owns the traffic", async ({ page }) => {
+  const staged = await mockWizardAPI(page, { overlap: "inside", reason: "inside", index: 0, ruleIds: ["inspect-modbus", "inspect-control"] });
+  await openPublishService(page);
+  await page.getByPlaceholder("e.g. 443").fill("502");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("combobox").selectOption("wan");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Stage", exact: true }).click();
+  await expect(page.getByText("Enforcing ICS rules inspect-modbus, inspect-control govern this traffic; no allow rule created.", { exact: false })).toBeVisible();
+  expect(staged).toHaveLength(1);
+  expect(staged[0]).toMatchObject({ allowRule: true });
+});
+
 test("the publish-service wizard rejects an out-of-range port at the server step", async ({ page }) => {
   await mockWizardAPI(page);
   await openPublishService(page);
@@ -99,7 +113,7 @@ test("the publish-service wizard stages the address and port accepted at the ser
   await page.getByRole("combobox").selectOption("wan");
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Stage", exact: true }).click();
-  await expect(page.getByText("Port forward and firewall rule staged", { exact: false })).toBeVisible();
+  await expect(page.getByText("matching allow rule pf-allow inserted at position 1", { exact: false })).toBeVisible();
   expect(staged).toHaveLength(1);
-  expect(staged[0]).toMatchObject({ portForwards: [{ listenPort: 502, destPort: 502, destIp: "192.0.2.5", ingressZone: "wan" }] });
+  expect(staged[0]).toMatchObject({ allowRule: true, forward: { listenPort: 502, destPort: 502, destIp: "192.0.2.5", ingressZone: "wan" } });
 });

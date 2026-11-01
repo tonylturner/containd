@@ -12,7 +12,7 @@ import {
 } from "./api-normalize";
 import { normalizeICSCoverageRule, type ICSCoverageRule } from "./api-ics-coverage";
 
-import type { ApiResult, TelemetryEvent } from "./api";
+import type { ApiResult, PortForward, TelemetryEvent } from "./api";
 
 export type Protocol = {
   name: string;
@@ -64,11 +64,42 @@ export type IOARange = {
 };
 
 /**
- * ALLOW, DENY and RESET decide: any matching ALLOW admits the packet,
- * otherwise the first matching DENY or RESET by rule ID decides, otherwise
- * the default action. RATE_LIMIT and TAG are effects that never admit.
+ * Enforcing terminals decide in list order: the first matching ALLOW, DENY
+ * or RESET wins, otherwise the default action. RATE_LIMIT and TAG are effects.
  */
 export type RuleAction = "ALLOW" | "DENY" | "RESET" | "RATE_LIMIT" | "TAG";
+
+export type Position = "top" | "bottom" | { before: string } | { after: string };
+export type FirewallRuleCreate = FirewallRule & { position?: Position };
+
+type ForwardGrantWarning = {
+  forwardId: string;
+  ruleIds: string[];
+  message: string;
+  traffic: {
+    sources: string[];
+    ingressZone: string;
+    backendZones: string;
+    protocol: string;
+    backend: string;
+    listenAddress: string;
+    listenPort: number;
+  };
+};
+
+export type ForwardPlacement = {
+  forwardId: string;
+  overlap: string;
+  ruleIds?: string[];
+  index: number;
+} & (
+  | { reason: "generated"; rule: FirewallRule; warning?: never }
+  | { reason: "inside"; rule?: never; warning?: never; ruleIds: string[] }
+  | { reason: "partial"; rule?: never; warning: ForwardGrantWarning }
+);
+
+export type ForwardPublishResult = { forward: PortForward; placement?: ForwardPlacement };
+export type ForwardDeleteResult = { deletedRuleIds: string[]; editedRuleIds: string[] };
 
 /** Packet policer per directional 5-tuple; burst 0 means packetsPerSecond. */
 export type RateLimit = {
@@ -86,6 +117,7 @@ export type FirewallRule = {
   protocols?: Protocol[];
   ics?: ICSPredicate;
   identities?: string[];
+  viaForwards?: string[];
   schedule?: RuleSchedule;
   action: RuleAction;
   /** Required for RATE_LIMIT, forbidden otherwise. */
@@ -125,12 +157,12 @@ export type FirewallRulePatch = Partial<
  * satisfies, zones none of which has an interface, or sources and
  * destinations that share no address family.
  */
-export type RuleWarningPredicate = "identity" | "zone" | "addressFamily";
+export type RuleWarningPredicate = "identity" | "zone" | "addressFamily" | "forward";
 
 /**
  * A firewall rule that does not act as written: it matches nothing because
- * of its `predicate`, or it is a DENY or RESET rule that an ALLOW matching
- * all of its traffic shadows (`shadowedBy`).
+ * of its `predicate`, or an earlier terminal covering all its traffic
+ * shadows it (`shadowedBy`).
  */
 export type RuleWarning = {
   ruleId: string;
@@ -144,6 +176,8 @@ export type RuleWarning = {
 
 /** Rule impact preview: the rule matched in isolation against recent events. */
 export type RulePreview = {
+  /** Why historical counting is unavailable; counts and samples must not be shown. */
+  unavailable?: string;
   match_count: number;
   /** The newest matching events, at most 50, in their original wire orientation. */
   sample_matches: TelemetryEvent[];
@@ -225,12 +259,22 @@ export const firewallAPI = {
     return normalizeFirewallRules(rules);
   },
   createFirewallRule: async (
-    r: FirewallRule,
-  ): Promise<ApiResult<FirewallRule>> => {
+    r: FirewallRuleCreate,
+  ): Promise<ApiResult<FirewallRule & { index: number }>> => {
     const result = await postJSONResult<unknown>("/api/v1/firewall/rules", r);
     if (!result.ok) return result;
-    return { ...result, data: normalizeFirewallRule(result.data) };
+    return { ...result, data: { ...normalizeFirewallRule(result.data), index: (result.data as { index: number }).index } };
   },
+  moveFirewallRule: async (id: string, position: Position): Promise<ApiResult<{ index: number; rules: FirewallRule[] }>> => {
+    const result = await postJSONResult<{ index: number; rules: unknown[] }>(
+      `/api/v1/firewall/rules/${encodeURIComponent(id)}/move`, { position },
+    );
+    return result.ok ? { ...result, data: { ...result.data, rules: normalizeFirewallRules(result.data.rules) } } : result;
+  },
+  publishPortForward: (forward: PortForward, allowRule = true) =>
+    postJSONResult<ForwardPublishResult>("/api/v1/firewall/port-forwards", { forward, allowRule }),
+  deletePortForward: (id: string) =>
+    deleteJSONResult<ForwardDeleteResult>(`/api/v1/firewall/port-forwards/${encodeURIComponent(id)}`),
   updateFirewallRule: async (
     id: string,
     r: FirewallRulePatch,

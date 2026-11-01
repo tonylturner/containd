@@ -37,7 +37,7 @@ func replyPredicateParity(t *testing.T, proto string, attrs map[string]any, entr
 		t.Fatal(err)
 	}
 	e.eventStore.Append(retained)
-	preview := e.previewRule(entry, previewZoneResolver)
+	preview := e.previewRule(PreviewRuleRequest{Entry: entry}, previewZoneResolver)
 	count := 0
 	if wantMatch {
 		count = 1

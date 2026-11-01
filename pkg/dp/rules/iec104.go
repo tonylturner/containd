@@ -65,22 +65,10 @@ func (e *Evaluator) IEC104Envelope(ctx EvalContext, globalMode string) (matched 
 	return false, ""
 }
 
-// EvaluateIEC104 evaluates one IEC104 object (or S/U/error APDU) against
-// the IEC104 rules only, in DecisionOrder: any matching ALLOW wins, else
-// the first matching DENY by rule ID. Other rules, including a broad
-// tcp/2404 ALLOW, do not take part. No match is DENY whatever
-// firewall.defaultAction says. ctx carries the session tuple, as for
-// IEC104Envelope, and ICS.IEC104 must be set.
+// EvaluateIEC104 judges the configured-order enforcing IEC-only partition.
+// Plain rules never participate and its unmatched default is always DENY.
 func (e *Evaluator) EvaluateIEC104(ctx EvalContext) (Action, *Entry) {
-	if ctx.ICS == nil || ctx.ICS.IEC104 == nil {
-		return ActionDeny, nil
-	}
-	for _, i := range e.decide {
-		if ce := &e.compiled[i]; ce.iec != nil && ce.matches(ctx) {
-			return ce.Action, &ce.Entry
-		}
-	}
-	return ActionDeny, nil
+	return e.EvaluateIEC104Enforcing(ctx)
 }
 
 // compiledIEC104 is an IEC104 predicate parsed once per snapshot.

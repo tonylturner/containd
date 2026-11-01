@@ -80,7 +80,7 @@ func TestICSAddressMax(t *testing.T) {
 // The evaluator matches every accepted entry on exactly its range.
 func TestEvaluatorMatchesAcceptedICSAddresses(t *testing.T) {
 	for _, tc := range acceptedICSAddresses {
-		ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{{
+		ev := NewEvaluator(&Snapshot{DPIMode: "enforce", Default: ActionDeny, Firewall: []Entry{{
 			ID: "addr", ICS: ICSPredicate{Protocol: "modbus", Addresses: []string{tc.spec}}, Action: ActionAllow,
 		}}})
 		decide := func(addr uint32) Action {
@@ -103,7 +103,7 @@ func TestEvaluatorMatchesAcceptedICSAddresses(t *testing.T) {
 // to the entries that parse.
 func TestEvaluatorRefusedICSAddressMatchesNothing(t *testing.T) {
 	for _, tc := range refusedICSAddresses {
-		ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{{
+		ev := NewEvaluator(&Snapshot{DPIMode: "enforce", Default: ActionDeny, Firewall: []Entry{{
 			ID: "addr", ICS: ICSPredicate{Protocol: "modbus", Addresses: []string{"0-65535", tc.spec}}, Action: ActionAllow,
 		}}})
 		for _, addr := range []uint32{0, 5, 256, 512} {

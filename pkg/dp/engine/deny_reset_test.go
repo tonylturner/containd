@@ -186,6 +186,17 @@ func TestDenyResetActions(t *testing.T) {
 				f.synAck()
 				f.accept("allowed read", p.read(1))
 				pkt := f.segment(false, f.isn+f.next, 9000, ackPsh, p.denied[0].frame)
+				if mode == "default" {
+					d := f.handle(pkt)
+					if d.Action != capture.Repeat || d.Reason != reasonPolicyNonAdmit {
+						t.Fatalf("default denial = %+v", d)
+					}
+					drainResetWorker(t, f.e)
+					if len(f.inj.Resets()) != 0 {
+						t.Fatal("ordinary default denial reset in userspace")
+					}
+					return
+				}
 				if d := f.handle(pkt); d.Action != capture.Drop || d.Reason != reasonDPIDeny {
 					t.Fatalf("denial = %+v", d)
 				}
@@ -289,15 +300,22 @@ func TestDenyResetUnavailable(t *testing.T) {
 			t.Run(p.name+"/"+mode, func(t *testing.T) {
 				f := newResetFlow(t, p.port)
 				readFC := map[string]uint8{"modbus": 3, "dnp3": 1, "cip": 0x0e}[p.name]
-				// No address scope: both address families exercise a decoded default deny.
+				// No address scope: both families exercise an explicit ICS
+				// denial (ordinary defaults continue to kernel admission).
 				f.e.LoadRules(rules.Snapshot{Default: rules.ActionDeny, Firewall: []rules.Entry{{
 					ID: "reads", Protocols: []rules.Protocol{{Name: "tcp", Port: strconv.Itoa(int(p.port))}},
 					ICS: rules.ICSPredicate{Protocol: p.name, FunctionCode: []uint8{readFC}}, Action: rules.ActionAllow,
 				}}})
+				snap := *f.e.CurrentRules()
+				deny := snap.Firewall[0]
+				deny.ID, deny.Action, deny.ICS.FunctionCode = "commands-denied", rules.ActionDeny, nil
+				snap.Firewall = append(snap.Firewall, deny)
+				f.e.LoadRules(snap)
 				pkt := f.segment(false, 7000, 9000, ackPsh, p.denied[0].frame)
 				switch mode {
 				case "IPv6":
 					pkt.SrcIP, pkt.DstIP = net.ParseIP("2001:db8::1"), net.ParseIP("2001:db8::2")
+					pkt.Queue = nil
 				case "injector":
 					f.e.iec.health.fault(faultInjector, "unavailable")
 				case "send_failure":
@@ -307,7 +325,7 @@ func TestDenyResetUnavailable(t *testing.T) {
 				syn.Payload, syn.TCP.Flags = nil, capture.TCPFlagSYN
 				syn.TCP.Seq--
 				markHandshake(&syn)
-				if d := f.handle(syn); d.Action != capture.Accept {
+				if d := f.handle(syn); d.Action != capture.Repeat {
 					t.Fatalf("SYN = %+v", d)
 				}
 				if d := f.handle(pkt); d.Action != capture.Drop || d.Reason != reasonDPIDeny {
@@ -357,7 +375,7 @@ func TestDenyUDPDatagramOnly(t *testing.T) {
 		t.Fatalf("UDP denied datagram = %+v", d)
 	}
 	pkt.Payload = cipCommand(0x0e)
-	if d := f.handle(pkt); d.Action != capture.Accept {
+	if d := f.handle(pkt); d.Action != capture.Repeat {
 		t.Fatalf("UDP next allowed datagram = %+v", d)
 	}
 	drainResetWorker(t, f.e)

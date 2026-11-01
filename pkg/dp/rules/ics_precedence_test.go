@@ -26,20 +26,21 @@ func TestICSContextPrecedence(t *testing.T) {
 				}
 				return ev.EvaluateMatch(ctx)
 			}
-			ev := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{
+			ev := NewEvaluator(&Snapshot{DPIMode: "enforce", Default: ActionDeny, Firewall: []Entry{
 				{ID: "deny-first", Action: ActionDeny, ICS: first},
 				{ID: "allow-a", Action: ActionAllow, ICS: first},
 				{ID: "allow-b", Action: ActionAllow, ICS: second},
 			}})
 			// The caller judges every context separately. No single rule needs
-			// to cover both objects; a restrictive DENY cannot beat an ALLOW.
+			// to cover both objects; the earlier matching DENY wins.
 			for i, obj := range []ICSContext{a, b} {
-				wantID := []string{"allow-a", "allow-b"}[i]
-				if action, entry := evaluate(ev, EvalContext{ICS: &obj}); action != ActionAllow || entry == nil || entry.ID != wantID {
+				wantID := []string{"deny-first", "allow-b"}[i]
+				wantAction := []Action{ActionDeny, ActionAllow}[i]
+				if action, entry := evaluate(ev, EvalContext{ICS: &obj}); action != wantAction || entry == nil || entry.ID != wantID {
 					t.Fatalf("context %d = %s by %v, want %s", i, action, entry, wantID)
 				}
 			}
-			onlyA := NewEvaluator(&Snapshot{Default: ActionDeny, Firewall: []Entry{
+			onlyA := NewEvaluator(&Snapshot{DPIMode: "enforce", Default: ActionDeny, Firewall: []Entry{
 				{ID: "allow-a", Action: ActionAllow, ICS: first},
 			}})
 			if action, entry := evaluate(onlyA, EvalContext{ICS: &b}); action != ActionDeny || entry != nil {
@@ -49,12 +50,12 @@ func TestICSContextPrecedence(t *testing.T) {
 			if protocol == ProtocolIEC104 {
 				broad.Protocol = protocol // generic L4 ALLOW stays outside the IEC envelope
 			}
-			ev = NewEvaluator(&Snapshot{Firewall: []Entry{
+			ev = NewEvaluator(&Snapshot{DPIMode: "enforce", Firewall: []Entry{
 				{ID: "a-deny", Action: ActionDeny, ICS: first},
 				{ID: "z-broad", Action: ActionAllow, ICS: broad},
 			}})
-			if action, entry := evaluate(ev, EvalContext{ICS: &a}); action != ActionAllow || entry == nil || entry.ID != "z-broad" {
-				t.Fatalf("broad ALLOW = %s by %v", action, entry)
+			if action, entry := evaluate(ev, EvalContext{ICS: &a}); action != ActionDeny || entry == nil || entry.ID != "a-deny" {
+				t.Fatalf("earlier DENY = %s by %v", action, entry)
 			}
 		})
 	}

@@ -87,32 +87,36 @@ func appendIP(b []byte, ip net.IP) []byte {
 
 // State holds runtime flow state and timestamps.
 type State struct {
-	Key         Key
-	idKey       MapKey
-	id          string
-	Connection  ConnectionSlot `json:"-"`
-	FirstSeen   time.Time
-	LastSeen    time.Time
-	Bytes       uint64
-	Packets     uint64
-	Application string
-	TCPState    string
-	IdleTimeout time.Duration
-	HardTimeout time.Duration
-	LastAction  string
+	Key          Key
+	idKey        MapKey
+	id           string
+	Connection   ConnectionSlot   `json:"-"`
+	InlinePolicy InlinePolicySlot `json:"-"`
+	FirstSeen    time.Time
+	LastSeen     time.Time
+	Bytes        uint64
+	Packets      uint64
+	Application  string
+	TCPState     string
+	IdleTimeout  time.Duration
+	HardTimeout  time.Duration
+	LastAction   string
 	// Tags are the labels of the TAG rules that match this connection
 	// at evidence binding. The engine guards updates and snapshots with flowMu.
 	Tags []string
 }
 
 func NewState(key Key, now time.Time) *State {
+	var inline InlinePolicySlot
+	inline.Store(nil)
 	return &State{
-		Key:        key,
-		idKey:      key.MapKey(),
-		id:         key.Hash(),
-		Connection: newConnectionSlot(),
-		FirstSeen:  now,
-		LastSeen:   now,
+		Key:          key,
+		idKey:        key.MapKey(),
+		id:           key.Hash(),
+		Connection:   newConnectionSlot(),
+		InlinePolicy: inline,
+		FirstSeen:    now,
+		LastSeen:     now,
 	}
 }
 

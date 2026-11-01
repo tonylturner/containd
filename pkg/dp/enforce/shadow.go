@@ -3,38 +3,29 @@
 package enforce
 
 import (
+	"fmt"
 	"net/netip"
-	"sort"
 	"strings"
 
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
-// shadowWarnings reports each DENY or RESET rule that an ALLOW rule
-// shadows: the ALLOW matches every packet and ICS message the rule
-// matches, and any matching ALLOW takes precedence (rules.DecisionOrder),
-// so the rule never decides anything. The check is sound, not complete: a
-// rule covered only by several ALLOWs together is not reported. IEC104
-// rules are left out: their objects are decided among IEC104 rules alone.
+// shadowWarnings reports terminals covered by an earlier unconditional
+// terminal. Effects and monitor rules cannot shadow a decision. IEC objects
+// retain their separate partition, so plain rules cannot shadow IEC policy.
 func shadowWarnings(snap *rules.Snapshot) []RuleWarning {
-	var allows []rules.Entry
-	for _, e := range snap.Firewall {
-		if e.Action == rules.ActionAllow && !rules.MonitorICS(e, snap.DPIMode) && unconditional(e) {
-			allows = append(allows, e)
-		}
-	}
-	sort.SliceStable(allows, func(i, j int) bool { return allows[i].ID < allows[j].ID })
 	var out []RuleWarning
-	for _, d := range snap.Firewall {
-		if (d.Action != rules.ActionDeny && d.Action != rules.ActionReset) || isIEC104Rule(d) || rules.MonitorICS(d, snap.DPIMode) {
+	for i, d := range snap.Firewall {
+		if !d.Action.Decides() || rules.MonitorICS(d, snap.DPIMode) {
 			continue
 		}
-		for _, a := range allows {
+		for j, a := range snap.Firewall[:i] {
+			if !a.Action.Decides() || rules.MonitorICS(a, snap.DPIMode) || !unconditional(a) || isIEC104Rule(d) != isIEC104Rule(a) {
+				continue
+			}
 			if covers(a, d) {
-				out = append(out, RuleWarning{
-					RuleID: d.ID, ShadowedBy: a.ID, Action: d.Action,
-					Message: "shadowed by ALLOW rule " + a.ID + ", which matches all of its traffic; a matching ALLOW takes precedence over every " + string(rules.ActionDeny) + " and " + string(rules.ActionReset),
-				})
+				out = append(out, RuleWarning{RuleID: d.ID, ShadowedBy: a.ID, Action: d.Action,
+					Message: fmt.Sprintf("rule at position %d is shadowed by earlier %s rule %s at position %d, which matches all of its traffic", i+1, a.Action, a.ID, j+1)})
 				break
 			}
 		}
@@ -42,7 +33,7 @@ func shadowWarnings(snap *rules.Snapshot) []RuleWarning {
 	return out
 }
 
-// unconditional reports an ALLOW whose match depends on nothing but its
+// unconditional reports a terminal whose match depends on nothing but its
 // L3/L4 scope and, at most, an ICS protocol: no identities, schedule or
 // semantic ICS values.
 func unconditional(a rules.Entry) bool {
@@ -54,12 +45,12 @@ func unconditional(a rules.Entry) bool {
 	return icsEmpty(ics)
 }
 
-// covers reports whether ALLOW a matches everything d matches.
+// covers reports whether terminal a matches everything d matches.
 func covers(a, d rules.Entry) bool {
 	if p := a.ICS.Protocol; p != "" && !strings.EqualFold(p, d.ICS.Protocol) {
 		return false
 	}
-	return zonesCover(a.SourceZones, d.SourceZones) && zonesCover(a.DestZones, d.DestZones) &&
+	return zonesCover(a.ViaForwards, d.ViaForwards) && zonesCover(a.SourceZones, d.SourceZones) && zonesCover(a.DestZones, d.DestZones) &&
 		prefixesCover(a.Sources, d.Sources) && prefixesCover(a.Destinations, d.Destinations) &&
 		protocolsCover(a.Protocols, d.Protocols)
 }
@@ -163,5 +154,9 @@ func protocolCovers(a, d rules.Protocol) bool {
 func icsEmpty(p rules.ICSPredicate) bool {
 	return p.Protocol == "" && len(p.FunctionCode) == 0 && p.UnitID == nil && len(p.Addresses) == 0 &&
 		len(p.ObjectClasses) == 0 && !p.ReadOnly && !p.WriteOnly && p.Direction == "" && p.Mode == "" &&
-		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0
+		len(p.TypeIDs) == 0 && len(p.Classes) == 0 && len(p.CA) == 0 && len(p.IOA) == 0 &&
+		len(p.COT) == 0 && len(p.Originators) == 0 && p.Negative == nil && p.Test == nil && p.SelectExecute == "" &&
+		len(p.CommandStates) == 0 && len(p.CommandQualifiers) == 0 &&
+		len(p.Masters) == 0 && len(p.Outstations) == 0 && len(p.Groups) == 0 && len(p.Variations) == 0 &&
+		len(p.Instances) == 0 && len(p.Attributes) == 0 && len(p.Tags) == 0
 }

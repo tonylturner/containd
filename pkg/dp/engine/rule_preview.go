@@ -19,9 +19,17 @@ import (
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
+// PreviewRuleRequest carries candidate-owned translation selectors. Runtime
+// zone, identity and device-address inputs still belong to the engine.
+type PreviewRuleRequest struct {
+	Entry          rules.Entry                   `json:"entry"`
+	ForwardMatches map[string]rules.ForwardMatch `json:"forwardMatches"`
+}
+
 // PreviewRuleResponse is the stable public rule-impact response, also used on
 // the internal engine API. Samples retain their original wire orientation.
 type PreviewRuleResponse struct {
+	Unavailable   string            `json:"unavailable,omitempty"`
 	MatchCount    int               `json:"match_count"`
 	SampleMatches []events.Event    `json:"sample_matches"`
 	TimeRange     *PreviewTimeRange `json:"time_range"`
@@ -44,12 +52,13 @@ type PreviewTimeRange struct {
 // default actions. It does not apply rules, log decisions or enforce verdicts.
 // A schedule is evaluated at each event's time. Identities are those the
 // running configuration binds to each event's opener now, not at the time
-// of the event.
-func (e *Engine) PreviewRule(entry rules.Entry) PreviewRuleResponse {
-	return e.previewRule(entry, e.zones.resolve)
+// of the event. Forward warnings use the candidate translation selectors.
+func (e *Engine) PreviewRule(request PreviewRuleRequest) PreviewRuleResponse {
+	return e.previewRule(request, e.zones.resolve)
 }
 
-func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRuleResponse {
+func (e *Engine) previewRule(request PreviewRuleRequest, resolve zoneResolver) PreviewRuleResponse {
+	entry := request.Entry
 	const maxSamples = 50
 	result := PreviewRuleResponse{SampleMatches: []events.Event{}}
 	// Use the same retained evidence window as GET /internal/events, including
@@ -57,14 +66,19 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 	evs := e.eventStore.ListTelemetry(5000)
 	result.TotalEvents = len(evs)
 	snap := e.ruleSnap.Load()
-	candidate := &rules.Snapshot{Firewall: []rules.Entry{entry}}
+	candidate := &rules.Snapshot{Firewall: []rules.Entry{entry}, ForwardMatches: request.ForwardMatches}
 	if snap != nil {
 		candidate.IdentityBindings = snap.IdentityBindings
 		candidate.ZoneIfaces = snap.ZoneIfaces
+		candidate.LocalIPv4ByDevice = snap.LocalIPv4ByDevice
 	}
 	result.Warnings = (&enforce.Compiler{QueueID: e.enforcedQueueID()}).RuleWarnings(candidate)
 	if cov := e.coverageOf(candidate); len(cov) == 1 {
 		result.ICSCoverage = &cov[0]
+	}
+	if len(entry.ViaForwards) > 0 {
+		result.Unavailable = "Retained events do not record which connections containd translated, so a rule limited to port forwards cannot be previewed from history."
+		return result
 	}
 	evaluator := rules.NewEvaluator(candidate)
 	parsing := e.ICSParsing(entry.ICS.Protocol)
@@ -82,12 +96,9 @@ func (e *Engine) previewRule(entry rules.Entry, resolve zoneResolver) PreviewRul
 		contexts := previewEventContexts(snap, entry, ev, resolve, parsing)
 		matches := len(contexts) > 0
 		for _, ctx := range contexts {
-			var matched *rules.Entry
-			if entry.ICS.Protocol == rules.ProtocolIEC104 {
-				_, matched = evaluator.EvaluateIEC104(ctx)
-			} else {
-				matched = evaluator.AnyMatch(ctx)
-			}
+			// This is an isolated predicate preview, not the enforcing
+			// partition: monitor rules and effects must remain previewable.
+			matched := evaluator.AnyMatch(ctx)
 			if entry.Action == rules.ActionAllow {
 				if matched == nil {
 					matches = false

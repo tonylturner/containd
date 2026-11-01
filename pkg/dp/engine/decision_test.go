@@ -51,7 +51,7 @@ func (idleCapture) Settler() capture.Settler                     { return nil }
 func modbusDenyEngine(t *testing.T, up *syncUpdater) *Engine {
 	t.Helper()
 	e, err := New(Config{
-		Enforce:    EnforceConfig{Enabled: true, Updater: up},
+		Enforce:    EnforceConfig{ClearMark: noPolicyMarks, Enabled: true, Updater: up},
 		DPIEnabled: true,
 		DPIMode:    "enforce",
 	})

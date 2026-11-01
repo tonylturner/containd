@@ -42,8 +42,8 @@ func TestEstablishedSYNDoesNotReanchorPickup(t *testing.T) {
 			f.syn()
 			f.accept("read before the sweep", p.read(1))
 			f.e.sweepFlows(time.Now().Add(time.Hour))
-			if d := f.establishedSyn(f.next); d.Action != capture.Accept {
-				t.Fatalf("SYN of a forgotten flow = %+v, want Accept", d)
+			if d := f.establishedSyn(f.next); d.Action != capture.Repeat {
+				t.Fatalf("SYN of a forgotten flow = %+v, want Repeat", d)
 			}
 			f.pickedUp("read after the SYN", f.decide(f.next, ackPsh, p.read(2)), rule, 0)
 		})

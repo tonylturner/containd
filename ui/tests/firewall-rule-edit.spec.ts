@@ -86,6 +86,7 @@ test("clearing rule fields in the editor clears them", async ({ page }) => {
     destinations: [],
     protocols: [{ name: "tcp", port: "502" }],
     identities: [],
+    viaForwards: [],
     rateLimit: null,
     tag: "",
     schedule: null,
@@ -237,6 +238,7 @@ test("the create form stages a RESET rule with identities and a schedule", async
   await expect.poll(() => seen.creates.length).toBe(1);
   expect(seen.creates[0]).toEqual({
     id: "reset-ssh",
+    position: "bottom",
     protocols: [{ name: "tcp", port: "22" }],
     identities: ["contractor", "vendor"],
     schedule: { daysOfWeek: ["Sunday", "Saturday"] },
@@ -251,7 +253,7 @@ test("the rule list tells deciding actions from effects and states precedence", 
     { id: "pps-cap", action: "RATE_LIMIT", rateLimit: { packetsPerSecond: 100, burst: 20 } },
     { id: "label-eng", action: "TAG", tag: "eng-access", identities: ["engineering", "vendor"] },
   ]);
-  await expect(page.getByText("Among enforcing rules, order does not decide: any matching ALLOW wins over every DENY and RESET.")).toBeVisible();
+  await expect(page.getByText(/Among enforcing rules, the first matching terminal rule in list order decides/)).toBeVisible();
   await expect(page.getByText(/Monitor ICS rules never decide/)).toBeVisible();
   const row = (id: string) => page.getByRole("row").filter({ has: page.getByRole("cell", { name: id, exact: true }) });
   await expect(row("reset-ssh").getByText("RESET", { exact: true })).toHaveClass(/badge-critical/);

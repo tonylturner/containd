@@ -84,5 +84,5 @@ func previewWithQueue(queueID int, bindings []rules.IdentityBinding, entry rules
 	for _, ev := range evs {
 		e.eventStore.Append(ev)
 	}
-	return e.previewRule(entry, previewZoneResolver)
+	return e.previewRule(PreviewRuleRequest{Entry: entry}, previewZoneResolver)
 }

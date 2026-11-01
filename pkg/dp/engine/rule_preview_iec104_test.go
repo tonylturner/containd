@@ -24,7 +24,7 @@ func previewRule(t *testing.T, events []dpevents.Event, rule string) PreviewRule
 		events[i].Timestamp = time.Unix(int64(len(events)-i), 0)
 		e.eventStore.Append(events[i])
 	}
-	return e.PreviewRule(entry)
+	return e.PreviewRule(PreviewRuleRequest{Entry: entry})
 }
 
 func iecEvent(id uint64, kind string, request bool, attrs map[string]any) dpevents.Event {

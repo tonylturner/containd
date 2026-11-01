@@ -118,6 +118,8 @@ func NewRegistry(store config.Store, api *API) *Registry {
 		r.RegisterRole("set ip rule add", RoleAdmin, setIPRuleAddAPI(api))
 		r.RegisterRole("set ip rule del", RoleAdmin, setIPRuleDelAPI(api))
 		r.RegisterRole("diag interfaces reconcile", RoleAdmin, interfacesReconcileAPI(api))
+		r.RegisterRole("add firewall rule", RoleAdmin, setFirewallRuleAPI(api))
+		r.RegisterRole("move firewall rule", RoleAdmin, moveFirewallRuleAPI(api))
 		r.RegisterRole("set firewall rule", RoleAdmin, setFirewallRuleAPI(api))
 		r.RegisterRole("set firewall ics-rule", RoleAdmin, setFirewallICSRuleAPI(api))
 		r.RegisterRole("show firewall ics-rules", RoleView, showFirewallICSRulesAPI(api))

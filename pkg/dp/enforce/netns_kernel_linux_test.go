@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,11 +18,11 @@ import (
 
 // netnsLab routes between a client and a target network namespace through
 // this namespace's forward chain. Tests using it replace containd's nft
-// tables and enable forwarding in this namespace, so they run only when CONTAIND_NETNS_KERNEL_TEST=1 inside a disposable
+// tables and require forwarding in this namespace, so they run only when CONTAIND_NETNS_KERNEL_TEST=1 inside a disposable
 // privileged Linux container with nft, iproute2 and Python, for example:
 //
 //	GOOS=linux CGO_ENABLED=0 go test -c -o build/enforce.test ./pkg/dp/enforce
-//	docker run --rm --privileged -e CONTAIND_NETNS_KERNEL_TEST=1 -v "$PWD/build:/w" alpine:3.21 \
+//	docker run --rm --privileged --sysctl net.ipv4.ip_forward=1 -e CONTAIND_NETNS_KERNEL_TEST=1 -v "$PWD/build:/w" alpine:3.21 \
 //	  sh -c 'apk add -q nftables iproute2 python3 && /w/enforce.test -test.run Kernel -test.v'
 type netnsLab struct {
 	ctx    context.Context
@@ -31,7 +32,7 @@ type netnsLab struct {
 
 // newNetnsLab creates the namespaces and veth pairs <name>0 and <name>1
 // with host addresses 198.18.<subnet>.1/24 and 198.18.<subnet+10>.1/24,
-// and enables forwarding. The target gets no default route. Every command
+// and checks forwarding. The target gets no default route. Every command
 // of the lab, cleanup included, shares one timeout.
 func newNetnsLab(t *testing.T, name string, subnet int, timeout time.Duration) *netnsLab {
 	t.Helper()
@@ -54,8 +55,9 @@ func newNetnsLab(t *testing.T, name string, subnet int, timeout time.Duration) *
 		lab.run(t, "ip", "-n", ns, "link", "set", peer, "up")
 		lab.run(t, "ip", "-n", ns, "link", "set", "lo", "up")
 	}
-	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0600); err != nil {
-		t.Fatal(err)
+	forward, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
+	if err != nil || strings.TrimSpace(string(forward)) != "1" {
+		t.Fatalf("requires docker --sysctl net.ipv4.ip_forward=1: %s %v", forward, err)
 	}
 	return lab
 }
@@ -113,7 +115,7 @@ func (l *netnsLab) serveLocal(t *testing.T, addr string, port int) {
 func (l *netnsLab) serve(t *testing.T, prefix []string, addr string, port int) {
 	t.Helper()
 	args := append(append([]string(nil), prefix...), "python3", "-u", "-c", fmt.Sprintf(`import socket
-s=socket.socket(); s.bind((%q,%d)); s.listen(); print('ready',flush=True)
+s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind((%q,%d)); s.listen(); print('ready',flush=True)
 while True:
  c,a=s.accept(); c.sendall(a[0].encode()); c.close()
 `, addr, port))
