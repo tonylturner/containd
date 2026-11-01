@@ -14,6 +14,25 @@ import { DetailRow, DetailSection, severityVariant } from "./alert-detail-parts"
 import { IEC104EvidencePanel } from "./iec104-alert-panel";
 import { alertView } from "./alert-view";
 
+/** A decision, packet verdict and TCP reset are different evidence, not synonyms. */
+function protectionOutcome(event: TelemetryEvent): string {
+  const attrs = event.attributes ?? {};
+  if (event.kind === "ics.decision") {
+    if (attrs.decision === "would_drop") return "Would-block (monitor)";
+    if (attrs.decision === "deny") return "Deny decision — packet outcome not reported";
+  }
+  if (event.kind === "ics.verdict") {
+    if (attrs.outcome === "dropped") return "Blocked — packet drop reported";
+    if (attrs.outcome === "drop_failed") return "Drop failed — blocking not confirmed";
+  }
+  if (event.kind === "ics.session") {
+    if (attrs.outcome === "reset_failed") return "Reset failed — closure not confirmed";
+    if (attrs.outcome === "reset_sent") return "Reset sent — closure not confirmed";
+    return String(attrs.outcome ?? "Unknown");
+  }
+  return "Detection — blocking not reported";
+}
+
 const PAGE_SIZES = [10, 25, 50, 100];
 
 export default function AlertsPage() {
@@ -93,6 +112,12 @@ export default function AlertsPage() {
     return c;
   }, [alerts]);
 
+  function closeDetail() {
+    const id = selected?.id;
+    setSelected(null);
+    if (id) document.getElementById(`alert-inspect-${id}`)?.focus();
+  }
+
   return (
     <Shell
       title="IDS Alerts"
@@ -123,7 +148,7 @@ export default function AlertsPage() {
         <div role="alert" className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>
       ) : loading ? <SkeletonList rows={4} /> : <>
       {/* Severity summary */}
-      <div className="mb-4 flex gap-3">
+      <div className="mb-4 flex flex-wrap gap-3">
         {(["critical", "high", "medium", "low"] as const).map((s) => (
           <button key={s} onClick={() => { setSevFilter(sevFilter === s ? "" : s); setPage(0); }}
             className={`flex items-center gap-1.5 rounded-xs border px-3 py-1.5 text-xs tabular-nums transition-ui ${
@@ -147,10 +172,11 @@ export default function AlertsPage() {
         <EmptyState title="No IDS alerts"
           description={events.some((e) => alertView(e)) ? "No alerts match your filters." : "No alerts yet. Alerts appear when intrusion detection finds suspicious activity."} />
       ) : (
-        <div className="flex gap-4">
+        <div className="flex flex-col gap-4 lg:flex-row">
           {/* Alert list */}
           <div className={selected ? "min-w-0 flex-1" : "min-w-0 w-full"}>
             <div className="rounded-xs border bg-(--surface) overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="bg-(--surface) text-[9px] font-medium uppercase tracking-[2px] text-(--text-dim)">
@@ -159,6 +185,7 @@ export default function AlertsPage() {
                     <th className="px-4 py-2.5">Source</th>
                     <th className="px-4 py-2.5">Dest</th>
                     <th className="px-4 py-2.5">Time</th>
+                    <th className="px-4 py-2.5">Protection outcome</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -168,27 +195,31 @@ export default function AlertsPage() {
                       <tr key={ev.id}
                         onClick={() => setSelected(isActive ? null : ev)}
                         className="table-row-hover transition-ui border-t cursor-pointer">
-                        <td className="px-4 py-2.5 font-medium text-(--text) max-w-[200px] truncate" title={msg}>{msg}</td>
+                        <td className="px-4 py-2.5 font-medium text-(--text) max-w-[200px]" title={msg}>
+                          <button id={`alert-inspect-${ev.id}`} type="button" aria-expanded={isActive} aria-controls="alert-inspection"
+                            onClick={e => { e.stopPropagation(); setSelected(isActive ? null : ev); }}
+                            className={`block w-full text-left underline decoration-dotted underline-offset-4 ${ev.attributes?.error ? "wrap-anywhere" : "truncate"}`}>{msg}</button>
+                        </td>
                         <td className="px-4 py-2.5"><StatusBadge variant={severityVariant(sev)} dot>{sev}</StatusBadge></td>
                         <td className="px-4 py-2.5 text-xs text-(--text) font-mono">{formatEndpoint(ev.srcIp, ev.srcPort)}</td>
                         <td className="px-4 py-2.5 text-xs text-(--text) font-mono">{formatEndpoint(ev.dstIp, ev.dstPort)}</td>
                         <td className="whitespace-nowrap px-4 py-2.5 text-xs text-(--text-muted)">{new Date(ev.timestamp).toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-xs">{protectionOutcome(ev)}</td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+              </div>
               <Pagination page={clampedPage} totalPages={totalPages} totalItems={alerts.length}
                 onPage={setPage} pageSize={pageSize} onPageSize={(s) => { setPageSize(s); setPage(0); }} pageSizeOptions={PAGE_SIZES} />
             </div>
           </div>
 
           {/* Detail panel */}
-          {selected && (
-            <div className="w-1/2 min-w-0 shrink-0">
-              <AlertDetailPanel event={selected} onClose={() => setSelected(null)} />
-            </div>
-          )}
+          <div id="alert-inspection" hidden={!selected} className={selected ? "w-full min-w-0 shrink-0 lg:w-1/2" : "hidden"}>
+            {selected && <AlertDetailPanel event={selected} onClose={closeDetail} />}
+          </div>
         </div>
       )}
       </>}

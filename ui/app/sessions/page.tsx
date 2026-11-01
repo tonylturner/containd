@@ -2,14 +2,14 @@
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, Fragment } from "react";
 
 import { api, isAdmin, type ConntrackEntry } from "../../lib/api";
 import type { ConntrackKillResult, ConntrackKillRequest, ConntrackKillTuple } from "../../lib/api-console";
 import { Shell } from "../../components/Shell";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
-import { TagList } from "../../components/TagList";
+import { ConnectionInspection } from "./connection-inspection";
 import { formatEndpoint } from "../../lib/endpoint";
 
 type Filter = {
@@ -69,6 +69,7 @@ function replyTuple(e: ConntrackEntry): string {
 }
 
 export default function SessionsPage() {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const canKill = isAdmin();
   const confirm = useConfirm();
   const [entries, setEntries] = useState<ConntrackEntry[]>([]);
@@ -155,12 +156,12 @@ export default function SessionsPage() {
     <Shell
       title="Sessions"
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
             value={filter.q}
             onChange={(e) => setFilter({ q: e.target.value })}
             placeholder="Filter (ip, port, proto, state, tag)…"
-            className="input-industrial w-64"
+            className="input-industrial w-64 max-w-full"
           />
           <select
             value={String(limit)}
@@ -239,31 +240,27 @@ export default function SessionsPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Sport</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Dst</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Dport</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Mark</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Tags</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Assured</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">TTL</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-(--text-dim)">Reply tuple (NAT)</th>
                   <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-(--text-dim)">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((e, idx) => (
-                  <tr key={`${e.proto}-${e.src}-${e.sport ?? e.icmpId}-${e.dst}-${e.dport ?? e.icmpType}-${idx}`} className="table-row-hover transition-ui border-t">
+                {filtered.map((e, idx) => {
+                  const key = JSON.stringify([e.proto, e.src, e.sport, e.icmpId, e.dst, e.dport, e.icmpType, e.icmpCode, idx]);
+                  const detailId = `session-detail-${encodeURIComponent(key)}`;
+                  return (
+                  <Fragment key={key}>
+                  <tr className="table-row-hover transition-ui border-t">
                     <td className="px-4 py-3 font-medium text-(--text)">{e.proto || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.state || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.src || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.icmpId !== undefined ? `id ${e.icmpId}` : e.sport || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.dst || "—"}</td>
                     <td className="px-4 py-3 text-(--text)">{e.icmpType !== undefined ? `type ${e.icmpType} code ${e.icmpCode ?? "—"}` : e.dport || "—"}</td>
-                    <td className="px-4 py-3 text-(--text)">{e.mark || "—"}</td>
-                    <td className="px-4 py-3 text-(--text)">
-                      <TagList tags={e.tags} />
-                    </td>
-                    <td className="px-4 py-3 text-(--text)">{e.assured ? "yes" : "no"}</td>
-                    <td className="px-4 py-3 text-(--text)">{e.timeoutSecs ? `${e.timeoutSecs}s` : "—"}</td>
-                    <td className="px-4 py-3 text-(--text-muted)">{replyTuple(e)}</td>
                     <td className="px-4 py-3 text-right">
+                      <button type="button" aria-expanded={!!expanded[key]} aria-controls={detailId}
+                        onClick={() => setExpanded(old => ({ ...old, [key]: !old[key] }))}
+                        className="rounded-xs border px-2 py-1 text-xs">Inspect connection</button>
+                      {(e.tags?.length || e.mark || e.replySrc) && <span className="mt-1 block text-xs text-(--text-muted)">{e.tags?.length ? `Tags: ${e.tags.length} · ` : ""}{e.mark ? `Mark: ${e.mark} · ` : ""}{e.replySrc ? "Reply tuple (NAT) available" : ""}</span>}
                       <button
                         disabled={!canKill || killing || killTuple(e) === null || !Number.isInteger(durationSecs) || durationSecs < 1 || durationSecs > 3600}
                         onClick={() => handleKill(e)}
@@ -278,7 +275,9 @@ export default function SessionsPage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  <ConnectionInspection entry={e} id={detailId} open={!!expanded[key]} reply={replyTuple(e)} />
+                  </Fragment>
+                );})}
               </tbody>
             </table>
           </div>

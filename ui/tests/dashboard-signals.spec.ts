@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { observation } from "./fixtures/protection-api";
 
 // The dashboard shows only what the APIs report: no animated traffic, no
 // invented baseline, and no alert pinned to a zone the event does not name.
@@ -49,6 +50,9 @@ type Mocks = {
   interfaceCount?: number;
   interfacesStatus?: number;
   interfaceStateStatus?: number;
+  simulation?: boolean;
+  dashboardStatus?: number;
+  protection?: ReturnType<typeof observation>;
 };
 
 async function openDashboard(page: Page, mocks: Mocks) {
@@ -62,6 +66,7 @@ async function openDashboard(page: Page, mocks: Mocks) {
     let status = 200;
     if (p === "/api/v1/auth/me" || p === "/api/v1/auth/session") body = user;
     if (p === "/api/v1/dashboard") {
+      status = mocks.dashboardStatus ?? 200;
       body = {
         user,
         health: mocks.health ?? { status: "ok", hostname: "test" },
@@ -90,16 +95,18 @@ async function openDashboard(page: Page, mocks: Mocks) {
     if (p === "/api/v1/ids/rules") body = mocks.ids ?? { enabled: false, rules: [] };
     if (p === "/api/v1/events") body = mocks.events;
     if (p === "/api/v1/flows") body = flows;
-    if (p === "/api/v1/simulation") body = { running: false };
-    if (p === "/api/v1/config/diff") body = { running: {}, candidate: {} };
+    if (p === "/api/v1/simulation") body = { running: mocks.simulation ?? false };
+    if (p === "/api/v1/config/diff") body = { changed: false, changedSections: [], pendingConfirm: null, running: {}, candidate: {} };
+    if (p === "/api/v1/dataplane/protection") body = mocks.protection ?? observation();
     if (p === "/api/v1/services/status") body = mocks.services;
-    await route.fulfill({ status, json: status === 200 ? body : { error: "interface read unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    await route.fulfill({ status, json: status === 200 ? body : { error: "telemetry read unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = Promise.all(["/api/v1/events", "/api/v1/zones", "/api/v1/flows", "/api/v1/system/stats"].map(
     (path) => page.waitForResponse((r) => new URL(r.url()).pathname === path),
   ));
   await page.goto("/");
   await loaded;
+  await page.getByRole("button", { name: /^Dashboard details/ }).click();
 }
 
 const zoneCard = (page: Page, name: string) => page.locator("a[href='/zones/']").filter({ hasText: name });
@@ -112,7 +119,7 @@ const services = {
 
 // Counts pixels close to the alert red the canvas uses for critical zones.
 function redPixels(page: Page) {
-  return page.locator("canvas").first().evaluate((canvas: HTMLCanvasElement) => {
+  return page.locator("#dashboard-details canvas").first().evaluate((canvas: HTMLCanvasElement) => {
     const ctx = canvas.getContext("2d")!;
     const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
     let red = 0;
@@ -125,7 +132,7 @@ function redPixels(page: Page) {
 
 test("network pulse is a still picture of real zone state", async ({ page }) => {
   await openDashboard(page, { events: [idsAlert(1)], services });
-  const canvas = page.locator("canvas").first();
+  const canvas = page.locator("#dashboard-details canvas").first();
   await expect(zoneCard(page, "lan")).toContainText("CLEAR");
   const first = await canvas.screenshot();
   await page.waitForTimeout(750);
@@ -233,7 +240,7 @@ for (const forward_enabled of [false, true]) {
   });
 }
 
-const bindStep = (page: Page) => page.getByText("Bind interfaces", { exact: true }).locator("../..");
+const bindStep = (page: Page) => page.locator("#setup-checklist").getByText("Bind interfaces", { exact: true }).locator("../..");
 const device = (name: string) => ({ name, index: 1, up: true, mtu: 1500, mac: "02:00:00:00:00:01", addrs: [] });
 
 for (const scenario of [
@@ -285,4 +292,64 @@ test("Bind interfaces discards stale readiness on a failed refresh and recovers"
   mocks.interfaceStateStatus = 200;
   await page.clock.fastForward(10_000);
   await expect(bindStep(page).getByText("Ready", { exact: true })).toBeVisible();
+});
+
+
+test("a completed checklist collapses, reopens by keyboard, and keeps every task", async ({ page }) => {
+  await openDashboard(page, { events: [], services, ruleCount: 1, interfaceCount: 1,
+    interfaces: [{ name: "lan", device: "eth0" }], interfaceState: [device("eth0")],
+  });
+  const toggle = page.getByRole("button", { name: /^First-Run Checklist/ });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator("#setup-checklist")).toBeHidden();
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  for (const task of ["Create zones", "Bind interfaces", "Create policy", "Commit runtime changes"]) {
+    await expect(page.locator("#setup-checklist").getByText(task, { exact: true })).toBeVisible();
+  }
+  await page.keyboard.press("Space");
+  await expect(page.locator("#setup-checklist")).toBeHidden();
+});
+
+test("active simulation stays visible with Tools collapsed and Stop remains immediate", async ({ page }) => {
+  await openDashboard(page, { events: [], services, simulation: true });
+  const tools = page.getByRole("button", { name: "Tools", exact: true });
+  await expect(tools).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("status").filter({ hasText: /^Simulation active$/ })).toBeVisible();
+  await expect(page.getByTitle("Stop traffic simulation")).toBeHidden();
+  await tools.click();
+  await expect(page.getByTitle("Stop traffic simulation")).toBeVisible();
+  await expect(page.getByText(/Simulation controls and CLI commands act immediately/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "CLI Console", exact: true })).toBeVisible();
+});
+
+test("stale dashboard totals are discarded while failed enforcement remains prominent", async ({ page }) => {
+  await page.clock.install();
+  const mocks: Mocks = { events: [], services, protection: observation({ state: "failed",
+    components: [{ name: "nft", required: true, state: "failed", reason: "apply rejected", since: "2026-10-31T12:00:00Z" }],
+    effects: [{ traffic: "Monitor traffic", effect: "not_inspected" }],
+  }) };
+  await openDashboard(page, mocks);
+  const protection = page.getByRole("status", { name: "Traffic protection" });
+  await expect(protection).toContainText("apply rejected");
+  mocks.dashboardStatus = 503;
+  await page.clock.fastForward(10_000);
+  await expect(page.getByRole("alert").filter({ hasText: /Dashboard unavailable/ })).toBeVisible();
+  await expect(page.getByText("No recent IDS/AV alerts", { exact: true })).toHaveCount(0);
+  const counter = page.getByText("Total Events", { exact: true }).locator("..");
+  await expect(counter).toContainText("Unknown");
+  await expect(protection).toBeVisible();
+  await expect(protection).toContainText("Monitor traffic is not being inspected");
+});
+
+
+test("dashboard overview and reopened details stay within a 390px viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openDashboard(page, { events: [idsAlert(1)], services, simulation: true });
+  await expect(page.locator("#dashboard-details")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
