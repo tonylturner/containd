@@ -368,6 +368,7 @@ test("Events shows decision, verdict and reset evidence and filters by session",
   await expect(page.getByText("IEC 104 packets dropped")).toBeVisible();
   await expect(page.getByText("IEC 104 reset sent to client")).toBeVisible();
   await expect(page.getByText(`Session ${session} ×`)).toBeVisible();
+  await page.getByRole("button", { name: "Inspect event", exact: true }).first().click();
   const message = page.locator("details").filter({ has: page.getByText("Message and session details", { exact: true }) }).first();
   await message.locator("summary").click();
   await expect(message.getByText(session, { exact: true })).toBeVisible();

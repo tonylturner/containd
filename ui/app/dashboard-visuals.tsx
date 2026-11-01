@@ -132,8 +132,9 @@ export function NetworkPulseCanvas({
       });
     };
     draw();
-    window.addEventListener("resize", draw);
-    return () => window.removeEventListener("resize", draw);
+    const observer = new ResizeObserver(draw);
+    observer.observe(canvasEl);
+    return () => observer.disconnect();
   }, [zones, threatMap]);
 
   return <canvas ref={canvasRef} className="w-full h-full" />;
