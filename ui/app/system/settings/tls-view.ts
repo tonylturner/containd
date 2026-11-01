@@ -37,6 +37,15 @@ function listenerRows(label: string, bound: string | undefined, changes: boolean
   return rows;
 }
 
+/** Equal nonempty paths select one PEM identity bundle, not separate files. */
+function identityRows(cert: string | undefined, key: string | undefined, suffix = ""): TLSRow[] {
+  if (cert && cert === key) return [{ label: `Identity bundle${suffix}`, value: cert }];
+  return [
+    { label: `Cert file${suffix}`, value: cert || "—" },
+    { label: `Key file${suffix}`, value: key || "—" },
+  ];
+}
+
 export function tlsView(info: TLSInfo | null, formatTime = formatTLSTime): TLSView {
   if (!info) {
     return { rows: ["HTTP listen", "HTTPS listen", "Cert file", "Key file", "Cert expires"].map((label) => ({ label, value: "—" })) };
@@ -48,8 +57,7 @@ export function tlsView(info: TLSInfo | null, formatTime = formatTLSTime): TLSVi
   const bound = Boolean(info.servedCertFile);
   if (bound) {
     rows.push(
-      { label: "Cert file", value: info.servedCertFile || "—" },
-      { label: "Key file", value: info.servedKeyFile || "—" },
+      ...identityRows(info.servedCertFile, info.servedKeyFile),
       { label: "Cert subject", value: info.servedCertSubject || "—" },
       { label: "Cert SANs", value: certSANs(info.servedCertDnsNames, info.servedCertIps, info.servedCertSubject) },
       { label: "Cert expires", value: formatTime(info.servedCertNotAfter) },
@@ -66,8 +74,7 @@ export function tlsView(info: TLSInfo | null, formatTime = formatTLSTime): TLSVi
   }
   if (note) {
     rows.push(
-      { label: "Cert file (next start)", value: info.certFile || "—" },
-      { label: "Key file (next start)", value: info.keyFile || "—" },
+      ...identityRows(info.certFile, info.keyFile, " (next start)"),
       { label: "Cert subject (next start)", value: info.certSubject || "—" },
       { label: "Cert SANs (next start)", value: certSANs(info.certDnsNames, info.certIps, info.certSubject) },
       { label: "Cert expires (next start)", value: formatTime(info.certNotAfter) },

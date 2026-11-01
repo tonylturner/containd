@@ -439,6 +439,9 @@ export type MFAEnrollResponse = {
 };
 
 export type TLSInfo = {
+  /** Whether the next-start configuration permits managed identity uploads;
+   * not the bound listener's mode. */
+  managed: boolean;
   /** Listeners management binds at the next start. */
   httpListenAddr?: string;
   httpsListenAddr?: string;
