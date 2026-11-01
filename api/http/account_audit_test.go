@@ -216,8 +216,8 @@ func TestMFAChangesRevokeOtherSessions(t *testing.T) {
 func TestTLSCertificateReplacementIsAudited(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg := config.DefaultConfig()
-	cfg.System.Mgmt.TLSCertFile = filepath.Join(dataDir, "tls", "cert.pem")
-	cfg.System.Mgmt.TLSKeyFile = filepath.Join(dataDir, "tls", "key.pem")
+	cfg.System.Mgmt.TLSCertFile = "/data/tls/server.crt"
+	cfg.System.Mgmt.TLSKeyFile = "/data/tls/server.key"
 	t.Setenv("CONTAIND_TLS_CERT_FILE", "")
 	t.Setenv("CONTAIND_TLS_KEY_FILE", "")
 	audits := &mockAuditStore{}
@@ -234,10 +234,10 @@ func TestTLSCertificateReplacementIsAudited(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("upload = %d %s", rec.Code, rec.Body)
 	}
-	if _, err := os.Stat(cfg.System.Mgmt.TLSCertFile); err != nil {
+	if _, err := os.Stat(filepath.Join(dataDir, "tls", "server.pem")); err != nil {
 		t.Fatal(err)
 	}
-	requireAudit(t, audits, "system.tls.cert.set", cfg.System.Mgmt.TLSCertFile, "success")
+	requireAudit(t, audits, "system.tls.cert.set", filepath.Join(dataDir, "tls", "server.pem"), "success")
 	if detail := audits.records[0].Detail; detail == "" || !bytes.Contains([]byte(detail), []byte("CN=containd.local")) {
 		t.Fatalf("audit detail = %q", detail)
 	}

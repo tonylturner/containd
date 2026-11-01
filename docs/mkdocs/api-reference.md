@@ -356,13 +356,25 @@ after resolving the reported failure. Auxiliary apply failures remain warnings,
 as with commit.
 
 Environment variables and command-line flags are never reloaded. Management
-HTTP/HTTPS listeners, TLS file paths, HTTP middleware, SSH listen address/banner/shell
+HTTP/HTTPS listeners, TLS source paths, HTTP middleware, SSH listen address/banner/shell
 mode and other startup-only system settings require a restart. SSH authentication
 policy and host-key rotation already read their live running settings.
-Replacing the certificate and key at the paths the HTTPS listener already serves
-takes effect at the next TLS handshake; it needs neither SIGHUP nor a restart.
 Engine-only mode logs that configuration reload is performed through management;
 signal the management process to replay into a split engine.
+
+The bound HTTPS listener reloads a validated identity without restart when its
+contents change. See [Management HTTPS identity](config-format.md#management-https-identity)
+for atomic bundle uploads, read-only external paths and rotation status.
+
+`GET /api/v1/system/tls` always includes the boolean `managed`. It describes
+the identity management next starts with, using the saved configuration and
+this process's environment, just like `certFile` and `keyFile`; it does not
+describe the bound listener's mode. `true` permits managed certificate uploads;
+`false` selects external read-only credentials and certificate upload returns
+HTTP 409. This is an identity-mode policy, not a guarantee that an upload will
+pass validation or filesystem checks. Do not infer mode from file paths:
+explicitly setting both source paths to `/data/tls/server.pem` is external
+mode, although its reported paths match the managed bundle.
 
 ## Events: Filtered Queries and Legacy Lists
 

@@ -18,9 +18,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An authoritative `managed` boolean in TLS status identifies the next-start
+  identity's upload policy without ambiguous file-path inference.
+- System settings show management TLS reload failures while the last valid
+  certificate keeps serving, and offer certificate upload only for the managed
+  identity; external identities show how to rotate them at their source.
 - Evidence health in the UI shell, Audit persistence view and `show audit --status`,
   with per-destination/source syslog backlog, retry, loss and continuity counters.
 - Authenticated `GET /api/v1/evidence/status` and sanitized `evidence.state` in health.
+
+### Fixed
+
+- Cache accepted and rejected management TLS file identities so unchanged
+  handshakes do not read or parse PEM, and a reload does not block other
+  handshakes from serving the last-good identity.
+- Publish management HTTPS certificate chains and private keys together as one
+  durable, atomically replaced `/data/tls/server.pem` bundle. Import valid legacy
+  default-path pairs automatically without changing the originals; invalid legacy
+  pairs get a fresh self-signed bundle. Operator-owned paths are read-only, with
+  last-good retention on invalid rotation, explicit status errors and upload 409s.
+- Preserve TLS identity and its managed/external selection across factory reset;
+  share the validated public-leaf snapshot with status and SSH/local CLI pins.
 
 ### Changed
 

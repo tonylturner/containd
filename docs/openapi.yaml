@@ -2344,8 +2344,8 @@ components:
         httpsListenAddr: {type: string}
         listenAddr: {type: string}
         redirectHTTPToHTTPS: {type: boolean}
-        tlsCertFile: {type: string}
-        tlsKeyFile: {type: string}
+        tlsCertFile: {type: string, description: 'Legacy default selects managed /data/tls/server.pem; nondefault paths are read-only. Same cert/key path selects an external bundle.'}
+        tlsKeyFile: {type: string, description: 'Legacy default selects managed /data/tls/server.pem; nondefault paths are read-only.'}
         trustedCAFile: {type: string}
       type: object
     NATConfig:
@@ -2873,6 +2873,7 @@ components:
         cgroupPIDsLimit: {type: string}
     TlsInfoResponse:
       type: object
+      required: [managed]
       description: >-
         The listen addresses and enabled flags are those management binds when it
         starts with the saved configuration: CONTAIND_MGMT_ADDR and
@@ -2886,11 +2887,17 @@ components:
         is the same listener. certFile and keyFile, and the
         certificate fields, are the files the HTTPS listener serves at the next
         start: CONTAIND_TLS_CERT_FILE and CONTAIND_TLS_KEY_FILE, then the saved
-        paths, then the defaults. servedCertFile and servedKeyFile, and the
+        paths, then the defaults. When both resolve to the legacy defaults, both
+        identity file fields name /data/tls/server.pem instead. managed reports
+        this next-start identity mode, not the bound listener's mode, using the
+        same predicate as the certificate upload policy. Explicitly selecting
+        /data/tls/server.pem as both source paths is external mode despite the
+        identical file fields. servedCertFile and servedKeyFile, and the
         servedCert fields, are the files and certificate the bound HTTPS
         listener serves now, which a listener fallback to the defaults or a
         path saved after boot makes differ. All file paths are cleaned, so
-        equal strings name the same file.
+        equal strings name the same file. Served metadata uses the validated in-memory
+        public leaf; reloadError reports an invalid rotation retained as last-good.
       properties:
         httpListenAddr: {type: string}
         httpsListenAddr: {type: string}
@@ -2900,6 +2907,7 @@ components:
         boundHttpsListenAddr: {type: string, description: 'Address of the bound HTTPS listener; absent when none is bound'}
         httpListenChanges: {type: boolean, description: 'True when the next start binds another HTTP listener than the bound one, or binds one where none is bound, or none where one is'}
         httpsListenChanges: {type: boolean, description: 'True when the next start binds another HTTPS listener than the bound one, or binds one where none is bound, or none where one is'}
+        managed: {type: boolean, description: 'Always present. True when the next-start configuration and environment resolve both source paths to the legacy defaults, permitting managed uploads; false for external read-only identities, for which certificate upload returns 409. Not the bound listener mode or a guarantee that an upload succeeds.'}
         certFile: {type: string}
         keyFile: {type: string}
         certSubject: {type: string}
@@ -2907,6 +2915,7 @@ components:
         certNotAfter: {type: string}
         certDnsNames: {type: array, items: {type: string}, description: 'DNS subject alternative names of the certificate the HTTPS listener serves at the next start'}
         certIps: {type: array, items: {type: string}, description: 'IP address subject alternative names of the certificate the HTTPS listener serves at the next start'}
+        reloadError: {type: string, description: 'Latest bound identity reload error; last-good certificate remains served'}
         servedCertFile: {type: string, description: 'Certificate file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedKeyFile: {type: string, description: 'Key file of the bound HTTPS listener; absent when no HTTPS listener is bound'}
         servedCertSubject: {type: string, description: 'Subject of the certificate the bound HTTPS listener serves; absent when none is bound or its file holds no certificate'}
@@ -7370,13 +7379,15 @@ paths:
               schema: {type: object, additionalProperties: {$ref: '#/components/schemas/ConduitResult'}}
   /system/tls/cert:
     post:
-      summary: Replace TLS certificate and key files (admin)
+      summary: Atomically replace the managed TLS bundle (admin)
       tags: [System]
       description: >-
-        Writes a validated PEM certificate and key to the files the HTTPS listener
-        serves at the next start (certFile and keyFile of GET /system/tls), under
-        /data; does not change saved listener paths. The bound HTTPS listener
-        reloads the files it serves at its next TLS handshake after they change.
+        Validates the certificate chain and matching key, then atomically publishes
+        /data/tls/server.pem (0600) with one durable rename. Both resolved paths
+        must select the legacy defaults; nondefault external paths are read-only.
+        Does not change saved listener paths. The bound listener reads the bundle
+        once on reload. A pre-rename failure preserves the old bundle; a parent
+        directory sync failure returns 500 with commit uncertain, without rollback.
       requestBody:
         required: true
         content:
@@ -7385,8 +7396,8 @@ paths:
       responses:
         '200':
           description: >-
-            Files written. Status updated means the bound HTTPS listener serves
-            these files and presents the new certificate from its next handshake.
+            Bundle published. Status updated means the bound HTTPS listener serves
+            this bundle and presents the new certificate from its next handshake.
             Status stored means it serves other files, or no HTTPS listener is
             bound, and the new certificate is served from the next management
             start; the warnings array and X-Containd-Warnings say so.
@@ -7397,10 +7408,10 @@ paths:
               schema: {$ref: '#/components/schemas/StatusResponse'}
         '409':
           description: >-
-            Nothing written. The resolved certificate or key path is outside /data
-            (the error names the path and its selecting environment variable,
-            config field, or default), or only one of the two is a file the bound
-            HTTPS listener serves, which would pair the new file with the served one.
+            Nothing written. A resolved nondefault certificate or key path selects
+            read-only external mode, including paths under /data. The error names
+            the paths and their selecting overrides, and explains how to return
+            to the managed bundle.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

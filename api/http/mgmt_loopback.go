@@ -7,7 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tonylturner/containd/pkg/common/mgmttls"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
 
@@ -27,6 +28,11 @@ type ServedManagement struct {
 	// which a listener fallback or a path saved after boot can make differ
 	// from the saved settings; both empty when no HTTPS listener is bound.
 	CertFile, KeyFile string
+	// TLS is the bound listener's snapshot, never serialized (it contains a key).
+	TLS *mgmttls.Loader `json:"-"`
+	// LeafPEM is public-only and refreshed in the local runtime record on reload.
+	LeafPEM           string `json:"leafPEM,omitempty"`
+	RuntimeRecordFile string `json:"-"`
 	// HTTPRedirects reports that the bound HTTP listener redirects GET and
 	// HEAD requests to the bound HTTPS listener.
 	HTTPRedirects bool
@@ -82,7 +88,33 @@ func LoopbackManagementAPI() (string, *http.Client, error) {
 	}
 	baseURL := fmt.Sprintf("%s://127.0.0.1:%d", scheme, port)
 	if scheme == "https" {
-		return baseURL, servedCertificateClient(served.CertFile), nil
+		return baseURL, snapshotCertificateClient(func() (*x509.Certificate, error) {
+			if served.TLS != nil {
+				leaf, err := served.TLS.PublicLeaf()
+				if leaf != nil {
+					return leaf, nil // invalid external rotation keeps the served pin
+				}
+				return nil, err
+			}
+			if served.RuntimeRecordFile != "" {
+				data, err := os.ReadFile(served.RuntimeRecordFile)
+				if err != nil {
+					return nil, err
+				}
+				var rec struct{ Served ServedManagement }
+				if err := json.Unmarshal(data, &rec); err != nil {
+					return nil, err
+				}
+				if rec.Served.LeafPEM == "" {
+					return nil, errors.New("management runtime record has no public TLS leaf")
+				}
+				return parseLeafCertificate([]byte(rec.Served.LeafPEM))
+			}
+			if served.LeafPEM != "" {
+				return parseLeafCertificate([]byte(served.LeafPEM))
+			}
+			return readLeafCertificate(served.CertFile)
+		}), nil
 	}
 	return baseURL, &http.Client{
 		Timeout:       loopbackAPITimeout,
@@ -138,21 +170,21 @@ func refuseLoopbackRedirect(*http.Request, []*http.Request) error {
 	return errLoopbackRedirect
 }
 
-// servedCertificateClient trusts only the first certificate of certFile, not
-// the host's system CAs. It reads the file for every connection, so it
-// follows a certificate replaced in place, which the HTTPS listener serves
-// from its next handshake; keep-alives are off, so every request connects.
-// Normal TLS verification (including validity and server usage) remains
-// enabled, with an exact leaf pin as an additional constraint even when the
-// leaf is itself a CA.
-func servedCertificateClient(certFile string) *http.Client {
+// snapshotCertificateClient pins only the validated public leaf. Keep-alives
+// are disabled so every operation checks the current snapshot, with normal
+// validity and server-usage verification in addition to the exact leaf pin.
+func snapshotCertificateClient(leaf func() (*x509.Certificate, error)) *http.Client {
 	return &http.Client{
 		Timeout:       loopbackAPITimeout,
 		CheckRedirect: refuseLoopbackRedirect,
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 			DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				cfg, err := pinnedLeafTLSConfig(certFile)
+				cert, err := leaf()
+				if err != nil {
+					return nil, err
+				}
+				cfg, err := leafTLSConfig(cert)
 				if err != nil {
 					return nil, err
 				}
@@ -163,20 +195,16 @@ func servedCertificateClient(certFile string) *http.Client {
 	}
 }
 
-// pinnedLeafTLSConfig verifies the certificate's own SAN while dialing
-// loopback: an operator certificate need not contain 127.0.0.1.
-func pinnedLeafTLSConfig(certFile string) (*tls.Config, error) {
-	leaf, err := readLeafCertificate(certFile)
-	if err != nil {
-		return nil, err
-	}
+// leafTLSConfig verifies the certificate's own SAN while dialing loopback:
+// an operator certificate need not contain 127.0.0.1.
+func leafTLSConfig(leaf *x509.Certificate) (*tls.Config, error) {
 	var name string
 	if len(leaf.DNSNames) > 0 {
 		name = leaf.DNSNames[0]
 	} else if len(leaf.IPAddresses) > 0 {
 		name = leaf.IPAddresses[0].String()
 	} else {
-		return nil, fmt.Errorf("management TLS certificate %q has no DNS or IP subject alternative name", certFile)
+		return nil, errors.New("management TLS certificate has no DNS or IP subject alternative name")
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(leaf)
@@ -193,34 +221,19 @@ func pinnedLeafTLSConfig(certFile string) (*tls.Config, error) {
 	}, nil
 }
 
-// readLeafCertificate is the first certificate of a PEM file holding only
-// certificates.
+// readLeafCertificate accepts a strict certificate chain or a validated bundle.
 func readLeafCertificate(certFile string) (*x509.Certificate, error) {
 	data, err := os.ReadFile(certFile)
 	if err != nil {
 		return nil, fmt.Errorf("read management TLS certificate %q: %w", certFile, err)
 	}
-	var leaf *x509.Certificate
-	for len(bytes.TrimSpace(data)) > 0 {
-		data = bytes.TrimSpace(data)
-		if !bytes.HasPrefix(data, []byte("-----BEGIN CERTIFICATE-----")) {
-			return nil, fmt.Errorf("parse management TLS certificate %q: expected PEM certificate", certFile)
-		}
-		block, rest := pem.Decode(data)
-		if block == nil || block.Type != "CERTIFICATE" {
-			return nil, fmt.Errorf("parse management TLS certificate %q: expected PEM certificate", certFile)
-		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("parse management TLS certificate %q: %w", certFile, err)
-		}
-		if leaf == nil {
-			leaf = cert
-		}
-		data = rest
-	}
-	if leaf == nil {
-		return nil, fmt.Errorf("parse management TLS certificate %q: no certificates", certFile)
+	return parseLeafCertificate(data)
+}
+
+func parseLeafCertificate(data []byte) (*x509.Certificate, error) {
+	leaf, err := mgmttls.ParsePublicLeaf(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse management TLS certificate: %w", err)
 	}
 	return leaf, nil
 }
