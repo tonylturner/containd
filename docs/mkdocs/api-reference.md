@@ -327,9 +327,17 @@ enforce-mode rules, `monitoring` when every ICS rule is in monitor mode, or
 protection readiness. See [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
 The existing `iec104Enforcement` object keeps its shape (`active`, `healthy` and
 `reason`), with fixed sanitized reasons describing IEC104 queue/reset health
-independently. It also turns unhealthy, with `active`
+independently. Reasons distinguish queue bind/receive failure, queue verdict
+failure, reset injector unavailability, reset failure, packet worker failure,
+stream framing failure, steering/envelope disagreement, steering unavailability,
+and dataplane admission/zone cleanup or local-address refresh failure. Unknown
+engine conditions report `IEC104 enforcement unavailable`; an unreachable engine
+reports `engine unreachable`. Healthy enforcement has an empty reason. Raw
+kernel/engine diagnostics and internal reason codes are never exposed here.
+It also turns unhealthy, with `active`
 false, when the engine fails to reset an ICS connection it picked up mid-stream
-while an enforce rule of another ICS protocol is loaded. An inactive
+while an enforce rule of another ICS protocol is loaded (reason:
+`ICS mid-stream reset failure`). An inactive
 IEC104 policy is not proof nft is available. A successful commit does not
 guarantee later queue/reset readiness or packet delivery; check both health
 objects and infrastructure warnings.
@@ -511,8 +519,10 @@ Passive decoder events carry `observation_only: true` and
 `binding_source: "observation"`. They are evidence, not verdicts. The Events
 page marks them **Observation only**.
 
-Offline and live suggestion generation excludes their entire connection
-incarnation, including port-decoded events emitted before content confirmation.
+Offline and live suggestion generation can certify content-confirmed passive
+observations on registered service ports, with sufficient role and capture
+authority. Nonstandard service-port observations exclude their entire connection
+incarnation, including earlier port-decoded events.
 Confirmed content/port mismatches also exclude the connection even if no passive
 decoder emits an event. Generate exposes these exclusions as
 `withheld.observation_binding`; suggestion limitations retain the exclusion.

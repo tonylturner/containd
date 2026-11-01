@@ -116,13 +116,13 @@ func TestHealthReportsIEC104Enforcement(t *testing.T) {
 			name:       "forwarding enabled",
 			engine:     &healthMockEngine{mockEngine: &mockEngine{}, forwarding: netcfg.IPv4ForwardingEnabled},
 			forwarding: netcfg.IPv4ForwardingEnabled,
-			want:       map[string]any{"active": false, "healthy": false, "reason": ""},
+			want:       map[string]any{"active": false, "healthy": false, "reason": "IEC104 enforcement unavailable"},
 		},
 		{
 			name:       "forwarding disabled",
 			engine:     &healthMockEngine{mockEngine: &mockEngine{}, forwarding: netcfg.IPv4ForwardingDisabled},
 			forwarding: netcfg.IPv4ForwardingDisabled,
-			want:       map[string]any{"active": false, "healthy": false, "reason": ""},
+			want:       map[string]any{"active": false, "healthy": false, "reason": "IEC104 enforcement unavailable"},
 		},
 	}
 	for _, c := range cases {
@@ -137,6 +137,55 @@ func TestHealthReportsIEC104Enforcement(t *testing.T) {
 		if body["ipv4Forwarding"] != string(c.forwarding) {
 			t.Fatalf("%s: ipv4Forwarding = %v, want %q", c.name, body["ipv4Forwarding"], c.forwarding)
 		}
+	}
+}
+
+func TestHealthSanitizesIEC104ReasonCodes(t *testing.T) {
+	for _, tc := range []struct {
+		code, want string
+		active     bool
+	}{
+		{"queue", "IEC104 queue bind/receive failure", true},
+		{"injector", "IEC104 reset injector unavailable", true},
+		{"reset", "IEC104 reset failure", true},
+		{"reset", "ICS mid-stream reset failure", false},
+		{"verdict", "IEC104 queue verdict failure", true},
+		{"worker", "IEC104 packet worker failure", true},
+		{"framing", "IEC104 stream framing failure", true},
+		{"envelope", "IEC104 steering/envelope disagreement", true},
+		{"steering", "IEC104 steering unavailable", true},
+		{"admission_sweep", "dataplane admission cleanup failure", false},
+		{"gate_zone_sweep", "dataplane zone cleanup failure", false},
+		{"local_addresses", "dataplane local address refresh failure", false},
+		{"secret unknown code", "IEC104 enforcement unavailable", true},
+		{"", "IEC104 enforcement unavailable", true},
+	} {
+		t.Run(tc.code+tc.want, func(t *testing.T) {
+			// Exercise the wire boundary, including an unknown future code.
+			wire, err := json.Marshal(map[string]any{
+				"active": tc.active, "healthy": false, "reasonCode": tc.code,
+				"reason": "kernel failure: secret 192.0.2.44 queue 101",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var st dpengine.IEC104Enforcement
+			if err := json.Unmarshal(wire, &st); err != nil {
+				t.Fatal(err)
+			}
+			_, body := healthBody(t, &healthMockEngine{mockEngine: &mockEngine{}, st: st})
+			got := body["iec104Enforcement"]
+			want := map[string]any{"active": tc.active, "healthy": false, "reason": tc.want}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("health=%v want=%v", got, want)
+			}
+		})
+	}
+	_, body := healthBody(t, &healthMockEngine{mockEngine: &mockEngine{}, st: dpengine.IEC104Enforcement{
+		Healthy: true, ReasonCode: dpengine.IEC104ReasonQueue, Reason: "stale secret diagnostics",
+	}})
+	if got := body["iec104Enforcement"]; !reflect.DeepEqual(got, map[string]any{"active": false, "healthy": true, "reason": ""}) {
+		t.Fatalf("healthy state exposed stale fault: %v", got)
 	}
 }
 

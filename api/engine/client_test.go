@@ -535,14 +535,14 @@ func TestRuntimeHealthReadsEngineHealth(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"status":"ok","component":"engine","bootId":"engine-boot-1","iec104Enforcement":{"active":true,"healthy":false,"reason":"queue down"},"ipv4Forwarding":"disabled"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","component":"engine","bootId":"engine-boot-1","iec104Enforcement":{"active":true,"healthy":false,"reason":"queue down","reasonCode":"queue"},"ipv4Forwarding":"disabled"}`))
 	}))
 	defer srv.Close()
 	client := NewHTTPClient(srv.URL)
 	health, err := client.RuntimeHealth(context.Background())
 	if err != nil ||
 		health.BootID != "engine-boot-1" ||
-		health.IEC104Enforcement != (dpengine.IEC104Enforcement{Active: true, Reason: "queue down"}) ||
+		health.IEC104Enforcement != (dpengine.IEC104Enforcement{Active: true, Reason: "queue down", ReasonCode: dpengine.IEC104ReasonQueue}) ||
 		health.IPv4Forwarding != netcfg.IPv4ForwardingDisabled {
 		t.Fatalf("RuntimeHealth = %+v, %v", health, err)
 	}

@@ -112,7 +112,7 @@ func TestObservationBindingAuthority(t *testing.T) {
 		{"cip", identification("cip", "confirmed", "observation", true), true, true},
 		{"mismatch without passive decoder", identification("iec104", "confirmed", "none", true), true, true},
 		{"mismatch with legacy binding", identification("modbus", "confirmed", "legacy", true), true, true},
-		{"alternate port binding", identification("modbus", "confirmed", "observation", false), true, true},
+		{"matching passive", identification("modbus", "confirmed", "observation", false), false, false},
 		{"matching legacy", identification("modbus", "confirmed", "legacy", false), false, false},
 		{"candidate", identification("iec104", "candidate", "none", true), false, false},
 		{"incomplete", identification("iec104", "identification_incomplete", "none", true), false, false},
@@ -156,7 +156,9 @@ func TestObservationBindingAuthority(t *testing.T) {
 		ds := metadata()
 		ds.ID = "passive"
 		var serial uint64
-		parents, err := learn.Normalize(ds, requestState(), []dpi.Event{ev}, &serial)
+		state := requestState()
+		state.Key.DstPort = 1502
+		parents, err := learn.Normalize(ds, state, []dpi.Event{ev}, &serial)
 		if err != nil || len(parents) != 1 {
 			t.Fatalf("passive parent: %+v %v", parents, err)
 		}
@@ -210,7 +212,9 @@ func TestConnectionExclusionAcrossPagesAndIncarnations(t *testing.T) {
 			if passiveOnly {
 				ev := request()
 				ev.Attributes[eventfields.KeyObservationOnly] = true
+				state.Key.DstPort = 1502
 				ingest(ev)
+				state.Key.DstPort = 502
 			} else {
 				ingest(identification("iec104", "confirmed", "observation", true))
 			}
@@ -287,7 +291,7 @@ func TestObservationBindingSurvivesParentAssembly(t *testing.T) {
 	ds := metadata()
 	ds.ID = "assembled"
 	state := requestState()
-	state.Key.DstPort = 2404
+	state.Key.DstPort = 12404
 	for _, marked := range []int{0, 1} {
 		var events []dpi.Event
 		for i := range 2 {

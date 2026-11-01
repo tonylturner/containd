@@ -49,10 +49,7 @@ func healthHandler(store config.Store, engine EngineClient, evidenceProviders ..
 		forwarding := netcfg.IPv4ForwardingUnknown
 		if hc, ok := engine.(RuntimeHealthClient); ok && hc != nil {
 			if health, err := hc.RuntimeHealth(ctx); err == nil && ctx.Err() == nil {
-				iec = health.IEC104Enforcement
-				if iec.Reason != "" {
-					iec.Reason = "IEC104 enforcement unavailable"
-				}
+				iec = publicIEC104Health(health.IEC104Enforcement)
 				protection = engineclient.NormalizeProtection(health.Protection, "")
 				if protection.BootID != health.BootID {
 					protection = engineclient.UnknownProtection("")

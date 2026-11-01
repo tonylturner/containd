@@ -1349,9 +1349,12 @@ existing port-selected decoder runs immediately. A confirmed protocol gets a
 separate passive decoder only when the legacy path does not already decode
 that protocol. These events carry `observation_only: true` and
 `binding_source: observation`; they do not enforce rules or generate automatic
-ALLOW suggestions. The learner withholds suggestions for nonstandard service-port
-observations. Observation-bound connections are excluded from offline and live
-policy suggestions, including legacy events emitted before confirmation. A
+ALLOW suggestions. Explicit learner generation can certify passive,
+content-confirmed observations on the protocol's registered service port when
+roles and capture coverage are sufficient, including IEC 104 on TCP/2404 without
+an existing IEC rule. The learner withholds suggestions for nonstandard
+service-port observations. Those observation-bound connections are excluded from
+offline and live policy suggestions, including earlier legacy events. A
 confirmed content/port mismatch excludes the entire connection incarnation, not
 just the passive decoder's events. Generate reports `observation_binding` withheld
 counts, and suggestion limitations state this exclusion.

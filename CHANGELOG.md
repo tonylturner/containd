@@ -168,9 +168,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   104 command watches keep up with normal captures; outcome-only drops do not
   exclude certification inputs. Large repeated relations use bounded proofs
   instead of overflowing suggestion storage budgets.
-- Exclude observation-bound and content/port-mismatched connections from offline
-  and live policy suggestions, including port-decoded events emitted before
-  content confirmation; retain the exclusion in withheld counts and limitations.
+- Exclude connections whose content contradicts a registered port, or that are
+  identified only on a nonstandard service port, from offline and live policy
+  suggestions, including port-decoded events emitted before content
+  confirmation; retain the exclusion in withheld counts and limitations.
+  Content-confirmed traffic on its registered port, such as IEC 104 on
+  TCP/2404 under AF_PACKET, still yields suggestions.
   Previously certified suggestions require regeneration; historical datasets
   without retained binding authority remain readable but fail closed. Reimporting
   the same capture after an adapter-normalization change creates a separate
@@ -216,6 +219,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   all accepted evidence before sealing, and real overflow retains its loss scope.
 - Show the enforcement health reason for topology and firewall/ICS health-only
   degradation instead of the contradictory explanation "Protecting".
+- Public health reports IEC 104 enforcement faults with fixed sanitized reasons
+  that distinguish queue, reset-injector and reset failures, without exposing
+  engine diagnostics.
 - Start rule-hit logging independently of capture so an optional NFQUEUE bind
   failure cannot leave protection pending without an advancing consumer.
 - Keep antivirus capability, scan-proof invalidation and recovery canaries

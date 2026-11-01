@@ -25,9 +25,14 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 	}
 	var parents []evidence.Observation
 	apdus := map[string]int{}
+	wire := state.Key
+	k := wire
+	if ds.Source == evidence.SourceLive {
+		k = state.ServiceKey()
+	}
 	for _, ev := range events {
 		identification := ev.Proto == eventfields.ProtoIdentify && ev.Kind == eventfields.KindIdentification
-		observationBound := observationBoundEvent(ev)
+		observationBound := observationBoundEvent(ev, k)
 		if identification {
 			if !observationBound {
 				continue
@@ -41,11 +46,6 @@ func Normalize(ds evidence.Dataset, state *flow.State, events []dpi.Event, seria
 		}
 		if !identification && ev.Kind != "request" && ev.Kind != "response" && ev.Kind != "apci" && ev.Kind != "malformed" && ev.Kind != "unsupported" && ev.Kind != "exception" && ev.Kind != "session" {
 			continue
-		}
-		wire := state.Key
-		k := wire
-		if ds.Source == evidence.SourceLive {
-			k = state.ServiceKey()
 		}
 		coordinates := evidence.CoordinatesWire
 		authority := evidence.Authority{Wire: tuple(wire), Correlation: "wire", RoleCertain: roleCertain(state, ev), RoleEvidence: PortDecoderAuthority, StandardPort: ics.IsProtocolPortOn(ev.Proto, k.Proto, serverPort(k))}
