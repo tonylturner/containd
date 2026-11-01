@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
+- Make admin MFA disable atomic with the required account's new enrollment grace
+  period, so a failed operation leaves the account unchanged.
 - Omit unknown DHCP and WireGuard runtime gauge series instead of reporting
   them stopped. Publish the VPN aggregate only when a VPN is observed running;
   service faults no longer manufacture stopped runtime observations.

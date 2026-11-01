@@ -149,8 +149,29 @@ func TestSyslogDestinationFailurePrefixRecoveryAndAudit(t *testing.T) {
 	m.flushEvents(context.Background())
 	m.flushAudit(context.Background())
 	rows := eventLines(t, recovered, 3)
-	if rows[0]["id"] != "5" || rows[1]["id"] != "4" {
+	// Each stream uses its own TCP connection. The collector's readers may
+	// interleave audit and engine records even when the flushes are serial.
+	var engineRows []map[string]any
+	auditCount := 0
+	for _, row := range rows {
+		if row["kind"] == "audit" {
+			auditCount++
+			if row["action"] != "config.commit" {
+				t.Fatal("unexpected audit record", row)
+			}
+			continue
+		}
+		if row["source"] != string(evidence.SourceEngine) {
+			t.Fatal("unexpected source", row)
+		}
+		engineRows = append(engineRows, row)
+	}
+	if len(engineRows) != 2 || engineRows[0]["id"] != "5" || engineRows[0]["offset"] != "1" ||
+		engineRows[1]["id"] != "4" || engineRows[1]["offset"] != "2" {
 		t.Fatal("retry order changed", rows)
+	}
+	if auditCount != 1 {
+		t.Fatal("missing recovered audit record", rows)
 	}
 	for _, st := range m.ForwardStatus() {
 		if st.Backlog != 0 || st.LastError != "" || st.Lost != 0 {
