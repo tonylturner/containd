@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Document established-session re-evaluation after policy changes and why a
+  blocked connection can remain visible in Sessions until conntrack timeout.
 - Serialize telemetry event IDs as decimal JSON strings across API, UI, CLI,
   previews and syslog; audit record IDs remain numeric.
 - Forward engine and management syslog streams independently, retry failed
@@ -50,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keep operations and management available when audit persistence fails, with
   visible degradation rather than an audit fail-closed policy.
 - Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
+
+### Fixed
+
+- Keep zone security scores, topology conduit selection and staged zone updates
+  separate for names that differ by case or punctuation.
 
 ## [0.1.37] - 2026-10-31
 

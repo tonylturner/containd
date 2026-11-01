@@ -45,6 +45,9 @@ table, and decides established connections in their scope again before the
 conntrack accept. For a conditional ICS `ALLOW` queued to the engine, that
 recheck covers the replies and server packets the queue does not see. See
 [Identity and schedule predicates](policy-model.md#identity-and-schedule-predicates).
+When a commit changes the policy, established connections are also evaluated
+again on their next packet, without deleting their conntrack entries. See
+[Established connections and policy changes](policy-model.md#established-connections-and-policy-changes).
 
 Rule addresses are written per address family (`ip` or `ip6`), one line per
 family for a rule with both. Interface names are written as quoted nftables

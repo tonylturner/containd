@@ -153,7 +153,7 @@ test("topology surfaces failed zone patches without optimistic target changes", 
   const state = await setup(page);
   state.zones = [{ name: "MixedCase" }, { name: "wan" }];
   state.reject = true;
-  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ json: { "mixedcase→wan": { state: "allow", ids: "none", traffic: 0, proto: [], gaps: [] } } }));
+  await page.route("**/api/v1/security/conduits", (route) => route.fulfill({ json: { "MixedCase→wan": { state: "allow", ids: "none", traffic: 0, proto: [], gaps: [] } } }));
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();
   await page.getByText("ALLOW", { exact: true }).click();
