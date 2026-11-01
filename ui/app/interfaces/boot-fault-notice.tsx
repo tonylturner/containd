@@ -20,12 +20,15 @@ export function BootFaultStatus({
     <div role="status" className={`rounded-xs border border-amber/30 bg-amber/10 px-3 py-2 text-amber ${className}`}>
       <p className="font-semibold">Configuration apply paused</p>
       <p>{recovery || "recovery pending: ruleset not verified"}</p>
-      <p className="wrap-break-word">{bootFault}</p>
+      <details className="wrap-break-word">
+        <summary className="cursor-pointer">Configuration fault details</summary>
+        {bootFault}
+      </details>
       <p>
         {reserved
           ? "Reserved management remains available."
           : "The recovery ruleset keeps the stored management listener access."}{" "}
-        Commit a safe configuration, roll back to a safe snapshot, or factory reset to resume applying configuration. The engine has not received this boot’s stored configuration.
+        Commit a safe configuration, roll back to a safe snapshot, or factory reset to resume applying configuration. The saved configuration has not been activated after startup.
       </p>
     </div>
   );

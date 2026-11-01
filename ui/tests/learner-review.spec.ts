@@ -28,7 +28,7 @@ test("selection starts empty, Generate is explicit, scope and frozen proof are v
     .click();
   await expect(
     page.getByText(
-      "iec104_value: 3 — IEC command withheld: value not expressible",
+      "IEC command withheld: value not expressible: 3",
       { exact: true },
     ),
   ).toBeVisible();
@@ -62,11 +62,11 @@ test("selection starts empty, Generate is explicit, scope and frozen proof are v
   );
   await expect(modbus.getByText(/transaction equality/)).toHaveCount(1);
   await expect(
-    modbus.getByText("Evidence digest: evidence-sha", { exact: true }),
+    modbus.getByText("Evidence checksum: evidence-sha", { exact: true }),
   ).not.toBeVisible();
   await evidence.locator("summary").click();
   await expect(
-    modbus.getByText("Evidence digest: evidence-sha", { exact: true }),
+    modbus.getByText("Evidence checksum: evidence-sha", { exact: true }),
   ).toBeVisible();
   await modbus
     .getByRole("button", { name: "Preview live recent evidence" })
@@ -139,7 +139,7 @@ test("wire-coordinate approval cannot be replaced by selection", async ({
   ).toBeDisabled();
   await modbus
     .getByLabel(
-      "I verified the wire addresses and service against policy/NAT coordinates.",
+      "I verified the captured addresses and service against the policy and NAT settings.",
     )
     .check();
   await modbus.getByRole("button", { name: "Review and approve" }).click();
@@ -186,7 +186,7 @@ test("409 is atomic: keeps selections but drops the receipt and unchecks changed
   });
   await expect(
     page.getByRole("article", { name: "Suggestion modbus-1", exact: true }),
-  ).toContainText("Revision 3");
+  ).toContainText("Suggestion version 3");
   await expect(
     page.getByRole("button", { name: "Stage 1 selected", exact: true }),
   ).toBeEnabled();
@@ -238,7 +238,7 @@ test("viewer reads proof and authority but has no mutation or selection actions"
   await expect(
     page
       .locator("summary")
-      .filter({ hasText: "Certified evidence (frozen)" })
+      .filter({ hasText: "Checks on saved evidence" })
       .first(),
   ).toBeVisible();
   for (const name of [
@@ -461,6 +461,7 @@ for (const status of [400, 403, 422]) {
     await select.check();
     await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
+    await page.getByLabel("Dataset review").getByRole("alert").locator("summary").click();
     await expect(page.getByText("not persisted", { exact: true })).toBeVisible();
     await expect(select).toBeChecked();
     await expect(select).toBeEnabled();

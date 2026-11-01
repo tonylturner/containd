@@ -177,7 +177,7 @@ export function InterfaceRow({
             value={device}
             onChange={(e) => setDevice(e.target.value)}
             disabled={!canEdit}
-            placeholder="os iface (e.g. eth0)"
+            placeholder="Network device (e.g. eth0)"
             className="w-full rounded-md border bg-(--surface) px-2 py-1 text-sm text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden placeholder:text-(--text-dim)"
           />
         ) : (
@@ -248,7 +248,7 @@ export function InterfaceRow({
                     if (suggestedGateway) setGateway(suggestedGateway);
                   }}
                   className="rounded-md px-2 py-1 text-(--amber) transition-ui"
-                  title="Use the currently detected OS address as this interface's static address (and infer gateway)."
+                  title="Use the currently detected address as this interface's static address (and infer gateway)."
                 >
                   Use detected
                 </button>
@@ -285,7 +285,7 @@ export function InterfaceRow({
                   ) : null}
                 </span>
               ) : (
-                <span>No IPv4 address detected on the bound OS device yet.</span>
+                <span>No IPv4 address detected on the connected network device yet.</span>
               )}
             </div>
           </div>
@@ -296,7 +296,7 @@ export function InterfaceRow({
           >
             {display.source === "os" && (
               <span title={OS_ADDRESS_HINT}>
-                <Image src={staticAssetURL("/icons/docker.svg")} alt="OS/Docker address" width={16} height={16} />
+                <Image src={staticAssetURL("/icons/docker.svg")} alt="Detected address" width={16} height={16} />
               </span>
             )}
             {display.source === "dhcp"
@@ -328,7 +328,7 @@ export function InterfaceRow({
                 <div className="font-semibold text-(--text)">Network</div>
                 <div className="mt-1 text-(--text)">
                   <span className="text-(--text-muted)">
-                    OS/Docker address:
+                    Detected address:
                   </span>{" "}
                   {network}
                 </div>
@@ -360,7 +360,7 @@ export function InterfaceRow({
                 disabled={!canEdit}
                 onChange={(e) => setMgmt(e.target.checked)}
               />
-              mgmt
+              Management access
             </label>
             <label className="flex items-center gap-2">
               <input
@@ -392,7 +392,7 @@ export function InterfaceRow({
           </div>
         ) : (
           <div className="flex flex-wrap gap-1 text-xs">
-            <span className={chipClass(iface.access?.mgmt ?? true)}>mgmt</span>
+            <span className={chipClass(iface.access?.mgmt ?? true)}>Management access</span>
             <span className={chipClass(iface.access?.ssh ?? true)}>ssh</span>
             <span className={chipClass(iface.access?.http ?? true)}>http</span>
             <span className={chipClass(iface.access?.https ?? true)}>https</span>

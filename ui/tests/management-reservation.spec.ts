@@ -25,7 +25,8 @@ test("Interfaces explains immutable access and exposes guard faults", async ({ p
   });
   await page.goto("/interfaces/");
   const note = page.getByRole("complementary", { name: "Reserved management path" });
-  await expect(note).toContainText("RangerDanger management access is reserved");
+  await expect(note).toContainText("Management access is reserved");
+  await expect(page.locator("body")).not.toContainText("RangerDanger");
   await expect(note).toContainText("10.99.99.10, 10.99.99.3");
   await expect(note).toContainText("even when all interface access is disabled");
   await expect(note).toContainText("Login is still required");
@@ -33,7 +34,7 @@ test("Interfaces explains immutable access and exposes guard faults", async ({ p
   await expect(note).toContainText("rollback refused");
   await expect(note.getByRole("status")).toContainText("Configuration apply paused");
   await expect(note.getByRole("status")).toContainText("Commit a safe configuration");
-  await expect(note.getByRole("status")).toContainText("has not received");
+  await expect(note.getByRole("status")).toContainText("has not been activated after startup");
   await expect(note.getByRole("status")).toContainText("recovery pending: ruleset not applied");
   await expect(note).not.toContainText("recovery: new transit dropped");
   recovery = "recovery: new transit dropped";
@@ -43,7 +44,7 @@ test("Interfaces explains immutable access and exposes guard faults", async ({ p
   bootFault = "";
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(note.getByRole("status")).toHaveCount(0);
-  await expect(note).toContainText("RangerDanger management access is reserved");
+  await expect(note).toContainText("Management access is reserved");
   listenerFaults = ["https 192.0.2.250:8443: cannot assign requested address"];
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(note.getByRole("status")).toContainText("Optional listener boot faults");

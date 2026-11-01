@@ -76,7 +76,7 @@ function RuleScope({
         <div>
           <h4 className="text-sm font-semibold">Live recent evidence</h4>
           <p className="text-xs text-(--text-muted)">
-            Isolated rule impact, not frozen certification or a whole-policy
+            Impact of this rule alone, not a new check of the saved suggestion or a whole-policy
             simulation.
           </p>
           <RuleImpactSummary preview={preview} />
@@ -139,9 +139,9 @@ export function SuggestionReview({
         <div className="min-w-0 flex-1">
           <h3 className="break-all font-mono text-sm">{s.id}</h3>
           <p className="text-xs text-(--text-muted)">
-            Revision {s.revision} · {expired ? "expired" : s.status} ·{" "}
+            Suggestion version {s.revision} · {expired ? "expired" : s.status} ·{" "}
             {s.status === "staged"
-              ? "Staged receipt — not proof of activation"
+              ? "Saved—activation not verified"
               : "Not staged"}
           </p>
           <p className="text-xs text-(--text-muted)">
@@ -162,10 +162,10 @@ export function SuggestionReview({
         )}
       </div>
       <p className="text-sm">
-        Authority:{" "}
+        Address basis:{" "}
         {s.content.requiresCoordinateReview
-          ? "wire coordinates; verify pre-NAT capture scope against deployment"
-          : "logical policy coordinates"}
+          ? "verify captured addresses and service against NAT and deployment"
+          : "addresses used by the policy"}
         .
       </p>
       {iec && (
@@ -184,7 +184,7 @@ export function SuggestionReview({
         className="rounded-xs border bg-(--surface) p-3"
       >
         <summary className="cursor-pointer text-sm font-semibold">
-          Certified evidence (frozen)
+          Checks on saved evidence
           {s.proof && (
             <>
               {" · replay "}
@@ -204,19 +204,19 @@ export function SuggestionReview({
         {s.proof ? (
           <div className="mt-2 space-y-1 break-words text-xs">
             <p>
-              Positive replay: {s.proof.positive.passed}/
+              Recorded-traffic tests: {s.proof.positive.passed}/
               {s.proof.positive.total} passed, {s.proof.positive.failed} failed.
             </p>
             <p>
-              Negative boundaries: {s.proof.negative.passed}/
+              Boundary tests: {s.proof.negative.passed}/
               {s.proof.negative.total} passed, {s.proof.negative.failed} failed.
             </p>
             <p>
-              {s.proof.parentRefs?.length ?? 0} parent references · certified{" "}
+              {s.proof.parentRefs?.length ?? 0} source evidence references · checked{" "}
               {new Date(s.proof.certifiedAt).toLocaleString()}
             </p>
             <p className="break-all">
-              Evidence digest: {s.proof.evidenceDigest}
+              Evidence checksum: {s.proof.evidenceDigest}
             </p>
             <p className="break-all">Content: {s.proof.contentId}</p>
             <p className="break-all">
@@ -239,14 +239,14 @@ export function SuggestionReview({
       </details>
       {(s.legacyOverlaps ?? []).map((o) => (
         <p key={o.ruleId} className="break-words text-xs text-(--amber)">
-          Legacy overlap {o.ruleId}: {o.reason}. Warning only; no existing rule
+          Existing-rule overlap {o.ruleId}: {o.reason}. Warning only; no existing rule
           is removed.
         </p>
       ))}
       {s.review && (
         <p className="text-xs">
           Reviewed by {s.review.actor} at{" "}
-          {new Date(s.review.at).toLocaleString()}; coordinates{" "}
+          {new Date(s.review.at).toLocaleString()}; captured addresses{" "}
           {s.review.coordinateApproved ? "approved" : "not approved"}.
         </p>
       )}
@@ -261,8 +261,7 @@ export function SuggestionReview({
                 disabled={busy}
                 onChange={(e) => setCoordinates(e.target.checked)}
               />
-              I verified the wire addresses and service against policy/NAT
-              coordinates.
+              I verified the captured addresses and service against the policy and NAT settings.
             </label>
           )}
           <div className="flex flex-wrap gap-2">
