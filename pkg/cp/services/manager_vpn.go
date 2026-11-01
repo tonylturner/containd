@@ -162,7 +162,7 @@ func (m *VPNManager) applyVPNLocked(ctx context.Context, cfg config.VPNConfig) (
 		if err != nil {
 			return err
 		}
-		if err = m.startOpenVPN(ctx, configPath); err != nil {
+		if err = m.startOpenVPN(ctx, configPath, cfg.OpenVPN.Mode == "server"); err != nil {
 			return err
 		}
 		m.mu.Lock()

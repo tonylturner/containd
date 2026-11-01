@@ -106,6 +106,13 @@ Successful later application clears the fault.
   - `GET/POST /api/v1/services/vpn`
   - OpenVPN profiles and clients: `/api/v1/services/vpn/openvpn/*`
 - Status is exposed via `/api/v1/services/status`; WireGuard runtime status is available from `/api/v1/services/vpn/wireguard/status`.
+- OpenVPN status distinguishes a supervised daemon (`openvpn_running`) from
+  completed initialization (`openvpn_connected`). A running client without a
+  completed tunnel is connecting, not faulted. Client startup checks for early
+  process exit for 250 ms, then leaves DNS and connection retries supervised.
+  Connection status clears on a soft restart or process exit. Server startup
+  still requires the initialization marker within five seconds before
+  acknowledging its loaded revocation list.
 
 ### OpenVPN (managed client)
 

@@ -16,6 +16,7 @@ type openVPNReadyWriter struct {
 	tail  string
 	ready chan struct{}
 	once  sync.Once
+	up    bool
 }
 
 func newOpenVPNReadyWriter(out io.Writer) *openVPNReadyWriter {
@@ -26,12 +27,28 @@ func (w *openVPNReadyWriter) Write(b []byte) (int, error) {
 	defer w.mu.Unlock()
 	n, err := w.out.Write(b)
 	text := w.tail + string(b)
-	if strings.Contains(text, "Initialization Sequence Completed") {
+	initialized := strings.LastIndex(text, "Initialization Sequence Completed")
+	restarting := strings.LastIndex(text, "SIGUSR1[")
+	if initialized >= 0 {
 		w.once.Do(func() { close(w.ready) })
+	}
+	if initialized >= 0 || restarting >= 0 {
+		w.up = initialized > restarting
 	}
 	if len(text) > 64 {
 		text = text[len(text)-64:]
 	}
 	w.tail = text
 	return n, err
+}
+
+// connected distinguishes a live retrying client from a completed tunnel.
+// OpenVPN emits SIGUSR1 when a soft restart drops the connection.
+func (w *openVPNReadyWriter) connected() bool {
+	if w == nil {
+		return false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.up
 }

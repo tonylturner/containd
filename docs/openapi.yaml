@@ -7918,6 +7918,9 @@ paths:
         faults is a sorted array of per-service diagnostics, empty when none.
         Each faulted service also has state=faulted and fault. WireGuard and
         OpenVPN have independent entries; vpn is retained as an aggregate.
+        The vpn entry includes openvpn_running (supervised process)
+        and openvpn_connected (initialization completed, cleared on soft restart
+        or exit). A running client may still be connecting; this is not a fault.
         AV fault fields are merged without replacing engine-observed status.
         syslog.audit reports audit-record forwarding: enabled, sent_total,
         failed_total, last_error, last_flush, backlog, and forwarders, a list

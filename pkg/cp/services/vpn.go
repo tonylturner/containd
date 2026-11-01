@@ -38,6 +38,7 @@ type VPNManager struct {
 
 	ovpnCmd        *exec.Cmd
 	ovpnWaitCh     chan struct{}
+	ovpnOutput     *openVPNReadyWriter
 	ovpnCRLNumber  int64 // CRL loaded by the ready managed server; zero when not confirmed.
 	ovpnRunning    bool
 	ovpnConfigPath string
@@ -104,6 +105,7 @@ func (m *VPNManager) Status() map[string]any {
 		"openvpn_binary":      m.OpenVPNPath,
 		"openvpn_supervise":   m.SuperviseOpenVPN,
 		"openvpn_running":     m.ovpnRunning,
+		"openvpn_connected":   m.ovpnRunning && m.ovpnOutput.connected(),
 		"openvpn_pid":         pidOrZero(m.ovpnCmd),
 		"openvpn_config_path": firstNonEmpty(m.ovpnConfigPath, m.lastCfg.OpenVPN.ConfigPath),
 		"openvpn_last_start":  formatMaybe(m.ovpnLastStart),
@@ -126,7 +128,7 @@ func (m *VPNManager) Status() map[string]any {
 	}
 }
 
-func (m *VPNManager) startOpenVPN(ctx context.Context, configPath string) error {
+func (m *VPNManager) startOpenVPN(ctx context.Context, configPath string, server bool) error {
 	if configPath == "" {
 		return errorsNew("openvpn configPath is empty")
 	}
@@ -166,6 +168,7 @@ func (m *VPNManager) startOpenVPN(ctx context.Context, configPath string) error 
 	waitCh := make(chan struct{})
 	m.ovpnCmd = cmd
 	m.ovpnWaitCh = waitCh
+	m.ovpnOutput = ready
 	m.ovpnRunning = true
 	m.ovpnConfigPath = configPath
 	m.ovpnRevision = revision
@@ -179,16 +182,34 @@ func (m *VPNManager) startOpenVPN(ctx context.Context, configPath string) error 
 	go m.waitOpenVPN(cmd, waitCh)
 	go m.renewOpenVPNCRL(waitCh)
 
+	// Clients may retry DNS and remote connections indefinitely. Only require
+	// survival of an early-exit window, not a completed remote handshake.
+	startupWindow := 250 * time.Millisecond
+	var readyCh <-chan struct{}
+	if server {
+		startupWindow = 5 * time.Second
+		readyCh = ready.ready
+	}
+	timer := time.NewTimer(startupWindow)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		_ = m.stopOpenVPN()
 		return ctx.Err()
 	case <-waitCh:
 		return fmt.Errorf("openvpn exited before ready")
-	case <-time.After(5 * time.Second):
-		_ = m.stopOpenVPN()
-		return fmt.Errorf("openvpn readiness timed out")
-	case <-ready.ready:
+	case <-timer.C:
+		if server {
+			_ = m.stopOpenVPN()
+			return fmt.Errorf("openvpn readiness timed out")
+		}
+		select {
+		case <-waitCh:
+			return fmt.Errorf("openvpn exited during startup")
+		default:
+			return nil
+		}
+	case <-readyCh:
 		select {
 		case <-waitCh:
 			return fmt.Errorf("openvpn exited at readiness")

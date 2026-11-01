@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep connecting OpenVPN clients supervised instead of quarantining them when
+  the remote is slow or unreachable; expose connection status separately from
+  process status while retaining the server readiness gate.
 - WireGuard configuration is applied to the kernel. The netlink attribute numbers
   did not match the kernel interface, so enabling WireGuard failed.
 - Project stored service faults for firewall replay and report per-service
