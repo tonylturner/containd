@@ -133,6 +133,7 @@ function coverageOf(page: Page, ruleId: string) {
 test("ICS page shows applied coverage for each state, never mode alone", async ({ page }) => {
   const seen = await mockAPI(page, {});
   await open(page, "/ics/");
+  await expect(page.getByLabel("Active inspection state", { exact: true }).getByText("Partly active", { exact: true })).toBeVisible();
 
   const read = coverageOf(page, "plc-read");
   await expect(read.getByText("applied: enforcing")).toHaveClass(/badge-secure/);
@@ -190,7 +191,7 @@ test("ICS page shows the runtime aggregate and the NFQUEUE inline path", async (
   await expect(page.getByText("1 enforcing, 1 partial, 3 not enforcing, 1 monitoring")).toBeVisible();
   await expect(page.getByText("Inline inspection configured", { exact: true })).toBeVisible();
   const queue = page.getByText("Inline inspection queue (NFQUEUE): 101", { exact: true });
-  await expect(queue.locator("..")).toHaveAttribute("open", "");
+  await expect(page.getByRole("region", { name: "Candidate DPI Settings" }).getByRole("button", { name: "Technical details", exact: true })).toHaveAttribute("aria-expanded", "true");
   await expect(queue).toBeVisible();
   await expect(page.getByText("needs no capture interface", { exact: false })).toBeVisible();
   await expect(page.getByText("at least one capture interface")).toHaveCount(0);
@@ -203,7 +204,7 @@ for (const width of [1280, 390]) {
     await open(page, "/ics/");
     const interfaces = page.getByText("Capture interfaces: eth0, lan1", { exact: true });
     await expect(interfaces).toBeVisible();
-    await expect(interfaces.locator("..")).toHaveAttribute("open", "");
+    await expect(page.getByRole("region", { name: "Candidate DPI Settings" }).getByRole("button", { name: "Technical details", exact: true })).toHaveAttribute("aria-expanded", "true");
   });
 }
 
@@ -211,7 +212,7 @@ test("default capture settings keep technical details collapsed", async ({ page 
   await mockAPI(page, { dataplane: { dpiEnabled: true, nfqueueGroup: 0, captureInterfaces: [] } });
   await open(page, "/ics/");
   const queue = page.getByText("Inline inspection queue (NFQUEUE): 0", { exact: true });
-  await expect(queue.locator("..")).not.toHaveAttribute("open");
+  await expect(page.getByRole("region", { name: "Candidate DPI Settings" }).getByRole("button", { name: "Technical details", exact: true })).toHaveAttribute("aria-expanded", "false");
   await expect(queue).not.toBeVisible();
 });
 
@@ -411,3 +412,99 @@ test("rule preview without coverage shows no coverage section", async ({ page })
   await expect(summary.getByLabel("ICS coverage", { exact: true })).toHaveCount(0);
   expect(seen.errors).toEqual([]);
 });
+
+for (const [state, expected] of [["enforcing", "Enforcing"], ["partial", "Partly active"], ["monitoring", "Monitoring"], ["unknown", "Unknown"], ["not_enforcing", "Not enforcing"]] as const) {
+  test(`active inspection header: ${state} comes from applied coverage and health`, async ({ page }) => {
+    const mode = state === "monitoring" ? "monitor" : "enforce";
+    await mockAPI(page, {
+      rules: [rules[0]],
+      coverage: { status: 200, json: { candidate: [cov("plc-read", "enforcing")], applied: [cov("plc-read", state, mode)] } },
+      health: { status: "ok", component: "mgmt", icsEnforcement: { state } },
+    });
+    await open(page, "/ics/");
+    const header = page.getByLabel("Active inspection state", { exact: true });
+    await expect(header.getByText(expected, { exact: true })).toBeVisible();
+    if (state === "monitoring") {
+      await expect(header).toContainText("monitor rules do not protect traffic");
+      await expect(header.locator(".badge-secure")).toHaveCount(0);
+    }
+  });
+}
+
+for (const endpoint of ["health", "dataplane/ics-coverage"]) {
+  test(`active inspection header is unknown after failed ${endpoint} read`, async ({ page }) => {
+    await mockAPI(page, {
+      health: { status: "ok", component: "mgmt", icsEnforcement: { state: "enforcing", enforcing: 1 } },
+      coverage: { status: 200, json: { candidate: [cov("plc-read", "enforcing")], applied: [cov("plc-read", "enforcing")] } },
+    });
+    await page.route(`**/api/v1/${endpoint}`, route => route.fulfill({ status: 503, json: { error: "inspection service offline" } }));
+    await open(page, "/ics/");
+    await expect(page.getByLabel("Active inspection state", { exact: true }).getByText("Unknown", { exact: true })).toBeVisible();
+    if (endpoint !== "health") await expect(page.getByText("inspection service offline", { exact: true })).toBeVisible();
+  });
+}
+
+for (const conflict of [true, false]) {
+  test(`active inspection ${conflict ? "does not resolve contradictory observations into protection" : "keeps monitor rules distinct alongside enforcing rules"}`, async ({ page }) => {
+    await mockAPI(page, {
+      coverage: { status: 200, json: { candidate: [], applied: [cov("plc-read", conflict ? "not_enforcing" : "enforcing"), cov("plc-learn", "monitoring", "monitor")] } },
+      health: { status: "ok", component: "mgmt", icsEnforcement: { state: "enforcing", enforcing: 1, monitoring: 1 } },
+    });
+    await open(page, "/ics/");
+    await expect(page.getByLabel("Active inspection state", { exact: true }).getByText(conflict ? "Unknown" : "Enforcing", { exact: true })).toBeVisible();
+    await expect(page.getByRole("row").filter({ has: page.getByRole("cell", { name: "plc-learn", exact: true }) }).getByText("Observation only", { exact: true })).toBeVisible();
+  });
+}
+
+test("Why? reveals full applied and candidate reasons without inventing drift", async ({ page }) => {
+  await mockAPI(page, {});
+  await open(page, "/ics/");
+  const coverage = coverageOf(page, "plc-inherit");
+  await expect(coverage.getByText(/^candidate:/)).toHaveCount(0);
+  await expect(coverage).toContainText("7 connections exempted since the last apply");
+  const why = coverage.getByRole("button", { name: "Why?", exact: true });
+  await why.focus();
+  await page.keyboard.press("Enter");
+  await expect(why).toHaveAttribute("aria-expanded", "true");
+  const detail = page.locator(`[id="${await why.getAttribute("aria-controls")}"]`);
+  await expect(detail).toContainText("Applied: partial");
+  await expect(detail).toContainText("Candidate: partial");
+  await expect(detail).toContainText(exclusion.message);
+  await page.keyboard.press("Space");
+  await expect(why).toHaveAttribute("aria-expanded", "false");
+  await expect(why).toBeFocused();
+});
+
+test("compact rules retain all matching fields and keyboard inspection at 390px", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockAPI(page, { rules: [icsRule("matching", "modbus", "enforce"), { id: "wildcard", action: "ALLOW", ics: { protocol: "modbus" } }] });
+  await open(page, "/ics/");
+  const matching = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "matching", exact: true }) });
+  await expect(matching.getByRole("button", { name: "Inspect rule" })).toHaveAttribute("aria-expanded", "true");
+  await expect(matching.getByText("Matching constraints", { exact: true })).toBeVisible();
+  const wildcard = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "wildcard", exact: true }) });
+  const button = wildcard.getByRole("button", { name: "Inspect rule" });
+  await expect(button).toHaveAttribute("aria-expanded", "false");
+  await button.focus();
+  await page.keyboard.press("Enter");
+  for (const label of ["Codes", "Addresses", "R/W"]) {
+    await expect(wildcard.getByText(label, { exact: true }).first()).toBeVisible();
+  }
+  await page.keyboard.press("Space");
+  await expect(button).toHaveAttribute("aria-expanded", "false");
+  await expect(button).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+for (const empty of [true, false]) {
+  test(`Inspection setup starts ${empty ? "open for the first empty state" : "collapsed for configured rules"}`, async ({ page }) => {
+    await mockAPI(page, { rules: empty ? [] : rules });
+    await open(page, "/ics/");
+    const button = page.getByRole("button", { name: "Inspection setup", exact: true });
+    await expect(button).toHaveAttribute("aria-expanded", String(empty));
+    if (!empty) await button.click();
+    await expect(page.getByRole("region", { name: "Supported Protocols", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Quick Start", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Go to Firewall Rules", exact: false })).toBeVisible();
+  });
+}

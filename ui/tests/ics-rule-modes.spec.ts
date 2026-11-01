@@ -128,7 +128,6 @@ for (const path of ["/ics/", "/firewall/"]) {
     await loaded;
     const note = page.getByRole("status", { name: "Shadow counters" });
     await expect(note).toContainText("Monitor counts unavailable.");
-    await note.getByText("Technical details", { exact: true }).click();
     await expect(note.getByText("engine unreachable", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Shadow matches of trial", { exact: true })).toContainText("unavailable");
     await expect(page.getByLabel("Shadow matches of trial", { exact: true })).not.toContainText("0 messages");

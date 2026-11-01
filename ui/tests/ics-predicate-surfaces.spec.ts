@@ -2,9 +2,32 @@ import { expect, test } from "@playwright/test";
 import { openEditor } from "./fixtures/ics-editor";
 
 const advanced = (page: import("@playwright/test").Page) =>
-  page.locator("div.fixed.inset-0 details").filter({ has: page.getByText("Advanced selectors (saved values still apply)", { exact: true }) });
+  page.locator("div.fixed.inset-0").getByRole("button", { name: "Advanced protocol fields", exact: true });
 
 for (const surface of ["ics", "firewall"]) {
+  test(`${surface}: clearing the final advanced restriction keeps the input and focus visible`, async ({ page }) => {
+    await openEditor(page, surface, { protocol: "dnp3", masters: [1] });
+    const input = page.getByLabel("Masters (0-65519)", { exact: true });
+    await input.fill("");
+    await expect(advanced(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
+  });
+
+  test(`${surface}: advanced protocol fields support keyboard inspection without clearing saved values`, async ({ page }) => {
+    await openEditor(page, surface, { protocol: "iec104", typeIds: [45], negative: false });
+    const button = advanced(page);
+    await expect(button).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByLabel("P/N flag", { exact: true })).toHaveValue("false");
+    await button.focus();
+    await page.keyboard.press("Space");
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByText("Protocol fields set — values still apply", { exact: true })).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(button).toBeFocused();
+    await expect(page.getByLabel("P/N flag", { exact: true })).toHaveValue("false");
+  });
+
   for (const [protocol, selectors] of [
     ["dnp3", [{ masters: [0] }, { outstations: [0] }, { groups: [0] }, { variations: [0] }, { direction: "response" }]],
     ["cip", [{ instances: [0] }, { attributes: [0] }, { tags: ["Motor"] }, { direction: "response" }]],
@@ -13,16 +36,16 @@ for (const surface of ["ics", "firewall"]) {
     for (const selector of selectors) {
       test(`${surface}: ${protocol} saved ${Object.keys(selector)[0]} opens advanced selectors`, async ({ page }) => {
         await openEditor(page, surface, { protocol, ...(protocol === "iec104" ? { typeIds: [45] } : {}), ...selector });
-        await expect(advanced(page)).toHaveJSProperty("open", true);
+        await expect(advanced(page)).toHaveAttribute("aria-expanded", "true");
       });
     }
     test(`${surface}: ${protocol} default advanced selectors stay collapsible`, async ({ page }) => {
       await openEditor(page, surface, { protocol });
-      await expect(advanced(page)).toHaveJSProperty("open", false);
-      await advanced(page).locator("summary").click();
-      await expect(advanced(page)).toHaveJSProperty("open", true);
-      await advanced(page).locator("summary").click();
-      await expect(advanced(page)).toHaveJSProperty("open", false);
+      await expect(advanced(page)).toHaveAttribute("aria-expanded", "false");
+      await advanced(page).click();
+      await expect(advanced(page)).toHaveAttribute("aria-expanded", "true");
+      await advanced(page).click();
+      await expect(advanced(page)).toHaveAttribute("aria-expanded", "false");
     });
   }
 }
@@ -32,7 +55,7 @@ for (const surface of ["ics", "firewall"]) {
     await page.setViewportSize({ width: 1440, height: 1600 });
     await openEditor(page, surface, { protocol: "dnp3", functionCode: [0, 1], masters: [1], groups: [50], addresses: ["0-10"] });
     await expect(page.locator("div.fixed.inset-0")).toBeVisible();
-    await expect(advanced(page)).toHaveJSProperty("open", true);
+    await expect(advanced(page)).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByLabel("Masters (0-65519)")).toHaveValue("1");
     await expect(page.getByLabel("Point indexes", { exact: true })).toHaveValue("0-10");
     await page.screenshot({ path: testInfo.outputPath(`${surface}-editor.png`), fullPage: true, animations: "disabled" });
@@ -50,7 +73,7 @@ for (const surface of ["ics", "firewall"]) {
   ] satisfies [string, import("../lib/api").ICSPredicate, [string, string][], string[]][]) {
     test(`${surface}: ${protocol} preserves all fields and clears ${cleared}`, async ({ page }) => {
       const seen = await openEditor(page, surface, { protocol, ...ics });
-      await expect(advanced(page)).toHaveJSProperty("open", true);
+      await expect(advanced(page)).toHaveAttribute("aria-expanded", "true");
       for (const [label, value] of changes) await form(page).getByLabel(label, { exact: true }).fill(value);
       await form(page).getByRole("button", { name: "Preview impact" }).click();
       await expect.poll(() => seen.previews.length).toBe(1);
@@ -84,7 +107,7 @@ for (const surface of ["ics", "firewall"]) {
   }
   test(`${surface}: invalid new field blocks save and preview`, async ({ page }) => {
     const seen = await openEditor(page, surface, { protocol: "dnp3", groups: [50] });
-    await expect(advanced(page)).toHaveJSProperty("open", true);
+    await expect(advanced(page)).toHaveAttribute("aria-expanded", "true");
     await form(page).getByLabel("Masters (0-65519)").fill("65520");
     await form(page).getByRole("button", { name: "Preview impact" }).click();
     await form(page).getByRole("button", { name: save }).click();

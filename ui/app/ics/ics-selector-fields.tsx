@@ -1,7 +1,7 @@
 "use client";
 
 import { UNSUPPORTED_UNIT_ID, type GenericSelectorDraft } from "./ics-shared";
-import { TechnicalDetails } from "../../components/TechnicalDetails";
+import { ICSDisclosure } from "./ics-disclosure";
 
 /** Shared by both rule editors; blank selectors mean ANY. */
 export function ICSSelectorFields({
@@ -19,19 +19,21 @@ export function ICSSelectorFields({
     : protocol === "cip"
       ? [["instances", "Instances (0-65535)"], ["attributes", "Attributes (0-65535)"], ["tags", "Tag paths"]] as const
       : [];
+  const advancedSet = fields.some(([key]) => draft[key].trim() !== "") || draft.direction !== "";
   return (
     <div className="space-y-3">
       {(protocol === "dnp3" || protocol === "cip") && unitId !== "" && (
         <div className="space-y-2">
           <p role="alert" className="text-sm text-red-400">{UNSUPPORTED_UNIT_ID}</p>
-          <TechnicalDetails>Existing unitId: <code>{unitId}</code></TechnicalDetails>
+          <p className="break-words text-xs text-(--text-muted)">Existing unitId: <code>{unitId}</code></p>
           <button type="button" disabled={disabled} onClick={() => onUnitIdChange("")} className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) disabled:opacity-50">
             Remove unit ID filter
           </button>
         </div>
       )}
-      <details open={fields.some(([key]) => draft[key].trim() !== "") || draft.direction !== ""}>
-        <summary className="cursor-pointer text-xs text-(--text-muted)">Advanced selectors (saved values still apply)</summary>
+      <ICSDisclosure title="Advanced protocol fields"
+        defaultOpen={advancedSet}
+        attention={advancedSet ? "Protocol fields set — values still apply" : undefined}>
         <div className="mt-2 grid gap-3 md:grid-cols-2">
           {fields.map(([key, label]) => (
             <label key={key} className="block text-xs text-(--text)">
@@ -47,7 +49,7 @@ export function ICSSelectorFields({
         </div>
         {protocol === "dnp3" && <p className="text-xs text-(--text-muted)">Station filters apply to application messages, not link-only frames. Variation 0 is not a wildcard: ALLOW must list 0; a constrained DENY always matches wire variation 0.</p>}
         {protocol === "cip" && <p className="text-xs text-(--text-muted)">Tags cannot combine with logical class/instance/attribute selectors. Names are case-insensitive subtrees, including all elements. Tag DENY does not see logical targets; prefer tag ALLOW lists with default deny.</p>}
-      </details>
+      </ICSDisclosure>
     </div>
   );
 }
