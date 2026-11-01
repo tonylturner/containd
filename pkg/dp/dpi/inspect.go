@@ -61,14 +61,13 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 		res.Proto = framer.Protocol()
 	}
 	var errEvent *Event
+	var unanchoredPayload bool
 	if framer != nil && !pkt.HasOffset && pkt.TCPSyn && pkt.TCPSeqValid {
 		anchored, discarded := m.reassembler.open(key, pkt.TCPSeq, time.Now(), pkt.FailClosed, pkt.TCPHandshake)
 		if discarded {
 			m.endStream(key)
 		}
-		if pkt.FailClosed && len(pkt.Payload) > 0 && !anchored {
-			errEvent = streamError(state, pkt, &res, &StreamError{Kind: StreamResync, Offset: m.reassembler.watermark(key)})
-		}
+		unanchoredPayload = pkt.FailClosed && len(pkt.Payload) > 0 && !anchored
 	}
 	if stream && res.Err == nil {
 		if err := m.reassembler.failure(key); err != nil {
@@ -78,6 +77,11 @@ func (m *Manager) Inspect(state *flow.State, pkt *ParsedPacket) (res InspectResu
 			}
 			m.reassembler.complete(key) // the flow no longer fails closed: start fresh
 		}
+	}
+	// A rejected SYN's payload must not replace an existing failure (in
+	// particular a non-admitting continuation) with a new resync/drop.
+	if unanchoredPayload {
+		errEvent = streamError(state, pkt, &res, &StreamError{Kind: StreamResync, Offset: m.reassembler.watermark(key)})
 	}
 
 	if framer != nil && res.Err == nil && len(pkt.Payload) > 0 && !(pkt.FailClosed && pkt.TCPRst) {

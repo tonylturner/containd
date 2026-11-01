@@ -89,7 +89,7 @@ func TestQueuedScopeUsesPostDNATCoordinates(t *testing.T) {
 		if !e.enforcingPacketScope(pkt, state) {
 			t.Fatal("missed post-DNAT service scope")
 		}
-		e.rememberDeniedTCP(state.Key, state.ServiceKey())
+		e.rememberDeniedTCP(state.Key, state.ServiceKey(), false)
 		forged := &flow.State{Key: state.Key.Reversed()}
 		forged.Key.Dir = flow.DirForward
 		if !e.enforcingPacketScope(pkt, forged) {

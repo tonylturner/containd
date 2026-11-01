@@ -19,15 +19,18 @@ import (
 // Reset jobs and retirement serialize per tuple so a delayed job cannot delete
 // a reconnect's conntrack entry. Reset I/O never holds the global flow lock.
 type deniedTCP struct {
-	mu      sync.Mutex
-	retired bool
-	isn     uint32
-	hasISN  bool
-	key     flow.Key
-	service flow.Key // immutable policy tuple of the denied incarnation
-	tuple   flow.MapKey
-	expires time.Time
-	order   *list.Element
+	// Non-admission retains only the reset generation guard: the failed
+	// stream, not this tombstone, supplies the kernel continuation verdict.
+	nonAdmit bool
+	mu       sync.Mutex
+	retired  bool
+	isn      uint32
+	hasISN   bool
+	key      flow.Key
+	service  flow.Key // immutable policy tuple of the denied incarnation
+	tuple    flow.MapKey
+	expires  time.Time
+	order    *list.Element
 }
 
 func (e *Engine) isDeniedTCP(state *flow.State) bool {
@@ -39,7 +42,7 @@ func (e *Engine) isDeniedTCP(state *flow.State) bool {
 			return false
 		}
 		if e.deniedTCPNow().Before(d.expires) {
-			return true
+			return !d.nonAdmit
 		}
 		// Enforce the lifetime even between the periodic flow sweeps.
 		e.retireDeniedTCP(d, false)
@@ -59,7 +62,7 @@ func (e *Engine) closeDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 	// Publish the guard only after both streams and the verdict cache have
 	// failed. An immediate capacity eviction must clear all of that state;
 	// nothing may recreate it after the guard has been retired.
-	if d := e.rememberDeniedTCP(state.Key, state.ServiceKey()); d != nil {
+	if d := e.rememberDeniedTCP(state.Key, state.ServiceKey(), false); d != nil {
 		e.resetDeniedTCP(pkt, state, proto, reason, d)
 	}
 }

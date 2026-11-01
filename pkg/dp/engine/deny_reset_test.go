@@ -191,13 +191,10 @@ func TestDenyResetActions(t *testing.T) {
 					if d.Action != capture.Repeat || d.Reason != reasonPolicyNonAdmit {
 						t.Fatalf("default denial = %+v", d)
 					}
-					drainResetWorker(t, f.e)
-					if len(f.inj.Resets()) != 0 {
-						t.Fatal("ordinary default denial reset in userspace")
+					if !d.Notify {
+						t.Fatal("default denial did not request verdict completion")
 					}
-					return
-				}
-				if d := f.handle(pkt); d.Action != capture.Drop || d.Reason != reasonDPIDeny {
+				} else if d := f.handle(pkt); d.Action != capture.Drop || d.Reason != reasonDPIDeny {
 					t.Fatalf("denial = %+v", d)
 				}
 				if got := f.waitResets(2); len(got) != 2 {
