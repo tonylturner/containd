@@ -88,7 +88,7 @@ func (m *mockStore) ReadHealthSnapshot(ctx context.Context) (config.HealthSnapsh
 	if err != nil && err != config.ErrNotFound {
 		return config.HealthSnapshot{}, err
 	}
-	return config.HealthSnapshot{Config: cfg, Revision: m.currentRevision()}, nil
+	return config.HealthSnapshot{Config: cfg}, nil
 }
 
 func (m *mockStore) MutateCandidate(ctx context.Context, expected config.Revision, edit func(*config.Config) error) (config.Revision, error) {

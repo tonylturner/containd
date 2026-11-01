@@ -13,7 +13,6 @@ import (
 type HealthSnapshot struct {
 	Config     *Config
 	ApplyFault string
-	Revision   Revision
 }
 
 // HealthReader provides observation within the caller's shared budget without
@@ -55,10 +54,6 @@ func (s *SQLiteStore) ReadHealthSnapshot(ctx context.Context) (HealthSnapshot, e
 		return HealthSnapshot{}, err
 	}
 	defer tx.Rollback() //nolint:errcheck
-	revision, err := readRevision(ctx, tx)
-	if err != nil {
-		return HealthSnapshot{}, err
-	}
 	cfg, err := readKindFrom(ctx, tx, configKeyRunning, false)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return HealthSnapshot{}, err
@@ -73,5 +68,5 @@ func (s *SQLiteStore) ReadHealthSnapshot(ctx context.Context) (HealthSnapshot, e
 	if err := tx.Commit(); err != nil {
 		return HealthSnapshot{}, err
 	}
-	return HealthSnapshot{Config: cfg, ApplyFault: fault, Revision: revision}, nil
+	return HealthSnapshot{Config: cfg, ApplyFault: fault}, nil
 }
