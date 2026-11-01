@@ -351,16 +351,9 @@ func disableUserMFAHandler(userStore users.Store) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"status": "already_disabled"})
 			return
 		}
-		if err := userStore.DisableTOTP(c.Request.Context(), u.ID); err != nil {
+		if err := userStore.DisableTOTPWithGrace(c.Request.Context(), u.ID, time.Now()); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
-		}
-		if u.MFARequired {
-			deadline := users.MFAGraceDeadline(time.Now())
-			if err := userStore.SetMFARequirement(c.Request.Context(), u.ID, true, &deadline); err != nil {
-				apiError(c, http.StatusBadRequest, err.Error())
-				return
-			}
 		}
 		auditLog(c, audit.Record{
 			Action: "auth.mfa.disable_admin",

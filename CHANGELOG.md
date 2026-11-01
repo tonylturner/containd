@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
+- Make admin MFA disable atomic with the required account's new enrollment grace
+  period, so a failed operation leaves the account unchanged.
 - Consume the TOTP enrollment confirmation time step so its code cannot also
   authenticate on web/API or SSH outside lab mode.
 - Count Unicode characters, not UTF-8 bytes, toward the eight-character password
