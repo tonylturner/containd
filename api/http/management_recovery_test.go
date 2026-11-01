@@ -35,9 +35,9 @@ func (e *recoveryEngine) Configure(_ context.Context, dp config.DataPlaneConfig)
 	return e.configErr
 }
 
-func (e *recoveryEngine) ApplyRules(_ context.Context, snapshot rules.Snapshot) error {
+func (e *recoveryEngine) ApplyRules(_ context.Context, snapshot rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	e.snapshot = snapshot
-	return e.rulesErr
+	return dpengine.ProtectionStatus{}, e.rulesErr
 }
 
 func TestManagementRecoveryApplyAndStatus(t *testing.T) {
@@ -123,7 +123,7 @@ func TestManagementRecoveryApplyAndStatus(t *testing.T) {
 		t.Fatal("recovery configure failure ignored")
 	}
 	engine.configErr = nil
-	if err := store.Commit(ctx); err != nil {
+	if err := testCommit(store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ApplyBootConfig(ctx, store, engine, services); err != nil {
@@ -148,7 +148,7 @@ func TestQueuedRecoveryRechecksPromotionUnderApplyLock(t *testing.T) {
 		_, err := ApplyBootConfig(ctx, store, engine, services)
 		done <- err
 	}()
-	err := store.Commit(ctx)
+	err := testCommit(store, ctx)
 	runningConfigApplyMu.Unlock()
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func TestManagementRecoveryWithoutReservation(t *testing.T) {
 	health := func() healthBody {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+		serveWithConfigRevision(t, server, rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
 		var body healthBody
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
@@ -251,7 +251,7 @@ func TestManagementRecoveryWithoutReservation(t *testing.T) {
 		})
 	}
 
-	if err := store.Commit(ctx); err != nil {
+	if err := testCommit(store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	engine.ruleset = dpengine.RulesetStatus{Ruleset: "x", SnapshotVersion: "compiled", AppliedAt: time.Now()}

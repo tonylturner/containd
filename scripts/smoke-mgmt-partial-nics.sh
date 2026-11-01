@@ -10,6 +10,8 @@
 set -Eeuo pipefail
 trap 'echo "FAIL: line $LINENO: $BASH_COMMAND" >&2' ERR
 ROOT=$(git rev-parse --show-toplevel)
+# shellcheck source=scripts/config-revision.sh
+source "$ROOT/scripts/config-revision.sh"
 PROJECT="containd-v033fix-partial-$(date +%s)-$$"
 IMAGE="$PROJECT:local"
 mkdir -p "$ROOT/build"
@@ -103,10 +105,10 @@ for row in rows:
 PY
 }
 commit_policy() {
-  api --data-binary @- "$BASE/config/candidate" <"$1" >"$SCRATCH/stage.json"
-  api -D /tmp/commit.headers -X POST "$BASE/config/commit" >"$SCRATCH/commit.json"
+  cas_write "$SCRATCH/config.revision" api --data-binary @- "$BASE/config/candidate" <"$1" >"$SCRATCH/stage.json"
+  cas_write "$SCRATCH/config.revision" api -X POST "$BASE/config/commit" >"$SCRATCH/commit.json"
   jq -e '.status == "committed"' "$SCRATCH/commit.json" >/dev/null
-  docker exec "$CONTAINER" cat /tmp/commit.headers >"$SCRATCH/commit.headers"
+  cp "$SCRATCH/config.revision.headers" "$SCRATCH/commit.headers"
   if grep -qi '^X-Containd-Warnings:' "$SCRATCH/commit.headers"; then
     echo "policy applied with warnings" >&2
     return 1
@@ -143,10 +145,11 @@ for N in 5 7 8; do
     peer outsider --fail "$BASE/health" >"$SCRATCH/outsider-before.json"
     assert_bindings
     if [[ "$RESERVED" == 1 ]]; then
-      api "$BASE/config" >"$SCRATCH/running.json"
+      cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/running.json"
       jq '.interfaces |= map(.access = {mgmt:false,http:false,https:false,ssh:false})' \
         "$SCRATCH/running.json" >"$SCRATCH/policy.json"
     else
+      cas_read "$SCRATCH/config.revision" api "$BASE/config/candidate" >"$SCRATCH/before-replacement.json"
       cp "$ROOT/test/mgmt-partial-nics/rd-policy.json" "$SCRATCH/policy.json"
       # The shipped full-replacement policy omits enforcement (false). Keep
       # the fixture exact and verify that runtime state, not a rewritten policy.
@@ -168,7 +171,7 @@ for N in 5 7 8; do
     assert_bindings
     cp "$SCRATCH/interfaces.json" "$SCRATCH/$CONTAINER-renumbered-interfaces.json"
     if [[ "$RESERVED" == 1 ]]; then
-      api "$BASE/config" >"$SCRATCH/restarted.json"
+      cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/restarted.json"
       jq -e 'all(.interfaces[]; .access.mgmt == false and .access.http == false)' "$SCRATCH/restarted.json" >/dev/null
       if peer outsider --fail "$BASE/health" >"$SCRATCH/outsider-restarted.json" 2>"$SCRATCH/outsider.err"; then
         echo "outsider bypassed policy after restart" >&2
@@ -176,7 +179,7 @@ for N in 5 7 8; do
       fi
     else
       # Opt-out remains opt-out: a later all-access-off edit is denied.
-      api "$BASE/config" >"$SCRATCH/running.json"
+      cas_read "$SCRATCH/config.revision" api "$BASE/config" >"$SCRATCH/running.json"
       jq '.interfaces |= map(.access = {mgmt:false,http:false,https:false,ssh:false})' "$SCRATCH/running.json" >"$SCRATCH/off.json"
       commit_policy "$SCRATCH/off.json"
       for name in source proxy outsider; do

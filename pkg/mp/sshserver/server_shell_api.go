@@ -26,7 +26,7 @@ type shellAPI struct {
 	server *http.Server
 }
 
-func (s *Server) openShellAPI(conn *sshConnection) (*shellAPI, error) {
+func (s *Server) openShellAPI(conn *sshConnection, stopShell func()) (*shellAPI, error) {
 	dir, err := os.MkdirTemp("", "containd-ssh-")
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func (s *Server) openShellAPI(conn *sshConnection) (*shellAPI, error) {
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
-	server := &http.Server{Handler: s.shellAPIHandler(conn), ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Handler: s.shellAPIHandler(conn, stopShell), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = server.Serve(ln) }()
 	return &shellAPI{dir: dir, socket: socket, server: server}, nil
 }
@@ -50,7 +50,7 @@ func (a *shellAPI) close() {
 
 // shellAPIHandler forwards management API requests through the connection's
 // client, which authenticates them and names the connection.
-func (s *Server) shellAPIHandler(conn *sshConnection) http.Handler {
+func (s *Server) shellAPIHandler(conn *sshConnection, stopShell func()) http.Handler {
 	client := s.connectionClient(conn)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == cli.SSHResetAcknowledgePath && r.Method == http.MethodPost {
@@ -62,7 +62,9 @@ func (s *Server) shellAPIHandler(conn *sshConnection) http.Handler {
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
-			conn.close()
+			// Stop the shell, not the SSH transport. The session drains
+			// PTY output (including the CLI result) before disconnecting.
+			stopShell()
 			return
 		}
 		if !shellAPIPath(r.URL.Path) {
@@ -79,9 +81,9 @@ func (s *Server) shellAPIHandler(conn *sshConnection) http.Handler {
 			return
 		}
 		req.ContentLength = r.ContentLength
-		for _, name := range []string{"Content-Type", "Accept"} {
-			if v := r.Header.Get(name); v != "" {
-				req.Header.Set(name, v)
+		for _, name := range []string{"Content-Type", "Accept", "X-Containd-If-Revision"} {
+			for _, value := range r.Header.Values(name) {
+				req.Header.Add(name, value)
 			}
 		}
 		resp, err := client.Do(req)
@@ -106,7 +108,7 @@ func (s *Server) shellAPIHandler(conn *sshConnection) http.Handler {
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
-			time.AfterFunc(shellResetCloseGrace, conn.close)
+			time.AfterFunc(shellResetCloseGrace, stopShell)
 		}
 	})
 }

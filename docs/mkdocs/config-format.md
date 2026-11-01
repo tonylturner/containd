@@ -20,6 +20,27 @@ shows the intentionally disabled mode, which updates the engine's in-memory
 snapshot without installing firewall rules. Interface and service configuration
 can still change.
 
+## Concurrent edits
+
+Configuration revisions are transport metadata, not JSON fields or schema
+versions. Every configuration read returns `X-Containd-Revision` from the same
+snapshot as its document. Keep that opaque string with your draft and send it
+as `X-Containd-If-Revision` when saving or importing. Successful writes return
+their resulting revision; staged sequences must chain those acknowledgements.
+
+The shared revision includes running, candidate, previous, confirmed-commit
+state and IDS bank references. Secret-only and IDS-only edits invalidate it
+just like visible settings. HTTP 428 means the precondition is missing; 400
+with `config_revision_malformed` means its syntax is invalid; 412 means another
+transition occurred. Keep your edits, reload and review before retrying.
+Review the diff and use its revision for commit or commit-confirmed. Rollback
+restores running but retains a newer candidate, and returns a fresh revision.
+Reset and apply compensation also never reuse old tokens. A no-op boot repair
+does not invalidate drafts. See the
+[API client contract](api-reference.md#orchestrator-client-contract).
+
+## Stored service faults
+
 Stored-state replay, rollback and commit confirmation tolerate service-only
 faults by applying an in-memory effective configuration. They still refuse
 invalid firewall, scan-selection or management-path policy. The stored document

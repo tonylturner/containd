@@ -20,8 +20,9 @@ set -euo pipefail
 #
 # The checks, each under the policy named in its ID:
 # - open (fail-open, scanner ready): the EICAR download and upload are
-#   refused with 403 and no EICAR byte reaches the client, the origin never
-#   receives the upload, clean objects pass whole, the origin sees the
+#   refused with a complete generated 403 and no 16-byte EICAR fragment
+#   reaches the client, the origin never receives the upload, clean objects
+#   pass whole (exact download body and upload receiver size/MD5), the origin sees the
 #   engine's WAN address (masquerade) and a detection event names the
 #   client; the DNAT forward refuses EICAR and delivers clean with the
 #   target seeing the engine's LAN address (return-path masquerade); the
@@ -58,7 +59,9 @@ LAN_NET=${SMOKE_LAN_NET:-172.31.0}
 BASE=${BASE:-http://localhost:18080/api/v1}
 TOKEN=${TOKEN:-devtoken}
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
-CURL="curl -sf --max-time 30 --connect-timeout 5"
+CURL=(curl -sf --max-time 30 --connect-timeout 5)
+# shellcheck source=scripts/config-revision.sh
+source "$(dirname "${BASH_SOURCE[0]}")/config-revision.sh"
 SMOKE_SKIP_UP=${SMOKE_SKIP_UP:-0}
 SMOKE_BUILD=${SMOKE_BUILD:-1}
 SMOKE_MUTATION=${SMOKE_MUTATION:-}
@@ -131,7 +134,7 @@ ensure_tools() {
 wait_for_http() {
   local url=$1
   for _ in $(seq 1 30); do
-    if $CURL "$url" >/dev/null 2>&1; then
+    if "${CURL[@]}" "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 2
@@ -212,13 +215,36 @@ eicar_path() {
 }
 
 # expect_refused ID DESCRIPTION OUTCOME passes when the gate answered 403
-# and no EICAR byte reached the client.
+# and a complete generated refusal contains no 16-byte EICAR fragment.
+refusal_ok() {
+  [[ "$(outcome_field "$1" status)" == 403 &&
+    "$(outcome_field "$1" complete)" == yes &&
+    "$(outcome_field "$1" fragment)" == no &&
+    "$(outcome_field "$1" refusal)" == yes ]]
+}
+
+clean_download_ok() {
+  [[ "$(outcome_field "$1" status)" == 200 &&
+    "$(outcome_field "$1" complete)" == yes &&
+    "$(outcome_field "$1" clean)" == yes ]]
+}
+
+clean_upload_ok() {
+  local line
+  line=$(outcome_field "$1" line)
+  [[ "$(outcome_field "$1" status)" == 200 &&
+    "$(outcome_field "$1" complete)" == yes &&
+    "$(reply_field "$line" method)" == POST &&
+    "$(reply_field "$line" size)" == "$(outcome_field "$1" upload_size)" &&
+    "$(reply_field "$line" md5)" == "$(outcome_field "$1" upload_md5)" ]]
+}
+
 expect_refused() {
   local id=$1 desc=$2 outcome=$3
-  if [[ "$(outcome_field "$outcome" status)" == 403 && "$(outcome_field "$outcome" eicar)" == no ]]; then
+  if refusal_ok "$outcome"; then
     pass "$id" "$desc refused ($outcome)"
   else
-    check_fail "$id" "$desc was not refused with 403 and no EICAR bytes ($outcome)"
+    check_fail "$id" "$desc lacked a complete generated 403 refusal free of EICAR fragments ($outcome)"
   fi
 }
 
@@ -226,7 +252,8 @@ expect_refused() {
 # response arrived whose EICAR content matches EICAR (yes or no).
 expect_delivered() {
   local id=$1 desc=$2 outcome=$3 eicar=$4
-  if [[ "$(outcome_field "$outcome" status)" == 200 && "$(outcome_field "$outcome" complete)" == yes && "$(outcome_field "$outcome" eicar)" == "$eicar" ]]; then
+  if [[ "$(outcome_field "$outcome" status)" == 200 && "$(outcome_field "$outcome" complete)" == yes && "$(outcome_field "$outcome" eicar)" == "$eicar" ]] &&
+    { [[ $eicar == yes ]] || clean_download_ok "$outcome"; }; then
     pass "$id" "$desc delivered ($outcome)"
   else
     check_fail "$id" "$desc was not delivered whole with eicar=$eicar ($outcome)"
@@ -273,7 +300,7 @@ origin_upload_count() {
 }
 
 api_get() {
-  $CURL -H "$AUTH_HEADER" "${BASE}$1"
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}$1"
 }
 
 # av_status prints the av entry of the services status.
@@ -395,12 +422,12 @@ apply_policy() {
       }
   ')
   resp="$WORK_DIR/cfg_resp"
-  code=$(echo "$updated" | $CURL -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$resp" 2>"$WORK_DIR/cfg_err" || true)
+  code=$(echo "$updated" | cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -w "%{http_code}" -H "$AUTH_HEADER" -H "Content-Type: application/json" -X POST "${BASE}/config" --data-binary @- -o "$resp" 2>"$WORK_DIR/cfg_err" || true)
   if [[ "$code" != "200" ]]; then
     harness_error "config save failed (HTTP $code): body=$(cat "$resp"), err=$(cat "$WORK_DIR/cfg_err")"
   fi
-  headers="$WORK_DIR/commit_headers"
-  code=$($CURL -w "%{http_code}" -D "$headers" -H "$AUTH_HEADER" -X POST "${BASE}/config/commit" -o "$resp" 2>"$WORK_DIR/commit_err" || true)
+  headers="$WORK_DIR/config.revision.headers"
+  code=$(cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -w "%{http_code}" -H "$AUTH_HEADER" -X POST "${BASE}/config/commit" -o "$resp" 2>"$WORK_DIR/commit_err" || true)
   if [[ "$code" != "200" || "$(jq -r '.status' "$resp" 2>/dev/null)" != "committed" ]]; then
     harness_error "commit failed (HTTP $code): body=$(cat "$resp"), err=$(cat "$WORK_DIR/commit_err")"
   fi
@@ -414,7 +441,7 @@ apply_policy() {
 upload_definition() {
   local resp="$WORK_DIR/defs_resp" code
   printf '%s:%s:Smoke.EICAR.Test\n' "$EICAR_MD5" "$EICAR_SIZE" >"$WORK_DIR/eicar.hdb"
-  code=$($CURL -w "%{http_code}" -H "$AUTH_HEADER" -X POST "${BASE}/services/av/defs" -F "file=@${WORK_DIR}/eicar.hdb;filename=eicar.hdb" -o "$resp" 2>"$WORK_DIR/defs_err" || true)
+  code=$("${CURL[@]}" -w "%{http_code}" -H "$AUTH_HEADER" -X POST "${BASE}/services/av/defs" -F "file=@${WORK_DIR}/eicar.hdb;filename=eicar.hdb" -o "$resp" 2>"$WORK_DIR/defs_err" || true)
   if [[ "$code" != "200" ]]; then
     harness_error "definition upload failed (HTTP $code): body=$(cat "$resp"), err=$(cat "$WORK_DIR/defs_err")"
   fi
@@ -447,7 +474,7 @@ download_checks() {
   log "Testing $prefix: lan_client GET clean file from av_server:8080 (should pass whole)..."
   outcome=$(fetch lan_client get "$AV_SERVER" 8080 /clean.txt)
   seen=$(reply_field "$(outcome_field "$outcome" line)" client)
-  if [[ "$(outcome_field "$outcome" status)" == 200 && "$(outcome_field "$outcome" complete)" == yes && "$(outcome_field "$outcome" eicar)" == no && "$seen" == "$ENGINE_WAN" ]]; then
+  if clean_download_ok "$outcome" && [[ "$seen" == "$ENGINE_WAN" ]]; then
     pass "$prefix-download-clean" "clean download delivered whole, av_server saw $ENGINE_WAN ($outcome)"
   else
     check_fail "$prefix-download-clean" "clean download was not delivered whole from the engine's WAN address $ENGINE_WAN ($outcome)"
@@ -456,7 +483,7 @@ download_checks() {
   before=$(origin_upload_count av_server "$EICAR_MD5")
   outcome=$(fetch lan_client post "$AV_SERVER" 8080 /upload eicar)
   after=$(origin_upload_count av_server "$EICAR_MD5")
-  if [[ "$(outcome_field "$outcome" status)" == 403 && "$after" == "$before" ]]; then
+  if refusal_ok "$outcome" && [[ "$after" == "$before" ]]; then
     pass "$prefix-upload-eicar" "EICAR upload refused, av_server received no EICAR body ($outcome)"
   else
     check_fail "$prefix-upload-eicar" "EICAR upload was not refused with 403 before the origin saw it (EICAR uploads at origin $before -> $after; $outcome)"
@@ -464,7 +491,7 @@ download_checks() {
   log "Testing $prefix: lan_client POST clean body to av_server:8080 (should pass)..."
   outcome=$(fetch lan_client post "$AV_SERVER" 8080 /upload clean)
   seen=$(reply_field "$(outcome_field "$outcome" line)" client)
-  if [[ "$(outcome_field "$outcome" status)" == 200 && "$(reply_field "$(outcome_field "$outcome" line)" method)" == POST && "$seen" == "$ENGINE_WAN" ]]; then
+  if clean_upload_ok "$outcome" && [[ "$seen" == "$ENGINE_WAN" ]]; then
     pass "$prefix-upload-clean" "clean upload delivered, av_server saw $ENGINE_WAN ($outcome)"
   else
     check_fail "$prefix-upload-clean" "clean upload was not delivered from the engine's WAN address $ENGINE_WAN ($outcome)"
@@ -488,7 +515,7 @@ wait_for_http "${BASE}/health"
 log "Fetching interface state..."
 STATE=""
 for _ in $(seq 1 10); do
-  STATE=$($CURL -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
+  STATE=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
   if [[ -n "$STATE" && "$STATE" != "[]" ]]; then
     break
   fi
@@ -502,7 +529,7 @@ fi
 log "Detected wan=${WAN_DEV}, lan=${LAN_DEV}"
 
 log "Fetching current config..."
-CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
+CFG=$(cas_read "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config")
 
 log "Uploading the EICAR signature as a custom definition..."
 upload_definition
@@ -516,7 +543,7 @@ for chain in gate_pre gate_admit; do
 done
 
 log "Verifying mgmt API still reachable..."
-$CURL "${BASE}/health" >/dev/null
+"${CURL[@]}" "${BASE}/health" >/dev/null
 
 log "Setting test client routes (cross-subnet and default via the engine)..."
 route_client lan_client "$LAN_CLIENT" "$LAN_NET" "$WAN_NET" "$ENGINE_LAN"
@@ -546,7 +573,7 @@ fi
 log "Testing open: DNAT WAN:${DNAT_PORT} -> av_target:80 from av_server, clean file (should pass whole)..."
 OUTCOME=$(fetch av_server get "$ENGINE_WAN" "$DNAT_PORT" /clean.txt)
 SEEN=$(reply_field "$(outcome_field "$OUTCOME" line)" client)
-if [[ "$(outcome_field "$OUTCOME" status)" == 200 && "$(outcome_field "$OUTCOME" complete)" == yes && "$(reply_field "$(outcome_field "$OUTCOME" line)" server)" == av_target && "$SEEN" == "$ENGINE_LAN" ]]; then
+if clean_download_ok "$OUTCOME" && [[ "$(reply_field "$(outcome_field "$OUTCOME" line)" server)" == av_target && "$SEEN" == "$ENGINE_LAN" ]]; then
   pass dnat-download-clean "clean download through the port forward reached av_target, which saw the engine's LAN address $ENGINE_LAN ($OUTCOME)"
 else
   check_fail dnat-download-clean "clean download through the port forward was not delivered whole by av_target from the engine's LAN address $ENGINE_LAN ($OUTCOME)"
@@ -585,7 +612,7 @@ expect_refused unavailable-closed-clean "clean download with the scanner unavail
 OUTCOME=$(fetch lan_client post "$AV_SERVER" 8080 /upload clean)
 expect_refused unavailable-closed-upload "clean upload with the scanner unavailable under fail-closed" "$OUTCOME"
 log "Testing unavailable-closed: management API still answers (harness path and lan_client -> ${ENGINE_LAN}:18080)..."
-MGMT_HARNESS=$($CURL -w "%{http_code}" -o /dev/null "${BASE}/health" || true)
+MGMT_HARNESS=$("${CURL[@]}" -w "%{http_code}" -o /dev/null "${BASE}/health" || true)
 OUTCOME=$(fetch lan_client get "$ENGINE_LAN" 18080 /api/v1/health)
 if [[ "$MGMT_HARNESS" == 200 && "$(outcome_field "$OUTCOME" status)" == 200 ]]; then
   pass mgmt-reachable "management health answers 200 on the harness path and from lan_client ($OUTCOME)"

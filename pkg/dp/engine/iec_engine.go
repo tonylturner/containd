@@ -6,7 +6,6 @@ package engine
 import (
 	"time"
 
-	"github.com/tonylturner/containd/pkg/dp/capture"
 	"github.com/tonylturner/containd/pkg/dp/dpi"
 	"github.com/tonylturner/containd/pkg/dp/session"
 )
@@ -18,7 +17,7 @@ var newInjector = session.NewInjector
 // inline (NFQUEUE) engine opens the reset injector; when it cannot, the
 // configuration is kept, enforce envelopes fail closed and health reports
 // it.
-func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
+func (e *Engine) initIEC(cfg Config) {
 	store := e.eventStore
 	var t *iecTable
 	emit := func(evs []iecTelemetry) {
@@ -39,12 +38,10 @@ func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
 	}
 	t.dpi = e.dpiMgr
 	t.health = health
-	t.jobs = e.hooks.blocks
 	t.emit = emit
 	t.shadow = e.countShadow
 	t.markAbort = store.MarkAborted
 	t.onError = cfg.OnError
-	t.settler = capManager.Settler
 	switch {
 	case cfg.ResetInjector != nil:
 		t.injector = cfg.ResetInjector
@@ -58,7 +55,6 @@ func (e *Engine) initIEC(cfg Config, capManager *capture.Manager) {
 		t.injector = inj
 	}
 	e.iec = t
-	e.hooks.iec = t
 }
 
 // IEC104Enforcement reports IEC104 enforcement health.

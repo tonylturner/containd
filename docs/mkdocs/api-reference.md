@@ -147,28 +147,124 @@ not treated as a successful runtime apply.
 See [Config Format](config-format.md) for the configuration lifecycle and JSON.
 
 Successful staged edits return `X-Containd-Config: staged`. Successful commit,
-commit-confirmed, confirm and rollback return `X-Containd-Config: committed`.
+commit-confirmed, confirm, rollback and factory reset return `X-Containd-Config: committed`.
 Operational, read and preview-only responses carry neither header value.
-Failed responses normally omit it too. One exception is `POST /learn/apply`:
+Failed responses also omit them. One exception is `POST /learn/apply`:
 if candidate persistence succeeds but receipt completion fails, HTTP `503`
-still carries `X-Containd-Config: staged`. Retry that request ID and ordered
-selections; the header does not mean the entire request completed.
+still carries `X-Containd-Config: staged`; the header does not mean the
+entire request completed.
+Configuration reads also return `X-Containd-Revision`; successful configuration
+writes return the revision produced by that write, alongside the staged or
+committed header. The revision is header-only, including on `/config/diff`.
+Unauthenticated `/health` and all error responses omit the revision header.
+A learner HTTP 503 reporting durable staging has no revision header: re-read the
+candidate and review it before retrying the receipt.
+
+`POST /interfaces/reconcile` and `POST /routing/reconcile` are runtime operations,
+not configuration writers. They ignore `X-Containd-If-Revision` and return no
+`X-Containd-Revision`. Reconcile leaves unfinished UI edits based on their original
+revision; a later stale save requires conflict review rather than silently
+overwriting another operator's changes.
+
+## Protection observations
+
+Commit, commit-confirmed, rollback and factory reset success bodies include
+`{status, applyId, protection}`. Reset also retains its logout, message and
+warning fields. Confirm remains `{status:"confirmed"}`: it does not apply runtime.
+An opaque `applyId` identifies one runtime apply, not a configuration revision;
+boot replay, timed rollback and compensation each mint a fresh ID. Synchronous
+success does not certify readiness. Missing telemetry reports `unknown` without
+undoing a successful transaction.
+
+When scan selection is active, protection follows live AV readiness. Losing
+clamd or ICAP removes `protecting` without a commit; recovery requires an EICAR
+canary detection in every selected direction, not merely a successful connection
+or ICAP `OPTIONS` response.
+
+NFLOG rule-hit logging starts and retries independently of NFQUEUE capture.
+An exhausted queue bind does not prevent logging from becoming ready. A queue
+that the installed policy does not require cannot by itself prevent
+`protecting`; unavailable logging instead reports `degraded` with a retry action.
+
+- `GET /dataplane/protection` (any authenticated user) returns the current
+  `ProtectionStatus`: `bootId`, `applyId`, `installedApplyId`, `state`, `retryable`,
+  `observedAt`, `components` and `effects`. Components carry `name`, `required`,
+  `state`, `reason`, `since`, and optional bounded `attempt`/`maxAttempts`.
+  Effects carry `traffic` and `effect` (`normal`, `fail_closed_drop`,
+  `not_inspected`, or `unknown`). An unavailable upstream returns 502; no engine
+  returns 503.
+- `POST /dataplane/protection/retry` (admin) sends `{bootId, applyId}` from the
+  observation the operator reviewed. It returns 202 `{status:"retrying",applyId}`,
+  409 with `code: protection_superseded` or `protection_not_retryable`, 502 for
+  upstream failure, or 503 without an engine. Invalid identities return 400.
+  The action is audited as `dataplane.protection.retry`; it restarts only failed
+  consumers and keeps the current apply identity. No revision header is needed.
+
+`/health` remains unauthenticated HTTP 200. Its `protection` object contains only
+`{state, applyId}`, never component details. `enforcement` maps `protecting` to
+`enforcing`, `pending`/`failed` to `unavailable` with fixed reasons
+"protection pending"/"protection failed", `degraded` to `degraded` with reason
+"rule-hit logging unavailable; nft policy enforcing", `disabled` to `disabled`,
+and unreadable or stale observations to `unknown`. Persisted apply faults and
+management recovery still override protection; schedule planner degradation
+still overrides enforcing. Neither raw kernel errors nor private policy text
+appear in health reasons. Topology and firewall/ICS indicators retain the health
+reason when a health-only override applies while datapath protection is healthy,
+rather than explaining a degraded state as "Protecting".
 
 ## Orchestrator Client Contract
 
-Orchestrators that push a whole policy, such as RangerDanger, apply it with
-the following steps (paths below are relative to `/api/v1`):
+Every configuration writer requires `X-Containd-If-Revision` with the revision
+of the snapshot it is based on. This includes full documents, section edits,
+imports, IDS uploads, learner staging, commits, confirmation, rollback and
+factory reset. There are no client or lab-mode exemptions. The ICS template
+apply route with `preview: true` needs no revision header and ignores one if
+sent; preview does not compare or change configuration state.
 
-1. `POST /config/candidate` with the full document. A non-2xx response means
-   staging failed; report the error body. Staging alone never activates policy.
-2. `POST /config/commit`. A 200 with `X-Containd-Config: committed` means the
-   requested snapshot was applied. With `dataplane.enforcement: true`, the nft
-   ruleset has been installed; nft errors, including missing `NET_ADMIN`, are
-   failures, never ruleset warnings. Keep enforcement enabled for a firewall.
-3. Optionally, `GET /config` and compare running with what was submitted
-   (secrets are redacted and the IDS rule bank is omitted). Use
-   `GET /config/export` to include the running IDS rules. Check `GET /health`
-   for continuing runtime health.
+The revision covers running, candidate (including absence), previous,
+confirmed-commit state and IDS bank references together. Treat it as an opaque
+string, never a number or a document field. It has the form
+`<16 lowercase hex characters>.<positive decimal counter>`, at most 64 bytes.
+Unrelated simultaneous edits intentionally conflict. Restarts preserve it;
+reset, rollback and apply compensation never restore an old revision.
+
+Integrations that push a whole policy use these steps (paths are relative to
+`/api/v1`):
+
+1. `GET /config/candidate` and retain its `X-Containd-Revision` with the document.
+2. `POST /config/candidate` with the full document and
+   `X-Containd-If-Revision: <read revision>`. A non-2xx means staging failed;
+   report the error. Staging alone never activates policy.
+3. Review `GET /config/diff` and retain that response's revision with the diff.
+   `POST /config/commit` with that reviewed revision. A 200 with
+   `X-Containd-Config: committed` means the reviewed candidate was applied.
+   An automated stage-then-commit sequence can send the exact revision returned
+   by its stage; never fetch a later revision merely to authorize an old edit.
+   With `dataplane.enforcement: true`, nft installation failures, including
+   missing `NET_ADMIN`, fail the request rather than becoming warnings. Keep
+   enforcement enabled for a firewall.
+4. Optionally compare `GET /config` with the submitted running document
+   (secrets are redacted and the IDS rule bank is omitted; `GET /config/export`
+   includes the running IDS rules), and check `GET /health` for continuing
+   runtime health.
+
+Missing preconditions return HTTP **428** with `code: config_revision_required`.
+Malformed preconditions (including `*`, quoted tokens and multiple values)
+return **400** with `code: config_revision_malformed`, before body decoding.
+Authentication and authorization run first. A stale valid precondition returns
+**412**, without changing configuration, banks, timers or runtime policy:
+
+```json
+{"error":"configuration changed since it was read","code":"config_revision_mismatch","currentRevision":"0123456789abcdef.42"}
+```
+
+Keep the draft on 412. Re-read and review the changed state before deliberately
+resubmitting; never automatically retry an old edit with `currentRevision`.
+Independent semantic conflicts still use 409. A rejected VPN upload removes its
+new file. Learner staging releases its engine reservation on rejection; release
+uncertainty remains 503. If a learner 503 reports durable staging, retain the
+receipt, re-read/review the candidate, and resubmit that same receipt with the
+reviewed revision; the original precondition remains stale.
 
 Commit, commit-confirmed and rollback restore the pre-request running document
 and IDS bank on apply failure, then reapply them. The failed candidate stays
@@ -192,25 +288,27 @@ A store preflight/validation failure before promotion is HTTP 400 without
 recovery fields and does not promote running. A disconnected request is not
 proof of success or failure; read running, candidate and health before retrying.
 
+Internal runtime apply requests carry an opaque `X-Containd-Apply-Id`.
+The engine rejects a superseded ID with HTTP 409, code `apply_superseded`,
+for five minutes after supersession. Older history is evicted on admission;
+IDs are not ordered by their contents or by the management clock. Management
+serializes applies and uses a five-second engine request timeout. A request
+canceled or waiting five minutes for admission is rejected with HTTP 408,
+code `apply_expired`, without side effects. The current ID does not expire.
+
 `GET /health` remains HTTP 200 liveness and uses one observation budget of
 one second. General firewall health is a top-level `enforcement` object with
 exactly `state` and `reason`:
 
-- `enforcing`: enforcement is enabled and the engine reports an applied ruleset
-  without error.
-- `degraded`: a ruleset is in force, but the last apply failed and left the
-  previous ruleset in force, or the schedule planner is degraded: a refill of
-  the schedule time sets is failing, or their horizon ends within an hour.
-  `schedulePlanner` in `GET /api/v1/dataplane/ruleset/status` (any
-  authenticated user) and `engineStatus.schedulePlanner` in the admin-only
-  `GET /api/v1/dataplane/ruleset` show the
-  planner's last refill, horizon end and last error.
-- `disabled`: `dataplane.enforcement: false` intentionally selects the supported
-  in-memory-only mode; a successful commit does not install nft rules.
-- `unavailable`: the ruleset apply failed with no ruleset in force, no ruleset
-  has been applied while enforcement is enabled, or a persisted replay/recovery
-  fault makes runtime synchronization uncertain (including a failed disable
-  operation).
+- `enforcing`: the engine reports `protecting` for its current runtime apply.
+- `degraded`: protection reports unavailable rule-hit logging while nft policy
+  enforces, or the schedule planner is degraded (refill failure or a near-ending
+  horizon). Inspect `schedulePlanner` in `GET /dataplane/ruleset/status` or the
+  admin-only `GET /dataplane/ruleset` for planner diagnostics.
+- `disabled`: the engine reports enforcement disabled, intentionally selecting
+  the supported in-memory-only mode.
+- `unavailable`: protection is pending or failed, management recovery is active,
+  or a persisted replay/recovery fault makes runtime synchronization uncertain.
 - `unknown`: the configuration/fault or engine state could not be read within
   the observation budget. Health waits through brief store contention, but it
   never waits past that shared budget or exposes an unapplied document. Enforcement
@@ -225,10 +323,11 @@ response carries details. There is no separate config-apply-error field.
 counts `enforcing`, `partial`, `notEnforcing` and `monitoring`; it names no rule
 or exclusion. `state` is `none` without ICS rules, the worst state among
 enforce-mode rules, `monitoring` when every ICS rule is in monitor mode, or
-`unknown` when the engine cannot be read. `enforcement` stays the nftables-level
-state. See [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
-The existing `iec104Enforcement` object is unchanged: only `active`, `healthy`
-and `reason`, describing IEC104 queue/reset health independently. It also turns unhealthy, with `active`
+`unknown` when the engine cannot be read. `enforcement` reports current overall
+protection readiness. See [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
+The existing `iec104Enforcement` object keeps its shape (`active`, `healthy` and
+`reason`), with fixed sanitized reasons describing IEC104 queue/reset health
+independently. It also turns unhealthy, with `active`
 false, when the engine fails to reset an ICS connection it picked up mid-stream
 while an enforce rule of another ICS protocol is loaded. An inactive
 IEC104 policy is not proof nft is available. A successful commit does not
@@ -253,8 +352,13 @@ the submitted document must keep the reserved interface's `device` binding and
 set `dataplane.enforcement: true`. Copy the binding from `GET /config`.
 Otherwise staging is rejected with HTTP 400 and running remains unchanged.
 
+`GET /config/diff` includes `pendingConfirm: {"deadline":"<RFC3339 UTC>"}`
+or `pendingConfirm: null`, read in the same snapshot as the documents and
+revision. This is server state, including after navigation or a restart.
+
 `POST /config/confirm` only cancels the pending rollback deadline; its
-`committed` header acknowledges confirmation, not a new runtime apply.
+`committed` header acknowledges confirmation, not a new runtime apply. When
+nothing is pending it returns the current revision without invalidating drafts.
 
 ### Factory reset
 
@@ -695,10 +799,9 @@ All inventory reads require management authentication:
 An unavailable engine returns **503** with `{"error":"engine inventory unavailable"}`
 for these operations, never a fabricated empty list. A reachable empty inventory
 returns `[]` for the legacy list and `pairs: []` in the IEC 104 snapshot. The
-engine feeds the IEC section from decoded traffic. Accepted command counts are
-credited only in inline enforce mode, after the decision allowed the command and
-every packet that carried it completed an Accept verdict; monitor mode records
-attempts and points only. The read model does not generate policy.
+engine feeds the IEC section from decoded traffic. Inventory counts attempted
+commands and observed points, not delivery or physical execution. The read model
+does not generate policy.
 
 The IEC response has this shape (a populated observation example):
 
@@ -707,31 +810,29 @@ The IEC response has this shape (a populated observation example):
   "pairs": [{
     "controlling": "192.0.2.10:50000", "controlled": "192.0.2.20:2404",
     "firstSeen": "2026-10-26T12:00:00Z", "lastSeen": "2026-10-26T12:01:00Z",
-    "attemptedCommands": 2, "acceptedCommands": 1,
+    "attemptedCommands": 2,
     "cas": [{
       "ca": 1, "firstSeen": "2026-10-26T12:00:00Z", "lastSeen": "2026-10-26T12:01:00Z",
-      "attemptedCommands": 2, "acceptedCommands": 1,
+      "attemptedCommands": 2,
       "points": [{"ioa": 100, "typeId": 45, "firstSeen": "2026-10-26T12:00:00Z", "lastSeen": "2026-10-26T12:01:00Z"}]
     }]
   }],
   "limits": {"pairs": 128, "casPerPair": 32, "pointsPerCA": 256, "assets": 1024, "peersPerAsset": 128, "stationAddressesPerAsset": 256, "maxIdleSeconds": 86400},
-  "overflow": {"observations": 0, "pairs": 0, "cas": 0, "points": 0, "assets": 0, "peers": 0, "stationAddresses": 0, "outcomes": 0}
+  "overflow": {"observations": 0, "pairs": 0, "cas": 0, "points": 0, "assets": 0, "peers": 0, "stationAddresses": 0}
 }
 ```
 
 Pair identity includes both endpoint ports; reconnects using different client
 ports are separate pairs. Point identity is `(IOA, typeId)` within a CA. Times
 are first/last observations, not delivery times. Attempted counts decoded
-control-direction command APDUs (type IDs 45–51 and 58–64); accepted additionally
-requires successful delivery verdicts for all carrying packets. A pending or
-failed command is not accepted. Pair totals may exceed the sum of retained CA
+control-direction command APDUs (type IDs 45–51 and 58–64), regardless of their
+subsequent delivery. Pair totals may exceed the sum of retained CA
 totals after CA eviction. Counts do not represent lifetime traffic.
 
 Entries use least-recently-observed eviction and 24-hour idle expiry. Overflow
 counts capacity evictions or truncated observations, not unique devices;
-`observations` counts observations dropped on inventory lock contention;
-`outcomes` counts final outcomes dropped on contention or for expired/evicted
-observations. Input calls never wait for readers or other writers.
+`observations` counts observations dropped on inventory lock contention.
+Input calls never wait for readers or other writers.
 Counters survive evictions and reset on clear/restart. Reads do not extend
 retention. The internal engine read is
 `GET /internal/inventory?section=iec104`; it uses the existing inventory handler.

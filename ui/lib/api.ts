@@ -1,13 +1,15 @@
 /** Discriminated result type for mutation API calls that surfaces backend error messages. */
 export type ApiResult<T> =
-  | { ok: true; data: T; warning?: string }
+  | { ok: true; data: T; warning?: string; revision?: string }
   | ApiFailure;
 
 /**
  * A refused or failed call. `retryAfter` is the server's Retry-After in
  * seconds, set when it said when to try again (a 429 rate limit or lock).
  */
-export type ApiFailure = { ok: false; error: string; retryAfter?: number };
+export type ApiFailure = { ok: false; error: string; retryAfter?: number; status?: number; code?: string; currentRevision?: string; revision?: string };
+
+export type ConfigSnapshot<T> = { data: T; revision: string };
 
 // This file is the stable UI API facade. Keep shared public types and the
 // exported `api` surface here, but place endpoint families in `api-*.ts`
@@ -87,6 +89,8 @@ export type {
 } from "./api-ics-coverage";
 export { iec104SessionID, parseICSEvidence } from "./api-iec104";
 export { fetchHealth } from "./api-health";
+export { fetchProtection, retryProtection } from "./api-protection";
+export type { ProtectionStatus, ProtectionState, ProtectionComponent, ProtectionEffect } from "./api-protection";
 export { getEvidenceStatus } from "./api-evidence";
 export type { AuditPersistenceStatus, EvidenceStatus, EvidenceState } from "./api-evidence";
 export type {

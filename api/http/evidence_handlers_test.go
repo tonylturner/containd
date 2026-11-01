@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -97,7 +98,8 @@ func TestEvidenceStageAtomicRetry(t *testing.T) {
 		}
 		assertConfigResponseHeader(t, rec, "staged")
 	}
-	candidate, err := store.LoadCandidate(ctx)
+	candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,13 +127,14 @@ func TestEvidenceStageConflictRollsBackWholeBatch(t *testing.T) {
 	s.ID, s.Proof.ContentID = id, id
 	conflict := s.Content.Rules[1]
 	conflict.ICS.Addresses = []string{"4-6"}
-	if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 		cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict, config.Rule{ID: "learned-legacy", Action: config.ActionAllow})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	before, err := store.LoadCandidate(ctx)
+	beforeSnapshot2, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	before := beforeSnapshot2.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +144,8 @@ func TestEvidenceStageConflictRollsBackWholeBatch(t *testing.T) {
 		t.Fatalf("conflict: %d %s", rec.Code, rec.Body)
 	}
 	assertConfigResponseHeader(t, rec, "")
-	after, err := store.LoadCandidate(ctx)
+	afterSnapshot3, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	after := afterSnapshot3.Candidate
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("partially staged conflict or deleted legacy", err)
 	}
@@ -207,7 +211,7 @@ func TestEvidenceStageRecoveryErrorsAreRetryable(t *testing.T) {
 					e.releaseError = failure
 					conflict := s.Content.Rules[0]
 					conflict.ICS.Addresses = []string{"4-6"}
-					if err := store.MutateCandidate(context.Background(), func(cfg *config.Config) error {
+					if err := testMutateCandidate(store, context.Background(), func(cfg *config.Config) error {
 						cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict)
 						return nil
 					}); err != nil {
@@ -322,17 +326,19 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 					t.Fatal(err)
 				}
 				store := stageStore(t)
-				before, err := store.LoadCandidate(ctx)
+				beforeSnapshot4, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				before := beforeSnapshot4.Candidate
 				if err != nil {
 					t.Fatal(err)
 				}
 				if release {
 					conflict := s.Content.Rules[0]
 					conflict.ICS.Addresses = []string{"4-6"}
-					if err := store.MutateCandidate(ctx, func(cfg *config.Config) error { cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict); return nil }); err != nil {
+					if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error { cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict); return nil }); err != nil {
 						t.Fatal(err)
 					}
-					before, err = store.LoadCandidate(ctx)
+					beforeSnapshot5, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+					before = beforeSnapshot5.Candidate
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -368,7 +374,8 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 					if err := es.ReleaseStage(ctx, req); err != nil {
 						t.Fatal("release retry", err)
 					}
-					after, err := store.LoadCandidate(ctx)
+					afterSnapshot6, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+					after := afterSnapshot6.Candidate
 					if err != nil || !reflect.DeepEqual(before, after) {
 						t.Fatal("failed mutation changed candidate", err)
 					}
@@ -383,7 +390,8 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 						t.Fatalf("retry: %d %s", rec.Code, rec.Body)
 					}
 				}
-				after, err := store.LoadCandidate(ctx)
+				afterSnapshot7, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				after := afterSnapshot7.Candidate
 				if err != nil || len(after.Firewall.Rules) != len(before.Firewall.Rules)+1 {
 					t.Fatal("duplicate or missing staged rules", err)
 				}
@@ -409,14 +417,14 @@ func TestEvidenceStageUpgradeOnlyReconcilesExistingRules(t *testing.T) {
 			s.Proof.ContentID, s.Proof.Versions = s.ID, s.Content.Versions
 			s.StageReconcileOnly = true
 			if existing {
-				if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+				if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 					cfg.Firewall.Rules = append(cfg.Firewall.Rules, s.Content.Rules...)
 					return nil
 				}); err != nil {
 					t.Fatal(err)
 				}
 			}
-			before, err := store.LoadCandidate(ctx)
+			before, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -429,16 +437,65 @@ func TestEvidenceStageUpgradeOnlyReconcilesExistingRules(t *testing.T) {
 					t.Fatalf("upgrade status: %d %s", rec.Code, rec.Body)
 				}
 			}
-			after, err := store.LoadCandidate(ctx)
+			after, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(before.Firewall.Rules, after.Firewall.Rules) {
+			if !reflect.DeepEqual(before.Candidate.Firewall.Rules, after.Candidate.Firewall.Rules) {
 				t.Fatal("upgrade mutated candidate")
 			}
 			if e.releases != 0 {
 				t.Fatal("lost historical receipt needed for reconciliation")
 			}
 		})
+	}
+}
+
+func TestEvidenceStageUpgradeRevisionMismatch(t *testing.T) {
+	ctx := context.Background()
+	store := stageStore(t)
+	s := stageProposal(t)
+	s.StageReconcileOnly = true
+	e := &evidenceStageEngine{stageEngine: &stageEngine{mockEngine: &mockEngine{}}, frozen: []learn.Suggestion{s}}
+	server := NewServerWithEngine(store, nil, e)
+	body, err := json.Marshal(learn.ApplyRequest{RequestID: "stale-upgrade", Selections: []learn.Selection{{ID: s.ID, Revision: s.Revision}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := withTestRevision(store, authedRequest(http.MethodPost, "/api/v1/learn/apply", strings.NewReader(string(body))))
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
+		cfg.System.Hostname = "external-edit"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale upgrade status: %d %s", rec.Code, rec.Body)
+	}
+	var failure struct {
+		Code            string          `json:"code"`
+		CurrentRevision config.Revision `json:"currentRevision"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Code != "config_revision_mismatch" || failure.CurrentRevision != before.Revision {
+		t.Fatalf("wrong revision failure: %+v", failure)
+	}
+	after, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) || e.resolves != 1 || e.releases != 0 || e.done != 0 {
+		t.Fatal("stale upgrade changed candidate or lost the historical receipt")
+	}
+	if rec.Header().Get(revisionHeader) != "" {
+		t.Fatal("stale upgrade acknowledged a write")
 	}
 }

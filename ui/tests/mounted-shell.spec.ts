@@ -7,7 +7,7 @@ async function mockAPI(page: Page) {
       ? { id: "admin", username: "containd", role: "admin" }
       : path.endsWith("/config/diff") ? { changed: false }
       : path.endsWith("/services/dns") ? { enabled: true, listenPort: 53 } : {};
-    return route.fulfill({ json });
+    return route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 }
 

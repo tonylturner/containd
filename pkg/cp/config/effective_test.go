@@ -128,19 +128,26 @@ func TestStoredFaultPromotionRestoreConfirmAndExpiry(t *testing.T) {
 	}
 	cfg.Services.Proxy.Forward.Upstream = "legacy"
 	installStoredFault(t, s, cfg)
-	if err := s.MutateCandidate(ctx, func(c *Config) error { c.Description = "repair"; return nil }); err != nil {
+	if err := testMutateCandidate(s, ctx, func(c *Config) error { c.Description = "repair"; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(s, ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ConfirmCommit(ctx); err != nil {
+	if err := testConfirmCommit(s, ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MutateCandidate(ctx, func(c *Config) error { c.Services.Proxy = ProxyConfig{}; return nil }); err != nil {
+	if err := testMutateCandidate(s, ctx, func(c *Config) error { c.Services.Proxy = ProxyConfig{}; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(s, ctx, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(pendingCommit{DeadlineUnix: time.Now().Add(-time.Hour).UnixNano()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE configs SET data=? WHERE key=?`, string(data), configKeyPending); err != nil {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
@@ -153,11 +160,11 @@ func TestStoredFaultPromotionRestoreConfirmAndExpiry(t *testing.T) {
 	if err != nil || running.Services.Proxy.Forward.Upstream != "legacy" {
 		t.Fatalf("restoration persisted projection: %v %+v", err, running)
 	}
-	if err := s.MutateCandidate(ctx, func(c *Config) error { c.Description = "failed change"; return nil }); err != nil {
+	if err := testMutateCandidate(s, ctx, func(c *Config) error { c.Description = "failed change"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	attempts := 0
-	err = s.ApplyChange(ctx, ChangeCommit, 0, func(_ context.Context, _, next *Config) error {
+	err = testApplyChange(s, ctx, ChangeCommit, 0, func(_ context.Context, _, next *Config) error {
 		attempts++
 		_, faults, err := Effective(next, nil)
 		if err != nil || len(faults) != 1 {
@@ -208,10 +215,10 @@ func TestStoredFaultExpiredAtOpen(t *testing.T) {
 	}
 	cfg.Services.Proxy.Forward.Upstream = "legacy"
 	installStoredFault(t, s, cfg)
-	if err := s.MutateCandidate(ctx, func(c *Config) error { c.Services.Proxy = ProxyConfig{}; return nil }); err != nil {
+	if err := testMutateCandidate(s, ctx, func(c *Config) error { c.Services.Proxy = ProxyConfig{}; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(s, ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	data, err := json.Marshal(pendingCommit{DeadlineUnix: time.Now().Add(-time.Hour).UnixNano()})

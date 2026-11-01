@@ -20,15 +20,15 @@ async function openZones(page: Page, reply: { status: number; error?: string } =
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") {
-      await route.fulfill({ json: user });
+      await route.fulfill({ json: user, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     if (path === "/api/v1/zones" && request.method() === "POST") {
       posts.push(request.postDataJSON());
-      await route.fulfill(reply.status === 200 ? { json: request.postDataJSON() } : { status: reply.status, json: { error: reply.error } });
+      await route.fulfill(reply.status === 200 ? { json: request.postDataJSON(), headers: { "X-Containd-Revision": "0123456789abcdef.1" } } : { status: reply.status, json: { error: reply.error }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
-    await route.fulfill({ json: path === "/api/v1/zones" ? [] : {} });
+    await route.fulfill({ json: path === "/api/v1/zones" ? [] : {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/zones");
   await page.goto("/zones/");

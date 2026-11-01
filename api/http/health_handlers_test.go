@@ -29,7 +29,7 @@ func TestHealthReportsUnboundManagement(t *testing.T) {
 	check := func(want string) {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+		serveWithConfigRevision(t, server, rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
 		var body struct {
 			Binding struct {
 				State string `json:"state"`
@@ -74,7 +74,7 @@ func healthBody(t *testing.T, engine EngineClient) (int, map[string]any) {
 	s := NewServerWithEngine(&mockStore{}, nil, engine)
 	rec := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
@@ -104,7 +104,7 @@ func TestHealthReportsIEC104Enforcement(t *testing.T) {
 			name:       "engine unhealthy",
 			engine:     &healthMockEngine{mockEngine: &mockEngine{}, st: dpengine.IEC104Enforcement{Active: true, Reason: "reset injector unavailable"}},
 			forwarding: netcfg.IPv4ForwardingUnknown,
-			want:       map[string]any{"active": true, "healthy": false, "reason": "reset injector unavailable"},
+			want:       map[string]any{"active": true, "healthy": false, "reason": "IEC104 enforcement unavailable"},
 		},
 		{
 			name:       "inactive",
@@ -151,7 +151,7 @@ func TestRulesetHealthDoesNotExposePolicyDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	health := enforcementHealth(snapshot, nil, observeRuleset(context.Background(), engine))
+	health := enforcementHealth(snapshot, nil, observeRuleset(context.Background(), engine), dpengine.ProtectionStatus{State: "protecting"})
 	if health["state"] != "unavailable" || health["reason"] == "" || len(health) != 2 {
 		t.Fatalf("health fault hidden or shape changed: %v", health)
 	}
@@ -180,27 +180,29 @@ func TestHealthEnforcementStates(t *testing.T) {
 		snapshotErr error
 		status      dpengine.RulesetStatus
 		engineErr   error
+		protection  string
 		want        string
 	}{
-		{name: "disabled", want: "disabled"},
-		{name: "enforcing", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now()}, want: "enforcing"},
-		{name: "not applied", enabled: true, want: "unavailable"},
-		{name: "failed ruleset", enabled: true, status: dpengine.RulesetStatus{Error: "private nft diagnostic"}, want: "unavailable"},
-		{name: "failed over an installed ruleset", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now(), Error: "private nft diagnostic"}, want: "degraded"},
+		{name: "disabled", protection: "disabled", want: "disabled"},
+		{name: "enforcing", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now()}, protection: "protecting", want: "enforcing"},
+		{name: "not applied", enabled: true, protection: "pending", want: "unavailable"},
+		{name: "failed ruleset", enabled: true, status: dpengine.RulesetStatus{Error: "private nft diagnostic"}, protection: "failed", want: "unavailable"},
+		{name: "protection authoritative over stale ruleset error", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now(), Error: "private nft diagnostic"}, protection: "protecting", want: "enforcing"},
 		{name: "schedule planner degraded", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now(),
-			SchedulePlanner: &dpengine.SchedulePlan{State: dpengine.SchedulePlannerDegraded, Reason: "schedule refill failing", LastError: "private nft diagnostic"}}, want: "degraded"},
+			SchedulePlanner: &dpengine.SchedulePlan{State: dpengine.SchedulePlannerDegraded, Reason: "schedule refill failing", LastError: "private nft diagnostic"}}, protection: "protecting", want: "degraded"},
 		{name: "schedule planner ok", enabled: true, status: dpengine.RulesetStatus{Ruleset: "rules", AppliedAt: time.Now(),
-			SchedulePlanner: &dpengine.SchedulePlan{State: dpengine.SchedulePlannerOK}}, want: "enforcing"},
-		{name: "persisted fault", enabled: true, fault: "private replay diagnostic", want: "unavailable"},
-		{name: "failed disable", fault: "private replay diagnostic", want: "unavailable"},
-		{name: "store busy", snapshotErr: config.ErrHealthBusy, want: "unknown"},
-		{name: "engine unreadable", enabled: true, engineErr: context.DeadlineExceeded, want: "unknown"},
+			SchedulePlanner: &dpengine.SchedulePlan{State: dpengine.SchedulePlannerOK}}, protection: "protecting", want: "enforcing"},
+		{name: "persisted fault", enabled: true, fault: "private replay diagnostic", protection: "protecting", want: "unavailable"},
+		{name: "failed disable", fault: "private replay diagnostic", protection: "disabled", want: "unavailable"},
+		{name: "store busy", snapshotErr: config.ErrHealthBusy, protection: "protecting", want: "unknown"},
+		{name: "engine unreadable", enabled: true, engineErr: context.DeadlineExceeded, protection: "unknown", want: "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := config.DefaultConfig()
 			cfg.DataPlane.Enforcement = tc.enabled
 			engine := &healthRulesetEngine{mockEngine: &mockEngine{ruleset: tc.status}, err: tc.engineErr}
-			health := enforcementHealth(config.HealthSnapshot{Config: cfg, ApplyFault: tc.fault}, tc.snapshotErr, observeRuleset(context.Background(), engine))
+
+			health := enforcementHealth(config.HealthSnapshot{Config: cfg, ApplyFault: tc.fault}, tc.snapshotErr, observeRuleset(context.Background(), engine), dpengine.ProtectionStatus{State: tc.protection})
 			if health["state"] != tc.want || len(health) != 2 {
 				t.Fatalf("health: %v want %s", health, tc.want)
 			}
@@ -230,7 +232,7 @@ func TestHealthWaitsForBriefStoreOperation(t *testing.T) {
 	defer unblock()
 	mutated := make(chan error, 1)
 	go func() {
-		mutated <- store.MutateCandidate(ctx, func(candidate *config.Config) error {
+		mutated <- testMutateCandidate(store, ctx, func(candidate *config.Config) error {
 			close(entered)
 			<-release
 			candidate.System.Hostname = "candidate-only"
@@ -248,7 +250,7 @@ func TestHealthWaitsForBriefStoreOperation(t *testing.T) {
 	started := time.Now()
 	timer := time.AfterFunc(50*time.Millisecond, unblock)
 	defer timer.Stop()
-	server.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, server, rec, req)
 	elapsed := time.Since(started)
 	if elapsed < 50*time.Millisecond || elapsed > engineHealthTimeout+100*time.Millisecond {
 		t.Fatalf("health did not wait within budget: %s", elapsed)
@@ -281,7 +283,7 @@ func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
 	}
 	candidate.System.Hostname = "not-yet-applied"
 	candidate.DataPlane.Enforcement = true
-	if err := store.SaveCandidate(ctx, candidate); err != nil {
+	if err := testSaveCandidate(store, ctx, candidate); err != nil {
 		t.Fatal(err)
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -290,7 +292,7 @@ func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
 	defer unblock()
 	applied := make(chan error, 1)
 	go func() {
-		applied <- store.ApplyChange(ctx, config.ChangeCommit, 0, func(context.Context, *config.Config, *config.Config) error {
+		applied <- testApplyChange(store, ctx, config.ChangeCommit, 0, func(context.Context, *config.Config, *config.Config) error {
 			close(entered)
 			<-release
 			return nil
@@ -316,7 +318,7 @@ func TestHealthAnswersDuringRunningApplyWithoutExposingPromotion(t *testing.T) {
 	answered := make(chan struct{})
 	start := time.Now()
 	go func() {
-		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+		serveWithConfigRevision(t, server, rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
 		close(answered)
 	}()
 	select {
@@ -390,7 +392,7 @@ func TestHealthSharesOneObservationDeadline(t *testing.T) {
 			defer cancel()
 			rec := httptest.NewRecorder()
 			started := time.Now()
-			server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil).WithContext(ctx))
+			serveWithConfigRevision(t, server, rec, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil).WithContext(ctx))
 			if rec.Code != http.StatusOK || time.Since(started) >= engineHealthTimeout {
 				t.Fatalf("late liveness: %d %s", rec.Code, rec.Body)
 			}

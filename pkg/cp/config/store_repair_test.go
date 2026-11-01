@@ -15,10 +15,10 @@ import (
 func TestSavePreservesStagedStateAndUnchangedBank(t *testing.T) {
 	s := candidateStore(t)
 	ctx := context.Background()
-	if err := s.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(s, ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+	if err := testMutateCandidate(s, ctx, func(cfg *Config) error {
 		cfg.Description = "staged"
 		return nil
 	}); err != nil {
@@ -114,11 +114,11 @@ func TestRepairTransaction(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s := candidateStore(t)
 			ctx := context.Background()
-			if err := s.CommitConfirmed(ctx, time.Hour); err != nil {
+			if err := testCommitConfirmed(s, ctx, time.Hour); err != nil {
 				t.Fatal(err)
 			}
 			if mode != "no-candidate" {
-				if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
+				if err := testMutateCandidateIDS(s, ctx, func(cfg *Config) error {
 					cfg.Description = "staged"
 					cfg.IDS.Rules = DefaultIDSConfig().Rules[1:2]
 					return nil
@@ -161,11 +161,12 @@ func TestRepairTransaction(t *testing.T) {
 						t.Fatal("repair seeded a candidate")
 					}
 				} else {
-					candidate, err := s.LoadCandidate(ctx)
+					candidateSnapshot1, err := s.ReadSnapshot(ctx, SnapshotCandidate, true)
+					candidate := candidateSnapshot1.Candidate
 					if err != nil || candidate.Description != "staged" || candidate.System.Hostname != "repaired" || candidate.IDS.Rules[0].ID == rulesBefore[0].ID {
 						t.Fatalf("repair lost staged edit/bank: %+v %v", candidate, err)
 					}
-					if err := s.Commit(ctx); err != nil {
+					if err := testCommit(s, ctx); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -213,13 +214,13 @@ func benchmarkStageRuleBank(b *testing.B, size int) {
 	if err := s.Save(ctx, cfg); err != nil {
 		b.Fatal(err)
 	}
-	if err := s.SaveCandidate(ctx, cfg); err != nil {
+	if err := testSaveCandidate(s, ctx, cfg); err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := s.MutateCandidate(ctx, func(next *Config) error {
+		if err := testMutateCandidate(s, ctx, func(next *Config) error {
 			next.Description = fmt.Sprintf("edit-%d", i)
 			return nil
 		}); err != nil {

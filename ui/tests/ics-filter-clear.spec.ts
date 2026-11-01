@@ -26,7 +26,7 @@ test("disabling an ICS filter clears the rule's predicate", async ({ page }) => 
     if (path === "/api/v1/firewall/rules/plc-read" && request.method() === "PATCH") {
       patches.push(request.postDataJSON());
       stored = { ...base, ics: {} };
-      await route.fulfill({ json: stored });
+      await route.fulfill({ json: stored, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     let body: unknown = {};
@@ -34,7 +34,7 @@ test("disabling an ICS filter clears the rule's predicate", async ({ page }) => 
     if (path === "/api/v1/firewall/rules") body = [stored];
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "enforce" };
     if (path === "/api/v1/health") body = { status: "ok", component: "mgmt" };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
   await page.goto("/ics/");
@@ -64,14 +64,14 @@ async function openEditor(page: Page, rule: Record<string, unknown>) {
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/firewall/rules/plc-read" && request.method() === "PATCH") {
       patches.push(request.postDataJSON());
-      await route.fulfill({ json: rule });
+      await route.fulfill({ json: rule, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     let body: unknown = {};
     if (path === "/api/v1/auth/me" || path === "/api/v1/auth/session") body = user;
     if (path === "/api/v1/firewall/rules") body = [rule];
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "monitor" };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/rules");
   await page.goto("/ics/");

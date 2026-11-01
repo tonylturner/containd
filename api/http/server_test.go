@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-
 	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -48,14 +47,17 @@ func authedRequest(method, path string, body io.Reader) *http.Request {
 }
 
 type mockStore struct {
-	cfg     *config.Config
-	save    func(*config.Config) error
-	load    func() (*config.Config, error)
-	calls   int
-	lastTTL time.Duration
+	cfg       *config.Config
+	save      func(*config.Config) error
+	load      func() (*config.Config, error)
+	calls     int
+	lastTTL   time.Duration
+	revision  uint64
+	mutations int
 }
 
 func (m *mockStore) Save(ctx context.Context, cfg *config.Config) error {
+	m.mutations++
 	m.calls++
 	if m.save != nil {
 		return m.save(cfg)
@@ -64,6 +66,7 @@ func (m *mockStore) Save(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	m.cfg = cfg
+	m.revision++
 	return nil
 }
 
@@ -88,27 +91,9 @@ func (m *mockStore) ReadHealthSnapshot(ctx context.Context) (config.HealthSnapsh
 	return config.HealthSnapshot{Config: cfg}, nil
 }
 
-func (m *mockStore) LoadCandidateDocument(ctx context.Context) (*config.Config, error) {
-	cfg, err := m.LoadCandidate(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cp := *cfg
-	cp.IDS.Rules = nil
-	return &cp, nil
-}
-
-func (m *mockStore) LoadPair(ctx context.Context) (*config.Config, *config.Config, error) {
-	running, err := m.Load(ctx)
-	if err != nil && err != config.ErrNotFound {
-		return nil, nil, err
-	}
-	candidate, err := m.LoadCandidate(ctx)
-	return running, candidate, err
-}
-
-func (m *mockStore) MutateCandidate(ctx context.Context, edit func(*config.Config) error) error {
-	return m.MutateCandidateIDS(ctx, func(cfg *config.Config) error {
+func (m *mockStore) MutateCandidate(ctx context.Context, expected config.Revision, edit func(*config.Config) error) (config.Revision, error) {
+	m.mutations++
+	return m.MutateCandidateIDS(ctx, expected, func(cfg *config.Config) error {
 		bank := cfg.IDS.Rules
 		cfg.IDS.Rules = nil
 		if err := edit(cfg); err != nil {
@@ -122,48 +107,98 @@ func (m *mockStore) MutateCandidate(ctx context.Context, edit func(*config.Confi
 	})
 }
 
-func (m *mockStore) MutateCandidateIDS(ctx context.Context, edit func(*config.Config) error) error {
-	cfg, err := m.LoadCandidate(ctx)
+func (m *mockStore) MutateCandidateIDS(ctx context.Context, expected config.Revision, edit func(*config.Config) error) (config.Revision, error) {
+	m.mutations++
+	if err := m.compareRevision(expected); err != nil {
+		return "", err
+	}
+	snapshot, err := m.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	cfg := snapshot.Candidate
 	if err != nil && err != config.ErrNotFound {
-		return err
+		return "", err
 	}
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
 	blob, err := json.Marshal(cfg)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var next config.Config
 	if err := json.Unmarshal(blob, &next); err != nil {
-		return err
+		return "", err
 	}
 	if err := edit(&next); err != nil {
-		return err
+		return "", err
 	}
-	return m.SaveCandidate(ctx, &next)
+	return m.SaveCandidate(ctx, expected, &next)
 }
 
-func (m *mockStore) SaveCandidate(ctx context.Context, cfg *config.Config) error {
-	return m.Save(ctx, cfg)
-}
-
-func (m *mockStore) LoadCandidate(ctx context.Context) (*config.Config, error) {
-	cfg, err := m.Load(ctx)
-	if err == config.ErrNotFound {
-		return config.DefaultConfig(), nil
+func (m *mockStore) SaveCandidate(ctx context.Context, expected config.Revision, cfg *config.Config) (config.Revision, error) {
+	m.mutations++
+	if err := m.compareRevision(expected); err != nil {
+		return "", err
 	}
-	return cfg, err
+	if err := m.Save(ctx, cfg); err != nil {
+		return "", err
+	}
+	return m.currentRevision(), nil
 }
 
-func (m *mockStore) Commit(ctx context.Context) error { return nil }
-func (m *mockStore) CommitConfirmed(ctx context.Context, ttl time.Duration) error {
-	m.lastTTL = ttl
+func (m *mockStore) currentRevision() config.Revision {
+	return config.Revision(fmt.Sprintf("0123456789abcdef.%d", m.revision+1))
+}
+func (m *mockStore) compareRevision(expected config.Revision) error {
+	if current := m.currentRevision(); expected != current {
+		return &config.ErrRevisionMismatch{CurrentRevision: current}
+	}
 	return nil
 }
-func (m *mockStore) ConfirmCommit(ctx context.Context) error { return nil }
-func (m *mockStore) Rollback(ctx context.Context) error      { return nil }
+func (m *mockStore) Commit(ctx context.Context, expected config.Revision) (config.Revision, error) {
+	m.mutations++
+	if err := m.compareRevision(expected); err != nil {
+		return "", err
+	}
+	m.calls++
+	m.revision++
+	return m.currentRevision(), nil
+}
+func (m *mockStore) CommitConfirmed(ctx context.Context, expected config.Revision, ttl time.Duration) (config.Revision, error) {
+	revision, err := m.Commit(ctx, expected)
+	if err == nil {
+		m.lastTTL = ttl
+	}
+	return revision, err
+}
+func (m *mockStore) ConfirmCommit(ctx context.Context, expected config.Revision) (config.Revision, error) {
+	return m.Commit(ctx, expected)
+}
+func (m *mockStore) Rollback(ctx context.Context, expected config.Revision) (config.Revision, error) {
+	return m.Commit(ctx, expected)
+}
+func (m *mockStore) ReadSnapshot(ctx context.Context, _ config.SnapshotKind, withBank bool) (config.ConfigSnapshot, error) {
+	running, err := m.Load(ctx)
+	if err != nil && err != config.ErrNotFound {
+		return config.ConfigSnapshot{}, err
+	}
+	candidate := running
+	if candidate == nil {
+		candidate = config.DefaultConfig()
+	}
+	if !withBank {
+		copyCandidate := *candidate
+		copyCandidate.IDS.Rules = nil
+		candidate = &copyCandidate
+		if running != nil {
+			copyRunning := *running
+			copyRunning.IDS.Rules = nil
+			running = &copyRunning
+		}
+	}
+	return config.ConfigSnapshot{Running: running, Candidate: candidate, Revision: m.currentRevision()}, nil
+}
 func (m *mockStore) SaveIDSRules(ctx context.Context, rules []config.IDSRule) error {
+	m.mutations++
 	return nil
 }
 func (m *mockStore) LoadIDSRules(ctx context.Context) ([]config.IDSRule, error) {
@@ -235,10 +270,14 @@ func (m *mockEngine) ListInterfaceState(ctx context.Context) ([]config.Interface
 	return []config.InterfaceState{{Name: "eth0", Index: 1, Up: true, Addrs: []string{"192.0.2.1/24"}}}, nil
 }
 
-func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
+func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	m.applied = true
 	m.snap = snap
-	return m.err
+	return dpengine.ProtectionStatus{}, m.err
+}
+
+func (m *mockEngine) RuntimeHealth(context.Context) (engineclient.RuntimeHealth, error) {
+	return engineclient.RuntimeHealth{BootID: "boot", Protection: dpengine.ProtectionStatus{BootID: "boot", ApplyID: "apply", State: "protecting", ObservedAt: time.Now()}}, nil
 }
 
 func (m *mockEngine) RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error) {
@@ -354,7 +393,7 @@ func TestGetConfigNotFound(t *testing.T) {
 	s := NewServer(&mockStore{}, nil)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/config", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -374,7 +413,7 @@ func TestSaveConfig(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config", body)
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -388,7 +427,7 @@ func TestValidateConfigBadJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config/validate", bytes.NewBufferString(`{"zones": "oops"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
@@ -400,7 +439,7 @@ func TestCreateZone(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/zones", bytes.NewBufferString(`{"name":"it"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -426,7 +465,7 @@ func TestCreateInterfaceValidation(t *testing.T) {
 	body := bytes.NewBufferString(`{"name":"eth0","zone":"missing"}`)
 	req := authedRequest(http.MethodPost, "/api/v1/interfaces", body)
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code == http.StatusOK {
 		t.Fatalf("expected validation error, got 200")
 	}
@@ -447,7 +486,7 @@ func TestCreateRuleDuplicate(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/firewall/rules", bytes.NewBufferString(`{"id":"1","action":"ALLOW"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for duplicate, got %d", rec.Code)
 	}
@@ -461,7 +500,7 @@ func TestGetAndSetFirewallNAT(t *testing.T) {
 	{
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodGet, "/api/v1/firewall/nat", nil)
-		s.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, s, rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 		}
@@ -479,7 +518,7 @@ func TestGetAndSetFirewallNAT(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodPost, "/api/v1/firewall/nat", bytes.NewBufferString(`{"enabled":true,"egressZone":"wan","sourceZones":["lan","dmz"]}`))
 		req.Header.Set("Content-Type", "application/json")
-		s.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, s, rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 		}
@@ -490,7 +529,7 @@ func TestGetAndSetFirewallNAT(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodPost, "/api/v1/firewall/nat", bytes.NewBufferString(`{"enabled":true,"egressZone":"nope","sourceZones":["lan"]}`))
 		req.Header.Set("Content-Type", "application/json")
-		s.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, s, rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
 		}
@@ -507,7 +546,7 @@ func TestUpdateZone(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPatch, "/api/v1/zones/it", bytes.NewBufferString(`{"description":"new"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -522,41 +561,51 @@ func TestUpdateInterfaceNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPatch, "/api/v1/interfaces/eth0", bytes.NewBufferString(`{"zone":"it"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
 	}
 }
 
-func (m *mockStore) ApplyChange(ctx context.Context, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) error {
-	return mockApplyChange(ctx, m, change, ttl, apply)
+func (m *mockStore) ApplyChange(ctx context.Context, expected config.Revision, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) (config.Revision, error) {
+	m.mutations++
+	return mockApplyChange(ctx, m, expected, change, ttl, apply)
 }
 func (m *mockStore) RuntimeApplyFault(context.Context) (string, error)  { return "", nil }
 func (m *mockStore) SetRuntimeApplyFault(context.Context, string) error { return nil }
 
-func mockApplyChange(ctx context.Context, store config.Store, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) error {
-	previous, err := loadOrInitConfig(ctx, store)
-	if err != nil {
-		return err
+func mockApplyChange(ctx context.Context, store config.Store, expected config.Revision, change config.RunningChange, ttl time.Duration, apply func(context.Context, *config.Config, *config.Config) error) (config.Revision, error) {
+	before, err := store.ReadSnapshot(ctx, config.SnapshotRunning, true)
+	previous := before.Running
+	if previous == nil {
+		previous = config.DefaultConfig()
 	}
+	if err != nil {
+		return "", err
+	}
+	var revision config.Revision
 	switch change {
 	case config.ChangeCommit:
-		err = store.Commit(ctx)
+		revision, err = store.Commit(ctx, expected)
 	case config.ChangeCommitConfirmed:
-		err = store.CommitConfirmed(ctx, ttl)
+		revision, err = store.CommitConfirmed(ctx, expected, ttl)
 	case config.ChangeRollback:
-		err = store.Rollback(ctx)
+		revision, err = store.Rollback(ctx, expected)
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
-	next, err := loadOrInitConfig(ctx, store)
+	after, err := store.ReadSnapshot(ctx, config.SnapshotRunning, true)
+	next := after.Running
+	if next == nil {
+		next = config.DefaultConfig()
+	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := apply(ctx, previous, next); err != nil {
 		restoreErr := store.Save(context.WithoutCancel(ctx), previous)
-		return &config.ApplyError{Err: err, RestoreError: restoreErr, ReapplyError: apply(context.WithoutCancel(ctx), next, previous)}
+		return "", &config.ApplyError{Err: err, RestoreError: restoreErr, ReapplyError: apply(context.WithoutCancel(ctx), next, previous)}
 	}
-	return nil
+	return revision, nil
 }

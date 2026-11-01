@@ -127,7 +127,8 @@ func TestDHCPListenNameWriteValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := storedDHCPListenStore(t, tc.storedName)
 			ctx := context.Background()
-			before, err := store.LoadCandidate(ctx)
+			beforeSnapshot, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			before := beforeSnapshot.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,7 +137,8 @@ func TestDHCPListenNameWriteValidation(t *testing.T) {
 			path := "/services/dhcp"
 			var body any = config.DHCPConfig{Enabled: true, ListenIfaces: []string{tc.nextName}}
 			if tc.unrelated {
-				next, err := store.LoadCandidate(ctx)
+				nextSnapshot, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				next := nextSnapshot.Candidate
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -147,7 +149,8 @@ func TestDHCPListenNameWriteValidation(t *testing.T) {
 			if rec.Code != tc.wantStatus || engine.applied {
 				t.Fatalf("write status: %d %s", rec.Code, rec.Body)
 			}
-			after, err := store.LoadCandidate(ctx)
+			afterSnapshot, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			after := afterSnapshot.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}

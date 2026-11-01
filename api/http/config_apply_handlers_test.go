@@ -23,14 +23,14 @@ type transactionalEngine struct {
 	configureErr error
 }
 
-func (e *transactionalEngine) ApplyRules(_ context.Context, snap rules.Snapshot) error {
+func (e *transactionalEngine) ApplyRules(_ context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	e.attempts = append(e.attempts, snap)
 	if len(e.attempts) == 1 || e.failRestore {
 		e.ruleset = dpengine.RulesetStatus{Error: "nft apply failed: operation not permitted"}
-		return errors.New(e.ruleset.Error)
+		return dpengine.ProtectionStatus{}, errors.New(e.ruleset.Error)
 	}
 	e.ruleset = dpengine.RulesetStatus{Ruleset: "restored rules", AppliedAt: time.Now()}
-	return nil
+	return dpengine.ProtectionStatus{}, nil
 }
 func (e *transactionalEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
 	if e.configureErr != nil {
@@ -45,7 +45,7 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 			t.Run(action+"/restore="+map[bool]string{true: "failed", false: "ok"}[failRestore], func(t *testing.T) {
 				ctx := context.Background()
 				store := stageStore(t)
-				if err := store.Commit(ctx); err != nil {
+				if err := testCommit(store, ctx); err != nil {
 					t.Fatal(err)
 				} // establish rollback baseline
 				running, err := store.Load(ctx)
@@ -65,10 +65,11 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 				}
 				candidate.System.Hostname = "failed-candidate"
 				candidate.IDS.Rules = []config.IDSRule{}
-				if err := store.SaveCandidate(ctx, candidate); err != nil {
+				if err := testSaveCandidate(store, ctx, candidate); err != nil {
 					t.Fatal(err)
 				}
-				candidate, _ = store.LoadCandidate(ctx)
+				candidateSnapshot1, _ := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				candidate = candidateSnapshot1.Candidate
 				engine := &transactionalEngine{mockEngine: &mockEngine{}, failRestore: failRestore}
 				server := NewServerWithEngine(store, nil, engine)
 				rec := requestStage(t, server, "POST", "/config/"+action, map[string]int{"ttl_seconds": 1})
@@ -93,7 +94,8 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 				if err != nil || !reflect.DeepEqual(jsonValue(t, got), jsonValue(t, running)) {
 					t.Fatalf("running not restored: %v %+v", err, got)
 				}
-				staged, err := store.LoadCandidate(ctx)
+				stagedSnapshot2, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+				staged := stagedSnapshot2.Candidate
 				if err != nil || !reflect.DeepEqual(jsonValue(t, staged), jsonValue(t, candidate)) {
 					t.Fatalf("candidate changed: %v %+v", err, staged)
 				}
@@ -193,7 +195,7 @@ func TestCommitConfirmedRejectsUnreadableRequest(t *testing.T) {
 	engine := &mockEngine{}
 	server := NewServerWithEngine(store, nil, engine)
 	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/v1/config/commit_confirmed", failedCommitReader{}))
+	serveWithConfigRevision(t, server, rec, authedRequest(http.MethodPost, "/api/v1/config/commit_confirmed", failedCommitReader{}))
 	if rec.Code != http.StatusBadRequest || engine.applied {
 		t.Fatalf("unreadable request: %d %s", rec.Code, rec.Body)
 	}

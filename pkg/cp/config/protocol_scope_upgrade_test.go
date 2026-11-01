@@ -24,10 +24,10 @@ func TestProtocolScopeUpgradeEntrypoints(t *testing.T) {
 				if err := old.Validate(); err != nil {
 					t.Fatal(err)
 				}
-				if err := s.SaveCandidate(ctx, old); err != nil {
+				if err := testSaveCandidate(s, ctx, old); err != nil {
 					t.Fatal(err)
 				}
-				if err := s.Commit(ctx); err != nil {
+				if err := testCommit(s, ctx); err != nil {
 					t.Fatal(err)
 				}
 			default:
@@ -46,9 +46,9 @@ func TestProtocolScopeUpgradeEntrypoints(t *testing.T) {
 					t.Fatal(err)
 				}
 				if path == "promote" {
-					err = s.Commit(ctx)
+					err = testCommit(s, ctx)
 				} else {
-					err = s.Rollback(ctx)
+					err = testRollback(s, ctx)
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -62,7 +62,7 @@ func TestProtocolScopeUpgradeEntrypoints(t *testing.T) {
 				t.Fatalf("obsolete bank restored: %+v", got.IDS.Rules)
 			}
 			if path == "rollback" {
-				if err := s.Rollback(ctx); err != nil {
+				if err := testRollback(s, ctx); err != nil {
 					t.Fatal(err)
 				}
 			}

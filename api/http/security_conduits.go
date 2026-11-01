@@ -85,7 +85,7 @@ type conduitGlobalState struct {
 
 func securityConduitsHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := readRunningOrDefault(c, store)
 		if err != nil {
 			internalError(c, err)
 			return

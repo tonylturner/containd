@@ -15,6 +15,7 @@ import (
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/users"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
 type factoryResetRequest struct {
@@ -80,21 +81,27 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 		// Preserve the full config state until runtime apply succeeds. In
 		// particular, do not stage defaults over the caller's candidate.
 		var warnings []string
+		var observation dpengine.ProtectionStatus
 		attempt := 0
-		err = cs.ApplyReset(ctx, def, func(ctx context.Context, previous, next *config.Config) error {
-			w, err := applyConfigSnapshot(ctx, cfgStore, engine, services, previous, next)
+		revision, err := cs.ApplyReset(ctx, expectedConfigRevision(c), def, func(ctx context.Context, previous, next *config.Config) error {
+			w, protection, err := applyConfigSnapshot(ctx, cfgStore, engine, services, previous, next)
 			if attempt == 0 {
 				warnings = w
+				observation = protection
 			}
 			attempt++
 			return err
 		})
+		if revisionMismatchResponse(c, err) {
+			return
+		}
 		recoveryWarnings := reenterRecoveryLocked(ctx, cfgStore, engine, err)
 		if err != nil {
 			setWarningHeader(c, recoveryWarnings)
 			factoryResetApplyError(c, err)
 			return
 		}
+		configRevisionResponse(c, revision)
 		// Dynamic blocks and connection revocations are runtime state the
 		// applied defaults do not replace. A failed clear leaves them in
 		// force, so it is reported as incomplete convergence.
@@ -150,12 +157,9 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 		if lab {
 			message += " Lab web/API tokens remain valid; factory reset does not revoke them."
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "reset",
-			"loggedOut": true,
-			"message":   message,
-			"warnings":  append([]string{}, warnings...),
-		})
+		body := protectionResponse(observation)
+		body["loggedOut"], body["message"], body["warnings"] = true, message, append([]string{}, warnings...)
+		committedConfigResponse(c, "reset", body)
 	}
 }
 

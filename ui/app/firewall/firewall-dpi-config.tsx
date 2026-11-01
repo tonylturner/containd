@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 
+import type { ConfigBase, ConfigWriteResult } from "../../lib/config-boundary";
+import type { ApiResult } from "../../lib/api";
+import { revisionError } from "../../lib/config-revision";
+
 import { ICSModeSelect } from "../ics/ics-mode-select";
 import { formatICSMode, type ICSModeSelection } from "../ics/ics-shared";
 import { Card } from "../../components/Card";
@@ -9,7 +13,6 @@ import { InfoTip } from "../../components/InfoTip";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
   isAdmin,
-  setDataPlane,
   type DataPlaneConfig,
   type DPIExclusion,
   type HealthResponse,
@@ -24,15 +27,18 @@ import {
 
 export function DPIConfigSection({
   config: cfg,
+  revision,
+  onSave, onSaveDraft,
   health,
   available,
-  onChange,
 }: {
   config: DataPlaneConfig;
+  revision: string;
+  onSave: (update: (config: DataPlaneConfig) => DataPlaneConfig) => Promise<ConfigWriteResult<DataPlaneConfig>>;
+  onSaveDraft: (base: ConfigBase, config: DataPlaneConfig) => Promise<ApiResult<DataPlaneConfig> | null>;
   available: boolean;
   /** Runtime health; undefined while unknown. */
   health: HealthResponse | undefined;
-  onChange: (c: DataPlaneConfig) => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saved" | "error">(
@@ -61,46 +67,47 @@ export function DPIConfigSection({
 
   // Failed requests leave the editor open; only acknowledged state replaces
   // the displayed server copy.
-  async function save(updated: DataPlaneConfig) {
+  async function save(update: (config: DataPlaneConfig) => DataPlaneConfig, expectedRevision?: ConfigBase) {
     if (!canEdit || !available || saving) return null;
     setSaving(true);
     setSaveError(null);
-    const result = await setDataPlane(updated);
+    const result = expectedRevision === undefined ? await onSave(update) : await onSaveDraft(expectedRevision, update(cfg));
+    if (!result) { setSaving(false); return null; }
     setSaving(false);
-    setSaveState(result.ok ? "saved" : "error");
+    setSaveState(result.ok ? "saved" : revisionError(result) === null ? "idle" : "error");
     if (!result.ok) {
-      setSaveError(result.error);
-      return null;
+      setSaveError(revisionError(result));
+      return result;
     }
-    onChange(result.data);
-    return result.data;
+    return result;
   }
 
   function toggleDPI() {
-    save({ ...cfg, dpiEnabled: !dpiOn });
+    save(current => ({ ...current, dpiEnabled: !(current.dpiEnabled ?? false) }));
   }
 
   function setMode(mode: ICSModeSelection) {
-    save({ ...cfg, dpiMode: mode });
+    save(current => ({ ...current, dpiMode: mode }));
   }
 
-  function saveProtos(newProtos: Record<string, boolean>) {
-    return save({ ...cfg, dpiProtocols: newProtos });
+  function saveProtos(newProtos: Record<string, boolean>, expectedRevision: ConfigBase) {
+    return save(current => ({ ...current, dpiProtocols: newProtos }), expectedRevision);
   }
 
   function saveICSProtos(
     newICSProtos: Record<string, boolean>,
     parsing: NonNullable<DataPlaneConfig["dpiIcsParsing"]>,
+    expectedRevision: ConfigBase,
   ) {
-    return save({
-      ...cfg,
+    return save(current => ({
+      ...current,
       dpiIcsProtocols: newICSProtos,
       ...(Object.keys(parsing).length > 0 ? { dpiIcsParsing: parsing } : {}),
-    });
+    }), expectedRevision);
   }
 
-  function saveExclusions(newExcl: DPIExclusion[]) {
-    return save({ ...cfg, dpiExclusions: newExcl });
+  function saveExclusions(newExcl: DPIExclusion[], expectedRevision: ConfigBase) {
+    return save(current => ({ ...current, dpiExclusions: newExcl }), expectedRevision);
   }
 
   return (
@@ -131,6 +138,7 @@ export function DPIConfigSection({
             {canEdit && (
               <button
                 onClick={toggleDPI}
+                aria-label="Toggle DPI"
                 disabled={saving || !available}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   dpiOn ? "bg-emerald-500" : "bg-white/10"
@@ -320,6 +328,7 @@ export function DPIConfigSection({
 
       {showProtoModal && (
         <DPIProtocolModal
+          revision={revision}
           context={cfg}
           protocols={protos}
           saving={saving || !available}
@@ -329,6 +338,7 @@ export function DPIConfigSection({
       )}
       {showExclModal && (
         <DPIExclusionModal
+          revision={revision}
           context={cfg}
           exclusions={exclusions}
           saving={saving || !available}
@@ -338,6 +348,7 @@ export function DPIConfigSection({
       )}
       {showICSConfigModal && (
         <ICSDPIConfigModal
+          revision={revision}
           context={cfg}
           icsProtocols={icsProtos}
           parsing={cfg.dpiIcsParsing ?? {}}

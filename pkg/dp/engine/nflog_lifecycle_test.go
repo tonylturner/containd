@@ -23,7 +23,7 @@ func TestReconfigureWaitsForNFLogStopBeforeNextBind(t *testing.T) {
 	var bound bool
 	var overlap bool
 	var binds, stops int
-	startNFLog = func(context.Context, uint16, capture.RuleHitSink, func(error)) (func(), error) {
+	startNFLog = func(context.Context, uint16, capture.RuleHitSink, func(error), func(capture.SourceEvent)) (func(), error) {
 		mu.Lock()
 		if bound {
 			overlap = true
@@ -109,7 +109,7 @@ func TestConcurrentReconfigureAndStartSerializeNFLogLifecycle(t *testing.T) {
 	var stopFns []func()
 	firstBindEntered := make(chan struct{})
 	releaseFirstBind := make(chan struct{})
-	startNFLog = func(_ context.Context, _ uint16, sink capture.RuleHitSink, _ func(error)) (func(), error) {
+	startNFLog = func(_ context.Context, _ uint16, sink capture.RuleHitSink, _ func(error), _ func(capture.SourceEvent)) (func(), error) {
 		hits, ok := sink.(nflogRuleHits)
 		if !ok {
 			return func() {}, errors.New("unexpected NFLOG sink type")
@@ -214,7 +214,7 @@ func TestStartNFLogErrorIsReportedAndStored(t *testing.T) {
 	t.Cleanup(func() { startNFLog = oldStartNFLog })
 
 	wantErr := errors.New("permission denied")
-	startNFLog = func(context.Context, uint16, capture.RuleHitSink, func(error)) (func(), error) {
+	startNFLog = func(context.Context, uint16, capture.RuleHitSink, func(error), func(capture.SourceEvent)) (func(), error) {
 		return func() {}, wantErr
 	}
 

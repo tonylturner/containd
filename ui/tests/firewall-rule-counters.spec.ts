@@ -43,7 +43,7 @@ async function openFirewall(page: Page, response: { status: number; json: unknow
     if (path === "/api/v1/zones") body = [];
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/counters");
   await page.goto("/firewall/");

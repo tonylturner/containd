@@ -57,7 +57,7 @@ func TestCommitRejectsLegacyMalformedListener(t *testing.T) {
 	if _, err := store.db.ExecContext(ctx, `REPLACE INTO configs (key,data,updated_at) VALUES ('candidate',?,0)`, string(data)); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Commit(ctx); err == nil || !strings.Contains(err.Error(), "mgmt.httpsListenAddr") {
+	if err := testCommit(store, ctx); err == nil || !strings.Contains(err.Error(), "mgmt.httpsListenAddr") {
 		t.Fatalf("commit malformed listener: %v", err)
 	}
 	running, err := store.Load(ctx)

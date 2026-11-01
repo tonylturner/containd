@@ -232,18 +232,22 @@ func (s *Server) shellCommand(ctx context.Context, username string, pr *ptyReque
 	if _, err := os.Stat(shell); err != nil {
 		shell = "/bin/sh"
 	}
-	cmd := exec.CommandContext(ctx, shell, "--login")
+	shellCtx, stopShell := context.WithCancel(ctx)
+	cmd := exec.CommandContext(shellCtx, shell, "--login")
 	cmd.Env = buildShellEnv(username, pr)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	release := func() {}
+	release := stopShell
 	if conn := connectionFromContext(ctx); conn != nil {
-		api, err := s.openShellAPI(conn)
+		api, err := s.openShellAPI(conn, stopShell)
 		if err != nil {
 			s.logger.Errorf("ssh shell API: %v", err)
 			writeTTY(out, "warning: containd cli cannot use this SSH login in this shell: "+err.Error()+"\n")
 		} else {
 			cmd.Env = append(cmd.Env, cli.EnvSSHAPISocket+"="+api.socket)
-			release = api.close
+			release = func() {
+				stopShell()
+				api.close()
+			}
 		}
 	}
 	return cmd, release

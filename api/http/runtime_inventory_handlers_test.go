@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"reflect"
 	"strings"
@@ -80,11 +81,35 @@ func TestInventoryAvailability(t *testing.T) {
 }
 
 func TestIEC104InventoryRegisteredRoute(t *testing.T) {
-	server := NewServerWithEngine(&mockStore{cfg: nil}, nil, inventoryEngine{inv: inventory.New()})
+	inv := inventory.New()
+	inv.ObserveIEC104(inventory.IEC104Observation{
+		Controlling: netip.MustParseAddrPort("192.0.2.1:50000"), Controlled: netip.MustParseAddrPort("192.0.2.2:2404"),
+		CA: 1, TypeID: 46, IOAs: []uint32{2001}, ControlDirection: true,
+	})
+	server := NewServerWithEngine(&mockStore{cfg: nil}, nil, inventoryEngine{inv: inv})
 	w := httptest.NewRecorder()
 	server.ServeHTTP(w, authedRequest("GET", "/api/v1/inventory/iec104", nil))
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"pointsPerCA":256`) {
 		t.Fatal(w.Code, w.Body.String())
+	}
+	var body struct {
+		Pairs []struct {
+			Attempted uint64                       `json:"attemptedCommands"`
+			CAs       []map[string]json.RawMessage `json:"cas"`
+		} `json:"pairs"`
+		Overflow map[string]json.RawMessage `json:"overflow"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Pairs) != 1 || body.Pairs[0].Attempted != 1 || len(body.Pairs[0].CAs) != 1 {
+		t.Fatal(w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), `"acceptedCommands"`) {
+		t.Fatal("retired inventory acceptance field returned", w.Body.String())
+	}
+	if _, exists := body.Overflow["outcomes"]; exists {
+		t.Fatal("retired inventory outcomes field returned", w.Body.String())
 	}
 }
 

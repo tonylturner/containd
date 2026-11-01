@@ -71,7 +71,7 @@ for (const [name, mutate] of Object.entries({
 }
 
 for (const [name, mutate] of Object.entries({
-  importIDSRules: () => idsAPI.importIDSRules(new File(["[]"], "rules.json")),
+  importIDSRules: () => idsAPI.importIDSRules("0123456789abcdef.1", new File(["[]"], "rules.json")),
   uploadAVDef: () => servicesAPI.uploadAVDef(new File(["definition"], "definition.ndb")),
   deleteAVDef: () => servicesAPI.deleteAVDef("definition.ndb"),
   uploadPcap: () => uploadPcap(new File(["capture"], "capture.pcap")),

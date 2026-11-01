@@ -1008,9 +1008,15 @@ the durable `collection_loss` withheld reason. Connections
 fully outside localized loss remain eligible. Restart and policy-change loss
 exclude the dataset: store-clock lease bounds cannot safely delimit packet times.
 Loss localization is capped at 1,024 entries per dataset; exhaustion collapses to
-one dataset-wide loss. Live collection batches parent rows in bounded SQLite
-statements and uses a 256-batch queue with a 64 MiB decoded-copy budget to absorb
-flush bursts without blocking packet verdicts. Deletion or eviction invalidates
+one dataset-wide loss. Live collection normalizes and joins decoded events
+separately from SQLite persistence. The intake queue has a 64 MiB decoded-copy
+budget, charging at least 1 KiB per batch including queue/snapshot overhead;
+its count limit follows that byte budget. A separate 32 MiB serialized-write
+budget includes queued and in-progress groups. Group commits contain up to 128
+parents or just under 1 MiB, flushing partial groups every 100 ms. Database
+stalls do not stop intake until the write budget is exhausted, and packet
+verdicts never wait for evidence. Real admission overflow still records loss.
+Stop drains both stages before sealing the dataset. Deletion or eviction invalidates
 dependent proofs for new stage requests.
 Resolved staging snapshots and completed receipts count toward the storage
 budget and are purged when their retry window expires. Dataset review shows the
@@ -1303,43 +1309,32 @@ The **Assets** page has a read-only IEC 104 section, separate from configured
 assets and learner evidence datasets. It groups controlling stations (clients)
 with controlled stations (servers, normally port 2404). Expand a pair to see observed
 common addresses (CAs), then expand a CA to see each (IOA, type ID) point and its
-first/last observation times. Pair and CA command counters distinguish decoded
-client command attempts from accepted commands. Accepted means the IEC decision
-allowed the APDU **and every packet carrying its bytes completed an Accept
-verdict without error**; an allow decision alone is not delivery evidence.
-Acceptance is recorded only in inline enforce envelopes. Monitor and
-non-inline capture record attempts and points, but never claim delivery.
+first/last observation times. Pair and CA command counters count decoded
+client command attempts in both enforce and monitor modes, not accepted commands.
 Server echoes and monitoring ASDUs do not count as command attempts.
 
 The live feed observes ordered, TCP-deduplicated ASDUs in sessions tracked from
 their SYN within IEC 104 envelopes. Untracked, midstream and uninspected traffic
-does not populate it. Retransmissions are not new attempts; retransmissions
-received while delivery is pending also need successful Accept verdicts.
-Acceptance is not a station acknowledgement or proof of physical execution.
+does not populate it. Retransmissions are not new attempts. Inventory counts
+attempted commands and observed points, not delivery or physical execution.
 Inventory summaries never generate ALLOW rules or enforcement decisions.
-During an explicit live watch, the delivery ledger also reports accepted
-APDUs to learner evidence; inventory counters are not its input.
-Engine unavailability displays an explicit
-unavailable state, not an empty inventory or zero counters; **Refresh** retries.
+The separate delivery ledger still reports provable userspace delivery to learner
+evidence during an explicit live watch; inventory counters are not its input.
+Engine unavailability displays an explicit unavailable state, not an empty
+inventory or zero counters; **Refresh** retries.
 
 Memory is bounded to 128 endpoint pairs, 32 CAs per pair and 256 (IOA, type ID)
 points per CA. The least recently observed entry is evicted at each cap; idle
 entries expire after 24 hours on the next observation or read. Reads do not
 extend retention. The legacy Modbus/DNP3/CIP inventory is bounded to 1,024 assets,
 128 peers and 256 station addresses per asset, with the same asset LRU/expiry.
-Overflow counters show capacity evictions, truncated metadata observations and
-late command outcomes whose observation has expired or been evicted. Input calls
-never wait for the inventory lock: observations or outcomes dropped on contention
-have visible overflow counters. Per-session delivery evidence is capped at 128
-commands and 128 carrying packet tokens. Ledger overflow records a not-accepted
-outcome and increments **Lost outcomes**. Pending evidence expires after one
-second, and is freed on session end, abort, queue close, policy removal,
-reconfiguration or stop; incomplete evidence never credits acceptance. Counts
-are therefore conservative when evidence is unavailable. Oversized
-ASDU input is truncated to 127 IOAs and counted as point overflow. Expiry is not
-overflow. Counts are retained-history totals, not lifetime traffic or unique
-missing-device counts. Clearing inventory or restarting the engine resets data
-and overflow totals. See [API Reference](api-reference.md#passive-inventory).
+Overflow counters show capacity evictions and truncated metadata observations.
+Input calls never wait for the inventory lock: observations dropped on contention
+have a visible overflow counter. Oversized ASDU input is truncated to 127 IOAs
+and counted as point overflow. Expiry is not overflow. Counts are retained-history
+totals, not lifetime traffic or unique missing-device counts. Clearing inventory
+or restarting the engine resets data and overflow totals. See
+[API Reference](api-reference.md#passive-inventory).
 
 ## Content identification
 

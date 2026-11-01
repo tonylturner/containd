@@ -3,7 +3,6 @@ package engineapp
 
 import (
 	"container/list"
-	"context"
 	"encoding/json"
 	"time"
 
@@ -28,7 +27,7 @@ type pendingEvidence struct {
 }
 type evidenceJoin struct {
 	watch       *evidenceWatch
-	ctx         context.Context
+	writer      *evidenceWatchWriter
 	entries     map[string]*pendingEvidence
 	order       list.List
 	bytes       int
@@ -38,8 +37,8 @@ type evidenceJoin struct {
 	collectedAt time.Time
 }
 
-func newEvidenceJoin(w *evidenceWatch, ctx context.Context) *evidenceJoin {
-	return &evidenceJoin{watch: w, ctx: ctx, entries: map[string]*pendingEvidence{}}
+func newEvidenceJoin(w *evidenceWatch, writer *evidenceWatchWriter) *evidenceJoin {
+	return &evidenceJoin{watch: w, writer: writer, entries: map[string]*pendingEvidence{}}
 }
 func (j *evidenceJoin) write(lease *watchLease, parents []evidence.Observation, collectedAt time.Time) {
 	for _, parent := range parents {
@@ -64,12 +63,7 @@ func (j *evidenceJoin) flushWrites() {
 		return
 	}
 	defer func() { j.writes = nil; j.writeBytes = 0; j.collectedAt = time.Time{} }()
-	if err := j.watch.flushLosses(j.ctx, j.writeLease); err != nil {
-		j.watch.fail(err)
-		return
-	}
-	_, err := j.watch.store.Ingest(j.ctx, evidence.IngestRequest{DatasetID: j.writeLease.dataset.ID, Parents: j.writes, CollectedAt: j.collectedAt})
-	j.watch.fail(err)
+	j.writer.submit(evidenceWrite{lease: j.writeLease, parents: j.writes, collectedAt: j.collectedAt, bytes: j.writeBytes + watchWriteOverhead})
 }
 func (j *evidenceJoin) finish(key string) {
 	entry := j.entries[key]

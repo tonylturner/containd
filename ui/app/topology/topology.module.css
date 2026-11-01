@@ -29,6 +29,7 @@
 /* ── TOPBAR ── */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--topo-border);
   background: var(--topo-surface);
@@ -47,15 +48,16 @@
 .tab:hover { color: var(--topo-text); border-color: rgba(245,158,11,0.3); }
 .tabActive { background: var(--amber-glow); border-color: var(--amber); color: var(--amber); }
 
-.topbarRight { display: flex; align-items: center; gap: 12px; font-family: var(--mono); font-size: 10px; }
+.topbarRight { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; font-family: var(--mono); font-size: 10px; }
 
 .statusChip {
   display: flex; align-items: center; gap: 5px;
+  max-width: 100%; min-width: 0;
   padding: 3px 10px; border: 1px solid var(--topo-border);
   font-size: 9px; letter-spacing: 1px;
 }
-.chipDot { width: 5px; height: 5px; border-radius: 50%; }
-.chipReason { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0; color: var(--text-dim); }
+.chipDot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.chipReason { max-width: 280px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0; color: var(--text-dim); }
 
 .iconBtn {
   width: 28px; height: 28px; border: 1px solid var(--topo-border);

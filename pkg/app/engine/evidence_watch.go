@@ -20,10 +20,11 @@ import (
 
 const decoderVersion = "ics-1"
 
-// Absorb bounded SQLite flush/scheduler bursts without raising the previous
-// 64 MiB decoded-copy budget. Packet verdicts never wait for the worker.
-const watchQueueBatches = 256
+// Charge even empty offers for their queue slot and flow snapshot. The count
+// bound follows the byte budget, rather than rejecting small batches early.
+const watchBatchOverhead = 1024
 const watchQueueBytes = 64 << 20
+const watchQueueBatches = watchQueueBytes / watchBatchOverhead
 
 type watchLease struct {
 	dataset     evidence.Dataset
@@ -127,6 +128,7 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 		lease.drop(state, events)
 		return
 	}
+	size += watchBatchOverhead
 	if lease.queuedBytes.Add(int64(size)) > watchQueueBytes {
 		lease.queuedBytes.Add(-int64(size))
 		lease.drop(state, events)
@@ -151,8 +153,14 @@ func (w *evidenceWatch) offer(state *flow.State, events []dpi.Event) {
 }
 func (w *evidenceWatch) run(ctx context.Context) {
 	defer close(w.done)
-	join := newEvidenceJoin(w, ctx)
-	ticker := time.NewTicker(25 * time.Millisecond)
+	w.runWithWriter(ctx, newEvidenceWatchWriter(w, ctx))
+}
+
+func (w *evidenceWatch) runWithWriter(ctx context.Context, writer *evidenceWatchWriter) {
+	go writer.run()
+	defer func() { <-writer.done }()
+	join := newEvidenceJoin(w, writer)
+	ticker := time.NewTicker(watchCommitInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -164,7 +172,7 @@ func (w *evidenceWatch) run(ctx context.Context) {
 			}
 			if batch.barrier != nil {
 				join.flushAll()
-				batch.barrier <- w.err()
+				writer.submit(evidenceWrite{barrier: batch.barrier})
 			} else {
 				if batch.state != nil {
 					serial := w.serial.Add(uint64(len(batch.events))) - uint64(len(batch.events))
@@ -190,9 +198,6 @@ func (w *evidenceWatch) run(ctx context.Context) {
 		case <-ticker.C:
 			join.expire(time.Now())
 			join.flushWrites()
-			if lease := w.active.Load(); lease != nil {
-				w.fail(w.flushLosses(ctx, lease))
-			}
 		}
 	}
 }

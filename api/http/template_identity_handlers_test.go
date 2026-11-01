@@ -39,7 +39,7 @@ func TestIdentityBindingRoutesStageCandidate(t *testing.T) {
 			r.Header.Set("Content-Type", "application/json")
 		}
 		rec := httptest.NewRecorder()
-		s.ServeHTTP(rec, r)
+		serveWithConfigRevision(t, s, rec, r)
 		return rec
 	}
 	for _, tc := range []struct {
@@ -71,7 +71,7 @@ func TestIdentityBindingRoutesStageCandidate(t *testing.T) {
 	if err != nil || len(running.Firewall.IdentityBindings) != 0 {
 		t.Fatalf("an identity edit reached the running config before commit: %+v, %v", running.Firewall.IdentityBindings, err)
 	}
-	if err := store.Commit(ctx); err != nil {
+	if err := testCommit(store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	running, err = store.Load(ctx)
@@ -93,7 +93,7 @@ func TestTemplateAppendShadowWarning(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := authedRequest("POST", "/api/v1"+path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		NewServer(store, nil).ServeHTTP(rec, req)
+		NewServer(store, nil).ServeHTTP(rec, withTestRevision(store, req))
 		if rec.Code != 200 || !strings.Contains(strings.Join(rec.Header().Values("X-Containd-Warnings"), " "), "earlier-deny") || store.cfg.Firewall.Rules[0].ID != "earlier-deny" {
 			t.Fatalf("%s: response=%d %s headers=%v", path, rec.Code, rec.Body, rec.Header())
 		}

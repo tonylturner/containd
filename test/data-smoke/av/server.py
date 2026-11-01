@@ -26,9 +26,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from eicar import eicar_bytes
+from payloads import clean_download
 
 LOG_PATH = "/tmp/av-requests.jsonl"
-CLEAN_FILLER_LINES = 40
 _log_lock = threading.Lock()
 
 
@@ -74,8 +74,7 @@ def handler_for(name: str, eicar: bytes) -> type:
             if path == "/":
                 self.reply(200, self.echo_line().encode("ascii"), "text/plain")
             elif path == "/clean.txt":
-                filler = "".join(f"clean line {i:03d} from {name}\n" for i in range(CLEAN_FILLER_LINES))
-                self.reply(200, (self.echo_line() + filler).encode("ascii"), "text/plain")
+                self.reply(200, clean_download(name, self.server.server_port, self.client_address[0]), "text/plain")
             elif path == "/eicar.txt":
                 self.reply(200, eicar, "application/octet-stream")
             else:

@@ -58,13 +58,20 @@ GOOS=linux go build ./...
 GOOS=linux go vet ./...
 GOOS=linux golangci-lint run ./...
 bash scripts/semgrep-verify.sh
-(cd ui && npm ci && npm run lint && npm run typecheck && npm test && npm run build && npm run test:routes)  # needs MkDocs on PATH
-(cd docs && mkdocs build -f mkdocs.yml -d /tmp/containd-docs)
+(cd ui && npm ci && npm run lint && npm run typecheck && npm test && npm run build && npx playwright install --with-deps chromium && npm run test:routes)  # needs MkDocs on PATH
+mkdocs build --strict -f docs/mkdocs.yml
+python3 scripts/release-ci-gate.test.py
 docker buildx build --load --file build/Dockerfile.mgmt --tag containd/containd:ci .
 ```
 
 The Docker command builds the management image used by CI. The release workflow
 also builds `build/Dockerfile.engine` for `linux/amd64` and `linux/arm64`.
+CI additionally runs npm audit, the public Compose quickstart, the AV scanning
+gate smoke against the just-built image, and a HIGH/CRITICAL Trivy image scan.
+The UI job installs Chromium and runs all Playwright specs, uploading the report
+on failure. The docs job rejects warnings with `--strict`; the release CI gate
+tests run offline in their own job. The explicit UI `typecheck` command above is
+an additional local check, not a separate CI step.
 CI's lint action invokes golangci-lint against the repository using
 `.golangci.yml`. Consult [Testing and Coverage](docs/mkdocs/testing.md) for
 Linux-only tests, route smoke prerequisites, and other focused checks.

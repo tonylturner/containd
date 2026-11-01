@@ -35,7 +35,9 @@ import (
 
 var startNFLog = capture.StartNFLog
 
-type captureRunner interface {
+// CaptureRunner is a capture consumer and its inline verdict settlement surface.
+// Stop must join the consumer and deliver all pending source completions.
+type CaptureRunner interface {
 	Start(context.Context, capture.Handler) error
 	Stop()
 	Interfaces() []string
@@ -48,8 +50,11 @@ type Engine struct {
 	inspectionRegistry    atomic.Uint64
 	managementReservation *mgmtpath.Reservation
 	engineAPI             *enforce.EngineAPIPath
-	capture               captureRunner
-	runCapture            captureRunner
+	captureConfig         capture.Config
+	captureFactory        func(capture.Config) (CaptureRunner, error)
+	protection            *protectionState
+	capture               CaptureRunner
+	runCapture            CaptureRunner
 	runCancel             context.CancelFunc
 	runDone               chan struct{}
 	ruleSnap              ruleSnapshots
@@ -153,6 +158,9 @@ type EnforceConfig struct {
 
 type Config struct {
 	Capture capture.Config
+	// NewCapture supplies capture consumers. Nil uses capture.NewManager.
+	// A replacement run uses the same factory with new, epoch-fenced callbacks.
+	NewCapture func(capture.Config) (CaptureRunner, error)
 	// Events is shared by every configuration of a live engine. Nil allocates
 	// a private 4096-event store for a standalone engine.
 	Events *events.Store
@@ -213,17 +221,11 @@ func New(cfg Config) (*Engine, error) {
 		cfg.Capture.Mode = "nfqueue"
 		cfg.Capture.QueueID = int(cfg.NFQueueGroup)
 	}
-	hooks := newInlineHooks(cfg.OnError)
-	cfg.Capture.OnVerdict = hooks.onVerdict
-	cfg.Capture.OnSource = hooks.onSource
-	capManager, err := capture.NewManager(cfg.Capture)
-	if err != nil {
-		return nil, err
-	}
 	e := &Engine{
 		managementReservation: cfg.Enforce.ManagementReservation,
 		engineAPI:             cfg.Enforce.EngineAPI,
-		capture:               capManager,
+		captureConfig:         cfg.Capture,
+		captureFactory:        cfg.NewCapture,
 		onError:               cfg.OnError,
 		inspectAll:            cfg.InspectAll,
 		dpiEnabled:            cfg.DPIEnabled,
@@ -237,7 +239,6 @@ func New(cfg Config) (*Engine, error) {
 		flows:                 make(map[flow.MapKey]*flow.State),
 		deniedTCPNow:          time.Now,
 		verdictCache:          NewVerdictCache(30*time.Second, 65536),
-		hooks:                 hooks,
 		clearMarks:            cfg.Enforce.ClearMark,
 		localIPv4:             discoverLocalIPv4,
 	}
@@ -246,7 +247,6 @@ func New(cfg Config) (*Engine, error) {
 	}
 	e.zones.changes = make(chan struct{}, 1)
 	e.SetICSParsing(cfg.DPIICSParsing)
-	capManager.SetPublicationFence(&e.policyMu)
 	e.inventory = inventory.New()
 	e.anomalyDetector = anomaly.New()
 	e.sigEngine = signatures.New()
@@ -256,8 +256,13 @@ func New(cfg Config) (*Engine, error) {
 	if e.eventStore == nil {
 		e.eventStore = events.NewStore(4096)
 	}
+	e.protection = newProtection(e.eventStore)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
-	e.initIEC(cfg, capManager)
+	e.initIEC(cfg)
+	if err := e.newRun(); err != nil {
+		e.Close()
+		return nil, err
+	}
 	e.gate = &envelopeGate{}
 	e.bindGate()
 	if cfg.Enforce.Enabled {
@@ -278,14 +283,16 @@ func New(cfg Config) (*Engine, error) {
 			e.updater = enforce.NewNftUpdater(comp.TableName)
 		}
 	}
+	e.bindProtection(true)
 	if err := e.initTransport(cfg); err != nil {
 		return nil, err
 	}
 	if e.transport != nil {
-		e.observation, err = newLiveObserver(cfg)
+		observation, err := newLiveObserver(cfg)
 		if err != nil {
 			return nil, err
 		}
+		e.observation = observation
 	}
 	return e, nil
 }
@@ -314,42 +321,16 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 			return fmt.Errorf("remove enforcement tables: %w", err)
 		}
 		e.releaseRulesetStatus()
+		e.protection.released()
 		e.admission = admissionPolicy{}
 	}
 
-	prevCancel := e.runCancel
-	prevCapture := e.runCapture
-	e.flowMu.Lock()
-	prevNflogStop := e.nflogStop
-	e.nflogStop = nil
-	e.flowMu.Unlock()
-	prevRunDone := e.runDone
 	prevIEC := e.iec
-	if prevCapture != nil {
-		prevCapture.Stop()
-	}
-	// Closing an inline queue invokes OnSourceDown, which schedules IEC
-	// session resets on the old worker. Keep it alive until those callbacks
-	// and their reset jobs have completed; otherwise cancellation can discard
-	// the resets while Reconfigure replaces the session table.
-	if prevIEC != nil && prevIEC.jobs != nil && prevRunDone != nil {
-		prevIEC.jobs.flush(prevRunDone)
-	}
-	if prevCancel != nil {
-		prevCancel()
-	}
-	if prevNflogStop != nil {
-		prevNflogStop()
-	}
-	if prevRunDone != nil {
-		<-prevRunDone
-	}
+	e.retireCaptureLocked()
+	e.stopNFLogLocked()
 	if prevIEC != nil {
 		prevIEC.stopInventory()
 	}
-	e.runCancel = nil
-	e.runCapture = nil
-	e.runDone = nil
 
 	e.policyMu.Lock()
 	defer e.policyMu.Unlock()
@@ -362,6 +343,8 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	}
 	e.observation = fresh.observation
 	e.capture = fresh.capture
+	e.captureConfig = fresh.captureConfig
+	e.captureFactory = fresh.captureFactory
 	if manager, ok := e.capture.(*capture.Manager); ok {
 		manager.SetPublicationFence(&e.policyMu)
 	}
@@ -418,6 +401,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	// The old queue is closed and the new one is not bound yet: the
 	// envelope drops until the new run binds.
 	e.bindGate()
+	e.bindProtection(true)
 	e.gate.own(0)
 	// The fresh table enforces the loaded rules at once; sessions of the
 	// old run are unknown to it and are reset once.
@@ -454,6 +438,10 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 			return group, err
 		}
 	}
+	// NFLOG owns an independent lifetime and retry budget. A failed capture
+	// bind (which may be optional for the installed policy) must not strand
+	// rule-hit logging pending without ever starting its consumer.
+	e.startNFLogLocked(ctx)
 	runCtx, runCancel := context.WithCancel(ctx)
 	runCapture := e.capture
 	e.runCancel = runCancel
@@ -483,44 +471,9 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 		e.started.Store(false)
 		return group, err
 	}
-	if group != 0 {
-		// Start returned nil: the queue is bound and registered.
-		e.gate.own(group)
-	}
-	// Start the nflog consumer if configured. This produces
-	// firewall.rule.hit events for L4 (non-DPI) rules with Log:true. A
-	// failure here is non-fatal — log it via the rules-event log so the
-	// admin can see "nflog unavailable" without taking down the rest of
-	// the engine. Common cause: container lacks NET_ADMIN cap; in that
-	// case the kernel log clause still fires but the userspace consumer
-	// just won't translate the packets into events.
-	if e.nflogGroup != 0 && e.eventStore != nil {
-		stop, err := startNFLog(runCtx, e.nflogGroup, nflogRuleHits{e}, func(perr error) {
-			// Per-packet hook errors — drop. Surface only at debug.
-			_ = perr
-		})
-		if err != nil {
-			e.flowMu.Lock()
-			e.nflogStop = nil
-			e.flowMu.Unlock()
-			// Surface as a system event so it's visible in /api/v1/events.
-			e.eventStore.Append(events.Event{
-				Kind:      "service.nflog.unavailable",
-				Timestamp: time.Now().UTC(),
-				Attributes: map[string]any{
-					"group": int(e.nflogGroup),
-					"error": err.Error(),
-				},
-			})
-			if e.onError != nil {
-				e.onError(fmt.Errorf("nflog group %d unavailable: %w", e.nflogGroup, err))
-			}
-		} else {
-			e.flowMu.Lock()
-			e.nflogStop = stop
-			e.flowMu.Unlock()
-		}
-	}
+	// Only SourceReady owns the envelope. The consumer can die after
+	// registration but before Start returns; a successful return cannot
+	// overwrite the later SourceDown and reopen a dark queue.
 	runDone := make(chan struct{})
 	e.runDone = runDone
 	var run sync.WaitGroup

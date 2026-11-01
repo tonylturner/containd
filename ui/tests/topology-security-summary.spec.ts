@@ -35,14 +35,30 @@ test("zones below their target are counted across all zones", () => {
 });
 
 async function serveSecurity(page: Page, zoneList: Zone[], conduits: Conduit[] = []) {
+  let counter = 1;
+  const revision = () => `0123456789abcdef.${counter}`;
+  const updates: { name: string; body: unknown }[] = [];
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (route.request().method() === "PATCH" && path.startsWith("/api/v1/zones/")) {
+      const body = route.request().postDataJSON();
+      const expected = route.request().headers()["x-containd-if-revision"];
+      if (!expected) return route.fulfill({ status: 428, json: { error: "revision required", code: "config_revision_required" } });
+      if (expected !== revision()) return route.fulfill({ status: 412, json: { error: "configuration changed", code: "config_revision_mismatch", currentRevision: revision() } });
+      const name = decodeURIComponent(path.split("/").pop()!);
+      const zone = zoneList.find((z) => z.name === name)!;
+      Object.assign(zone, body);
+      updates.push({ name, body });
+      counter++;
+      return route.fulfill({ json: zone, headers: { "X-Containd-Revision": revision(), "X-Containd-Config": "staged" } });
+    }
     const body = path === "/api/v1/auth/me" || path === "/api/v1/auth/session" ? { id: "admin", username: "containd", role: "admin" }
       : path === "/api/v1/zones" ? zoneList
         : path === "/api/v1/security/conduits" ? conduits
           : path === "/api/v1/config/diff" ? { changed: false, changedSections: [] } : {};
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": revision() } });
   });
+  return updates;
 }
 
 test("the security view summarizes zones below target, including zones outside the matrix", async ({ page }) => {
@@ -109,19 +125,10 @@ test("colliding zone slugs keep separate scores, conduits and staging targets", 
     tlsEnforced: true, protoWhitelist: true, mfaRequired: false,
     auditLogged: true, avEnabled: false,
   };
-  await serveSecurity(page, zoneList, [
+  const updates = await serveSecurity(page, zoneList, [
     { ...admitted, from: "OT-1", to: "ot_1" },
     { ...admitted, from: "ot_1", to: "OT-1", state: "block", defaultDeny: false, auditLogged: false },
   ]);
-  const updates: { name: string; body: unknown }[] = [];
-  await page.route("**/api/v1/zones/*", async (route) => {
-    const name = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop()!);
-    const body = route.request().postDataJSON();
-    updates.push({ name, body });
-    const zone = zoneList.find((z) => z.name === name)!;
-    Object.assign(zone, body);
-    await route.fulfill({ json: zone });
-  });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/security/conduits");
   await page.goto("/topology/");
   await page.getByRole("button", { name: "SECURITY", exact: true }).click();

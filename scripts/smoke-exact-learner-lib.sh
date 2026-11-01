@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Shared assertions and public management API helpers for smoke-exact-learner.sh.
+# shellcheck source=scripts/config-revision.sh
+source "$(dirname "${BASH_SOURCE[0]}")/config-revision.sh"
 
 exact_fail() {
 	printf 'FAIL: %s; evidence: %s\n' "$*" "$MODE_RESULTS" >&2
@@ -21,7 +23,13 @@ exact_api() {
 		args+=(-X "$method" -H 'Content-Type: application/json')
 		[[ -z $body ]] || args+=(--data-binary "@$body")
 	fi
-	HTTP_CODE=$(curl "${args[@]}" "${BASE}${path}" 2>"$MODE_RESULTS/curl-error.log") || HTTP_CODE=000
+	local -a request=(curl)
+	if [[ $method == GET && ( $path == /config || $path == /config/candidate ) ]]; then
+		request=(cas_read "$output.revision" curl)
+	elif [[ $method == POST && ( $path == /config/* || $path == /learn/apply ) ]]; then
+		request=(cas_write "$MODE_RESULTS/config.revision" curl)
+	fi
+	HTTP_CODE=$("${request[@]}" "${args[@]}" "${BASE}${path}" 2>"$MODE_RESULTS/curl-error.log") || HTTP_CODE=000
 }
 
 exact_api_expect() {
@@ -40,6 +48,31 @@ exact_api_post() {
 	API_OUTPUT=$3
 	exact_api POST "$1" "$API_OUTPUT" "$2"
 	exact_api_expect 200 "$4"
+}
+
+exact_review_required() {
+	[[ $HTTP_CODE == 409 ]] &&
+		jq -e '.error == "explicit suggestion review required"' "$1" >/dev/null
+}
+
+exact_candidate_unchanged() {
+	local before after
+	cmp -s "$1.revision" "$2.revision" &&
+		before=$(jq -Sec 'select(type == "object")' "$1") &&
+		after=$(jq -Sec 'select(type == "object")' "$2") &&
+		[[ $before == "$after" ]]
+}
+
+exact_review_selection() {
+	local id=$1 revision=$2
+	jq -n --arg id "$id" --argjson revision "$revision" \
+		'{selection:{id:$id,revision:$revision},approve:true,coordinateApproved:true}' \
+		>"$MODE_RESULTS/review-request-$id.json"
+	exact_api_post "/learn/suggestions/$id/review" \
+		"$MODE_RESULTS/review-request-$id.json" \
+		"$MODE_RESULTS/review-response-$id.json" "$CAPTURE_MODE authenticated IEC/coordinate review"
+	jq -e '.status == "reviewed" and .review.actor != ""' "$MODE_RESULTS/review-response-$id.json" >/dev/null ||
+		exact_fail "$CAPTURE_MODE suggestion review did not persist an authenticated reviewed state; response=$(cat "$MODE_RESULTS/review-response-$id.json")"
 }
 
 exact_write_json() {

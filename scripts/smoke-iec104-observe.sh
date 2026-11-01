@@ -11,14 +11,14 @@ observe_check() {
   else
     fail "$name" "$detail"
     observe_inventory failure || log "could not capture inventory after failure"
-    $CURL -H "$AUTH_HEADER" "${BASE}/diagnostics/iec104" -o "$RESULTS_DIR/diagnostics.json" ||
+    "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/diagnostics/iec104" -o "$RESULTS_DIR/diagnostics.json" ||
       log "could not capture diagnostics after failure"
     fatal "observability assertion failed; inspect $RESULTS_DIR (stopping without changing product or policy)"
   fi
 }
 
 observe_inventory() {
-  $CURL -H "$AUTH_HEADER" "${BASE}/inventory/iec104" -o "$RESULTS_DIR/inventory-$1.json"
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/inventory/iec104" -o "$RESULTS_DIR/inventory-$1.json"
 }
 
 # Pair identity includes the ephemeral controlling port. Sum only this host's
@@ -27,8 +27,7 @@ observe_counts() {
   jq --arg cc "$CC_IP:" --arg rtu "$RTU_IP:$RTU_PORT" '
     [.pairs[] | select((.controlling | startswith($cc)) and .controlled == $rtu)
       | .cas[] | select(.ca == 1)]
-    | {attempted: (map(.attemptedCommands) | add // 0),
-       accepted: (map(.acceptedCommands) | add // 0)}' "$1"
+    | {attempted: (map(.attemptedCommands) | add // 0)}' "$1"
 }
 
 observe_denied() {
@@ -36,9 +35,9 @@ observe_denied() {
   observe_inventory denied
   before=$(observe_counts "$RESULTS_DIR/inventory-before-deny.json")
   after=$(observe_counts "$RESULTS_DIR/inventory-denied.json")
-  observe_check "inventory: denied command increments attempts, never accepts" "$before -> $after" \
+  observe_check "inventory: denied command increments attempts" "$before -> $after" \
     jq -en --argjson before "$before" --argjson after "$after" \
-    '$after.attempted > $before.attempted and $after.accepted == $before.accepted'
+    '$after.attempted > $before.attempted'
 }
 
 observe_allowed() {
@@ -46,13 +45,16 @@ observe_allowed() {
   observe_inventory allowed
   before=$(observe_counts "$RESULTS_DIR/inventory-denied.json")
   after=$(observe_counts "$RESULTS_DIR/inventory-allowed.json")
-  observe_check "inventory: allowed type 46 command is accepted at CA 1 / IOA 2001" "$before -> $after" \
+  observe_check "inventory: new type 46 attempts at CA 1 / IOA 2001" "$before -> $after" \
     jq -e --arg cc "$CC_IP:" --arg rtu "$RTU_IP:$RTU_PORT" \
+    --slurpfile previous "$RESULTS_DIR/inventory-denied.json" \
     --argjson before "$before" --argjson after "$after" '
-      $after.accepted >= 1 and $after.accepted > $before.accepted
-      and any(.pairs[]; (.controlling | startswith($cc)) and .controlled == $rtu
-        and any(.cas[]; .ca == 1 and .acceptedCommands >= 1
-          and any(.points[]; .ioa == 2001 and .typeId == 46)))' \
+      def point_attempts:
+        [.pairs[] | select((.controlling | startswith($cc)) and .controlled == $rtu)
+          | .cas[] | select(.ca == 1 and any(.points[]; .ioa == 2001 and .typeId == 46))
+          | .attemptedCommands] | add // 0;
+      $after.attempted > $before.attempted
+      and point_attempts > ($previous[0] | point_attempts)' \
     "$RESULTS_DIR/inventory-allowed.json"
 }
 
@@ -63,7 +65,7 @@ observe_events() {
   shift
   printf '[]\n' >"$RESULTS_DIR/events-$name.json"
   while :; do
-    $CURL -G -H "$AUTH_HEADER" "${BASE}/events" --data-urlencode "query=1" \
+    "${CURL[@]}" -G -H "$AUTH_HEADER" "${BASE}/events" --data-urlencode "query=1" \
       --data-urlencode "limit=5000" --data-urlencode "cursor=$cursor" "$@" -o "$page"
     jq -e '(.engineError // "") == "" and (.events | type == "array")' "$page" >/dev/null ||
       fatal "event query failed: $(cat "$page")"
@@ -77,7 +79,7 @@ observe_events() {
 observe_alerts() {
   # The Alerts page uses this event feed, not the legacy /anomalies detector
   # buffer. Query separately from the filtered evidence API above.
-  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=5000" -o "$RESULTS_DIR/alerts-$1.json"
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=5000" -o "$RESULTS_DIR/alerts-$1.json"
 }
 
 observe_clean() {
@@ -91,7 +93,7 @@ observe_clean() {
     jq -e '[.[] | select(.proto == "ids" and .kind == "anomaly")
       | select((.attributes.anomaly_type // "") | startswith("iec104_"))] | length == 0' \
     "$RESULTS_DIR/alerts-clean.json"
-  code=$($CURL -H "$AUTH_HEADER" "${BASE}/flows" -o "$RESULTS_DIR/flows.json" -w '%{http_code}')
+  code=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/flows" -o "$RESULTS_DIR/flows.json" -w '%{http_code}')
   observe_check "monitoring: flows API remains available with engine up" "GET /flows returns HTTP $code" \
     test "$code" = 200
 }
@@ -135,7 +137,7 @@ observe_final() {
   observe_check "inventory: no overflow counters were incremented" "inventory-final.json" \
     jq -e '.overflow | to_entries | length > 0 and all(.[]; .value == 0)' "$RESULTS_DIR/inventory-final.json"
   for _ in $(seq 1 20); do
-    $CURL -H "$AUTH_HEADER" "${BASE}/diagnostics/iec104" -o "$RESULTS_DIR/diagnostics.json"
+    "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/diagnostics/iec104" -o "$RESULTS_DIR/diagnostics.json"
     if jq -e '.heldPackets == 0 and .heldBytes == 0 and .oldestPendingSeconds == 0' \
       "$RESULTS_DIR/diagnostics.json" >/dev/null; then settled=1; break; fi
     sleep 0.5

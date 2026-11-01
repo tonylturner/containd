@@ -5,6 +5,7 @@ package httpapi
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -19,7 +20,7 @@ import (
 
 func getVPNHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -83,28 +84,37 @@ func uploadOpenVPNProfileHandler(store config.Store) gin.HandlerFunc {
 		if v := strings.TrimSpace(os.Getenv("CONTAIND_OPENVPN_DIR")); v != "" {
 			base = v
 		}
-		if err := os.MkdirAll(base, 0o700); err != nil {
-			internalError(c, err)
-			return
-		}
-		// CreateTemp uses O_EXCL and never replaces an active profile artifact.
-		file, err := os.CreateTemp(base, name+"-*.ovpn")
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		path := file.Name()
-		if _, err := file.WriteString(ovpn + "\n"); err != nil {
-			file.Close()
-			internalError(c, err)
-			return
-		}
-		if err := file.Close(); err != nil {
-			internalError(c, err)
-			return
-		}
-
+		var path string
+		persisted := false
+		defer func() {
+			if path != "" && !persisted {
+				if err := os.Remove(path); err != nil {
+					slog.Error("remove rejected VPN profile", "path", path, "error", err)
+				}
+			}
+		}()
 		cfg, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
+			// Create artifacts only after the store's authoritative comparison. A
+			// later validation failure rolls back the candidate and removes this file.
+			if err := os.MkdirAll(base, 0o700); err != nil {
+				internalError(c, err)
+				return false
+			}
+			file, err := os.CreateTemp(base, name+"-*.ovpn")
+			if err != nil {
+				internalError(c, err)
+				return false
+			}
+			path = file.Name()
+			if _, err := file.WriteString(ovpn + "\n"); err != nil {
+				file.Close()
+				internalError(c, err)
+				return false
+			}
+			if err := file.Close(); err != nil {
+				internalError(c, err)
+				return false
+			}
 			cfg.Services.VPN.OpenVPN.ConfigPath = path
 			cfg.Services.VPN.OpenVPN.Managed = nil
 			return true
@@ -112,6 +122,7 @@ func uploadOpenVPNProfileHandler(store config.Store) gin.HandlerFunc {
 		if !ok {
 			return
 		}
+		persisted = true
 		auditLog(c, audit.Record{Action: "services.vpn.openvpn.profile.upload", Target: name, Detail: "candidate"})
 		c.JSON(http.StatusOK, gin.H{"configPath": path, "vpn": cfg.Services.VPN})
 	}

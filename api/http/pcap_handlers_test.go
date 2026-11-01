@@ -46,7 +46,7 @@ func TestPCAPStartForwardsOverrideBodyToEngine(t *testing.T) {
 	req := authedRequest(http.MethodPost, "/api/v1/pcap/start", strings.NewReader(
 		`{"interfaces":["override"],"zones":["lab"],"filter":{"port":"2404"}}`,
 	))
-	server.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, server, rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("pcap start status = %d body=%s", rec.Code, rec.Body.String())
@@ -89,7 +89,7 @@ func TestPCAPStartWithoutBodyUsesStoredConfig(t *testing.T) {
 			server := NewServerWithEngine(store, nil, engine)
 
 			rec := httptest.NewRecorder()
-			server.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/v1/pcap/start", test.body))
+			serveWithConfigRevision(t, server, rec, authedRequest(http.MethodPost, "/api/v1/pcap/start", test.body))
 
 			if rec.Code != http.StatusOK {
 				t.Fatalf("pcap start status = %d body=%s", rec.Code, rec.Body.String())
@@ -113,7 +113,7 @@ func TestPCAPStartBodyWithoutSelectionRejectsStoredFallback(t *testing.T) {
 	server := NewServerWithEngine(store, nil, engine)
 
 	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, authedRequest(
+	serveWithConfigRevision(t, server, rec, authedRequest(
 		http.MethodPost,
 		"/api/v1/pcap/start",
 		strings.NewReader(`{"snaplen":512}`),
@@ -148,7 +148,7 @@ func TestPCAPStartMapsEngineResolutionErrorToBadRequest(t *testing.T) {
 	req := authedRequest(http.MethodPost, "/api/v1/pcap/start", strings.NewReader(
 		`{"zones":["ghost"]}`,
 	))
-	server.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, server, rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("pcap start status = %d body=%s, want 400", rec.Code, rec.Body.String())
@@ -165,7 +165,7 @@ func TestPCAPStartWithoutEngineDoesNotPersist(t *testing.T) {
 	store := &mockStore{cfg: config.DefaultConfig()}
 	server := NewServerWithEngine(store, nil, nil)
 	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/v1/pcap/start", strings.NewReader(
+	serveWithConfigRevision(t, server, rec, authedRequest(http.MethodPost, "/api/v1/pcap/start", strings.NewReader(
 		`{"zones":["lan"],"filter":{"port":"502"}}`,
 	)))
 
@@ -193,7 +193,7 @@ func TestPCAPConfigDoesNotCallEngine(t *testing.T) {
 		"/api/v1/pcap/config",
 		strings.NewReader(`{"enabled":true,"interfaces":["missing"]}`),
 	)
-	server.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, server, rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body)

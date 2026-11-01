@@ -110,7 +110,8 @@ func TestRemoteAccessProfileParserRefusesBeforePublication(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("profile accepted: status=%d body=%s", rec.Code, rec.Body)
 		}
-		candidate, err := store.LoadCandidate(context.Background())
+		candidateSnapshot, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+		candidate := candidateSnapshot.Candidate
 		if err != nil || candidate.Services.VPN.OpenVPN.ConfigPath != "" {
 			t.Fatalf("refusal staged a profile: %+v %v", candidate, err)
 		}
@@ -135,7 +136,8 @@ func TestRemoteAccessProfileInlineImport(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("bounded import: %d %s", rec.Code, rec.Body)
 	}
-	candidate, err := store.LoadCandidate(context.Background())
+	candidateSnapshot, err := store.ReadSnapshot(context.Background(), config.SnapshotCandidate, true)
+	candidate := candidateSnapshot.Candidate
 	if err != nil {
 		t.Fatal(err)
 	}

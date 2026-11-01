@@ -6,14 +6,14 @@
 modes_fail() {
   log "FAIL rule modes: $*" >&2
   log "receiver state: $(server_state)" >&2
-  log "shadow counters: $($CURL -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")" >&2
+  log "shadow counters: $("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")" >&2
   return 1
 }
 
 modes_apply() {
   UPDATED_CFG=$1
   local code
-  code=$(printf '%s' "$UPDATED_CFG" | $CURL -H "$AUTH_HEADER" -H 'Content-Type: application/json' \
+  code=$(printf '%s' "$UPDATED_CFG" | cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" -H 'Content-Type: application/json' \
     -X POST "${BASE}/config" --data-binary @- -o "$WORK_DIR/modes-save.json" -w '%{http_code}')
   [[ $code == 200 ]] || { modes_fail "config save HTTP=$code expected=200; response=$(cat "$WORK_DIR/modes-save.json")"; return 1; }
   DATAPLANE_CFG=$(jq '.dataplane' <<<"$UPDATED_CFG")
@@ -22,21 +22,29 @@ modes_apply() {
 }
 
 modes_counter() {
-  $CURL -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters" |
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters" |
     jq -er --arg id "$1" 'select(.available and .unit == "messages") | .rules[] | select(.ruleId == $id)'
+}
+
+modes_order() {
+  local expected=$1 installed
+  installed=$(compose exec -T engine curl -fsS http://127.0.0.1:8081/internal/rules) ||
+    { modes_fail "could not read installed engine rules"; return 1; }
+  jq -e --argjson expected "$expected" '[.Firewall[].ID] == $expected' <<<"$installed" >/dev/null ||
+    { modes_fail "installed rule order differs: expected=$expected installed=$installed"; return 1; }
 }
 
 modes_evidence() {
   local id=$1 decision=$2 field=$3
   for _ in $(seq 1 30); do
     if modes_counter "$id" | jq -e --arg f "$field" '.shadowMatches == 1 and .[$f] == 1' >/dev/null &&
-      $CURL -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor" |
+      "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor" |
         jq -e --arg d "$decision" 'any(.events[]; .attributes.decision == $d and .attributes.reason == "rule")' >/dev/null; then
       return 0
     fi
     sleep 0.2
   done
-  modes_fail "rule=$id expected shadowMatches=1, $field=1 and event decision=$decision; events=$($CURL -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor")"
+  modes_fail "rule=$id expected shadowMatches=1, $field=1 and event decision=$decision; events=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor")"
 }
 
 run_rule_modes_matrix() {
@@ -44,21 +52,22 @@ run_rule_modes_matrix() {
   for order in first last; do
     for pair in 'DENY none pass' 'ALLOW DENY drop' 'DENY ALLOW pass' 'ALLOW none default-drop'; do
       read -r trial active want <<<"$pair"
-      id="a-monitor-$trial-$active-$want"; eid=z-enforce
-      [[ $order == first ]] || { id="z-monitor-$trial-$active-$want"; eid=a-enforce; }
+      id="monitor-$trial-$active-$want"; eid=enforce
       cfg=$(jq --arg trial "$trial" --arg active "$active" --arg want "$want" --arg id "$id" --arg eid "$eid" \
-        --arg server "${WAN_NET}.4/32" --arg capture "$SMOKE_DPI_CAPTURE" '
+        --arg server "${WAN_NET}.4/32" --arg order "$order" '
         .dataplane.dpiMode="monitor" | .firewall.rules=[
           {id:$id, destinations:[$server], protocols:[{name:"tcp",port:"502"}],
            ics:{protocol:"modbus",mode:"monitor",direction:"request",functionCode:[6]},action:$trial}]
         | if $active != "none" then .firewall.rules += [{id:$eid,destinations:[$server],protocols:[{name:"tcp",port:"502"}],ics:{protocol:"modbus",mode:"enforce",functionCode:[6]},action:$active}] else . end
         | if $active == "none" and $want != "default-drop" then .firewall.rules += [{id:"ordinary-l4",protocols:[{name:"tcp",port:"502"}],action:"ALLOW"}] else . end
+        | if $order == "last" then .firewall.rules |= reverse else . end
         # AF_PACKET cannot enforce ICS; use the same policy semantics only in queue mode.
         ' <<<"$policy_base")
       if [[ $SMOKE_DPI_CAPTURE == afpacket && $active != none ]]; then
         continue # mixed inline decisions are exercised in the NFQUEUE run
       fi
       modes_apply "$cfg" || return 1
+      modes_order "$(jq -c '[.firewall.rules[].id]' <<<"$cfg")" || return 1
       before=$(server_fc6_requests); writes=$(server_state | jq '.writes')
       value=$((writes + 16000)); status=0
       compose exec -T ot_client python /opt/modbus/client.py write "${WAN_NET}.4" 502 --value "$value" \
@@ -86,7 +95,9 @@ run_rule_modes_matrix() {
   done
   # DNAT: selectors name backend:502, not the public listen port 1502.
   cfg=$(jq --arg backend "${WAN_NET}.4" --arg capture "$SMOKE_DPI_CAPTURE" '
-    .dataplane.dpiMode="monitor" | .firewall.rules=[{id:"dnat-monitor",destinations:[($backend+"/32")],protocols:[{name:"tcp",port:"502"}],ics:{protocol:"modbus",mode:"monitor",direction:"request",functionCode:[6]},action:"DENY"}]
+    .dataplane.dpiMode="monitor" | .firewall.rules=[
+      {id:"dnat-monitor",destinations:[($backend+"/32")],protocols:[{name:"tcp",port:"502"}],ics:{protocol:"modbus",mode:"monitor",direction:"request",functionCode:[6]},action:"DENY"},
+      {id:"allow-modbus-forward",viaForwards:["modbus"],action:"ALLOW"}]
     | .firewall.nat.portForwards=[{id:"modbus",enabled:true,ingressZone:"lan",proto:"tcp",listenPort:1502,destIp:$backend,destPort:502}]
     ' <<<"$policy_base")
   modes_apply "$cfg" || return 1
@@ -95,5 +106,5 @@ run_rule_modes_matrix() {
   sleep 0.5
   [[ $(server_fc6_requests) == $((before+1)) ]] || { modes_fail "$SMOKE_DPI_CAPTURE DNAT: expected FC6=$((before+1)); observed=$(server_fc6_requests)"; return 1; }
   modes_evidence dnat-monitor would_drop wouldDeny || return 1
-  pass "$SMOKE_DPI_CAPTURE DNAT monitor matches backend coordinates; receiver admitted by DNAT"
+  pass "$SMOKE_DPI_CAPTURE DNAT monitor matches backend coordinates; receiver admitted by explicit viaForwards ALLOW"
 }

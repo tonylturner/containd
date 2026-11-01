@@ -43,6 +43,7 @@ var transientFaults = []string{faultQueue, faultVerdict, faultReset, faultWorker
 // loaded (ics) a reset fault makes the object unhealthy too, with active
 // still false.
 type iecHealth struct {
+	changed   func()
 	mu        sync.Mutex
 	active    bool
 	ics       bool
@@ -111,6 +112,7 @@ func (h *iecHealth) setICS(ics bool) {
 	h.mu.Lock()
 	h.ics = ics
 	h.mu.Unlock()
+	h.notify()
 }
 
 // fault records a failure of cause with a human reason.
@@ -161,7 +163,23 @@ func (h *iecHealth) transitionLocked() (string, string) {
 }
 
 func (h *iecHealth) report(outcome, text string) {
+	h.notify()
 	if outcome != "" && h.emit != nil {
 		h.emit(outcome, text)
+	}
+}
+
+func (h *iecHealth) observe(changed func()) {
+	h.mu.Lock()
+	h.changed = changed
+	h.mu.Unlock()
+}
+
+func (h *iecHealth) notify() {
+	h.mu.Lock()
+	changed := h.changed
+	h.mu.Unlock()
+	if changed != nil {
+		changed()
 	}
 }

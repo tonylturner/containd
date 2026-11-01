@@ -21,7 +21,7 @@ func getICSCoverageHandler(store config.Store, engine EngineClient) gin.HandlerF
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		resp := gin.H{}
-		if cfg, err := store.LoadCandidate(ctx); err != nil {
+		if cfg, err := readCandidate(c, store); err != nil {
 			resp["candidateError"] = "candidate config unavailable"
 		} else if candidate, faults, err := candidateCoverage(store, cfg); err != nil {
 			resp["candidateError"] = err.Error()

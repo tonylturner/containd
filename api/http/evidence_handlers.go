@@ -47,7 +47,7 @@ func evidenceProxy(store config.Store, engine EngineClient, path string) gin.Han
 			return
 		}
 		if c.Request.Method == "GET" && (path == "/learn/suggestions" || path == "/learn/suggestions/:id") {
-			cfg, err := store.Load(c.Request.Context())
+			cfg, err := readRunning(c, store)
 			if err != nil {
 				internalError(c, err)
 				return
@@ -146,7 +146,7 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 			return
 		}
 		conflict := errors.New("candidate contains conflicting rule content")
-		err = store.MutateCandidate(c.Request.Context(), func(cfg *config.Config) error {
+		revision, err := store.MutateCandidate(c.Request.Context(), expectedConfigRevision(c), func(cfg *config.Config) error {
 			existing := map[string]config.Rule{}
 			for _, r := range cfg.Firewall.Rules {
 				if _, found := existing[r.ID]; found {
@@ -179,6 +179,9 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 		})
 		if err != nil {
 			if reconcileOnly {
+				if revisionMismatchResponse(c, err) {
+					return
+				}
 				apiError(c, 409, "incompatible proof; only identical already-staged rules may be reconciled")
 				return
 			}
@@ -189,6 +192,9 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 				apiError(c, 503, "stage release uncertain; retry requestId "+req.RequestID)
 				return
 			}
+			if revisionMismatchResponse(c, err) {
+				return
+			}
 			if errors.Is(err, conflict) {
 				apiError(c, 409, err.Error())
 			} else {
@@ -196,6 +202,7 @@ func applyEvidenceHandler(store config.Store, engine EngineClient) gin.HandlerFu
 			}
 			return
 		}
+		configRevisionResponse(c, revision)
 		configChangeResponse(c, "staged")
 		if _, err := client.Learn(c.Request.Context(), http.MethodPost, "/learn/stage/complete", c.GetString("actor"), body); err != nil {
 			apiError(c, 503, "candidate durably staged; completion uncertain; retry requestId "+req.RequestID)
@@ -216,8 +223,8 @@ func registerEvidenceRoutes(group *gin.RouterGroup, store config.Store, engine E
 		if route.method == "GET" {
 			group.Handle(route.method, route.path, handler)
 		} else {
-			group.Handle(route.method, route.path, requireAdmin(), handler)
+			group.Handle(route.method, route.path, requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), handler)
 		}
 	}
-	group.POST("/learn/apply", requireAdmin(), applyEvidenceHandler(store, engine))
+	group.POST("/learn/apply", requireAdmin(), requireConfigRevision(), applyEvidenceHandler(store, engine))
 }

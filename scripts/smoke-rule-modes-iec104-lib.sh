@@ -5,8 +5,8 @@
 iec_modes_fail() {
   log "FAIL rule modes: $*" >&2
   log "RTU state: $(rtu_state)" >&2
-  log "shadow counters: $($CURL -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")" >&2
-  log "monitor events: $($CURL -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&mode=monitor")" >&2
+  log "shadow counters: $("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")" >&2
+  log "monitor events: $("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&mode=monitor")" >&2
   return 1
 }
 
@@ -14,8 +14,8 @@ iec_modes_evidence() {
   local id=$1 decision=$2 expected=${3:-1} counters events field=wouldDeny
   [[ $decision != would_allow ]] || field=wouldAllow
   for _ in $(seq 1 30); do
-    counters=$($CURL -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")
-    events=$($CURL -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor")
+    counters=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/firewall/shadow-counters")
+    events=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&ruleId=$id&mode=monitor")
     if echo "$counters" | jq -e --arg id "$id" --arg f "$field" --argjson n "$expected" '
       .available and .unit == "messages" and any(.rules[]; .ruleId == $id and .shadowMatches == $n and .[$f] == $n)' >/dev/null &&
       echo "$events" | jq -e --arg d "$decision" 'any(.events[]; .attributes.decision == $d and .attributes.reason == "rule")' >/dev/null; then
@@ -28,6 +28,30 @@ iec_modes_evidence() {
   done
   iec_modes_fail "rule=$id expected shadowMatches=$expected, $field=$expected and decision=$decision; counters=$counters events=$events"
 }
+
+# Keep IDs fixed: first/last is the monitor's actual array position relative
+# to enforce, not its lexical rule ID. Only coexistence policies have a pair.
+iec_modes_order() {
+  jq --arg order "$1" '
+    if $order == "last" then .firewall.rules |= (.[:-2] + (.[-2:] | reverse)) else . end'
+}
+
+iec_modes_install() {
+  local cfg=$1 label=$2 order=$3 running
+  cfg=$(iec_modes_order "$order" <<<"$cfg") || return 1
+  apply_config "$cfg" "$label" || return 1
+  # apply_config stages and directly applies the snapshot. Promote it as well
+  # so the authoritative running bank can prove the installed array order.
+  cas_write "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" \
+    -X POST "${BASE}/config/commit" >"$RESULTS_DIR/modes-$order-$label-commit.json" || return 1
+  running=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config") || return 1
+  printf '%s\n' "$running" >"$RESULTS_DIR/modes-$order-$label-running.json"
+  jq -e --argjson expected "$(jq '[.firewall.rules[].id]' <<<"$cfg")" \
+    '[.firewall.rules[].id] == $expected' <<<"$running" >/dev/null || {
+    iec_modes_fail "$order $label: running rules do not match the installed order"; return 1;
+  }
+}
+
 run_iec_rule_modes_matrix() {
   local capture=${SMOKE_DPI_CAPTURE:-nfqueue} policy_base cfg id eid order before writes out after written status objects events
   policy_base=$(jq --arg capture "$capture" --arg cc "$CC_DEV" --arg rtu "$RTU_DEV" --argjson l4 "$(jq '.firewall.rules' <<<"$BASELINE")" '
@@ -36,7 +60,6 @@ run_iec_rule_modes_matrix() {
     ' <<<"$EU_POLICY")
   for order in first last; do
     id=a-monitor;eid=z-enforce
-    [[ $order == first ]] || { id=z-monitor;eid=a-enforce; }
     cfg=$(jq --arg id "$id" '.firewall.rules += [{id:$id,protocols:[{name:"tcp",port:"2404"}],ics:{protocol:"iec104",mode:"monitor",typeIds:[46],direction:"request"},action:"DENY"}]' <<<"$policy_base")
     apply_config "$cfg" 'monitor-only command' || { iec_modes_fail "$capture $order: policy apply failed"; return 1; }
     before=$(rtu_field commands_received);writes=$(rtu_field writes_applied)
@@ -58,32 +81,32 @@ run_iec_rule_modes_matrix() {
       cfg=$(jq --arg id "$id" --arg eid "$eid" '.firewall.rules += [
         {id:$id,protocols:[{name:"tcp",port:"2404"}],ics:{protocol:"iec104",mode:"monitor",typeIds:[46],direction:"request"},action:"ALLOW"},
         {id:$eid,protocols:[{name:"tcp",port:"2404"}],ics:{protocol:"iec104",mode:"enforce",readOnly:true},action:"ALLOW"}]' <<<"$policy_base")
-      apply_config "$cfg" 'enforce envelope plus monitor ALLOW' || { iec_modes_fail "$capture $order: policy apply failed"; return 1; }
+      iec_modes_install "$cfg" envelope "$order" || { iec_modes_fail "$capture $order: policy apply failed"; return 1; }
       before=$(rtu_field commands_received);writes=$(rtu_field writes_applied)
       out=$(malformer -scenario dc-execute -ca "$ALLOWED_CA" -ioa "$ALLOWED_IOA" -dcs "$DCS_CLOSE" -hold 2s) || {
         iec_modes_fail "$capture $order: command probe failed: $out"; return 1;
       }
       after=$(rtu_field commands_received); written=$(rtu_field writes_applied)
-      [[ $(socket_of "$out") == reset && $after == "$before" && $written == "$writes" ]] || {
+      if ! { [[ $(socket_of "$out") == reset && $after == "$before" && $written == "$writes" ]] && iec_probe_sent 0 "$out"; }; then
         iec_modes_fail "$capture $order enforce envelope: expected reset, no delivery/writes; probe=$out commands $before->$after writes $writes->$written"; return 1;
-      }
+      fi
       iec_modes_evidence "$id" would_allow || return 1
       printf '%s\n' "$out" >"$RESULTS_DIR/modes-$order-envelope-probe.json"
       pass "$order monitor ALLOW cannot admit a command in an enforce envelope"
       cfg=$(jq --arg id "$id" --arg eid "$eid" '.dataplane.dpiIcsParsing={iec104:"strict"} | .firewall.rules += [
         {id:$id,protocols:[{name:"tcp",port:"2404"}],ics:{protocol:"iec104",mode:"monitor",typeIds:[46],direction:"request"},action:"DENY"},
         {id:$eid,protocols:[{name:"tcp",port:"2404"}],ics:{protocol:"iec104",mode:"enforce"},action:"ALLOW"}]' <<<"$policy_base")
-      apply_config "$cfg" 'strict scope plus monitor DENY' || { iec_modes_fail "$capture $order: policy apply failed"; return 1; }
+      iec_modes_install "$cfg" strict "$order" || { iec_modes_fail "$capture $order: policy apply failed"; return 1; }
       before=$(rtu_field commands_received)
       out=$(malformer -scenario reserved-bits -ca "$ALLOWED_CA" -ioa "$ALLOWED_IOA" -dcs "$DCS_CLOSE" -hold 2s) || {
         iec_modes_fail "$capture $order: strict probe failed: $out"; return 1;
       }
       after=$(rtu_field commands_received)
-      [[ $(socket_of "$out") == reset && $after == "$before" ]] || {
+      if ! { [[ $(socket_of "$out") == reset && $after == "$before" ]] && iec_probe_sent 0 "$out"; }; then
         iec_modes_fail "$capture $order strict scope: expected reset and no delivery; probe=$out commands $before->$after"; return 1;
-      }
+      fi
       iec_modes_evidence "$id" would_drop || return 1
-      events=$($CURL -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&mode=enforce")
+      events=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?kind=ics.decision&mode=enforce")
       echo "$events" |
         jq -e --arg id "$eid" 'any(.events[]; .attributes.reason == "nonconformant" and .attributes.scopeId == $id and .attributes.findingCode == "iec104.reserved_bits" and .attributes.ruleId == null and .attributes.action == null)' >/dev/null || { iec_modes_fail "$capture $order strict attribution: expected nonconformant/reserved_bits scope=$eid, no rule/action; events=$events"; return 1; }
       printf '%s\n' "$events" >"$RESULTS_DIR/modes-$order-strict-enforce-events.json"

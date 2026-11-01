@@ -32,10 +32,10 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 			running.System.Hostname = "pre-reset"
 			running.DataPlane.Enforcement = true
 			running.Firewall.DefaultAction = config.ActionAllow
-			if err := store.SaveCandidate(ctx, running); err != nil {
+			if err := testSaveCandidate(store, ctx, running); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.CommitConfirmed(ctx, time.Hour); err != nil {
+			if err := testCommitConfirmed(store, ctx, time.Hour); err != nil {
 				t.Fatal(err)
 			}
 			running, err = store.Load(ctx)
@@ -45,10 +45,11 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 			candidate := config.DefaultConfig()
 			candidate.System.Hostname = "staged-before-reset"
 			candidate.IDS.Rules = []config.IDSRule{}
-			if err := store.SaveCandidate(ctx, candidate); err != nil {
+			if err := testSaveCandidate(store, ctx, candidate); err != nil {
 				t.Fatal(err)
 			}
-			candidate, err = store.LoadCandidate(ctx)
+			candidateSnapshot1, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			candidate = candidateSnapshot1.Candidate
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -91,9 +92,10 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 				c.Next()
 			})
 			revoked := false
+			router.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
 			router.POST("/system/factory-reset", factoryResetHandler(store, userStore, engine, nil, func(context.Context, string) { revoked = true }))
 			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`)))
+			serveWithConfigRevision(t, router, rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))))
 			var body struct {
 				Error        string `json:"error"`
 				Detail       string `json:"detail"`
@@ -120,7 +122,8 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(jsonValue(t, running), jsonValue(t, got)) {
 				t.Fatalf("running changed: %+v %v", got, err)
 			}
-			staged, err := store.LoadCandidate(ctx)
+			stagedSnapshot2, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+			staged := stagedSnapshot2.Candidate
 			if err != nil || !reflect.DeepEqual(jsonValue(t, candidate), jsonValue(t, staged)) {
 				t.Fatalf("candidate changed: %+v %v", staged, err)
 			}
@@ -150,7 +153,7 @@ func TestFactoryResetApplyFailurePreservesStores(t *testing.T) {
 			if mode != "dataplane" && len(engine.attempts) != 2 {
 				t.Fatalf("runtime recovery not attempted: %+v", engine.attempts)
 			}
-			if err := store.Rollback(ctx); err != nil {
+			if err := testRollback(store, ctx); err != nil {
 				t.Fatal(err)
 			}
 			previous, err := store.Load(ctx)
@@ -172,7 +175,7 @@ func TestFactoryResetApplyErrorReportsRecoveryFailures(t *testing.T) {
 		})
 	})
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+	serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/", nil))
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
@@ -188,13 +191,13 @@ func TestFactoryResetSuccessReplacesConfigurationAndUsers(t *testing.T) {
 	t.Setenv("CONTAIND_LAB_MODE", "")
 	ctx := context.Background()
 	store := stageStore(t)
-	if err := store.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(store, ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	candidate := config.DefaultConfig()
 	candidate.System.Hostname = "discard-me"
 	candidate.IDS.Rules = []config.IDSRule{}
-	if err := store.SaveCandidate(ctx, candidate); err != nil {
+	if err := testSaveCandidate(store, ctx, candidate); err != nil {
 		t.Fatal(err)
 	}
 	userStore, err := users.NewSQLiteStore(filepath.Join(t.TempDir(), "users.db"))
@@ -212,9 +215,10 @@ func TestFactoryResetSuccessReplacesConfigurationAndUsers(t *testing.T) {
 	}
 	engine := &mockEngine{}
 	router := gin.New()
+	router.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
 	router.POST("/", factoryResetHandler(store, userStore, engine, nil))
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`)))
+	serveWithConfigRevision(t, router, rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))))
 	if rec.Code != http.StatusOK || rec.Header().Get("X-Containd-Warnings") != "" {
 		t.Fatalf("reset failed: %d %v %s", rec.Code, rec.Header(), rec.Body)
 	}
@@ -225,7 +229,8 @@ func TestFactoryResetSuccessReplacesConfigurationAndUsers(t *testing.T) {
 	if err != nil || running.System.Hostname != "containd" {
 		t.Fatalf("defaults not saved: %+v %v", running, err)
 	}
-	staged, err := store.LoadCandidate(ctx)
+	stagedSnapshot3, err := store.ReadSnapshot(ctx, config.SnapshotCandidate, true)
+	staged := stagedSnapshot3.Candidate
 	if err != nil || staged.System.Hostname != "containd" {
 		t.Fatalf("old candidate retained: %+v %v", staged, err)
 	}
@@ -235,7 +240,7 @@ func TestFactoryResetSuccessReplacesConfigurationAndUsers(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(jsonValue(t, wantBank), jsonValue(t, bank)) {
 		t.Fatalf("default IDS bank not installed: %+v %v", bank, err)
 	}
-	if err := store.Rollback(ctx); !errors.Is(err, config.ErrNotFound) {
+	if err := testRollback(store, ctx); !errors.Is(err, config.ErrNotFound) {
 		t.Fatalf("old history retained: %v", err)
 	}
 	gotUsers, err := userStore.List(ctx)

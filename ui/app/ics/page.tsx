@@ -1,5 +1,10 @@
 "use client";
 
+import { revisionError } from "../../lib/config-revision";
+
+import type { ConfigBase } from "../../lib/config-boundary";
+import { useConfigView, matchingRevisions } from "../../lib/use-config-revision";
+
 import { useConfigLoad } from "../../lib/use-config-editor";
 
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
@@ -48,14 +53,13 @@ export default function ICSPolicyPage() {
   const toast = useToast();
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
-  const [rules, setRules] = useState<FirewallRule[]>([]);
+  const view = useConfigView({ rules: [] as FirewallRule[], dpiConfig: { captureInterfaces: [], dpiMock: false } as DataPlaneConfig });
+  const { readConfig } = view;
+  const { rules, dpiConfig } = view.data;
+  const viewRevision = view.state.baseRevision ?? "";
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<FirewallRule | null>(null);
   const [filterProto, setFilterProto] = useState<string>("all");
-  const [dpiConfig, setDpiConfig] = useState<DataPlaneConfig>({
-    captureInterfaces: [],
-    dpiMock: false,
-  });
   const coverage = useICSCoverage();
   const shadow = useShadowCounters();
   const health = useHealth();
@@ -63,13 +67,15 @@ export default function ICSPolicyPage() {
   const queueGroup = dpiConfig.nfqueueGroup ?? 0;
 
   const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
-    const [list, dp] = await Promise.all([api.listFirewallRules(), fetchDataPlane()]);
+    const [listSnapshot, dpSnapshot] = await Promise.all([api.listFirewallRules(), fetchDataPlane()]);
+    if (!matchingRevisions(listSnapshot, dpSnapshot)) { checkLoaded(null); return; }
+    const list = (listSnapshot?.data ?? null);
+    const dp = (dpSnapshot?.data ?? null);
     if (!checkLoaded(list)) return;
     setError(null);
-    if (dp) setDpiConfig(dp);
-    setRules(list);
+    readConfig({ data: { rules: list, dpiConfig: dp! }, revision: listSnapshot!.revision }, keepEdits);
     if (!keepEdits) setEditing(null);
-  }, [checkLoaded]));
+  }, [checkLoaded, readConfig]));
 
   useConfigRefresh(refresh);
 
@@ -93,20 +99,21 @@ export default function ICSPolicyPage() {
 
   // The editor reports a disabled filter as no predicate; null clears the
   // stored one, where an omitted key would keep it.
-  async function onSave(id: string, ics: ICSPredicatePatch | undefined) {
+  async function onSave(id: string, ics: ICSPredicatePatch | undefined, revision: ConfigBase) {
     setError(null);
     if (!canSave) return null;
-    const result = await api.updateFirewallRule(id, { ics: ics ?? null });
+    const result = await view.writer((base, predicate: ICSPredicatePatch | undefined) => api.updateFirewallRule(base, id, { ics: predicate ?? null }),
+      (view, saved) => ({ ...view, rules: view.rules.map(row => row.id === saved.id ? saved : row) }))(revision, ics);
     if (!result.ok) {
-      setError(result.error);
-      return null;
+      setError(revisionError(result));
+      return result;
     }
     toast(
       ics ? "ICS filter staged — commit to apply." : "ICS filter removal staged — commit to apply.",
       "success",
     );
     refresh();
-    return result.data;
+    return result;
   }
 
   return (
@@ -357,12 +364,13 @@ export default function ICSPolicyPage() {
 
       {editing && canEdit && (
         <EditICSModal
+          revision={viewRevision}
           available={canSave}
           rule={rules.find((r) => r.id === editing.id) ?? editing}
           context={rules}
           globalMode={dpiConfig.dpiMode}
           onClose={() => setEditing(null)}
-          onSave={(ics) => onSave(editing.id, ics)}
+          onSave={(ics, revision) => onSave(editing.id, ics, revision)}
         />
       )}
     </Shell>

@@ -226,7 +226,7 @@ func TestStoreRejectsUnactivatableIEC104Enforce(t *testing.T) {
 
 	cfg := iec104Config(iecRule("cc-rtu", ActionAllow, ICSPredicate{ReadOnly: true, Mode: "enforce"}))
 	cfg.DataPlane.DPIICSProtocols["iec104"] = false
-	if err := store.SaveCandidate(ctx, cfg); err == nil || !strings.Contains(err.Error(), "iec104") {
+	if err := testSaveCandidate(store, ctx, cfg); err == nil || !strings.Contains(err.Error(), "iec104") {
 		t.Fatalf("SaveCandidate err = %v, want iec104 rejection", err)
 	}
 	if err := store.Save(ctx, cfg); err == nil || !strings.Contains(err.Error(), "iec104") {

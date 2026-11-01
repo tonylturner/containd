@@ -37,13 +37,13 @@ async function openFirewall(
     if (path.startsWith("/api/v1/firewall/rules/") && request.method() === "PATCH") {
       const patch = request.postDataJSON() as Record<string, unknown>;
       patches.push(patch);
-      await route.fulfill({ json: { ...rules[0], ...patch } });
+      await route.fulfill({ json: { ...rules[0], ...patch }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     if (path === "/api/v1/firewall/rules" && request.method() === "POST") {
       const created = request.postDataJSON();
       creates.push(created);
-      await route.fulfill({ json: created });
+      await route.fulfill({ json: created, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     let body: unknown = {};
@@ -52,7 +52,7 @@ async function openFirewall(
     if (path === "/api/v1/zones") body = [{ name: "it" }, { name: "ot" }];
     if (path === "/api/v1/routing") body = { gateways: [], routes: [], rules: [] };
     if (path === "/api/v1/dataplane") body = { captureInterfaces: [], dpiMock: false, dpiMode: "monitor", ...dataplane };
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/firewall/rules");
   await page.goto("/firewall/");

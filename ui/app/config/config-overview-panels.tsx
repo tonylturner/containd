@@ -1,5 +1,7 @@
 "use client";
 
+import { IDSRestore } from "./ids-restore";
+
 import type { ConfigBackup } from "../../lib/api";
 
 import { Card } from "../../components/Card";
@@ -9,6 +11,7 @@ export function ConfigBackupRecoveryCard({
   backupName,
   backups,
   canEdit,
+  canRestore,
   onBackupNameChange,
   onCreateBackup,
   onDeleteBackup,
@@ -20,6 +23,7 @@ export function ConfigBackupRecoveryCard({
   backupName: string;
   backups: ConfigBackup[];
   canEdit: boolean;
+  canRestore: boolean;
   onBackupNameChange: (value: string) => void;
   onCreateBackup: (redacted: boolean) => void;
   onDeleteBackup: (backup: ConfigBackup) => void;
@@ -68,7 +72,8 @@ export function ConfigBackupRecoveryCard({
         {canEdit && (
           <button
             onClick={onRestoreConfig}
-            className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui"
+            disabled={!canRestore}
+            className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
           >
             Restore
           </button>
@@ -211,12 +216,16 @@ export function IDSRulesCard({
   canEdit,
   idsRuleCount,
   onDownloadRules,
-  onRestoreRules,
+  revision,
+  onStatus,
+  onChanged,
 }: {
   canEdit: boolean;
   idsRuleCount: number;
   onDownloadRules: () => void;
-  onRestoreRules: (file: File | null) => void;
+  revision?: string;
+  onStatus: (status: string) => void;
+  onChanged: () => unknown;
 }) {
   return (
     <Card padding="md">
@@ -234,20 +243,7 @@ export function IDSRulesCard({
           >
             Download rule backup
           </button>
-          {canEdit && (
-            <label className="cursor-pointer rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui">
-              Stage rule restore
-              <input
-                type="file"
-                accept=".json"
-                className="hidden"
-                onChange={(e) => {
-                  onRestoreRules(e.target.files?.[0] ?? null);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-          )}
+          {canEdit && <IDSRestore revision={revision} onStatus={onStatus} onChanged={onChanged} />}
         </div>
       </div>
     </Card>
@@ -256,6 +252,8 @@ export function IDSRulesCard({
 
 export function ConfigActionBar({
   canEdit,
+  canCommit,
+  canMutate,
   ttlSeconds,
   onTtlChange,
   onCommit,
@@ -264,6 +262,8 @@ export function ConfigActionBar({
   onRollback,
 }: {
   canEdit: boolean;
+  canCommit: boolean;
+  canMutate: boolean;
   ttlSeconds: string;
   onTtlChange: (value: string) => void;
   onCommit: () => void;
@@ -277,7 +277,8 @@ export function ConfigActionBar({
         {canEdit && (
           <button
             onClick={onCommit}
-            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui"
+            disabled={!canCommit}
+            className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 transition-ui disabled:opacity-50"
           >
             Commit
           </button>
@@ -286,7 +287,8 @@ export function ConfigActionBar({
           {canEdit && (
             <button
               onClick={onCommitConfirmed}
-              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
+              disabled={!canCommit}
+              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
             >
               Commit-confirmed
             </button>
@@ -303,13 +305,15 @@ export function ConfigActionBar({
           <>
             <button
               onClick={onConfirmCommit}
-              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui"
+              disabled={!canMutate}
+              className="rounded-xs border bg-(--surface) px-3 py-1.5 text-sm text-(--text) transition-ui disabled:opacity-50"
             >
               Confirm
             </button>
             <button
               onClick={onRollback}
-              className="rounded-xs bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui"
+              disabled={!canMutate}
+              className="rounded-xs bg-red-600/20 px-3 py-1.5 text-sm text-red-400 hover:bg-red-600/30 transition-ui disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Rollback
             </button>

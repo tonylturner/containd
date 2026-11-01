@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 )
 
 func commitConfigHandler(store config.Store, engine EngineClient, services ServicesApplier) gin.HandlerFunc {
@@ -60,15 +61,20 @@ func runningChangeHandler(store config.Store, engine EngineClient, services Serv
 			return
 		}
 		var warnings []string
+		var observation dpengine.ProtectionStatus
 		attempt := 0
-		err := runtimeStore.ApplyChange(c.Request.Context(), change, ttl, func(ctx context.Context, previous, next *config.Config) error {
-			w, err := applyConfigSnapshot(ctx, store, engine, services, previous, next)
+		revision, err := runtimeStore.ApplyChange(c.Request.Context(), expectedConfigRevision(c), change, ttl, func(ctx context.Context, previous, next *config.Config) error {
+			w, protection, err := applyConfigSnapshot(ctx, store, engine, services, previous, next)
 			if attempt == 0 {
 				warnings = w
+				observation = protection
 			}
 			attempt++
 			return err
 		})
+		if revisionMismatchResponse(c, err) {
+			return
+		}
 		recoveryWarnings := reenterRecoveryLocked(c.Request.Context(), store, engine, err)
 		if err != nil {
 			setWarningHeader(c, recoveryWarnings)
@@ -96,7 +102,8 @@ func runningChangeHandler(store config.Store, engine EngineClient, services Serv
 		if change == config.ChangeRollback {
 			status = "rolled back"
 		}
-		committedConfigResponse(c, status)
+		configRevisionResponse(c, revision)
+		committedConfigResponse(c, status, protectionResponse(observation))
 	}
 }
 
@@ -104,11 +111,16 @@ func confirmCommitHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
-		if err := store.ConfirmCommit(c.Request.Context()); err != nil {
+		revision, err := store.ConfirmCommit(c.Request.Context(), expectedConfigRevision(c))
+		if err != nil {
+			if revisionMismatchResponse(c, err) {
+				return
+			}
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.confirm_commit", Target: "running"})
-		committedConfigResponse(c, "confirmed")
+		configRevisionResponse(c, revision)
+		committedConfigResponse(c, "confirmed", nil)
 	}
 }

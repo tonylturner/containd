@@ -63,7 +63,7 @@ func TestIDSHandlersDeferApplyResultsUntilCommit(t *testing.T) {
 				audit := &mockAuditStore{}
 				server := NewServerWithEngine(store, audit, engine)
 				rec := httptest.NewRecorder()
-				server.ServeHTTP(rec, idsApplyRequest(t, action))
+				serveWithConfigRevision(t, server, rec, idsApplyRequest(t, action))
 				if rec.Code != http.StatusOK || engine.applied {
 					t.Fatalf("stage unexpectedly applied or failed: status=%d body=%s", rec.Code, rec.Body)
 				}

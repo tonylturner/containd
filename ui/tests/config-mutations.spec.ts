@@ -45,7 +45,7 @@ async function mockAPI(page: Page) {
       server.failReads = server.failImportRead;
       result = { imported: 1, skipped: 0, total: server.ids.rules!.length, format: "suricata" };
     } else if (path === "/ids/rules") {
-      if (method === "GET" && server.failReads) return route.fulfill({ status: 503, json: { error: "Unavailable" } });
+      if (method === "GET" && server.failReads) return route.fulfill({ status: 503, json: { error: "Unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       if (method === "POST") server.saved = server.ids = req.postDataJSON();
       result = server.ids;
     } else if (path === "/interfaces/assign") {
@@ -87,7 +87,7 @@ async function mockAPI(page: Page) {
       server.readHeld = true;
       await hold;
     }
-    await route.fulfill({ json: result, headers: method === "GET" || path === "/ids/convert/sigma" ? {} : { "X-Containd-Config": "staged" } });
+    await route.fulfill({ json: result, headers: { "X-Containd-Revision": "0123456789abcdef.1", ...(method === "GET" || path === "/ids/convert/sigma" ? {} : { "X-Containd-Config": "staged" }) } });
   });
   return server;
 }
@@ -219,7 +219,7 @@ test("IDS blocks Save after an acknowledged import until its rules can be read",
   await expect.poll(() => server.readHeld).toBe(true);
   server.failImportRead = true;
   await importFile(page);
-  await expect(page.getByText("Rules were imported, but could not be loaded. Refresh to reconcile them before saving.")).toBeVisible();
+  await expect(page.getByText("Changes staged, but the updated configuration is unavailable. Reload before saving.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   // Releasing a pre-import snapshot must not acknowledge the import or enable Save.
   const stale = page.waitForResponse((r) => read("/ids/rules")(r) && r.status() === 200);

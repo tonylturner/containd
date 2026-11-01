@@ -92,7 +92,9 @@ ENDPOINT_IMAGE=${IEC104_ENDPOINT_IMAGE:-containd-iec104-endpoint:iec104-smoke-$(
 RESULTS_DIR=${IEC104_RESULTS_DIR:-$ROOT/build/iec104-smoke}
 RESULTS_FILE="$RESULTS_DIR/results.json"
 WORK_DIR=$(mktemp -d)
-CURL="curl -sf --max-time 10 --connect-timeout 5"
+CURL=(curl -sf --max-time 10 --connect-timeout 5)
+# shellcheck source=scripts/config-revision.sh
+source "$(dirname "${BASH_SOURCE[0]}")/config-revision.sh"
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
 
 CC_SUBNET=${IEC104_CC_SUBNET:-10.233.0}
@@ -244,7 +246,7 @@ ensure_images() {
 wait_http() {
   local url=$1
   for _ in $(seq 1 60); do
-    $CURL "$url" >/dev/null 2>&1 && return 0
+    "${CURL[@]}" "$url" >/dev/null 2>&1 && return 0
     sleep 1
   done
   return 1
@@ -294,7 +296,7 @@ STACK_UP=1
 
 # Copy the malformer binary into the cc container for the split/malformed cases.
 compose cp "$WORK_DIR/malformer" cc:/usr/local/bin/malformer >/dev/null 2>&1 ||
-  log "WARNING: could not install the malformer in the cc container"
+  fatal "could not install the malformer in the cc container"
 
 BASE="http://127.0.0.1:$(compose port firewall 18080 | awk -F: '{print $NF}')/api/v1"
 log "Management on $BASE (loopback only); engine API through compose exec"
@@ -321,7 +323,7 @@ fi
 log "Discovering firewall interfaces..."
 STATE=""
 for _ in $(seq 1 15); do
-  STATE=$($CURL -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
+  STATE=$("${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/interfaces/state" || true)
   [[ -n "$STATE" && "$STATE" != "[]" ]] && break
   sleep 2
 done
@@ -360,7 +362,7 @@ apply_config() {
   local cfg=$1 label=$2 resp code
   resp="$WORK_DIR/cfg-resp.json"
   : >"$resp"
-  code=$(echo "$cfg" | curl -sS --max-time 10 --connect-timeout 5 -w "%{http_code}" \
+  code=$(echo "$cfg" | cas_write "$WORK_DIR/config.revision" curl -sS --max-time 10 --connect-timeout 5 -w "%{http_code}" \
     -H "$AUTH_HEADER" -H "Content-Type: application/json" \
     -X POST "${BASE}/config" --data-binary @- -o "$resp" || true)
   if [[ "$code" != "200" ]]; then
@@ -369,17 +371,19 @@ apply_config() {
   fi
   local ruleset snap
   ruleset="$WORK_DIR/ruleset.json"
-  $CURL -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset" || return 1
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/dataplane/ruleset" -o "$ruleset" || return 1
   snap=$(jq -c '.snapshot' "$ruleset")
-  code=$(echo "$cfg" | jq -c '.dataplane' | engine_post firewall /internal/config "$resp")
+  local apply_id
+  apply_id=$(engine_apply_id)
+  code=$(echo "$cfg" | jq -c '.dataplane' | engine_apply firewall /internal/config "$resp" "$apply_id")
   [[ "$code" == "200" ]] || { log "engine config for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
-  code=$(engine_post firewall /internal/apply_rules "$resp" <<<"$snap")
+  code=$(engine_apply firewall /internal/apply_rules "$resp" "$apply_id" <<<"$snap")
   [[ "$code" == "200" ]] || { log "engine apply_rules for $label failed (HTTP $code): $(cat "$resp")"; return 1; }
   CC_LAST_POLICY_COT3=$(cc_count 'cot=3 ' cc.log)
   return 0
 }
 
-CFG=$($CURL -H "$AUTH_HEADER" "${BASE}/config")
+CFG=$(cas_read "$WORK_DIR/config.revision" "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/config")
 
 # L4 baseline: zones for the two sides and a plain tcp/2404 allow both ways, so
 # monitoring works and the harness routing is provable even before IEC
@@ -473,7 +477,7 @@ else
 fi
 
 health_json() {
-  $CURL -H "$AUTH_HEADER" "${BASE}/health" 2>/dev/null || echo '{}'
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/health" 2>/dev/null || echo '{}'
 }
 
 if [[ "$EU_APPLIED" -eq 1 ]] && health_json | jq -e '.iec104Enforcement.active == true and .iec104Enforcement.healthy == true' >/dev/null 2>&1; then
@@ -518,30 +522,13 @@ socket_of() {
 # unsupported event at or after TS (UTC, second resolution).
 iec_event_since() {
   local since=$1
-  $CURL -H "$AUTH_HEADER" "${BASE}/events?limit=200" 2>/dev/null | jq -e --arg since "$since" '
+  "${CURL[@]}" -H "$AUTH_HEADER" "${BASE}/events?limit=200" 2>/dev/null | jq -e --arg since "$since" '
     any(.[]; .proto == "iec104" and (.kind == "malformed" or .kind == "unsupported")
       and ((.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) >= ($since | fromdateiso8601)))' >/dev/null 2>&1
 }
 
-# assert_not_received NAME COUNTER CMD...: run CMD and assert the RTU counter
-# (commands_received or gi_requests) did not advance and no write was applied.
-# These must be prevented by the active IEC104 enforcement policy.
-assert_not_received() {
-  local name=$1 counter=$2 rc=0 before after writes_before writes_after out detail
-  shift 2
-  before=$(rtu_field "$counter")
-  writes_before=$(rtu_field writes_applied)
-  out=$("$@" 2>&1) || rc=$?
-  sleep 1
-  after=$(rtu_field "$counter")
-  writes_after=$(rtu_field writes_applied)
-  detail="exit $rc; $counter $before -> $after; writes $writes_before -> $writes_after; last_command '$(rtu_field last_command)'; $(tr '\n' ' ' <<<"$out" | head -c 100)"
-  if [[ -n "$before" && "$after" == "$before" && "$writes_after" == "$writes_before" ]]; then
-    gate_pass "$name" "$detail"
-  else
-    gate_fail "$name" "$detail"
-  fi
-}
+# shellcheck source=scripts/smoke-iec104-probes.sh
+source "$ROOT/scripts/smoke-iec104-probes.sh"
 
 if [[ ${SMOKE_RULE_MODES_ONLY:-0} == 1 ]]; then
   # shellcheck source=scripts/smoke-rule-modes-iec104-lib.sh
@@ -720,15 +707,15 @@ fi
 # double command handler records ioa=2003 in last_command.
 STALE_IOA=$((FORBIDDEN_IOA + 1))
 received_before=$(rtu_field commands_received)
-STALE_OUT=$(compose exec -T cc /usr/local/bin/malformer -addr "$RTU_IP:$RTU_PORT" \
-  -scenario stale-retransmit -lport 40405 -ca "$ALLOWED_CA" -ioa "$FORBIDDEN_IOA" -dcs "$DCS_OPEN" 2>&1 | tr -d '\r' | tail -n 1)
+rc=0
+STALE_OUT=$(malformer -scenario stale-retransmit -lport 40405 -ca "$ALLOWED_CA" \
+  -ioa "$FORBIDDEN_IOA" -dcs "$DCS_OPEN") || rc=$?
+iec_stale_probe_ran "$rc" "$STALE_OUT" || fatal "raw replay did not run: exit $rc; $STALE_OUT"
 sleep 1
 last_cmd=$(rtu_field last_command)
 received_after=$(rtu_field commands_received)
 STALE_DETAIL="malformer: $STALE_OUT; RTU last_command '$last_cmd'; commands_received $received_before -> $received_after"
-if [[ "$STALE_OUT" == *FAILED* ]]; then
-  fail "stale retransmit after a new handshake cannot bypass" "raw replay could not run: $STALE_OUT"
-elif [[ "$last_cmd" != *"ioa=$STALE_IOA"* ]]; then
+if [[ -n "$received_before" && "$received_after" == "$received_before" && "$last_cmd" != *"ioa=$STALE_IOA"* ]]; then
   gate_pass "stale retransmit after a new handshake cannot bypass" "$STALE_DETAIL"
 else
   gate_fail "stale retransmit after a new handshake cannot bypass" "the stale segment reached the RTU: $STALE_DETAIL"
@@ -746,7 +733,7 @@ run_parsing_gates
 reject_check() {
   local name=$1 cfg=$2 code
   # Expected HTTP errors are data here: -f can discard their response body.
-  code=$(echo "$cfg" | curl -sS --max-time 10 --connect-timeout 5 -w "%{http_code}" \
+  code=$(echo "$cfg" | cas_write "$WORK_DIR/config.revision" curl -sS --max-time 10 --connect-timeout 5 -w "%{http_code}" \
     -H "$AUTH_HEADER" -H "Content-Type: application/json" \
     -X POST "${BASE}/config" --data-binary @- -o "$WORK_DIR/reject.json" || true)
   if [[ "$code" == "400" && -s "$WORK_DIR/reject.json" ]]; then

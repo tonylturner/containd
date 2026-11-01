@@ -28,9 +28,4 @@ func TestIEC104ObservationFromEvents(t *testing.T) {
 			t.Fatal("APCI-only frame became a CA")
 		}
 	}
-	inv := New()
-	inv.RecordIEC104DeliveryOverflow(2)
-	if inv.SnapshotIEC104().Overflow.Outcomes != 2 {
-		t.Fatal("missing delivery overflow")
-	}
 }

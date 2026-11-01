@@ -406,7 +406,7 @@ export function withHealth(data: TopoNodeData, health: HealthResponse | undefine
 
 export async function buildTopology(): Promise<TopoResult | null> {
   const [running, ifaceState, osRouting, flows, events, sysStats, counters] = await Promise.all([
-    api.getRunningConfig(),
+    api.getRunningConfig().then(snapshot => snapshot?.data ?? null),
     api.listInterfaceState(),
     api.getOSRouting(),
     api.listFlows(),

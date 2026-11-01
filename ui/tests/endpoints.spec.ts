@@ -34,7 +34,7 @@ async function mockAPI(page: Page, bodies: Record<string, unknown>) {
     const body = path.endsWith("/auth/me") || path.endsWith("/auth/session")
       ? { id: "admin", username: "containd", role: "admin" }
       : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : bodies[path] ?? {};
-    await route.fulfill({ json: body });
+    await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
 }
 

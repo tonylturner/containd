@@ -20,7 +20,7 @@ async function openNAT(page: Page, zones: Zone[] = [{ name: "wan" }, { name: "la
       const body = route.request().postDataJSON();
       staged.push(body);
       forwards.push(body.forward);
-      await route.fulfill({ json: { forward: body.forward, ...(body.allowRule ? { placement: { reason: "generated", rule: { id: "allow-published" }, index: 0 } } : {}) } });
+      await route.fulfill({ json: { forward: body.forward, ...(body.allowRule ? { placement: { reason: "generated", rule: { id: "allow-published" }, index: 0 } } : {}) }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       return;
     }
     const json = path.endsWith("/auth/me") || path.endsWith("/auth/session")
@@ -29,7 +29,7 @@ async function openNAT(page: Page, zones: Zone[] = [{ name: "wan" }, { name: "la
         : path === "/api/v1/zones" ? zones
           : path === "/api/v1/firewall/nat" ? { enabled: true, portForwards: forwards }
             : path === "/api/v1/firewall/rules" ? [] : {};
-    await route.fulfill({ json });
+    await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/firewall/nat");
   await page.goto("/nat/");
@@ -139,7 +139,7 @@ test("publish describes inside placement without claiming a generated permission
   await page.route("**/api/v1/firewall/port-forwards", (route) => route.fulfill({ json: {
     forward: route.request().postDataJSON().forward,
     placement: { forwardId: "pf-test", index: 0, reason: "inside", overlap: "inside", ruleIds: ["inspect-modbus"] },
-  } }));
+  }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.getByPlaceholder("listen port").fill("1502");
   await page.getByPlaceholder("dest ip").fill("192.0.2.5");
   await page.getByRole("button", { name: "Add", exact: true }).click();
@@ -155,7 +155,7 @@ test("publish displays the fail-closed warning and its traffic, not a generated 
       forwardId: "pf-test", ruleIds: ["ics-control"], message: "Partial overlap: no generated grant. Existing policy decides delivery.",
       traffic: { sources: ["198.51.100.0/24"], ingressZone: "wan", backendZones: "any routed egress (unknown)", protocol: "tcp", backend: "192.0.2.5:502", listenAddress: "ingress-local", listenPort: 1502 },
     } },
-  } }));
+  }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.getByPlaceholder("listen port").fill("1502");
   await page.getByPlaceholder("dest ip").fill("192.0.2.5");
   await page.getByPlaceholder("dest port (opt)").fill("502");
@@ -167,7 +167,7 @@ test("publish displays the fail-closed warning and its traffic, not a generated 
 
 test("a rejected publish keeps the draft for correction", async ({ page }) => {
   await openNAT(page);
-  await page.route("**/api/v1/firewall/port-forwards", (route) => route.fulfill({ status: 400, json: { error: "Overlapping forward" } }));
+  await page.route("**/api/v1/firewall/port-forwards", (route) => route.fulfill({ status: 400, json: { error: "Overlapping forward" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.getByPlaceholder("listen port").fill("8443");
   await page.getByPlaceholder("dest ip").fill("192.0.2.5");
   await page.getByRole("button", { name: "Add", exact: true }).click();
@@ -185,14 +185,14 @@ test("delete confirmation lists rules to edit and delete, links them, and shows 
     { id: "reset-only-this", action: "RESET", viaForwards: ["pf-test"] },
   ];
   const deleted: string[] = [];
-  await page.route("**/api/v1/firewall/nat", (route) => route.fulfill({ json: { enabled: true, portForwards: forwards } }));
-  await page.route("**/api/v1/firewall/rules", (route) => route.fulfill({ json: rules }));
+  await page.route("**/api/v1/firewall/nat", (route) => route.fulfill({ json: { enabled: true, portForwards: forwards }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
+  await page.route("**/api/v1/firewall/rules", (route) => route.fulfill({ json: rules, headers: { "X-Containd-Revision": "0123456789abcdef.1" } }));
   await page.route("**/api/v1/firewall/port-forwards/pf-test", async (route) => {
     expect(route.request().method()).toBe("DELETE");
     deleted.push("pf-test");
     forwards = [];
     rules = [{ id: "deny-both", action: "DENY", viaForwards: ["pf-other"] }];
-    await route.fulfill({ json: { deletedRuleIds: ["allow-only-this", "reset-only-this"], editedRuleIds: ["deny-both"] } });
+    await route.fulfill({ json: { deletedRuleIds: ["allow-only-this", "reset-only-this"], editedRuleIds: ["deny-both"] }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(page.getByRole("link", { name: "deny-both", exact: true })).toHaveAttribute("href", "/firewall/#rule-deny-both");

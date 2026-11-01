@@ -25,10 +25,10 @@ func TestApplyChangePreservesPreviousPendingAndCanceledCaller(t *testing.T) {
 	}
 	next := DefaultConfig()
 	next.System.Hostname = "pending"
-	if err := store.SaveCandidate(ctx, next); err != nil {
+	if err := testSaveCandidate(store, ctx, next); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(store, ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := store.loadPending(ctx)
@@ -36,11 +36,11 @@ func TestApplyChangePreservesPreviousPendingAndCanceledCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	next.System.Hostname = "failed"
-	if err := store.SaveCandidate(ctx, next); err != nil {
+	if err := testSaveCandidate(store, ctx, next); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
-	err = store.ApplyChange(ctx, ChangeCommitConfirmed, time.Second, func(ctx context.Context, previous, next *Config) error {
+	err = testApplyChange(store, ctx, ChangeCommitConfirmed, time.Second, func(ctx context.Context, previous, next *Config) error {
 		calls++
 		if calls == 1 {
 			cancel()
@@ -59,7 +59,7 @@ func TestApplyChangePreservesPreviousPendingAndCanceledCaller(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(gotPending, pending) || store.pendingTimer == nil {
 		t.Fatalf("pending not restored: %+v %v", gotPending, err)
 	}
-	if err := store.Rollback(context.Background()); err != nil {
+	if err := testRollback(store, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.Load(context.Background())
@@ -82,7 +82,7 @@ func TestApplyChangeReportsRestoreFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	err = store.ApplyChange(ctx, ChangeCommit, 0, func(context.Context, *Config, *Config) error { calls++; return errors.New("apply failed") })
+	err = testApplyChange(store, ctx, ChangeCommit, 0, func(context.Context, *Config, *Config) error { calls++; return errors.New("apply failed") })
 	var failure *ApplyError
 	if !errors.As(err, &failure) || failure.RestoreError == nil || failure.ReapplyError == nil || calls != 1 {
 		t.Fatalf("missing recovery failure: %v calls=%d", err, calls)
@@ -107,11 +107,11 @@ func TestFailedConfirmedApplyCannotExpireAfterRestoration(t *testing.T) {
 	}
 	next := DefaultConfig()
 	next.System.Hostname = "candidate"
-	if err := store.SaveCandidate(ctx, next); err != nil {
+	if err := testSaveCandidate(store, ctx, next); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
-	err = store.ApplyChange(ctx, ChangeCommitConfirmed, time.Millisecond, func(context.Context, *Config, *Config) error {
+	err = testApplyChange(store, ctx, ChangeCommitConfirmed, time.Millisecond, func(context.Context, *Config, *Config) error {
 		calls++
 		if calls == 1 {
 			time.Sleep(10 * time.Millisecond)
@@ -131,7 +131,8 @@ func TestFailedConfirmedApplyCannotExpireAfterRestoration(t *testing.T) {
 	if err != nil || running.System.Hostname != baseline.System.Hostname {
 		t.Fatalf("running changed after failed apply: %+v %v", running, err)
 	}
-	candidate, err := store.LoadCandidate(ctx)
+	candidateSnapshot1, err := store.ReadSnapshot(ctx, SnapshotCandidate, true)
+	candidate := candidateSnapshot1.Candidate
 	if err != nil || candidate.System.Hostname != "candidate" {
 		t.Fatalf("candidate changed: %+v %v", candidate, err)
 	}
@@ -156,11 +157,11 @@ func TestApplyChangeFromRecoveryDoesNotReapplyRefusedConfig(t *testing.T) {
 	}
 	candidate := DefaultConfig()
 	candidate.System.Hostname = "candidate"
-	if err := store.SaveCandidate(ctx, candidate); err != nil {
+	if err := testSaveCandidate(store, ctx, candidate); err != nil {
 		t.Fatal(err)
 	}
 	var applied []string
-	err = store.ApplyChange(ctx, ChangeCommit, 0, func(_ context.Context, _, next *Config) error {
+	err = testApplyChange(store, ctx, ChangeCommit, 0, func(_ context.Context, _, next *Config) error {
 		applied = append(applied, next.System.Hostname)
 		return errors.New("apply failed")
 	})

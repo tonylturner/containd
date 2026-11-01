@@ -29,11 +29,7 @@ for (const unavailable of [false, true]) {
             status: "ok",
             iec104Enforcement: { active: false, healthy: true },
           };
-        await route.fulfill({
-          status,
-          contentType: "application/json",
-          body: JSON.stringify(body),
-        });
+        await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body), headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       });
       await page.goto("/diagnostics");
       await expect(

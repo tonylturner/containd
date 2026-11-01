@@ -24,7 +24,7 @@ const (
 // snapshots are detached; previous is nil when no running document exists.
 type RuntimeStore interface {
 	Store
-	ApplyChange(context.Context, RunningChange, time.Duration, func(context.Context, *Config, *Config) error) error
+	ApplyChange(context.Context, Revision, RunningChange, time.Duration, func(context.Context, *Config, *Config) error) (Revision, error)
 	RuntimeApplyFault(context.Context) (string, error)
 	SetRuntimeApplyFault(context.Context, string) error
 }
@@ -57,20 +57,25 @@ type savedConfigRow struct {
 // ApplyChange keeps readers, candidate writers and expiry callbacks out until
 // the transition either succeeds or has been restored and reapplied. Recovery
 // has its own bounded context: disconnecting the caller must not cancel it.
-func (s *SQLiteStore) ApplyChange(ctx context.Context, change RunningChange, ttl time.Duration, apply func(context.Context, *Config, *Config) error) error {
-	return s.applyTransition(ctx, func() error {
+func (s *SQLiteStore) ApplyChange(ctx context.Context, expected Revision, change RunningChange, ttl time.Duration, apply func(context.Context, *Config, *Config) error) (Revision, error) {
+	return s.applyTransition(ctx, func(capture func(*sql.Tx) error) (Revision, error) {
 		switch change {
 		case ChangeCommit:
-			return s.promoteLocked(ctx, 0)
+			return s.promoteLocked(ctx, &expected, 0, capture)
 		case ChangeCommitConfirmed:
 			if ttl <= 0 {
-				return errors.New("ttl must be > 0")
+				return "", errors.New("ttl must be > 0")
 			}
-			return s.promoteLocked(ctx, ttl)
+			return s.promoteLocked(ctx, &expected, ttl, capture)
 		case ChangeRollback:
-			return s.rollbackLocked(ctx)
+			revision, err := s.rollbackLocked(ctx, &expected, capture)
+			var invalid *ValidationError
+			if errors.As(err, &invalid) {
+				err = errors.Join(err, s.recordRollbackRefusal(ctx, err))
+			}
+			return revision, err
 		default:
-			return fmt.Errorf("unknown running change %q", change)
+			return "", fmt.Errorf("unknown running change %q", change)
 		}
 	}, apply)
 }
@@ -79,62 +84,75 @@ func (s *SQLiteStore) ApplyChange(ctx context.Context, change RunningChange, ttl
 // the same restoration and runtime recovery as ApplyChange. Users and audit
 // stores must only be cleared after it succeeds. The callback must not acquire
 // the store mutex.
-func (s *SQLiteStore) ApplyReset(ctx context.Context, defaults *Config, apply func(context.Context, *Config, *Config) error) error {
+func (s *SQLiteStore) ApplyReset(ctx context.Context, expected Revision, defaults *Config, apply func(context.Context, *Config, *Config) error) (Revision, error) {
 	if defaults == nil {
-		return errors.New("config is nil")
+		return "", errors.New("config is nil")
 	}
 	if err := s.ValidateConfig(defaults); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
+		return "", fmt.Errorf("config validation failed: %w", err)
 	}
-	return s.applyTransition(ctx, func() error {
-		return s.resetLocked(ctx, defaults)
+	return s.applyTransition(ctx, func(capture func(*sql.Tx) error) (Revision, error) {
+		return s.resetLocked(ctx, expected, defaults, capture)
 	}, apply)
 }
 
-func (s *SQLiteStore) applyTransition(ctx context.Context, transition func() error, apply func(context.Context, *Config, *Config) error) error {
+func (s *SQLiteStore) applyTransition(ctx context.Context, transition func(func(*sql.Tx) error) (Revision, error), apply func(context.Context, *Config, *Config) error) (Revision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	previous, err := s.loadRunningLocked(ctx)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT key, data, updated_at FROM configs`)
-	if err != nil {
-		return err
-	}
+	var previous *Config
 	var saved []savedConfigRow
-	for rows.Next() {
-		var row savedConfigRow
-		if err := rows.Scan(&row.key, &row.data, &row.updatedAt); err != nil {
-			rows.Close()
+	var bank []IDSRule
+	var banks []savedBank
+	recovering := false
+	capture := func(tx *sql.Tx) error {
+		var err error
+		previous, err = loadRunningFrom(ctx, tx)
+		if err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
-		saved = append(saved, row)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
+		rows, err := tx.QueryContext(ctx, `SELECT key, data, updated_at FROM configs`)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var row savedConfigRow
+			if err := rows.Scan(&row.key, &row.data, &row.updatedAt); err != nil {
+				rows.Close()
+				return err
+			}
+			saved = append(saved, row)
+			recovering = recovering || row.key == bootFaultKey
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		banks, err = captureRecoveryBanks(ctx, tx)
+		if err != nil {
+			return err
+		}
+		bank, err = loadIDSRulesFrom(ctx, tx)
 		return err
 	}
-	recovering := false
-	for _, row := range saved {
-		recovering = recovering || row.key == bootFaultKey
-	}
-	bank, err := s.loadIDSRulesRaw(ctx)
-	if err != nil {
-		return err
-	}
-	// No other writer or timer can run while mu is held. Defer collection
-	// while these saved rows may be needed, even if the transition removes all
-	// of their persisted references (notably reset and rollback).
+	// This handle excludes its own writers and timers. Another handle can
+	// transition after the promotion commits; compensation compares the
+	// promoted revision and refuses to overwrite that newer state. Defer collection
+	// while these saved rows may be needed. This is only an optimization:
+	// another handle may collect them, so compensation reconstructs the saved
+	// immutable banks in the same transaction as their restored references.
 	s.recoveryHoldsBanks = true
 	defer func() { s.recoveryHoldsBanks = false }()
-	if err := transition(); err != nil {
+	revision, err := transition(capture)
+	if err != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		return errors.Join(err, s.finishBankRecoveryLocked(cleanupCtx))
+		return "", errors.Join(err, s.finishBankRecoveryLocked(cleanupCtx))
 	}
-	next, err := s.loadRunningLocked(ctx)
+	next, observed, err := s.loadRunningRevisionLocked(ctx)
+	if err == nil && observed != revision {
+		err = errors.New("configuration changed during runtime apply")
+	}
 	if err == nil {
 		err = apply(ctx, previous, next)
 	}
@@ -148,13 +166,13 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func() err
 		err = s.finishBankRecoveryLocked(ctx)
 	}
 	if err == nil {
-		return nil
+		return revision, nil
 	}
 	s.recoveryHoldsBanks = true
 	failure := &ApplyError{Err: err}
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	failure.RestoreError = s.restoreApplyStateLocked(recoveryCtx, saved, bank)
+	failure.RestoreError = s.restoreApplyStateLocked(recoveryCtx, revision, saved, bank, banks)
 	switch {
 	case failure.RestoreError != nil:
 		failure.ReapplyError = errors.New("reapply not attempted: store restoration failed")
@@ -175,15 +193,20 @@ func (s *SQLiteStore) applyTransition(ctx context.Context, transition func() err
 	if err := s.finishBankRecoveryLocked(recoveryCtx); err != nil {
 		failure.HealthError = errors.Join(failure.HealthError, err)
 	}
-	return failure
+	return "", failure
 }
 
-func (s *SQLiteStore) restoreApplyStateLocked(ctx context.Context, saved []savedConfigRow, bank []IDSRule) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+func (s *SQLiteStore) restoreApplyStateLocked(ctx context.Context, expected Revision, saved []savedConfigRow, bank []IDSRule, banks []savedBank) error {
+	tx, err := s.beginConfigTx(ctx, &expected)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	for _, b := range banks {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO ids_banks (id, data) VALUES (?, ?) ON CONFLICT(id) DO NOTHING`, b.id, b.data); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM configs`); err != nil {
 		return err
 	}
@@ -195,7 +218,7 @@ func (s *SQLiteStore) restoreApplyStateLocked(ctx context.Context, saved []saved
 	if err := replaceIDSRulesTx(ctx, tx, bank); err != nil {
 		return err
 	}
-	if err := s.commitStateTx(ctx, tx); err != nil {
+	if _, err := s.commitRevisionTx(ctx, tx); err != nil {
 		return err
 	}
 	s.stopPendingTimerLocked()

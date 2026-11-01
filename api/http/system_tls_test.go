@@ -68,7 +68,7 @@ func TestTLSUploadPathRefusal(t *testing.T) {
 			router := gin.New()
 			router.POST("/upload", setTLSCertHandler(&mockStore{cfg: cfg}))
 			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", bytes.NewReader(body)))
+			serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/upload", bytes.NewReader(body)))
 			var resp struct {
 				Error string `json:"error"`
 			}
@@ -130,7 +130,7 @@ func TestTLSUploadSaysWhenItTakesEffect(t *testing.T) {
 			router := gin.New()
 			router.POST("/upload", tlsCertUploadHandler(&mockStore{cfg: cfg}, dir))
 			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/upload", bytes.NewReader(body)))
+			serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodPost, "/upload", bytes.NewReader(body)))
 			if rec.Code != tc.code {
 				t.Fatalf("status %d, body %s", rec.Code, rec.Body)
 			}
@@ -228,7 +228,7 @@ func TestTLSInfoShowsServedCertificate(t *testing.T) {
 		router := gin.New()
 		router.GET("/tls", getTLSHandler(&mockStore{cfg: cfg}))
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
+		serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
 		var got tlsInfoResponse
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d", rec.Code)
@@ -337,7 +337,7 @@ func TestTLSInfoComparesBoundAndNextListeners(t *testing.T) {
 			router := gin.New()
 			router.GET("/tls", getTLSHandler(&mockStore{cfg: cfg}))
 			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
+			serveWithConfigRevision(t, router, rec, httptest.NewRequest(http.MethodGet, "/tls", nil))
 			var got map[string]any
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 				t.Fatalf("status %d, %v: %s", rec.Code, err, rec.Body)

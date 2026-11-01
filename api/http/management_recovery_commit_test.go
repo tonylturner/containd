@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -20,15 +21,15 @@ type commitFailingEngine struct {
 	applied []string
 }
 
-func (e *commitFailingEngine) ApplyRules(ctx context.Context, snapshot rules.Snapshot) error {
+func (e *commitFailingEngine) ApplyRules(ctx context.Context, snapshot rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	e.applied = append(e.applied, snapshot.Version)
-	if err := e.recoveryEngine.ApplyRules(ctx, snapshot); err != nil {
-		return err
+	if _, err := e.recoveryEngine.ApplyRules(ctx, snapshot); err != nil {
+		return dpengine.ProtectionStatus{}, err
 	}
 	if snapshot.Version != config.ManagementRecoveryVersion {
-		return errors.New("nft apply failed")
+		return dpengine.ProtectionStatus{}, errors.New("nft apply failed")
 	}
-	return nil
+	return dpengine.ProtectionStatus{}, nil
 }
 
 // A transition that fails at runtime while the appliance is in management
@@ -60,7 +61,7 @@ func TestFailedTransitionDuringRecoveryReentersRecovery(t *testing.T) {
 
 	for _, path := range []string{"/config/commit", "/config/commit_confirmed"} {
 		t.Run(path, func(t *testing.T) {
-			if err := store.SaveCandidate(ctx, cfg); err != nil {
+			if err := testSaveCandidate(store, ctx, cfg); err != nil {
 				t.Fatal(err)
 			}
 			engine.applied = nil
@@ -94,7 +95,7 @@ func TestFailedTransitionDuringRecoveryReentersRecovery(t *testing.T) {
 
 	// A failed recovery apply is the compensation's failure.
 	engine.rulesErr = errors.New("nft unavailable")
-	if err := store.SaveCandidate(ctx, cfg); err != nil {
+	if err := testSaveCandidate(store, ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
 	rec := requestStage(t, server, "POST", "/config/commit", nil)

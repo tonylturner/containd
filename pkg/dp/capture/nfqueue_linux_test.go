@@ -119,7 +119,7 @@ func TestNFQueueSuperviseGivesUpAfterMaxRetries(t *testing.T) {
 
 	var gaveUp atomic.Bool
 	onErr := func(e error) {
-		if e != nil && strings.Contains(e.Error(), "giving up") && strings.Contains(e.Error(), "engine restart") {
+		if e != nil && strings.Contains(e.Error(), "giving up") && strings.Contains(e.Error(), "explicit retry") {
 			gaveUp.Store(true)
 		}
 	}
@@ -318,4 +318,31 @@ func TestNFQueueSuperviseBoundRunResetsFailures(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestNFQueueTerminalNotificationOnce(t *testing.T) {
+	defer withFastBackoff(time.Millisecond)()
+	var attempts, terminal, transient int
+	src := &nfqueueSource{queueID: 100, generation: 42}
+	src.runFn = func(_ context.Context, ready func()) error {
+		attempts++
+		if attempts == 1 {
+			ready()
+		}
+		return errors.New("consumer failed")
+	}
+	src.cfg.OnSource = func(ev SourceEvent) {
+		if ev.Terminal {
+			terminal++
+			if ev.Generation != 42 || ev.Attempt != nfqueueMaxRetries || ev.MaxAttempts != nfqueueMaxRetries {
+				t.Errorf("terminal identity/budget: %+v", ev)
+			}
+		} else {
+			transient++
+		}
+	}
+	src.supervise(context.Background(), make(chan error, 1))
+	if terminal != 1 || transient != nfqueueMaxRetries-1 {
+		t.Fatalf("terminal=%d transient=%d", terminal, transient)
+	}
 }
