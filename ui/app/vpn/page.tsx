@@ -131,6 +131,11 @@ export default function VPNPage() {
   const { loading, refresh } = useAsyncRefresh(useCallback(
     async ({ silent = false, keepEdits = true }: { silent?: boolean; keepEdits?: boolean } = {}) => {
       try {
+        try {
+          setServicesStatus(await api.getServicesStatus());
+        } catch {
+          setServicesStatus(null);
+        }
         const currentSnapshot = await api.getVPN();
         const current = currentSnapshot?.data;
         if (!checkLoaded(current)) return;
@@ -149,11 +154,6 @@ export default function VPNPage() {
           setWgStatus(await api.getWireGuardStatus(ifName));
         } catch {
           setWgStatus(null);
-        }
-        try {
-          setServicesStatus(await api.getServicesStatus());
-        } catch {
-          setServicesStatus(null);
         }
 
         // OpenVPN server: list clients (admin-only).
@@ -411,7 +411,6 @@ export default function VPNPage() {
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded || clientForm.editor.superseded} />
       <ServiceStatusStrip label="WireGuard status" configured={canSave ? cfg.wireguard.enabled : undefined} attention={wireguardFaulted ? servicesStatus?.wireguard?.fault?.message || "WireGuard faulted" : !wgStatus || interfaceStateStatus !== "ready" ? "Live tunnel status unavailable — use Refresh to retry" : undefined} updated={svcStatus?.last_render} />
       <ServiceStatusStrip label="OpenVPN status" configured={canSave ? cfg.openvpn.enabled : undefined} running={svcStatus?.openvpn_running} attention={servicesStatus?.openvpn?.fault?.message || svcStatus?.openvpn_last_error || (!svcStatus ? "Live VPN status unavailable — use Refresh to retry" : undefined)} updated={svcStatus?.last_render} />
-      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text) shadow-card">
           View-only mode: configuration changes are disabled.
@@ -466,7 +465,7 @@ export default function VPNPage() {
               <input
                 type="checkbox"
                 checked={cfg.wireguard.enabled ?? false}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, enabled: e.target.checked } }))}
                 className="h-4 w-4"
               />
@@ -484,7 +483,7 @@ export default function VPNPage() {
                 <label className="text-xs uppercase tracking-wide text-(--text-muted)">Interface</label>
                 <input
                   value={cfg.wireguard.interface ?? "wg0"}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, interface: e.target.value } }))}
                   className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
@@ -497,7 +496,7 @@ export default function VPNPage() {
                 <input
                   type="number"
                   value={cfg.wireguard.listenPort ?? 51820}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setCfg((c) => ({
                       ...c,
@@ -514,7 +513,7 @@ export default function VPNPage() {
                 </label>
                 <select
                   value={cfg.wireguard.listenZone ?? ""}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setCfg((c) => ({
                       ...c,
@@ -547,7 +546,7 @@ export default function VPNPage() {
                         <input
                           type="checkbox"
                           checked={active}
-                          disabled={!canEdit}
+                          disabled={!canEdit || !canSave}
                           onChange={(e) => {
                             const next = new Set(cfg.wireguard.listenInterfaces ?? []);
                             if (e.target.checked) {
@@ -577,7 +576,7 @@ export default function VPNPage() {
               </label>
               <input
                 value={cfg.wireguard.addressCIDR ?? ""}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, addressCIDR: e.target.value } }))}
                 className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
               />
@@ -590,7 +589,7 @@ export default function VPNPage() {
               </label>
               <input
                 value={cfg.wireguard.privateKey ?? ""}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) => setCfg((c) => ({ ...c, wireguard: { ...c.wireguard, privateKey: e.target.value } }))}
                 className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 placeholder="(leave blank to set later)"
@@ -607,7 +606,7 @@ export default function VPNPage() {
                 id="wireguard-peers"
                 rows={8}
                 value={peersText}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) => setText("peers", e.target.value)}
                 className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
               />
@@ -616,6 +615,7 @@ export default function VPNPage() {
         </div>
 
         <OpenVPNEditorCard
+          canSave={canSave}
           canEdit={canEdit}
           cfg={cfg}
           setCfg={setCfg}
@@ -665,7 +665,6 @@ export default function VPNPage() {
               : "idle"}
       </p>
       <ConfirmDialog {...confirm.props} />
-      </fieldset>
     </Shell>
   );
 }

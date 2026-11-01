@@ -191,13 +191,12 @@ export default function IDSPage() {
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...panelForm.conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={false} />
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
-      <fieldset disabled={!canSave} className="min-w-0">
       {error && <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>}
       {success && <div className="mb-4 rounded-xs border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{success}</div>}
 
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2 text-sm text-(--text)">
-          <input type="checkbox" checked={!!ids.enabled} disabled={!canEdit}
+          <input type="checkbox" checked={!!ids.enabled} disabled={!canEdit || !canSave}
             onChange={(e) => setIds({ ...ids, enabled: e.target.checked })}
             className="h-4 w-4 rounded-sm border-white/20 bg-(--surface)" />
           Enable intrusion detection
@@ -208,7 +207,7 @@ export default function IDSPage() {
       </div>
 
       <button ref={rulesButton} type="button" onClick={() => setActiveTab("rules")} className="mb-3 text-sm font-semibold">Rules <span className="text-(--text-muted)">{rules.length.toLocaleString()}</span></button>
-      <RulesTable rules={rules} canEdit={canEdit} onEdit={setEditing} onDelete={onDelete}
+      <RulesTable mutationDisabled={!canSave} rules={rules} canEdit={canEdit} onEdit={setEditing} onDelete={onDelete}
         onBulkDelete={onBulkDelete} onBulkToggle={onBulkToggle} onToggleRule={onToggleRule} />
 
       <h2 className="mt-6 text-base font-semibold">Add/import rules</h2>
@@ -216,7 +215,7 @@ export default function IDSPage() {
       <button type="button" aria-expanded={activeTab === "import"} aria-controls="ids-import" onClick={() => setActiveTab(activeTab === "import" ? "rules" : "import")} className="my-3 rounded-xs border px-3 py-2 text-sm">Import</button>
       <div id="ids-import">
       {activeTab === "import" && canEdit && (
-        <ImportPanel form={panelForm} onImport={onImport} onConverted={(rule, revision) => {
+        <fieldset disabled={!canSave} className="min-w-0"><ImportPanel form={panelForm} onImport={onImport} onConverted={(rule, revision) => {
           if (!canCombinePanel(revision)) return false;
           // Conversion returns a rule but does not stage it on the server.
           setIds((current) => ({ ...current, rules: upsertRow(current.rules ?? [], rule, (r) => r.id) }));
@@ -224,7 +223,7 @@ export default function IDSPage() {
           setActiveTab("rules");
           rulesButton.current?.focus();
           return true;
-        }} onError={setError} />
+        }} onError={setError} /></fieldset>
       )}
       {activeTab === "import" && !canEdit && (
         <div className="py-8 text-center text-sm text-(--text-muted)">Import is disabled in view-only mode.</div>
@@ -232,7 +231,7 @@ export default function IDSPage() {
       </div>
       <h2 className="mt-6 text-base font-semibold">Manage groups</h2>
       <Disclosure title="Groups" defaultOpen={groups.length > 0} indicator={`${groups.length} group${groups.length !== 1 ? "s" : ""}${groups.length ? " · non-default settings" : ""}`}>
-        <GroupsPanel form={panelForm} groups={groups} rules={rules} canEdit={canEdit}
+        <GroupsPanel mutationDisabled={!canSave} form={panelForm} groups={groups} rules={rules} canEdit={canEdit}
           onUpdate={(g) => {
             if (!canCombinePanel()) return false;
             setIds((prev) => ({ ...prev, ruleGroups: g }));
@@ -253,7 +252,7 @@ export default function IDSPage() {
       </div>
 
       {editing && canEdit && (
-        <EditRuleModal rule={editing}
+        <EditRuleModal mutationDisabled={!canSave} rule={editing}
           text={text(`rule.${editing.id}`, JSON.stringify(editing, null, 2))}
           setText={(value) => setText(`rule.${editing.id}`, value)}
           onClose={() => { clearText(`rule.${editing.id}`); setEditing(null); }} onSave={(newRule) => {
@@ -262,7 +261,6 @@ export default function IDSPage() {
           setEditing(null);
         }} />
       )}
-      </fieldset>
       <ConfirmDialog {...confirm.props} />
     </Shell>
   );

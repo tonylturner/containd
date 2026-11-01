@@ -39,6 +39,22 @@ function present(gate: AVGateStatus): Presentation {
   }
 }
 
+/** Keep the protection outcome ahead of configuration, using the same state copy as Activity. */
+export function GateSummary({ gate }: { gate: AVGateStatus | undefined }) {
+  if (!gate) return <p>Scan path: Unknown — live scan-path status not reported.</p>;
+  const view = present(gate);
+  return (
+    <p className={view.variant === "error" ? "text-red-400" : view.variant === "warning" ? "text-amber" : "text-(--text-muted)"}>
+      Scan path: {gate.state} — {view.description}
+      {gate.state === "pending" && (gate.fail_policy === "open"
+        ? " Selected HTTP objects pass unscanned while the scanner is unavailable."
+        : gate.fail_policy === "closed"
+          ? " Selected HTTP objects are refused while the scanner is unavailable."
+          : " Unscanned-traffic effect: Unknown.")}
+    </p>
+  );
+}
+
 /** The scanning gate's block of the live runtime status. */
 export function GateStatus({ gate }: { gate: AVGateStatus | undefined }) {
   if (!gate) {

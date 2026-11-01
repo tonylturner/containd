@@ -22,6 +22,7 @@ import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
 import { SyslogEventStatusPanel } from "./syslog-event-status";
 import { SyslogAuditStatusPanel } from "./syslog-audit-status";
+import { deliveryAttention, DeliverySummary } from "./delivery-summary";
 
 export default function SyslogPage() {
   const canEdit = isAdmin();
@@ -151,8 +152,10 @@ export default function SyslogPage() {
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={false} />
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded || form.editor.superseded} />
-      <ServiceStatusStrip configured={canSave ? `${fwdCount} forwarders` : undefined} attention={!status ? "Delivery status unavailable — use Refresh to retry" : status.last_error || status.fault?.message || (status.failed_total > 0 ? "Delivery failures reported — review Activity" : "Delivery is not an acknowledgement by the collector")} updated={status?.last_flush} />
-      <fieldset disabled={!canSave} className="min-w-0">
+      <ServiceStatusStrip configured={canSave ? `${fwdCount} forwarders` : undefined}
+        attention={deliveryAttention(status)} updated={status?.last_flush}
+        note="Delivery is not an acknowledgement by the collector"
+        summary={<DeliverySummary status={status} />} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -180,7 +183,7 @@ export default function SyslogPage() {
             Log format:
             <select
               value={cfg.format ?? "rfc5424"}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) =>
                 setCfg((c) => ({
                   ...c,
@@ -200,7 +203,7 @@ export default function SyslogPage() {
               min={1}
               max={5000}
               value={cfg.batchSize ?? 500}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) =>
                 setCfg((c) => ({
                   ...c,
@@ -217,7 +220,7 @@ export default function SyslogPage() {
               min={1}
               max={60}
               value={cfg.flushEvery ?? 2}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) =>
                 setCfg((c) => ({
                   ...c,
@@ -233,7 +236,7 @@ export default function SyslogPage() {
           <input
             value={newFwd.address}
             onChange={(e) => setNewFwd((f) => ({ ...f, address: e.target.value }))}
-            disabled={!canEdit}
+            disabled={!canEdit || !canSave}
             placeholder="address"
             className="input-industrial"
           />
@@ -241,14 +244,14 @@ export default function SyslogPage() {
             type="number"
             value={newFwd.port}
             onChange={(e) => setNewFwd((f) => ({ ...f, port: Number(e.target.value) }))}
-            disabled={!canEdit}
+            disabled={!canEdit || !canSave}
             placeholder="port"
             className="input-industrial"
           />
           <select
             value={newFwd.proto ?? "udp"}
             onChange={(e) => setNewFwd((f) => ({ ...f, proto: e.target.value as "udp" | "tcp" }))}
-            disabled={!canEdit}
+            disabled={!canEdit || !canSave}
             className="input-industrial"
           >
             <option value="udp">UDP</option>
@@ -256,6 +259,7 @@ export default function SyslogPage() {
           </select>
           {canEdit && (
             <button
+              disabled={!canSave}
               onClick={addForwarder}
               className="rounded-xs bg-(--amber) px-3 py-2 text-sm font-medium text-white transition-ui hover:brightness-110"
             >
@@ -290,6 +294,7 @@ export default function SyslogPage() {
                   <td className="px-4 py-3 text-right">
                     {canEdit && (
                       <button
+                        disabled={!canSave}
                         onClick={() => deleteForwarder(i)}
                         className="rounded-md px-2 py-1 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                       >
@@ -351,7 +356,6 @@ export default function SyslogPage() {
       )}
       <SyslogEventStatusPanel events={status?.events} />
       {status?.audit && <SyslogAuditStatusPanel audit={status.audit} />}
-      </fieldset>
     </Shell>
   );
 }

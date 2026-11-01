@@ -20,7 +20,7 @@ import { ServiceStatusStrip } from "../service-presentation";
 import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
 import { CustomDefinitions } from "./custom-defs";
-import { GateStatus } from "./gate-status";
+import { GateStatus, GateSummary } from "./gate-status";
 import { normalizeScan } from "./scan-model";
 import { ScanSelectionEditor } from "./scan-selection";
 
@@ -200,8 +200,8 @@ export default function AVPage() {
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
       <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} running={status?.available && status.mode === "clamav" ? status.clamav_running : undefined}
         attention={!status || !status.available ? "Live scanner status unavailable — use Refresh to retry" : status.last_error || status.ready_error || status.freshclam_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)}
-        updated={status?.available ? status.last_render : undefined} />
-      <fieldset disabled={!canSave} className="min-w-0">
+        updated={status?.available ? status.last_render : undefined}
+        summary={<GateSummary gate={status?.available ? status.gate : undefined} />} />
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -244,7 +244,7 @@ export default function AVPage() {
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setCfg((c) => ({ ...c, enabled: e.target.checked }))}
               className="h-4 w-4"
             />
@@ -254,7 +254,7 @@ export default function AVPage() {
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">Mode</label>
             <select
               value={cfg.mode ?? "clamav"}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => {
                 const mode = e.target.value as AVConfig["mode"];
                 setCfg((c) => {
@@ -280,7 +280,7 @@ export default function AVPage() {
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">Fail policy</label>
             <select
               value={cfg.failPolicy ?? "open"}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setCfg((c) => ({ ...c, failPolicy: e.target.value as AVConfig["failPolicy"] }))}
               className="mt-1 w-full input-industrial"
             >
@@ -293,7 +293,7 @@ export default function AVPage() {
             <input
               type="number"
               value={cfg.maxSizeBytes ?? 0}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setCfg((c) => ({ ...c, maxSizeBytes: Number(e.target.value) }))}
               className="mt-1 w-full input-industrial"
             />
@@ -303,7 +303,7 @@ export default function AVPage() {
             <input
               type="number"
               value={cfg.timeoutSec ?? 0}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setCfg((c) => ({ ...c, timeoutSec: Number(e.target.value) }))}
               className="mt-1 w-full input-industrial"
             />
@@ -312,7 +312,7 @@ export default function AVPage() {
         <section className="mt-4">
           <h2 className="text-lg font-semibold text-(--text)">Scanned traffic</h2>
           <div className="mt-3">
-            <ScanSelectionEditor cfg={cfg} update={setCfg} zones={zones} assets={assets} canEdit={canEdit} />
+            <ScanSelectionEditor cfg={cfg} update={setCfg} zones={zones} assets={assets} canEdit={canEdit && canSave} />
           </div>
         </section>
         <details className="mt-6 rounded-xs border p-3" open={cfg.mode === "icap" || icapServers.length > 0}>
@@ -325,14 +325,14 @@ export default function AVPage() {
                 <input
                   value={srv.address}
                   onChange={(e) => updateICAPServer(idx, "address", e.target.value)}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   placeholder="host:port"
                   className="input-industrial"
                 />
                 <input
                   value={srv.service ?? ""}
                   onChange={(e) => updateICAPServer(idx, "service", e.target.value)}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   placeholder="service (optional)"
                   className="input-industrial"
                 />
@@ -340,7 +340,7 @@ export default function AVPage() {
                   <input
                     type="checkbox"
                     checked={srv.useTls ?? false}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) => updateICAPServer(idx, "useTls", e.target.checked)}
                     className="h-4 w-4"
                   />
@@ -348,6 +348,7 @@ export default function AVPage() {
                 </label>
                 {canEdit && (
                   <button
+                    disabled={!canSave}
                     onClick={() => deleteICAPServer(idx)}
                     className="rounded-xs border px-3 py-2 text-xs text-red-400 transition-ui hover:bg-red-500/10"
                   >
@@ -358,6 +359,7 @@ export default function AVPage() {
             ))}
             {canEdit && icapServers.length === 0 && (
               <button
+                disabled={!canSave}
                 onClick={addICAPServer}
                 className="rounded-xs border bg-(--surface2) px-3 py-2 text-sm text-(--text) transition-ui"
               >
@@ -376,7 +378,7 @@ export default function AVPage() {
               <label className="text-xs uppercase tracking-wide text-(--text-muted)">Socket path</label>
               <input
                 value={cfg.clamav?.socketPath ?? ""}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), socketPath: e.target.value } }))
                 }
@@ -388,7 +390,7 @@ export default function AVPage() {
               <label className="text-xs uppercase tracking-wide text-(--text-muted)">Custom defs path</label>
               <input
                 value={cfg.clamav?.customDefsPath ?? ""}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), customDefsPath: e.target.value } }))
                 }
@@ -400,7 +402,7 @@ export default function AVPage() {
               <label className="text-xs uppercase tracking-wide text-(--text-muted)">Update schedule</label>
               <input
                 value={cfg.clamav?.updateSchedule ?? ""}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), updateSchedule: e.target.value } }))
                 }
@@ -412,7 +414,7 @@ export default function AVPage() {
               <input
                 type="checkbox"
                 checked={cfg.clamav?.freshclamEnabled ?? true}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setCfg((c) => ({ ...c, clamav: { ...(c.clamav ?? {}), freshclamEnabled: e.target.checked } }))
                 }
@@ -500,7 +502,6 @@ export default function AVPage() {
           </div>
         )}
       </Card>
-      </fieldset>
     </Shell>
   );
 }

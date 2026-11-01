@@ -23,12 +23,14 @@ export function GroupsPanel({
   groups,
   rules,
   canEdit,
+  mutationDisabled = false,
   onUpdate,
 }: {
   form: PanelForm;
   groups: RuleGroup[];
   rules: IDSRule[];
   canEdit: boolean;
+  mutationDisabled?: boolean;
   onUpdate: (g: RuleGroup[]) => boolean;
 }) {
   const [name, setName] = form.field("name");
@@ -87,6 +89,7 @@ export function GroupsPanel({
                 Name
               </label>
               <input
+                disabled={mutationDisabled}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. ICS/Modbus"
@@ -98,6 +101,7 @@ export function GroupsPanel({
                 Filter
               </label>
               <input
+                disabled={mutationDisabled}
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="proto:modbus"
@@ -106,7 +110,7 @@ export function GroupsPanel({
             </div>
             <button
               onClick={onCreate}
-              disabled={!name.trim()}
+              disabled={mutationDisabled || !name.trim()}
               className="rounded-xs bg-(--amber) px-4 py-2 text-sm font-medium text-white transition-ui hover:brightness-110 disabled:opacity-50"
             >
               Create
@@ -133,6 +137,7 @@ export function GroupsPanel({
             >
               {canEdit && (
                 <button
+                  disabled={mutationDisabled}
                   onClick={() => onToggle(g.id)}
                   title={g.enabled ? "Disable group" : "Enable group"}
                   className={`inline-flex h-5 w-9 items-center rounded-full transition-colors ${g.enabled ? "bg-emerald-500/30" : "bg-white/10"}`}
@@ -164,6 +169,7 @@ export function GroupsPanel({
               </span>
               {canEdit && (
                 <button
+                  disabled={mutationDisabled}
                   onClick={() => onRemove(g.id)}
                   className="text-xs text-red-400 transition-ui hover:text-red-300"
                 >
@@ -410,12 +416,14 @@ export function SourcesCatalog({ sources }: { sources: IDSRuleSource[] }) {
 }
 
 export function EditRuleModal({
+  mutationDisabled = false,
   rule,
   text,
   setText,
   onClose,
   onSave,
 }: {
+  mutationDisabled?: boolean;
   rule: IDSRule;
   text: string;
   setText: (text: string) => void;
@@ -458,6 +466,7 @@ export function EditRuleModal({
           </div>
         )}
         <textarea
+          disabled={mutationDisabled}
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={16}
@@ -471,6 +480,7 @@ export function EditRuleModal({
             Cancel
           </button>
           <button
+            disabled={mutationDisabled}
             onClick={save}
             className="rounded-xs bg-(--amber) px-3 py-1.5 text-sm font-medium text-white transition-ui hover:brightness-110"
           >

@@ -219,7 +219,6 @@ export default function ProxiesPage() {
       <ConfigEditNotice superseded={forwardDraft.editor.superseded || reverseDraft.editor.superseded || siteDraft.editor.superseded} />
       <ServiceStatusStrip label="Forward proxy status" configured={canSave ? forward.enabled : undefined} running={proxy?.envoy_running} attention={!proxy ? "Live proxy status unavailable — use Refresh to retry" : proxy.envoy_last_error || proxy.fault?.message || (proxy.state === "faulted" ? "Service faulted" : undefined)} updated={proxy?.last_render} />
       <ServiceStatusStrip label="Reverse proxy status" configured={canSave ? reverse.enabled : undefined} running={proxy?.nginx_running} attention={!proxy ? "Live proxy status unavailable — use Refresh to retry" : proxy.nginx_last_error || proxy.fault?.message || (proxy.state === "faulted" ? "Service faulted" : undefined)} updated={proxy?.last_render} />
-      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -246,7 +245,7 @@ export default function ProxiesPage() {
               <input
                 type="checkbox"
                 checked={forward.enabled ?? false}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setForward((f) => ({ ...f, enabled: e.target.checked }))
                 }
@@ -262,7 +261,7 @@ export default function ProxiesPage() {
               <input
                 type="number"
                 value={forward.listenPort ?? 3128}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setForward((f) => ({
                     ...f,
@@ -284,7 +283,7 @@ export default function ProxiesPage() {
                   <input
                     type="text"
                     value={listenZonesCSV}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) => forwardDraft.setText("listenZones", e.target.value)}
                     placeholder="mgmt, lan"
                     className="mt-2 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -299,7 +298,7 @@ export default function ProxiesPage() {
                   <input
                     type="text"
                     value={allowedDomainsCSV}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) => forwardDraft.setText("allowedDomains", e.target.value)}
                     placeholder="*.example.com"
                     className="mt-2 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -314,7 +313,7 @@ export default function ProxiesPage() {
                   <input
                     type="text"
                     value={forward.upstream ?? ""}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canSave}
                     onChange={(e) =>
                       setForward((f) => ({
                         ...f,
@@ -332,7 +331,7 @@ export default function ProxiesPage() {
               <input
                 type="checkbox"
                 checked={forward.logRequests ?? false}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setForward((f) => ({ ...f, logRequests: e.target.checked }))
                 }
@@ -373,7 +372,7 @@ export default function ProxiesPage() {
               <input
                 type="checkbox"
                 checked={reverse.enabled ?? false}
-                disabled={!canEdit}
+                disabled={!canEdit || !canSave}
                 onChange={(e) =>
                   setReverse((r) => ({ ...r, enabled: e.target.checked }))
                 }
@@ -388,7 +387,7 @@ export default function ProxiesPage() {
                 <input
                   type="text"
                   value={newSite.name}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setNewSite((s) => ({ ...s, name: e.target.value }))
                   }
@@ -398,7 +397,7 @@ export default function ProxiesPage() {
                 <input
                   type="number"
                   value={newSite.listenPort}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setNewSite((s) => ({
                       ...s,
@@ -411,7 +410,7 @@ export default function ProxiesPage() {
                 <input
                   type="text"
                   value={backendsCSV}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setBackendsCSV(e.target.value)}
                   placeholder="backends host:port, host:port"
                   className="md:col-span-2 input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -419,7 +418,7 @@ export default function ProxiesPage() {
                 <input
                   type="text"
                   value={hostnamesCSV}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setHostnamesCSV(e.target.value)}
                   placeholder="hostnames (optional)"
                   className="md:col-span-2 input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -428,6 +427,7 @@ export default function ProxiesPage() {
               <div className="mt-3 flex justify-end">
                 {canEdit && (
                   <button
+                    disabled={!canSave}
                     onClick={addSite}
                     className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-sm text-(--text) transition-ui"
                   >
@@ -458,6 +458,7 @@ export default function ProxiesPage() {
                   </div>
                   {canEdit && (
                     <button
+                      disabled={!canSave}
                       onClick={() => deleteSite(site.name)}
                       className="rounded-md border bg-(--surface2) px-2 py-1 text-xs text-(--text) transition-ui"
                     >
@@ -597,7 +598,6 @@ export default function ProxiesPage() {
           )}
         </Card>
       </div>
-      </fieldset>
     </Shell>
   );
 }

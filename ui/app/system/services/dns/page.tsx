@@ -110,7 +110,6 @@ export default function DNSPage() {
       <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} running={status?.running}
         attention={!status ? "Live service status unavailable — use Refresh to retry" : status.last_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)}
         updated={status?.last_render} />
-      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -143,7 +142,7 @@ export default function DNSPage() {
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) =>
                 setCfg((c) => ({ ...c, enabled: e.target.checked }))
               }
@@ -161,7 +160,7 @@ export default function DNSPage() {
             <textarea
               rows={5}
               value={upstreamText}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setText("upstreamServers", e.target.value)}
               placeholder="1.1.1.1\n8.8.8.8"
               className="mt-1 w-full input-industrial"
@@ -179,7 +178,7 @@ export default function DNSPage() {
                 <input
                   type="number"
                   value={cfg.listenPort ?? 53}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setCfg((c) => ({ ...c, listenPort: Number(e.target.value) }))
                   }
@@ -195,7 +194,7 @@ export default function DNSPage() {
                 <input
                   type="number"
                   value={cfg.cacheSizeMB ?? 0}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) =>
                     setCfg((c) => ({ ...c, cacheSizeMB: Number(e.target.value) }))
                   }
@@ -270,7 +269,6 @@ export default function DNSPage() {
           </div>
         )}
       </Card>
-      </fieldset>
     </Shell>
   );
 }

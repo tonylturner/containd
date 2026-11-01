@@ -1,11 +1,13 @@
 "use client";
 
 /** Presentation only: each caller supplies independent saved and live observations. */
-export function ServiceStatusStrip({ configured, running, attention, updated, label = "Service status" }: {
+export function ServiceStatusStrip({ configured, running, attention, updated, note, summary, label = "Service status" }: {
   configured?: boolean | string;
   running?: boolean;
   attention?: string;
   updated?: string;
+  note?: string;
+  summary?: ReactNode;
   label?: string;
 }) {
   return (
@@ -14,6 +16,8 @@ export function ServiceStatusStrip({ configured, running, attention, updated, la
       <span>Running: {typeof running === "boolean" ? running ? "yes" : "no" : "Unknown"}</span>
       <span className={attention ? "text-amber" : "text-(--text-muted)"}>Attention: {attention || "No fault reported; not proof of protection"}</span>
       <span className="text-(--text-muted)">Updated time: {updated || "Unknown"}</span>
+      {summary && <div className="basis-full">{summary}</div>}
+      {note && <p className="basis-full text-(--text-muted)">{note}</p>}
     </section>
   );
 }
