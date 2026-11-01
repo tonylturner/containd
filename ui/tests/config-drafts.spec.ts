@@ -578,11 +578,18 @@ for (const surface of ["Firewall", "ICS"]) {
 test("Firewall creation keeps failed submissions and later typing, independently of collection refreshes", async ({ page }) => {
   const server = await mockAPI(page);
   await open(page, "/firewall/", "/firewall/rules");
-  const id = page.getByPlaceholder("id (e.g. mb-allow)");
-  const sources = page.getByPlaceholder("sources CIDR (csv)");
+  const disclosure = page.getByRole("button", { name: "Create rule", exact: true })
+    .and(page.locator('[aria-controls="create-rule-panel"]'));
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await disclosure.click();
+  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  const form = page.locator("#create-rule-panel");
+  const submit = form.getByRole("button", { name: "Create rule", exact: true });
+  const id = form.getByPlaceholder("id (e.g. mb-allow)");
+  const sources = form.getByPlaceholder("sources CIDR (csv)");
   await id.fill("new-rule");
   await sources.fill("192.0.2.0/24, ");
-  const sourceZone = page.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Source zone (any)", exact: true }) });
+  const sourceZone = form.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Source zone (any)", exact: true }) });
   await sourceZone.selectOption("lan");
   server.change("/zones", [{ name: "wan" }]);
   server.change("/firewall/rules", [draftRule]);
@@ -591,16 +598,16 @@ test("Firewall creation keeps failed submissions and later typing, independently
   await expect(sources).toHaveValue("192.0.2.0/24, ");
   await expect(sourceZone).toHaveValue("lan");
   await expect(sourceZone.getByRole("option", { selected: true })).toContainText("no longer on server");
-  await reviewConflict(page, server, page.getByRole("button", { name: "Create rule", exact: true }));
+  await reviewConflict(page, server, submit);
   server.failedWrites.add("/firewall/rules");
-  await page.getByRole("button", { name: "Create rule", exact: true }).click();
+  await submit.click();
   await expect(page.getByText("rejected", { exact: true })).toBeVisible();
   await expect(id).toHaveValue("new-rule");
   await expect(sources).toHaveValue("192.0.2.0/24, ");
   server.failedWrites.clear();
   let release!: () => void;
   server.hold = new Promise<void>((resolve) => { release = resolve; });
-  await page.getByRole("button", { name: "Create rule", exact: true }).click();
+  await submit.click();
   await expect.poll(() => server.writes.length).toBe(3);
   await sources.fill("192.0.2.0/24, 198.51.");
   release();

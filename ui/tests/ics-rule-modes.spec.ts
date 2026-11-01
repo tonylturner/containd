@@ -101,6 +101,11 @@ for (const path of ["/ics/", "/firewall/"]) {
     await page.goto(path);
     await loaded;
     await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText(`Messages matched since ${since}`);
+    if (path === "/firewall/") {
+      for (const id of ["trial", "zero", "pending"]) {
+        await page.getByRole("button", { name: `Details for ${id}`, exact: true }).click();
+      }
+    }
     const trial = page.getByLabel("Shadow matches of trial", { exact: true });
     await expect(trial).toContainText("12 messages");
     await expect(trial).toContainText("10 would allow · 2 would deny");
@@ -129,6 +134,7 @@ for (const path of ["/ics/", "/firewall/"]) {
     const note = page.getByRole("status", { name: "Shadow counters" });
     await expect(note).toContainText("Monitor counts unavailable.");
     await expect(note.getByText("engine unreachable", { exact: true })).toBeVisible();
+    if (path === "/firewall/") await page.getByRole("button", { name: "Details for trial", exact: true }).click();
     await expect(page.getByLabel("Shadow matches of trial", { exact: true })).toContainText("unavailable");
     await expect(page.getByLabel("Shadow matches of trial", { exact: true })).not.toContainText("0 messages");
   });
@@ -196,6 +202,7 @@ for (const path of ["/ics/", "/firewall/"]) {
     let current: unknown = snapshot;
     await mock(page, () => current);
     await page.goto(path);
+    if (path === "/firewall/") await page.getByRole("button", { name: "Details for trial", exact: true }).click();
     const trial = page.getByLabel("Shadow matches of trial", { exact: true });
     await expect(trial).toContainText("12 messages");
     // Candidate refresh or a failed apply still returns the installed snapshot.
@@ -229,7 +236,10 @@ for (const path of ["/ics/", "/firewall/"]) {
   test(`${path} changing one rule's mode sends only that rule's PATCH`, async ({ page }) => {
     const seen = await mock(page);
     await page.goto(path);
-    await page.getByRole("row").filter({ has: page.getByRole("cell", { name: "trial", exact: true }) })
+    const ruleID = path === "/firewall/"
+      ? page.getByText("trial", { exact: true })
+      : page.getByRole("cell", { name: "trial", exact: true });
+    await page.getByRole("row").filter({ has: ruleID })
       .getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByLabel(path === "/ics/" ? "Safety mode" : "Rule Mode", { exact: true }).selectOption("enforce");
     await page.getByRole("button", { name: path === "/ics/" ? "Save filter" : "Save changes", exact: true }).click();
