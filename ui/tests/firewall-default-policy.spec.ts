@@ -76,6 +76,26 @@ test("view-only users see the default but no reorder or mutation controls", asyn
   await expect(region.getByRole("button")).toHaveCount(0);
 });
 
+for (const count of [0, 3]) {
+  test(`ALLOW default has one compact action badge and a readable warning at 1280px with ${count} rules`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openFirewall(page, { action: "ALLOW", count });
+    const fallback = page.getByRole("row", { name: "Default policy" });
+    const action = fallback.getByRole("cell").filter({ has: page.getByRole("status").filter({ hasText: /^ALLOW$/ }) });
+    await expect(action.getByRole("status")).toHaveCount(1);
+    await expect(action).toHaveText("ALLOW");
+    const warning = fallback.getByText("Unmatched traffic allowed", { exact: true });
+    await expect(warning).toBeVisible();
+    const description = fallback.getByRole("cell").filter({ hasText: "Applies when no enforcing rule" });
+    await expect(description).toContainText("Unmatched traffic allowed");
+    expect(await warning.evaluate((el) => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))).toBeLessThanOrEqual(2);
+    expect(await action.getByRole("status").evaluate((el) => {
+      const style = getComputedStyle(el);
+      return (el.getBoundingClientRect().height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / parseFloat(style.lineHeight);
+    })).toBeLessThanOrEqual(1);
+  });
+}
+
 test("a failed default refresh does not leave a previously reported action visible", async ({ page }) => {
   await openFirewall(page, { action: "ALLOW" });
   const fallback = page.getByRole("row", { name: "Default policy" });
