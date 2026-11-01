@@ -1,8 +1,9 @@
 import type { EnforcementHealth, HealthResponse } from "../../lib/api";
-import type { InstalledRulesetView } from "../../hooks/useInstalledRuleset";
+import type { ProtectionStatus } from "../../lib/api-protection";
+import { protectionView } from "../../lib/protection-view";
 
 /** The topology status chip: firewall enforcement as health reports it. */
-export type TopologyStatus = { label: string; tone: "ok" | "warn" | "error" | "unknown"; reason?: string };
+export type TopologyStatus = { label: string; tone: "ok" | "warn" | "error" | "unknown"; reason?: string; action?: string };
 
 const STATES: Record<EnforcementHealth["state"], Omit<TopologyStatus, "reason">> = {
   enforcing: { label: "ENFORCING", tone: "ok" },
@@ -20,29 +21,15 @@ export const TONE_COLORS: Record<TopologyStatus["tone"], string> = {
   unknown: "#6b7280",
 };
 
-/** A failed apply or a degraded schedule planner in the installed ruleset's status. */
-function rulesetFault(installed: InstalledRulesetView): string | undefined {
-  if (installed.state !== "loaded") return undefined;
-  const { error, schedulePlanner } = installed.status;
-  if (error) return `Last apply failed: ${error}`;
-  if (schedulePlanner?.state === "degraded") {
-    return `Schedule planner degraded${schedulePlanner.reason ? `: ${schedulePlanner.reason}` : ""}`;
-  }
-  return undefined;
-}
-
 /**
- * The chip's state comes from health's firewall enforcement. Unless it is
- * enforcing, the reason is the installed ruleset's fault (a failed apply or
- * a degraded schedule planner), else health's own reason, else that no
- * ruleset is in force.
+ * Health owns the chip's state. Protection supplies its own reason/action
+ * without joining component detail to the unversioned installed ruleset.
  */
-export function topologyStatus(health: HealthResponse | undefined, installed: InstalledRulesetView): TopologyStatus {
+export function topologyStatus(health: HealthResponse | undefined, protection?: ProtectionStatus): TopologyStatus {
   const enforcement = health?.enforcement;
   if (!enforcement) return { ...STATES.unknown, reason: "Health unavailable" };
   const view = STATES[enforcement.state];
   if (enforcement.state === "enforcing") return view;
-  const noRuleset = installed.state === "loaded" && !installed.status.installed ? "No ruleset in force" : undefined;
-  const reason = rulesetFault(installed) || enforcement.reason || noRuleset;
-  return reason ? { ...view, reason } : view;
+  const detail = protectionView(protection);
+  return { ...view, reason: detail.title, action: detail.action };
 }

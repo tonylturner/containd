@@ -1,66 +1,43 @@
 import { expect, test } from "./fixtures/topology-test";
 
 import { topologyStatus } from "../app/topology/topology-status";
-import type { HealthResponse, InstalledRulesetStatus } from "../lib/api";
+import type { HealthResponse } from "../lib/api";
+import { observation, openProtection, protectionAPI } from "./fixtures/protection-api";
 
 // The topology status chip shows health's firewall enforcement state, and
-// unless it is enforcing, why: the installed ruleset's failed apply or
-// degraded schedule planner, else health's reason. It no longer reads
-// nominal merely because the topology loaded.
+// unless it is enforcing, a separate protection observation says what traffic
+// is affected. Unversioned ruleset detail cannot be joined to that observation.
 
 const health = (state: NonNullable<HealthResponse["enforcement"]>["state"], reason = ""): HealthResponse =>
   ({ status: "ok", component: "containd", enforcement: { state, reason } });
-const loaded = (status: Partial<InstalledRulesetStatus>) => ({ state: "loaded" as const, status: { installed: true, ...status } });
-const failedApply = loaded({ error: "nft: syntax error near zone_ot", failedAt: "2026-10-26T08:00:00Z" });
-
 test("the chip follows health's enforcement state", () => {
-  expect(topologyStatus(health("enforcing"), loaded({}))).toEqual({ label: "ENFORCING", tone: "ok" });
-  // Enforcing has no reason even while an older fault is still loaded.
-  expect(topologyStatus(health("enforcing"), failedApply)).toEqual({ label: "ENFORCING", tone: "ok" });
-  expect(topologyStatus(health("disabled", "enforcement is off"), { state: "loading" })).toEqual({ label: "ENFORCEMENT OFF", tone: "unknown", reason: "enforcement is off" });
-  expect(topologyStatus(undefined, { state: "loading" })).toEqual({ label: "STATUS UNKNOWN", tone: "unknown", reason: "Health unavailable" });
-});
-
-test("a degraded chip takes its reason from the installed ruleset status", () => {
-  expect(topologyStatus(health("degraded", "last apply failed"), failedApply)).toEqual({
-    label: "DEGRADED", tone: "warn", reason: "Last apply failed: nft: syntax error near zone_ot",
+  expect(topologyStatus(health("enforcing"), observation())).toEqual({ label: "ENFORCING", tone: "ok" });
+  expect(topologyStatus(health("enforcing"), observation({ state: "failed" }))).toEqual({ label: "ENFORCING", tone: "ok" });
+  expect(topologyStatus(health("disabled"), observation({ state: "disabled" }))).toEqual({
+    label: "ENFORCEMENT OFF", tone: "unknown", reason: "Protection disabled", action: "Enable enforcement to protect traffic.",
   });
-  const planner = loaded({ schedulePlanner: { state: "degraded", reason: "refill failed", lastRefill: "", horizonEnd: "" } });
-  expect(topologyStatus(health("degraded"), planner).reason).toBe("Schedule planner degraded: refill failed");
-  // Without a ruleset fault, or without the ruleset status, health says why.
-  expect(topologyStatus(health("degraded", "schedule planner stalled"), loaded({})).reason).toBe("schedule planner stalled");
-  expect(topologyStatus(health("degraded", "schedule planner stalled"), { state: "unavailable", error: "forbidden" }).reason).toBe("schedule planner stalled");
-  expect(topologyStatus(health("unavailable"), loaded({ installed: false }))).toEqual({ label: "UNAVAILABLE", tone: "error", reason: "No ruleset in force" });
+  expect(topologyStatus(undefined)).toEqual({ label: "STATUS UNKNOWN", tone: "unknown", reason: "Health unavailable" });
 });
 
-test("the topology chip reads degraded with the failed apply while the topology loads", async ({ page }) => {
+test("a non-enforcing chip takes reason and action from protection", () => {
+  expect(topologyStatus(health("degraded"), observation({ state: "degraded", retryable: true }))).toEqual({
+    label: "DEGRADED", tone: "warn", reason: "Rule-hit logging unavailable",
+    action: "Nft policy is enforcing; rule-hit evidence is unavailable. Retry protection, then check status.",
+  });
+  expect(topologyStatus(health("unavailable")).reason).toBe("Protection unknown");
+});
+
+test("the topology chip reads effects without joining old ruleset detail", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(String(err)));
-  await page.addInitScript(() => {
-    localStorage.setItem("containd.auth.token", "test-token");
-    localStorage.setItem("containd.auth.role", "view");
-  });
-  await page.route("**/api/v1/**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    const data: Record<string, unknown> = {
-      "/api/v1/auth/me": { id: "viewer", username: "viewer", role: "view" },
-      "/api/v1/auth/session": { id: "viewer", username: "viewer", role: "view" },
-      "/api/v1/health": health("degraded", "last ruleset apply failed"),
-      "/api/v1/dataplane/ruleset/status": failedApply.status,
-      "/api/v1/config": { zones: [{ name: "it" }], interfaces: [{ name: "lan1", device: "eth0", zone: "it" }], routing: { gateways: [], routes: [], rules: [] }, firewall: { rules: [] } },
-      "/api/v1/config/diff": { changed: false, changedSections: [] },
-      "/api/v1/interfaces/state": [],
-      "/api/v1/flows": [],
-      "/api/v1/events": [],
-    };
-    await route.fulfill({ json: data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
-  });
-  const statusLoaded = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/dataplane/ruleset/status");
-  await page.goto("/topology/");
-  await statusLoaded;
+  await protectionAPI(page, observation({
+    state: "failed", effects: [{ traffic: "Monitor IEC 104", effect: "not_inspected" }],
+  }), { role: "view" });
+  await openProtection(page, "/topology/");
   const chip = page.getByRole("status", { name: "Firewall enforcement" });
-  await expect(chip).toContainText("DEGRADED");
-  await expect(chip).toContainText("Last apply failed: nft: syntax error near zone_ot");
+  await expect(chip).toContainText("UNAVAILABLE");
+  await expect(chip).toContainText("Inspection unavailable — Monitor IEC 104 is not being inspected by containd");
+  await expect(chip).not.toContainText("old uncorrelated ruleset error");
   await expect(page.getByText("ALL NOMINAL")).toHaveCount(0);
   await expect(page.getByText("Logical topology unavailable", { exact: false })).toHaveCount(0);
   expect(errors).toEqual([]);
