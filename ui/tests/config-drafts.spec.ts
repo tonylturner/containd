@@ -698,7 +698,7 @@ for (const surface of ["Firewall", "ICS"]) {
 
 test("Config JSON keeps its draft through a failed Refresh and stages the complete recovered document", async ({ page }) => {
   const server = await mockAPI(page);
-  const original = { schemaVersion: "0.1.9", system: { hostname: "existing" }, services: { syslog: { forwarders: [{ address: "192.0.2.1", port: 514 }] } } };
+  const original = { schema_version: "0.1.9", system: { hostname: "existing" }, services: { syslog: { forwarders: [{ address: "192.0.2.1", port: 514 }] } } };
   server.data["/config/diff"] = { running: original, candidate: original, changed: false, changedSections: [] };
   await open(page, "/config/?tab=candidate", "/config/diff");
   const field = page.getByRole("textbox", { name: "Staged config JSON", exact: true });

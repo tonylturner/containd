@@ -81,6 +81,16 @@ never round it through a JavaScript number. Audit record IDs remain numeric.
 
 ## Staged Configuration
 
+Full-document POSTs to `/config`, `/config/candidate`, `/config/validate` and
+`/config/import` require exact, case-sensitive top-level JSON names and reject
+unknown or duplicate keys with HTTP 400. For example, `dataPlane` is rejected
+with `unknown top-level key "dataPlane" (did you mean "dataplane"?)` in the
+response's `detail`. API callers must send `dataplane` and `schema_version`;
+nested-section compatibility is unchanged. Only `/config/import` accepts and
+discards the retired `export` key from schemas `0.1.0`–`0.1.7`, with a missing
+schema treated as `0.1.0`. Newer schemas with `export` are rejected. See
+[backup and restore](config-format.md#configuration-lifecycle).
+
 All persisted configuration edits stage into one shared candidate, including
 object CRUD, identity bindings (`/identities`), service settings, IDS rules,
 saved PCAP settings, `POST /config` and `POST /config/import`. Import replaces the candidate, never running.

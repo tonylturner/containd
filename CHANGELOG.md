@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Document established-session re-evaluation after policy changes and why a
   blocked connection can remain visible in Sessions until conntrack timeout.
+- Reject unknown, case-mismatched or duplicate top-level keys in full-config
+  API writes and validation with HTTP 400 naming the key. API callers must use
+  canonical names such as `dataplane` and `schema_version`. Old backups with
+  the retired `export` section still import for schemas 0.1.0–0.1.7.
 - Serialize telemetry event IDs as decimal JSON strings across API, UI, CLI,
   previews and syslog; audit record IDs remain numeric.
 - Forward engine and management syslog streams independently, retry failed
@@ -55,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separate for names that differ by case or punctuation.
 - Make admin MFA disable atomic with the required account's new enrollment grace
   period, so a failed operation leaves the account unchanged.
+- Keep topology security matrix columns visible at 1024 px and horizontally
+  scrollable for larger zone selections.
 
 ## [0.1.37] - 2026-10-31
 
