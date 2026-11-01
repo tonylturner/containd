@@ -5042,7 +5042,7 @@ paths:
         "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200":
-          description: Previewed rules or rules staged in candidate configuration
+          description: Previewed rules or rules staged in candidate configuration. Revision and staged headers are returned only when applying, not previewing.
           content:
             application/json:
               schema:
@@ -5057,7 +5057,9 @@ paths:
                   rules: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}
                   mode: {type: string}
           headers:
-            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
+            X-Containd-Revision:
+              description: Configuration revision after applying the template; omitted for preview.
+              schema: {$ref: '#/components/schemas/ConfigRevision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400": {description: Unknown template or missing params, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Preview returns generated rules without staging and needs no revision header; any supplied precondition is ignored. Otherwise upserts candidate rules by ID; commit to apply.
