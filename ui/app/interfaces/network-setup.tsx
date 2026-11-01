@@ -3,9 +3,9 @@ import { Fragment, type ReactNode } from "react";
 
 const steps = [
   { href: "/zones/", label: "Zones" },
-  { href: "/interfaces/", label: "Network devices" },
+  { href: "/interfaces/", label: "Logical interfaces" },
   { href: "/routing/", label: "Connectivity" },
-  { href: "/config/", label: "Review" },
+  { href: "/config/?tab=diff", label: "Review" },
 ];
 
 /** Navigation only: visiting another setup step never stages or applies settings. */

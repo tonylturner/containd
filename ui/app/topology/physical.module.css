@@ -134,6 +134,7 @@
   display: flex; align-items: center; gap: 4px;
 }
 .badgeOk { background: #14532d; color: #22c55e; }
+.badgeUnknown { background: var(--surface2); color: var(--text-muted); }
 .badgeWarn { background: #78490a; color: #f59e0b; }
 .badgeCrit { background: #7f1d1d; color: #ef4444; }
 .badgeInfo { background: #164e63; color: #06b6d4; }

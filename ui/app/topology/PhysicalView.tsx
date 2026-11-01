@@ -3,6 +3,7 @@
 import { useAsyncRefresh } from "../../hooks/useAsyncRefresh";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   api,
   SystemStats,
@@ -42,6 +43,7 @@ interface SecurityFlag {
   title: string;
   summary: string;
   desc: string;
+  reference?: string;
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -89,10 +91,6 @@ function computeFlags(d: PhysicalData): SecurityFlag[] {
   if (insp.security.dockerSocketMounted) {
     flags.push({ level: "crit", title: "Docker socket mounted", summary: "Container can control the host runtime", desc: "/var/run/docker.sock is accessible. Container can control host Docker daemon." });
   }
-  const authEnv = insp.container.envVars.find((e) => e.key === "CONTAIND_AUTH");
-  if (authEnv?.value === "relaxed") {
-    flags.push({ level: "crit", title: "CONTAIND_AUTH=relaxed", summary: "Relaxed authentication setting detected", desc: "CONTAIND_AUTH is set to relaxed. Review authentication settings; this observation alone does not establish effective API access." });
-  }
   if (insp.container.seccompProfile === "unconfined") {
     flags.push({ level: "crit", title: "Seccomp unconfined", summary: "System-call restrictions are off", desc: "No syscall filtering. Container has unrestricted kernel surface." });
   }
@@ -105,7 +103,7 @@ function computeFlags(d: PhysicalData): SecurityFlag[] {
     flags.push({ level: "warn", title: "CPU quota unlimited", summary: "No CPU limit", desc: "No CPU cgroup limit set. Container can saturate all cores." });
   }
   if (insp.container.networkMode === "host") {
-    flags.push({ level: "warn", title: "Host network namespace", summary: "Host network is shared", desc: "--net=host expected for a firewall, but container sees all host interfaces." });
+    flags.push({ level: "warn", title: "Host network namespace", summary: "Host network is shared", desc: "The container shares the host's interfaces and loopback. Loopback listeners are host-wide, not container-private.", reference: "/docs/threat-model/#management-plane-to-dataplane" });
   }
   const configMount = insp.container.mounts.find((m) => m.containerPath.includes("/config"));
   if (configMount?.mode?.toLowerCase().includes("rw")) {
@@ -339,12 +337,25 @@ export default function PhysicalView() {
         <KVc k="Host uptime" v={hostUptime} color="#22c55e" />
       </div>
       <div className={s.layerSection}>
-        <div className={s.layerSectionLabel}>Resources</div>
-        {st ? <><ResBar name="CPU" val={`${numCPU} vCPU \u00b7 ${cpuPct.toFixed(1)}%`} pct={cpuPct} color={cpuPct > 80 ? "#ef4444" : cpuPct > 50 ? "#f59e0b" : "#22c55e"} />
-          <KVc k="Available RAM" v={st ? fmtBytes(st.memory.availableBytes) : "Unknown"} />
-          <KVc k="Available storage" v={st ? fmtBytes(st.disk.availableBytes) : "Unknown"} />
-          <ResBar name="RAM" val={`${fmtBytes(memTotal)} total \u00b7 ${fmtBytes(memUsed)} used (${memPct.toFixed(1)}%)`} pct={memPct} color="#06b6d4" />
-          <ResBar name="DISK" val={`${fmtBytes(diskTotal)} \u00b7 ${fmtBytes(diskUsed)} used (${diskPct.toFixed(1)}%)`} pct={diskPct} color={diskPct > 80 ? "#ef4444" : "#f59e0b"} /></> : <p className="text-xs text-(--text-muted)">Resource statistics unavailable.</p>}
+        <div className={s.layerSectionLabel}>CPU</div>
+        <KVc k="vCPU count" v={numCPU > 0 ? String(numCPU) : "Unknown"} />
+        {st ? <ResBar name="Current usage" val={`${cpuPct.toFixed(1)}%`} pct={cpuPct} color={cpuPct > 80 ? "#ef4444" : cpuPct > 50 ? "#f59e0b" : "#22c55e"} />
+          : <KVc k="Current usage" v="Unknown" />}
+        {!st && <p className="text-xs text-(--text-muted)">Resource statistics unavailable.</p>}
+      </div>
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>Memory</div>
+        <KVc k="Total RAM" v={st ? fmtBytes(memTotal) : "Unknown"} />
+        {st ? <ResBar name="Used" val={`${fmtBytes(memUsed)} (${memPct.toFixed(1)}%)`} pct={memPct} color="#06b6d4" />
+          : <KVc k="Used" v="Unknown" />}
+        <KVc k="Available" v={st ? fmtBytes(st.memory.availableBytes) : "Unknown"} />
+      </div>
+      <div className={s.layerSection}>
+        <div className={s.layerSectionLabel}>Storage</div>
+        <KVc k="Total" v={st ? fmtBytes(diskTotal) : "Unknown"} />
+        {st ? <ResBar name="Used" val={`${fmtBytes(diskUsed)} (${diskPct.toFixed(1)}%)`} pct={diskPct} color={diskPct > 80 ? "#ef4444" : "#f59e0b"} />
+          : <KVc k="Used" v="Unknown" />}
+        <KVc k="Available" v={st ? fmtBytes(st.disk.availableBytes) : "Unknown"} />
       </div>
       <div className={s.layerSectionFull}>
         <div className={s.layerSectionLabel}>Host Interfaces</div>
@@ -535,7 +546,7 @@ export default function PhysicalView() {
                 <div className={s.flagBody}>
                   <div className={s.flagTitle}>{f.summary}</div>
                   <p className={s.flagDesc}>{f.title}</p>
-                  <p className={s.flagDesc}>{f.desc}</p>
+                  <p className={s.flagDesc}>{f.desc}{f.reference && <> <Link href={f.reference} className="text-(--amber) underline">Threat model</Link></>}</p>
                 </div>
               </div>
             ))}
@@ -562,7 +573,7 @@ export default function PhysicalView() {
                   </div>
                   <div className={s.layerBadges}>
                     <span className={`${s.badge} ${s.badgeInfo}`}>{hostArch}</span>
-                    <span className={`${s.badge} ${s.badgeOk}`}>{insp ? "REPORTED" : "UNKNOWN"}</span>
+                    <span className={`${s.badge} ${insp ? s.badgeOk : s.badgeUnknown}`}>{insp ? "REPORTED" : "UNKNOWN"}</span>
                   </div>
                 </button>
 
@@ -593,7 +604,7 @@ export default function PhysicalView() {
                     <span className={s.layerSubtitle}>Docker {dockerVer} &middot; containerd {containerdVer}</span>
                   </div>
                   <div className={s.layerBadges}>
-                    <span className={`${s.badge} ${s.badgeOk}`}>{insp ? "REPORTED" : "UNKNOWN"}</span>
+                    <span className={`${s.badge} ${insp ? s.badgeOk : s.badgeUnknown}`}>{insp ? "REPORTED" : "UNKNOWN"}</span>
                     {st && memLimit === 0 && <span className={`${s.badge} ${s.badgeWarn}`}>NO MEM LIMIT</span>}
                   </div>
                 </button>
@@ -626,7 +637,7 @@ export default function PhysicalView() {
                   </div>
                   <div className={s.layerBadges}>
                     {privileged && <span className={`${s.badge} ${s.badgeOrange}`}>PRIVILEGED</span>}
-                    <span className={`${s.badge} ${s.badgeOk}`}>{insp ? "REPORTED" : "UNKNOWN"}</span>
+                    <span className={`${s.badge} ${insp ? s.badgeOk : s.badgeUnknown}`}>{insp ? "REPORTED" : "UNKNOWN"}</span>
                     {hasLabEnv(envVars) && <span className={`${s.badge} ${s.badgeWarn}`}>LAB MODE</span>}
                   </div>
                 </button>
@@ -657,7 +668,7 @@ export default function PhysicalView() {
                     <span className={s.layerSubtitle}>pid 1 &middot; {buildVersion} &middot; {st ? goroutines : "Unknown"} goroutines</span>
                   </div>
                   <div className={s.layerBadges}>
-                    <span className={`${s.badge} ${s.badgeOk}`}>{st ? "REPORTED" : "UNKNOWN"}</span>
+                    <span className={`${s.badge} ${st ? s.badgeOk : s.badgeUnknown}`}>{st ? "REPORTED" : "UNKNOWN"}</span>
                     <span className={`${s.badge} ${s.badgePurple}`}>{sessionCount} SESSIONS</span>
                   </div>
                 </button>

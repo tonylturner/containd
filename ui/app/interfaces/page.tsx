@@ -88,13 +88,13 @@ export default function InterfacesPage() {
     const [iSnapshot, zSnapshot, s, r] = await Promise.all([api.listInterfaces(), api.listZones(), api.listInterfaceState(), api.getManagementReservation()]);
     const i = iSnapshot?.data ?? null;
     const z = zSnapshot?.data ?? null;
-    if (!checkLoaded(i)) return;
-    refreshForm({ data: i, revision: iSnapshot?.revision ?? "" }, keepEdits);
     setReservation(r);
-    adoptRows({ data: i, revision: iSnapshot?.revision ?? "" }, keepEdits);
-    setZones(z ?? []);
     setState(s ?? []);
     setRuntimeStatus(s === null ? "unavailable" : "ready");
+    if (!checkLoaded(i)) return;
+    refreshForm({ data: i, revision: iSnapshot?.revision ?? "" }, keepEdits);
+    adoptRows({ data: i, revision: iSnapshot?.revision ?? "" }, keepEdits);
+    setZones(z ?? []);
   }, [checkLoaded, refreshForm, adoptRows]));
 
   const boundDevices = new Set(ifaces.map((iface) => (iface.device || "").trim()).filter(Boolean));
@@ -318,7 +318,6 @@ export default function InterfacesPage() {
       <ConfigEditNotice superseded={form.editor.superseded || rowsDraft.editor.superseded} />
       <ConfigEditNotice superseded={false} {...form.conflictProps} onReload={() => refresh({ keepEdits: false })} />
       <ConfigEditNotice superseded={false} {...rowsDraft.conflictProps} onReload={() => refresh({ keepEdits: false })} />
-      <fieldset disabled={!canSave} className="min-w-0">
       {!isAdmin() && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -346,7 +345,6 @@ export default function InterfacesPage() {
           </div>
         </div>
       )}
-      </fieldset>
       <div className="mt-6 overflow-x-auto rounded-xs border bg-(--surface) shadow-card">
         <table className="w-full text-sm">
           <thead className="bg-(--surface) text-left text-xs uppercase tracking-wide text-(--text)">
