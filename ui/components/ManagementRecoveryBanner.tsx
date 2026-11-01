@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { useHealth } from "../hooks/useHealth";
+import { useHealth, useHealthSettled } from "../hooks/useHealth";
 import type { ManagementRecoveryHealth } from "../lib/api";
 
 const TITLES: Record<Exclude<ManagementRecoveryHealth["state"], "inactive">, string> = {
@@ -20,6 +20,7 @@ function ManagementRecoveryBanner({ recovery }: { recovery: ManagementRecoveryHe
   if (!recovery || recovery.state === "inactive") return null;
   return (
     <aside role="status" aria-label="Boot recovery" className="mb-4 rounded-xs border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+      <p className="mb-1 text-xs font-semibold">Startup recovery</p>
       <p className="font-semibold">{TITLES[recovery.state]}</p>
       {recovery.reason && <p className="mt-1 whitespace-pre-wrap break-words">{recovery.reason}</p>}
       <p className="mt-1 text-xs">
@@ -35,5 +36,7 @@ function ManagementRecoveryBanner({ recovery }: { recovery: ManagementRecoveryHe
 /** The shell's banner, from the shared health poll. */
 export function ShellRecoveryBanner() {
   const health = useHealth();
-  return <ManagementRecoveryBanner recovery={health?.managementRecovery} />;
+  const settled = useHealthSettled();
+  return <ManagementRecoveryBanner recovery={health?.managementRecovery ??
+    (settled && !health ? { state: "unknown", reason: "Appliance health is unavailable." } : undefined)} />;
 }

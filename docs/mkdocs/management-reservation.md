@@ -236,6 +236,11 @@ allows that management applies.
 
 ## Faults and visibility
 
+The shared attention area shows startup recovery independently of traffic
+protection, activity-record health and pending settings. Recovery faults and
+their cause remain visible with the **Interfaces** repair link. A healthy
+domain or successful configuration operation does not dismiss a recovery fault.
+
 `GET /api/v1/system/management-reservation` requires the normal API authentication.
 It returns device, local host prefix, exact sources, HTTP port, engine guard
 health/fault history, the persistent boot fault (`bootFault`) and the last refused

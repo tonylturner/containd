@@ -2,7 +2,7 @@
 
 import { requestProtectionRetry, useProtection } from "../hooks/useProtection";
 import { protectionView } from "../lib/protection-view";
-import { TechnicalDetails } from "./TechnicalDetails";
+import { Disclosure } from "./Disclosure";
 
 /** Shared retry state prevents duplicate clicks across the shell and indicators. */
 export function ProtectionRetry({ isAdmin }: { isAdmin: boolean }) {
@@ -30,14 +30,19 @@ export function ProtectionNotice({ isAdmin }: { isAdmin: boolean }) {
         : "border-amber/30 bg-amber/10 text-amber"}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 break-words">
+          <h2 className="mb-1 text-xs font-semibold">Traffic protection</h2>
           <p className="font-semibold">{view.title}</p>
           <p className="mt-1 text-xs">{view.action}</p>
           {status.components.some((c) => (c.state === "failed" || c.state === "pending") && c.reason) && (
-            <TechnicalDetails>
+            <div className="mt-2 space-y-1 text-xs">
               {status.components.filter((c) => c.state === "failed" || c.state === "pending").map((c) =>
                 c.reason && <p key={c.name}>{c.name}: {c.reason}</p>)}
-            </TechnicalDetails>
+            </div>
           )}
+          {status.observedAt && <Disclosure title="Technical details">
+            <p>Observation: <time dateTime={status.observedAt}>{status.observedAt}</time></p>
+            <p className="break-all">Boot ID: {status.bootId} · Apply ID: {status.applyId} · Installed apply ID: {status.installedApplyId}</p>
+          </Disclosure>}
         </div>
         <ProtectionRetry isAdmin={isAdmin} />
       </div>

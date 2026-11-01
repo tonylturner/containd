@@ -16,6 +16,7 @@ export function EvidenceBanner() {
       className={`mb-4 rounded-xs border px-4 py-3 text-sm ${failed
         ? "border-(--red)/30 bg-(--red)/10 text-(--red)"
         : "border-amber/30 bg-amber/10 text-amber"}`}>
+      <p className="mb-1 text-xs font-semibold">Missing activity records</p>
       <p className="font-semibold">{failed ? "Activity records may be missing"
         : state === "recovered" ? "Evidence recovered — history needs review" : "Evidence state unknown"}</p>
       <p className="mt-1 text-xs">

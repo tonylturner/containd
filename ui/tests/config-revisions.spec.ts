@@ -284,6 +284,7 @@ test("Confirm and Rollback are disabled without a diff revision", async ({ page 
   await mockConfig(page);
   await page.route("**/api/v1/config/diff", route => route.fulfill({ json: { pendingConfirm: null, changed: true, changedSections: [], running: {}, candidate: {} } }));
   await page.goto("/config/?tab=diff");
+  await page.getByRole("button", { name: "Recovery", exact: true }).click();
   await expect(page.getByRole("button", { name: "Confirm", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Rollback", exact: true })).toBeDisabled();
 });
@@ -292,6 +293,7 @@ test("rollback holds the displayed diff and the revision captured when its dialo
   const { state, writes } = await mockConfig(page);
   await page.goto("/config/?tab=diff");
   await expect(page.getByRole("region", { name: "System changes" })).toContainText("initial");
+  await page.getByRole("button", { name: "Recovery", exact: true }).click();
   await page.getByRole("button", { name: "Rollback", exact: true }).click();
   state.counter++;
   state.hostname = "not-reviewed";

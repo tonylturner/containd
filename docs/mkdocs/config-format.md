@@ -27,6 +27,27 @@ The policy wizard's **Review & Stage** step also saves for later review and
 commit; it does not activate policy. Configuration tabs and JSON keys retain
 their existing names.
 
+**Review changes** leads with changed sections and their old → new values.
+Secret-only changes are identified without showing secret values. **Advanced**
+opens the exact redacted JSON diff and IDS bank fingerprints; the Overview
+tab's **Advanced** section contains the block explorer. **Staged config**
+keeps the raw JSON editor and **Copy running → staged**, and **Running config**
+keeps the committed JSON viewer.
+
+**Commit** and **Commit-confirmed**, with its seconds field, are together at
+the review. **Confirm** is prominent while a server-reported confirmation
+deadline is pending. **Recovery** contains **Rollback** and explains that it
+keeps the newer staged candidate; review that candidate before committing
+again. The committed document is not proof of live traffic protection.
+Exports, appliance backups and IDS bank backup/restore remain on Overview.
+
+The shared attention area keeps traffic protection, startup recovery, missing
+activity records and pending settings separate. Failures and unknown states
+remain visible, with retry or repair links; healthy domains need no notice.
+Protection causes stay inline, while **Technical details** contains the
+observation time and identifiers. A successful configuration operation does not
+clear an independent protection or activity-record failure.
+
 ## Concurrent edits
 
 Configuration revisions are transport metadata, not JSON fields or schema
