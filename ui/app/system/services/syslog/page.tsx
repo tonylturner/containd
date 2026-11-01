@@ -17,7 +17,8 @@ import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
-import { ServiceDisclosure, ServiceStatusStrip } from "../service-presentation";
+import { ServiceStatusStrip } from "../service-presentation";
+import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
 import { SyslogEventStatusPanel } from "./syslog-event-status";
 import { SyslogAuditStatusPanel } from "./syslog-audit-status";
@@ -336,12 +337,12 @@ export default function SyslogPage() {
           <div>Sent: {status?.sent_total ?? "Unknown"}</div>
           <div>Failed: {status?.failed_total ?? "Unknown"}</div>
           <div>Last check: {status?.last_flush || "\u2014"}</div>
-          <div className="md:col-span-4"><h3>Troubleshooting</h3><ServiceDisclosure title="Delivery details" indicator={status.hit_limit ? "Batch limit reached" : status.last_batch === undefined ? "Some details unknown" : undefined}>
+          <div className="md:col-span-4"><h3>Troubleshooting</h3><Disclosure title="Delivery details" indicator={status.hit_limit ? "Batch limit reached" : status.last_batch === undefined ? "Some details unknown" : undefined}>
             <div>Last batch: {status?.last_batch ?? "Unknown"}</div>
             <div>Batch limit: {status?.batch_limit ?? "Unknown"}</div>
             <div>Hit limit: {typeof status?.hit_limit === "boolean" ? (status.hit_limit ? "yes" : "no") : "Unknown"}</div>
             <div>Flush interval: {status?.flush_interval_sec ?? "Unknown"}s</div>
-          </ServiceDisclosure>
+          </Disclosure>
             </div>
           {status?.last_error ? (
             <div className="md:col-span-4">Last error: {status.last_error}</div>

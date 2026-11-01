@@ -15,7 +15,8 @@ import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
-import { ServiceDisclosure, ServiceStatusStrip } from "../service-presentation";
+import { ServiceStatusStrip } from "../service-presentation";
+import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
 
 export default function NTPPage() {
@@ -219,7 +220,7 @@ export default function NTPPage() {
             ) : null}
             <div className="md:col-span-2">
               <h3 className="text-sm">Troubleshooting</h3>
-              <ServiceDisclosure title="Service details" indicator={status.ntpd_path === "" ? "Binary not found" : status.pid === undefined || !status.ntpd_path ? "Some details unknown" : undefined}>
+              <Disclosure title="Service details" indicator={status.ntpd_path === "" ? "Binary not found" : status.pid === undefined || !status.ntpd_path ? "Some details unknown" : undefined}>
               <p>Software: chrony</p>
               <p>Process ID: {status.pid ?? "Unknown"}</p>
               <div>
@@ -234,7 +235,7 @@ export default function NTPPage() {
                   {status.ntpd_path === "" ? "not found" : status.ntpd_path ?? "Unknown"}{status.ntpd_name ? ` (${status.ntpd_name})` : ""}
                 </span>
               </div>
-            </ServiceDisclosure>
+            </Disclosure>
             </div>
           </div>
         )}

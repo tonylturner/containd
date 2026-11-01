@@ -27,7 +27,8 @@ import { Skeleton } from "../../components/Skeleton";
 import { Sparkline } from "../../components/Sparkline";
 import { InfoTip } from "../../components/InfoTip";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
-import { ServiceDisclosure, ServiceStatusStrip } from "../system/services/service-presentation";
+import { ServiceStatusStrip } from "../system/services/service-presentation";
+import { Disclosure } from "../../components/Disclosure";
 import { Card } from "../../components/Card";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -524,11 +525,11 @@ export default function ProxiesPage() {
                   {proxy.envoy_last_error}
                 </div>
               ) : null}
-              <h3 className="mt-3 text-sm">Troubleshooting</h3><ServiceDisclosure title="Service details" indicator={proxy.envoy_pid === undefined || !proxy.envoy_last_start ? "Some details unknown" : undefined}>
+              <h3 className="mt-3 text-sm">Troubleshooting</h3><Disclosure title="Service details" indicator={proxy.envoy_pid === undefined || !proxy.envoy_last_start ? "Some details unknown" : undefined}>
                 <p>Software: Envoy</p>
                 <p>Process ID: {proxy?.envoy_pid ?? "Unknown"}</p>
                 <p>Last start: {proxy?.envoy_last_start || "n/a"}</p>
-              </ServiceDisclosure>
+              </Disclosure>
               {envoy?.sparkline.length ? (
                 <div className="mt-4">
                   <Sparkline
@@ -577,11 +578,11 @@ export default function ProxiesPage() {
                   {proxy.nginx_last_error}
                 </div>
               ) : null}
-              <h3 className="mt-3 text-sm">Troubleshooting</h3><ServiceDisclosure title="Service details" indicator={proxy.nginx_pid === undefined || !proxy.nginx_last_start ? "Some details unknown" : undefined}>
+              <h3 className="mt-3 text-sm">Troubleshooting</h3><Disclosure title="Service details" indicator={proxy.nginx_pid === undefined || !proxy.nginx_last_start ? "Some details unknown" : undefined}>
                 <p>Software: Nginx</p>
                 <p>Process ID: {proxy?.nginx_pid ?? "Unknown"}</p>
                 <p>Last start: {proxy?.nginx_last_start || "n/a"}</p>
-              </ServiceDisclosure>
+              </Disclosure>
               {nginx?.sparkline.length ? (
                 <div className="mt-4">
                   <Sparkline

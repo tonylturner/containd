@@ -374,7 +374,6 @@ export default function FirewallPage() {
           )}
           <InstalledRulesetUnavailable view={installed} />
         </div>
-        {health?.enforcement?.state !== "enforcing" && health?.enforcement?.reason && <p className="mt-2 break-words text-xs text-amber">{health.enforcement.reason}</p>}
       </Card>
       <Card padding="md" className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">

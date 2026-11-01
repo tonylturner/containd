@@ -1,5 +1,5 @@
 import type { ICSPredicate } from "../../lib/api";
-import { ICSDisclosure } from "./ics-disclosure";
+import { Disclosure } from "../../components/Disclosure";
 import { protoMeta, summarizeGenericICS } from "./ics-shared";
 import { summarizeIEC104 } from "./iec104";
 
@@ -9,7 +9,7 @@ export function ICSRuleDetails({ ics, filterProto }: { ics: ICSPredicate; filter
     (Array.isArray(value) ? value.length > 0 : value !== ""));
   return (
     <div className="mt-2 min-w-44 font-sans">
-      <ICSDisclosure title="Inspect rule" defaultOpen={constrained} attention={constrained ? "Matching constraints" : undefined}>
+      <Disclosure title="Inspect rule" defaultOpen={constrained} indicator={constrained ? "Matching constraints" : undefined}>
         <div className="break-words font-mono">
           <strong className="block font-sans">{filterProto !== "all" ? protoMeta(filterProto).fcLabel : "Codes"}</strong>
           {ics.protocol === "iec104" ? summarizeIEC104(ics).types : summarizeGenericICS(ics)}
@@ -19,7 +19,7 @@ export function ICSRuleDetails({ ics, filterProto }: { ics: ICSPredicate; filter
           {ics.protocol === "iec104" ? summarizeIEC104(ics).addresses : (ics.addresses ?? []).join(", ") || "*"}
         </div>
         <div><strong className="block">R/W</strong>{ics.readOnly ? "R" : ics.writeOnly ? "W" : "R/W"}</div>
-      </ICSDisclosure>
+      </Disclosure>
     </div>
   );
 }

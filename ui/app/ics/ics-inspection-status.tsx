@@ -9,7 +9,7 @@ import { RulesetFaults } from "../firewall/firewall-ruleset-status";
 import { IEC104HealthIndicator } from "./iec104-health";
 import { ICSCoverageNotice, ICSEnforcementIndicator } from "./ics-coverage";
 import type { ICSCoverageView } from "./ics-coverage-model";
-import { ICSDisclosure } from "./ics-disclosure";
+import { Disclosure } from "../../components/Disclosure";
 
 function inspectionState(coverage: ICSCoverageView, health?: HealthResponse) {
   const aggregate = health?.icsEnforcement;
@@ -52,12 +52,11 @@ export function ICSInspectionStatus({ coverage, health, installed }: {
       <div className="mt-2 space-y-2">
         <ICSEnforcementIndicator health={health?.icsEnforcement} />
         {health?.enforcement?.state !== "enforcing" && <EnforcementHealthIndicator health={health?.enforcement} />}
-        {health?.enforcement?.reason && <p className="break-words text-xs text-amber">{health.enforcement.reason}</p>}
         {health?.iec104Enforcement?.healthy !== true && <IEC104HealthIndicator health={health?.iec104Enforcement} />}
-        <ICSDisclosure title="Inspection details">
+        <Disclosure title="Inspection details">
           {health?.enforcement?.state === "enforcing" && <EnforcementHealthIndicator health={health.enforcement} />}
           {health?.iec104Enforcement?.healthy === true && <IEC104HealthIndicator health={health.iec104Enforcement} />}
-        </ICSDisclosure>
+        </Disclosure>
         {installed.state === "loaded" && <RulesetFaults status={installed.status} />}
         {installed.state === "loaded" && installed.status.error && <p className="break-words text-xs text-red-400">{installed.status.error}</p>}
         {installed.state === "loaded" && installed.status.schedulePlanner?.state === "degraded" && (

@@ -2,7 +2,7 @@
 
 import { useId } from "react";
 import { InfoTip } from "../../components/InfoTip";
-import { ICSDisclosure } from "./ics-disclosure";
+import { Disclosure } from "../../components/Disclosure";
 import type { IEC104Class } from "../../lib/api";
 import {
   IEC104_CLASSES,
@@ -150,9 +150,9 @@ export function IEC104Fields({
         </div>
       </div>
 
-      <ICSDisclosure title="Advanced protocol fields"
+      <Disclosure title="Advanced protocol fields"
         defaultOpen={advancedSet}
-        attention={advancedSet ? "Protocol fields set — values still apply" : undefined}>
+        indicator={advancedSet ? "Protocol fields set — values still apply" : undefined}>
         <div className="mt-2 grid gap-3 md:grid-cols-2">
           {([ ["cot", "Cause of transmission (1-63)"], ["originators", "Originators (0-255)"] ] as const).map(([key, label]) => (
             <label key={key} className={LABEL}>{label}
@@ -190,7 +190,7 @@ export function IEC104Fields({
           </label>
         </div>
         <p className="text-xs text-(--text-muted)">State and QU filters require explicit Type IDs: 45, 46, 47, 58, 59 or 60. Empty = any; a bound filter never matches an object without that field.</p>
-      </ICSDisclosure>
+      </Disclosure>
 
       <label className="flex items-center gap-2 text-sm text-(--text)">
         <input

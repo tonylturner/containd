@@ -17,7 +17,8 @@ import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
 import { InfoTip } from "../../../../components/InfoTip";
-import { ServiceDisclosure, ServiceStatusStrip } from "../service-presentation";
+import { ServiceStatusStrip } from "../service-presentation";
+import { Disclosure } from "../../../../components/Disclosure";
 import { Card } from "../../../../components/Card";
 
 export default function DNSPage() {
@@ -255,7 +256,7 @@ export default function DNSPage() {
             ) : null}
             <div className="md:col-span-2">
               <h3 className="text-sm">Troubleshooting</h3>
-              <ServiceDisclosure title="Service details" indicator={status.pid === undefined || !status.config_path ? "Some details unknown" : undefined}>
+              <Disclosure title="Service details" indicator={status.pid === undefined || !status.config_path ? "Some details unknown" : undefined}>
               <p>Software: Unbound</p>
               <p>Process ID: {status.pid ?? "Unknown"}</p>
               <div className="md:col-span-2">
@@ -264,7 +265,7 @@ export default function DNSPage() {
                   {status?.config_path ?? "(unknown)"}
                 </span>
               </div>
-            </ServiceDisclosure>
+            </Disclosure>
             </div>
           </div>
         )}
