@@ -36,7 +36,7 @@ const flows = Array.from({ length: 60 }, (_, i) => ({
   eventCount: 1,
 }));
 
-type Mocks = { events: unknown[]; services: unknown };
+type Mocks = { events: unknown[]; services: unknown; health?: unknown; eventStats?: unknown };
 
 async function openDashboard(page: Page, mocks: Mocks) {
   await page.addInitScript(() => {
@@ -50,9 +50,9 @@ async function openDashboard(page: Page, mocks: Mocks) {
     if (p === "/api/v1/dashboard") {
       body = {
         user,
-        health: { status: "ok", hostname: "test" },
+        health: mocks.health ?? { status: "ok", hostname: "test" },
         counts: { assets: 0, zones: zones.length, interfaces: 0, rules: 0, icsRules: 0 },
-        eventStats: { total: mocks.events.length, idsAlerts: 0, modbusWrites: 0, avDetections: 0, avBlocks: 0 },
+        eventStats: "eventStats" in mocks ? mocks.eventStats : { total: mocks.events.length, idsAlerts: 0, modbusWrites: 0, avDetections: 0, avBlocks: 0 },
         services: null,
         lastActivity: null,
       };
@@ -139,4 +139,17 @@ test("service cards read the services status, antivirus included", async ({ page
   await openDashboard(page, { events: [], services: { faults: [], av: { available: false, error: "engine unavailable" } } });
   await expect(card("AV")).toContainText("Engine unavailable");
   await expect(card("DNS")).toContainText("Disabled");
+});
+
+
+test("a quiet alert window does not claim overall health when protection is degraded", async ({ page }) => {
+  await openDashboard(page, { events: [], services, health: { hostname: "test", status: "degraded", enforceEnabled: false } });
+  await expect(page.getByText("No recent IDS/AV alerts", { exact: true })).toBeVisible();
+  await expect(page.getByText("All systems nominal", { exact: true })).toHaveCount(0);
+});
+
+test("missing dashboard alert counts remain unknown", async ({ page }) => {
+  await openDashboard(page, { events: [], services, eventStats: {} });
+  await expect(page.getByText("Recent IDS/AV alerts unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("No recent IDS/AV alerts", { exact: true })).toHaveCount(0);
 });
