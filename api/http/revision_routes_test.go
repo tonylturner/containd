@@ -88,6 +88,7 @@ var mutationRouteClass = map[string]string{
 	"POST /api/v1/simulation":                   "non-config",
 	"POST /api/v1/conntrack/kill":               "non-config",
 	"POST /api/v1/dataplane/blocks/host":        "non-config",
+	"POST /api/v1/dataplane/protection/retry":   "non-config",
 	"POST /api/v1/dataplane/blocks/flow":        "non-config",
 	"POST /api/v1/system/tls/cert":              "non-config",
 	"POST /api/v1/system/tls/trusted-ca":        "non-config",

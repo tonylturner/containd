@@ -45,15 +45,23 @@ func healthHandler(store config.Store, engine EngineClient, evidenceProviders ..
 			snapshot, snapshotErr = reader.ReadHealthSnapshot(ctx)
 		}
 		iec := engineUnreachable
+		protection := engineclient.UnknownProtection("")
 		forwarding := netcfg.IPv4ForwardingUnknown
 		if hc, ok := engine.(RuntimeHealthClient); ok && hc != nil {
 			if health, err := hc.RuntimeHealth(ctx); err == nil && ctx.Err() == nil {
 				iec = health.IEC104Enforcement
+				if iec.Reason != "" {
+					iec.Reason = "IEC104 enforcement unavailable"
+				}
+				protection = engineclient.NormalizeProtection(health.Protection, "")
+				if protection.BootID != health.BootID {
+					protection = engineclient.UnknownProtection("")
+				}
 				forwarding = health.IPv4Forwarding
 			}
 		}
 		ruleset := observeRuleset(ctx, engine)
-		enforcement := enforcementHealth(snapshot, snapshotErr, ruleset)
+		enforcement := enforcementHealth(snapshot, snapshotErr, ruleset, protection)
 		recovery := managementRecoveryHealth(ctx, store, ruleset)
 		if recovery["state"] != recoveryInactive && recovery["state"] != recoveryUnknown {
 			// Recovery enforces its own ruleset, never the stored policy.
@@ -89,6 +97,7 @@ func healthHandler(store config.Store, engine EngineClient, evidenceProviders ..
 			"time":               time.Now().UTC().Format(time.RFC3339Nano),
 			"iec104Enforcement":  iec,
 			"enforcement":        enforcement,
+			"protection":         gin.H{"state": protection.State, "applyId": protection.ApplyID},
 			"icsEnforcement":     icsEnforcementHealth(ruleset),
 			"ipv4Forwarding":     forwarding,
 			"managementBinding":  binding,

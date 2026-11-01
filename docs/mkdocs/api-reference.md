@@ -116,7 +116,7 @@ not treated as a successful runtime apply.
 See [Config Format](config-format.md) for the configuration lifecycle and JSON.
 
 Successful staged edits return `X-Containd-Config: staged`. Successful commit,
-commit-confirmed, confirm and rollback return `X-Containd-Config: committed`.
+commit-confirmed, confirm, rollback and factory reset return `X-Containd-Config: committed`.
 Operational, read and preview-only responses carry neither header value.
 Failed responses also omit them. One exception is `POST /learn/apply`:
 if candidate persistence succeeds but receipt completion fails, HTTP `503`
@@ -128,6 +128,40 @@ committed header. The revision is header-only, including on `/config/diff`.
 Unauthenticated `/health` and all error responses omit the revision header.
 A learner HTTP 503 reporting durable staging has no revision header: re-read the
 candidate and review it before retrying the receipt.
+
+## Protection observations
+
+Commit, commit-confirmed, rollback and factory reset success bodies include
+`{status, applyId, protection}`. Reset also retains its logout, message and
+warning fields. Confirm remains `{status:"confirmed"}`: it does not apply runtime.
+An opaque `applyId` identifies one runtime apply, not a configuration revision;
+boot replay, timed rollback and compensation each mint a fresh ID. Synchronous
+success does not certify readiness. Missing telemetry reports `unknown` without
+undoing a successful transaction.
+
+- `GET /dataplane/protection` (any authenticated user) returns the current
+  `ProtectionStatus`: `bootId`, `applyId`, `installedApplyId`, `state`, `retryable`,
+  `observedAt`, `components` and `effects`. Components carry `name`, `required`,
+  `state`, `reason`, `since`, and optional bounded `attempt`/`maxAttempts`.
+  Effects carry `traffic` and `effect` (`normal`, `fail_closed_drop`,
+  `not_inspected`, or `unknown`). An unavailable upstream returns 502; no engine
+  returns 503.
+- `POST /dataplane/protection/retry` (admin) sends `{bootId, applyId}` from the
+  observation the operator reviewed. It returns 202 `{status:"retrying",applyId}`,
+  409 with `code: protection_superseded` or `protection_not_retryable`, 502 for
+  upstream failure, or 503 without an engine. Invalid identities return 400.
+  The action is audited as `dataplane.protection.retry`; it restarts only failed
+  consumers and keeps the current apply identity. No revision header is needed.
+
+`/health` remains unauthenticated HTTP 200. Its `protection` object contains only
+`{state, applyId}`, never component details. `enforcement` maps `protecting` to
+`enforcing`, `pending`/`failed` to `unavailable` with fixed reasons
+"protection pending"/"protection failed", `degraded` to `degraded` with reason
+"rule-hit logging unavailable; nft policy enforcing", `disabled` to `disabled`,
+and unreadable or stale observations to `unknown`. Persisted apply faults and
+management recovery still override protection; schedule planner degradation
+still overrides enforcing. Neither raw kernel errors nor private policy text
+appear in health reasons.
 
 ## Orchestrator Client Contract
 
@@ -217,21 +251,15 @@ code `apply_expired`, without side effects. The current ID does not expire.
 one second. General firewall health is a top-level `enforcement` object with
 exactly `state` and `reason`:
 
-- `enforcing`: enforcement is enabled and the engine reports an applied ruleset
-  without error.
-- `degraded`: a ruleset is in force, but the last apply failed and left the
-  previous ruleset in force, or the schedule planner is degraded: a refill of
-  the schedule time sets is failing, or their horizon ends within an hour.
-  `schedulePlanner` in `GET /api/v1/dataplane/ruleset/status` (any
-  authenticated user) and `engineStatus.schedulePlanner` in the admin-only
-  `GET /api/v1/dataplane/ruleset` show the
-  planner's last refill, horizon end and last error.
-- `disabled`: `dataplane.enforcement: false` intentionally selects the supported
-  in-memory-only mode; a successful commit does not install nft rules.
-- `unavailable`: the ruleset apply failed with no ruleset in force, no ruleset
-  has been applied while enforcement is enabled, or a persisted replay/recovery
-  fault makes runtime synchronization uncertain (including a failed disable
-  operation).
+- `enforcing`: the engine reports `protecting` for its current runtime apply.
+- `degraded`: protection reports unavailable rule-hit logging while nft policy
+  enforces, or the schedule planner is degraded (refill failure or a near-ending
+  horizon). Inspect `schedulePlanner` in `GET /dataplane/ruleset/status` or the
+  admin-only `GET /dataplane/ruleset` for planner diagnostics.
+- `disabled`: the engine reports enforcement disabled, intentionally selecting
+  the supported in-memory-only mode.
+- `unavailable`: protection is pending or failed, management recovery is active,
+  or a persisted replay/recovery fault makes runtime synchronization uncertain.
 - `unknown`: the configuration/fault or engine state could not be read within
   the observation budget. Health waits through brief store contention, but it
   never waits past that shared budget or exposes an unapplied document. Enforcement
@@ -246,10 +274,11 @@ response carries details. There is no separate config-apply-error field.
 counts `enforcing`, `partial`, `notEnforcing` and `monitoring`; it names no rule
 or exclusion. `state` is `none` without ICS rules, the worst state among
 enforce-mode rules, `monitoring` when every ICS rule is in monitor mode, or
-`unknown` when the engine cannot be read. `enforcement` stays the nftables-level
-state. See [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
-The existing `iec104Enforcement` object is unchanged: only `active`, `healthy`
-and `reason`, describing IEC104 queue/reset health independently. It also turns unhealthy, with `active`
+`unknown` when the engine cannot be read. `enforcement` reports current overall
+protection readiness. See [ICS rule coverage](dataplane-enforcement.md#ics-rule-coverage).
+The existing `iec104Enforcement` object keeps its shape (`active`, `healthy` and
+`reason`), with fixed sanitized reasons describing IEC104 queue/reset health
+independently. It also turns unhealthy, with `active`
 false, when the engine fails to reset an ICS connection it picked up mid-stream
 while an enforce rule of another ICS protocol is loaded. An inactive
 IEC104 policy is not proof nft is available. A successful commit does not

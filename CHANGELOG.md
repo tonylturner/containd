@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- Commit, commit-confirmed, rollback and factory reset responses add `applyId`
+  and `protection`. Success acknowledges synchronous apply, not readiness; health
+  reports `unavailable` while protection is pending or failed.
+
 - Every configuration write and commit must send `X-Containd-If-Revision` with
   the revision from the read it is based on; requests without it get 428, stale
   ones 412. Scripts and integrations that stage then commit must read the
@@ -18,11 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Authenticated protection status and admin retry APIs; commit and reset bodies
+  carry the engine protection observation and runtime apply ID.
+
 - Evidence health in the UI shell, Audit persistence view and `show audit --status`,
   with per-destination/source syslog backlog, retry, loss and continuity counters.
 - Authenticated `GET /api/v1/evidence/status` and sanitized `evidence.state` in health.
 
 ### Changed
+
+- Health `enforcement` reflects pending and failed protection rather than
+  treating nft installation alone as an enforcing dataplane.
 
 - Document established-session re-evaluation after policy changes and why a
   blocked connection can remain visible in Sessions until conntrack timeout.
@@ -36,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Describe IEC 62443 indicators as automated requirement checks and check-based security levels, not a standards assessment.
 
 ### Fixed
+
+- Bound internal apply-ID replay history to five minutes and ensure NFLOG shutdown waits for receiver callbacks.
 
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.

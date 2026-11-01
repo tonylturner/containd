@@ -23,14 +23,14 @@ type transactionalEngine struct {
 	configureErr error
 }
 
-func (e *transactionalEngine) ApplyRules(_ context.Context, snap rules.Snapshot) error {
+func (e *transactionalEngine) ApplyRules(_ context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	e.attempts = append(e.attempts, snap)
 	if len(e.attempts) == 1 || e.failRestore {
 		e.ruleset = dpengine.RulesetStatus{Error: "nft apply failed: operation not permitted"}
-		return errors.New(e.ruleset.Error)
+		return dpengine.ProtectionStatus{}, errors.New(e.ruleset.Error)
 	}
 	e.ruleset = dpengine.RulesetStatus{Ruleset: "restored rules", AppliedAt: time.Now()}
-	return nil
+	return dpengine.ProtectionStatus{}, nil
 }
 func (e *transactionalEngine) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
 	if e.configureErr != nil {

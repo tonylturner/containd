@@ -221,7 +221,7 @@ func TestHTTPClientRepresentativeEndpoints(t *testing.T) {
 	defer srv.Close()
 
 	c := NewHTTPClient(srv.URL)
-	if err := c.ApplyRules(ctx, rules.Snapshot{}); err != nil {
+	if _, err := c.ApplyRules(ctx, rules.Snapshot{}); err != nil {
 		t.Fatalf("ApplyRules: %v", err)
 	}
 	if err := c.Configure(ctx, config.DataPlaneConfig{Enforcement: true}); err != nil {
@@ -284,7 +284,7 @@ func TestHTTPClientEmptyBaseURLGuards(t *testing.T) {
 
 	c := &HTTPClient{}
 	ctx := context.Background()
-	if err := c.ApplyRules(ctx, rules.Snapshot{}); err == nil {
+	if _, err := c.ApplyRules(ctx, rules.Snapshot{}); err == nil {
 		t.Fatal("expected ApplyRules to reject empty BaseURL")
 	}
 	if _, err := c.PcapConfig(ctx); err == nil {

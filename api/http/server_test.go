@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	engineclient "github.com/tonylturner/containd/api/engine"
 
 	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -269,10 +270,14 @@ func (m *mockEngine) ListInterfaceState(ctx context.Context) ([]config.Interface
 	return []config.InterfaceState{{Name: "eth0", Index: 1, Up: true, Addrs: []string{"192.0.2.1/24"}}}, nil
 }
 
-func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
+func (m *mockEngine) ApplyRules(ctx context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	m.applied = true
 	m.snap = snap
-	return m.err
+	return dpengine.ProtectionStatus{}, m.err
+}
+
+func (m *mockEngine) RuntimeHealth(context.Context) (engineclient.RuntimeHealth, error) {
+	return engineclient.RuntimeHealth{BootID: "boot", Protection: dpengine.ProtectionStatus{BootID: "boot", ApplyID: "apply", State: "protecting", ObservedAt: time.Now()}}, nil
 }
 
 func (m *mockEngine) RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error) {

@@ -35,9 +35,9 @@ func (e *recoveryEngine) Configure(_ context.Context, dp config.DataPlaneConfig)
 	return e.configErr
 }
 
-func (e *recoveryEngine) ApplyRules(_ context.Context, snapshot rules.Snapshot) error {
+func (e *recoveryEngine) ApplyRules(_ context.Context, snapshot rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	e.snapshot = snapshot
-	return e.rulesErr
+	return dpengine.ProtectionStatus{}, e.rulesErr
 }
 
 func TestManagementRecoveryApplyAndStatus(t *testing.T) {

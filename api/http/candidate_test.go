@@ -17,6 +17,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/templates"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/pcap"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
@@ -54,10 +55,10 @@ func (e *stageEngine) StopPcap(context.Context) (pcap.Status, error) {
 	e.mutations++
 	return pcap.Status{}, nil
 }
-func (e *stageEngine) ApplyRules(_ context.Context, snap rules.Snapshot) error {
+func (e *stageEngine) ApplyRules(_ context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	e.mutations++
 	e.snap = snap
-	return nil
+	return dpengine.ProtectionStatus{}, nil
 }
 
 type stageServices struct{ mutations int }

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/cp/config"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -20,15 +21,15 @@ type commitFailingEngine struct {
 	applied []string
 }
 
-func (e *commitFailingEngine) ApplyRules(ctx context.Context, snapshot rules.Snapshot) error {
+func (e *commitFailingEngine) ApplyRules(ctx context.Context, snapshot rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	e.applied = append(e.applied, snapshot.Version)
-	if err := e.recoveryEngine.ApplyRules(ctx, snapshot); err != nil {
-		return err
+	if _, err := e.recoveryEngine.ApplyRules(ctx, snapshot); err != nil {
+		return dpengine.ProtectionStatus{}, err
 	}
 	if snapshot.Version != config.ManagementRecoveryVersion {
-		return errors.New("nft apply failed")
+		return dpengine.ProtectionStatus{}, errors.New("nft apply failed")
 	}
-	return nil
+	return dpengine.ProtectionStatus{}, nil
 }
 
 // A transition that fails at runtime while the appliance is in management

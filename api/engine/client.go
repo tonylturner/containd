@@ -15,6 +15,7 @@ import (
 
 	"github.com/tonylturner/containd/pkg/common/enginetransport"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
 	"github.com/tonylturner/containd/pkg/dp/rules"
 )
 
@@ -88,28 +89,34 @@ func (c *HTTPClient) deleteOK(ctx context.Context, path, statusPrefix string) er
 	return nil
 }
 
-func (c *HTTPClient) ApplyRules(ctx context.Context, snap rules.Snapshot) error {
+func (c *HTTPClient) ApplyRules(ctx context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error) {
 	if c.BaseURL == "" {
-		return fmt.Errorf("engine BaseURL is empty")
+		return dpengine.ProtectionStatus{}, fmt.Errorf("engine BaseURL is empty")
 	}
 	body, err := json.Marshal(snap)
 	if err != nil {
-		return err
+		return dpengine.ProtectionStatus{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/apply_rules", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return dpengine.ProtectionStatus{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ApplyIDHeader, ApplyID(ctx))
 	resp, err := c.Client.Do(req)
 	if err != nil {
-		return err
+		return dpengine.ProtectionStatus{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return engineStatusError(resp, "engine apply_rules status")
+		return dpengine.ProtectionStatus{}, engineStatusError(resp, "engine apply_rules status")
 	}
-	return nil
+	var observation dpengine.ProtectionStatus
+	// A successful synchronous apply must not be undone for absent telemetry.
+	if err := json.NewDecoder(resp.Body).Decode(&observation); err != nil {
+		return UnknownProtection(ApplyID(ctx)), nil
+	}
+	return NormalizeProtection(observation, ApplyID(ctx)), nil
 }
 
 func (c *HTTPClient) Configure(ctx context.Context, cfg config.DataPlaneConfig) error {
@@ -125,13 +132,14 @@ func (c *HTTPClient) Configure(ctx context.Context, cfg config.DataPlaneConfig) 
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ApplyIDHeader, ApplyID(ctx))
 	resp, err := c.Client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("engine config status %d", resp.StatusCode)
+		return engineStatusError(resp, "engine config status")
 	}
 	return nil
 }
@@ -153,6 +161,7 @@ func (c *HTTPClient) ConfigureServices(ctx context.Context, services config.Serv
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(ApplyIDHeader, ApplyID(ctx))
 	resp, err := c.Client.Do(req)
 	if err != nil {
 		return nil, err

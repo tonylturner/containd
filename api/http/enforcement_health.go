@@ -50,7 +50,7 @@ func observeRuleset(ctx context.Context, engine EngineClient) rulesetObservation
 // enforcementHealth reports general firewall state separately from IEC104.
 // Snapshot faults take precedence over configured mode: failed compensation or
 // replay makes the live state uncertain, including a failed disable request.
-func enforcementHealth(snapshot config.HealthSnapshot, snapshotErr error, ruleset rulesetObservation) gin.H {
+func enforcementHealth(snapshot config.HealthSnapshot, snapshotErr error, ruleset rulesetObservation, protection dpengine.ProtectionStatus) gin.H {
 	health := gin.H{"state": "unknown", "reason": "configuration health unavailable"}
 	if snapshotErr != nil {
 		return health
@@ -64,31 +64,25 @@ func enforcementHealth(snapshot config.HealthSnapshot, snapshotErr error, rulese
 	if snapshot.Config == nil {
 		return health
 	}
-	if !snapshot.Config.DataPlane.Enforcement {
-		health["state"] = "disabled"
-		health["reason"] = ""
-		return health
-	}
-	status := ruleset.status
-	switch {
-	case ruleset.err != nil:
-		health["reason"] = "engine ruleset status unavailable"
-	case !rulesetInstalled(status) && status.Error != "":
-		health["state"] = "unavailable"
-		health["reason"] = "ruleset apply failed"
-	case !rulesetInstalled(status):
-		health["state"] = "unavailable"
-		health["reason"] = "no enforced ruleset applied"
-	case status.Error != "":
-		health["state"] = "degraded"
-		health["reason"] = "last ruleset apply failed; the previous ruleset stays in force"
-	case status.SchedulePlanner != nil && status.SchedulePlanner.State == dpengine.SchedulePlannerDegraded:
-		// The planner's reasons are fixed texts that name no rule.
-		health["state"] = "degraded"
-		health["reason"] = status.SchedulePlanner.Reason
+	switch protection.State {
+	case "protecting":
+		health["state"], health["reason"] = "enforcing", ""
+		if ruleset.err == nil && ruleset.status.SchedulePlanner != nil && ruleset.status.SchedulePlanner.State == dpengine.SchedulePlannerDegraded {
+			health["state"], health["reason"] = "degraded", "schedule planner degraded"
+			// Preserve the planner's public summaries, never its diagnostics.
+			switch reason := ruleset.status.SchedulePlanner.Reason; reason {
+			case "schedule refill failing", "schedule horizon exhausted", "schedule horizon ends within an hour":
+				health["reason"] = reason
+			}
+		}
+	case "degraded":
+		health["state"], health["reason"] = "degraded", "rule-hit logging unavailable; nft policy enforcing"
+	case "pending", "failed":
+		health["state"], health["reason"] = "unavailable", "protection "+protection.State
+	case "disabled":
+		health["state"], health["reason"] = "disabled", ""
 	default:
-		health["state"] = "enforcing"
-		health["reason"] = ""
+		health["reason"] = "engine protection status unavailable"
 	}
 	return health
 }
