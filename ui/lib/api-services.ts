@@ -5,7 +5,7 @@ import {
   fetchWithSession,
   handleUnauthorized,
 } from "./api-core";
-import { failureOf, getJSON, getJSONShaped, isRecord, postJSONResult } from "./api-request";
+import { failureOf, getJSON, getJSONShaped, postJSONResult } from "./api-request";
 
 import type {
   AVConfig,
@@ -20,6 +20,7 @@ import type {
   SystemStats,
 } from "./api";
 import type { ServicesStatus } from "./api-service-status";
+import { parseServicesStatus } from "./service-status";
 
 /** A custom ClamAV database stored on the engine. */
 export type AVDefinition = {
@@ -38,10 +39,7 @@ export type AVDefinitionList = {
 
 export const servicesAPI = {
   getServicesStatus: async (signal?: AbortSignal): Promise<ServicesStatus | null> => {
-    const status = await getJSON<ServicesStatus>("/api/v1/services/status", signal);
-    if (!status) return null;
-    // The engine's antivirus entry is always present; a missing one reads as unreachable.
-    return isRecord(status.av) ? status : { ...status, av: { available: false, error: "antivirus status not reported" } };
+    return parseServicesStatus(await getJSON<ServicesStatus>("/api/v1/services/status", signal));
   },
   getSystemStats: (signal?: AbortSignal) =>
     getJSONShaped<SystemStats>("/api/v1/system/stats", {

@@ -208,7 +208,11 @@ func (s *SQLiteStore) saveKind(ctx context.Context, kind string, cfg *Config) er
 	if cfg == nil {
 		return errors.New("config is nil")
 	}
-	if err := s.ValidateConfig(cfg); err != nil {
+	baseline, err := readKindFrom(ctx, s.db, configKeyRunning, false)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err := s.checkWrite(baseline, cfg); err != nil {
 		return err
 	}
 	if err := s.validateSSHAccessLocked(ctx, cfg); err != nil {
@@ -334,7 +338,7 @@ func (s *SQLiteStore) ConfirmCommit(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.ValidateConfig(cfg); err != nil {
+	if err := s.checkStored(cfg); err != nil {
 		return err
 	}
 	return s.clearPendingLocked(ctx)

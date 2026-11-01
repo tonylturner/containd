@@ -37,8 +37,8 @@ func TestManagerApplyContinuesAfterServiceError(t *testing.T) {
 		DHCP: config.DHCPConfig{Enabled: true},
 	}
 
-	err := mgr.Apply(context.Background(), cfg)
-	if err == nil {
+	_, warnings := mgr.ApplyEffective(context.Background(), cfg, nil)
+	if len(warnings) == 0 {
 		t.Fatal("expected proxy validation error")
 	}
 	if !mgr.DHCP.Current().Enabled {

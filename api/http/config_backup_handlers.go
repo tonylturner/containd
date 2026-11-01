@@ -79,10 +79,6 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 		// Imports restore exported backups, including those of releases
 		// that saved any shellMode.
 		config.NormalizeLegacySSHShellMode(cfg)
-		if err := cfg.Validate(); err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
 		if !replaceCandidate(c, c.Request.Context(), store, cfg) {
 			return
 		}

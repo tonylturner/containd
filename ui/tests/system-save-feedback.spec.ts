@@ -41,7 +41,7 @@ async function mockAPI(page: Page, options: { held?: string[]; fail?: Record<str
           : path === "/api/v1/services/av" ? { enabled: true, mode: "clamav", failPolicy: "open" }
             : path === "/api/v1/services/dns" ? { enabled: true, listenPort: 53, upstreamServers: ["192.0.2.53"] }
             : path === "/api/v1/services/av/defs" ? { path: "/data/clamav", files: [], definitions: [] }
-              : path === "/api/v1/services/status" ? { av: { available: false, error: "engine unavailable" } }
+              : path === "/api/v1/services/status" ? { faults: [], av: { available: false, error: "engine unavailable" } }
                 : {};
       await route.fulfill({ json: body });
       return;

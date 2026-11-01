@@ -27,6 +27,8 @@ type Options struct {
 }
 
 // NewZap returns a sugared zap logger with stdout and optional rotating file sink.
+// If syslog initialization fails, it returns the logger without that sink and
+// the initialization error, so callers can report the failure and keep local logs.
 func NewZap(service, facility string, opts Options) (*zap.SugaredLogger, error) {
 	// Global and per-service env overrides for level (e.g., CONTAIND_LOG_LEVEL=debug or CONTAIND_LOG_LEVEL_PROXY=warn).
 	levelEnv := strings.TrimSpace(os.Getenv("CONTAIND_LOG_LEVEL"))
@@ -60,7 +62,6 @@ func NewZap(service, facility string, opts Options) (*zap.SugaredLogger, error) 
 	if opts.MaxAgeDays == 0 {
 		opts.MaxAgeDays = 7
 	}
-	// Syslog sink is intentionally omitted until we add a portable client.
 	cores := []zapcore.Core{}
 
 	level := zapcore.InfoLevel
@@ -99,6 +100,7 @@ func NewZap(service, facility string, opts Options) (*zap.SugaredLogger, error) 
 		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encCfg), zapcore.AddSync(lj), level))
 	}
 
+	var syslogErr error
 	if strings.TrimSpace(opts.SyslogAddr) != "" {
 		proto := strings.TrimSpace(opts.SyslogProtocol)
 		if proto == "" {
@@ -106,18 +108,18 @@ func NewZap(service, facility string, opts Options) (*zap.SugaredLogger, error) 
 		}
 		fac := parseFacility(facility)
 		writer, err := srslog.Dial(proto, opts.SyslogAddr, fac, service)
-		if err != nil {
-			return nil, err
+		if err == nil {
+			writer.SetFormatter(srslog.RFC5424Formatter)
+			cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encCfg), zapcore.AddSync(writer), level))
 		}
-		writer.SetFormatter(srslog.RFC5424Formatter)
-		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encCfg), zapcore.AddSync(writer), level))
+		syslogErr = err
 	}
 
 	logger := zap.New(zapcore.NewTee(cores...)).With(
 		zap.String("service", service),
 		zap.String("facility", facility),
 	)
-	return logger.Sugar(), nil
+	return logger.Sugar(), syslogErr
 }
 
 func parseFacility(f string) srslog.Priority {
