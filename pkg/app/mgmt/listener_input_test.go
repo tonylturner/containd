@@ -15,6 +15,7 @@ import (
 // environment addresses and with the stored configuration's defaults.
 func TestManagementInputAdmitsServedListeners(t *testing.T) {
 	dir := t.TempDir()
+	sshTestKeyPair(t, dir, "server")
 	stored := config.DefaultConfig()
 	stored.System.Mgmt.TLSCertFile = filepath.Join(dir, "server.crt")
 	stored.System.Mgmt.TLSKeyFile = filepath.Join(dir, "server.key")

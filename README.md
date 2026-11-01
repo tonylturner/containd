@@ -153,7 +153,7 @@ CONTAIND_JWT_SECRET=$(openssl rand -hex 32) CONTAIND_UI_DIR=ui/out ./containd al
 - Default-deny firewall posture
 - Wolfi-based container image (glibc, actively patched, minimal CVE surface); the published starter runs as `root` inside the container so nftables, routing, and TUN operations work reliably across Docker lab runtimes
 - JWT auth with session invalidation, admin/view-only roles, MustChangePassword on first login, and optional app-based TOTP MFA for local accounts
-- TLS 1.2+ with hardened cipher suites, HSTS enabled by default
+- TLS 1.2+ with hardened cipher suites, HSTS enabled by default; [atomic management certificate rotation](docs/mkdocs/config-format.md#management-https-identity)
 - CORS wildcard rejection, same-origin protection for cookie-authenticated browser writes, SameSite=Strict cookies, request body limits, path traversal protection
 - Rate limiting on auth endpoints, nftables injection prevention
 - Cosign-signed container images with CycloneDX SBOM attestation
