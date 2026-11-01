@@ -17,7 +17,7 @@ import (
 )
 
 // resetDeniedTCP generalizes pickup resets: the denied packet seeds best-effort
-// resets for both peers, followed by exact conntrack deletion after its drop.
+// resets for both peers, followed by exact conntrack deletion after its verdict.
 // IPv6 and an unavailable injector still produce per-peer outcome evidence.
 func (e *Engine) resetDeniedTCP(pkt capture.Packet, state *flow.State, proto, reason string, d *deniedTCP) {
 	t := e.iec
@@ -39,7 +39,7 @@ func (e *Engine) resetDeniedTCP(pkt capture.Packet, state *flow.State, proto, re
 	if hasSender {
 		resets.targets[sender] = resetTarget{valid: true, r: toSender}
 	}
-	e.afterDrop(pkt.Token, func() {
+	e.afterPacketVerdict(pkt.Token, func() {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		if d.retired {

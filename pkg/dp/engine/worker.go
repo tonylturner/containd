@@ -67,8 +67,8 @@ func (w *worker) run(ctx context.Context) {
 }
 
 // afterVerdict defers jobs until the verdict of the packet that caused them
-// has completed: capture reports every Drop through OnVerdict exactly once,
-// including (VerdictDrop, ErrQueueClosed) when the generation goes down.
+// has completed: capture reports every Drop and explicitly notified decision
+// through OnVerdict exactly once, including when the generation goes down.
 type afterVerdict struct {
 	mu        sync.Mutex
 	pending   map[capture.Token]func()
