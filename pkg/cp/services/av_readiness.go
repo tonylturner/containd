@@ -27,15 +27,27 @@ type avDirectionHealth struct {
 	healthy         bool
 	capabilityError string
 	scanError       string
-	scanSeq         uint64
+	invalidationSeq uint64
+	canarySeq       uint64
 }
 
 // Lost transport or capability invalidates prior scan proof too. Reconnecting
 // to a backend does not prove that it still scans rather than bypassing.
 func (s *avDirectionHealth) invalidateScan(seq uint64, why string) {
-	if seq >= s.scanSeq {
-		s.scanSeq = seq
+	s.invalidationSeq = max(s.invalidationSeq, seq)
+	if seq >= s.canarySeq {
 		s.healthy, s.scanError = false, why
+	}
+}
+
+// Ordinary clean objects are not proof. Only a canary started after the latest
+// loss can restore health, and only a newer canary can supersede that proof.
+func (s *avDirectionHealth) publishCanary(seq uint64, healthy bool, why string) {
+	if !healthy {
+		s.invalidateScan(seq, why)
+	} else if seq > s.invalidationSeq && seq >= s.canarySeq {
+		s.canarySeq = seq
+		s.healthy, s.scanError = true, ""
 	}
 }
 
@@ -110,24 +122,24 @@ func (m *AVManager) publishScan(epoch, seq uint64, dir avscan.Direction, healthy
 		return
 	}
 	wasReady := m.backendReady
-	if transportFailure && seq >= m.capabilitySeq {
-		m.capabilitySeq = seq
-		m.capabilityError = why
-		m.nextOptions = time.Time{}
+	if transportFailure {
+		publishCapability := seq >= m.capabilitySeq
+		if publishCapability {
+			m.capabilitySeq = seq
+			m.capabilityError = why
+			m.nextOptions = time.Time{}
+		}
 		for d, state := range m.directions {
-			state.capable = false
-			state.capabilityError = why
+			if publishCapability {
+				state.capable = false
+				state.capabilityError = why
+			}
 			state.invalidateScan(seq, why)
 			m.directions[d] = state
 		}
 	}
-	if state, ok := m.directions[dir]; ok && seq >= state.scanSeq {
-		state.scanSeq = seq
-		// Only a canary can clear an established scan-path failure. A clean
-		// ordinary object could equally be the result of antivirus bypass.
-		if !healthy {
-			state.healthy, state.scanError = false, why
-		}
+	if state, ok := m.directions[dir]; ok && !healthy {
+		state.invalidateScan(seq, why)
 		m.directions[dir] = state
 	}
 	m.lastTest = time.Now().UTC()
@@ -251,13 +263,18 @@ func (m *AVManager) observeBackend(caller context.Context, cfg config.AVConfig, 
 			}
 			if publishCapability {
 				state.capable, state.capabilityError = observed.capable, observed.capabilityError
-				if probeErr != nil || !state.capable {
-					state.invalidateScan(seq, firstNonEmpty(m.capabilityError, state.capabilityError))
-				}
 			}
-			if scanned[dir] && seq >= state.scanSeq && probeErr == nil {
-				state.scanSeq = seq
-				state.healthy, state.scanError = observed.healthy, observed.scanError
+			// A newer OPTIONS result may own capability, but it cannot erase
+			// the independent loss of scan proof observed by this probe.
+			if capability && (probeErr != nil || !observed.capable) {
+				why := observed.capabilityError
+				if probeErr != nil {
+					why = probeErr.Error()
+				}
+				state.invalidateScan(seq, why)
+			}
+			if scanned[dir] && probeErr == nil {
+				state.publishCanary(seq, observed.healthy, observed.scanError)
 			}
 			m.directions[dir] = state
 		}

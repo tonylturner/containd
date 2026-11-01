@@ -72,6 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep antivirus capability, scan-proof invalidation and recovery canaries
+  independently ordered so concurrent OPTIONS and clean traffic cannot
+  resurrect stale readiness or prevent recovery.
 - Keep decoded NFQUEUE default denials non-admitting across TCP
   retransmissions, including reserved Modbus FC5 coil values, without
   bypassing ordered kernel admission. The first scoped TCP non-admission

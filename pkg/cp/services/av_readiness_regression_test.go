@@ -378,7 +378,15 @@ func TestAVReadinessSameEpochStartOrdering(t *testing.T) {
 			m.directions[avscan.Download] = avDirectionHealth{capable: true, healthy: true}
 			older := m.nextProbeLocked()
 			newer := m.nextProbeLocked()
-			m.publishScan(0, newer, avscan.Download, !staleHealthy, false, "newer failure")
+			if staleHealthy {
+				m.publishScan(0, newer, avscan.Download, false, false, "newer failure")
+			} else {
+				// A newer canary, not an ordinary clean object, supersedes
+				// an older failure's scan-path invalidation.
+				state := m.directions[avscan.Download]
+				state.publishCanary(newer, true, "")
+				m.directions[avscan.Download] = state
+			}
 			m.publishScan(0, older, avscan.Download, staleHealthy, false, "stale failure")
 			assertAVReady(t, m, !staleHealthy)
 		})
@@ -425,7 +433,20 @@ func TestAVReadinessSameEpochLateStatus(t *testing.T) {
 			assertAVReady(t, m, !staleSuccess)
 			unblock()
 			<-done
-			assertAVReady(t, m, !staleSuccess)
+			// Capability retains start ordering, but even a late failure
+			// invalidates old canaries independently of newer OPTIONS.
+			m.mu.Lock()
+			capabilityError := m.capabilityError
+			m.mu.Unlock()
+			if (capabilityError == "") == staleSuccess {
+				t.Fatalf("late status replaced newer capability: %q", capabilityError)
+			}
+			assertAVReady(t, m, false)
+			block.Store(false)
+			cfg := readinessICAPConfig(s)
+			if ready, _, why := m.observeBackend(context.Background(), cfg, m.backendEpoch, true, true); !ready {
+				t.Fatal(why)
+			}
 		})
 	}
 }

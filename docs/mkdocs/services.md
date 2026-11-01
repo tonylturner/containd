@@ -352,7 +352,10 @@ Gate status, the `gate` object of the `av` status entry:
   Healthy directions are not continuously canary-scanned.
 - Losing transport or a direction's capability invalidates its previous
   scan-path proof. After reconnection, every affected direction must detect
-  EICAR again before readiness and datapath protection can recover.
+  EICAR again before readiness and datapath protection can recover. Newer
+  capability replies cannot suppress that invalidation. Only a canary started
+  after the loss can restore its direction's proof; ordinary clean traffic
+  neither preserves obsolete proof nor supersedes a recovery canary.
 - Readiness follows observable backend loss and recovery without a commit or
   status request. clamd capability is probed once per second after completion.
   ICAP honours `Options-TTL`, bounded to one through 30 seconds; a missing or
