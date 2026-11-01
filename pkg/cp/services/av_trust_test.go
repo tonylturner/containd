@@ -113,12 +113,34 @@ func TestAVTrustReachesFreshclamChildOnly(t *testing.T) {
 	private := newTestCA(t, "containd private mirror CA")
 	fake := newFakeClamAV(t)
 	mgr := newTestAVManager(t, fake.opts)
+	finished := make(chan string, 1)
+	mgr.OnEvent = func(kind string, _ map[string]any) {
+		if kind == "service.av.freshclam_ok" || kind == "service.av.freshclam_failed" {
+			finished <- kind
+		}
+	}
+	awaitFreshclam := func(prefix string, count int) {
+		t.Helper()
+		// The child's log marks its start, not its exit. Completion is
+		// emitted after the manager reaps the child and clears running.
+		select {
+		case kind := <-finished:
+			if kind != "service.av.freshclam_ok" {
+				t.Fatalf("FreshClam failed: %+v", mgr.Status(context.Background()))
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("FreshClam did not finish")
+		}
+		if got := countLines(fake.freshLog, prefix); got != count {
+			t.Fatalf("FreshClam log %q: got %d runs, want %d", prefix, got, count)
+		}
+	}
 	cfg := clamavConfig(fake.socket())
 	cfg.ClamAV.CustomDefsPath = t.TempDir()
 	if err := mgr.Apply(applyCtx(t), cfg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	waitFor(t, 3*time.Second, func() bool { return countLines(fake.freshLog, "run ca=none") == 1 })
+	awaitFreshclam("run ca=none", 1)
 
 	if err := mgr.SetTrust(context.Background(), mustBundle(t, private.PEM)); err != nil {
 		t.Fatalf("SetTrust: %v", err)
@@ -127,7 +149,7 @@ func TestAVTrustReachesFreshclamChildOnly(t *testing.T) {
 	if err := mgr.RunFreshclamNow(); err != nil {
 		t.Fatalf("RunFreshclamNow: %v", err)
 	}
-	waitFor(t, 3*time.Second, func() bool { return countLines(fake.freshLog, "run ca="+bundle) == 1 })
+	awaitFreshclam("run ca="+bundle, 1)
 	data, err := os.ReadFile(bundle)
 	if err != nil || !strings.Contains(string(data), strings.TrimSpace(string(system.PEM))) || !strings.Contains(string(data), strings.TrimSpace(string(private.PEM))) {
 		t.Fatalf("FreshClam bundle must hold system and additional roots: %q, %v", data, err)
@@ -146,5 +168,5 @@ func TestAVTrustReachesFreshclamChildOnly(t *testing.T) {
 	if err := mgr.RunFreshclamNow(); err != nil {
 		t.Fatalf("RunFreshclamNow: %v", err)
 	}
-	waitFor(t, 3*time.Second, func() bool { return countLines(fake.freshLog, "run ca=none") == 2 })
+	awaitFreshclam("run ca=none", 2)
 }
