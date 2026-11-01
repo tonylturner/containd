@@ -338,7 +338,42 @@ Gate status, the `gate` object of the `av` status entry:
 - A commit whose scanner backend is still starting succeeds with the
   `services:` warning `AV backend is still starting … scanning is pending
   until it is ready`, records `service.av.pending`, and the gate shows
-  `pending` until clamd answers. The AV page shows the same state.
+  `pending` until clamd is capable and its selected scan paths are proven. The AV page
+  shows the same state.
+- Scanner readiness keeps two independent facts for each selected direction:
+  backend capability and scan-path health. clamd must answer `PING` and
+  `VERSION`; ICAP `OPTIONS` must declare `REQMOD` for uploads and `RESPMOD`
+  for downloads. A successful scan never overrides a missing capability.
+  Initial scan-path proof and recovery after a scan failure require a bounded
+  scan of the standard EICAR antivirus test string in each unhealthy direction.
+  Only an infected verdict is accepted: a clean reply (including ICAP `204`)
+  could mean antivirus was bypassed and cannot restore readiness. These
+  synthetic scans do not enter object counters, detections or security events.
+  Healthy directions are not continuously canary-scanned.
+- Readiness follows observable backend loss and recovery without a commit or
+  status request. clamd capability is probed once per second after completion.
+  ICAP honours `Options-TTL`, bounded to one through 30 seconds; a missing or
+  invalid TTL selects one second. No autonomous ICAP probes run without a
+  selected scan direction. Unhealthy directions retry their canary once per
+  second, reusing unexpired OPTIONS capability. Each complete observation
+  (capability plus canaries) has a two-second budget, or `timeoutSec` if shorter.
+  Capability loss is detected within at most 34 seconds (an in-flight
+  observation, the capped TTL, then the next observation); with the default
+  one-second cadence the bound is five seconds. The gate samples readiness
+  every 200 ms. A scan failure invalidates its direction immediately;
+  transport failures also invalidate backend capability. Object-level
+  rejections, detections and cancelled diagnostic requests do not invalidate
+  readiness. An unchanged backend reapply retains the existing proof and accepts
+  failures from scans already in flight; readiness ignores scan results from a
+  replaced backend.
+- Readiness proves the latest capability and scan-path observations, not that
+  every future object will scan successfully. In particular, if an ICAP
+  frontend keeps answering OPTIONS after its antivirus dependency fails,
+  that scan-path loss is discovered by the next scan, not by OPTIONS or a
+  periodic healthy-path canary. After that failure, OPTIONS alone cannot
+  restore protection; the unhealthy direction must detect EICAR again.
+  An active scan selection is not reported as protecting while either
+  required fact is unavailable.
 
 Gate runtime: the listeners bind `127.0.0.1` and `::1` on ports 18100
 (plain) and 18101 (masqueraded upstream); the gate's replies reach it over
@@ -398,11 +433,15 @@ ClamAV mode:
   re-owned, never followed.
 
 Applying AV fails, and the commit reports a `services:` warning, when the
-backend is missing, clamd exits, or the ICAP server does not answer
-`OPTIONS` with the needed methods. A clamd that is still starting when the
-three-second apply budget ends is pending, not failed (see the gate status
-above); a freshly started clamd with the full official database can take
-longer to load, and the status `ready` field turns true once it answers.
+backend is missing, clamd exits, the ICAP server does not answer
+`OPTIONS` with a non-empty `Methods` header declaring the needed methods,
+or an initial scan-path canary fails.
+A missing, empty or incomplete declaration reports the scanner as not
+ready, with the reason in AV and gate status. A clamd that is still starting
+when the three-second apply budget ends is pending, not failed (see the gate
+status above); a freshly started clamd with the full official database can take
+longer to load. Readiness requires capability, confirmed database activation
+and scan-path proof for the selected directions.
 
 Scanning:
 
@@ -428,19 +467,20 @@ Scanning:
   transferred (chunked framing removed, content coding kept), with
   `X-Client-IP` and `X-Server-IP`. A reply is infected when it carries
   `X-Infection-Found`, `X-Violations-Found`, `X-Virus-ID` or an
-  `X-ICAP-Status` containing `VirusFound`; `204 No Content` is clean; any
-  other reply, including `200` with adapted content, is a scan error.
-  An `OPTIONS` response must return `200`. If it includes `Methods`, that
-  list must include `REQMOD` when uploads are scanned and `RESPMOD` when
-  downloads are; the current probe also accepts an absent `Methods` header.
+  `X-ICAP-Status` containing `VirusFound`; `204 No Content` is clean;
+  `413` rejects an oversized object. Any other reply, including `200`
+  with adapted content, is a scan error.
+  An `OPTIONS` response must include a non-empty `Methods` header, listing
+  `REQMOD` when uploads are scanned and `RESPMOD` when downloads are.
+  A `200` response without that declaration is not ready.
   `useTls` connects with verified TLS 1.2 or
   newer, using the configured host as the server name and the system roots
   plus the [additional CA bundle](config-format.md#additional-ca-bundle);
   there is no plaintext fallback.
 
-Status (`av` entry) reports the applied settings and `ready` from a live clamd
-`PING`/`VERSION` or ICAP `OPTIONS` check. `db_version` holds clamd's version
-response and is empty for ICAP. Status also includes scan, error and
+Status (`av` entry) reports the applied settings, combined capability and
+scan-path `ready`, and `db_version` from a live clamd `VERSION` (empty for
+ICAP). Status also includes scan, error and
 detection counters, the clamd process, the FreshClam schedule, the pending
 reload, the applied additional CA bundle revision (`trust_revision`) and
 the `gate` object above.
