@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import Link from "next/link";
 
 import { api, type FlowSummary } from "../../lib/api";
 import { formatEndpoint } from "../../lib/endpoint";
@@ -135,7 +136,7 @@ function FlowsContent() {
         <div className="w-full text-(--text-muted)">
           Live flow summaries show active conversations, AV flags and the labels of the connection-label rules that matched them. These are observed conversations, not kernel connection state. Use Events for activity records and Alerts for IDS investigations.
         </div>
-        <a href="/sessions/" className="underline">Sessions — inspect kernel connections and revoke immediately</a>
+        <Link href="/sessions/" className="underline">Sessions — inspect kernel connections and revoke immediately</Link>
         <div className="rounded-lg border bg-(--surface2) px-3 py-1.5">
           Total flows: {flows.length}
         </div>
@@ -148,12 +149,12 @@ function FlowsContent() {
         <div className="rounded-lg border bg-(--surface2) px-3 py-1.5">
           IEC 104 sessions: {iecSessionCount}
         </div>
-        <a
+        <Link
           href="/events/?av=1"
           className="rounded-xs border bg-(--surface2) px-3 py-1.5 text-xs text-(--text) transition-ui"
         >
           Open AV events
-        </a>
+        </Link>
       </div>
 
       {flows.length === 0 ? (
@@ -190,12 +191,12 @@ function FlowsContent() {
                     {f.session_id ? (
                       <span title={f.session_id}>
                         IEC {shortSessionID(f.session_id)}
-                        <a
+                        <Link
                           href={`/events/?filter=iec104&session=${encodeURIComponent(f.session_id)}`}
                           className="ml-2 font-sans text-(--amber) hover:text-(--amber)"
                         >
                           Evidence
-                        </a>
+                        </Link>
                       </span>
                     ) : (
                       <>{f.flowId.slice(0, 10)}…</>

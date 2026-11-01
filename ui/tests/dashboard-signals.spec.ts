@@ -182,6 +182,36 @@ test("partially reported service entries do not claim stopped or disabled", asyn
   }
 });
 
+for (const scenario of [
+  { name: "unavailable scanner", status: { ...services, av: { available: false, error: "engine unavailable" } }, message: "AV: Scanner unavailable" },
+  { name: "stopped DNS", status: { ...services, dns: { enabled: true, running: false } }, message: "DNS: Stopped" },
+  { name: "stopped proxy", status: { ...services, proxy: { forward_enabled: true, reverse_enabled: false, envoy_running: false, nginx_running: false } }, message: "Proxy: Stopped" },
+  { name: "syslog errors", status: { ...services, syslog: { configured_forwarders: 1, ...meter(), errors_rate_per_min: 2 } }, message: "Syslog: 1 fwd · 0/min · 2.0 err/min" },
+]) {
+  test(`service attention stays visible with details collapsed: ${scenario.name}`, async ({ page }) => {
+    await openDashboard(page, { events: [], services: scenario.status });
+    const details = page.getByRole("button", { name: /^Dashboard details/ });
+    await expect(details).toHaveAttribute("aria-expanded", "true");
+    await details.click();
+    await expect(details).toHaveAttribute("aria-expanded", "false");
+    const attention = page.getByRole("status").filter({ hasText: scenario.message });
+    await expect(attention).toBeVisible();
+    await expect(attention.getByRole("link", { name: "Check service" })).toBeVisible();
+  });
+}
+
+test("service attention uses runtime state, not service display text", async ({ page }) => {
+  await openDashboard(page, { events: [], services: {
+    ...services, av: { ...services.av, mode: "Stopped" },
+    dns: { enabled: false, running: false }, proxy: { envoy_running: false },
+    syslog: { configured_forwarders: 0, ...meter() },
+  } });
+  const av = page.locator("a.rounded-lg").filter({ has: page.getByText("AV", { exact: true }) });
+  await expect(av).toContainText("Stopped");
+  await expect(av).toHaveClass(/border-emerald/);
+  await expect(page.getByRole("link", { name: "Check service", exact: true })).toHaveCount(0);
+});
+
 
 test("a quiet alert window does not claim overall health when protection is degraded", async ({ page }) => {
   await openDashboard(page, { events: [], services, health: { hostname: "test", status: "degraded", enforceEnabled: false } });

@@ -32,7 +32,7 @@ async function serve(page: Page) {
     if (path === "/api/v1/events") queries.push(url);
     const json = path.endsWith("/auth/me") || path.endsWith("/auth/session")
       ? { id: "admin", username: "containd", role: "admin" }
-      : path === "/api/v1/flows" ? [{ ...base, flowId: "flow-1", firstSeen: base.timestamp, lastSeen: base.timestamp, eventCount: 1, tags: ["triage"] }]
+      : path === "/api/v1/flows" ? [{ ...base, flowId: "flow-1", session_id: session, firstSeen: base.timestamp, lastSeen: base.timestamp, eventCount: 1, tags: ["triage"] }]
         : path === "/api/v1/conntrack" ? [{ proto: "tcp", src: base.srcIp, dst: base.dstIp, sport: "41000", dport: "2404", tags: ["triage"], mark: "1", assured: true, timeoutSecs: 45, replySrc: base.dstIp, replyDst: base.srcIp }]
         : path === "/api/v1/events"
         ? url.searchParams.has("query") ? { events, historyTruncated: true } : events
@@ -41,6 +41,25 @@ async function serve(page: Page) {
     await route.fulfill({ json, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });
   return queries;
+}
+
+for (const destination of [
+  { name: "Sessions — inspect kernel connections and revoke immediately", path: "/sessions/", query: "" },
+  { name: "Open AV events", path: "/events/", query: "?av=1" },
+  { name: "Evidence", path: "/events/", query: `?filter=iec104&session=${session}` },
+]) {
+  test(`flow link uses client navigation and preserves its destination: ${destination.name}`, async ({ page }) => {
+    await serve(page);
+    const loaded = page.waitForResponse(r => new URL(r.url()).pathname === "/api/v1/flows");
+    await page.goto("/flows/");
+    await loaded;
+    const link = page.getByRole("link", { name: destination.name, exact: true });
+    await expect(link).toHaveAttribute("href", `${destination.path}${destination.query}`);
+    await page.evaluate(() => Reflect.set(window, "flowNavigationMarker", "same-document"));
+    await link.click();
+    await expect(page).toHaveURL(new URL(`${destination.path}${destination.query}`, page.url()).href);
+    expect(await page.evaluate(() => Reflect.get(window, "flowNavigationMarker"))).toBe("same-document");
+  });
 }
 
 test("all event deep-link filters survive disclosure and keyboard inspection", async ({ page }) => {

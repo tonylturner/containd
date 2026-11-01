@@ -380,7 +380,6 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
                     </button>
                   )}
                 </div>
-
               </div>
             )}
             {!evidence && typeof ev.attributes?.error === "string" && <p className="mt-2 text-xs text-amber">{ev.attributes.error}</p>}
