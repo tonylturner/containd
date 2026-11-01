@@ -7552,7 +7552,7 @@ paths:
       - $ref: '#/components/parameters/IfRevision'
       summary: Import rules into candidate bank (admin)
       tags: [Ids]
-      description: Imports and deduplicates by rule ID in the candidate bank. Format is detected from file when omitted. Commit to apply.
+      description: Imports and deduplicates by rule ID in the candidate bank. Format is detected from file when omitted. Commit to apply evaluable rules. YARA is storage-only and is never executed. Rules with labels.evaluable=false are not evaluated even when enabled; inspect conversionNotes.
       responses:
         "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
@@ -7572,6 +7572,10 @@ paths:
                   skipped: {type: integer}
                   total: {type: integer}
                   format: {type: string}
+                  rules:
+                    description: Newly added rules with evaluability labels and conversion notes; excludes skipped duplicates.
+                    type: array
+                    items: {$ref: '#/components/schemas/IDSRule'}
           headers:
             X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}

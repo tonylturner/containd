@@ -40,10 +40,11 @@ async function mockAPI(page: Page) {
     let result: unknown = {};
     if (path.startsWith("/auth/")) result = { id: "admin", username: "containd", role: "admin" };
     else if (path === "/ids/import") {
+      expect(req.headers()["x-containd-if-revision"]).toBe("0123456789abcdef.1");
       server.imports.push(req.postData() ?? "");
       server.ids = { ...server.ids, rules: [...server.ids.rules ?? [], imported] };
       server.failReads = server.failImportRead;
-      result = { imported: 1, skipped: 0, total: server.ids.rules!.length, format: "suricata" };
+      result = { imported: 1, skipped: 0, total: server.ids.rules!.length, format: "suricata", rules: [imported] };
     } else if (path === "/ids/rules") {
       if (method === "GET" && server.failReads) return route.fulfill({ status: 503, json: { error: "Unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
       if (method === "POST") server.saved = server.ids = req.postDataJSON();

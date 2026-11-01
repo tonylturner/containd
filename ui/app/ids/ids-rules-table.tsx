@@ -12,6 +12,7 @@ import {
   EMPTY_FILTERS,
   FormatBadge,
   isRuleEnabled,
+  RuleEvaluation,
   PAGE_SIZES,
   ruleMatchesAdvanced,
   ruleMatchesFilter,
@@ -361,7 +362,7 @@ export function RulesTable({
                       }
                       description={
                         rules.length === 0
-                          ? "Import Suricata, Snort, YARA, or Sigma rules to enable intrusion detection."
+                          ? "Import rules and review their evaluability. YARA is storage-only and does not enable detection."
                           : "Adjust your search or filters."
                       }
                     />
@@ -401,6 +402,7 @@ export function RulesTable({
                           className={`inline-block h-2 w-2 rounded-full ${enabled ? "bg-emerald-400" : "bg-white/20"}`}
                         />
                       )}
+                      <RuleEvaluation rule={r} />
                     </td>
                     <td
                       className="max-w-[160px] truncate px-4 py-2.5 font-mono text-[11px] text-(--text)"

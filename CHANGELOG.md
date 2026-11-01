@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Label non-evaluable IDS imports as storage-only, show conversion notes per rule
+  and in import results, and clarify that YARA imports do not execute or detect threats.
 - Reject unsupported IPv6 WireGuard tunnel addresses, AllowedIPs and endpoints
   during configuration validation, including while disabled; clarify IPv4-only support.
 - Keep decoded NFQUEUE default denials non-admitting across TCP

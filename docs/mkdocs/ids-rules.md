@@ -75,7 +75,13 @@ native YAML output is **not** accepted by `/api/v1/ids/import`. For programmatic
 
 `POST /api/v1/ids/import` accepts a multipart `file` and optional `format`:
 `sigma`, `suricata`, `snort`, or `yara`. Import stages converted rules, skips
-existing IDs, and requires commit to activate them. Native standalone YAML is
+existing IDs, and requires commit to apply evaluable rules. Its `rules` result
+contains newly added rules with `labels.evaluable` and `conversionNotes`; skipped
+duplicates are not included. The UI shows these notes in the import result and
+per rule. A rule with `labels.evaluable: "false"` is **storage only**, regardless
+of its enabled flag. YARA imports always have that state: they can be inspected
+and exported, but no YARA engine executes them and they do not detect threats.
+Native standalone YAML is
 not a supported import format. These converters implement subsets, not complete
 compatibility with the source engines. Inspect conversion notes and evaluability
 before enabling imported rules.

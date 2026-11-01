@@ -50,6 +50,21 @@ export function isRuleEnabled(r: IDSRule): boolean {
   return r.enabled === undefined || r.enabled === null || r.enabled === true;
 }
 
+export function isRuleEvaluable(r: IDSRule): boolean {
+  return r.labels?.evaluable !== "false";
+}
+
+export function RuleEvaluation({ rule }: { rule: IDSRule }) {
+  return (
+    <div className="text-xs text-(--text-muted)">
+      <span className={isRuleEvaluable(rule) ? "" : "text-amber"}>
+        {isRuleEvaluable(rule) ? "Evaluable" : "Storage only — not evaluated"}
+      </span>
+      {rule.conversionNotes?.map((note, i) => <p key={i} className="mt-1">{note}</p>)}
+    </div>
+  );
+}
+
 export function ruleMatchesFilter(r: IDSRule, q: string): boolean {
   return (
     r.id.toLowerCase().includes(q) ||
