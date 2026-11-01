@@ -245,7 +245,6 @@ func (inv *Inventory) Clear() {
 	inv.iec104.pairs = newBounded[pairKey, *pairState](MaxIEC104Pairs)
 	inv.iec104.overflow = InventoryOverflow{}
 	inv.iec104.busyObservations.Store(0)
-	inv.iec104.busyOutcomes.Store(0)
 	inv.iec104.mu.Unlock()
 }
 
