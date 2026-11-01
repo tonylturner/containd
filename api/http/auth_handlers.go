@@ -88,11 +88,13 @@ func loginHandler(userStore users.Store) gin.HandlerFunc {
 				apiError(c, http.StatusInternalServerError, "failed to create MFA challenge")
 				return
 			}
+			profile := u.User
+			profile.Role = effectiveUserRole(labmode.Enabled(), u.Role)
 			c.JSON(http.StatusOK, mfaLoginChallengeResponse{
 				MFARequired:       true,
 				MFAMethod:         "totp",
 				MFAChallengeToken: challengeToken,
-				User:              u.User,
+				User:              profile,
 			})
 			return
 		}
@@ -154,7 +156,7 @@ func meHandler(userStore users.Store) gin.HandlerFunc {
 		resp := gin.H{
 			"id":       u.ID,
 			"username": u.Username,
-			"role":     u.Role,
+			"role":     c.GetString(ctxRoleKey),
 			"labMode":  lab,
 		}
 		if u.FirstName != "" {
@@ -202,7 +204,7 @@ func authSessionHandler(userStore users.Store) gin.HandlerFunc {
 		if userStore != nil {
 			if uid := c.GetString(ctxUserKey); uid != "" {
 				if u, err := userStore.GetByID(c.Request.Context(), uid); err == nil && u != nil {
-					resp["user"] = u.User
+					resp["user"] = callerProfile(c, u.User)
 				}
 			}
 			if sid := c.GetString(ctxSessionKey); sid != "" && sid != "lab" {
@@ -242,7 +244,7 @@ func updateMeHandler(userStore users.Store) gin.HandlerFunc {
 			return
 		}
 		auditLog(c, audit.Record{Action: "auth.profile.update", Target: u.Username})
-		c.JSON(http.StatusOK, u)
+		c.JSON(http.StatusOK, callerProfile(c, *u))
 	}
 }
 

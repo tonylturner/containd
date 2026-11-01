@@ -67,7 +67,9 @@ func issueLoginResponse(c *gin.Context, userStore users.Store, u *users.StoredUs
 		return
 	}
 	secret := jwtSecret()
-	token, err := signJWT(secret, u.ID, u.Username, u.Role, sess.ID, sess.ExpiresAt)
+	profile := u.User
+	profile.Role = effectiveUserRole(labmode.Enabled(), u.Role)
+	token, err := signJWT(secret, u.ID, u.Username, profile.Role, sess.ID, sess.ExpiresAt)
 	if err != nil {
 		apiError(c, http.StatusInternalServerError, "failed to sign token")
 		return
@@ -82,7 +84,7 @@ func issueLoginResponse(c *gin.Context, userStore users.Store, u *users.StoredUs
 	c.JSON(http.StatusOK, loginResponse{
 		Token:     token,
 		ExpiresAt: sess.ExpiresAt.Format(time.RFC3339Nano),
-		User:      u.User,
+		User:      profile,
 	})
 }
 
