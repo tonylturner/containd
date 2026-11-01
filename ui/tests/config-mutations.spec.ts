@@ -94,7 +94,7 @@ async function mockAPI(page: Page) {
 
 async function importFile(page: Page) {
   await page.getByRole("button", { name: "Import", exact: true }).click();
-  await page.locator("select").selectOption("suricata");
+  await page.locator("#ids-import select").selectOption("suricata");
   await page.locator('input[type="file"]').setInputFiles({
     name: "test.rules", mimeType: "text/plain",
     buffer: Buffer.from('alert tcp any any -> any any (msg:"Imported rule"; sid:10001;)\n'),
@@ -187,7 +187,7 @@ test("IDS import and group creation forms never dirty the configuration or block
   await page.getByRole("button", { name: /^Groups/ }).click();
   await page.getByPlaceholder("e.g. ICS/Modbus").fill("unfinished group");
   await page.getByRole("button", { name: "Import", exact: true }).click();
-  await page.locator("select").selectOption("suricata");
+  await page.locator("#ids-import select").selectOption("suricata");
   await page.locator("textarea").fill("unfinished sigma");
   await page.locator('input[type="file"]').setInputFiles({
     name: "test.rules", mimeType: "text/plain", buffer: Buffer.from("unfinished"),
@@ -199,11 +199,11 @@ test("IDS import and group creation forms never dirty the configuration or block
   ]);
   await expect(page.getByRole("checkbox", { name: "Enable intrusion detection" })).not.toBeChecked();
   await expect(page.getByRole("status", { name: "Unsaved edits" })).toHaveCount(0);
-  await expect(page.locator("select")).toHaveValue("suricata");
+  await expect(page.locator("#ids-import select")).toHaveValue("suricata");
   await expect(page.locator("textarea")).toHaveValue("unfinished sigma");
   await page.getByRole("button", { name: /^Rules/ }).click();
   await expect(row(page, "imported-rule")).toBeVisible();
-  await page.getByRole("button", { name: /^Groups/ }).click();
+  await expect(page.getByRole("button", { name: /^Groups/ })).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByPlaceholder("e.g. ICS/Modbus")).toHaveValue("unfinished group");
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(page.getByPlaceholder("e.g. ICS/Modbus")).toHaveValue("");

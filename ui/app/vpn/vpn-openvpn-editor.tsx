@@ -313,7 +313,7 @@ export function OpenVPNEditorCard({
               </div>
             ) : (
               <details className="mt-3 rounded-xs border bg-(--surface) px-4 py-3" open={Boolean(cfg.openvpn.configPath) || cfg.openvpn.enabled}>
-                <summary className="cursor-pointer text-sm text-(--text)">Advanced profile path</summary>
+                <summary className="cursor-pointer text-sm text-(--text)"><span>Advanced profile path</span>{(Boolean(cfg.openvpn.configPath) || cfg.openvpn.enabled) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
                 <div className="mt-3">
                   <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-(--text-muted)">
                     Config Path
@@ -569,6 +569,7 @@ export function OpenVPNEditorCard({
               </div>
 
               {canEdit && <section aria-label="OpenVPN client credentials" className="rounded-xs border bg-(--surface) p-3">
+                <p className="mb-3 text-xs text-(--text-muted)">Credential actions use the active server immediately, independently of Save. Revocation restarts the server; all clients reconnect.</p>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-(--text)">
                     Client credentials

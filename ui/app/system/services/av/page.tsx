@@ -16,6 +16,7 @@ import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
+import { ServiceDisclosure, ServiceStatusStrip } from "../service-presentation";
 import { Card } from "../../../../components/Card";
 import { CustomDefinitions } from "./custom-defs";
 import { GateStatus } from "./gate-status";
@@ -196,6 +197,9 @@ export default function AVPage() {
       <ServiceFaultBanner status={servicesStatus} loading={loading} only={["av"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
+      <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} running={status?.available && status.mode === "clamav" ? status.clamav_running : undefined}
+        attention={!status || !status.available ? "Live scanner status unavailable — use Refresh to retry" : status.last_error || status.ready_error || status.freshclam_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)}
+        updated={status?.available ? status.last_render : undefined} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
@@ -231,61 +235,6 @@ export default function AVPage() {
           Settings show AV {cfg.enabled ? "enabled" : "disabled"} but runtime reports {status.enabled ? "enabled" : "disabled"}. Save to stage your changes, then commit to apply.
         </div>
       )}
-      <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-(--text)">Live runtime status</h2>
-        {loading ? (
-          <div className="mt-3 space-y-2">
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-10 w-1/2" />
-          </div>
-        ) : !status || !status.available ? (
-          <p className="mt-3 text-sm text-(--text-muted)">Live scanner status was not reported.</p>
-        ) : (
-          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-3">
-            <div>Enabled: <span className="text-(--text)">{typeof status?.enabled === "boolean" ? (status.enabled ? "yes" : "no") : "Unknown"}</span></div>
-            <div>Scanner ready: <span className="text-(--text)">{typeof status?.ready !== "boolean" ? "Unknown" : status.ready ? "yes" : `no${status?.ready_error ? ` (${status.ready_error})` : ""}`}</span></div>
-            <div>Detections: <span className="text-(--text)">{status?.detections ?? "Unknown"}</span></div>
-            <div>Mode: <span className="text-(--text)">{status?.mode ?? "Unknown"}</span></div>
-            <div>Fail policy: <span className="text-(--text)">{status?.failPolicy ?? "Unknown"}</span></div>
-            <div>
-              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
-            </div>
-            <div>
-              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
-            </div>
-            <details className="md:col-span-3 rounded-xs border p-3">
-              <summary className="cursor-pointer">Service details</summary>
-              <div>Additional CA: <span className="text-(--text)">{status?.trust_revision || "Unknown"}</span></div>
-              <div>Definitions: <span className="text-(--text)">{status?.db_version || "n/a"}</span></div>
-              <div>ICAP servers: <span className="text-(--text)">{status?.icap_servers ?? "Unknown"}</span></div>
-              <div>Cache: <span className="text-(--text)">{status?.cache_size ?? "Unknown"}</span></div>
-              <div>ClamAV running: <span className="text-(--text)">{typeof status?.clamav_running !== "boolean" ? "Unknown" : status.clamav_running ? `yes (pid ${status?.clamav_pid ?? ""})` : "no"}</span></div>
-              <div>ClamAV socket: <span className="text-(--text)">{status?.clamav_socket || "n/a"}</span></div>
-              <div>ClamAV last start: <span className="text-(--text)">{status?.clamav_last_start || "Unknown"}</span></div>
-              <div>Definition updater software: Freshclam</div>
-              <div>Definition updater: <span className="text-(--text)">{typeof status?.freshclam_enabled !== "boolean" ? "Unknown" : status.freshclam_enabled ? (status?.freshclam_running ? "running" : "enabled") : "disabled"}</span></div>
-              <div>Definition updater last: <span className="text-(--text)">{status?.freshclam_last || "Unknown"}</span></div>
-              <div>Definition updater interval: <span className="text-(--text)">{status?.freshclam_interval || "Unknown"}</span></div>
-              <div>Custom definition folder: <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
-            </details>
-            {status.sparkline?.length ? (
-              <div className="md:col-span-3">
-                <Sparkline
-                  values={status.sparkline}
-                  color="var(--purple)"
-                  background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))"
-                  title="Scans per minute"
-                />
-              </div>
-            ) : null}
-            <div className="md:col-span-3 text-xs">{status?.last_error}</div>
-            <div className="md:col-span-3 text-xs">{status?.freshclam_error}</div>
-            <div className="md:col-span-3">
-              <GateStatus gate={status.gate} />
-            </div>
-          </div>
-        )}
-      </Card>
 
       <Card>
         <h2 className="text-lg font-semibold text-(--text)">Settings</h2>
@@ -359,8 +308,14 @@ export default function AVPage() {
             />
           </div>
         </div>
+        <section className="mt-4">
+          <h2 className="text-lg font-semibold text-(--text)">Scanned traffic</h2>
+          <div className="mt-3">
+            <ScanSelectionEditor cfg={cfg} update={setCfg} zones={zones} assets={assets} canEdit={canEdit} />
+          </div>
+        </section>
         <details className="mt-6 rounded-xs border p-3" open={cfg.mode === "icap" || icapServers.length > 0}>
-          <summary className="cursor-pointer text-sm">Advanced remote scanner settings</summary>
+          <summary className="cursor-pointer text-sm"><span>Advanced remote scanner settings</span>{(cfg.mode === "icap" || icapServers.length > 0) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
           <h3 className="text-sm font-semibold text-(--text)">ICAP servers</h3>
           <p className="text-xs text-(--text-muted)">Used when mode is ICAP: one RFC 3507 server (REQMOD for uploads, RESPMOD for downloads).</p>
           <div className="mt-3 space-y-2">
@@ -412,7 +367,7 @@ export default function AVPage() {
         </details>
 
         <details className="mt-6 rounded-xs border p-3" open={localScannerCustomized}>
-          <summary className="cursor-pointer text-sm">Advanced local scanner settings</summary>
+          <summary className="cursor-pointer text-sm"><span>Advanced local scanner settings</span>{(localScannerCustomized) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
           <h3 className="text-sm font-semibold text-(--text)">ClamAV</h3>
           <p className="text-xs text-(--text-muted)">Used with the local scanner (ClamAV, the default).</p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -467,6 +422,13 @@ export default function AVPage() {
           </div>
         </details>
 
+
+      </Card>
+
+      <SaveStateLine state={save.state} saved="staged — commit to apply." />
+      <section aria-label="Immediate definition actions" className="my-4 rounded-xs border bg-(--surface) p-4">
+        <h2 className="text-base font-semibold">Immediate definition actions</h2>
+        <p className="mt-1 text-xs text-(--text-muted)">Run definition update, Upload file and Delete act immediately, independently of Save. Save only stages configuration.</p>
         <CustomDefinitions
           defs={defs}
           defsPath={defsPath}
@@ -477,16 +439,66 @@ export default function AVPage() {
           }}
           refresh={refresh}
         />
-      </Card>
+      </section>
+      <Card className="mb-4">
+        <h2 className="text-base font-semibold text-(--text)">Activity</h2>
+        <h3 className="text-sm font-semibold text-(--text)">Live runtime status</h3>
+        {loading ? (
+          <div className="mt-3 space-y-2">
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-10 w-1/2" />
+          </div>
+        ) : !status || !status.available ? (
+          <p className="mt-3 text-sm text-(--text-muted)">Live scanner status was not reported.</p>
+        ) : (
+          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-3">
+            <div>Enabled: <span className="text-(--text)">{typeof status?.enabled === "boolean" ? (status.enabled ? "yes" : "no") : "Unknown"}</span></div>
+            <div>Scanner ready: <span className="text-(--text)">{typeof status?.ready !== "boolean" ? "Unknown" : status.ready ? "yes" : `no${status?.ready_error ? ` (${status.ready_error})` : ""}`}</span></div>
+            <div>Detections: <span className="text-(--text)">{status?.detections ?? "Unknown"}</span></div>
+            <div>Mode: <span className="text-(--text)">{status?.mode ?? "Unknown"}</span></div>
+            <div>Fail policy: <span className="text-(--text)">{status?.failPolicy ?? "Unknown"}</span></div>
+            <div>
+              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
+            </div>
+            <div>
+              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
+            </div>
 
-      <Card className="mt-4">
-        <h2 className="text-lg font-semibold text-(--text)">Scanned traffic</h2>
-        <div className="mt-3">
-          <ScanSelectionEditor cfg={cfg} update={setCfg} zones={zones} assets={assets} canEdit={canEdit} />
-        </div>
+            {status.sparkline?.length ? (
+              <div className="md:col-span-3">
+                <Sparkline
+                  values={status.sparkline}
+                  color="var(--purple)"
+                  background="linear-gradient(180deg, rgba(139,92,246,0.08), rgba(37,99,235,0.04))"
+                  title="Scans per minute"
+                />
+              </div>
+            ) : null}
+            <div className="md:col-span-3 text-xs">{status?.last_error}</div>
+            <div className="md:col-span-3 text-xs">{status?.freshclam_error}</div>
+            <div className="md:col-span-3">
+              <GateStatus gate={status.gate} />
+            </div>
+            <div className="md:col-span-3">
+              <h3 className="text-sm">Troubleshooting</h3>
+              <ServiceDisclosure title="Service details" indicator={!status.trust_revision || status.clamav_pid === undefined ? "Some details unknown" : undefined}>
+              <div>Additional CA: <span className="text-(--text)">{status?.trust_revision || "Unknown"}</span></div>
+              <div>Definitions: <span className="text-(--text)">{status?.db_version || "n/a"}</span></div>
+              <div>ICAP servers: <span className="text-(--text)">{status?.icap_servers ?? "Unknown"}</span></div>
+              <div>Cache: <span className="text-(--text)">{status?.cache_size ?? "Unknown"}</span></div>
+              <div>ClamAV running: <span className="text-(--text)">{typeof status?.clamav_running !== "boolean" ? "Unknown" : status.clamav_running ? `yes (pid ${status?.clamav_pid ?? ""})` : "no"}</span></div>
+              <div>ClamAV socket: <span className="text-(--text)">{status?.clamav_socket || "n/a"}</span></div>
+              <div>ClamAV last start: <span className="text-(--text)">{status?.clamav_last_start || "Unknown"}</span></div>
+              <div>Definition updater software: Freshclam</div>
+              <div>Definition updater: <span className="text-(--text)">{typeof status?.freshclam_enabled !== "boolean" ? "Unknown" : status.freshclam_enabled ? (status?.freshclam_running ? "running" : "enabled") : "disabled"}</span></div>
+              <div>Definition updater last: <span className="text-(--text)">{status?.freshclam_last || "Unknown"}</span></div>
+              <div>Definition updater interval: <span className="text-(--text)">{status?.freshclam_interval || "Unknown"}</span></div>
+              <div>Custom definition folder: <span className="text-(--text)">{defsPath || status?.clamav_custom_defs || cfg.clamav?.customDefsPath || "/data/clamav/custom"}</span></div>
+            </ServiceDisclosure>
+            </div>
+          </div>
+        )}
       </Card>
-
-      <SaveStateLine state={save.state} saved="staged — commit to apply." />
       </fieldset>
     </Shell>
   );

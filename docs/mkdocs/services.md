@@ -12,6 +12,23 @@ namespace; engine-owned services run in the engine's namespace. Both processes
 need the intended network reachability and privileges.
 Check runtime status after commit, not just whether saving succeeded.
 
+The Services overview groups the existing routes by **Connectivity**, **Access**,
+**Inspection** and **Logs**. Individual pages lead with a compact **Configured** /
+**Running** / **Attention** / **Updated time** strip, then settings, then
+**Activity**. Configured describes the candidate editor, not live protection;
+Running uses a separate runtime observation. DHCP and Syslog do not report a
+separate running flag, so their strip leaves Running **Unknown**. WireGuard
+link state and remote ICAP readiness are shown separately in Activity, not
+reinterpreted as a process-running flag. Updated time
+is the service's reported render/check time, not a guarantee of freshness.
+
+**Troubleshooting** contains the **Service details** button for process IDs,
+paths and software metadata. The button works with Enter or Space and leaves
+focus on the button when closed. Fault causes remain outside disclosures.
+Antivirus keeps **Scanned traffic** beside its enable and fail-policy settings;
+definition updates and VPN credential revocations remain immediate operations,
+separate from staging settings with **Save**.
+
 Service panels show **Unknown** when live status is unavailable; missing readings
 are not stopped services or zero activity. Use **Refresh** or the panel's **Retry**
 to request a new observation. **Service details** keeps process IDs, generated
@@ -24,7 +41,10 @@ stream positions.
 retain scanner paths, update scheduling and ICAP protocol settings. VPN keeps
 peer JSON and profile import under **Advanced peer settings** and
 **Advanced profile import**; opening a disclosure does not change saved settings.
-Saved peers and customized scanner settings open automatically. Remote scanner
+Saved peers and customized scanner settings open automatically. DNS and proxy
+advanced options open for non-default values. DHCP keeps listen interfaces,
+gateway and pools beside enablement; its advanced options open for saved
+non-default lease, DNS, domain or reservation settings. Remote scanner
 settings also open whenever ICAP mode requires them. **Advanced profile path**
 opens for a saved OpenVPN path or when an enabled path-based client needs one.
 

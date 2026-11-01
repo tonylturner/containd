@@ -15,6 +15,7 @@ import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
 import { Skeleton } from "../../../../components/Skeleton";
 import { Sparkline } from "../../../../components/Sparkline";
+import { ServiceDisclosure, ServiceStatusStrip } from "../service-presentation";
 import { Card } from "../../../../components/Card";
 
 export default function NTPPage() {
@@ -101,6 +102,9 @@ export default function NTPPage() {
       <ServiceFaultBanner status={servicesStatus} loading={loading} only={["ntp"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
+      <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} running={status?.running}
+        attention={!status ? "Live service status unavailable — use Refresh to retry" : status.last_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)}
+        updated={status?.last_render} />
       <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
@@ -115,65 +119,6 @@ export default function NTPPage() {
       <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-
-      <Card className="mb-4">
-        <h2 className="text-sm font-semibold text-(--text)">Live runtime status</h2>
-        {loading ? (
-          <div className="mt-3">
-            <Skeleton className="h-20 w-full" />
-          </div>
-        ) : !status ? (
-          <div role="status" className="mt-3 text-sm text-(--text-muted)">
-            Unknown — live service status unavailable.
-            <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
-          </div>
-        ) : (
-          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
-            <div>
-              Running:{" "}
-              <span className="text-(--text)">{typeof status?.running === "boolean" ? (status.running ? "yes" : "no") : "Unknown"}</span>
-            </div>
-            <div>
-              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
-            </div>
-            <div>
-              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
-            </div>
-            <details className="md:col-span-2 rounded-xs border p-3">
-              <summary className="cursor-pointer text-sm">Service details</summary>
-              <p>Software: chrony</p>
-              <p>Process ID: {status.pid ?? "Unknown"}</p>
-              <div>
-                Last start:{" "}
-                <span className="text-(--text)">
-                  {status?.last_start || "Unknown"}
-                </span>
-              </div>
-              <div className="md:col-span-2">
-                Binary:{" "}
-                <span className="text-(--text)">
-                  {status.ntpd_path === "" ? "not found" : status.ntpd_path ?? "Unknown"}{status.ntpd_name ? ` (${status.ntpd_name})` : ""}
-                </span>
-              </div>
-            </details>
-            {status?.last_error ? (
-              <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                {status.last_error}
-              </div>
-            ) : null}
-            {status?.sparkline?.length ? (
-              <div className="md:col-span-2">
-                <Sparkline
-                  values={status.sparkline}
-                  color="var(--teal)"
-                  background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
-                  title="NTP events per minute"
-                />
-              </div>
-            ) : null}
-          </div>
-        )}
-      </Card>
 
       <Card>
         <h2 className="text-lg font-semibold text-(--text)">Client</h2>
@@ -196,7 +141,7 @@ export default function NTPPage() {
           </label>
 
           <details className="rounded-xs border p-3" open={(cfg.intervalSeconds ?? 0) > 0}>
-            <summary className="cursor-pointer text-sm">Advanced timing</summary>
+            <summary className="cursor-pointer text-sm"><span>Advanced timing</span>{((cfg.intervalSeconds ?? 0) > 0) && <span className="ml-2 text-xs text-(--text-muted)">Configured settings</span>}</summary>
             <label className="text-xs uppercase tracking-wide text-(--text-muted)">
               Requested polling interval (seconds)
             </label>
@@ -231,6 +176,68 @@ export default function NTPPage() {
         </div>
 
         <SaveStateLine state={save.state} saved="staged — commit to apply." />
+      </Card>
+      <Card className="mb-4">
+        <h2 className="text-base font-semibold text-(--text)">Activity</h2>
+        <h3 className="text-sm font-semibold text-(--text)">Live runtime status</h3>
+        {loading ? (
+          <div className="mt-3">
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : !status ? (
+          <div role="status" className="mt-3 text-sm text-(--text-muted)">
+            Unknown — live service status unavailable.
+            <button type="button" onClick={() => refresh()} className="ml-2 underline">Retry</button>
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-2 text-sm text-(--text) md:grid-cols-2">
+            <div>
+              Running:{" "}
+              <span className="text-(--text)">{typeof status?.running === "boolean" ? (status.running ? "yes" : "no") : "Unknown"}</span>
+            </div>
+            <div>
+              Rate: <span className="text-(--text)">{typeof status?.rate_per_min === "number" ? status.rate_per_min.toFixed(1) : "Unknown"} / min</span>
+            </div>
+            <div>
+              Errors: <span>{typeof status?.errors_rate_per_min === "number" ? status.errors_rate_per_min.toFixed(1) : "Unknown"} / min</span>
+            </div>
+
+            {status?.last_error ? (
+              <div className="md:col-span-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                {status.last_error}
+              </div>
+            ) : null}
+            {status?.sparkline?.length ? (
+              <div className="md:col-span-2">
+                <Sparkline
+                  values={status.sparkline}
+                  color="var(--teal)"
+                  background="linear-gradient(180deg, rgba(6,182,212,0.08), rgba(59,130,246,0.04))"
+                  title="NTP events per minute"
+                />
+              </div>
+            ) : null}
+            <div className="md:col-span-2">
+              <h3 className="text-sm">Troubleshooting</h3>
+              <ServiceDisclosure title="Service details" indicator={status.ntpd_path === "" ? "Binary not found" : status.pid === undefined || !status.ntpd_path ? "Some details unknown" : undefined}>
+              <p>Software: chrony</p>
+              <p>Process ID: {status.pid ?? "Unknown"}</p>
+              <div>
+                Last start:{" "}
+                <span className="text-(--text)">
+                  {status?.last_start || "Unknown"}
+                </span>
+              </div>
+              <div className="md:col-span-2">
+                Binary:{" "}
+                <span className="text-(--text)">
+                  {status.ntpd_path === "" ? "not found" : status.ntpd_path ?? "Unknown"}{status.ntpd_name ? ` (${status.ntpd_name})` : ""}
+                </span>
+              </div>
+            </ServiceDisclosure>
+            </div>
+          </div>
+        )}
       </Card>
       </fieldset>
     </Shell>
