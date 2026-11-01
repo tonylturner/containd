@@ -5,6 +5,18 @@ refactor or feature. See [Contributing](https://github.com/tonylturner/containd/
 for development prerequisites and the contributor workflow, and
 [Performance Baseline](performance.md) for benchmarks and profiles.
 
+## CI Checks
+
+On pull requests and pushes to `main`, CI runs module tidiness, Go vet and the
+full Go race suite, golangci-lint, Semgrep, a strict documentation build, and
+the offline release promotion tests. The UI job runs npm audit, lint,
+docs-builder tests, the production build and all Playwright specs with Chromium.
+The Docker job builds the management/all-mode image, runs the AV gate and public
+Compose quickstart against that image, then scans it with Trivy.
+
+These checks do not run the opt-in privileged kernel test suite or every live
+smoke below. Mocked browser tests do not replace live backend or lab-path checks.
+
 ## Coverage Workflow
 
 From the repo root:
@@ -172,6 +184,12 @@ defeats only the LAN-to-WAN source-address check. Both scripts accept the
 isolation variables described in the smoke fixture README linked below.
 
 ## Scanning Gate Smoke
+
+CI runs this smoke against the just-built `containd/containd:ci` image, using a
+Compose override for the engine image and `SMOKE_BUILD=0`. It captures Compose
+logs and tears down the stack on success or failure, preserving a failed smoke's
+exit status. A log collection or teardown failure also fails an otherwise
+successful step. Logs are uploaded as `av-compose-logs`.
 
 `bash scripts/smoke-av-gate.sh` brings up the same harness, enables the
 native clamd with FreshClam off and the EICAR test file's MD5 as its only
