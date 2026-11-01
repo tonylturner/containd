@@ -45,11 +45,12 @@ type Options struct {
 }
 
 type healthResponse struct {
-	Status     string `json:"status"`
-	Component  string `json:"component"`
-	Build      string `json:"build"`
-	CommitHash string `json:"commitHash,omitempty"`
-	BootID     string `json:"bootId"`
+	Status     string                  `json:"status"`
+	Component  string                  `json:"component"`
+	Build      string                  `json:"build"`
+	CommitHash string                  `json:"commitHash,omitempty"`
+	BootID     string                  `json:"bootId"`
+	Protection engine.ProtectionStatus `json:"protection"`
 
 	ManagementReservation netcfg.ManagementHealth     `json:"managementReservation"`
 	IEC104Enforcement     engine.IEC104Enforcement    `json:"iec104Enforcement"`
@@ -148,16 +149,16 @@ func Run(ctx context.Context, opts Options) error {
 	// The scanning gate runs beside the data plane while it enforces and
 	// drives the data plane's gate admission switch.
 	gateMgr := newGateManager(logger, avMgr, dpEngine, dpEngine.Events(), enforce.DefaultGatePlainPort, enforce.DefaultGateMasqPort)
+	coordinator := newProtectionCoordinator(ctx, dpEngine, logger)
+	defer coordinator.close()
+	gateMgr.protection = dpEngine
+	gateMgr.lifetime = ctx
 	engine.SetGateCloser(gateMgr)
 	defer engine.SetGateCloser(nil)
 	defer gateMgr.close()
 	gateMgr.setEnforcing(enforceEnabled)
-	// Start capture (no-op if no interfaces).
-	go func() {
-		if err := dpEngine.StartWithRetry(ctx); err != nil {
-			logger.Errorf("capture start failed: %v", err)
-		}
-	}()
+	// Startup capture uses the same lifetime and join discipline as later applies.
+	coordinator.start()
 
 	// Simulation manager for synthetic traffic (lab/demo mode).
 	simMgr := &simulationManager{dpEngine: dpEngine, logger: logger}
@@ -211,12 +212,13 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		writeJSON(w, map[string]string{"status": "ready"})
 	})
-	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine, gateMgr))
+	mux.HandleFunc("/internal/protection/retry", coordinator.retryHandler(gateMgr))
+	mux.HandleFunc("/internal/apply_rules", applyRulesHandler(dpEngine, gateMgr, coordinator))
 	mux.HandleFunc("/internal/rules", getRulesHandler(dpEngine))
 	mux.HandleFunc("/internal/rules/preview", previewRuleHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset/preview", previewRulesetHandler(dpEngine))
 	mux.HandleFunc("/internal/ruleset_status", rulesetStatusHandler(dpEngine))
-	mux.HandleFunc("/internal/config", configHandler(logger, gateFollower{Engine: dpEngine, gate: gateMgr}, simMgr))
+	mux.HandleFunc("/internal/config", configHandler(logger, gateFollower{Engine: dpEngine, gate: gateMgr}, simMgr, coordinator))
 	mux.HandleFunc("/internal/pcap/config", pcapConfigHandler(pcapMgr, ownership))
 	mux.HandleFunc("/internal/pcap/start", pcapStartHandler(pcapMgr, ownership))
 	mux.HandleFunc("/internal/pcap/stop", pcapStopHandler(pcapMgr))
@@ -253,7 +255,7 @@ func Run(ctx context.Context, opts Options) error {
 	mux.HandleFunc("/internal/blocks/host", blockHostHandler(dpEngine, gateMgr))
 	mux.HandleFunc("/internal/blocks/flow", blockFlowHandler(dpEngine, gateMgr))
 	mux.HandleFunc("/internal/blocks/clear", clearBlocksHandler(dpEngine))
-	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr, avMgr, gateMgr))
+	mux.HandleFunc("/internal/services", servicesHandler(logger, dpEngine, ownership, dhcpMgr, avMgr, gateMgr, coordinator))
 	registerAVHandlers(mux, avMgr, gateMgr)
 	mux.HandleFunc("/internal/trust", trustHandler(avMgr))
 	mux.HandleFunc("/internal/wireguard/status", wireguardStatusHandler())

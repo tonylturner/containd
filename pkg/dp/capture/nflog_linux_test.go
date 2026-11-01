@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -52,7 +53,7 @@ func TestStartNFLogStopCancelsBeforeClosingAndIsIdempotent(t *testing.T) {
 	openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) { flags = cfg.Flags; return fake, nil }
 
 	var reported int
-	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, func(error) { reported++ })
+	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, func(error) { reported++ }, nil)
 	if err != nil {
 		t.Fatalf("StartNFLog: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestStartNFLogRegisterErrorCancelsAndCloses(t *testing.T) {
 	fake := &fakeNFLogHandle{registerErr: wantErr}
 	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
 
-	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, nil)
+	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, nil, nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("StartNFLog error = %v, want wrapped %v", err, wantErr)
 	}
@@ -123,7 +124,7 @@ func TestStartNFLogParentContextCancelClosesHandle(t *testing.T) {
 	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stop, err := StartNFLog(ctx, 100, &recordingSink{}, nil)
+	stop, err := StartNFLog(ctx, 100, &recordingSink{}, nil, nil)
 	if err != nil {
 		t.Fatalf("StartNFLog: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestStartNFLogDisabledReturnsNoOpStop(t *testing.T) {
 		{name: "nil sink", group: 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			stop, err := StartNFLog(context.Background(), tc.group, tc.sink, nil)
+			stop, err := StartNFLog(context.Background(), tc.group, tc.sink, nil, nil)
 			if err != nil {
 				t.Fatalf("StartNFLog: %v", err)
 			}
@@ -416,5 +417,45 @@ func TestRulePrefixRERejectsUnsafeRuleIDs(t *testing.T) {
 				t.Errorf("expected !ok for malformed prefix %q", c)
 			}
 		})
+	}
+}
+
+func TestNFLogTransientErrorsDoNotRetireConsumer(t *testing.T) {
+	oldOpen := openNFLog
+	t.Cleanup(func() { openNFLog = oldOpen })
+	fake := &fakeNFLogHandle{}
+	openNFLog = func(*nflog.Config) (nfLogHandle, error) { return fake, nil }
+	source := make(chan SourceEvent, 2)
+	stop, err := StartNFLog(context.Background(), 100, &recordingSink{}, nil, func(ev SourceEvent) { source <- ev })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	for _, err := range []error{syscall.ENOBUFS, syscall.EINTR, syscall.EAGAIN} {
+		if ret := fake.errFn(err); ret != 0 {
+			t.Fatalf("transient %v retired consumer", err)
+		}
+	}
+	select {
+	case ev := <-source:
+		t.Fatalf("transient emitted source death: %+v", ev)
+	default:
+	}
+	if ret := fake.errFn(syscall.EBADF); ret != 1 {
+		t.Fatal("terminal receive error did not end consumer")
+	}
+	select {
+	case ev := <-source:
+		if !ev.Terminal || !errors.Is(ev.Err, syscall.EBADF) {
+			t.Fatalf("terminal: %+v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("consumer loss not published")
+	}
+	stop()
+	select {
+	case ev := <-source:
+		t.Fatalf("duplicate terminal: %+v", ev)
+	default:
 	}
 }

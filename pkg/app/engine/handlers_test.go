@@ -266,8 +266,8 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 		}
 
 		rec = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodPost, "/internal/apply_rules", bytes.NewBufferString(`{"firewall":[],"nat":{"snat":[],"dnat":[]},"ids":{"enabled":false,"rules":null}}`))
-		applyRulesHandler(dp, nil).ServeHTTP(rec, req)
+		req = protectionRequest(http.MethodPost, "/internal/apply_rules", bytes.NewBufferString(`{"firewall":[],"nat":{"snat":[],"dnat":[]},"ids":{"enabled":false,"rules":null}}`))
+		applyRulesHandler(dp, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("apply_rules status = %d body=%s", rec.Code, rec.Body.String())
 		}
@@ -287,8 +287,8 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 		}
 
 		rec = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodPost, "/internal/apply_rules", bytes.NewBufferString("{"))
-		applyRulesHandler(dp, nil).ServeHTTP(rec, req)
+		req = protectionRequest(http.MethodPost, "/internal/apply_rules", bytes.NewBufferString("{"))
+		applyRulesHandler(dp, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected invalid JSON status, got %d", rec.Code)
 		}
@@ -302,14 +302,14 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/internal/config", nil)
-		configHandler(logger, dp, sim).ServeHTTP(rec, req)
+		configHandler(logger, dp, sim, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("config GET status = %d", rec.Code)
 		}
 
 		rec = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodPost, "/internal/config", bytes.NewBufferString("{"))
-		configHandler(logger, dp, sim).ServeHTTP(rec, req)
+		req = protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString("{"))
+		configHandler(logger, dp, sim, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("config invalid JSON status = %d", rec.Code)
 		}
@@ -337,8 +337,8 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 		}
 
 		rec = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"enforcement":false,"dpiMock":true,"dpiEnabled":true,"dpiMode":"monitor","captureInterfaces":["wan"],"dpiProtocols":{"dns":true}}`))
-		configHandler(logger, dp, sim).ServeHTTP(rec, req)
+		req = protectionRequest(http.MethodPost, "/internal/config", bytes.NewBufferString(`{"enforcement":false,"dpiMock":true,"dpiEnabled":true,"dpiMode":"monitor","captureInterfaces":["wan"],"dpiProtocols":{"dns":true}}`))
+		configHandler(logger, dp, sim, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("config valid POST status = %d body=%s", rec.Code, rec.Body.String())
 		}
@@ -368,21 +368,21 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 		logger := zap.NewNop().Sugar()
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/internal/services", nil)
-		servicesHandler(logger, dp, nil, nil, nil, nil).ServeHTTP(rec, req)
+		servicesHandler(logger, dp, nil, nil, nil, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("services GET status = %d", rec.Code)
 		}
 
 		rec = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodPost, "/internal/services", bytes.NewBufferString("{"))
-		servicesHandler(logger, dp, nil, nil, nil, nil).ServeHTTP(rec, req)
+		req = protectionRequest(http.MethodPost, "/internal/services", bytes.NewBufferString("{"))
+		servicesHandler(logger, dp, nil, nil, nil, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("services invalid JSON status = %d", rec.Code)
 		}
 
 		rec = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodPost, "/internal/services", bytes.NewBufferString(`{"vpn":{"wireguard":{"enabled":false}}}`))
-		servicesHandler(logger, dp, nil, nil, nil, nil).ServeHTTP(rec, req)
+		req = protectionRequest(http.MethodPost, "/internal/services", bytes.NewBufferString(`{"vpn":{"wireguard":{"enabled":false}}}`))
+		servicesHandler(logger, dp, nil, nil, nil, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
 		if runtime.GOOS == "linux" {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("services valid POST status = %d body=%s", rec.Code, rec.Body.String())
@@ -393,7 +393,7 @@ func TestEngineAuxiliaryHandlers(t *testing.T) {
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPatch, "/internal/services", nil)
-		servicesHandler(logger, dp, nil, nil, nil, nil).ServeHTTP(rec, req)
+		servicesHandler(logger, dp, nil, nil, nil, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, req)
 		if rec.Code != http.StatusMethodNotAllowed {
 			t.Fatalf("services method status = %d", rec.Code)
 		}

@@ -29,12 +29,21 @@ var errStartSuperseded = errors.New("engine: start superseded by reconfigure")
 // Reconfigure ends the loop: the new configuration starts its own. Other
 // capture modes start once, as before.
 func (e *Engine) StartWithRetry(ctx context.Context) error {
+	return e.StartProtection(ctx, ctx)
+}
+
+// StartProtection separates retry cancellation from the adopted run lifetime.
+func (e *Engine) StartProtection(ctx, lifetime context.Context) error {
 	e.lifecycleMu.Lock()
 	epoch, onError := e.epoch.Load(), e.onError
 	e.lifecycleMu.Unlock()
 	backoff := startRetryInitial
 	for attempt := 1; ; attempt++ {
-		group, err := e.start(ctx)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		group, err := e.start(lifetime)
+		e.protection.bindAttempt(epoch, group, err, attempt, startRetryAttempts)
 		if err == nil || group == 0 {
 			return err
 		}

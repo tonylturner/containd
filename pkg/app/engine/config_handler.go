@@ -27,7 +27,7 @@ type dataPlane interface {
 	Events() *events.Store
 	SetICSParsing(map[string]string)
 	Reconfigure(fresh *engine.Engine) error
-	StartWithRetry(ctx context.Context) error
+	RetryProtection(context.Context) error
 }
 
 // appliedConfig is the data-plane configuration the engine runs. The zero
@@ -55,11 +55,10 @@ func (a *appliedConfig) get() config.DataPlaneConfig {
 // effect (the nft tables of a disabled enforcement cannot be removed) fails
 // the POST and leaves the applied configuration unchanged, so a retry
 // rebuilds again.
-func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationManager) http.HandlerFunc {
+func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationManager, coordinator *protectionCoordinator) http.HandlerFunc {
 	store := dp.Events()
 	var current appliedConfig
-	var post sync.Mutex // one POST at a time: compare, rebuild and record together
-	return func(w http.ResponseWriter, r *http.Request) {
+	return coordinator.admit(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			writeJSON(w, current.get())
@@ -82,8 +81,7 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			post.Lock()
-			defer post.Unlock()
+			coordinator.joinWorker()
 			current.mu.Lock()
 			unchanged := current.applied && sameDataPlane(current.dp, next)
 			previous := current.dp
@@ -114,16 +112,16 @@ func configHandler(logger *zap.SugaredLogger, dp dataPlane, simMgr *simulationMa
 					simMgr.start(nil)
 				}
 			}
-			go func() {
-				if err := dp.StartWithRetry(context.Background()); err != nil {
-					logger.Errorf("capture start failed: %v", err)
-				}
-			}()
+			if err := dp.RetryProtection(coordinator.ctx); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			coordinator.start()
 			writeJSON(w, map[string]any{"status": "configured", "unchanged": unchanged})
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	}
+	})
 }
 
 // sameDataPlane reports whether two configurations are identical in every

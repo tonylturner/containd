@@ -22,11 +22,12 @@ const inlineMaxPacketLen = 65535
 // nfqueueSource captures packets via NFQUEUE and delivers them inline: the
 // handler's Decision is the packet's verdict.
 type nfqueueSource struct {
-	queueID int
-	cfg     Config
-	handler Handler
-	settler *settler
-	comp    *completer
+	generation uint64
+	queueID    int
+	cfg        Config
+	handler    Handler
+	settler    *settler
+	comp       *completer
 
 	// runFn lets tests inject a fake inner-loop implementation. Production
 	// uses s.run (the real go-nfqueue consumer). A run calls ready once its
@@ -137,9 +138,18 @@ func (s *nfqueueSource) supervise(ctx context.Context, bound chan<- error) {
 		if err != nil && onError != nil {
 			onError(fmt.Errorf("nfqueue consumer exited (attempt %d/%d): %w", failures, nfqueueMaxRetries, err))
 		}
+		if s.cfg.OnSource != nil {
+			ev := SourceEvent{Generation: s.generation, Err: err, Terminal: failures >= nfqueueMaxRetries, Attempt: failures, MaxAttempts: nfqueueMaxRetries}
+			if s.comp != nil {
+				s.comp.push(completion{source: true, event: ev})
+				s.comp.flush()
+			} else {
+				s.cfg.OnSource(ev)
+			}
+		}
 		if failures >= nfqueueMaxRetries {
 			if onError != nil {
-				onError(fmt.Errorf("nfqueue consumer giving up after %d failed attempts; queue %d will be undrained until engine restart",
+				onError(fmt.Errorf("nfqueue consumer giving up after %d failed attempts; queue %d will be undrained until an explicit retry or reconfiguration",
 					nfqueueMaxRetries, s.queueID))
 			}
 			return
@@ -204,6 +214,7 @@ func (s *nfqueueSource) run(ctx context.Context, ready func()) error {
 		}
 		return nf.SetVerdict(id, nfqueue.NfAccept)
 	}, s.comp, s.cfg.OnError)
+	s.generation = gen.id
 	gen.fence = s.cfg.PublicationFence
 	open := make(chan struct{}) // closed once the Ready event is delivered
 

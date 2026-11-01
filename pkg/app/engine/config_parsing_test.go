@@ -17,7 +17,7 @@ func TestConfigPushParsingDoesNotReconfigureSessions(t *testing.T) {
 	dp := newCountingDP(t)
 	// No live capture is needed; retain the handler's asynchronous start path.
 	dp.startFn = func(context.Context) error { return nil }
-	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()})
+	h := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, testProtectionCoordinator(t, dp))
 	postConfig(t, h, `{"dpiIcsParsing":{"modbus":"strict"}}`)
 	if err := dp.waitStart(t); err != nil {
 		t.Fatal(err)

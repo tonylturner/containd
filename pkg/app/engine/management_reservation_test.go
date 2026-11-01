@@ -36,8 +36,8 @@ func TestManagementPartialAPIsRejectBeforeSideEffects(t *testing.T) {
 	logger := zap.NewNop().Sugar()
 	owner := newOwnershipManager(logger)
 	owner.reservation = r
-	cfgHandler := configHandler(logger, dp, &simulationManager{})
-	svcHandler := servicesHandler(logger, dp, owner, nil, nil, nil)
+	cfgHandler := configHandler(logger, dp, &simulationManager{}, testProtectionCoordinator(t, dp))
+	svcHandler := servicesHandler(logger, dp, owner, nil, nil, nil, testProtectionCoordinator(t, dp))
 	for _, tc := range []struct {
 		name, body string
 		handler    http.Handler
@@ -52,7 +52,7 @@ func TestManagementPartialAPIsRejectBeforeSideEffects(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			tc.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/"+tc.name+"?mode=replace", strings.NewReader(tc.body)))
+			tc.handler.ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/"+tc.name+"?mode=replace", strings.NewReader(tc.body)))
 			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "reserved management path") {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 			}

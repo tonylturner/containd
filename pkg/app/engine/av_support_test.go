@@ -32,7 +32,7 @@ func TestServicesApplyReportsAVFailure(t *testing.T) {
 	}
 	av := &failingAVApplier{}
 	rec := httptest.NewRecorder()
-	servicesHandler(zap.NewNop().Sugar(), dp, nil, nil, av, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/services", strings.NewReader(`{}`)))
+	servicesHandler(zap.NewNop().Sugar(), dp, nil, nil, av, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/services", strings.NewReader(`{}`)))
 	if av.applied != 1 {
 		t.Fatalf("AV applied %d times, want 1", av.applied)
 	}
@@ -61,7 +61,7 @@ func TestServicesApplyReportsStartingBackendAsPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()
-	servicesHandler(zap.NewNop().Sugar(), dp, nil, nil, startingAVApplier{}, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/internal/services", strings.NewReader(`{}`)))
+	servicesHandler(zap.NewNop().Sugar(), dp, nil, nil, startingAVApplier{}, nil, testProtectionCoordinator(t, dp)).ServeHTTP(rec, protectionRequest(http.MethodPost, "/internal/services", strings.NewReader(`{}`)))
 	if runtime.GOOS != "linux" {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("non-linux services apply = %d %s", rec.Code, rec.Body)

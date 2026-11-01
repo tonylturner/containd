@@ -29,7 +29,9 @@ const envelopeSwitchTimeout = 5 * time.Second
 // serialises ruleset applies with switches, so a reapply always writes the
 // current state and a switch never races a reapply.
 type envelopeGate struct {
-	mu sync.Mutex
+	mu          sync.Mutex
+	switchError string
+	observe     func(state, reason string)
 	// owned is the NFQUEUE group this engine has bound and registered; 0
 	// before the first bind and while a bind fault or source-down stands.
 	owned uint16
@@ -114,6 +116,8 @@ func (g *envelopeGate) apply(ctx context.Context, comp *enforce.Compiler, applie
 	g.plan.Store(newSchedulePlan(snap, comp))
 	g.installed = comp.SteersIEC104(snap)
 	g.open = g.installed && open
+	g.switchError = ""
+	g.observeLocked("")
 	if g.ok != nil {
 		g.ok() // the kernel holds the current state again
 	}
@@ -145,8 +149,13 @@ func (g *envelopeGate) own(group uint16) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.owned = group
+	g.switchLocked(false)
+}
+
+func (g *envelopeGate) switchLocked(force bool) {
 	want := g.wantOpenLocked()
-	if !g.installed || want == g.open {
+	if !g.installed || want == g.open && !force {
+		g.observeLocked("")
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), envelopeSwitchTimeout)
@@ -155,12 +164,15 @@ func (g *envelopeGate) own(group uint16) {
 		// Opening failed: the chain still drops (fail closed). Closing
 		// failed: the chain may still queue to a queue this engine no
 		// longer holds. Either way enforcement is unhealthy.
+		g.observeLocked("envelope steering switch: " + err.Error())
 		if g.fault != nil {
 			g.fault("envelope steering switch: " + err.Error())
 		}
 		return
 	}
 	g.open = want
+	g.switchError = ""
+	g.observeLocked("")
 	if g.ok != nil {
 		g.ok()
 	}
@@ -177,4 +189,30 @@ func (e *Engine) bindGate() {
 	e.gate.mu.Lock()
 	e.gate.fault, e.gate.ok = fault, ok
 	e.gate.mu.Unlock()
+}
+
+func (g *envelopeGate) observeLocked(reason string) {
+	if g.observe == nil {
+		return
+	}
+	if reason != "" {
+		g.switchError = reason
+	}
+	reason = g.switchError
+	state := "pending"
+	if g.open || !g.installed {
+		state = "ready"
+	}
+	if reason != "" {
+		state = "failed"
+	}
+	g.observe(state, reason)
+}
+
+func (g *envelopeGate) reconcile() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	// Retry against current ownership atomically with the switch. SourceDown
+	// cannot lose to a copied group number from before the reconciliation.
+	g.switchLocked(true)
 }

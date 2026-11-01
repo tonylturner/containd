@@ -47,6 +47,8 @@ type Engine struct {
 	inspectionRegistry    atomic.Uint64
 	managementReservation *mgmtpath.Reservation
 	engineAPI             *enforce.EngineAPIPath
+	captureConfig         capture.Config
+	protection            *protectionState
 	capture               captureRunner
 	runCapture            captureRunner
 	runCancel             context.CancelFunc
@@ -221,6 +223,7 @@ func New(cfg Config) (*Engine, error) {
 		managementReservation: cfg.Enforce.ManagementReservation,
 		engineAPI:             cfg.Enforce.EngineAPI,
 		capture:               capManager,
+		captureConfig:         cfg.Capture,
 		onError:               cfg.OnError,
 		inspectAll:            cfg.InspectAll,
 		dpiEnabled:            cfg.DPIEnabled,
@@ -253,6 +256,7 @@ func New(cfg Config) (*Engine, error) {
 	if e.eventStore == nil {
 		e.eventStore = events.NewStore(4096)
 	}
+	e.protection = newProtection(e.eventStore)
 	e.dpiMgr = dpi.NewManager(FilterDecoders(cfg.DPIProtocols, cfg.DPIICSProtocols)...)
 	e.initIEC(cfg, capManager)
 	e.gate = &envelopeGate{}
@@ -275,6 +279,7 @@ func New(cfg Config) (*Engine, error) {
 			e.updater = enforce.NewNftUpdater(comp.TableName)
 		}
 	}
+	e.bindProtection(true)
 	if err := e.initTransport(cfg); err != nil {
 		return nil, err
 	}
@@ -311,42 +316,16 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 			return fmt.Errorf("remove enforcement tables: %w", err)
 		}
 		e.releaseRulesetStatus()
+		e.protection.released()
 		e.admission = admissionPolicy{}
 	}
 
-	prevCancel := e.runCancel
-	prevCapture := e.runCapture
-	e.flowMu.Lock()
-	prevNflogStop := e.nflogStop
-	e.nflogStop = nil
-	e.flowMu.Unlock()
-	prevRunDone := e.runDone
 	prevIEC := e.iec
-	if prevCapture != nil {
-		prevCapture.Stop()
-	}
-	// Closing an inline queue invokes OnSourceDown, which schedules IEC
-	// session resets on the old worker. Keep it alive until those callbacks
-	// and their reset jobs have completed; otherwise cancellation can discard
-	// the resets while Reconfigure replaces the session table.
-	if prevIEC != nil && prevIEC.jobs != nil && prevRunDone != nil {
-		prevIEC.jobs.flush(prevRunDone)
-	}
-	if prevCancel != nil {
-		prevCancel()
-	}
-	if prevNflogStop != nil {
-		prevNflogStop()
-	}
-	if prevRunDone != nil {
-		<-prevRunDone
-	}
+	e.retireCaptureLocked()
+	e.stopNFLogLocked()
 	if prevIEC != nil {
 		prevIEC.stopInventory()
 	}
-	e.runCancel = nil
-	e.runCapture = nil
-	e.runDone = nil
 
 	e.policyMu.Lock()
 	defer e.policyMu.Unlock()
@@ -359,6 +338,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	}
 	e.observation = fresh.observation
 	e.capture = fresh.capture
+	e.captureConfig = fresh.captureConfig
 	if manager, ok := e.capture.(*capture.Manager); ok {
 		manager.SetPublicationFence(&e.policyMu)
 	}
@@ -415,6 +395,7 @@ func (e *Engine) Reconfigure(fresh *Engine) error {
 	// The old queue is closed and the new one is not bound yet: the
 	// envelope drops until the new run binds.
 	e.bindGate()
+	e.bindProtection(true)
 	e.gate.own(0)
 	// The fresh table enforces the loaded rules at once; sessions of the
 	// old run are unknown to it and are reset once.
@@ -480,44 +461,10 @@ func (e *Engine) start(ctx context.Context) (uint16, error) {
 		e.started.Store(false)
 		return group, err
 	}
-	if group != 0 {
-		// Start returned nil: the queue is bound and registered.
-		e.gate.own(group)
-	}
-	// Start the nflog consumer if configured. This produces
-	// firewall.rule.hit events for L4 (non-DPI) rules with Log:true. A
-	// failure here is non-fatal — log it via the rules-event log so the
-	// admin can see "nflog unavailable" without taking down the rest of
-	// the engine. Common cause: container lacks NET_ADMIN cap; in that
-	// case the kernel log clause still fires but the userspace consumer
-	// just won't translate the packets into events.
-	if e.nflogGroup != 0 && e.eventStore != nil {
-		stop, err := startNFLog(runCtx, e.nflogGroup, nflogRuleHits{e}, func(perr error) {
-			// Per-packet hook errors — drop. Surface only at debug.
-			_ = perr
-		})
-		if err != nil {
-			e.flowMu.Lock()
-			e.nflogStop = nil
-			e.flowMu.Unlock()
-			// Surface as a system event so it's visible in /api/v1/events.
-			e.eventStore.Append(events.Event{
-				Kind:      "service.nflog.unavailable",
-				Timestamp: time.Now().UTC(),
-				Attributes: map[string]any{
-					"group": int(e.nflogGroup),
-					"error": err.Error(),
-				},
-			})
-			if e.onError != nil {
-				e.onError(fmt.Errorf("nflog group %d unavailable: %w", e.nflogGroup, err))
-			}
-		} else {
-			e.flowMu.Lock()
-			e.nflogStop = stop
-			e.flowMu.Unlock()
-		}
-	}
+	// Only SourceReady owns the envelope. The consumer can die after
+	// registration but before Start returns; a successful return cannot
+	// overwrite the later SourceDown and reopen a dark queue.
+	e.startNFLogLocked(ctx)
 	runDone := make(chan struct{})
 	e.runDone = runDone
 	var run sync.WaitGroup

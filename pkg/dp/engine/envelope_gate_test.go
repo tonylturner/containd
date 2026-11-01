@@ -87,6 +87,9 @@ func gateEngine(t *testing.T, nft *nftModel, group uint16, c captureRunner) *Eng
 		t.Fatal(err)
 	}
 	e.capture = c
+	if fake, ok := c.(*bindCapture); ok {
+		fake.onReady = func() { e.hooks.onSource(capture.SourceEvent{Generation: 1, Ready: true}) }
+	}
 	return e
 }
 

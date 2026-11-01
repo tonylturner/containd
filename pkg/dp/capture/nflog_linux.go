@@ -52,8 +52,11 @@ var openNFLog = func(cfg *nflog.Config) (nfLogHandle, error) {
 // needed). On registration failure it returns a no-op stop and an error.
 //
 // onErr, if non-nil, is called for each non-fatal error from the netlink
-// hook (e.g., parse errors on a single packet). It should not block.
-func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(error)) (func(), error) {
+// receive hook. Recoverable packet/receive errors do not retire the consumer.
+// onSource reports terminal consumer loss after the socket closes; it must
+// not call stop itself. Parse failures for individual packets remain local
+// to the packet decoder and are not source loss.
+func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(error), onSource func(SourceEvent)) (func(), error) {
 	if sink == nil || group == 0 {
 		return func() {}, nil
 	}
@@ -80,6 +83,7 @@ func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(
 		return 0
 	}
 
+	lost := make(chan error, 1)
 	errFn := func(e error) int {
 		if onErr != nil {
 			onErr(e)
@@ -87,7 +91,14 @@ func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(
 		if nflogCtx.Err() != nil {
 			return 1
 		}
-		return 0
+		if receiveRecoverable(e) {
+			return 0
+		}
+		select {
+		case lost <- e:
+		default:
+		}
+		return 1
 	}
 
 	if err := nf.RegisterWithErrorFunc(nflogCtx, hook, errFn); err != nil {
@@ -104,13 +115,24 @@ func StartNFLog(ctx context.Context, group uint16, sink RuleHitSink, onErr func(
 	closeHandle := func() {
 		once.Do(func() { _ = nf.Close() })
 	}
+	done := make(chan struct{})
 	go func() {
-		<-nflogCtx.Done()
-		closeHandle()
+		defer close(done)
+		select {
+		case <-nflogCtx.Done():
+			closeHandle()
+		case err := <-lost:
+			cancel()
+			closeHandle()
+			if onSource != nil {
+				onSource(SourceEvent{Err: err, Terminal: true})
+			}
+		}
 	}()
 	stop := func() {
 		cancel()
 		closeHandle()
+		<-done
 	}
 	return stop, nil
 }
