@@ -5,11 +5,51 @@ configuration; review the diff and commit to apply it. Rollback reapplies the
 previous running configuration. See [Config Format](config-format.md#configuration-lifecycle)
 for the lifecycle and [API Reference](api-reference.md) for endpoint details.
 
-`containd mgmt` configures services and supervises DNS, NTP, OpenVPN, proxies,
-and optional AV daemons. The engine owns the DHCP server and kernel WireGuard
+`containd mgmt` configures services and supervises DNS, NTP, OpenVPN and proxies.
+The engine owns AV daemons, the DHCP server and kernel WireGuard
 interfaces. In split deployments these run in the engine's network namespace;
 management and engine need the intended network reachability and privileges.
 Check runtime status after commit, not just whether saving succeeded.
+
+## Service faults
+
+An older stored service configuration that no longer passes validation is
+quarantined independently. Management, firewall replay and other services keep
+running. Missing or expired proxy TLS material is also checked at apply time:
+there is no plaintext fallback. Management-run process or filesystem failures
+are reported as runtime faults; they do not prevent firewall application.
+
+`GET /api/v1/services/status` includes a sorted `faults` array (empty when healthy).
+Each entry has `service`, `kind` (`config` or `runtime`) and a sanitized `message`.
+Service identities are `syslog`, `dns`, `ntp`, `av`, `proxy`, `dhcp`, `wireguard`
+and `openvpn`. Faulted service entries also contain `state: "faulted"` and `fault`
+with that same object. WireGuard and OpenVPN have independent entries; the legacy
+`vpn` entry remains. AV retains engine availability and runtime details alongside
+the management-known fault, even when the engine is unreachable.
+
+The desired configuration remains available for inspection, export and repair;
+quarantine is never saved over it. Unchanged faults can be carried through
+unrelated configuration edits, but new faults and invalid edits to a faulting
+service are rejected. Clear the service section or repair it before changing
+that service. Commit checks this again against the current running document.
+Ruleset and coverage previews use the effective configuration and disclose
+`serviceFaults`.
+
+A quarantined service gets no automatic firewall admission rule. VPN CIDR tokens
+for a quarantined tunnel match nothing; OpenVPN is stopped, and a quarantined
+DHCP server is stopped without its UDP/67 input rule. WireGuard quarantine
+currently requests removal of `wg0`, not a previously configured custom
+interface name. Do not rely on quarantine to tear down a custom-named tunnel.
+AV is different: scanner quarantine retains scan selection, directions and fail
+policy. A closed policy still blocks unscanned content except the configured ICS
+bypass; an open policy permits it. Quarantine does not silently disable the gate.
+
+Fault-set changes produce service events and best-effort durable audit records,
+not duplicate faults on every engine reconnect. The most recent boot's faults
+also appear as `bootServiceFaults` in `/api/v1/system/management-reservation`.
+Audit-write failure is logged and does not stop enforcement. Metrics expose
+`containd_services_faulted{service}` and do not count faulted services as running.
+Successful later application clears the fault.
 
 ## Syslog
 

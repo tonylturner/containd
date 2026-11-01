@@ -24,9 +24,9 @@ import (
 
 type resetCaptureServices struct{ config.ServicesConfig }
 
-func (s *resetCaptureServices) Apply(_ context.Context, cfg config.ServicesConfig) error {
+func (s *resetCaptureServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
 	s.ServicesConfig = cfg
-	return nil
+	return cfg, nil
 }
 
 func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {

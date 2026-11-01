@@ -909,17 +909,19 @@ type IOARange struct {
 // blockTtlSeconds still loads and is ignored. Scan alone is strict
 // (config_scan.go).
 type AVConfig struct {
-	Enabled      bool          `json:"enabled"`
-	Mode         string        `json:"mode,omitempty"`         // clamav (default) | icap
-	FailPolicy   string        `json:"failPolicy,omitempty"`   // open|closed
-	MaxSizeBytes int64         `json:"maxSizeBytes,omitempty"` // 0 = unlimited
-	TimeoutSec   int           `json:"timeoutSec,omitempty"`   // backend connect/scan bound
-	CacheTTL     time.Duration `json:"cacheTtl,omitempty"`     // native ClamAV verdict cache TTL; ICAP is never cached
-	ICAP         ICAPConfig    `json:"icap,omitempty"`
-	ClamAV       ClamAVConfig  `json:"clamav,omitempty"`
-	HTTPDownload bool          `json:"httpDownload,omitempty"` // scan HTTP responses
-	HTTPUpload   bool          `json:"httpUpload,omitempty"`   // scan HTTP requests/uploads
-	Scan         ScanSelection `json:"scan,omitempty"`         // traffic the scanning gate intercepts
+	// BackendDisabled is set only on an in-memory quarantine projection.
+	BackendDisabled bool          `json:"backendDisabled,omitempty"`
+	Enabled         bool          `json:"enabled"`
+	Mode            string        `json:"mode,omitempty"`         // clamav (default) | icap
+	FailPolicy      string        `json:"failPolicy,omitempty"`   // open|closed
+	MaxSizeBytes    int64         `json:"maxSizeBytes,omitempty"` // 0 = unlimited
+	TimeoutSec      int           `json:"timeoutSec,omitempty"`   // backend connect/scan bound
+	CacheTTL        time.Duration `json:"cacheTtl,omitempty"`     // native ClamAV verdict cache TTL; ICAP is never cached
+	ICAP            ICAPConfig    `json:"icap,omitempty"`
+	ClamAV          ClamAVConfig  `json:"clamav,omitempty"`
+	HTTPDownload    bool          `json:"httpDownload,omitempty"` // scan HTTP responses
+	HTTPUpload      bool          `json:"httpUpload,omitempty"`   // scan HTTP requests/uploads
+	Scan            ScanSelection `json:"scan,omitempty"`         // traffic the scanning gate intercepts
 }
 
 type ICAPConfig struct {

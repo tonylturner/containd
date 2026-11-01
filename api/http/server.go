@@ -151,10 +151,10 @@ type ServicesValidator interface {
 	Validate(ctx context.Context, cfg config.ServicesConfig) error
 }
 
-// ServicesApplier is an optional interface for applying services config
-// (syslog/proxies/etc.) when commits are made.
+// ServicesApplier applies a validated projection and its fault set. Runtime
+// failures narrow that projection and return warnings, never block enforcement.
 type ServicesApplier interface {
-	Apply(ctx context.Context, cfg config.ServicesConfig) error
+	ApplyEffective(ctx context.Context, cfg config.ServicesConfig, faults []config.ServiceConfigError) (config.ServicesConfig, []string)
 }
 
 // NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
@@ -448,7 +448,12 @@ func validateConfigHandler(store config.Store) gin.HandlerFunc {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if err := config.ValidateForStore(store, &cfg); err != nil {
+		baseline, err := store.Load(c.Request.Context())
+		if err != nil && !errors.Is(err, config.ErrNotFound) {
+			internalError(c, err)
+			return
+		}
+		if err := config.CheckWrite(baseline, &cfg, config.ReservationForStore(store)); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -543,25 +548,32 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	// and validated. Keep this change in memory only: applying a previously
 	// loaded snapshot must never persist it over a newer store mutation.
 	// Bootstrap owns persisted default device bindings.
-	if err := config.ValidateForStore(store, cfg); err != nil {
-		return nil, err
-	}
-	// Reserved bindings were persisted by bootstrap. Never normalize them during
-	// replay: preflight must precede every runtime side effect.
 	if config.ReservationForStore(store) == nil {
 		bindUnboundDefaultInterfaceDevices(cfg)
 	}
-	if err := config.ValidateForStore(store, cfg); err != nil {
+	effective, faults, err := config.EffectiveForStore(store, cfg)
+	if err != nil {
 		return nil, err
 	}
-	scanWarnings, err := config.ValidateScanSelection(cfg)
+	cfg = effective
+	scanWarnings, _ := config.ValidateScanSelection(cfg)
+	// Compile once before any side effects. A sink may subsequently quarantine
+	// another service; compile that narrower projection again before engine apply.
+	snap, err := compile.CompileSnapshot(cfg)
 	if err != nil {
 		return nil, err
 	}
 	if services != nil {
-		if err := services.Apply(ctx, cfg.Services); err != nil {
+		var serviceWarnings []string
+		cfg.Services, serviceWarnings = services.ApplyEffective(ctx, cfg.Services, faults)
+		scanWarnings = append(scanWarnings, serviceWarnings...)
+		snap, err = compile.CompileSnapshot(cfg)
+		if err != nil {
 			return nil, err
 		}
+	}
+	for _, fault := range faults {
+		scanWarnings = append(scanWarnings, fault.Service+": quarantined")
 	}
 	warnings := scanWarnings
 	if engine == nil {
@@ -607,11 +619,6 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 				warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
 			}
 		}
-	}
-	// Always compile and push rules regardless of infrastructure errors.
-	snap, err := compile.CompileSnapshot(cfg)
-	if err != nil {
-		return nil, err
 	}
 	if err := engine.ApplyRules(ctx, snap); err != nil {
 		return nil, fmt.Errorf("ruleset: %w", err)

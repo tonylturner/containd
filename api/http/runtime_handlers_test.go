@@ -173,8 +173,8 @@ type telemetryOnlyServices struct {
 	events []dpevents.Event
 }
 
-func (t telemetryOnlyServices) Apply(ctx context.Context, cfg config.ServicesConfig) error {
-	return nil
+func (t telemetryOnlyServices) ApplyEffective(ctx context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+	return cfg, nil
 }
 
 func (t telemetryOnlyServices) ListTelemetryEvents(limit int) []dpevents.Event {

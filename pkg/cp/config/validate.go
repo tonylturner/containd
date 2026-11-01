@@ -18,6 +18,13 @@ import (
 
 // Validate performs basic consistency checks on the config.
 func (c *Config) Validate() error {
+	if err := c.validateCore(); err != nil {
+		return err
+	}
+	return ValidateServiceConfigs(c)
+}
+
+func (c *Config) validateCore() error {
 	if c == nil {
 		return errors.New("config is nil")
 	}
@@ -69,9 +76,11 @@ func (c *Config) Validate() error {
 	if err := validateIDS(c.IDS); err != nil {
 		return err
 	}
-	if err := validateServices(c.Services, c.Interfaces, c.Zones); err != nil {
-		return err
-	}
+	return c.validateCoreServices()
+}
+
+// validateCoreServices checks policy on desired state, before service projection.
+func (c *Config) validateCoreServices() error {
 	if _, err := ValidateScanSelection(c); err != nil {
 		return err
 	}

@@ -14,13 +14,7 @@ import (
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 )
 
-type vpnManagedServices struct{ *cpservices.VPNManager }
-
-func (s *vpnManagedServices) Apply(ctx context.Context, cfg config.ServicesConfig) error {
-	return s.VPNManager.Apply(ctx, cfg.VPN)
-}
-
-func vpnManagedAuthority(t *testing.T, cfg config.VPNConfig) *vpnManagedServices {
+func vpnManagedAuthority(t *testing.T, cfg config.VPNConfig) *cpservices.Manager {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("CONTAIND_OPENVPN_DIR", filepath.Join(root, "authority"))
@@ -49,7 +43,7 @@ while true; do sleep 0.02; done
 	if err := manager.Apply(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	return &vpnManagedServices{manager}
+	return &cpservices.Manager{VPN: manager}
 }
 
 func TestVPNClientManagedAuthority(t *testing.T) {
@@ -81,7 +75,7 @@ func TestVPNClientManagedAuthority(t *testing.T) {
 	}
 	// Removing the daemon executable makes runtime confirmation impossible but
 	// cannot prevent or roll back the durable revocation.
-	svc.OpenVPNPath = filepath.Join(t.TempDir(), "missing-openvpn")
+	svc.VPN.OpenVPNPath = filepath.Join(t.TempDir(), "missing-openvpn")
 	rec = vpnRequest(server, "POST", "/clients/"+credential.ID+"/revoke", "")
 	var result cpservices.OpenVPNRevokeResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil || rec.Code != http.StatusServiceUnavailable || !result.Revoked || result.Applied {

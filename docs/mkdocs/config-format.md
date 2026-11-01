@@ -13,6 +13,20 @@ Keep `dataplane.enforcement: true` to install firewall rules. The example below
 shows the existing intentionally disabled mode, which only applies an in-memory
 snapshot and cannot certify nft enforcement.
 
+Stored-state replay, rollback and commit confirmation tolerate service-only
+faults by applying an in-memory effective configuration. They still refuse
+invalid firewall, scan-selection or management-path policy. The stored document
+is preserved, including quarantined service settings.
+
+Candidate saves, imports and commits reject new service faults. They permit a
+fault only when the running document already faults that service and its section
+is unchanged. This lets an operator repair firewall policy without first fixing
+an unrelated service. New defaults and factory resets require fault-free
+configuration. Validation previews use the same write rule. Schema migrations
+preserve historical service content; boot repairs may change interface bindings
+and management defaults but may not change service sections.
+See [Service faults](services.md#service-faults) for status and protection effects.
+
 ## Schema
 
 This complete example uses schema `0.1.9`. It defines two routed networks and a

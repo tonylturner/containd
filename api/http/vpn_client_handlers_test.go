@@ -28,7 +28,9 @@ type vpnClientServices struct {
 	result      cpservices.OpenVPNRevokeResult
 }
 
-func (*vpnClientServices) Apply(context.Context, config.ServicesConfig) error { return nil }
+func (*vpnClientServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+	return cfg, nil
+}
 func (s *vpnClientServices) ListOpenVPNClients(context.Context) (cpservices.OpenVPNClientList, error) {
 	return cpservices.OpenVPNClientList{Clients: s.credentials, RevocationsApplied: s.applied}, s.err
 }

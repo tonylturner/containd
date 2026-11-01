@@ -104,6 +104,9 @@ func validateNTPService(cfg NTPConfig) error {
 }
 
 func validateAV(cfg AVConfig) error {
+	if cfg.BackendDisabled {
+		return nil
+	}
 	if cfg.ClamAV.SocketPath != "" {
 		if err := ValidateClamdSocketPath(cfg.ClamAV.SocketPath); err != nil {
 			return err

@@ -221,7 +221,11 @@ func servicesHandler(logger *zap.SugaredLogger, dpEngine *engine.Engine, ownersh
 			var avPending bool
 			if av != nil {
 				avCtx, cancelAV := context.WithTimeout(r.Context(), avApplyTimeout)
-				avErr = av.Apply(avCtx, svc.AV)
+				backend := svc.AV
+				if backend.BackendDisabled {
+					backend.Enabled = false
+				}
+				avErr = av.Apply(avCtx, backend)
 				avPending = avApplyPending(avCtx, avErr)
 				cancelAV()
 			}

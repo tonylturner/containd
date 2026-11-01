@@ -2,6 +2,7 @@
 package mgmtapp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -9,9 +10,24 @@ import (
 	"testing"
 
 	"github.com/tonylturner/containd/pkg/common/mgmtpath"
+	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"go.uber.org/zap"
 )
+
+type failedBootFaultAudit struct{ audit.Store }
+
+func (failedBootFaultAudit) Add(context.Context, audit.Record) error { return errors.New("disk full") }
+
+func TestBootServiceFaultAuditFailureContinues(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Services.Proxy.Forward.Upstream = "legacy"
+	store := &bootFaultRecordingStore{}
+	event, events, err := recordBootDecision(zap.NewNop().Sugar(), mgmtStores{store: store, auditStore: failedBootFaultAudit{}}, cfg, nil)
+	if err != nil || event != nil || store.fault != "" || len(events) != 1 || events[0].Kind != "service.config_fault" {
+		t.Fatalf("audit failure blocked service-tolerant boot: %v %+v", err, events)
+	}
+}
 
 func TestBootServiceFaultDecision(t *testing.T) {
 	for _, reserved := range []bool{false, true} {
@@ -44,7 +60,7 @@ func TestBootServiceFaultDecision(t *testing.T) {
 				}
 				store := &bootFaultRecordingStore{fault: "historical recovery"}
 				auditStore := &testAuditStore{}
-				event, err := recordBootDecision(zap.NewNop().Sugar(), mgmtStores{
+				event, serviceEvents, err := recordBootDecision(zap.NewNop().Sugar(), mgmtStores{
 					store: store, auditStore: auditStore,
 				}, cfg, reservation)
 				if err != nil {
@@ -62,7 +78,7 @@ func TestBootServiceFaultDecision(t *testing.T) {
 				if mixed && !strings.Contains(event.Kind, "boot_fault") {
 					t.Fatalf("lost primary management boot fault: %+v", event)
 				}
-				services := &bootEventServices{event: event}
+				services := &bootEventServices{event: event, events: serviceEvents}
 				events := services.ListTelemetryEvents(0)
 				want := 3
 				if mixed {
@@ -116,7 +132,7 @@ func TestBootServiceFaultErrorTree(t *testing.T) {
 		{errors.Join(fault, other), 1, true},
 		{fmt.Errorf("outer: %w", errors.Join(fault, other)), 1, true},
 	} {
-		faults, err := splitServiceFaults(tc.err)
+		faults, err := config.SplitServiceFaults(tc.err)
 		if len(faults) != tc.count || (err != nil) != tc.mixed {
 			t.Errorf("split %v => faults=%v other=%v", tc.err, faults, err)
 		}

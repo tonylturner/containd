@@ -62,9 +62,9 @@ func (e *stageEngine) ApplyRules(_ context.Context, snap rules.Snapshot) error {
 
 type stageServices struct{ mutations int }
 
-func (s *stageServices) Apply(context.Context, config.ServicesConfig) error {
+func (s *stageServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
 	s.mutations++
-	return nil
+	return cfg, nil
 }
 
 func stageStore(t *testing.T) *config.SQLiteStore {

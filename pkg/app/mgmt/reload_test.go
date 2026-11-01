@@ -22,9 +22,9 @@ type reloadServices struct {
 	last config.ServicesConfig
 }
 
-func (s *reloadServices) Apply(_ context.Context, cfg config.ServicesConfig) error {
+func (s *reloadServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
 	s.last = cfg
-	return nil
+	return cfg, nil
 }
 
 type invalidReloadStore struct{ *config.SQLiteStore }

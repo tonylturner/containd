@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Project stored service faults for firewall replay and report per-service
+  status. Retain AV fail policy and allow unrelated edits carrying unchanged
+  faults. Custom-named WireGuard tunnel teardown remains unsupported by quarantine.
 - Direct CLI login explains when an account needs MFA, password rotation or MFA
   enrollment and directs users to the web UI or SSH.
 - Partial account profile updates preserve omitted fields and still allow explicit clearing.

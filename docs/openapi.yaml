@@ -1665,6 +1665,7 @@ components:
         scan.icsAssets replace it. The scanning gate intercepts traffic only with enabled, at least
         one scan.include entry and httpDownload or httpUpload set.
       properties:
+        backendDisabled: {type: boolean, readOnly: true, description: Runtime-only quarantine projection; disables the scanner backend without disabling scan policy. Rejected in desired configuration writes}
         cacheTtl: {type: integer, format: int64, minimum: 0, description: Native ClamAV verdict cache lifetime in nanoseconds; 0 selects 10 minutes. ICAP verdicts are never cached}
         clamav: {$ref: '#/components/schemas/ClamAVConfig'}
         enabled: {type: boolean}
@@ -1708,12 +1709,31 @@ components:
         destinations: {items: {type: string}, type: array, description: Effective destination CIDRs}
         destPorts: {items: {type: string}, type: array, description: Decimal ports or N-M ranges}
       type: object
+    ServiceFault:
+      type: object
+      additionalProperties: false
+      required: [service, kind, message]
+      properties:
+        service:
+          type: string
+          enum: [syslog, dns, ntp, av, proxy, dhcp, wireguard, openvpn]
+        kind: {type: string, enum: [config, runtime]}
+        message: {type: string, description: Sanitized diagnostic; contains no credentials}
+    ServiceFaultStatus:
+      type: object
+      additionalProperties: true
+      description: Existing service runtime fields with optional quarantine diagnostics; absence of a fault does not assert runtime readiness.
+      properties:
+        state: {type: string, enum: [faulted], description: Present while faulted}
+        fault: {$ref: '#/components/schemas/ServiceFault'}
     AVStatus:
       description: The engine's live antivirus status; the keys beside gate are the applied settings, readiness, counters and the clamd and FreshClam state.
       type: object
       additionalProperties: true
       properties:
-        available: {type: boolean, description: false when the engine cannot be reached; the entry then carries only error}
+        available: {type: boolean, description: false when the engine cannot be reached; management-known state and fault remain visible alongside error}
+        state: {type: string, enum: [faulted], description: Management-known service fault; independent of engine availability}
+        fault: {$ref: '#/components/schemas/ServiceFault'}
         error: {type: string}
         ready: {type: boolean}
         db_version: {type: string}
@@ -3703,6 +3723,10 @@ paths:
                       default-deny recovery ruleset instead. Without a reservation
                       that ruleset keeps the stored management listener access.
                       A safe commit, rollback or factory reset clears it.
+                  bootServiceFaults:
+                    type: array
+                    items: {$ref: '#/components/schemas/ServiceFault'}
+                    description: Service quarantine recorded at the most recent boot; never activates management recovery.
                   recovery:
                     type: string
                     description: >
@@ -6714,6 +6738,10 @@ paths:
                     items: {$ref: '#/components/schemas/ICSCoverageRule'}
                     description: Static coverage of the candidate, in rule ID order; empty without ICS rules.
                   candidateError: {type: string, description: Why the candidate does not validate.}
+                  serviceFaults:
+                    type: array
+                    items: {$ref: '#/components/schemas/ServiceFault'}
+                    description: Quarantined candidate services omitted from the effective coverage projection.
                   applied:
                     type: array
                     items: {$ref: '#/components/schemas/ICSCoverageRule'}
@@ -6797,6 +6825,10 @@ paths:
                     description: Static coverage of the candidate's ICS rules, in rule ID order; omitted when there are none.
                   engineStatus: {$ref: '#/components/schemas/EngineRulesetStatus'}
                   engineStatusError: {type: string}
+                  serviceFaults:
+                    type: array
+                    items: {$ref: '#/components/schemas/ServiceFault'}
+                    description: Quarantined services omitted from the effective candidate ruleset; empty when none.
         '400':
           description: Invalid candidate configuration
         '502':
@@ -7639,6 +7671,10 @@ paths:
         engine's live antivirus status (ready, db_version, counters) with the
         scanning gate under gate; when the engine cannot be reached it is
         {"available": false, "error": ...}.
+        faults is a sorted array of per-service diagnostics, empty when none.
+        Each faulted service also has state=faulted and fault. WireGuard and
+        OpenVPN have independent entries; vpn is retained as an aggregate.
+        AV fault fields are merged without replacing engine-observed status.
         syslog.audit reports audit-record forwarding: enabled, sent_total,
         failed_total, last_error, last_flush, backlog, and forwarders, a list
         of {forwarder, last_id, backlog, last_error, last_sent}.
@@ -7650,7 +7686,19 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+                required: [faults]
                 properties:
+                  faults:
+                    type: array
+                    items: {$ref: '#/components/schemas/ServiceFault'}
+                  syslog: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  dns: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  ntp: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  proxy: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  dhcp: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  vpn: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  wireguard: {$ref: '#/components/schemas/ServiceFaultStatus'}
+                  openvpn: {$ref: '#/components/schemas/ServiceFaultStatus'}
                   av: {$ref: '#/components/schemas/AVStatus'}
 
 # Trusted engine operations, on the engine listener only; not public API paths.

@@ -85,7 +85,9 @@ func TestCandidateBankRoutingAndResponse(t *testing.T) {
 
 type bankFreeValidationServices struct{}
 
-func (bankFreeValidationServices) Apply(context.Context, config.ServicesConfig) error    { return nil }
+func (bankFreeValidationServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+	return cfg, nil
+}
 func (bankFreeValidationServices) Validate(context.Context, config.ServicesConfig) error { return nil }
 
 func TestServiceValidationReadsBankFreeDocument(t *testing.T) {

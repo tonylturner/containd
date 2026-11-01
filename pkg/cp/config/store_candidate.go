@@ -160,7 +160,11 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, ttl time.Duration) erro
 	if err != nil {
 		return err
 	}
-	if err := s.ValidateConfig(candidate); err != nil {
+	baseline, err := readKindFrom(ctx, s.db, configKeyRunning, false)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err := s.checkWrite(baseline, candidate); err != nil {
 		return err
 	}
 	if err := s.validateSSHAccessLocked(ctx, candidate); err != nil {
@@ -243,7 +247,7 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.ValidateConfig(prev); err != nil {
+	if err := s.checkStored(prev); err != nil {
 		if recordErr := s.recordRollbackRefusal(ctx, err); recordErr != nil {
 			return fmt.Errorf("record rollback refusal (%v): %w", err, recordErr)
 		}
