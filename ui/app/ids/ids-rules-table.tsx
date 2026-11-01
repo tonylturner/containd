@@ -21,6 +21,7 @@ import {
 export function RulesTable({
   rules,
   canEdit,
+  mutationDisabled = false,
   onEdit,
   onDelete,
   onBulkDelete,
@@ -29,6 +30,7 @@ export function RulesTable({
 }: {
   rules: IDSRule[];
   canEdit: boolean;
+  mutationDisabled?: boolean;
   onEdit: (r: IDSRule) => void;
   onDelete: (id: string) => void;
   onBulkDelete: (ids: string[]) => void;
@@ -264,18 +266,21 @@ export function RulesTable({
           </button>
           <span className="flex-1" />
           <button
+            disabled={mutationDisabled}
             onClick={() => onBulkToggle(Array.from(selected), true)}
             className="rounded-xs border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-400 transition-ui hover:bg-emerald-500/20"
           >
             Enable
           </button>
           <button
+            disabled={mutationDisabled}
             onClick={() => onBulkToggle(Array.from(selected), false)}
             className="rounded-xs border bg-(--surface2) px-2.5 py-1 text-xs text-(--text-muted) transition-ui"
           >
             Disable
           </button>
           <button
+            disabled={mutationDisabled}
             onClick={() => {
               onBulkDelete(Array.from(selected));
               clearSelection();
@@ -388,6 +393,7 @@ export function RulesTable({
                     <td className="px-4 py-2.5">
                       {canEdit ? (
                         <button
+                          disabled={mutationDisabled}
                           onClick={() => onToggleRule(r.id)}
                           title={enabled ? "Click to disable" : "Click to enable"}
                           className={`inline-flex h-5 w-9 items-center rounded-full transition-colors ${enabled ? "bg-emerald-500/30" : "bg-white/10"}`}
@@ -437,12 +443,14 @@ export function RulesTable({
                       {canEdit && (
                         <>
                           <button
+                            disabled={mutationDisabled}
                             onClick={() => onEdit(r)}
                             className="mr-1.5 rounded-xs border bg-(--surface2) px-2 py-0.5 text-[11px] transition-ui"
                           >
                             Edit
                           </button>
                           <button
+                            disabled={mutationDisabled}
                             onClick={() => onDelete(r.id)}
                             className="rounded-xs px-2 py-0.5 text-[11px] text-red-400 transition-ui hover:bg-red-500/10"
                           >

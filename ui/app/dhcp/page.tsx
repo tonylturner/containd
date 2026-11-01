@@ -186,7 +186,6 @@ export default function DHCPPage() {
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={false} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} attention={!status ? "Live service status unavailable — use Refresh to retry" : status.last_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)} updated={status?.last_render} />
-      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -218,7 +217,7 @@ export default function DHCPPage() {
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setCfg((c) => ({ ...c, enabled: e.target.checked }))}
               className="h-4 w-4"
             />
@@ -230,7 +229,7 @@ export default function DHCPPage() {
             <input
               type="checkbox"
               checked={cfg.authoritative ?? false}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setCfg((c) => ({ ...c, authoritative: e.target.checked }))}
               className="h-4 w-4"
             />
@@ -245,7 +244,7 @@ export default function DHCPPage() {
             </label>
             <input
               value={listenIfacesText}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setText("listenIfaces", e.target.value)}
               placeholder="lan2, lan3"
               className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -258,7 +257,7 @@ export default function DHCPPage() {
             </label>
             <input
               value={cfg.router ?? ""}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setCfg((c) => ({ ...c, router: e.target.value }))}
               placeholder="192.168.1.1"
               className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -272,7 +271,7 @@ export default function DHCPPage() {
             <textarea
               rows={6}
               value={poolsText}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setText("pools", e.target.value)}
               placeholder={"lan2,192.168.10.100,192.168.10.200\nlan3,192.168.20.100,192.168.20.200"}
               className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -290,7 +289,7 @@ export default function DHCPPage() {
                 <input
                   type="number"
                   value={cfg.leaseSeconds ?? 3600}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setCfg((c) => ({ ...c, leaseSeconds: Number(e.target.value) || 0 }))}
                   className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
                 />
@@ -303,7 +302,7 @@ export default function DHCPPage() {
                 </label>
                 <input
                   value={dnsServersText}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setText("dnsServers", e.target.value)}
                   placeholder="192.168.1.1, 1.1.1.1"
                   className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -317,7 +316,7 @@ export default function DHCPPage() {
                 </label>
                 <input
                   value={cfg.domain ?? ""}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setCfg((c) => ({ ...c, domain: e.target.value }))}
                   placeholder="lab.local"
                   className="mt-1 w-full input-industrial transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -332,7 +331,7 @@ export default function DHCPPage() {
                 <textarea
                   rows={6}
                   value={reservationsText}
-                  disabled={!canEdit}
+                  disabled={!canEdit || !canSave}
                   onChange={(e) => setText("reservations", e.target.value)}
                   placeholder={"lan2,aa:bb:cc:dd:ee:ff,192.168.10.50"}
                   className="mt-1 w-full rounded-xs border bg-(--surface) px-3 py-2 font-mono text-xs text-(--text) transition-ui focus-visible:shadow-focus-ring outline-hidden"
@@ -481,7 +480,6 @@ export default function DHCPPage() {
           )}
         </div>
       </Card>
-      </fieldset>
     </Shell>
   );
 }

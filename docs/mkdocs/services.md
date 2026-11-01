@@ -25,6 +25,8 @@ is the service's reported render/check time, not a guarantee of freshness.
 **Troubleshooting** contains the **Service details** button for process IDs,
 paths and software metadata. The button works with Enter or Space and leaves
 focus on the button when closed. Fault causes remain outside disclosures.
+Inspection stays available when the configuration read fails: editing and
+**Save** are disabled, not troubleshooting or live-status refresh.
 Antivirus keeps **Scanned traffic** beside its enable and fail-policy settings;
 definition updates and VPN credential revocations remain immediate operations,
 separate from staging settings with **Save**.
@@ -37,6 +39,12 @@ Antivirus **Scan-path details** retains listener counts and admission metadata;
 fault causes, the scanning outcome and fail policy remain visible. Syslog
 **Delivery details** and per-stream **Technical details** expose batching and exact
 stream positions.
+The antivirus status strip also summarizes the scan-path state and its traffic
+effect before settings. Syslog summarizes known telemetry loss, continuity gaps
+and audit forwarding failures/backlog there; per-stream totals are summed across
+destinations and sources, not unique lost records. Audit forwarding does not
+report a loss count, and missing progress remains **Unknown**. The collector
+acknowledgement caveat is a neutral note, not itself a delivery fault.
 **Advanced local scanner settings** and **Advanced remote scanner settings**
 retain scanner paths, update scheduling and ICAP protocol settings. VPN keeps
 peer JSON and profile import under **Advanced peer settings** and

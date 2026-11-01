@@ -16,6 +16,9 @@ default; a count remains visible when closed. The **Filter** text field preserve
 the exact matching expression, with syntax help in **Advanced group matching**.
 **Export** and **Sources** are secondary tools below the list. At export the UI
 states **Export uses active committed rules**: candidate changes are not included.
+If a configuration refresh fails, retained rules, group details, filters,
+**Export** and **Sources** remain inspectable; configuration edits stay disabled
+until the configuration can be read again.
 
 ## Storage and staging
 

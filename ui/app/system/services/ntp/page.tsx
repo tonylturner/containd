@@ -105,7 +105,6 @@ export default function NTPPage() {
       <ServiceStatusStrip configured={canSave ? cfg.enabled : undefined} running={status?.running}
         attention={!status ? "Live service status unavailable — use Refresh to retry" : status.last_error || status.fault?.message || (status.state === "faulted" ? "Service faulted" : undefined)}
         updated={status?.last_render} />
-      <fieldset disabled={!canSave} className="min-w-0">
       {!canEdit && (
         <div className="mb-4 rounded-xs border bg-(--surface) px-4 py-3 text-sm text-(--text)">
           View-only mode: configuration changes are disabled.
@@ -131,7 +130,7 @@ export default function NTPPage() {
             <input
               type="checkbox"
               checked={cfg.enabled ?? false}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) =>
                 setCfg((c) => ({ ...c, enabled: e.target.checked }))
               }
@@ -148,7 +147,7 @@ export default function NTPPage() {
             <input
               type="number"
               value={cfg.intervalSeconds ?? 0}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) =>
                 setCfg((c) => ({
                   ...c,
@@ -167,7 +166,7 @@ export default function NTPPage() {
             <textarea
               rows={5}
               value={serversText}
-              disabled={!canEdit}
+              disabled={!canEdit || !canSave}
               onChange={(e) => setText("servers", e.target.value)}
               placeholder="pool.ntp.org\n192.0.2.10"
               className="mt-1 w-full input-industrial"
@@ -239,7 +238,6 @@ export default function NTPPage() {
           </div>
         )}
       </Card>
-      </fieldset>
     </Shell>
   );
 }
