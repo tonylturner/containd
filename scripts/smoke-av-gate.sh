@@ -6,7 +6,8 @@ set -euo pipefail
 # Requirements: docker compose, jq, curl.
 #
 # The harness installs a forward policy (default deny, lan_client -> wan on
-# tcp/8080 and tcp/8082), SNAT lan->wan and a DNAT port forward from the
+# tcp/8080 and tcp/8082, and an ALLOW limited to the port forward, which
+# only translates), SNAT lan->wan and a DNAT port forward from the
 # engine's WAN address to av_target:80, then enables the native clamd with
 # FreshClam off and one local signature, the MD5 of the EICAR test file,
 # uploaded as a custom definition, so no network is needed. The scan
@@ -359,6 +360,15 @@ apply_policy() {
           destZones:["wan"],
           sources:[($lanClient + "/32")],
           protocols:[{name:"tcp", port:"8080"}, {name:"tcp", port:"8082"}],
+          action:"ALLOW"
+        },
+        {
+          id:"allow-av-forward",
+          sourceZones:["wan"],
+          destZones:["lan"],
+          destinations:[($avTarget + "/32")],
+          protocols:[{name:"tcp", port:"80"}],
+          viaForwards:["av-http"],
           action:"ALLOW"
         }
       ]
