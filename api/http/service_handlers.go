@@ -131,13 +131,12 @@ func setDNSHandler(store config.Store, services ServicesApplier) gin.HandlerFunc
 			return
 		}
 		if v, ok := services.(ServicesValidator); ok && v != nil {
-			current, err := loadCandidateDocument(c.Request.Context(), store)
+			_, err := loadCandidateDocument(c.Request.Context(), store)
 			if err != nil {
 				internalError(c, err)
 				return
 			}
-			next := current.Services
-			next.DNS = dnsCfg
+			next := config.ServicesConfig{DNS: dnsCfg}
 			if err := v.Validate(c.Request.Context(), next); err != nil {
 				apiError(c, http.StatusBadRequest, err.Error())
 				return
@@ -204,13 +203,12 @@ func setAVHandler(store config.Store, services ServicesApplier) gin.HandlerFunc 
 			return
 		}
 		if v, ok := services.(ServicesValidator); ok && v != nil {
-			current, err := loadCandidateDocument(c.Request.Context(), store)
+			_, err := loadCandidateDocument(c.Request.Context(), store)
 			if err != nil {
 				internalError(c, err)
 				return
 			}
-			next := current.Services
-			next.AV = avCfg
+			next := config.ServicesConfig{AV: avCfg}
 			if err := v.Validate(c.Request.Context(), next); err != nil {
 				apiError(c, http.StatusBadRequest, err.Error())
 				return
@@ -435,7 +433,15 @@ func getServicesStatusHandler(services ServicesApplier, engine EngineClient) gin
 				out = m
 			}
 		}
-		out["av"] = engineAVStatus(c.Request.Context(), engine)
+		av := engineAVStatus(c.Request.Context(), engine)
+		if desired, ok := out["av"].(map[string]any); ok && desired["state"] == "faulted" {
+			av["state"] = "faulted"
+			av["fault"] = desired["fault"]
+		}
+		out["av"] = av
+		if _, ok := out["faults"]; !ok {
+			out["faults"] = []cpservices.ServiceFault{}
+		}
 		c.JSON(http.StatusOK, out)
 	}
 }
@@ -453,4 +459,8 @@ func engineAVStatus(ctx context.Context, engine EngineClient) map[string]any {
 	}
 	status["available"] = true
 	return status
+}
+
+func serviceFaultResponse(faults []config.ServiceConfigError) []cpservices.ServiceFault {
+	return cpservices.ConfigFaults(faults)
 }

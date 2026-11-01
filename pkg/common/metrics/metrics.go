@@ -88,7 +88,7 @@ var (
 		Namespace: namespace,
 		Subsystem: "services",
 		Name:      "running",
-		Help:      "Whether a managed service is running (1) or stopped (0).",
+		Help:      "Observed managed service state: running (1), stopped (0); unknown states are omitted. The vpn aggregate is omitted unless a VPN is observed running or all VPNs are observed stopped.",
 	}, []string{"service"})
 )
 

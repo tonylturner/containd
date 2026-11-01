@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	"github.com/tonylturner/containd/pkg/cp/templates"
 	dpengine "github.com/tonylturner/containd/pkg/dp/engine"
@@ -39,9 +40,9 @@ func (e *stageEngine) ConfigureRouting(context.Context, config.RoutingConfig) er
 	e.mutations++
 	return nil
 }
-func (e *stageEngine) ConfigureServices(context.Context, config.ServicesConfig) ([]string, error) {
+func (e *stageEngine) ConfigureServices(context.Context, config.ServicesConfig) (engineclient.ServicesApplyResult, error) {
 	e.mutations++
-	return nil, nil
+	return engineclient.ServicesApplyResult{}, nil
 }
 func (e *stageEngine) SetPcapConfig(_ context.Context, cfg config.PCAPConfig) (config.PCAPConfig, error) {
 	e.mutations++
@@ -63,9 +64,9 @@ func (e *stageEngine) ApplyRules(_ context.Context, snap rules.Snapshot) (dpengi
 
 type stageServices struct{ mutations int }
 
-func (s *stageServices) Apply(context.Context, config.ServicesConfig) error {
+func (s *stageServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
 	s.mutations++
-	return nil
+	return cfg, nil
 }
 
 func stageStore(t *testing.T) *config.SQLiteStore {
@@ -339,3 +340,5 @@ func TestVPNProfileUploadsNeverOverwriteRunningArtifact(t *testing.T) {
 		t.Fatalf("profile overwritten: %q %q %q %s %v", first, second, third, data, err)
 	}
 }
+
+func (*stageServices) RecordEngineFaults([]config.ServiceFault) {}

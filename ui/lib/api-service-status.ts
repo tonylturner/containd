@@ -2,8 +2,17 @@
 // management plane runs, plus the engine's antivirus status. Times are
 // RFC 3339 strings.
 
+export const serviceNames = ["syslog", "dns", "ntp", "av", "proxy", "dhcp", "wireguard", "openvpn"] as const;
+export type ServiceName = typeof serviceNames[number];
+export type ServiceFault = {
+  service: ServiceName;
+  kind: "config" | "runtime";
+  message: string;
+};
+export type ServiceFaultState = { state?: "faulted"; fault?: ServiceFault };
+
 /** Event meter every management service entry carries. */
-export type ServiceMeter = {
+export type ServiceMeter = ServiceFaultState & {
   /**
    * Events per minute, oldest first, one entry per minute through the
    * current minute (quiet minutes are 0); empty before the first event.
@@ -254,7 +263,7 @@ export type AVRuntimeStatus = ServiceMeter & {
 };
 
 /** The engine did not answer its antivirus status request. */
-export type AVUnavailableStatus = { available: false; error: string };
+export type AVUnavailableStatus = ServiceFaultState & { available: false; error: string };
 
 export type AVStatus = AVRuntimeStatus | AVUnavailableStatus;
 
@@ -264,6 +273,7 @@ export type AVStatus = AVRuntimeStatus | AVUnavailableStatus;
  * an event.
  */
 export type ServicesStatus = {
+  faults: ServiceFault[];
   syslog?: SyslogStatus;
   dns?: DNSStatus;
   ntp?: NTPStatus;
@@ -272,5 +282,7 @@ export type ServicesStatus = {
   nginx?: ProxyTelemetryStatus;
   dhcp?: DHCPStatus;
   vpn?: VPNStatus;
+  wireguard?: ServiceMeter;
+  openvpn?: ServiceMeter;
   av: AVStatus;
 };

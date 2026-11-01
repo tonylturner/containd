@@ -20,9 +20,12 @@ import {
   type Interface,
   type InterfaceState,
   type WireGuardStatus,
-  type VPNStatus,
+  type ServicesStatus,
 } from "../../lib/api";
-import { staticAssetURL } from "../../lib/api-core";
+import { authHeaders, fetchWithSession, handleUnauthorized, staticAssetURL } from "../../lib/api-core";
+import { parseErrorBody } from "../../lib/api-request";
+import type { OpenVPNCredential } from "../../lib/api-vpn";
+import { ServiceFaultBanner } from "../../components/ServiceFaultBanner";
 import { Shell } from "../../components/Shell";
 import { useToast } from "../../components/ToastProvider";
 import { ConfirmDialog, useConfirm } from "../../components/ConfirmDialog";
@@ -55,10 +58,17 @@ export default function VPNPage() {
   const [runtime, setRuntime] = useState<InterfaceState | null>(null);
   const [interfaceStateStatus, setInterfaceStateStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [wgStatus, setWgStatus] = useState<WireGuardStatus | null>(null);
-  const [svcStatus, setSvcStatus] = useState<VPNStatus | null>(null);
+  const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
+  const svcStatus = servicesStatus?.vpn ?? null;
+  const wireguardFaulted = servicesStatus?.wireguard?.state === "faulted";
   const [zones, setZones] = useState<Zone[]>([]);
   const [interfaces, setInterfaces] = useState<Interface[]>([]);
-  const [ovpnClients, setOvpnClients] = useState<string[]>([]);
+  const [ovpnClients, setOvpnClients] = useState<OpenVPNCredential[]>([]);
+  const [revocationsApplied, setRevocationsApplied] = useState(true);
+  const [clientsUnavailable, setClientsUnavailable] = useState(false);
+  const [clientError, setClientError] = useState<string | null>(null);
+  const [clientBusy, setClientBusy] = useState(false);
+  const [pendingRevocations, setPendingRevocations] = useState<Record<string, string>>({});
   const clientForm = useConfigForm({ name: "" });
   const [newClientName, setNewClientName] = clientForm.field("name");
   const { readConfig: refreshClient } = clientForm;
@@ -140,22 +150,28 @@ export default function VPNPage() {
           setWgStatus(null);
         }
         try {
-          setSvcStatus((await api.getServicesStatus())?.vpn ?? null);
+          setServicesStatus(await api.getServicesStatus());
         } catch {
-          setSvcStatus(null);
+          setServicesStatus(null);
         }
 
         // OpenVPN server: list clients (admin-only).
         try {
           const mode = (current?.openvpn?.mode ?? "client").trim();
-          if (mode === "server") {
+          if (mode === "server" && canEdit) {
             const res = await api.listOpenVPNClients();
-            setOvpnClients(res?.clients ?? []);
+            setClientsUnavailable(res === null);
+            if (res) {
+              setOvpnClients(res.clients);
+              setRevocationsApplied(res.revocationsApplied);
+              if (res.revocationsApplied) setPendingRevocations({});
+            }
           } else {
             setOvpnClients([]);
+            setClientsUnavailable(false);
           }
         } catch {
-          setOvpnClients([]);
+          setClientsUnavailable(true);
         }
         setLastUpdated(new Date());
         if (!silent) toast("VPN status refreshed", "success");
@@ -166,7 +182,7 @@ export default function VPNPage() {
         if (!silent) toast("Failed to refresh VPN status", "error");
       }
     },
-    [checkLoaded, toast, adoptConfig, refreshClient],
+    [checkLoaded, toast, adoptConfig, refreshClient, canEdit],
   ), { initialArgs: [{ silent: true }] });
 
   useConfigRefresh(refresh);
@@ -279,44 +295,82 @@ export default function VPNPage() {
   }
 
   async function createClient() {
-    if (!canEdit) return;
+    if (!canEdit || clientBusy) return;
     const submitted = newClientName;
     const name = submitted.trim();
     if (!name) return;
-    setError(null);
+    setClientError(null);
+    setClientBusy(true);
     const created = await api.createOpenVPNClient(name);
+    setClientBusy(false);
     if (!created.ok) {
       const msg = created.error || "Failed to create client.";
-      setError(msg);
+      setClientError(msg);
       toast(msg, "error");
       return;
     }
     setNewClientName((current) => current === submitted ? "" : current);
-    const res = await api.listOpenVPNClients();
-    setOvpnClients(res?.clients ?? []);
+    setOvpnClients((current) => [...current, created.data]);
     toast(created.warning ? `Client created with warning: ${created.warning}` : "Client created", "success");
   }
 
-  async function downloadClient(name: string) {
-    if (!canEdit) return;
-    setError(null);
+  async function downloadClient(credential: OpenVPNCredential) {
+    if (!canEdit || credential.revokedAt || clientBusy) return;
+    setClientError(null);
+    setClientBusy(true);
     try {
-      const resp = await fetch(api.downloadOpenVPNClientURL(name), { credentials: "include" });
-      if (!resp.ok) throw new Error(`download failed: ${resp.status}`);
+      const resp = await fetchWithSession(api.downloadOpenVPNClientURL(credential.id), { headers: authHeaders() });
+      handleUnauthorized(resp);
+      if (!resp.ok) throw new Error(await parseErrorBody(resp) || `Download failed (${resp.status})`);
       const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${name}.ovpn`;
+      a.download = `${credential.name}.ovpn`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
       toast("Client profile downloaded", "success");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to download client profile.");
+      setClientError(e instanceof Error ? e.message : "Failed to download client profile.");
       toast("Download failed", "error");
+    } finally {
+      setClientBusy(false);
     }
+  }
+
+  function revokeClient(credential: OpenVPNCredential) {
+    if (!canEdit || clientBusy || (credential.revokedAt && revocationsApplied)) return;
+    confirm.open({
+      title: credential.revokedAt ? "Apply revocation?" : "Revoke client credential?",
+      message: <>Revoke {credential.name} (serial {credential.serial}) and restart the managed server? All clients will reconnect once. Revocation cannot be undone.</>,
+      confirmLabel: credential.revokedAt ? (pendingRevocations[credential.id] ? "Retry apply" : "Apply revocation") : "Revoke",
+      variant: "danger",
+      onConfirm: () => { void applyRevocation(credential); },
+    });
+  }
+
+  async function applyRevocation(credential: OpenVPNCredential) {
+    setClientBusy(true);
+    setClientError(null);
+    const result = await api.revokeOpenVPNClient(credential.id);
+    const revocation = result.ok ? result.data : result.revocation;
+    if (revocation?.revoked) {
+      setOvpnClients((current) => current.map((c) => c.id === credential.id ? revocation.credential : c));
+      setRevocationsApplied(revocation.applied);
+      // A successful restart loads the cumulative CRL, confirming every retry.
+      if (revocation.applied) setPendingRevocations({});
+      else setPendingRevocations((current) => ({
+        ...current, [credential.id]: revocation.error || "Runtime not confirmed",
+      }));
+      if (revocation.applied) toast("Client revoked and applied", "success");
+    } else {
+      const msg = result.ok ? "Revocation not confirmed." : result.error;
+      setClientError(msg);
+      toast(msg, "error");
+    }
+    setClientBusy(false);
   }
 
   return (
@@ -351,6 +405,7 @@ export default function VPNPage() {
         </div>
       }
     >
+      <ServiceFaultBanner status={servicesStatus} loading={loading} only={["wireguard", "openvpn"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded || clientForm.editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
@@ -362,7 +417,7 @@ export default function VPNPage() {
       <p className="mb-4 text-xs text-(--text-muted)">
         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "\u2014"} {autoRefresh ? "(auto)" : ""}
       </p>
-      <VPNRuntimeStatusCard cfg={cfg} loading={loading} svcStatus={svcStatus} />
+      <VPNRuntimeStatusCard loading={loading} servicesStatus={servicesStatus} />
       {!loading && error && (
         <div className="mb-4 rounded-xs border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
@@ -389,7 +444,9 @@ export default function VPNPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <Badge tone={cfg.wireguard.enabled ? "ok" : "off"}>{cfg.wireguard.enabled ? "enabled" : "disabled"}</Badge>
+              <Badge tone={wireguardFaulted ? "warn" : cfg.wireguard.enabled ? "ok" : "off"}>
+                {wireguardFaulted ? "faulted" : cfg.wireguard.enabled ? "enabled" : "disabled"}
+              </Badge>
               <Badge
                 tone={interfaceStateStatus === "unavailable" ? "warn" : runtime?.up ? "ok" : runtime ? "warn" : "off"}
                 title={interfaceStateStatus !== "ready" ? "Kernel interface state unknown" : runtime ? "Kernel interface state" : "Kernel interface not present"}
@@ -416,7 +473,7 @@ export default function VPNPage() {
 
             {cfg.wireguard.enabled ? <IssuesBanner title="WireGuard setup checklist" issues={wireguardIssues} /> : null}
             <div className="rounded-xs border bg-black/20 px-3 py-2 text-xs text-(--text)">
-              When enabled, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the configured listen zone or interfaces
+              When enabled and not quarantined, containd auto-opens UDP/{cfg.wireguard.listenPort ?? 51820} on the configured listen zone or interfaces
               (default <span className="font-mono">wan</span>) via nftables input so clients can connect.
             </div>
 
@@ -574,13 +631,20 @@ export default function VPNPage() {
           interfaceOptions={interfaceOptions}
           openvpnIssues={openvpnIssues}
           svcStatus={svcStatus}
+          faulted={servicesStatus?.openvpn?.state === "faulted"}
           uploadState={uploadState}
           ovpnClients={ovpnClients}
+          revocationsApplied={revocationsApplied}
+          clientsUnavailable={clientsUnavailable}
+          clientError={clientError}
+          clientBusy={clientBusy}
+          pendingRevocations={pendingRevocations}
           newClientName={newClientName}
           setNewClientName={setNewClientName}
           uploadOpenVPNProfile={uploadOpenVPNProfile}
           createClient={createClient}
           downloadClient={downloadClient}
+          revokeClient={revokeClient}
         />
       </div>
 

@@ -37,6 +37,10 @@ bash scripts/containd-connect
 
 Tip: `bash scripts/containd up` wraps `docker compose --env-file .env -f deploy/docker-compose.yml up -d` and prints connection info automatically when a repo-root `.env` exists.
 
+`scripts/containd-connect` also passes the repository-root `.env` when present.
+Compose interpolation errors are reported directly and stop the helper, rather
+than being reported as a stopped service.
+
 The starter compose enables nftables enforcement by default so a fresh lab behaves like a firewall once you bind zones and commit policy. It also runs the appliance as `root` inside the container because nftables, routing, and TUN operations need that privilege across Linux, Docker Desktop, and WSL-backed lab environments. Set `CONTAIND_ENFORCE_ENABLED=0` only when you intentionally want an observe-only/demo mode.
 
 ## Configuration via `.env`
@@ -61,6 +65,19 @@ and `docker-compose.yml`. For a repository checkout, use the explicit
 - `CONTAIND_ALLOWED_ORIGINS`: optional comma-separated browser origins that may embed or call the appliance cross-origin. Starter and dev Compose pass it through to management. Leave empty unless you intentionally integrate containd into another UI or portal.
 
 The default `:latest` tag moves only to signed, SBOM-attached stable releases whose commits have reached main; prereleases never move it. Pin `CONTAIND_IMAGE` to a version tag or digest for a fixed lab release. See [Update Policy](update-policy.md#when-latest-moves).
+
+### Management HTTPS mounts and rotation
+
+The default writable `/data` volume holds the atomically replaced management
+identity `/data/tls/server.pem`. A valid legacy `server.crt`/`server.key` pair
+at the default paths is imported automatically without changing the originals.
+For operator-owned credentials, set `CONTAIND_TLS_CERT_FILE` and
+`CONTAIND_TLS_KEY_FILE` to the **same bundle path** and mount its containing
+directory read-only. Rotate by atomically replacing that bundle on the host;
+a single-file bind mount can pin the old inode. External paths are never
+modified by containd, and certificate uploads return 409 in external mode.
+See [Management HTTPS identity](config-format.md#management-https-identity)
+for migration, split-file limitations, status and reset behavior.
 
 ### Management ↔ Engine connectivity
 

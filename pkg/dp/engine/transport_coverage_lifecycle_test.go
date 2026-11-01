@@ -40,7 +40,7 @@ func TestTransportCoverageRetirement(t *testing.T) {
 			notice := <-r.losses
 			connection := states[0].Connection.Load()
 			if removal == "deny" {
-				d := e.rememberDeniedTCP(packetKey(pkt), packetKey(pkt))
+				d := e.rememberDeniedTCP(packetKey(pkt), packetKey(pkt), false)
 				if d == nil {
 					t.Fatal("fixture did not create a denial tombstone")
 				}

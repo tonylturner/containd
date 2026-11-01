@@ -5,13 +5,9 @@ package httpapi
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -74,16 +70,12 @@ func uploadOpenVPNProfileHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid profile name")
 			return
 		}
-		ovpn := strings.TrimSpace(r.OVPN)
-		if ovpn == "" {
+		ovpn := r.OVPN
+		if strings.TrimSpace(ovpn) == "" {
 			apiError(c, http.StatusBadRequest, "ovpn content is empty")
 			return
 		}
-		if len(ovpn) > 1_000_000 {
-			apiError(c, http.StatusRequestEntityTooLarge, "ovpn content too large")
-			return
-		}
-		if err := ensureOpenVPNConfigForegroundString(ovpn); err != nil {
+		if _, err := cpservices.ParseOpenVPNProfile([]byte(ovpn)); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -155,226 +147,6 @@ func sanitizeProfileName(in string) string {
 		out = out[:64]
 	}
 	return out
-}
-
-func ensureOpenVPNConfigForegroundString(s string) error {
-	lines := strings.Split(s, "\n")
-	for _, raw := range lines {
-		line := strings.TrimSpace(raw)
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if fields[0] == "daemon" {
-			return fmt.Errorf("openvpn profile contains 'daemon' directive; remove it (supervisor requires foreground)")
-		}
-	}
-	return nil
-}
-
-func openVPNBaseDir() string {
-	base := "/data/openvpn"
-	if v := strings.TrimSpace(os.Getenv("CONTAIND_OPENVPN_DIR")); v != "" {
-		base = v
-		if strings.HasSuffix(base, "/profiles") {
-			base = filepath.Dir(base)
-		}
-	}
-	return base
-}
-
-func openVPNManagedServerPKIDir() string {
-	return filepath.Join(openVPNBaseDir(), "managed", "server", "pki")
-}
-
-func openVPNManagedServerClientsDir() string {
-	return filepath.Join(openVPNManagedServerPKIDir(), "clients")
-}
-
-func listOpenVPNClientsHandler(store config.Store) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		cfg, err := readRunningOrDefault(c, store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if !cfg.Services.VPN.OpenVPN.Enabled || strings.TrimSpace(cfg.Services.VPN.OpenVPN.Mode) != "server" || cfg.Services.VPN.OpenVPN.Server == nil {
-			apiError(c, http.StatusBadRequest, "openvpn server is not configured")
-			return
-		}
-		dir := openVPNManagedServerClientsDir()
-		ents, err := os.ReadDir(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				c.JSON(http.StatusOK, gin.H{"clients": []string{}})
-				return
-			}
-			internalError(c, err)
-			return
-		}
-		var out []string
-		for _, e := range ents {
-			if e.IsDir() {
-				continue
-			}
-			name := e.Name()
-			if strings.HasSuffix(name, ".crt") {
-				out = append(out, strings.TrimSuffix(name, ".crt"))
-			}
-		}
-		sort.Strings(out)
-		c.JSON(http.StatusOK, gin.H{"clients": out})
-	}
-}
-
-func createOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
-	type req struct {
-		Name string `json:"name"`
-	}
-	return func(c *gin.Context) {
-		cfg, err := readRunningOrDefault(c, store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		if !cfg.Services.VPN.OpenVPN.Enabled || strings.TrimSpace(cfg.Services.VPN.OpenVPN.Mode) != "server" || cfg.Services.VPN.OpenVPN.Server == nil {
-			apiError(c, http.StatusBadRequest, "openvpn server is not configured")
-			return
-		}
-		var r req
-		if err := c.ShouldBindJSON(&r); err != nil {
-			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
-			return
-		}
-		name := strings.TrimSpace(r.Name)
-		if name == "" {
-			apiError(c, http.StatusBadRequest, "name is required")
-			return
-		}
-		if strings.ContainsAny(name, "/\\ ") {
-			apiError(c, http.StatusBadRequest, "name contains invalid characters")
-			return
-		}
-		pkiDir := openVPNManagedServerPKIDir()
-		caCertPath, caKeyPath, err := cpservices.EnsureOpenVPNCA(pkiDir)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		_, _, _ = cpservices.EnsureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath)
-		clientCertPath, _, err := cpservices.EnsureOpenVPNClientCert(pkiDir, caCertPath, caKeyPath, name)
-		if err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		clientName := strings.TrimSuffix(filepath.Base(clientCertPath), ".crt")
-		auditLog(c, audit.Record{Action: "services.vpn.openvpn.client.create", Target: clientName})
-		c.JSON(http.StatusOK, gin.H{"name": clientName})
-	}
-}
-
-func downloadOpenVPNClientHandler(store config.Store) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		name := strings.TrimSpace(c.Param("name"))
-		if name == "" {
-			apiError(c, http.StatusBadRequest, "name is required")
-			return
-		}
-		if strings.ContainsAny(name, "/\\ ") {
-			apiError(c, http.StatusBadRequest, "name contains invalid characters")
-			return
-		}
-		cfg, err := readRunningOrDefault(c, store)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		ovpn := cfg.Services.VPN.OpenVPN
-		if !ovpn.Enabled || strings.TrimSpace(ovpn.Mode) != "server" || ovpn.Server == nil {
-			apiError(c, http.StatusBadRequest, "openvpn server is not configured")
-			return
-		}
-		publicEndpoint := strings.TrimSpace(ovpn.Server.PublicEndpoint)
-		if publicEndpoint == "" {
-			apiError(c, http.StatusBadRequest, "openvpn.server.publicEndpoint is required to generate client profiles")
-			return
-		}
-		proto := strings.ToLower(strings.TrimSpace(ovpn.Server.Proto))
-		if proto == "" {
-			proto = "udp"
-		}
-		port := ovpn.Server.ListenPort
-		if port == 0 {
-			port = 1194
-		}
-
-		pkiDir := openVPNManagedServerPKIDir()
-		caCertPath, caKeyPath, err := cpservices.EnsureOpenVPNCA(pkiDir)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		_, _, _ = cpservices.EnsureOpenVPNServerCert(pkiDir, caCertPath, caKeyPath)
-		clientCertPath, clientKeyPath, err := cpservices.EnsureOpenVPNClientCert(pkiDir, caCertPath, caKeyPath, name)
-		if err != nil {
-			apiError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		caPEM, err := os.ReadFile(caCertPath)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		certPEM, err := os.ReadFile(clientCertPath)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		keyPEM, err := os.ReadFile(clientKeyPath)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-
-		var b strings.Builder
-		b.WriteString("client\n")
-		b.WriteString("dev tun\n")
-		b.WriteString("nobind\n")
-		b.WriteString("persist-key\n")
-		b.WriteString("persist-tun\n")
-		b.WriteString("remote " + publicEndpoint + " " + strconv.Itoa(port) + "\n")
-		if proto == "tcp" {
-			b.WriteString("proto tcp-client\n")
-		} else {
-			b.WriteString("proto udp\n")
-		}
-		b.WriteString("remote-cert-tls server\n")
-		b.WriteString("verb 3\n")
-		writeInlineBlock(&b, "ca", caPEM)
-		writeInlineBlock(&b, "cert", certPEM)
-		writeInlineBlock(&b, "key", keyPEM)
-
-		clientName := strings.TrimSuffix(filepath.Base(clientCertPath), ".crt")
-		auditLog(c, audit.Record{Action: "services.vpn.openvpn.client.download", Target: clientName})
-		c.Header("Content-Type", "application/x-openvpn-profile")
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", clientName+".ovpn"))
-		c.String(http.StatusOK, b.String())
-	}
-}
-
-func writeInlineBlock(b *strings.Builder, tag string, pemBytes []byte) {
-	b.WriteString("<" + tag + ">\n")
-	b.Write(pemBytes)
-	if len(pemBytes) == 0 || pemBytes[len(pemBytes)-1] != '\n' {
-		b.WriteString("\n")
-	}
-	b.WriteString("</" + tag + ">\n")
 }
 
 func getWireGuardStatusHandler(engine any) gin.HandlerFunc {

@@ -32,7 +32,7 @@ async function mockAPI(page: Page, config: DHCPConfig): Promise<Server> {
     const data = path.endsWith("/auth/me") || path.endsWith("/auth/session")
       ? { id: "admin-1", username: "containd", role: "admin" }
       : path.endsWith("/dhcp/leases") ? { leases: [] }
-        : path.endsWith("/services/status") ? { dhcp: { enabled: false, ...idleMeter }, av: { available: false, error: "engine unavailable" } }
+        : path.endsWith("/services/status") ? { faults: [], dhcp: { enabled: false, ...idleMeter }, av: { available: false, error: "engine unavailable" } }
           : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
     await route.fulfill({ json: data, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
   });

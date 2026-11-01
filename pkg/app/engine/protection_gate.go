@@ -3,7 +3,9 @@
 package engineapp
 
 // Scanner readiness is sampled by the gate's lifetime worker because Scanner
-// exposes Ready(), not a notification API. Listener/routing/admission changes
+// exposes Ready(), not a notification API. The production AVManager supplies
+// live capability and per-direction canary proof, never apply-time readiness.
+// Listener/routing/admission changes
 // also publish immediately; health requests never drive readiness transitions.
 func (g *gateManager) publishProtection() {
 	if g == nil || g.protection == nil {

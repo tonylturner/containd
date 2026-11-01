@@ -41,7 +41,19 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
+		if cfgStore == nil {
+			apiError(c, http.StatusServiceUnavailable, "reset stores unavailable")
+			return
+		}
 		def := ApplianceDefaults(config.ReservationForStore(cfgStore))
+		previous, err := cfgStore.Load(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		// TLS identity and its managed/external selection survive reset.
+		def.System.Mgmt.TLSCertFile = previous.System.Mgmt.TLSCertFile
+		def.System.Mgmt.TLSKeyFile = previous.System.Mgmt.TLSKeyFile
 		// Validate the exact replacement before revoking sessions or wiping any
 		// database. An incompatible factory default is an explicit refusal.
 		if err := config.ValidateForStore(cfgStore, def); err != nil {

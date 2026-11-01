@@ -4,11 +4,13 @@ package mgmtapp
 
 import (
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 
 	httpapi "github.com/tonylturner/containd/api/http"
 	"github.com/tonylturner/containd/pkg/cp/config"
@@ -91,6 +93,9 @@ func LocalManagementAPI() (string, *http.Client, error) {
 		return "", nil, err
 	}
 	config.SetBoundManagementListeners(rec.Listeners)
+	if rec.Served.LeafPEM != "" {
+		rec.Served.RuntimeRecordFile = RuntimeRecordPath()
+	}
 	httpapi.SetServedManagement(rec.Served)
 	baseURL, client, err := httpapi.LoopbackManagementAPI()
 	if err != nil {
@@ -102,15 +107,27 @@ func LocalManagementAPI() (string, *http.Client, error) {
 // runtimeRecordPublisher writes the record whenever management publishes
 // bound listeners, and removes it when management stops.
 type runtimeRecordPublisher struct {
-	path   string
-	served httpapi.ServedManagement
+	mu      sync.Mutex
+	stopped bool
+	path    string
+	served  httpapi.ServedManagement
 }
 
 // publish writes the listeners management has bound so far. A failure is
 // returned for logging: management keeps serving, and local CLIs report
 // that it is not running.
 func (p *runtimeRecordPublisher) publish() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped {
+		return nil
+	}
 	served := p.served
+	if served.TLS != nil {
+		if leaf := served.TLS.LastLeaf(); leaf != nil {
+			served.LeafPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leaf.Raw}))
+		}
+	}
 	var err error
 	if served.CertFile != "" {
 		served.CertFile, err = filepath.Abs(served.CertFile)
@@ -128,6 +145,9 @@ func (p *runtimeRecordPublisher) publish() error {
 }
 
 func (p *runtimeRecordPublisher) remove() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopped = true
 	if err := os.Remove(p.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

@@ -76,7 +76,7 @@ func TestManagementReservationView(t *testing.T) {
 		t.Fatalf("reservation view = %s, %v", rec.Body, err)
 	}
 	rec = requestStage(t, NewServer(&mockStore{}, nil), "GET", "/system/management-reservation", nil)
-	if rec.Code != http.StatusOK || rec.Body.String() != `{"active":false}` {
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"active":false,"bootServiceFaults":[]}` {
 		t.Fatalf("inactive view = %d %s", rec.Code, rec.Body)
 	}
 	rec = requestStage(t, NewServer(store, nil), "GET", "/system/management-reservation", nil)

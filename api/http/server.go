@@ -56,8 +56,8 @@ type EngineClient interface {
 	ConfigureRouting(ctx context.Context, routing config.RoutingConfig) error
 	ConfigureRoutingReplace(ctx context.Context, routing config.RoutingConfig) error
 	// ConfigureServices applies the services configuration and returns the
-	// warnings the engine applied it with.
-	ConfigureServices(ctx context.Context, services config.ServicesConfig) ([]string, error)
+	// independent runtime outcomes and pending warnings.
+	ConfigureServices(ctx context.Context, services config.ServicesConfig) (engineclient.ServicesApplyResult, error)
 	ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error)
 	ApplyRules(ctx context.Context, snap rules.Snapshot) (dpengine.ProtectionStatus, error)
 	RulesetStatus(ctx context.Context) (dpengine.RulesetStatus, error)
@@ -151,10 +151,11 @@ type ServicesValidator interface {
 	Validate(ctx context.Context, cfg config.ServicesConfig) error
 }
 
-// ServicesApplier is an optional interface for applying services config
-// (syslog/proxies/etc.) when commits are made.
+// ServicesApplier applies a validated projection and its fault set. Runtime
+// failures narrow that projection and return warnings, never block enforcement.
 type ServicesApplier interface {
-	Apply(ctx context.Context, cfg config.ServicesConfig) error
+	ApplyEffective(ctx context.Context, cfg config.ServicesConfig, faults []config.ServiceConfigError) (config.ServicesConfig, []string)
+	RecordEngineFaults([]config.ServiceFault)
 }
 
 // NewServerWithEngine builds a Gin engine and optionally wires engine commit hooks.
@@ -276,9 +277,10 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.GET("/services/vpn", getVPNHandler(store))
 		protected.POST("/services/vpn", requireAdmin(), requireConfigRevision(), setVPNHandler(store))
 		protected.POST("/services/vpn/openvpn/profile", requireAdmin(), requireConfigRevision(), uploadOpenVPNProfileHandler(store))
-		protected.GET("/services/vpn/openvpn/clients", requireAdmin(), listOpenVPNClientsHandler(store))
-		protected.POST("/services/vpn/openvpn/clients", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), createOpenVPNClientHandler(store))
-		protected.GET("/services/vpn/openvpn/clients/:name", requireAdmin(), downloadOpenVPNClientHandler(store))
+		protected.GET("/services/vpn/openvpn/clients", requireAdmin(), listOpenVPNClientsHandler(services))
+		protected.POST("/services/vpn/openvpn/clients", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), createOpenVPNClientHandler(services))
+		protected.GET("/services/vpn/openvpn/clients/:id", requireAdmin(), downloadOpenVPNClientHandler(services))
+		protected.POST("/services/vpn/openvpn/clients/:id/revoke", requireAdmin(), limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit), revokeOpenVPNClientHandler(services))
 		protected.GET("/services/vpn/wireguard/status", getWireGuardStatusHandler(engine))
 		protected.GET("/services/av", getAVHandler(store))
 		protected.POST("/services/av", requireAdmin(), requireConfigRevision(), setAVHandler(store, services))
@@ -430,14 +432,19 @@ func getConfigHandler(store config.Store) gin.HandlerFunc {
 
 func saveConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var cfg config.Config
-		if err := c.ShouldBindJSON(&cfg); err != nil {
+		body, err := c.GetRawData()
+		if err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
+			return
+		}
+		cfg, err := config.DecodeRequestConfig(body, config.RequestConfigWrite)
+		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
-		if !replaceCandidate(c, ctx, store, &cfg) {
+		if !replaceCandidate(c, ctx, store, cfg) {
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.save", Target: "candidate"})
@@ -447,12 +454,22 @@ func saveConfigHandler(store config.Store) gin.HandlerFunc {
 
 func validateConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var cfg config.Config
-		if err := c.ShouldBindJSON(&cfg); err != nil {
+		body, err := c.GetRawData()
+		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
-		if err := config.ValidateForStore(store, &cfg); err != nil {
+		cfg, err := config.DecodeRequestConfig(body, config.RequestConfigWrite)
+		if err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
+			return
+		}
+		baseline, err := store.Load(c.Request.Context())
+		if err != nil && !errors.Is(err, config.ErrNotFound) {
+			internalError(c, err)
+			return
+		}
+		if err := config.CheckWrite(baseline, cfg, config.ReservationForStore(store)); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -477,8 +494,13 @@ func getCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 
 func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var cfg config.Config
-		if err := c.ShouldBindJSON(&cfg); err != nil {
+		body, err := c.GetRawData()
+		if err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
+			return
+		}
+		cfg, err := config.DecodeRequestConfig(body, config.RequestConfigWrite)
+		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
@@ -491,7 +513,7 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 			if cfg.IDS.Rules == nil {
 				cfg.IDS.Rules = existing.IDS.Rules
 			}
-			*existing = cfg
+			*existing = *cfg
 			return true
 		}); !ok {
 			return
@@ -549,25 +571,33 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	// and validated. Keep this change in memory only: applying a previously
 	// loaded snapshot must never persist it over a newer store mutation.
 	// Bootstrap owns persisted default device bindings.
-	if err := config.ValidateForStore(store, cfg); err != nil {
-		return nil, dpengine.ProtectionStatus{}, err
-	}
-	// Reserved bindings were persisted by bootstrap. Never normalize them during
-	// replay: preflight must precede every runtime side effect.
+	// Reserved bindings were persisted by bootstrap; never normalize them on replay.
 	if config.ReservationForStore(store) == nil {
 		bindUnboundDefaultInterfaceDevices(cfg)
 	}
-	if err := config.ValidateForStore(store, cfg); err != nil {
+	effective, faults, err := config.EffectiveForStore(store, cfg)
+	if err != nil {
 		return nil, dpengine.ProtectionStatus{}, err
 	}
-	scanWarnings, err := config.ValidateScanSelection(cfg)
+	cfg = effective
+	scanWarnings, _ := config.ValidateScanSelection(cfg)
+	// Compile once before any side effects. A sink may subsequently quarantine
+	// another service; compile that narrower projection again before engine apply.
+	snap, err := compile.CompileSnapshot(cfg)
 	if err != nil {
 		return nil, dpengine.ProtectionStatus{}, err
 	}
 	if services != nil {
-		if err := services.Apply(ctx, cfg.Services); err != nil {
+		var serviceWarnings []string
+		cfg.Services, serviceWarnings = services.ApplyEffective(ctx, cfg.Services, faults)
+		scanWarnings = append(scanWarnings, serviceWarnings...)
+		snap, err = compile.CompileSnapshot(cfg)
+		if err != nil {
 			return nil, dpengine.ProtectionStatus{}, err
 		}
+	}
+	for _, fault := range faults {
+		scanWarnings = append(scanWarnings, fault.Service+": quarantined")
 	}
 	warnings := scanWarnings
 	if engine == nil {
@@ -588,11 +618,18 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 	if err := pushTrustedCA(ctx, cfg, engine); err != nil {
 		warnings = append(warnings, fmt.Sprintf("trust: %v", err))
 	}
-	serviceWarnings, err := engine.ConfigureServices(ctx, cfg.Services)
+	serviceResult, err := engine.ConfigureServices(ctx, cfg.Services)
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("services: %v", err))
+	} else {
+		if services != nil {
+			services.RecordEngineFaults(serviceResult.Faults)
+		}
+		for _, fault := range serviceResult.Faults {
+			warnings = append(warnings, "services: "+fault.Service+": "+fault.Message)
+		}
 	}
-	for _, warning := range serviceWarnings {
+	for _, warning := range serviceResult.Warnings {
 		warnings = append(warnings, "services: "+warning)
 	}
 	if err := engine.Configure(ctx, cfg.DataPlane); err != nil {
@@ -613,11 +650,6 @@ func applyConfigSnapshot(ctx context.Context, store config.Store, engine EngineC
 				warnings = append(warnings, fmt.Sprintf("pcap stop: %v", err))
 			}
 		}
-	}
-	// Always compile and push rules regardless of infrastructure errors.
-	snap, err := compile.CompileSnapshot(cfg)
-	if err != nil {
-		return nil, dpengine.ProtectionStatus{}, err
 	}
 	observation, err := engine.ApplyRules(ctx, snap)
 	if err != nil {

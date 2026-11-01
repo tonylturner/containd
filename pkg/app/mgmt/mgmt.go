@@ -41,6 +41,7 @@ type mgmtStores struct {
 	auditStore  audit.Store
 	userStore   users.Store
 	bootEvent   *dpevents.Event
+	bootEvents  []dpevents.Event
 	scopeEvents []dpevents.Event
 }
 
@@ -57,6 +58,7 @@ type mgmtListenerConfig struct {
 	allowedOrigins      []string
 	tlsCert             string
 	tlsKey              string
+	tlsLoader           *certReloader
 	optionalFault       func(error)
 	reservedHTTPAddr    string
 }
@@ -115,12 +117,17 @@ func Run(ctx context.Context, opts Options) error {
 		engineClient = transportClient
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
-	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
+	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent, events: stores.bootEvents}
 	auditLog, ok := stores.auditStore.(audit.ForwardLog)
 	if !ok {
 		return fmt.Errorf("audit store %T cannot be forwarded to syslog", stores.auditStore)
 	}
 	serviceManager.SetAuditLog(auditLog)
+	serviceManager.SetFaultAudit(stores.auditStore)
+	if cfg, err := stores.store.Load(ctx); err == nil {
+		_, faults, _ := config.EffectiveForStore(stores.store, cfg)
+		serviceManager.SeedFaults(faults)
+	}
 	var sshServer atomic.Pointer[sshserver.Server]
 	resetSessions := httpapi.FactoryResetSessions(func(_ context.Context, initiator string) {
 		if srv := sshServer.Load(); srv != nil {
@@ -145,16 +152,30 @@ func Run(ctx context.Context, opts Options) error {
 	runtimeCfg, listenerCfg = bound.cfg, bound.listener
 	record := &runtimeRecordPublisher{path: RuntimeRecordPath(), served: publishBoundManagement(listenerCfg, bound.binds)}
 	publishRuntimeRecord(logger, record)
+	if listenerCfg.tlsLoader != nil {
+		listenerCfg.tlsLoader.OnChange(func() { publishRuntimeRecord(logger, record) })
+	}
 	defer func() {
 		if err := record.remove(); err != nil {
 			logger.Warnf("failed to remove management runtime record: %v", err)
 		}
 	}()
 	installSyslogSources(serviceManager, engineClient, stores, logger)
-	// Best-effort initial service render on startup.
-	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
-		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
-			logger.Warnf("failed to apply initial service config: %v", applyErr)
+	// Management-run services must be available even while engine health is
+	// unreachable. Never render unprojected stored service content.
+	engineReachable := false
+	if health, ok := engineClient.(httpapi.RuntimeHealthClient); ok {
+		probe, cancel := context.WithTimeout(ctx, engineSyncHealthTimeout)
+		_, err := health.RuntimeHealth(probe)
+		cancel()
+		engineReachable = err == nil
+	}
+	if cfg, err := stores.store.Load(ctx); err == nil && !engineReachable && config.CheckManagementBootFault(ctx, stores.store) == nil {
+		if effective, faults, err := config.EffectiveForStore(stores.store, cfg); err == nil {
+			_, warnings := serviceManager.ApplyEffective(ctx, effective.Services, faults)
+			for _, warning := range warnings {
+				logger.Warn(warning)
+			}
 		}
 	}
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
@@ -247,7 +268,7 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		stores.userStore.Close()
 		return fail(err)
 	}
-	event, err := recordBootDecision(logger, stores, cfg, r)
+	event, events, err := recordBootDecision(logger, stores, cfg, r)
 	if err != nil {
 		stores.auditStore.Close()
 		stores.userStore.Close()
@@ -258,6 +279,7 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		logger.Errorw("persist industrial scope migration evidence", "error", err)
 	}
 	stores.bootEvent = event
+	stores.bootEvents = events
 	return stores, cfg, nil
 }
 
@@ -317,7 +339,7 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	if !listenerCfg.enableHTTPS {
 		return listenerCfg, nil
 	}
-	tlsCert, tlsKey, err := ensureSelfSignedTLSFiles(listenerCfg.tlsCert, listenerCfg.tlsKey, detectIPs())
+	tlsCert, tlsKey, err := ensureTLSIdentity(cfg, detectIPs(), logger.Warnf)
 	if err != nil {
 		logger.Warnf("https disabled: failed to ensure TLS cert: %v", err)
 		if listenerCfg.optionalFault != nil {
@@ -328,6 +350,10 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	}
 	listenerCfg.tlsCert = tlsCert
 	listenerCfg.tlsKey = tlsKey
+	listenerCfg.tlsLoader = newCertReloader(tlsCert, tlsKey)
+	if _, err := listenerCfg.tlsLoader.GetCertificate(nil); err != nil {
+		return listenerCfg, err
+	}
 	return listenerCfg, nil
 }
 
@@ -379,6 +405,7 @@ func (lc mgmtListenerConfig) servedManagement(b mgmtBinds) httpapi.ServedManagem
 	}
 	if b.https.record().Enabled {
 		served.CertFile, served.KeyFile = lc.tlsCert, lc.tlsKey
+		served.TLS = lc.tlsLoader
 	}
 	return served
 }
@@ -403,7 +430,7 @@ func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) (mgm
 		return mgmtBinds{}, fmt.Errorf("%s disabled: %w", proto, err)
 	}
 	if listenerCfg.enableHTTPS {
-		bound, err := b.bindListener(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsCert, listenerCfg.tlsKey), "", listenerCfg.optionalFault)
+		bound, err := b.bindListener(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsLoader), "", listenerCfg.optionalFault)
 		if err != nil {
 			return fail("https", err)
 		}
@@ -427,8 +454,7 @@ func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) (mgm
 	return b, nil
 }
 
-func newMgmtTLSConfig(tlsCert, tlsKey string) *tls.Config {
-	reloader := newCertReloader(tlsCert, tlsKey)
+func newMgmtTLSConfig(reloader *certReloader) *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		CipherSuites: []uint16{

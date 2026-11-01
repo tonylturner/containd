@@ -131,10 +131,11 @@ export default function InterfacesPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setReconciling(true);
-        const res = await rowsDraft.write(base => api.reconcileInterfacesReplace(base), { patch: rows => rows });
+        // Runtime operations cannot acknowledge or rebase retained row edits.
+        const res = await api.reconcileInterfacesReplace();
         setReconciling(false);
         if (!res.ok) {
-          setError(revisionError(res));
+          setError(res.error);
           return;
         }
         await refresh();

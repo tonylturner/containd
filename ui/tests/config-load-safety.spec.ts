@@ -2,6 +2,7 @@ import { expect, test, type Page, type Response } from "@playwright/test";
 import { CONFIG_COMMITTED } from "../lib/config-events";
 
 const prefix = "/api/v1";
+const revision = (counter: number) => `0123456789abcdef.${counter}`;
 const read = (path: string) => (r: Response) =>
   new URL(r.url()).pathname === prefix + path && r.request().method() === "GET";
 
@@ -18,7 +19,7 @@ const data: Record<string, unknown> = {
   "/pcap/list": [],
   "/ids/rules": { enabled: false, rules: [{ id: "existing", title: "Existing", enabled: true }], ruleGroups: [{ id: "group", name: "Group", enabled: true }] },
   "/ids/sources": [],
-  "/services/status": {},
+  "/services/status": { faults: [], av: { available: false, error: "engine unavailable" } },
   "/services/dns": { enabled: false, listenPort: 5353, upstreamServers: ["192.0.2.53"], listenZones: ["lan"], cacheSizeMB: 16 },
   "/services/ntp": { enabled: false, servers: ["ntp.example.test"], intervalSeconds: 90 },
   "/services/syslog": { forwarders: [{ address: "192.0.2.9", port: 6514, proto: "tcp" }], batchSize: 700, flushEvery: 5 },
@@ -30,11 +31,11 @@ const data: Record<string, unknown> = {
   "/services/vpn": { wireguard: { enabled: false, interface: "wg0", listenPort: 51820, listenZone: "lan", listenInterfaces: [], addressCIDR: "10.8.0.1/24", privateKey: "private", peers: [{ publicKey: "peer", allowedIPs: ["10.8.0.2/32"] }] }, openvpn: { enabled: false, mode: "client", configPath: "/data/client.ovpn" } },
   "/identities": { mappings: [{ ip: "192.0.2.5", identities: ["operator"] }] },
   "/assets": [],
-  "/config/diff": { running: { schemaVersion: "0.1.9", system: { hostname: "existing" } }, candidate: { schemaVersion: "0.1.9", system: { hostname: "existing" } }, changed: false, changedSections: [] },
+  "/config/diff": { running: { schema_version: "0.1.9", system: { hostname: "existing" } }, candidate: { schema_version: "0.1.9", system: { hostname: "existing" } }, changed: false, changedSections: [] },
 };
 
 async function mockAPI(page: Page) {
-  const server = { data: structuredClone(data), failed: new Set<string>(), nullReads: new Set<string>(), writes: [] as { path: string; body: unknown }[] };
+  const server = { data: structuredClone(data), counter: 1, failed: new Set<string>(), nullReads: new Set<string>(), writes: [] as { path: string; body: unknown }[] };
   await page.addInitScript(() => {
     localStorage.setItem("containd.auth.token", "test-token");
     localStorage.setItem("containd.auth.role", "admin");
@@ -42,17 +43,66 @@ async function mockAPI(page: Page) {
   await page.route("**/api/v1/**", async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname.slice(prefix.length);
-    if (path === "/auth/me" || path === "/auth/session") return route.fulfill({ json: { id: "admin", username: "containd", role: "admin" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+    if (path === "/auth/me" || path === "/auth/session") return route.fulfill({ json: { id: "admin", username: "containd", role: "admin" } });
     if (req.method() === "GET") {
-      if (server.failed.has(path)) return route.fulfill({ status: 503, json: { error: "unavailable" }, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
-      return route.fulfill({ json: server.nullReads.has(path) ? null : server.data[path] ?? {}, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });
+      if (server.failed.has(path)) return route.fulfill({ status: 503, json: { error: "unavailable" } });
+      return route.fulfill({ json: server.nullReads.has(path) ? null : server.data[path] ?? {}, headers: { "X-Containd-Revision": revision(server.counter) } });
     }
     const body: unknown = req.postDataJSON();
     server.writes.push({ path, body });
+    const base = req.headers()["x-containd-if-revision"];
+    if (base === undefined) return route.fulfill({ status: 428, json: { error: "revision required", code: "config_revision_required" } });
+    if (base.length > 64 || !/^[0-9a-f]{16}\.[1-9][0-9]*$/.test(base)) return route.fulfill({
+      status: 400, json: { error: "malformed revision", code: "config_revision_malformed" },
+    });
+    if (base !== revision(server.counter)) return route.fulfill({
+      status: 412, json: { error: "changed", code: "config_revision_mismatch", currentRevision: revision(server.counter) },
+    });
     server.data[path] = body;
-    return route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1", "X-Containd-Config": "staged" } });
+    return route.fulfill({ json: body, headers: { "X-Containd-Revision": revision(++server.counter), "X-Containd-Config": "staged" } });
   });
   return server;
+}
+
+for (const surface of ["raw editor", "restore"] as const) {
+  test(`Config ${surface} preserves user keys and displays the full rejection detail`, async ({ page }) => {
+    const server = await mockAPI(page);
+    server.data["/config/backups"] = [];
+    const path = surface === "raw editor" ? "/config/candidate" : "/config/import";
+    const detail = 'unknown top-level key "dataPlane" (did you mean "dataplane"?)';
+    const document = { schema_version: "0.1.10", dataPlane: { enforcement: true } };
+    let submitted: unknown;
+    let base: string | undefined;
+    await page.route(`**/api/v1${path}`, async (route) => {
+      submitted = route.request().postDataJSON();
+      base = route.request().headers()["x-containd-if-revision"];
+      if (!base) return route.fulfill({ status: 428, json: { error: "revision required", code: "config_revision_required" } });
+      if (base !== revision(server.counter)) return route.fulfill({
+        status: 412, json: { error: "changed", code: "config_revision_mismatch", currentRevision: revision(server.counter) },
+      });
+      await route.fulfill({ status: 400, json: { error: "invalid JSON", detail } });
+    });
+    await Promise.all([
+      page.waitForResponse(read("/config/diff")),
+      page.goto(surface === "raw editor" ? "/config/?tab=candidate" : "/config/"),
+    ]);
+    if (surface === "raw editor") {
+      const editor = page.getByRole("textbox", { name: "Staged config JSON", exact: true });
+      await expect(editor).toBeEnabled();
+      await editor.fill(JSON.stringify(document));
+      await page.getByRole("button", { name: "Save staged config", exact: true }).click();
+      await expect(editor).toHaveValue(JSON.stringify(document));
+    } else {
+      await page.locator('input[type="file"][accept=".json"]:visible').setInputFiles({
+        name: "config.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(document)),
+      });
+      await page.getByRole("button", { name: "Restore", exact: true }).click();
+    }
+    const prefix = surface === "raw editor" ? "Failed to save candidate" : "Restore failed";
+    await expect(page.getByText(`${prefix}: invalid JSON: ${detail}`, { exact: true })).toBeVisible();
+    expect(submitted).toEqual(document);
+    expect(base).toBe(revision(server.counter));
+  });
 }
 
 const services = [

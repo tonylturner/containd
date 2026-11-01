@@ -61,7 +61,7 @@ func TestTCP2404LifecycleOwnership(t *testing.T) {
 					t.Fatalf("old incarnation retained = %v, owned = %v", retained, owned)
 				}
 
-				guard := e.rememberDeniedTCP(st.Key, st.ServiceKey())
+				guard := e.rememberDeniedTCP(st.Key, st.ServiceKey(), false)
 				if guard == nil {
 					t.Fatal("missing test tombstone")
 				}

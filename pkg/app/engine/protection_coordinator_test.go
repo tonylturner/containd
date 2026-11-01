@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,11 +31,7 @@ func TestProtectionCoordinatorServicesAndSupersession(t *testing.T) {
 	services := servicesHandler(zap.NewNop().Sugar(), dp.Engine, nil, nil, nil, nil, c)
 	conf := configHandler(zap.NewNop().Sugar(), dp, &simulationManager{dpEngine: dp.Engine, logger: zap.NewNop().Sugar()}, c)
 	apply := applyRulesHandler(dp.Engine, nil, c)
-	wantServices := 200
-	if runtime.GOOS != "linux" {
-		wantServices = 400
-	}
-	if w := coordinatedPost(services, "A", `{}`); w.Code != wantServices {
+	if w := coordinatedPost(services, "A", `{}`); w.Code != 200 {
 		t.Fatalf("services: %d %s", w.Code, w.Body)
 	}
 	if st := dp.Protection(); st.ApplyID != "A" || st.State != "pending" {

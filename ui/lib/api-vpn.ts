@@ -1,5 +1,5 @@
-import { apiURL } from "./api-core";
-import { getConfigJSON, getJSON, getJSONShaped, postJSONResult } from "./api-request";
+import { apiURL, authHeaders, clearAuthExpired, fetchWithSession, handleUnauthorized } from "./api-core";
+import { getConfigJSON, failureOf, getJSON, getJSONShaped, postJSONResult } from "./api-request";
 
 // VPN: WireGuard and OpenVPN configuration, OpenVPN client profiles and
 // WireGuard runtime status.
@@ -81,6 +81,50 @@ export type WireGuardStatus = {
   peers?: WireGuardPeerStatus[];
 };
 
+export type OpenVPNCredential = {
+  id: string;
+  issuer: string;
+  serial: string;
+  name: string;
+  issuedAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+};
+
+export type OpenVPNRevokeResult = {
+  credential: OpenVPNCredential;
+  revoked: boolean;
+  applied: boolean;
+  error?: string;
+};
+
+type RevokeResponse =
+  | { ok: true; data: OpenVPNRevokeResult }
+  | { ok: false; error: string; revocation?: OpenVPNRevokeResult };
+
+async function revokeOpenVPNClient(id: string): Promise<RevokeResponse> {
+  try {
+    const res = await fetchWithSession(
+      `/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(id)}/revoke`,
+      { method: "POST", headers: authHeaders() },
+    );
+    if (handleUnauthorized(res)) return failureOf(res);
+    clearAuthExpired();
+    if (res.ok) return { ok: true, data: await res.json() };
+    // A 503 can report a durable revocation, not a failed mutation. Preserve
+    // its credential and runtime acknowledgement instead of discarding them.
+    if (res.status === 503) {
+      const body = await res.clone().json().catch(() => null);
+      if (body?.revoked === true && body?.applied === false && body?.credential?.id === id) {
+        return { ok: false, error: body.error, revocation: body };
+      }
+    }
+    return failureOf(res);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+  }
+}
+
 export const vpnAPI = {
   getVPN: () => getConfigJSON<VPNConfig>("/api/v1/services/vpn", "object"),
   setVPN: (expectedRevision: string, cfg: VPNConfig) =>
@@ -91,13 +135,14 @@ export const vpnAPI = {
       { name, ovpn }, expectedRevision,
     ),
   listOpenVPNClients: () =>
-    getJSONShaped<{ clients: string[] }>("/api/v1/services/vpn/openvpn/clients", { lists: ["clients"] }),
+    getJSONShaped<{ clients: OpenVPNCredential[]; revocationsApplied: boolean }>("/api/v1/services/vpn/openvpn/clients", { lists: ["clients"] }),
   createOpenVPNClient: (name: string) =>
-    postJSONResult<{ name: string }>("/api/v1/services/vpn/openvpn/clients", {
+    postJSONResult<OpenVPNCredential>("/api/v1/services/vpn/openvpn/clients", {
       name,
     }),
-  downloadOpenVPNClientURL: (name: string) =>
-    apiURL(`/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(name)}`),
+  downloadOpenVPNClientURL: (id: string) =>
+    apiURL(`/api/v1/services/vpn/openvpn/clients/${encodeURIComponent(id)}`),
+  revokeOpenVPNClient,
   getWireGuardStatus: (iface?: string) =>
     getJSON<WireGuardStatus>(
       `/api/v1/services/vpn/wireguard/status${iface ? `?iface=${encodeURIComponent(iface)}` : ""}`,

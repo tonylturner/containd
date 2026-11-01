@@ -217,7 +217,11 @@ func (s *SQLiteStore) saveKindTx(ctx context.Context, tx *sql.Tx, kind string, c
 	if cfg == nil {
 		return errors.New("config is nil")
 	}
-	if err := s.ValidateConfig(cfg); err != nil {
+	baseline, err := readKindFrom(ctx, tx, configKeyRunning, false)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err := s.checkWrite(baseline, cfg); err != nil {
 		return err
 	}
 	if err := s.validateSSHAccessLocked(ctx, cfg); err != nil {
@@ -347,7 +351,7 @@ func (s *SQLiteStore) ConfirmCommit(ctx context.Context, expected Revision) (Rev
 	if err != nil {
 		return "", err
 	}
-	if err := s.ValidateConfig(cfg); err != nil {
+	if err := s.checkStored(cfg); err != nil {
 		return "", err
 	}
 	revision, err := s.commitRevisionTx(ctx, tx)

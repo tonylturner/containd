@@ -27,6 +27,7 @@ test("monitoring overview reads the typed services status", async ({ page }) => 
     if (p === "/api/v1/events" || p === "/api/v1/flows") body = [];
     if (p === "/api/v1/services/status") {
       body = {
+        faults: [],
         dns: { enabled: true, running: true, ...meter() },
         ntp: { enabled: true, running: false, ...meter() },
         envoy: { note: "", ...meter([4]), rate_per_min: 2.5, errors_rate_per_min: 0.5 },

@@ -5,9 +5,7 @@ package httpapi
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
@@ -45,6 +43,10 @@ type tlsInfoResponse struct {
 	HTTPListenChanges  bool `json:"httpListenChanges"`
 	HTTPSListenChanges bool `json:"httpsListenChanges"`
 
+	// Managed uses the same identity-mode predicate as uploads for the
+	// next-start configuration and environment, not the bound listener.
+	Managed bool `json:"managed"`
+
 	// CertFile and KeyFile are the files the HTTPS listener serves when
 	// management next starts with this configuration, and the Cert fields
 	// describe that certificate.
@@ -66,6 +68,7 @@ type tlsInfoResponse struct {
 	ServedCertNotAfter string   `json:"servedCertNotAfter,omitempty"`
 	ServedCertDNSNames []string `json:"servedCertDnsNames,omitempty"`
 	ServedCertIPs      []string `json:"servedCertIps,omitempty"`
+	ReloadError        string   `json:"reloadError,omitempty"`
 }
 
 func getTLSHandler(store config.Store) gin.HandlerFunc {
@@ -84,7 +87,7 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 		// configuration, under this process's environment.
 		listeners := config.EffectiveManagementListeners(cfg)
 		bound := config.BoundManagementListeners()
-		certFile, keyFile := mgmttls.ResolveFiles(cfg)
+		certFile, keyFile := mgmttls.IdentityFiles(cfg)
 		served := currentServedManagement()
 
 		resp := tlsInfoResponse{
@@ -96,24 +99,43 @@ func getTLSHandler(store config.Store) gin.HandlerFunc {
 			BoundHTTPSListenAddr: boundAddr(bound.HTTPS),
 			HTTPListenChanges:    listenerChanges(bound.HTTP, listeners.HTTP),
 			HTTPSListenChanges:   listenerChanges(bound.HTTPS, listeners.HTTPS),
+			Managed:              mgmttls.Managed(cfg),
 			CertFile:             cleanFilePath(certFile),
 			KeyFile:              cleanFilePath(keyFile),
 			ServedCertFile:       cleanFilePath(served.CertFile),
 			ServedKeyFile:        cleanFilePath(served.KeyFile),
 		}
 
-		if cert := readCertificate(resp.CertFile); cert != nil {
+		var leaf *x509.Certificate
+		if served.TLS != nil {
+			var err error
+			leaf, err = served.TLS.PublicLeaf()
+			if err != nil {
+				resp.ReloadError = err.Error()
+			}
+		} else if served.CertFile != "" {
+			if pair, err := mgmttls.ReadPair(resp.ServedCertFile, resp.ServedKeyFile); err == nil {
+				leaf = pair.Leaf
+			}
+		}
+		if leaf != nil {
+			resp.ServedCertSubject = leaf.Subject.String()
+			resp.ServedCertNotAfter = formatNotAfter(leaf)
+			resp.ServedCertDNSNames, resp.ServedCertIPs = certSANs(leaf)
+		}
+
+		configuredLeaf := leaf
+		if resp.CertFile != resp.ServedCertFile || resp.KeyFile != resp.ServedKeyFile {
+			configuredLeaf = nil
+			if pair, err := mgmttls.ReadPair(resp.CertFile, resp.KeyFile); err == nil {
+				configuredLeaf = pair.Leaf
+			}
+		}
+		if cert := configuredLeaf; cert != nil {
 			resp.CertSubject = cert.Subject.String()
 			resp.CertIssuer = cert.Issuer.String()
 			resp.CertNotAfter = formatNotAfter(cert)
 			resp.CertDNSNames, resp.CertIPs = certSANs(cert)
-		}
-		// The bound listener reloads its files at the next handshake after
-		// they change, so the file is what it serves.
-		if cert := readCertificate(resp.ServedCertFile); cert != nil {
-			resp.ServedCertSubject = cert.Subject.String()
-			resp.ServedCertNotAfter = formatNotAfter(cert)
-			resp.ServedCertDNSNames, resp.ServedCertIPs = certSANs(cert)
 		}
 
 		c.JSON(http.StatusOK, resp)
@@ -177,20 +199,6 @@ func cleanFilePath(path string) string {
 	return filepath.Clean(path)
 }
 
-// readCertificate is the first certificate of a PEM file; nil when the file
-// is missing or holds none.
-func readCertificate(path string) *x509.Certificate {
-	der, err := readFirstCertDER(path)
-	if err != nil {
-		return nil
-	}
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		return nil
-	}
-	return cert
-}
-
 func formatNotAfter(cert *x509.Certificate) string {
 	return cert.NotAfter.UTC().Format(time.RFC3339Nano)
 }
@@ -213,19 +221,12 @@ type setTLSCertRequest struct {
 }
 
 func setTLSCertHandler(store config.Store) gin.HandlerFunc {
-	return tlsCertUploadHandler(store, "/data")
+	return tlsCertUploadHandler(store, mgmttls.DefaultDataDir)
 }
 
-// tlsCertUploadHandler writes the management certificate and key files that
-// management serves when it next starts with the saved configuration, which
-// must both be under dataDir. The bound HTTPS listener reloads the files it
-// serves at its next TLS handshake after they change, so when they are those
-// files the upload is served at once (status "updated"). Otherwise it is
-// served from the next start (status "stored", with a warning that says so).
-// An upload that would replace only one of the served files is refused: the
-// listener would pair it with the other one.
+// tlsCertUploadHandler publishes only the managed identity. dataDir is the
+// appliance data root; external paths are read-only even beneath this directory.
 func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
-	under := filepath.Clean(dataDir) + string(os.PathSeparator)
 	return func(c *gin.Context) {
 		if store == nil {
 			apiError(c, http.StatusServiceUnavailable, "config store unavailable")
@@ -244,7 +245,7 @@ func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 		}
 
 		// Validate the pair before writing.
-		pair, err := tls.X509KeyPair([]byte(req.CertPEM), []byte(req.KeyPEM))
+		pair, err := mgmttls.ParseBundle([]byte(req.CertPEM + "\n" + req.KeyPEM + "\n"))
 		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid cert/key pair", err.Error())
 			return
@@ -256,42 +257,18 @@ func tlsCertUploadHandler(store config.Store, dataDir string) gin.HandlerFunc {
 			return
 		}
 		cert, key := mgmttls.ResolveFilesWithSources(cfg)
-		certFile, keyFile := cert.Path, key.Path
-
-		if !strings.HasPrefix(filepath.Clean(certFile)+string(os.PathSeparator), under) {
-			apiError(c, http.StatusConflict, fmt.Sprintf("TLS certificate path %q (source: %s) must be under %s", certFile, cert.Source, dataDir))
+		if !mgmttls.Managed(cfg) {
+			apiError(c, http.StatusConflict, fmt.Sprintf("external TLS paths are read-only: certificate %q (source: %s), key %q (source: %s); unset CONTAIND_TLS_CERT_FILE/CONTAIND_TLS_KEY_FILE and clear system.mgmt.tlsCertFile/tlsKeyFile or restore their default paths to use the managed bundle", cert.Path, cert.Source, key.Path, key.Source))
 			return
 		}
-		if !strings.HasPrefix(filepath.Clean(keyFile)+string(os.PathSeparator), under) {
-			apiError(c, http.StatusConflict, fmt.Sprintf("TLS key path %q (source: %s) must be under %s", keyFile, key.Source, dataDir))
-			return
-		}
-
+		certFile, _ := mgmttls.IdentityFilesIn(cfg, dataDir)
 		served := currentServedManagement()
-		liveCert, liveKey := served.CertFile != "" && sameFilePath(certFile, served.CertFile), served.KeyFile != "" && sameFilePath(keyFile, served.KeyFile)
-		if liveCert != liveKey {
-			apiError(c, http.StatusConflict, fmt.Sprintf("the HTTPS listener serves certificate %q with key %q; writing certificate %q (source: %s) and key %q (source: %s) would pair a new file with a served one", served.CertFile, served.KeyFile, certFile, cert.Source, keyFile, key.Source))
+		liveCert := sameFilePath(certFile, served.CertFile) && sameFilePath(certFile, served.KeyFile)
+		if err := mgmttls.Publish(certFile, []byte(req.CertPEM), []byte(req.KeyPEM)); err != nil {
+			apiErrorDetail(c, http.StatusInternalServerError, "TLS bundle publication failed", err.Error())
 			return
 		}
 
-		if err := os.MkdirAll(filepath.Dir(certFile), 0o755); err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := os.MkdirAll(filepath.Dir(keyFile), 0o755); err != nil {
-			internalError(c, err)
-			return
-		}
-
-		// Write key first with restrictive perms, then cert.
-		if err := os.WriteFile(keyFile, []byte(req.KeyPEM+"\n"), 0o600); err != nil {
-			internalError(c, err)
-			return
-		}
-		if err := os.WriteFile(certFile, []byte(req.CertPEM+"\n"), 0o644); err != nil {
-			internalError(c, err)
-			return
-		}
 		status, warnings := "updated", []string{}
 		switch {
 		case served.CertFile == "":
@@ -404,22 +381,4 @@ func certAuditDetail(cert *x509.Certificate) string {
 		return ""
 	}
 	return fmt.Sprintf("subject=%s notAfter=%s", cert.Subject, cert.NotAfter.UTC().Format(time.RFC3339))
-}
-
-func readFirstCertDER(path string) ([]byte, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	for {
-		var block *pem.Block
-		block, b = pem.Decode(b)
-		if block == nil {
-			break
-		}
-		if block.Type == "CERTIFICATE" && len(block.Bytes) > 0 {
-			return block.Bytes, nil
-		}
-	}
-	return nil, errors.New("no certificate found")
 }

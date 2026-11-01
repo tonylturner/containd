@@ -578,13 +578,19 @@ func TestConfigureServicesWarnings(t *testing.T) {
 		body     string
 		warnings []string
 		errText  string
+		service  string
 	}{
-		{"applied", http.StatusOK, `{"status":"applied"}`, nil, ""},
-		{"pending", http.StatusOK, `{"status":"applied","warnings":["AV backend is still starting: clamd not ready; scanning is pending until it is ready"]}`,
-			[]string{"AV backend is still starting: clamd not ready; scanning is pending until it is ready"}, ""},
-		{"no body", http.StatusNoContent, "", nil, ""},
-		{"malformed", http.StatusOK, `{"status":`, nil, "engine services response"},
-		{"unavailable", http.StatusServiceUnavailable, "AV service apply failed: clamd exited", nil, "engine services status 503: AV service apply failed: clamd exited"},
+		{"applied", http.StatusOK, `{"faults":[]}`, nil, "", ""},
+		{"pending", http.StatusOK, `{"faults":[],"warnings":["AV backend is still starting: clamd not ready; scanning is pending until it is ready"]}`,
+			[]string{"AV backend is still starting: clamd not ready; scanning is pending until it is ready"}, "", ""},
+		{"runtime", http.StatusOK, `{"faults":[{"service":"dhcp","kind":"runtime","message":"runtime apply failed"}]}`, nil, "", "dhcp"},
+		{"no body", http.StatusNoContent, "", nil, "engine services response", ""},
+		{"missing faults", http.StatusOK, `{"status":"applied"}`, nil, "missing faults", ""},
+		{"invalid service", http.StatusOK, `{"faults":[{"service":"dns","kind":"runtime","message":"failed"}]}`, nil, "invalid runtime fault", ""},
+		{"invalid kind", http.StatusOK, `{"faults":[{"service":"av","kind":"config","message":"failed"}]}`, nil, "invalid runtime fault", ""},
+		{"duplicate", http.StatusOK, `{"faults":[{"service":"av","kind":"runtime","message":"failed"},{"service":"av","kind":"runtime","message":"failed"}]}`, nil, "invalid runtime fault", ""},
+		{"malformed", http.StatusOK, `{"status":`, nil, "engine services response", ""},
+		{"unavailable", http.StatusServiceUnavailable, "request refused", nil, "engine services status 503: request refused", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -603,15 +609,18 @@ func TestConfigureServicesWarnings(t *testing.T) {
 				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer srv.Close()
-			warnings, err := NewHTTPClient(srv.URL).ConfigureServices(context.Background(), config.ServicesConfig{})
+			result, err := NewHTTPClient(srv.URL).ConfigureServices(context.Background(), config.ServicesConfig{})
 			if tc.errText != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.errText) || warnings != nil {
-					t.Fatalf("warnings=%v err=%v, want error %q", warnings, err, tc.errText)
+				if err == nil || !strings.Contains(err.Error(), tc.errText) || result.Faults != nil {
+					t.Fatalf("result=%v err=%v, want error %q", result, err, tc.errText)
 				}
 				return
 			}
-			if err != nil || !reflect.DeepEqual(warnings, tc.warnings) {
-				t.Fatalf("warnings=%v err=%v, want %v", warnings, err, tc.warnings)
+			if err != nil || !reflect.DeepEqual(result.Warnings, tc.warnings) {
+				t.Fatalf("result=%v err=%v, want %v", result, err, tc.warnings)
+			}
+			if tc.service != "" && (len(result.Faults) != 1 || result.Faults[0].Service != tc.service || result.Faults[0].Kind != "runtime") {
+				t.Fatalf("lost typed runtime fault: %+v", result)
 			}
 		})
 	}

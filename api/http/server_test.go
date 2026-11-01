@@ -19,7 +19,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	engineclient "github.com/tonylturner/containd/api/engine"
-
 	"github.com/tonylturner/containd/pkg/common/trust"
 	"github.com/tonylturner/containd/pkg/cp/config"
 	cpservices "github.com/tonylturner/containd/pkg/cp/services"
@@ -214,6 +213,7 @@ type mockEngine struct {
 	svcErr  error
 	// svcWarnings are the warnings the engine applied the services with.
 	svcWarnings []string
+	svcFaults   []config.ServiceFault
 	lastDP      config.DataPlaneConfig
 	lastIf      []config.Interface
 	lastRT      config.RoutingConfig
@@ -258,9 +258,9 @@ func (m *mockEngine) ConfigureRoutingReplace(ctx context.Context, routing config
 	return nil
 }
 
-func (m *mockEngine) ConfigureServices(ctx context.Context, services config.ServicesConfig) ([]string, error) {
+func (m *mockEngine) ConfigureServices(ctx context.Context, services config.ServicesConfig) (engineclient.ServicesApplyResult, error) {
 	m.lastSvc = services
-	return m.svcWarnings, m.svcErr
+	return engineclient.ServicesApplyResult{Warnings: m.svcWarnings, Faults: m.svcFaults}, m.svcErr
 }
 
 func (m *mockEngine) ListInterfaceState(ctx context.Context) ([]config.InterfaceState, error) {

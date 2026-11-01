@@ -31,7 +31,7 @@ func TestApplyProtectionHeaderAndObservation(t *testing.T) {
 					t.Errorf("apply header=%q want %q", r.Header.Get(ApplyIDHeader), id)
 				}
 				if r.URL.Path != "/internal/apply_rules" {
-					_, _ = io.WriteString(w, `{}`)
+					_, _ = io.WriteString(w, `{"faults":[]}`)
 					return
 				}
 				switch response {

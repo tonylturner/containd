@@ -150,10 +150,11 @@ export default function RoutingPage() {
       onConfirm: async () => {
         if (!canSaveNow()) return;
         setReconciling(true);
-        const res = await form.write(base => api.reconcileRoutingReplace(base));
+        // Runtime operations cannot acknowledge or rebase a retained draft.
+        const res = await api.reconcileRoutingReplace();
         setReconciling(false);
         if (!res.ok) {
-          setError(revisionError(res));
+          setError(res.error);
           return;
         }
         await refresh();

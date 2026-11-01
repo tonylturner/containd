@@ -144,47 +144,50 @@ func (c *HTTPClient) Configure(ctx context.Context, cfg config.DataPlaneConfig) 
 	return nil
 }
 
-// ConfigureServices applies the services configuration and returns the
-// warnings the engine applied it with: conditions such as an AV backend that
-// is still starting, which the engine resolves on its own without a further
-// apply.
-func (c *HTTPClient) ConfigureServices(ctx context.Context, services config.ServicesConfig) ([]string, error) {
+// ConfigureServices applies every service and returns per-service runtime faults
+// and warnings. Only request-level failures are returned as errors.
+func (c *HTTPClient) ConfigureServices(ctx context.Context, services config.ServicesConfig) (ServicesApplyResult, error) {
 	if c.BaseURL == "" {
-		return nil, fmt.Errorf("engine BaseURL is empty")
+		return ServicesApplyResult{}, fmt.Errorf("engine BaseURL is empty")
 	}
 	body, err := json.Marshal(services)
 	if err != nil {
-		return nil, err
+		return ServicesApplyResult{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/internal/services", bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return ServicesApplyResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(ApplyIDHeader, ApplyID(ctx))
 	resp, err := c.Client.Do(req)
 	if err != nil {
-		return nil, err
+		return ServicesApplyResult{}, err
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("engine services response: %w", err)
+		return ServicesApplyResult{}, fmt.Errorf("engine services response: %w", err)
 	}
 	if resp.StatusCode >= 300 {
 		if detail := strings.TrimSpace(string(b)); detail != "" {
-			return nil, fmt.Errorf("engine services status %d: %s", resp.StatusCode, detail)
+			return ServicesApplyResult{}, fmt.Errorf("engine services status %d: %s", resp.StatusCode, detail)
 		}
-		return nil, fmt.Errorf("engine services status %d", resp.StatusCode)
+		return ServicesApplyResult{}, fmt.Errorf("engine services status %d", resp.StatusCode)
 	}
-	if len(bytes.TrimSpace(b)) == 0 {
-		return nil, nil
-	}
-	var applied struct {
-		Warnings []string `json:"warnings"`
-	}
+	var applied ServicesApplyResult
 	if err := json.Unmarshal(b, &applied); err != nil {
-		return nil, fmt.Errorf("engine services response: %w", err)
+		return ServicesApplyResult{}, fmt.Errorf("engine services response: %w", err)
 	}
-	return applied.Warnings, nil
+	if applied.Faults == nil {
+		return ServicesApplyResult{}, fmt.Errorf("engine services response: missing faults")
+	}
+	seen := map[string]bool{}
+	for _, fault := range applied.Faults {
+		if (fault.Service != config.ServiceAV && fault.Service != config.ServiceWireGuard && fault.Service != config.ServiceDHCP) || fault.Kind != "runtime" || fault.Message == "" || seen[fault.Service] {
+			return ServicesApplyResult{}, fmt.Errorf("engine services response: invalid runtime fault")
+		}
+		seen[fault.Service] = true
+	}
+	return applied, nil
 }

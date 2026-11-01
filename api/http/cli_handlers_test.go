@@ -389,7 +389,7 @@ func TestConsoleTLSCertificateFileErrors(t *testing.T) {
 	for _, tt := range []struct{ name, data, want string }{
 		{"missing", "", "read management TLS certificate"},
 		{"empty", "", "no certificates"},
-		{"invalid PEM", "not PEM", "expected PEM certificate"},
+		{"invalid PEM", "not PEM", "unexpected text in TLS bundle"},
 		{"invalid DER", "-----BEGIN CERTIFICATE-----\nYWJj\n-----END CERTIFICATE-----\n", "parse management TLS certificate"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -574,13 +574,21 @@ func TestConsolePinsTheServedCertificate(t *testing.T) {
 }
 
 func TestConsoleTLSInfoUsesServedEnvironmentPaths(t *testing.T) {
-	_, certPEM := consoleTestCertificate(t)
+	pair, certPEM := consoleTestCertificate(t)
 	path := filepath.Join(t.TempDir(), "server.crt")
 	if err := os.WriteFile(path, certPEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CONTAIND_TLS_CERT_FILE", path)
-	t.Setenv("CONTAIND_TLS_KEY_FILE", "/env/server.key")
+	keyPath := filepath.Join(filepath.Dir(path), "server.key")
+	keyDER, err := x509.MarshalPKCS8PrivateKey(pair.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONTAIND_TLS_KEY_FILE", keyPath)
 	cfg := consoleTestConfig("/config/server.crt")
 	cfg.System.Mgmt.TLSKeyFile = "/config/server.key"
 	router := gin.New()
@@ -591,7 +599,7 @@ func TestConsoleTLSInfoUsesServedEnvironmentPaths(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != http.StatusOK || result.CertFile != path || result.KeyFile != "/env/server.key" ||
+	if rec.Code != http.StatusOK || result.CertFile != path || result.KeyFile != keyPath ||
 		!containsString(result.CertDNSNames, "appliance.example") {
 		t.Fatalf("TLS info status=%d result=%+v", rec.Code, result)
 	}

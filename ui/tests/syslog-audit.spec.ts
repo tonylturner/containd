@@ -21,7 +21,7 @@ async function open(page: Page, audit: unknown) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const body = path.endsWith("/auth/me") || path.endsWith("/auth/session") ? user
-      : path === "/api/v1/services/status" ? { syslog: { ...syslog, ...(audit === undefined ? {} : { audit }) }, av: { available: false, error: "x" } }
+      : path === "/api/v1/services/status" ? { faults: [], syslog: { ...syslog, ...(audit === undefined ? {} : { audit }) }, av: { available: false, error: "x" } }
         : path === "/api/v1/services/syslog" ? { forwarders: [{ address: "192.0.2.10", port: 514, proto: "udp" }], batchSize: 500, flushEvery: 2 }
           : path.endsWith("/config/diff") ? { changed: false, changedSections: [] } : {};
     await route.fulfill({ json: body, headers: { "X-Containd-Revision": "0123456789abcdef.1" } });

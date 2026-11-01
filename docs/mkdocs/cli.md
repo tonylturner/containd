@@ -88,6 +88,8 @@ candidate snapshot and chains the revisions returned by its staged writes.
   - `set dataplane enforcement <on|off> [table] [iface...]`
   - `set system hostname <name>` (candidate)
   - `set system mgmt http listen <addr>` (candidate)
+  - `set system mgmt listen <addr>` (alias for the HTTP listener command; both
+    set `httpListenAddr` and clear the legacy `listenAddr` in the candidate)
   - `set system ssh listen <addr>` (candidate)
   - `set system ssh allow-password <true|false>` (candidate)
   - `set system ssh authorized-keys-dir <dir>` (candidate)
@@ -180,11 +182,12 @@ See [Learning](ics-dpi.md#learning) for protocol and evidence-retention limits.
 Management APIs and the in-app CLI use short-lived JWT sessions stored in a cookie by default.
 
 Environment variables (common):
-- `CONTAIND_LAB_MODE=1` pins the lab credential to `containd/containd` and refuses
-  every password change, including the SSH menu reset and the wizard's password
-  step. Protected API routes still require a bearer token or cookie.
-  With a JWT secret, the token's signature and expiry are validated without a
-  session lookup. Without a secret, **any nonempty token passes**. Factory reset
+- `CONTAIND_LAB_MODE=1` refuses every password change, including the SSH menu
+  reset and the wizard's password step. It keeps existing and custom-seeded
+  credentials; a freshly seeded lab uses `containd/containd`. Protected API
+  routes still require a bearer token or cookie.
+  With a JWT secret, the token must be HS256-signed and carry `exp`; signature
+  and expiry are validated with 30 seconds of leeway, without a session lookup. Without a secret, **any nonempty token passes**. Factory reset
   does not revoke lab web/API tokens in either case. Lab requests receive admin
   access rather than ordinary role enforcement. Use only in isolated, disposable environments; see
   [default-password and lab-mode limits](secure-by-design.md#2-default-passwords).
@@ -293,7 +296,10 @@ the configuration store (`CONTAIND_CONFIG_DB`, default `/data/config.db` in
 the image), readable only by its own user. It removes the file when it stops.
 The CLI calls the HTTP listener on `127.0.0.1` unless it redirects to HTTPS,
 and otherwise the HTTPS listener, trusting only the certificate management
-serves. It follows no redirect. It logs in as `CONTAIND_CLI_USER` with
+serves, using the public-leaf snapshot in the runtime record; no private key is
+recorded. The record follows valid [management TLS rotations](config-format.md#management-https-identity),
+including retention of the last-good identity after an invalid external rotation.
+It follows no redirect. It logs in as `CONTAIND_CLI_USER` with
 `CONTAIND_CLI_PASSWORD`; both default to `containd`. Without the file, the
 CLI stops with `management is not running`. The container health check
 (`containd healthcheck`) uses the same file.

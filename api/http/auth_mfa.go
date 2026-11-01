@@ -67,7 +67,9 @@ func issueLoginResponse(c *gin.Context, userStore users.Store, u *users.StoredUs
 		return
 	}
 	secret := jwtSecret()
-	token, err := signJWT(secret, u.ID, u.Username, u.Role, sess.ID, sess.ExpiresAt)
+	profile := u.User
+	profile.Role = effectiveUserRole(labmode.Enabled(), u.Role)
+	token, err := signJWT(secret, u.ID, u.Username, profile.Role, sess.ID, sess.ExpiresAt)
 	if err != nil {
 		apiError(c, http.StatusInternalServerError, "failed to sign token")
 		return
@@ -82,7 +84,7 @@ func issueLoginResponse(c *gin.Context, userStore users.Store, u *users.StoredUs
 	c.JSON(http.StatusOK, loginResponse{
 		Token:     token,
 		ExpiresAt: sess.ExpiresAt.Format(time.RFC3339Nano),
-		User:      u.User,
+		User:      profile,
 	})
 }
 
@@ -349,16 +351,9 @@ func disableUserMFAHandler(userStore users.Store) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"status": "already_disabled"})
 			return
 		}
-		if err := userStore.DisableTOTP(c.Request.Context(), u.ID); err != nil {
+		if err := userStore.DisableTOTPWithGrace(c.Request.Context(), u.ID, time.Now()); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
-		}
-		if u.MFARequired {
-			deadline := users.MFAGraceDeadline(time.Now())
-			if err := userStore.SetMFARequirement(c.Request.Context(), u.ID, true, &deadline); err != nil {
-				apiError(c, http.StatusBadRequest, err.Error())
-				return
-			}
 		}
 		auditLog(c, audit.Record{
 			Action: "auth.mfa.disable_admin",

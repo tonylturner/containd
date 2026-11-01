@@ -21,8 +21,8 @@ import (
 
 type routeInventoryServices struct{}
 
-func (s routeInventoryServices) Apply(ctx context.Context, cfg config.ServicesConfig) error {
-	return nil
+func (s routeInventoryServices) ApplyEffective(ctx context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+	return cfg, nil
 }
 
 func (s routeInventoryServices) Status() any { return map[string]any{} }
@@ -172,6 +172,9 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 				if class == "config-writer" && rec.Code != http.StatusPreconditionRequired {
 					t.Fatalf("unguarded config writer: %d %s", rec.Code, rec.Body)
 				}
+				if strings.HasSuffix(route.Path, "/reconcile") && rec.Header().Get(revisionHeader) != "" {
+					t.Fatal("operational reconcile response acknowledged a configuration revision")
+				}
 				if store.mutations != 0 {
 					t.Fatalf("unconditioned probe mutated store %d times", store.mutations)
 				}
@@ -192,3 +195,5 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 		})
 	}
 }
+
+func (routeInventoryServices) RecordEngineFaults([]config.ServiceFault) {}

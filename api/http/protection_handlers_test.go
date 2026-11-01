@@ -28,9 +28,9 @@ type protectionEngine struct {
 	retryCalls          int
 }
 
-func (e *protectionEngine) ConfigureServices(ctx context.Context, _ config.ServicesConfig) ([]string, error) {
+func (e *protectionEngine) ConfigureServices(ctx context.Context, _ config.ServicesConfig) (engineclient.ServicesApplyResult, error) {
 	e.phases = append(e.phases, engineclient.ApplyID(ctx))
-	return nil, nil
+	return engineclient.ServicesApplyResult{}, nil
 }
 func (e *protectionEngine) Configure(ctx context.Context, _ config.DataPlaneConfig) error {
 	e.phases = append(e.phases, engineclient.ApplyID(ctx))

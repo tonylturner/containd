@@ -35,6 +35,9 @@ func (e *rulesetPreviewEngine) PreviewRuleset(_ context.Context, cfg *config.Con
 
 func TestRulesetPreviewDelegatesCandidate(t *testing.T) {
 	cfg := config.DefaultConfig()
+	// Stored candidates have a schema stamp; preview must not normalize its
+	// source document in place just to obtain a comparable runtime snapshot.
+	cfg.SchemaVersion = config.SchemaVersionCurrent
 	cfg.DataPlane = config.DataPlaneConfig{Enforcement: true, EnforceTable: "custom", NFLogGroup: 205, NFQueueGroup: 209}
 	warnings := []enforce.RuleWarning{{RuleID: "maint", Predicate: enforce.PredicateIdentity, Action: rules.ActionAllow,
 		Message: "no bound address can match identities operator; the rule matches nothing until one is bound"}}
