@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Omit unknown DHCP and WireGuard runtime gauge series instead of reporting
+  them stopped. Publish the VPN aggregate only when a VPN is observed running;
+  service faults no longer manufacture stopped runtime observations.
 - Keep connecting OpenVPN clients supervised instead of quarantining them when
   the remote is slow or unreachable; expose connection status separately from
   process status while retaining the server readiness gate.

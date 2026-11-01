@@ -12,7 +12,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/tonylturner/containd/pkg/common/metrics"
 	"github.com/tonylturner/containd/pkg/cp/audit"
 	"github.com/tonylturner/containd/pkg/cp/config"
 )
@@ -48,8 +47,8 @@ func (m *Manager) SeedFaults(in []config.ServiceConfigError) {
 	}
 	for _, f := range in {
 		serviceFaulted.WithLabelValues(f.Service).Set(1)
-		metrics.ServicesRunning.WithLabelValues(f.Service).Set(0)
 	}
+	m.updateServiceGauges()
 }
 
 // SetFaultAudit supplies the durable audit sink for subsequent fault changes.
@@ -166,7 +165,6 @@ func (m *Manager) ApplyEffective(ctx context.Context, cfg config.ServicesConfig,
 	}
 	m.localFaults = faults
 	m.publishCombinedFaults()
-	m.updateServiceGauges(cfg)
 	return cfg, warnings
 }
 
@@ -207,7 +205,7 @@ func (m *Manager) publishCombinedFaults() {
 		}
 	}
 	m.publishFaults(faults)
-	for _, fault := range faults {
-		metrics.ServicesRunning.WithLabelValues(fault.Service).Set(0)
-	}
+	// Faults do not certify a stopped runtime, especially after a failed
+	// engine apply or teardown. Only runtime owners publish known states.
+	m.updateServiceGauges()
 }

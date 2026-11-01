@@ -248,34 +248,36 @@ func (m *Manager) Validate(ctx context.Context, cfg config.ServicesConfig) error
 	return nil
 }
 
-func (m *Manager) updateServiceGauges(cfg config.ServicesConfig) {
-	set := func(name string, enabled bool) {
+func (m *Manager) updateServiceGauges() {
+	set := func(name string, running, known bool) {
+		if !known {
+			metrics.ServicesRunning.DeleteLabelValues(name)
+			return
+		}
 		v := 0.0
-		if enabled {
+		if running {
 			v = 1.0
 		}
 		metrics.ServicesRunning.WithLabelValues(name).Set(v)
 	}
-	set("dns", m.DNS != nil && m.DNS.Status()["running"] == true)
-	set("ntp", m.NTP != nil && m.NTP.Status()["running"] == true)
-	set("syslog", m.Syslog != nil && m.Syslog.Status()["configured_forwarders"].(int) > 0)
+	set("dns", m.DNS != nil && m.DNS.Status()["running"] == true, m.DNS != nil)
+	set("ntp", m.NTP != nil && m.NTP.Status()["running"] == true, m.NTP != nil)
+	set("syslog", m.Syslog != nil && m.Syslog.Status()["configured_forwarders"].(int) > 0, m.Syslog != nil)
 	proxyRunning := false
 	if m.Proxy != nil {
 		st := m.Proxy.Status()
 		proxyRunning = st["envoy_running"] == true || st["nginx_running"] == true
 	}
-	set("proxy", proxyRunning)
-	set("dhcp", false) // Runtime is engine-owned, not inferred from desired config.
-	set("wireguard", false)
+	set("proxy", proxyRunning, m.Proxy != nil)
+	// Engine apply results and DHCP lease records are not live observations.
+	// WireGuard's on-demand status endpoint does not feed this manager.
+	set("dhcp", false, false)
+	set("wireguard", false, false)
 	ovpn := m.VPN != nil && m.VPN.Status()["openvpn_running"] == true
-	set("openvpn", ovpn)
-	set("vpn", ovpn)
-	for _, fault := range m.Faults() {
-		set(fault.Service, false)
-		if fault.Service == config.ServiceWireGuard || fault.Service == config.ServiceOpenVPN {
-			set("vpn", false)
-		}
-	}
+	set("openvpn", ovpn, m.VPN != nil)
+	// One running member proves the aggregate is running. Without a WireGuard
+	// observation, a stopped OpenVPN daemon cannot prove all VPNs are stopped.
+	set("vpn", ovpn, ovpn)
 }
 
 // Status returns a basic status bundle for UI/CLI.

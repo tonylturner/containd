@@ -57,8 +57,29 @@ Fault-set changes produce service events and best-effort durable audit records,
 not duplicate faults on every engine reconnect. The most recent boot's faults
 also appear as `bootServiceFaults` in `/api/v1/system/management-reservation`.
 Audit-write failure is logged and does not stop enforcement. Metrics expose
-`containd_services_faulted{service}` and do not count faulted services as running.
+`containd_services_faulted{service}` independently of runtime observations:
+a fault is not proof that a process or kernel interface has stopped.
 Successful later application clears the fault.
+
+## Runtime metrics
+
+`containd_services_running{service="..."}` reports observed running state
+(`1`) or stopped state (`0`). An absent series means unknown, not stopped;
+do not fill missing series with zero in alerts or dashboards.
+
+- Management refreshes `dns`, `ntp`, `syslog`, `proxy` and `openvpn` from its
+  service managers during service application and fault updates. An absent
+  manager removes its series. OpenVPN measures the supervised process, not
+  tunnel connectivity; a connecting client counts as running.
+- Management omits `dhcp` and `wireguard`: it has no live runtime observation
+  for these engine-owned services in this collector. Desired configuration,
+  apply outcomes and stored DHCP leases do not establish runtime state.
+  WireGuard's on-demand status API does not feed these gauges.
+- The aggregate `vpn` is `1` when OpenVPN is observed running. Otherwise it is
+  omitted: without a WireGuard observation, management cannot establish that
+  every VPN is stopped. A WireGuard fault does not hide a running OpenVPN daemon.
+- The engine's AV manager owns `av`; management fault reporting does not
+  overwrite that runtime gauge.
 
 ## Syslog
 
