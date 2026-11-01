@@ -145,11 +145,14 @@ function ruleDraftFrom(rule: FirewallRule, rules: FirewallRule[], zones: Zone[],
     description: rule.description ?? "",
     log: rule.log ?? false,
     viaForwards: rule.viaForwards ?? [],
+    originalSourceZones: rule.sourceZones ?? [],
+    originalDestZones: rule.destZones ?? [],
+    originalProtocols: rule.protocols ?? [],
     srcZone: (rule.sourceZones ?? [])[0] ?? "",
     dstZone: (rule.destZones ?? [])[0] ?? "",
     sources: (rule.sources ?? []).join(", "),
     destinations: (rule.destinations ?? []).join(", "),
-    proto: (rule.protocols ?? [])[0]?.name ?? "tcp",
+    proto: (rule.protocols ?? [])[0]?.name ?? "",
     port: (rule.protocols ?? [])[0]?.port ?? "",
     policy: policyDraftFrom(rule),
     ics: icsDraftFrom(rule.ics, rule.ics?.mode ?? ""),
@@ -222,11 +225,13 @@ export function EditRuleModal({
       description: description.trim(),
       action: fields.action,
       log,
-      sourceZones: srcZone ? [srcZone] : [],
-      destZones: dstZone ? [dstZone] : [],
+      sourceZones: [...(srcZone ? [srcZone] : []), ...cfg.originalSourceZones.slice(1)],
+      destZones: [...(dstZone ? [dstZone] : []), ...cfg.originalDestZones.slice(1)],
       sources: splitCSV(sources) ?? [],
       destinations: splitCSV(destinations) ?? [],
-      protocols: buildProtocols(proto, port),
+      protocols: proto === (cfg.originalProtocols[0]?.name ?? "") && port === (cfg.originalProtocols[0]?.port ?? "")
+        ? cfg.originalProtocols
+        : [...buildProtocols(proto, port), ...cfg.originalProtocols.slice(1)],
       identities: fields.identities,
       viaForwards: cfg.viaForwards,
     };
@@ -286,6 +291,20 @@ export function EditRuleModal({
         </div>
 
         <ConfigEditNotice superseded={draft.editor.superseded} {...draft.conflictProps} onReload={() => window.location.reload()} />
+        {(cfg.originalSourceZones.length > 1 || cfg.originalDestZones.length > 1 || cfg.originalProtocols.length > 1) && (
+          <div className="mb-3 text-xs text-(--text-muted)">
+            This form edits the first zone and protocol in each list. Additional entries are retained.
+            To edit the full lists, use the Staged JSON editor in <Link href="/config/" className="underline">Configuration</Link>.
+            <details className="mt-2">
+              <summary className="cursor-pointer">All saved matching values</summary>
+              <pre className="mt-2 overflow-auto">{JSON.stringify({
+                sourceZones: cfg.originalSourceZones,
+                destZones: cfg.originalDestZones,
+                protocols: cfg.originalProtocols,
+              }, null, 2)}</pre>
+            </details>
+          </div>
+        )}
         <div className="grid gap-3 md:grid-cols-3">
           <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="description" className="input-industrial md:col-span-3" />
           <select value={srcZone} onChange={(e) => setSrcZone(e.target.value)} className="input-industrial">
@@ -300,6 +319,8 @@ export function EditRuleModal({
             {zones.map((z) => (<option key={z.name} value={z.name}>{zoneLabel(z)}</option>))}
           </select>
           <select value={proto} onChange={(e) => setProto(e.target.value)} className="input-industrial">
+            <option value="">Any protocol</option>
+            {proto && !["tcp", "udp", "icmp"].includes(proto) && <option value={proto}>{proto}</option>}
             <option value="tcp">tcp</option>
             <option value="udp">udp</option>
             <option value="icmp">icmp</option>

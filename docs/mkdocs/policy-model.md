@@ -63,6 +63,13 @@ before or after another rule. Editing keeps a rule's slot. Templates append
 their ordered rules and can report a warning when an earlier terminal shadows
 an addition. CLI syntax is in [CLI](cli.md).
 
+The rule editor preserves all saved source zones, destination zones and
+protocols, including when only the description or logging changes. Its simple
+controls edit the first entry in each list; additional entries remain unchanged
+and can be inspected under **All saved matching values**. To edit entire lists,
+use the **Staged** JSON editor in Configuration and review the diff before commit.
+An empty protocol list continues to mean any protocol.
+
 | Action | Decides | Effect |
 | --- | --- | --- |
 | `ALLOW` | yes | Accepts the packet. |
