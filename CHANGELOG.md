@@ -11,12 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Telemetry event IDs are JSON strings. API clients that parse event IDs as
   numbers must accept decimal strings.
+- ICAP servers must answer `OPTIONS` with a non-empty `Methods` header that
+  declares `REQMOD` for scanned uploads and `RESPMOD` for scanned downloads.
+  A server without that declaration reports the scanner as not ready.
 
 ### Added
 
 - Evidence health in the UI shell, Audit persistence view and `show audit --status`,
   with per-destination/source syslog backlog, retry, loss and continuity counters.
 - Authenticated `GET /api/v1/evidence/status` and sanitized `evidence.state` in health.
+- Live antivirus readiness: AV status and the scan gate follow clamd and ICAP
+  loss and recovery without a commit, and a direction becomes ready only after
+  an EICAR test scan through it is detected.
 
 ### Changed
 
@@ -35,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
+- An ICAP `413` reply counts as an oversized object, not a scanner error.
 
 ## [0.1.37] - 2026-10-31
 
