@@ -49,9 +49,10 @@ for (const path of ["/topology/", "/firewall/", "/ics/"]) {
     if (path === "/topology/") await expect(indicator).toContainText("schedule horizon exhausted");
     else {
       await expect(indicator).toContainText("Protection needs attention");
-      const details = indicator.locator("..").locator("details");
-      await details.locator("summary").click();
-      await expect(details).toContainText("schedule horizon exhausted");
+      // The health reason is a fault cause, so it is shown without expanding.
+      const reason = indicator.locator("..").getByText("schedule horizon exhausted", { exact: true });
+      await expect(reason).toBeVisible();
+      await expect(reason).toHaveCount(1);
     }
     await expect(indicator).not.toContainText("Protecting");
     await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(0);
