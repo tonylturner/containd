@@ -264,6 +264,10 @@ func updateInterfaceHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusBadRequest, "invalid interface payload")
 			return
 		}
+		if _, err := mergeInterfacePatch(config.Interface{}, patch); err != nil {
+			apiError(c, http.StatusBadRequest, "invalid interface payload")
+			return
+		}
 		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
 			for i, existing := range cfg.Interfaces {
 				if existing.Name == name {

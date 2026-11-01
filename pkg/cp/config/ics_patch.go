@@ -8,6 +8,28 @@ import (
 	"fmt"
 )
 
+// ValidateICSPredicatePatch checks supplied keys and field types without needing
+// the current predicate. Null deletes a field; protocol-dependent checks happen
+// after merging. HTTP callers can therefore reject malformed bodies before CAS.
+func ValidateICSPredicatePatch(patch json.RawMessage) error {
+	if isJSONNull(patch) {
+		return nil
+	}
+	fields, err := decodeStrictObject(patch, icsPredicateKeys)
+	if err != nil {
+		return err
+	}
+	var predicate ICSPredicate
+	for key, raw := range fields {
+		if !isJSONNull(raw) {
+			if err := predicate.decodeField(key, raw); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // PatchICSPredicate applies the raw "ics" object of a rule PATCH to cur.
 // The patch is decoded strictly, so its own unknown and duplicate keys are
 // errors. A patch that changes the protocol replaces the predicate; any

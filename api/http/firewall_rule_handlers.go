@@ -135,13 +135,25 @@ func updateFirewallRuleHandler(store config.Store) gin.HandlerFunc {
 			return
 		}
 		var patch map[string]json.RawMessage
-		if err := json.Unmarshal(body, &patch); err != nil {
+		if err := json.Unmarshal(body, &patch); err != nil || patch == nil {
 			apiError(c, http.StatusBadRequest, "invalid rule payload")
 			return
 		}
 		var rule config.Rule
 		icsPatch, patchesICS := patch["ics"]
 		delete(patch, "ics")
+		// Decode supplied types before CAS; only merging with existing state
+		// and protocol-dependent validation belong inside the mutation.
+		if _, err := mergeRulePatch(config.Rule{}, patch); err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid rule payload", err.Error())
+			return
+		}
+		if patchesICS {
+			if err := config.ValidateICSPredicatePatch(icsPatch); err != nil {
+				apiErrorDetail(c, http.StatusBadRequest, "invalid rule payload", err.Error())
+				return
+			}
+		}
 		_, ok := stageCandidate(c, store, func(cfg *config.Config) bool {
 			idx := -1
 			for i, existing := range cfg.Firewall.Rules {

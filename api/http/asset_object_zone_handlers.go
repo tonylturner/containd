@@ -5,6 +5,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -347,6 +348,13 @@ func readZonePatch(c *gin.Context) (map[string]interface{}, error) {
 	var patch map[string]interface{}
 	if err := json.Unmarshal(body, &patch); err != nil {
 		return nil, err
+	}
+	var typed config.Zone
+	if err := json.Unmarshal(body, &typed); err != nil {
+		return nil, err
+	}
+	if patch == nil {
+		return nil, errors.New("zone patch must be an object")
 	}
 	return patch, nil
 }
