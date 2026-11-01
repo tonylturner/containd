@@ -431,14 +431,19 @@ func getConfigHandler(store config.Store) gin.HandlerFunc {
 
 func saveConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var cfg config.Config
-		if err := c.ShouldBindJSON(&cfg); err != nil {
+		body, err := c.GetRawData()
+		if err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
+			return
+		}
+		cfg, err := config.DecodeRequestConfig(body, config.RequestConfigWrite)
+		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
-		if !replaceCandidate(c, ctx, store, &cfg) {
+		if !replaceCandidate(c, ctx, store, cfg) {
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.save", Target: "candidate"})
@@ -448,8 +453,13 @@ func saveConfigHandler(store config.Store) gin.HandlerFunc {
 
 func validateConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var cfg config.Config
-		if err := c.ShouldBindJSON(&cfg); err != nil {
+		body, err := c.GetRawData()
+		if err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
+			return
+		}
+		cfg, err := config.DecodeRequestConfig(body, config.RequestConfigWrite)
+		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
@@ -458,7 +468,7 @@ func validateConfigHandler(store config.Store) gin.HandlerFunc {
 			internalError(c, err)
 			return
 		}
-		if err := config.CheckWrite(baseline, &cfg, config.ReservationForStore(store)); err != nil {
+		if err := config.CheckWrite(baseline, cfg, config.ReservationForStore(store)); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -483,8 +493,13 @@ func getCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 
 func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var cfg config.Config
-		if err := c.ShouldBindJSON(&cfg); err != nil {
+		body, err := c.GetRawData()
+		if err != nil {
+			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
+			return
+		}
+		cfg, err := config.DecodeRequestConfig(body, config.RequestConfigWrite)
+		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
@@ -497,7 +512,7 @@ func saveCandidateConfigHandler(store config.Store) gin.HandlerFunc {
 			if cfg.IDS.Rules == nil {
 				cfg.IDS.Rules = existing.IDS.Rules
 			}
-			*existing = cfg
+			*existing = *cfg
 			return true
 		}); !ok {
 			return

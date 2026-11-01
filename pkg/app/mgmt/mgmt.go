@@ -58,6 +58,7 @@ type mgmtListenerConfig struct {
 	allowedOrigins      []string
 	tlsCert             string
 	tlsKey              string
+	tlsLoader           *certReloader
 	optionalFault       func(error)
 	reservedHTTPAddr    string
 }
@@ -151,6 +152,9 @@ func Run(ctx context.Context, opts Options) error {
 	runtimeCfg, listenerCfg = bound.cfg, bound.listener
 	record := &runtimeRecordPublisher{path: RuntimeRecordPath(), served: publishBoundManagement(listenerCfg, bound.binds)}
 	publishRuntimeRecord(logger, record)
+	if listenerCfg.tlsLoader != nil {
+		listenerCfg.tlsLoader.OnChange(func() { publishRuntimeRecord(logger, record) })
+	}
 	defer func() {
 		if err := record.remove(); err != nil {
 			logger.Warnf("failed to remove management runtime record: %v", err)
@@ -335,7 +339,7 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	if !listenerCfg.enableHTTPS {
 		return listenerCfg, nil
 	}
-	tlsCert, tlsKey, err := ensureSelfSignedTLSFiles(listenerCfg.tlsCert, listenerCfg.tlsKey, detectIPs())
+	tlsCert, tlsKey, err := ensureTLSIdentity(cfg, detectIPs(), logger.Warnf)
 	if err != nil {
 		logger.Warnf("https disabled: failed to ensure TLS cert: %v", err)
 		if listenerCfg.optionalFault != nil {
@@ -346,6 +350,10 @@ func resolveMgmtListenerConfig(logger *zap.SugaredLogger, cfg *config.Config, op
 	}
 	listenerCfg.tlsCert = tlsCert
 	listenerCfg.tlsKey = tlsKey
+	listenerCfg.tlsLoader = newCertReloader(tlsCert, tlsKey)
+	if _, err := listenerCfg.tlsLoader.GetCertificate(nil); err != nil {
+		return listenerCfg, err
+	}
 	return listenerCfg, nil
 }
 
@@ -397,6 +405,7 @@ func (lc mgmtListenerConfig) servedManagement(b mgmtBinds) httpapi.ServedManagem
 	}
 	if b.https.record().Enabled {
 		served.CertFile, served.KeyFile = lc.tlsCert, lc.tlsKey
+		served.TLS = lc.tlsLoader
 	}
 	return served
 }
@@ -421,7 +430,7 @@ func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) (mgm
 		return mgmtBinds{}, fmt.Errorf("%s disabled: %w", proto, err)
 	}
 	if listenerCfg.enableHTTPS {
-		bound, err := b.bindListener(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsCert, listenerCfg.tlsKey), "", listenerCfg.optionalFault)
+		bound, err := b.bindListener(handler, listenerCfg.httpsAddr, listenerCfg.httpsLoopbackAddr, newMgmtTLSConfig(listenerCfg.tlsLoader), "", listenerCfg.optionalFault)
 		if err != nil {
 			return fail("https", err)
 		}
@@ -445,8 +454,7 @@ func buildMgmtServers(handler http.Handler, listenerCfg mgmtListenerConfig) (mgm
 	return b, nil
 }
 
-func newMgmtTLSConfig(tlsCert, tlsKey string) *tls.Config {
-	reloader := newCertReloader(tlsCert, tlsKey)
+func newMgmtTLSConfig(reloader *certReloader) *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		CipherSuites: []uint16{

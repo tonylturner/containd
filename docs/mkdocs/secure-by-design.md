@@ -259,7 +259,8 @@ These steps adapt a deployment to its network. They are guidance, not gaps.
 - Require MFA for administrative accounts.
 - Keep `CONTAIND_LAB_MODE=0` except in the isolated cases above.
 - Use a unique JWT secret. Replace the generated self-signed HTTPS certificate,
-  and prefer HTTPS.
+  and prefer HTTPS. Managed uploads atomically replace a single PEM bundle;
+  [external identities](config-format.md#management-https-identity) are read-only.
 - Remove HTTP, HTTPS and SSH access from interfaces that do not need management.
 - In split mode, set `CONTAIND_ENGINE_ADDR` to the engine's address on a trusted
   private management network, set the same `CONTAIND_ENGINE_SECRET` on both peers,

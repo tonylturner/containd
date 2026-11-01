@@ -11,7 +11,7 @@ import { summarizeTargets, targetSummaryText } from "./security-summary";
 import s from "./security.module.css";
 import ts from "./topology.module.css";
 
-const MAX_ZONES = 6;
+const INITIAL_ZONES = 6;
 
 /* ════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
@@ -43,7 +43,7 @@ export default function SecurityView() {
       const zv = zones.map(mapZone);
       setAllZones(zv);
       setConduits((conds as ConduitMap) || {});
-      setActiveIds((prev) => prev.length ? prev : zv.slice(0, Math.min(MAX_ZONES, zv.length)).map((z) => z.id));
+      setActiveIds((prev) => prev.length ? prev : zv.slice(0, INITIAL_ZONES).map((z) => z.id));
     } catch (e) {
       setError(String(e));
     }
@@ -57,7 +57,7 @@ export default function SecurityView() {
   // ── Zone selector ──
   const addZone = useCallback((id: string) => {
     setActiveIds((prev) => {
-      if (prev.includes(id) || prev.length >= MAX_ZONES) return prev;
+      if (prev.includes(id)) return prev;
       return [...prev, id];
     });
     setDropdownOpen(false);
@@ -138,7 +138,7 @@ export default function SecurityView() {
   const selectedTo = selected ? allZones.find((z) => z.id === selected.split("\u2192")[1]) : null;
 
   return (
-    <div className={ts.workspace} style={{ gridTemplateColumns: panelOpen ? "1fr 320px" : "1fr" }}>
+    <div className={`${ts.workspace} ${s.workspace} ${panelOpen ? s.workspaceWithPanel : ""} ${panelOpen && selected ? s.workspaceWithSelection : ""}`}>
       <div className={s.matrixPane}>
         <div className={s.matrixHeader}>
           <div className={s.matrixTitle}>ZONE &middot; CONDUIT MATRIX</div>
@@ -182,7 +182,6 @@ export default function SecurityView() {
               onFocus={() => setDropdownOpen(true)}
               onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
               onKeyDown={(e) => { if (e.key === "Escape") { setDropdownOpen(false); searchRef.current?.blur(); } }}
-              disabled={activeIds.length >= MAX_ZONES}
             />
             {dropdownOpen && (
               <div className={s.zoneDropdown}>
@@ -192,7 +191,7 @@ export default function SecurityView() {
                   const { sl_a } = scoreZone(z, conduits);
                   const sc = slColor(sl_a, z.sl_t);
                   return (
-                    <div key={z.id} className={`${s.zoneDropdownItem} ${activeIds.length >= MAX_ZONES ? s.zoneDropdownItemDisabled : ""}`} onMouseDown={() => addZone(z.id)}>
+                    <div key={z.id} className={s.zoneDropdownItem} onMouseDown={() => addZone(z.id)}>
                       <div className={s.zoneDropdownDot} style={{ background: z.color }} />
                       <span className={s.zoneDropdownName} style={{ color: z.color }}>{z.name}</span>
                       <span className={s.zoneDropdownSl} style={{ color: sc }}>SL{sl_a}/{z.sl_t}</span>
@@ -202,13 +201,10 @@ export default function SecurityView() {
               </div>
             )}
           </div>
-          <span className={s.zoneLimitNote}>
-            {activeIds.length >= MAX_ZONES ? "max zones reached" : `${MAX_ZONES - activeIds.length} slot${MAX_ZONES - activeIds.length !== 1 ? "s" : ""} remaining`}
-          </span>
         </div>
 
         {/* Matrix grid */}
-        <div className={s.matrixScroll}>
+        <div className={s.matrixScroll} role="region" aria-label="Zone conduit matrix" tabIndex={0}>
           <div className={s.gridWrap} style={{ transform: `scale(${zoom})`, transformOrigin: "top left", transition: "transform .15s" }}>
             {/* Column headers */}
             <div className={s.gridColHeaders}>
@@ -309,7 +305,7 @@ export default function SecurityView() {
 
       {/* Detail panel */}
       {panelOpen && (
-        <div className={ts.detailPanel}>
+        <div className={`${ts.detailPanel} ${s.detailPanel}`} role="region" aria-label="Conduit details">
           <div className={ts.panelHeader}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
               <span className={ts.panelTitle} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedFrom && selectedTo ? `${selectedFrom.name} \u2192 ${selectedTo.name}` : "SELECT A CELL"}</span>
@@ -322,7 +318,7 @@ export default function SecurityView() {
               )}
               {!selectedConduit && <span style={{ fontFamily: "var(--mono)", fontSize: 8, padding: "2px 7px", borderRadius: 1, background: "#78490a", color: "#f59e0b", flexShrink: 0 }}>IEC 62443</span>}
             </div>
-            <button className={ts.panelClose} onClick={() => setPanelOpen(false)}>&#x25B6;</button>
+            <button className={ts.panelClose} onClick={() => setPanelOpen(false)} aria-label="Hide detail panel">&#x25B6;</button>
           </div>
           <div className={ts.panelBody}>
             {selectedConduit && selectedFrom && selectedTo ? (

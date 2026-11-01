@@ -71,15 +71,15 @@ func importConfigHandler(store config.Store) gin.HandlerFunc {
 			apiError(c, http.StatusRequestEntityTooLarge, "request body too large")
 			return
 		}
-		var cfg config.Config
-		if err := json.Unmarshal(body, &cfg); err != nil {
+		cfg, err := config.DecodeRequestConfig(body, config.RequestConfigImport)
+		if err != nil {
 			apiErrorDetail(c, http.StatusBadRequest, "invalid JSON", err.Error())
 			return
 		}
 		// Imports restore exported backups, including those of releases
 		// that saved any shellMode.
-		config.NormalizeLegacySSHShellMode(&cfg)
-		if !replaceCandidate(c, c.Request.Context(), store, &cfg) {
+		config.NormalizeLegacySSHShellMode(cfg)
+		if !replaceCandidate(c, c.Request.Context(), store, cfg) {
 			return
 		}
 		auditLog(c, audit.Record{Action: "config.import", Target: "candidate"})
