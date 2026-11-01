@@ -77,7 +77,13 @@ test("the sessions page shows a portless ICMP reply tuple as addresses", async (
     }],
   });
   await open(page, "/sessions/", "/api/v1/conntrack");
-  await expect(page.getByRole("cell", { name: "192.0.2.20 → 192.0.2.10", exact: true })).toBeVisible();
+  const inspect = page.getByRole("button", { name: "Inspect connection", exact: true });
+  await expect(inspect).toHaveAttribute("aria-expanded", "false");
+  await inspect.click();
+  await expect(inspect).toHaveAttribute("aria-expanded", "true");
+  const detail = page.locator(`[id="${await inspect.getAttribute("aria-controls")}"]`);
+  const reply = detail.getByText("Reply tuple (NAT)", { exact: true }).locator("..");
+  await expect(reply.getByText("192.0.2.20 → 192.0.2.10", { exact: true })).toBeVisible();
 });
 
 const zones = [{ name: "wan" }, { name: "lan" }];
