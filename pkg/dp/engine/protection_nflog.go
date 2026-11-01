@@ -24,11 +24,13 @@ func (e *Engine) startNFLogLocked(lifetime context.Context) {
 	var once sync.Once
 	e.nflogStop = func() { once.Do(func() { cancel(); <-done }) }
 	p, group, onError := e.protection, e.nflogGroup, e.onError
+	p.update(func() { p.nflogLost = false })
 	set := func(state, reason string, attempt int) {
 		p.update(func() {
 			max := attempts
 			if state == "ready" {
 				max = 0
+				p.nflogLost = false
 			}
 			p.setLocked("nflog", state, reason, attempt, max)
 		})
@@ -42,9 +44,12 @@ func (e *Engine) startNFLogLocked(lifetime context.Context) {
 		stop, err := start(consumerCtx, group, nflogRuleHits{e}, func(error) {}, func(ev capture.SourceEvent) {
 			sourceMu.Lock()
 			defer sourceMu.Unlock()
-			if !ev.Ready && consumerCtx.Err() == nil && !dead {
+			if ev.Terminal && consumerCtx.Err() == nil && !dead {
 				dead = true
-				set("pending", fmt.Sprintf("nflog:%d: %v", group, ev.Err), 0)
+				p.update(func() {
+					p.nflogLost = true
+					p.setLocked("nflog", "pending", fmt.Sprintf("nflog:%d: %v", group, ev.Err), 0, attempts)
+				})
 				select {
 				case lost <- ev.Err:
 				default:

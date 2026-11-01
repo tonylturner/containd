@@ -21,6 +21,7 @@ func (e *Engine) bindProtection(newConfiguration bool) {
 		p.iecFault = ""
 		p.steeringFault = false
 		if newConfiguration {
+			p.nflogLost = false
 			if e.nflogGroup == 0 {
 				p.setLocked("nflog", "off", "", 0, 0)
 			} else {
@@ -198,7 +199,10 @@ func (e *Engine) RetryProtection(ctx context.Context) error {
 		e.retireCaptureLocked()
 		e.policyMu.Lock()
 		defer e.policyMu.Unlock()
-		e.epoch.Add(1)
+		epoch := e.epoch.Add(1)
+		// Retirement is final even if constructing the replacement fails.
+		// Do not leave the retired hooks active until the next successful bind.
+		e.protection.update(func() { e.protection.epoch = epoch })
 		if err := e.newRun(); err != nil {
 			return err
 		}

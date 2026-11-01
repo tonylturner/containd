@@ -60,6 +60,7 @@ type protectionState struct {
 	ruleReconciling  bool
 	applying         bool
 	installFailed    bool
+	nflogLost        bool
 	store            *events.Store
 }
 
@@ -116,7 +117,11 @@ func (p *protectionState) recomputeLocked() {
 		}
 		if state == "protecting" {
 			if c, ok := p.components["nflog"]; ok && c.State != "off" && c.State != "ready" {
-				state, reason = "degraded", "rule-hit logging unavailable"
+				if c.State == "pending" && !p.nflogLost {
+					state, reason = "pending", c.Reason
+				} else {
+					state, reason = "degraded", "rule-hit logging unavailable"
+				}
 			}
 		}
 		if state == "failed" && !p.installFailed {

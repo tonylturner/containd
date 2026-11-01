@@ -56,22 +56,41 @@ func TestProtectionGateObservesScannerWithoutHealthRequests(t *testing.T) {
 	await("scan-gate", "failed")
 }
 
-func TestProtectionGatePublicationWaitsForAdmissionTransaction(t *testing.T) {
+func TestProtectionGateLossPublishesDuringAdmissionIO(t *testing.T) {
 	env := newGateTestEnv(t)
 	env.g.protection = newCountingDP(t).Engine
+	env.g.setEnforcing(true)
+	env.admit.await(t, enforce.GateAdmitOpen)
+	env.g.publishProtection()
+	// An admission transaction may block in kernel I/O. A routing/listener
+	// loss must still invalidate the previous ready observation immediately.
 	env.g.admitMu.Lock()
+	env.g.mu.Lock()
+	env.g.routingOK = false
+	env.g.mu.Unlock()
 	done := make(chan struct{})
 	go func() { env.g.publishProtection(); close(done) }()
 	select {
 	case <-done:
-		env.g.admitMu.Unlock()
-		t.Fatal("published an in-flight admission transaction")
-	case <-time.After(20 * time.Millisecond):
+		found := false
+		for _, c := range env.g.protection.Protection().Components {
+			if c.Name == "scan-gate" {
+				found = true
+				if c.State != "pending" {
+					t.Errorf("routing loss kept scan gate ready: %+v", c)
+				}
+			}
+		}
+		if !found {
+			t.Error("missing scan-gate observation")
+		}
+	case <-time.After(time.Second):
+		t.Error("admission I/O delayed publication of a required component loss")
 	}
 	env.g.admitMu.Unlock()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("publication did not resume after admission completed")
+		t.Fatal("publication did not complete")
 	}
 }

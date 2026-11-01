@@ -4,6 +4,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync"
 	"testing"
@@ -122,5 +123,29 @@ func TestProtectionNewRunUsesConfiguredCaptureFactory(t *testing.T) {
 	source(capture.SourceEvent{Ready: true})
 	if protectionComponent(t, e.Protection(), "nfqueue:101").State != "ready" {
 		t.Fatal("factory did not receive current source hooks")
+	}
+}
+
+func TestProtectionFailedReplacementStillFencesRetiredCallbacks(t *testing.T) {
+	e := protectionFixture(t, false)
+	t.Cleanup(e.Close)
+	old := e.hooks
+	old.onSource(capture.SourceEvent{Terminal: true, Err: errBind})
+	e.captureFactory = func(capture.Config) (CaptureRunner, error) { return nil, errBind }
+	if err := e.RetryProtection(context.Background()); !errors.Is(err, errBind) {
+		t.Fatalf("replacement construction: %v", err)
+	}
+	before := e.Protection()
+	old.onSource(capture.SourceEvent{Ready: true})
+	after := e.Protection()
+	before.ObservedAt = after.ObservedAt
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("failed replacement allowed retired callbacks to advance observation")
+	}
+	e.gate.mu.Lock()
+	owned := e.gate.owned
+	e.gate.mu.Unlock()
+	if owned != 0 {
+		t.Fatal("failed replacement allowed retired callbacks to reopen envelope")
 	}
 }

@@ -19,6 +19,8 @@ import (
 // must judge every payload byte.
 const inlineMaxPacketLen = 65535
 
+var openNFQueue = nfqueue.Open
+
 // nfqueueSource captures packets via NFQUEUE and delivers them inline: the
 // handler's Decision is the packet's verdict.
 type nfqueueSource struct {
@@ -195,7 +197,7 @@ func (s *nfqueueSource) run(ctx context.Context, ready func()) error {
 		Flags:        nfqueue.NfQaCfgFlagConntrack,
 	}
 
-	nf, err := nfqueue.Open(&cfg)
+	nf, err := openNFQueue(&cfg)
 	if err != nil {
 		return fmt.Errorf("nfqueue open queue %d: %w", s.queueID, err)
 	}

@@ -255,9 +255,11 @@ func TestProtectionBindKernel(t *testing.T) {
 		oldStart := startNFLog
 		t.Cleanup(func() { startNFLog = oldStart })
 		var fail atomic.Bool
+		var registrations atomic.Int64
 		var stopConsumer func()
 		var notify func(capture.SourceEvent)
 		startNFLog = func(ctx context.Context, group uint16, sink capture.RuleHitSink, onErr func(error), onSource func(capture.SourceEvent)) (func(), error) {
+			registrations.Add(1)
 			if fail.Load() {
 				return func() {}, fmt.Errorf("injected registration failure after consumer loss")
 			}
@@ -294,8 +296,14 @@ func TestProtectionBindKernel(t *testing.T) {
 		for protectionComponent(t, e.Protection(), "nflog").State != "failed" && time.Now().Before(deadline) {
 			time.Sleep(time.Millisecond)
 		}
-		if !e.Protection().Retryable {
-			t.Fatalf("exhausted NFLOG not retryable: %+v", e.Protection())
+		component := protectionComponent(t, e.Protection(), "nflog")
+		if component.State != "failed" || component.Attempt != 3 || component.MaxAttempts != 3 || !e.Protection().Retryable {
+			t.Fatalf("NFLOG did not exhaust its bounded budget: %+v", e.Protection())
+		}
+		beforeRetry := registrations.Load()
+		time.Sleep(30 * time.Millisecond)
+		if beforeRetry != 4 || registrations.Load() != beforeRetry {
+			t.Fatalf("NFLOG registrations continued past bound: before=%d after=%d", beforeRetry, registrations.Load())
 		}
 		captureBefore := e.capture
 		fail.Store(false)
