@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { mockLearner, openDataset, suggestion } from "./fixtures/learner";
 
-const pending = "Uncommitted changes — not active until you commit.";
+const pending = "Saved changes are not active yet.";
 
 test("selection starts empty, Generate is explicit, scope and frozen proof are visible", async ({
   page,

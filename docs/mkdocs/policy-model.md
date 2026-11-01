@@ -63,6 +63,13 @@ before or after another rule. Editing keeps a rule's slot. Templates append
 their ordered rules and can report a warning when an earlier terminal shadows
 an addition. CLI syntax is in [CLI](cli.md).
 
+The rule editor preserves all saved source zones, destination zones and
+protocols, including when only the description or logging changes. Its simple
+controls edit the first entry in each list; additional entries remain unchanged
+and can be inspected under **All saved matching values**. To edit entire lists,
+use the **Staged** JSON editor in Configuration and review the diff before commit.
+An empty protocol list continues to mean any protocol.
+
 | Action | Decides | Effect |
 | --- | --- | --- |
 | `ALLOW` | yes | Accepts the packet. |
@@ -186,8 +193,10 @@ nothing if none of its referenced candidate forwards can match. It is reported
 as a warning with its rule ID, the predicate (`identity`, `zone` with the
 `zones` concerned, `addressFamily`, or `forward`), the action and the effect, in:
 
-- The firewall page's nftables ruleset preview, which lists the candidate's
-  warnings.
+- The firewall page's **Generated firewall configuration (nftables)** preview,
+  which lists the candidate's warnings. Expand **Generated ruleset** for the
+  full low-level configuration; **Technical details** retains runtime reasons
+  and queue-ownership caveats.
 - `GET /api/v1/dataplane/ruleset`: `warnings` for the candidate and
   `engineStatus.warnings` for the last applied ruleset; any authenticated user
   reads the applied `warnings` through `GET /api/v1/dataplane/ruleset/status`.

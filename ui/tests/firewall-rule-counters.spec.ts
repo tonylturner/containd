@@ -74,7 +74,10 @@ for (const status of [502, 503]) {
     const reason = "rule counters unavailable: nftables enforcement is not active";
     const errors = await openFirewall(page, { status, json: { error: reason } });
     const note = page.getByRole("status", { name: "Rule counters" });
-    await expect(note).toHaveText(`Hit counters unavailable: ${reason}`);
+    await expect(note).toContainText("Hit counters unavailable.");
+    await expect(note.getByText(reason, { exact: true })).not.toBeVisible();
+    await note.getByText("Technical details", { exact: true }).click();
+    await expect(note.getByText(reason, { exact: true })).toBeVisible();
     await expect(note).toHaveClass(/text-\(--text-dim\)/);
     await expect(page.getByRole("row").filter({ hasText: "allow-hmi" })).toBeVisible();
     await expect(page.getByLabel("Hits of allow-hmi")).toHaveCount(0);

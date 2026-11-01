@@ -100,7 +100,7 @@ for (const path of ["/ics/", "/firewall/"]) {
     const loaded = page.waitForResponse((r) => r.url().includes("firewall/shadow-counters"));
     await page.goto(path);
     await loaded;
-    await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText(`Applied-policy shadow counters since ${since}`);
+    await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText(`Messages matched since ${since}`);
     const trial = page.getByLabel("Shadow matches of trial", { exact: true });
     await expect(trial).toContainText("12 messages");
     await expect(trial).toContainText("10 would allow · 2 would deny");
@@ -126,7 +126,10 @@ for (const path of ["/ics/", "/firewall/"]) {
     const loaded = page.waitForResponse((r) => r.url().includes("firewall/shadow-counters"));
     await page.goto(path);
     await loaded;
-    await expect(page.getByRole("status", { name: "Shadow counters" })).toContainText("unavailable: engine unreachable");
+    const note = page.getByRole("status", { name: "Shadow counters" });
+    await expect(note).toContainText("Monitor counts unavailable.");
+    await note.getByText("Technical details", { exact: true }).click();
+    await expect(note.getByText("engine unreachable", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Shadow matches of trial", { exact: true })).toContainText("unavailable");
     await expect(page.getByLabel("Shadow matches of trial", { exact: true })).not.toContainText("0 messages");
   });

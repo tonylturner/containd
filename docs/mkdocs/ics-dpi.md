@@ -149,8 +149,24 @@ configurations affected by removed protocol support, see
 An omitted map, omitted key or empty value means tolerant. Unknown protocol
 names and other values are rejected. Existing configurations become tolerant
 without migration. Stage settings in **Firewall → Deep Packet Inspection →
-ICS Protocol Decoders → Configure**, or POST the full candidate dataplane
+Industrial protocols → Configure**, or POST the full candidate dataplane
 document to `/api/v1/dataplane`, then commit to apply.
+
+The **Unrecognized messages** control offers **Inspect supported messages
+(tolerant)** and **Block unrecognized messages (strict)**. These labels do not
+change the stored `tolerant`/`strict` values or enable blocking by themselves.
+The ICS page shows whether inline inspection is configured; its **Technical
+details** retains the NFQUEUE number and capture interfaces. Live protection
+and per-rule coverage remain separate from these saved settings.
+If the saved settings cannot be read, their status is **unknown**, including
+after a failed refresh; the page does not imply inspection is disabled or show
+previous queue and interface values as current.
+
+Rule editors keep uncommon station, object, direction and message selectors
+under **Advanced selectors (saved values still apply)**. IEC 104 message
+types, station address (CA) and point addresses (IOA) remain directly visible.
+Closing the disclosure never clears its values. Per-rule **Inspection details**
+retains the exact reported reasons when coverage is limited or unavailable.
 
 For example, this fragment selects strict IEC 104 parsing and leaves the other
 protocols tolerant (merge it into the full dataplane document before posting;

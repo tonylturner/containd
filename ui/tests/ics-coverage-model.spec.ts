@@ -168,7 +168,7 @@ test("reasons name the exclusion, its matches and runtime faults", () => {
   expect(formatReason(exclusion)).toBe("exclusion 10.0.0.0/24 meets the rule scope");
   // Matches belong to exclusions only.
   expect(formatReason({ ...decoder, matches: 2 })).toBe(decoder.message);
-  expect(formatReason(queue)).toBe(`Running engine: ${queue.message}`);
+  expect(formatReason(queue)).toBe(`Live inspection: ${queue.message}`);
 });
 
 test("the health aggregate maps each state to its indicator", () => {
@@ -185,7 +185,7 @@ test("the health aggregate maps each state to its indicator", () => {
   expect(icsEnforcementIndicator({ state: "none", enforcing: 0, partial: 0, notEnforcing: 0, monitoring: 0 }))
     .toEqual({ status: "unknown", label: "ICS protocol enforcement", sublabel: "no ICS protocol rules applied" });
   expect(icsEnforcementIndicator({ state: "unknown", enforcing: 0, partial: 0, notEnforcing: 0, monitoring: 0 }).sublabel)
-    .toBe("engine status unknown");
+    .toBe("live inspection status unknown");
 });
 
 test("the effective mode resolves the global mode like the engine", () => {

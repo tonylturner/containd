@@ -51,7 +51,7 @@ async function setup(page: Page) {
   return state;
 }
 
-const pending = "Uncommitted changes — not active until you commit.";
+const pending = "Saved changes are not active yet.";
 
 test("successful zone mutation immediately refreshes global status; commit refreshes editors", async ({ page }) => {
   const state = await setup(page);
@@ -363,7 +363,7 @@ test("Config candidate editor saves the omitted bank unchanged and summary uses 
   expect(state.writes[0].body.ids).not.toHaveProperty("rules");
   expect(state.writes[0].body).not.toHaveProperty("idsBank");
   await page.getByRole("button", { name: "Overview", exact: true }).click();
-  await expect(page.getByText("Running IDS bank: 30000 committed rules. Restores stage the candidate bank; commit promotes both.", { exact: true })).toBeVisible();
+  await expect(page.getByText("30000 committed detection rules. Restored rules are saved for review; commit applies them with the configuration.", { exact: true })).toBeVisible();
 });
 
 test("saved candidate JSON adopts a later server refresh", async ({ page }) => {
@@ -437,7 +437,7 @@ test("Config IDS explorer shows the selected bank count and a browse link withou
   await expect(bank).toContainText("Running IDS bank: 30,000 rules.");
   await expect(bank).not.toContainText(/\b0 rules\b/);
   await expect(bank.getByRole("link", { name: "Browse IDS rules", exact: true })).toHaveAttribute("href", "/ids/");
-  await expect(bank).toContainText("Rule bodies are omitted from this viewer.");
+  await expect(bank).toContainText("Open the detection-rule editor to see rule contents.");
 
   await page.getByRole("button", { name: "Staged", exact: true }).click();
   await expect(bank).toContainText("Staged IDS bank: 42,000 rules.");

@@ -25,7 +25,7 @@ import {
 export function RulePrecedenceNote() {
   return (
     <p className="mb-2 text-xs text-(--text-muted)">
-      Among enforcing rules, the first matching terminal rule in list order decides, then the default
+      Among enforcing rules, the first matching rule that allows or blocks traffic decides, then the default
       action. Monitor ICS rules never decide. RATE_LIMIT and TAG are effects and never admit traffic.
     </p>
   );

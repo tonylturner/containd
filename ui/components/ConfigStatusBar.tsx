@@ -35,12 +35,13 @@ export function ConfigStatusBar() {
   return (
     <div role="status" className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-2.5 text-sm ${deadline ? "border-amber/30 bg-amber/10 text-amber" : ""}`}>
       <div className="min-w-0">
-        {status !== "clean" && <p>{status === "unknown" ? "Configuration status unknown — unable to check pending changes." : "Uncommitted changes — not active until you commit."}</p>}
+        {status !== "clean" && <p>{status === "unknown" ? "Configuration status unknown — unable to check pending changes." : "Saved changes are not active yet."}</p>}
         {deadline && <Link href="/config/?tab=diff" className="underline underline-offset-2">
           Commit-confirmed pending: confirm before <time dateTime={deadline} title={new Date(deadline).toLocaleString()}>
             {new Date(deadline).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })}
           </time>
         </Link>}
+        {deadline && <p className="mt-1 text-xs">Confirm before this deadline to keep these changes; otherwise they will be undone automatically.</p>}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {!deadline && <Link href="/config/?tab=diff" className="rounded-lg px-3 py-1 text-xs font-semibold transition-ui">Review diff</Link>}

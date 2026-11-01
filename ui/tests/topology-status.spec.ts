@@ -22,7 +22,7 @@ test("the chip follows health's enforcement state", () => {
 test("a non-enforcing chip takes reason and action from protection", () => {
   expect(topologyStatus(health("degraded"), observation({ state: "degraded", retryable: true }))).toEqual({
     label: "DEGRADED", tone: "warn", reason: "Rule-hit logging unavailable",
-    action: "Nft policy is enforcing; rule-hit evidence is unavailable. Retry protection, then check status.",
+    action: "Firewall rules are active, but rule-match logging is unavailable. Retry protection, then check status.",
   });
   expect(topologyStatus(health("unavailable")).reason).toBe("Protection unknown");
 });
@@ -46,9 +46,15 @@ for (const path of ["/topology/", "/firewall/", "/ics/"]) {
       exact: true,
     });
     await expect(indicator).toContainText(path === "/topology/" ? "DEGRADED" : "Firewall enforcement degraded");
-    await expect(indicator).toContainText("schedule horizon exhausted");
+    if (path === "/topology/") await expect(indicator).toContainText("schedule horizon exhausted");
+    else {
+      await expect(indicator).toContainText("Protection needs attention");
+      const details = indicator.locator("..").locator("details");
+      await details.locator("summary").click();
+      await expect(details).toContainText("schedule horizon exhausted");
+    }
     await expect(indicator).not.toContainText("Protecting");
-    await expect(page.getByRole("status", { name: "Dataplane protection" })).toHaveCount(0);
+    await expect(page.getByRole("status", { name: "Traffic protection" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Retry protection" })).toHaveCount(0);
   });
 }

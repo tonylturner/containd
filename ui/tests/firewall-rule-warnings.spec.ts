@@ -125,7 +125,7 @@ test("rule impact preview lists the time range and collapsed sample events", asy
 
 test("rule impact preview says when there were no events to search", async ({ page }) => {
   const summary = await previewContractor(page, { match_count: 0, sample_matches: [], time_range: null, total_events: 0 });
-  await expect(summary).toContainText("No recent events to search: the engine has retained none yet.");
+  await expect(summary).toContainText("No recent events to search: none have been retained yet.");
   await expect(summary).not.toContainText("of 0 recent events");
   await expect(summary).not.toContainText("Events searched");
   await expect(summary.getByText(/sample event/)).toHaveCount(0);
@@ -149,6 +149,9 @@ test("a via rule explains unavailable historical counting while retaining warnin
   await page.getByRole("row").filter({ hasText: contractor.id }).getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("button", { name: "Preview impact" }).click();
   const summary = page.getByLabel("Rule impact preview");
+  await expect(summary).toContainText("Recent-event comparison unavailable.");
+  await expect(summary.getByText(unavailable, { exact: true })).not.toBeVisible();
+  await summary.getByText("Technical details", { exact: true }).click();
   await expect(summary.getByText(unavailable, { exact: true })).toBeVisible();
   await expect(summary).not.toContainText("recent events match");
   await expect(summary).not.toContainText("No recent events to search");
@@ -157,7 +160,7 @@ test("a via rule explains unavailable historical counting while retaining warnin
   await expect(summary.getByText(/sample event/)).toHaveCount(0);
   await expect(summary.getByRole("status").filter({ hasText: "Rules that do not act as written" })).toContainText(warning.message);
   const coverage = summary.getByLabel("ICS coverage", { exact: true });
-  await expect(coverage).toContainText("effective mode: enforce");
+  await expect(coverage).toContainText("mode in use: enforce");
   await expect(coverage).toContainText("No inline capture path available.");
   expect(previews).toHaveLength(1);
   expect(previews[0]).toMatchObject({ viaForwards: ["modbus-pf"], ics: { protocol: "modbus" } });

@@ -31,13 +31,13 @@ for (const state of ["degraded", "unknown", "recovered", "ok"]) {
     await loaded;
     const persistence = page.getByRole("region", { name: "Audit persistence", exact: true });
     await expect(persistence).toContainText(`Audit persistence: ${state}`);
-    await expect(persistence).toContainText(`Failed writes since process start: ${state === "degraded" || state === "recovered" ? 2 : 0}`);
+    await expect(persistence).toContainText(`Failed saves since service restart: ${state === "degraded" || state === "recovered" ? 2 : 0}`);
     await expect(page.getByText(/Only successfully persisted actions/)).toBeVisible();
     const banner = page.getByRole("status", { name: "Evidence health" });
     if (state === "ok") {
       await expect(banner).toHaveCount(0);
     } else {
-      await expect(banner).toContainText(state === "degraded" ? "Evidence degraded"
+      await expect(banner).toContainText(state === "degraded" ? "Activity records may be missing"
         : state === "recovered" ? "Evidence recovered" : "Evidence state unknown");
       await expect(banner).toHaveClass(state === "degraded" ? /text-\(--red\)/ : /text-amber/);
     }
