@@ -6,10 +6,11 @@ export type ConfigRevision = {
   conflictRevision?: string;
   olderView?: boolean;
   revisionRequired?: boolean;
+  reviewOnRead?: boolean;
 };
 
 export function revisionFrom(baseRevision?: string): ConfigRevision {
-  return { baseRevision, serverRevision: baseRevision, conflictRevision: undefined, olderView: false, revisionRequired: false };
+  return { baseRevision, serverRevision: baseRevision, conflictRevision: undefined, olderView: false, revisionRequired: false, reviewOnRead: false };
 }
 
 export function isRevisionConflict(failure: ApiFailure): boolean {
@@ -29,6 +30,7 @@ export function revisionFailure<T extends ConfigRevision>(state: T, failure: Api
 
 /** Reads may move a clean view, but never consent to rebase retained edits. */
 export function readRevision<T extends ConfigRevision>(state: T, revision: string | undefined, retain: boolean): T {
+  if (retain && state.reviewOnRead && revision) return { ...state, serverRevision: revision, conflictRevision: revision, revisionRequired: false, reviewOnRead: false };
   return retain
     ? { ...state, serverRevision: revision }
     : { ...state, ...revisionFrom(revision) };
@@ -48,4 +50,9 @@ export function canAcknowledge(base: string | undefined, submitted: string | und
 
 export function acknowledgeRevision<T extends ConfigRevision>(state: T, submitted: string | undefined, revision?: string): T {
   return canAcknowledge(state.baseRevision, submitted, revision) ? readRevision(state, revision, false) : state;
+}
+
+/** Uncertain persistence needs a successful read before operator consent. */
+export function requireRevisionReview<T extends ConfigRevision>(state: T, revision?: string): T {
+  return { ...state, conflictRevision: revision, revisionRequired: !revision, reviewOnRead: !revision };
 }

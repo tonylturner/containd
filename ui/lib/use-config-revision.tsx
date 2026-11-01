@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { ApiResult, ConfigSnapshot } from "./api";
-import { acknowledgeRevision, canAcknowledge, keepRevision, readRevision, revisionFailure, type ConfigRevision } from "./config-revision";
+import { acknowledgeRevision, canAcknowledge, keepRevision, readRevision, requireRevisionReview, revisionFailure, type ConfigRevision } from "./config-revision";
 import { ConfigEditNotice } from "./use-config-editor";
 
 /** Sections used together must describe one state, not a torn view. */
@@ -31,7 +31,7 @@ export function useConfigRevision() {
     update(result.ok ? acknowledgeRevision(current.current, submittedBase, result.revision) : revisionFailure(current.current, result));
     return result.ok ? { ...result, adopted } : result;
   }, [update]);
-  const requireReview = useCallback((revision: string) => update({ ...current.current, conflictRevision: revision }), [update]);
+  const requireReview = useCallback((revision?: string) => update(requireRevisionReview(current.current, revision)), [update]);
   const revisionNotice = (reload: () => unknown) => (
     <ConfigEditNotice superseded={false} {...state}
       onReload={() => { void reload(); }} onKeep={() => update(keepRevision(current.current))} />

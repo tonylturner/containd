@@ -134,7 +134,7 @@ test("learner preserves selections and original receipt through conflict and rev
   counter++;
   await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
-  await expect(page.getByText("Configuration changed since you loaded it. Selections and the original receipt are kept.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Configuration changed since you loaded it", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Select modbus-1", { exact: true })).toBeChecked();
   await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeDisabled();
   await page.getByRole("button", { name: "Keep my edits", exact: true }).click();
@@ -290,4 +290,29 @@ test("rollback holds the displayed diff and the revision captured when its dialo
   await page.getByRole("dialog").getByRole("button", { name: "Rollback", exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ path: "/config/rollback", revision: token(1) });
+});
+
+test("an uncertain learner request still requires review after an unavailable destination recovers", async ({ page }) => {
+  await mockLearner(page);
+  let offline = false;
+  await page.route("**/api/v1/config/diff", route => offline
+    ? route.fulfill({ status: 503, json: { error: "unavailable" } })
+    : route.fulfill({ headers: { "X-Containd-Revision": token(1) }, json: { changed: false, changedSections: [], running: {}, candidate: {} } }));
+  await page.route("**/api/v1/learn/apply", async route => {
+    route.request().postDataJSON();
+    offline = true;
+    await route.fulfill({ status: 503, json: { error: "completion uncertain" } });
+  });
+  await openDataset(page);
+  await page.getByLabel("Select modbus-1", { exact: true }).check();
+  await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
+  await expect(page.getByText("Destination candidate: unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeDisabled();
+  offline = false;
+  await page.getByRole("button", { name: "Refresh suggestions", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Keep my edits", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeDisabled();
+  await page.getByRole("button", { name: "Keep my edits", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeEnabled();
 });

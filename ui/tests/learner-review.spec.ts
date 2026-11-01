@@ -153,7 +153,7 @@ test("wire-coordinate approval cannot be replaced by selection", async ({
   expect(state.writes[0].body.coordinateApproved).toBe(true);
 });
 
-test("409 is atomic: server reason, refreshed revisions and the original selections and receipt retained", async ({
+test("409 is atomic: keeps selections but drops the receipt and unchecks changed suggestions", async ({
   page,
 }) => {
   const state = await mockLearner(page);
@@ -189,10 +189,17 @@ test("409 is atomic: server reason, refreshed revisions and the original selecti
   ).toContainText("Revision 3");
   await expect(
     page.getByRole("button", { name: "Stage 1 selected", exact: true }),
-  ).toBeDisabled();
-  await expect(page.getByLabel("Select modbus-1", { exact: true })).toBeChecked();
+  ).toBeEnabled();
+  await expect(page.getByLabel("Select modbus-1", { exact: true })).not.toBeChecked();
   await expect(page.getByLabel("Select modbus-2", { exact: true })).toBeChecked();
-  await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeVisible();
+  await expect(page.getByText("Changed since selected — review this revision and select it again.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry same staging request" })).toHaveCount(0);
+  state.conflict = false;
+  await page.getByLabel("Select modbus-1", { exact: true }).check();
+  await page.getByRole("button", { name: "Stage 2 selected", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
+  await expect(page.getByText(/2 suggestion\(s\) staged — not active/)).toBeVisible();
+  expect(state.writes[1].body.selections).toEqual([{ id: "modbus-1", revision: 3 }, { id: "modbus-2", revision: 2 }]);
 });
 
 test("uncertain completion retries identical request ID and ordered revisions", async ({
@@ -441,3 +448,44 @@ for (const width of [1440, 390])
       }
     });
   }
+
+for (const status of [400, 403, 422]) {
+  test(`definitive learner ${status} drops only the receipt`, async ({ page }) => {
+    await mockLearner(page);
+    await page.route("**/api/v1/learn/apply", async route => {
+      route.request().postDataJSON();
+      await route.fulfill({ status, json: { error: "not persisted" } });
+    });
+    await openDataset(page);
+    const select = page.getByLabel("Select modbus-1", { exact: true });
+    await select.check();
+    await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
+    await expect(page.getByText("not persisted", { exact: true })).toBeVisible();
+    await expect(select).toBeChecked();
+    await expect(select).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Retry same staging request" })).toHaveCount(0);
+    await select.uncheck();
+    await expect(page.getByRole("button", { name: "Stage 0 selected", exact: true })).toBeDisabled();
+  });
+}
+
+test("uncertain network staging keeps a receipt until explicit discard, without undoing the candidate", async ({ page }) => {
+  await mockLearner(page);
+  await page.route("**/api/v1/learn/apply", async route => {
+    route.request().postDataJSON();
+    await route.abort("failed");
+  });
+  await openDataset(page);
+  const select = page.getByLabel("Select modbus-1", { exact: true });
+  await select.check();
+  await page.getByRole("button", { name: "Stage 1 selected", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Stage", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Retry same staging request" })).toBeDisabled();
+  await expect(select).toBeChecked();
+  await expect(select).toBeDisabled();
+  await page.getByRole("button", { name: "Discard receipt", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Retry same staging request" })).toHaveCount(0);
+  await expect(select).toBeEnabled();
+  await expect(page.getByText(/Receipt discarded. This does not undo any rules already staged/)).toBeVisible();
+});
