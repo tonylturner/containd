@@ -20,7 +20,7 @@ import (
 
 func listFirewallRulesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -224,7 +224,7 @@ func previewFirewallRuleHandler(store config.Store, engine EngineClient) gin.Han
 			apiError(c, http.StatusServiceUnavailable, "engine rule preview unavailable")
 			return
 		}
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -240,7 +240,7 @@ func previewFirewallRuleHandler(store config.Store, engine EngineClient) gin.Han
 
 func listICSRulesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return

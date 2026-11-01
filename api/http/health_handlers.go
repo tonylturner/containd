@@ -44,6 +44,9 @@ func healthHandler(store config.Store, engine EngineClient) gin.HandlerFunc {
 		if reader, ok := store.(config.HealthReader); ok {
 			snapshot, snapshotErr = reader.ReadHealthSnapshot(ctx)
 		}
+		if snapshotErr == nil {
+			configRevisionResponse(c, snapshot.Revision)
+		}
 		iec := engineUnreachable
 		forwarding := netcfg.IPv4ForwardingUnknown
 		if hc, ok := engine.(RuntimeHealthClient); ok && hc != nil {

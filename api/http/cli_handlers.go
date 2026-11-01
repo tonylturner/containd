@@ -92,7 +92,7 @@ func cliCompleteHandler(store config.Store) gin.HandlerFunc {
 			c.JSON(http.StatusOK, []string{})
 			return
 		}
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := readRunningOrDefault(c, store)
 		if err != nil {
 			c.JSON(http.StatusOK, []string{})
 			return

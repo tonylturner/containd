@@ -21,7 +21,7 @@ func TestWholeConfigReplacesCandidateOnly(t *testing.T) {
 			store := stageStore(t)
 			ctx := context.Background()
 			running, _ := store.Load(ctx)
-			if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+			if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 				cfg.Description = "replace-me"
 				return nil
 			}); err != nil {
@@ -54,7 +54,7 @@ func TestWholeConfigReplacesCandidateOnly(t *testing.T) {
 func TestImportValidationIsClientErrorAndPreservesCandidate(t *testing.T) {
 	store := stageStore(t)
 	ctx := context.Background()
-	if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 		cfg.Description = "keep-me"
 		return nil
 	}); err != nil {
@@ -84,7 +84,7 @@ func TestRunningExportsAndDiffAuthority(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &diff); err != nil || !reflect.DeepEqual(diff.Running, diff.Candidate) {
 		t.Fatalf("seed looks pending: %s %v", rec.Body, err)
 	}
-	if err := store.MutateCandidateIDS(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidateIDS(store, ctx, func(cfg *config.Config) error {
 		cfg.System.Hostname = "staged"
 		cfg.IDS.Rules = config.DefaultIDSConfig().Rules[1:2]
 		return nil
@@ -141,7 +141,7 @@ func TestPCAPOperationsPreserveRunningAndCandidate(t *testing.T) {
 	if err := store.Save(ctx, running); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 		cfg.PCAP.Interfaces = []string{"candidate"}
 		return nil
 	}); err != nil {
@@ -152,7 +152,7 @@ func TestPCAPOperationsPreserveRunningAndCandidate(t *testing.T) {
 	server := NewServerWithEngine(store, nil, engine)
 	for _, body := range []string{"", `{"interfaces":["explicit"]}`} {
 		rec := httptest.NewRecorder()
-		server.ServeHTTP(rec, authedRequest("POST", "/api/v1/pcap/start", strings.NewReader(body)))
+		serveWithConfigRevision(t, server, rec, authedRequest("POST", "/api/v1/pcap/start", strings.NewReader(body)))
 		assertConfigResponseHeader(t, rec, "")
 		want := "running"
 		if body != "" {
@@ -175,7 +175,7 @@ func TestCandidateRoundTripPreservesStagedSecrets(t *testing.T) {
 	store := stageStore(t)
 	ctx := context.Background()
 	secret := testSensitiveValue("staged-key")
-	if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 		cfg.Services.VPN.WireGuard.PrivateKey = secret
 		return nil
 	}); err != nil {

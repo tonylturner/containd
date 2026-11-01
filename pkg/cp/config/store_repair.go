@@ -4,8 +4,10 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -26,7 +28,7 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginConfigTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -38,6 +40,15 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 	candidate, err := loadKindFrom(ctx, tx, configKeyCandidate)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
+	}
+	before := make(map[*Config][]byte)
+	for _, cfg := range []*Config{running, candidate} {
+		if cfg != nil {
+			before[cfg], err = json.Marshal(cfg)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	// Only transaction writes happen after both repairs and validations succeed.
 	for _, cfg := range []*Config{running, candidate} {
@@ -51,19 +62,35 @@ func Repair(ctx context.Context, store Store, edit func(*Config) error) (*Config
 			return nil, fmt.Errorf("repaired config validation failed: %w", err)
 		}
 	}
-	if err := replaceChangedIDSRulesTx(ctx, tx, running.IDS.Rules); err != nil {
-		return nil, err
-	}
-	if err := writeConfigTx(ctx, tx, configKeyRunning, running); err != nil {
-		return nil, err
-	}
-	if candidate != nil {
-		if err := writeConfigTx(ctx, tx, configKeyCandidate, candidate); err != nil {
+	changed := false
+	for _, item := range []struct {
+		key string
+		cfg *Config
+	}{{configKeyRunning, running}, {configKeyCandidate, candidate}} {
+		if item.cfg == nil {
+			continue
+		}
+		after, err := json.Marshal(item.cfg)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(before[item.cfg], after) {
+			continue
+		}
+		changed = true
+		if item.key == configKeyRunning {
+			if err := replaceChangedIDSRulesTx(ctx, tx, item.cfg.IDS.Rules); err != nil {
+				return nil, err
+			}
+		}
+		if err := writeConfigTx(ctx, tx, item.key, item.cfg); err != nil {
 			return nil, err
 		}
 	}
-	if err := s.commitStateTx(ctx, tx); err != nil {
-		return nil, err
+	if changed {
+		if _, err := s.commitRevisionTx(ctx, tx); err != nil {
+			return nil, err
+		}
 	}
 	return running, nil
 }

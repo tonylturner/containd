@@ -40,6 +40,11 @@ components:
       name: containd_token
       description: Session cookie set by login; cookie-authenticated browser writes require an allowed Origin.
   schemas:
+    ConfigRevision:
+      type: string
+      maxLength: 64
+      pattern: '^[0-9a-f]{16}\.[1-9][0-9]*$'
+      example: '0123456789abcdef.42'
     IEC104Pressure:
       type: object
       description: Observational pressure; totals persist until the engine process restarts.
@@ -177,6 +182,8 @@ components:
     ErrorResponse:
       type: object
       properties:
+        code: {type: string, description: Machine-readable error code for configuration preconditions}
+        currentRevision: {$ref: '#/components/schemas/ConfigRevision'}
         error: {type: string, description: Human-readable error message}
         detail: {type: string, description: Optional additional context}
 
@@ -3531,12 +3538,21 @@ components:
           description: Auxiliary apply or audit cleanup failures; nonempty means runtime convergence is incomplete.
           items: {type: string}
   parameters:
+    IfRevision:
+      name: X-Containd-If-Revision
+      in: header
+      required: true
+      description: Exact revision of the snapshot this write is based on. Missing is 428; stale is 412. Wildcards are not supported.
+      schema: {$ref: '#/components/schemas/ConfigRevision'}
     pathId:
       name: id
       in: path
       required: true
       schema: {type: string}
   headers:
+    Revision:
+      description: Opaque whole-configuration revision from the same snapshot or successful mutation as this response. Never a JSON field.
+      schema: {$ref: '#/components/schemas/ConfigRevision'}
     Staged:
       description: Candidate edit only; not active until committed.
       schema: {type: string, enum: [staged]}
@@ -3590,6 +3606,8 @@ paths:
       tags: [System]
       responses:
         "200":
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Liveness response; inspect enforcement and IEC104 health separately
           content:
             application/json:
@@ -3748,6 +3766,8 @@ paths:
       tags: [Dashboard]
       responses:
         "200":
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Dashboard payload
           content:
             application/json:
@@ -3820,6 +3840,8 @@ paths:
 
   /system/factory-reset:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Reset appliance configuration and sessions (admin)
       description: >
         Preflights the autobound appliance defaults (shared with first boot) against
@@ -3856,9 +3878,12 @@ paths:
               properties:
                 confirm: {type: string, enum: [NUCLEAR]}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200":
           description: Reset applied; inspect warnings for incomplete convergence and reauthenticate with default credentials
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}
           content:
             application/json:
@@ -3912,10 +3937,14 @@ paths:
       tags: [Config]
       responses:
         "200":
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Running configuration with secrets redacted and ids.rules omitted (use IDS endpoints for the bank).
           content:
             application/json: {schema: {$ref: '#/components/schemas/Config'}}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace candidate configuration (admin)
       tags: [Config]
       requestBody:
@@ -3924,8 +3953,11 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/Config'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200": {description: 'Configuration staged, not activated', content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}},
-          headers: {X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+          headers: {X-Containd-Config: {$ref: '#/components/headers/Staged'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
         "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Stages the shared candidate; commit to apply.
 
@@ -3935,11 +3967,15 @@ paths:
       tags: [Config]
       responses:
         "200":
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Candidate configuration with secrets redacted and ids.rules omitted.
           content:
             application/json: {schema: {$ref: '#/components/schemas/Config'}}
         "404": {description: No candidate configuration, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Save a candidate configuration (admin)
       description: >-
         Validates and stages the whole config without activating it. ICS predicates decode strictly, and IEC104 enforce that cannot activate is
@@ -3952,8 +3988,10 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/Config'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200": {description: Candidate saved, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}, headers: {
-            X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+            X-Containd-Config: {$ref: '#/components/headers/Staged'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
         "400":
           description: Invalid JSON or configuration; unsupported industrial references are rejected atomically with the rule or decoder key named
           content:
@@ -3973,6 +4011,8 @@ paths:
       tags: [Config]
       responses:
         "200":
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Pending changes (an absent candidate is seeded from running)
           content:
             application/json:
@@ -3999,6 +4039,8 @@ paths:
 
   /config/commit:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Commit candidate config and apply to data plane (admin)
       description: >
         Applies and promotes the candidate as one serialized operation. Every
@@ -4018,9 +4060,12 @@ paths:
         Never treat import as a fallback activation step: import only stages.
       tags: [Config]
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200":
           description: Commit applied
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}
             X-Containd-Config: {$ref: '#/components/headers/Committed'}
           content:
@@ -4036,6 +4081,8 @@ paths:
 
   /config/import:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Import a configuration as the candidate (admin)
       description: >-
         Validates the whole config and replaces the candidate with it. It never
@@ -4053,12 +4100,15 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/Config'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200":
           description: Candidate replaced, not activated
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusResponse'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400":
           description: Invalid JSON or configuration; unsupported industrial references are rejected atomically with the rule or decoder key named
@@ -4070,6 +4120,8 @@ paths:
 
   /config/rollback:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Roll back to previous configuration (admin)
       description: >
         Uses the same strict apply/recovery semantics as commit. On runtime
@@ -4078,8 +4130,10 @@ paths:
         Failed recovery leaves runtime synchronization uncertain; inspect health.
       tags: [Config]
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200": {description: Previous configuration restored and applied, content: {application/json: {schema: {$ref: '#/components/schemas/StatusResponse'}}}, headers: {
-            X-Containd-Config: {$ref: '#/components/headers/Committed'}, X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}}}
+            X-Containd-Config: {$ref: '#/components/headers/Committed'}, X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
         "403": {description: Admin role required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "400":
           description: Previous configuration unavailable or invalid; no promotion or recovery fields
@@ -4204,8 +4258,10 @@ paths:
       summary: Get candidate services syslog settings
       tags: [Services]
       responses:
-        "200": {description: Syslog config, content: {application/json: {schema: {$ref: '#/components/schemas/SyslogConfig'}}}}
+        "200": {description: Syslog config, content: {application/json: {schema: {$ref: '#/components/schemas/SyslogConfig'}}}, headers: {X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace services syslog settings (admin)
       tags: [Services]
       requestBody:
@@ -4214,10 +4270,15 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/SyslogConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/SyslogConfig'}}}, headers: {
-              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
       description: Stages the shared candidate; commit to apply.
     patch:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Patch syslog settings (admin)
       tags: [Services]
       description: Stages the shared candidate; commit to apply.
@@ -4227,12 +4288,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/SyslogPatch'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SyslogConfig'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
 
   /services/dns:
@@ -4240,8 +4305,10 @@ paths:
       summary: Get candidate services dns settings
       tags: [Services]
       responses:
-        "200": {description: DNS config, content: {application/json: {schema: {$ref: '#/components/schemas/DNSConfig'}}}}
+        "200": {description: DNS config, content: {application/json: {schema: {$ref: '#/components/schemas/DNSConfig'}}}, headers: {X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace services dns settings (admin)
       tags: [Services]
       requestBody:
@@ -4250,8 +4317,11 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/DNSConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/DNSConfig'}}}, headers: {
-              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
       description: Stages the shared candidate; commit to apply.
 
   /services/ntp:
@@ -4259,8 +4329,10 @@ paths:
       summary: Get candidate services ntp settings
       tags: [Services]
       responses:
-        "200": {description: NTP config, content: {application/json: {schema: {$ref: '#/components/schemas/NTPConfig'}}}}
+        "200": {description: NTP config, content: {application/json: {schema: {$ref: '#/components/schemas/NTPConfig'}}}, headers: {X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace services ntp settings (admin)
       tags: [Services]
       requestBody:
@@ -4269,8 +4341,11 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/NTPConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/NTPConfig'}}}, headers: {
-              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
       description: Stages the shared candidate; commit to apply.
 
   /services/dhcp:
@@ -4278,8 +4353,10 @@ paths:
       summary: Get candidate services dhcp settings
       tags: [Services]
       responses:
-        "200": {description: DHCP config, content: {application/json: {schema: {$ref: '#/components/schemas/DHCPConfig'}}}}
+        "200": {description: DHCP config, content: {application/json: {schema: {$ref: '#/components/schemas/DHCPConfig'}}}, headers: {X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace services dhcp settings (admin)
       tags: [Services]
       requestBody:
@@ -4288,8 +4365,11 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/DHCPConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/DHCPConfig'}}}, headers: {
-              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
       description: Stages the shared candidate; commit to apply.
 
   /services/vpn:
@@ -4297,8 +4377,10 @@ paths:
       summary: Get candidate services vpn settings
       tags: [Services]
       responses:
-        "200": {description: VPN config, content: {application/json: {schema: {$ref: '#/components/schemas/VPNConfig'}}}}
+        "200": {description: VPN config, content: {application/json: {schema: {$ref: '#/components/schemas/VPNConfig'}}}, headers: {X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace services vpn settings (admin)
       tags: [Services]
       requestBody:
@@ -4307,8 +4389,11 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/VPNConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200": {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/VPNConfig'}}}, headers: {
-              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
       description: Stages the shared candidate; commit to apply.
 
   # ── Firewall ──────────────────────────────────────────────────────
@@ -4318,11 +4403,15 @@ paths:
       tags: [Firewall]
       responses:
         "200":
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Array of firewall rules
           content:
             application/json:
               schema: {type: array, items: {$ref: "#/components/schemas/FirewallRule"}, nullable: true}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Create firewall rule (admin)
       tags: [Firewall]
       requestBody:
@@ -4331,8 +4420,10 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/FirewallRuleCreate'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200": {description: Rule created, content: {application/json: {schema: {$ref: '#/components/schemas/FirewallRuleCreated'}}}, headers: {
-              X-Containd-Config: {$ref: '#/components/headers/Staged'}}}
+              X-Containd-Config: {$ref: '#/components/headers/Staged'}, X-Containd-Revision: {$ref: '#/components/headers/Revision'}}}
         "400": {description: Invalid rule or resulting configuration; unsupported ICS protocol names are rejected without staging or applying changes, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Stages the shared candidate; commit to apply.
 
@@ -4342,6 +4433,7 @@ paths:
       description: One candidate mutation. PATCH preserves the existing slot; commit to apply.
       tags: [Firewall]
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - $ref: '#/components/parameters/pathId'
       requestBody:
         required: true
@@ -4353,9 +4445,12 @@ paths:
               properties:
                 position: {$ref: '#/components/schemas/RulePosition'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Final zero-based index and full ordered candidate list
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
           content:
             application/json:
@@ -4369,6 +4464,8 @@ paths:
         '404': {description: Rule not found, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /firewall/port-forwards:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Publish a port forward with an optional scoped allow rule (admin)
       description: Appends the forward and inserts the generated rule atomically. Inside overlap stays under governing ICS rules without a warning; partial overlap generates no grant and returns a fail-closed warning. Commit to apply.
       tags: [Firewall]
@@ -4383,9 +4480,12 @@ paths:
                 forward: {$ref: '#/components/schemas/PortForward'}
                 allowRule: {type: boolean, default: true}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Published forward and placement (omitted when allowRule is false)
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
           content:
             application/json:
@@ -4402,11 +4502,16 @@ paths:
       description: Removes the forward ID from all rules atomically. A rule whose via list becomes empty is deleted, regardless of action. Commit to apply.
       tags: [Firewall]
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - $ref: '#/components/parameters/pathId'
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Deleted and edited rule IDs in policy order
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
           content:
             application/json:
@@ -4432,6 +4537,7 @@ paths:
         the predicate.
       tags: [Firewall]
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - $ref: "#/components/parameters/pathId"
       requestBody:
         required: true
@@ -4439,12 +4545,15 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/FirewallRulePatch'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200":
           description: Rule updated
           content:
             application/json:
               schema: {$ref: "#/components/schemas/FirewallRule"}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400":
           description: Invalid patch or resulting configuration
@@ -4456,11 +4565,16 @@ paths:
       summary: Delete firewall rule (admin)
       tags: [Firewall]
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - $ref: "#/components/parameters/pathId"
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '204':
           description: Success
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       description: Stages the shared candidate; commit to apply.
 
@@ -4638,11 +4752,15 @@ paths:
       tags: [PCAP]
       responses:
         "200":
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Capture settings
           content:
             application/json:
               schema: {$ref: "#/components/schemas/PcapConfig"}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Stage PCAP settings (admin)
       tags: [PCAP]
       requestBody:
@@ -4651,12 +4769,15 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/PcapConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200":
           description: Candidate capture settings; commit to persist running settings.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PcapConfig'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400": {description: Invalid capture settings, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Stages the shared candidate; commit to apply.
@@ -4841,6 +4962,8 @@ paths:
 
   /templates/ics/apply:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Apply an ICS template to generate firewall rules (admin)
       tags: [Templates]
       requestBody:
@@ -4849,6 +4972,8 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/ApplyICSTemplateRequest"}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         "200":
           description: Previewed rules or rules staged in candidate configuration
           content:
@@ -4865,6 +4990,7 @@ paths:
                   rules: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}
                   mode: {type: string}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         "400": {description: Unknown template or missing params, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       description: Preview returns generated rules without staging. Otherwise upserts candidate rules by ID; commit to apply.
@@ -5549,6 +5675,8 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /learn/apply:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Stage selected certified suggestion revisions (admin)
       tags:
       - Learn
@@ -5563,6 +5691,8 @@ paths:
         converge by content-derived rule ID. A completion error after persistence does not roll back the candidate;
         retry the same request ID.
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
@@ -5570,6 +5700,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/LearnApplyResult'
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config:
               $ref: '#/components/headers/Staged'
         '400':
@@ -5597,6 +5728,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Engine evidence authority unavailable
           content:
             application/json:
@@ -5802,11 +5935,15 @@ paths:
       tags: [Assets]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {type: array, items: {$ref: '#/components/schemas/Asset'}, nullable: true}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Create asset (admin)
       tags: [Assets]
       description: Stages the shared candidate; commit to apply.
@@ -5819,12 +5956,16 @@ paths:
               - {$ref: '#/components/schemas/Asset'}
               required: [id]
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Asset'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /assets/{id}:
     patch:
@@ -5837,14 +5978,19 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/Asset'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Asset'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - name: id
         in: path
         required: true
@@ -5854,11 +6000,16 @@ paths:
       tags: [Assets]
       description: Stages the shared candidate; commit to apply.
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '204':
           description: Success
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - name: id
         in: path
         required: true
@@ -5869,11 +6020,15 @@ paths:
       tags: [Objects]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {type: array, items: {$ref: '#/components/schemas/Object'}, nullable: true}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Create object (admin)
       tags: [Objects]
       description: Stages the shared candidate; commit to apply.
@@ -5886,12 +6041,16 @@ paths:
               - {$ref: '#/components/schemas/Object'}
               required: [id]
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Object'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /objects/{id}:
     patch:
@@ -5904,14 +6063,19 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/Object'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Object'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - name: id
         in: path
         required: true
@@ -5921,11 +6085,16 @@ paths:
       tags: [Objects]
       description: Stages the shared candidate; commit to apply.
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '204':
           description: Success
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - name: id
         in: path
         required: true
@@ -5936,11 +6105,15 @@ paths:
       tags: [Zones]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {type: array, items: {$ref: '#/components/schemas/Zone'}, nullable: true}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Create zone (admin)
       tags: [Zones]
       description: Stages the shared candidate; commit to apply.
@@ -5953,12 +6126,16 @@ paths:
               - {$ref: '#/components/schemas/Zone'}
               required: [name]
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Zone'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /zones/{name}:
     patch:
@@ -5971,14 +6148,19 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/Zone'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Zone'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - name: name
         in: path
         required: true
@@ -5988,11 +6170,16 @@ paths:
       tags: [Zones]
       description: Stages the shared candidate; commit to apply.
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '204':
           description: Success
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - name: name
         in: path
         required: true
@@ -6003,11 +6190,15 @@ paths:
       tags: [Interfaces]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {type: array, items: {$ref: '#/components/schemas/Interface'}, nullable: true}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Create interface (admin)
       tags: [Interfaces]
       description: Stages the shared candidate; commit to apply.
@@ -6020,12 +6211,16 @@ paths:
               - {$ref: '#/components/schemas/Interface'}
               required: [name]
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Interface'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /interfaces/{name}:
     patch:
@@ -6044,14 +6239,19 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/InterfacePatch'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Interface'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - name: name
         in: path
         required: true
@@ -6061,11 +6261,16 @@ paths:
       tags: [Interfaces]
       description: Stages the shared candidate; commit to apply.
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '204':
           description: Success
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - name: name
         in: path
         required: true
@@ -6076,11 +6281,15 @@ paths:
       tags: [Dataplane]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DataPlaneConfig'}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace dataplane settings (admin)
       tags: [Dataplane]
       description: Stages the shared candidate; commit to apply.
@@ -6090,12 +6299,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/DataPlaneConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DataPlaneConfig'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /routing:
     get:
@@ -6103,11 +6316,15 @@ paths:
       tags: [Routing]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/RoutingConfig'}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace routing settings (admin)
       tags: [Routing]
       description: Stages the shared candidate; commit to apply.
@@ -6117,12 +6334,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/RoutingConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/RoutingConfig'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /firewall/nat:
     get:
@@ -6130,11 +6351,15 @@ paths:
       tags: [Firewall]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/NATConfig'}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace firewall nat settings (admin)
       tags: [Firewall]
       description: Pure replacement of NAT settings; never creates or removes firewall rules. Dangling viaForwards references are rejected. Stages the shared candidate; commit to apply.
@@ -6144,12 +6369,15 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/NATConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/NATConfig'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         '400': {description: Invalid NAT settings or dangling viaForwards references, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /ids/rules:
@@ -6158,11 +6386,15 @@ paths:
       tags: [Ids]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/IDSConfig'}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace ids rules settings (admin)
       tags: [Ids]
       description: Stages enabled and ruleGroups; replaces the rule bank only when rules is non-null. Commit to apply.
@@ -6172,12 +6404,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/IDSConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/IDSConfig'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /services/av:
     get:
@@ -6185,11 +6421,15 @@ paths:
       tags: [Services]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AVConfig'}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace services av settings (admin)
       tags: [Services]
       description: Stages the shared candidate; commit to apply.
@@ -6199,12 +6439,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/AVConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AVConfig'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /services/proxy/forward:
     get:
@@ -6212,11 +6456,15 @@ paths:
       tags: [Services]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ForwardProxyConfig'}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace services proxy forward settings (admin)
       tags: [Services]
       description: Stages the shared candidate; commit to apply.
@@ -6226,12 +6474,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/ForwardProxyConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ForwardProxyConfig'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /services/proxy/reverse:
     get:
@@ -6239,11 +6491,15 @@ paths:
       tags: [Services]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ReverseProxyConfig'}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace services proxy reverse settings (admin)
       tags: [Services]
       description: Stages the shared candidate; commit to apply.
@@ -6253,12 +6509,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/ReverseProxyConfig'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ReverseProxyConfig'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /interfaces/state:
     get:
@@ -6277,6 +6537,8 @@ paths:
               schema: {type: array, items: {$ref: '#/components/schemas/InterfaceState'}}
   /interfaces/assign:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Stage logical interface bindings (admin)
       tags: [Interfaces]
       description: Stages the shared candidate; commit to apply.
@@ -6286,6 +6548,9 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/InterfaceAssignRequest'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
@@ -6295,6 +6560,7 @@ paths:
                 properties:
                   interfaces: {type: array, items: {$ref: '#/components/schemas/Interface'}}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /interfaces/reconcile:
     post:
@@ -6475,6 +6741,8 @@ paths:
       description: Secrets are redacted by default. Only admins may request redacted=false.
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
@@ -6540,6 +6808,8 @@ paths:
         schema: {type: string}
   /config/commit_confirmed:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Commit with automatic rollback unless confirmed (admin)
       tags: [Config]
       description: >
@@ -6561,12 +6831,15 @@ paths:
               properties:
                 ttl_seconds: {type: integer, format: int64, default: 60, description: Positive seconds; omitted or nonpositive uses 60; duration overflow is rejected}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Applied and awaiting confirmation
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusResponse'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Committed'}
             X-Containd-Warnings: {$ref: '#/components/headers/Warnings'}
         '400':
@@ -6586,18 +6859,23 @@ paths:
               schema: {$ref: '#/components/schemas/ConfigApplyError'}
   /config/confirm:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Confirm pending confirmed commit (admin)
       description: >
         Only cancels the pending rollback deadline; does not reapply runtime.
         The committed header acknowledges confirmation, not a new runtime apply.
       tags: [Config]
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Confirmation recorded
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatusResponse'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Committed'}
         '400':
           description: Confirmation failed
@@ -6673,6 +6951,8 @@ paths:
       tags: [System]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
@@ -6871,6 +7151,8 @@ paths:
         runtime and without matches.
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
@@ -6933,6 +7215,8 @@ paths:
         engineStatus describes the last apply separately from the preview runtime sample.
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
@@ -7008,6 +7292,8 @@ paths:
       tags: [Security]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
@@ -7116,10 +7402,14 @@ paths:
               schema: {$ref: '#/components/schemas/IDSRule'}
   /ids/import:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Import rules into candidate bank (admin)
       tags: [Ids]
       description: Imports and deduplicates by rule ID in the candidate bank. Format is detected from file when omitted. Commit to apply.
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '400':
           description: 'Invalid import or removed industrial protocol. Rejected imports leave candidate and running banks unchanged; ids rule <id> proto "<name>" is not supported; supported: modbus, dnp3, iec104, cip'
           content:
@@ -7137,6 +7427,7 @@ paths:
                   total: {type: integer}
                   format: {type: string}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       requestBody:
         required: true
@@ -7161,6 +7452,7 @@ paths:
             for refused rules, using '//' instead of '#' for YARA.
             Refused rules are not emitted as active rules.
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-IDS-Refused:
               description: Number of rules refused because their predicates cannot be preserved.
               schema: {type: integer, minimum: 0}
@@ -7180,12 +7472,16 @@ paths:
       tags: [Ids]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {type: array, items: {$ref: '#/components/schemas/IDSRule'}}
   /ids/restore:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Replace candidate IDS bank (admin)
       tags: [Ids]
       description: Stages the shared candidate; commit to apply.
@@ -7195,6 +7491,9 @@ paths:
           application/json:
             schema: {type: array, items: {$ref: '#/components/schemas/IDSRule'}}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
@@ -7205,6 +7504,7 @@ paths:
                   status: {type: string}
                   count: {type: integer}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /ids/sources:
     get:
@@ -7298,6 +7598,8 @@ paths:
           description: Success
   /templates/apply:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Stage policy template rules (admin)
       tags: [Templates]
       description: Stages the shared candidate; commit to apply.
@@ -7312,6 +7614,9 @@ paths:
                 mode: {type: string, enum: ['', monitor, enforce]}
               required: [name]
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
@@ -7323,6 +7628,7 @@ paths:
                   ruleCount: {type: integer}
                   mode: {type: string}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /firewall/ics-rules:
     get:
@@ -7330,11 +7636,15 @@ paths:
       tags: [Firewall]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
               schema: {type: array, items: {$ref: '#/components/schemas/FirewallRule'}}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Create ICS rule (admin)
       tags: [Firewall]
       description: Stages the shared candidate; commit to apply.
@@ -7344,12 +7654,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/FirewallRuleCreate'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/FirewallRuleCreated'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /firewall/ics-rules/{id}:
     patch:
@@ -7367,14 +7681,19 @@ paths:
               required:
               - action
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
             application/json:
               schema: {$ref: '#/components/schemas/FirewallRule'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - name: id
         in: path
         required: true
@@ -7386,6 +7705,8 @@ paths:
       description: Reads firewall.identityBindings of the candidate configuration.
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
@@ -7395,6 +7716,8 @@ paths:
                 properties:
                   mappings: {type: array, items: {$ref: '#/components/schemas/IdentityMapping'}}
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Stage an identity binding (admin)
       tags: [Identities]
       description: >-
@@ -7406,12 +7729,15 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/IdentityMapping'}
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Staged binding, with the canonical address
           content:
             application/json:
               schema: {$ref: '#/components/schemas/IdentityMapping'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         '400': {description: Invalid address or resulting configuration, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   /identities/{ip}:
@@ -7420,6 +7746,8 @@ paths:
       tags: [Identities]
       description: Removes the address's binding from the candidate. Stages the shared candidate; commit to apply.
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Staged removal
           content:
@@ -7429,10 +7757,12 @@ paths:
                 properties:
                   deleted: {type: string}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
         '400': {description: Invalid address, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '404': {description: No binding for the address, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
       parameters:
+      - $ref: '#/components/parameters/IfRevision'
       - name: ip
         in: path
         required: true
@@ -7475,6 +7805,8 @@ paths:
       tags: [Cli]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
@@ -7538,6 +7870,8 @@ paths:
           description: Account restricted
   /services/vpn/openvpn/profile:
     post:
+      parameters:
+      - $ref: '#/components/parameters/IfRevision'
       summary: Upload foreground OpenVPN profile and stage its path (admin)
       tags: [Services]
       description: Stages the shared candidate; commit to apply.
@@ -7552,6 +7886,9 @@ paths:
                 ovpn: {type: string}
               required: [ovpn]
       responses:
+        "412": {description: Configuration changed since it was read; code config_revision_mismatch and currentRevision identify the locked authority, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "428": {description: Required X-Containd-If-Revision is missing; code config_revision_required, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+        "400": {description: Invalid body or malformed X-Containd-If-Revision (code config_revision_malformed), content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
         '200':
           description: Success
           content:
@@ -7562,6 +7899,7 @@ paths:
                   configPath: {type: string}
                   vpn: {$ref: '#/components/schemas/VPNConfig'}
           headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
             X-Containd-Config: {$ref: '#/components/headers/Staged'}
   /services/vpn/openvpn/clients:
     get:
@@ -7569,6 +7907,8 @@ paths:
       tags: [Services]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Success
           content:
             application/json:
@@ -7604,6 +7944,8 @@ paths:
       tags: [Services]
       responses:
         '200':
+          headers:
+            X-Containd-Revision: {$ref: '#/components/headers/Revision'}
           description: Client profile with inline credentials
           content:
             application/x-openvpn-profile:

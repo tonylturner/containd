@@ -31,10 +31,10 @@ func TestAutoRollbackNotificationNeverBlocks(t *testing.T) {
 			if err := store.Save(ctx, &Config{System: SystemConfig{Hostname: "previous"}}); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.SaveCandidate(ctx, &Config{System: SystemConfig{Hostname: "pending"}}); err != nil {
+			if err := testSaveCandidate(store, ctx, &Config{System: SystemConfig{Hostname: "pending"}}); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.CommitConfirmed(ctx, 10*time.Millisecond); err != nil {
+			if err := testCommitConfirmed(store, ctx, 10*time.Millisecond); err != nil {
 				t.Fatal(err)
 			}
 			deadline := time.Now().Add(3 * time.Second)
@@ -52,7 +52,7 @@ func TestAutoRollbackNotificationNeverBlocks(t *testing.T) {
 				time.Sleep(time.Millisecond)
 			}
 			done := make(chan error, 1)
-			go func() { done <- store.ConfirmCommit(ctx) }()
+			go func() { done <- testConfirmCommit(store, ctx) }()
 			select {
 			case err := <-done:
 				if err != nil {
@@ -77,10 +77,10 @@ func TestPendingCommitRearmedAtStoreOpen(t *testing.T) {
 			if err := store.Save(ctx, &Config{System: SystemConfig{Hostname: "previous"}}); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.SaveCandidate(ctx, &Config{System: SystemConfig{Hostname: "pending"}}); err != nil {
+			if err := testSaveCandidate(store, ctx, &Config{System: SystemConfig{Hostname: "pending"}}); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.CommitConfirmed(ctx, time.Hour); err != nil {
+			if err := testCommitConfirmed(store, ctx, time.Hour); err != nil {
 				t.Fatal(err)
 			}
 			deadline := time.Now().Add(100 * time.Millisecond)
@@ -212,17 +212,17 @@ func TestCandidateCommitRollback(t *testing.T) {
 		t.Fatalf("save running: %v", err)
 	}
 	candidate := Config{System: SystemConfig{Hostname: "candidate"}}
-	if err := store.SaveCandidate(context.Background(), &candidate); err != nil {
+	if err := testSaveCandidate(store, context.Background(), &candidate); err != nil {
 		t.Fatalf("save candidate: %v", err)
 	}
-	if err := store.Commit(context.Background()); err != nil {
+	if err := testCommit(store, context.Background()); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	got, _ := store.Load(context.Background())
 	if got.System.Hostname != "candidate" {
 		t.Fatalf("expected committed candidate, got %s", got.System.Hostname)
 	}
-	if err := store.Rollback(context.Background()); err != nil {
+	if err := testRollback(store, context.Background()); err != nil {
 		t.Fatalf("rollback: %v", err)
 	}
 	got, _ = store.Load(context.Background())
@@ -243,12 +243,12 @@ func TestCommitWithoutCandidateDoesNotDeadlock(t *testing.T) {
 	if err := store.Save(context.Background(), &running); err != nil {
 		t.Fatalf("save running: %v", err)
 	}
-	if err := store.Commit(context.Background()); err != nil {
+	if err := testCommit(store, context.Background()); err != nil {
 		t.Fatalf("initial commit: %v", err)
 	}
 
 	done := make(chan error, 1)
-	go func() { done <- store.Commit(context.Background()) }()
+	go func() { done <- testCommit(store, context.Background()) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -281,7 +281,7 @@ func TestCommitConfirmedWithoutCandidateDoesNotDeadlock(t *testing.T) {
 	}
 
 	done := make(chan error, 1)
-	go func() { done <- store.CommitConfirmed(context.Background(), time.Minute) }()
+	go func() { done <- testCommitConfirmed(store, context.Background(), time.Minute) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -305,10 +305,10 @@ func TestCommitConfirmedAutoRollback(t *testing.T) {
 		t.Fatalf("save running: %v", err)
 	}
 	candidate := Config{System: SystemConfig{Hostname: "candidate"}}
-	if err := store.SaveCandidate(context.Background(), &candidate); err != nil {
+	if err := testSaveCandidate(store, context.Background(), &candidate); err != nil {
 		t.Fatalf("save candidate: %v", err)
 	}
-	if err := store.CommitConfirmed(context.Background(), 100*time.Millisecond); err != nil {
+	if err := testCommitConfirmed(store, context.Background(), 100*time.Millisecond); err != nil {
 		t.Fatalf("commit confirmed: %v", err)
 	}
 	got, _ := store.Load(context.Background())
@@ -335,13 +335,13 @@ func TestConfirmCommitCancelsRollback(t *testing.T) {
 		t.Fatalf("save running: %v", err)
 	}
 	candidate := Config{System: SystemConfig{Hostname: "candidate"}}
-	if err := store.SaveCandidate(context.Background(), &candidate); err != nil {
+	if err := testSaveCandidate(store, context.Background(), &candidate); err != nil {
 		t.Fatalf("save candidate: %v", err)
 	}
-	if err := store.CommitConfirmed(context.Background(), 100*time.Millisecond); err != nil {
+	if err := testCommitConfirmed(store, context.Background(), 100*time.Millisecond); err != nil {
 		t.Fatalf("commit confirmed: %v", err)
 	}
-	if err := store.ConfirmCommit(context.Background()); err != nil {
+	if err := testConfirmCommit(store, context.Background()); err != nil {
 		t.Fatalf("confirm commit: %v", err)
 	}
 	time.Sleep(200 * time.Millisecond)

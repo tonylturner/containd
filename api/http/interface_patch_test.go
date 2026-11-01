@@ -17,7 +17,7 @@ func interfacePatchStore(t *testing.T) *config.SQLiteStore {
 	t.Helper()
 	store := stageStore(t)
 	enabled, disabled := true, false
-	err := store.MutateCandidate(context.Background(), func(cfg *config.Config) error {
+	err := testMutateCandidate(store, context.Background(), func(cfg *config.Config) error {
 		cfg.Interfaces = append(cfg.Interfaces, config.Interface{
 			Name: "patch0", Alias: "Plant VLAN", Device: "eth9",
 			Type: "vlan", Parent: "eth8", VLANID: 123, Members: []string{"eth7"},
@@ -95,7 +95,7 @@ func TestInterfacePatchMerge(t *testing.T) {
 			req := authedRequest(http.MethodPatch, "/api/v1/interfaces/patch0", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
-			server.ServeHTTP(rec, req)
+			serveWithConfigRevision(t, server, rec, req)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("PATCH: %d %s", rec.Code, rec.Body)
 			}
@@ -136,7 +136,7 @@ func TestInterfacePatchRejected(t *testing.T) {
 			req := authedRequest(http.MethodPatch, "/api/v1/interfaces/"+tt.path, strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
-			NewServer(store, nil).ServeHTTP(rec, req)
+			NewServer(store, nil).ServeHTTP(rec, withTestRevision(store, req))
 			if rec.Code != tt.status {
 				t.Fatalf("PATCH: %d %s, want %d", rec.Code, rec.Body, tt.status)
 			}
@@ -158,7 +158,7 @@ func TestInterfacePatchRequiresAdmin(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer test-auditor")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	NewServer(store, nil).ServeHTTP(rec, req)
+	NewServer(store, nil).ServeHTTP(rec, withTestRevision(store, req))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("PATCH: %d %s, want 403", rec.Code, rec.Body)
 	}

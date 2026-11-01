@@ -60,17 +60,17 @@ func TestStoredUnsupportedAddressesRemainRepairable(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := store.SaveCandidate(ctx, candidate); err == nil {
+			if err := testSaveCandidate(store, ctx, candidate); err == nil {
 				t.Fatal("unchanged invalid candidate was accepted")
 			}
 			candidate.Firewall.Rules[0].ICS.Addresses = nil
-			if err := store.SaveCandidate(ctx, candidate); err != nil {
+			if err := testSaveCandidate(store, ctx, candidate); err != nil {
 				t.Fatal(err)
 			}
 			if err := CheckManagementBootFault(ctx, store); !errors.Is(err, ErrManagementBootFault) {
 				t.Fatalf("staging cleared recovery: %v", err)
 			}
-			if err := store.Commit(ctx); err != nil {
+			if err := testCommit(store, ctx); err != nil {
 				t.Fatal(err)
 			}
 			if err := CheckManagementBootFault(ctx, store); err != nil {

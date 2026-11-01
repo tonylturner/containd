@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -17,11 +18,13 @@ import (
 )
 
 type memStore struct {
-	cfg *config.Config
+	cfg      *config.Config
+	revision uint64
 }
 
 func (m *memStore) Save(ctx context.Context, cfg *config.Config) error {
 	m.cfg = cfg
+	m.revision++
 	return nil
 }
 
@@ -32,48 +35,74 @@ func (m *memStore) Load(ctx context.Context) (*config.Config, error) {
 	return m.cfg, nil
 }
 
-func (m *memStore) MutateCandidate(ctx context.Context, edit func(*config.Config) error) error {
+func (m *memStore) MutateCandidate(ctx context.Context, expected config.Revision, edit func(*config.Config) error) (config.Revision, error) {
+	if expected != m.currentRevision() {
+		return "", &config.ErrRevisionMismatch{CurrentRevision: m.currentRevision()}
+	}
 	cfg, err := m.LoadCandidate(ctx)
 	if err != nil && err != config.ErrNotFound {
-		return err
+		return "", err
 	}
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
 	blob, err := json.Marshal(cfg)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var next config.Config
 	if err := json.Unmarshal(blob, &next); err != nil {
-		return err
+		return "", err
 	}
 	bank := next.IDS.Rules
 	next.IDS.Rules = nil
 	if err := edit(&next); err != nil {
-		return err
+		return "", err
 	}
 	if next.IDS.Rules != nil {
-		return errors.New("bank-free candidate edit supplied IDS rules")
+		return "", errors.New("bank-free candidate edit supplied IDS rules")
 	}
 	next.IDS.Rules = bank
-	return m.SaveCandidate(ctx, &next)
+	return m.SaveCandidate(ctx, expected, &next)
 }
 
-func (m *memStore) SaveCandidate(ctx context.Context, cfg *config.Config) error {
-	return m.Save(ctx, cfg)
+func (m *memStore) SaveCandidate(ctx context.Context, expected config.Revision, cfg *config.Config) (config.Revision, error) {
+	if expected != m.currentRevision() {
+		return "", &config.ErrRevisionMismatch{CurrentRevision: m.currentRevision()}
+	}
+	if err := m.Save(ctx, cfg); err != nil {
+		return "", err
+	}
+	return m.currentRevision(), nil
 }
 
 func (m *memStore) LoadCandidate(ctx context.Context) (*config.Config, error) {
 	return m.Load(ctx)
 }
 
-func (m *memStore) Commit(ctx context.Context) error { return nil }
-func (m *memStore) CommitConfirmed(ctx context.Context, ttl time.Duration) error {
-	return nil
+func (m *memStore) currentRevision() config.Revision {
+	return config.Revision(fmt.Sprintf("0123456789abcdef.%d", m.revision+1))
 }
-func (m *memStore) ConfirmCommit(ctx context.Context) error { return nil }
-func (m *memStore) Rollback(ctx context.Context) error      { return nil }
+func (m *memStore) ReadSnapshot(ctx context.Context, _ config.SnapshotKind, withBank bool) (config.ConfigSnapshot, error) {
+	cfg, err := m.Load(ctx)
+	return config.ConfigSnapshot{Running: cfg, Candidate: cfg, Revision: m.currentRevision()}, err
+}
+func (m *memStore) Commit(ctx context.Context, expected config.Revision) (config.Revision, error) {
+	if expected != m.currentRevision() {
+		return "", &config.ErrRevisionMismatch{CurrentRevision: m.currentRevision()}
+	}
+	m.revision++
+	return m.currentRevision(), nil
+}
+func (m *memStore) CommitConfirmed(ctx context.Context, expected config.Revision, ttl time.Duration) (config.Revision, error) {
+	return m.Commit(ctx, expected)
+}
+func (m *memStore) ConfirmCommit(ctx context.Context, expected config.Revision) (config.Revision, error) {
+	return m.Commit(ctx, expected)
+}
+func (m *memStore) Rollback(ctx context.Context, expected config.Revision) (config.Revision, error) {
+	return m.Commit(ctx, expected)
+}
 func (m *memStore) SaveIDSRules(ctx context.Context, rules []config.IDSRule) error {
 	return nil
 }
@@ -99,7 +128,7 @@ func TestMemStoreBankFreeCandidateEdits(t *testing.T) {
 			cfg.System.Hostname = "before"
 			cfg.IDS.Rules = []config.IDSRule{{ID: "retained", Labels: map[string]string{"source": "saved"}}}
 			store := &memStore{cfg: cfg}
-			err := store.MutateCandidate(context.Background(), func(next *config.Config) error {
+			_, err := store.MutateCandidate(context.Background(), store.currentRevision(), func(next *config.Config) error {
 				if next.IDS.Rules != nil {
 					t.Fatal("bank-free callback received IDS rules")
 				}

@@ -25,7 +25,7 @@ func strictRuleRequest(t *testing.T, server http.Handler, method, path, body str
 	rec := httptest.NewRecorder()
 	req := authedRequest(method, path, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-	server.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, server, rec, req)
 	return rec
 }
 
@@ -116,6 +116,7 @@ func TestCommitRejectsPersistedCandidateWithUnknownRuleKey(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
+	base := testBaseRevision(store, context.Background())
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("open config database: %v", err)
@@ -127,6 +128,9 @@ func TestCommitRejectsPersistedCandidateWithUnknownRuleKey(t *testing.T) {
 		t.Fatalf("seed candidate config: %v", err)
 	}
 
-	rec := strictRuleRequest(t, NewServer(store, nil), http.MethodPost, "/api/v1/config/commit", "")
+	req := authedRequest(http.MethodPost, "/api/v1/config/commit", nil)
+	req.Header.Set(ifRevisionHeader, string(base))
+	rec := httptest.NewRecorder()
+	NewServer(store, nil).ServeHTTP(rec, req)
 	assertUnknownRule400(t, rec, true, "strict-rule")
 }

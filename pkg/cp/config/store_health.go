@@ -3,6 +3,7 @@ package config
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 )
@@ -12,6 +13,7 @@ import (
 type HealthSnapshot struct {
 	Config     *Config
 	ApplyFault string
+	Revision   Revision
 }
 
 // HealthReader provides observation within the caller's shared budget without
@@ -48,16 +50,28 @@ func (s *SQLiteStore) ReadHealthSnapshot(ctx context.Context) (HealthSnapshot, e
 		}
 	}
 	defer s.mu.Unlock()
-	cfg, err := s.loadKind(ctx, configKeyRunning)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return HealthSnapshot{}, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	revision, err := readRevision(ctx, tx)
+	if err != nil {
+		return HealthSnapshot{}, err
+	}
+	cfg, err := readKindFrom(ctx, tx, configKeyRunning, false)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return HealthSnapshot{}, err
 	}
-	fault, err := s.runtimeApplyFaultLocked(ctx)
-	if err != nil {
+	var fault string
+	if err := tx.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, runtimeApplyFaultKey).Scan(&fault); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return HealthSnapshot{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return HealthSnapshot{}, err
 	}
-	return HealthSnapshot{Config: cfg, ApplyFault: fault}, nil
+	if err := tx.Commit(); err != nil {
+		return HealthSnapshot{}, err
+	}
+	return HealthSnapshot{Config: cfg, ApplyFault: fault, Revision: revision}, nil
 }

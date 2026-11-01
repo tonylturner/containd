@@ -80,16 +80,13 @@ func changedConfigSections(running, candidate *config.Config, runningBank, candi
 
 func diffConfigHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		paired, ok := store.(config.PairedStore)
-		if !ok {
-			internalError(c, fmt.Errorf("store does not support paired config reads"))
-			return
-		}
-		running, candidate, err := paired.LoadPair(c.Request.Context())
+		snapshot, err := store.ReadSnapshot(c.Request.Context(), config.SnapshotPair, true)
 		if err != nil {
 			internalError(c, err)
 			return
 		}
+		running, candidate := snapshot.Running, snapshot.Candidate
+		configRevisionResponse(c, snapshot.Revision)
 		runningBank, err := summarizeIDSBank(running)
 		if err != nil {
 			internalError(c, err)

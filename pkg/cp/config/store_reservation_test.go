@@ -32,8 +32,8 @@ func TestStoreReservationPersistenceBoundaries(t *testing.T) {
 	invalid, _ := reservationFixture()
 	invalid.Interfaces[0].Addresses = []string{"192.0.2.1/24"}
 	requireReservationError(t, store.Save(ctx, invalid))
-	requireReservationError(t, store.SaveCandidate(ctx, invalid))
-	requireReservationError(t, store.MutateCandidate(ctx, func(c *Config) error {
+	requireReservationError(t, testSaveCandidate(store, ctx, invalid))
+	requireReservationError(t, testMutateCandidate(store, ctx, func(c *Config) error {
 		c.DataPlane.Enforcement = false
 		return nil
 	}))
@@ -49,30 +49,39 @@ func TestStoreReservationPersistenceBoundaries(t *testing.T) {
 		}
 	}
 	putSnapshot(configKeyCandidate, invalid)
-	requireReservationError(t, store.Commit(ctx))
-	requireReservationError(t, store.CommitConfirmed(ctx, time.Hour))
+	requireReservationError(t, testCommit(store, ctx))
+	requireReservationError(t, testCommitConfirmed(store, ctx, time.Hour))
 	if _, err := Repair(ctx, store, func(c *Config) error { c.System.Hostname = "repaired"; return nil }); err != nil {
 		t.Fatalf("boot normalization blocked by residual candidate conflict: %v", err)
 	}
-	requireReservationError(t, store.Commit(ctx))
+	requireReservationError(t, testCommit(store, ctx))
 	putSnapshot(configKeyCandidate, valid)
 	putSnapshot(configKeyPrevious, invalid)
-	requireReservationError(t, store.Rollback(ctx))
+	requireReservationError(t, testRollback(store, ctx))
 	fault, err := store.ManagementRollbackFault(ctx)
 	if err != nil || !strings.Contains(fault, "rollback refused") {
 		t.Fatalf("missing visible refusal: %q %v", fault, err)
 	}
+	base := testBaseRevision(store, ctx)
+	_, applyErr := store.ApplyChange(ctx, base, ChangeRollback, 0, func(context.Context, *Config, *Config) error {
+		t.Fatal("refused rollback reached runtime apply")
+		return nil
+	})
+	requireReservationError(t, applyErr)
+	if testBaseRevision(store, ctx) != base {
+		t.Fatal("rollback refusal allocated a revision")
+	}
 	putSnapshot(configKeyRunning, invalid)
-	requireReservationError(t, store.ConfirmCommit(ctx))
+	requireReservationError(t, testConfirmCommit(store, ctx))
 	putSnapshot(configKeyRunning, valid)
 	f := false
 	for i := range valid.Interfaces {
 		valid.Interfaces[i].Access = InterfaceAccess{Mgmt: &f, HTTP: &f, HTTPS: &f, SSH: &f}
 	}
-	if err := store.SaveCandidate(ctx, valid); err != nil {
+	if err := testSaveCandidate(store, ctx, valid); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Commit(ctx); err != nil {
+	if err := testCommit(store, ctx); err != nil {
 		t.Fatalf("disabling ordinary access must succeed: %v", err)
 	}
 	// Mutation of caller-owned authority or its read-only view cannot weaken it.
@@ -100,12 +109,13 @@ func TestStoreReservationRefusesTimedRollback(t *testing.T) {
 			if err := store.Save(ctx, unsafe); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.SaveCandidate(ctx, valid); err != nil {
+			if err := testSaveCandidate(store, ctx, valid); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.CommitConfirmed(ctx, time.Hour); err != nil {
+			if err := testCommitConfirmed(store, ctx, time.Hour); err != nil {
 				t.Fatal(err)
 			}
+			beforeExpiry := testBaseRevision(store, ctx)
 			deadline := time.Now().Add(150 * time.Millisecond)
 			if atOpen {
 				deadline = time.Now().Add(-time.Second)
@@ -144,6 +154,9 @@ func TestStoreReservationRefusesTimedRollback(t *testing.T) {
 			store.mu.Lock()
 			_, pendingErr := store.loadPending(ctx)
 			store.mu.Unlock()
+			if revision := testBaseRevision(store, ctx); revision == beforeExpiry {
+				t.Fatal("refused timed rollback did not allocate")
+			}
 			if !errors.Is(pendingErr, ErrNotFound) {
 				t.Fatalf("pending retained: %v", pendingErr)
 			}
@@ -199,10 +212,10 @@ func TestManagementBootFaultRecovery(t *testing.T) {
 			if err := store.Save(ctx, valid); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.SaveCandidate(ctx, valid); err != nil {
+			if err := testSaveCandidate(store, ctx, valid); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.Commit(ctx); err != nil {
+			if err := testCommit(store, ctx); err != nil {
 				t.Fatal(err)
 			}
 			if err := store.SetManagementBootFault(ctx, "stored conflict"); err != nil {
@@ -221,9 +234,9 @@ func TestManagementBootFaultRecovery(t *testing.T) {
 			}
 			switch recovery {
 			case "commit":
-				err = store.Commit(ctx)
+				err = testCommit(store, ctx)
 			case "rollback":
-				err = store.Rollback(ctx)
+				err = testRollback(store, ctx)
 			case "reset":
 				err = store.WipeAll(ctx)
 			}
@@ -254,10 +267,10 @@ func TestManagementBootFaultGatesWithoutReservation(t *testing.T) {
 	if err := CheckManagementBootFault(ctx, store); !errors.Is(err, ErrManagementBootFault) {
 		t.Fatalf("fault without reservation did not gate replay: %v", err)
 	}
-	if err := store.SaveCandidate(ctx, DefaultConfig()); err != nil {
+	if err := testSaveCandidate(store, ctx, DefaultConfig()); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Commit(ctx); err != nil {
+	if err := testCommit(store, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := CheckManagementBootFault(ctx, store); err != nil {

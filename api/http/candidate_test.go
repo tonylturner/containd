@@ -114,7 +114,7 @@ func requestStage(t *testing.T, server http.Handler, method, path string, body a
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User", "stage-tester")
 	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, server, rec, req)
 	return rec
 }
 
@@ -221,7 +221,7 @@ func TestConfigurationEndpointsStageWithoutApplying(t *testing.T) {
 			store := stageStore(t)
 			ctx := context.Background()
 			running, _ := store.Load(ctx)
-			if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+			if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 				cfg.System.Hostname = "unrelated-edit"
 				return nil
 			}); err != nil {
@@ -300,7 +300,7 @@ func TestIDSSaveResponseSurvivesSecondSave(t *testing.T) {
 		t.Fatalf("omitted rules erased bank: %d %s", rec.Code, rec.Body)
 	}
 	rec = httptest.NewRecorder()
-	server.ServeHTTP(rec, idsApplyRequest(t, "import"))
+	serveWithConfigRevision(t, server, rec, idsApplyRequest(t, "import"))
 	if rec.Code != http.StatusOK || engine.mutations != 0 {
 		t.Fatalf("IDS import applied or failed: %d %s", rec.Code, rec.Body)
 	}
@@ -325,7 +325,7 @@ func TestVPNProfileUploadsNeverOverwriteRunningArtifact(t *testing.T) {
 		return cfg.Services.VPN.OpenVPN.ConfigPath
 	}
 	first := upload("client\nremote first 1194\n")
-	if err := store.Commit(context.Background()); err != nil {
+	if err := testCommit(store, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	second := upload("client\nremote second 1194\n")

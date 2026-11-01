@@ -7,7 +7,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +17,9 @@ func assertConfigResponseHeader(t *testing.T, rec *httptest.ResponseRecorder, wa
 	t.Helper()
 	// Inspect the headers actually sent, not the mutable writer's late headers.
 	got := rec.Result().Header.Values("X-Containd-Config")
+	if want != "" && !config.Revision(rec.Result().Header.Get(revisionHeader)).Valid() {
+		t.Fatalf("missing revision: %v", rec.Result().Header)
+	}
 	if want == "" {
 		if len(got) != 0 {
 			t.Fatalf("unexpected config header %v (status=%d)", got, rec.Code)
@@ -36,28 +38,6 @@ func configResponseStageCases() []candidateEndpointCase {
 	return append(cases, candidateEndpointCase{method: "POST", path: "/ids/import"})
 }
 
-// Used only by tests to check the complete registered route inventory. The
-// production classifier is the persistence boundary, never a URL inventory.
-func configResponseRouteState(method, route string) string {
-	path := strings.TrimPrefix(route, "/api/v1")
-	path = strings.NewReplacer(":id", "old", ":name", "spare").Replace(path)
-	if path == "/firewall/ics-rules/old" {
-		path = "/firewall/ics-rules/ics"
-	}
-	if method == http.MethodPost {
-		switch path {
-		case "/config/commit", "/config/commit_confirmed", "/config/confirm", "/config/rollback":
-			return "committed"
-		}
-	}
-	for _, test := range configResponseStageCases() {
-		if method == test.method && path == test.path {
-			return "staged"
-		}
-	}
-	return ""
-}
-
 func TestConfigResponseHeadersEveryStagedRoute(t *testing.T) {
 	for _, test := range configResponseStageCases() {
 		t.Run(test.method+test.path, func(t *testing.T) {
@@ -67,7 +47,7 @@ func TestConfigResponseHeadersEveryStagedRoute(t *testing.T) {
 			var rec *httptest.ResponseRecorder
 			if test.path == "/ids/import" {
 				rec = httptest.NewRecorder()
-				server.ServeHTTP(rec, idsApplyRequest(t, "import"))
+				serveWithConfigRevision(t, server, rec, idsApplyRequest(t, "import"))
 			} else {
 				rec = requestStage(t, server, test.method, test.path, test.body)
 			}
@@ -84,11 +64,11 @@ func TestConfigResponseHeadersEveryLifecycleRoute(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			store := stageStore(t)
 			ctx := context.Background()
-			if err := store.SaveCandidate(ctx, config.DefaultConfig()); err != nil {
+			if err := testSaveCandidate(store, ctx, config.DefaultConfig()); err != nil {
 				t.Fatal(err)
 			}
 			if path == "/config/confirm" || path == "/config/rollback" {
-				if err := store.CommitConfirmed(ctx, time.Hour); err != nil {
+				if err := testCommitConfirmed(store, ctx, time.Hour); err != nil {
 					t.Fatal(err)
 				}
 			}

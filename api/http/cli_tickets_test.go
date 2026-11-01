@@ -48,12 +48,12 @@ func TestCLITicketLifetimeAndAtomicConsume(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/ticket", nil)
 		req.Header.Set("Authorization", "Bearer issuer")
-		r.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, r, rec, req)
 		return rec
 	}
 	consume := func(key string) int {
 		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ws?ticket="+key, nil))
+		serveWithConfigRevision(t, r, rec, httptest.NewRequest(http.MethodGet, "/ws?ticket="+key, nil))
 		return rec.Code
 	}
 	key := decodeCLITicket(t, issue())
@@ -112,12 +112,12 @@ func TestCLITicketPendingIssuanceDoesNotStarveLabUsers(t *testing.T) {
 	})
 	issue := func(token string) string {
 		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, jwtAuthedRequest(http.MethodPost, "/ticket", nil, token))
+		serveWithConfigRevision(t, r, rec, jwtAuthedRequest(http.MethodPost, "/ticket", nil, token))
 		return decodeCLITicket(t, rec)
 	}
 	consume := func(key string, want int) {
 		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/redeem?ticket="+key, nil))
+		serveWithConfigRevision(t, r, rec, httptest.NewRequest(http.MethodGet, "/redeem?ticket="+key, nil))
 		if rec.Code != want {
 			t.Fatalf("redemption: status=%d body=%s", rec.Code, rec.Body)
 		}
@@ -163,11 +163,11 @@ func TestCLITicketSessionAuth(t *testing.T) {
 			req.Header.Del("Authorization")
 			req.AddCookie(&http.Cookie{Name: "containd_token", Value: token})
 		}
-		r.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, r, rec, req)
 		return decodeCLITicket(t, rec)
 	}
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/cli/ws/ticket", nil))
+	serveWithConfigRevision(t, r, rec, httptest.NewRequest(http.MethodPost, "/api/v1/cli/ws/ticket", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatal("unauthenticated ticket issuance")
 	}
@@ -176,7 +176,7 @@ func TestCLITicketSessionAuth(t *testing.T) {
 	cross.AddCookie(&http.Cookie{Name: "containd_token", Value: token})
 	cross.Header.Set("Origin", "https://evil.example")
 	rec = httptest.NewRecorder()
-	r.ServeHTTP(rec, cross)
+	serveWithConfigRevision(t, r, rec, cross)
 	if rec.Code != http.StatusForbidden {
 		t.Fatal("cross-origin cookie issuance accepted")
 	}
@@ -222,7 +222,7 @@ func TestCLITicketSessionAuth(t *testing.T) {
 	key = issue(false)
 	// The actual logout route must invalidate already-issued tickets.
 	rec = httptest.NewRecorder()
-	r.ServeHTTP(rec, jwtAuthedRequest(http.MethodPost, "/api/v1/auth/logout", nil, token))
+	serveWithConfigRevision(t, r, rec, jwtAuthedRequest(http.MethodPost, "/api/v1/auth/logout", nil, token))
 	if rec.Code != http.StatusOK && rec.Code != http.StatusNoContent {
 		t.Fatalf("logout: %d %s", rec.Code, rec.Body)
 	}
@@ -245,7 +245,7 @@ func TestCLIWSProxyHostWithoutPort(t *testing.T) {
 	req.Host = "localhost"
 	req.Header.Set("Origin", "http://localhost:8088")
 	req.AddCookie(&http.Cookie{Name: "containd_token", Value: token})
-	r.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, r, rec, req)
 	ticket := decodeCLITicket(t, rec)
 
 	srv := httptest.NewServer(r)
@@ -294,14 +294,14 @@ func TestCLITicketReauthenticationPreservesIdentity(t *testing.T) {
 	})
 	issue := func() string {
 		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, jwtAuthedRequest(http.MethodPost, "/ticket", nil, token))
+		serveWithConfigRevision(t, r, rec, jwtAuthedRequest(http.MethodPost, "/ticket", nil, token))
 		return decodeCLITicket(t, rec)
 	}
 	consume := func(key string, want int) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/ws?ticket="+key, nil)
 		req.Header.Set("Authorization", "Bearer unrelated")
-		r.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, r, rec, req)
 		if rec.Code != want {
 			t.Fatalf("consume: %d %s", rec.Code, rec.Body)
 		}
@@ -337,10 +337,10 @@ func TestCLITicketLabSessionlessJWT(t *testing.T) {
 		c.Status(http.StatusNoContent)
 	})
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, jwtAuthedRequest(http.MethodPost, "/ticket", nil, token))
+	serveWithConfigRevision(t, r, rec, jwtAuthedRequest(http.MethodPost, "/ticket", nil, token))
 	key := decodeCLITicket(t, rec)
 	rec = httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ws?ticket="+key, nil))
+	serveWithConfigRevision(t, r, rec, httptest.NewRequest(http.MethodGet, "/ws?ticket="+key, nil))
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("lab redemption: %d %s", rec.Code, rec.Body)
 	}

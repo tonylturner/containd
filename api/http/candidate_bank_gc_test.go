@@ -37,10 +37,10 @@ func bankGCHandlerStore(t *testing.T, large bool) (*config.SQLiteStore, *sql.DB)
 		cfg.IDS.Rules[i] = template
 		cfg.IDS.Rules[i].ID = fmt.Sprintf("bank-%05d", i)
 	}
-	if err := store.SaveCandidate(ctx, cfg); err != nil {
+	if err := testSaveCandidate(store, ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(store, ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	inspector, err := sql.Open("sqlite", path)
@@ -64,7 +64,7 @@ func TestRepeatedIDSImportsReclaimBankGenerations(t *testing.T) {
 	server := NewServer(store, nil)
 	for range 6 {
 		rec := httptest.NewRecorder()
-		server.ServeHTTP(rec, idsApplyRequest(t, "import"))
+		serveWithConfigRevision(t, server, rec, idsApplyRequest(t, "import"))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("import: %d %s", rec.Code, rec.Body)
 		}
@@ -74,7 +74,7 @@ func TestRepeatedIDSImportsReclaimBankGenerations(t *testing.T) {
 	if err != nil || len(cfg.IDS.Rules) != 30001 {
 		t.Fatalf("large-bank import/deduplication changed: %v", err)
 	}
-	if err := store.Rollback(context.Background()); err != nil {
+	if err := testRollback(store, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	assertHandlerBankBound(t, inspector)
@@ -98,7 +98,7 @@ func TestRepeatedIDSReplacementsReclaimBankGenerations(t *testing.T) {
 					cfg := config.DefaultConfig()
 					rec = requestStage(t, server, "POST", "/config/candidate", cfg)
 				} else {
-					server.ServeHTTP(rec, idsApplyRequest(t, action))
+					serveWithConfigRevision(t, server, rec, idsApplyRequest(t, action))
 				}
 				if rec.Code != http.StatusOK {
 					t.Fatalf("%s: %d %s", action, rec.Code, rec.Body)

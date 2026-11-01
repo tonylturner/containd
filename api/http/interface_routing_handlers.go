@@ -18,7 +18,7 @@ import (
 
 func listInterfacesHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -186,7 +186,7 @@ func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.Han
 		}
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := readRunningOrDefault(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -313,7 +313,7 @@ func mergeInterfacePatch(existing config.Interface, patch map[string]json.RawMes
 
 func getRoutingHandler(store config.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := store.LoadCandidate(c.Request.Context())
+		cfg, err := readCandidate(c, store)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -356,7 +356,7 @@ func routingReconcileHandler(store config.Store, engine EngineClient) gin.Handle
 		}
 		runningConfigApplyMu.Lock()
 		defer runningConfigApplyMu.Unlock()
-		cfg, err := loadOrInitConfig(c.Request.Context(), store)
+		cfg, err := readRunningOrDefault(c, store)
 		if err != nil {
 			internalError(c, err)
 			return

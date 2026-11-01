@@ -66,7 +66,7 @@ func assertBankCollection(t *testing.T, s *SQLiteStore, limit int) map[int64]boo
 
 func replaceGCTestBank(t *testing.T, s *SQLiteStore, label string) {
 	t.Helper()
-	if err := s.MutateCandidateIDS(context.Background(), func(cfg *Config) error {
+	if err := testMutateCandidateIDS(s, context.Background(), func(cfg *Config) error {
 		cfg.IDS.Rules = append([]IDSRule(nil), DefaultIDSConfig().Rules[:1]...)
 		cfg.IDS.Rules[0].ID = label
 		return nil
@@ -93,22 +93,22 @@ func TestBankGCReplacementPathsAreBounded(t *testing.T) {
 				case "save_rules":
 					err = s.SaveIDSRules(ctx, cfg.IDS.Rules)
 				case "candidate":
-					err = s.SaveCandidate(ctx, cfg)
+					err = testSaveCandidate(s, ctx, cfg)
 				case "mutate":
 					replaceGCTestBank(t, s, cfg.IDS.Rules[0].ID)
 				case "repair":
 					_, err = Repair(ctx, s, func(c *Config) error { c.IDS.Rules = cfg.IDS.Rules; return nil })
 				default:
-					err = s.SaveCandidate(ctx, cfg)
+					err = testSaveCandidate(s, ctx, cfg)
 					if err == nil {
 						if mode == "confirmed" {
-							err = s.CommitConfirmed(ctx, time.Hour)
+							err = testCommitConfirmed(s, ctx, time.Hour)
 						} else {
-							err = s.Commit(ctx)
+							err = testCommit(s, ctx)
 						}
 					}
 					if err == nil && mode == "rollback" {
-						err = s.Rollback(ctx)
+						err = testRollback(s, ctx)
 					}
 				}
 				if err != nil {
@@ -164,9 +164,9 @@ func TestBankGCPinsRecoveryAcrossImports(t *testing.T) {
 				return nil
 			}
 			if mode == "reset" {
-				err = s.ApplyReset(caller, DefaultConfig(), apply)
+				err = testApplyReset(s, caller, DefaultConfig(), apply)
 			} else {
-				err = s.ApplyChange(caller, RunningChange(mode), time.Hour, apply)
+				err = testApplyChange(s, caller, RunningChange(mode), time.Hour, apply)
 			}
 			var failure *ApplyError
 			if !errors.As(err, &failure) || failure.RestoreError != nil || failure.ReapplyError != nil || failure.HealthError != nil || calls != 2 {
@@ -182,7 +182,7 @@ func TestBankGCPinsRecoveryAcrossImports(t *testing.T) {
 				replaceGCTestBank(t, s, fmt.Sprintf("after-failure-%d", i))
 				assertBankCollection(t, s, 3)
 			}
-			if err := s.Rollback(ctx); err != nil {
+			if err := testRollback(s, ctx); err != nil {
 				t.Fatal(err)
 			}
 			got, err := s.Load(ctx)
@@ -202,9 +202,9 @@ func TestBankGCSuccessfulApplyAndWipeLeaveNoOrphans(t *testing.T) {
 			apply := func(context.Context, *Config, *Config) error { return nil }
 			var err error
 			if mode == "reset" {
-				err = s.ApplyReset(ctx, DefaultConfig(), apply)
+				err = testApplyReset(s, ctx, DefaultConfig(), apply)
 			} else {
-				err = s.ApplyChange(ctx, RunningChange(mode), time.Hour, apply)
+				err = testApplyChange(s, ctx, RunningChange(mode), time.Hour, apply)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -263,7 +263,7 @@ func TestBankGCBootSweepsOrphansAndPreservesPendingRollback(t *testing.T) {
 				t.Fatalf("boot retained orphan: %d %v", count, err)
 			}
 			if !expired {
-				if err := s.Rollback(ctx); err != nil {
+				if err := testRollback(s, ctx); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -282,7 +282,7 @@ func TestBankGCFailureRollsBackReplacement(t *testing.T) {
 	if _, err := s.db.Exec(`CREATE TRIGGER deny_gc BEFORE DELETE ON ids_banks BEGIN SELECT RAISE(ABORT, 'GC denied'); END`); err != nil {
 		t.Fatal(err)
 	}
-	err := s.MutateCandidateIDS(context.Background(), func(c *Config) error { c.IDS.Rules = DefaultIDSConfig().Rules[:1]; return nil })
+	err := testMutateCandidateIDS(s, context.Background(), func(c *Config) error { c.IDS.Rules = DefaultIDSConfig().Rules[:1]; return nil })
 	if err == nil || !strings.Contains(err.Error(), "GC denied") {
 		t.Fatalf("collection error ignored: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestBankGCSweepFailureCompensatesApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	err = s.ApplyReset(ctx, DefaultConfig(), func(_ context.Context, _, next *Config) error {
+	err = testApplyReset(s, ctx, DefaultConfig(), func(_ context.Context, _, next *Config) error {
 		calls++
 		if calls == 2 && !reflect.DeepEqual(next, running) {
 			t.Fatal("GC failure lost recovery target")
@@ -321,7 +321,7 @@ func TestBankGCSweepFailureCompensatesApply(t *testing.T) {
 	if _, err := s.db.Exec(`DROP TRIGGER deny_gc`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MutateCandidate(ctx, func(c *Config) error { c.Description = "retry collection"; return nil }); err != nil {
+	if err := testMutateCandidate(s, ctx, func(c *Config) error { c.Description = "retry collection"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	assertBankCollection(t, s, 3)

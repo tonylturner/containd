@@ -50,7 +50,7 @@ func TestIDSExportDownload(t *testing.T) {
 			server := gin.New()
 			server.GET("/export", idsExportHandler(store))
 			rec := httptest.NewRecorder()
-			server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/export?format="+tc.query, nil))
+			serveWithConfigRevision(t, server, rec, httptest.NewRequest(http.MethodGet, "/export?format="+tc.query, nil))
 			if rec.Code != tc.status {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
 			}
@@ -109,7 +109,7 @@ func TestIDSExportEditedImportedSnort(t *testing.T) {
 	server := gin.New()
 	server.GET("/export", idsExportHandler(store))
 	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/export?format=snort", nil))
+	serveWithConfigRevision(t, server, rec, httptest.NewRequest(http.MethodGet, "/export?format=snort", nil))
 	if rec.Code != http.StatusOK || rec.Header().Get("X-Containd-IDS-Refused") != "0" {
 		t.Fatalf("response=%d,%v,%s", rec.Code, rec.Header(), rec.Body)
 	}

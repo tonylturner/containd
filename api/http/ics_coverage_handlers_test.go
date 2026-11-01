@@ -159,7 +159,7 @@ func TestViewerReadsICSCoverage(t *testing.T) {
 		"/api/v1/dataplane/ruleset":        http.StatusForbidden,
 	} {
 		rec := httptest.NewRecorder()
-		s.ServeHTTP(rec, jwtAuthedRequest(http.MethodGet, path, &bytes.Buffer{}, tok))
+		serveWithConfigRevision(t, s, rec, jwtAuthedRequest(http.MethodGet, path, &bytes.Buffer{}, tok))
 		if rec.Code != want {
 			t.Fatalf("viewer %s = %d, want %d: %s", path, rec.Code, want, rec.Body.String())
 		}

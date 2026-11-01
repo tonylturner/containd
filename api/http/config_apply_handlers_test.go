@@ -45,7 +45,7 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 			t.Run(action+"/restore="+map[bool]string{true: "failed", false: "ok"}[failRestore], func(t *testing.T) {
 				ctx := context.Background()
 				store := stageStore(t)
-				if err := store.Commit(ctx); err != nil {
+				if err := testCommit(store, ctx); err != nil {
 					t.Fatal(err)
 				} // establish rollback baseline
 				running, err := store.Load(ctx)
@@ -65,7 +65,7 @@ func TestRunningChangesRestoreDocumentBankAndCandidate(t *testing.T) {
 				}
 				candidate.System.Hostname = "failed-candidate"
 				candidate.IDS.Rules = []config.IDSRule{}
-				if err := store.SaveCandidate(ctx, candidate); err != nil {
+				if err := testSaveCandidate(store, ctx, candidate); err != nil {
 					t.Fatal(err)
 				}
 				candidate, _ = store.LoadCandidate(ctx)
@@ -193,7 +193,7 @@ func TestCommitConfirmedRejectsUnreadableRequest(t *testing.T) {
 	engine := &mockEngine{}
 	server := NewServerWithEngine(store, nil, engine)
 	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, authedRequest(http.MethodPost, "/api/v1/config/commit_confirmed", failedCommitReader{}))
+	serveWithConfigRevision(t, server, rec, authedRequest(http.MethodPost, "/api/v1/config/commit_confirmed", failedCommitReader{}))
 	if rec.Code != http.StatusBadRequest || engine.applied {
 		t.Fatalf("unreadable request: %d %s", rec.Code, rec.Body)
 	}

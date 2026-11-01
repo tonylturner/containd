@@ -84,16 +84,17 @@ func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
 				router.POST("/login", loginHandler(us))
 				protected := router.Group("", authMiddleware(us))
 				protected.GET("/auth/me", func(c *gin.Context) { c.Status(http.StatusOK) })
+				protected.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
 				protected.POST("/reset", factoryResetHandler(store, us, engine, services, func(_ context.Context, initiator string) { revoked = initiator }))
 				rec := httptest.NewRecorder()
-				router.ServeHTTP(rec, jwtAuthedRequest(http.MethodGet, "/auth/me", nil, token))
+				serveWithConfigRevision(t, router, rec, jwtAuthedRequest(http.MethodGet, "/auth/me", nil, token))
 				if rec.Code != http.StatusOK {
 					t.Fatalf("initial auth: %d %s", rec.Code, rec.Body)
 				}
 				rec = httptest.NewRecorder()
 				resetReq := jwtAuthedRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), token)
 				resetReq.Header.Set("X-Containd-SSH-Connection", "initiating-ssh-connection")
-				router.ServeHTTP(rec, resetReq)
+				serveWithConfigRevision(t, router, rec, resetReq)
 				var body struct {
 					Warnings []string `json:"warnings"`
 					Message  string   `json:"message"`
@@ -131,7 +132,7 @@ func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
 					}
 				}
 				rec = httptest.NewRecorder()
-				router.ServeHTTP(rec, jwtAuthedRequest(http.MethodGet, "/auth/me", nil, token))
+				serveWithConfigRevision(t, router, rec, jwtAuthedRequest(http.MethodGet, "/auth/me", nil, token))
 				wantStatus := http.StatusUnauthorized
 				if lab {
 					wantStatus = http.StatusOK
@@ -140,7 +141,7 @@ func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
 					t.Fatalf("old JWT status: got %d want %d body=%s", rec.Code, wantStatus, rec.Body)
 				}
 				rec = httptest.NewRecorder()
-				router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/login", bytes.NewBufferString(`{"username":"containd","password":"containd"}`)))
+				serveWithConfigRevision(t, router, rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/login", bytes.NewBufferString(`{"username":"containd","password":"containd"}`))))
 				var login loginResponse
 				if err := json.Unmarshal(rec.Body.Bytes(), &login); err != nil {
 					t.Fatal(err)
@@ -149,7 +150,7 @@ func TestFactoryResetConvergenceWarningsAndJWTRevocation(t *testing.T) {
 					t.Fatalf("default credential login failed: %d %s", rec.Code, rec.Body)
 				}
 				rec = httptest.NewRecorder()
-				router.ServeHTTP(rec, jwtAuthedRequest(http.MethodGet, "/auth/me", nil, login.Token))
+				serveWithConfigRevision(t, router, rec, jwtAuthedRequest(http.MethodGet, "/auth/me", nil, login.Token))
 				if rec.Code != http.StatusOK {
 					t.Fatalf("management unavailable after reset: %d %s", rec.Code, rec.Body)
 				}
@@ -211,7 +212,7 @@ func TestFactoryResetPreservesRangerDangerLabToken(t *testing.T) {
 			{expired, http.StatusUnauthorized},
 		} {
 			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, jwtAuthedRequest(http.MethodGet, "/api/v1/auth/session", nil, tc.token))
+			serveWithConfigRevision(t, router, rec, jwtAuthedRequest(http.MethodGet, "/api/v1/auth/session", nil, tc.token))
 			if rec.Code != tc.want {
 				t.Fatalf("lab token authentication: got %d want %d body=%s", rec.Code, tc.want, rec.Body)
 			}
@@ -231,7 +232,7 @@ func TestFactoryResetPreservesRangerDangerLabToken(t *testing.T) {
 	}
 	checkAuth()
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, jwtAuthedRequest(http.MethodPost, "/api/v1/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), token))
+	serveWithConfigRevision(t, router, rec, jwtAuthedRequest(http.MethodPost, "/api/v1/system/factory-reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), token))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Lab web/API tokens remain valid") {
 		t.Fatalf("reset with session-less lab token: %d %s", rec.Code, rec.Body)
 	}
@@ -252,15 +253,16 @@ func TestFactoryResetPreservesSecretlessLabBypass(t *testing.T) {
 	}
 	router := gin.New()
 	router.Use(authMiddleware(us))
+	router.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
 	router.POST("/reset", factoryResetHandler(store, us, &mockEngine{}, nil))
 	router.GET("/auth/me", func(c *gin.Context) { c.Status(http.StatusOK) })
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, jwtAuthedRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), "lab"))
+	serveWithConfigRevision(t, router, rec, jwtAuthedRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`), "lab"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reset: %d %s", rec.Code, rec.Body)
 	}
 	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, jwtAuthedRequest(http.MethodGet, "/auth/me", nil, "lab"))
+	serveWithConfigRevision(t, router, rec, jwtAuthedRequest(http.MethodGet, "/auth/me", nil, "lab"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("secretless bypass changed: %d %s", rec.Code, rec.Body)
 	}
@@ -285,9 +287,10 @@ func TestFactoryResetReportsAuditCleanupWarning(t *testing.T) {
 		c.Set("auditStore", audits)
 		c.Next()
 	})
+	router.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
 	router.POST("/reset", factoryResetHandler(store, us, &mockEngine{}, nil))
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`)))
+	serveWithConfigRevision(t, router, rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "audit reset:") || strings.Contains(rec.Body.String(), "completed") {
 		t.Fatalf("audit cleanup failure hidden: %d %s", rec.Code, rec.Body)
 	}
@@ -305,9 +308,10 @@ func TestFactoryResetReportsDynamicBlockClearFailure(t *testing.T) {
 	defer us.Close()
 	engine := &mockEngine{clearErr: errors.New("engine blocks clear status 502: nft: netlink busy")}
 	router := gin.New()
+	router.GET("/api/v1/config/candidate", getCandidateConfigHandler(store))
 	router.POST("/reset", factoryResetHandler(store, us, engine, nil))
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`)))
+	serveWithConfigRevision(t, router, rec, withTestRevision(store, httptest.NewRequest(http.MethodPost, "/reset", bytes.NewBufferString(`{"confirm":"NUCLEAR"}`))))
 	var body struct {
 		Warnings []string `json:"warnings"`
 		Message  string   `json:"message"`

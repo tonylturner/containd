@@ -30,7 +30,7 @@ func TestDHCPAuthorityRoundTrip(t *testing.T) {
 		req := authedRequest(method, "/api/v1"+path, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
-		server.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, server, rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body.String())
 		}
@@ -50,7 +50,7 @@ func TestDHCPAuthorityRoundTrip(t *testing.T) {
 				t.Fatalf("authority lost in service response: %s", rec.Body.String())
 			}
 		}
-		if err := store.Commit(ctx); err != nil {
+		if err := testCommit(store, ctx); err != nil {
 			t.Fatal(err)
 		}
 		exported := call(http.MethodGet, "/config/export", nil).Body.Bytes()

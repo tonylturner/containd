@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- Every configuration write and commit must send `X-Containd-If-Revision` with
+  the revision from the read it is based on; requests without it get 428, stale
+  ones 412. Scripts and integrations that stage then commit must read the
+  revision first and pass the one each write returns.
+
+### Fixed
+
+- Reject stale configuration saves, section edits and lifecycle actions using
+  a durable whole-state revision, including IDS banks and secret-only edits.
+
 ## [0.1.37] - 2026-10-31
 
 ### Upgrade notes

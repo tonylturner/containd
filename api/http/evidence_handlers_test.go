@@ -125,7 +125,7 @@ func TestEvidenceStageConflictRollsBackWholeBatch(t *testing.T) {
 	s.ID, s.Proof.ContentID = id, id
 	conflict := s.Content.Rules[1]
 	conflict.ICS.Addresses = []string{"4-6"}
-	if err := store.MutateCandidate(ctx, func(cfg *config.Config) error {
+	if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error {
 		cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict, config.Rule{ID: "learned-legacy", Action: config.ActionAllow})
 		return nil
 	}); err != nil {
@@ -207,7 +207,7 @@ func TestEvidenceStageRecoveryErrorsAreRetryable(t *testing.T) {
 					e.releaseError = failure
 					conflict := s.Content.Rules[0]
 					conflict.ICS.Addresses = []string{"4-6"}
-					if err := store.MutateCandidate(context.Background(), func(cfg *config.Config) error {
+					if err := testMutateCandidate(store, context.Background(), func(cfg *config.Config) error {
 						cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict)
 						return nil
 					}); err != nil {
@@ -329,7 +329,7 @@ func TestEvidenceStageLifecycleConverges(t *testing.T) {
 				if release {
 					conflict := s.Content.Rules[0]
 					conflict.ICS.Addresses = []string{"4-6"}
-					if err := store.MutateCandidate(ctx, func(cfg *config.Config) error { cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict); return nil }); err != nil {
+					if err := testMutateCandidate(store, ctx, func(cfg *config.Config) error { cfg.Firewall.Rules = append(cfg.Firewall.Rules, conflict); return nil }); err != nil {
 						t.Fatal(err)
 					}
 					before, err = store.LoadCandidate(ctx)

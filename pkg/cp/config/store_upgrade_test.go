@@ -63,9 +63,9 @@ func TestLegacySnapshotsKeepDeployedBank(t *testing.T) {
 					t.Fatal(err)
 				}
 				if mode == "candidate" {
-					err = s.Commit(ctx)
+					err = testCommit(s, ctx)
 				} else {
-					err = s.Rollback(ctx)
+					err = testRollback(s, ctx)
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -82,28 +82,28 @@ func TestLegacySnapshotsKeepDeployedBank(t *testing.T) {
 func TestSnapshotEmptyBankSurvivesReopen(t *testing.T) {
 	s := candidateStore(t)
 	ctx := context.Background()
-	if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
+	if err := testMutateCandidateIDS(s, ctx, func(cfg *Config) error {
 		cfg.IDS.Rules = []IDSRule{}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	s = reopenSnapshotStore(t, s)
-	if err := s.Commit(ctx); err != nil {
+	if err := testCommit(s, ctx); err != nil {
 		t.Fatal(err)
 	}
 	// Snapshot the empty bank as previous, then put rules back in running.
-	if err := s.MutateCandidateIDS(ctx, func(cfg *Config) error {
+	if err := testMutateCandidateIDS(s, ctx, func(cfg *Config) error {
 		cfg.IDS.Rules = DefaultIDSConfig().Rules[:1]
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Commit(ctx); err != nil {
+	if err := testCommit(s, ctx); err != nil {
 		t.Fatal(err)
 	}
 	s = reopenSnapshotStore(t, s)
-	if err := s.Rollback(ctx); err != nil {
+	if err := testRollback(s, ctx); err != nil {
 		t.Fatal(err)
 	}
 	rules, err := s.LoadIDSRules(ctx)
@@ -145,7 +145,7 @@ func TestUnversionedEmbeddedBankIsPreserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	s = reopenSnapshotStore(t, s)
-	if err := s.Rollback(ctx); err != nil {
+	if err := testRollback(s, ctx); err != nil {
 		t.Fatal(err)
 	}
 	rules, err := s.LoadIDSRules(ctx)
@@ -171,7 +171,7 @@ func TestSnapshotRejectsUnknownFormat(t *testing.T) {
 func TestStoredRemovedExportSectionLoads(t *testing.T) {
 	s := candidateStore(t)
 	ctx := context.Background()
-	if err := s.MutateCandidate(ctx, func(cfg *Config) error {
+	if err := testMutateCandidate(s, ctx, func(cfg *Config) error {
 		cfg.System.Hostname = "candidate"
 		return nil
 	}); err != nil {
@@ -213,7 +213,7 @@ func TestStoredRemovedExportSectionLoads(t *testing.T) {
 	if err := candidate.Validate(); err != nil {
 		t.Fatalf("validate candidate: %v", err)
 	}
-	if err := s.Commit(ctx); err != nil {
+	if err := testCommit(s, ctx); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 }

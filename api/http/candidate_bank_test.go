@@ -25,14 +25,14 @@ func (s *bankRoutingStore) LoadCandidateDocument(ctx context.Context) (*config.C
 	return s.SQLiteStore.LoadCandidateDocument(ctx)
 }
 
-func (s *bankRoutingStore) MutateCandidate(ctx context.Context, edit func(*config.Config) error) error {
+func (s *bankRoutingStore) MutateCandidate(ctx context.Context, expected config.Revision, edit func(*config.Config) error) (config.Revision, error) {
 	s.ordinary++
-	return s.SQLiteStore.MutateCandidate(ctx, edit)
+	return s.SQLiteStore.MutateCandidate(ctx, expected, edit)
 }
 
-func (s *bankRoutingStore) MutateCandidateIDS(ctx context.Context, edit func(*config.Config) error) error {
+func (s *bankRoutingStore) MutateCandidateIDS(ctx context.Context, expected config.Revision, edit func(*config.Config) error) (config.Revision, error) {
 	s.bankAware++
-	return s.SQLiteStore.MutateCandidateIDS(ctx, edit)
+	return s.SQLiteStore.MutateCandidateIDS(ctx, expected, edit)
 }
 
 func TestCandidateBankRoutingAndResponse(t *testing.T) {

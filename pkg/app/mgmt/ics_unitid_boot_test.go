@@ -94,7 +94,7 @@ func TestStoredDNP3UnitIDBootsIntoRecovery(t *testing.T) {
 	}
 	// The previous snapshot also decodes through the store's rollback path;
 	// it is rejected semantically rather than erasing the unsupported filter.
-	if err := stores.store.Rollback(ctx); err == nil || !strings.Contains(err.Error(), cause) {
+	if err := testRollback(stores.store, ctx); err == nil || !strings.Contains(err.Error(), cause) {
 		t.Fatalf("previous snapshot did not reach semantic validation: %v", err)
 	}
 }

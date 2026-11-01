@@ -20,7 +20,7 @@ func TestRemovedProtocolStageAtomic(t *testing.T) {
 	resetTestRateLimiters()
 	store := stageStore(t)
 	ctx := context.Background()
-	if err := store.SaveCandidate(ctx, config.DefaultConfig()); err != nil {
+	if err := testSaveCandidate(store, ctx, config.DefaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	server := NewServer(store, nil)

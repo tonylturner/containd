@@ -20,7 +20,7 @@ func TestBankFreeMutationRejectsRulesAndNeverReadsBank(t *testing.T) {
 	ctx := context.Background()
 	before := storeRows(t, s)
 	for _, rules := range [][]IDSRule{{}, DefaultIDSConfig().Rules[:1]} {
-		if err := s.MutateCandidate(ctx, func(c *Config) error {
+		if err := testMutateCandidate(s, ctx, func(c *Config) error {
 			if c.IDS.Rules != nil {
 				t.Fatal("callback received bank")
 			}
@@ -54,7 +54,7 @@ func TestBankFreeMutationRejectsRulesAndNeverReadsBank(t *testing.T) {
 		if err != nil || doc.IDS.Rules != nil {
 			t.Fatalf("document read touched bank: %v", err)
 		}
-		if err := s.MutateCandidate(ctx, func(c *Config) error { c.Description = "cheap edit"; return nil }); err != nil {
+		if err := testMutateCandidate(s, ctx, func(c *Config) error { c.Description = "cheap edit"; return nil }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -70,11 +70,11 @@ func TestPairedReadWithConcurrentPromotions(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		for i := 1; i <= 100; i++ {
-			if err := s.MutateCandidate(ctx, func(c *Config) error { c.Description = strconv.Itoa(i); return nil }); err != nil {
+			if err := testMutateCandidate(s, ctx, func(c *Config) error { c.Description = strconv.Itoa(i); return nil }); err != nil {
 				t.Error(err)
 				return
 			}
-			if err := s.Commit(ctx); err != nil {
+			if err := testCommit(s, ctx); err != nil {
 				t.Error(err)
 				return
 			}
@@ -199,14 +199,14 @@ func TestExtractEmbeddedBanksFromPreviousSchema(t *testing.T) {
 			t.Fatalf("migration not idempotent: %s %d != %d: %v", key, got, id, err)
 		}
 	}
-	if err := s.CommitConfirmed(ctx, time.Hour); err != nil {
+	if err := testCommitConfirmed(s, ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.Load(ctx)
 	if err != nil || len(got.IDS.Rules) != 0 {
 		t.Fatalf("migrated empty candidate not promoted: %v", err)
 	}
-	if err := s.Rollback(ctx); err != nil {
+	if err := testRollback(s, ctx); err != nil {
 		t.Fatal(err)
 	}
 	got, err = s.Load(ctx)
@@ -251,7 +251,7 @@ func TestBankReferencesSurviveApplyRecovery(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			calls := 0
-			err = s.ApplyChange(ctx, change, time.Hour, func(ctx context.Context, _, next *Config) error {
+			err = testApplyChange(s, ctx, change, time.Hour, func(ctx context.Context, _, next *Config) error {
 				calls++
 				if calls == 1 {
 					cancel()

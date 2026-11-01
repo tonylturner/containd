@@ -38,7 +38,7 @@ func TestImportNormalizesLegacyShellModeAndSaveStaysStrict(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodPost, path, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		s.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, s, rec, req)
 		return rec
 	}
 	for backup, want := range map[string]string{"Linux": "linux", "LINUX": "linux", "linux": "linux", "bash": "appliance", "": ""} {

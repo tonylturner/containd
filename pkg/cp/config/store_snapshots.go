@@ -28,11 +28,12 @@ type storedConfig struct {
 // pending-deadline handling. The marker distinguishes inherited banks from
 // authoritative empty embedded banks; slice nilness cannot make that decision.
 func (s *SQLiteStore) upgradeSnapshots(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.beginConfigTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	changed := false
 	for _, key := range []string{configKeyCandidate, configKeyPrevious} {
 		var raw string
 		err := tx.QueryRowContext(ctx, `SELECT data FROM configs WHERE key = ?`, key).Scan(&raw)
@@ -76,6 +77,7 @@ func (s *SQLiteStore) upgradeSnapshots(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			changed = true
 			if _, err := tx.ExecContext(ctx, `UPDATE configs SET data = ? WHERE key = ?`, string(blob), key); err != nil {
 				return err
 			}
@@ -84,5 +86,9 @@ func (s *SQLiteStore) upgradeSnapshots(ctx context.Context) error {
 			return fmt.Errorf("unsupported %s snapshot format %d", key, format)
 		}
 	}
-	return tx.Commit()
+	if changed {
+		_, err = s.commitRevisionTx(ctx, tx)
+		return err
+	}
+	return s.commitStateTx(ctx, tx)
 }

@@ -31,7 +31,7 @@ func TestApplyICSTemplatePreviewDoesNotSave(t *testing.T) {
 		"preview":true
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -74,7 +74,7 @@ func TestApplyICSTemplatePersistsRules(t *testing.T) {
 		"destZones":["wan"]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -135,7 +135,7 @@ func TestApplyICSTemplateAcceptsHyphenatedName(t *testing.T) {
 		"destZones":["wan"]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -155,14 +155,14 @@ func TestApplyICSTemplateListFirewallRulesReturnsArraySafeShapes(t *testing.T) {
 		"destZones":["wan"]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("apply template: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/firewall/rules", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list firewall rules: expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -226,7 +226,7 @@ func TestApplyICSTemplateUpsertsExistingRules(t *testing.T) {
 		"parameters":{"ranges":"100-199"}
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -264,7 +264,7 @@ func TestAssignInterfacesAuto(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"auto"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -304,7 +304,7 @@ func TestAssignInterfacesAutoPrefersSubnetMatching(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"auto"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -345,7 +345,7 @@ func TestAssignInterfacesRejectsDuplicateDevice(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/interfaces/assign", bytes.NewBufferString(`{"mode":"explicit","mappings":{"wan":"eth0","dmz":"eth0"}}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -357,7 +357,7 @@ func TestDefaultInterfacesSeeded(t *testing.T) {
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/interfaces", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -442,7 +442,7 @@ func TestCreateFirewallRuleWithICSPredicate(t *testing.T) {
 	body := `{"id":"mb1","sourceZones":["ot"],"protocols":[{"name":"tcp","port":"502"}],"ics":{"protocol":"modbus","functionCode":[3,16],"addresses":["0-10"]},"action":"ALLOW"}`
 	req := authedRequest(http.MethodPost, "/api/v1/firewall/rules", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -471,7 +471,7 @@ func TestUpdateFirewallRulePartialPatchPreservesExistingFields(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPatch, "/api/v1/firewall/rules/audit-allow", bytes.NewBufferString(`{"description":"new"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -499,7 +499,7 @@ func TestSetDHCPDefersRuntimeApply(t *testing.T) {
 	body := `{"enabled":true,"listenIfaces":["lan1"],"pools":[{"iface":"lan1","start":"10.0.0.10","end":"10.0.0.20"}],"router":"10.0.0.1","dnsServers":["10.0.0.1"]}`
 	req := authedRequest(http.MethodPost, "/api/v1/services/dhcp", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -519,14 +519,14 @@ func TestCandidateCommitRollback(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config/candidate", bytes.NewBufferString(`{"zones":[{"name":"it"}]}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 saving candidate, got %d", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/config/commit", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 committing, got %d", rec.Code)
 	}
@@ -536,7 +536,7 @@ func TestCandidateCommitRollback(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/config/rollback", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 rollback, got %d", rec.Code)
 	}
@@ -548,7 +548,7 @@ func TestConfigDiff(t *testing.T) {
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/config/diff", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 diff, got %d", rec.Code)
 	}
@@ -566,14 +566,14 @@ func TestExportImportConfig(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config/import", bytes.NewBufferString(importBody))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("import expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/config/export", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("export expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -608,7 +608,7 @@ func TestImportConfigReplacesEmbeddedIDSRules(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config/import", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("import expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -621,7 +621,7 @@ func TestImportConfigReplacesEmbeddedIDSRules(t *testing.T) {
 	if err != nil || len(loaded.IDS.Rules) != len(wantRules) || loaded.IDS.Rules[0].ID != wantRules[0].ID {
 		t.Fatalf("candidate bank=%+v err=%v", loaded, err)
 	}
-	if err := store.Commit(context.Background()); err != nil {
+	if err := testCommit(store, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	gotRules, err = store.LoadIDSRules(context.Background())
@@ -637,7 +637,7 @@ func TestCommitConfirmedTTLParsing(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config/commit_confirmed", bytes.NewBufferString(`{"ttl_seconds":5}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -651,7 +651,7 @@ func TestConfirmCommitEndpoint(t *testing.T) {
 	s := NewServer(m, nil)
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config/confirm", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -665,14 +665,14 @@ func TestSyslogHandlers(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/services/syslog", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/services/syslog", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -689,14 +689,14 @@ func TestDataPlaneHandlers(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/dataplane", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/dataplane", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"enforcement":true`)) {
 		t.Fatalf("unexpected dataplane payload: %s", rec.Body.String())
 	}
@@ -712,7 +712,7 @@ func TestSaveConfigValidationError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/config", bytes.NewBufferString(`{"zones":[{"name":"it"}]}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
@@ -725,7 +725,7 @@ func TestAssetCRUD(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/zones", bytes.NewBufferString(`{"name":"ot"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("zone create expected 200, got %d", rec.Code)
 	}
@@ -733,14 +733,14 @@ func TestAssetCRUD(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPost, "/api/v1/assets", bytes.NewBufferString(`{"id":"a1","name":"plc-1","type":"PLC","zone":"ot","ips":["10.0.0.10"],"criticality":"HIGH"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("asset create expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/assets", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"a1"`)) {
 		t.Fatalf("asset list missing asset: %s", rec.Body.String())
 	}
@@ -748,14 +748,14 @@ func TestAssetCRUD(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPatch, "/api/v1/assets/a1", bytes.NewBufferString(`{"description":"updated"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("asset update expected 200, got %d", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodDelete, "/api/v1/assets/a1", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("asset delete expected 204, got %d", rec.Code)
 	}
@@ -768,14 +768,14 @@ func TestObjectCRUD(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodPost, "/api/v1/objects", bytes.NewBufferString(`{"id":"obj1","name":"plc-host","type":"HOST","addresses":["10.0.0.5"]}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("object create expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodGet, "/api/v1/objects", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"obj1"`)) {
 		t.Fatalf("object list missing object: %s", rec.Body.String())
 	}
@@ -783,14 +783,14 @@ func TestObjectCRUD(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodPatch, "/api/v1/objects/obj1", bytes.NewBufferString(`{"description":"updated"}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("object update expected 200, got %d", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
 	req = authedRequest(http.MethodDelete, "/api/v1/objects/obj1", nil)
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("object delete expected 204, got %d", rec.Code)
 	}
@@ -808,7 +808,7 @@ func TestApplyICSTemplateModeEnforce(t *testing.T) {
 		"mode":"enforce"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -846,7 +846,7 @@ func TestApplyICSTemplateModeEnforceNeedsInlinePath(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := authedRequest(http.MethodPost, tc.path, bytes.NewBufferString(tc.body))
 		req.Header.Set("Content-Type", "application/json")
-		s.ServeHTTP(rec, req)
+		serveWithConfigRevision(t, s, rec, req)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "dataplane.nfqueueGroup") {
 			t.Fatalf("%s: got %d body=%s, want 400 naming dataplane.nfqueueGroup", tc.path, rec.Code, rec.Body.String())
 		}
@@ -867,7 +867,7 @@ func TestApplyICSTemplateModeBlankPreservesTemplate(t *testing.T) {
 		"template":"modbus_read_only"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -890,7 +890,7 @@ func TestApplyICSTemplateModeInvalid(t *testing.T) {
 		"mode":"observe"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid mode, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -907,7 +907,7 @@ func TestApplyGenericTemplateModeEnforce(t *testing.T) {
 		"mode":"enforce"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.ServeHTTP(rec, req)
+	serveWithConfigRevision(t, s, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}

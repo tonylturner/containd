@@ -69,7 +69,7 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 		// particular, do not stage defaults over the caller's candidate.
 		var warnings []string
 		attempt := 0
-		err := cs.ApplyReset(ctx, def, func(ctx context.Context, previous, next *config.Config) error {
+		revision, err := cs.ApplyReset(ctx, expectedConfigRevision(c), def, func(ctx context.Context, previous, next *config.Config) error {
 			w, err := applyConfigSnapshot(ctx, cfgStore, engine, services, previous, next)
 			if attempt == 0 {
 				warnings = w
@@ -77,12 +77,16 @@ func factoryResetHandler(cfgStore config.Store, userStore users.Store, engine En
 			attempt++
 			return err
 		})
+		if revisionMismatchResponse(c, err) {
+			return
+		}
 		recoveryWarnings := reenterRecoveryLocked(ctx, cfgStore, engine, err)
 		if err != nil {
 			setWarningHeader(c, recoveryWarnings)
 			factoryResetApplyError(c, err)
 			return
 		}
+		configRevisionResponse(c, revision)
 		// Dynamic blocks and connection revocations are runtime state the
 		// applied defaults do not replace. A failed clear leaves them in
 		// force, so it is reported as incomplete convergence.

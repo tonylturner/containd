@@ -33,7 +33,7 @@ func TestForwardWarningsDurableAtUpgradeAndPublish(t *testing.T) {
 				{ID: "b", Action: config.ActionDeny, Sources: []string{"198.51.100.0/25"}, ICS: config.ICSPredicate{Protocol: "modbus"}},
 				{ID: "a", Action: config.ActionAllow, Sources: []string{"198.51.100.0/25"}, ICS: config.ICSPredicate{Protocol: "modbus", FunctionCode: []uint8{3}}},
 			}
-			if err := s.SaveCandidate(ctx, c); err != nil {
+			if err := testSaveCandidate(s, ctx, c); err != nil {
 				t.Fatal(err)
 			}
 			if err := s.Close(); err != nil {
