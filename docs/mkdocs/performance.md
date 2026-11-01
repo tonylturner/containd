@@ -19,6 +19,9 @@ The benchmark entry points live in:
 
 - `pkg/dp/dpi/reassembly_bench_test.go`
 - `pkg/dp/engine/bench_test.go`
+- `pkg/dp/engine/packet_accounting_bench_test.go`
+- `pkg/dp/engine/stream_fail_closed_test.go`
+- `pkg/dp/engine/transport_bench_test.go`
 - `pkg/dp/itdpi/bench_test.go`
 
 ## Run The Baseline
@@ -73,7 +76,8 @@ Recommended workflow:
 
 The baseline does not cover:
 
-- long-running multi-packet protocol sessions beyond the current single-packet engine and reassembly benchmarks
+- live kernel conntrack lookup latency (transport benchmarks use fakes)
+- long-running protocol sessions under live capture; reassembly benchmarks use synthetic in-order and gap-fill payloads
 - UI route performance
 - automated regression thresholds in CI
 

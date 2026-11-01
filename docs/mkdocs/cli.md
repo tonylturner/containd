@@ -72,13 +72,13 @@ require a restart; committing does not rebind management sockets.
   - `set firewall ics-rule <id> <action> <protocol> [options...]`
   - `delete firewall rule <id>`
   - `set nat on|off [egress <zone|default>] [sources <z1,z2|default>]`
-  - `set outbound quickstart` (enables default route + SNAT + allow rule for LAN/MGMT → WAN)
+  - `set outbound quickstart` (stages default route + SNAT + allow rule for LAN/MGMT → WAN)
   - `set port-forward add <id> <ingress_zone> <tcp|udp> <listen_port> <dest_ip[:dest_port]> [sources <cidr1,cidr2>] [desc <text>] [off] [no-allow]`
   - `set port-forward del <id>`
   - `set port-forward enable <id>` / `set port-forward disable <id>`
   - `set dataplane enforcement <on|off> [table] [iface...]`
   - `set system hostname <name>` (candidate)
-  - `set system mgmt listen <addr>` (candidate)
+  - `set system mgmt http listen <addr>` (candidate)
   - `set system ssh listen <addr>` (candidate)
   - `set system ssh allow-password <true|false>` (candidate)
   - `set system ssh authorized-keys-dir <dir>` (candidate)
@@ -114,7 +114,8 @@ set port-forward del plc
 ```
 
 Port-forward add atomically stages the forward and, by default, requests a
-matching allow rule. The output reports `Inserted rule <id> at position <n>.`
+matching explicit allow rule. DNAT alone does not authorize traffic.
+The output reports `Inserted rule <id> at position <n>.`
 for `generated`, or `Placement: <reason>; governing rules: <ids>` for `inside`
 or `partial`. Partial/unknown overlap prints a warning and generates no grant;
 existing policy decides delivery. A trailing `no-allow` stages translation
@@ -227,8 +228,10 @@ not a completion claim. The initiating appliance console disconnects after
 printing its result; other SSH connections, including Linux shells, are closed.
 
 Notes:
-- The SSH console is implemented without allocating a PTY; basic line editing/echo is handled internally.
-- `diag capture` and `show ip route` require Linux (inside the container) and typically `CAP_NET_RAW`.
+- The appliance CLI handles basic line editing and echo internally and can run
+  without a PTY. The Linux shell requires a PTY.
+- `diag capture` requires Linux (inside the container) and typically
+  `CAP_NET_RAW`. `show ip route` requires Linux but not raw-packet access.
 - The `wizard` includes an optional step to run `set outbound quickstart` (equivalent to the UI "Quick start (LAN→WAN)").
 
 ### Shell modes

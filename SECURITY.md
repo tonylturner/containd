@@ -176,8 +176,11 @@ password-change flow, and both support optional TOTP MFA for local accounts:
   the password cannot lock an account out; reaching the TOTP lock takes the
   right password. Resetting the password or MFA lifts the locks.
 
-Lab mode (`CONTAIND_LAB_MODE=1`) skips these SSH checks and the per-account
-limits, accepts a reused TOTP code and pins the bootstrap credential. An authenticated SSH PTY can reach the appliance's Linux shell, not
+Lab mode (`CONTAIND_LAB_MODE=1`) skips SSH password-change and MFA assurance,
+the per-account factor limits, and TOTP replay protection. It pins the bootstrap
+credential. SSH still requires an admin account and a valid password or authorized
+key; SSH password attempts remain rate-limited.
+An authenticated SSH PTY can reach the appliance's Linux shell, not
 just a restricted configuration CLI. The supplied appliance runs as root inside
 its container; treat SSH access as privileged appliance access. Keep it
 unreachable from untrusted networks.

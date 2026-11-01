@@ -64,9 +64,11 @@ also uploads these in its `sboms` Actions artifact, subject to artifact retentio
 ### Generate locally with Syft
 
 ```bash
-# Scan the local image
+# Scan the image
 syft ghcr.io/tonylturner/containd:latest -o cyclonedx-json > sbom-local.cdx.json
 ```
+
+This scan does not perform the release workflow's production npm lockfile merge.
 
 ### Analyze with OWASP Dependency-Track
 

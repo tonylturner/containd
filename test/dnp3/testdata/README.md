@@ -7,7 +7,8 @@ image/package identities, topology, capture side and tshark 4.6.7 preferences.
 SHA256SUMS authenticates every referenced pcap, normalized oracle, expectation
 file and auxiliary asset. The manifest does not hash itself.
 
-Original traffic and named byte-offset CRC mutations are separate scenarios.
+Original traffic and named byte-offset mutations (data CRC, header CRC and
+reserved qualifier with an uninspected object tail) are separate scenarios.
 Oracle rows are independent observations, not containd output or policy verdicts.
 Each TCP record retains its complete original payload even when multiple link
 frames or application objects are observed. Qualifiers and individual indices

@@ -16,8 +16,10 @@
 
 File rotation defaults are **20 MB per file, 5 backups, and 7 days**. These are
 library defaults for configured files, not a guarantee of complete retention.
-`CONTAIND_LOG_LEVEL` and `CONTAIND_LOG_LEVEL_<SERVICE>` control application log
-levels. CLI queries include `show audit` and `show events`; see
+`CONTAIND_LOG_LEVEL` and `CONTAIND_LOG_LEVEL_<SERVICE>` set levels for loggers
+without an explicit level. The embedded service managers explicitly use `info`,
+so these variables do not override their levels. CLI queries include
+`show audit` and `show events`; see
 [API Reference](api-reference.md) for wire contracts.
 
 ## Account and credential audit records
@@ -40,12 +42,14 @@ Records never hold the password or code that was tried.
 | `ssh.authorized_key.add` | SSH key enrollment in the setup wizard, with the key fingerprint |
 | `system.tls.cert.set`, `system.tls.trusted_ca.set` | Management TLS certificate and additional CA bundle replacement |
 
-A refused SSH key is recorded once per connection that ends without logging
-in, since clients offer every key they hold. Each refused SSH check counts
-against the login limit for its client address and account: 10 failures, then
-2 minutes blocked. Blocked attempts write no record, so a sustained attempt
-against one account from one address writes about 5 records a minute. Each new
-account name or address starts its own count. Lab mode writes no refused-SSH or
+Refused SSH keys are collected into one record per account when a connection
+ends without logging in, since clients offer every key they hold. Failed
+credentials count against the login limit for their client address and account:
+10 failures within one minute, then 2 minutes blocked. Blocked attempts write no
+record, so sustained bad-credential attempts against one account from one address
+write about 5 records a minute. An expired MFA-enrollment grace refusal after
+correct credentials is recorded without incrementing that limit. Each new account
+name or address starts its own count. Lab mode writes no refused-SSH or
 refused-MFA-change records.
 
 ## Off-box forwarding
@@ -97,9 +101,10 @@ in the configured format:
 `GET /api/v1/services/status` reports `syslog.audit`: `enabled`, `sent_total`,
 `failed_total`, `last_error`, `last_flush`, total `backlog`, and per forwarder
 `forwarder`, `last_id`, `backlog` (records not yet delivered), `last_error`
-and `last_sent`. A growing backlog or a set `last_error` means the collector is
-not accepting audit records locally. The CLI command `show syslog status` prints the
-same fields.
+and `last_sent`. A growing backlog means delivery is falling behind.
+`last_error` can indicate a transport or local database/cursor failure; it does
+not by itself prove a collector failure. The CLI command `show syslog status`
+prints the same fields.
 
 ### Telemetry retries and visible loss
 
