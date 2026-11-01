@@ -11,6 +11,12 @@ export function observation(overrides: Partial<ProtectionStatus> = {}): Protecti
   };
 }
 
+/** Register after catch-all API handlers. Layout tests default to a healthy engine;
+ * protection-specific tests can supply a different complete observation. */
+export async function mockProtection(page: Page, status: ProtectionStatus = observation()) {
+  await page.route("**/api/v1/dataplane/protection", (route) => route.fulfill({ json: status }));
+}
+
 export async function protectionAPI(page: Page, initial: ProtectionStatus, options: {
   role?: "admin" | "view";
   enforcement?: "enforcing" | "degraded" | "disabled" | "unavailable" | "unknown";
