@@ -49,7 +49,7 @@ async function mockAPI(page: Page, options: { gate?: Record<string, unknown>; fa
     }
     if (request.method() === "GET") {
       const body = path === "/api/v1/services/av" ? baseConfig
-        : path === "/api/v1/services/status" ? { av: { available: true, enabled: true, mode: "clamav", ready: true, ...meter, gate: options.gate ?? gate() } }
+        : path === "/api/v1/services/status" ? { faults: [], av: { available: true, enabled: true, mode: "clamav", ready: true, ...meter, gate: options.gate ?? gate() } }
           : path === "/api/v1/zones" ? zones
             : path === "/api/v1/assets" ? assets
               : path === "/api/v1/services/av/defs" ? { path: "/data/clamav/custom", files: [], definitions: [] }

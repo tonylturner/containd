@@ -19,6 +19,7 @@ function meter(sparkline: number[]) {
 function servicesStatus(sparkline: number[]) {
   const m = meter(sparkline);
   return {
+    faults: [],
     syslog: { configured_forwarders: 0, protos: null, last_flush: "", last_error: "", ...m },
     dns: { enabled: true, running: true, installed: true, pid: 0, config_path: "/data/unbound.conf", last_error: "", ...m },
     ntp: { enabled: true, running: false, pid: 0, last_start: "", last_error: "", ...m },
@@ -80,7 +81,7 @@ for (const { path, charts } of pages) {
 }
 
 test("the antivirus page reports an unreachable engine without runtime values", async ({ page }) => {
-  await open(page, "/system/services/av/", { av: { available: false, error: "engine unavailable" } });
+  await open(page, "/system/services/av/", { faults: [], av: { available: false, error: "engine unavailable" } });
   await expect(page.getByText("Engine antivirus unavailable: engine unavailable")).toBeVisible();
   await expect(page.getByText("The engine did not report its runtime status.")).toBeVisible();
   await expect(page.getByText("Backend ready:")).toHaveCount(0);

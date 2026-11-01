@@ -41,6 +41,7 @@ type mgmtStores struct {
 	auditStore  audit.Store
 	userStore   users.Store
 	bootEvent   *dpevents.Event
+	bootEvents  []dpevents.Event
 	scopeEvents []dpevents.Event
 }
 
@@ -116,12 +117,17 @@ func Run(ctx context.Context, opts Options) error {
 		engineClient = transportClient
 	}
 	startDHCPLeaseAuditIngestor(ctx, logger, engineClient, stores.auditStore)
-	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent}
+	serviceManager := &bootEventServices{Manager: services.NewManager(services.ManagerOptions{}), event: stores.bootEvent, events: stores.bootEvents}
 	auditLog, ok := stores.auditStore.(audit.ForwardLog)
 	if !ok {
 		return fmt.Errorf("audit store %T cannot be forwarded to syslog", stores.auditStore)
 	}
 	serviceManager.SetAuditLog(auditLog)
+	serviceManager.SetFaultAudit(stores.auditStore)
+	if cfg, err := stores.store.Load(ctx); err == nil {
+		_, faults, _ := config.EffectiveForStore(stores.store, cfg)
+		serviceManager.SeedFaults(faults)
+	}
 	var sshServer atomic.Pointer[sshserver.Server]
 	resetSessions := httpapi.FactoryResetSessions(func(_ context.Context, initiator string) {
 		if srv := sshServer.Load(); srv != nil {
@@ -155,10 +161,21 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 	installSyslogSources(serviceManager, engineClient, stores, logger)
-	// Best-effort initial service render on startup.
-	if cfg, err := stores.store.Load(ctx); err == nil && config.CheckManagementBootFault(ctx, stores.store) == nil {
-		if applyErr := serviceManager.Apply(context.Background(), cfg.Services); applyErr != nil {
-			logger.Warnf("failed to apply initial service config: %v", applyErr)
+	// Management-run services must be available even while engine health is
+	// unreachable. Never render unprojected stored service content.
+	engineReachable := false
+	if health, ok := engineClient.(httpapi.RuntimeHealthClient); ok {
+		probe, cancel := context.WithTimeout(ctx, engineSyncHealthTimeout)
+		_, err := health.RuntimeHealth(probe)
+		cancel()
+		engineReachable = err == nil
+	}
+	if cfg, err := stores.store.Load(ctx); err == nil && !engineReachable && config.CheckManagementBootFault(ctx, stores.store) == nil {
+		if effective, faults, err := config.EffectiveForStore(stores.store, cfg); err == nil {
+			_, warnings := serviceManager.ApplyEffective(ctx, effective.Services, faults)
+			for _, warning := range warnings {
+				logger.Warn(warning)
+			}
 		}
 	}
 	stopEngineSync := startEngineSync(ctx, logger, stores.store, engineClient, serviceManager)
@@ -251,7 +268,7 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		stores.userStore.Close()
 		return fail(err)
 	}
-	event, err := recordBootDecision(logger, stores, cfg, r)
+	event, events, err := recordBootDecision(logger, stores, cfg, r)
 	if err != nil {
 		stores.auditStore.Close()
 		stores.userStore.Close()
@@ -262,6 +279,7 @@ func initMgmtStores(logger *zap.SugaredLogger, r *mgmtpath.Reservation) (mgmtSto
 		logger.Errorw("persist industrial scope migration evidence", "error", err)
 	}
 	stores.bootEvent = event
+	stores.bootEvents = events
 	return stores, cfg, nil
 }
 

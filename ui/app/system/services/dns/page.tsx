@@ -9,7 +9,8 @@ import { useConfigRefresh } from "../../../../lib/use-config-refresh";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
-import { api, isAdmin, type DNSConfig, type DNSStatus } from "../../../../lib/api";
+import { api, isAdmin, type DNSConfig, type ServicesStatus } from "../../../../lib/api";
+import { ServiceFaultBanner } from "../../../../components/ServiceFaultBanner";
 import { Shell } from "../../../../components/Shell";
 import { SaveStateLine } from "../../../../components/SaveStateLine";
 import { useSaveAction } from "../../../../hooks/useSaveAction";
@@ -21,7 +22,8 @@ import { Card } from "../../../../components/Card";
 export default function DNSPage() {
   const canEdit = isAdmin();
   const { canSave, loadError, checkLoaded } = useConfigLoad();
-  const [status, setStatus] = useState<DNSStatus | null>(null);
+  const [servicesStatus, setServicesStatus] = useState<ServicesStatus | null>(null);
+  const status = servicesStatus?.dns ?? null;
   const { conflictProps, editor, cfg, setCfg, readConfig: adoptConfig, write, text, setText } = useConfigEditor<DNSConfig>({
     enabled: false,
     listenPort: 53,
@@ -35,7 +37,7 @@ export default function DNSPage() {
 
   const { loading, refresh } = useAsyncRefresh(useCallback(async ({ keepEdits = true }: { keepEdits?: boolean } = {}) => {
     const svc = await api.getServicesStatus();
-    setStatus(svc?.dns ?? null);
+    setServicesStatus(svc);
     const sSnapshot = await api.getDNS();
     const s = (sSnapshot?.data ?? null);
     if (!checkLoaded(s)) return;
@@ -100,6 +102,7 @@ export default function DNSPage() {
         </div>
       }
     >
+      <ServiceFaultBanner status={servicesStatus} loading={loading} only={["dns"]} />
       {loadError && <p role="alert" className="mb-4 text-sm text-red-400">{loadError}</p>}
       <ConfigEditNotice {...conflictProps} onReload={() => refresh({ keepEdits: false })} superseded={editor.superseded} />
       <fieldset disabled={!canSave} className="min-w-0">
@@ -160,7 +163,7 @@ export default function DNSPage() {
                 {status.last_error}
               </div>
             ) : null}
-            {status?.sparkline.length ? (
+            {status?.sparkline?.length ? (
               <div className="md:col-span-2">
                 <Sparkline
                   values={status.sparkline}

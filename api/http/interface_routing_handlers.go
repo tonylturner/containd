@@ -193,7 +193,7 @@ func interfacesReconcileHandler(store config.Store, engine EngineClient) gin.Han
 			internalError(c, err)
 			return
 		}
-		if err := config.ValidateForStore(store, cfg); err != nil {
+		if _, _, err := config.EffectiveForStore(store, cfg); err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}

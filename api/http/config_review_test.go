@@ -161,7 +161,9 @@ type validationReadServices struct {
 	store config.Store
 }
 
-func (s validationReadServices) Apply(context.Context, config.ServicesConfig) error { return nil }
+func (s validationReadServices) ApplyEffective(_ context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+	return cfg, nil
+}
 func (s validationReadServices) Validate(ctx context.Context, _ config.ServicesConfig) error {
 	return configReadableDuringDiscovery(ctx, s.store)
 }
@@ -225,3 +227,5 @@ func TestConfigReadsOmitBankAndRoundTripRetainsIt(t *testing.T) {
 		})
 	}
 }
+
+func (validationReadServices) RecordEngineFaults([]config.ServiceFault) {}

@@ -20,6 +20,7 @@ const idle = meter([], 0);
 
 function servicesStatus(av: Record<string, unknown>) {
   return {
+    faults: [],
     syslog: {
       configured_forwarders: 1,
       format: "rfc5424",

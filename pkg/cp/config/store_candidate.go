@@ -146,14 +146,14 @@ func (s *SQLiteStore) promoteLocked(ctx context.Context, expected *Revision, ttl
 	if err != nil {
 		return "", err
 	}
-	if err := s.ValidateConfig(candidate); err != nil {
-		return "", err
-	}
 	if err := s.validateSSHAccessLocked(ctx, candidate); err != nil {
 		return "", err
 	}
 	running, err := readKindFrom(ctx, tx, configKeyRunning, false)
 	if err != nil && !errors.Is(err, ErrNotFound) {
+		return "", err
+	}
+	if err := s.checkWrite(running, candidate); err != nil {
 		return "", err
 	}
 	if candidate.scopeMigration != nil || candidate.modeMigration != nil || candidate.orderMigration != nil {
@@ -236,7 +236,7 @@ func (s *SQLiteStore) rollbackLocked(ctx context.Context, expected *Revision, ca
 	if err != nil {
 		return "", err
 	}
-	if err := s.ValidateConfig(prev); err != nil {
+	if err := s.checkStored(prev); err != nil {
 		return "", err
 	}
 	if prev.scopeMigration != nil || prev.modeMigration != nil || prev.orderMigration != nil {

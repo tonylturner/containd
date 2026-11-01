@@ -21,8 +21,8 @@ import (
 
 type routeInventoryServices struct{}
 
-func (s routeInventoryServices) Apply(ctx context.Context, cfg config.ServicesConfig) error {
-	return nil
+func (s routeInventoryServices) ApplyEffective(ctx context.Context, cfg config.ServicesConfig, _ []config.ServiceConfigError) (config.ServicesConfig, []string) {
+	return cfg, nil
 }
 
 func (s routeInventoryServices) Status() any { return map[string]any{} }
@@ -195,3 +195,5 @@ func TestAPIEndpointInventorySanity(t *testing.T) {
 		})
 	}
 }
+
+func (routeInventoryServices) RecordEngineFaults([]config.ServiceFault) {}

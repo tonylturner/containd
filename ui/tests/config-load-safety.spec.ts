@@ -19,7 +19,7 @@ const data: Record<string, unknown> = {
   "/pcap/list": [],
   "/ids/rules": { enabled: false, rules: [{ id: "existing", title: "Existing", enabled: true }], ruleGroups: [{ id: "group", name: "Group", enabled: true }] },
   "/ids/sources": [],
-  "/services/status": {},
+  "/services/status": { faults: [], av: { available: false, error: "engine unavailable" } },
   "/services/dns": { enabled: false, listenPort: 5353, upstreamServers: ["192.0.2.53"], listenZones: ["lan"], cacheSizeMB: 16 },
   "/services/ntp": { enabled: false, servers: ["ntp.example.test"], intervalSeconds: 90 },
   "/services/syslog": { forwarders: [{ address: "192.0.2.9", port: 6514, proto: "tcp" }], batchSize: 700, flushEvery: 5 },

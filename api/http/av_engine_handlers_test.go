@@ -13,6 +13,7 @@ import (
 
 	engineclient "github.com/tonylturner/containd/api/engine"
 	"github.com/tonylturner/containd/pkg/cp/config"
+	cpservices "github.com/tonylturner/containd/pkg/cp/services"
 )
 
 func avRequest(t *testing.T, engine EngineClient, req *http.Request) *httptest.ResponseRecorder {
@@ -31,20 +32,24 @@ func avRequest(t *testing.T, engine EngineClient, req *http.Request) *httptest.R
 
 func TestServicesStatusReportsEngineAV(t *testing.T) {
 	rec := avRequest(t, &mockEngine{}, authedRequest(http.MethodGet, "/api/v1/services/status", nil))
-	var out map[string]map[string]any
+	var out struct {
+		AV     map[string]any            `json:"av"`
+		Faults []cpservices.ServiceFault `json:"faults"`
+	}
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
 		t.Fatalf("status = %d %s", rec.Code, rec.Body)
 	}
-	if out["av"]["available"] != true || out["av"]["ready"] != true {
-		t.Fatalf("av status = %+v", out["av"])
+	if out.AV["available"] != true || out.AV["ready"] != true {
+		t.Fatalf("av status = %+v", out.AV)
 	}
 
+	out.AV = nil
 	rec = avRequest(t, &mockEngine{avErr: errors.New("connection refused")}, authedRequest(http.MethodGet, "/api/v1/services/status", nil))
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
 		t.Fatalf("status = %d %s", rec.Code, rec.Body)
 	}
-	if out["av"]["available"] != false || !strings.Contains(out["av"]["error"].(string), "connection refused") || out["av"]["enabled"] != nil {
-		t.Fatalf("unreachable engine av status = %+v", out["av"])
+	if out.AV["available"] != false || !strings.Contains(out.AV["error"].(string), "connection refused") || out.AV["enabled"] != nil {
+		t.Fatalf("unreachable engine av status = %+v", out.AV)
 	}
 }
 

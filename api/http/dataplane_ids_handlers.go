@@ -46,7 +46,8 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 			internalError(c, err)
 			return
 		}
-		if err := cfg.Validate(); err != nil {
+		effective, faults, err := config.EffectiveForStore(store, cfg)
+		if err != nil {
 			apiError(c, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -55,15 +56,16 @@ func getRulesetPreviewHandler(store config.Store, engine EngineClient) gin.Handl
 			apiError(c, http.StatusServiceUnavailable, "engine unavailable: ruleset preview requires a live engine")
 			return
 		}
-		preview, err := ec.PreviewRuleset(c.Request.Context(), cfg)
+		preview, err := ec.PreviewRuleset(c.Request.Context(), effective)
 		if err != nil {
 			apiError(c, http.StatusBadGateway, err.Error())
 			return
 		}
 
 		resp := gin.H{
-			"snapshot": preview.Snapshot,
-			"runtime":  preview.Runtime,
+			"snapshot":      preview.Snapshot,
+			"serviceFaults": serviceFaultResponse(faults),
+			"runtime":       preview.Runtime,
 		}
 		if preview.Ruleset != "" {
 			resp["ruleset"] = preview.Ruleset

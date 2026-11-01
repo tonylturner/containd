@@ -260,9 +260,10 @@ clear pending.
 The guarantee covers policy/API edits, including import, rollback and replay.
 It does not cover a root shell,
 host/Compose/environment changes, network deletion, source spoofing, denial of
-service, process failure or revoked credentials. An uploaded OpenVPN profile's
-script hooks are root code execution and outside this boundary. A script-free
-profile or remote VPN server assigning a reserved source loses it to the guard.
+service, process failure or revoked credentials. OpenVPN profiles cannot carry
+script hooks or plugins: the profile parser rejects them at upload and when
+`configPath` is read. A profile or remote VPN server assigning a reserved
+source loses it to the guard.
 
 ## Verification and limitations
 
