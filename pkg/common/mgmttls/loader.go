@@ -7,39 +7,85 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"sync"
+	"sync/atomic"
 )
 
 // Loader owns the listener's last-good immutable identity. Status and in-process
 // pins share this loader; only public leaf bytes leave it.
 type Loader struct {
 	certFile, keyFile string
-	mu                sync.Mutex
-	pair              *tls.Certificate
+	ops               loaderOps
+	snapshot          atomic.Pointer[loaderSnapshot]
+	reloadMu          sync.Mutex
+	callbackMu        sync.Mutex
 	onChange          func()
 }
 
-func NewLoader(certFile, keyFile string) *Loader {
-	return &Loader{certFile: certFile, keyFile: keyFile}
+type loaderSnapshot struct {
+	identity pairIdentity
+	pair     *tls.Certificate
+	err      error
 }
 
-// Reload reports an invalid rotation while retaining the last-good snapshot.
-// With no last-good identity the caller must refuse HTTPS.
+func NewLoader(certFile, keyFile string) *Loader {
+	return &Loader{certFile: certFile, keyFile: keyFile, ops: diskLoaderOps}
+}
+
+// Reload checks file metadata before reading or parsing. Both accepted and
+// rejected identities are cached. An initialized listener never waits for
+// another request's reload I/O: it keeps serving its last-good snapshot.
 func (l *Loader) Reload() (*tls.Certificate, error) {
-	l.mu.Lock()
-	pair, err := ReadPair(l.certFile, l.keyFile)
-	var notify func()
-	if err == nil {
-		if l.pair == nil || !bytes.Equal(l.pair.Certificate[0], pair.Certificate[0]) {
-			notify = l.onChange
+	identity, statErr := observePair(l.certFile, l.keyFile, l.ops.stat)
+	previous := l.snapshot.Load()
+	if previous != nil && previous.identity.equal(identity) {
+		return previous.pair, previous.err
+	}
+	if !l.reloadMu.TryLock() {
+		if previous != nil {
+			return previous.pair, previous.err
 		}
-		l.pair = pair
+		// Startup loads the first identity before binding HTTPS. Only callers
+		// with no initial snapshot need to wait for that first load.
+		l.reloadMu.Lock()
+		current := l.snapshot.Load()
+		l.reloadMu.Unlock()
+		return current.pair, current.err
 	}
-	current := l.pair
-	l.mu.Unlock()
-	if notify != nil {
-		notify()
+	current := l.snapshot.Load()
+	if current != previous {
+		// Another reload may have finished after our metadata probe.
+		identity, statErr = observePair(l.certFile, l.keyFile, l.ops.stat)
+		if current != nil && current.identity.equal(identity) {
+			l.reloadMu.Unlock()
+			return current.pair, current.err
+		}
 	}
-	return current, err
+	next := &loaderSnapshot{identity: identity, err: statErr}
+	if current != nil {
+		next.pair = current.pair
+	}
+	var pair *tls.Certificate
+	err := statErr
+	if err == nil {
+		pair, next.identity, err = loadPair(l.certFile, l.keyFile, identity, l.ops)
+		next.err = err
+	}
+	changed := false
+	if err == nil {
+		changed = next.pair == nil || !bytes.Equal(next.pair.Certificate[0], pair.Certificate[0])
+		next.pair = pair
+	}
+	l.snapshot.Store(next)
+	l.reloadMu.Unlock()
+	if changed {
+		l.callbackMu.Lock()
+		notify := l.onChange
+		l.callbackMu.Unlock()
+		if notify != nil {
+			notify()
+		}
+	}
+	return next.pair, next.err
 }
 
 func (l *Loader) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -60,16 +106,15 @@ func (l *Loader) PublicLeaf() (*x509.Certificate, error) {
 
 // LastLeaf does not reload: record publishers use it from a reload notification.
 func (l *Loader) LastLeaf() *x509.Certificate {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.pair == nil {
+	current := l.snapshot.Load()
+	if current == nil || current.pair == nil {
 		return nil
 	}
-	return l.pair.Leaf
+	return current.pair.Leaf
 }
 
 func (l *Loader) OnChange(f func()) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.callbackMu.Lock()
+	defer l.callbackMu.Unlock()
 	l.onChange = f
 }

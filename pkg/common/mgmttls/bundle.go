@@ -93,18 +93,8 @@ func parseIdentity(data []byte, requireKey bool) (*tls.Certificate, error) {
 // ReadPair reads a bundle exactly once. External split files are read-only and
 // accepted only after validating their bytes together.
 func ReadPair(certFile, keyFile string) (*tls.Certificate, error) {
-	cert, err := os.ReadFile(certFile)
-	if err != nil {
-		return nil, err
-	}
-	if filepath.Clean(certFile) == filepath.Clean(keyFile) {
-		return ParseBundle(cert)
-	}
-	key, err := os.ReadFile(keyFile)
-	if err != nil {
-		return nil, err
-	}
-	return ParseBundle(bytes.Join([][]byte{bytes.TrimSpace(cert), bytes.TrimSpace(key), nil}, []byte{'\n'}))
+	pair, _, err := loadPair(certFile, keyFile, pairIdentity{}, diskLoaderOps)
+	return pair, err
 }
 
 func bundleBytes(cert, key []byte) ([]byte, error) {

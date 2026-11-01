@@ -356,6 +356,13 @@ A successful upload reports `updated` when the bound HTTPS listener serves the
 bundle, or `stored` with a warning when it takes effect at the next start.
 Uploads never change saved paths.
 
+Handshakes check each file's device/inode, size and modification time. Unchanged
+files are not reread or reparsed, including invalid replacements: status keeps
+the remembered error and last-good public leaf until another identity change.
+An in-progress reload does not block other handshakes from using the last-good
+snapshot. Use atomic replacement for rotation; edits preserving all of those
+metadata fields are not detected.
+
 `CONTAIND_TLS_CERT_FILE` and `CONTAIND_TLS_KEY_FILE` override the corresponding
 saved paths independently. Any resolved nondefault path selects **external,
 read-only mode**, even under `/data`: containd never writes, chmods or generates

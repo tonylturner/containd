@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cache accepted and rejected management TLS file identities so unchanged
+  handshakes do not read or parse PEM, and a reload does not block other
+  handshakes from serving the last-good identity.
 - Publish management HTTPS certificate chains and private keys together as one
   durable, atomically replaced `/data/tls/server.pem` bundle. Import valid legacy
   default-path pairs automatically without changing the originals; invalid legacy
