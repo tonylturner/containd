@@ -17,10 +17,14 @@ function formatCount(n: number): string {
 export function RuleCountersNote({ counters }: { counters: CountersState }) {
   if (!counters) return null;
   if (!counters.ok) {
+    const inactive = counters.error.endsWith("nftables enforcement is not active");
     return (
       <div role="status" aria-label="Rule counters" className="mb-2 text-xs text-(--text-dim)">
         Hit counters unavailable.
-        <TechnicalDetails>{counters.error}</TechnicalDetails>
+        <div className="text-(--text-muted) break-words">
+          {inactive ? "Firewall enforcement is not active." : counters.error}
+        </div>
+        {inactive && <TechnicalDetails>{counters.error}</TechnicalDetails>}
       </div>
     );
   }

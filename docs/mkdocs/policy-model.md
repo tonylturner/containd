@@ -56,8 +56,8 @@ to any zone and protocol when no enforcing `ALLOW`, `DENY` or `RESET` rule
 decides. Matching `TAG`, under-limit `RATE_LIMIT` and Monitor rules can fall
 through to this default. Its action comes from the
 same candidate revision as the listed rules: an empty or omitted action means
-`DENY`, `ALLOW` carries an unmatched-traffic warning, and an unreadable or
-revision-mismatched default is shown as **unknown**, never assumed to deny.
+`DENY`, `ALLOW` carries an unmatched-traffic warning in the description cell,
+and an unreadable or revision-mismatched default is shown as **unknown**, never assumed to deny.
 This row has no edit, delete or move controls.
 
 New rules default to the bottom; creation can instead select top, bottom,
@@ -119,6 +119,9 @@ the applied ruleset; logging need not be on. Every apply restarts the counters
 at zero, and the response says when (`since`). These are rule-path counters,
 not total connection traffic: established packets can use the admission fast
 path without incrementing an `ALLOW` counter, and ICS counters measure steering.
+When counters are unavailable, the firewall page shows the cause inline, not
+zero hits. Inactive firewall enforcement is explained directly; the exact
+engine response remains available under **Technical details**.
 
 ### Established connections and policy changes
 

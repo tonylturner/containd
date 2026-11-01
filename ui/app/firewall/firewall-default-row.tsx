@@ -19,16 +19,14 @@ export function FirewallDefaultRow({ action }: { action: DefaultAction }) {
       <td className="px-3 py-3 text-xs text-(--text-muted)">—</td>
       <td className="px-3 py-3 text-xs text-(--text-muted)">
         Applies when no enforcing rule allows, blocks or rejects traffic.
+        {action === "ALLOW" && <div className="mt-1 text-amber">Unmatched traffic allowed</div>}
       </td>
       <td className="whitespace-nowrap px-3 py-3">any → any</td>
       <td className="px-3 py-3">any</td>
       <td className="px-3 py-3">—</td>
       <td className="px-3 py-3">—</td>
-      <td className="px-3 py-3">
-        <div className="space-y-1">
-          <StatusBadge variant={action === "DENY" ? "error" : "warning"}>{action}</StatusBadge>
-          {action === "ALLOW" && <StatusBadge variant="warning">Unmatched traffic allowed</StatusBadge>}
-        </div>
+      <td className="whitespace-nowrap px-3 py-3">
+        <StatusBadge variant={action === "DENY" ? "error" : "warning"}>{action}</StatusBadge>
       </td>
       <td className="px-3 py-3">—</td>
       <td className="px-3 py-3">—</td>

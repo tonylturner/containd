@@ -190,11 +190,29 @@ test("ICS page shows the runtime aggregate and the NFQUEUE inline path", async (
   await expect(page.getByText("1 enforcing, 1 partial, 3 not enforcing, 1 monitoring")).toBeVisible();
   await expect(page.getByText("Inline inspection configured", { exact: true })).toBeVisible();
   const queue = page.getByText("Inline inspection queue (NFQUEUE): 101", { exact: true });
-  await expect(queue).not.toBeVisible();
-  await queue.locator("..").locator("summary").click();
+  await expect(queue.locator("..")).toHaveAttribute("open", "");
   await expect(queue).toBeVisible();
   await expect(page.getByText("needs no capture interface", { exact: false })).toBeVisible();
   await expect(page.getByText("at least one capture interface")).toHaveCount(0);
+});
+
+for (const width of [1280, 390]) {
+  test(`saved capture interfaces are visible without expanding details at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockAPI(page, { dataplane: { dpiEnabled: true, nfqueueGroup: 0, captureInterfaces: ["eth0", "lan1"] } });
+    await open(page, "/ics/");
+    const interfaces = page.getByText("Capture interfaces: eth0, lan1", { exact: true });
+    await expect(interfaces).toBeVisible();
+    await expect(interfaces.locator("..")).toHaveAttribute("open", "");
+  });
+}
+
+test("default capture settings keep technical details collapsed", async ({ page }) => {
+  await mockAPI(page, { dataplane: { dpiEnabled: true, nfqueueGroup: 0, captureInterfaces: [] } });
+  await open(page, "/ics/");
+  const queue = page.getByText("Inline inspection queue (NFQUEUE): 0", { exact: true });
+  await expect(queue.locator("..")).not.toHaveAttribute("open");
+  await expect(queue).not.toBeVisible();
 });
 
 test("ICS page without an inline path says rules can only monitor", async ({ page }) => {

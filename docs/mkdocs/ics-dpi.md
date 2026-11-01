@@ -160,6 +160,10 @@ values or enable blocking by themselves.
 The ICS page shows whether inline inspection is configured; its **Technical
 details** retains the NFQUEUE number and capture interfaces. Live protection
 and per-rule coverage remain separate from these saved settings.
+The details open automatically when a nonzero inline queue or any capture
+interfaces are saved; default capture settings stay collapsed.
+The IEC 104 health indicator distinguishes no active blocking rules from a
+healthy active enforcement path.
 If the saved settings cannot be read, their status is **unknown**, including
 after a failed refresh; the page does not imply inspection is disabled or show
 previous queue and interface values as current.

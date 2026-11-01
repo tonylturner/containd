@@ -155,13 +155,16 @@ export default function ICSPolicyPage() {
             ? "Inline inspection configured"
             : "Monitor only \u2014 inline inspection is not configured"}
         </div>
-        {canSave && <details className="mt-2 text-xs text-(--text-muted)">
+        {canSave && <details
+          open={queueGroup > 0 || (dpiConfig.captureInterfaces ?? []).length > 0}
+          className="mt-2 text-xs text-(--text-muted)"
+        >
           <summary className="cursor-pointer">Technical details</summary>
           <p>Inline inspection queue (NFQUEUE): {queueGroup}</p>
           {(dpiConfig.captureInterfaces ?? []).length > 0 && (
-          <div>
-            Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
-          </div>
+            <div>
+              Capture interfaces: {(dpiConfig.captureInterfaces ?? []).join(", ")}
+            </div>
           )}
         </details>}
         <div className="mt-3 space-y-2">
