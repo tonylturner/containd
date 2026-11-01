@@ -65,7 +65,11 @@ func mustInitAuditStore() audit.Store {
 		logging.NewService("mgmt").Fatalf("failed to create audit dir: %v", err)
 	}
 	store, err := openStoreWithRetry("audit", func() (audit.Store, error) {
-		return audit.NewSQLiteStore(dbPath)
+		store, err := audit.NewSQLiteStore(dbPath)
+		if err != nil {
+			return nil, err
+		}
+		return audit.NewObservedStore(store), nil
 	})
 	if err != nil {
 		logging.NewService("mgmt").Fatalf("failed to open audit store: %v", err)

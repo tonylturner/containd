@@ -407,7 +407,7 @@ func TestRuntimeTelemetryHandlers(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := authedRequest(http.MethodGet, "/api/v1/events?limit=10", nil)
 	s.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"id":7`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"id":"7"`) {
 		t.Fatalf("events list: expected event payload, got %d body=%s", rec.Code, rec.Body.String())
 	}
 

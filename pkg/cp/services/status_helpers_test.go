@@ -58,9 +58,9 @@ func TestManagerTelemetryStatusAndValidation(t *testing.T) {
 		t.Fatalf("manager status missing vpn: %#v", status)
 	}
 
-	mgr.SetEventLister(func(limit int) []dpevents.Event { return nil })
-	if mgr.Syslog.listEvents == nil {
-		t.Fatal("SetEventLister did not install list function on Syslog manager")
+	mgr.SetEventFeeds(testEventFeeds(dpevents.NewStore(8)))
+	if len(mgr.Syslog.feeds) != 1 {
+		t.Fatal("SetEventFeeds did not install feed on Syslog manager")
 	}
 
 	if err := mgr.Validate(context.Background(), config.ServicesConfig{

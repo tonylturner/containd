@@ -275,6 +275,7 @@ func showSyslogStatus(api *API) Command {
 		if le := fmtAny(syslog["last_error"]); le != "" {
 			fmt.Fprintf(out, "  last_error: %s\n", le)
 		}
+		writeSyslogEventStatus(out, syslog["events"])
 		if audit, ok := syslog["audit"].(map[string]any); ok {
 			writeSyslogAuditStatus(out, audit)
 		}

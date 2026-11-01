@@ -215,7 +215,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 	api := r.Group("/api/v1")
 	api.Use(limitRequestBody(defaultJSONBodyLimit, defaultMultipartBodyLimit))
 	// Health is always unauthenticated for liveness.
-	api.GET("/health", healthHandler(store, engine))
+	api.GET("/health", healthHandler(store, engine, auditStore, services))
 	// Prometheus metrics endpoint (unauthenticated for scraping).
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	// Login is always unauthenticated (unless JWT not configured).
@@ -240,6 +240,7 @@ func NewServerWithEngineAndServices(store config.Store, auditStore audit.Store, 
 		protected.POST("/auth/me/mfa/enroll", rateLimitSensitive(), enrollMyMFAHandler(userStore))
 		protected.POST("/auth/me/mfa/enable", rateLimitSensitive(), enableMyMFAHandler(userStore))
 		protected.POST("/auth/me/mfa/disable", rateLimitSensitive(), disableMyMFAHandler(userStore))
+		protected.GET("/evidence/status", evidenceStatusHandler(auditStore, services))
 		protected.GET("/dashboard", dashboardHandler(store, engine, services, userStore, auditStore))
 		protected.GET("/system/management-reservation", managementReservationHandler(store, guardHealth, engine, listenerFaults))
 		protected.GET("/system/stats", systemStatsHandler())
@@ -629,55 +630,4 @@ func loadOrInitConfig(ctx context.Context, store config.Store) (*config.Config, 
 		return config.DefaultConfig(), nil
 	}
 	return cfg, err
-}
-
-func withAuditStore(store audit.Store) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if store != nil {
-			c.Set("auditStore", store)
-			if actor := c.GetHeader("X-User"); actor != "" {
-				c.Set("actor", actor)
-			}
-			if source := c.GetHeader("X-Source"); source != "" {
-				c.Set("source", source)
-			}
-		}
-		c.Next()
-	}
-}
-
-func auditLog(c *gin.Context, rec audit.Record) {
-	if c == nil {
-		return
-	}
-	storeVal, ok := c.Get("auditStore")
-	if !ok || storeVal == nil {
-		return
-	}
-	store, ok := storeVal.(audit.Store)
-	if !ok || store == nil {
-		return
-	}
-	if rec.Actor == "" {
-		if actor := c.GetString("actor"); actor != "" {
-			rec.Actor = actor
-		} else if actor := c.GetHeader("X-User"); actor != "" {
-			rec.Actor = actor
-		} else {
-			rec.Actor = "unknown"
-		}
-	}
-	if rec.Source == "" {
-		if src := c.GetString("source"); src != "" {
-			rec.Source = src
-		} else if src := c.GetHeader("X-Source"); src != "" {
-			rec.Source = src
-		} else {
-			rec.Source = "api"
-		}
-	}
-	if rec.Result == "" {
-		rec.Result = "success"
-	}
-	_ = store.Add(c.Request.Context(), rec)
 }

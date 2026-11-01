@@ -45,6 +45,41 @@ function eventSubtitle(ev: TelemetryEvent): string {
   return parts.join(" · ");
 }
 
+function EventDetails({ id }: { id: string }) {
+  const [detail, setDetail] = useState<TelemetryEvent | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState(false);
+  async function load() {
+    setPending(true);
+    setError(false);
+    try {
+      const event = await api.getEvent(id);
+      setDetail(event);
+      setError(!event);
+    } finally {
+      setPending(false);
+    }
+  }
+  const json = detail ? JSON.stringify(detail, null, 2) : "";
+  return (
+    <div className="mt-2 text-xs">
+      <button onClick={() => void load()} disabled={pending}
+        className="rounded-xs border px-2 py-1 font-mono disabled:opacity-50">
+        {pending ? "Loading" : "Event"} {id}
+      </button>
+      {error && <p role="status" className="mt-1 text-amber">Event detail unavailable; it may have left retention.</p>}
+      {detail && (
+        <details open className="mt-2">
+          <summary>Event JSON</summary>
+          <a className="mt-1 inline-block underline" download={`event-${id}.json`}
+            href={`data:application/json;charset=utf-8,${encodeURIComponent(json)}`}>Download event JSON</a>
+          <pre className="mt-2 overflow-x-auto rounded-lg bg-black/40 p-3">{json}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function EventsInner() {
   const searchParams = useSearchParams();
   const [live, setLive] = useState(true);
@@ -348,6 +383,7 @@ function EventsContent({ live, setLive }: { live: boolean; setLive: React.Dispat
             <div className="mt-1 text-xs text-(--text-muted)">
               {eventSubtitle(ev)}
             </div>
+            <EventDetails id={ev.id} />
             <div className="mt-1 text-xs text-(--text)">
               {formatEndpoint(ev.srcIp, ev.srcPort)} → {formatEndpoint(ev.dstIp, ev.dstPort)}{" "}
               {ev.transport ? `(${ev.transport})` : ""}

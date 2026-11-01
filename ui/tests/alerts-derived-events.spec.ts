@@ -7,7 +7,7 @@ const session = "0123456789abcdef0123456789abcdef-1";
 const anomalyMessage = "Modbus response (txn 123) without prior request";
 const signatureName = "CIP controller stop signature";
 
-function event(id: number, kind: string, attributes: Record<string, unknown>): TelemetryEvent {
+function event(id: string, kind: string, attributes: Record<string, unknown>): TelemetryEvent {
   return {
     id, flowId: `flow-${id}`, proto: "ids", kind, attributes,
     timestamp: "2026-10-28T12:00:00Z",
@@ -19,26 +19,26 @@ function event(id: number, kind: string, attributes: Record<string, unknown>): T
 // Derived fixtures carry only the attributes supplied by their producers.
 // In particular, the CIP signature has no message, protocol or event_attrs.
 const anomaly = {
-  ...event(1, "anomaly", {
+  ...event("1", "anomaly", {
     message: anomalyMessage, severity: "medium", protocol: "modbus",
     anomaly_type: "protocol_violation", source_ip: "192.0.2.20", dest_ip: "192.0.2.10",
   }),
   srcIp: "192.0.2.20", dstIp: "192.0.2.10", srcPort: 502, dstPort: 49152,
 };
 const signature = {
-  ...event(2, "signature_match", {
+  ...event("2", "signature_match", {
     signature_id: "CIP-STOP-001", name: signatureName, severity: "critical",
     description: "Detects a controller stop service request.",
   }),
   dstPort: 44818,
 };
-const rule = event(3, "alert", {
+const rule = event("3", "alert", {
   message: "Modbus write detected", severity: "low", rule_id: "MB-WRITE-001",
   event_proto: "modbus", event_kind: "request",
   event_attrs: { function_code: 6, unit_id: 1, is_write: true, address: 1, value: 3 },
 });
 const apci = {
-  ...event(4, "anomaly", {
+  ...event("4", "anomaly", {
     anomaly_type: "iec104_send_sequence", protocol: "iec104", severity: "medium",
     message: "IEC 104 send sequence anomaly", session_id: session,
     direction: "request", apci_type: "I", send_sequence: 3, expected_send_sequence: 1,
@@ -46,22 +46,22 @@ const apci = {
   dstPort: 2404,
 };
 const deny: TelemetryEvent = {
-  ...event(5, "ics.decision", {
+  ...event("5", "ics.decision", {
     session_id: session, apdu_id: `${session}/c/16`, decision: "deny",
     reason: "rule", action: "DENY", mode: "enforce", ruleId: "deny-rule",
     type_id: 46, ca: 1, ioa: 2001, direction: "request",
   }),
   proto: "iec104", dstPort: 2404,
 };
-const conformance = event(6, "alert", {
+const conformance = event("6", "alert", {
   message: "modbus conformance modbus.length: passed", severity: "medium", rule_id: "ics-conformance",
   protocol: "modbus", action: "passed", conformance: ["modbus.length"],
 });
 const allow = {
-  ...deny, id: 7,
+  ...deny, id: "7",
   attributes: { ...deny.attributes, decision: "allow", action: "ALLOW" },
 };
-const request = { ...event(8, "request", { function_code: 3 }), proto: "modbus" };
+const request = { ...event("8", "request", { function_code: 3 }), proto: "modbus" };
 const events = [anomaly, signature, rule, apci, deny, conformance, allow, request];
 
 async function loadAlerts(page: Page) {
@@ -178,9 +178,9 @@ test("presentation normalizes severity and excludes allows and ordinary protocol
   }
   expect(alertView(allow)).toBeNull();
   expect(alertView(request)).toBeNull();
-  expect(alertView(event(9, "other", {}))).toBeNull();
+  expect(alertView(event("9", "other", {}))).toBeNull();
   for (const kind of ["alert", "anomaly", "signature_match"]) {
-    const view = alertView(event(10, kind, {}));
+    const view = alertView(event("10", kind, {}));
     expect(view?.identifier).toBeUndefined();
     expect(view?.triggeredBy).toBe("");
     expect(view?.protocol).toBe("");

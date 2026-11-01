@@ -80,7 +80,7 @@ export const consoleAPI = {
   },
   listFlows: (limit = 200, signal?: AbortSignal) =>
     getJSONList<FlowSummary>(`/api/v1/flows?limit=${limit}`, signal),
-  getEvent: (id: number) => getJSON<TelemetryEvent>(`/api/v1/events/${id}`),
+  getEvent: (id: string) => getJSON<TelemetryEvent>(`/api/v1/events/${encodeURIComponent(id)}`),
 
   getSimulationStatus: (signal?: AbortSignal) =>
     getJSON<{ running: boolean }>("/api/v1/simulation", signal),
