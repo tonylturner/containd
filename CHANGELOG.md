@@ -12,7 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Commit, commit-confirmed, rollback and factory reset responses add `applyId`
   and `protection`. Success acknowledges synchronous apply, not readiness; health
   reports `unavailable` while protection is pending or failed.
-
 - Every configuration write and commit must send `X-Containd-If-Revision` with
   the revision from the read it is based on; requests without it get 428, stale
   ones 412. Scripts and integrations that stage then commit must read the
@@ -22,9 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Authenticated protection status and admin retry APIs; commit and reset bodies
-  carry the engine protection observation and runtime apply ID.
-
+- Datapath protection status: `GET /api/v1/dataplane/protection` reports
+  whether the engine enforces the committed policy (queue binding, IEC
+  envelope, scan gate, scanner, rule-hit logging) and which traffic is dropped
+  or not inspected; admins retry a failed consumer with
+  `POST /api/v1/dataplane/protection/retry`. Commit and reset bodies carry the
+  observation and the runtime apply ID.
+- Protection notices, effect-aware topology and firewall/ICS indicators, and
+  administrator retry in the management UI.
 - Evidence health in the UI shell, Audit persistence view and `show audit --status`,
   with per-destination/source syslog backlog, retry, loss and continuity counters.
 - Authenticated `GET /api/v1/evidence/status` and sanitized `evidence.state` in health.
@@ -33,7 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Health `enforcement` reflects pending and failed protection rather than
   treating nft installation alone as an enforcing dataplane.
-
 - Document established-session re-evaluation after policy changes and why a
   blocked connection can remain visible in Sessions until conntrack timeout.
 - Serialize telemetry event IDs as decimal JSON strings across API, UI, CLI,
@@ -47,8 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Bound internal apply-ID replay history to five minutes and ensure NFLOG shutdown waits for receiver callbacks.
-
+- A commit no longer reads as enforcing when an NFQUEUE bind fails after the
+  ruleset is installed; health and the UI report pending or failed protection.
 - Keep zone security scores, topology conduit selection and staged zone updates
   separate for names that differ by case or punctuation.
 - CLI configuration edits and repository smoke scripts carry snapshot revisions
